@@ -247,8 +247,5 @@ pub fn blueprint_external_dns_config<'a>(
             .extend(zone_records);
     }
 
-    DnsConfigZone {
-        zone_name: external_dns_zone_name,
-        records: records.clone(),
-    }
+    DnsConfigZone { zone_name: external_dns_zone_name, names: records.clone() }
 }

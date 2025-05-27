@@ -91,18 +91,18 @@ impl TryFrom<DnsConfig> for v1::config::DnsConfig {
 #[derive(Clone, Debug, Serialize, Deserialize, JsonSchema, PartialEq, Eq)]
 pub struct DnsConfigZone {
     pub zone_name: String,
-    pub records: HashMap<String, Vec<DnsRecord>>,
+    pub names: HashMap<String, Vec<DnsRecord>>,
 }
 
 impl TryFrom<DnsConfigZone> for v1::config::DnsConfigZone {
     type Error = TranslationError;
 
     fn try_from(v2: DnsConfigZone) -> Result<Self, Self::Error> {
-        let DnsConfigZone { zone_name, records } = v2;
+        let DnsConfigZone { zone_name, names } = v2;
 
         Ok(v1::config::DnsConfigZone {
             zone_name,
-            records: records
+            records: names
                 .into_iter()
                 .map(|(name, records)| {
                     let converted_records = records

@@ -46,11 +46,11 @@ impl<'a> DnsDiff<'a> {
         );
 
         let all_names =
-            left_zone.records.keys().chain(right_zone.records.keys()).collect();
+            left_zone.names.keys().chain(right_zone.names.keys()).collect();
 
         Ok(DnsDiff {
-            left: &left_zone.records,
-            right: &right_zone.records,
+            left: &left_zone.names,
+            right: &right_zone.names,
             zone_name: &left_zone.zone_name,
             all_names,
         })
@@ -220,7 +220,7 @@ mod test {
     fn example() -> DnsConfigZone {
         DnsConfigZone {
             zone_name: ZONE_NAME.to_string(),
-            records: HashMap::from([
+            names: HashMap::from([
                 ("ex1".to_string(), vec![DnsRecord::A(Ipv4Addr::LOCALHOST)]),
                 (
                     "ex2".to_string(),
@@ -235,7 +235,7 @@ mod test {
         // Cannot compare different zone names
         let example_different_zone = DnsConfigZone {
             zone_name: format!("{}-other", ZONE_NAME),
-            records: HashMap::new(),
+            names: HashMap::new(),
         };
         let error = DnsDiff::new(&example_different_zone, &example())
             .expect_err(
@@ -268,7 +268,7 @@ mod test {
         let example = example();
         let example2 = DnsConfigZone {
             zone_name: ZONE_NAME.to_string(),
-            records: HashMap::from([
+            names: HashMap::from([
                 (
                     "ex2".to_string(),
                     vec![DnsRecord::A("192.168.1.4".parse().unwrap())],

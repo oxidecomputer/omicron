@@ -724,7 +724,7 @@ impl DnsConfigBuilder {
             .chain(srv_records_zones)
             .collect();
 
-        DnsConfigZone { zone_name: DNS_ZONE.to_owned(), records: all_records }
+        DnsConfigZone { zone_name: DNS_ZONE.to_owned(), names: all_records }
     }
 
     /// Construct a complete [`DnsConfigParams`] (suitable for propagating to
@@ -946,9 +946,8 @@ mod test {
             assert_eq!(config.zones[0].zone_name, DNS_ZONE);
             write!(&mut output, "builder: {:?}\n", label).unwrap();
             // Sort the records for stability.
-            let records: BTreeMap<_, _> =
-                config.zones[0].records.iter().collect();
-            serde_json::to_writer_pretty(&mut output, &records).unwrap();
+            let names: BTreeMap<_, _> = config.zones[0].names.iter().collect();
+            serde_json::to_writer_pretty(&mut output, &names).unwrap();
             write!(&mut output, "\n").unwrap();
         }
 

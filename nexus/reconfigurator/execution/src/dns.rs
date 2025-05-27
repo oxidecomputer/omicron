@@ -403,7 +403,7 @@ mod test {
             time_created: chrono::Utc::now(),
             zones: vec![DnsConfigZone {
                 zone_name: String::from("internal"),
-                records: HashMap::new(),
+                names: HashMap::new(),
             }],
         }
     }
@@ -640,7 +640,7 @@ mod test {
             &Default::default(),
         )
         .unwrap();
-        assert!(blueprint_dns.records.is_empty());
+        assert!(blueprint_dns.names.is_empty());
     }
 
     /// test blueprint_dns_config(): exercise various different conditions
@@ -846,7 +846,7 @@ mod test {
         // IPs show up both in the special boundary NTP DNS name and as their
         // normal SRV records.
         let boundary_ntp_ips = blueprint_dns_zone
-            .records
+            .names
             .remove(BOUNDARY_NTP_DNS_NAME)
             .expect("missing boundary NTP DNS name")
             .into_iter()
@@ -878,7 +878,7 @@ mod test {
         let mut expected_srv_targets: BTreeSet<_> = BTreeSet::new();
         let mut unaccounted_omicron_zones = omicron_zones_by_ip.clone();
         let mut unaccounted_switch_zones = switch_sleds_by_ip.clone();
-        for (name, records) in &blueprint_dns_zone.records {
+        for (name, records) in &blueprint_dns_zone.names {
             let addrs: Vec<_> = records
                 .iter()
                 .filter_map(|dns_record| match dns_record {
@@ -983,7 +983,7 @@ mod test {
             ServiceName::RepoDepot,
         ]);
 
-        for (name, records) in &blueprint_dns_zone.records {
+        for (name, records) in &blueprint_dns_zone.names {
             let mut this_kind = None;
             let kinds_left: Vec<_> =
                 srv_kinds_expected.iter().copied().collect();
@@ -1069,14 +1069,11 @@ mod test {
         // We'll only have external DNS nameserver records - the A/AAAA records
         // for servers themselves, and NS records at the apex.
         let baseline_external_dns_names = external_dns_count + 1;
-        assert_eq!(
-            external_dns_zone.records.len(),
-            baseline_external_dns_names
-        );
+        assert_eq!(external_dns_zone.names.len(), baseline_external_dns_names);
 
         use internal_dns_types::names::ZONE_APEX_NAME;
         let apex_records = external_dns_zone
-            .records
+            .names
             .get(ZONE_APEX_NAME)
             .expect("records are present for zone apex");
         assert_eq!(apex_records.len(), external_dns_count);
@@ -1084,7 +1081,7 @@ mod test {
             // The nameserver records have 1-indexed numbering, but we iterate
             // from 0. Add one to line up expectations for the test.
             let ns_name = format!("ns{}", i + 1);
-            assert!(external_dns_zone.records.contains_key(&ns_name));
+            assert!(external_dns_zone.names.contains_key(&ns_name));
             assert_eq!(
                 apex_records[i],
                 DnsRecord::Ns(format!(
@@ -1101,7 +1098,7 @@ mod test {
             String::from("oxide.test"),
         );
         assert_eq!(external_dns_zone.zone_name, String::from("oxide.test"));
-        let records = &external_dns_zone.records;
+        let records = &external_dns_zone.names;
         // One name for the silo, three for the nameservers, and one more for
         // the zone apex.
         let expected_dns_names = 1 + baseline_external_dns_names;
@@ -1167,7 +1164,7 @@ mod test {
             String::from("oxide.test"),
         );
         let silo_records = &external_dns_zone
-            .records
+            .names
             .get(&silo_dns_name(my_silo.name()))
             .expect("missing silo DNS records");
         let silo_record_ips: Vec<_> = records_to_ips(silo_records);
@@ -1213,7 +1210,7 @@ mod test {
         // sure it matches what we expect.
         let dns_zone1 = DnsConfigZone {
             zone_name: "my-zone".to_string(),
-            records: HashMap::from([
+            names: HashMap::from([
                 ("ex1".to_string(), vec![DnsRecord::A(Ipv4Addr::LOCALHOST)]),
                 (
                     "ex2".to_string(),
@@ -1224,7 +1221,7 @@ mod test {
 
         let dns_zone2 = DnsConfigZone {
             zone_name: "my-zone".to_string(),
-            records: HashMap::from([
+            names: HashMap::from([
                 (
                     "ex2".to_string(),
                     vec![DnsRecord::A("192.168.1.4".parse().unwrap())],
@@ -1263,7 +1260,7 @@ mod test {
 
         // Test the difference between two configs whose SRV records differ.
         let mut dns_zone1 = dns_zone1.clone();
-        dns_zone1.records.insert(
+        dns_zone1.names.insert(
             String::from("_nexus._tcp"),
             vec![
                 DnsRecord::Srv(Srv {
@@ -1295,9 +1292,9 @@ mod test {
 
         // If we shift the order of the items, it should still reflect no
         // changes.
-        let records = dns_zone2.records.get_mut("_nexus._tcp").unwrap();
+        let records = dns_zone2.names.get_mut("_nexus._tcp").unwrap();
         records.rotate_left(1);
-        assert!(records != dns_zone1.records.get("_nexus._tcp").unwrap());
+        assert!(records != dns_zone1.names.get("_nexus._tcp").unwrap());
         let update = dns_compute_update(
             &logctx.log,
             DnsGroup::Internal,
@@ -1310,7 +1307,7 @@ mod test {
         assert!(update.is_none());
 
         // If we add another record, there should indeed be a new update.
-        let records = dns_zone2.records.get_mut("_nexus._tcp").unwrap();
+        let records = dns_zone2.names.get_mut("_nexus._tcp").unwrap();
         records.push(DnsRecord::Srv(Srv {
             port: 123,
             prio: 1,
@@ -1736,7 +1733,7 @@ mod test {
         assert_eq!(new_name, silo_dns_name(&silo.identity.name));
         // And it should have the same IP addresses as all of the other Silos.
         for (prior_record_name, prior_records) in
-            old_external.zones[0].records.iter()
+            old_external.zones[0].names.iter()
         {
             // Only some records in the external zone are for Silos, though.
             if prior_record_name.ends_with(".sys") {
