@@ -821,7 +821,7 @@ async fn test_multiple_receivers(cptestctx: &ControlPlaneTestContext) {
         .alert_publish(
             &opctx,
             baz_alert_id,
-            test_events::FooBaz { hello: "san francisco" },
+            test_alerts::FooBaz { hello: "san francisco" },
         )
         .await
         .expect("event should be published successfully");

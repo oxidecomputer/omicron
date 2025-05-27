@@ -21,6 +21,7 @@ impl_enum_type!(
         AsExpression,
         FromSqlRow,
         strum::VariantArray,
+        schemars::JsonSchema,
     )]
     pub enum AlertClass;
 

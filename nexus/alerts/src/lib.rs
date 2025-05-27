@@ -119,3 +119,54 @@ impl JsonSchema for AlertSchemaRegistry {
         // }
     }
 }
+
+// impl JsonSchema for SchemaVersions {
+//     fn schema_name() -> String {
+//         self.name.clone()
+//     }
+
+//     fn json_schema(generator: &mut schemars::SchemaGenerator) -> Schema {
+//         todo!("eliza figure this out")
+//         // for (class, alert) in self.schemas {
+
+//         // }
+//     }
+// }
+
+// use schemars::schema::{Metadata, Schema, SchemaObject, SubschemaValidation};
+// use serde_json::json;
+
+// /// Insert another level of schema indirection in order to provide an
+// /// additional title for a subschema. This allows generators to infer a better
+// /// variant name for an "untagged" enum.
+// pub(crate) fn label_schema(label: &str, schema: Schema) -> Schema {
+//     SchemaObject {
+//         metadata: Some(
+//             Metadata { title: Some(label.to_string()), ..Default::default() }
+//                 .into(),
+//         ),
+//         subschemas: Some(
+//             SubschemaValidation {
+//                 all_of: Some(vec![schema]),
+//                 ..Default::default()
+//             }
+//             .into(),
+//         ),
+//         ..Default::default()
+//     }
+//     .into()
+// }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn alert_class_schema() {
+        let mut generator = schemars::SchemaGenerator::default();
+
+        let _ = generator.subschema_for::<AlertClass>();
+        let root = generator.into_root_schema_for::<()>();
+        eprintln!("{}", serde_json::to_string_pretty(&root).unwrap())
+    }
+}

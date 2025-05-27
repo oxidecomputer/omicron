@@ -5910,6 +5910,7 @@ dependencies = [
  "omicron-workspace-hack",
  "schemars",
  "serde",
+ "serde_json",
 ]
 
 [[package]]
