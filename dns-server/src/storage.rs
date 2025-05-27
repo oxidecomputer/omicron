@@ -343,8 +343,14 @@ impl Store {
             .unwrap_or(Vec::new());
 
         nameservers.sort();
-        let preferred_nameserver = nameservers.first()
-            .ok_or_else(|| QueryError::QueryFail(anyhow!("tried to produce an SOA record but the zone has no nameservers")))
+        let preferred_nameserver = nameservers
+            .first()
+            .ok_or_else(|| {
+                QueryError::QueryFail(anyhow!(
+                    "tried to produce an SOA record but \
+                    the zone has no nameservers"
+                ))
+            })
             .map(name_from_str)??;
 
         let mut record = hickory_proto::rr::Record::new();

@@ -185,6 +185,12 @@ impl super::Nexus {
                 )
             })?;
 
+        // sled-agent, in service of RSS, has configured internal DNS. We record
+        // its reported initial DNS config in this `InitialDnsGroup`. sled-agent
+        // has not configured external DNS at all, so create a similar external
+        // `InitialDnsGroup` and initialize it in accordance with the initial
+        // system blueprint.
+
         let internal_dns = InitialDnsGroup::new(
             DnsGroup::Internal,
             &dns_zone.zone_name,
@@ -212,10 +218,6 @@ impl super::Nexus {
         let recovery_silo_fq_dns_name =
             format!("{silo_dns_name}.{}", request.external_dns_zone_name);
 
-        // sled-agent, in service of RSS, has configured internal DNS. We got
-        // its DNS configuration in `request.internal_dns_zone_config` and are
-        // appending to it before committing the initial RSS state to the
-        // database
         let external_dns_config =
             nexus_types::deployment::execution::blueprint_external_dns_config(
                 &request.blueprint,
