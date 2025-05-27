@@ -154,7 +154,9 @@ pub struct DnsConfigBuilder {
 
     /// similar to `internal_dns_addresses`, but for IPs that external DNS
     /// servers answer queries on.  Internal and external DNS addresses are
-    /// stored separately here to simplify collecting NS records for DNS zones.
+    /// stored separately because only internal IPs get NS records in internal
+    /// DNS configuration.  External DNS addresses are not currently used in
+    /// internal DNS configuration.
     external_dns_addresses: BTreeMap<Zone, IpAddr>,
 
     /// set of services (see module-level comment) that have been configured so

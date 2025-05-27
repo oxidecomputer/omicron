@@ -194,7 +194,7 @@ pub fn blueprint_external_dns_config<'a>(
     external_dns_zone_name: String,
 ) -> DnsConfigZone {
     let nexus_external_ips = blueprint_nexus_external_ips(blueprint);
-    let dns_external_ips = blueprint_external_dns_nameserver_ips(blueprint);
+    let mut dns_external_ips = blueprint_external_dns_nameserver_ips(blueprint);
 
     let nexus_dns_records: Vec<DnsRecord> = nexus_external_ips
         .into_iter()
@@ -205,6 +205,11 @@ pub fn blueprint_external_dns_config<'a>(
         .collect();
 
     let mut zone_records: Vec<DnsRecord> = Vec::new();
+    // Sort DNS IPs for determinism about which `ns<N>` records have which IPs.
+    // This avoids the risk that a permutation of the DNS nameserver IPs
+    // produces different records and a DNS configuration change even though the
+    // data is logically equivalent.
+    dns_external_ips.sort();
     let external_dns_records: Vec<(String, Vec<DnsRecord>)> = dns_external_ips
         .into_iter()
         .enumerate()

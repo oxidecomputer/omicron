@@ -398,9 +398,9 @@ external DNS:
     name: ns1                                                (records: 1)
         A    198.51.100.1
     name: ns2                                                (records: 1)
-        A    198.51.100.3
-    name: ns3                                                (records: 1)
         A    198.51.100.2
+    name: ns3                                                (records: 1)
+        A    198.51.100.3
 
 
 
@@ -699,9 +699,9 @@ external DNS:
     name: ns1                                                (records: 1)
         A    198.51.100.1
     name: ns2                                                (records: 1)
-        A    198.51.100.3
-    name: ns3                                                (records: 1)
         A    198.51.100.2
+    name: ns3                                                (records: 1)
+        A    198.51.100.3
 
 
 
