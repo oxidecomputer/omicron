@@ -20,7 +20,6 @@ use illumos_utils::zone::AdmError;
 use illumos_utils::zone::Api as _;
 use illumos_utils::zone::DeleteAddressError;
 use illumos_utils::zone::Zones;
-use illumos_utils::zpool::ZpoolName;
 use nexus_sled_agent_shared::inventory::ConfigReconcilerInventoryResult;
 use nexus_sled_agent_shared::inventory::OmicronZoneConfig;
 use nexus_sled_agent_shared::inventory::OmicronZoneType;
@@ -41,7 +40,6 @@ use std::num::NonZeroUsize;
 use std::str::FromStr as _;
 use std::sync::Arc;
 
-use super::CurrentlyManagedZpools;
 use super::OmicronDatasets;
 use super::datasets::ZoneDatasetDependencyError;
 
@@ -251,7 +249,6 @@ impl OmicronZones {
         sled_agent_facilities: &T,
         is_time_synchronized: bool,
         datasets: &OmicronDatasets,
-        all_u2_pools: &CurrentlyManagedZpools,
         log: &Logger,
     ) {
         self.start_zones_if_needed_impl(
@@ -260,7 +257,6 @@ impl OmicronZones {
             &RealZoneFacilities,
             is_time_synchronized,
             datasets,
-            all_u2_pools,
             log,
         )
         .await
@@ -276,7 +272,6 @@ impl OmicronZones {
         zone_facilities: &U,
         is_time_synchronized: bool,
         datasets: &OmicronDatasets,
-        all_u2_pools: &CurrentlyManagedZpools,
         log: &Logger,
     ) {
         // Filter desired zones down to just those that we need to start. See
@@ -323,7 +318,6 @@ impl OmicronZones {
         });
 
         // Build up the futures for starting each zone.
-        let all_u2_pools = all_u2_pools.clone().into_vec();
         let start_futures = zones_to_start.map(|zone| {
             self.start_single_zone(
                 zone,
@@ -331,7 +325,6 @@ impl OmicronZones {
                 zone_facilities,
                 is_time_synchronized,
                 datasets,
-                &all_u2_pools,
                 log,
             )
             .map(move |result| (zone.clone(), result))
@@ -355,7 +348,6 @@ impl OmicronZones {
         zone_facilities: &U,
         is_time_synchronized: bool,
         datasets: &OmicronDatasets,
-        all_u2_pools: &[ZpoolName],
         log: &Logger,
     ) -> Result<ZoneState, ZoneStartError> {
         // Ensure no zone by this name exists. This should only happen in the
@@ -373,17 +365,18 @@ impl OmicronZones {
             return Ok(state);
         }
 
-        // Ensure the dataset dependencies of this zone are okay.
-        datasets.validate_zone_dependencies(zone)?;
+        // Ensure that time is sync'd, if needed by this zone.
+        if zone.zone_type.requires_timesync() && !is_time_synchronized {
+            return Err(ZoneStartError::TimeNotSynchronized);
+        }
+
+        // Ensure all dataset dependencies of this zone are okay.
+        let zone_root_path =
+            datasets.validate_zone_storage(zone, &self.mount_config)?;
 
         // The zone is not running - start it.
         match sled_agent_facilities
-            .start_omicron_zone(
-                zone,
-                &self.mount_config,
-                is_time_synchronized,
-                all_u2_pools,
-            )
+            .start_omicron_zone(zone, zone_root_path)
             .await
         {
             Ok(running_zone) => Ok(ZoneState::Running(Arc::new(running_zone))),
@@ -860,6 +853,8 @@ enum PartiallyShutDownState {
 enum ZoneStartError {
     #[error("could not determine whether zone already exists")]
     CheckZoneExists(#[from] CheckZoneExistsError),
+    #[error("Time not yet synchronized")]
+    TimeNotSynchronized,
     #[error(transparent)]
     DatasetDependency(#[from] ZoneDatasetDependencyError),
     #[error("sled agent failed to start service")]
@@ -950,7 +945,6 @@ impl ZoneFacilities for RealZoneFacilities {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::CurrentlyManagedZpoolsReceiver;
     use crate::dataset_serialization_task::DatasetEnsureError;
     use anyhow::anyhow;
     use assert_matches::assert_matches;
@@ -1130,9 +1124,7 @@ mod tests {
         async fn start_omicron_zone(
             &self,
             _zone_config: &OmicronZoneConfig,
-            _mount_config: &MountConfig,
-            _is_time_synchronized: bool,
-            _all_u2_pools: &[ZpoolName],
+            _zone_root_path: PathInPool,
         ) -> anyhow::Result<RunningZone> {
             let mut inner = self.inner.lock().unwrap();
             inner
@@ -1341,11 +1333,6 @@ mod tests {
         let desired_zones: IdMap<_> =
             [make_zone_config(fake_zone_id)].into_iter().collect();
         let datasets = make_datasets(desired_zones.iter());
-        let currently_managed_zpools =
-            CurrentlyManagedZpoolsReceiver::fake_static(
-                desired_zones.iter().map(|z| z.filesystem_pool.unwrap()),
-            )
-            .current();
 
         // Configure our fake sled-agent to fail to start a zone.
         let sled_agent_facilities = FakeSledAgentFacilities::default();
@@ -1363,7 +1350,6 @@ mod tests {
                 &zone_facilities,
                 true,
                 &datasets,
-                &currently_managed_zpools,
                 &logctx.log,
             )
             .await;
@@ -1399,7 +1385,6 @@ mod tests {
                 &zone_facilities,
                 true,
                 &datasets,
-                &currently_managed_zpools,
                 &logctx.log,
             )
             .await;
@@ -1427,11 +1412,6 @@ mod tests {
         let fake_zone = make_zone_config(OmicronZoneUuid::new_v4());
         let desired_zones: IdMap<_> = [fake_zone.clone()].into_iter().collect();
         let datasets = make_datasets(desired_zones.iter());
-        let currently_managed_zpools =
-            CurrentlyManagedZpoolsReceiver::fake_static(
-                desired_zones.iter().map(|z| z.filesystem_pool.unwrap()),
-            )
-            .current();
 
         // Configure our fake zone facilities to report a zone with this name as
         // already running.
@@ -1457,7 +1437,6 @@ mod tests {
                 &zone_facilities,
                 true,
                 &datasets,
-                &currently_managed_zpools,
                 &logctx.log,
             )
             .await;
@@ -1483,6 +1462,54 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn start_zone_fails_if_time_not_synced_when_required() {
+        let logctx = dev::test_setup_log(
+            "start_zone_fails_if_time_not_synced_when_required",
+        );
+
+        // Construct a zone we want to start, of a type that requires time to be
+        // sync'd.
+        let fake_zone = make_zone_config(OmicronZoneUuid::new_v4());
+        assert!(fake_zone.zone_type.requires_timesync());
+        let desired_zones: IdMap<_> = [fake_zone.clone()].into_iter().collect();
+        let datasets = make_datasets(desired_zones.iter());
+
+        let zone_facilities = FakeZoneFacilities::default();
+        let sled_agent_facilities = FakeSledAgentFacilities::default();
+
+        let mut zones = OmicronZones::new(
+            nonexistent_mount_config(),
+            TimeSyncConfig::Normal,
+        );
+
+        // Start zones: this should refuse to start the zone.
+        zones
+            .start_zones_if_needed_impl(
+                &desired_zones,
+                &sled_agent_facilities,
+                &zone_facilities,
+                false, // is_time_synchronized
+                &datasets,
+                &logctx.log,
+            )
+            .await;
+
+        assert_eq!(zones.zones.len(), 1);
+        let zone = zones.zones.get(&fake_zone.id).expect("zone is present");
+        assert_eq!(zone.config, *desired_zones.get(&fake_zone.id).unwrap());
+
+        // The zone should now be in the expected error state.
+        match &zone.state {
+            ZoneState::FailedToStart(err) => {
+                assert_matches!(err, ZoneStartError::TimeNotSynchronized);
+            }
+            other => panic!("unexpected zone state: {other:?}"),
+        }
+
+        logctx.cleanup_successful();
+    }
+
+    #[tokio::test]
     async fn start_zone_fails_if_halting_preexisting_zone_fails() {
         let logctx = dev::test_setup_log(
             "start_zone_fails_if_halting_preexisting_zone_fails",
@@ -1492,11 +1519,6 @@ mod tests {
         let fake_zone = make_zone_config(OmicronZoneUuid::new_v4());
         let desired_zones: IdMap<_> = [fake_zone.clone()].into_iter().collect();
         let datasets = make_datasets(desired_zones.iter());
-        let currently_managed_zpools =
-            CurrentlyManagedZpoolsReceiver::fake_static(
-                desired_zones.iter().map(|z| z.filesystem_pool.unwrap()),
-            )
-            .current();
 
         // Configure our fake zone facilities to report a zone with this name as
         // already running, and configure halting this zone to fail.
@@ -1518,7 +1540,6 @@ mod tests {
                 &zone_facilities,
                 true,
                 &datasets,
-                &currently_managed_zpools,
                 &logctx.log,
             )
             .await;
@@ -1643,12 +1664,6 @@ mod tests {
             builder.build()
         };
 
-        let currently_managed_zpools =
-            CurrentlyManagedZpoolsReceiver::fake_static(
-                desired_zones.iter().map(|z| z.filesystem_pool.unwrap()),
-            )
-            .current();
-
         let zone_facilities = FakeZoneFacilities::default();
         let sled_agent_facilities = FakeSledAgentFacilities::default();
 
@@ -1666,7 +1681,6 @@ mod tests {
                     &zone_facilities,
                     true,
                     datasets,
-                    &currently_managed_zpools,
                     &logctx.log,
                 )
                 .await;
@@ -1734,12 +1748,6 @@ mod tests {
             builder.build()
         };
 
-        let currently_managed_zpools =
-            CurrentlyManagedZpoolsReceiver::fake_static(
-                desired_zones.iter().map(|z| z.filesystem_pool.unwrap()),
-            )
-            .current();
-
         let zone_facilities = FakeZoneFacilities::default();
         let sled_agent_facilities = FakeSledAgentFacilities::default();
 
@@ -1757,7 +1765,6 @@ mod tests {
                     &zone_facilities,
                     true,
                     datasets,
-                    &currently_managed_zpools,
                     &logctx.log,
                 )
                 .await;

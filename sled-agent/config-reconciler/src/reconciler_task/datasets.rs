@@ -12,12 +12,16 @@ use crate::dataset_serialization_task::DatasetEnsureResult;
 use crate::dataset_serialization_task::DatasetTaskHandle;
 use id_map::IdMap;
 use id_map::IdMappable;
+use illumos_utils::zpool::PathInPool;
+use illumos_utils::zpool::ZpoolOrRamdisk;
 use nexus_sled_agent_shared::inventory::ConfigReconcilerInventoryResult;
 use nexus_sled_agent_shared::inventory::OmicronZoneConfig;
 use omicron_common::disk::DatasetConfig;
 use omicron_common::disk::DatasetKind;
 use omicron_common::disk::DatasetName;
 use omicron_uuid_kinds::DatasetUuid;
+use sled_storage::config::MountConfig;
+use sled_storage::dataset::ZONE_DATASET;
 use slog::Logger;
 use slog::warn;
 use slog_error_chain::InlineErrorChain;
@@ -65,13 +69,20 @@ impl OmicronDatasets {
         Self { datasets: IdMap::default(), dataset_task }
     }
 
-    pub(super) fn validate_zone_dependencies(
+    /// Confirm that any dataset dependencies of `zone` have been ensured
+    /// successfully, returning the path for the zone's filesystem root.
+    pub(super) fn validate_zone_storage(
         &self,
         zone: &OmicronZoneConfig,
-    ) -> Result<(), ZoneDatasetDependencyError> {
+        mount_config: &MountConfig,
+    ) -> Result<PathInPool, ZoneDatasetDependencyError> {
         // Confirm that there's an ensured `TransientZoneRoot` dataset on this
         // zone's filesystem pool.
         let Some(filesystem_pool) = zone.filesystem_pool else {
+            // This should never happen: Reconfigurator guarantees all zones
+            // have filesystem pools. `filesystem_pool` is non-optional in
+            // blueprints; we should make it non-optional in `OmicronZoneConfig`
+            // too: https://github.com/oxidecomputer/omicron/issues/8216
             return Err(ZoneDatasetDependencyError::MissingFilesystemPool);
         };
 
@@ -82,6 +93,7 @@ impl OmicronDatasets {
 
         // TODO-cleanup It would be nicer if the zone included the filesystem
         // dataset ID, so we could just do a lookup here instead of searching.
+        // https://github.com/oxidecomputer/omicron/issues/7214
         if !self.datasets.iter().any(|d| {
             matches!(d.state, DatasetState::Ensured)
                 && d.config.name == filesystem_dataset_name
@@ -93,10 +105,18 @@ impl OmicronDatasets {
             );
         }
 
+        let zone_root_path = PathInPool {
+            pool: ZpoolOrRamdisk::Zpool(filesystem_pool),
+            // TODO-cleanup Should we get this path from the dataset we found
+            // above?
+            path: filesystem_pool
+                .dataset_mountpoint(&mount_config.root, ZONE_DATASET),
+        };
+
         // Confirm that the durable dataset for this zone has been ensured, if
         // it has one.
         let Some(durable_dataset) = zone.dataset_name() else {
-            return Ok(());
+            return Ok(zone_root_path);
         };
 
         // TODO-cleanup As above, if we had an ID we could look up instead of
@@ -112,7 +132,21 @@ impl OmicronDatasets {
             );
         }
 
-        Ok(())
+        // TODO-correctness Before we moved the logic of this method here, it
+        // was performed by
+        // `ServiceManager::validate_storage_and_pick_mountpoint()`. That method
+        // did not have access to `self.datasets`, so it issued an explicit
+        // `zfs` command to check the `zoned`, `canmount`, and `encryption`
+        // properties of the durable dataset. Should we:
+        //
+        // * Do that here
+        // * Do nothing here, as the dataset task should have have already done
+        //   this
+        // * Check the dataset config properties? (All three of the properties
+        //   are implied by the dataset kind, so this is probably equivalent to
+        //   "do nothing")
+
+        Ok(zone_root_path)
     }
 
     pub(super) fn remove_datasets_if_needed(

@@ -62,7 +62,6 @@ use illumos_utils::{PFEXEC, execute};
 use internal_dns_resolver::Resolver;
 use internal_dns_types::names::BOUNDARY_NTP_DNS_NAME;
 use internal_dns_types::names::DNS_ZONE;
-use itertools::Itertools;
 use nexus_config::{ConfigDropshotWithTls, DeploymentConfig};
 use nexus_sled_agent_shared::inventory::{
     OmicronZoneConfig, OmicronZoneImageSource, OmicronZoneType,
@@ -94,7 +93,6 @@ use omicron_common::disk::{DatasetKind, DatasetName};
 use omicron_common::ledger::Ledgerable;
 use omicron_ddm_admin_client::DdmError;
 use omicron_uuid_kinds::OmicronZoneUuid;
-use rand::prelude::SliceRandom;
 use sled_agent_config_reconciler::InternalDisksReceiver;
 use sled_agent_types::sled::SWITCH_ZONE_BASEBOARD_FILE;
 use sled_agent_zone_images::ZoneImageSourceResolver;
@@ -103,8 +101,6 @@ use sled_hardware::SledMode;
 use sled_hardware::is_gimlet;
 use sled_hardware::underlay;
 use sled_hardware_types::Baseboard;
-use sled_storage::config::MountConfig;
-use sled_storage::dataset::ZONE_DATASET;
 use slog::Logger;
 use slog_error_chain::InlineErrorChain;
 use std::net::{IpAddr, Ipv6Addr, SocketAddr};
@@ -150,9 +146,6 @@ pub enum Error {
     #[error("Sled Agent not initialized yet")]
     SledAgentNotReady,
 
-    #[error("No U.2 devices found with a {ZONE_DATASET} mountpoint")]
-    U2NotFound,
-
     #[error("Switch zone error: {0}")]
     SwitchZone(anyhow::Error),
 
@@ -195,9 +188,6 @@ pub enum Error {
     #[error(transparent)]
     ZoneInstall(#[from] illumos_utils::running_zone::InstallZoneError),
 
-    #[error("Failed to initialize zones: {errors:?}")]
-    ZoneEnsure { errors: Vec<(String, Error)> },
-
     #[error("Error contacting ddmd: {0}")]
     DdmError(#[from] DdmError),
 
@@ -228,33 +218,8 @@ pub enum Error {
     #[error("Failed to get address: {0}")]
     GetAddressFailure(#[from] illumos_utils::zone::GetAddressError),
 
-    #[error(
-        "Failed to launch zone {zone} because ZFS value cannot be accessed"
-    )]
-    GetZfsValue {
-        zone: String,
-        #[source]
-        source: illumos_utils::zfs::GetValueError,
-    },
-
-    #[error(
-        "Cannot launch {zone} with {dataset} (saw {prop_name} = {prop_value}, expected {prop_value_expected})"
-    )]
-    DatasetNotReady {
-        zone: String,
-        dataset: String,
-        prop_name: String,
-        prop_value: String,
-        prop_value_expected: String,
-    },
-
     #[error("NTP zone not ready")]
     NtpZoneNotReady,
-
-    // This isn't exactly "NtpZoneNotReady" -- it can happen when the NTP zone
-    // is up, but time is still in the process of synchronizing.
-    #[error("Time not yet synchronized")]
-    TimeNotSynchronized,
 
     #[error("Execution error: {0}")]
     ExecutionError(#[from] illumos_utils::ExecutionError),
@@ -333,39 +298,6 @@ impl From<Error> for omicron_common::api::external::Error {
             }
             Error::RequestedZoneConfigOutdated { .. } => {
                 omicron_common::api::external::Error::conflict(&err.to_string())
-            }
-            Error::TimeNotSynchronized => {
-                omicron_common::api::external::Error::unavail(&err.to_string())
-            }
-            Error::ZoneEnsure { errors } => {
-                // As a special case, if any zones failed to timesync,
-                // prioritize that error.
-                //
-                // This conversion to a 503 error was requested in
-                // https://github.com/oxidecomputer/omicron/issues/4776 ,
-                // and we preserve that behavior here, even though we may
-                // launch many zones at the same time.
-                if let Some(err) = errors.iter().find_map(|(_, err)| {
-                    if matches!(err, Error::TimeNotSynchronized) {
-                        Some(err)
-                    } else {
-                        None
-                    }
-                }) {
-                    omicron_common::api::external::Error::unavail(
-                        &err.to_string(),
-                    )
-                } else {
-                    let internal_message = errors
-                        .iter()
-                        .map(|(name, err)| {
-                            format!("failed to start {name}: {err:?}")
-                        })
-                        .join("\n");
-                    omicron_common::api::external::Error::InternalError {
-                        internal_message,
-                    }
-                }
             }
             _ => omicron_common::api::external::Error::InternalError {
                 internal_message: err.to_string(),
@@ -3278,25 +3210,10 @@ impl ServiceManager {
     // storage configuration against the reality of the current sled.
     pub(crate) async fn start_omicron_zone(
         &self,
-        mount_config: &MountConfig,
         zone: &OmicronZoneConfig,
-        time_is_synchronized: bool,
-        all_u2_pools: &[ZpoolName],
+        zone_root_path: PathInPool,
     ) -> Result<RunningZone, Error> {
-        // If this zone requires timesync and we aren't ready, fail it early.
-        if zone.zone_type.requires_timesync() && !time_is_synchronized {
-            return Err(Error::TimeNotSynchronized);
-        }
-
-        // Ensure that this zone's storage is ready.
-        let zone_root_path = self
-            .validate_storage_and_pick_mountpoint(
-                mount_config,
-                &zone,
-                &all_u2_pools,
-            )
-            .await?;
-
+        // TODO-john fixme
         let config = OmicronZoneConfigLocal {
             zone: zone.clone(),
             root: zone_root_path.path.clone(),
@@ -3314,99 +3231,6 @@ impl ServiceManager {
             .await?;
 
         Ok(runtime)
-    }
-
-    // Returns a zone filesystem mountpoint, after ensuring that U.2 storage
-    // is valid.
-    async fn validate_storage_and_pick_mountpoint(
-        &self,
-        mount_config: &MountConfig,
-        zone: &OmicronZoneConfig,
-        all_u2_pools: &[ZpoolName],
-    ) -> Result<PathInPool, Error> {
-        let name = zone.zone_name();
-
-        // If the caller has requested a specific durable dataset,
-        // ensure that it is encrypted and that it exists.
-        //
-        // Typically, the transient filesystem pool will be placed on the same
-        // zpool as the durable dataset (to reduce the fault domain), but that
-        // decision belongs to Nexus, and is not enforced here.
-        if let Some(dataset) = zone.dataset_name() {
-            // Check that the dataset is actually ready to be used.
-            let [zoned, canmount, encryption] =
-                illumos_utils::zfs::Zfs::get_values(
-                    &dataset.full_name(),
-                    &["zoned", "canmount", "encryption"],
-                    None,
-                )
-                .await
-                .map_err(|err| Error::GetZfsValue {
-                    zone: zone.zone_name(),
-                    source: err,
-                })?;
-
-            let check_property = |name, actual, expected| {
-                if actual != expected {
-                    return Err(Error::DatasetNotReady {
-                        zone: zone.zone_name(),
-                        dataset: dataset.full_name(),
-                        prop_name: String::from(name),
-                        prop_value: actual,
-                        prop_value_expected: String::from(expected),
-                    });
-                }
-                return Ok(());
-            };
-            check_property("zoned", zoned, "on")?;
-            check_property("canmount", canmount, "on")?;
-            if dataset.kind().dataset_should_be_encrypted() {
-                check_property("encryption", encryption, "aes-256-gcm")?;
-            }
-
-            let data_pool = dataset.pool();
-            if !all_u2_pools.contains(&data_pool) {
-                warn!(
-                    self.inner.log,
-                    "zone dataset requested on a zpool which doesn't exist";
-                    "zone" => &name,
-                    "zpool" => %data_pool
-                );
-                return Err(Error::MissingDevice {
-                    device: format!("zpool: {data_pool}"),
-                });
-            }
-        }
-
-        let filesystem_pool = match (&zone.filesystem_pool, zone.dataset_name())
-        {
-            // If a pool was explicitly requested, use it.
-            (Some(pool), _) => *pool,
-            // NOTE: The following cases are for backwards compatibility.
-            //
-            // If no pool was selected, prefer to use the same pool as the
-            // durable dataset. Otherwise, pick one randomly.
-            (None, Some(dataset)) => *dataset.pool(),
-            (None, None) => *all_u2_pools
-                .choose(&mut rand::thread_rng())
-                .ok_or_else(|| Error::U2NotFound)?,
-        };
-
-        if !all_u2_pools.contains(&filesystem_pool) {
-            warn!(
-                self.inner.log,
-                "zone filesystem dataset requested on a zpool which doesn't exist";
-                "zone" => &name,
-                "zpool" => %filesystem_pool
-            );
-            return Err(Error::MissingDevice {
-                device: format!("zpool: {filesystem_pool}"),
-            });
-        }
-        let path = filesystem_pool
-            .dataset_mountpoint(&mount_config.root, ZONE_DATASET);
-        let pool = ZpoolOrRamdisk::Zpool(filesystem_pool);
-        Ok(PathInPool { pool, path })
     }
 
     /// Adjust the system boot time to the latest boot time of all zones.
