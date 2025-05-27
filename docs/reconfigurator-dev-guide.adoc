@@ -784,6 +784,31 @@ The easiest way to test Reconfigurator-driven updates is using `reconfigurator-s
 
 Regardless of how you perform updates, it's useful to use `faux-mgs` to read the ground truth state from the SP about its configuration (what versions are in each slot and which slots are active).  More on this below.
 
+```mermaid
+flowchart TD
+    nexus["Reconfigurator<br/>(Nexus, sp-updater)"]
+
+    subgraph "Switch zone"
+        mgs["MGS<br/>(management gateway)"]
+        wicket["Wicket<br/>(mupdate)"]
+        faux-mgs["faux-mgs"]
+    end
+
+    network["Management Network"]
+    sp["SP"]
+
+    nexus --> mgs
+    wicket --> mgs
+    mgs --> network
+    faux-mgs --> network
+
+    network --> sp
+    sp --> network
+
+    classDef noStyle fill:transparent,stroke:transparent,color:black;
+    class network noStyle
+```
+
 [#task-testing-reconfigurator-driven-sp-updates]
 === Testing Reconfigurator-driven updates
 
