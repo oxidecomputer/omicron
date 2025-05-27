@@ -55,7 +55,9 @@ use nexus_db_queries::db::model::{DeviceAccessToken, DeviceAuthRequest};
 use anyhow::anyhow;
 use nexus_types::external_api::params::DeviceAccessTokenRequest;
 use nexus_types::external_api::views;
-use omicron_common::api::external::{CreateResult, Error};
+use omicron_common::api::external::{
+    CreateResult, DataPageParams, Error, InternalContext, ListResultVec,
+};
 
 use chrono::{Duration, Utc};
 use serde::Serialize;
@@ -290,5 +292,23 @@ impl super::Nexus {
             .status(status)
             .header(header::CONTENT_TYPE, "application/json")
             .body(body.into())?)
+    }
+
+    pub(crate) async fn current_user_token_list(
+        &self,
+        opctx: &OpContext,
+        pagparams: &DataPageParams<'_, Uuid>,
+    ) -> ListResultVec<DeviceAccessToken> {
+        let &actor = opctx
+            .authn
+            .actor_required()
+            .internal_context("loading current user to list tokens")?;
+        let (.., authz_user) = LookupPath::new(opctx, self.datastore())
+            .silo_user_id(actor.actor_id())
+            .lookup_for(authz::Action::ListChildren)
+            .await?;
+        self.db_datastore
+            .device_access_tokens_list(opctx, &authz_user, pagparams)
+            .await
     }
 }

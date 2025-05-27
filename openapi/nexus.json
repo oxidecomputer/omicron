@@ -5736,6 +5736,66 @@
         }
       }
     },
+    "/v1/me/tokens": {
+      "get": {
+        "tags": [
+          "tokens"
+        ],
+        "summary": "List device access tokens",
+        "description": "List device access tokens for the currently authenticated user.",
+        "operationId": "current_user_token_list",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "limit",
+            "description": "Maximum number of items returned by a single call",
+            "schema": {
+              "nullable": true,
+              "type": "integer",
+              "format": "uint32",
+              "minimum": 1
+            }
+          },
+          {
+            "in": "query",
+            "name": "page_token",
+            "description": "Token returned by previous call to retrieve the subsequent page",
+            "schema": {
+              "nullable": true,
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "sort_by",
+            "schema": {
+              "$ref": "#/components/schemas/IdSortMode"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DeviceAccessTokenResultsPage"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "x-dropshot-pagination": {
+          "required": []
+        }
+      }
+    },
     "/v1/metrics/{metric_name}": {
       "get": {
         "tags": [
@@ -16512,6 +16572,30 @@
           "public_cert"
         ]
       },
+      "DeviceAccessToken": {
+        "description": "View of a device access token",
+        "type": "object",
+        "properties": {
+          "id": {
+            "description": "A unique, immutable, system-controlled identifier for the token. Note that this ID is not the bearer token itself, which starts with \"oxide-token-\"",
+            "type": "string",
+            "format": "uuid"
+          },
+          "time_created": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "time_expires": {
+            "nullable": true,
+            "type": "string",
+            "format": "date-time"
+          }
+        },
+        "required": [
+          "id",
+          "time_created"
+        ]
+      },
       "DeviceAccessTokenRequest": {
         "type": "object",
         "properties": {
@@ -16530,6 +16614,27 @@
           "client_id",
           "device_code",
           "grant_type"
+        ]
+      },
+      "DeviceAccessTokenResultsPage": {
+        "description": "A single page of results",
+        "type": "object",
+        "properties": {
+          "items": {
+            "description": "list of items on this page of results",
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/DeviceAccessToken"
+            }
+          },
+          "next_page": {
+            "nullable": true,
+            "description": "token used to fetch the next page of results (if any)",
+            "type": "string"
+          }
+        },
+        "required": [
+          "items"
         ]
       },
       "DeviceAuthRequest": {
@@ -26727,6 +26832,13 @@
     },
     {
       "name": "system/update"
+    },
+    {
+      "name": "tokens",
+      "description": "API clients use device access tokens for authentication.",
+      "externalDocs": {
+        "url": "http://docs.oxide.computer/api/tokens"
+      }
     },
     {
       "name": "vpcs",

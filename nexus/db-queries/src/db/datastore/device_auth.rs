@@ -9,13 +9,17 @@ use crate::authz;
 use crate::context::OpContext;
 use crate::db::model::DeviceAccessToken;
 use crate::db::model::DeviceAuthRequest;
+use crate::db::pagination::paginated;
 use async_bb8_diesel::AsyncRunQueryDsl;
+use chrono::Utc;
 use diesel::prelude::*;
 use nexus_db_errors::ErrorHandler;
 use nexus_db_errors::public_error_from_diesel;
 use nexus_db_schema::schema::device_access_token;
 use omicron_common::api::external::CreateResult;
+use omicron_common::api::external::DataPageParams;
 use omicron_common::api::external::Error;
+use omicron_common::api::external::ListResultVec;
 use omicron_common::api::external::LookupResult;
 use omicron_common::api::external::LookupType;
 use omicron_common::api::external::ResourceType;
@@ -175,5 +179,34 @@ impl DataStore {
                     ),
                 )
             })
+    }
+
+    pub async fn device_access_tokens_list(
+        &self,
+        opctx: &OpContext,
+        authz_user: &authz::SiloUser,
+        pagparams: &DataPageParams<'_, Uuid>,
+    ) -> ListResultVec<DeviceAccessToken> {
+        // TODO: this authz check can't be right can it? or at least, we
+        // should probably handle this explicitly at the policy level
+        opctx.authorize(authz::Action::ListChildren, authz_user).await?;
+
+        use nexus_db_schema::schema::device_access_token::dsl;
+        paginated(dsl::device_access_token, dsl::id, &pagparams)
+            .filter(dsl::silo_user_id.eq(authz_user.id()))
+            // we don't have time_deleted on tokens. unfortunately this is not
+            // indexed well. maybe it can be!
+            .filter(
+                dsl::time_expires
+                    .is_null()
+                    .or(dsl::time_expires.gt(Utc::now())),
+            )
+            // TODO: what if we used a different model struct here so we're not
+            // pulling less out of the DB and it's harder to accidentally return
+            // the token itself
+            .select(DeviceAccessToken::as_select())
+            .load_async(&*self.pool_connection_authorized(opctx).await?)
+            .await
+            .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))
     }
 }
