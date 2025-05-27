@@ -894,7 +894,7 @@
           {
             "in": "header",
             "name": "range",
-            "description": "A request to access a portion of the resource, such as:\n\n```text bytes=0-499 ```\n\n<https://developer.mozilla.org/en-US/docs/Web/HTTP/Reference/Headers/Range>",
+            "description": "A request to access a portion of the resource, such as `bytes=0-499`\n\nSee: <https://developer.mozilla.org/en-US/docs/Web/HTTP/Reference/Headers/Range>",
             "schema": {
               "type": "string"
             }
@@ -928,7 +928,7 @@
           {
             "in": "header",
             "name": "range",
-            "description": "A request to access a portion of the resource, such as:\n\n```text bytes=0-499 ```\n\n<https://developer.mozilla.org/en-US/docs/Web/HTTP/Reference/Headers/Range>",
+            "description": "A request to access a portion of the resource, such as `bytes=0-499`\n\nSee: <https://developer.mozilla.org/en-US/docs/Web/HTTP/Reference/Headers/Range>",
             "schema": {
               "type": "string"
             }
@@ -964,7 +964,7 @@
           {
             "in": "header",
             "name": "range",
-            "description": "A request to access a portion of the resource, such as:\n\n```text bytes=0-499 ```\n\n<https://developer.mozilla.org/en-US/docs/Web/HTTP/Reference/Headers/Range>",
+            "description": "A request to access a portion of the resource, such as `bytes=0-499`\n\nSee: <https://developer.mozilla.org/en-US/docs/Web/HTTP/Reference/Headers/Range>",
             "schema": {
               "type": "string"
             }
@@ -1007,7 +1007,7 @@
           {
             "in": "header",
             "name": "range",
-            "description": "A request to access a portion of the resource, such as:\n\n```text bytes=0-499 ```\n\n<https://developer.mozilla.org/en-US/docs/Web/HTTP/Reference/Headers/Range>",
+            "description": "A request to access a portion of the resource, such as `bytes=0-499`\n\nSee: <https://developer.mozilla.org/en-US/docs/Web/HTTP/Reference/Headers/Range>",
             "schema": {
               "type": "string"
             }
@@ -1052,7 +1052,7 @@
           {
             "in": "header",
             "name": "range",
-            "description": "A request to access a portion of the resource, such as:\n\n```text bytes=0-499 ```\n\n<https://developer.mozilla.org/en-US/docs/Web/HTTP/Reference/Headers/Range>",
+            "description": "A request to access a portion of the resource, such as `bytes=0-499`\n\nSee: <https://developer.mozilla.org/en-US/docs/Web/HTTP/Reference/Headers/Range>",
             "schema": {
               "type": "string"
             }
