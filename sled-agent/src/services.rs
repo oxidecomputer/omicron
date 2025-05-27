@@ -64,8 +64,7 @@ use internal_dns_types::names::BOUNDARY_NTP_DNS_NAME;
 use internal_dns_types::names::DNS_ZONE;
 use nexus_config::{ConfigDropshotWithTls, DeploymentConfig};
 use nexus_sled_agent_shared::inventory::{
-    OmicronZoneConfig, OmicronZoneImageSource, OmicronZoneType,
-    OmicronZonesConfig, ZoneKind,
+    OmicronZoneConfig, OmicronZoneImageSource, OmicronZoneType, ZoneKind,
 };
 use omicron_common::address::AZ_PREFIX;
 use omicron_common::address::DENDRITE_PORT;
@@ -90,7 +89,6 @@ use omicron_common::backoff::{
     BackoffError, retry_notify, retry_policy_internal_service_aggressive,
 };
 use omicron_common::disk::{DatasetKind, DatasetName};
-use omicron_common::ledger::Ledgerable;
 use omicron_ddm_admin_client::DdmError;
 use omicron_uuid_kinds::OmicronZoneUuid;
 use sled_agent_config_reconciler::InternalDisksReceiver;
@@ -424,96 +422,6 @@ impl RealSystemApi {
 
 impl SystemApi for RealSystemApi {}
 
-/// Combines the Nexus-provided `OmicronZonesConfig` (which describes what Nexus
-/// wants for all of its zones) with the locally-determined configuration for
-/// these zones.
-#[derive(
-    Clone,
-    Debug,
-    Eq,
-    PartialEq,
-    serde::Serialize,
-    serde::Deserialize,
-    schemars::JsonSchema,
-)]
-pub struct OmicronZonesConfigLocal {
-    /// generation of the Omicron-provided part of the configuration
-    ///
-    /// This generation number is outside of Sled Agent's control.  We store
-    /// exactly what we were given and use this number to decide when to
-    /// fail requests to establish an outdated configuration.
-    ///
-    /// You can think of this as a major version number, with
-    /// `ledger_generation` being a minor version number.  See
-    /// `is_newer_than()`.
-    pub omicron_generation: Generation,
-
-    /// ledger-managed generation number
-    ///
-    /// This generation is managed by the ledger facility itself.  It's bumped
-    /// whenever we write a new ledger.  In practice, we don't currently have
-    /// any reason to bump this _for a given Omicron generation_ so it's
-    /// somewhat redundant.  In principle, if we needed to modify the ledgered
-    /// configuration due to some event that doesn't change the Omicron config
-    /// (e.g., if we wanted to move the root filesystem to a different path), we
-    /// could do that by bumping this generation.
-    pub ledger_generation: Generation,
-    pub zones: Vec<OmicronZoneConfigLocal>,
-}
-
-impl Ledgerable for OmicronZonesConfigLocal {
-    fn is_newer_than(&self, other: &OmicronZonesConfigLocal) -> bool {
-        self.omicron_generation > other.omicron_generation
-            || (self.omicron_generation == other.omicron_generation
-                && self.ledger_generation >= other.ledger_generation)
-    }
-
-    fn generation_bump(&mut self) {
-        self.ledger_generation = self.ledger_generation.next();
-    }
-}
-
-impl OmicronZonesConfigLocal {
-    /// Returns the initial configuration for generation 1, which has no zones
-    pub fn initial() -> OmicronZonesConfigLocal {
-        OmicronZonesConfigLocal {
-            omicron_generation: Generation::new(),
-            ledger_generation: Generation::new(),
-            zones: vec![],
-        }
-    }
-
-    pub fn to_omicron_zones_config(self) -> OmicronZonesConfig {
-        OmicronZonesConfig {
-            generation: self.omicron_generation,
-            zones: self.zones.into_iter().map(|z| z.zone).collect(),
-        }
-    }
-}
-
-/// Combines the Nexus-provided `OmicronZoneConfig` (which describes what Nexus
-/// wants for this zone) with any locally-determined configuration (like the
-/// path to the root filesystem)
-//
-// NOTE: Although the path to the root filesystem is not exactly equal to the
-// ZpoolName, it is derivable from it, and the ZpoolName for the root filesystem
-// is now being supplied as a part of OmicronZoneConfig. Therefore, this struct
-// is less necessary than it has been historically.
-#[derive(
-    Clone,
-    Debug,
-    Eq,
-    PartialEq,
-    serde::Serialize,
-    serde::Deserialize,
-    schemars::JsonSchema,
-)]
-pub struct OmicronZoneConfigLocal {
-    pub zone: OmicronZoneConfig,
-    #[schemars(with = "String")]
-    pub root: Utf8PathBuf,
-}
-
 /// Describes how we want a switch zone to be configured
 ///
 /// This is analogous to `OmicronZoneConfig`, but for the switch zone (which is
@@ -568,7 +476,7 @@ impl illumos_utils::smf_helper::Service for SwitchService {
 /// Describes either an Omicron-managed zone or the switch zone, used for
 /// functions that operate on either one or the other
 enum ZoneArgs<'a> {
-    Omicron(&'a OmicronZoneConfigLocal),
+    Omicron(&'a OmicronZoneConfig),
     Switch(&'a SwitchZoneConfig),
 }
 
@@ -576,7 +484,7 @@ impl<'a> ZoneArgs<'a> {
     /// If this is an Omicron zone, return its type
     pub fn omicron_type(&self) -> Option<&'a OmicronZoneType> {
         match self {
-            ZoneArgs::Omicron(zone_config) => Some(&zone_config.zone.zone_type),
+            ZoneArgs::Omicron(zone_config) => Some(&zone_config.zone_type),
             ZoneArgs::Switch(_) => None,
         }
     }
@@ -1430,12 +1338,11 @@ impl ServiceManager {
         // dataset into the zone. Additionally, construct a "unique enough" name
         // so we can create multiple zones of this type without collision.
         let unique_name = match &request {
-            ZoneArgs::Omicron(zone_config) => Some(zone_config.zone.id),
+            ZoneArgs::Omicron(zone_config) => Some(zone_config.id),
             ZoneArgs::Switch(_) => None,
         };
         let datasets: Vec<_> = match &request {
             ZoneArgs::Omicron(zone_config) => zone_config
-                .zone
                 .dataset_name()
                 .map(|n| zone::Dataset { name: n.full_name() })
                 .into_iter()
@@ -1455,7 +1362,7 @@ impl ServiceManager {
         // are falling back to searching `/opt/oxide` in addition to the install
         // datasets.
         let image_source = match &request {
-            ZoneArgs::Omicron(zone_config) => &zone_config.zone.image_source,
+            ZoneArgs::Omicron(zone_config) => &zone_config.image_source,
             ZoneArgs::Switch(_) => &OmicronZoneImageSource::InstallDataset,
         };
         let file_source = self.inner.zone_image_resolver.file_source_for(
@@ -1465,7 +1372,7 @@ impl ServiceManager {
 
         let zone_type_str = match &request {
             ZoneArgs::Omicron(zone_config) => {
-                zone_config.zone.zone_type.kind().zone_prefix()
+                zone_config.zone_type.kind().zone_prefix()
             }
             ZoneArgs::Switch(_) => "switch",
         };
@@ -1516,12 +1423,8 @@ impl ServiceManager {
                 .add_instance(ServiceInstanceBuilder::new("default"));
 
         let running_zone = match &request {
-            ZoneArgs::Omicron(OmicronZoneConfigLocal {
-                zone:
-                    OmicronZoneConfig {
-                        zone_type: OmicronZoneType::Clickhouse { address, .. },
-                        ..
-                    },
+            ZoneArgs::Omicron(OmicronZoneConfig {
+                zone_type: OmicronZoneType::Clickhouse { address, .. },
                 ..
             }) => {
                 let Some(info) = self.inner.sled_info.get() else {
@@ -1605,13 +1508,8 @@ impl ServiceManager {
                 RunningZone::boot(installed_zone).await?
             }
 
-            ZoneArgs::Omicron(OmicronZoneConfigLocal {
-                zone:
-                    OmicronZoneConfig {
-                        zone_type:
-                            OmicronZoneType::ClickhouseServer { address, .. },
-                        ..
-                    },
+            ZoneArgs::Omicron(OmicronZoneConfig {
+                zone_type: OmicronZoneType::ClickhouseServer { address, .. },
                 ..
             }) => {
                 let Some(info) = self.inner.sled_info.get() else {
@@ -1695,13 +1593,8 @@ impl ServiceManager {
                 RunningZone::boot(installed_zone).await?
             }
 
-            ZoneArgs::Omicron(OmicronZoneConfigLocal {
-                zone:
-                    OmicronZoneConfig {
-                        zone_type:
-                            OmicronZoneType::ClickhouseKeeper { address, .. },
-                        ..
-                    },
+            ZoneArgs::Omicron(OmicronZoneConfig {
+                zone_type: OmicronZoneType::ClickhouseKeeper { address, .. },
                 ..
             }) => {
                 let Some(info) = self.inner.sled_info.get() else {
@@ -1778,13 +1671,9 @@ impl ServiceManager {
                 RunningZone::boot(installed_zone).await?
             }
 
-            ZoneArgs::Omicron(OmicronZoneConfigLocal {
-                zone:
-                    OmicronZoneConfig {
-                        id: zone_id,
-                        zone_type: OmicronZoneType::CockroachDb { address, .. },
-                        ..
-                    },
+            ZoneArgs::Omicron(OmicronZoneConfig {
+                id: zone_id,
+                zone_type: OmicronZoneType::CockroachDb { address, .. },
                 ..
             }) => {
                 let Some(info) = self.inner.sled_info.get() else {
@@ -1849,13 +1738,8 @@ impl ServiceManager {
                 RunningZone::boot(installed_zone).await?
             }
 
-            ZoneArgs::Omicron(OmicronZoneConfigLocal {
-                zone:
-                    OmicronZoneConfig {
-                        zone_type:
-                            OmicronZoneType::Crucible { address, dataset },
-                        ..
-                    },
+            ZoneArgs::Omicron(OmicronZoneConfig {
+                zone_type: OmicronZoneType::Crucible { address, dataset },
                 ..
             }) => {
                 let Some(info) = self.inner.sled_info.get() else {
@@ -1907,12 +1791,8 @@ impl ServiceManager {
                 RunningZone::boot(installed_zone).await?
             }
 
-            ZoneArgs::Omicron(OmicronZoneConfigLocal {
-                zone:
-                    OmicronZoneConfig {
-                        zone_type: OmicronZoneType::CruciblePantry { address },
-                        ..
-                    },
+            ZoneArgs::Omicron(OmicronZoneConfig {
+                zone_type: OmicronZoneType::CruciblePantry { address },
                 ..
             }) => {
                 let Some(info) = self.inner.sled_info.get() else {
@@ -1954,13 +1834,9 @@ impl ServiceManager {
                     .map_err(|err| Error::io("crucible pantry profile", err))?;
                 RunningZone::boot(installed_zone).await?
             }
-            ZoneArgs::Omicron(OmicronZoneConfigLocal {
-                zone:
-                    OmicronZoneConfig {
-                        id,
-                        zone_type: OmicronZoneType::Oximeter { address },
-                        ..
-                    },
+            ZoneArgs::Omicron(OmicronZoneConfig {
+                id,
+                zone_type: OmicronZoneType::Oximeter { address },
                 ..
             }) => {
                 let Some(info) = self.inner.sled_info.get() else {
@@ -1995,16 +1871,12 @@ impl ServiceManager {
                     })?;
                 RunningZone::boot(installed_zone).await?
             }
-            ZoneArgs::Omicron(OmicronZoneConfigLocal {
-                zone:
-                    OmicronZoneConfig {
-                        zone_type:
-                            OmicronZoneType::ExternalDns {
-                                http_address,
-                                dns_address,
-                                nic,
-                                ..
-                            },
+            ZoneArgs::Omicron(OmicronZoneConfig {
+                zone_type:
+                    OmicronZoneType::ExternalDns {
+                        http_address,
+                        dns_address,
+                        nic,
                         ..
                     },
                 ..
@@ -2058,17 +1930,13 @@ impl ServiceManager {
                     })?;
                 RunningZone::boot(installed_zone).await?
             }
-            ZoneArgs::Omicron(OmicronZoneConfigLocal {
-                zone:
-                    OmicronZoneConfig {
-                        zone_type:
-                            OmicronZoneType::BoundaryNtp {
-                                address,
-                                dns_servers,
-                                ntp_servers,
-                                domain,
-                                ..
-                            },
+            ZoneArgs::Omicron(OmicronZoneConfig {
+                zone_type:
+                    OmicronZoneType::BoundaryNtp {
+                        address,
+                        dns_servers,
+                        ntp_servers,
+                        domain,
                         ..
                     },
                 ..
@@ -2146,12 +2014,8 @@ impl ServiceManager {
 
                 RunningZone::boot(installed_zone).await?
             }
-            ZoneArgs::Omicron(OmicronZoneConfigLocal {
-                zone:
-                    OmicronZoneConfig {
-                        zone_type: OmicronZoneType::InternalNtp { address },
-                        ..
-                    },
+            ZoneArgs::Omicron(OmicronZoneConfig {
+                zone_type: OmicronZoneType::InternalNtp { address },
                 ..
             }) => {
                 let Some(info) = self.inner.sled_info.get() else {
@@ -2207,17 +2071,13 @@ impl ServiceManager {
 
                 RunningZone::boot(installed_zone).await?
             }
-            ZoneArgs::Omicron(OmicronZoneConfigLocal {
-                zone:
-                    OmicronZoneConfig {
-                        zone_type:
-                            OmicronZoneType::InternalDns {
-                                http_address,
-                                dns_address,
-                                gz_address,
-                                gz_address_index,
-                                ..
-                            },
+            ZoneArgs::Omicron(OmicronZoneConfig {
+                zone_type:
+                    OmicronZoneType::InternalDns {
+                        http_address,
+                        dns_address,
+                        gz_address,
+                        gz_address_index,
                         ..
                     },
                 ..
@@ -2302,19 +2162,15 @@ impl ServiceManager {
                     })?;
                 RunningZone::boot(installed_zone).await?
             }
-            ZoneArgs::Omicron(OmicronZoneConfigLocal {
-                zone:
-                    OmicronZoneConfig {
-                        zone_type:
-                            OmicronZoneType::Nexus {
-                                internal_address,
-                                external_tls,
-                                external_dns_servers,
-                                ..
-                            },
-                        id,
+            ZoneArgs::Omicron(OmicronZoneConfig {
+                zone_type:
+                    OmicronZoneType::Nexus {
+                        internal_address,
+                        external_tls,
+                        external_dns_servers,
                         ..
                     },
+                id,
                 ..
             }) => {
                 let Some(info) = self.inner.sled_info.get() else {
@@ -3194,34 +3050,24 @@ impl ServiceManager {
         Ok(running_zone)
     }
 
-    // Ensures that a single Omicron zone is running.
+    // Attempt to start a single Omicron zone is running.
     //
     // This method is NOT idempotent.
     //
-    // - If the zone already exists, in any form, it is fully removed
-    // before being initialized. This is primarily intended to remove "partially
-    // stopped/started" zones with detritus from interfering with a new zone
-    // being launched.
-    // - If zones need time to be synchronized before they are initialized
-    // (e.g., this is a hard requirement for CockroachDb) they can check the
-    // `time_is_synchronized` argument.
-    // - `all_u2_pools` provides a snapshot into durable storage on this sled,
-    // which gives the storage manager an opportunity to validate the zone's
-    // storage configuration against the reality of the current sled.
+    // Callers must do any "pre-zone-start" validation, including:
+    //
+    // * No other zone of this same name is still running
+    // * Time is synchronized, if the zone requires it
+    // * Any datasets the zone depends on exist and have been configured and/or
+    //   mounted appropriately
     pub(crate) async fn start_omicron_zone(
         &self,
         zone: &OmicronZoneConfig,
         zone_root_path: PathInPool,
     ) -> Result<RunningZone, Error> {
-        // TODO-john fixme
-        let config = OmicronZoneConfigLocal {
-            zone: zone.clone(),
-            root: zone_root_path.path.clone(),
-        };
-
         let runtime = self
             .initialize_zone(
-                ZoneArgs::Omicron(&config),
+                ZoneArgs::Omicron(zone),
                 zone_root_path,
                 // filesystems=
                 &[],
@@ -4090,15 +3936,6 @@ mod test {
         let schema = schemars::schema_for!(ZoneBundleMetadata);
         expectorate::assert_contents(
             "../schema/zone-bundle-metadata.json",
-            &serde_json::to_string_pretty(&schema).unwrap(),
-        );
-    }
-
-    #[test]
-    fn test_all_zones_requests_schema() {
-        let schema = schemars::schema_for!(OmicronZonesConfigLocal);
-        expectorate::assert_contents(
-            "../schema/all-zones-requests.json",
             &serde_json::to_string_pretty(&schema).unwrap(),
         );
     }
