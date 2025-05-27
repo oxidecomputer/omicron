@@ -2233,7 +2233,7 @@ impl JsonSchema for IcmpParamRange {
                 schemars::schema::InstanceType::String.into()
             ),
             string: Some(Box::new(schemars::schema::StringValidation {
-                max_length: Some(7),  // 3 digits for each port and the dash
+                max_length: Some(7),  // 3 digits for each value and the dash
                 min_length: Some(1),
                 pattern: Some(
                     r#"^[0-9]{1,3}(-[0-9]{1,3})?$"#.to_string(),
