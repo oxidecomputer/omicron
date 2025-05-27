@@ -3,12 +3,6 @@
 :toc: left
 
 // TODO: This guide could use more sections:
-// - task: generate a new blueprint using the planner
-// - task: export reconfigurator state
-// - task: generate a new blueprint using reconfigurator-cli
-// - task: import blueprint
-// - task: execute blueprint (via Nexus)
-// - task: monitor blueprint execution
 // - task: previewing what changes a blueprint will make
 // - task: trigger inventory collection (and add back reference from `omdb` section)
 // - task: wait for inventory collection to complete
@@ -342,6 +336,425 @@ Broadly, we have several kinds of tests:
 * We have a small number of xref:../live-tests["live tests"] that can be run on-demand in a4x2 or a racklette that exercise behavior that can't currently be tested in CI.
 
 The https://github.com/oxidecomputer/omicron/pull/7424[ongoing work mentioned above] will make it possible to run the live tests in a4x2 in CI.
+
+== Working with blueprints
+
+In deployed systems (including those simulated with `cargo xtask omicron-dev run-all`), blueprints are _stored_ in the database and managed using the Nexus internal API, using `omdb`.
+
+```
+$ omdb nexus blueprints --help
+interact with blueprints
+
+Usage: omdb nexus blueprints [OPTIONS] <COMMAND>
+
+Commands:
+  list        List all blueprints
+  show        Show a blueprint
+  diff        Diff two blueprints
+  delete      Delete a blueprint
+  target      Interact with the current target blueprint
+  regenerate  Generate a new blueprint
+  import      Import a blueprint
+  help        Print this message or the help of the given subcommand(s)
+
+Options:
+      --log-level <LOG_LEVEL>  log level filter [env: LOG_LEVEL=] [default: warn]
+      --color <COLOR>          Color output [default: auto] [possible values: auto,
+                               always, never]
+  -h, --help                   Print help
+
+Connection Options:
+  --nexus-internal-url <NEXUS_INTERNAL_URL>
+          URL of the Nexus internal API [env: OMDB_NEXUS_URL=]
+  --dns-server <DNS_SERVER>
+          [env: OMDB_DNS_SERVER=[::1]:41524]
+
+Safety Options:
+  -w, --destructive  Allow potentially-destructive subcommands
+```
+
+Commands that modify the system in any way, even in ways that should be safe, require passing the `-w`/`--destructive` option.
+
+When testing with `omicron-dev run-all`, you generally need to use the `--dns-server` / `OMDB_DNS_SERVER` option to point `omdb` at the DNS server for your deployment.  For example, `omicron-dev run-all` outputs:
+
+```
+...
+omicron-dev: internal DNS:          [::1]:63673
+...
+```
+
+Then you can run `omdb --dns-server [::1]:63673` or set `OMDB_DNS_SERVER=[::1]:63673` in the environment.
+
+In a4x2 and racklettes, if you run `omdb` from the switch zone, you generally don't need to do this.  `omdb` knows how to find the internal DNS servers in these environments.
+
+=== Task: running the planner to generate a new blueprint
+
+At any time, you can run the planner to generate a new blueprint based on the current target blueprint and current system state:
+
+```
+$ omdb nexus blueprints list
+note: Nexus URL not specified.  Will pick one from DNS.
+note: using DNS server for subnet fd00:1122:3344::/48
+note: (if this is not right, use --dns-server to specify an alternate DNS server)
+note: using Nexus URL http://[fd00:1122:3344:101::6]:12221
+T ENA ID                                   PARENT TIME_CREATED
+* no  c43bd021-5982-48a0-b139-07180717a5f9 <none> 2025-05-27T18:01:00.567Z
+
+$ omdb --destructive nexus blueprints regenerate
+note: Nexus URL not specified.  Will pick one from DNS.
+note: using DNS server for subnet fd00:1122:3344::/48
+note: (if this is not right, use --dns-server to specify an alternate DNS server)
+note: using Nexus URL http://[fd00:1122:3344:101::6]:12221
+generated new blueprint f48b5b5a-05dd-4fab-95a9-e062ae8704b1
+
+$ omdb nexus blueprints list
+note: Nexus URL not specified.  Will pick one from DNS.
+note: using DNS server for subnet fd00:1122:3344::/48
+note: (if this is not right, use --dns-server to specify an alternate DNS server)
+note: using Nexus URL http://[fd00:1122:3344:101::6]:12221
+T ENA ID                                   PARENT                               TIME_CREATED             
+* no  c43bd021-5982-48a0-b139-07180717a5f9 <none>                               2025-05-27T18:01:00.567Z 
+      f48b5b5a-05dd-4fab-95a9-e062ae8704b1 c43bd021-5982-48a0-b139-07180717a5f9 2025-05-27T18:30:06.338Z 
+
+$ omdb nexus blueprints show f48b5b5a-05dd-4fab-95a9-e062ae8704b1
+note: Nexus URL not specified.  Will pick one from DNS.
+note: using DNS server for subnet fd00:1122:3344::/48
+note: (if this is not right, use --dns-server to specify an alternate DNS server)
+note: using Nexus URL http://[fd00:1122:3344:101::6]:12221
+blueprint  f48b5b5a-05dd-4fab-95a9-e062ae8704b1
+parent:    c43bd021-5982-48a0-b139-07180717a5f9
+
+  sled: 2fd3f2ad-1386-4606-bb9c-a8336fde2e9e (active, config generation 5)
+
+...
+
+
+ COCKROACHDB SETTINGS:
+    state fingerprint:::::::::::::::::   d4d87aa2ad877a4cc2fddd0573952362739110de
+    cluster.preserve_downgrade_option:   "22.1"
+
+ OXIMETER SETTINGS:
+    generation:   1
+    read from::   SingleNode
+
+ METADATA:
+    created by:::::::::::   5fad2dd8-a448-4592-a5a0-0ef319610c2f
+    created at:::::::::::   2025-05-27T18:30:06.338Z
+    comment::::::::::::::   (none)
+    internal DNS version:   1
+    external DNS version:   2
+
+ PENDING MGS-MANAGED UPDATES: 0
+
+$
+```
+
+Under normal conditions, when the system does not need to make any changes, this blueprint will show no differences from its parent:
+
+```
+$ omdb nexus blueprints diff c43bd021-5982-48a0-b139-07180717a5f9 f48b5b5a-05dd-4fab-95a9-e062ae8704b1
+note: Nexus URL not specified.  Will pick one from DNS.
+note: using DNS server for subnet fd00:1122:3344::/48
+note: (if this is not right, use --dns-server to specify an alternate DNS server)
+note: using Nexus URL http://[fd00:1122:3344:101::6]:12221
+from: blueprint c43bd021-5982-48a0-b139-07180717a5f9
+to:   blueprint f48b5b5a-05dd-4fab-95a9-e062ae8704b1
+
+ UNCHANGED SLEDS:
+
+  sled 2fd3f2ad-1386-4606-bb9c-a8336fde2e9e (active, config generation 5):
+
+...
+
+  sled a9bee580-305e-4377-8d13-b8e327bf2370 (active, config generation 5):
+
+...
+
+  sled f8c21585-7094-44e0-a230-389988225cc1 (active, config generation 5):
+
+...
+
+
+ COCKROACHDB SETTINGS:
+    state fingerprint:::::::::::::::::   d4d87aa2ad877a4cc2fddd0573952362739110de (unchanged)
+    cluster.preserve_downgrade_option:   "22.1" (unchanged)
+
+ METADATA:
+    internal DNS version:   1 (unchanged)
+    external DNS version:   2 (unchanged)
+
+ OXIMETER SETTINGS:
+    generation:   1 (unchanged)
+    read from::   SingleNode (unchanged)
+
+```
+
+[#task-blueprint-set-target]
+=== Task: Setting a new target blueprint
+
+If we want the system to execute our blueprint, we must set it as the current **target blueprint** and make sure that it's _enabled_.  We can do that in one step:
+
+```
+$ omdb --destructive nexus blueprints target set f48b5b5a-05dd-4fab-95a9-e062ae8704b1 enabled
+note: Nexus URL not specified.  Will pick one from DNS.
+note: using DNS server for subnet fd00:1122:3344::/48
+note: (if this is not right, use --dns-server to specify an alternate DNS server)
+note: using Nexus URL http://[fd00:1122:3344:101::6]:12221
+set target blueprint to f48b5b5a-05dd-4fab-95a9-e062ae8704b1
+
+$ omdb nexus blueprints target show
+note: Nexus URL not specified.  Will pick one from DNS.
+note: using DNS server for subnet fd00:1122:3344::/48
+note: (if this is not right, use --dns-server to specify an alternate DNS server)
+note: using Nexus URL http://[fd00:1122:3344:101::6]:12221
+target blueprint: f48b5b5a-05dd-4fab-95a9-e062ae8704b1
+made target at:   2025-05-27 18:36:12.227236 UTC
+enabled:          true
+```
+
+Note that you can only set a blueprint as the target if it was generated from the _current_ target.  This is how the system ensures strong consistency in the planning process.  If you try to, say, set an old blueprint as the target, you'll get an error:
+
+```
+$ omdb --destructive nexus blueprints target set c43bd021-5982-48a0-b139-07180717a5f9 enabled
+note: Nexus URL not specified.  Will pick one from DNS.
+note: using DNS server for subnet fd00:1122:3344::/48
+note: (if this is not right, use --dns-server to specify an alternate DNS server)
+note: using Nexus URL http://[fd00:1122:3344:101::6]:12221
+Error: setting target to blueprint c43bd021-5982-48a0-b139-07180717a5f9
+
+Caused by:
+    Error Response: status: 400 Bad Request; headers: {"content-type": "application/json", "x-request-id": "5535a0e0-b431-4018-8d3f-6d3e4f1393fc", "content-length": "210", "date": "Tue, 27 May 2025 18:37:36 GMT"}; value: Error { error_code: Some("InvalidRequest"), message: "Blueprint c43bd021-5982-48a0-b139-07180717a5f9's parent blueprint is not the current target blueprint", request_id: "5535a0e0-b431-4018-8d3f-6d3e4f1393fc" }
+
+```
+
+You'll get a similar error if somebody else manages to set a different target blueprint before you do, since yours is no longer based on the current target.
+
+=== Task: monitoring blueprint execution
+
+It's common for users (developers and support technicians) to want to know when a blueprint has been executed so they can verify things are behaving as expected or move onto the next step in some multi-step process.
+
+WARNING: It's also common to want to know when a blueprint has been executed in automated tests so that the test can then verify some behavior that depended on the blueprint being executed.  **But this approach can lead to flaky tests or implicit breakage** when, say, the planner is changed to do things in a different order or split one complicated step into two steps.  The test might fail even though the system is working because the test encodes an assumption about how planning and execution work.  Consider using `wait_for_condition` on the specific condition you care about instead of waiting for a specific blueprint to complete.
+
+CAUTION: Parts of the control plane sometimes want to know when a blueprint is executed so they can take some follow-on action.  **This is almost certainly the wrong approach**, for the same reason that it leads to flaky and brittle tests.  Components should identify what specific condition they care about (e.g., some zone being deployed) and then find a way to be notified or poll on that condition rather than wait for specific blueprints to be planned and executed.
+
+The easiest way to do this is to look at the status of the `blueprint_executor` background task using `omdb nexus background-tasks`.  For example:
+
+```
+$ omdb nexus background-tasks show blueprint_executor
+note: Nexus URL not specified.  Will pick one from DNS.
+note: using Nexus URL http://[::1]:12221
+task: "blueprint_executor"
+  configured period: every 1m
+  currently executing: no
+  last completed activation: iter 22, triggered by a periodic timer firing
+    started at 2025-05-27T17:53:38.363Z (33s ago) and ran for 0ms
+    target blueprint: 184d8b69-bfdf-4b68-b8a7-f79412b40003 
+    execution:        disabled                             
+    status:           (no event report found)              
+    error:            (none)      
+
+```
+
+This status shows that the executor saw the target blueprint `184d8b69-bfdf-4b68-b8a7-f79412b40003` but didn't do anything because execution is currently disabled.
+
+Here's an example where execution was enabled and completed successfully:
+
+```
+$ omdb nexus background-tasks show blueprint_executor
+note: Nexus URL not specified.  Will pick one from DNS.
+note: using DNS server for subnet fd00:1122:3344::/48
+note: (if this is not right, use --dns-server to specify an alternate DNS server)
+note: using Nexus URL http://[fd00:1122:3344:101::6]:12221
+task: "blueprint_executor"
+  configured period: every 1m
+  currently executing: no
+  last completed activation: iter 37, triggered by a dependent task completing
+    started at 2025-05-27T18:36:12.348Z (26s ago) and ran for 8582ms
+    target blueprint: f48b5b5a-05dd-4fab-95a9-e062ae8704b1
+    execution:        enabled
+    status:           completed (14 steps)
+    error:            (none)
+
+```
+
+You can print a summary of steps taken:
+
+```
+$ omdb nexus background-tasks print-report blueprint_executor
+note: Nexus URL not specified.  Will pick one from DNS.
+note: using DNS server for subnet fd00:1122:3344::/48
+note: (if this is not right, use --dns-server to specify an alternate DNS server)
+note: using Nexus URL http://[fd00:1122:3344:101::6]:12221
+[May 27 18:36:12]   Running ( 1/14) Ensure external networking resources
+[May 27 18:36:13] Completed ( 1/14) Ensure external networking resources: after 1.12s
+[May 27 18:36:13]   Running ( 2/14) Fetch sled list
+[May 27 18:36:14] Completed ( 2/14) Fetch sled list: after 646.93ms
+[May 27 18:36:14]   Running ( 3/14) Deploy sled configs
+[May 27 18:36:16] Completed ( 3/14) Deploy sled configs: after 2.28s
+[May 27 18:36:16]   Running ( 4/14) Plumb service firewall rules
+[May 27 18:36:18] Completed ( 4/14) Plumb service firewall rules: after 2.44s
+[May 27 18:36:18]   Running ( 5/14) Deploy DNS records
+[May 27 18:36:19] Completed ( 5/14) Deploy DNS records: after 1.11s
+[May 27 18:36:19]   Running ( 6/14) Cleanup expunged zones
+[May 27 18:36:19] Completed ( 6/14) Cleanup expunged zones: after 9.54µs
+[May 27 18:36:19]   Running ( 7/14) Decommission sleds
+[May 27 18:36:19] Completed ( 7/14) Decommission sleds: after 4.33µs
+[May 27 18:36:19]   Running ( 8/14) Decommission expunged disks
+[May 27 18:36:19] Completed ( 8/14) Decommission expunged disks: after 5.65µs
+[May 27 18:36:19]   Running ( 9/14) Deploy clickhouse cluster nodes
+[May 27 18:36:19] Completed ( 9/14) Deploy clickhouse cluster nodes: after 28.65µs
+[May 27 18:36:19]   Running (10/14) Deploy single-node clickhouse cluster
+[May 27 18:36:20] Completed (10/14) Deploy single-node clickhouse cluster: after 237.21ms
+[May 27 18:36:20]   Running (11/14) Mark support bundles as failed if they rely on an expunged disk or sled
+[May 27 18:36:20] Completed (11/14) Mark support bundles as failed if they rely on an expunged disk or sled: after 71.84ms with message: support bundle expunge report: SupportBundleExpungementReport { bundles_failed_missing_datasets: 0, bundles_deleted_missing_datasets: 0, bundles_failing_missing_nexus: 0, bundles_reassigned: 0 }
+[May 27 18:36:20]   Running (12/14) Reassign sagas
+[May 27 18:36:20] Completed (12/14) Reassign sagas: after 625.62ms
+[May 27 18:36:20]   Running (13/14) Ensure CockroachDB settings
+[May 27 18:36:20] Completed (13/14) Ensure CockroachDB settings: after 23.43ms
+[May 27 18:36:20]   Running (14/14) Kick off MGS-managed updates
+[May 27 18:36:20] Completed (14/14) Kick off MGS-managed updates: after 7.28µs
+```
+
+=== Task: making custom changes to live systems
+
+Separating planning from execution makes it possible to create your own blueprints (different from what the system would create for itself) and have the system execute those.  This is intended for development, testing, and product support (for emergencies).  It's a multi-step process:
+
+* <<task-omdb-export>>
+* <<task-cli-edit>> (if needed, you can build a custom `reconfigurator-cli` that makes specific blueprint changes that you need)
+* <<task-cli-export>>
+* <<task-blueprint-import>>
+* <<task-blueprint-set-target>>
+
+Broadly, it looks like this:
+
+```mermaid
+flowchart TD
+    subgraph "Real or simulated system"
+        nexus["Nexus"]
+        db["Database"]    
+    end
+
+    cli["reconfigurator-cli<br />(edit/generate new blueprints)"]
+    state_file["reconfigurator state file"]
+    blueprint_file["blueprint file"]
+    omdb["omdb"]
+
+    db --> |read state| omdb
+    omdb --> |reconfigurator export| state_file
+
+    state_file --> |load system state| cli
+    cli --> |save blueprint| blueprint_file
+
+    blueprint_file --> |import| omdb
+    omdb --> |import blueprint| nexus
+
+    style state_file fill:#c8e6c9,stroke:#388e3c
+    style blueprint_file fill:#c8e6c9,stroke:#388e3c
+    style cli fill:#f3e5f5,stroke:#8e24aa
+    style omdb fill:#f3e5f5,stroke:#8e24aa
+```
+
+[#task-omdb-export]
+=== Task: exporting live system state for `reconfigurator-cli`
+
+You can bundle up all the Reconfigurator-related state from a live system with:
+
+```
+$ omdb reconfigurator export reconfigurator.out
+note: database URL not specified.  Will search DNS.
+note: (override with --db-url or OMDB_DB_URL)
+note: using DNS server for subnet fd00:1122:3344::/48
+note: (if this is not right, use --dns-server to specify an alternate DNS server)
+note: using database URL postgresql://root@[fd00:1122:3344:102::4]:32221,[fd00:1122:3344:101::3]:32221,[fd00:1122:3344:101::4]:32221,[fd00:1122:3344:102::3]:32221,[fd00:1122:3344:103::3]:32221/omicron?sslmode=disable
+note: database schema version matches expected (144.0.0)
+assembling reconfigurator state ... done
+wrote reconfigurator.out
+
+```
+
+You can copy that file around as needed and then import it into `reconfigurator-cli`.  For historical reasons (that should be fixed), when you do this, you need to pick an inventory collection to use as the basis for creating `reconfigurator-cli`'s model of the sleds in the system.  You can usually pick any one.  Usually, you can just try the import:
+
+```
+# ./reconfigurator-cli
+generated RNG seed: reportedly-vivacious-scad
+〉load reconfigurator.out
+error: no collection_id specified and file contains 4 collections: 1f397505-6ec3-4d23-9aae-bb331e2caf9f, 5febd3ec-e68d-48f5-966f-c88990d14ef3, 346d8c4d-7b99-4af7-a76e-f7a37c8780b5, 80ae5780-1806-438b-ad64-7a6b1d4e8543
+```
+
+then pick one of the ones from the error message:
+
+```
+〉load reconfigurator.out 80ae5780-1806-438b-ad64-7a6b1d4e8543
+loaded data from "reconfigurator.out"
+result:
+  system:
+    using collection 80ae5780-1806-438b-ad64-7a6b1d4e8543 as source of sled inventory data
+    loaded sleds: 2fd3f2ad-1386-4606-bb9c-a8336fde2e9e, a9bee580-305e-4377-8d13-b8e327bf2370, f8c21585-7094-44e0-a230-389988225cc1
+    loaded collections: 1f397505-6ec3-4d23-9aae-bb331e2caf9f, 5febd3ec-e68d-48f5-966f-c88990d14ef3, 346d8c4d-7b99-4af7-a76e-f7a37c8780b5, 80ae5780-1806-438b-ad64-7a6b1d4e8543
+    loaded blueprints: c43bd021-5982-48a0-b139-07180717a5f9, f48b5b5a-05dd-4fab-95a9-e062ae8704b1
+    loaded service IP pool ranges: [V4(Ipv4Range { first: 198.51.100.20, last: 198.51.100.29 })]
+    loaded internal DNS generations: (none)
+    loaded external DNS generations: (none)
+  config:
+    configured external DNS zone name: oxide.test
+    configured silo names: default-silo, recovery
+
+```
+
+[#task-cli-edit]
+=== Task: editing a blueprint in `reconfigurator-cli`
+
+Whether you loaded state from a live system or used the `load-example` command, `reconfigurator-cli` maintains an in-memory model of the system that you can change.  A key use case is "editing" a blueprint, by which we really mean creating a _new_ blueprint based on an existing one.  Here's an example (continuing from the previous one):
+
+```
+〉sled-list
+ID                                   NZPOOLS SUBNET
+2fd3f2ad-1386-4606-bb9c-a8336fde2e9e 5       fd00:1122:3344:103::/64
+a9bee580-305e-4377-8d13-b8e327bf2370 5       fd00:1122:3344:102::/64
+f8c21585-7094-44e0-a230-389988225cc1 5       fd00:1122:3344:101::/64
+
+〉blueprint-edit f48b5b5a-05dd-4fab-95a9-e062ae8704b1 add-nexus 2fd3f2ad-1386-4606-bb9c-a8336fde2e9e
+blueprint d00e6de7-26d4-498e-a5d6-6f92498c7a57 created from blueprint f48b5b5a-05dd-4fab-95a9-e062ae8704b1: added Nexus zone to sled 2fd3f2ad-1386-4606-bb9c-a8336fde2e9e
+```
+
+This added a Nexus zone to sled `2fd3f2ad-1386-4606-bb9c-a8336fde2e9e`.  Keep in mind that all this did was create a new blueprint in `reconfigurator-cli`'s in-memory state.  To actually take this action on a real system, we have to <<task-cli-export,export the blueprint>>, <<task-blueprint-import,import it back into the live system>>, and <<task-blueprint-set-target,make it the target>>.
+
+[#task-cli-export]
+=== Task: exporting from `reconfigurator-cli`
+
+You can save _just_ one blueprint from `reconfigurator-cli` to a file:
+
+```
+〉blueprint-save d00e6de7-26d4-498e-a5d6-6f92498c7a57 d00e6de7-26d4-498e-a5d6-6f92498c7a57.out
+saved blueprint d00e6de7-26d4-498e-a5d6-6f92498c7a57 to "d00e6de7-26d4-498e-a5d6-6f92498c7a57.out"
+```
+
+This is only useful for importing with `omdb nexus blueprints import`.
+
+You can also save the entire in-memory model, in the same form that gets exported from a live system with `omdb reconfigurator export`:
+
+```
+〉save reconfigurator1.out
+saved planning input, collections, and blueprints to "reconfigurator1.out"
+```
+
+This is only useful for importing back into another `reconfigurator-cli` session.
+
+[#task-blueprint-import]
+=== Task: importing a saved blueprint
+
+If you've saved a blueprint from `reconfigurator-cli` to a file, you can import it into a live system:
+
+```
+root@oxz_switch:~# omdb --destructive nexus blueprints import d00e6de7-26d4-498e-a5d6-6f92498c7a57.out
+note: Nexus URL not specified.  Will pick one from DNS.
+note: using DNS server for subnet fd00:1122:3344::/48
+note: (if this is not right, use --dns-server to specify an alternate DNS server)
+note: using Nexus URL http://[fd00:1122:3344:101::6]:12221
+uploaded new blueprint d00e6de7-26d4-498e-a5d6-6f92498c7a57
+```
+
+Note that this doesn't take any other action because the blueprint is not the current target.  See <<task-blueprint-set-target>>.
 
 == Updating SPs
 
