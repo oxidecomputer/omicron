@@ -10,6 +10,7 @@ use camino::Utf8PathBuf;
 use dropshot::ApiDescription;
 use dropshot::ErrorStatusCode;
 use dropshot::FreeformBody;
+use dropshot::Header;
 use dropshot::HttpError;
 use dropshot::HttpResponseAccepted;
 use dropshot::HttpResponseCreated;
@@ -34,7 +35,7 @@ use omicron_common::api::internal::shared::VirtualNetworkInterfaceHost;
 use omicron_common::api::internal::shared::{
     ResolvedVpcRouteSet, ResolvedVpcRouteState, SwitchPorts,
 };
-use range_requests::RequestContextEx;
+use range_requests::PotentialRange;
 use sled_agent_api::*;
 use sled_agent_types::boot_disk::BootDiskOsWriteStatus;
 use sled_agent_types::boot_disk::BootDiskPathParams;
@@ -408,13 +409,17 @@ impl SledAgentApi for SledAgentSimImpl {
 
     async fn support_bundle_download(
         rqctx: RequestContext<Self::Context>,
+        headers: Header<RangeRequestHeaders>,
         path_params: Path<SupportBundlePathParam>,
     ) -> Result<http::Response<dropshot::Body>, HttpError> {
         let sa = rqctx.context();
         let SupportBundlePathParam { zpool_id, dataset_id, support_bundle_id } =
             path_params.into_inner();
 
-        let range = rqctx.range();
+        let range = headers
+            .into_inner()
+            .range
+            .map(|r| PotentialRange::new(r.as_bytes()));
         sa.support_bundle_get(
             zpool_id,
             dataset_id,
@@ -427,6 +432,7 @@ impl SledAgentApi for SledAgentSimImpl {
 
     async fn support_bundle_download_file(
         rqctx: RequestContext<Self::Context>,
+        headers: Header<RangeRequestHeaders>,
         path_params: Path<SupportBundleFilePathParam>,
     ) -> Result<http::Response<dropshot::Body>, HttpError> {
         let sa = rqctx.context();
@@ -436,7 +442,10 @@ impl SledAgentApi for SledAgentSimImpl {
             file,
         } = path_params.into_inner();
 
-        let range = rqctx.range();
+        let range = headers
+            .into_inner()
+            .range
+            .map(|r| PotentialRange::new(r.as_bytes()));
         sa.support_bundle_get(
             zpool_id,
             dataset_id,
@@ -449,13 +458,17 @@ impl SledAgentApi for SledAgentSimImpl {
 
     async fn support_bundle_index(
         rqctx: RequestContext<Self::Context>,
+        headers: Header<RangeRequestHeaders>,
         path_params: Path<SupportBundlePathParam>,
     ) -> Result<http::Response<dropshot::Body>, HttpError> {
         let sa = rqctx.context();
         let SupportBundlePathParam { zpool_id, dataset_id, support_bundle_id } =
             path_params.into_inner();
 
-        let range = rqctx.range();
+        let range = headers
+            .into_inner()
+            .range
+            .map(|r| PotentialRange::new(r.as_bytes()));
         sa.support_bundle_get(
             zpool_id,
             dataset_id,
@@ -468,13 +481,17 @@ impl SledAgentApi for SledAgentSimImpl {
 
     async fn support_bundle_head(
         rqctx: RequestContext<Self::Context>,
+        headers: Header<RangeRequestHeaders>,
         path_params: Path<SupportBundlePathParam>,
     ) -> Result<http::Response<dropshot::Body>, HttpError> {
         let sa = rqctx.context();
         let SupportBundlePathParam { zpool_id, dataset_id, support_bundle_id } =
             path_params.into_inner();
 
-        let range = rqctx.range();
+        let range = headers
+            .into_inner()
+            .range
+            .map(|r| PotentialRange::new(r.as_bytes()));
         sa.support_bundle_head(
             zpool_id,
             dataset_id,
@@ -487,6 +504,7 @@ impl SledAgentApi for SledAgentSimImpl {
 
     async fn support_bundle_head_file(
         rqctx: RequestContext<Self::Context>,
+        headers: Header<RangeRequestHeaders>,
         path_params: Path<SupportBundleFilePathParam>,
     ) -> Result<http::Response<dropshot::Body>, HttpError> {
         let sa = rqctx.context();
@@ -496,7 +514,10 @@ impl SledAgentApi for SledAgentSimImpl {
             file,
         } = path_params.into_inner();
 
-        let range = rqctx.range();
+        let range = headers
+            .into_inner()
+            .range
+            .map(|r| PotentialRange::new(r.as_bytes()));
         sa.support_bundle_get(
             zpool_id,
             dataset_id,
@@ -509,13 +530,17 @@ impl SledAgentApi for SledAgentSimImpl {
 
     async fn support_bundle_head_index(
         rqctx: RequestContext<Self::Context>,
+        headers: Header<RangeRequestHeaders>,
         path_params: Path<SupportBundlePathParam>,
     ) -> Result<http::Response<dropshot::Body>, HttpError> {
         let sa = rqctx.context();
         let SupportBundlePathParam { zpool_id, dataset_id, support_bundle_id } =
             path_params.into_inner();
 
-        let range = rqctx.range();
+        let range = headers
+            .into_inner()
+            .range
+            .map(|r| PotentialRange::new(r.as_bytes()));
         sa.support_bundle_head(
             zpool_id,
             dataset_id,

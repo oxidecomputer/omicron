@@ -71,7 +71,7 @@ impl super::Nexus {
         id: SupportBundleUuid,
         query: SupportBundleQueryType,
         head: bool,
-        _range: Option<PotentialRange>,
+        range: Option<PotentialRange>,
     ) -> Result<Response<Body>, Error> {
         // Lookup the bundle, confirm it's accessible
         let (.., bundle) = LookupPath::new(opctx, &self.db_datastore)
@@ -105,7 +105,16 @@ impl super::Nexus {
             .expect("Failed to build reqwest Client");
         let client = self.sled_client_ext(&sled_id, client).await?;
 
-        // TODO: Use "range"?
+        let range = if let Some(potential_range) = &range {
+            Some(potential_range.try_into_str().map_err(|err| match err {
+                range_requests::Error::Parse(_) => Error::invalid_request(
+                    "Failed to parse range request header",
+                ),
+                _ => Error::internal_error("Invalid range request"),
+            })?)
+        } else {
+            None
+        };
 
         let response = match (query, head) {
             (SupportBundleQueryType::Whole, true) => {
@@ -114,6 +123,7 @@ impl super::Nexus {
                         &ZpoolUuid::from(bundle.zpool_id),
                         &DatasetUuid::from(bundle.dataset_id),
                         &SupportBundleUuid::from(bundle.id),
+                        range,
                     )
                     .await
             }
@@ -123,6 +133,7 @@ impl super::Nexus {
                         &ZpoolUuid::from(bundle.zpool_id),
                         &DatasetUuid::from(bundle.dataset_id),
                         &SupportBundleUuid::from(bundle.id),
+                        range,
                     )
                     .await
             }
@@ -132,6 +143,7 @@ impl super::Nexus {
                         &ZpoolUuid::from(bundle.zpool_id),
                         &DatasetUuid::from(bundle.dataset_id),
                         &SupportBundleUuid::from(bundle.id),
+                        range,
                     )
                     .await
             }
@@ -141,6 +153,7 @@ impl super::Nexus {
                         &ZpoolUuid::from(bundle.zpool_id),
                         &DatasetUuid::from(bundle.dataset_id),
                         &SupportBundleUuid::from(bundle.id),
+                        range,
                     )
                     .await
             }
@@ -151,6 +164,7 @@ impl super::Nexus {
                         &DatasetUuid::from(bundle.dataset_id),
                         &SupportBundleUuid::from(bundle.id),
                         &file_path,
+                        range,
                     )
                     .await
             }
@@ -161,6 +175,7 @@ impl super::Nexus {
                         &DatasetUuid::from(bundle.dataset_id),
                         &SupportBundleUuid::from(bundle.id),
                         &file_path,
+                        range,
                     )
                     .await
             }
