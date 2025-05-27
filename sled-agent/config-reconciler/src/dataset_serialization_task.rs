@@ -175,6 +175,14 @@ impl IdMappable for DatasetEnsureResult {
 pub(crate) struct DatasetTaskHandle(mpsc::Sender<DatasetTaskRequest>);
 
 impl DatasetTaskHandle {
+    // For testing, create a handle on which requests will always fail with a
+    // `DatasetTaskError`.
+    #[cfg(any(test, feature = "testing"))]
+    pub(crate) fn spawn_noop() -> Self {
+        let (tx, _rx) = mpsc::channel(1);
+        Self(tx)
+    }
+
     pub fn spawn_dataset_task(
         mount_config: Arc<MountConfig>,
         currently_managed_zpools_rx: CurrentlyManagedZpoolsReceiver,
