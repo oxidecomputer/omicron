@@ -34,6 +34,15 @@
 //!     there could be a fair bit of data and it may be updated fairly
 //!     frequently.
 //!
+//! (4) DNS data is managed by Nexus, persisted in Cockroach, and propagated out
+//!     to these severs.  Critically, these servers may serve records derived
+//!     from but not explicitly defined as a
+//!     [`internal_dns_types::config::DnsRecord`].  SOA records are an example
+//!     here.  On the HTTP interface, there is one consistent "upstream" view of
+//!     the DNS server: the configuration that has been given to this DNS
+//!     server.  This avoids the burden of having to rectify any intermediary
+//!     state (in a database or Nexus) with synthesized "downstream" records.
+//!
 //! This crate provides three main pieces for running the DNS server program:
 //!
 //! 1. Persistent [`storage::Store`] of DNS data

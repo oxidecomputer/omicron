@@ -565,7 +565,11 @@ impl DnsConfigBuilder {
         http_address: SocketAddrV6,
         dns_address: SocketAddr,
     ) -> anyhow::Result<()> {
-        anyhow::ensure!(service == ServiceName::InternalDns, "TODO: asdf");
+        anyhow::ensure!(
+            service == ServiceName::InternalDns,
+            "This method is only valid for internal DNS servers, \
+            but we were provided the service '{service:?}'",
+        );
         let zone = self.host_zone(zone_id, *http_address.ip())?;
         self.service_backend_zone(service, &zone, http_address.port())?;
         let prior_address =
@@ -591,7 +595,11 @@ impl DnsConfigBuilder {
         http_address: SocketAddrV6,
         dns_address: SocketAddr,
     ) -> anyhow::Result<()> {
-        anyhow::ensure!(service == ServiceName::ExternalDns, "TODO: asdf");
+        anyhow::ensure!(
+            service == ServiceName::ExternalDns,
+            "This method is only valid for external DNS servers, \
+            but we were provided the service '{service:?}'",
+        );
         let zone = self.host_zone(zone_id, *http_address.ip())?;
         self.service_backend_zone(service, &zone, http_address.port())?;
         let prior_address =
