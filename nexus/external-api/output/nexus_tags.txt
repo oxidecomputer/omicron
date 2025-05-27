@@ -287,6 +287,10 @@ API operations found with tag "system/status"
 OPERATION ID                             METHOD   URL PATH
 ping                                     GET      /v1/ping
 
+API operations found with tag "tokens"
+OPERATION ID                             METHOD   URL PATH
+current_user_token_list                  GET      /v1/me/tokens
+
 API operations found with tag "vpcs"
 OPERATION ID                             METHOD   URL PATH
 internet_gateway_create                  POST     /v1/internet-gateways
