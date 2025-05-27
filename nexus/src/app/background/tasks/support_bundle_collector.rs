@@ -6,8 +6,10 @@
 
 use crate::app::background::BackgroundTask;
 use anyhow::Context;
+use base64::Engine;
 use camino::Utf8DirEntry;
 use camino::Utf8Path;
+use camino::Utf8PathBuf;
 use camino_tempfile::Utf8TempDir;
 use camino_tempfile::tempdir_in;
 use camino_tempfile::tempfile_in;
@@ -15,6 +17,10 @@ use futures::FutureExt;
 use futures::StreamExt;
 use futures::future::BoxFuture;
 use futures::stream::FuturesUnordered;
+use gateway_client::Client as MgsClient;
+use gateway_client::types::SpIdentifier;
+use internal_dns_resolver::Resolver;
+use internal_dns_types::names::ServiceName;
 use nexus_db_model::SupportBundle;
 use nexus_db_model::SupportBundleState;
 use nexus_db_queries::authz;
@@ -37,6 +43,7 @@ use omicron_uuid_kinds::ZpoolUuid;
 use parallel_task_set::ParallelTaskSet;
 use serde_json::json;
 use sha2::{Digest, Sha256};
+use slog_error_chain::InlineErrorChain;
 use std::future::Future;
 use std::io::Write;
 use std::sync::Arc;
@@ -84,6 +91,7 @@ enum DatabaseBundleCleanupResult {
 /// The background task responsible for cleaning and collecting support bundles
 pub struct SupportBundleCollector {
     datastore: Arc<DataStore>,
+    resolver: Resolver,
     disable: bool,
     nexus_id: OmicronZoneUuid,
 }
@@ -91,10 +99,11 @@ pub struct SupportBundleCollector {
 impl SupportBundleCollector {
     pub fn new(
         datastore: Arc<DataStore>,
+        resolver: Resolver,
         disable: bool,
         nexus_id: OmicronZoneUuid,
     ) -> Self {
-        SupportBundleCollector { datastore, disable, nexus_id }
+        SupportBundleCollector { datastore, resolver, disable, nexus_id }
     }
 
     // Tells a sled agent to delete a support bundle
@@ -376,6 +385,7 @@ impl SupportBundleCollector {
 
         let collection = Arc::new(BundleCollection {
             datastore: self.datastore.clone(),
+            resolver: self.resolver.clone(),
             log: opctx.log.new(slog::o!("bundle" => bundle.id.to_string())),
             opctx: opctx.child(std::collections::BTreeMap::new()),
             request: request.clone(),
@@ -419,6 +429,7 @@ impl SupportBundleCollector {
 // Wraps up all arguments to perform a single support bundle collection
 struct BundleCollection {
     datastore: Arc<DataStore>,
+    resolver: Resolver,
     log: slog::Logger,
     opctx: OpContext,
     request: BundleRequest,
@@ -557,6 +568,18 @@ impl BundleCollection {
             self.bundle.id.to_string(),
         )
         .await?;
+
+        let sp_dumps_dir = dir.path().join("sp_task_dumps");
+        tokio::fs::create_dir_all(&sp_dumps_dir).await.with_context(|| {
+            format!("failed to create SP task dump directory {sp_dumps_dir}")
+        })?;
+        if let Err(e) =
+            save_all_sp_dumps(log, &self.resolver, &sp_dumps_dir).await
+        {
+            error!(log, "failed to capture SP task dumps"; "error" => InlineErrorChain::new(e.as_ref()));
+        } else {
+            report.listed_sps = true;
+        };
 
         if let Ok(all_sleds) = self
             .datastore
@@ -969,6 +992,86 @@ where
     Ok(())
 }
 
+/// Collect task dumps from all SPs via MGS and save them to a directory.
+async fn save_all_sp_dumps(
+    log: &slog::Logger,
+    resolver: &Resolver,
+    sp_dumps_dir: &Utf8Path,
+) -> anyhow::Result<()> {
+    let mgs_client = resolver
+        .lookup_socket_v6(ServiceName::ManagementGatewayService)
+        .await
+        .map(|sockaddr| {
+            let url = format!("http://{}", sockaddr);
+            gateway_client::Client::new(&url, log.clone())
+        })
+        .context("failed to resolve address of MGS")?;
+
+    let all_sps = mgs_client
+        .sp_all_ids()
+        .await
+        .context("failed to get list of SPs from MGS")?
+        .into_inner();
+
+    let mut tasks = ParallelTaskSet::new();
+    for sp in all_sps {
+        let mgs_client = mgs_client.clone();
+        let sp_dumps_dir = sp_dumps_dir.to_owned();
+
+        tasks
+            .spawn(async move {
+                save_sp_dumps(mgs_client, sp, sp_dumps_dir)
+                    .await
+                    .with_context(|| format!("SP {} {}", sp.type_, sp.slot))
+            })
+            .await;
+    }
+    for result in tasks.join_all().await {
+        if let Err(e) = result {
+            error!(
+                log,
+                "failed to capture task dumps";
+                "error" => InlineErrorChain::new(e.as_ref())
+            );
+        }
+    }
+
+    Ok(())
+}
+
+/// Fetch and save task dumps from a single SP.
+async fn save_sp_dumps(
+    mgs_client: MgsClient,
+    sp: SpIdentifier,
+    sp_dumps_dir: Utf8PathBuf,
+) -> anyhow::Result<()> {
+    let dump_count = mgs_client
+        .sp_task_dump_count(sp.type_, sp.slot)
+        .await
+        .context("failed to get task dump count from SP")?
+        .into_inner();
+
+    let output_dir = sp_dumps_dir.join(format!("{}_{}", sp.type_, sp.slot));
+    tokio::fs::create_dir_all(&output_dir).await?;
+
+    for i in 0..dump_count {
+        let task_dump = mgs_client
+            .sp_task_dump_get(sp.type_, sp.slot, i)
+            .await
+            .with_context(|| format!("failed to get task dump {i} from SP"))?
+            .into_inner();
+
+        let zip_bytes = base64::engine::general_purpose::STANDARD
+            .decode(task_dump.base64_zip)
+            .context("failed to decode base64-encoded SP task dump zip")?;
+
+        tokio::fs::write(output_dir.join(format!("dump-{i}.zip")), zip_bytes)
+            .await
+            .context("failed to write SP task dump zip to disk")?;
+    }
+    Ok(())
+}
+
 #[cfg(test)]
 mod test {
     use super::*;
@@ -1025,12 +1128,17 @@ mod test {
     async fn test_cleanup_noop(cptestctx: &ControlPlaneTestContext) {
         let nexus = &cptestctx.server.server_context().nexus;
         let datastore = nexus.datastore();
+        let resolver = nexus.resolver();
         let opctx = OpContext::for_tests(
             cptestctx.logctx.log.clone(),
             datastore.clone(),
         );
-        let collector =
-            SupportBundleCollector::new(datastore.clone(), false, nexus.id());
+        let collector = SupportBundleCollector::new(
+            datastore.clone(),
+            resolver.clone(),
+            false,
+            nexus.id(),
+        );
 
         let report = collector
             .cleanup_destroyed_bundles(&opctx)
@@ -1046,12 +1154,17 @@ mod test {
     async fn test_collect_noop(cptestctx: &ControlPlaneTestContext) {
         let nexus = &cptestctx.server.server_context().nexus;
         let datastore = nexus.datastore();
+        let resolver = nexus.resolver();
         let opctx = OpContext::for_tests(
             cptestctx.logctx.log.clone(),
             datastore.clone(),
         );
-        let collector =
-            SupportBundleCollector::new(datastore.clone(), false, nexus.id());
+        let collector = SupportBundleCollector::new(
+            datastore.clone(),
+            resolver.clone(),
+            false,
+            nexus.id(),
+        );
 
         let request = BundleRequest::default();
         let report = collector
@@ -1212,6 +1325,7 @@ mod test {
     async fn test_collect_one(cptestctx: &ControlPlaneTestContext) {
         let nexus = &cptestctx.server.server_context().nexus;
         let datastore = nexus.datastore();
+        let resolver = nexus.resolver();
         let opctx = OpContext::for_tests(
             cptestctx.logctx.log.clone(),
             datastore.clone(),
@@ -1230,8 +1344,12 @@ mod test {
             .expect("Couldn't allocate a support bundle");
         assert_eq!(bundle.state, SupportBundleState::Collecting);
 
-        let collector =
-            SupportBundleCollector::new(datastore.clone(), false, nexus.id());
+        let collector = SupportBundleCollector::new(
+            datastore.clone(),
+            resolver.clone(),
+            false,
+            nexus.id(),
+        );
 
         // The bundle collection should complete successfully.
         let request = BundleRequest {
@@ -1246,6 +1364,7 @@ mod test {
             .expect("Collecting the bundle should have generated a report");
         assert_eq!(report.bundle, bundle.id.into());
         assert!(report.listed_in_service_sleds);
+        assert!(report.listed_sps);
         assert!(report.activated_in_db_ok);
 
         let observed_bundle = datastore
@@ -1267,6 +1386,7 @@ mod test {
     async fn test_collect_many(cptestctx: &ControlPlaneTestContext) {
         let nexus = &cptestctx.server.server_context().nexus;
         let datastore = nexus.datastore();
+        let resolver = nexus.resolver();
         let opctx = OpContext::for_tests(
             cptestctx.logctx.log.clone(),
             datastore.clone(),
@@ -1287,8 +1407,12 @@ mod test {
             .await
             .expect("Couldn't allocate a second support bundle");
 
-        let collector =
-            SupportBundleCollector::new(datastore.clone(), false, nexus.id());
+        let collector = SupportBundleCollector::new(
+            datastore.clone(),
+            resolver.clone(),
+            false,
+            nexus.id(),
+        );
 
         // Each time we call "collect_bundle", we collect a SINGLE bundle.
         let request = BundleRequest { skip_sled_info: true };
@@ -1299,6 +1423,7 @@ mod test {
             .expect("Collecting the bundle should have generated a report");
         assert_eq!(report.bundle, bundle1.id.into());
         assert!(report.listed_in_service_sleds);
+        assert!(report.listed_sps);
         assert!(report.activated_in_db_ok);
 
         // This is observable by checking the state of bundle1 and bundle2:
@@ -1321,6 +1446,7 @@ mod test {
             .expect("Collecting the bundle should have generated a report");
         assert_eq!(report.bundle, bundle2.id.into());
         assert!(report.listed_in_service_sleds);
+        assert!(report.listed_sps);
         assert!(report.activated_in_db_ok);
 
         // After another collection request, we'll see that both bundles have
@@ -1343,6 +1469,7 @@ mod test {
     ) {
         let nexus = &cptestctx.server.server_context().nexus;
         let datastore = nexus.datastore();
+        let resolver = nexus.resolver();
         let opctx = OpContext::for_tests(
             cptestctx.logctx.log.clone(),
             datastore.clone(),
@@ -1372,8 +1499,12 @@ mod test {
             .await
             .unwrap();
 
-        let collector =
-            SupportBundleCollector::new(datastore.clone(), false, nexus.id());
+        let collector = SupportBundleCollector::new(
+            datastore.clone(),
+            resolver.clone(),
+            false,
+            nexus.id(),
+        );
 
         let report = collector
             .cleanup_destroyed_bundles(&opctx)
@@ -1398,6 +1529,7 @@ mod test {
     ) {
         let nexus = &cptestctx.server.server_context().nexus;
         let datastore = nexus.datastore();
+        let resolver = nexus.resolver();
         let opctx = OpContext::for_tests(
             cptestctx.logctx.log.clone(),
             datastore.clone(),
@@ -1415,8 +1547,12 @@ mod test {
             .expect("Couldn't allocate a support bundle");
         assert_eq!(bundle.state, SupportBundleState::Collecting);
 
-        let collector =
-            SupportBundleCollector::new(datastore.clone(), false, nexus.id());
+        let collector = SupportBundleCollector::new(
+            datastore.clone(),
+            resolver.clone(),
+            false,
+            nexus.id(),
+        );
         let request = BundleRequest { skip_sled_info: true };
         let report = collector
             .collect_bundle(&opctx, &request)
@@ -1425,6 +1561,7 @@ mod test {
             .expect("Collecting the bundle should have generated a report");
         assert_eq!(report.bundle, bundle.id.into());
         assert!(report.listed_in_service_sleds);
+        assert!(report.listed_sps);
         assert!(report.activated_in_db_ok);
 
         // Cancel the bundle after collection has completed
@@ -1463,6 +1600,7 @@ mod test {
     ) {
         let nexus = &cptestctx.server.server_context().nexus;
         let datastore = nexus.datastore();
+        let resolver = nexus.resolver();
         let opctx = OpContext::for_tests(
             cptestctx.logctx.log.clone(),
             datastore.clone(),
@@ -1494,8 +1632,12 @@ mod test {
             .await
             .unwrap();
 
-        let collector =
-            SupportBundleCollector::new(datastore.clone(), false, nexus.id());
+        let collector = SupportBundleCollector::new(
+            datastore.clone(),
+            resolver.clone(),
+            false,
+            nexus.id(),
+        );
 
         let report = collector
             .cleanup_destroyed_bundles(&opctx)
@@ -1523,6 +1665,7 @@ mod test {
     ) {
         let nexus = &cptestctx.server.server_context().nexus;
         let datastore = nexus.datastore();
+        let resolver = nexus.resolver();
         let opctx = OpContext::for_tests(
             cptestctx.logctx.log.clone(),
             datastore.clone(),
@@ -1540,8 +1683,12 @@ mod test {
             .expect("Couldn't allocate a support bundle");
         assert_eq!(bundle.state, SupportBundleState::Collecting);
 
-        let collector =
-            SupportBundleCollector::new(datastore.clone(), false, nexus.id());
+        let collector = SupportBundleCollector::new(
+            datastore.clone(),
+            resolver.clone(),
+            false,
+            nexus.id(),
+        );
         let request = BundleRequest { skip_sled_info: true };
         let report = collector
             .collect_bundle(&opctx, &request)
@@ -1597,6 +1744,7 @@ mod test {
     ) {
         let nexus = &cptestctx.server.server_context().nexus;
         let datastore = nexus.datastore();
+        let resolver = nexus.resolver();
         let opctx = OpContext::for_tests(
             cptestctx.logctx.log.clone(),
             datastore.clone(),
@@ -1614,8 +1762,12 @@ mod test {
             .expect("Couldn't allocate a support bundle");
         assert_eq!(bundle.state, SupportBundleState::Collecting);
 
-        let collector =
-            SupportBundleCollector::new(datastore.clone(), false, nexus.id());
+        let collector = SupportBundleCollector::new(
+            datastore.clone(),
+            resolver.clone(),
+            false,
+            nexus.id(),
+        );
         let request = BundleRequest { skip_sled_info: true };
         let report = collector
             .collect_bundle(&opctx, &request)
