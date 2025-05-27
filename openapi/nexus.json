@@ -5796,6 +5796,39 @@
         }
       }
     },
+    "/v1/me/tokens/{token_id}": {
+      "delete": {
+        "tags": [
+          "tokens"
+        ],
+        "summary": "Delete device access token",
+        "description": "Delete a device access token for the currently authenticated user.",
+        "operationId": "current_user_token_delete",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "token_id",
+            "description": "ID of the token",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "successful deletion"
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
     "/v1/metrics/{metric_name}": {
       "get": {
         "tags": [

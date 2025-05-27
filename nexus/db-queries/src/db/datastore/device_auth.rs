@@ -209,4 +209,31 @@ impl DataStore {
             .await
             .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))
     }
+
+    pub async fn device_access_token_delete(
+        &self,
+        opctx: &OpContext,
+        authz_user: &authz::SiloUser,
+        token_id: Uuid,
+    ) -> Result<(), Error> {
+        // TODO: surely this is the wrong permission
+        opctx.authorize(authz::Action::Modify, authz_user).await?;
+
+        use nexus_db_schema::schema::device_access_token::dsl;
+        let num_deleted = diesel::delete(dsl::device_access_token)
+            .filter(dsl::id.eq(token_id))
+            .filter(dsl::silo_user_id.eq(authz_user.id()))
+            .execute_async(&*self.pool_connection_authorized(opctx).await?)
+            .await
+            .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))?;
+
+        if num_deleted == 0 {
+            return Err(Error::not_found_by_id(
+                ResourceType::DeviceAccessToken,
+                &token_id,
+            ));
+        }
+
+        Ok(())
+    }
 }

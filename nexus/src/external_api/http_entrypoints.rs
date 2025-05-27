@@ -7099,6 +7099,26 @@ impl NexusExternalApi for NexusExternalApiImpl {
             .await
     }
 
+    async fn current_user_token_delete(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<params::TokenPath>,
+    ) -> Result<HttpResponseDeleted, HttpError> {
+        let apictx = rqctx.context();
+        let handler = async {
+            let opctx =
+                crate::context::op_context_for_external_api(&rqctx).await?;
+            let nexus = &apictx.context.nexus;
+            let path = path_params.into_inner();
+            nexus.current_user_token_delete(&opctx, path.token_id).await?;
+            Ok(HttpResponseDeleted())
+        };
+        apictx
+            .context
+            .external_latencies
+            .instrument_dropshot_handler(&rqctx, handler)
+            .await
+    }
+
     async fn support_bundle_list(
         rqctx: RequestContext<ApiContext>,
         query_params: Query<PaginatedById>,

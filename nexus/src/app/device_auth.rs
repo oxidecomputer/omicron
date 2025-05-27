@@ -311,4 +311,22 @@ impl super::Nexus {
             .device_access_tokens_list(opctx, &authz_user, pagparams)
             .await
     }
+
+    pub(crate) async fn current_user_token_delete(
+        &self,
+        opctx: &OpContext,
+        token_id: Uuid,
+    ) -> Result<(), Error> {
+        let &actor = opctx
+            .authn
+            .actor_required()
+            .internal_context("loading current user to delete token")?;
+        let (.., authz_user) = LookupPath::new(opctx, self.datastore())
+            .silo_user_id(actor.actor_id())
+            .lookup_for(authz::Action::Modify)
+            .await?;
+        self.db_datastore
+            .device_access_token_delete(opctx, &authz_user, token_id)
+            .await
+    }
 }

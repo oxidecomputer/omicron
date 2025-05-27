@@ -204,6 +204,45 @@ async fn test_device_auth_flow(cptestctx: &ControlPlaneTestContext) {
     project_list(&testctx, &token.access_token, StatusCode::OK)
         .await
         .expect("failed to get projects with token");
+
+    let token_id = tokens_unpriv_after[0].id;
+
+    // Test that privileged user cannot delete unpriv's token through this
+    // endpoint, though it will probably be able to do it via a different one
+    let token_url = format!("/v1/me/tokens/{}", token_id);
+    NexusRequest::new(
+        RequestBuilder::new(testctx, Method::DELETE, &token_url)
+            .expect_status(Some(StatusCode::NOT_FOUND)),
+    )
+    .authn_as(AuthnMode::PrivilegedUser)
+    .execute()
+    .await
+    .expect("privileged user should get a 404 when trying to delete another user's token");
+
+    // Test deleting the token as the owner
+    NexusRequest::object_delete(testctx, &token_url)
+        .authn_as(AuthnMode::UnprivilegedUser)
+        .execute()
+        .await
+        .expect("failed to delete token");
+
+    // Verify token is gone from the list
+    assert_eq!(get_tokens_unpriv(testctx).await.len(), 0);
+
+    // Token should no longer work for API calls
+    project_list(&testctx, &token.access_token, StatusCode::UNAUTHORIZED)
+        .await
+        .expect("deleted token should be unauthorized");
+
+    // Trying to delete the same token again should 404
+    NexusRequest::new(
+        RequestBuilder::new(testctx, Method::DELETE, &token_url)
+            .expect_status(Some(StatusCode::NOT_FOUND)),
+    )
+    .authn_as(AuthnMode::UnprivilegedUser)
+    .execute()
+    .await
+    .expect("double delete should 404");
 }
 
 /// Helper to make the test cute. Goes through the whole flow, returns the token

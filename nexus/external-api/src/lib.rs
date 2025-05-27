@@ -3168,6 +3168,19 @@ pub trait NexusExternalApi {
         query_params: Query<PaginatedById>,
     ) -> Result<HttpResponseOk<ResultsPage<views::DeviceAccessToken>>, HttpError>;
 
+    /// Delete device access token
+    ///
+    /// Delete a device access token for the currently authenticated user.
+    #[endpoint {
+        method = DELETE,
+        path = "/v1/me/tokens/{token_id}",
+        tags = ["tokens"],
+    }]
+    async fn current_user_token_delete(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<params::TokenPath>,
+    ) -> Result<HttpResponseDeleted, HttpError>;
+
     // Support bundles (experimental)
 
     /// List all support bundles
