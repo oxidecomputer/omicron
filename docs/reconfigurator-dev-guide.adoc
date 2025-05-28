@@ -1289,6 +1289,8 @@ For a4x2: copy this binary to the switch zone and run it from there.  You'll nee
 
 For `omicron-dev run-all`, you can run this command from the same system where you're running `omicron-dev`.  Instead of `--interface`, you need to use the `--sp-sim-addr IPV6_ADDR:PORT` option to point `faux-mgs` at the simulated SP.  Unfortunately, the easiest way to find the address and port of the simulated SP is in the log file whose path is printed out by `omicron-dev run-all`.
 
+You can find the necessary addresses for each interface during the initial SP discovery phase:
+
 ```
 $ cat /tmp/omicron-dev-omicron-dev.20224.2.log | grep "SP discovery" | looker
 01:08:25.680Z DEBG 645532bc-27f9-4602-bd3a-cff17d678bde (ManagementSwitch): attempting initial SP discovery
@@ -1356,6 +1358,15 @@ Sled SimGimlet00
     RoT: slot A SHA3-256: aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
     RoT: slot B SHA3-256: bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb
 
+...
+```
+
+If you're running `omicron-dev run-all`, you'll need to use the `--dns-server` flag to specify
+the DNS server `omdb` will use. You can find this information within the `omicron-dev run-all` output:
+
+```
+...
+omicron-dev: internal DNS:          [::1]:63673
 ...
 ```
 
