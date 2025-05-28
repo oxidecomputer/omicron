@@ -14,8 +14,9 @@ use std::sync::Arc;
 use crate::ZoneImageZpools;
 use camino::Utf8Path;
 use camino::Utf8PathBuf;
-use id_map::IdMap;
-use id_map::IdMappable;
+use iddqd::IdOrdItem;
+use iddqd::IdOrdMap;
+use iddqd::id_upcast;
 use illumos_utils::zpool::ZpoolName;
 use omicron_common::update::MupdateOverrideInfo;
 use sled_storage::dataset::INSTALL_DATASET;
@@ -33,7 +34,7 @@ pub(crate) struct AllMupdateOverrides {
     boot_disk_path: Utf8PathBuf,
     boot_disk_override:
         Result<Option<MupdateOverrideInfo>, MupdateOverrideReadError>,
-    non_boot_disk_overrides: IdMap<MupdateOverrideNonBootInfo>,
+    non_boot_disk_overrides: IdOrdMap<MupdateOverrideNonBootInfo>,
 }
 
 impl AllMupdateOverrides {
@@ -272,12 +273,14 @@ impl MupdateOverrideNonBootInfo {
     }
 }
 
-impl IdMappable for MupdateOverrideNonBootInfo {
-    type Id = ZpoolName;
+impl IdOrdItem for MupdateOverrideNonBootInfo {
+    type Key<'a> = ZpoolName;
 
-    fn id(&self) -> Self::Id {
+    fn key(&self) -> Self::Key<'_> {
         self.zpool_name
     }
+
+    id_upcast!();
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -561,7 +564,7 @@ mod tests {
             overrides.boot_disk_override.as_ref().unwrap().as_ref(),
             Some(&override_info)
         );
-        assert_eq!(overrides.non_boot_disk_overrides, IdMap::new());
+        assert_eq!(overrides.non_boot_disk_overrides, IdOrdMap::new());
 
         logctx.cleanup_successful();
     }
@@ -951,6 +954,7 @@ mod tests {
         MupdateOverrideInfo {
             mupdate_uuid: OVERRIDE_UUID,
             hash_ids: BTreeSet::new(),
+            zones: IdOrdMap::new(),
         }
     }
 
@@ -958,6 +962,7 @@ mod tests {
         MupdateOverrideInfo {
             mupdate_uuid: OVERRIDE_2_UUID,
             hash_ids: BTreeSet::new(),
+            zones: IdOrdMap::new(),
         }
     }
 
