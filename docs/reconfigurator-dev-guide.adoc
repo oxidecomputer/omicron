@@ -954,7 +954,7 @@ Prerequisite: you must already have an _unpacked_ TUF repo.  You could <<task-do
 For testing SP updates, we don't need the host OS and control plane images, which are by far the largest files in the repo.  You can delete them with:
 
 ```
-$ rm -f repo/targets/*.host* repo/targets/*.trampoline-* repo/targets/*.control-plane-*
+$ rm -f repo/targets/*.host* repo/targets/*.trampoline-* repo/targets/*.control_plane-*
 ```
 
 Then copy this directory tree over to the switch zone.
