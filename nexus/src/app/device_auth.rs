@@ -78,12 +78,14 @@ impl super::Nexus {
         &self,
         opctx: &OpContext,
         client_id: Uuid,
+        requested_ttl_seconds: Option<u32>,
     ) -> CreateResult<DeviceAuthRequest> {
         // TODO-correctness: the `user_code` generated for a new request
         // is used as a primary key, but may potentially collide with an
         // existing outstanding request. So we should retry some (small)
         // number of times if inserting the new request fails.
-        let auth_request = DeviceAuthRequest::new(client_id);
+        let auth_request =
+            DeviceAuthRequest::new(client_id, requested_ttl_seconds);
         self.db_datastore.device_auth_request_create(opctx, auth_request).await
     }
 
@@ -115,17 +117,45 @@ impl super::Nexus {
             .silo_auth_settings_view(opctx, &authz_silo)
             .await?;
 
+        // Validate the requested TTL against the silo's max TTL
+        if let Some(requested_ttl) = db_request.requested_ttl_seconds {
+            if let Some(max_ttl) =
+                silo_auth_settings.device_token_max_ttl_seconds
+            {
+                if requested_ttl > max_ttl {
+                    return Err(Error::invalid_request(&format!(
+                        "Requested TTL {} exceeds maximum allowed TTL {} for this silo",
+                        requested_ttl, max_ttl
+                    )));
+                }
+            }
+        }
+
         // Create an access token record.
+        let token_ttl = match db_request.requested_ttl_seconds {
+            Some(requested_ttl) => {
+                // Use the requested TTL, but cap it at the silo max if there is one
+                let effective_ttl =
+                    match silo_auth_settings.device_token_max_ttl_seconds {
+                        Some(max_ttl) => std::cmp::min(requested_ttl, max_ttl),
+                        None => requested_ttl,
+                    };
+                Some(Utc::now() + Duration::seconds(effective_ttl))
+            }
+            None => {
+                // Use the silo max TTL if no specific TTL was requested
+                silo_auth_settings
+                    .device_token_max_ttl_seconds
+                    .map(|ttl| Utc::now() + Duration::seconds(ttl))
+            }
+        };
+
         let token = DeviceAccessToken::new(
             db_request.client_id,
             db_request.device_code,
             db_request.time_created,
             silo_user_id,
-            // Token gets the max TTL for the silo (if there is one) until we
-            // build a way for the user to ask for a different TTL
-            silo_auth_settings
-                .device_token_max_ttl_seconds
-                .map(|ttl| Utc::now() + Duration::seconds(ttl.0.into())),
+            token_ttl,
         );
 
         if db_request.time_expires < Utc::now() {

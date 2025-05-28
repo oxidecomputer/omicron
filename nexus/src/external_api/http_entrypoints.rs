@@ -7857,7 +7857,7 @@ impl NexusExternalApi for NexusExternalApiImpl {
             };
 
             let model = nexus
-                .device_auth_request_create(&opctx, params.client_id)
+                .device_auth_request_create(&opctx, params.client_id, params.ttl_seconds)
                 .await?;
             nexus.build_oauth_response(
                 StatusCode::OK,

@@ -2467,6 +2467,8 @@ impl TryFrom<String> for RelativeUri {
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
 pub struct DeviceAuthRequest {
     pub client_id: Uuid,
+    /// Optional TTL for the access token in seconds. If not specified, the silo's max TTL will be used.
+    pub ttl_seconds: Option<u32>,
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]

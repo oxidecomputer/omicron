@@ -55,7 +55,7 @@ async fn test_device_auth_flow(cptestctx: &ControlPlaneTestContext) {
         .expect("failed to reject device auth start without client_id");
 
     let client_id = Uuid::new_v4();
-    let authn_params = DeviceAuthRequest { client_id };
+    let authn_params = DeviceAuthRequest { client_id, ttl_seconds: None };
 
     // Using a JSON encoded body fails.
     RequestBuilder::new(testctx, Method::POST, "/device/auth")
@@ -241,7 +241,7 @@ async fn test_device_auth_flow(cptestctx: &ControlPlaneTestContext) {
 /// as a string
 async fn get_device_token(testctx: &ClientTestContext) -> String {
     let client_id = Uuid::new_v4();
-    let authn_params = DeviceAuthRequest { client_id };
+    let authn_params = DeviceAuthRequest { client_id, ttl_seconds: None };
 
     // Start a device authentication flow
     let auth_response: DeviceAuthResponse =
@@ -429,6 +429,133 @@ async fn test_device_token_expiration(cptestctx: &ControlPlaneTestContext) {
     let settings: views::SiloAuthSettings =
         object_get(testctx, "/v1/auth-settings").await;
     assert_eq!(settings.device_token_max_ttl_seconds, None);
+}
+
+#[nexus_test]
+async fn test_device_token_request_ttl(cptestctx: &ControlPlaneTestContext) {
+    let testctx = &cptestctx.external_client;
+
+    // Set silo max TTL to 10 seconds
+    let _settings: views::SiloSettings = object_put(
+        testctx,
+        "/v1/settings",
+        &params::SiloSettingsUpdate {
+            device_token_max_ttl_seconds: NonZeroU32::new(10),
+        },
+    )
+    .await;
+
+    let client_id = Uuid::new_v4();
+
+    // Test 1: Request TTL above the max should fail at verification time
+    let authn_params_invalid = DeviceAuthRequest { 
+        client_id, 
+        ttl_seconds: Some(20) // Above the 10 second max
+    };
+
+    let auth_response: DeviceAuthResponse =
+        RequestBuilder::new(testctx, Method::POST, "/device/auth")
+            .allow_non_dropshot_errors()
+            .body_urlencoded(Some(&authn_params_invalid))
+            .expect_status(Some(StatusCode::OK))
+            .execute()
+            .await
+            .expect("failed to start client authentication flow")
+            .parsed_body()
+            .expect("client authentication response");
+
+    let confirm_params = DeviceAuthVerify { user_code: auth_response.user_code };
+
+    // Confirmation should fail because requested TTL exceeds max
+    let confirm_response = NexusRequest::new(
+        RequestBuilder::new(testctx, Method::POST, "/device/confirm")
+            .body(Some(&confirm_params))
+            .expect_status(Some(StatusCode::BAD_REQUEST)),
+    )
+    .authn_as(AuthnMode::PrivilegedUser)
+    .execute()
+    .await
+    .expect("confirmation should fail for TTL above max");
+
+    // Check that the error message mentions TTL
+    let error_body = String::from_utf8_lossy(&confirm_response.body);
+    assert!(error_body.contains("TTL") || error_body.contains("ttl"));
+
+    // Test 2: Request TTL below the max should succeed and be used
+    let authn_params_valid = DeviceAuthRequest { 
+        client_id: Uuid::new_v4(), // New client ID for new flow
+        ttl_seconds: Some(5) // Below the 10 second max
+    };
+
+    let auth_response: DeviceAuthResponse =
+        RequestBuilder::new(testctx, Method::POST, "/device/auth")
+            .allow_non_dropshot_errors()
+            .body_urlencoded(Some(&authn_params_valid))
+            .expect_status(Some(StatusCode::OK))
+            .execute()
+            .await
+            .expect("failed to start client authentication flow")
+            .parsed_body()
+            .expect("client authentication response");
+
+    let device_code = auth_response.device_code;
+    let user_code = auth_response.user_code;
+    let confirm_params = DeviceAuthVerify { user_code };
+
+    // Confirmation should succeed
+    NexusRequest::new(
+        RequestBuilder::new(testctx, Method::POST, "/device/confirm")
+            .body(Some(&confirm_params))
+            .expect_status(Some(StatusCode::NO_CONTENT)),
+    )
+    .authn_as(AuthnMode::PrivilegedUser)
+    .execute()
+    .await
+    .expect("failed to confirm");
+
+    let token_params = DeviceAccessTokenRequest {
+        grant_type: "urn:ietf:params:oauth:grant-type:device_code".to_string(),
+        device_code,
+        client_id: authn_params_valid.client_id,
+    };
+
+    // Get the token
+    let token: DeviceAccessTokenGrant = NexusRequest::new(
+        RequestBuilder::new(testctx, Method::POST, "/device/token")
+            .allow_non_dropshot_errors()
+            .body_urlencoded(Some(&token_params))
+            .expect_status(Some(StatusCode::OK)),
+    )
+    .authn_as(AuthnMode::PrivilegedUser)
+    .execute()
+    .await
+    .expect("failed to get token")
+    .parsed_body()
+    .expect("failed to deserialize token response");
+
+    // Verify the token has the correct expiration (5 seconds from now)
+    let tokens = get_tokens_priv(testctx).await;
+    let our_token = tokens.iter().find(|t| t.time_expires.is_some()).unwrap();
+    let expires_at = our_token.time_expires.unwrap();
+    let now = Utc::now();
+    
+    // Should expire approximately 5 seconds from now (allow some tolerance for test timing)
+    let expected_expiry = now + chrono::Duration::seconds(5);
+    let time_diff = (expires_at - expected_expiry).num_seconds().abs();
+    assert!(time_diff <= 2, "Token expiry should be close to requested TTL");
+
+    // Token should work initially
+    project_list(&testctx, &token.access_token, StatusCode::OK)
+        .await
+        .expect("token should work initially");
+
+    // Wait for token to expire
+    sleep(Duration::from_secs(6)).await;
+
+    // Token should be expired now
+    project_list(&testctx, &token.access_token, StatusCode::UNAUTHORIZED)
+        .await
+        .expect("token should be expired");
 }
 
 async fn get_tokens_priv(

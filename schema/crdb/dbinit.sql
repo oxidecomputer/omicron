@@ -2811,7 +2811,9 @@ CREATE TABLE IF NOT EXISTS omicron.public.device_auth_request (
     client_id UUID NOT NULL,
     device_code STRING(40) NOT NULL,
     time_created TIMESTAMPTZ NOT NULL,
-    time_expires TIMESTAMPTZ NOT NULL
+    time_expires TIMESTAMPTZ NOT NULL,
+    -- requested TTL for the token in seconds (if specified by the user)
+    requested_ttl_seconds INT8 CHECK (requested_ttl_seconds > 0)
 );
 
 -- Access tokens granted in response to successful device authorization flows.
