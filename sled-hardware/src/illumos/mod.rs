@@ -4,9 +4,8 @@
 
 use crate::DiskFirmware;
 use crate::{DendriteAsic, HardwareUpdate, SledMode, UnparsedDisk};
-use camino::Utf8PathBuf;
 use gethostname::gethostname;
-use illumos_devinfo::{DevInfo, DevLinkType, DevLinks, Node, Property};
+use illumos_devinfo::{DevInfo, Node, Property};
 use libnvme::{Nvme, controller::Controller};
 use omicron_common::disk::{DiskIdentity, DiskVariant};
 use sled_hardware_types::Baseboard;
