@@ -811,7 +811,7 @@ where
         // WHERE alias1.scope_column = scope_key
         // AND alias1.time_deleted IS NULL
         // AND alias1.item + 1 BETWEEN min_item AND max_item
-        // AND alias2.item IS NULL;
+        // AND alias2.item IS NULL LIMIT 1;
         out.push_sql(" SELECT ");
         out.push_identifier(SELF_JOIN_FIRST_TABLE_ALIAS)?;
         out.push_sql(".");
@@ -974,13 +974,11 @@ where
         // SELECT alias1.item + 1
         // FROM table alias1
         // LEFT JOIN table alias2
-        // ON alias2.scope_column = alias1.scope_column
-        // AND alias2.item = alias1.item + 1
+        // ON alias2.item = alias1.item + 1
         // AND alias2.time_deleted IS NULL
-        // WHERE alias1.scope_column = scope_key
-        // AND alias1.time_deleted IS NULL
+        // WHERE alias1.time_deleted IS NULL
         // AND alias1.item + 1 BETWEEN min_item AND max_item
-        // AND alias2.item IS NULL;
+        // AND alias2.item IS NULL LIMIT 1;
         out.push_sql(" SELECT ");
         out.push_identifier(SELF_JOIN_FIRST_TABLE_ALIAS)?;
         out.push_sql(".");
