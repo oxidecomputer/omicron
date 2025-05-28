@@ -32,7 +32,9 @@ pub struct DeviceAuthRequest {
     pub user_code: String,
     pub time_created: DateTime<Utc>,
     pub time_expires: DateTime<Utc>,
-    pub requested_ttl_seconds: Option<i64>,
+
+    /// TTL requested by the user
+    pub token_ttl_seconds: Option<i64>,
 }
 
 impl DeviceAuthRequest {
@@ -108,7 +110,7 @@ impl DeviceAuthRequest {
             time_created: now,
             time_expires: now
                 + Duration::seconds(CLIENT_AUTHENTICATION_TIMEOUT),
-            requested_ttl_seconds: requested_ttl_seconds.map(|ttl| ttl as i64),
+            token_ttl_seconds: requested_ttl_seconds.map(i64::from),
         }
     }
 
