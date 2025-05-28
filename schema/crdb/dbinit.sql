@@ -2813,7 +2813,7 @@ CREATE TABLE IF NOT EXISTS omicron.public.device_auth_request (
     time_created TIMESTAMPTZ NOT NULL,
     time_expires TIMESTAMPTZ NOT NULL,
     -- requested TTL for the token in seconds (if specified by the user)
-    requested_ttl_seconds INT8 CHECK (requested_ttl_seconds > 0)
+    token_ttl_seconds INT8 CHECK (token_ttl_seconds > 0)
 );
 
 -- Access tokens granted in response to successful device authorization flows.
@@ -5692,7 +5692,7 @@ INSERT INTO omicron.public.db_metadata (
     version,
     target_version
 ) VALUES
-    (TRUE, NOW(), NOW(), '146.0.0', NULL)
+    (TRUE, NOW(), NOW(), '147.0.0', NULL)
 ON CONFLICT DO NOTHING;
 
 COMMIT;

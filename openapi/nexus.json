@@ -16676,6 +16676,13 @@
           "client_id": {
             "type": "string",
             "format": "uuid"
+          },
+          "ttl_seconds": {
+            "nullable": true,
+            "description": "Optional lifetime for the access token in seconds. If not specified, the silo's max TTL will be used (if set).",
+            "type": "integer",
+            "format": "uint32",
+            "minimum": 0
           }
         },
         "required": [

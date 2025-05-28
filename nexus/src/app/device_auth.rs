@@ -53,7 +53,7 @@ use nexus_db_queries::context::OpContext;
 use nexus_db_queries::db::model::{DeviceAccessToken, DeviceAuthRequest};
 
 use anyhow::anyhow;
-use nexus_types::external_api::params::DeviceAccessTokenRequest;
+use nexus_types::external_api::params;
 use nexus_types::external_api::views;
 use omicron_common::api::external::{
     CreateResult, DataPageParams, Error, ListResultVec,
@@ -77,15 +77,17 @@ impl super::Nexus {
     pub(crate) async fn device_auth_request_create(
         &self,
         opctx: &OpContext,
-        client_id: Uuid,
-        requested_ttl_seconds: Option<u32>,
+        params: params::DeviceAuthRequest,
     ) -> CreateResult<DeviceAuthRequest> {
         // TODO-correctness: the `user_code` generated for a new request
         // is used as a primary key, but may potentially collide with an
         // existing outstanding request. So we should retry some (small)
         // number of times if inserting the new request fails.
+
+        // Note that we cannot validate the TTL here against the silo max
+        // because we do not know what silo we're talking about until verify
         let auth_request =
-            DeviceAuthRequest::new(client_id, requested_ttl_seconds);
+            DeviceAuthRequest::new(params.client_id, params.ttl_seconds);
         self.db_datastore.device_auth_request_create(opctx, auth_request).await
     }
 
@@ -117,45 +119,29 @@ impl super::Nexus {
             .silo_auth_settings_view(opctx, &authz_silo)
             .await?;
 
+        let silo_max_ttl = silo_auth_settings.device_token_max_ttl_seconds;
+        let requested_ttl = db_request.token_ttl_seconds;
+
         // Validate the requested TTL against the silo's max TTL
-        if let Some(requested_ttl) = db_request.requested_ttl_seconds {
-            if let Some(max_ttl) =
-                silo_auth_settings.device_token_max_ttl_seconds
-            {
-                if requested_ttl > max_ttl {
-                    return Err(Error::invalid_request(&format!(
-                        "Requested TTL {} exceeds maximum allowed TTL {} for this silo",
-                        requested_ttl, max_ttl
-                    )));
-                }
+        if let (Some(requested), Some(max)) = (requested_ttl, silo_max_ttl) {
+            if requested > max.0.into() {
+                return Err(Error::invalid_request(&format!(
+                    "Requested TTL {} seconds exceeds maximum allowed TTL {} seconds for this silo",
+                    requested, max
+                )));
             }
         }
 
-        // Create an access token record.
-        let token_ttl = match db_request.requested_ttl_seconds {
-            Some(requested_ttl) => {
-                // Use the requested TTL, but cap it at the silo max if there is one
-                let effective_ttl =
-                    match silo_auth_settings.device_token_max_ttl_seconds {
-                        Some(max_ttl) => std::cmp::min(requested_ttl, max_ttl),
-                        None => requested_ttl,
-                    };
-                Some(Utc::now() + Duration::seconds(effective_ttl))
-            }
-            None => {
-                // Use the silo max TTL if no specific TTL was requested
-                silo_auth_settings
-                    .device_token_max_ttl_seconds
-                    .map(|ttl| Utc::now() + Duration::seconds(ttl))
-            }
-        };
+        let time_expires = requested_ttl
+            .or(silo_max_ttl)
+            .map(|ttl| Utc::now() + Duration::seconds(ttl.0.into()));
 
         let token = DeviceAccessToken::new(
             db_request.client_id,
             db_request.device_code,
             db_request.time_created,
             silo_user_id,
-            token_ttl,
+            time_expires,
         );
 
         if db_request.time_expires < Utc::now() {
@@ -254,7 +240,7 @@ impl super::Nexus {
     pub(crate) async fn device_access_token(
         &self,
         opctx: &OpContext,
-        params: DeviceAccessTokenRequest,
+        params: params::DeviceAccessTokenRequest,
     ) -> Result<Response<Body>, HttpError> {
         // RFC 8628 §3.4
         if params.grant_type != "urn:ietf:params:oauth:grant-type:device_code" {

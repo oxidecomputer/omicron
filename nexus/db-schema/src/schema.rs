@@ -1360,7 +1360,7 @@ table! {
         device_code -> Text,
         time_created -> Timestamptz,
         time_expires -> Timestamptz,
-        requested_ttl_seconds -> Nullable<Int8>,
+        token_ttl_seconds -> Nullable<Int8>,
     }
 }
 

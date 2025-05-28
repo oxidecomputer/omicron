@@ -15,6 +15,7 @@ use omicron_uuid_kinds::{AccessTokenKind, GenericUuid, TypedUuid};
 use rand::{Rng, RngCore, SeedableRng, distributions::Slice, rngs::StdRng};
 use uuid::Uuid;
 
+use crate::SqlU32;
 use crate::typed_uuid::DbTypedUuid;
 
 /// Default timeout in seconds for client to authenticate for a token request.
@@ -32,7 +33,9 @@ pub struct DeviceAuthRequest {
     pub user_code: String,
     pub time_created: DateTime<Utc>,
     pub time_expires: DateTime<Utc>,
-    pub requested_ttl_seconds: Option<i64>,
+
+    /// TTL requested by the user
+    pub token_ttl_seconds: Option<SqlU32>,
 }
 
 impl DeviceAuthRequest {
@@ -108,7 +111,7 @@ impl DeviceAuthRequest {
             time_created: now,
             time_expires: now
                 + Duration::seconds(CLIENT_AUTHENTICATION_TIMEOUT),
-            requested_ttl_seconds: requested_ttl_seconds.map(|ttl| ttl as i64),
+            token_ttl_seconds: requested_ttl_seconds.map(SqlU32::from),
         }
     }
 
