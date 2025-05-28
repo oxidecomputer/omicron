@@ -17,6 +17,7 @@ use slog::info;
 use slog::o;
 use slog::warn;
 use std::collections::{HashMap, HashSet};
+use std::str::Utf8Error;
 use std::sync::Arc;
 use std::sync::Mutex;
 use tokio::sync::broadcast;
@@ -51,9 +52,6 @@ enum Error {
     #[error("Expected property {name} to have type {ty}")]
     UnexpectedPropertyType { name: String, ty: String },
 
-    #[error("Could not translate {0} to '/dev' path: no links")]
-    NoDevLinks(Utf8PathBuf),
-
     #[error("Failed to issue request to sysconf: {0}")]
     SysconfError(#[from] sysconf::Error),
 
@@ -72,8 +70,16 @@ enum Error {
     #[error("Unable to grab NVMe Controller lock")]
     NvmeControllerLocked,
 
+    #[error("libnvme controller info error: {0}")]
+    NvmeControllerInfoError(#[from] libnvme::controller_info::NvmeInfoError),
+
     #[error("Failed to get NVMe Controller's firmware log page: {0}")]
     FirmwareLogPage(#[from] libnvme::firmware::FirmwareLogPageError),
+
+    #[error(
+        "NVMe instance {instance} with serial {serial} contains invalid Utf8"
+    )]
+    NvmeInvalidModelString { instance: i32, serial: String },
 }
 
 const GIMLET_ROOT_NODE_NAME: &str = "Oxide,Gimlet";
@@ -170,11 +176,11 @@ impl HardwareSnapshot {
 
         // Monitor for block devices.
         let mut disks = HashMap::new();
-        let mut node_walker = device_info.walk_driver("blkdev");
+        let mut node_walker = device_info.walk_driver("nvme");
         while let Some(node) =
             node_walker.next().transpose().map_err(Error::DevInfo)?
         {
-            poll_blkdev_node(&log, &mut disks, node, boot_storage_unit)?;
+            poll_nvme_node(&log, &mut disks, node, boot_storage_unit)?;
         }
 
         Ok(Self { tofino, disks, baseboard })
@@ -348,51 +354,6 @@ fn get_tofino_snapshot(log: &Logger, devinfo: &mut DevInfo) -> TofinoSnapshot {
     TofinoSnapshot { exists, driver_loaded }
 }
 
-fn get_dev_path_of_whole_disk(
-    node: &Node<'_>,
-) -> Result<Option<Utf8PathBuf>, Error> {
-    let mut wm = node.minors();
-    while let Some(m) = wm.next().transpose().map_err(Error::DevInfo)? {
-        // "wd" stands for "whole disk"
-        if m.name() != "wd" {
-            continue;
-        }
-        let links = {
-            match DevLinks::new(true) {
-                Ok(links) => links,
-                Err(_) => DevLinks::new(false).map_err(Error::DevInfo)?,
-            }
-        };
-        let devfs_path = m.devfs_path().map_err(Error::DevInfo)?;
-
-        let paths = links
-            .links_for_path(&devfs_path)
-            .map_err(Error::DevInfo)?
-            .into_iter()
-            .filter(|l| {
-                // Devices in "/dev/dsk" have names that denote their purpose,
-                // of the form "controller, disk, slice" or "controller, disk,
-                // partition".
-                //
-                // The suffix of "d0" is typical of an individual disk, and is
-                // the expected device to correspond with the "wd" device in
-                // the "/devices" hierarchy.
-                l.linktype() == DevLinkType::Primary
-                    && l.path()
-                        .file_name()
-                        .map(|f| f.to_string_lossy().ends_with("d0"))
-                        .unwrap_or(false)
-            })
-            .collect::<Vec<_>>();
-
-        if paths.is_empty() {
-            return Err(Error::NoDevLinks(Utf8PathBuf::from(devfs_path)));
-        }
-        return Ok(Some(paths[0].path().to_path_buf().try_into()?));
-    }
-    Ok(None)
-}
-
 fn get_parent_node<'a>(
     node: &Node<'a>,
     expected_parent_driver_name: &'static str,
@@ -479,7 +440,39 @@ fn find_properties<'a, const N: usize>(
     Ok(output.try_into().map_err(|_| "Unexpected output size").unwrap())
 }
 
-fn poll_blkdev_node(
+// The illumos NVMe driver uses `sata_split_model` to split the nvme model into
+// vid and pid if possible.
+// Seehttps://github.com/illumos/illumos-gate/blob/8c91f274084b61c5ccfc1e0e27de9d353785c4c0/usr/src/uts/common/io/sata/impl/sata.c#L2129
+fn sata_split_model(
+    model: &str,
+) -> Result<(Option<String>, String), Utf8Error> {
+    // This string is expected to be 40 or less characters but in C we are
+    // opearting on bytes rather than valid utf8 characters.
+    const SATA_ID_MODEL_LEN: usize = 40;
+    let bytes = model.as_bytes();
+    let len = bytes.len().min(SATA_ID_MODEL_LEN);
+    let model = str::from_utf8(&bytes[..len])?;
+
+    // The C code trims ' ', '\t', and '\0' characters from the end. Since
+    // we are operating on a &str we can just remove whitespace and tabs  at
+    // the end.
+    let model_trimmed = model.trim_end_matches(|c| c == ' ' || c == '\t');
+    let mut vendor_product = model_trimmed.splitn(2, |c| c == ' ' || c == '\t');
+
+    if let Some(vendor) = vendor_product.next() {
+        // If there is a potential vendor and it is  8 or less characters
+        // return the distinct vendor and product.
+        if vendor.len() <= 8 {
+            let product = vendor_product.next().unwrap_or_default();
+            return Ok((Some(vendor.to_string()), product.to_string()));
+        }
+    }
+
+    // Fallback with no vendor is to return the entire trimmed model string.
+    Ok((None, model_trimmed.to_string()))
+}
+
+fn poll_nvme_node(
     log: &Logger,
     disks: &mut HashMap<DiskIdentity, UnparsedDisk>,
     node: Node<'_>,
@@ -489,62 +482,16 @@ fn poll_blkdev_node(
         return Ok(());
     };
 
-    if driver_name != "blkdev" {
+    if driver_name != "nvme" {
         return Ok(());
     }
 
-    let devfs_path = node.devfs_path().map_err(Error::DevInfo)?;
-    let dev_path = get_dev_path_of_whole_disk(&node)?;
-
-    // libdevfs doesn't prepend "/devices" when referring to the path, but it
-    // still returns an absolute path. This is the absolute path from the
-    // kernel's perspective, but in userspace, it is typically mounted under
-    // "/devices"
-    //
-    // Validate that we're still using this leading slash, and also make the
-    // path usable.
-    assert!(devfs_path.starts_with('/'));
-    let devfs_path = format!("/devices{devfs_path}");
-
-    let properties = find_properties(
-        &node,
-        ["inquiry-serial-no", "inquiry-product-id", "inquiry-vendor-id"],
-    )?;
-    let inquiry_serial_no = string_from_property(&properties[0])?;
-    let inquiry_product_id = string_from_property(&properties[1])?;
-    let inquiry_vendor_id = string_from_property(&properties[2])?;
-
-    // We expect that the parent of the "blkdev" node is an "nvme" driver.
-    let nvme_node = get_parent_node(&node, "nvme")?;
-    // Importantly we grab the NVMe instance and not the blkdev instance.
-    // Eventually we should switch the logic here to search for nvme instances
-    // and confirm that we only have one blkdev sibling:
-    // https://github.com/oxidecomputer/omicron/issues/5241
-    let nvme_instance = nvme_node
+    let nvme_instance = node
         .instance()
         .ok_or(Error::MissingNvmeDevinfoInstance { node: node.node_name() })?;
 
-    let vendor_id =
-        i64_from_property(&find_properties(&nvme_node, ["vendor-id"])?[0])?;
-
-    // The model is generally equal to "inquiry-vendor-id" plus
-    // "inquiry-product-id", separated by a space.
-    //
-    // However, libdevfs may emit a placeholder value for the
-    // "inquiry-vendor-id", in which case it should be omitted.
-    let model = match inquiry_vendor_id.as_str() {
-        "" | "NVMe" => inquiry_product_id,
-        _ => format!("{inquiry_vendor_id} {inquiry_product_id}"),
-    };
-
-    let device_id = DiskIdentity {
-        vendor: format!("{:x}", vendor_id),
-        serial: inquiry_serial_no,
-        model,
-    };
-
     // We expect that the parent of the "nvme" device is a "pcieb" driver.
-    let pcieb_node = get_parent_node(&nvme_node, "pcieb")?;
+    let pcieb_node = get_parent_node(&node, "pcieb")?;
 
     // The "pcieb" device needs to have a physical slot for us to understand
     // what type of disk it is.
@@ -552,7 +499,10 @@ fn poll_blkdev_node(
         &find_properties(&pcieb_node, ["physical-slot#"])?[0],
     )?;
     let Some(variant) = slot_to_disk_variant(slot) else {
-        warn!(log, "Slot# {slot} is not recognized as a disk: {devfs_path}");
+        warn!(
+            log,
+            "Slot# {slot} is not recognized as a disk: nvme{nvme_instance}"
+        );
         return Err(Error::UnrecognizedSlot { slot });
     };
 
@@ -574,6 +524,29 @@ fn poll_blkdev_node(
             return Err(Error::from(err));
         }
     };
+
+    let controller_info = controller_lock.get_info()?;
+    let serial_no = controller_info.serial();
+
+    let nvme_model = controller_info.model();
+    // The illumos NVMe driver will attempt to split the NVMe model info into
+    // a vendor-id and product-id. These are what get used for a blkdev node in
+    // the device tree.
+    let (model, vendor) = match sata_split_model(&nvme_model).map_err(|_| {
+        Error::NvmeInvalidModelString {
+            instance: nvme_instance,
+            serial: serial_no.to_string(),
+        }
+    })? {
+        (Some(vendor_id), product_id) => {
+            (format!("{vendor_id}, {product_id}"), vendor_id)
+        }
+        // If no vendor is found we opt reuse the entire product_id as the model
+        (None, product_id) => (product_id.clone(), product_id),
+    };
+    let device_id =
+        DiskIdentity { vendor, serial: serial_no.to_string(), model };
+
     let firmware_log_page = controller_lock.get_firmware_log_page()?;
     let firmware = DiskFirmware::new(
         firmware_log_page.active_slot,
@@ -584,8 +557,7 @@ fn poll_blkdev_node(
     );
 
     let disk = UnparsedDisk::new(
-        Utf8PathBuf::from(&devfs_path),
-        dev_path,
+        nvme_instance,
         slot,
         variant,
         device_id.clone(),
@@ -841,3 +813,70 @@ impl HardwareManager {
         // This could simplify the `SledAgent::monitor` function?
     }
 }
+
+#[cfg(test)]
+mod tests {
+
+    use super::sata_split_model;
+
+    #[test]
+    fn split_nvme_model_info_works() {
+        let model = "Samsung SSD 990 PRO with Heatsink 2TB";
+        let (vendor, product) = sata_split_model(&model).unwrap();
+        assert_eq!(Some("Samsung".to_string()), vendor);
+        assert_eq!("SSD 990 PRO with Heatsink 2TB", product);
+
+        let model = "SomeFakeVendor SSD 0x1de Test";
+        let (vendor, product) = sata_split_model(&model).unwrap();
+        assert_eq!(None, vendor);
+        assert_eq!("SomeFakeVendor SSD 0x1de Test", product);
+    }
+}
+
+// XXX TODO: Make this not run by default until we can require root for specific
+// tests
+// #[cfg(all(target_os = "illumos", test))]
+// mod illumos_specific_tests {
+//     use illumos_devinfo::DevInfo;
+//     use libnvme::{Nvme, controller::Controller};
+
+//     use super::{find_properties, sata_split_model, string_from_property};
+
+//     #[test]
+//     fn compare_nvme_to_blkdev_nodes() {
+//         let nvme = Nvme::new().unwrap();
+
+//         let mut devinfo = DevInfo::new_force_load().unwrap();
+//         for node in devinfo.walk_driver("blkdev").map(Result::unwrap) {
+//             let properties = find_properties(
+//                 &node,
+//                 ["inquiry-product-id", "inquiry-vendor-id"],
+//             )
+//             .unwrap();
+//             let inquiry_product_id =
+//                 string_from_property(&properties[0]).unwrap();
+//             let inquiry_vendor_id =
+//                 string_from_property(&properties[1]).unwrap();
+
+//             let nvme_node = node.parent().unwrap().unwrap();
+//             let nvme_instance = nvme_node.instance().unwrap();
+
+//             let controller =
+//                 Controller::init_by_instance(&nvme, nvme_instance).unwrap();
+//             let nvme_info = controller.get_info().unwrap();
+//             let nvme_model = nvme_info.model();
+//             let (vendor, product) = sata_split_model(&nvme_model).unwrap();
+//             println!("{product}");
+
+//             assert_eq!(
+//                 inquiry_vendor_id,
+//                 vendor.unwrap_or("NVMe".to_string()),
+//                 "nvme and blkdev vendor match"
+//             );
+//             assert_eq!(
+//                 inquiry_product_id, product,
+//                 "nvme and blkdev product match"
+//             );
+//         }
+//     }
+// }

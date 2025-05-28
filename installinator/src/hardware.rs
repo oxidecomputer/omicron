@@ -46,7 +46,7 @@ impl Hardware {
                 DiskVariant::U2 => {
                     info!(
                         log, "ignoring U.2 disk";
-                        "path" => disk.devfs_path().as_str(),
+                        "nvme instance" => "XXX FIXME",
                     );
                 }
                 DiskVariant::M2 => {
