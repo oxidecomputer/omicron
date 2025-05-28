@@ -1289,6 +1289,22 @@ For a4x2: copy this binary to the switch zone and run it from there.  You'll nee
 
 For `omicron-dev run-all`, you can run this command from the same system where you're running `omicron-dev`.  Instead of `--interface`, you need to use the `--sp-sim-addr IPV6_ADDR:PORT` option to point `faux-mgs` at the simulated SP.  Unfortunately, the easiest way to find the address and port of the simulated SP is in the log file whose path is printed out by `omicron-dev run-all`.
 
+```
+$ cat /tmp/omicron-dev-omicron-dev.20224.2.log | grep "SP discovery" | looker
+01:08:25.680Z DEBG 645532bc-27f9-4602-bd3a-cff17d678bde (ManagementSwitch): attempting initial SP discovery
+    discovery_addr = [::1]:36109
+    interface = fake-switch0
+01:08:25.680Z DEBG 645532bc-27f9-4602-bd3a-cff17d678bde (ManagementSwitch): attempting initial SP discovery
+    discovery_addr = [::1]:47800
+    interface = fake-switch1
+01:08:25.680Z DEBG 645532bc-27f9-4602-bd3a-cff17d678bde (ManagementSwitch): attempting initial SP discovery
+    discovery_addr = [::1]:55043
+    interface = fake-sled0
+01:08:25.680Z DEBG 645532bc-27f9-4602-bd3a-cff17d678bde (ManagementSwitch): attempting initial SP discovery
+    discovery_addr = [::1]:50632
+    interface = fake-sled1
+```
+
 ---
 
 However you get `faux-mgs` running, you can use it to inspect state and https://github.com/oxidecomputer/meta/blob/master/engineering/mupdate/manual-rot-sp-updates.adoc[perform updates by hand].  (If you follow those linked instructions, note that they use `pilot sp exec -e CMD SERIAL`.  This is a thin wrapper that finds the right interface for the host with serial `SERIAL` and then runs `faux-mgs --interface INTERFACE CMD`.  You can just do this transformation yourself.)
