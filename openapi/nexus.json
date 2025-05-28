@@ -9660,8 +9660,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "title": "Boolean",
-                  "type": "boolean"
+                  "$ref": "#/components/schemas/ServiceIcmpConfig"
                 }
               }
             }
@@ -9679,30 +9678,20 @@
           "system/networking"
         ],
         "summary": "Set whether API services can receive limited ICMP traffic",
-        "description": "When enabled, Nexus is able to receive ICMP Destination Unreachable (type 4, fragmentation needed) and Time Exceeded messages. These enable Nexus to perform Path MTU discovery and better cope with fragmentation issues. Otherwise all ICMP traffic will be dropped.",
         "operationId": "networking_inbound_icmp_update",
         "requestBody": {
           "content": {
             "application/json": {
               "schema": {
-                "title": "Boolean",
-                "type": "boolean"
+                "$ref": "#/components/schemas/ServiceIcmpConfig"
               }
             }
           },
           "required": true
         },
         "responses": {
-          "200": {
-            "description": "successful operation",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "title": "Boolean",
-                  "type": "boolean"
-                }
-              }
-            }
+          "204": {
+            "description": "resource updated"
           },
           "4XX": {
             "$ref": "#/components/responses/Error"
@@ -22436,6 +22425,19 @@
           "slo_url",
           "sp_client_id",
           "technical_contact_email"
+        ]
+      },
+      "ServiceIcmpConfig": {
+        "description": "Configuration of inbound ICMP allowed by API services.",
+        "type": "object",
+        "properties": {
+          "enabled": {
+            "description": "When enabled, Nexus is able to receive ICMP Destination Unreachable (type 4, fragmentation needed) and Time Exceeded messages. These enable Nexus to perform Path MTU discovery and better cope with fragmentation issues. Otherwise all ICMP traffic will be dropped.",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "enabled"
         ]
       },
       "ServiceUsingCertificate": {

@@ -77,6 +77,7 @@ use omicron_common::api::external::ResourceType;
 use omicron_common::api::external::RouteDestination;
 use omicron_common::api::external::RouteTarget;
 use omicron_common::api::external::RouterRouteKind as ExternalRouteKind;
+use omicron_common::api::external::ServiceIcmpConfig;
 use omicron_common::api::external::UpdateResult;
 use omicron_common::api::external::Vni as ExternalVni;
 use omicron_common::api::external::VpcFirewallRuleStatus;
@@ -755,7 +756,7 @@ impl DataStore {
     pub async fn nexus_inbound_icmp_view(
         &self,
         opctx: &OpContext,
-    ) -> Result<bool, Error> {
+    ) -> Result<ServiceIcmpConfig, Error> {
         opctx.authorize(authz::Action::Read, &authz::FLEET).await?;
         use nexus_db_schema::schema::vpc_firewall_rule::dsl;
 
@@ -771,16 +772,20 @@ impl DataStore {
             .await
             .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))?;
 
-        Ok(rule.status.0 == VpcFirewallRuleStatus::Enabled)
+        Ok(ServiceIcmpConfig {
+            enabled: rule.status.0 == VpcFirewallRuleStatus::Enabled,
+        })
     }
 
     pub async fn nexus_inbound_icmp_update(
         &self,
         opctx: &OpContext,
-        enabled: bool,
-    ) -> Result<bool, Error> {
+        config: ServiceIcmpConfig,
+    ) -> Result<ServiceIcmpConfig, Error> {
         opctx.authorize(authz::Action::Modify, &authz::FLEET).await?;
         use nexus_db_schema::schema::vpc_firewall_rule::dsl;
+
+        let ServiceIcmpConfig { enabled } = config;
 
         let conn = self.pool_connection_authorized(opctx).await?;
 
@@ -801,7 +806,9 @@ impl DataStore {
             .await
             .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))?;
 
-        Ok(rule.status.0 == VpcFirewallRuleStatus::Enabled)
+        Ok(ServiceIcmpConfig {
+            enabled: rule.status.0 == VpcFirewallRuleStatus::Enabled,
+        })
     }
 
     /// Return the list of `Sled`s hosting instances or control plane services

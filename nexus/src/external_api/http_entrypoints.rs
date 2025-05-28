@@ -78,6 +78,7 @@ use omicron_common::api::external::NameOrId;
 use omicron_common::api::external::Probe;
 use omicron_common::api::external::RouterRoute;
 use omicron_common::api::external::RouterRouteKind;
+use omicron_common::api::external::ServiceIcmpConfig;
 use omicron_common::api::external::SwitchPort;
 use omicron_common::api::external::SwitchPortSettings;
 use omicron_common::api::external::SwitchPortSettingsView;
@@ -4245,7 +4246,7 @@ impl NexusExternalApi for NexusExternalApiImpl {
 
     async fn networking_inbound_icmp_view(
         rqctx: RequestContext<Self::Context>,
-    ) -> Result<HttpResponseOk<bool>, HttpError> {
+    ) -> Result<HttpResponseOk<ServiceIcmpConfig>, HttpError> {
         let apictx = rqctx.context();
         let handler = async {
             let nexus = &apictx.context.nexus;
@@ -4266,8 +4267,8 @@ impl NexusExternalApi for NexusExternalApiImpl {
 
     async fn networking_inbound_icmp_update(
         rqctx: RequestContext<Self::Context>,
-        params: TypedBody<bool>,
-    ) -> Result<HttpResponseOk<bool>, HttpError> {
+        params: TypedBody<ServiceIcmpConfig>,
+    ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
         let apictx = rqctx.context();
         let handler = async {
             let nexus = &apictx.context.nexus;
@@ -4277,7 +4278,7 @@ impl NexusExternalApi for NexusExternalApiImpl {
             nexus
                 .nexus_firewall_inbound_icmp_update(&opctx, params)
                 .await
-                .map(HttpResponseOk)
+                .map(|_| HttpResponseUpdatedNoContent())
                 .map_err(HttpError::from)
         };
         apictx

@@ -23,6 +23,7 @@ use omicron_common::api::external::ListResultVec;
 use omicron_common::api::external::LookupResult;
 use omicron_common::api::external::LookupType;
 use omicron_common::api::external::NameOrId;
+use omicron_common::api::external::ServiceIcmpConfig;
 use omicron_common::api::external::UpdateResult;
 use omicron_common::api::external::VpcFirewallRuleUpdateParams;
 use omicron_common::api::external::http_pagination::PaginatedBy;
@@ -276,17 +277,17 @@ impl super::Nexus {
     pub async fn nexus_firewall_inbound_icmp_view(
         &self,
         opctx: &OpContext,
-    ) -> Result<bool, Error> {
+    ) -> Result<ServiceIcmpConfig, Error> {
         self.datastore().nexus_inbound_icmp_view(opctx).await
     }
 
     pub async fn nexus_firewall_inbound_icmp_update(
         &self,
         opctx: &OpContext,
-        enabled: bool,
-    ) -> Result<bool, Error> {
+        config: ServiceIcmpConfig,
+    ) -> Result<ServiceIcmpConfig, Error> {
         let out =
-            self.datastore().nexus_inbound_icmp_update(opctx, enabled).await?;
+            self.datastore().nexus_inbound_icmp_update(opctx, config).await?;
 
         // Notify the sled-agents of the updated firewall rules.
         //
@@ -297,7 +298,7 @@ impl super::Nexus {
             opctx.log,
             "updated user-facing services ICMP status, switching to \
             internal opcontext to plumb rules to sled-agents";
-            "icmp-allowed" => ?enabled,
+            "icmp-allowed" => ?config.enabled,
         );
         let new_opctx = self.opctx_for_internal_api();
         match nexus_networking::plumb_service_firewall_rules(
@@ -314,14 +315,14 @@ impl super::Nexus {
                 Ok(out)
             }
             Err(e) => {
-                error!(
-                    self.log,
-                    "failed to update sled-agents with new ICMP status";
-                    "error" => ?e
-                );
                 let message = "Failed to plumb ICMP status as firewall rules \
                 to relevant sled agents. The request must be retried for them \
                 to take effect.";
+                error!(
+                    self.log,
+                    "failed to update sled-agents with new ICMP status";
+                    "error" => format!("{message}: {e:?}"),
+                );
                 Err(Error::unavail(message))
             }
         }

@@ -10,14 +10,14 @@ use nexus_db_lookup::LookupPath;
 use nexus_db_queries::db::fixed_data::vpc_firewall_rule::NEXUS_ICMP_FW_RULE_NAME;
 use nexus_db_queries::db::{self, DataStore};
 use nexus_networking::vpc_list_firewall_rules;
-use nexus_test_utils::http_testing::{AuthnMode, NexusRequest};
+use nexus_test_utils::http_testing::{AuthnMode, NexusRequest, RequestBuilder};
 use nexus_test_utils::resource_helpers::{
     create_project, create_vpc, object_get, object_put, object_put_error,
 };
 use nexus_test_utils_macros::nexus_test;
 use nexus_types::external_api::views::Vpc;
 use omicron_common::api::external::{
-    IdentityMetadata, L4Port, L4PortRange, VpcFirewallRule,
+    IdentityMetadata, L4Port, L4PortRange, ServiceIcmpConfig, VpcFirewallRule,
     VpcFirewallRuleAction, VpcFirewallRuleDirection, VpcFirewallRuleFilter,
     VpcFirewallRuleHostFilter, VpcFirewallRulePriority,
     VpcFirewallRuleProtocol, VpcFirewallRuleStatus, VpcFirewallRuleTarget,
@@ -635,38 +635,39 @@ async fn test_nexus_firewall_icmp(cptestctx: &ControlPlaneTestContext) {
     const NEXUS_ICMP_URL: &str = "/v1/system/networking/inbound-icmp";
 
     // ICMP access should be enabled by default.
-    let icmp_allowed: bool = NexusRequest::object_get(client, NEXUS_ICMP_URL)
-        .authn_as(AuthnMode::PrivilegedUser)
-        .execute()
-        .await
-        .unwrap()
-        .parsed_body()
-        .unwrap();
+    let icmp_allowed: ServiceIcmpConfig =
+        NexusRequest::object_get(client, NEXUS_ICMP_URL)
+            .authn_as(AuthnMode::PrivilegedUser)
+            .execute()
+            .await
+            .unwrap()
+            .parsed_body()
+            .unwrap();
 
-    assert!(icmp_allowed);
+    assert!(icmp_allowed.enabled);
     assert!(icmp_rule_is_enabled(true, datastore, nexus, &opctx).await);
 
     // Disabling this should propagate to the rule.
-    let icmp_allowed =
-        NexusRequest::object_put(client, NEXUS_ICMP_URL, Some(&false))
-            .authn_as(AuthnMode::PrivilegedUser)
-            .execute()
-            .await
-            .unwrap()
-            .parsed_body::<bool>()
-            .unwrap();
-    assert!(!icmp_allowed);
+    NexusRequest::new(
+        RequestBuilder::new(client, http::Method::PUT, NEXUS_ICMP_URL)
+            .body(Some(&ServiceIcmpConfig { enabled: false }))
+            .expect_status(Some(http::StatusCode::NO_CONTENT)),
+    )
+    .authn_as(AuthnMode::PrivilegedUser)
+    .execute()
+    .await
+    .unwrap();
     assert!(icmp_rule_is_enabled(false, datastore, nexus, &opctx).await);
 
     // Now, re-anable the rule.
-    let icmp_allowed =
-        NexusRequest::object_put(client, NEXUS_ICMP_URL, Some(&true))
-            .authn_as(AuthnMode::PrivilegedUser)
-            .execute()
-            .await
-            .unwrap()
-            .parsed_body::<bool>()
-            .unwrap();
-    assert!(icmp_allowed);
+    NexusRequest::new(
+        RequestBuilder::new(client, http::Method::PUT, NEXUS_ICMP_URL)
+            .body(Some(&ServiceIcmpConfig { enabled: true }))
+            .expect_status(Some(http::StatusCode::NO_CONTENT)),
+    )
+    .authn_as(AuthnMode::PrivilegedUser)
+    .execute()
+    .await
+    .unwrap();
     assert!(icmp_rule_is_enabled(true, datastore, nexus, &opctx).await);
 }

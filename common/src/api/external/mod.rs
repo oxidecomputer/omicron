@@ -2064,7 +2064,7 @@ pub struct L4PortRange {
 }
 
 impl FromStr for L4PortRange {
-    type Err = String;
+    type Err = &'static str;
     fn from_str(range: &str) -> Result<Self, Self::Err> {
         const INVALID_PORT_NUMBER_MSG: &str = "invalid port number";
 
@@ -2072,18 +2072,18 @@ impl FromStr for L4PortRange {
             None => {
                 let port = range
                     .parse::<NonZeroU16>()
-                    .map_err(|_| INVALID_PORT_NUMBER_MSG.to_string())?
+                    .map_err(|_| INVALID_PORT_NUMBER_MSG)?
                     .into();
                 Ok(L4PortRange { first: port, last: port })
             }
             Some((left, right)) => {
                 let first = left
                     .parse::<NonZeroU16>()
-                    .map_err(|_| INVALID_PORT_NUMBER_MSG.to_string())?
+                    .map_err(|_| INVALID_PORT_NUMBER_MSG)?
                     .into();
                 let last = right
                     .parse::<NonZeroU16>()
-                    .map_err(|_| INVALID_PORT_NUMBER_MSG.to_string())?
+                    .map_err(|_| INVALID_PORT_NUMBER_MSG)?
                     .into();
                 Ok(L4PortRange { first, last })
             }
@@ -2168,24 +2168,21 @@ pub struct IcmpParamRange {
 }
 
 impl FromStr for IcmpParamRange {
-    type Err = String;
+    type Err = &'static str;
     fn from_str(range: &str) -> Result<Self, Self::Err> {
         const INVALID_NUMBER_MSG: &str = "invalid 8-bit number";
 
         match range.split_once('-') {
             None => {
-                let port = range
-                    .parse::<u8>()
-                    .map_err(|_| INVALID_NUMBER_MSG.to_string())?;
+                let port =
+                    range.parse::<u8>().map_err(|_| INVALID_NUMBER_MSG)?;
                 Ok(IcmpParamRange { first: port, last: port })
             }
             Some((left, right)) => {
-                let first = left
-                    .parse::<u8>()
-                    .map_err(|_| INVALID_NUMBER_MSG.to_string())?;
-                let last = right
-                    .parse::<u8>()
-                    .map_err(|_| INVALID_NUMBER_MSG.to_string())?;
+                let first =
+                    left.parse::<u8>().map_err(|_| INVALID_NUMBER_MSG)?;
+                let last =
+                    right.parse::<u8>().map_err(|_| INVALID_NUMBER_MSG)?;
                 Ok(IcmpParamRange { first, last })
             }
         }
@@ -3339,6 +3336,27 @@ pub enum BfdMode {
     MultiHop,
 }
 
+/// Configuration of inbound ICMP allowed by API services.
+#[derive(
+    Clone,
+    Copy,
+    Debug,
+    Deserialize,
+    Serialize,
+    JsonSchema,
+    PartialEq,
+    Eq,
+    Ord,
+    PartialOrd,
+)]
+pub struct ServiceIcmpConfig {
+    /// When enabled, Nexus is able to receive ICMP Destination Unreachable
+    /// (type 4, fragmentation needed) and Time Exceeded messages. These
+    /// enable Nexus to perform Path MTU discovery and better cope with
+    /// fragmentation issues. Otherwise all ICMP traffic will be dropped.
+    pub enabled: bool,
+}
+
 /// A description of an uploaded TUF repository.
 #[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize, JsonSchema)]
 pub struct TufRepoDescription {
@@ -3816,31 +3834,31 @@ mod test {
 
         assert_eq!(
             L4PortRange::try_from("".to_string()),
-            Err("invalid port number".to_string())
+            Err("invalid port number")
         );
         assert_eq!(
             L4PortRange::try_from("65536".to_string()),
-            Err("invalid port number".to_string())
+            Err("invalid port number")
         );
         assert_eq!(
             L4PortRange::try_from("65535-65536".to_string()),
-            Err("invalid port number".to_string())
+            Err("invalid port number")
         );
         assert_eq!(
             L4PortRange::try_from("0x23".to_string()),
-            Err("invalid port number".to_string())
+            Err("invalid port number")
         );
         assert_eq!(
             L4PortRange::try_from("0".to_string()),
-            Err("invalid port number".to_string())
+            Err("invalid port number")
         );
         assert_eq!(
             L4PortRange::try_from("0-20".to_string()),
-            Err("invalid port number".to_string())
+            Err("invalid port number")
         );
         assert_eq!(
             L4PortRange::try_from("-20".to_string()),
-            Err("invalid port number".to_string())
+            Err("invalid port number")
         );
     }
 
