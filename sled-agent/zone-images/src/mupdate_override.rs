@@ -483,6 +483,7 @@ mod tests {
     use dropshot::ConfigLogging;
     use dropshot::ConfigLoggingLevel;
     use dropshot::test_util::LogContext;
+    use iddqd::IdOrdMap;
     use omicron_uuid_kinds::MupdateOverrideUuid;
     use omicron_uuid_kinds::ZpoolUuid;
     use pretty_assertions::assert_eq;
@@ -951,6 +952,7 @@ mod tests {
         MupdateOverrideInfo {
             mupdate_uuid: OVERRIDE_UUID,
             hash_ids: BTreeSet::new(),
+            zones: IdOrdMap::new(),
         }
     }
 
@@ -958,6 +960,7 @@ mod tests {
         MupdateOverrideInfo {
             mupdate_uuid: OVERRIDE_2_UUID,
             hash_ids: BTreeSet::new(),
+            zones: IdOrdMap::new(),
         }
     }
 

@@ -404,6 +404,7 @@ pub struct BlueprintBuilder<'a> {
     // corresponding fields in `Blueprint`.
     sled_editors: BTreeMap<SledUuid, SledEditor>,
     cockroachdb_setting_preserve_downgrade: CockroachDbPreserveDowngrade,
+    target_release_minimum_generation: Generation,
 
     creator: String,
     operations: Vec<Operation>,
@@ -465,6 +466,7 @@ impl<'a> BlueprintBuilder<'a> {
             parent_blueprint_id: None,
             internal_dns_version: Generation::new(),
             external_dns_version: Generation::new(),
+            target_release_minimum_generation: Generation::new(),
             cockroachdb_fingerprint: String::new(),
             cockroachdb_setting_preserve_downgrade:
                 CockroachDbPreserveDowngrade::DoNotModify,
@@ -541,6 +543,8 @@ impl<'a> BlueprintBuilder<'a> {
             cockroachdb_setting_preserve_downgrade: parent_blueprint
                 .cockroachdb_setting_preserve_downgrade,
             pending_mgs_updates: parent_blueprint.pending_mgs_updates.clone(),
+            target_release_minimum_generation: parent_blueprint
+                .target_release_minimum_generation,
             creator: creator.to_owned(),
             operations: Vec::new(),
             comments: Vec::new(),
@@ -709,6 +713,8 @@ impl<'a> BlueprintBuilder<'a> {
             parent_blueprint_id: Some(self.parent_blueprint.id),
             internal_dns_version: self.input.internal_dns_version(),
             external_dns_version: self.input.external_dns_version(),
+            target_release_minimum_generation: self
+                .target_release_minimum_generation,
             cockroachdb_fingerprint: self
                 .input
                 .cockroachdb_settings()
@@ -716,6 +722,7 @@ impl<'a> BlueprintBuilder<'a> {
                 .clone(),
             cockroachdb_setting_preserve_downgrade: self
                 .cockroachdb_setting_preserve_downgrade,
+
             clickhouse_cluster_config,
             oximeter_read_version: oximeter_read_version.into(),
             oximeter_read_mode,
@@ -1878,6 +1885,17 @@ impl<'a> BlueprintBuilder<'a> {
             })
             .collect::<HashSet<IpAddr>>()
             .len()
+    }
+
+    /// Set the `target_release_minimum_generation` field for this blueprint.
+    pub fn set_target_release_minimum_generation(
+        &mut self,
+        target_release_minimum_generation: Generation,
+    ) -> Result<(), Error> {
+        // May need to do some validation here in the future.
+        self.target_release_minimum_generation =
+            target_release_minimum_generation;
+        Ok(())
     }
 
     /// Allow a test to manually add an external DNS address, which could
