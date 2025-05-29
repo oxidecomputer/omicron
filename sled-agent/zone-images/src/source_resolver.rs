@@ -6,6 +6,7 @@
 
 use crate::AllMupdateOverrides;
 use crate::MupdateOverrideStatus;
+use crate::RAMDISK_IMAGE_PATH;
 use crate::install_dataset_file_name;
 use camino::Utf8Path;
 use camino::Utf8PathBuf;
@@ -138,7 +139,7 @@ impl ResolverInner {
             OmicronZoneImageSource::InstallDataset => {
                 // Look for the image in the ramdisk first
                 let mut zone_image_paths =
-                    vec![Utf8PathBuf::from("/opt/oxide")];
+                    vec![Utf8PathBuf::from(RAMDISK_IMAGE_PATH)];
                 // Inject an image path if requested by a test.
                 if let Some(path) = &self.image_directory_override {
                     zone_image_paths.push(path.clone());
