@@ -43,6 +43,7 @@ use std::fmt::Result as FormatResult;
 use std::net::IpAddr;
 use std::net::Ipv4Addr;
 use std::num::{NonZeroU16, NonZeroU32};
+use std::ops::Deref;
 use std::str::FromStr;
 use tufaceous_artifact::ArtifactHash;
 use uuid::Uuid;
@@ -3276,6 +3277,60 @@ pub enum ImportExportPolicy {
     #[default]
     NoFiltering,
     Allow(Vec<oxnet::IpNet>),
+}
+
+/// Use instead of Option in API request body structs to get a field that can be
+/// null (parsed as `None`) but is not optional. Will fail to parse if the key
+/// is not present.
+#[derive(Clone, Debug, Serialize)]
+pub struct Nullable<T>(pub Option<T>);
+
+impl<T> From<Option<T>> for Nullable<T> {
+    fn from(option: Option<T>) -> Self {
+        Nullable(option)
+    }
+}
+
+impl<T> Deref for Nullable<T> {
+    type Target = Option<T>;
+
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
+
+// it looks like we're just using Option's impl here, so why not derive instead?
+// For some reason, deriving JsonSchema + #[serde(transparent)] doesn't work --
+// it almost does, but the field does not end up marked required in the schema.
+// There must be some special handling of Option somewhere causing it to be
+// marked optional rather than nullable + required.
+
+impl<T: JsonSchema> JsonSchema for Nullable<T> {
+    fn schema_name() -> String {
+        T::schema_name()
+    }
+
+    fn json_schema(
+        generator: &mut schemars::r#gen::SchemaGenerator,
+    ) -> schemars::schema::Schema {
+        Option::<T>::json_schema(generator)
+    }
+
+    fn is_referenceable() -> bool {
+        Option::<T>::is_referenceable()
+    }
+}
+
+impl<'de, T: serde::Deserialize<'de>> serde::Deserialize<'de> for Nullable<T> {
+    fn deserialize<D: serde::Deserializer<'de>>(
+        deserializer: D,
+    ) -> Result<Self, D::Error> {
+        // this is what errors if the key isn't present
+        let value = serde_json::Value::deserialize(deserializer)?;
+
+        use serde::de::Error;
+        Option::<T>::deserialize(value).map_err(D::Error::custom).map(Nullable)
+    }
 }
 
 #[cfg(test)]

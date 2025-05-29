@@ -50,16 +50,18 @@ impl From<SiloSettings> for views::SiloSettings {
 #[derive(AsChangeset)]
 #[diesel(table_name = silo_settings)]
 pub struct SiloSettingsUpdate {
-    pub device_token_max_ttl_seconds: Option<i64>,
+    // Needs to be double Option so we can set a value of null in the DB by
+    // passing Some(None). None by itself is ignored by Diesel.
+    pub device_token_max_ttl_seconds: Option<Option<i64>>,
     pub time_modified: DateTime<Utc>,
 }
 
 impl From<params::SiloSettingsUpdate> for SiloSettingsUpdate {
     fn from(params: params::SiloSettingsUpdate) -> Self {
         Self {
-            device_token_max_ttl_seconds: params
-                .device_token_max_ttl_seconds
-                .map(|ttl| ttl.get().into()),
+            device_token_max_ttl_seconds: Some(
+                params.device_token_max_ttl_seconds.map(|ttl| ttl.get().into()),
+            ),
             time_modified: Utc::now(),
         }
     }

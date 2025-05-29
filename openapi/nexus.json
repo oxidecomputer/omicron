@@ -22959,12 +22959,15 @@
         "properties": {
           "device_token_max_ttl_seconds": {
             "nullable": true,
-            "description": "Maximum lifetime of a device token in seconds. If unset (or set to null), users will be able to create tokens that do not expire.",
+            "description": "Maximum lifetime of a device token in seconds. If set to null, users will be able to create tokens that do not expire.",
             "type": "integer",
             "format": "uint32",
             "minimum": 1
           }
-        }
+        },
+        "required": [
+          "device_token_max_ttl_seconds"
+        ]
       },
       "SiloUtilization": {
         "description": "View of a silo's resource utilization and capacity",

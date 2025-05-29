@@ -13,8 +13,8 @@ use omicron_common::api::external::{
     AddressLotKind, AffinityPolicy, AllowedSourceIps, BfdMode, BgpPeer,
     ByteCount, FailureDomain, Hostname, IdentityMetadataCreateParams,
     IdentityMetadataUpdateParams, InstanceAutoRestartPolicy, InstanceCpuCount,
-    LinkFec, LinkSpeed, Name, NameOrId, PaginationOrder, RouteDestination,
-    RouteTarget, UserId,
+    LinkFec, LinkSpeed, Name, NameOrId, Nullable, PaginationOrder,
+    RouteDestination, RouteTarget, UserId,
 };
 use omicron_common::disk::DiskVariant;
 use oxnet::{IpNet, Ipv4Net, Ipv6Net};
@@ -490,12 +490,12 @@ pub struct SiloQuotasUpdate {
 // was discussed.
 
 /// Updateable properties of a silo's settings.
-#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
+#[derive(Clone, Debug, Serialize, Deserialize, JsonSchema)]
 pub struct SiloSettingsUpdate {
-    /// Maximum lifetime of a device token in seconds. If unset (or set to
-    /// null), users will be able to create tokens that do not expire.
+    /// Maximum lifetime of a device token in seconds. If set to null, users
+    /// will be able to create tokens that do not expire.
     #[schemars(range(min = 1))]
-    pub device_token_max_ttl_seconds: Option<NonZeroU32>,
+    pub device_token_max_ttl_seconds: Nullable<NonZeroU32>,
 }
 
 /// Create-time parameters for a `User`
