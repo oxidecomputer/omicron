@@ -21,6 +21,7 @@ impl_enum_type!(
         AsExpression,
         FromSqlRow,
         strum::VariantArray,
+        schemars::JsonSchema,
     )]
     pub enum AlertClass;
 
@@ -82,6 +83,19 @@ impl AlertClass {
     /// All webhook event classes.
     pub const ALL_CLASSES: &'static [Self] =
         <Self as strum::VariantArray>::VARIANTS;
+}
+
+// Alphabetical ordering
+impl Ord for AlertClass {
+    fn cmp(&self, other: &Self) -> std::cmp::Ordering {
+        self.as_str().cmp(other.as_str())
+    }
+}
+
+impl PartialOrd for AlertClass {
+    fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
+        Some(self.cmp(other))
+    }
 }
 
 impl fmt::Display for AlertClass {

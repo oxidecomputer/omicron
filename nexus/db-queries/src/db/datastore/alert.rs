@@ -26,6 +26,7 @@ impl DataStore {
         opctx: &OpContext,
         id: AlertUuid,
         class: AlertClass,
+        version: u32,
         payload: serde_json::Value,
     ) -> CreateResult<Alert> {
         let conn = self.pool_connection_authorized(&opctx).await?;
@@ -36,6 +37,7 @@ impl DataStore {
                 class,
                 payload,
                 num_dispatched: 0,
+                schema_version: version.into(),
             })
             .returning(Alert::as_returning())
             .get_result_async(&*conn)

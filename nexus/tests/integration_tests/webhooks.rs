@@ -26,6 +26,8 @@ use sha2::Sha256;
 use std::time::Duration;
 use uuid::Uuid;
 
+use nexus_alerts::alerts::test as test_alerts;
+
 type ControlPlaneTestContext =
     nexus_test_utils::ControlPlaneTestContext<omicron_nexus::Server>;
 
@@ -529,12 +531,7 @@ async fn test_event_delivery(cptestctx: &ControlPlaneTestContext) {
 
     // Publish an event
     let event = nexus
-        .alert_publish(
-            &opctx,
-            id,
-            AlertClass::TestFoo,
-            serde_json::json!({"hello_world": true}),
-        )
+        .alert_publish(&opctx, id, test_alerts::Foo { hello_world: true })
         .await
         .expect("event should be published successfully");
     dbg!(event);
@@ -651,12 +648,7 @@ async fn test_multiple_secrets(cptestctx: &ControlPlaneTestContext) {
 
     // Publish an event
     let event = nexus
-        .alert_publish(
-            &opctx,
-            id,
-            AlertClass::TestFoo,
-            serde_json::json!({"hello_world": true}),
-        )
+        .alert_publish(&opctx, id, test_alerts::Foo { hello_world: true })
         .await
         .expect("event should be published successfully");
     dbg!(event);
@@ -819,8 +811,7 @@ async fn test_multiple_receivers(cptestctx: &ControlPlaneTestContext) {
         .alert_publish(
             &opctx,
             bar_alert_id,
-            AlertClass::TestFooBar,
-            serde_json::json!({"lol": "webhooked on phonics"}),
+            test_alerts::FooBar { hello: "emeryville" },
         )
         .await
         .expect("event should be published successfully");
@@ -830,8 +821,7 @@ async fn test_multiple_receivers(cptestctx: &ControlPlaneTestContext) {
         .alert_publish(
             &opctx,
             baz_alert_id,
-            AlertClass::TestFooBaz,
-            serde_json::json!({"lol": "webhook, line, and sinker"}),
+            test_alerts::FooBaz { hello: "san francisco" },
         )
         .await
         .expect("event should be published successfully");
@@ -898,12 +888,7 @@ async fn test_retry_backoff(cptestctx: &ControlPlaneTestContext) {
 
     // Publish an event
     let event = nexus
-        .alert_publish(
-            &opctx,
-            id,
-            AlertClass::TestFoo,
-            serde_json::json!({"hello_world": true}),
-        )
+        .alert_publish(&opctx, id, test_alerts::Foo { hello_world: true })
         .await
         .expect("event should be published successfully");
     dbg!(event);
@@ -1311,8 +1296,7 @@ async fn test_probe_resends_failed_deliveries(
             .alert_publish(
                 &opctx,
                 event1_id,
-                AlertClass::TestFoo,
-                serde_json::json!({"hello": "world"}),
+                test_alerts::Foo { hello_world: true }
             )
             .await
             .expect("event1 should be published successfully")
@@ -1322,8 +1306,7 @@ async fn test_probe_resends_failed_deliveries(
             .alert_publish(
                 &opctx,
                 event2_id,
-                AlertClass::TestFoo,
-                serde_json::json!({"hello": "emeryville"}),
+                test_alerts::Foo { hello_world: false }
             )
             .await
             .expect("event2 should be published successfully")
@@ -1471,8 +1454,7 @@ async fn test_api_resends_failed_deliveries(
         .alert_publish(
             &opctx,
             event1_id,
-            AlertClass::TestFoo,
-            serde_json::json!({"hello_world": true}),
+            test_alerts::Foo { hello_world: true },
         )
         .await
         .expect("event should be published successfully");
@@ -1483,8 +1465,7 @@ async fn test_api_resends_failed_deliveries(
         .alert_publish(
             &opctx,
             event2_id,
-            AlertClass::TestQuuxBar,
-            serde_json::json!({"hello_world": true}),
+            test_alerts::QuuxBar { a: true, b: 42 },
         )
         .await
         .expect("event should be published successfully");
@@ -1587,7 +1568,7 @@ async fn subscription_add_test(
                     "alert_class": "test.foo.bar",
                     "alert_id": id2,
                     "data": {
-                        "hello_world": true,
+                        "hello": "robert",
                     }
                 })
                 .to_string();
@@ -1608,12 +1589,7 @@ async fn subscription_add_test(
     // Publish an event. This should not be received, as we are not subscribed
     // to it.
     let event = nexus
-        .alert_publish(
-            &opctx,
-            id1,
-            AlertClass::TestFooBar,
-            serde_json::json!({"hello_world": false}),
-        )
+        .alert_publish(&opctx, id1, test_alerts::FooBar { hello: "joe" })
         .await
         .expect("event should be published successfully");
     dbg!(event);
@@ -1641,12 +1617,7 @@ async fn subscription_add_test(
 
     // Publish an event. This one should make it through.
     let event = nexus
-        .alert_publish(
-            &opctx,
-            id2,
-            AlertClass::TestFooBar,
-            serde_json::json!({"hello_world": true}),
-        )
+        .alert_publish(&opctx, id2, test_alerts::FooBar { hello: "robert" })
         .await
         .expect("event should be published successfully");
     dbg!(event);
@@ -1719,7 +1690,7 @@ async fn subscription_remove_test(
                     "alert_class": "test.foo.bar",
                     "alert_id": id1,
                     "data": {
-                        "hello_world": true,
+                        "hello": "joe",
                     }
                 })
                 .to_string();
@@ -1740,12 +1711,7 @@ async fn subscription_remove_test(
     // Publish an event. This should be received, as it matches the subscription
     // we are about to delete.
     let event = nexus
-        .alert_publish(
-            &opctx,
-            id1,
-            AlertClass::TestFooBar,
-            serde_json::json!({"hello_world": true}),
-        )
+        .alert_publish(&opctx, id1, test_alerts::FooBar { hello: "joe" })
         .await
         .expect("event should be published successfully");
     dbg!(event);
@@ -1772,12 +1738,7 @@ async fn subscription_remove_test(
     // Publish an event. This one should not be received, as we are no longer
     // subscribed to its event class.
     let event = nexus
-        .alert_publish(
-            &opctx,
-            id2,
-            AlertClass::TestFooBar,
-            serde_json::json!({"hello_world": false}),
-        )
+        .alert_publish(&opctx, id2, test_alerts::FooBar { hello: "robert" })
         .await
         .expect("event should be published successfully");
     dbg!(event);
@@ -1800,7 +1761,7 @@ async fn subscription_remove_test(
                     "alert_class": "test.foo",
                     "alert_id": id3,
                     "data": {
-                        "whatever": 1
+                        "hello_world": true,
                     }
                 })
                 .to_string();
@@ -1819,12 +1780,7 @@ async fn subscription_remove_test(
     };
 
     let event = nexus
-        .alert_publish(
-            &opctx,
-            id3,
-            AlertClass::TestFoo,
-            serde_json::json!({"whatever": 1}),
-        )
+        .alert_publish(&opctx, id3, test_alerts::Foo { hello_world: true })
         .await
         .expect("event should be published successfully");
     dbg!(event);

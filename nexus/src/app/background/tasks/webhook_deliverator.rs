@@ -35,9 +35,9 @@ use crate::app::webhook::ReceiverClient;
 use futures::future::BoxFuture;
 use nexus_db_queries::context::OpContext;
 use nexus_db_queries::db::DataStore;
-use nexus_db_queries::db::datastore::webhook_delivery::DeliveryAndEvent;
 use nexus_db_queries::db::datastore::webhook_delivery::DeliveryAttemptState;
 pub use nexus_db_queries::db::datastore::webhook_delivery::DeliveryConfig;
+use nexus_db_queries::db::model::Alert;
 use nexus_db_queries::db::model::WebhookDeliveryAttemptResult;
 use nexus_db_queries::db::model::WebhookReceiverConfig;
 use nexus_db_queries::db::pagination::Paginator;
@@ -231,7 +231,9 @@ impl WebhookDeliverator {
             ..Default::default()
         };
 
-        for DeliveryAndEvent { delivery, alert_class, event } in deliveries {
+        for (delivery, alert) in deliveries {
+            let Alert { class, payload, schema_version, .. } = alert;
+            let version = schema_version.into();
             let attempt = (*delivery.attempts) + 1;
             let delivery_id = WebhookDeliveryUuid::from(delivery.id);
             match self
@@ -248,7 +250,8 @@ impl WebhookDeliverator {
                     slog::trace!(&opctx.log,
                         "webhook event delivery attempt started";
                         "alert_id" => %delivery.alert_id,
-                        "alert_class" => %alert_class,
+                        "alert_class" => %class,
+                        "alert_version" => %version,
                         "delivery_id" => %delivery_id,
                         "attempt" => ?attempt,
                     );
@@ -259,7 +262,8 @@ impl WebhookDeliverator {
                         "delivery of this webhook event was already completed \
                          at {time:?}";
                         "alert_id" => %delivery.alert_id,
-                        "alert_class" => %alert_class,
+                        "alert_class" => %class,
+                        "alert_version" => %version,
                         "delivery_id" => %delivery_id,
                         "time_completed" => ?time,
                     );
@@ -272,7 +276,8 @@ impl WebhookDeliverator {
                         "delivery of this webhook event is in progress by \
                          another Nexus";
                         "alert_id" => %delivery.alert_id,
-                        "alert_class" => %alert_class,
+                        "alert_class" => %class,
+                        "alert_version" => %version,
                         "delivery_id" => %delivery_id,
                         "nexus_id" => %nexus_id,
                         "time_started" => ?started,
@@ -286,7 +291,8 @@ impl WebhookDeliverator {
                         "unexpected database error error starting webhook \
                          delivery attempt";
                         "alert_id" => %delivery.alert_id,
-                        "alert_class" => %alert_class,
+                        "alert_class" => %class,
+                        "alert_version" => %version,
                         "delivery_id" => %delivery_id,
                         "error" => %error,
                     );
@@ -299,7 +305,9 @@ impl WebhookDeliverator {
 
             // okay, actually do the thing...
             let delivery_attempt = match client
-                .send_delivery_request(opctx, &delivery, alert_class, &event)
+                .send_delivery_request(
+                    opctx, &delivery, class, version, &payload,
+                )
                 .await
             {
                 Ok(delivery) => delivery,
@@ -326,7 +334,8 @@ impl WebhookDeliverator {
                     &opctx.log,
                     "{MSG}";
                     "alert_id" => %delivery.alert_id,
-                    "alert_class" => %alert_class,
+                    "alert_class" => %class,
+                    "alert_version" => %version,
                     "delivery_id" => %delivery_id,
                     "error" => %e,
                 );

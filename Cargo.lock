@@ -5899,6 +5899,21 @@ dependencies = [
 ]
 
 [[package]]
+name = "nexus-alerts"
+version = "0.1.0"
+dependencies = [
+ "nexus-auth",
+ "nexus-db-model",
+ "omicron-common",
+ "omicron-rpaths",
+ "omicron-uuid-kinds",
+ "omicron-workspace-hack",
+ "schemars",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
 name = "nexus-auth"
 version = "0.1.0"
 dependencies = [
@@ -7391,6 +7406,7 @@ dependencies = [
  "macaddr",
  "maplit",
  "mg-admin-client",
+ "nexus-alerts",
  "nexus-auth",
  "nexus-background-task-interface",
  "nexus-client",
