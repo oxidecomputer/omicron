@@ -1287,6 +1287,7 @@ pub enum PendingMgsUpdateDetails {
         /// override persistent preference selection for a single boot
         expected_transient_boot_preference: Option<RotSlot>,
     },
+    RotBootloader {},
 }
 
 impl slog::KV for PendingMgsUpdateDetails {
@@ -1341,6 +1342,9 @@ impl slog::KV for PendingMgsUpdateDetails {
                     Key::from("expected_transient_boot_preference"),
                     &format!("{:?}", expected_transient_boot_preference),
                 )
+            }
+            PendingMgsUpdateDetails::RotBootloader {} => {
+                serializer.emit_str(Key::from("component"), "rot_bootloader") //?;
             }
         }
     }

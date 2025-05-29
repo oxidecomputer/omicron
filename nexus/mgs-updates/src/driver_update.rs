@@ -96,6 +96,19 @@ impl SpComponentUpdate {
                     update_id,
                 }
             }
+            PendingMgsUpdateDetails::RotBootloader { .. } => {
+                SpComponentUpdate {
+                    log: log.clone(),
+                    component: SpComponent::STAGE0,
+                    target_sp_type: request.sp_type,
+                    target_sp_slot: request.slot_id,
+                    // The RoT bootlaoder has two firmware slots, stage0 and
+                    // stage0next. We always request an update to slot stage0,
+                    // which will always mean "the inactive slot".
+                    firmware_slot: 0,
+                    update_id,
+                }
+            }
         }
     }
 }

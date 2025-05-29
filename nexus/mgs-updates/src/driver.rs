@@ -10,6 +10,7 @@ use crate::driver_update::ApplyUpdateError;
 use crate::driver_update::PROGRESS_TIMEOUT;
 use crate::driver_update::SpComponentUpdate;
 use crate::driver_update::apply_update;
+use crate::rot_bootloader_updater::ReconfiguratorRotBootloaderUpdater;
 use crate::rot_updater::ReconfiguratorRotUpdater;
 use crate::sp_updater::ReconfiguratorSpUpdater;
 use futures::FutureExt;
@@ -321,6 +322,14 @@ impl MgsUpdateDriver {
                     SpComponentUpdate::from_request(&log, &request, update_id);
 
                 (sp_update, Box::new(ReconfiguratorRotUpdater {}))
+            }
+            nexus_types::deployment::PendingMgsUpdateDetails::RotBootloader {
+                ..
+            } => {
+                let sp_update =
+                    SpComponentUpdate::from_request(&log, &request, update_id);
+
+                (sp_update, Box::new(ReconfiguratorRotBootloaderUpdater {}))
             }
         };
 

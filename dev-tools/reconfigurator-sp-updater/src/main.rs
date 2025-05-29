@@ -343,6 +343,9 @@ fn cmd_config(
                     expected_transient_boot_preference,
                 )?;
             }
+            PendingMgsUpdateDetails::RotBootloader {} => {
+                writeln!(&mut s, "        preconditions: ",)?;
+            }
         }
 
         writeln!(&mut s)?;
