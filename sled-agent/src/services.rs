@@ -102,7 +102,9 @@ use sled_agent_types::{
     sled::SWITCH_ZONE_BASEBOARD_FILE, time_sync::TimeSync,
     zone_bundle::ZoneBundleCause,
 };
-use sled_agent_zone_images::{ZoneImageSourceResolver, ZoneImageZpools};
+use sled_agent_zone_images::{
+    MupdateOverrideReadError, ZoneImageSourceResolver, ZoneImageZpools,
+};
 use sled_hardware::SledMode;
 use sled_hardware::is_gimlet;
 use sled_hardware::underlay;
@@ -311,6 +313,9 @@ pub enum Error {
 
     #[error("Unexpected zone config: zone {zone_id} is running on ramdisk ?!")]
     ZoneIsRunningOnRamdisk { zone_id: OmicronZoneUuid },
+
+    #[error("failed to read mupdate override info, not starting zones")]
+    MupdateOverrideRead(#[source] MupdateOverrideReadError),
 
     #[error(
         "Couldn't find requested zone image ({hash}) for \
@@ -1748,12 +1753,16 @@ impl ServiceManager {
         };
         let boot_zpool =
             all_disks.boot_disk().map(|(_, boot_zpool)| boot_zpool);
-        let file_source = self.inner.zone_image_resolver.file_source_for(
-            zone_type_str,
-            image_source,
-            &zpools,
-            boot_zpool.as_ref(),
-        );
+        let file_source = self
+            .inner
+            .zone_image_resolver
+            .file_source_for(
+                zone_type_str,
+                image_source,
+                &zpools,
+                boot_zpool.as_ref(),
+            )
+            .map_err(|error| Error::MupdateOverrideRead(error))?;
 
         // We use the fake initialiser for testing
         let mut zone_builder = match self.inner.system_api.fake_install_dir() {

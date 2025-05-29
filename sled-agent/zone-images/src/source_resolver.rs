@@ -5,6 +5,7 @@
 //! Zone image lookup.
 
 use crate::AllMupdateOverrides;
+use crate::MupdateOverrideReadError;
 use crate::MupdateOverrideStatus;
 use crate::RAMDISK_IMAGE_PATH;
 use crate::install_dataset_file_name;
@@ -74,7 +75,7 @@ impl ZoneImageSourceResolver {
         image_source: &OmicronZoneImageSource,
         zpools: &ZoneImageZpools<'_>,
         boot_zpool: Option<&ZpoolName>,
-    ) -> ZoneImageFileSource {
+    ) -> Result<ZoneImageFileSource, MupdateOverrideReadError> {
         let inner = self.inner.lock().unwrap();
         inner.file_source_for(zone_type, image_source, zpools, boot_zpool)
     }
@@ -89,7 +90,6 @@ pub struct ResolverStatus {
 
 #[derive(Debug)]
 struct ResolverInner {
-    #[expect(unused)]
     log: slog::Logger,
     image_directory_override: Option<Utf8PathBuf>,
     // Store all collected information for mupdate overrides -- we're going to
@@ -134,9 +134,22 @@ impl ResolverInner {
         image_source: &OmicronZoneImageSource,
         zpools: &ZoneImageZpools<'_>,
         boot_zpool: Option<&ZpoolName>,
-    ) -> ZoneImageFileSource {
+    ) -> Result<ZoneImageFileSource, MupdateOverrideReadError> {
+        let mupdate_override_status = self.mupdate_overrides.status();
+
+        // Error out if the install dataset is missing or if any zones fail. At
+        // the moment we don't use this for the artifact dataset, but we'll use
+        // it to determine mupdate override status in the future.
+        //
+        // XXX This does mean that zones from the RAM disk will not be started,
+        // including the switch zone. That feels a bit concerning and worth
+        // thinking about more carefully -- we should consider maybe exempting
+        // the switch zone from this check.
+        let boot_disk_override = mupdate_override_status.boot_disk_override?;
+
         match image_source {
             OmicronZoneImageSource::InstallDataset => {
+                let file_name = install_dataset_file_name(zone_type);
                 // Look for the image in the ramdisk first
                 let mut zone_image_paths =
                     vec![Utf8PathBuf::from(RAMDISK_IMAGE_PATH)];
@@ -145,19 +158,38 @@ impl ResolverInner {
                     zone_image_paths.push(path.clone());
                 };
 
-                // If the boot disk exists, look for the image in the "install"
-                // dataset on the boot zpool.
+                // Any zones not part of the ramdisk are managed via mupdate
+                // overrides.
+                //
+                // XXX: we ask for the boot zpool to be passed in here. But
+                // `AllMupdateOverrides` also caches the boot zpool. How should
+                // we reconcile the two?
                 if let Some(boot_zpool) = boot_zpool {
-                    zone_image_paths.push(
-                        boot_zpool
-                            .dataset_mountpoint(zpools.root, INSTALL_DATASET),
-                    );
+                    if let Some(info) = boot_disk_override {
+                        if info.zones.contains_key(file_name.as_str()) {
+                            zone_image_paths.push(
+                                boot_zpool.dataset_mountpoint(
+                                    zpools.root,
+                                    INSTALL_DATASET,
+                                ),
+                            );
+                        } else {
+                            // The zone was requested but not found in the
+                            // install dataset. This is unusual! We log a
+                            // message but do not return the zone.
+                            slog::warn!(
+                                self.log,
+                                "zone {} not found in mupdate-override.json",
+                                file_name
+                            );
+                        }
+                    }
                 }
 
-                ZoneImageFileSource {
-                    file_name: install_dataset_file_name(zone_type),
+                Ok(ZoneImageFileSource {
+                    file_name,
                     search_paths: zone_image_paths,
-                }
+                })
             }
             OmicronZoneImageSource::Artifact { hash } => {
                 // Search both artifact datasets, but look on the boot disk first.
@@ -177,12 +209,12 @@ impl ResolverInner {
                         )
                     })
                     .collect();
-                ZoneImageFileSource {
+                Ok(ZoneImageFileSource {
                     // Images in the artifact store are named by just their
                     // hash.
                     file_name: hash.to_string(),
                     search_paths,
-                }
+                })
             }
         }
     }
