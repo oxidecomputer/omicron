@@ -12,7 +12,7 @@ use nexus_db_queries::db::fixed_data::silo::DEFAULT_SILO;
 use nexus_db_queries::db::identity::{Asset, Resource};
 use nexus_test_utils::http_testing::TestResponse;
 use nexus_test_utils::resource_helpers::{
-    object_get, object_put, object_put_error,
+    object_delete_error, object_get, object_put, object_put_error,
 };
 use nexus_test_utils::{
     http_testing::{AuthnMode, NexusRequest, RequestBuilder},
@@ -207,17 +207,9 @@ async fn test_device_auth_flow(cptestctx: &ControlPlaneTestContext) {
 
     let token_id = tokens_unpriv_after[0].id;
 
-    // Test that privileged user cannot delete unpriv's token through this
-    // endpoint, though it will probably be able to do it via a different one
+    // Priv user cannot delete unpriv's token through this endpoint by ID
     let token_url = format!("/v1/me/device-tokens/{}", token_id);
-    NexusRequest::new(
-        RequestBuilder::new(testctx, Method::DELETE, &token_url)
-            .expect_status(Some(StatusCode::NOT_FOUND)),
-    )
-    .authn_as(AuthnMode::PrivilegedUser)
-    .execute()
-    .await
-    .expect("privileged user should get a 404 when trying to delete another user's token");
+    object_delete_error(testctx, &token_url, StatusCode::NOT_FOUND).await;
 
     // Test deleting the token as the owner
     NexusRequest::object_delete(testctx, &token_url)
