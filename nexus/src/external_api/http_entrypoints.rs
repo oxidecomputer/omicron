@@ -7066,7 +7066,7 @@ impl NexusExternalApi for NexusExternalApiImpl {
             .await
     }
 
-    async fn current_user_token_list(
+    async fn current_user_device_token_list(
         rqctx: RequestContext<Self::Context>,
         query_params: Query<PaginatedById>,
     ) -> Result<HttpResponseOk<ResultsPage<views::DeviceAccessToken>>, HttpError>
@@ -7097,7 +7097,7 @@ impl NexusExternalApi for NexusExternalApiImpl {
             .await
     }
 
-    async fn current_user_token_delete(
+    async fn current_user_device_token_delete(
         rqctx: RequestContext<Self::Context>,
         path_params: Path<params::TokenPath>,
     ) -> Result<HttpResponseDeleted, HttpError> {
