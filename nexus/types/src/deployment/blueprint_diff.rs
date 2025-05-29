@@ -1918,7 +1918,14 @@ impl fmt::Display for BlueprintDiffDisplay<'_> {
 
                 let mut rows = Vec::new();
                 if let Some(id) = sled.remove_mupdate_override {
-                    rows.push((WILL_REMOVE_MUPDATE_OVERRIDE, id.to_string()));
+                    // For unchanged sleds, the tense of "will remove mupdate
+                    // override" can be a bit confusing because it doesn't
+                    // indicate that the value of this field has not changed.
+                    // Add an "(unchanged)" at the end.
+                    rows.push((
+                        WILL_REMOVE_MUPDATE_OVERRIDE,
+                        format!("{id} {UNCHANGED_PARENS}"),
+                    ));
                 }
                 let list = KvList::new_unchanged(None, rows);
                 writeln!(f, "{list}")?;

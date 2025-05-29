@@ -1155,7 +1155,10 @@ fn cmd_blueprint_edit(
             generation,
         } => {
             builder
-                .set_target_release_minimum_generation(generation)
+                .set_target_release_minimum_generation(
+                    blueprint.target_release_minimum_generation,
+                    generation,
+                )
                 .context("failed to set target release minimum generation")?;
             format!("set target release minimum generation to {generation}")
         }

@@ -253,7 +253,7 @@ to:   blueprint afb09faf-a586-4483-9289-04d4f1d8ba23
   sled 2b8f0cb3-0295-4b3c-bc58-4fe88b57112c (active, config generation 1):
 
   sled aff6c093-197d-42c5-ad80-9f10ba051a34 (active, config generation 2):
-    will remove mupdate override:   00000000-0000-0000-0000-000000000000
+    will remove mupdate override:   00000000-0000-0000-0000-000000000000 (unchanged)
 
  REMOVED SLEDS:
 
@@ -510,23 +510,23 @@ to:   blueprint ce365dff-2cdb-4f35-a186-b15e20e1e700
  UNCHANGED SLEDS:
 
   sled 00320471-945d-413c-85e7-03e091a70b3c (active, config generation 2):
-    will remove mupdate override:   ffffffff-ffff-ffff-ffff-ffffffffffff
+    will remove mupdate override:   ffffffff-ffff-ffff-ffff-ffffffffffff (unchanged)
 
   sled 2b8f0cb3-0295-4b3c-bc58-4fe88b57112c (active, config generation 1):
 
   sled 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6 (active, config generation 2):
-    will remove mupdate override:   ffffffff-ffff-ffff-ffff-ffffffffffff
+    will remove mupdate override:   ffffffff-ffff-ffff-ffff-ffffffffffff (unchanged)
 
   sled 9a867dc9-d505-427f-9eff-cdb1d4d9bd73 (active, config generation 3):
 
   sled aff6c093-197d-42c5-ad80-9f10ba051a34 (active, config generation 2):
-    will remove mupdate override:   00000000-0000-0000-0000-000000000000
+    will remove mupdate override:   00000000-0000-0000-0000-000000000000 (unchanged)
 
   sled b82ede02-399c-48c6-a1de-411df4fa49a7 (active, config generation 3):
-    will remove mupdate override:   ffffffff-ffff-ffff-ffff-ffffffffffff
+    will remove mupdate override:   ffffffff-ffff-ffff-ffff-ffffffffffff (unchanged)
 
   sled d81c6a84-79b8-4958-ae41-ea46c9b19763 (active, config generation 3):
-    will remove mupdate override:   00000000-0000-0000-0000-000000000000
+    will remove mupdate override:   00000000-0000-0000-0000-000000000000 (unchanged)
 
  COCKROACHDB SETTINGS:
     state fingerprint:::::::::::::::::   (none) (unchanged)
