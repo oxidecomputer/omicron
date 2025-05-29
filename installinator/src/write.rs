@@ -14,7 +14,7 @@ use async_trait::async_trait;
 use buf_list::BufList;
 use bytes::{Buf, Bytes};
 use camino::{Utf8Path, Utf8PathBuf};
-use id_map::IdMap;
+use iddqd::IdOrdMap;
 use illumos_utils::zpool::{Zpool, ZpoolName};
 use installinator_common::{
     ControlPlaneZonesSpec, ControlPlaneZonesStepId, RawDiskWriter, StepContext,
@@ -791,7 +791,7 @@ impl ControlPlaneZoneWriteContext<'_> {
 /// Panics if the runtime shuts down causing a task abort, or a task panics.
 async fn compute_zone_hashes(
     images: &ControlPlaneZoneImages,
-) -> IdMap<MupdateOverrideZone> {
+) -> IdOrdMap<MupdateOverrideZone> {
     let mut tasks = JoinSet::new();
     for (file_name, data) in &images.zones {
         let file_name = file_name.clone();
@@ -810,11 +810,13 @@ async fn compute_zone_hashes(
         });
     }
 
-    let mut output = IdMap::new();
+    let mut output = IdOrdMap::new();
     while let Some(res) = tasks.join_next().await {
         // Propagate panics across tasks—this is the standard pattern we follow
         // in installinator.
-        output.insert(res.expect("task panicked"));
+        output
+            .insert_unique(res.expect("task panicked"))
+            .expect("filenames are unique");
     }
     output
 }

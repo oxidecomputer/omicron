@@ -442,6 +442,7 @@ impl DataStore {
             parent_blueprint_id,
             internal_dns_version,
             external_dns_version,
+            target_release_minimum_generation,
             cockroachdb_fingerprint,
             cockroachdb_setting_preserve_downgrade,
             time_created,
@@ -467,6 +468,7 @@ impl DataStore {
                 blueprint.parent_blueprint_id.map(From::from),
                 *blueprint.internal_dns_version,
                 *blueprint.external_dns_version,
+                *blueprint.target_release_minimum_generation,
                 blueprint.cockroachdb_fingerprint,
                 blueprint.cockroachdb_setting_preserve_downgrade,
                 blueprint.time_created,
@@ -949,6 +951,7 @@ impl DataStore {
             parent_blueprint_id,
             internal_dns_version,
             external_dns_version,
+            target_release_minimum_generation,
             cockroachdb_fingerprint,
             cockroachdb_setting_preserve_downgrade,
             clickhouse_cluster_config,
@@ -2135,7 +2138,7 @@ mod tests {
         assert_eq!(blueprint1.sleds.len(), collection.sled_agents.len());
         assert_eq!(
             blueprint1.all_omicron_zones(BlueprintZoneDisposition::any).count(),
-            collection.all_omicron_zones().count()
+            collection.all_ledgered_omicron_zones().count()
         );
         // All zones should be in service.
         assert_all_zones_in_service(&blueprint1);
