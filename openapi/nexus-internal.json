@@ -892,6 +892,14 @@
         "operationId": "support_bundle_download",
         "parameters": [
           {
+            "in": "header",
+            "name": "range",
+            "description": "A request to access a portion of the resource, such as `bytes=0-499`\n\nSee: <https://developer.mozilla.org/en-US/docs/Web/HTTP/Reference/Headers/Range>",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
             "in": "path",
             "name": "bundle_id",
             "description": "ID of the support bundle",
@@ -917,6 +925,14 @@
         "summary": "Download the metadata of a support bundle",
         "operationId": "support_bundle_head",
         "parameters": [
+          {
+            "in": "header",
+            "name": "range",
+            "description": "A request to access a portion of the resource, such as `bytes=0-499`\n\nSee: <https://developer.mozilla.org/en-US/docs/Web/HTTP/Reference/Headers/Range>",
+            "schema": {
+              "type": "string"
+            }
+          },
           {
             "in": "path",
             "name": "bundle_id",
@@ -945,6 +961,14 @@
         "summary": "Download a file within a support bundle",
         "operationId": "support_bundle_download_file",
         "parameters": [
+          {
+            "in": "header",
+            "name": "range",
+            "description": "A request to access a portion of the resource, such as `bytes=0-499`\n\nSee: <https://developer.mozilla.org/en-US/docs/Web/HTTP/Reference/Headers/Range>",
+            "schema": {
+              "type": "string"
+            }
+          },
           {
             "in": "path",
             "name": "bundle_id",
@@ -980,6 +1004,14 @@
         "summary": "Download the metadata of a file within the support bundle",
         "operationId": "support_bundle_head_file",
         "parameters": [
+          {
+            "in": "header",
+            "name": "range",
+            "description": "A request to access a portion of the resource, such as `bytes=0-499`\n\nSee: <https://developer.mozilla.org/en-US/docs/Web/HTTP/Reference/Headers/Range>",
+            "schema": {
+              "type": "string"
+            }
+          },
           {
             "in": "path",
             "name": "bundle_id",
@@ -1017,6 +1049,14 @@
         "summary": "Download the index of a support bundle",
         "operationId": "support_bundle_index",
         "parameters": [
+          {
+            "in": "header",
+            "name": "range",
+            "description": "A request to access a portion of the resource, such as `bytes=0-499`\n\nSee: <https://developer.mozilla.org/en-US/docs/Web/HTTP/Reference/Headers/Range>",
+            "schema": {
+              "type": "string"
+            }
+          },
           {
             "in": "path",
             "name": "bundle_id",
@@ -2366,7 +2406,7 @@
             }
           },
           "target_release_minimum_generation": {
-            "description": "The minimum release generation to accept for target release configuration. Target release configuration with a generation less than this number will be ignored.\n\nFor example, let's say that the current target release generation is 5. Then, when reconfigurator detects a MUPdate:\n\n* the target release is ignored in favor of the install dataset * this field is set to Some(6)\n\nOnce the target release generation is updated to 6 or higher, Reconfigurator knows that it is back in charge of driving the system to the target release.",
+            "description": "The minimum release generation to accept for target release configuration. Target release configuration with a generation less than this number will be ignored.\n\nFor example, let's say that the current target release generation is 5. Then, when reconfigurator detects a MUPdate:\n\n* the target release is ignored in favor of the install dataset * this field is set to 6\n\nOnce the target release generation is updated to 6 or higher, Reconfigurator knows that it is back in charge of driving the system to the target release.",
             "allOf": [
               {
                 "$ref": "#/components/schemas/Generation"

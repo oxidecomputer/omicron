@@ -61,7 +61,6 @@ mod clickhouse;
 pub mod execution;
 mod network_resources;
 mod planning_input;
-mod tri_map;
 mod zone_type;
 
 use crate::inventory::BaseboardId;
@@ -183,7 +182,7 @@ pub struct Blueprint {
     /// Then, when reconfigurator detects a MUPdate:
     ///
     /// * the target release is ignored in favor of the install dataset
-    /// * this field is set to Some(6)
+    /// * this field is set to 6
     ///
     /// Once the target release generation is updated to 6 or higher,
     /// Reconfigurator knows that it is back in charge of driving the system to
@@ -555,7 +554,7 @@ impl fmt::Display for BlueprintDisplay<'_> {
             // Handled by `make_oximeter_table`, called below.
             oximeter_read_version: _,
             oximeter_read_mode: _,
-            // These siz fields are handled by `make_metadata_table()`, called
+            // These six fields are handled by `make_metadata_table()`, called
             // below.
             target_release_minimum_generation: _,
             internal_dns_version: _,

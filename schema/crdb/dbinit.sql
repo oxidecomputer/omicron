@@ -4083,7 +4083,7 @@ CREATE TABLE IF NOT EXISTS omicron.public.blueprint (
     -- Then, when reconfigurator detects a MUPdate:
     --
     -- * the target release is ignored in favor of the install dataset
-    -- * this field is set to Some(6)
+    -- * this field is set to 6
     --
     -- Once the target release generation is updated to 6 or higher,
     -- Reconfigurator knows that it is back in charge of driving the system to

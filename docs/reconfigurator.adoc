@@ -4,6 +4,10 @@
 
 = Reconfigurator
 
+This document gives a first-principles overview of Reconfigurator.
+
+**For practical tips for working on Reconfigurator, see the xref:reconfigurator-dev-guide.adoc[Reconfigurator Developer Guide].**
+
 == Introduction
 
 **Reconfigurator** is a system within Nexus for carrying out all kinds of system changes in a controlled way.  Examples of what Reconfigurator can do today or that we plan to extend it to do in the future:

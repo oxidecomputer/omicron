@@ -1090,7 +1090,7 @@ pub struct AlertSubscriptionCreated {
 
 /// The possible alert delivery mechanisms for an alert receiver.
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema, PartialEq)]
-#[serde(rename_all = "snake_case")]
+#[serde(rename_all = "snake_case", tag = "kind")]
 pub enum AlertReceiverKind {
     Webhook(WebhookReceiverConfig),
 }
