@@ -49,6 +49,7 @@ either = { version = "1.14.0" }
 elliptic-curve = { version = "0.13.8", features = ["ecdh", "hazmat", "pem", "std"] }
 ff = { version = "0.13.0", default-features = false, features = ["alloc"] }
 flate2 = { version = "1.1.1" }
+foldhash = { version = "0.1.5" }
 fs-err = { version = "3.1.0", default-features = false, features = ["tokio"] }
 futures = { version = "0.3.31" }
 futures-channel = { version = "0.3.31", features = ["sink"] }
@@ -173,6 +174,7 @@ either = { version = "1.14.0" }
 elliptic-curve = { version = "0.13.8", features = ["ecdh", "hazmat", "pem", "std"] }
 ff = { version = "0.13.0", default-features = false, features = ["alloc"] }
 flate2 = { version = "1.1.1" }
+foldhash = { version = "0.1.5" }
 fs-err = { version = "3.1.0", default-features = false, features = ["tokio"] }
 futures = { version = "0.3.31" }
 futures-channel = { version = "0.3.31", features = ["sink"] }

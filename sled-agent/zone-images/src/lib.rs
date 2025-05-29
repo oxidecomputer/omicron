@@ -10,5 +10,5 @@
 mod mupdate_override;
 mod source_resolver;
 
-pub(crate) use mupdate_override::*;
+pub use mupdate_override::*;
 pub use source_resolver::*;
