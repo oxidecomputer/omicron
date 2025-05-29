@@ -439,7 +439,7 @@ impl CockroachStarter {
                 // the user can debug if they want.  We'll skip cleanup of the
                 // temporary directory for the same reason and also so that
                 // CockroachDB doesn't trip over its files being gone.
-                let _preserve_directory = self.temp_dir.into_path();
+                let _preserve_directory = self.temp_dir.keep();
 
                 Err(match poll_error {
                     poll::Error::PermanentError(e) => e,
@@ -683,7 +683,7 @@ impl Drop for CockroachInstance {
             #[allow(unused_must_use)]
             if let Some(temp_dir) = self.temp_dir.take() {
                 // Do NOT clean up the temporary directory in this case.
-                let path = temp_dir.into_path();
+                let path = temp_dir.keep();
                 eprintln!(
                     "WARN: temporary directory leaked: {path:?}\n\
                      \tIf you would like to access the database for debugging, run the following:\n\n\

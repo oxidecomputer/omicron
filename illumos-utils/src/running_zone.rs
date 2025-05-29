@@ -1016,7 +1016,7 @@ impl ZoneBuilderFactory {
     ) -> Self {
         let temp_dir = match temp_dir {
             Some(dir) => Utf8PathBuf::from(dir),
-            None => Utf8TempDir::new().unwrap().into_path(),
+            None => Utf8TempDir::new().unwrap().keep(),
         };
         Self {
             fake_cfg: Some(FakeZoneBuilderConfig {

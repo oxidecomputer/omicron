@@ -704,7 +704,7 @@ fn ensure_mountpoint_empty(path: &Utf8Path) -> Result<(), MountpointError> {
     let prefix = format!("{MOUNTPOINT_TRANSFER_PREFIX}{file}-");
     let destination_dir = Utf8TempDir::with_prefix_in(prefix, parent)
         .map_err(|err| MountpointError::CreateTransferDirectory(err))?
-        .into_path();
+        .keep();
 
     let entries =
         path.read_dir_utf8().map_err(|err| MountpointError::Readdir(err))?;
