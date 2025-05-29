@@ -2406,7 +2406,7 @@
             }
           },
           "target_release_minimum_generation": {
-            "description": "The minimum release generation to accept for target release configuration. Target release configuration with a generation less than this number will be ignored.\n\nFor example, let's say that the current target release generation is 5. Then, when reconfigurator detects a MUPdate:\n\n* the target release is ignored in favor of the install dataset * this field is set to Some(6)\n\nOnce the target release generation is updated to 6 or higher, Reconfigurator knows that it is back in charge of driving the system to the target release.",
+            "description": "The minimum release generation to accept for target release configuration. Target release configuration with a generation less than this number will be ignored.\n\nFor example, let's say that the current target release generation is 5. Then, when reconfigurator detects a MUPdate:\n\n* the target release is ignored in favor of the install dataset * this field is set to 6\n\nOnce the target release generation is updated to 6 or higher, Reconfigurator knows that it is back in charge of driving the system to the target release.",
             "allOf": [
               {
                 "$ref": "#/components/schemas/Generation"
