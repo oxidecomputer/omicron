@@ -11738,7 +11738,6 @@ dependencies = [
  "camino",
  "camino-tempfile-ext",
  "dropshot",
- "id-map",
  "iddqd",
  "illumos-utils",
  "nexus-sled-agent-shared",
