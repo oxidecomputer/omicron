@@ -19,6 +19,7 @@ use nexus_db_schema::schema::device_access_token;
 use omicron_common::api::external::CreateResult;
 use omicron_common::api::external::DataPageParams;
 use omicron_common::api::external::Error;
+use omicron_common::api::external::InternalContext;
 use omicron_common::api::external::ListResultVec;
 use omicron_common::api::external::LookupResult;
 use omicron_common::api::external::LookupType;
@@ -181,19 +182,25 @@ impl DataStore {
             })
     }
 
-    pub async fn device_access_tokens_list(
+    // Similar to session hard delete and silo group list, we do not do a
+    // typical authz check, instead effectively encoding the policy here that
+    // any user is allowed to list and delete their own tokens. When we add the
+    // ability for silo admins to list and delete tokens from any user, we will
+    // have to model these permissions properly in the polar policy.
+
+    pub async fn current_user_token_list(
         &self,
         opctx: &OpContext,
-        authz_user: &authz::SiloUser,
         pagparams: &DataPageParams<'_, Uuid>,
     ) -> ListResultVec<DeviceAccessToken> {
-        // TODO: this authz check can't be right can it? or at least, we
-        // should probably handle this explicitly at the policy level
-        opctx.authorize(authz::Action::ListChildren, authz_user).await?;
+        let &actor = opctx
+            .authn
+            .actor_required()
+            .internal_context("listing current user's tokens")?;
 
         use nexus_db_schema::schema::device_access_token::dsl;
         paginated(dsl::device_access_token, dsl::id, &pagparams)
-            .filter(dsl::silo_user_id.eq(authz_user.id()))
+            .filter(dsl::silo_user_id.eq(actor.actor_id()))
             // we don't have time_deleted on tokens. unfortunately this is not
             // indexed well. maybe it can be!
             .filter(
@@ -207,19 +214,20 @@ impl DataStore {
             .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))
     }
 
-    pub async fn device_access_token_delete(
+    pub async fn current_user_token_delete(
         &self,
         opctx: &OpContext,
-        authz_user: &authz::SiloUser,
         token_id: Uuid,
     ) -> Result<(), Error> {
-        // TODO: surely this is the wrong permission
-        opctx.authorize(authz::Action::Modify, authz_user).await?;
+        let &actor = opctx
+            .authn
+            .actor_required()
+            .internal_context("deleting current user's token")?;
 
         use nexus_db_schema::schema::device_access_token::dsl;
         let num_deleted = diesel::delete(dsl::device_access_token)
+            .filter(dsl::silo_user_id.eq(actor.actor_id()))
             .filter(dsl::id.eq(token_id))
-            .filter(dsl::silo_user_id.eq(authz_user.id()))
             .execute_async(&*self.pool_connection_authorized(opctx).await?)
             .await
             .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))?;
