@@ -102,7 +102,9 @@ use sled_agent_types::{
     sled::SWITCH_ZONE_BASEBOARD_FILE, time_sync::TimeSync,
     zone_bundle::ZoneBundleCause,
 };
-use sled_agent_zone_images::{ZoneImageSourceResolver, ZoneImageZpools};
+use sled_agent_zone_images::{
+    MupdateOverrideReadError, ZoneImageSourceResolver, ZoneImageZpools,
+};
 use sled_hardware::SledMode;
 use sled_hardware::is_gimlet;
 use sled_hardware::underlay;
@@ -311,6 +313,9 @@ pub enum Error {
 
     #[error("Unexpected zone config: zone {zone_id} is running on ramdisk ?!")]
     ZoneIsRunningOnRamdisk { zone_id: OmicronZoneUuid },
+
+    #[error("failed to read mupdate override info, not starting zones")]
+    MupdateOverrideRead(#[source] MupdateOverrideReadError),
 
     #[error(
         "Couldn't find requested zone image ({hash}) for \
@@ -1724,6 +1729,13 @@ impl ServiceManager {
             .map(|d| zone::Device { name: d.to_string() })
             .collect();
 
+        let zone_type_str = match &request {
+            ZoneArgs::Omicron(zone_config) => {
+                zone_config.zone.zone_type.kind().zone_prefix()
+            }
+            ZoneArgs::Switch(_) => "switch",
+        };
+
         // TODO: `InstallDataset` should be renamed to something more accurate
         // when all the major changes here have landed. Some zones are
         // distributed from the host OS image and are never placed in the
@@ -1741,18 +1753,16 @@ impl ServiceManager {
         };
         let boot_zpool =
             all_disks.boot_disk().map(|(_, boot_zpool)| boot_zpool);
-        let file_source = self.inner.zone_image_resolver.file_source_for(
-            image_source,
-            &zpools,
-            boot_zpool.as_ref(),
-        );
-
-        let zone_type_str = match &request {
-            ZoneArgs::Omicron(zone_config) => {
-                zone_config.zone.zone_type.kind().zone_prefix()
-            }
-            ZoneArgs::Switch(_) => "switch",
-        };
+        let file_source = self
+            .inner
+            .zone_image_resolver
+            .file_source_for(
+                zone_type_str,
+                image_source,
+                &zpools,
+                boot_zpool.as_ref(),
+            )
+            .map_err(|error| Error::MupdateOverrideRead(error))?;
 
         // We use the fake initialiser for testing
         let mut zone_builder = match self.inner.system_api.fake_install_dir() {
@@ -1769,15 +1779,12 @@ impl ServiceManager {
         if let Some(vnic) = bootstrap_vnic {
             zone_builder = zone_builder.with_bootstrap_vnic(vnic);
         }
-        if let Some(file_name) = &file_source.file_name {
-            zone_builder = zone_builder.with_zone_image_file_name(file_name);
-        }
         let installed_zone = zone_builder
             .with_log(self.inner.log.clone())
             .with_underlay_vnic_allocator(&self.inner.underlay_vnic_allocator)
             .with_zone_root_path(zone_root_path)
-            .with_zone_image_paths(file_source.search_paths.as_slice())
             .with_zone_type(zone_type_str)
+            .with_file_source(&file_source)
             .with_datasets(datasets.as_slice())
             .with_filesystems(&filesystems)
             .with_data_links(&data_links)

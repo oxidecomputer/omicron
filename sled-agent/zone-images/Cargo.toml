@@ -8,18 +8,20 @@ license = "MPL-2.0"
 workspace = true
 
 [dependencies]
-anyhow.workspace = true
 camino.workspace = true
-id-map.workspace = true
+iddqd.workspace = true
 illumos-utils.workspace = true
 nexus-sled-agent-shared.workspace = true
 omicron-common.workspace = true
 omicron-workspace-hack.workspace = true
+rayon.workspace = true
 serde_json.workspace = true
+sha2.workspace = true
 sled-storage.workspace = true
 slog.workspace = true
 slog-error-chain.workspace = true
 thiserror.workspace = true
+tufaceous-artifact.workspace = true
 
 [dev-dependencies]
 camino-tempfile-ext.workspace = true
