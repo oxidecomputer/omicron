@@ -7,7 +7,7 @@
 use camino_tempfile::tempfile_in;
 use dropshot::HttpError;
 use range_requests::make_get_response;
-use sled_storage::manager::StorageHandle;
+use sled_agent_config_reconciler::InternalDisksReceiver;
 use slog::Logger;
 use slog_error_chain::InlineErrorChain;
 use tokio::io::AsyncSeekExt;
@@ -43,12 +43,15 @@ impl From<Error> for HttpError {
 
 pub struct SupportBundleLogs<'a> {
     log: &'a Logger,
-    sled_storage: &'a StorageHandle,
+    internal_disks_rx: &'a InternalDisksReceiver,
 }
 
 impl<'a> SupportBundleLogs<'a> {
-    pub fn new(log: &'a Logger, sled_storage: &'a StorageHandle) -> Self {
-        Self { log, sled_storage }
+    pub fn new(
+        log: &'a Logger,
+        internal_disks_rx: &'a InternalDisksReceiver,
+    ) -> Self {
+        Self { log, internal_disks_rx }
     }
 
     /// Get a list of zones on a sled containing logs that we want to include in
@@ -77,12 +80,9 @@ impl<'a> SupportBundleLogs<'a> {
     {
         // We are using an M.2 device for temporary storage to assemble a zip
         // file made up of all of the discovered zone's logs.
-        let m2_debug_datasets = self
-            .sled_storage
-            .get_latest_disks()
-            .await
-            .all_sled_diagnostics_directories();
-        let tempdir = m2_debug_datasets.first().ok_or(Error::MissingStorage)?;
+        let current_internal_disks = self.internal_disks_rx.current();
+        let mut m2_debug_datasets = current_internal_disks.all_debug_datasets();
+        let tempdir = m2_debug_datasets.next().ok_or(Error::MissingStorage)?;
         let mut tempfile = tempfile_in(tempdir)?;
 
         let log = self.log.clone();

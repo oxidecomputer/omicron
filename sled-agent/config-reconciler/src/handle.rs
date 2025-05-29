@@ -12,7 +12,6 @@ use nexus_sled_agent_shared::inventory::InventoryDisk;
 use nexus_sled_agent_shared::inventory::InventoryZpool;
 use nexus_sled_agent_shared::inventory::OmicronSledConfig;
 use omicron_common::disk::DatasetName;
-use omicron_common::disk::DiskIdentity;
 use sled_agent_api::ArtifactConfig;
 use sled_storage::config::MountConfig;
 use sled_storage::disk::Disk;
@@ -37,6 +36,7 @@ use sled_storage::dataset::U2_DEBUG_DATASET;
 use sled_storage::dataset::ZONE_DATASET;
 
 use crate::DatasetTaskError;
+use crate::InternalDisksWithBootDisk;
 use crate::LedgerArtifactConfigError;
 use crate::LedgerNewConfigError;
 use crate::LedgerTaskError;
@@ -277,7 +277,7 @@ impl ConfigReconcilerHandle {
     }
 
     /// Wait for the internal disks task to start managing the boot disk.
-    pub async fn wait_for_boot_disk(&mut self) -> Arc<DiskIdentity> {
+    pub async fn wait_for_boot_disk(&mut self) -> InternalDisksWithBootDisk {
         self.internal_disks_rx.wait_for_boot_disk().await
     }
 
@@ -343,16 +343,16 @@ impl ConfigReconcilerHandle {
             .await
     }
 
-    /// Collect inventory fields relevant to config reconciliation.
-    pub async fn inventory(
+    /// Return the currently-ledgered [`OmicronSledConfig`].
+    ///
+    /// # Errors
+    ///
+    /// Fails if `spawn_reconciliation_task()` has not yet been called or if we
+    /// have not yet checked the internal disks for a ledgered config.
+    pub fn ledgered_sled_config(
         &self,
-        log: &Logger,
-    ) -> Result<ReconcilerInventory, InventoryError> {
-        let ledgered_sled_config = match self
-            .ledger_task
-            .get()
-            .map(LedgerTaskHandle::current_config)
-        {
+    ) -> Result<Option<OmicronSledConfig>, InventoryError> {
+        match self.ledger_task.get().map(LedgerTaskHandle::current_config) {
             // If we haven't yet spawned the ledger task, or we have but
             // it's still waiting on disks, we don't know whether we have a
             // ledgered sled config. It's not reasonable to report `None` in
@@ -363,12 +363,19 @@ impl ConfigReconcilerHandle {
             // for the boot disk and spawn the reconciler task before starting
             // the dropshot server that allows Nexus to collect inventory.
             None | Some(CurrentSledConfig::WaitingForInternalDisks) => {
-                return Err(InventoryError::LedgerContentsNotAvailable);
+                Err(InventoryError::LedgerContentsNotAvailable)
             }
-            Some(CurrentSledConfig::WaitingForInitialConfig) => None,
-            Some(CurrentSledConfig::Ledgered(config)) => Some(config),
-        };
+            Some(CurrentSledConfig::WaitingForInitialConfig) => Ok(None),
+            Some(CurrentSledConfig::Ledgered(config)) => Ok(Some(config)),
+        }
+    }
 
+    /// Collect inventory fields relevant to config reconciliation.
+    pub async fn inventory(
+        &self,
+        log: &Logger,
+    ) -> Result<ReconcilerInventory, InventoryError> {
+        let ledgered_sled_config = self.ledgered_sled_config()?;
         let zpools = self.currently_managed_zpools_rx.to_inventory(log).await;
 
         let datasets = self
@@ -468,7 +475,7 @@ impl AvailableDatasetsReceiver {
             AvailableDatasetsReceiverInner::FakeStatic(pools) => pools
                 .iter()
                 .map(|(pool, path)| PathInPool {
-                    pool: ZpoolOrRamdisk::Zpool(pool.clone()),
+                    pool: ZpoolOrRamdisk::Zpool(*pool),
                     path: path.join(U2_DEBUG_DATASET),
                 })
                 .collect(),
@@ -491,7 +498,7 @@ impl AvailableDatasetsReceiver {
             AvailableDatasetsReceiverInner::FakeStatic(pools) => pools
                 .iter()
                 .map(|(pool, path)| PathInPool {
-                    pool: ZpoolOrRamdisk::Zpool(pool.clone()),
+                    pool: ZpoolOrRamdisk::Zpool(*pool),
                     path: path.join(ZONE_DATASET),
                 })
                 .collect(),
