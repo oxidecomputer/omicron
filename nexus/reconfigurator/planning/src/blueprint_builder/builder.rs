@@ -124,6 +124,14 @@ pub enum Error {
     AllocateExternalNetworking(#[from] ExternalNetworkingError),
     #[error("can only have {INTERNAL_DNS_REDUNDANCY} internal DNS servers")]
     PolicySpecifiesTooManyInternalDnsServers,
+    #[error(
+        "mismatch while setting target_release_minimum_generation, \
+         expected current value is {expected} but actual value is {actual}"
+    )]
+    TargetReleaseMinimumGenerationMismatch {
+        expected: Generation,
+        actual: Generation,
+    },
 }
 
 /// Describes the result of an idempotent "ensure" operation
@@ -1887,12 +1895,19 @@ impl<'a> BlueprintBuilder<'a> {
             .len()
     }
 
-    /// Set the `target_release_minimum_generation` field for this blueprint.
+    /// Given the current value of `target_release_minimum_generation`, set the
+    /// new value for this blueprint.
     pub fn set_target_release_minimum_generation(
         &mut self,
+        current: Generation,
         target_release_minimum_generation: Generation,
     ) -> Result<(), Error> {
-        // May need to do some validation here in the future.
+        if self.target_release_minimum_generation != current {
+            return Err(Error::TargetReleaseMinimumGenerationMismatch {
+                expected: current,
+                actual: self.target_release_minimum_generation,
+            });
+        }
         self.target_release_minimum_generation =
             target_release_minimum_generation;
         Ok(())
