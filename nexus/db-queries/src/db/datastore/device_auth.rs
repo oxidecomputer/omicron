@@ -201,9 +201,6 @@ impl DataStore {
                     .is_null()
                     .or(dsl::time_expires.gt(Utc::now())),
             )
-            // TODO: what if we used a different model struct here so we're not
-            // pulling less out of the DB and it's harder to accidentally return
-            // the token itself
             .select(DeviceAccessToken::as_select())
             .load_async(&*self.pool_connection_authorized(opctx).await?)
             .await
