@@ -72,7 +72,7 @@ async fn test_blueprint_edit(cptestctx: &ControlPlaneTestContext) {
     let tmpdir = camino_tempfile::tempdir().expect("failed to create tmpdir");
     // Save the path and prevent the temporary directory from being cleaned up
     // automatically.  We want to be preserve the contents if this test fails.
-    let tmpdir_path = tmpdir.into_path();
+    let tmpdir_path = tmpdir.keep();
     let saved_state1_path = tmpdir_path.join("reconfigurator-state1.json");
     let saved_state2_path = tmpdir_path.join("reconfigurator-state2.json");
     let script1_path = tmpdir_path.join("cmds1");

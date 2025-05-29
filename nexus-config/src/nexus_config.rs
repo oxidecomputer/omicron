@@ -436,7 +436,7 @@ pub struct BackgroundTaskConfig {
     pub read_only_region_replacement_start:
         ReadOnlyRegionReplacementStartConfig,
     /// configuration for webhook dispatcher task
-    pub webhook_dispatcher: WebhookDispatcherConfig,
+    pub alert_dispatcher: AlertDispatcherConfig,
     /// configuration for webhook deliverator task
     pub webhook_deliverator: WebhookDeliveratorConfig,
 }
@@ -765,7 +765,7 @@ pub struct ReadOnlyRegionReplacementStartConfig {
 
 #[serde_as]
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
-pub struct WebhookDispatcherConfig {
+pub struct AlertDispatcherConfig {
     /// period (in seconds) for periodic activations of this background task
     #[serde_as(as = "DurationSeconds<u64>")]
     pub period_secs: Duration,
@@ -1079,7 +1079,7 @@ mod test {
             tuf_artifact_replication.period_secs = 300
             tuf_artifact_replication.min_sled_replication = 3
             read_only_region_replacement_start.period_secs = 30
-            webhook_dispatcher.period_secs = 42
+            alert_dispatcher.period_secs = 42
             webhook_deliverator.period_secs = 43
             webhook_deliverator.lease_timeout_secs = 44
             webhook_deliverator.first_retry_backoff_secs = 45
@@ -1292,7 +1292,7 @@ mod test {
                             ReadOnlyRegionReplacementStartConfig {
                                 period_secs: Duration::from_secs(30),
                             },
-                        webhook_dispatcher: WebhookDispatcherConfig {
+                        alert_dispatcher: AlertDispatcherConfig {
                             period_secs: Duration::from_secs(42),
                         },
                         webhook_deliverator: WebhookDeliveratorConfig {
@@ -1387,7 +1387,7 @@ mod test {
             tuf_artifact_replication.period_secs = 300
             tuf_artifact_replication.min_sled_replication = 3
             read_only_region_replacement_start.period_secs = 30
-            webhook_dispatcher.period_secs = 42
+            alert_dispatcher.period_secs = 42
             webhook_deliverator.period_secs = 43
             [default_region_allocation_strategy]
             type = "random"

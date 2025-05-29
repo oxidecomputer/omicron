@@ -1619,7 +1619,7 @@ impl StorageInner {
     }
 
     pub fn omicron_physical_disks_list(
-        &mut self,
+        &self,
     ) -> Result<OmicronPhysicalDisksConfig, HttpError> {
         let Some(config) = self.config.as_ref() else {
             return Err(HttpError::for_not_found(

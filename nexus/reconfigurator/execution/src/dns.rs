@@ -655,11 +655,13 @@ mod test {
         let mut blueprint_sleds = BTreeMap::new();
 
         for (sled_id, sa) in collection.sled_agents {
+            let ledgered_sled_config =
+                sa.ledgered_sled_config.unwrap_or_default();
+
             // Convert the inventory `OmicronZonesConfig`s into
             // `BlueprintZoneConfig`s. This is going to get more painful over
             // time as we add to blueprints, but for now we can make this work.
-            let zones = sa
-                .omicron_zones
+            let zones = ledgered_sled_config
                 .zones
                 .into_iter()
                 .map(|config| -> BlueprintZoneConfig {
@@ -678,7 +680,7 @@ mod test {
                 sled_id,
                 BlueprintSledConfig {
                     state: SledState::Active,
-                    sled_agent_generation: sa.omicron_zones.generation,
+                    sled_agent_generation: ledgered_sled_config.generation,
                     disks: IdMap::new(),
                     datasets: IdMap::new(),
                     zones,
@@ -698,6 +700,7 @@ mod test {
             parent_blueprint_id: None,
             internal_dns_version: initial_dns_generation,
             external_dns_version: Generation::new(),
+            target_release_minimum_generation: Generation::new(),
             cockroachdb_fingerprint: String::new(),
             clickhouse_cluster_config: None,
             oximeter_read_version: Generation::new(),

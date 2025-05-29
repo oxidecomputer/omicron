@@ -6,7 +6,7 @@
 
 use std::collections::BTreeSet;
 
-use id_map::{IdMap, IdMappable};
+use iddqd::{IdOrdItem, IdOrdMap, id_upcast};
 use omicron_uuid_kinds::MupdateOverrideUuid;
 use serde::{Deserialize, Serialize};
 use tufaceous_artifact::{ArtifactHash, ArtifactHashId};
@@ -28,7 +28,7 @@ pub struct MupdateOverrideInfo {
     pub hash_ids: BTreeSet<ArtifactHashId>,
 
     /// Control plane zone file names and hashes.
-    pub zones: IdMap<MupdateOverrideZone>,
+    pub zones: IdOrdMap<MupdateOverrideZone>,
 }
 
 impl MupdateOverrideInfo {
@@ -53,10 +53,13 @@ pub struct MupdateOverrideZone {
     pub hash: ArtifactHash,
 }
 
-impl IdMappable for MupdateOverrideZone {
-    type Id = String;
+impl IdOrdItem for MupdateOverrideZone {
+    type Key<'a> = &'a str;
 
-    fn id(&self) -> Self::Id {
-        self.file_name.clone()
+    #[inline]
+    fn key(&self) -> Self::Key<'_> {
+        &self.file_name
     }
+
+    id_upcast!();
 }

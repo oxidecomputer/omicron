@@ -1172,23 +1172,30 @@ pub struct InstanceCreate {
     #[serde(default)]
     pub external_ips: Vec<ExternalIpCreate>,
 
-    /// The disks to be created or attached for this instance.
+    /// A list of disks to be attached to the instance.
+    ///
+    /// Disk attachments of type "create" will be created, while those of type
+    /// "attach" must already exist.
+    ///
+    /// The order of this list does not guarantee a boot order for the
+    /// instance. Use the boot_disk attribute to specify a boot disk.
     #[serde(default)]
     pub disks: Vec<InstanceDiskAttachment>,
 
-    /// The disk this instance should boot into. This disk can either be
-    /// attached if it already exists, or created, if it should be a new disk.
+    /// The disk the instance is configured to boot from.
     ///
-    /// It is strongly recommended to either provide a boot disk at instance
-    /// creation, or update the instance after creation to set a boot disk.
+    /// This disk can either be attached if it already exists or created along
+    /// with the instance.
     ///
-    /// An instance without an explicit boot disk can be booted: the options are
-    /// as managed by UEFI, and as controlled by the guest OS, but with some
-    /// risk.  If this instance later has a disk attached or detached, it is
-    /// possible that boot options can end up reordered, with the intended boot
-    /// disk moved after the EFI shell in boot priority. This may result in an
-    /// instance that only boots to the EFI shell until the desired disk is set
-    /// as an explicit boot disk and the instance rebooted.
+    /// Specifying a boot disk is optional but recommended to ensure predictable
+    /// boot behavior. The boot disk can be set during instance creation or
+    /// later if the instance is stopped.
+    ///
+    /// An instance that does not have a boot disk set will use the boot
+    /// options specified in its UEFI settings, which are controlled by both the
+    /// instance's UEFI firmware and the guest operating system. Boot options
+    /// can change as disks are attached and detached, which may result in an
+    /// instance that only boots to the EFI shell until a boot disk is set.
     #[serde(default)]
     pub boot_disk: Option<InstanceDiskAttachment>,
 
@@ -2371,26 +2378,41 @@ pub struct DeviceAccessTokenRequest {
     pub client_id: Uuid,
 }
 
-// Webhooks
+// Alerts
 
-/// Query params for listing webhook event classes.
+/// Query params for listing alert classes.
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
-pub struct EventClassFilter {
-    /// An optional glob pattern for filtering event class names.
+pub struct AlertClassFilter {
+    /// An optional glob pattern for filtering alert class names.
     ///
-    /// If provided, only event classes which match this glob pattern will be
+    /// If provided, only alert classes which match this glob pattern will be
     /// included in the response.
-    pub filter: Option<shared::WebhookSubscription>,
+    pub filter: Option<shared::AlertSubscription>,
+}
+
+#[derive(Deserialize, JsonSchema)]
+pub struct AlertSelector {
+    /// UUID of the alert
+    pub alert_id: Uuid,
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
-pub struct EventClassPage {
+pub struct AlertSubscriptionSelector {
+    /// The webhook receiver that the subscription is attached to.
+    #[serde(flatten)]
+    pub receiver: AlertReceiverSelector,
+    /// The event class subscription itself.
+    pub subscription: shared::AlertSubscription,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
+pub struct AlertClassPage {
     /// The last webhook event class returned by a previous page.
     pub last_seen: String,
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
-pub struct WebhookReceiverSelector {
+pub struct AlertReceiverSelector {
     /// The name or ID of the webhook receiver.
     pub receiver: NameOrId,
 }
@@ -2411,7 +2433,7 @@ pub struct WebhookCreate {
     /// If this list is empty or is not included in the request body, the
     /// webhook will not be subscribed to any events.
     #[serde(default)]
-    pub subscriptions: Vec<shared::WebhookSubscription>,
+    pub subscriptions: Vec<shared::AlertSubscription>,
 }
 
 /// Parameters to update a webhook configuration.
@@ -2425,9 +2447,9 @@ pub struct WebhookReceiverUpdate {
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
-pub struct WebhookSubscriptionCreate {
+pub struct AlertSubscriptionCreate {
     /// The event class pattern to subscribe to.
-    pub subscription: shared::WebhookSubscription,
+    pub subscription: shared::AlertSubscription,
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
@@ -2442,23 +2464,8 @@ pub struct WebhookSecretSelector {
     pub secret_id: Uuid,
 }
 
-#[derive(Deserialize, JsonSchema)]
-pub struct WebhookEventSelector {
-    /// UUID of the event
-    pub event_id: Uuid,
-}
-
-#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
-pub struct WebhookSubscriptionSelector {
-    /// The webhook receiver that the subscription is attached to.
-    #[serde(flatten)]
-    pub receiver: WebhookReceiverSelector,
-    /// The event class subscription itself.
-    pub subscription: shared::WebhookSubscription,
-}
-
 #[derive(Copy, Clone, Debug, Deserialize, Serialize, JsonSchema)]
-pub struct WebhookDeliveryStateFilter {
+pub struct AlertDeliveryStateFilter {
     /// If true, include deliveries which are currently in progress.
     ///
     /// If any of the "pending", "failed", or "delivered" query parameters are
@@ -2489,13 +2496,13 @@ pub struct WebhookDeliveryStateFilter {
     pub delivered: Option<bool>,
 }
 
-impl Default for WebhookDeliveryStateFilter {
+impl Default for AlertDeliveryStateFilter {
     fn default() -> Self {
         Self::ALL
     }
 }
 
-impl WebhookDeliveryStateFilter {
+impl AlertDeliveryStateFilter {
     pub const ALL: Self =
         Self { pending: Some(true), failed: Some(true), delivered: Some(true) };
 
@@ -2526,7 +2533,7 @@ impl WebhookDeliveryStateFilter {
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
-pub struct WebhookProbe {
+pub struct AlertReceiverProbe {
     /// If true, resend all events that have not been delivered successfully if
     /// the probe request succeeds.
     #[serde(default)]

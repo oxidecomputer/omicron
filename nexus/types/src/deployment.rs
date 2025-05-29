@@ -61,7 +61,6 @@ mod clickhouse;
 pub mod execution;
 mod network_resources;
 mod planning_input;
-mod tri_map;
 mod zone_type;
 
 use crate::inventory::BaseboardId;
@@ -175,6 +174,21 @@ pub struct Blueprint {
     // See blueprint execution for more on this.
     pub external_dns_version: Generation,
 
+    /// The minimum release generation to accept for target release
+    /// configuration. Target release configuration with a generation less than
+    /// this number will be ignored.
+    ///
+    /// For example, let's say that the current target release generation is 5.
+    /// Then, when reconfigurator detects a MUPdate:
+    ///
+    /// * the target release is ignored in favor of the install dataset
+    /// * this field is set to 6
+    ///
+    /// Once the target release generation is updated to 6 or higher,
+    /// Reconfigurator knows that it is back in charge of driving the system to
+    /// the target release.
+    pub target_release_minimum_generation: Generation,
+
     /// CockroachDB state fingerprint when this blueprint was created
     // See `nexus/db-queries/src/db/datastore/cockroachdb_settings.rs` for more
     // on this.
@@ -216,6 +230,8 @@ impl Blueprint {
             parent_blueprint_id: self.parent_blueprint_id,
             internal_dns_version: self.internal_dns_version,
             external_dns_version: self.external_dns_version,
+            target_release_minimum_generation: self
+                .target_release_minimum_generation,
             cockroachdb_fingerprint: self.cockroachdb_fingerprint.clone(),
             cockroachdb_setting_preserve_downgrade: Some(
                 self.cockroachdb_setting_preserve_downgrade,
@@ -493,6 +509,12 @@ impl BlueprintDisplay<'_> {
                     EXTERNAL_DNS_VERSION,
                     self.blueprint.external_dns_version.to_string(),
                 ),
+                (
+                    TARGET_RELEASE_MIN_GEN,
+                    self.blueprint
+                        .target_release_minimum_generation
+                        .to_string(),
+                ),
             ],
         )
     }
@@ -532,8 +554,9 @@ impl fmt::Display for BlueprintDisplay<'_> {
             // Handled by `make_oximeter_table`, called below.
             oximeter_read_version: _,
             oximeter_read_mode: _,
-            // These five fields are handled by `make_metadata_table()`, called
+            // These six fields are handled by `make_metadata_table()`, called
             // below.
+            target_release_minimum_generation: _,
             internal_dns_version: _,
             external_dns_version: _,
             time_created: _,
@@ -1262,12 +1285,12 @@ pub enum PendingMgsUpdateDetails {
     Rot {
         // implicit: component = ROT
         // implicit: firmware slot id will be the inactive slot
-        /// expected contents of "A" slot
-        expected_slot_a_version: ExpectedVersion,
-        /// expected contents of "B" slot
-        expected_slot_b_version: ExpectedVersion,
-        /// the slot of the currently running image
-        expected_active_slot: RotSlot,
+        // whether we expect the "A" or "B" slot to be active
+        // and its expected version
+        expected_active_slot: ExpectedActiveRotSlot,
+        // expected version of the "A" or "B" slot (opposite to
+        // the active slot as specified above)
+        expected_inactive_version: ExpectedVersion,
         // under normal operation, this should always match the active slot.
         // if this field changed without the active slot changing, that might
         // reflect a bad update.
@@ -1312,21 +1335,16 @@ impl slog::KV for PendingMgsUpdateDetails {
                 )
             }
             PendingMgsUpdateDetails::Rot {
-                expected_slot_a_version,
-                expected_slot_b_version,
                 expected_active_slot,
+                expected_inactive_version,
                 expected_persistent_boot_preference,
                 expected_pending_persistent_boot_preference,
                 expected_transient_boot_preference,
             } => {
                 serializer.emit_str(Key::from("component"), "rot")?;
                 serializer.emit_str(
-                    Key::from("expected_slot_a_version"),
-                    &format!("{:?}", expected_slot_a_version),
-                )?;
-                serializer.emit_str(
-                    Key::from("expected_slot_b_version"),
-                    &format!("{:?}", expected_slot_b_version),
+                    Key::from("expected_inactive_version"),
+                    &format!("{:?}", expected_inactive_version),
                 )?;
                 serializer.emit_str(
                     Key::from("expected_active_slot"),
@@ -1373,6 +1391,25 @@ impl FromStr for ExpectedVersion {
         } else {
             Ok(ExpectedVersion::Version(s.parse()?))
         }
+    }
+}
+
+/// Describes the expected active RoT slot, and the version we expect to find for it
+#[derive(
+    Clone, Debug, Eq, PartialEq, JsonSchema, Deserialize, Serialize, Diffable,
+)]
+pub struct ExpectedActiveRotSlot {
+    pub slot: RotSlot,
+    pub version: ArtifactVersion,
+}
+
+impl ExpectedActiveRotSlot {
+    pub fn slot(&self) -> &RotSlot {
+        &self.slot
+    }
+
+    pub fn version(&self) -> ArtifactVersion {
+        self.version.clone()
     }
 }
 
@@ -1651,6 +1688,10 @@ pub struct BlueprintMetadata {
     pub internal_dns_version: Generation,
     /// external DNS version when this blueprint was created
     pub external_dns_version: Generation,
+    /// The minimum generation for the target release.
+    ///
+    /// See [`Blueprint::target_release_minimum_generation`].
+    pub target_release_minimum_generation: Generation,
     /// CockroachDB state fingerprint when this blueprint was created
     pub cockroachdb_fingerprint: String,
     /// Whether to set `cluster.preserve_downgrade_option` and what to set it to

@@ -17,8 +17,9 @@ use std::sync::Arc;
 use crate::ZoneImageZpools;
 use camino::Utf8Path;
 use camino::Utf8PathBuf;
-use id_map::IdMap;
-use id_map::IdMappable;
+use iddqd::IdOrdItem;
+use iddqd::IdOrdMap;
+use iddqd::id_upcast;
 use illumos_utils::zpool::ZpoolName;
 use omicron_common::update::MupdateOverrideInfo;
 use omicron_common::update::MupdateOverrideZone;
@@ -36,13 +37,32 @@ use slog_error_chain::InlineErrorChain;
 use thiserror::Error;
 use tufaceous_artifact::ArtifactHash;
 
+/// Describes the current state of mupdate overrides.
+#[derive(Clone, Debug)]
+pub struct MupdateOverrideStatus {
+    /// The boot zpool.
+    pub boot_zpool: ZpoolName,
+
+    /// The boot disk path.
+    pub boot_disk_path: Utf8PathBuf,
+
+    /// Status of the boot disk.
+    pub boot_disk_override:
+        Result<Option<MupdateOverrideInfo>, MupdateOverrideReadError>,
+
+    /// Status of the non-boot disks. This results in warnings.
+    pub non_boot_disk_overrides: IdOrdMap<MupdateOverrideNonBootInfo>,
+}
+
 #[derive(Debug)]
 pub(crate) struct AllMupdateOverrides {
+    // This is internal-only, and currently a duplicate of MupdateOverrideStatus
+    // in case we need to store more information here in the future.
     boot_zpool: ZpoolName,
     boot_disk_path: Utf8PathBuf,
     boot_disk_override:
         Result<Option<MupdateOverrideInfo>, MupdateOverrideReadError>,
-    non_boot_disk_overrides: IdMap<MupdateOverrideNonBootInfo>,
+    non_boot_disk_overrides: IdOrdMap<MupdateOverrideNonBootInfo>,
 }
 
 impl AllMupdateOverrides {
@@ -109,6 +129,15 @@ impl AllMupdateOverrides {
 
         ret.log_results(&log);
         ret
+    }
+
+    pub(crate) fn status(&self) -> MupdateOverrideStatus {
+        MupdateOverrideStatus {
+            boot_zpool: self.boot_zpool.clone(),
+            boot_disk_path: self.boot_disk_path.clone(),
+            boot_disk_override: self.boot_disk_override.clone(),
+            non_boot_disk_overrides: self.non_boot_disk_overrides.clone(),
+        }
     }
 
     fn log_results(&self, log: &slog::Logger) {
@@ -248,15 +277,15 @@ fn read_mupdate_override(
 }
 
 #[derive(Clone, Debug, PartialEq)]
-struct MupdateOverrideNonBootInfo {
+pub struct MupdateOverrideNonBootInfo {
     /// The name of the zpool.
-    zpool_name: ZpoolName,
+    pub zpool_name: ZpoolName,
 
     /// The path that was read from.
-    path: Utf8PathBuf,
+    pub path: Utf8PathBuf,
 
     /// The result of performing the read operation.
-    result: MupdateOverrideNonBootResult,
+    pub result: MupdateOverrideNonBootResult,
 }
 
 impl MupdateOverrideNonBootInfo {
@@ -295,16 +324,18 @@ impl MupdateOverrideNonBootInfo {
     }
 }
 
-impl IdMappable for MupdateOverrideNonBootInfo {
-    type Id = ZpoolName;
+impl IdOrdItem for MupdateOverrideNonBootInfo {
+    type Key<'a> = ZpoolName;
 
-    fn id(&self) -> Self::Id {
+    fn key(&self) -> Self::Key<'_> {
         self.zpool_name
     }
+
+    id_upcast!();
 }
 
 #[derive(Clone, Debug, PartialEq)]
-enum MupdateOverrideNonBootResult {
+pub enum MupdateOverrideNonBootResult {
     /// The override is present and matches the value on the boot disk.
     MatchesPresent,
 
@@ -358,7 +389,7 @@ impl MupdateOverrideNonBootResult {
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
-enum MupdateOverrideNonBootMismatch {
+pub enum MupdateOverrideNonBootMismatch {
     /// The override is present on the boot disk but absent on the other disk.
     BootPresentOtherAbsent,
 
@@ -427,9 +458,9 @@ impl MupdateOverrideNonBootMismatch {
 /// This may or may not be valid, depending on the status of the artifacts. See
 /// [`Self::is_valid`].
 #[derive(Clone, Debug, PartialEq)]
-struct MupdateOverrideArtifactsResult {
-    info: MupdateOverrideInfo,
-    data: IdMap<MupdateOverrideArtifactResult>,
+pub struct MupdateOverrideArtifactsResult {
+    pub info: MupdateOverrideInfo,
+    pub data: IdOrdMap<MupdateOverrideArtifactResult>,
 }
 
 impl MupdateOverrideArtifactsResult {
@@ -468,14 +499,14 @@ impl MupdateOverrideArtifactsResult {
 }
 
 struct MupdateOverrideArtifactsDisplay<'a> {
-    artifacts: &'a IdMap<MupdateOverrideArtifactResult>,
+    artifacts: &'a IdOrdMap<MupdateOverrideArtifactResult>,
 }
 
 impl fmt::Display for MupdateOverrideArtifactsDisplay<'_> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        for artifact in self.artifacts.iter() {
+        for artifact in self.artifacts {
             match &artifact.status {
-                ArtifactReadResult::Matches => {
+                ArtifactReadResult::Valid => {
                     writeln!(
                         f,
                         "  {}: ok ({} bytes, {})",
@@ -507,41 +538,43 @@ impl fmt::Display for MupdateOverrideArtifactsDisplay<'_> {
 }
 
 #[derive(Clone, Debug, PartialEq)]
-struct MupdateOverrideArtifactResult {
+pub struct MupdateOverrideArtifactResult {
     /// The filename.
-    file_name: String,
+    pub file_name: String,
 
     /// The full path to the file.
-    path: Utf8PathBuf,
+    pub path: Utf8PathBuf,
 
     /// The expected size.
-    expected_size: u64,
+    pub expected_size: u64,
 
     /// The expected hash.
-    expected_hash: ArtifactHash,
+    pub expected_hash: ArtifactHash,
 
     /// The status on disk.
-    status: ArtifactReadResult,
+    pub status: ArtifactReadResult,
 }
 
 impl MupdateOverrideArtifactResult {
     fn is_valid(&self) -> bool {
-        matches!(self.status, ArtifactReadResult::Matches)
+        matches!(self.status, ArtifactReadResult::Valid)
     }
 }
 
-impl IdMappable for MupdateOverrideArtifactResult {
-    type Id = String;
+impl IdOrdItem for MupdateOverrideArtifactResult {
+    type Key<'a> = &'a str;
 
-    fn id(&self) -> Self::Id {
-        self.file_name.clone()
+    fn key(&self) -> Self::Key<'_> {
+        &self.file_name
     }
+
+    id_upcast!();
 }
 
 #[derive(Clone, Debug, PartialEq)]
-enum ArtifactReadResult {
+pub enum ArtifactReadResult {
     /// The artifact was read successfully and matches.
-    Matches,
+    Valid,
 
     /// The artifact was read successfully but does not match.
     Mismatch {
@@ -570,7 +603,7 @@ fn validate_one(
     match compute_size_and_hash(&mut f) {
         Ok((actual_size, actual_hash)) => {
             if zone.file_size == actual_size && zone.hash == actual_hash {
-                ArtifactReadResult::Matches
+                ArtifactReadResult::Valid
             } else {
                 ArtifactReadResult::Mismatch { actual_size, actual_hash }
             }
@@ -598,7 +631,7 @@ fn compute_size_and_hash(
 }
 
 #[derive(Clone, Debug, PartialEq, Error)]
-enum MupdateOverrideReadError {
+pub enum MupdateOverrideReadError {
     #[error(
         "error retrieving metadata for install dataset directory \
          `{dataset_dir}`"
@@ -643,7 +676,7 @@ enum MupdateOverrideReadError {
 /// An `io::Error` wrapper that implements `Clone` and `PartialEq`.
 #[derive(Clone, Debug, Error)]
 #[error(transparent)]
-struct ArcIoError(Arc<io::Error>);
+pub struct ArcIoError(Arc<io::Error>);
 
 impl ArcIoError {
     fn new(error: io::Error) -> Self {
@@ -662,7 +695,7 @@ impl PartialEq for ArcIoError {
 /// A `serde_json::Error` that implements `Clone` and `PartialEq`.
 #[derive(Clone, Debug, Error)]
 #[error(transparent)]
-struct ArcSerdeJsonError(Arc<serde_json::Error>);
+pub struct ArcSerdeJsonError(Arc<serde_json::Error>);
 
 impl ArcSerdeJsonError {
     fn new(error: serde_json::Error) -> Self {
@@ -683,6 +716,9 @@ impl PartialEq for ArcSerdeJsonError {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use camino_tempfile_ext::fixture::ChildPath;
+    use camino_tempfile_ext::fixture::FixtureError;
+    use camino_tempfile_ext::fixture::FixtureKind;
     use camino_tempfile_ext::prelude::*;
     use dropshot::ConfigLogging;
     use dropshot::ConfigLoggingLevel;
@@ -735,11 +771,6 @@ mod tests {
     static NON_BOOT_3_PATHS: LazyLock<OverridePaths> =
         LazyLock::new(|| OverridePaths::for_uuid(NON_BOOT_3_UUID));
 
-    static OVERRIDE_UUID: MupdateOverrideUuid =
-        MupdateOverrideUuid::from_u128(0x70b965c2_fc95_4843_a34d_a2c7246788a8);
-    static OVERRIDE_2_UUID: MupdateOverrideUuid =
-        MupdateOverrideUuid::from_u128(0x20588f8f_c680_4101_afc7_820226d03ada);
-
     /// Boot disk present / no other disks. (This produces a warning, but is
     /// otherwise okay.)
     #[test]
@@ -748,12 +779,10 @@ mod tests {
             "mupdate_override_read_other_absent",
             &ConfigLogging::StderrTerminal { level: ConfigLoggingLevel::Debug },
         );
-        let override_info = override_info();
         let dir = Utf8TempDir::new().unwrap();
-
-        dir.child(&BOOT_PATHS.override_json)
-            .write_str(&serde_json::to_string(&override_info).unwrap())
-            .unwrap();
+        let cx = WriteInstallDatasetContext::new_basic();
+        let info =
+            cx.write_to(&dir.child(&BOOT_PATHS.install_dataset)).unwrap();
 
         let zpools = ZoneImageZpools {
             root: dir.path(),
@@ -763,9 +792,9 @@ mod tests {
             AllMupdateOverrides::read_all(&logctx.log, &zpools, &BOOT_ZPOOL);
         assert_eq!(
             overrides.boot_disk_override.as_ref().unwrap().as_ref(),
-            Some(&override_info)
+            Some(&info)
         );
-        assert_eq!(overrides.non_boot_disk_overrides, IdMap::new());
+        assert_eq!(overrides.non_boot_disk_overrides, IdOrdMap::new());
 
         logctx.cleanup_successful();
     }
@@ -777,15 +806,13 @@ mod tests {
             "mupdate_override_read_both_present",
             &ConfigLogging::StderrTerminal { level: ConfigLoggingLevel::Debug },
         );
-        let override_info = override_info();
         let dir = Utf8TempDir::new().unwrap();
-
-        dir.child(&BOOT_PATHS.override_json)
-            .write_str(&serde_json::to_string(&override_info).unwrap())
-            .unwrap();
-        dir.child(&NON_BOOT_PATHS.override_json)
-            .write_str(&serde_json::to_string(&override_info).unwrap())
-            .unwrap();
+        let cx = WriteInstallDatasetContext::new_basic();
+        let info =
+            cx.write_to(&dir.child(&BOOT_PATHS.install_dataset)).unwrap();
+        let info2 =
+            cx.write_to(&dir.child(&NON_BOOT_PATHS.install_dataset)).unwrap();
+        assert_eq!(info, info2, "the same contents must have been written out");
 
         let zpools = ZoneImageZpools {
             root: dir.path(),
@@ -796,7 +823,7 @@ mod tests {
             AllMupdateOverrides::read_all(&logctx.log, &zpools, &BOOT_ZPOOL);
         assert_eq!(
             overrides.boot_disk_override.as_ref().unwrap().as_ref(),
-            Some(&override_info)
+            Some(&info)
         );
         assert_eq!(
             overrides.non_boot_disk_overrides,
@@ -819,6 +846,7 @@ mod tests {
             "mupdate_override_read_both_absent",
             &ConfigLogging::StderrTerminal { level: ConfigLoggingLevel::Debug },
         );
+
         let dir = Utf8TempDir::new().unwrap();
 
         // Create the directories but not the override JSONs within them.
@@ -857,12 +885,11 @@ mod tests {
             "mupdate_override_read_boot_present_other_absent",
             &ConfigLogging::StderrTerminal { level: ConfigLoggingLevel::Debug },
         );
-        let override_info = override_info();
         let dir = Utf8TempDir::new().unwrap();
+        let cx = WriteInstallDatasetContext::new_basic();
+        let info =
+            cx.write_to(&dir.child(&BOOT_PATHS.install_dataset)).unwrap();
 
-        dir.child(&BOOT_PATHS.override_json)
-            .write_str(&serde_json::to_string(&override_info).unwrap())
-            .unwrap();
         // Create the directory, but not the override JSON within it.
         dir.child(&NON_BOOT_PATHS.install_dataset).create_dir_all().unwrap();
 
@@ -875,7 +902,7 @@ mod tests {
             AllMupdateOverrides::read_all(&logctx.log, &zpools, &BOOT_ZPOOL);
         assert_eq!(
             overrides.boot_disk_override.as_ref().unwrap().as_ref(),
-            Some(&override_info)
+            Some(&info)
         );
         assert_eq!(
             overrides.non_boot_disk_overrides,
@@ -900,15 +927,14 @@ mod tests {
             "mupdate_override_read_boot_absent_other_present",
             &ConfigLogging::StderrTerminal { level: ConfigLoggingLevel::Debug },
         );
-        let override_info = override_info();
         let dir = Utf8TempDir::new().unwrap();
+        let cx = WriteInstallDatasetContext::new_basic();
 
         // Create the directory, but not the override JSON within it.
         dir.child(&BOOT_PATHS.install_dataset).create_dir_all().unwrap();
 
-        dir.child(&NON_BOOT_PATHS.override_json)
-            .write_str(&serde_json::to_string(&override_info).unwrap())
-            .unwrap();
+        let info =
+            cx.write_to(&dir.child(&NON_BOOT_PATHS.install_dataset)).unwrap();
 
         let zpools = ZoneImageZpools {
             root: dir.path(),
@@ -927,7 +953,7 @@ mod tests {
                 path: dir.path().join(&NON_BOOT_PATHS.override_json),
                 result: MupdateOverrideNonBootResult::Mismatch(
                     MupdateOverrideNonBootMismatch::BootAbsentOtherPresent {
-                        non_boot_disk_info: override_info.clone()
+                        non_boot_disk_info: info.clone()
                     },
                 ),
             }]
@@ -945,16 +971,17 @@ mod tests {
             "mupdate_override_read_different_values",
             &ConfigLogging::StderrTerminal { level: ConfigLoggingLevel::Debug },
         );
-        let override_info = override_info();
-        let override_info_2 = override_info_2();
+
         let dir = Utf8TempDir::new().unwrap();
 
-        dir.child(&BOOT_PATHS.override_json)
-            .write_str(&serde_json::to_string(&override_info).unwrap())
-            .expect("failed to write override json");
-        dir.child(&NON_BOOT_PATHS.override_json)
-            .write_str(&serde_json::to_string(&override_info_2).unwrap())
-            .expect("failed to write override json");
+        // Make two different contexts. Each will have a different mupdate_uuid
+        // so will not match.
+        let cx = WriteInstallDatasetContext::new_basic();
+        let info =
+            cx.write_to(&dir.child(&BOOT_PATHS.install_dataset)).unwrap();
+        let cx2 = WriteInstallDatasetContext::new_basic();
+        let info2 =
+            cx2.write_to(&dir.child(&NON_BOOT_PATHS.install_dataset)).unwrap();
 
         let zpools = ZoneImageZpools {
             root: dir.path(),
@@ -964,7 +991,7 @@ mod tests {
             AllMupdateOverrides::read_all(&logctx.log, &zpools, &BOOT_ZPOOL);
         assert_eq!(
             overrides.boot_disk_override.as_ref().unwrap().as_ref(),
-            Some(&override_info),
+            Some(&info),
         );
         assert_eq!(
             overrides.non_boot_disk_overrides,
@@ -973,7 +1000,7 @@ mod tests {
                 path: dir.path().join(&NON_BOOT_PATHS.override_json),
                 result: MupdateOverrideNonBootResult::Mismatch(
                     MupdateOverrideNonBootMismatch::ValueMismatch {
-                        non_boot_disk_info: override_info_2,
+                        non_boot_disk_info: info2,
                     }
                 ),
             }]
@@ -1082,15 +1109,14 @@ mod tests {
             "mupdate_override_read_boot_read_error",
             &ConfigLogging::StderrTerminal { level: ConfigLoggingLevel::Debug },
         );
-        let override_info = override_info();
         let dir = Utf8TempDir::new().unwrap();
+        let cx = WriteInstallDatasetContext::new_basic();
 
         // Create an empty file: this won't deserialize correctly.
         dir.child(&BOOT_PATHS.override_json).touch().unwrap();
         // File with the correct contents.
-        dir.child(&NON_BOOT_PATHS.override_json)
-            .write_str(&serde_json::to_string(&override_info).unwrap())
-            .unwrap();
+        let info =
+            cx.write_to(&dir.child(&NON_BOOT_PATHS.install_dataset)).unwrap();
         // File that's absent.
         dir.child(&NON_BOOT_2_PATHS.install_dataset).create_dir_all().unwrap();
         // Read error (empty file).
@@ -1119,7 +1145,7 @@ mod tests {
                     path: dir.path().join(&NON_BOOT_PATHS.override_json),
                     result: MupdateOverrideNonBootResult::Mismatch(
                         MupdateOverrideNonBootMismatch::BootDiskReadError {
-                            non_boot_disk_info: Some(override_info),
+                            non_boot_disk_info: Some(info),
                         },
                     ),
                 },
@@ -1151,20 +1177,293 @@ mod tests {
         logctx.cleanup_successful();
     }
 
-    fn override_info() -> MupdateOverrideInfo {
-        MupdateOverrideInfo {
-            mupdate_uuid: OVERRIDE_UUID,
-            hash_ids: BTreeSet::new(),
-            zones: IdMap::new(),
+    /// Error case: zones don't match expected ones on boot disk.
+    #[test]
+    fn read_boot_disk_zone_mismatch() {
+        let logctx = LogContext::new(
+            "mupdate_override_read_boot_disk_zone_mismatch",
+            &ConfigLogging::StderrTerminal { level: ConfigLoggingLevel::Debug },
+        );
+        let dir = Utf8TempDir::new().unwrap();
+        let cx = WriteInstallDatasetContext::new_basic();
+        let mut invalid_cx = cx.clone();
+        invalid_cx.make_error_cases();
+
+        invalid_cx.write_to(&dir.child(&BOOT_PATHS.install_dataset)).unwrap();
+        let valid_info =
+            cx.write_to(&dir.child(&NON_BOOT_PATHS.install_dataset)).unwrap();
+
+        let zpools = ZoneImageZpools {
+            root: dir.path(),
+            all_m2_zpools: vec![BOOT_ZPOOL, NON_BOOT_ZPOOL],
+        };
+
+        let overrides =
+            AllMupdateOverrides::read_all(&logctx.log, &zpools, &BOOT_ZPOOL);
+        assert_eq!(
+            overrides.boot_disk_override.as_ref().unwrap_err(),
+            &MupdateOverrideReadError::ArtifactRead {
+                dataset_dir: dir
+                    .child(&BOOT_PATHS.install_dataset)
+                    .as_path()
+                    .to_path_buf(),
+                artifacts: invalid_cx.expected_result(
+                    dir.child(&BOOT_PATHS.install_dataset).as_path()
+                ),
+            }
+        );
+
+        assert_eq!(
+            overrides.non_boot_disk_overrides,
+            [MupdateOverrideNonBootInfo {
+                zpool_name: NON_BOOT_ZPOOL,
+                path: dir.path().join(&NON_BOOT_PATHS.override_json),
+                result: MupdateOverrideNonBootResult::Mismatch(
+                    MupdateOverrideNonBootMismatch::BootDiskReadError {
+                        non_boot_disk_info: Some(valid_info),
+                    }
+                )
+            }]
+            .into_iter()
+            .collect(),
+        );
+
+        logctx.cleanup_successful();
+    }
+
+    /// Warning case: zones don't match expected ones on non-boot disk.
+    #[test]
+    fn read_non_boot_disk_zone_mismatch() {
+        let logctx = LogContext::new(
+            "mupdate_override_read_non_boot_disk_zone_mismatch",
+            &ConfigLogging::StderrTerminal { level: ConfigLoggingLevel::Debug },
+        );
+        let dir = Utf8TempDir::new().unwrap();
+        let cx = WriteInstallDatasetContext::new_basic();
+        let mut invalid_cx = cx.clone();
+        invalid_cx.make_error_cases();
+
+        let info =
+            cx.write_to(&dir.child(&BOOT_PATHS.install_dataset)).unwrap();
+        invalid_cx
+            .write_to(&dir.child(&NON_BOOT_PATHS.install_dataset))
+            .unwrap();
+
+        let zpools = ZoneImageZpools {
+            root: dir.path(),
+            all_m2_zpools: vec![BOOT_ZPOOL, NON_BOOT_ZPOOL],
+        };
+
+        let overrides =
+            AllMupdateOverrides::read_all(&logctx.log, &zpools, &BOOT_ZPOOL);
+        // The boot disk is valid.
+        assert_eq!(
+            overrides.boot_disk_override.as_ref().unwrap().as_ref(),
+            Some(&info)
+        );
+
+        // The non-boot disk has an error.
+        assert_eq!(
+            overrides.non_boot_disk_overrides,
+            [MupdateOverrideNonBootInfo {
+                zpool_name: NON_BOOT_ZPOOL,
+                path: dir.path().join(&NON_BOOT_PATHS.override_json),
+                result: MupdateOverrideNonBootResult::ReadError(
+                    MupdateOverrideReadError::ArtifactRead {
+                        dataset_dir: dir
+                            .path()
+                            .join(&NON_BOOT_PATHS.install_dataset),
+                        artifacts: invalid_cx.expected_result(
+                            &dir.path().join(&NON_BOOT_PATHS.install_dataset)
+                        ),
+                    },
+                ),
+            }]
+            .into_iter()
+            .collect(),
+        );
+
+        logctx.cleanup_successful();
+    }
+
+    /// Context for writing out fake zones to install dataset directories.
+    ///
+    /// The tests in this module ensure that the override JSON's list of zones
+    /// matches the zone files on disk.
+    #[derive(Clone, Debug)]
+    struct WriteInstallDatasetContext {
+        zones: IdOrdMap<ZoneContents>,
+        mupdate_uuid: MupdateOverrideUuid,
+    }
+
+    impl WriteInstallDatasetContext {
+        /// Initializes a new context with a couple of zones and no known
+        /// errors.
+        fn new_basic() -> Self {
+            Self {
+                zones: [
+                    ZoneContents::new("zone1.tar.gz", b"zone1"),
+                    ZoneContents::new("zone2.tar.gz", b"zone2"),
+                    ZoneContents::new("zone3.tar.gz", b"zone3"),
+                    ZoneContents::new("zone4.tar.gz", b"zone4"),
+                    ZoneContents::new("zone5.tar.gz", b"zone5"),
+                ]
+                .into_iter()
+                .collect(),
+                mupdate_uuid: MupdateOverrideUuid::new_v4(),
+            }
+        }
+
+        /// Makes a number of error cases for testing.
+        fn make_error_cases(&mut self) {
+            // zone1.tar.gz is valid.
+            // For zone2.tar.gz, change the size.
+            self.zones.get_mut("zone2.tar.gz").unwrap().json_size = 1024;
+            // For zone3.tar.gz, change the hash.
+            self.zones.get_mut("zone3.tar.gz").unwrap().json_hash =
+                ArtifactHash([0; 32]);
+            // Don't write out zone4 but include it in the JSON.
+            self.zones.get_mut("zone4.tar.gz").unwrap().write_to_disk = false;
+            // Write out zone5 but don't include it in the JSON.
+            self.zones.get_mut("zone5.tar.gz").unwrap().include_in_json = false;
+        }
+
+        fn override_info(&self) -> MupdateOverrideInfo {
+            MupdateOverrideInfo {
+                mupdate_uuid: self.mupdate_uuid,
+                // The hash IDs are not used for validation, so leave this
+                // empty.
+                hash_ids: BTreeSet::new(),
+                zones: self
+                    .zones
+                    .iter()
+                    .filter_map(|zone| {
+                        zone.include_in_json.then(|| MupdateOverrideZone {
+                            file_name: zone.file_name.clone(),
+                            file_size: zone.json_size,
+                            hash: zone.json_hash,
+                        })
+                    })
+                    .collect(),
+            }
+        }
+
+        /// Returns the expected result of the override, taking into account
+        /// mismatches, etc.
+        fn expected_result(
+            &self,
+            dir: &Utf8Path,
+        ) -> MupdateOverrideArtifactsResult {
+            let info = self.override_info();
+            let data = self
+                .zones
+                .iter()
+                .filter_map(|zone| {
+                    // Currently, zone files not present in the JSON aren't
+                    // reported at all.
+                    //
+                    // XXX: should they be?
+                    zone.include_in_json.then(|| zone.expected_result(dir))
+                })
+                .collect();
+            MupdateOverrideArtifactsResult { info, data }
+        }
+
+        /// Writes the context to a directory, returning the JSON that was
+        /// written out.
+        fn write_to(
+            &self,
+            dir: &ChildPath,
+        ) -> Result<MupdateOverrideInfo, FixtureError> {
+            for zone in &self.zones {
+                if zone.write_to_disk {
+                    dir.child(&zone.file_name).write_binary(&zone.contents)?;
+                }
+            }
+
+            let info = self.override_info();
+            let json = serde_json::to_string(&info).map_err(|e| {
+                FixtureError::new(FixtureKind::WriteFile).with_source(e)
+            })?;
+            // No need to create intermediate directories with
+            // camino-tempfile-ext.
+            dir.child(MupdateOverrideInfo::FILE_NAME).write_str(&json)?;
+
+            Ok(info)
         }
     }
 
-    fn override_info_2() -> MupdateOverrideInfo {
-        MupdateOverrideInfo {
-            mupdate_uuid: OVERRIDE_2_UUID,
-            hash_ids: BTreeSet::new(),
-            zones: IdMap::new(),
+    #[derive(Clone, Debug)]
+    struct ZoneContents {
+        file_name: String,
+        contents: Vec<u8>,
+        // json_size and json_hash are stored separately, so tests can tweak
+        // them before writing out the override info.
+        json_size: u64,
+        json_hash: ArtifactHash,
+        write_to_disk: bool,
+        include_in_json: bool,
+    }
+
+    impl ZoneContents {
+        fn new(file_name: &str, contents: &[u8]) -> Self {
+            let size = contents.len() as u64;
+            let hash = compute_hash(contents);
+            Self {
+                file_name: file_name.to_string(),
+                contents: contents.to_vec(),
+                json_size: size,
+                json_hash: hash,
+                write_to_disk: true,
+                include_in_json: true,
+            }
         }
+
+        fn expected_result(
+            &self,
+            dir: &Utf8Path,
+        ) -> MupdateOverrideArtifactResult {
+            let status = if !self.write_to_disk {
+                // Missing from the disk
+                ArtifactReadResult::Error(ArcIoError::new(io::Error::new(
+                    io::ErrorKind::NotFound,
+                    "file not found",
+                )))
+            } else {
+                let actual_size = self.contents.len() as u64;
+                let actual_hash = compute_hash(&self.contents);
+                if self.json_size != actual_size
+                    || self.json_hash != actual_hash
+                {
+                    ArtifactReadResult::Mismatch { actual_size, actual_hash }
+                } else {
+                    ArtifactReadResult::Valid
+                }
+            };
+
+            MupdateOverrideArtifactResult {
+                file_name: self.file_name.clone(),
+                path: dir.join(&self.file_name),
+                expected_size: self.json_size,
+                expected_hash: self.json_hash,
+                status,
+            }
+        }
+    }
+
+    impl IdOrdItem for ZoneContents {
+        type Key<'a> = &'a str;
+
+        fn key(&self) -> Self::Key<'_> {
+            &self.file_name
+        }
+
+        id_upcast!();
+    }
+
+    fn compute_hash(contents: &[u8]) -> ArtifactHash {
+        let hash = Sha256::digest(contents);
+        ArtifactHash(hash.into())
     }
 
     fn dataset_missing_error(dir_path: &Utf8Path) -> MupdateOverrideReadError {

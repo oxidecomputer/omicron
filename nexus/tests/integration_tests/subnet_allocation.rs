@@ -124,6 +124,7 @@ async fn test_subnet_allocation(cptestctx: &ControlPlaneTestContext) {
 
     // The valid addresses for allocation in `subnet` are 192.168.42.5 and
     // 192.168.42.6. The rest are reserved as described in RFD21.
+    const SUBNET_NAME: &str = "small";
     let nic = params::InstanceNetworkInterfaceAttachment::Create(vec![
         params::InstanceNetworkInterfaceCreate {
             identity: IdentityMetadataCreateParams {
@@ -131,7 +132,7 @@ async fn test_subnet_allocation(cptestctx: &ControlPlaneTestContext) {
                 description: String::from("some iface"),
             },
             vpc_name: "default".parse().unwrap(),
-            subnet_name: "small".parse().unwrap(),
+            subnet_name: SUBNET_NAME.parse().unwrap(),
             ip: None,
         },
     ]);
@@ -167,7 +168,10 @@ async fn test_subnet_allocation(cptestctx: &ControlPlaneTestContext) {
         subnet_name,
     )
     .await;
-    assert_eq!(error.message, "No available IP addresses for interface");
+    assert!(error.message.starts_with(&format!(
+        "No available IP addresses for interface in \
+        subnet '{SUBNET_NAME}' with ID '"
+    )));
 
     // Verify the subnet lists the two addresses as in use
     let url_ips = format!(
