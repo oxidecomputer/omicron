@@ -175,11 +175,12 @@ parent:    6ccc786b-17f1-4562-958f-5a7d9a5a15fd
     read from::   SingleNode
 
  METADATA:
-    created by:::::::::::   test suite
-    created at:::::::::::   <REDACTED_TIMESTAMP>
-    comment::::::::::::::   (none)
-    internal DNS version:   1
-    external DNS version:   1
+    created by:::::::::::::   test suite
+    created at:::::::::::::   <REDACTED_TIMESTAMP>
+    comment::::::::::::::::   (none)
+    internal DNS version:::   1
+    external DNS version:::   1
+    target release min gen:   1
 
  PENDING MGS-MANAGED UPDATES: 0
 
@@ -358,11 +359,12 @@ parent:    ad97e762-7bf1-45a6-a98f-60afb7e491c0
     read from::   SingleNode
 
  METADATA:
-    created by:::::::::::   reconfigurator-cli
-    created at:::::::::::   <REDACTED_TIMESTAMP>
-    comment::::::::::::::   (none)
-    internal DNS version:   1
-    external DNS version:   1
+    created by:::::::::::::   reconfigurator-cli
+    created at:::::::::::::   <REDACTED_TIMESTAMP>
+    comment::::::::::::::::   (none)
+    internal DNS version:::   1
+    external DNS version:::   1
+    target release min gen:   1
 
  PENDING MGS-MANAGED UPDATES: 1
     Pending MGS-managed updates (all baseboards):
@@ -537,8 +539,9 @@ to:   blueprint cca24b71-09b5-4042-9185-b33e9f2ebba0
     cluster.preserve_downgrade_option:   (do not modify) (unchanged)
 
  METADATA:
-    internal DNS version:   1 (unchanged)
-    external DNS version:   1 (unchanged)
+    internal DNS version:::   1 (unchanged)
+    external DNS version:::   1 (unchanged)
+    target release min gen:   1 (unchanged)
 
  OXIMETER SETTINGS:
     generation:   1 (unchanged)
@@ -836,8 +839,9 @@ to:   blueprint ad97e762-7bf1-45a6-a98f-60afb7e491c0
     cluster.preserve_downgrade_option:   (do not modify) (unchanged)
 
  METADATA:
-    internal DNS version:   1 (unchanged)
-    external DNS version:   1 (unchanged)
+    internal DNS version:::   1 (unchanged)
+    external DNS version:::   1 (unchanged)
+    target release min gen:   1 (unchanged)
 
  OXIMETER SETTINGS:
     generation:   1 (unchanged)
@@ -1145,11 +1149,12 @@ parent:    cca24b71-09b5-4042-9185-b33e9f2ebba0
     read from::   SingleNode
 
  METADATA:
-    created by:::::::::::   reconfigurator-cli
-    created at:::::::::::   <REDACTED_TIMESTAMP>
-    comment::::::::::::::   (none)
-    internal DNS version:   1
-    external DNS version:   1
+    created by:::::::::::::   reconfigurator-cli
+    created at:::::::::::::   <REDACTED_TIMESTAMP>
+    comment::::::::::::::::   (none)
+    internal DNS version:::   1
+    external DNS version:::   1
+    target release min gen:   1
 
  PENDING MGS-MANAGED UPDATES: 1
     Pending MGS-managed updates (all baseboards):
@@ -1324,8 +1329,9 @@ to:   blueprint 5bf974f3-81f9-455b-b24e-3099f765664c
     cluster.preserve_downgrade_option:   (do not modify) (unchanged)
 
  METADATA:
-    internal DNS version:   1 (unchanged)
-    external DNS version:   1 (unchanged)
+    internal DNS version:::   1 (unchanged)
+    external DNS version:::   1 (unchanged)
+    target release min gen:   1 (unchanged)
 
  OXIMETER SETTINGS:
     generation:   1 (unchanged)
@@ -1624,8 +1630,9 @@ to:   blueprint cca24b71-09b5-4042-9185-b33e9f2ebba0
     cluster.preserve_downgrade_option:   (do not modify) (unchanged)
 
  METADATA:
-    internal DNS version:   1 (unchanged)
-    external DNS version:   1 (unchanged)
+    internal DNS version:::   1 (unchanged)
+    external DNS version:::   1 (unchanged)
+    target release min gen:   1 (unchanged)
 
  OXIMETER SETTINGS:
     generation:   1 (unchanged)
@@ -1935,11 +1942,12 @@ parent:    5bf974f3-81f9-455b-b24e-3099f765664c
     read from::   SingleNode
 
  METADATA:
-    created by:::::::::::   reconfigurator-cli
-    created at:::::::::::   <REDACTED_TIMESTAMP>
-    comment::::::::::::::   (none)
-    internal DNS version:   1
-    external DNS version:   1
+    created by:::::::::::::   reconfigurator-cli
+    created at:::::::::::::   <REDACTED_TIMESTAMP>
+    comment::::::::::::::::   (none)
+    internal DNS version:::   1
+    external DNS version:::   1
+    target release min gen:   1
 
  PENDING MGS-MANAGED UPDATES: 2
     Pending MGS-managed updates (all baseboards):
@@ -2115,8 +2123,9 @@ to:   blueprint 1b837a27-3be1-4fcb-8499-a921c839e1d0
     cluster.preserve_downgrade_option:   (do not modify) (unchanged)
 
  METADATA:
-    internal DNS version:   1 (unchanged)
-    external DNS version:   1 (unchanged)
+    internal DNS version:::   1 (unchanged)
+    external DNS version:::   1 (unchanged)
+    target release min gen:   1 (unchanged)
 
  OXIMETER SETTINGS:
     generation:   1 (unchanged)
@@ -2423,11 +2432,12 @@ parent:    1b837a27-3be1-4fcb-8499-a921c839e1d0
     read from::   SingleNode
 
  METADATA:
-    created by:::::::::::   reconfigurator-cli
-    created at:::::::::::   <REDACTED_TIMESTAMP>
-    comment::::::::::::::   (none)
-    internal DNS version:   1
-    external DNS version:   1
+    created by:::::::::::::   reconfigurator-cli
+    created at:::::::::::::   <REDACTED_TIMESTAMP>
+    comment::::::::::::::::   (none)
+    internal DNS version:::   1
+    external DNS version:::   1
+    target release min gen:   1
 
  PENDING MGS-MANAGED UPDATES: 1
     Pending MGS-managed updates (all baseboards):
@@ -2602,8 +2612,9 @@ to:   blueprint 3682a71b-c6ca-4b7e-8f84-16df80c85960
     cluster.preserve_downgrade_option:   (do not modify) (unchanged)
 
  METADATA:
-    internal DNS version:   1 (unchanged)
-    external DNS version:   1 (unchanged)
+    internal DNS version:::   1 (unchanged)
+    external DNS version:::   1 (unchanged)
+    target release min gen:   1 (unchanged)
 
  OXIMETER SETTINGS:
     generation:   1 (unchanged)
@@ -2745,15 +2756,27 @@ edit contents of a blueprint directly
 Usage: blueprint-edit [OPTIONS] <BLUEPRINT_ID> <COMMAND>
 
 Commands:
-  add-nexus                    add a Nexus instance to a particular sled
-  add-cockroach                add a CockroachDB instance to a particular sled
-  set-zone-image               set the image source for a zone
-  set-remove-mupdate-override  set the remove_mupdate_override field for a sled
-  expunge-zone                 expunge a zone
-  set-sp-update                configure an SP update
-  delete-sp-update             delete a configured SP update
-  debug                        debug commands that bypass normal checks
-  help                         Print this message or the help of the given subcommand(s)
+  add-nexus
+          add a Nexus instance to a particular sled
+  add-cockroach
+          add a CockroachDB instance to a particular sled
+  set-zone-image
+          set the image source for a zone
+  set-remove-mupdate-override
+          set the remove_mupdate_override field for a sled
+  set-target-release-minimum-generation
+          set the minimum generation for which target releases are accepted [aliases:
+          set-target-release-min-gen]
+  expunge-zone
+          expunge a zone
+  set-sp-update
+          configure an SP update
+  delete-sp-update
+          delete a configured SP update
+  debug
+          debug commands that bypass normal checks
+  help
+          Print this message or the help of the given subcommand(s)
 
 Arguments:
   <BLUEPRINT_ID>  id of the blueprint to edit, "latest", or "target"

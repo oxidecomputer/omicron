@@ -355,11 +355,12 @@ parent:    02697f74-b14a-4418-90f0-c28b2a3a6aa9
     read from::   SingleNode
 
  METADATA:
-    created by:::::::::::   test suite
-    created at:::::::::::   <REDACTED_TIMESTAMP>
-    comment::::::::::::::   (none)
-    internal DNS version:   1
-    external DNS version:   1
+    created by:::::::::::::   test suite
+    created at:::::::::::::   <REDACTED_TIMESTAMP>
+    comment::::::::::::::::   (none)
+    internal DNS version:::   1
+    external DNS version:::   1
+    target release min gen:   1
 
  PENDING MGS-MANAGED UPDATES: 0
 
@@ -451,11 +452,12 @@ parent:    02697f74-b14a-4418-90f0-c28b2a3a6aa9
     read from::   SingleNode
 
  METADATA:
-    created by:::::::::::   test suite
-    created at:::::::::::   <REDACTED_TIMESTAMP>
-    comment::::::::::::::   (none)
-    internal DNS version:   1
-    external DNS version:   1
+    created by:::::::::::::   test suite
+    created at:::::::::::::   <REDACTED_TIMESTAMP>
+    comment::::::::::::::::   (none)
+    internal DNS version:::   1
+    external DNS version:::   1
+    target release min gen:   1
 
  PENDING MGS-MANAGED UPDATES: 0
 

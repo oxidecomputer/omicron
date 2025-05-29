@@ -93,11 +93,12 @@ parent:    1b013011-2062-4b48-b544-a32b23bce83a
     read from::   SingleNode
 
  METADATA:
-    created by:::::::::::   test suite
-    created at:::::::::::   <REDACTED_TIMESTAMP>
-    comment::::::::::::::   (none)
-    internal DNS version:   1
-    external DNS version:   1
+    created by:::::::::::::   test suite
+    created at:::::::::::::   <REDACTED_TIMESTAMP>
+    comment::::::::::::::::   (none)
+    internal DNS version:::   1
+    external DNS version:::   1
+    target release min gen:   1
 
  PENDING MGS-MANAGED UPDATES: 0
 
@@ -199,11 +200,12 @@ parent:    9766ca20-38d4-4380-b005-e7c43c797e7c
     read from::   SingleNode
 
  METADATA:
-    created by:::::::::::   reconfigurator-cli
-    created at:::::::::::   <REDACTED_TIMESTAMP>
-    comment::::::::::::::   (none)
-    internal DNS version:   1
-    external DNS version:   1
+    created by:::::::::::::   reconfigurator-cli
+    created at:::::::::::::   <REDACTED_TIMESTAMP>
+    comment::::::::::::::::   (none)
+    internal DNS version:::   1
+    external DNS version:::   1
+    target release min gen:   1
 
  PENDING MGS-MANAGED UPDATES: 0
 
@@ -294,8 +296,9 @@ to:   blueprint f714e6ea-e85a-4d7d-93c2-a018744fe176
     cluster.preserve_downgrade_option:   (do not modify) (unchanged)
 
  METADATA:
-    internal DNS version:   1 (unchanged)
-    external DNS version:   1 (unchanged)
+    internal DNS version:::   1 (unchanged)
+    external DNS version:::   1 (unchanged)
+    target release min gen:   1 (unchanged)
 
  OXIMETER SETTINGS:
     generation:   1 (unchanged)
@@ -480,11 +483,12 @@ parent:    bb128f06-a2e1-44c1-8874-4f789d0ff896
     read from::   SingleNode
 
  METADATA:
-    created by:::::::::::   reconfigurator-cli
-    created at:::::::::::   <REDACTED_TIMESTAMP>
-    comment::::::::::::::   (none)
-    internal DNS version:   1
-    external DNS version:   1
+    created by:::::::::::::   reconfigurator-cli
+    created at:::::::::::::   <REDACTED_TIMESTAMP>
+    comment::::::::::::::::   (none)
+    internal DNS version:::   1
+    external DNS version:::   1
+    target release min gen:   1
 
  PENDING MGS-MANAGED UPDATES: 0
 
@@ -575,8 +579,9 @@ to:   blueprint d9c572a1-a68c-4945-b1ec-5389bd588fe9
     cluster.preserve_downgrade_option:   (do not modify) (unchanged)
 
  METADATA:
-    internal DNS version:   1 (unchanged)
-    external DNS version:   1 (unchanged)
+    internal DNS version:::   1 (unchanged)
+    external DNS version:::   1 (unchanged)
+    target release min gen:   1 (unchanged)
 
  OXIMETER SETTINGS:
     generation:   1 (unchanged)
@@ -673,15 +678,27 @@ edit contents of a blueprint directly
 Usage: blueprint-edit [OPTIONS] <BLUEPRINT_ID> <COMMAND>
 
 Commands:
-  add-nexus                    add a Nexus instance to a particular sled
-  add-cockroach                add a CockroachDB instance to a particular sled
-  set-zone-image               set the image source for a zone
-  set-remove-mupdate-override  set the remove_mupdate_override field for a sled
-  expunge-zone                 expunge a zone
-  set-sp-update                configure an SP update
-  delete-sp-update             delete a configured SP update
-  debug                        debug commands that bypass normal checks
-  help                         Print this message or the help of the given subcommand(s)
+  add-nexus
+          add a Nexus instance to a particular sled
+  add-cockroach
+          add a CockroachDB instance to a particular sled
+  set-zone-image
+          set the image source for a zone
+  set-remove-mupdate-override
+          set the remove_mupdate_override field for a sled
+  set-target-release-minimum-generation
+          set the minimum generation for which target releases are accepted [aliases:
+          set-target-release-min-gen]
+  expunge-zone
+          expunge a zone
+  set-sp-update
+          configure an SP update
+  delete-sp-update
+          delete a configured SP update
+  debug
+          debug commands that bypass normal checks
+  help
+          Print this message or the help of the given subcommand(s)
 
 Arguments:
   <BLUEPRINT_ID>  id of the blueprint to edit, "latest", or "target"
