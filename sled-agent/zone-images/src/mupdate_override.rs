@@ -133,7 +133,7 @@ impl AllMupdateOverrides {
 
     pub(crate) fn status(&self) -> MupdateOverrideStatus {
         MupdateOverrideStatus {
-            boot_zpool: self.boot_zpool.clone(),
+            boot_zpool: self.boot_zpool,
             boot_disk_path: self.boot_disk_path.clone(),
             boot_disk_override: self.boot_disk_override.clone(),
             non_boot_disk_overrides: self.non_boot_disk_overrides.clone(),
@@ -489,16 +489,18 @@ impl MupdateOverrideArtifactsResult {
         Self { info, data: artifacts.into_iter().collect() }
     }
 
-    fn is_valid(&self) -> bool {
+    /// Returns true if all artifacts are valid.
+    pub fn is_valid(&self) -> bool {
         self.data.iter().all(|artifact| artifact.is_valid())
     }
 
-    fn display(&self) -> MupdateOverrideArtifactsDisplay<'_> {
+    /// Returns a displayable representation of the artifacts.
+    pub fn display(&self) -> MupdateOverrideArtifactsDisplay<'_> {
         MupdateOverrideArtifactsDisplay { artifacts: &self.data }
     }
 }
 
-struct MupdateOverrideArtifactsDisplay<'a> {
+pub struct MupdateOverrideArtifactsDisplay<'a> {
     artifacts: &'a IdOrdMap<MupdateOverrideArtifactResult>,
 }
 
