@@ -62,6 +62,7 @@ impl<'a> BlueprintDiffSummary<'a> {
             sleds,
             pending_mgs_updates,
             clickhouse_cluster_config,
+            target_release_minimum_generation,
             // Metadata fields for which changes don't reflect semantic
             // changes from one blueprint to the next.
             id: _,
@@ -99,6 +100,13 @@ impl<'a> BlueprintDiffSummary<'a> {
 
         // Did oximeter read policy change?
         if oximeter_read_mode.before != oximeter_read_mode.after {
+            return true;
+        }
+
+        // Did the target release minimum generation change?
+        if target_release_minimum_generation.before
+            != target_release_minimum_generation.after
+        {
             return true;
         }
 
@@ -1762,6 +1770,10 @@ impl<'diff> BlueprintDiffDisplay<'diff> {
                 vec![
                     diff_row!(internal_dns_version, INTERNAL_DNS_VERSION),
                     diff_row!(external_dns_version, EXTERNAL_DNS_VERSION),
+                    diff_row!(
+                        target_release_minimum_generation,
+                        TARGET_RELEASE_MIN_GEN
+                    ),
                 ],
             ),
         ]
@@ -1906,7 +1918,14 @@ impl fmt::Display for BlueprintDiffDisplay<'_> {
 
                 let mut rows = Vec::new();
                 if let Some(id) = sled.remove_mupdate_override {
-                    rows.push((WILL_REMOVE_MUPDATE_OVERRIDE, id.to_string()));
+                    // For unchanged sleds, the tense of "will remove mupdate
+                    // override" can be a bit confusing because it doesn't
+                    // indicate that the value of this field has not changed.
+                    // Add an "(unchanged)" at the end.
+                    rows.push((
+                        WILL_REMOVE_MUPDATE_OVERRIDE,
+                        format!("{id} {UNCHANGED_PARENS}"),
+                    ));
                 }
                 let list = KvList::new_unchanged(None, rows);
                 writeln!(f, "{list}")?;
