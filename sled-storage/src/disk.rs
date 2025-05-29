@@ -205,30 +205,30 @@ impl RawDisk {
         !self.is_synthetic()
     }
 
-    pub fn u2_zpool_path(&self) -> Result<Utf8PathBuf, PooledDiskError> {
-        if !matches!(self.variant(), DiskVariant::U2) {
-            return Err(PooledDiskError::UnexpectedVariant);
-        }
-        match self {
-            Self::Real(disk) => {
-                let paths = disk.paths();
-                // This is hard-coded to be "0", but that's because we aren't
-                // really parsing the whole partition table before considering
-                // where this would be see.
-                paths
-                    .partition_path(0, false)
-                    .ok_or_else(|| PooledDiskError::ZpoolDoesNotExist)
-            }
-            Self::Synthetic(raw) => Ok(raw.path.clone()),
-        }
-    }
+    // pub fn u2_zpool_path(&self) -> Result<Utf8PathBuf, PooledDiskError> {
+    //     if !matches!(self.variant(), DiskVariant::U2) {
+    //         return Err(PooledDiskError::UnexpectedVariant);
+    //     }
+    //     match self {
+    //         Self::Real(disk) => {
+    //             let paths = disk.paths();
+    //             // This is hard-coded to be "0", but that's because we aren't
+    //             // really parsing the whole partition table before considering
+    //             // where this would be see.
+    //             paths
+    //                 .partition_path(0, false)
+    //                 .ok_or_else(|| PooledDiskError::ZpoolDoesNotExist)
+    //         }
+    //         Self::Synthetic(raw) => Ok(raw.path.clone()),
+    //     }
+    // }
 
-    pub fn devfs_path(&self) -> &Utf8PathBuf {
-        match self {
-            Self::Real(disk) => disk.devfs_path(),
-            Self::Synthetic(_) => unreachable!(),
-        }
-    }
+    // pub fn devfs_path(&self) -> &Utf8PathBuf {
+    //     match self {
+    //         Self::Real(disk) => disk.devfs_path(),
+    //         Self::Synthetic(_) => unreachable!(),
+    //     }
+    // }
 
     pub fn slot(&self) -> i64 {
         match self {
@@ -409,8 +409,7 @@ impl From<Disk> for RawDisk {
     fn from(disk: Disk) -> RawDisk {
         match disk {
             Disk::Real(pooled_disk) => RawDisk::Real(UnparsedDisk::new(
-                pooled_disk.paths.devfs_path,
-                pooled_disk.paths.dev_path,
+                pooled_disk.nvme_instance,
                 pooled_disk.slot,
                 pooled_disk.variant,
                 pooled_disk.identity,
