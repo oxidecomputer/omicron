@@ -1846,7 +1846,7 @@ pub enum VpcFirewallRuleProtocol {
 }
 
 impl FromStr for VpcFirewallRuleProtocol {
-    type Err = String;
+    type Err = Error;
 
     fn from_str(proto: &str) -> Result<Self, Self::Err> {
         let (ty_str, content_str) = match proto.split_once(':') {
@@ -1854,14 +1854,21 @@ impl FromStr for VpcFirewallRuleProtocol {
             Some((lhs, rhs)) => (lhs, Some(rhs)),
         };
 
-        match (ty_str.to_lowercase().as_str(), content_str) {
-            ("tcp", None) => Ok(Self::Tcp),
-            ("udp", None) => Ok(Self::Udp),
-            ("icmp", None) => Ok(Self::Icmp(None)),
-            ("icmp", Some(rhs)) => Ok(Self::Icmp(Some(rhs.parse()?))),
-            (lhs, None) => Err(format!("unrecognized protocol \"{lhs}\"")),
-            (lhs, Some(_)) => Err(format!(
-                "cannot specify extra filters for protocol \"{lhs}\""
+        match (ty_str, content_str) {
+            (lhs, None) if lhs.eq_ignore_ascii_case("tcp") => Ok(Self::Tcp),
+            (lhs, None) if lhs.eq_ignore_ascii_case("udp") => Ok(Self::Udp),
+            (lhs, None) if lhs.eq_ignore_ascii_case("icmp") => {
+                Ok(Self::Icmp(None))
+            }
+            (lhs, Some(rhs)) if lhs.eq_ignore_ascii_case("icmp") => {
+                Ok(Self::Icmp(Some(rhs.parse()?)))
+            }
+            (lhs, None) => {
+                Err(Error::invalid_value(lhs, "unrecognized protocol"))
+            }
+            (lhs, Some(rhs)) => Err(Error::invalid_value(
+                rhs,
+                format!("cannot specify extra filters for protocol \"{lhs}\""),
             )),
         }
     }
@@ -1903,7 +1910,7 @@ impl Display for VpcFirewallIcmpFilter {
 }
 
 impl FromStr for VpcFirewallIcmpFilter {
-    type Err = String;
+    type Err = Error;
 
     fn from_str(filter: &str) -> Result<Self, Self::Err> {
         let (ty_str, code_str) = match filter.split_once(',') {
@@ -1912,8 +1919,15 @@ impl FromStr for VpcFirewallIcmpFilter {
         };
 
         Ok(Self {
-            icmp_type: ty_str.parse::<u8>().map_err(|e| e.to_string())?,
-            code: code_str.map(|v| v.parse()).transpose()?,
+            icmp_type: ty_str
+                .parse::<u8>()
+                .map_err(|e| Error::invalid_value(ty_str, e.to_string()))?,
+            code: code_str
+                .map(|v| {
+                    v.parse::<IcmpParamRange>()
+                        .map_err(|e| Error::invalid_value(v, e.to_string()))
+                })
+                .transpose()?,
         })
     }
 }
@@ -2064,7 +2078,7 @@ pub struct L4PortRange {
 }
 
 impl FromStr for L4PortRange {
-    type Err = &'static str;
+    type Err = Error;
     fn from_str(range: &str) -> Result<Self, Self::Err> {
         const INVALID_PORT_NUMBER_MSG: &str = "invalid port number";
 
@@ -2072,18 +2086,33 @@ impl FromStr for L4PortRange {
             None => {
                 let port = range
                     .parse::<NonZeroU16>()
-                    .map_err(|_| INVALID_PORT_NUMBER_MSG)?
+                    .map_err(|e| {
+                        Error::invalid_value(
+                            range,
+                            format!("{INVALID_PORT_NUMBER_MSG}: {e}"),
+                        )
+                    })?
                     .into();
                 Ok(L4PortRange { first: port, last: port })
             }
             Some((left, right)) => {
                 let first = left
                     .parse::<NonZeroU16>()
-                    .map_err(|_| INVALID_PORT_NUMBER_MSG)?
+                    .map_err(|e| {
+                        Error::invalid_value(
+                            left,
+                            format!("{INVALID_PORT_NUMBER_MSG}: {e}"),
+                        )
+                    })?
                     .into();
                 let last = right
                     .parse::<NonZeroU16>()
-                    .map_err(|_| INVALID_PORT_NUMBER_MSG)?
+                    .map_err(|e| {
+                        Error::invalid_value(
+                            right,
+                            format!("{INVALID_PORT_NUMBER_MSG}: {e}"),
+                        )
+                    })?
                     .into();
                 Ok(L4PortRange { first, last })
             }
@@ -2168,21 +2197,33 @@ pub struct IcmpParamRange {
 }
 
 impl FromStr for IcmpParamRange {
-    type Err = &'static str;
+    type Err = Error;
     fn from_str(range: &str) -> Result<Self, Self::Err> {
         const INVALID_NUMBER_MSG: &str = "invalid 8-bit number";
 
         match range.split_once('-') {
             None => {
-                let port =
-                    range.parse::<u8>().map_err(|_| INVALID_NUMBER_MSG)?;
-                Ok(IcmpParamRange { first: port, last: port })
+                let param = range.parse::<u8>().map_err(|e| {
+                    Error::invalid_value(
+                        range,
+                        format!("{INVALID_NUMBER_MSG}: {e}"),
+                    )
+                })?;
+                Ok(IcmpParamRange { first: param, last: param })
             }
             Some((left, right)) => {
-                let first =
-                    left.parse::<u8>().map_err(|_| INVALID_NUMBER_MSG)?;
-                let last =
-                    right.parse::<u8>().map_err(|_| INVALID_NUMBER_MSG)?;
+                let first = left.parse::<u8>().map_err(|e| {
+                    Error::invalid_value(
+                        left,
+                        format!("{INVALID_NUMBER_MSG}: {e}"),
+                    )
+                })?;
+                let last = right.parse::<u8>().map_err(|e| {
+                    Error::invalid_value(
+                        right,
+                        format!("{INVALID_NUMBER_MSG}: {e}"),
+                    )
+                })?;
                 Ok(IcmpParamRange { first, last })
             }
         }
@@ -3834,31 +3875,52 @@ mod test {
 
         assert_eq!(
             L4PortRange::try_from("".to_string()),
-            Err("invalid port number")
+            Err(Error::invalid_value(
+                "",
+                "invalid port number: cannot parse integer from empty string"
+            ))
         );
         assert_eq!(
             L4PortRange::try_from("65536".to_string()),
-            Err("invalid port number")
+            Err(Error::invalid_value(
+                "65536",
+                "invalid port number: number too large to fit in target type"
+            ))
         );
         assert_eq!(
             L4PortRange::try_from("65535-65536".to_string()),
-            Err("invalid port number")
+            Err(Error::invalid_value(
+                "65536",
+                "invalid port number: number too large to fit in target type"
+            ))
         );
         assert_eq!(
             L4PortRange::try_from("0x23".to_string()),
-            Err("invalid port number")
+            Err(Error::invalid_value(
+                "0x23",
+                "invalid port number: invalid digit found in string"
+            ))
         );
         assert_eq!(
             L4PortRange::try_from("0".to_string()),
-            Err("invalid port number")
+            Err(Error::invalid_value(
+                "0",
+                "invalid port number: number would be zero for non-zero type"
+            ))
         );
         assert_eq!(
             L4PortRange::try_from("0-20".to_string()),
-            Err("invalid port number")
+            Err(Error::invalid_value(
+                "0",
+                "invalid port number: number would be zero for non-zero type"
+            ))
         );
         assert_eq!(
             L4PortRange::try_from("-20".to_string()),
-            Err("invalid port number")
+            Err(Error::invalid_value(
+                "",
+                "invalid port number: cannot parse integer from empty string"
+            ))
         );
     }
 
