@@ -3155,28 +3155,28 @@ pub trait NexusExternalApi {
         path_params: Path<params::SshKeyPath>,
     ) -> Result<HttpResponseDeleted, HttpError>;
 
-    /// List device access tokens
+    /// List device tokens
     ///
     /// List device access tokens for the currently authenticated user.
     #[endpoint {
         method = GET,
-        path = "/v1/me/tokens",
+        path = "/v1/me/device-tokens",
         tags = ["tokens"],
     }]
-    async fn current_user_token_list(
+    async fn current_user_device_token_list(
         rqctx: RequestContext<Self::Context>,
         query_params: Query<PaginatedById>,
     ) -> Result<HttpResponseOk<ResultsPage<views::DeviceAccessToken>>, HttpError>;
 
-    /// Delete device access token
+    /// Delete device token
     ///
     /// Delete a device access token for the currently authenticated user.
     #[endpoint {
         method = DELETE,
-        path = "/v1/me/tokens/{token_id}",
+        path = "/v1/me/device-tokens/{token_id}",
         tags = ["tokens"],
     }]
-    async fn current_user_token_delete(
+    async fn current_user_device_token_delete(
         rqctx: RequestContext<Self::Context>,
         path_params: Path<params::TokenPath>,
     ) -> Result<HttpResponseDeleted, HttpError>;

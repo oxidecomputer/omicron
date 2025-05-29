@@ -209,7 +209,7 @@ async fn test_device_auth_flow(cptestctx: &ControlPlaneTestContext) {
 
     // Test that privileged user cannot delete unpriv's token through this
     // endpoint, though it will probably be able to do it via a different one
-    let token_url = format!("/v1/me/tokens/{}", token_id);
+    let token_url = format!("/v1/me/device-tokens/{}", token_id);
     NexusRequest::new(
         RequestBuilder::new(testctx, Method::DELETE, &token_url)
             .expect_status(Some(StatusCode::NOT_FOUND)),
@@ -442,7 +442,7 @@ async fn test_device_token_expiration(cptestctx: &ControlPlaneTestContext) {
 async fn get_tokens_priv(
     testctx: &ClientTestContext,
 ) -> Vec<views::DeviceAccessToken> {
-    NexusRequest::object_get(testctx, "/v1/me/tokens")
+    NexusRequest::object_get(testctx, "/v1/me/device-tokens")
         .authn_as(AuthnMode::PrivilegedUser)
         .execute_and_parse_unwrap::<ResultsPage<views::DeviceAccessToken>>()
         .await
@@ -452,7 +452,7 @@ async fn get_tokens_priv(
 async fn get_tokens_unpriv(
     testctx: &ClientTestContext,
 ) -> Vec<views::DeviceAccessToken> {
-    NexusRequest::object_get(testctx, "/v1/me/tokens")
+    NexusRequest::object_get(testctx, "/v1/me/device-tokens")
         .authn_as(AuthnMode::UnprivilegedUser)
         .execute_and_parse_unwrap::<ResultsPage<views::DeviceAccessToken>>()
         .await
