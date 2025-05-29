@@ -278,13 +278,34 @@ async fn test_device_token_expiration(cptestctx: &ControlPlaneTestContext) {
         let msg = "unable to parse JSON body: device_token_max_ttl_seconds: invalid value";
         assert!(error.message.starts_with(&msg));
     }
+    for value in [-3, 0] {
+        let error = object_put_error(
+            testctx,
+            "/v1/settings",
+            &serde_json::json!({ "device_token_max_ttl_seconds": value }),
+            StatusCode::BAD_REQUEST,
+        )
+        .await;
+        let msg = "unable to parse JSON body: device_token_max_ttl_seconds: invalid value";
+        assert!(error.message.starts_with(&msg));
+    }
+
+    // omitting the key is also a 400
+    let error = object_put_error(
+        testctx,
+        "/v1/settings",
+        &serde_json::json!({}),
+        StatusCode::BAD_REQUEST,
+    )
+    .await;
+    assert!(error.message.starts_with("unable to parse JSON body: missing field `device_token_max_ttl_seconds`"));
 
     // set token expiration on silo to 3 seconds
     let settings: views::SiloSettings = object_put(
         testctx,
         "/v1/settings",
         &params::SiloSettingsUpdate {
-            device_token_max_ttl_seconds: NonZeroU32::new(3),
+            device_token_max_ttl_seconds: NonZeroU32::new(3).into(),
         },
     )
     .await;
@@ -316,6 +337,21 @@ async fn test_device_token_expiration(cptestctx: &ControlPlaneTestContext) {
     project_list(&testctx, &initial_token, StatusCode::OK)
         .await
         .expect("initial token should still work");
+
+    // now test setting the silo max TTL back to null
+    let settings: views::SiloSettings = object_put(
+        testctx,
+        "/v1/settings",
+        &params::SiloSettingsUpdate {
+            device_token_max_ttl_seconds: None.into(),
+        },
+    )
+    .await;
+    assert_eq!(settings.device_token_max_ttl_seconds, None);
+
+    let settings: views::SiloSettings =
+        object_get(testctx, "/v1/settings").await;
+    assert_eq!(settings.device_token_max_ttl_seconds, None);
 }
 
 async fn project_list(

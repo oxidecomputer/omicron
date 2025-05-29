@@ -34,6 +34,7 @@ use omicron_common::api::external::IdentityMetadataUpdateParams;
 use omicron_common::api::external::InstanceCpuCount;
 use omicron_common::api::external::Name;
 use omicron_common::api::external::NameOrId;
+use omicron_common::api::external::Nullable;
 use omicron_common::api::external::RouteDestination;
 use omicron_common::api::external::RouteTarget;
 use omicron_common::api::external::UserId;
@@ -1641,7 +1642,9 @@ pub static VERIFY_ENDPOINTS: LazyLock<Vec<VerifyEndpoint>> =
                     AllowedMethod::Get,
                     AllowedMethod::Put(
                         serde_json::to_value(&params::SiloSettingsUpdate {
-                            device_token_max_ttl_seconds: NonZeroU32::new(3),
+                            device_token_max_ttl_seconds: Nullable(
+                                NonZeroU32::new(3),
+                            ),
                         })
                         .unwrap(),
                     ),
