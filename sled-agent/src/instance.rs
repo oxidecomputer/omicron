@@ -38,6 +38,7 @@ use rand::SeedableRng;
 use rand::prelude::IteratorRandom;
 use sled_agent_types::instance::*;
 use sled_agent_types::zone_bundle::ZoneBundleCause;
+use sled_agent_zone_images::ramdisk_file_source;
 use sled_storage::dataset::ZONE_DATASET;
 use sled_storage::manager::StorageHandle;
 use slog::Logger;
@@ -2007,7 +2008,7 @@ impl InstanceRunner {
             .with_log(self.log.clone())
             .with_underlay_vnic_allocator(&self.vnic_allocator)
             .with_zone_root_path(root)
-            .with_zone_image_paths(&["/opt/oxide".into()])
+            .with_file_source(&ramdisk_file_source("propolis-server"))
             .with_zone_type("propolis-server")
             .with_unique_name(OmicronZoneUuid::from_untyped_uuid(
                 self.propolis_id.into_untyped_uuid(),
