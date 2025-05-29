@@ -5,6 +5,7 @@
 //! Zone image lookup.
 
 use crate::AllMupdateOverrides;
+use crate::MupdateOverrideStatus;
 use camino::Utf8Path;
 use camino::Utf8PathBuf;
 use illumos_utils::zpool::ZpoolName;
@@ -70,6 +71,12 @@ impl ZoneImageSourceResolver {
         self.inner.lock().unwrap().override_image_directory(path);
     }
 
+    /// Returns current information about resolver status and health.
+    pub fn status(&self) -> ResolverStatus {
+        let inner = self.inner.lock().unwrap();
+        ResolverStatus { mupdate_override: inner.mupdate_overrides.status() }
+    }
+
     /// Returns a [`ZoneImageFileSource`] consisting of the file name, plus a
     /// list of potential paths to search, for a zone image.
     pub fn file_source_for(
@@ -83,6 +90,13 @@ impl ZoneImageSourceResolver {
     }
 }
 
+/// Current status of the zone image resolver.
+#[derive(Clone, Debug)]
+pub struct ResolverStatus {
+    /// The mupdate override status.
+    pub mupdate_override: MupdateOverrideStatus,
+}
+
 #[derive(Debug)]
 struct ResolverInner {
     #[expect(unused)]
@@ -90,9 +104,6 @@ struct ResolverInner {
     image_directory_override: Option<Utf8PathBuf>,
     // Store all collected information for mupdate overrides -- we're going to
     // need to report this via inventory.
-    //
-    // This isn't actually used yet.
-    #[expect(unused)]
     mupdate_overrides: AllMupdateOverrides,
 }
 
