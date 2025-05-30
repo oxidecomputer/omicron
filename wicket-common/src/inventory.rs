@@ -5,10 +5,10 @@
 // Re-export these types from gateway_client, so that users are oblivious to
 // where these types come from.
 pub use gateway_client::types::{
-    RotSlot, RotState, SpComponentCaboose, SpComponentInfo,
-    SpComponentPresence, SpIdentifier, SpIgnition, SpIgnitionSystemType,
-    SpState, SpType,
+    RotState, SpComponentCaboose, SpComponentInfo, SpComponentPresence,
+    SpIdentifier, SpIgnition, SpIgnitionSystemType, SpState, SpType,
 };
+pub use gateway_types::rot::RotSlot;
 use omicron_common::api::external::SwitchLocation;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};

@@ -977,6 +977,8 @@ pub enum ResourceType {
     AffinityGroupMember,
     AntiAffinityGroup,
     AntiAffinityGroupMember,
+    Alert,
+    AlertReceiver,
     AllowList,
     BackgroundTask,
     BgpConfig,
@@ -1040,8 +1042,6 @@ pub enum ResourceType {
     Probe,
     ProbeNetworkInterface,
     LldpLinkConfig,
-    WebhookEvent,
-    WebhookReceiver,
     WebhookSecret,
 }
 
@@ -1789,6 +1789,7 @@ pub struct VpcFirewallRuleUpdate {
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
 pub struct VpcFirewallRuleUpdateParams {
     #[schemars(length(max = 1024))]
+    #[serde(default)]
     pub rules: Vec<VpcFirewallRuleUpdate>,
 }
 

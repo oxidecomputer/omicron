@@ -1,4 +1,5 @@
 # This is a legacy test; new tests shouldn't need to set a seed
+
 set seed test_basic
 sled-list
 inventory-list

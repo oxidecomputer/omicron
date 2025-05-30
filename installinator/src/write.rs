@@ -750,7 +750,7 @@ impl ControlPlaneZoneWriteContext<'_> {
                     std::mem::drop(output_directory);
 
                     if let Some(zpool) = zpool {
-                        Zpool::export(zpool)?;
+                        Zpool::export(zpool).await?;
                     }
 
                     StepSuccess::new(()).into()

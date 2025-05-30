@@ -19,6 +19,7 @@ use nexus_db_queries::db::identity::{Asset, Resource};
 use nexus_test_utils::http_testing::{
     AuthnMode, NexusRequest, RequestBuilder, TestResponse,
 };
+use nexus_test_utils::resource_helpers::test_params;
 use nexus_test_utils::resource_helpers::{
     create_silo, grant_iam, object_create,
 };
@@ -26,9 +27,7 @@ use nexus_test_utils::{
     TEST_SUITE_PASSWORD, load_test_config, test_setup_with_config,
 };
 use nexus_test_utils_macros::nexus_test;
-use nexus_types::external_api::params::{
-    self, ProjectCreate, UsernamePasswordCredentials,
-};
+use nexus_types::external_api::params::{self, ProjectCreate};
 use nexus_types::external_api::shared::{SiloIdentityMode, SiloRole};
 use nexus_types::external_api::{shared, views};
 use omicron_common::api::external::IdentityMetadataCreateParams;
@@ -878,9 +877,9 @@ async fn log_in_and_extract_token(
 ) -> String {
     let testctx = &cptestctx.external_client;
     let url = format!("/v1/login/{}/local", cptestctx.silo_name);
-    let credentials = UsernamePasswordCredentials {
+    let credentials = test_params::UsernamePasswordCredentials {
         username: cptestctx.user_name.as_ref().parse().unwrap(),
-        password: TEST_SUITE_PASSWORD.parse().unwrap(),
+        password: TEST_SUITE_PASSWORD.to_string(),
     };
     let login = RequestBuilder::new(&testctx, Method::POST, &url)
         .body(Some(&credentials))

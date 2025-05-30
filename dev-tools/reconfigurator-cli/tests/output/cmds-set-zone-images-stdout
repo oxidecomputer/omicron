@@ -1,6 +1,5 @@
 using provided RNG seed: reconfigurator-cli-test
 > # Load example system
-
 > # This is a legacy test; new tests shouldn't need to set a seed
 
 > load-example --nsleds 1 --ndisks-per-sled 3 --seed test_set_zone_images
@@ -103,19 +102,16 @@ parent:    1b013011-2062-4b48-b544-a32b23bce83a
  PENDING MGS-MANAGED UPDATES: 0
 
 
-> 
 
 > # Set a couple zones' image sources to specific artifacts.
-
-> blueprint-edit 971eeb12-1830-4fa0-a699-98ea0164505c set-zone-image 026f8db9-b966-45ec-bf89-fb7b41a04cc9 artifact 1.2.3 e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855
-blueprint 9766ca20-38d4-4380-b005-e7c43c797e7c created from blueprint 971eeb12-1830-4fa0-a699-98ea0164505c: set sled 868d5b02-7792-4fc0-b6a9-654afcae9ea0 zone 026f8db9-b966-45ec-bf89-fb7b41a04cc9 image source to artifact: version 1.2.3
+> blueprint-edit latest set-zone-image 026f8db9-b966-45ec-bf89-fb7b41a04cc9 artifact 1.2.3 e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855
+blueprint 9766ca20-38d4-4380-b005-e7c43c797e7c created from latest blueprint (971eeb12-1830-4fa0-a699-98ea0164505c): set sled 868d5b02-7792-4fc0-b6a9-654afcae9ea0 zone 026f8db9-b966-45ec-bf89-fb7b41a04cc9 image source to artifact: version 1.2.3
 warn: no validation is done on the requested image source
 
-> blueprint-edit 9766ca20-38d4-4380-b005-e7c43c797e7c set-zone-image 72d12821-646d-4296-a081-ef5fb3a0ca24 artifact valid-non-semver 7b4281a6bd5946bb96b332c62afe289bef275e58b9ba031085f8827655f434b3
-blueprint f714e6ea-e85a-4d7d-93c2-a018744fe176 created from blueprint 9766ca20-38d4-4380-b005-e7c43c797e7c: set sled 868d5b02-7792-4fc0-b6a9-654afcae9ea0 zone 72d12821-646d-4296-a081-ef5fb3a0ca24 image source to artifact: version valid-non-semver
+> blueprint-edit latest set-zone-image 72d12821-646d-4296-a081-ef5fb3a0ca24 artifact valid-non-semver 7b4281a6bd5946bb96b332c62afe289bef275e58b9ba031085f8827655f434b3
+blueprint f714e6ea-e85a-4d7d-93c2-a018744fe176 created from latest blueprint (9766ca20-38d4-4380-b005-e7c43c797e7c): set sled 868d5b02-7792-4fc0-b6a9-654afcae9ea0 zone 72d12821-646d-4296-a081-ef5fb3a0ca24 image source to artifact: version valid-non-semver
 warn: no validation is done on the requested image source
 
-> 
 
 > blueprint-show f714e6ea-e85a-4d7d-93c2-a018744fe176
 blueprint  f714e6ea-e85a-4d7d-93c2-a018744fe176
@@ -388,16 +384,14 @@ external DNS:
 
 
 
-> 
 
 > # Set these zones' image sources back to the install dataset.
-
-> blueprint-edit f714e6ea-e85a-4d7d-93c2-a018744fe176 set-zone-image 026f8db9-b966-45ec-bf89-fb7b41a04cc9 install-dataset
-blueprint bb128f06-a2e1-44c1-8874-4f789d0ff896 created from blueprint f714e6ea-e85a-4d7d-93c2-a018744fe176: set sled 868d5b02-7792-4fc0-b6a9-654afcae9ea0 zone 026f8db9-b966-45ec-bf89-fb7b41a04cc9 image source to install dataset
+> blueprint-edit latest set-zone-image 026f8db9-b966-45ec-bf89-fb7b41a04cc9 install-dataset
+blueprint bb128f06-a2e1-44c1-8874-4f789d0ff896 created from latest blueprint (f714e6ea-e85a-4d7d-93c2-a018744fe176): set sled 868d5b02-7792-4fc0-b6a9-654afcae9ea0 zone 026f8db9-b966-45ec-bf89-fb7b41a04cc9 image source to install dataset
 warn: no validation is done on the requested image source
 
-> blueprint-edit bb128f06-a2e1-44c1-8874-4f789d0ff896 set-zone-image 72d12821-646d-4296-a081-ef5fb3a0ca24 install-dataset
-blueprint d9c572a1-a68c-4945-b1ec-5389bd588fe9 created from blueprint bb128f06-a2e1-44c1-8874-4f789d0ff896: set sled 868d5b02-7792-4fc0-b6a9-654afcae9ea0 zone 72d12821-646d-4296-a081-ef5fb3a0ca24 image source to install dataset
+> blueprint-edit latest set-zone-image 72d12821-646d-4296-a081-ef5fb3a0ca24 install-dataset
+blueprint d9c572a1-a68c-4945-b1ec-5389bd588fe9 created from latest blueprint (bb128f06-a2e1-44c1-8874-4f789d0ff896): set sled 868d5b02-7792-4fc0-b6a9-654afcae9ea0 zone 72d12821-646d-4296-a081-ef5fb3a0ca24 image source to install dataset
 warn: no validation is done on the requested image source
 
 > blueprint-show d9c572a1-a68c-4945-b1ec-5389bd588fe9
@@ -671,33 +665,33 @@ external DNS:
 
 
 
-> 
 
 > # test help output
-
-> blueprint-edit d9c572a1-a68c-4945-b1ec-5389bd588fe9 help
+> blueprint-edit latest help
 edit contents of a blueprint directly
 
 Usage: blueprint-edit [OPTIONS] <BLUEPRINT_ID> <COMMAND>
 
 Commands:
-  add-nexus         add a Nexus instance to a particular sled
-  add-cockroach     add a CockroachDB instance to a particular sled
-  set-zone-image    set the image source for a zone
-  expunge-zone      expunge a zone
-  set-sp-update     configure an SP update
-  delete-sp-update  delete a configured SP update
-  help              Print this message or the help of the given subcommand(s)
+  add-nexus                    add a Nexus instance to a particular sled
+  add-cockroach                add a CockroachDB instance to a particular sled
+  set-zone-image               set the image source for a zone
+  set-remove-mupdate-override  set the remove_mupdate_override field for a sled
+  expunge-zone                 expunge a zone
+  set-sp-update                configure an SP update
+  delete-sp-update             delete a configured SP update
+  debug                        debug commands that bypass normal checks
+  help                         Print this message or the help of the given subcommand(s)
 
 Arguments:
-  <BLUEPRINT_ID>  id of the blueprint to edit
+  <BLUEPRINT_ID>  id of the blueprint to edit, "latest", or "target"
 
 Options:
       --creator <CREATOR>  "creator" field for the new blueprint
       --comment <COMMENT>  "comment" field for the new blueprint
   -h, --help               Print help
 
-> blueprint-edit d9c572a1-a68c-4945-b1ec-5389bd588fe9 set-zone-image help
+> blueprint-edit latest set-zone-image help
 set the image source for a zone
 
 Usage: blueprint-edit <BLUEPRINT_ID> set-zone-image <ZONE_ID> <COMMAND>
@@ -713,18 +707,14 @@ Arguments:
 Options:
   -h, --help  Print help
 
-> 
 
 > # test error case: no such zone id
-
-> blueprint-edit d9c572a1-a68c-4945-b1ec-5389bd588fe9 set-zone-image 126f8db9-b966-45ec-bf89-fb7b41a04cc9 install-dataset
+> blueprint-edit latest set-zone-image 126f8db9-b966-45ec-bf89-fb7b41a04cc9 install-dataset
 error: could not find parent sled for zone 126f8db9-b966-45ec-bf89-fb7b41a04cc9
 
 > # test error case: invalid version identifier
-
-> blueprint-edit d9c572a1-a68c-4945-b1ec-5389bd588fe9 set-zone-image 026f8db9-b966-45ec-bf89-fb7b41a04cc9 artifact 🫡 5d835e8666bd5cf65be66efbca6847b24e41fd85993448a211ad7be5fea559ab
+> blueprint-edit latest set-zone-image 026f8db9-b966-45ec-bf89-fb7b41a04cc9 artifact 🫡 5d835e8666bd5cf65be66efbca6847b24e41fd85993448a211ad7be5fea559ab
 
 > # test error case: bad hash
-
-> blueprint-edit d9c572a1-a68c-4945-b1ec-5389bd588fe9 set-zone-image 026f8db9-b966-45ec-bf89-fb7b41a04cc9 artifact 1.2.3 aaaa
+> blueprint-edit latest set-zone-image 026f8db9-b966-45ec-bf89-fb7b41a04cc9 artifact 1.2.3 aaaa
 

@@ -394,11 +394,45 @@ pub async fn create_silo(
     .await
 }
 
+/// This contains slight variations of Nexus external API types that are to be
+/// used for testing purposes only. These new types are needed because we want
+/// special protections for how passwords are handled in the Nexus server,
+/// including protections against user passwords accidentally becoming
+/// serialized.
+pub mod test_params {
+    /// Testing only version of the the create-time parameters for a `User`
+    #[derive(Clone, serde::Serialize)]
+    pub struct UserCreate {
+        /// username used to log in
+        pub external_id: super::UserId,
+        /// how to set the user's login password
+        pub password: UserPassword,
+    }
+
+    /// Testing only version of parameters for setting a user's password
+    #[derive(Clone, serde::Serialize)]
+    #[serde(rename_all = "snake_case")]
+    #[serde(tag = "mode", content = "value")]
+    pub enum UserPassword {
+        /// Sets the user's password to the provided value
+        Password(String),
+        /// Invalidates any current password (disabling password authentication)
+        LoginDisallowed,
+    }
+
+    /// Testing only credentials for local user login
+    #[derive(Clone, serde::Serialize)]
+    pub struct UsernamePasswordCredentials {
+        pub username: super::UserId,
+        pub password: String,
+    }
+}
+
 pub async fn create_local_user(
     client: &ClientTestContext,
     silo: &views::Silo,
     username: &UserId,
-    password: params::UserPassword,
+    password: test_params::UserPassword,
 ) -> User {
     let silo_name = &silo.identity.name;
     let url =
@@ -406,7 +440,7 @@ pub async fn create_local_user(
     object_create(
         client,
         &url,
-        &params::UserCreate { external_id: username.to_owned(), password },
+        &test_params::UserCreate { external_id: username.to_owned(), password },
     )
     .await
 }

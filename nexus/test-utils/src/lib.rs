@@ -933,6 +933,7 @@ impl<'a, N: NexusServer> ControlPlaneTestContextBuilder<'a, N> {
                         disks,
                         datasets,
                         zones,
+                        remove_mupdate_override: None,
                     },
                 );
             }
@@ -1097,6 +1098,7 @@ impl<'a, N: NexusServer> ControlPlaneTestContextBuilder<'a, N> {
                     .into_iter()
                     .map(From::from)
                     .collect(),
+                remove_mupdate_override: None,
             })
             .await
             .expect("Failed to configure sled agent with our zones");
@@ -1135,6 +1137,7 @@ impl<'a, N: NexusServer> ControlPlaneTestContextBuilder<'a, N> {
                     disks: IdMap::default(),
                     datasets: IdMap::default(),
                     zones: IdMap::default(),
+                    remove_mupdate_override: None,
                 })
                 .await
                 .expect("Failed to configure sled agent with our zones");

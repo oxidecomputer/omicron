@@ -5,11 +5,18 @@
 //! Tool for discovering oxide related logfiles on sleds
 
 use clap::{ArgAction, Args, Parser, Subcommand};
+use glob::Pattern;
 use jiff::civil::DateTime;
 use jiff::tz::TimeZone;
 use jiff::{Span, Timestamp};
 use oxlog::{DateRange, Filter, LogFile, Zones};
 use std::collections::BTreeSet;
+use std::num::NonZeroUsize;
+use std::str::FromStr;
+
+/// The number of threads to given to the Rayon thread pool.
+/// The default thread-per-physical core is excessive on a Gimlet.
+const MAX_THREADS: usize = 12;
 
 #[derive(Debug, Parser)]
 #[command(version)]
@@ -25,8 +32,8 @@ enum Commands {
 
     /// List logs for a given service
     Logs {
-        /// The name of the zone
-        zone: String,
+        /// The glob pattern to match against zone names
+        zone_glob: GlobPattern,
 
         /// The name of the service to list logs for
         service: Option<String>,
@@ -49,13 +56,24 @@ enum Commands {
         after: Option<Timestamp>,
     },
 
-    /// List the names of all services in a zone, from the perspective of oxlog.
+    /// List the names of all services in matching zones, from the perspective of oxlog.
     /// Use these names with `oxlog logs` to filter output to logs from a
     /// specific service.
     Services {
-        /// The name of the zone
-        zone: String,
+        /// The glob pattern to match against zone names
+        zone_glob: GlobPattern,
     },
+}
+
+#[derive(Clone, Debug)]
+struct GlobPattern(Pattern);
+
+impl FromStr for GlobPattern {
+    type Err = glob::PatternError;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        Pattern::new(s).map(GlobPattern)
+    }
 }
 
 #[derive(Args, Debug)]
@@ -109,6 +127,12 @@ fn parse_timestamp(
 fn main() -> Result<(), anyhow::Error> {
     sigpipe::reset();
 
+    let num_threads = std::thread::available_parallelism()
+        .map(NonZeroUsize::get)
+        .unwrap_or(MAX_THREADS)
+        .min(MAX_THREADS);
+    rayon::ThreadPoolBuilder::new().num_threads(num_threads).build_global()?;
+
     let cli = Cli::parse();
 
     match cli.command {
@@ -118,7 +142,14 @@ fn main() -> Result<(), anyhow::Error> {
             }
             Ok(())
         }
-        Commands::Logs { zone, service, metadata, filter, before, after } => {
+        Commands::Logs {
+            zone_glob,
+            service,
+            metadata,
+            filter,
+            before,
+            after,
+        } => {
             let zones = Zones::load()?;
             let date_range = match (before, after) {
                 (None, None) => None,
@@ -145,44 +176,46 @@ fn main() -> Result<(), anyhow::Error> {
                 );
             };
 
-            let logs = zones.zone_logs(&zone, filter);
-            for (svc_name, svc_logs) in logs {
-                if let Some(service) = &service {
-                    if svc_name != service.as_str() {
-                        continue;
-                    }
-                }
-                if filter.current {
-                    if let Some(current) = &svc_logs.current {
-                        if metadata {
-                            print_metadata(current);
-                        } else {
-                            println!("{}", current.path);
+            let zones = zones.matching_zone_logs(&zone_glob.0, filter);
+            for logs in zones {
+                for (svc_name, svc_logs) in logs {
+                    if let Some(service) = &service {
+                        if svc_name != service.as_str() {
+                            continue;
                         }
                     }
-                }
-                if filter.archived {
-                    for f in &svc_logs.archived {
-                        if metadata {
-                            print_metadata(f);
-                        } else {
-                            println!("{}", f.path);
+                    if filter.current {
+                        if let Some(current) = &svc_logs.current {
+                            if metadata {
+                                print_metadata(current);
+                            } else {
+                                println!("{}", current.path);
+                            }
                         }
                     }
-                }
-                if filter.extra {
-                    for f in &svc_logs.extra {
-                        if metadata {
-                            print_metadata(f);
-                        } else {
-                            println!("{}", f.path);
+                    if filter.archived {
+                        for f in &svc_logs.archived {
+                            if metadata {
+                                print_metadata(f);
+                            } else {
+                                println!("{}", f.path);
+                            }
+                        }
+                    }
+                    if filter.extra {
+                        for f in &svc_logs.extra {
+                            if metadata {
+                                print_metadata(f);
+                            } else {
+                                println!("{}", f.path);
+                            }
                         }
                     }
                 }
             }
             Ok(())
         }
-        Commands::Services { zone } => {
+        Commands::Services { zone_glob } => {
             let zones = Zones::load()?;
 
             // We want all logs that exist, anywhere, so we can find their
@@ -197,8 +230,11 @@ fn main() -> Result<(), anyhow::Error> {
 
             // Collect a unique set of services, based on the logs in the
             // specified zone
-            let services: BTreeSet<String> =
-                zones.zone_logs(&zone, filter).into_keys().collect();
+            let services: BTreeSet<String> = zones
+                .matching_zone_logs(&zone_glob.0, filter)
+                .into_iter()
+                .flat_map(|l| l.into_keys())
+                .collect();
 
             for svc in services {
                 println!("{}", svc);

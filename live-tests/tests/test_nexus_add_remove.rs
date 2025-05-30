@@ -186,9 +186,21 @@ async fn test_nexus_add_remove(lc: &LiveTestContext) {
             let agent = latest_collection.sled_agents.get(&sled_id).expect(
                 "collection information for the sled we added a Nexus to",
             );
-            if agent.omicron_zones.zones.iter().any(|z| z.id == new_zone.id) {
-                debug!(log, "zone still present in inventory");
-                return Err(CondCheckError::<()>::NotYet);
+            if let Some(config) = &agent.ledgered_sled_config {
+                if config.zones.iter().any(|z| z.id == new_zone.id) {
+                    debug!(log, "zone still present in ledger");
+                    return Err(CondCheckError::<()>::NotYet);
+                }
+            }
+            if let Some(config) = agent
+                .last_reconciliation
+                .as_ref()
+                .map(|lr| &lr.last_reconciled_config)
+            {
+                if config.zones.iter().any(|z| z.id == new_zone.id) {
+                    debug!(log, "zone still present in inventory");
+                    return Err(CondCheckError::<()>::NotYet);
+                }
             }
             return Ok(latest_collection);
         },

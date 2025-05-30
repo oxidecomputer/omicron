@@ -267,18 +267,6 @@ repo is not currently open source.
 """
 
 [[apis]]
-client_package_name = "ereport-client"
-label = "ereport"
-server_package_name = "ereport-api"
-versioned_how = "server"
-notes = """
-Implemented by sled-agents and by MGS, and consumed by Nexus to collect \
-ereports.
-
-The sled-agent and MGS APIs are server-versioned, so this can be as well.
-"""
-
-[[apis]]
 client_package_name = "lldpd-client"
 label = "LLDP daemon"
 server_package_name = "lldpd"

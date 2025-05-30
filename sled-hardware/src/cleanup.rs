@@ -76,15 +76,15 @@ fn delete_addresses_matching_prefixes(
 }
 
 /// Delete the etherstub and underlay VNIC used for interzone communication
-pub fn delete_etherstub(log: &Logger) -> Result<(), ExecutionError> {
+pub async fn delete_etherstub(log: &Logger) -> Result<(), ExecutionError> {
     warn!(log, "Deleting Omicron underlay VNIC"; "vnic_name" => UNDERLAY_ETHERSTUB_VNIC_NAME);
-    Dladm::delete_etherstub_vnic(UNDERLAY_ETHERSTUB_VNIC_NAME)?;
+    Dladm::delete_etherstub_vnic(UNDERLAY_ETHERSTUB_VNIC_NAME).await?;
     warn!(log, "Deleting Omicron underlay etherstub"; "stub_name" => UNDERLAY_ETHERSTUB_NAME);
-    Dladm::delete_etherstub(UNDERLAY_ETHERSTUB_NAME)?;
+    Dladm::delete_etherstub(UNDERLAY_ETHERSTUB_NAME).await?;
     warn!(log, "Deleting Omicron bootstrap VNIC"; "vnic_name" => BOOTSTRAP_ETHERSTUB_VNIC_NAME);
-    Dladm::delete_etherstub_vnic(BOOTSTRAP_ETHERSTUB_VNIC_NAME)?;
+    Dladm::delete_etherstub_vnic(BOOTSTRAP_ETHERSTUB_VNIC_NAME).await?;
     warn!(log, "Deleting Omicron bootstrap etherstub"; "stub_name" => BOOTSTRAP_ETHERSTUB_NAME);
-    Dladm::delete_etherstub(BOOTSTRAP_ETHERSTUB_NAME)?;
+    Dladm::delete_etherstub(BOOTSTRAP_ETHERSTUB_NAME).await?;
     Ok(())
 }
 
@@ -92,22 +92,18 @@ pub fn delete_etherstub(log: &Logger) -> Result<(), ExecutionError> {
 ///
 /// These are currently those that match the prefix `ox` or `vopte`.
 pub async fn delete_omicron_vnics(log: &Logger) -> Result<(), Error> {
-    let vnics = Dladm::get_vnics()?;
+    let vnics = Dladm::get_vnics().await?;
     stream::iter(vnics)
         .zip(stream::iter(std::iter::repeat(log.clone())))
         .map(Ok::<_, illumos_utils::dladm::DeleteVnicError>)
-        .try_for_each_concurrent(None, |(vnic, log)| async {
-            tokio::task::spawn_blocking(move || {
-                warn!(
-                  log,
-                  "Deleting existing VNIC";
-                    "vnic_name" => &vnic,
-                    "vnic_kind" => ?LinkKind::from_name(&vnic).unwrap(),
-                );
-                Dladm::real_api().delete_vnic(&vnic)
-            })
-            .await
-            .unwrap()
+        .try_for_each_concurrent(None, |(vnic, log)| async move {
+            warn!(
+              log,
+              "Deleting existing VNIC";
+                "vnic_name" => &vnic,
+                "vnic_kind" => ?LinkKind::from_name(&vnic).unwrap(),
+            );
+            Dladm::real_api().delete_vnic(&vnic).await
         })
         .await?;
     Ok(())
@@ -117,7 +113,7 @@ pub async fn cleanup_networking_resources(log: &Logger) -> Result<(), Error> {
     delete_underlay_addresses(log)?;
     delete_bootstrap_addresses(log)?;
     delete_omicron_vnics(log).await?;
-    delete_etherstub(log)?;
+    delete_etherstub(log).await?;
     opte::delete_all_xde_devices(log)?;
 
     Ok(())

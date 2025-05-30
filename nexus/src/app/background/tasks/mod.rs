@@ -5,6 +5,7 @@
 //! Implementations of specific background tasks
 
 pub mod abandoned_vmm_reaper;
+pub mod alert_dispatcher;
 pub mod bfd;
 pub mod blueprint_execution;
 pub mod blueprint_load;
@@ -41,4 +42,3 @@ pub mod tuf_artifact_replication;
 pub mod v2p_mappings;
 pub mod vpc_routes;
 pub mod webhook_deliverator;
-pub mod webhook_dispatcher;

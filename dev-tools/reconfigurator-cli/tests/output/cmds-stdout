@@ -13,7 +13,6 @@ ID NERRORS TIME_DONE
 > blueprint-list
 T ENA ID PARENT TIME_CREATED 
 
-> 
 
 > sled-show dde1c0e2-b10d-4621-b420-f179f7a7a00a
 error: sled dde1c0e2-b10d-4621-b420-f179f7a7a00a was not found in the planning input
@@ -63,7 +62,6 @@ ID                                   NZPOOLS SUBNET
 90c1102a-b9f5-4d88-92a2-60d54a2d98cc 10      fd00:1122:3344:102::/64 
 dde1c0e2-b10d-4621-b420-f179f7a7a00a 10      fd00:1122:3344:101::/64 
 
-> 
 
 > inventory-generate
 generated inventory collection 6e066695-94bc-4250-bd63-fd799c166cc1 from configured sleds
@@ -72,7 +70,6 @@ generated inventory collection 6e066695-94bc-4250-bd63-fd799c166cc1 from configu
 ID                                   NERRORS TIME_DONE                
 6e066695-94bc-4250-bd63-fd799c166cc1 0       <REDACTED_TIMESTAMP> 
 
-> 
 
 > save state.json
 saved planning input, collections, and blueprints to "state.json"
@@ -80,7 +77,6 @@ saved planning input, collections, and blueprints to "state.json"
 > load state.json
 error: changes made to simulated system: run `wipe system` before loading
 
-> 
 
 > wipe system
 wiped system

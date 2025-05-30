@@ -6,7 +6,6 @@ loaded example system with:
 - collection: 8bc58dd6-dd6e-44e2-9671-e35a2a941c98
 - blueprint: 3f00b694-1b16-4aaa-8f78-e6b3a527b434
 
-> 
 
 > blueprint-show 3f00b694-1b16-4aaa-8f78-e6b3a527b434
 blueprint  3f00b694-1b16-4aaa-8f78-e6b3a527b434
@@ -314,7 +313,6 @@ parent:    06c88262-f435-410e-ba98-101bed41ec27
 > blueprint-edit 3f00b694-1b16-4aaa-8f78-e6b3a527b434 expunge-zone 9995de32-dd52-4eb1-b0eb-141eb84bc739
 blueprint 366b0b68-d80e-4bc1-abd3-dc69837847e0 created from blueprint 3f00b694-1b16-4aaa-8f78-e6b3a527b434: expunged zone 9995de32-dd52-4eb1-b0eb-141eb84bc739 from sled a88790de-5962-4871-8686-61c1fd5b7094
 
-> 
 
 > blueprint-show 366b0b68-d80e-4bc1-abd3-dc69837847e0
 blueprint  366b0b68-d80e-4bc1-abd3-dc69837847e0
@@ -633,7 +631,6 @@ INFO sufficient Oximeter zones exist in plan, desired_count: 0, current_count: 0
 INFO will ensure cockroachdb setting, setting: cluster.preserve_downgrade_option, value: DoNotModify
 generated blueprint 9c998c1d-1a7b-440a-ae0c-40f781dea6e2 based on parent blueprint 366b0b68-d80e-4bc1-abd3-dc69837847e0
 
-> 
 
 > blueprint-show 9c998c1d-1a7b-440a-ae0c-40f781dea6e2
 blueprint  9c998c1d-1a7b-440a-ae0c-40f781dea6e2

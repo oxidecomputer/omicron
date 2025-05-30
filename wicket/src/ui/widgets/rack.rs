@@ -248,8 +248,10 @@ fn resize(rect: Rect) -> ComponentRects {
     let (rack_height, sled_height, other_height): (u16, u16, u16) =
         if max_height < 20 {
             // The window is too short.
-            let text = Paragraph::new(Text::raw("[window too short]"))
-                .alignment(Alignment::Center);
+            let text = Box::new(
+                Paragraph::new(Text::raw("[window too short]"))
+                    .alignment(Alignment::Center),
+            );
             // Center vertically.
             let text_rect =
                 Rect { y: rect.y + max_height / 2, height: 1, ..rect };
@@ -406,7 +408,7 @@ enum ComponentRects {
     },
 
     /// The window is too short and needs to be resized.
-    WindowTooShort { text: Paragraph<'static>, text_rect: Rect },
+    WindowTooShort { text: Box<Paragraph<'static>>, text_rect: Rect },
 }
 
 type ComponentRectsMap = BTreeMap<ComponentId, Rect>;

@@ -315,6 +315,7 @@ mod tests {
             disks,
             datasets,
             zones,
+            remove_mupdate_override: None,
         };
         let sled_configs =
             [(sim_sled_agent.id, sled_config.clone())].into_iter().collect();

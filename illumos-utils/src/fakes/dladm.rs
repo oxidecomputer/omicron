@@ -24,8 +24,9 @@ impl Dladm {
     }
 }
 
+#[async_trait::async_trait]
 impl Api for Dladm {
-    fn create_vnic(
+    async fn create_vnic(
         &self,
         _source: &(dyn VnicSource + 'static),
         _vnic_name: &str,
@@ -36,11 +37,14 @@ impl Api for Dladm {
         Ok(())
     }
 
-    fn verify_link(&self, link: &str) -> Result<Link, FindPhysicalLinkError> {
+    async fn verify_link(
+        &self,
+        link: &str,
+    ) -> Result<Link, FindPhysicalLinkError> {
         Ok(Link::wrap_physical(link))
     }
 
-    fn delete_vnic(&self, _name: &str) -> Result<(), DeleteVnicError> {
+    async fn delete_vnic(&self, _name: &str) -> Result<(), DeleteVnicError> {
         Ok(())
     }
 }

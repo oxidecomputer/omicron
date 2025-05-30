@@ -6,13 +6,13 @@ use crate::external_api::views;
 use chrono::DateTime;
 use chrono::Utc;
 use omicron_common::api::external::Generation;
+use omicron_uuid_kinds::AlertReceiverUuid;
+use omicron_uuid_kinds::AlertUuid;
 use omicron_uuid_kinds::BlueprintUuid;
 use omicron_uuid_kinds::CollectionUuid;
 use omicron_uuid_kinds::SledUuid;
 use omicron_uuid_kinds::SupportBundleUuid;
 use omicron_uuid_kinds::WebhookDeliveryUuid;
-use omicron_uuid_kinds::WebhookEventUuid;
-use omicron_uuid_kinds::WebhookReceiverUuid;
 use serde::Deserialize;
 use serde::Serialize;
 use std::collections::BTreeMap;
@@ -231,6 +231,9 @@ pub struct SupportBundleCollectionReport {
     /// True iff we could list in-service sleds
     pub listed_in_service_sleds: bool,
 
+    /// True iff we could list the service processors.
+    pub listed_sps: bool,
+
     /// True iff the bundle was successfully made 'active' in the database.
     pub activated_in_db_ok: bool,
 }
@@ -240,6 +243,7 @@ impl SupportBundleCollectionReport {
         Self {
             bundle,
             listed_in_service_sleds: false,
+            listed_sps: false,
             activated_in_db_ok: false,
         }
     }
@@ -455,27 +459,27 @@ impl slog::KV for DebugDatasetsRendezvousStats {
     }
 }
 
-/// The status of a `webhook_dispatcher` background task activation.
+/// The status of a `alert_dispatcher` background task activation.
 #[derive(Debug, Clone, Eq, PartialEq, Serialize, Deserialize)]
-pub struct WebhookDispatcherStatus {
-    pub globs_reprocessed: BTreeMap<WebhookReceiverUuid, ReprocessedGlobs>,
+pub struct AlertDispatcherStatus {
+    pub globs_reprocessed: BTreeMap<AlertReceiverUuid, ReprocessedGlobs>,
 
     pub glob_version: semver::Version,
 
-    /// The webhook events dispatched on this activation.
-    pub dispatched: Vec<WebhookDispatched>,
+    /// The alerts dispatched on this activation.
+    pub dispatched: Vec<AlertDispatched>,
 
-    /// Webhook events which did not have receivers.
-    pub no_receivers: Vec<WebhookEventUuid>,
+    /// Alerts  which did not have receivers.
+    pub no_receivers: Vec<AlertUuid>,
 
     /// Any errors that occurred during activation.
     pub errors: Vec<String>,
 }
 
-type ReprocessedGlobs = BTreeMap<String, Result<WebhookGlobStatus, String>>;
+type ReprocessedGlobs = BTreeMap<String, Result<AlertGlobStatus, String>>;
 
 #[derive(Debug, Clone, Eq, PartialEq, Serialize, Deserialize)]
-pub enum WebhookGlobStatus {
+pub enum AlertGlobStatus {
     AlreadyReprocessed,
     Reprocessed {
         created: usize,
@@ -485,15 +489,15 @@ pub enum WebhookGlobStatus {
 }
 
 #[derive(Debug, Copy, Clone, Eq, PartialEq, Serialize, Deserialize)]
-pub struct WebhookDispatched {
-    pub event_id: WebhookEventUuid,
+pub struct AlertDispatched {
+    pub alert_id: AlertUuid,
     pub subscribed: usize,
     pub dispatched: usize,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct WebhookDeliveratorStatus {
-    pub by_rx: BTreeMap<WebhookReceiverUuid, WebhookRxDeliveryStatus>,
+    pub by_rx: BTreeMap<AlertReceiverUuid, WebhookRxDeliveryStatus>,
     pub error: Option<String>,
 }
 
@@ -511,7 +515,7 @@ pub struct WebhookRxDeliveryStatus {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct WebhookDeliveryFailure {
     pub delivery_id: WebhookDeliveryUuid,
-    pub event_id: WebhookEventUuid,
+    pub alert_id: AlertUuid,
     pub attempt: usize,
     pub result: views::WebhookDeliveryAttemptResult,
     pub response_status: Option<u16>,

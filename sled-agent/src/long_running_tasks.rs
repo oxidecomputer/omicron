@@ -117,7 +117,8 @@ pub async fn spawn_all_longrunning_tasks(
     )
     .await;
 
-    let zone_bundler = spawn_zone_bundler_tasks(log, &mut storage_manager);
+    let zone_bundler =
+        spawn_zone_bundler_tasks(log, &mut storage_manager).await;
     let zone_image_resolver =
         make_zone_image_resolver(log, &all_disks, &boot_zpool);
 
@@ -237,13 +238,14 @@ async fn spawn_bootstore_tasks(
 }
 
 // `ZoneBundler::new` spawns a periodic cleanup task that runs indefinitely
-fn spawn_zone_bundler_tasks(
+async fn spawn_zone_bundler_tasks(
     log: &Logger,
     storage_handle: &mut StorageHandle,
 ) -> ZoneBundler {
     info!(log, "Starting ZoneBundler related tasks");
     let log = log.new(o!("component" => "ZoneBundler"));
     ZoneBundler::new(log, storage_handle.clone(), CleanupContext::default())
+        .await
 }
 
 fn make_zone_image_resolver(

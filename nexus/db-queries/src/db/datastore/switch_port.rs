@@ -2154,7 +2154,10 @@ mod test {
                             .await
                             .expect("bgp config should be present in db");
 
-                        assert_eq!(db_bgp_config.identity.name, name);
+                        assert_eq!(
+                            db_bgp_config.identity.name,
+                            nexus_db_model::Name(name)
+                        );
                     }
                 }
 
