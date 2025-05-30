@@ -67,7 +67,7 @@ use omicron_common::address::{CLICKHOUSE_ADMIN_PORT, CLICKHOUSE_TCP_PORT};
 use omicron_common::api::external::Generation;
 use omicron_uuid_kinds::{OmicronZoneUuid, SledUuid};
 use std::collections::BTreeMap;
-use std::net::{IpAddr, Ipv6Addr, SocketAddr, SocketAddrV6};
+use std::net::{Ipv6Addr, SocketAddrV6};
 
 // "v2" types are the most recent, so we re-export them here for dependents that
 // just want "latest".
@@ -144,20 +144,13 @@ pub struct DnsConfigBuilder {
     /// network
     zones: BTreeMap<Zone, Ipv6Addr>,
 
-    /// a map of DNS service zone UUIDs to the address that service answers DNS
-    /// queries on.  Each DNS server is present on the control plane network
-    /// with its HTTP interface on an IPv6 address in the map above, as well as
-    /// listening on port 53 for DNS queries on a different IP address.  These
-    /// addresses may be IPv4 or IPv6, depending on if the server is for
-    /// internal or external use, and the rack's external IP range.
-    internal_dns_addresses: BTreeMap<Zone, IpAddr>,
-
-    /// similar to `internal_dns_addresses`, but for IPs that external DNS
-    /// servers answer queries on.  Internal and external DNS addresses are
-    /// stored separately because only internal IPs get NS records in internal
-    /// DNS configuration.  External DNS addresses are not currently used in
-    /// internal DNS configuration.
-    external_dns_addresses: BTreeMap<Zone, IpAddr>,
+    /// a map of internal DNS service zone UUIDs to the address that service
+    /// answers DNS queries on.  Each internal DNS server is present on the
+    /// control plane network with its HTTP interface on an IPv6 address in the
+    /// map above.  In practice the addresses here are the same as the addresses
+    /// associated with this same UUID in `zones` above, but they are tracked
+    /// separately here to avoid surprise if they differ in the future.
+    internal_dns_addresses: BTreeMap<Zone, Ipv6Addr>,
 
     /// set of services (see module-level comment) that have been configured so
     /// far, mapping the name of the service (encapsulated in a [`ServiceName`])
@@ -214,7 +207,6 @@ impl DnsConfigBuilder {
         DnsConfigBuilder {
             sleds: BTreeMap::new(),
             zones: BTreeMap::new(),
-            external_dns_addresses: BTreeMap::new(),
             internal_dns_addresses: BTreeMap::new(),
             service_instances_zones: BTreeMap::new(),
             service_instances_sleds: BTreeMap::new(),
@@ -565,7 +557,7 @@ impl DnsConfigBuilder {
         zone_id: OmicronZoneUuid,
         service: ServiceName,
         http_address: SocketAddrV6,
-        dns_address: SocketAddr,
+        dns_address: SocketAddrV6,
     ) -> anyhow::Result<()> {
         anyhow::ensure!(
             service == ServiceName::InternalDns,
@@ -575,37 +567,7 @@ impl DnsConfigBuilder {
         let zone = self.host_zone(zone_id, *http_address.ip())?;
         self.service_backend_zone(service, &zone, http_address.port())?;
         let prior_address =
-            self.internal_dns_addresses.insert(zone.clone(), dns_address.ip());
-        if let Some(addr) = prior_address {
-            anyhow::bail!("zone {} already had a DNS address: {}", zone, addr);
-        }
-        Ok(())
-    }
-
-    /// Higher-level shorthand for adding an external DNS zone, including
-    /// records for both its HTTP and DNS interfaces.
-    ///
-    /// # Errors
-    ///
-    /// This fails if the provided `service` is not for an external DNS zone. It
-    /// also fails if the given zone has already been added to the
-    /// configuration.
-    pub fn host_zone_external_dns(
-        &mut self,
-        zone_id: OmicronZoneUuid,
-        service: ServiceName,
-        http_address: SocketAddrV6,
-        dns_address: SocketAddr,
-    ) -> anyhow::Result<()> {
-        anyhow::ensure!(
-            service == ServiceName::ExternalDns,
-            "This method is only valid for external DNS servers, \
-            but we were provided the service '{service:?}'",
-        );
-        let zone = self.host_zone(zone_id, *http_address.ip())?;
-        self.service_backend_zone(service, &zone, http_address.port())?;
-        let prior_address =
-            self.external_dns_addresses.insert(zone.clone(), dns_address.ip());
+            self.internal_dns_addresses.insert(zone.clone(), *dns_address.ip());
         if let Some(addr) = prior_address {
             anyhow::bail!("zone {} already had a DNS address: {}", zone, addr);
         }
@@ -665,13 +627,7 @@ impl DnsConfigBuilder {
                     name,
                     crate::names::DNS_ZONE
                 )));
-                (
-                    name,
-                    match ip {
-                        IpAddr::V4(ip) => vec![DnsRecord::A(*ip)],
-                        IpAddr::V6(ip) => vec![DnsRecord::Aaaa(*ip)],
-                    },
-                )
+                (name, vec![DnsRecord::Aaaa(**ip)])
             })
             .collect::<Vec<_>>();
         if !internal_nameservers.is_empty() {

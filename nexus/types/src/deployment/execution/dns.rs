@@ -113,20 +113,8 @@ pub fn blueprint_internal_dns_config(
                 address,
             }) => (ServiceName::Oximeter, address),
             BlueprintZoneType::ExternalDns(
-                blueprint_zone_type::ExternalDns {
-                    http_address,
-                    dns_address,
-                    ..
-                },
-            ) => {
-                dns_builder.host_zone_external_dns(
-                    zone.id,
-                    ServiceName::ExternalDns,
-                    *http_address,
-                    dns_address.addr,
-                )?;
-                continue 'all_zones;
-            }
+                blueprint_zone_type::ExternalDns { http_address, .. },
+            ) => (ServiceName::ExternalDns, http_address),
             BlueprintZoneType::InternalDns(
                 blueprint_zone_type::InternalDns {
                     http_address,

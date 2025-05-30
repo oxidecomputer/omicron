@@ -345,7 +345,7 @@ impl RackInitRequestBuilder {
         &mut self,
         zone_id: OmicronZoneUuid,
         http_address: SocketAddrV6,
-        dns_address: SocketAddr,
+        dns_address: SocketAddrV6,
     ) {
         self.internal_dns_config
             .host_zone_internal_dns(
@@ -355,24 +355,6 @@ impl RackInitRequestBuilder {
                 dns_address,
             )
             .expect("Failed to setup internal DNS");
-    }
-
-    // Special handling of external DNS, which has a second A/AAAA record and an
-    // NS record pointing to it.
-    fn add_external_name_server_to_dns(
-        &mut self,
-        zone_id: OmicronZoneUuid,
-        http_address: SocketAddrV6,
-        dns_address: SocketAddr,
-    ) {
-        self.internal_dns_config
-            .host_zone_external_dns(
-                zone_id,
-                ServiceName::ExternalDns,
-                http_address,
-                dns_address,
-            )
-            .expect("Failed to setup external DNS");
     }
 }
 
@@ -1263,10 +1245,10 @@ impl<'a, N: NexusServer> ControlPlaneTestContextBuilder<'a, N> {
             .next()
             .expect("ran out of MAC addresses");
         let zone_id = OmicronZoneUuid::new_v4();
-        self.rack_init_builder.add_external_name_server_to_dns(
+        self.rack_init_builder.add_service_to_dns(
             zone_id,
             dropshot_address,
-            dns.dropshot_server.local_addr(),
+            ServiceName::ExternalDns,
         );
 
         let zpool_id = ZpoolUuid::new_v4();
@@ -1329,7 +1311,7 @@ impl<'a, N: NexusServer> ControlPlaneTestContextBuilder<'a, N> {
         self.rack_init_builder.add_internal_name_server_to_dns(
             zone_id,
             http_address,
-            dns.dropshot_server.local_addr(),
+            dns_address,
         );
 
         let zpool_id = ZpoolUuid::new_v4();

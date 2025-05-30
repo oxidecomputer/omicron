@@ -312,7 +312,7 @@ parent:    184f10b3-61cb-41ef-9b93-3489b2bac559
 > blueprint-edit dbcbd3d6-41ff-48ae-ac0b-1becc9b2fd21 expunge-zone 5a526763-1d2b-42a5-b2ef-42f58aa8cbfa
 blueprint 8da82a8e-bf97-4fbd-8ddd-9f6462732cf1 created from blueprint dbcbd3d6-41ff-48ae-ac0b-1becc9b2fd21: expunged zone 5a526763-1d2b-42a5-b2ef-42f58aa8cbfa from sled d81c6a84-79b8-4958-ae41-ea46c9b19763
 
-> # Diff against the new blueprint; internal DNS is not eagerly removed, so DNS records won't have changed
+> # Diff against the new blueprint; the zone has been expunged so its records should be removed.
 > blueprint-diff dbcbd3d6-41ff-48ae-ac0b-1becc9b2fd21 8da82a8e-bf97-4fbd-8ddd-9f6462732cf1
 from: blueprint dbcbd3d6-41ff-48ae-ac0b-1becc9b2fd21
 to:   blueprint 8da82a8e-bf97-4fbd-8ddd-9f6462732cf1
@@ -845,7 +845,7 @@ external DNS:
 
 > # Mark the internal DNS zone ready for cleanup.
 > # This approximates sled-agent performing an inventory collection and seeing the DNS zone has gone away.
-> # Afterward, diffing should show that the server's records are removed from DNS.
+> # This zone's records were removed in the expunge before, so there are no further DNS changes.
 > blueprint-edit 8da82a8e-bf97-4fbd-8ddd-9f6462732cf1 mark-for-cleanup 5a526763-1d2b-42a5-b2ef-42f58aa8cbfa
 blueprint 58d5e830-0884-47d8-a7cd-b2b3751adeb4 created from blueprint 8da82a8e-bf97-4fbd-8ddd-9f6462732cf1: marked zone 5a526763-1d2b-42a5-b2ef-42f58aa8cbfa ready for cleanup
 
@@ -1367,7 +1367,7 @@ external DNS:
 
 
 
-> # And at this point planning a new blueprint will place a new internal DNS zone and set up its records.
+> # Planning a new blueprint will now replace the expunged zone, with new records for its replacement.
 > blueprint-plan 58d5e830-0884-47d8-a7cd-b2b3751adeb4
 INFO sufficient BoundaryNtp zones exist in plan, desired_count: 0, current_count: 0
 INFO sufficient Clickhouse zones exist in plan, desired_count: 1, current_count: 1

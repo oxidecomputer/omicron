@@ -397,9 +397,13 @@ mod test {
         nexus_test_utils::ControlPlaneTestContext<omicron_nexus::Server>;
 
     fn dns_config_empty() -> DnsConfigParams {
+        let initial_generation = Generation::new();
         DnsConfigParams {
-            generation: Generation::new(),
-            serial: 0,
+            generation: initial_generation,
+            serial: initial_generation
+                .as_u64()
+                .try_into()
+                .expect("initial DNS generation is a valid serial"),
             time_created: chrono::Utc::now(),
             zones: vec![DnsConfigZone {
                 zone_name: String::from("internal"),

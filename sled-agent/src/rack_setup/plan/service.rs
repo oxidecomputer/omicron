@@ -498,12 +498,14 @@ impl Plan {
             let http_address = SocketAddrV6::new(internal_ip, http_port, 0, 0);
             let dns_port = omicron_common::address::DNS_PORT;
             let dns_sockaddr = SocketAddr::new(external_ip, dns_port);
+            // With respect to internal DNS configuration, there's only one
+            // address for external DNS that matters: the management (HTTP)
+            // interface.
             dns_builder
-                .host_zone_external_dns(
+                .host_zone_with_one_backend(
                     id,
                     ServiceName::ExternalDns,
                     http_address,
-                    dns_sockaddr,
                 )
                 .unwrap();
             let dns_address =
