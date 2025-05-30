@@ -130,7 +130,7 @@ pub trait DnsServerApi {
         method = GET,
         path = "/config",
         operation_id = "dns_config_get",
-        versions = "1.0.0".."2.0.0"
+        versions = VERSION_INITIAL..VERSION_SOA_AND_NS
     )]
     async fn dns_config_get_v1(
         rqctx: RequestContext<Self::Context>,
@@ -143,7 +143,7 @@ pub trait DnsServerApi {
         method = GET,
         path = "/config",
         operation_id = "dns_config_get",
-        versions = "2.0.0"..
+        versions = VERSION_SOA_AND_NS..
     )]
     async fn dns_config_get_v2(
         rqctx: RequestContext<Self::Context>,
@@ -156,7 +156,7 @@ pub trait DnsServerApi {
         method = PUT,
         path = "/config",
         operation_id = "dns_config_put",
-        versions = "1.0.0".."2.0.0",
+        versions = VERSION_INITIAL..VERSION_SOA_AND_NS,
     )]
     async fn dns_config_put_v1(
         rqctx: RequestContext<Self::Context>,
@@ -169,7 +169,7 @@ pub trait DnsServerApi {
         method = PUT,
         path = "/config",
         operation_id = "dns_config_put",
-        versions = "2.0.0"..
+        versions = VERSION_SOA_AND_NS..
     )]
     async fn dns_config_put_v2(
         rqctx: RequestContext<Self::Context>,
