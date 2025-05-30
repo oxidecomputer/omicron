@@ -2143,8 +2143,16 @@ mod test {
                     NameOrId::Id(id) => {
                         assert_eq!(db_peer.bgp_config_id, id);
                     }
-                    NameOrId::Name(_) => {
-                        // TODO: resolve to id
+                    NameOrId::Name(name) => {
+                        let db_bgp_config = datastore
+                            .bgp_config_get(
+                                opctx,
+                                &NameOrId::Id(db_peer.bgp_config_id),
+                            )
+                            .await
+                            .expect("bgp config should be present in db");
+
+                        assert_eq!(db_bgp_config.identity.name, name);
                     }
                 }
 
