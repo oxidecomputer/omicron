@@ -1862,7 +1862,7 @@ mod test {
         NameOrId,
     };
     use omicron_test_utils::dev;
-    use std::str::FromStr;
+    use std::{collections::HashMap, str::FromStr};
     use uuid::Uuid;
 
     #[tokio::test]
@@ -1967,6 +1967,208 @@ mod test {
             datastore.switch_ports_with_uplinks(&opctx).await.unwrap();
 
         assert_eq!(uplink_ports.len(), 1);
+
+        let db_settings_id = uplink_ports[0]
+            .port_settings_id
+            .expect("should have a port settings id");
+
+        let db_settings = datastore
+            .switch_port_settings_get(&opctx, &NameOrId::Id(db_settings_id))
+            .await
+            .unwrap();
+
+        assert_eq!(settings.identity.name, *db_settings.settings.identity.name);
+
+        assert_eq!(
+            settings.identity.description,
+            db_settings.settings.identity.description
+        );
+
+        assert_eq!(settings.port_config.geometry, db_settings.port.geometry);
+
+        assert_eq!(
+            db_settings.groups.len(),
+            0,
+            "groups are not currently used and should be empty"
+        );
+
+        assert_eq!(settings.links.len(), db_settings.links.len());
+        let mut db_links = HashMap::new();
+
+        for link in db_settings.links {
+            db_links.insert(link.link_name.clone(), link);
+        }
+
+        for link in settings.links {
+            let db_link = db_links
+                .get(&link.link_name.to_string())
+                .expect("requested link should be present");
+
+            assert_eq!(link.mtu, *db_link.mtu);
+            assert_eq!(link.fec, db_link.fec.map(Into::into));
+            assert_eq!(link.speed, db_link.speed.into());
+            assert_eq!(link.autoneg, db_link.autoneg);
+
+            match &db_link.lldp_link_config {
+                Some(config) => {
+                    assert_eq!(
+                        config.link_description,
+                        link.lldp.link_description
+                    );
+
+                    assert_eq!(config.chassis_id, link.lldp.chassis_id);
+
+                    assert_eq!(config.system_name, link.lldp.system_name);
+
+                    assert_eq!(
+                        config.system_description,
+                        link.lldp.system_description
+                    );
+
+                    assert_eq!(
+                        config.management_ip.map(|n| n.ip()),
+                        link.lldp.management_ip
+                    );
+                }
+                None => {
+                    unreachable!(
+                        "we currently always create a LLDP configuration for a link"
+                    );
+                }
+            }
+
+            match &db_link.tx_eq_config {
+                Some(config) => {
+                    let requested_config = link.tx_eq.expect("if tx_eq config is present in db it should be present in request");
+                    // stuff
+                    // pub pre1: Option<i32>,
+                    assert_eq!(config.pre1, requested_config.pre1);
+
+                    // pub pre2: Option<i32>,
+                    assert_eq!(config.pre2, requested_config.pre2);
+
+                    // pub main: Option<i32>,
+                    assert_eq!(config.main, requested_config.main);
+
+                    // pub post2: Option<i32>,
+                    assert_eq!(config.post2, requested_config.post2);
+
+                    // pub post1: Option<i32>,
+                    assert_eq!(config.post1, requested_config.post1);
+                }
+                None => {
+                    assert!(
+                        link.tx_eq.is_none(),
+                        "if tx_eq config is absent in db it should be absent in request"
+                    )
+                }
+            }
+        }
+
+        assert_eq!(
+            db_settings.interfaces.len(),
+            0,
+            "interfaces are not currently used and should be empty"
+        );
+
+        let mut db_routes = HashMap::new();
+
+        for route in db_settings.routes {
+            db_routes.insert(
+                (route.interface_name.clone(), route.dst, route.gw.ip()),
+                route,
+            );
+        }
+
+        for config in settings.routes {
+            for route in config.routes {
+                let db_route = db_routes
+                    .get(&(
+                        config.link_name.to_string(),
+                        route.dst.into(),
+                        route.gw,
+                    ))
+                    .expect("requested route should be present");
+
+                assert_eq!(
+                    db_route.rib_priority.map(|p| *p),
+                    route.rib_priority
+                );
+
+                assert_eq!(db_route.vid.map(|v| *v), route.vid);
+            }
+        }
+
+        let mut db_addresses = HashMap::new();
+
+        for address in db_settings.addresses {
+            db_addresses.insert(address.interface_name.clone(), address);
+        }
+
+        for config in settings.addresses {
+            let db_address = db_addresses
+                .get(&config.link_name.to_string())
+                .expect("requested address should be present");
+
+            for address in config.addresses {
+                assert_eq!(db_address.address, address.address);
+
+                assert_eq!(db_address.vlan_id, address.vlan_id);
+
+                match address.address_lot {
+                    NameOrId::Id(id) => {
+                        assert_eq!(db_address.address_lot_id, id);
+                    }
+                    NameOrId::Name(name) => {
+                        assert_eq!(db_address.address_lot_name, name);
+                    }
+                }
+            }
+        }
+
+        // TODO: assert_eq!(settings.bgp_peers, db_settings.bgp_peers);
+        let mut db_peers = HashMap::new();
+
+        for peer in db_settings.bgp_peers {
+            db_peers.insert(peer.interface_name.clone(), peer);
+        }
+
+        for config in settings.bgp_peers {
+            let db_peer = db_peers
+                .get(&config.link_name.to_string())
+                .expect("requested peer should be present");
+
+            for peer in config.peers {
+                match peer.bgp_config {
+                    NameOrId::Id(id) => {
+                        assert_eq!(db_peer.bgp_config_id, id);
+                    }
+                    NameOrId::Name(_) => {
+                        // TODO: resolve to id
+                    }
+                }
+
+                assert_eq!(db_peer.addr.ip(), peer.addr);
+                assert_eq!(*db_peer.hold_time, peer.hold_time);
+                assert_eq!(*db_peer.idle_hold_time, peer.idle_hold_time);
+                assert_eq!(*db_peer.delay_open, peer.delay_open);
+                assert_eq!(*db_peer.connect_retry, peer.connect_retry);
+                assert_eq!(*db_peer.keepalive, peer.keepalive);
+                assert_eq!(db_peer.remote_asn.map(|asn| *asn), peer.remote_asn);
+                assert_eq!(db_peer.min_ttl.map(|ttl| *ttl), peer.min_ttl);
+                assert_eq!(db_peer.md5_auth_key, peer.md5_auth_key);
+                assert_eq!(
+                    db_peer.multi_exit_discriminator.map(|med| *med),
+                    peer.multi_exit_discriminator
+                );
+                assert_eq!(db_peer.communities, peer.communities);
+                assert_eq!(db_peer.local_pref.map(|lp| *lp), peer.local_pref);
+                assert_eq!(db_peer.enforce_first_as, peer.enforce_first_as);
+                assert_eq!(db_peer.allowed_export, peer.allowed_export);
+                assert_eq!(db_peer.allowed_import, peer.allowed_import);
+                assert_eq!(db_peer.vlan_id.map(|vid| *vid), peer.vlan_id);
+            }
+        }
 
         db.terminate().await;
         logctx.cleanup_successful();

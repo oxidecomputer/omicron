@@ -47,6 +47,28 @@ impl_enum_type!(
     Sfp28x4 => b"Sfp28x4"
 );
 
+impl PartialEq<params::SwitchPortGeometry> for SwitchPortGeometry {
+    fn eq(&self, other: &params::SwitchPortGeometry) -> bool {
+        match self {
+            Self::Qsfp28x1 => {
+                return matches!(other, params::SwitchPortGeometry::Qsfp28x1);
+            }
+            Self::Qsfp28x2 => {
+                return matches!(other, params::SwitchPortGeometry::Qsfp28x2);
+            }
+            Self::Sfp28x4 => {
+                return matches!(other, params::SwitchPortGeometry::Sfp28x4);
+            }
+        }
+    }
+}
+
+impl PartialEq<SwitchPortGeometry> for params::SwitchPortGeometry {
+    fn eq(&self, other: &SwitchPortGeometry) -> bool {
+        other.eq(self)
+    }
+}
+
 impl_enum_type!(
     SwitchLinkFecEnum:
 
