@@ -3279,9 +3279,11 @@ pub enum ImportExportPolicy {
     Allow(Vec<oxnet::IpNet>),
 }
 
-/// Use instead of Option in API request body structs to get a field that can be
-/// null (parsed as `None`) but is not optional. Will fail to parse if the key
-/// is not present.
+/// Use instead of Option in API request body structs to get a field that can
+/// be null (parsed as `None`) but is not optional. Unlike Option, Nullable
+/// will fail to parse if the key is not present. The JSON Schema in the
+/// OpenAPI definition will also reflect that the field is required. See
+/// <https://github.com/serde-rs/serde/issues/2753>.
 #[derive(Clone, Debug, Serialize)]
 pub struct Nullable<T>(pub Option<T>);
 
@@ -3325,7 +3327,13 @@ impl<'de, T: serde::Deserialize<'de>> serde::Deserialize<'de> for Nullable<T> {
     fn deserialize<D: serde::Deserializer<'de>>(
         deserializer: D,
     ) -> Result<Self, D::Error> {
-        // this is what errors if the key isn't present
+        // This line is required to get a parse error on missing fields.
+        // It seems that when the field is missing in the JSON, struct
+        // deserialization produces an error before this function is even hit,
+        // and that error is passed in here inside `deserializer`. If we don't
+        // do this Value::deserialize to cause that error to be returned as a
+        // missing field error, Option's deserialize will eat it by turning it
+        // into a successful parse as None.
         let value = serde_json::Value::deserialize(deserializer)?;
 
         use serde::de::Error;
