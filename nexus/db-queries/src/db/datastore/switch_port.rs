@@ -2071,6 +2071,7 @@ mod test {
             "interfaces are not currently used and should be empty"
         );
 
+        assert_eq!(settings.routes.len(), db_settings.routes.len());
         let mut db_routes = HashMap::new();
 
         for route in db_settings.routes {
@@ -2099,6 +2100,7 @@ mod test {
             }
         }
 
+        assert_eq!(settings.addresses.len(), db_settings.addresses.len());
         let mut db_addresses = HashMap::new();
 
         for address in db_settings.addresses {
@@ -2126,7 +2128,7 @@ mod test {
             }
         }
 
-        // TODO: assert_eq!(settings.bgp_peers, db_settings.bgp_peers);
+        assert_eq!(settings.bgp_peers.len(), db_settings.bgp_peers.len());
         let mut db_peers = HashMap::new();
 
         for peer in db_settings.bgp_peers {
