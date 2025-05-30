@@ -419,7 +419,7 @@ impl Plan {
                     id,
                     ServiceName::InternalDns,
                     http_address,
-                    dns_address.into(),
+                    dns_address,
                 )
                 .unwrap();
             let dataset_name =

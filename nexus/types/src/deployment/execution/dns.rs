@@ -126,7 +126,7 @@ pub fn blueprint_internal_dns_config(
                     zone.id,
                     ServiceName::InternalDns,
                     *http_address,
-                    dns_address.to_owned().into(),
+                    dns_address.to_owned(),
                 )?;
                 continue 'all_zones;
             }
