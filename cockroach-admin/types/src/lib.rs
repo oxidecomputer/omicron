@@ -20,6 +20,20 @@ pub struct NodeStatus {
     pub locality: String,
     pub is_available: bool,
     pub is_live: bool,
+    pub replicas_leaders: i64,
+    pub replicas_leaseholders: i64,
+    pub ranges: i64,
+    pub ranges_unavailable: i64,
+    pub ranges_underreplicated: i64,
+    pub live_bytes: i64,
+    pub key_bytes: i64,
+    pub value_bytes: i64,
+    pub intent_bytes: i64,
+    pub system_bytes: i64,
+    pub gossiped_replicas: i64,
+    pub is_decommissioning: bool,
+    pub membership: String,
+    pub is_draining: bool,
 }
 
 impl NodeStatus {
@@ -50,6 +64,20 @@ struct CliNodeStatus {
     locality: String,
     is_available: bool,
     is_live: bool,
+    replicas_leaders: i64,
+    replicas_leaseholders: i64,
+    ranges: i64,
+    ranges_unavailable: i64,
+    ranges_underreplicated: i64,
+    live_bytes: i64,
+    key_bytes: i64,
+    value_bytes: i64,
+    intent_bytes: i64,
+    system_bytes: i64,
+    gossiped_replicas: i64,
+    is_decommissioning: bool,
+    membership: String,
+    is_draining: bool,
 }
 
 impl From<CliNodeStatus> for NodeStatus {
@@ -64,6 +92,20 @@ impl From<CliNodeStatus> for NodeStatus {
             locality: cli.locality,
             is_available: cli.is_available,
             is_live: cli.is_live,
+            replicas_leaders: cli.replicas_leaders,
+            replicas_leaseholders: cli.replicas_leaseholders,
+            ranges: cli.ranges,
+            ranges_unavailable: cli.ranges_unavailable,
+            ranges_underreplicated: cli.ranges_underreplicated,
+            live_bytes: cli.live_bytes,
+            key_bytes: cli.key_bytes,
+            value_bytes: cli.value_bytes,
+            intent_bytes: cli.intent_bytes,
+            system_bytes: cli.system_bytes,
+            gossiped_replicas: cli.gossiped_replicas,
+            is_decommissioning: cli.is_decommissioning,
+            membership: cli.membership,
+            is_draining: cli.is_draining,
         }
     }
 }

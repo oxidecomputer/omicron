@@ -28,6 +28,12 @@ pub enum CockroachCliError {
         #[source]
         err: io::Error,
     },
+    #[error("node {0} not found")]
+    NodeNotFound(String),
+    #[error("multiple nodes found when asking for status of node {0}")]
+    MultipleNodesFound(String),
+    #[error("cannot decommission node {node_id}: {reason}")]
+    NodeDecommissionNotAllowed { node_id: String, reason: String },
     #[error(transparent)]
     ExecutionError(#[from] ExecutionError),
     #[error(
@@ -46,7 +52,22 @@ pub enum CockroachCliError {
 impl From<CockroachCliError> for HttpError {
     fn from(err: CockroachCliError) -> Self {
         match err {
+            CockroachCliError::NodeNotFound(_) => {
+                let message = InlineErrorChain::new(&err).to_string();
+                HttpError::for_bad_request(None, message)
+            }
+            CockroachCliError::NodeDecommissionNotAllowed { .. } => {
+                let message = InlineErrorChain::new(&err).to_string();
+                HttpError {
+                    status_code: dropshot::ErrorStatusCode::SERVICE_UNAVAILABLE,
+                    error_code: None,
+                    external_message: message.clone(),
+                    internal_message: message,
+                    headers: None,
+                }
+            }
             CockroachCliError::InvokeCli { .. }
+            | CockroachCliError::MultipleNodesFound(_)
             | CockroachCliError::ExecutionError(_)
             | CockroachCliError::ParseOutput { .. } => {
                 let message = InlineErrorChain::new(&err).to_string();
@@ -127,17 +148,57 @@ impl CockroachCli {
         &self,
     ) -> Result<Vec<NodeStatus>, CockroachCliError> {
         self.invoke_cli_with_format_csv(
-            ["node", "status"],
+            ["node", "status", "--all"],
             NodeStatus::parse_from_csv,
             "node status",
         )
         .await
     }
 
+    async fn single_node_status(
+        &self,
+        node_id: &str,
+    ) -> Result<NodeStatus, CockroachCliError> {
+        let mut statuses = self
+            .invoke_cli_with_format_csv(
+                ["node", "status", node_id, "--all"],
+                NodeStatus::parse_from_csv,
+                "node status",
+            )
+            .await?;
+
+        let Some(status) = statuses.pop() else {
+            return Err(CockroachCliError::NodeNotFound(node_id.to_string()));
+        };
+
+        if !statuses.is_empty() {
+            return Err(CockroachCliError::MultipleNodesFound(
+                node_id.to_string(),
+            ));
+        }
+
+        Ok(status)
+    }
+
     pub async fn node_decommission(
         &self,
         node_id: &str,
     ) -> Result<NodeDecommission, CockroachCliError> {
+        let status = self.single_node_status(node_id).await?;
+        self.node_decommission_if_allowed(node_id, status).await
+    }
+
+    async fn node_decommission_if_allowed(
+        &self,
+        node_id: &str,
+        status: NodeStatus,
+    ) -> Result<NodeDecommission, CockroachCliError> {
+        if status.ranges > 0 {
+            return Err(CockroachCliError::NodeDecommissionNotAllowed {
+                node_id: node_id.to_string(),
+                reason: format!("{} ranges", status.ranges),
+            });
+        }
         self.invoke_cli_with_format_csv(
             ["node", "decommission", node_id, "--wait", "none"],
             NodeDecommission::parse_from_csv,
@@ -233,6 +294,7 @@ impl CockroachCli {
 mod tests {
     use super::*;
     use camino_tempfile::Utf8TempDir;
+    use chrono::Utc;
     use cockroach_admin_types::NodeMembership;
     use nexus_test_utils::db::TestDatabase;
     use omicron_test_utils::dev;
@@ -293,7 +355,7 @@ mod tests {
         let db = TestDatabase::new_populate_nothing(&logctx.log).await;
         let db_url = db.crdb().listen_url().to_string();
 
-        let expected_headers = "id,address,sql_address,build,started_at,updated_at,locality,is_available,is_live";
+        let expected_headers = "id,address,sql_address,build,started_at,updated_at,locality,is_available,is_live,replicas_leaders,replicas_leaseholders,ranges,ranges_unavailable,ranges_underreplicated,live_bytes,key_bytes,value_bytes,intent_bytes,system_bytes,gossiped_replicas,is_decommissioning,membership,is_draining";
 
         // Manually run cockroach node status to grab just the CSV header line
         // (which the `csv` crate normally eats on our behalf) and check it's
@@ -302,6 +364,7 @@ mod tests {
         command
             .arg("node")
             .arg("status")
+            .arg("--all")
             .arg("--url")
             .arg(&db_url)
             .arg("--format")
@@ -335,6 +398,15 @@ mod tests {
         assert_eq!(status[0].sql_address, SocketAddr::V6(cockroach_address));
         assert_eq!(status[0].is_available, true);
         assert_eq!(status[0].is_live, true);
+
+        let status =
+            cli.single_node_status("1").await.expect("got node status");
+
+        assert_eq!(status.node_id, "1");
+        assert_eq!(status.address, SocketAddr::V6(cockroach_address));
+        assert_eq!(status.sql_address, SocketAddr::V6(cockroach_address));
+        assert_eq!(status.is_available, true);
+        assert_eq!(status.is_live, true);
 
         db.terminate().await;
         logctx.cleanup_successful();
@@ -388,7 +460,36 @@ mod tests {
         .expect("valid SocketAddrV6");
         let cli = CockroachCli::new("cockroach".into(), cockroach_address);
         let result = cli
-            .node_decommission("1")
+            .node_decommission_if_allowed(
+                "1",
+                // Only fields relevant to "is decommissioning okay" are
+                // meaningful
+                NodeStatus {
+                    node_id: "1".to_string(),
+                    address: SocketAddr::V6(cockroach_address),
+                    sql_address: SocketAddr::V6(cockroach_address),
+                    build: "test-build".to_string(),
+                    started_at: Utc::now(),
+                    updated_at: Utc::now(),
+                    locality: "".to_string(),
+                    is_available: true,
+                    is_live: true,
+                    replicas_leaders: 0,
+                    replicas_leaseholders: 0,
+                    ranges: 0,
+                    ranges_unavailable: 0,
+                    ranges_underreplicated: 0,
+                    live_bytes: 0,
+                    key_bytes: 0,
+                    value_bytes: 0,
+                    intent_bytes: 0,
+                    system_bytes: 0,
+                    gossiped_replicas: 0,
+                    is_decommissioning: false,
+                    membership: "active".to_string(),
+                    is_draining: false,
+                },
+            )
             .await
             .expect("got node decommission result");
 
