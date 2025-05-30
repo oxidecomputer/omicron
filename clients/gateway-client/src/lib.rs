@@ -74,7 +74,11 @@ progenitor::generate_api!(
         SpUpdateStatus = { derives = [PartialEq, Hash, Eq] },
         UpdatePreparationProgress = { derives = [PartialEq, Hash, Eq] },
     },
-    replace = { RotSlot = gateway_types::rot::RotSlot },
+    replace = {
+        RotSlot = gateway_types::rot::RotSlot,
+        Ena = ereport_types::Ena,
+        TypedUuidForEreporterRestartKind = omicron_uuid_kinds::EreporterRestartUuid,
+    },
 );
 
 // Override the impl of Ord for SpIdentifier because the default one orders the
