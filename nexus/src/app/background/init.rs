@@ -1160,7 +1160,7 @@ pub mod test {
         let initial_srv_record = {
             let zone =
                 config.zones.get(0).expect("DNS config must have a zone");
-            let Some(record) = zone.names.get(&internal_dns_srv_name) else {
+            let Some(record) = zone.records.get(&internal_dns_srv_name) else {
                 panic!("zone must have a record for {internal_dns_srv_name}")
             };
             match record.get(0) {

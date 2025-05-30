@@ -643,13 +643,15 @@ async fn dns_records_create(
 
     assert!(our_zones.len() <= 1);
     let zone_records = if let Some(our_zone) = our_zones.into_iter().next() {
-        our_zone.names.into_iter().chain(records.into_iter()).collect()
+        our_zone.records.into_iter().chain(records.into_iter()).collect()
     } else {
         records
     };
 
-    let new_zone =
-        DnsConfigZone { zone_name: zone_name.to_owned(), names: zone_records };
+    let new_zone = DnsConfigZone {
+        zone_name: zone_name.to_owned(),
+        records: zone_records,
+    };
 
     let zones =
         other_zones.into_iter().chain(std::iter::once(new_zone)).collect();
@@ -675,7 +677,7 @@ async fn dns_records_list(
         .zones
         .into_iter()
         .find(|z| z.zone_name == zone_name)
-        .map(|z| z.names)
+        .map(|z| z.records)
         .unwrap_or_else(HashMap::new))
 }
 

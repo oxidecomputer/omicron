@@ -100,7 +100,7 @@ impl Into<v2::config::DnsConfigZone> for DnsConfigZone {
                 .collect();
         v2::config::DnsConfigZone {
             zone_name: self.zone_name,
-            names: converted_records,
+            records: converted_records,
         }
     }
 }

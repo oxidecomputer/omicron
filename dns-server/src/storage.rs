@@ -272,7 +272,7 @@ impl Store {
                     .open_tree(&tree_name)
                     .with_context(|| format!("opening tree {:?}", tree_name))?;
 
-                let names = tree
+                let records = tree
                     .iter()
                     .map(|entry| {
                         let (name_bytes, records_bytes) =
@@ -294,7 +294,7 @@ impl Store {
                     .collect::<anyhow::Result<_>>()
                     .context("assembling records")?;
 
-                Ok(DnsConfigZone { zone_name: zone_name.to_owned(), names })
+                Ok(DnsConfigZone { zone_name: zone_name.to_owned(), records })
             })
             .collect::<anyhow::Result<_>>()?;
 
@@ -486,7 +486,7 @@ impl Store {
                 .open_tree(&tree_name)
                 .with_context(|| format!("creating tree {:?}", &tree_name))?;
 
-            for (name, records) in &zone_config.names {
+            for (name, records) in &zone_config.records {
                 if records.is_empty() {
                     // There's no distinction between in DNS between a name that
                     // doesn't exist at all and one with no records associated
@@ -1040,7 +1040,7 @@ mod test {
             serial: 1,
             zones: vec![DnsConfigZone {
                 zone_name: "zone1.internal".to_string(),
-                names: HashMap::from([
+                records: HashMap::from([
                     ("gen1_name".to_string(), vec![dummy_record.clone()]),
                     ("shared_name".to_string(), vec![dummy_record.clone()]),
                 ]),
@@ -1085,14 +1085,14 @@ mod test {
             zones: vec![
                 DnsConfigZone {
                     zone_name: "zone1.internal".to_string(),
-                    names: HashMap::from([(
+                    records: HashMap::from([(
                         "shared_name".to_string(),
                         vec![dummy_record.clone()],
                     )]),
                 },
                 DnsConfigZone {
                     zone_name: "zone2.internal".to_string(),
-                    names: HashMap::from([(
+                    records: HashMap::from([(
                         "gen2_name".to_string(),
                         vec![dummy_record.clone()],
                     )]),
@@ -1126,7 +1126,7 @@ mod test {
             serial: 8,
             zones: vec![DnsConfigZone {
                 zone_name: "zone8.internal".to_string(),
-                names: HashMap::from([(
+                records: HashMap::from([(
                     "gen8_name".to_string(),
                     vec![dummy_record.clone()],
                 )]),
@@ -1207,7 +1207,7 @@ mod test {
             serial: 9,
             zones: vec![DnsConfigZone {
                 zone_name: "zone8.internal".to_string(),
-                names: HashMap::from([(
+                records: HashMap::from([(
                     "gen8_name".to_string(),
                     vec![dummy_record.clone()],
                 )]),
@@ -1244,7 +1244,7 @@ mod test {
             serial: 1,
             zones: vec![DnsConfigZone {
                 zone_name: "zone1.internal".to_string(),
-                names: HashMap::from([(
+                records: HashMap::from([(
                     "gen1_name".to_string(),
                     vec![dummy_record.clone()],
                 )]),
@@ -1273,7 +1273,7 @@ mod test {
             serial: 2,
             zones: vec![DnsConfigZone {
                 zone_name: "zone2.internal".to_string(),
-                names: HashMap::from([(
+                records: HashMap::from([(
                     "gen2_name".to_string(),
                     vec![dummy_record.clone()],
                 )]),
@@ -1376,7 +1376,7 @@ mod test {
             serial: 1,
             zones: vec![DnsConfigZone {
                 zone_name: "zone1.internal".to_string(),
-                names: HashMap::from([(
+                records: HashMap::from([(
                     "gen1_name".to_string(),
                     vec![dummy_record.clone()],
                 )]),
@@ -1437,7 +1437,7 @@ mod test {
             serial: 1,
             zones: vec![DnsConfigZone {
                 zone_name: "zone1.internal".to_string(),
-                names: HashMap::from([
+                records: HashMap::from([
                     ("ns1".to_string(), vec![ns1_a.clone()]),
                     (ZONE_APEX_NAME.to_string(), vec![ns1_ns.clone()]),
                 ]),
@@ -1469,7 +1469,7 @@ mod test {
             serial: 2,
             zones: vec![DnsConfigZone {
                 zone_name: "zone1.internal".to_string(),
-                names: HashMap::from([(
+                records: HashMap::from([(
                     "ns1".to_string(),
                     vec![ns1_a.clone()],
                 )]),
@@ -1497,7 +1497,7 @@ mod test {
             serial: 3,
             zones: vec![DnsConfigZone {
                 zone_name: "zone1.internal".to_string(),
-                names: HashMap::from([
+                records: HashMap::from([
                     ("ns2".to_string(), vec![ns2_a.clone()]),
                     ("ns1".to_string(), vec![ns1_a.clone()]),
                     (

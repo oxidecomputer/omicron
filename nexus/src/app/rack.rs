@@ -196,7 +196,7 @@ impl super::Nexus {
             &dns_zone.zone_name,
             &self.id.to_string(),
             "rack setup",
-            dns_zone.names,
+            dns_zone.records,
         );
 
         let external_dns = InitialDnsGroup::new(
@@ -224,7 +224,7 @@ impl super::Nexus {
                 vec![silo_name],
                 request.external_dns_zone_name,
             );
-        for (name, records) in external_dns_config.names.into_iter() {
+        for (name, records) in external_dns_config.records.into_iter() {
             dns_update.add_name(name, records)?;
         }
 

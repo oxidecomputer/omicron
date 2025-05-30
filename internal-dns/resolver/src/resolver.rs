@@ -694,7 +694,7 @@ mod test {
         // If we deploy a new generation that removes all records, then we don't
         // find anything any more.
         dns_config.generation = dns_config.generation.next();
-        dns_config.zones[0].names = HashMap::new();
+        dns_config.zones[0].records = HashMap::new();
         dns_server.update(&dns_config).await.unwrap();
 
         // If we remove the records for all services, we won't find them any
@@ -1048,7 +1048,7 @@ mod test {
             .find(|zone| zone.zone_name == DNS_ZONE)
             .expect("root dns zone missing?");
         let zone1_records = root
-            .names
+            .records
             .remove(&zone1.dns_name())
             .expect("Cockroach Zone record missing?");
         // There should've been just the one address in this record
@@ -1056,7 +1056,7 @@ mod test {
 
         // Both SRV records should stil exist
         let srv_records = root
-            .names
+            .records
             .get(&ServiceName::Cockroach.dns_name())
             .expect("Cockroach SRV records missing?");
         assert_eq!(srv_records.len(), 2);
@@ -1090,7 +1090,7 @@ mod test {
             .find(|zone| zone.zone_name == DNS_ZONE)
             .expect("root dns zone missing?");
         let zone2_records = root
-            .names
+            .records
             .remove(&zone2.dns_name())
             .expect("Cockroach Zone record missing?");
         // There should've been just the one address in this record

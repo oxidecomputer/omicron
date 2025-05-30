@@ -133,8 +133,9 @@ async fn main() -> Result<()> {
                 println!("\nzone {:?}", zone_config.zone_name);
 
                 // Sort the records so that we get consistent ordering.
-                let names: BTreeMap<_, _> = zone_config.names.iter().collect();
-                for (name, records) in names {
+                let records: BTreeMap<_, _> =
+                    zone_config.records.iter().collect();
+                for (name, records) in records {
                     println!("    key {:?}:", name);
                     for record in records {
                         match record {
@@ -212,8 +213,8 @@ async fn main() -> Result<()> {
                     } else {
                         DnsConfigZone {
                             zone_name: dns_zone.zone_name,
-                            names: dns_zone
-                                .names
+                            records: dns_zone
+                                .records
                                 .into_iter()
                                 .filter(|(name, _)| *name != cmd.name)
                                 .collect(),
@@ -271,7 +272,7 @@ fn add_record(
     let our_records = our_zone
         .into_iter()
         .next()
-        .map(|z| z.names)
+        .map(|z| z.records)
         .unwrap_or_else(HashMap::new);
     let (our_kv, other_kvs): (Vec<_>, Vec<_>) =
         our_records.into_iter().partition(|(n, _)| n == name);
@@ -289,7 +290,7 @@ fn add_record(
             .into_iter()
             .chain(once(DnsConfigZone {
                 zone_name: zone_name.to_owned(),
-                names: other_kvs.into_iter().chain(once(our_kv)).collect(),
+                records: other_kvs.into_iter().chain(once(our_kv)).collect(),
             }))
             .collect(),
     })

@@ -276,7 +276,7 @@ impl DataStore {
             if !zone_records.is_empty() {
                 zones.push(DnsConfigZone {
                     zone_name: zone.zone_name,
-                    names: zone_records.into_iter().collect(),
+                    records: zone_records.into_iter().collect(),
                 });
             }
         }
@@ -936,7 +936,7 @@ mod test {
         assert_eq!(dns_config.zones.len(), 1);
         assert_eq!(dns_config.zones[0].zone_name, "dummy.oxide.internal");
         assert_eq!(
-            dns_config.zones[0].names,
+            dns_config.zones[0].records,
             HashMap::from([
                 ("krabappel".to_string(), krabappel_records),
                 ("wendell".to_string(), wendell_records)
@@ -1234,7 +1234,7 @@ mod test {
         assert_eq!(dns_config_v1.zones.len(), 2);
         assert_eq!(dns_config_v1.zones[0].zone_name, "z1.foo");
         assert_eq!(
-            dns_config_v1.zones[0].names,
+            dns_config_v1.zones[0].records,
             HashMap::from([
                 ("n1".to_string(), records_r1.clone()),
                 ("n2".to_string(), records_r1.clone())
@@ -1242,7 +1242,7 @@ mod test {
         );
         assert_eq!(dns_config_v1.zones[1].zone_name, "z3.bar");
         assert_eq!(
-            dns_config_v1.zones[1].names,
+            dns_config_v1.zones[1].records,
             HashMap::from([("n1".to_string(), records_r2.clone())])
         );
 
@@ -1256,7 +1256,7 @@ mod test {
         assert_eq!(dns_config_v2.zones.len(), 3);
         assert_eq!(dns_config_v2.zones[0].zone_name, "z1.foo");
         assert_eq!(
-            dns_config_v2.zones[0].names,
+            dns_config_v2.zones[0].records,
             HashMap::from([
                 ("n1".to_string(), records_r1.clone()),
                 ("n3".to_string(), records_r1.clone())
@@ -1264,15 +1264,15 @@ mod test {
         );
 
         assert_eq!(dns_config_v2.zones[1].zone_name, "z2.foo");
-        assert_eq!(dns_config_v2.zones[1].names.len(), 1);
+        assert_eq!(dns_config_v2.zones[1].records.len(), 1);
         assert_eq!(
-            dns_config_v2.zones[1].names,
+            dns_config_v2.zones[1].records,
             HashMap::from([("n1".to_string(), records_r1.clone())])
         );
 
         assert_eq!(dns_config_v2.zones[2].zone_name, "z3.bar");
         assert_eq!(
-            dns_config_v2.zones[2].names,
+            dns_config_v2.zones[2].records,
             HashMap::from([
                 ("n1".to_string(), records_r1r2.clone()),
                 ("n2".to_string(), records_r2.clone())
@@ -1289,12 +1289,12 @@ mod test {
         assert_eq!(dns_config_v3.zones.len(), 2);
         assert_eq!(dns_config_v3.zones[0].zone_name, "z2.foo");
         assert_eq!(
-            dns_config_v3.zones[0].names,
+            dns_config_v3.zones[0].records,
             HashMap::from([("n1".to_string(), records_r2.clone())])
         );
         assert_eq!(dns_config_v3.zones[1].zone_name, "z3.bar");
         assert_eq!(
-            dns_config_v3.zones[1].names,
+            dns_config_v3.zones[1].records,
             HashMap::from([("n2".to_string(), records_r2.clone())])
         );
 
@@ -1328,7 +1328,7 @@ mod test {
         assert_eq!(internal_dns_config_v2.zones.len(), 1);
         assert_eq!(internal_dns_config_v2.zones[0].zone_name, "z1.foo");
         assert_eq!(
-            internal_dns_config_v2.zones[0].names,
+            internal_dns_config_v2.zones[0].records,
             HashMap::from([("n1".to_string(), records_r2.clone())])
         );
 
@@ -1629,14 +1629,14 @@ mod test {
         assert_eq!(dns_config.zones.len(), 2);
         assert_eq!(dns_config.zones[0].zone_name, "oxide1.test");
         assert_eq!(
-            dns_config.zones[0].names,
+            dns_config.zones[0].records,
             HashMap::from([
                 ("n1".to_string(), records1.clone()),
                 ("n2".to_string(), records2.clone()),
             ])
         );
         assert_eq!(dns_config.zones[1].zone_name, "oxide2.test");
-        assert_eq!(dns_config.zones[0].names, dns_config.zones[1].names,);
+        assert_eq!(dns_config.zones[0].records, dns_config.zones[1].records,);
 
         // Now change "n1" in the group by removing it and adding it again.
         // This should work and affect both zones.
@@ -1664,14 +1664,14 @@ mod test {
         assert_eq!(dns_config.zones.len(), 2);
         assert_eq!(dns_config.zones[0].zone_name, "oxide1.test");
         assert_eq!(
-            dns_config.zones[0].names,
+            dns_config.zones[0].records,
             HashMap::from([
                 ("n1".to_string(), records12.clone()),
                 ("n2".to_string(), records2.clone()),
             ])
         );
         assert_eq!(dns_config.zones[1].zone_name, "oxide2.test");
-        assert_eq!(dns_config.zones[0].names, dns_config.zones[1].names,);
+        assert_eq!(dns_config.zones[0].records, dns_config.zones[1].records,);
 
         // Now just remove "n1" in this group altogether.
         {
@@ -1697,11 +1697,11 @@ mod test {
         assert_eq!(dns_config.zones.len(), 2);
         assert_eq!(dns_config.zones[0].zone_name, "oxide1.test");
         assert_eq!(
-            dns_config.zones[0].names,
+            dns_config.zones[0].records,
             HashMap::from([("n2".to_string(), records2.clone()),])
         );
         assert_eq!(dns_config.zones[1].zone_name, "oxide2.test");
-        assert_eq!(dns_config.zones[0].names, dns_config.zones[1].names,);
+        assert_eq!(dns_config.zones[0].records, dns_config.zones[1].records,);
 
         // Now add "n1" back -- again.
         {
@@ -1727,14 +1727,14 @@ mod test {
         assert_eq!(dns_config.zones.len(), 2);
         assert_eq!(dns_config.zones[0].zone_name, "oxide1.test");
         assert_eq!(
-            dns_config.zones[0].names,
+            dns_config.zones[0].records,
             HashMap::from([
                 ("n1".to_string(), records2.clone()),
                 ("n2".to_string(), records2.clone()),
             ])
         );
         assert_eq!(dns_config.zones[1].zone_name, "oxide2.test");
-        assert_eq!(dns_config.zones[0].names, dns_config.zones[1].names,);
+        assert_eq!(dns_config.zones[0].records, dns_config.zones[1].records,);
 
         // Now, try concurrent updates to different DNS groups.  Both should
         // succeed.
@@ -1806,11 +1806,11 @@ mod test {
         assert_eq!(dns_config.zones.len(), 2);
         assert_eq!(dns_config.zones[0].zone_name, "oxide1.test");
         assert_eq!(
-            dns_config.zones[0].names,
+            dns_config.zones[0].records,
             HashMap::from([("n2".to_string(), records2.clone()),])
         );
         assert_eq!(dns_config.zones[1].zone_name, "oxide2.test");
-        assert_eq!(dns_config.zones[0].names, dns_config.zones[1].names,);
+        assert_eq!(dns_config.zones[0].records, dns_config.zones[1].records,);
         let dns_config = datastore
             .dns_config_read(&opctx, DnsGroup::Internal)
             .await
@@ -1819,7 +1819,7 @@ mod test {
         assert_eq!(dns_config.zones.len(), 1);
         assert_eq!(dns_config.zones[0].zone_name, "oxide3.test");
         assert_eq!(
-            dns_config.zones[0].names,
+            dns_config.zones[0].records,
             HashMap::from([("n1".to_string(), records1.clone()),])
         );
 
@@ -1886,11 +1886,11 @@ mod test {
         assert_eq!(dns_config.zones.len(), 2);
         assert_eq!(dns_config.zones[0].zone_name, "oxide1.test");
         assert_eq!(
-            dns_config.zones[0].names,
+            dns_config.zones[0].records,
             HashMap::from([("n2".to_string(), records2.clone()),])
         );
         assert_eq!(dns_config.zones[1].zone_name, "oxide2.test");
-        assert_eq!(dns_config.zones[0].names, dns_config.zones[1].names,);
+        assert_eq!(dns_config.zones[0].records, dns_config.zones[1].records,);
 
         db.terminate().await;
         logctx.cleanup_successful();
@@ -1984,7 +1984,7 @@ mod test {
         let gen2 = nexus_db_model::Generation(gen1.next());
         assert_eq!(gen2.0, config.generation);
         assert_eq!(1, config.zones.len());
-        let records = &config.zones[0].names;
+        let records = &config.zones[0].records;
         assert!(records.contains_key("nelson"));
         assert!(!records.contains_key("wendell"));
         assert!(records.contains_key("krabappel"));
@@ -2001,7 +2001,7 @@ mod test {
             .expect("failed to read config");
         assert_eq!(gen2.next(), config.generation);
         assert_eq!(1, config.zones.len());
-        let records = &config.zones[0].names;
+        let records = &config.zones[0].records;
         assert!(records.contains_key("nelson"));
         assert!(!records.contains_key("wendell"));
         assert!(!records.contains_key("krabappel"));

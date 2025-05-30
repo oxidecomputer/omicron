@@ -1927,7 +1927,7 @@ mod test {
         assert_eq!(dns_config_internal.zones.len(), 1);
         assert_eq!(dns_config_internal.zones[0].zone_name, DNS_ZONE);
         assert_eq!(
-            dns_config_internal.zones[0].names,
+            dns_config_internal.zones[0].records,
             HashMap::from([("nexus".to_string(), internal_records)]),
         );
 
@@ -1942,7 +1942,7 @@ mod test {
             "test-suite.oxide.test",
         );
         assert_eq!(
-            dns_config_external.zones[0].names.get("api.sys"),
+            dns_config_external.zones[0].records.get("api.sys"),
             Some(&external_records)
         );
 
