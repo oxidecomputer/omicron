@@ -335,7 +335,7 @@ async fn handle_dns_message(
             // for their referents (rather than IP addresses dierctly). If
             // someone has queried for one of those kinds of records, they'll
             // almost certainly be needing the IP addresses that go with them as
-            // well. We opportunistically attempt to resovle the target here and
+            // well. We opportunistically attempt to resolve the target here and
             // if successful return those additional records in the response.
             //
             // NOTE: we only do this one-layer deep. If the target of a SRV or
