@@ -765,16 +765,24 @@ impl DataStore {
         let rule = dsl::vpc_firewall_rule
             .filter(dsl::time_deleted.is_null())
             .filter(dsl::vpc_id.eq(*SERVICES_VPC_ID))
-            .filter(dsl::name.eq(NEXUS_ICMP_FW_RULE_NAME.to_string()))
+            .filter(dsl::name.eq(NEXUS_ICMP_FW_RULE_NAME))
             .limit(1)
             .select(VpcFirewallRule::as_select())
             .get_result_async::<VpcFirewallRule>(&*conn)
             .await
+            .optional()
             .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))?;
 
-        Ok(ServiceIcmpConfig {
-            enabled: rule.status.0 == VpcFirewallRuleStatus::Enabled,
-        })
+        if let Some(rule) = rule {
+            Ok(ServiceIcmpConfig {
+                enabled: rule.status.0 == VpcFirewallRuleStatus::Enabled,
+            })
+        } else {
+            Err(Error::internal_error(&format!(
+                "services VPC is missing the builtin firewall rule \
+                {NEXUS_ICMP_FW_RULE_NAME}"
+            )))
+        }
     }
 
     pub async fn nexus_inbound_icmp_update(
@@ -799,16 +807,24 @@ impl DataStore {
         let rule = diesel::update(dsl::vpc_firewall_rule)
             .filter(dsl::time_deleted.is_null())
             .filter(dsl::vpc_id.eq(*SERVICES_VPC_ID))
-            .filter(dsl::name.eq(NEXUS_ICMP_FW_RULE_NAME.to_string()))
+            .filter(dsl::name.eq(NEXUS_ICMP_FW_RULE_NAME))
             .set((dsl::time_modified.eq(now), dsl::status.eq(status)))
             .returning(VpcFirewallRule::as_returning())
             .get_result_async(&*conn)
             .await
+            .optional()
             .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))?;
 
-        Ok(ServiceIcmpConfig {
-            enabled: rule.status.0 == VpcFirewallRuleStatus::Enabled,
-        })
+        if let Some(rule) = rule {
+            Ok(ServiceIcmpConfig {
+                enabled: rule.status.0 == VpcFirewallRuleStatus::Enabled,
+            })
+        } else {
+            Err(Error::internal_error(&format!(
+                "services VPC is missing the builtin firewall rule \
+                {NEXUS_ICMP_FW_RULE_NAME}"
+            )))
+        }
     }
 
     /// Return the list of `Sled`s hosting instances or control plane services
