@@ -610,7 +610,7 @@ impl DnsConfigBuilder {
         });
 
         // DNS nameservers can be added in arbitrary order to this builder.
-        // Before assembling DNS records, sort the addresses to some stability
+        // Before assembling DNS records, sort the addresses to have stability
         // in which IPs are for which nameserver records.
         let mut internal_dns_addresses =
             self.internal_dns_addresses.values().collect::<Vec<_>>();

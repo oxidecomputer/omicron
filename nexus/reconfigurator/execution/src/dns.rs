@@ -1073,9 +1073,21 @@ mod test {
         // We'll only have external DNS nameserver records - the A/AAAA records
         // for servers themselves, and NS records at the apex.
         let baseline_external_dns_names = external_dns_count + 1;
+        // Note that `records` is a map of names to records for each name, so
+        // we're asserting on the number of names here.
         assert_eq!(
             external_dns_zone.records.len(),
             baseline_external_dns_names
+        );
+        // Each nameserver has one A/AAAA record and an NS record at the apex.
+        // These should be the only records in external DNS at this point.
+        assert_eq!(
+            external_dns_zone
+                .records
+                .values()
+                .map(|recs| recs.len())
+                .sum::<usize>(),
+            external_dns_count * 2
         );
 
         use internal_dns_types::names::ZONE_APEX_NAME;
