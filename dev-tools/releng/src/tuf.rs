@@ -72,6 +72,21 @@ pub(crate) async fn build_tuf_repo(
         }
     }
 
+    let mut measurement_corpus = vec![];
+
+    for entry in std::fs::read_dir(
+        output_dir.join("hubris-staging").join("measurement_corpus"),
+    )? {
+        let entry = entry?;
+        measurement_corpus.push(DeserializedControlPlaneZoneSource::File {
+            file_name: Some(format!(
+                "{}.cbor",
+                entry.file_name().into_string().unwrap()
+            )),
+            path: Utf8PathBuf::from_path_buf(entry.path()).unwrap(),
+        });
+    }
+
     // Add the OS images.
     manifest.artifacts.insert(
         KnownArtifactKind::Host,
@@ -111,12 +126,27 @@ pub(crate) async fn build_tuf_repo(
                 .join(format!("{}.tar.gz", package)),
         });
     }
+
+    // XXX fixme
+    //let measurement_corpus = vec![
+    //    DeserializedControlPlaneZoneSource::File {
+    //        file_name: Some("rot_staging.cbor".to_string()),
+    //        path: crate::WORKSPACE_DIR.join("corpus").join("rot_staging.cbor"),
+    //    },
+    //    DeserializedControlPlaneZoneSource::File {
+    //        file_name: Some("sp.cbor".to_string()),
+    //        path: crate::WORKSPACE_DIR.join("corpus").join("sp.cbor"),
+    //    },
+    //];
     manifest.artifacts.insert(
         KnownArtifactKind::ControlPlane,
         vec![DeserializedArtifactData {
             name: "control-plane".to_string(),
             version: artifact_version.clone(),
-            source: DeserializedArtifactSource::CompositeControlPlane { zones },
+            source: DeserializedArtifactSource::CompositeControlPlane {
+                zones,
+                measurement_corpus,
+            },
         }],
     );
 
