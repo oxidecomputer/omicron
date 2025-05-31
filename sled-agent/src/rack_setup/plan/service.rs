@@ -496,8 +496,6 @@ impl Plan {
             let internal_ip = sled.addr_alloc.next().expect("Not enough addrs");
             let http_port = omicron_common::address::DNS_HTTP_PORT;
             let http_address = SocketAddrV6::new(internal_ip, http_port, 0, 0);
-            let dns_port = omicron_common::address::DNS_PORT;
-            let dns_sockaddr = SocketAddr::new(external_ip, dns_port);
             // With respect to internal DNS configuration, there's only one
             // address for external DNS that matters: the management (HTTP)
             // interface.
@@ -508,8 +506,10 @@ impl Plan {
                     http_address,
                 )
                 .unwrap();
-            let dns_address =
-                from_sockaddr_to_external_floating_addr(dns_sockaddr);
+            let dns_port = omicron_common::address::DNS_PORT;
+            let dns_address = from_sockaddr_to_external_floating_addr(
+                SocketAddr::new(external_ip, dns_port),
+            );
             let dataset_kind = DatasetKind::ExternalDns;
             let dataset_name = sled.alloc_dataset_from_u2s(dataset_kind)?;
             let filesystem_pool = *dataset_name.pool();
