@@ -399,6 +399,28 @@ impl SpComponentUpdateHelper for ReconfiguratorRotUpdater {
     ) -> BoxFuture<'a, Result<(), GatewayClientError>> {
         mgs_clients
             .try_all_serially(log, move |mgs_client| async move {
+                // We want to set the slot we've just updated as the active one
+                debug!(log, "attempting to set active slot");
+                let inactive_slot = match &update.details {
+                    PendingMgsUpdateDetails::Rot { expected_active_slot, .. } => {
+                        expected_active_slot.slot().toggled().to_u16()
+                    },
+                    PendingMgsUpdateDetails::Sp { .. } => unreachable!(
+                        "pending MGS update details within ReconfiguratorRotUpdater \
+                        will always be for the RoT"
+                    )
+                };
+                let persist = true;
+                mgs_client
+                    .sp_component_active_slot_set(
+                        update.sp_type,
+                        update.slot_id,
+                        &SpComponent::ROT.to_string(),
+                        persist,
+                        &SpComponentFirmwareSlot { slot: inactive_slot }
+                    )
+                    .await?;
+
                 debug!(log, "attempting to reset device");
                 mgs_client
                     .sp_component_reset(

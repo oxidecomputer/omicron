@@ -14,6 +14,7 @@ chrono.workspace = true
 dropshot.workspace = true
 futures.workspace = true
 gateway-client.workspace = true
+gateway-types.workspace = true
 humantime.workspace = true
 internal-dns-resolver.workspace = true
 internal-dns-types.workspace = true
