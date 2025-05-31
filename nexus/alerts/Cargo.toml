@@ -1,0 +1,24 @@
+[package]
+name = "nexus-alerts"
+version = "0.1.0"
+edition = "2024"
+
+[lints]
+workspace = true
+
+[build-dependencies]
+omicron-rpaths.workspace = true
+
+[dependencies]
+nexus-db-model.workspace = true
+omicron-common.workspace = true
+omicron-uuid-kinds.workspace = true
+nexus-auth.workspace = true
+schemars.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+
+omicron-workspace-hack.workspace = true
+
+[features]
+test-alerts = []

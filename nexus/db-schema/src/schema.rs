@@ -2368,6 +2368,7 @@ table! {
         payload -> Jsonb,
         time_dispatched -> Nullable<Timestamptz>,
         num_dispatched -> Int8,
+        schema_version -> Int8,
     }
 }
 

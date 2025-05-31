@@ -3,6 +3,7 @@
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 use crate::AlertClass;
+use crate::SqlU32;
 use chrono::{DateTime, Utc};
 use db_macros::Asset;
 use nexus_db_schema::schema::alert;
@@ -40,6 +41,9 @@ pub struct Alert {
     pub payload: serde_json::Value,
 
     pub num_dispatched: i64,
+
+    /// The version of the JSON schema for `payload`.
+    pub schema_version: SqlU32,
 }
 
 impl Alert {

@@ -52,15 +52,6 @@ pub struct DeliveryConfig {
     pub lease_timeout: TimeDelta,
 }
 
-/// A record from the [`WebhookDelivery`] table along with the event class and
-/// data of the corresponding [`Alert`] record.
-#[derive(Debug, Clone)]
-pub struct DeliveryAndEvent {
-    pub delivery: WebhookDelivery,
-    pub alert_class: AlertClass,
-    pub event: serde_json::Value,
-}
-
 impl DataStore {
     pub async fn webhook_delivery_create_batch(
         &self,
@@ -191,12 +182,11 @@ impl DataStore {
         opctx: &OpContext,
         rx_id: &AlertReceiverUuid,
         cfg: &DeliveryConfig,
-    ) -> Result<impl ExactSizeIterator<Item = DeliveryAndEvent> + 'static, Error>
-    {
+    ) -> ListResultVec<(WebhookDelivery, Alert)> {
         let conn = self.pool_connection_authorized(opctx).await?;
         let now =
             diesel::dsl::now.into_sql::<diesel::pg::sql_types::Timestamptz>();
-        let rows = dsl::webhook_delivery
+        dsl::webhook_delivery
             // Filter out deliveries triggered by probe requests, as those are
             // executed synchronously by the probe endpoint, rather than by the
             // webhook deliverator.
@@ -232,20 +222,14 @@ impl DataStore {
                     )),
             )
             .order_by(dsl::time_created.asc())
-            // Join with the `webhook_event` table to get the event class, which
-            // is necessary to construct delivery requests.
+            // Join with the `alert` table to get the alert, including its
+            // class, payload version, and payload (which are necessary to
+            // construct delivery requests).let rows = 
             .inner_join(alert_dsl::alert.on(alert_dsl::id.eq(dsl::alert_id)))
-            .select((
-                WebhookDelivery::as_select(),
-                alert_dsl::alert_class,
-                alert_dsl::payload,
-            ))
+            .select((WebhookDelivery::as_select(), Alert::as_select()))
             .load_async(&*conn)
             .await
-            .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))?;
-        Ok(rows.into_iter().map(|(delivery, alert_class, event)| {
-            DeliveryAndEvent { delivery, alert_class, event }
-        }))
+            .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))
     }
 
     pub async fn webhook_delivery_start_attempt(
@@ -488,6 +472,7 @@ mod test {
                 &opctx,
                 alert_id,
                 AlertClass::TestFoo,
+                1,
                 serde_json::json!({
                     "answer": 42,
                 }),

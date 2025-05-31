@@ -53,6 +53,7 @@ itertools.workspace = true
 lldpd_client.workspace = true
 macaddr.workspace = true
 maplit.workspace = true
+nexus-alerts.workspace = true
 nexus-background-task-interface.workspace = true
 # Not under "dev-dependencies"; these also need to be implemented for
 # integration tests.
@@ -147,6 +148,7 @@ hyper-rustls.workspace = true
 gateway-messages.workspace = true
 gateway-test-utils.workspace = true
 hubtools.workspace = true
+nexus-alerts = { workspace = true, features = ["test-alerts"] }
 nexus-db-queries = { workspace = true, features = ["testing"] }
 nexus-client.workspace = true
 nexus-test-utils-macros.workspace = true

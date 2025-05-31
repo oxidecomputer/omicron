@@ -73,6 +73,7 @@ members = [
     "nexus",
     "nexus-config",
     "nexus-sled-agent-shared",
+    "nexus/alerts",
     "nexus/authz-macros",
     "nexus/auth",
     "nexus/background-task-interface",
@@ -225,6 +226,7 @@ default-members = [
     "nexus",
     "nexus-config",
     "nexus-sled-agent-shared",
+    "nexus/alerts",
     "nexus/authz-macros",
     "nexus/auth",
     "nexus/background-task-interface",
@@ -510,6 +512,7 @@ newtype_derive = "0.1.6"
 mg-admin-client = { git = "https://github.com/oxidecomputer/maghemite", rev = "875ae5b7f8f0e32e9be672a36b5dda109b9b2450" }
 ddm-admin-client = { git = "https://github.com/oxidecomputer/maghemite", rev = "875ae5b7f8f0e32e9be672a36b5dda109b9b2450" }
 multimap = "0.10.1"
+nexus-alerts = { path = "nexus/alerts" }
 nexus-auth = { path = "nexus/auth" }
 nexus-background-task-interface = { path = "nexus/background-task-interface" }
 nexus-client = { path = "clients/nexus-client" }

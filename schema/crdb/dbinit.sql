@@ -5451,6 +5451,9 @@ CREATE TABLE IF NOT EXISTS omicron.public.alert (
     -- The number of receivers that this alart was dispatched to.
     num_dispatched INT8 NOT NULL,
 
+    -- The version number of the JSON schema for this alert
+    schema_version INT8 NOT NULL,
+
     CONSTRAINT time_dispatched_set_if_dispatched CHECK (
         (num_dispatched = 0) OR (time_dispatched IS NOT NULL)
     ),
@@ -5468,7 +5471,8 @@ INSERT INTO omicron.public.alert (
     alert_class,
     payload,
     time_dispatched,
-    num_dispatched
+    num_dispatched,
+    schema_version
 ) VALUES (
     -- NOTE: this UUID is duplicated in nexus_db_model::alert.
     '001de000-7768-4000-8000-000000000001',
@@ -5479,7 +5483,8 @@ INSERT INTO omicron.public.alert (
     -- Pretend to be dispatched so we won't show up in "list alerts needing
     -- dispatch" queries
     NOW(),
-    0
+    0,
+    1
 ) ON CONFLICT DO NOTHING;
 
 -- Look up webhook events in need of dispatching.
@@ -5671,7 +5676,7 @@ INSERT INTO omicron.public.db_metadata (
     version,
     target_version
 ) VALUES
-    (TRUE, NOW(), NOW(), '144.0.0', NULL)
+    (TRUE, NOW(), NOW(), '145.0.0', NULL)
 ON CONFLICT DO NOTHING;
 
 COMMIT;
