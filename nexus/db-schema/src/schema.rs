@@ -2270,6 +2270,12 @@ allow_tables_to_appear_in_same_query!(
     bgp_config
 );
 
+allow_tables_to_appear_in_same_query!(
+    address_lot,
+    address_lot_block,
+    switch_port_settings,
+);
+
 allow_tables_to_appear_in_same_query!(disk, virtual_provisioning_resource);
 
 allow_tables_to_appear_in_same_query!(volume, virtual_provisioning_resource);

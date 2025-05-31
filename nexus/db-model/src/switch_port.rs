@@ -47,6 +47,28 @@ impl_enum_type!(
     Sfp28x4 => b"Sfp28x4"
 );
 
+impl PartialEq<params::SwitchPortGeometry> for SwitchPortGeometry {
+    fn eq(&self, other: &params::SwitchPortGeometry) -> bool {
+        match self {
+            Self::Qsfp28x1 => {
+                return matches!(other, params::SwitchPortGeometry::Qsfp28x1);
+            }
+            Self::Qsfp28x2 => {
+                return matches!(other, params::SwitchPortGeometry::Qsfp28x2);
+            }
+            Self::Sfp28x4 => {
+                return matches!(other, params::SwitchPortGeometry::Sfp28x4);
+            }
+        }
+    }
+}
+
+impl PartialEq<SwitchPortGeometry> for params::SwitchPortGeometry {
+    fn eq(&self, other: &SwitchPortGeometry) -> bool {
+        other.eq(self)
+    }
+}
+
 impl_enum_type!(
     SwitchLinkFecEnum:
 
@@ -286,9 +308,9 @@ impl SwitchPortSettings {
     }
 }
 
-impl Into<external::SwitchPortSettings> for SwitchPortSettings {
-    fn into(self) -> external::SwitchPortSettings {
-        external::SwitchPortSettings { identity: self.identity() }
+impl Into<external::SwitchPortSettingsIdentity> for SwitchPortSettings {
+    fn into(self) -> external::SwitchPortSettingsIdentity {
+        external::SwitchPortSettingsIdentity { identity: self.identity() }
     }
 }
 
@@ -407,21 +429,6 @@ impl SwitchPortLinkConfig {
     }
 }
 
-impl Into<external::SwitchPortLinkConfig> for SwitchPortLinkConfig {
-    fn into(self) -> external::SwitchPortLinkConfig {
-        external::SwitchPortLinkConfig {
-            port_settings_id: self.port_settings_id,
-            lldp_link_config_id: self.lldp_link_config_id,
-            tx_eq_config_id: self.tx_eq_config_id,
-            link_name: self.link_name.clone(),
-            mtu: self.mtu.into(),
-            fec: self.fec.map(|fec| fec.into()),
-            speed: self.speed.into(),
-            autoneg: self.autoneg,
-        }
-    }
-}
-
 #[derive(
     Queryable,
     Insertable,
@@ -486,7 +493,7 @@ impl Into<external::LldpLinkConfig> for LldpLinkConfig {
             chassis_id: self.chassis_id.clone(),
             system_name: self.system_name.clone(),
             system_description: self.system_description.clone(),
-            management_ip: self.management_ip.map(|a| a.into()),
+            management_ip: self.management_ip.map(|a| a.ip()),
         }
     }
 }
@@ -625,7 +632,7 @@ impl Into<external::SwitchPortRouteConfig> for SwitchPortRouteConfig {
             port_settings_id: self.port_settings_id,
             interface_name: self.interface_name.clone(),
             dst: self.dst.into(),
-            gw: self.gw.into(),
+            gw: self.gw.ip(),
             vlan_id: self.vid.map(Into::into),
             rib_priority: self.rib_priority.map(Into::into),
         }

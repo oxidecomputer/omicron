@@ -4,6 +4,8 @@
 
 //! Integration tests for operating on Ports
 
+use std::str::FromStr;
+
 use http::StatusCode;
 use http::method::Method;
 use nexus_test_utils::http_testing::{AuthnMode, NexusRequest, RequestBuilder};
@@ -16,19 +18,15 @@ use nexus_types::external_api::params::{
     SwitchPortSettingsCreate,
 };
 use nexus_types::external_api::views::Rack;
-use omicron_common::api::external::ImportExportPolicy;
 use omicron_common::api::external::{
     self, AddressLotKind, BgpPeer, IdentityMetadataCreateParams, LinkFec,
-    LinkSpeed, NameOrId, SwitchPort, SwitchPortSettingsView,
+    LinkSpeed, NameOrId, SwitchPort, SwitchPortSettings,
 };
+use omicron_common::api::external::{ImportExportPolicy, Name};
 
 type ControlPlaneTestContext =
     nexus_test_utils::ControlPlaneTestContext<omicron_nexus::Server>;
 
-// TODO: unfortunately this test can no longer be run in the integration test
-//       suite because it depends on communicating with MGS which is not part
-//       of the infrastructure available in the integration test context.
-#[ignore]
 #[nexus_test]
 async fn test_port_settings_basic_crud(ctx: &ControlPlaneTestContext) {
     let client = &ctx.external_client;
@@ -74,10 +72,10 @@ async fn test_port_settings_basic_crud(ctx: &ControlPlaneTestContext) {
         }],
     };
 
-    NexusRequest::objects_post(
+    NexusRequest::object_put(
         client,
         "/v1/system/networking/bgp-announce-set",
-        &announce_set,
+        Some(&announce_set),
     )
     .authn_as(AuthnMode::PrivilegedUser)
     .execute()
@@ -113,59 +111,57 @@ async fn test_port_settings_basic_crud(ctx: &ControlPlaneTestContext) {
             name: "portofino".parse().unwrap(),
             description: "just a port".into(),
         });
-    // links
-    settings.links.insert(
-        "phy0".into(),
-        LinkConfigCreate {
-            mtu: 4700,
-            lldp: LldpLinkConfigCreate {
-                enabled: true,
-                link_name: Some("Link Name".into()),
-                link_description: Some("link_ Dscription".into()),
-                chassis_id: Some("Chassis ID".into()),
-                system_name: Some("System Name".into()),
-                system_description: Some("System description".into()),
-                management_ip: None,
-            },
-            fec: Some(LinkFec::None),
-            speed: LinkSpeed::Speed100G,
-            autoneg: false,
-            tx_eq: None,
-        },
-    );
-    // interfaces
-    settings.interfaces.insert(
-        "phy0".into(),
-        SwitchInterfaceConfigCreate {
-            v6_enabled: true,
-            kind: SwitchInterfaceKind::Primary,
-        },
-    );
-    // routes
-    settings.routes.insert(
-        "phy0".into(),
-        RouteConfig {
-            routes: vec![Route {
-                dst: "1.2.3.0/24".parse().unwrap(),
-                gw: "1.2.3.4".parse().unwrap(),
-                vid: None,
-                rib_priority: None,
-            }],
-        },
-    );
-    // addresses
-    settings.addresses.insert(
-        "phy0".into(),
-        AddressConfig {
-            addresses: vec![Address {
-                address: "203.0.113.10/24".parse().unwrap(),
-                vlan_id: None,
-                address_lot: NameOrId::Name("parkinglot".parse().unwrap()),
-            }],
-        },
-    );
 
-    let created: SwitchPortSettingsView = NexusRequest::objects_post(
+    let link_name =
+        Name::from_str("phy0").expect("phy0 should be a valid name");
+
+    let lldp_params = LldpLinkConfigCreate {
+        enabled: true,
+        link_name: Some("Link Name".into()),
+        link_description: Some("link_ Dscription".into()),
+        chassis_id: Some("Chassis ID".into()),
+        system_name: Some("System Name".into()),
+        system_description: Some("System description".into()),
+        management_ip: None,
+    };
+
+    // links
+    settings.links.push(LinkConfigCreate {
+        link_name: link_name.clone(),
+        mtu: 4700,
+        lldp: lldp_params.clone(),
+        fec: Some(LinkFec::None),
+        speed: LinkSpeed::Speed100G,
+        autoneg: false,
+        tx_eq: None,
+    });
+    // interfaces
+    settings.interfaces.push(SwitchInterfaceConfigCreate {
+        link_name: link_name.clone(),
+        v6_enabled: true,
+        kind: SwitchInterfaceKind::Primary,
+    });
+    // routes
+    settings.routes.push(RouteConfig {
+        link_name: link_name.clone(),
+        routes: vec![Route {
+            dst: "1.2.3.0/24".parse().unwrap(),
+            gw: "1.2.3.4".parse().unwrap(),
+            vid: None,
+            rib_priority: None,
+        }],
+    });
+    // addresses
+    settings.addresses.push(AddressConfig {
+        link_name: link_name.clone(),
+        addresses: vec![Address {
+            address: "203.0.113.10/24".parse().unwrap(),
+            vlan_id: None,
+            address_lot: NameOrId::Name("parkinglot".parse().unwrap()),
+        }],
+    });
+
+    let created: SwitchPortSettings = NexusRequest::objects_post(
         client,
         "/v1/system/networking/switch-port-settings",
         &settings,
@@ -185,17 +181,8 @@ async fn test_port_settings_basic_crud(ctx: &ControlPlaneTestContext) {
     assert_eq!(&link0.link_name, "phy0");
     assert_eq!(link0.mtu, 4700);
 
-    let lldp0 = &created.link_lldp[0];
-    assert_eq!(lldp0.enabled, true);
-    assert_eq!(lldp0.link_name, Some("Link Name".to_string()));
-    assert_eq!(lldp0.link_description, Some("Link Description".to_string()));
-    assert_eq!(lldp0.chassis_id, Some("Chassis ID".to_string()));
-    assert_eq!(lldp0.system_name, Some("System Name".to_string()));
-    assert_eq!(
-        lldp0.system_description,
-        Some("System Description".to_string())
-    );
-    assert_eq!(lldp0.management_ip, None);
+    let lldp0 = link0.lldp_link_config.clone().unwrap();
+    assert_eq!(lldp0, lldp_params);
 
     let ifx0 = &created.interfaces[0];
     assert_eq!(&ifx0.interface_name, "phy0");
@@ -204,13 +191,13 @@ async fn test_port_settings_basic_crud(ctx: &ControlPlaneTestContext) {
 
     let route0 = &created.routes[0];
     assert_eq!(route0.dst, "1.2.3.0/24".parse().unwrap());
-    assert_eq!(route0.gw, "1.2.3.4".parse().unwrap());
+    assert_eq!(&route0.gw.to_string(), "1.2.3.4");
 
     let addr0 = &created.addresses[0];
     assert_eq!(addr0.address, "203.0.113.10/24".parse().unwrap());
 
     // Get the port settings back
-    let roundtrip: SwitchPortSettingsView = NexusRequest::object_get(
+    let roundtrip: SwitchPortSettings = NexusRequest::object_get(
         client,
         "/v1/system/networking/switch-port-settings/portofino",
     )
@@ -229,17 +216,8 @@ async fn test_port_settings_basic_crud(ctx: &ControlPlaneTestContext) {
     assert_eq!(&link0.link_name, "phy0");
     assert_eq!(link0.mtu, 4700);
 
-    let lldp0 = &roundtrip.link_lldp[0];
-    assert_eq!(lldp0.enabled, true);
-    assert_eq!(lldp0.link_name, Some("Link Name".to_string()));
-    assert_eq!(lldp0.link_description, Some("Link Description".to_string()));
-    assert_eq!(lldp0.chassis_id, Some("Chassis ID".to_string()));
-    assert_eq!(lldp0.system_name, Some("System Name".to_string()));
-    assert_eq!(
-        lldp0.system_description,
-        Some("System Description".to_string())
-    );
-    assert_eq!(lldp0.management_ip, None);
+    let lldp0 = link0.lldp_link_config.clone().unwrap();
+    assert_eq!(lldp0, lldp_params);
 
     let ifx0 = &roundtrip.interfaces[0];
     assert_eq!(&ifx0.interface_name, "phy0");
@@ -248,7 +226,7 @@ async fn test_port_settings_basic_crud(ctx: &ControlPlaneTestContext) {
 
     let route0 = &roundtrip.routes[0];
     assert_eq!(route0.dst, "1.2.3.0/24".parse().unwrap());
-    assert_eq!(route0.gw, "1.2.3.4".parse().unwrap());
+    assert_eq!(&route0.gw.to_string(), "1.2.3.4");
 
     let addr0 = &roundtrip.addresses[0];
     assert_eq!(addr0.address, "203.0.113.10/24".parse().unwrap());
@@ -267,7 +245,7 @@ async fn test_port_settings_basic_crud(ctx: &ControlPlaneTestContext) {
     .unwrap();
 
     // Create same port settings again. Should not see conflict.
-    let _created: SwitchPortSettingsView = NexusRequest::objects_post(
+    let _created: SwitchPortSettings = NexusRequest::objects_post(
         client,
         "/v1/system/networking/switch-port-settings",
         &settings,
@@ -280,32 +258,30 @@ async fn test_port_settings_basic_crud(ctx: &ControlPlaneTestContext) {
     .unwrap();
 
     // Update port settings. Should not see conflict.
-    settings.bgp_peers.insert(
-        "phy0".into(),
-        BgpPeerConfig {
-            peers: vec![BgpPeer {
-                bgp_config: NameOrId::Name("as47".parse().unwrap()),
-                interface_name: "phy0".to_string(),
-                addr: "1.2.3.4".parse().unwrap(),
-                hold_time: 6,
-                idle_hold_time: 6,
-                delay_open: 0,
-                connect_retry: 3,
-                keepalive: 2,
-                remote_asn: None,
-                min_ttl: None,
-                md5_auth_key: None,
-                multi_exit_discriminator: None,
-                communities: Vec::new(),
-                local_pref: None,
-                enforce_first_as: false,
-                allowed_export: ImportExportPolicy::NoFiltering,
-                allowed_import: ImportExportPolicy::NoFiltering,
-                vlan_id: None,
-            }],
-        },
-    );
-    let _created: SwitchPortSettingsView = NexusRequest::objects_post(
+    settings.bgp_peers.push(BgpPeerConfig {
+        link_name: link_name.clone(),
+        peers: vec![BgpPeer {
+            bgp_config: NameOrId::Name("as47".parse().unwrap()),
+            interface_name: "phy0".to_string(),
+            addr: "1.2.3.4".parse().unwrap(),
+            hold_time: 6,
+            idle_hold_time: 6,
+            delay_open: 0,
+            connect_retry: 3,
+            keepalive: 2,
+            remote_asn: None,
+            min_ttl: None,
+            md5_auth_key: None,
+            multi_exit_discriminator: None,
+            communities: Vec::new(),
+            local_pref: None,
+            enforce_first_as: false,
+            allowed_export: ImportExportPolicy::NoFiltering,
+            allowed_import: ImportExportPolicy::NoFiltering,
+            vlan_id: None,
+        }],
+    });
+    let _created: SwitchPortSettings = NexusRequest::objects_post(
         client,
         "/v1/system/networking/switch-port-settings",
         &settings,
