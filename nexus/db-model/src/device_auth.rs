@@ -11,8 +11,11 @@ use nexus_db_schema::schema::{device_access_token, device_auth_request};
 
 use chrono::{DateTime, Duration, Utc};
 use nexus_types::external_api::views;
+use omicron_uuid_kinds::{AccessTokenKind, TypedUuid};
 use rand::{Rng, RngCore, SeedableRng, distributions::Slice, rngs::StdRng};
 use uuid::Uuid;
+
+use crate::typed_uuid::DbTypedUuid;
 
 /// Default timeout in seconds for client to authenticate for a token request.
 const CLIENT_AUTHENTICATION_TIMEOUT: i64 = 300;
@@ -117,6 +120,7 @@ impl DeviceAuthRequest {
 #[derive(Clone, Debug, Insertable, Queryable, Selectable)]
 #[diesel(table_name = device_access_token)]
 pub struct DeviceAccessToken {
+    pub id: DbTypedUuid<AccessTokenKind>,
     pub token: String,
     pub client_id: Uuid,
     pub device_code: String,
@@ -136,6 +140,7 @@ impl DeviceAccessToken {
         let now = Utc::now();
         assert!(time_requested <= now);
         Self {
+            id: TypedUuid::new_v4().into(),
             token: generate_token(),
             client_id,
             device_code,
@@ -146,8 +151,8 @@ impl DeviceAccessToken {
         }
     }
 
-    pub fn id(&self) -> String {
-        self.token.clone()
+    pub fn id(&self) -> TypedUuid<AccessTokenKind> {
+        self.id.0
     }
 
     pub fn expires(mut self, time: DateTime<Utc>) -> Self {

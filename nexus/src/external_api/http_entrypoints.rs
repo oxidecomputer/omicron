@@ -7583,20 +7583,25 @@ impl NexusExternalApi for NexusExternalApiImpl {
         let apictx = rqctx.context();
         let handler = async {
             let nexus = &apictx.context.nexus;
-            let opctx =
-                crate::context::op_context_for_external_api(&rqctx).await;
-            let token = cookies.get(session_cookie::SESSION_COOKIE_COOKIE_NAME);
+            // this is kind of a weird one, but we're only doing things here
+            // that are authorized directly by the possession of the token,
+            // which makes it somewhat like a login
+            let opctx = nexus.opctx_external_authn();
+            let session_cookie =
+                cookies.get(session_cookie::SESSION_COOKIE_COOKIE_NAME);
 
-            if let Ok(opctx) = opctx {
-                if let Some(token) = token {
-                    nexus.session_hard_delete(&opctx, token.value()).await?;
-                }
+            // Look up session and delete it if present
+            if let Some(cookie) = session_cookie {
+                let token = cookie.value().to_string();
+                nexus.session_hard_delete_by_token(&opctx, token).await?;
             }
 
-            // If user's session was already expired, they failed auth and their
-            // session was automatically deleted by the auth scheme. If they have no
-            // session (e.g., they cleared their cookies while sitting on the page)
-            // they will also fail auth.
+            // If user's session was already expired, they fail auth and their
+            // session is automatically deleted by the auth scheme. If they
+            // have no session at all (because, e.g., they cleared their cookies
+            // while sitting on the page) they will also fail auth, but nothing
+            // is deleted and the above lookup by token fails (but doesn't early
+            // return).
 
             // Even if the user failed auth, we don't want to send them back a 401
             // like we would for a normal request. They are in fact logged out like

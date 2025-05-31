@@ -136,6 +136,19 @@ async fn test_sessions(cptestctx: &ControlPlaneTestContext) {
         .await
         .expect("failed to log out");
 
+    // logout with a nonexistent session token does the same thing: clears it out
+    RequestBuilder::new(&testctx, Method::POST, "/v1/logout")
+        .header(header::COOKIE, "session=abc")
+        .expect_status(Some(StatusCode::NO_CONTENT))
+        // logout also clears the cookie client-side
+        .expect_response_header(
+            header::SET_COOKIE,
+            "session=; Path=/; HttpOnly; SameSite=Lax; Max-Age=0",
+        )
+        .execute()
+        .await
+        .expect("failed to log out");
+
     // now the same requests with the same session cookie should 401/302 because
     // logout also deletes the session server-side
     RequestBuilder::new(&testctx, Method::POST, "/v1/projects")
