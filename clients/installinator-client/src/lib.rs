@@ -27,6 +27,7 @@ progenitor::generate_api!(
         ProgressEventForInstallinatorSpec = installinator_common::ProgressEvent,
         StepEventForGenericSpec = installinator_common::StepEvent<update_engine::NestedSpec>,
         StepEventForInstallinatorSpec = installinator_common::StepEvent,
+        TypedUuidForMupdateKind = omicron_uuid_kinds::MupdateUuid,
     }
 );
 

@@ -1933,8 +1933,7 @@
             "format": "hex string (32 bytes)"
           },
           "update_id": {
-            "type": "string",
-            "format": "uuid"
+            "$ref": "#/components/schemas/TypedUuidForMupdateKind"
           }
         },
         "required": [
@@ -3716,6 +3715,10 @@
         ]
       },
       "TypedUuidForEreporterRestartKind": {
+        "type": "string",
+        "format": "uuid"
+      },
+      "TypedUuidForMupdateKind": {
         "type": "string",
         "format": "uuid"
       },

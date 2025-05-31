@@ -14,10 +14,10 @@ use gateway_test_utils::setup as gateway_setup;
 use installinator::HOST_PHASE_2_FILE_NAME;
 use maplit::btreeset;
 use omicron_common::update::MupdateOverrideInfo;
+use omicron_uuid_kinds::MupdateUuid;
 use tokio::sync::oneshot;
 use tufaceous_artifact::{ArtifactHashId, ArtifactKind, KnownArtifactKind};
 use update_engine::NestedError;
-use uuid::Uuid;
 use wicket::OutputKind;
 use wicket_common::{
     inventory::{SpIdentifier, SpType},
@@ -345,7 +345,7 @@ async fn test_installinator_fetch() {
 
     // Create a new update ID and register it. This is required to ensure the
     // installinator reaches completion.
-    let update_id = Uuid::new_v4();
+    let update_id = MupdateUuid::new_v4();
     let start_receiver =
         wicketd_testctx.server.ipr_update_tracker.register(update_id);
 
