@@ -442,10 +442,6 @@ enum BlueprintEditCommands {
     /// expunge a zone
     ExpungeZone { zone_id: OmicronZoneUuid },
     /// mark an expunged zone ready for cleanup
-    ///
-    /// this typically does not mean anything different than any other expunged
-    /// zone, except that internal DNS zones are not replaced until they are
-    /// definitively marked "ready for cleanup".
     MarkForCleanup { zone_id: OmicronZoneUuid },
     /// configure an SP update
     SetSpUpdate {
