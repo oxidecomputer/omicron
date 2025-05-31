@@ -9,13 +9,18 @@ use crate::authz;
 use crate::context::OpContext;
 use crate::db::model::DeviceAccessToken;
 use crate::db::model::DeviceAuthRequest;
+use crate::db::pagination::paginated;
 use async_bb8_diesel::AsyncRunQueryDsl;
+use chrono::Utc;
 use diesel::prelude::*;
 use nexus_db_errors::ErrorHandler;
 use nexus_db_errors::public_error_from_diesel;
 use nexus_db_schema::schema::device_access_token;
 use omicron_common::api::external::CreateResult;
+use omicron_common::api::external::DataPageParams;
 use omicron_common::api::external::Error;
+use omicron_common::api::external::InternalContext;
+use omicron_common::api::external::ListResultVec;
 use omicron_common::api::external::LookupResult;
 use omicron_common::api::external::LookupType;
 use omicron_common::api::external::ResourceType;
@@ -175,5 +180,65 @@ impl DataStore {
                     ),
                 )
             })
+    }
+
+    // Similar to session hard delete and silo group list, we do not do a
+    // typical authz check, instead effectively encoding the policy here that
+    // any user is allowed to list and delete their own tokens. When we add the
+    // ability for silo admins to list and delete tokens from any user, we will
+    // have to model these permissions properly in the polar policy.
+
+    pub async fn current_user_token_list(
+        &self,
+        opctx: &OpContext,
+        pagparams: &DataPageParams<'_, Uuid>,
+    ) -> ListResultVec<DeviceAccessToken> {
+        let &actor = opctx
+            .authn
+            .actor_required()
+            .internal_context("listing current user's tokens")?;
+
+        use nexus_db_schema::schema::device_access_token::dsl;
+        paginated(dsl::device_access_token, dsl::id, &pagparams)
+            .filter(dsl::silo_user_id.eq(actor.actor_id()))
+            // we don't have time_deleted on tokens. unfortunately this is not
+            // indexed well. maybe it can be!
+            .filter(
+                dsl::time_expires
+                    .is_null()
+                    .or(dsl::time_expires.gt(Utc::now())),
+            )
+            .select(DeviceAccessToken::as_select())
+            .load_async(&*self.pool_connection_authorized(opctx).await?)
+            .await
+            .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))
+    }
+
+    pub async fn current_user_token_delete(
+        &self,
+        opctx: &OpContext,
+        token_id: Uuid,
+    ) -> Result<(), Error> {
+        let &actor = opctx
+            .authn
+            .actor_required()
+            .internal_context("deleting current user's token")?;
+
+        use nexus_db_schema::schema::device_access_token::dsl;
+        let num_deleted = diesel::delete(dsl::device_access_token)
+            .filter(dsl::silo_user_id.eq(actor.actor_id()))
+            .filter(dsl::id.eq(token_id))
+            .execute_async(&*self.pool_connection_authorized(opctx).await?)
+            .await
+            .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))?;
+
+        if num_deleted == 0 {
+            return Err(Error::not_found_by_id(
+                ResourceType::DeviceAccessToken,
+                &token_id,
+            ));
+        }
+
+        Ok(())
     }
 }
