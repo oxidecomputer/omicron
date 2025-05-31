@@ -136,9 +136,12 @@ impl DeviceAccessToken {
         device_code: String,
         time_requested: DateTime<Utc>,
         silo_user_id: Uuid,
+        time_expires: Option<DateTime<Utc>>,
     ) -> Self {
         let now = Utc::now();
         assert!(time_requested <= now);
+        assert!(time_expires.map_or(true, |t| t > now));
+
         Self {
             id: TypedUuid::new_v4().into(),
             token: generate_token(),
@@ -147,7 +150,7 @@ impl DeviceAccessToken {
             silo_user_id,
             time_requested,
             time_created: now,
-            time_expires: None,
+            time_expires,
         }
     }
 

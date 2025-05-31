@@ -13,8 +13,8 @@ use omicron_common::api::external::{
     AddressLotKind, AffinityPolicy, AllowedSourceIps, BfdMode, BgpPeer,
     ByteCount, FailureDomain, Hostname, IdentityMetadataCreateParams,
     IdentityMetadataUpdateParams, InstanceAutoRestartPolicy, InstanceCpuCount,
-    LinkFec, LinkSpeed, Name, NameOrId, PaginationOrder, RouteDestination,
-    RouteTarget, TxEqConfig, UserId,
+    LinkFec, LinkSpeed, Name, NameOrId, Nullable, PaginationOrder,
+    RouteDestination, RouteTarget, TxEqConfig, UserId,
 };
 use omicron_common::disk::DiskVariant;
 use oxnet::{IpNet, Ipv4Net, Ipv6Net};
@@ -28,6 +28,7 @@ use serde::{
 use std::collections::BTreeMap;
 use std::collections::BTreeSet;
 use std::collections::HashMap;
+use std::num::NonZeroU32;
 use std::{net::IpAddr, str::FromStr};
 use url::Url;
 use uuid::Uuid;
@@ -480,6 +481,22 @@ pub struct SiloQuotasUpdate {
     pub memory: Option<ByteCount>,
     /// The amount of storage (in bytes) available for disks or snapshots
     pub storage: Option<ByteCount>,
+}
+
+// TODO: Unlike quota values, silo settings are nullable, so we need passing
+// null to be meaningful here. But it's confusing for it to work that way here
+// and differently for quotas. Maybe the best thing would be to make them all
+// non-nullable on SiloQuotasUpdate. I vaguely remember the latter being the
+// direction we wanted to go in general anyway. Can't find the issue where it
+// was discussed.
+
+/// Updateable properties of a silo's settings.
+#[derive(Clone, Debug, Serialize, Deserialize, JsonSchema)]
+pub struct SiloSettingsUpdate {
+    /// Maximum lifetime of a device token in seconds. If set to null, users
+    /// will be able to create tokens that do not expire.
+    #[schemars(range(min = 1))]
+    pub device_token_max_ttl_seconds: Nullable<NonZeroU32>,
 }
 
 /// Create-time parameters for a `User`
