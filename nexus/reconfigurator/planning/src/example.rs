@@ -330,6 +330,14 @@ impl ExampleSystemBuilder {
         self.nexus_count.unwrap_or(ZoneCount(self.nsleds))
     }
 
+    pub fn get_internal_dns_zones(&self) -> usize {
+        self.internal_dns_count.0
+    }
+
+    pub fn get_external_dns_zones(&self) -> usize {
+        self.external_dns_count.0
+    }
+
     /// Create a new example system with the given modifications.
     ///
     /// Return the system, and the initial blueprint that matches it.
@@ -521,7 +529,7 @@ impl ExampleSystemBuilder {
 // A little wrapper to try and avoid having an `on` function which takes 3
 // usize parameters.
 #[derive(Clone, Copy, Debug)]
-struct ZoneCount(usize);
+struct ZoneCount(pub usize);
 
 impl ZoneCount {
     fn on(self, sled_id: usize, total_sleds: usize) -> usize {

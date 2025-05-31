@@ -826,6 +826,14 @@ mod test {
         };
         dropshot::ServerBuilder::new(api(), label, log)
             .config(config_dropshot)
+            .version_policy(dropshot::VersionPolicy::Dynamic(Box::new(
+                dropshot::ClientSpecifiesVersionInHeader::new(
+                    "api-version"
+                        .parse::<reqwest::header::HeaderName>()
+                        .expect("api-version is a valid header name"),
+                    semver::Version::new(2, 0, 0),
+                ),
+            )))
             .start()
             .unwrap()
     }
