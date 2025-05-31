@@ -7,13 +7,13 @@
 //! Note that this state is not necessarily directly serialized and saved.
 
 use crate::crypto::LrtqShare;
-use crate::messages::{CommitMsg, PrepareMsg};
+use crate::messages::PrepareMsg;
 use crate::{Configuration, Epoch, PlatformId};
 use bootstore::schemes::v0::SharePkgCommon as LrtqShareData;
 use gfss::shamir::Share;
 use omicron_uuid_kinds::{GenericUuid, RackUuid};
 use serde::{Deserialize, Serialize};
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 
 /// All the persistent state for this protocol
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
@@ -22,7 +22,7 @@ pub struct PersistentState {
     // data it read from disk. This allows us to upgrade from LRTQ.
     pub lrtq: Option<LrtqShareData>,
     pub prepares: BTreeMap<Epoch, PrepareMsg>,
-    pub commits: BTreeMap<Epoch, CommitMsg>,
+    pub commits: BTreeSet<Epoch>,
 
     // Has the node seen a commit for an epoch higher than it's current
     // configuration for which it has not received a `PrepareMsg` for? If at
@@ -37,7 +37,7 @@ impl PersistentState {
         PersistentState {
             lrtq: None,
             prepares: BTreeMap::new(),
-            commits: BTreeMap::new(),
+            commits: BTreeSet::new(),
             decommissioned: None,
         }
     }
@@ -66,7 +66,7 @@ impl PersistentState {
     }
 
     pub fn last_committed_epoch(&self) -> Option<Epoch> {
-        self.commits.keys().last().map(|epoch| *epoch)
+        self.commits.last().map(|epoch| *epoch)
     }
 
     // Get the configuration for the current epoch from its prepare message
@@ -88,7 +88,7 @@ impl PersistentState {
 
     // Return the key share for the latest committed trust quorum configuration
     // if one exists
-    pub fn key_share(&self) -> Option<Share> {
+    pub fn last_committed_key_share(&self) -> Option<Share> {
         self.last_committed_epoch().map(|epoch| {
             self.prepares.get(&epoch).expect("missing prepare").share.clone()
         })

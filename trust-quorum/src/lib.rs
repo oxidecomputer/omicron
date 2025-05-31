@@ -15,6 +15,7 @@ use serde::{Deserialize, Serialize};
 mod configuration;
 mod coordinator_state;
 pub(crate) mod crypto;
+pub(crate) mod errors;
 mod messages;
 mod node;
 mod persistent_state;
@@ -39,6 +40,13 @@ pub use persistent_state::{PersistentState, PersistentStateSummary};
     Display,
 )]
 pub struct Epoch(pub u64);
+
+impl Epoch {
+    // Increment the epoch and return the new value
+    pub fn inc(&self) -> Epoch {
+        Epoch(self.0 + 1)
+    }
+}
 
 /// The number of shares required to reconstruct the rack secret
 ///
