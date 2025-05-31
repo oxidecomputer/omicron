@@ -32,6 +32,9 @@ pub struct DeviceAuthRequest {
     pub user_code: String,
     pub time_created: DateTime<Utc>,
     pub time_expires: DateTime<Utc>,
+
+    /// TTL requested by the user
+    pub token_ttl_seconds: Option<i64>,
 }
 
 impl DeviceAuthRequest {
@@ -98,7 +101,7 @@ fn generate_user_code() -> String {
 }
 
 impl DeviceAuthRequest {
-    pub fn new(client_id: Uuid) -> Self {
+    pub fn new(client_id: Uuid, requested_ttl_seconds: Option<u32>) -> Self {
         let now = Utc::now();
         Self {
             client_id,
@@ -107,6 +110,7 @@ impl DeviceAuthRequest {
             time_created: now,
             time_expires: now
                 + Duration::seconds(CLIENT_AUTHENTICATION_TIMEOUT),
+            token_ttl_seconds: requested_ttl_seconds.map(i64::from),
         }
     }
 
