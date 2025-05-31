@@ -5,6 +5,18 @@
 //! Default values for data in the Nexus API, when not provided explicitly in a request.
 
 use omicron_common::api::external;
+use omicron_common::api::external::L4Port;
+use omicron_common::api::external::Name;
+use omicron_common::api::external::VpcFirewallRuleAction;
+use omicron_common::api::external::VpcFirewallRuleDirection;
+use omicron_common::api::external::VpcFirewallRuleFilter;
+use omicron_common::api::external::VpcFirewallRuleHostFilter;
+use omicron_common::api::external::VpcFirewallRulePriority;
+use omicron_common::api::external::VpcFirewallRuleProtocol;
+use omicron_common::api::external::VpcFirewallRuleStatus;
+use omicron_common::api::external::VpcFirewallRuleTarget;
+use omicron_common::api::external::VpcFirewallRuleUpdate;
+use omicron_common::api::external::VpcFirewallRuleUpdateParams;
 use oxnet::Ipv4Net;
 use oxnet::Ipv6Net;
 use std::net::Ipv4Addr;
@@ -21,44 +33,63 @@ pub const DEFAULT_PRIMARY_NIC_NAME: &str = "net0";
 pub static DEFAULT_VPC_SUBNET_IPV4_BLOCK: LazyLock<Ipv4Net> =
     LazyLock::new(|| Ipv4Net::new(Ipv4Addr::new(172, 30, 0, 0), 22).unwrap());
 
-pub static DEFAULT_FIREWALL_RULES: LazyLock<
-    external::VpcFirewallRuleUpdateParams,
-> = LazyLock::new(|| {
-    serde_json::from_str(r#"{
-        "rules": [
-            {
-                "name": "allow-internal-inbound",
-                "status": "enabled",
-                "direction": "inbound",
-                "targets": [ { "type": "vpc", "value": "default" } ],
-                "filters": { "hosts": [ { "type": "vpc", "value": "default" } ] },
-                "action": "allow",
-                "priority": 65534,
-                "description": "allow inbound traffic to all instances within the VPC if originated within the VPC"
-            },
-            {
-                "name": "allow-ssh",
-                "status": "enabled",
-                "direction": "inbound",
-                "targets": [ { "type": "vpc", "value": "default" } ],
-                "filters": { "ports": [ "22" ], "protocols": [ "TCP" ] },
-                "action": "allow",
-                "priority": 65534,
-                "description": "allow inbound TCP connections on port 22 from anywhere"
-            },
-            {
-                "name": "allow-icmp",
-                "status": "enabled",
-                "direction": "inbound",
-                "targets": [ { "type": "vpc", "value": "default" } ],
-                "filters": { "protocols": [ "ICMP" ] },
-                "action": "allow",
-                "priority": 65534,
-                "description": "allow inbound ICMP traffic from anywhere"
-            }
-        ]
-    }"#).unwrap()
-});
+pub static DEFAULT_FIREWALL_RULES: LazyLock<VpcFirewallRuleUpdateParams> =
+    LazyLock::new(|| {
+        let default: Name = "default".parse().unwrap();
+        let targets = vec![VpcFirewallRuleTarget::Vpc(default.clone())];
+        VpcFirewallRuleUpdateParams {
+            rules: vec![
+                VpcFirewallRuleUpdate {
+                    name: "allow-internal-inbound".parse().unwrap(),
+                    description:
+                        "allow inbound traffic to all instances within the VPC if originated within the VPC"
+                            .to_string(),
+                    status: VpcFirewallRuleStatus::Enabled,
+                    direction: VpcFirewallRuleDirection::Inbound,
+                    targets: targets.clone(),
+                    filters: VpcFirewallRuleFilter {
+                        hosts: Some(vec![VpcFirewallRuleHostFilter::Vpc(default)]),
+                        protocols: None,
+                        ports: None,
+                    },
+                    action: VpcFirewallRuleAction::Allow,
+                    priority: VpcFirewallRulePriority(65534),
+                },
+                VpcFirewallRuleUpdate {
+                    name: "allow-ssh".parse().unwrap(),
+                    description:
+                        "allow inbound TCP connections on port 22 from anywhere"
+                            .to_string(),
+                    status: VpcFirewallRuleStatus::Enabled,
+                    direction: VpcFirewallRuleDirection::Inbound,
+                    targets: targets.clone(),
+                    filters: VpcFirewallRuleFilter {
+                        hosts: None,
+                        protocols: Some(vec![VpcFirewallRuleProtocol::Tcp]),
+                        ports: Some(vec![L4Port::try_from(22u16).unwrap().into()]),
+                    },
+                    action: VpcFirewallRuleAction::Allow,
+                    priority: VpcFirewallRulePriority(65534),
+                },
+                VpcFirewallRuleUpdate {
+                    name: "allow-icmp".parse().unwrap(),
+                    description:
+                        "allow inbound ICMP traffic from anywhere"
+                            .to_string(),
+                    status: VpcFirewallRuleStatus::Enabled,
+                    direction: VpcFirewallRuleDirection::Inbound,
+                    targets,
+                    filters: VpcFirewallRuleFilter {
+                        hosts: None,
+                        protocols: Some(vec![VpcFirewallRuleProtocol::Icmp(None)]),
+                        ports: None,
+                    },
+                    action: VpcFirewallRuleAction::Allow,
+                    priority: VpcFirewallRulePriority(65534),
+                },
+            ]
+        }
+    });
 
 /// Generate a random VPC IPv6 prefix, in the range `fd00::/48`.
 pub fn random_vpc_ipv6_prefix() -> Result<Ipv6Net, external::Error> {
