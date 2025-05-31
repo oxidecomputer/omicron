@@ -449,7 +449,7 @@ gateway-types = { path = "gateway-types" }
 gethostname = "0.5.0"
 gfss = { path = "trust-quorum/gfss" }
 glob = "0.3.2"
-guppy = "0.17.18"
+guppy = "0.17.19"
 headers = "0.4.0"
 heck = "0.5"
 hex = "0.4.3"
