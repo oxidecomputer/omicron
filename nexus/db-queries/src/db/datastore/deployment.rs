@@ -2249,7 +2249,7 @@ mod tests {
             const SYSTEM_HASH: ArtifactHash = ArtifactHash([3; 32]);
 
             datastore
-                .update_tuf_repo_insert(
+                .tuf_repo_insert(
                     opctx,
                     &TufRepoDescription {
                         repo: TufRepoMeta {
