@@ -4047,7 +4047,7 @@
         "description": "Configuration for a specific DNS zone, as opposed to illumos zones in which the services described by these records run.\n\nThe name `@` is special: it describes records that should be provided for queries about `zone_name`. This is used in favor of the empty string as `@` is the name used for this purpose in zone files for most DNS configurations. It also avoids potentially-confusing debug output from naively printing out records and their names - if you've seen an `@` record and tools are unclear about what that means, hopefully you've arrived here!",
         "type": "object",
         "properties": {
-          "names": {
+          "records": {
             "type": "object",
             "additionalProperties": {
               "type": "array",
@@ -4061,7 +4061,7 @@
           }
         },
         "required": [
-          "names",
+          "records",
           "zone_name"
         ]
       },
