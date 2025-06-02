@@ -30,8 +30,8 @@ use nexus_db_fixed_data::silo::{DEFAULT_SILO, INTERNAL_SILO};
 use nexus_db_lookup::DbConnection;
 use nexus_db_model::Certificate;
 use nexus_db_model::ServiceKind;
+use nexus_db_model::SiloAuthSettings;
 use nexus_db_model::SiloQuotas;
-use nexus_db_model::SiloSettings;
 use nexus_types::external_api::params;
 use nexus_types::external_api::shared;
 use nexus_types::external_api::shared::SiloRole;
@@ -82,7 +82,7 @@ impl DataStore {
                     .execute_async(&conn)
                     .await?;
                 diesel::insert_into(silo_auth_settings::table)
-                    .values(SiloSettings::new(DEFAULT_SILO.id()))
+                    .values(SiloAuthSettings::new(DEFAULT_SILO.id()))
                     .on_conflict(silo_auth_settings::silo_id)
                     .do_nothing()
                     .execute_async(&conn)
@@ -311,7 +311,7 @@ impl DataStore {
                 self.silo_auth_settings_create(
                     &conn,
                     &authz_silo,
-                    SiloSettings::new(authz_silo.id()),
+                    SiloAuthSettings::new(authz_silo.id()),
                 )
                 .await?;
 

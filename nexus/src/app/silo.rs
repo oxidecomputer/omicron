@@ -9,7 +9,7 @@ use crate::external_api::shared;
 use anyhow::Context;
 use nexus_db_lookup::LookupPath;
 use nexus_db_lookup::lookup;
-use nexus_db_model::SiloSettings;
+use nexus_db_model::SiloAuthSettings;
 use nexus_db_model::{DnsGroup, UserProvisionType};
 use nexus_db_queries::authz::ApiResource;
 use nexus_db_queries::context::OpContext;
@@ -230,7 +230,7 @@ impl super::Nexus {
         &self,
         opctx: &OpContext,
         silo_lookup: &lookup::Silo<'_>,
-    ) -> LookupResult<SiloSettings> {
+    ) -> LookupResult<SiloAuthSettings> {
         // TODO: can everyone view this on their own silo? why not, right?
         let (.., authz_silo) =
             silo_lookup.lookup_for(authz::Action::Read).await?;
@@ -241,8 +241,8 @@ impl super::Nexus {
         &self,
         opctx: &OpContext,
         silo_lookup: &lookup::Silo<'_>,
-        settings: &params::SiloSettingsUpdate,
-    ) -> UpdateResult<SiloSettings> {
+        settings: &params::SiloAuthSettingsUpdate,
+    ) -> UpdateResult<SiloAuthSettings> {
         // TODO: modify seems fine, but look into why policy has its own
         // separate permission
         let (.., authz_silo) =

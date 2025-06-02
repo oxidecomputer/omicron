@@ -286,7 +286,7 @@ pub trait NexusExternalApi {
     }]
     async fn auth_settings_view(
         rqctx: RequestContext<Self::Context>,
-    ) -> Result<HttpResponseOk<views::SiloSettings>, HttpError>;
+    ) -> Result<HttpResponseOk<views::SiloAuthSettings>, HttpError>;
 
     /// Update current silo's auth settings
     #[endpoint {
@@ -296,8 +296,8 @@ pub trait NexusExternalApi {
     }]
     async fn auth_settings_update(
         rqctx: RequestContext<Self::Context>,
-        new_settings: TypedBody<params::SiloSettingsUpdate>,
-    ) -> Result<HttpResponseOk<views::SiloSettings>, HttpError>;
+        new_settings: TypedBody<params::SiloAuthSettingsUpdate>,
+    ) -> Result<HttpResponseOk<views::SiloAuthSettings>, HttpError>;
 
     /// Fetch resource utilization for user's current silo
     #[endpoint {

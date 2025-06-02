@@ -231,7 +231,7 @@ impl NexusExternalApi for NexusExternalApiImpl {
 
     async fn auth_settings_view(
         rqctx: RequestContext<ApiContext>,
-    ) -> Result<HttpResponseOk<views::SiloSettings>, HttpError> {
+    ) -> Result<HttpResponseOk<views::SiloAuthSettings>, HttpError> {
         let apictx = rqctx.context();
         let handler = async {
             let nexus = &apictx.context.nexus;
@@ -258,8 +258,8 @@ impl NexusExternalApi for NexusExternalApiImpl {
 
     async fn auth_settings_update(
         rqctx: RequestContext<Self::Context>,
-        new_settings: TypedBody<params::SiloSettingsUpdate>,
-    ) -> Result<HttpResponseOk<views::SiloSettings>, HttpError> {
+        new_settings: TypedBody<params::SiloAuthSettingsUpdate>,
+    ) -> Result<HttpResponseOk<views::SiloAuthSettings>, HttpError> {
         let apictx = rqctx.context();
         let handler = async {
             let nexus = &apictx.context.nexus;

@@ -15,7 +15,7 @@ use uuid::Uuid;
     AsChangeset,
 )]
 #[diesel(table_name = silo_auth_settings)]
-pub struct SiloSettings {
+pub struct SiloAuthSettings {
     pub silo_id: Uuid,
     pub time_created: DateTime<Utc>,
     pub time_modified: DateTime<Utc>,
@@ -25,7 +25,7 @@ pub struct SiloSettings {
     pub device_token_max_ttl_seconds: Option<i64>,
 }
 
-impl SiloSettings {
+impl SiloAuthSettings {
     pub fn new(silo_id: Uuid) -> Self {
         Self {
             silo_id,
@@ -36,8 +36,8 @@ impl SiloSettings {
     }
 }
 
-impl From<SiloSettings> for views::SiloSettings {
-    fn from(silo_auth_settings: SiloSettings) -> Self {
+impl From<SiloAuthSettings> for views::SiloAuthSettings {
+    fn from(silo_auth_settings: SiloAuthSettings) -> Self {
         Self {
             silo_id: silo_auth_settings.silo_id,
             device_token_max_ttl_seconds: silo_auth_settings
@@ -46,18 +46,18 @@ impl From<SiloSettings> for views::SiloSettings {
     }
 }
 
-// Describes a set of updates for the [`SiloSettings`] model.
+// Describes a set of updates for the [`SiloAuthSettings`] model.
 #[derive(AsChangeset)]
 #[diesel(table_name = silo_auth_settings)]
-pub struct SiloSettingsUpdate {
+pub struct SiloAuthSettingsUpdate {
     // Needs to be double Option so we can set a value of null in the DB by
     // passing Some(None). None by itself is ignored by Diesel.
     pub device_token_max_ttl_seconds: Option<Option<i64>>,
     pub time_modified: DateTime<Utc>,
 }
 
-impl From<params::SiloSettingsUpdate> for SiloSettingsUpdate {
-    fn from(params: params::SiloSettingsUpdate) -> Self {
+impl From<params::SiloAuthSettingsUpdate> for SiloAuthSettingsUpdate {
+    fn from(params: params::SiloAuthSettingsUpdate) -> Self {
         Self {
             device_token_max_ttl_seconds: Some(
                 params.device_token_max_ttl_seconds.map(|ttl| ttl.get().into()),

@@ -1009,7 +1009,7 @@ pub enum ResourceType {
     ProjectImage,
     Instance,
     LoopbackAddress,
-    SiloSettings,
+    SiloAuthSettings,
     SwitchPortSettings,
     SupportBundle,
     IpPool,

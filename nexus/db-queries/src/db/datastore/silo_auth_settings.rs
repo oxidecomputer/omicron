@@ -6,8 +6,8 @@ use diesel::prelude::*;
 use nexus_db_errors::ErrorHandler;
 use nexus_db_errors::public_error_from_diesel;
 use nexus_db_lookup::DbConnection;
-use nexus_db_model::SiloSettings;
-use nexus_db_model::SiloSettingsUpdate;
+use nexus_db_model::SiloAuthSettings;
+use nexus_db_model::SiloAuthSettingsUpdate;
 use omicron_common::api::external::DeleteResult;
 use omicron_common::api::external::Error;
 use omicron_common::api::external::ResourceType;
@@ -27,7 +27,7 @@ impl DataStore {
         &self,
         conn: &async_bb8_diesel::Connection<DbConnection>,
         authz_silo: &authz::Silo,
-        settings: SiloSettings,
+        settings: SiloAuthSettings,
     ) -> Result<(), Error> {
         let silo_id = authz_silo.id();
         use nexus_db_schema::schema::silo_auth_settings;
@@ -40,7 +40,7 @@ impl DataStore {
                 public_error_from_diesel(
                     e,
                     ErrorHandler::Conflict(
-                        ResourceType::SiloSettings,
+                        ResourceType::SiloAuthSettings,
                         &silo_id.to_string(),
                     ),
                 )
@@ -72,22 +72,22 @@ impl DataStore {
         &self,
         opctx: &OpContext,
         authz_silo: &authz::Silo,
-        updates: SiloSettingsUpdate,
-    ) -> UpdateResult<SiloSettings> {
+        updates: SiloAuthSettingsUpdate,
+    ) -> UpdateResult<SiloAuthSettings> {
         opctx.authorize(authz::Action::Modify, authz_silo).await?;
         use nexus_db_schema::schema::silo_auth_settings::dsl;
         let silo_id = authz_silo.id();
         diesel::update(dsl::silo_auth_settings)
             .filter(dsl::silo_id.eq(silo_id))
             .set(updates)
-            .returning(SiloSettings::as_returning())
+            .returning(SiloAuthSettings::as_returning())
             .get_result_async(&*self.pool_connection_authorized(opctx).await?)
             .await
             .map_err(|e| {
                 public_error_from_diesel(
                     e,
                     ErrorHandler::Conflict(
-                        ResourceType::SiloSettings,
+                        ResourceType::SiloAuthSettings,
                         &silo_id.to_string(),
                     ),
                 )
@@ -98,7 +98,7 @@ impl DataStore {
         &self,
         opctx: &OpContext,
         authz_silo: &authz::Silo,
-    ) -> Result<SiloSettings, Error> {
+    ) -> Result<SiloAuthSettings, Error> {
         // Works for everyone when making a token because everyone can read
         // their own silo. Operators looking at silo settings will have silo
         // read on all silos.

@@ -118,7 +118,7 @@ impl SimpleIdentityOrName for SiloUtilization {
 
 /// A collection of resource counts used to set the virtual capacity of a silo
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
-pub struct SiloSettings {
+pub struct SiloAuthSettings {
     pub silo_id: Uuid,
     pub device_token_max_ttl_seconds: Option<i64>,
 }

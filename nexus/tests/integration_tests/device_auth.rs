@@ -253,7 +253,7 @@ async fn get_device_token(testctx: &ClientTestContext) -> String {
 async fn test_device_token_expiration(cptestctx: &ControlPlaneTestContext) {
     let testctx = &cptestctx.external_client;
 
-    let settings: views::SiloSettings =
+    let settings: views::SiloAuthSettings =
         object_get(testctx, "/v1/auth-settings").await;
     assert_eq!(settings.device_token_max_ttl_seconds, None);
 
@@ -301,10 +301,10 @@ async fn test_device_token_expiration(cptestctx: &ControlPlaneTestContext) {
     assert!(error.message.starts_with("unable to parse JSON body: missing field `device_token_max_ttl_seconds`"));
 
     // set token expiration on silo to 3 seconds
-    let settings: views::SiloSettings = object_put(
+    let settings: views::SiloAuthSettings = object_put(
         testctx,
         "/v1/auth-settings",
-        &params::SiloSettingsUpdate {
+        &params::SiloAuthSettingsUpdate {
             device_token_max_ttl_seconds: NonZeroU32::new(3).into(),
         },
     )
@@ -313,7 +313,7 @@ async fn test_device_token_expiration(cptestctx: &ControlPlaneTestContext) {
     assert_eq!(settings.device_token_max_ttl_seconds, Some(3));
 
     // might as well test the get endpoint as well
-    let settings: views::SiloSettings =
+    let settings: views::SiloAuthSettings =
         object_get(testctx, "/v1/auth-settings").await;
     assert_eq!(settings.device_token_max_ttl_seconds, Some(3));
 
@@ -339,17 +339,17 @@ async fn test_device_token_expiration(cptestctx: &ControlPlaneTestContext) {
         .expect("initial token should still work");
 
     // now test setting the silo max TTL back to null
-    let settings: views::SiloSettings = object_put(
+    let settings: views::SiloAuthSettings = object_put(
         testctx,
         "/v1/auth-settings",
-        &params::SiloSettingsUpdate {
+        &params::SiloAuthSettingsUpdate {
             device_token_max_ttl_seconds: None.into(),
         },
     )
     .await;
     assert_eq!(settings.device_token_max_ttl_seconds, None);
 
-    let settings: views::SiloSettings =
+    let settings: views::SiloAuthSettings =
         object_get(testctx, "/v1/auth-settings").await;
     assert_eq!(settings.device_token_max_ttl_seconds, None);
 }

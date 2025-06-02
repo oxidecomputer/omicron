@@ -491,7 +491,7 @@ pub struct SiloQuotasUpdate {
 
 /// Updateable properties of a silo's settings.
 #[derive(Clone, Debug, Serialize, Deserialize, JsonSchema)]
-pub struct SiloSettingsUpdate {
+pub struct SiloAuthSettingsUpdate {
     /// Maximum lifetime of a device token in seconds. If set to null, users
     /// will be able to create tokens that do not expire.
     #[schemars(range(min = 1))]

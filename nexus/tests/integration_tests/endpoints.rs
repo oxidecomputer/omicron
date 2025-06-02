@@ -1641,7 +1641,7 @@ pub static VERIFY_ENDPOINTS: LazyLock<Vec<VerifyEndpoint>> =
                 allowed_methods: vec![
                     AllowedMethod::Get,
                     AllowedMethod::Put(
-                        serde_json::to_value(&params::SiloSettingsUpdate {
+                        serde_json::to_value(&params::SiloAuthSettingsUpdate {
                             device_token_max_ttl_seconds: Nullable(
                                 NonZeroU32::new(3),
                             ),
