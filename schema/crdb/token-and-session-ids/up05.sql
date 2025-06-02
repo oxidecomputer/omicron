@@ -1,2 +1,2 @@
-ALTER TABLE omicron.public.console_session
-  ALTER COLUMN token SET NOT NULL;
+CREATE UNIQUE INDEX IF NOT EXISTS console_session_token_unique
+  ON omicron.public.console_session (token);

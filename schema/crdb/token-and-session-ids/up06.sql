@@ -1,2 +1,2 @@
-CREATE UNIQUE INDEX IF NOT EXISTS console_session_token_unique
-  ON omicron.public.console_session (token);
+ALTER TABLE omicron.public.device_access_token
+  ADD COLUMN IF NOT EXISTS id UUID NOT NULL DEFAULT gen_random_uuid();
