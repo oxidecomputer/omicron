@@ -1,5 +1,5 @@
 use chrono::{DateTime, Utc};
-use nexus_db_schema::schema::silo_settings;
+use nexus_db_schema::schema::silo_auth_settings;
 use nexus_types::external_api::{params, views};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
@@ -14,7 +14,7 @@ use uuid::Uuid;
     Deserialize,
     AsChangeset,
 )]
-#[diesel(table_name = silo_settings)]
+#[diesel(table_name = silo_auth_settings)]
 pub struct SiloSettings {
     pub silo_id: Uuid,
     pub time_created: DateTime<Utc>,
@@ -37,10 +37,10 @@ impl SiloSettings {
 }
 
 impl From<SiloSettings> for views::SiloSettings {
-    fn from(silo_settings: SiloSettings) -> Self {
+    fn from(silo_auth_settings: SiloSettings) -> Self {
         Self {
-            silo_id: silo_settings.silo_id,
-            device_token_max_ttl_seconds: silo_settings
+            silo_id: silo_auth_settings.silo_id,
+            device_token_max_ttl_seconds: silo_auth_settings
                 .device_token_max_ttl_seconds,
         }
     }
@@ -48,7 +48,7 @@ impl From<SiloSettings> for views::SiloSettings {
 
 // Describes a set of updates for the [`SiloSettings`] model.
 #[derive(AsChangeset)]
-#[diesel(table_name = silo_settings)]
+#[diesel(table_name = silo_auth_settings)]
 pub struct SiloSettingsUpdate {
     // Needs to be double Option so we can set a value of null in the DB by
     // passing Some(None). None by itself is ignored by Diesel.

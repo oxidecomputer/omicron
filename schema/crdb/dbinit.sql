@@ -1065,7 +1065,7 @@ WHERE
 AND
     s.time_deleted IS NULL;
 
-CREATE TABLE IF NOT EXISTS omicron.public.silo_settings (
+CREATE TABLE IF NOT EXISTS omicron.public.silo_auth_settings (
     silo_id UUID PRIMARY KEY,
     time_created TIMESTAMPTZ NOT NULL,
     time_modified TIMESTAMPTZ NOT NULL,

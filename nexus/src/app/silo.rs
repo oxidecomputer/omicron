@@ -234,7 +234,7 @@ impl super::Nexus {
         // TODO: can everyone view this on their own silo? why not, right?
         let (.., authz_silo) =
             silo_lookup.lookup_for(authz::Action::Read).await?;
-        self.db_datastore.silo_settings_view(opctx, &authz_silo).await
+        self.db_datastore.silo_auth_settings_view(opctx, &authz_silo).await
     }
 
     pub(crate) async fn silo_update_settings(
@@ -248,7 +248,7 @@ impl super::Nexus {
         let (.., authz_silo) =
             silo_lookup.lookup_for(authz::Action::Modify).await?;
         self.db_datastore
-            .silo_settings_update(opctx, &authz_silo, settings.clone().into())
+            .silo_auth_settings_update(opctx, &authz_silo, settings.clone().into())
             .await
     }
 

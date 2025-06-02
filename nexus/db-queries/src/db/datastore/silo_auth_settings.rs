@@ -23,16 +23,16 @@ impl DataStore {
     /// isn't complete and will lead to a db deadlock.
     ///
     /// See <https://github.com/oxidecomputer/omicron/blob/07eb7dafc20e35e44edf429fcbb759cbb33edd5f/nexus/db-queries/src/db/datastore/rack.rs#L407-L410>
-    pub async fn silo_settings_create(
+    pub async fn silo_auth_settings_create(
         &self,
         conn: &async_bb8_diesel::Connection<DbConnection>,
         authz_silo: &authz::Silo,
         settings: SiloSettings,
     ) -> Result<(), Error> {
         let silo_id = authz_silo.id();
-        use nexus_db_schema::schema::silo_settings;
+        use nexus_db_schema::schema::silo_auth_settings;
 
-        diesel::insert_into(silo_settings::table)
+        diesel::insert_into(silo_auth_settings::table)
             .values(settings)
             .execute_async(conn)
             .await
@@ -48,7 +48,7 @@ impl DataStore {
             .map(|_| ())
     }
 
-    pub async fn silo_settings_delete(
+    pub async fn silo_auth_settings_delete(
         &self,
         opctx: &OpContext,
         conn: &async_bb8_diesel::Connection<DbConnection>,
@@ -58,9 +58,9 @@ impl DataStore {
         // Silo we just check for delete permission on the silo itself.
         opctx.authorize(authz::Action::Delete, authz_silo).await?;
 
-        use nexus_db_schema::schema::silo_settings;
-        diesel::delete(silo_settings::table)
-            .filter(silo_settings::silo_id.eq(authz_silo.id()))
+        use nexus_db_schema::schema::silo_auth_settings;
+        diesel::delete(silo_auth_settings::table)
+            .filter(silo_auth_settings::silo_id.eq(authz_silo.id()))
             .execute_async(conn)
             .await
             .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))?;
@@ -68,16 +68,16 @@ impl DataStore {
         Ok(())
     }
 
-    pub async fn silo_settings_update(
+    pub async fn silo_auth_settings_update(
         &self,
         opctx: &OpContext,
         authz_silo: &authz::Silo,
         updates: SiloSettingsUpdate,
     ) -> UpdateResult<SiloSettings> {
         opctx.authorize(authz::Action::Modify, authz_silo).await?;
-        use nexus_db_schema::schema::silo_settings::dsl;
+        use nexus_db_schema::schema::silo_auth_settings::dsl;
         let silo_id = authz_silo.id();
-        diesel::update(dsl::silo_settings)
+        diesel::update(dsl::silo_auth_settings)
             .filter(dsl::silo_id.eq(silo_id))
             .set(updates)
             .returning(SiloSettings::as_returning())
@@ -94,7 +94,7 @@ impl DataStore {
             })
     }
 
-    pub async fn silo_settings_view(
+    pub async fn silo_auth_settings_view(
         &self,
         opctx: &OpContext,
         authz_silo: &authz::Silo,
@@ -104,8 +104,8 @@ impl DataStore {
         // read on all silos.
         opctx.authorize(authz::Action::Read, authz_silo).await?;
 
-        use nexus_db_schema::schema::silo_settings::dsl;
-        dsl::silo_settings
+        use nexus_db_schema::schema::silo_auth_settings::dsl;
+        dsl::silo_auth_settings
             .filter(dsl::silo_id.eq(authz_silo.id()))
             .first_async(&*self.pool_connection_authorized(opctx).await?)
             .await

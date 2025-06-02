@@ -552,7 +552,7 @@ table! {
 }
 
 table! {
-    silo_settings(silo_id) {
+    silo_auth_settings(silo_id) {
         silo_id -> Uuid,
         time_created -> Timestamptz,
         time_modified -> Timestamptz,

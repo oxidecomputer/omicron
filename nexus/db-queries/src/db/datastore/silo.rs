@@ -67,7 +67,7 @@ impl DataStore {
 
         use nexus_db_schema::schema::silo;
         use nexus_db_schema::schema::silo_quotas;
-        use nexus_db_schema::schema::silo_settings;
+        use nexus_db_schema::schema::silo_auth_settings;
         let conn = self.pool_connection_authorized(opctx).await?;
 
         let count = self
@@ -81,9 +81,9 @@ impl DataStore {
                     .do_nothing()
                     .execute_async(&conn)
                     .await?;
-                diesel::insert_into(silo_settings::table)
+                diesel::insert_into(silo_auth_settings::table)
                     .values(SiloSettings::new(DEFAULT_SILO.id()))
-                    .on_conflict(silo_settings::silo_id)
+                    .on_conflict(silo_auth_settings::silo_id)
                     .do_nothing()
                     .execute_async(&conn)
                     .await?;
@@ -308,7 +308,7 @@ impl DataStore {
                     ),
                 )
                 .await?;
-                self.silo_settings_create(
+                self.silo_auth_settings_create(
                     &conn,
                     &authz_silo,
                     SiloSettings::new(authz_silo.id()),
@@ -465,7 +465,7 @@ impl DataStore {
                 }
 
                 self.silo_quotas_delete(opctx, &conn, &authz_silo).await?;
-                self.silo_settings_delete(opctx, &conn, &authz_silo).await?;
+                self.silo_auth_settings_delete(opctx, &conn, &authz_silo).await?;
 
                 self.virtual_provisioning_collection_delete_on_connection(
                     &opctx.log, &conn, id,

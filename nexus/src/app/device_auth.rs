@@ -108,8 +108,8 @@ impl super::Nexus {
                 .await?;
         assert_eq!(authz_user.id(), silo_user_id);
 
-        let silo_settings =
-            self.db_datastore.silo_settings_view(opctx, &authz_silo).await?;
+        let silo_auth_settings =
+            self.db_datastore.silo_auth_settings_view(opctx, &authz_silo).await?;
 
         // Create an access token record.
         let token = DeviceAccessToken::new(
@@ -119,7 +119,7 @@ impl super::Nexus {
             silo_user_id,
             // Token gets the max TTL for the silo (if there is one) until we
             // build a way for the user to ask for a different TTL
-            silo_settings
+            silo_auth_settings
                 .device_token_max_ttl_seconds
                 .map(|ttl| Utc::now() + Duration::seconds(ttl)),
         );

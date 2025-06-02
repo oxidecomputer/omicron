@@ -1,4 +1,4 @@
-INSERT INTO omicron.public.silo_settings (
+INSERT INTO omicron.public.silo_auth_settings (
   silo_id,
   time_created,
   time_modified,
