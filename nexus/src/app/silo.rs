@@ -248,7 +248,11 @@ impl super::Nexus {
         let (.., authz_silo) =
             silo_lookup.lookup_for(authz::Action::Modify).await?;
         self.db_datastore
-            .silo_auth_settings_update(opctx, &authz_silo, settings.clone().into())
+            .silo_auth_settings_update(
+                opctx,
+                &authz_silo,
+                settings.clone().into(),
+            )
             .await
     }
 

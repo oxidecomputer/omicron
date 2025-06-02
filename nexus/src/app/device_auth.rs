@@ -108,8 +108,10 @@ impl super::Nexus {
                 .await?;
         assert_eq!(authz_user.id(), silo_user_id);
 
-        let silo_auth_settings =
-            self.db_datastore.silo_auth_settings_view(opctx, &authz_silo).await?;
+        let silo_auth_settings = self
+            .db_datastore
+            .silo_auth_settings_view(opctx, &authz_silo)
+            .await?;
 
         // Create an access token record.
         let token = DeviceAccessToken::new(

@@ -66,8 +66,8 @@ impl DataStore {
         debug!(opctx.log, "attempting to create built-in silos");
 
         use nexus_db_schema::schema::silo;
-        use nexus_db_schema::schema::silo_quotas;
         use nexus_db_schema::schema::silo_auth_settings;
+        use nexus_db_schema::schema::silo_quotas;
         let conn = self.pool_connection_authorized(opctx).await?;
 
         let count = self
@@ -465,7 +465,8 @@ impl DataStore {
                 }
 
                 self.silo_quotas_delete(opctx, &conn, &authz_silo).await?;
-                self.silo_auth_settings_delete(opctx, &conn, &authz_silo).await?;
+                self.silo_auth_settings_delete(opctx, &conn, &authz_silo)
+                    .await?;
 
                 self.virtual_provisioning_collection_delete_on_connection(
                     &opctx.log, &conn, id,
