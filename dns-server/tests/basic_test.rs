@@ -323,35 +323,44 @@ async fn lookup_ip_expect_error_code(
     // exact Message from our DNS server.  `lookup_ip` queries both A and AAAA
     // and merges the answers, so we'll query both here too.
 
+    let raw_response =
+        raw_query_expect_err(server_addr, name, RecordType::A).await;
+
+    assert_eq!(raw_response.authoritative(), expected_authoritativeness);
+    assert_eq!(raw_response.response_code(), expected_code);
+
+    let raw_response =
+        raw_query_expect_err(server_addr, name, RecordType::AAAA).await;
+    assert_eq!(raw_response.authoritative(), expected_authoritativeness);
+    assert_eq!(raw_response.response_code(), expected_code);
+}
+
+async fn raw_query_expect_err(
+    server_addr: std::net::SocketAddr,
+    name: &str,
+    query_ty: RecordType,
+) -> DnsResponse {
     let name = Name::from_ascii(name).expect("can parse domain name");
 
-    let raw_response =
-        raw_dns_client_query(server_addr, name.clone(), RecordType::A)
-            .await
-            .expect("can issue DNS query");
+    let raw_response = raw_dns_client_query(server_addr, name, query_ty)
+        .await
+        .expect("can issue DNS query");
 
-    assert_eq!(raw_response.authoritative(), expected_authoritativeness);
-    assert_eq!(raw_response.response_code(), expected_code);
+    // The caller may have a specific error in mind, but we know that the
+    // response definitely should be that there was *some* kind of error.
+    assert_ne!(raw_response.response_code(), ResponseCode::NoError);
+
+    // We do not currently return answers or additionals for any errors.
     assert!(raw_response.answers().is_empty());
     assert!(raw_response.additionals().is_empty());
+
     // Optionally, the DNS server is permitted to return SOA records with
     // negative answers as a guide for how long to cache the result. We don't do
-    // that right now, so test that there are no name servers in the answer, but
-    // this should change if the DNS server is changed.
+    // that right now, so test that there are no name servers in the answer.
+    // This should change if the DNS server is changed.
     assert!(raw_response.name_servers().is_empty());
 
-    let raw_response =
-        raw_dns_client_query(server_addr, name, RecordType::AAAA)
-            .await
-            .expect("can issue DNS query");
-
-    assert_eq!(raw_response.authoritative(), expected_authoritativeness);
-    assert_eq!(raw_response.response_code(), expected_code);
-    assert!(raw_response.answers().is_empty());
-    assert!(raw_response.additionals().is_empty());
-    // Same as above, this assert may have to change if we return SOA records as
-    // negative caching hints.
-    assert!(raw_response.name_servers().is_empty());
+    raw_response
 }
 
 fn expect_no_records_error_code(
@@ -536,14 +545,23 @@ pub async fn soa() -> Result<(), anyhow::Error> {
 
     // SOA queries under the zone we now know we are authoritative for should
     // fail with NXDomain.
-    //
-    // TODO: we should see the authoritative bit set here. It's not clear that
-    // hickory-proto has a way to see if that bit is present in an error.
+    let no_soa_name = format!("foo.{TEST_ZONE}.");
     let lookup_err = resolver
-        .soa_lookup(format!("foo.{TEST_ZONE}."))
+        .soa_lookup(&no_soa_name)
         .await
         .expect_err("test zone should not exist");
     expect_no_records_error_code(&lookup_err, ResponseCode::NXDomain);
+
+    // As with other NXDomain answers, we should see the authoritative bit.
+    let raw_response = raw_query_expect_err(
+        test_ctx.dns_server.local_address(),
+        &no_soa_name,
+        RecordType::A,
+    )
+    .await;
+
+    assert!(raw_response.authoritative());
+    assert_eq!(raw_response.response_code(), ResponseCode::NXDomain);
 
     // If the zone has no ns1 for some reason, we ought to see an SOA record
     // referencing the next lowest-numbered name server.
