@@ -1,6 +1,6 @@
 API endpoints with no coverage in authz tests:
 probe_delete                             (delete "/experimental/v1/probes/{probe}")
-current_user_device_token_delete         (delete "/v1/me/device-tokens/{token_id}")
+current_user_access_token_delete         (delete "/v1/me/access-tokens/{token_id}")
 probe_list                               (get    "/experimental/v1/probes")
 probe_view                               (get    "/experimental/v1/probes/{probe}")
 support_bundle_download                  (get    "/experimental/v1/system/support-bundles/{bundle_id}/download")

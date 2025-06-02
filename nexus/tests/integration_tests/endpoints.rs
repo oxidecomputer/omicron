@@ -2599,7 +2599,7 @@ pub static VERIFY_ENDPOINTS: LazyLock<Vec<VerifyEndpoint>> =
             },
             /* Tokens */
             VerifyEndpoint {
-                url: "/v1/me/device-tokens",
+                url: "/v1/me/access-tokens",
                 visibility: Visibility::Public,
                 unprivileged_access: UnprivilegedAccess::ReadOnly,
                 allowed_methods: vec![AllowedMethod::Get],
@@ -2610,7 +2610,7 @@ pub static VERIFY_ENDPOINTS: LazyLock<Vec<VerifyEndpoint>> =
             // and opt out.
 
             // VerifyEndpoint {
-            //     url: "/v1/me/device-tokens/token-id",
+            //     url: "/v1/me/access-tokens/token-id",
             //     visibility: Visibility::Public,
             //     unprivileged_access: UnprivilegedAccess::None,
             //     allowed_methods: vec![AllowedMethod::Delete],

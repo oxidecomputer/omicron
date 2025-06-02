@@ -5512,14 +5512,14 @@
         }
       }
     },
-    "/v1/me/device-tokens": {
+    "/v1/me/access-tokens": {
       "get": {
         "tags": [
           "tokens"
         ],
-        "summary": "List device tokens",
+        "summary": "List access tokens",
         "description": "List device access tokens for the currently authenticated user.",
-        "operationId": "current_user_device_token_list",
+        "operationId": "current_user_access_token_list",
         "parameters": [
           {
             "in": "query",
@@ -5572,14 +5572,14 @@
         }
       }
     },
-    "/v1/me/device-tokens/{token_id}": {
+    "/v1/me/access-tokens/{token_id}": {
       "delete": {
         "tags": [
           "tokens"
         ],
-        "summary": "Delete device token",
+        "summary": "Delete access token",
         "description": "Delete a device access token for the currently authenticated user.",
-        "operationId": "current_user_device_token_delete",
+        "operationId": "current_user_access_token_delete",
         "parameters": [
           {
             "in": "path",

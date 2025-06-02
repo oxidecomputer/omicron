@@ -208,7 +208,7 @@ async fn test_device_auth_flow(cptestctx: &ControlPlaneTestContext) {
     let token_id = tokens_unpriv_after[0].id;
 
     // Priv user cannot delete unpriv's token through this endpoint by ID
-    let token_url = format!("/v1/me/device-tokens/{}", token_id);
+    let token_url = format!("/v1/me/access-tokens/{}", token_id);
     object_delete_error(testctx, &token_url, StatusCode::NOT_FOUND).await;
 
     // Test deleting the token as the owner
@@ -434,7 +434,7 @@ async fn test_device_token_expiration(cptestctx: &ControlPlaneTestContext) {
 async fn get_tokens_priv(
     testctx: &ClientTestContext,
 ) -> Vec<views::DeviceAccessToken> {
-    NexusRequest::object_get(testctx, "/v1/me/device-tokens")
+    NexusRequest::object_get(testctx, "/v1/me/access-tokens")
         .authn_as(AuthnMode::PrivilegedUser)
         .execute_and_parse_unwrap::<ResultsPage<views::DeviceAccessToken>>()
         .await
@@ -444,7 +444,7 @@ async fn get_tokens_priv(
 async fn get_tokens_unpriv(
     testctx: &ClientTestContext,
 ) -> Vec<views::DeviceAccessToken> {
-    NexusRequest::object_get(testctx, "/v1/me/device-tokens")
+    NexusRequest::object_get(testctx, "/v1/me/access-tokens")
         .authn_as(AuthnMode::UnprivilegedUser)
         .execute_and_parse_unwrap::<ResultsPage<views::DeviceAccessToken>>()
         .await
