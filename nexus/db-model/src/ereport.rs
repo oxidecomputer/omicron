@@ -12,7 +12,7 @@ use diesel::pg::Pg;
 use diesel::prelude::*;
 use diesel::serialize::{self, ToSql};
 use diesel::sql_types;
-use ereport_types::Ena;
+use ereport_types::{Ena, EreportId};
 use nexus_db_schema::schema::{host_ereport, sp_ereport};
 use omicron_uuid_kinds::{EreporterRestartKind, OmicronZoneKind, SledKind};
 use serde::{Deserialize, Serialize};
@@ -60,8 +60,7 @@ where
     }
 }
 
-#[derive(Clone, Debug, Queryable, Selectable)]
-#[diesel(table_name = sp_ereport)]
+#[derive(Clone, Debug)]
 pub struct EreportMetadata {
     pub restart_id: DbTypedUuid<EreporterRestartKind>,
     pub ena: DbEna,
@@ -70,11 +69,35 @@ pub struct EreportMetadata {
     pub collector_id: DbTypedUuid<OmicronZoneKind>,
 }
 
+pub type EreportMetadataTuple = (
+    DbTypedUuid<EreporterRestartKind>,
+    DbEna,
+    DateTime<Utc>,
+    DbTypedUuid<OmicronZoneKind>,
+);
+
+impl EreportMetadata {
+    pub fn id(&self) -> EreportId {
+        EreportId { restart_id: self.restart_id.into(), ena: self.ena.into() }
+    }
+}
+
+impl From<EreportMetadataTuple> for EreportMetadata {
+    fn from(
+        (restart_id, ena, time_collected, collector_id): EreportMetadataTuple,
+    ) -> Self {
+        EreportMetadata { restart_id, ena, time_collected, collector_id }
+    }
+}
+
 #[derive(Clone, Debug, Queryable, Selectable)]
 #[diesel(table_name = sp_ereport)]
 pub struct SpEreport {
-    #[diesel(embed)]
-    pub metadata: EreportMetadata,
+    pub restart_id: DbTypedUuid<EreporterRestartKind>,
+    pub ena: DbEna,
+
+    pub time_collected: DateTime<Utc>,
+    pub collector_id: DbTypedUuid<OmicronZoneKind>,
 
     pub sp_type: SpType,
     pub sp_slot: SpMgsSlot,
@@ -85,8 +108,11 @@ pub struct SpEreport {
 #[derive(Clone, Debug, Queryable, Selectable)]
 #[diesel(table_name = host_ereport)]
 pub struct HostEreport {
-    #[diesel(embed)]
-    pub metadata: EreportMetadata,
+    pub restart_id: DbTypedUuid<EreporterRestartKind>,
+    pub ena: DbEna,
+
+    pub time_collected: DateTime<Utc>,
+    pub collector_id: DbTypedUuid<OmicronZoneKind>,
 
     pub sled_id: DbTypedUuid<SledKind>,
     pub sled_serial: String,
