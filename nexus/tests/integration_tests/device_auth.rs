@@ -254,7 +254,7 @@ async fn test_device_token_expiration(cptestctx: &ControlPlaneTestContext) {
     let testctx = &cptestctx.external_client;
 
     let settings: views::SiloSettings =
-        object_get(testctx, "/v1/settings").await;
+        object_get(testctx, "/v1/auth-settings").await;
     assert_eq!(settings.device_token_max_ttl_seconds, None);
 
     // get a token for the privileged user. default silo max token expiration
@@ -270,7 +270,7 @@ async fn test_device_token_expiration(cptestctx: &ControlPlaneTestContext) {
     for value in [-3, 0] {
         let error = object_put_error(
             testctx,
-            "/v1/settings",
+            "/v1/auth-settings",
             &serde_json::json!({ "device_token_max_ttl_seconds": value }),
             StatusCode::BAD_REQUEST,
         )
@@ -281,7 +281,7 @@ async fn test_device_token_expiration(cptestctx: &ControlPlaneTestContext) {
     for value in [-3, 0] {
         let error = object_put_error(
             testctx,
-            "/v1/settings",
+            "/v1/auth-settings",
             &serde_json::json!({ "device_token_max_ttl_seconds": value }),
             StatusCode::BAD_REQUEST,
         )
@@ -293,7 +293,7 @@ async fn test_device_token_expiration(cptestctx: &ControlPlaneTestContext) {
     // omitting the key is also a 400
     let error = object_put_error(
         testctx,
-        "/v1/settings",
+        "/v1/auth-settings",
         &serde_json::json!({}),
         StatusCode::BAD_REQUEST,
     )
@@ -303,7 +303,7 @@ async fn test_device_token_expiration(cptestctx: &ControlPlaneTestContext) {
     // set token expiration on silo to 3 seconds
     let settings: views::SiloSettings = object_put(
         testctx,
-        "/v1/settings",
+        "/v1/auth-settings",
         &params::SiloSettingsUpdate {
             device_token_max_ttl_seconds: NonZeroU32::new(3).into(),
         },
@@ -314,7 +314,7 @@ async fn test_device_token_expiration(cptestctx: &ControlPlaneTestContext) {
 
     // might as well test the get endpoint as well
     let settings: views::SiloSettings =
-        object_get(testctx, "/v1/settings").await;
+        object_get(testctx, "/v1/auth-settings").await;
     assert_eq!(settings.device_token_max_ttl_seconds, Some(3));
 
     // create token again (this one will have the 3-second expiration)
@@ -341,7 +341,7 @@ async fn test_device_token_expiration(cptestctx: &ControlPlaneTestContext) {
     // now test setting the silo max TTL back to null
     let settings: views::SiloSettings = object_put(
         testctx,
-        "/v1/settings",
+        "/v1/auth-settings",
         &params::SiloSettingsUpdate {
             device_token_max_ttl_seconds: None.into(),
         },
@@ -350,7 +350,7 @@ async fn test_device_token_expiration(cptestctx: &ControlPlaneTestContext) {
     assert_eq!(settings.device_token_max_ttl_seconds, None);
 
     let settings: views::SiloSettings =
-        object_get(testctx, "/v1/settings").await;
+        object_get(testctx, "/v1/auth-settings").await;
     assert_eq!(settings.device_token_max_ttl_seconds, None);
 }
 

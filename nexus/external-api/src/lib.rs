@@ -278,23 +278,23 @@ pub trait NexusExternalApi {
         new_policy: TypedBody<shared::Policy<shared::SiloRole>>,
     ) -> Result<HttpResponseOk<shared::Policy<shared::SiloRole>>, HttpError>;
 
-    /// Fetch current silo's settings
+    /// Fetch current silo's auth settings
     #[endpoint {
         method = GET,
-        path = "/v1/settings",
+        path = "/v1/auth-settings",
         tags = ["silos"],
     }]
-    async fn settings_view(
+    async fn auth_settings_view(
         rqctx: RequestContext<Self::Context>,
     ) -> Result<HttpResponseOk<views::SiloSettings>, HttpError>;
 
-    /// Update current silo's settings
+    /// Update current silo's auth settings
     #[endpoint {
         method = PUT,
-        path = "/v1/settings",
+        path = "/v1/auth-settings",
         tags = ["silos"],
     }]
-    async fn settings_update(
+    async fn auth_settings_update(
         rqctx: RequestContext<Self::Context>,
         new_settings: TypedBody<params::SiloSettingsUpdate>,
     ) -> Result<HttpResponseOk<views::SiloSettings>, HttpError>;

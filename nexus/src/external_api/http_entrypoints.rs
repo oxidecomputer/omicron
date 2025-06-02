@@ -229,7 +229,7 @@ impl NexusExternalApi for NexusExternalApiImpl {
             .await
     }
 
-    async fn settings_view(
+    async fn auth_settings_view(
         rqctx: RequestContext<ApiContext>,
     ) -> Result<HttpResponseOk<views::SiloSettings>, HttpError> {
         let apictx = rqctx.context();
@@ -256,7 +256,7 @@ impl NexusExternalApi for NexusExternalApiImpl {
             .await
     }
 
-    async fn settings_update(
+    async fn auth_settings_update(
         rqctx: RequestContext<Self::Context>,
         new_settings: TypedBody<params::SiloSettingsUpdate>,
     ) -> Result<HttpResponseOk<views::SiloSettings>, HttpError> {
