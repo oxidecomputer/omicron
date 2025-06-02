@@ -2429,7 +2429,7 @@ joinable!(webhook_delivery_attempt -> webhook_delivery (delivery_id));
 table! {
     sp_ereport (restart_id, ena) {
         restart_id -> Uuid,
-        ena -> Uuid,
+        ena -> Int8,
         time_collected -> Timestamptz,
         collector_id -> Uuid,
 
@@ -2443,7 +2443,7 @@ table! {
 table! {
     host_ereport (restart_id, ena) {
         restart_id -> Uuid,
-        ena -> Uuid,
+        ena -> Int8,
         time_collected -> Timestamptz,
         collector_id -> Uuid,
 
