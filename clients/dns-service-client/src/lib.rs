@@ -31,6 +31,7 @@ pub type DnsError = crate::Error<crate::types::Error>;
 pub const ERROR_CODE_UPDATE_IN_PROGRESS: &'static str = "UpdateInProgress";
 pub const ERROR_CODE_BAD_UPDATE_GENERATION: &'static str =
     "BadUpdateGeneration";
+pub const ERROR_CODE_INCOMPATIBLE_RECORD: &'static str = "IncompatibleRecord";
 
 /// Returns whether an error from this client should be retried
 pub fn is_retryable(error: &DnsError) -> bool {

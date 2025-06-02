@@ -3,6 +3,7 @@
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 pub mod config;
+mod ereport;
 mod gimlet;
 mod helpers;
 mod sensors;
@@ -43,6 +44,10 @@ pub trait SimulatedSp {
     /// Listening UDP address of the given port of this simulated SP, if it was
     /// configured to listen.
     fn local_addr(&self, port: SpPort) -> Option<SocketAddrV6>;
+
+    /// Listening UDP ereport address of the given port of this simulated SP, if it was
+    /// configured to listen for ereport packets.
+    fn local_ereport_addr(&self, port: SpPort) -> Option<SocketAddrV6>;
 
     /// Simulate the SP being unresponsive, in which it ignores all incoming
     /// messages.
@@ -98,6 +103,20 @@ pub trait SimulatedSp {
     async fn install_udp_accept_semaphore(
         &self,
     ) -> mpsc::UnboundedSender<usize>;
+
+    /// Simulate a restart of the SP for the purposes of ereport collection.
+    ///
+    /// This will clear any simulated ereports buffered by the simulated SP, and
+    /// set the simulated snitch task's restart ID and metadata to the provided
+    /// [`config::EreportRestart`] value.
+    async fn ereport_restart(&self, restart: config::EreportRestart);
+
+    /// Add a new simulated ereport to the SP's queue of ereports, returning its
+    /// ENA.
+    async fn ereport_append(
+        &self,
+        restart: config::Ereport,
+    ) -> gateway_ereport_messages::Ena;
 }
 
 // Helper function to pad a simulated serial number (stored as a `String`) to

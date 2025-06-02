@@ -28,8 +28,10 @@ DNS zone:                   oxide-dev.test (External)
 requested version:          2 (created at <REDACTED_TIMESTAMP>)
 version created by Nexus:   ..........<REDACTED_UUID>...........
 version created because:    create silo: "test-suite-silo"
-changes:                    names added: 1, names removed: 0
+changes:                    names added: 3, names removed: 0
 
++  @                                                  NS   ns1.oxide-dev.test
++  ns1                                                AAAA ::1
 +  test-suite-silo.sys                                A    127.0.0.1
 ---------------------------------------------
 stderr:
@@ -42,6 +44,8 @@ termination: Exited(0)
 stdout:
 External zone: oxide-dev.test
   NAME                                               RECORDS
+  @                                                  NS   ns1.oxide-dev.test
+  ns1                                                AAAA ::1
   test-suite-silo.sys                                A    127.0.0.1
 ---------------------------------------------
 stderr:
@@ -238,6 +242,10 @@ task: "abandoned_vmm_reaper"
     instances
 
 
+task: "alert_dispatcher"
+    dispatches queued alerts to receivers
+
+
 task: "bfd_manager"
     Manages bidirectional fowarding detection (BFD) configuration on rack
     switches
@@ -403,10 +411,6 @@ task: "webhook_deliverator"
     sends webhook delivery requests
 
 
-task: "webhook_dispatcher"
-    dispatches queued webhook events to receivers
-
-
 ---------------------------------------------
 stderr:
 note: using Nexus URL http://127.0.0.1:REDACTED_PORT/
@@ -501,6 +505,14 @@ task: "abandoned_vmm_reaper"
       VMM records deleted:                     0
       VMMs already deleted by another Nexus:   0
     sled resource reservations deleted:        0
+
+task: "alert_dispatcher"
+  configured period: every <REDACTED_DURATION>m
+  currently executing: no
+  last completed activation: <REDACTED ITERATIONS>, triggered by a periodic timer firing
+    started at <REDACTED_TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
+    alerts dispatched:                            0
+    alerts with no receivers subscribed:          0
 
 task: "bfd_manager"
   configured period: every <REDACTED_DURATION>s
@@ -794,14 +806,6 @@ task: "webhook_deliverator"
     internal delivery errors:             0
     already delivered by another Nexus:   0
     in progress by another Nexus:         0
-
-task: "webhook_dispatcher"
-  configured period: every <REDACTED_DURATION>m
-  currently executing: no
-  last completed activation: <REDACTED ITERATIONS>, triggered by a periodic timer firing
-    started at <REDACTED_TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
-    events dispatched:                            0
-    events with no receivers subscribed:          0
 
 ---------------------------------------------
 stderr:
@@ -1021,6 +1025,14 @@ task: "abandoned_vmm_reaper"
       VMMs already deleted by another Nexus:   0
     sled resource reservations deleted:        0
 
+task: "alert_dispatcher"
+  configured period: every <REDACTED_DURATION>m
+  currently executing: no
+  last completed activation: <REDACTED ITERATIONS>, triggered by a periodic timer firing
+    started at <REDACTED_TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
+    alerts dispatched:                            0
+    alerts with no receivers subscribed:          0
+
 task: "bfd_manager"
   configured period: every <REDACTED_DURATION>s
   currently executing: no
@@ -1313,14 +1325,6 @@ task: "webhook_deliverator"
     internal delivery errors:             0
     already delivered by another Nexus:   0
     in progress by another Nexus:         0
-
-task: "webhook_dispatcher"
-  configured period: every <REDACTED_DURATION>m
-  currently executing: no
-  last completed activation: <REDACTED ITERATIONS>, triggered by a periodic timer firing
-    started at <REDACTED_TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
-    events dispatched:                            0
-    events with no receivers subscribed:          0
 
 ---------------------------------------------
 stderr:

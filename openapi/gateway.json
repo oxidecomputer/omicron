@@ -1110,6 +1110,87 @@
         }
       }
     },
+    "/sp/{type}/{slot}/ereports": {
+      "post": {
+        "summary": "Request ereports from the target service processor.",
+        "description": "Query parameters provide the ENAs of the initial ereport in the returned tranche, the SP's restart ID that the control plane believes is current, and the (optional) last committed ENA.",
+        "operationId": "sp_ereports_ingest",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "slot",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "format": "uint32",
+              "minimum": 0
+            }
+          },
+          {
+            "in": "path",
+            "name": "type",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/SpType"
+            }
+          },
+          {
+            "in": "query",
+            "name": "committed",
+            "description": "The ENA of the last ereport committed to persistent storage from the requested reporter restart generation.\n\nIf the restart ID parameter matches the reporter's current restart ID, it is permitted to discard any ereports with ENAs up to and including this value. If the restart ID has changed from the provided one, the reporter will not discard data.",
+            "schema": {
+              "$ref": "#/components/schemas/Ena"
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "description": "Maximum number of ereports to return in this tranche.",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "format": "uint32",
+              "minimum": 1
+            }
+          },
+          {
+            "in": "query",
+            "name": "restart_id",
+            "description": "The restart ID of the reporter at which all other query parameters are valid.\n\nIf this value does not match the reporter's restart ID, the reporter's response will include the current generation, and will start at the earliest known ENA, rather than the provided `start_at` ENA.",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/TypedUuidForEreporterRestartKind"
+            }
+          },
+          {
+            "in": "query",
+            "name": "start_at",
+            "description": "If present, the reporter should not include ENAs earlier than this one in its response, provided that the query's requested restart ID matches the current restart ID.",
+            "schema": {
+              "$ref": "#/components/schemas/Ena"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Ereports"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
     "/sp/{type}/{slot}/host-phase2-progress": {
       "get": {
         "summary": "Get the most recent host phase2 request we've seen from the target SP.",
@@ -1633,6 +1714,60 @@
         "required": [
           "nanos",
           "secs"
+        ]
+      },
+      "Ena": {
+        "description": "An Error Numeric Association (ENA)",
+        "type": "integer",
+        "format": "uint64",
+        "minimum": 0
+      },
+      "Ereport": {
+        "description": "An ereport message.",
+        "type": "object",
+        "properties": {
+          "ena": {
+            "description": "The ENA of the ereport.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/Ena"
+              }
+            ]
+          }
+        },
+        "required": [
+          "ena"
+        ],
+        "additionalProperties": true
+      },
+      "Ereports": {
+        "description": "A tranche of ereports received from a reporter.",
+        "type": "object",
+        "properties": {
+          "items": {
+            "description": "list of items on this page of results",
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Ereport"
+            }
+          },
+          "next_page": {
+            "nullable": true,
+            "description": "token used to fetch the next page of results (if any)",
+            "type": "string"
+          },
+          "restart_id": {
+            "description": "The reporter's current restart ID.\n\nIf this is not equal to the current known restart ID, then the reporter has restarted.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/TypedUuidForEreporterRestartKind"
+              }
+            ]
+          }
+        },
+        "required": [
+          "items",
+          "restart_id"
         ]
       },
       "Error": {
@@ -3579,6 +3714,10 @@
           "task_index",
           "timestamp"
         ]
+      },
+      "TypedUuidForEreporterRestartKind": {
+        "type": "string",
+        "format": "uuid"
       },
       "UpdateAbortBody": {
         "type": "object",

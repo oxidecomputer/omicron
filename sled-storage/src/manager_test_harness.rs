@@ -425,7 +425,7 @@ impl StorageManagerTestHarness {
 
         for (pool, _) in pools {
             eprintln!("Destroying pool: {pool:?}");
-            if let Err(e) = illumos_utils::zpool::Zpool::destroy(&pool) {
+            if let Err(e) = illumos_utils::zpool::Zpool::destroy(&pool).await {
                 eprintln!("Failed to destroy {pool:?}: {e:?}");
             }
         }

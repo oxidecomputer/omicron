@@ -12,7 +12,7 @@ use crate::helpers::ConfirmationPrompt;
 use crate::helpers::const_max_len;
 use crate::helpers::display_option_blank;
 use crate::helpers::should_colorize;
-use anyhow::Context;
+use anyhow::Context as _;
 use anyhow::bail;
 use camino::Utf8PathBuf;
 use chrono::DateTime;
@@ -76,8 +76,11 @@ use serde::Deserialize;
 use slog_error_chain::InlineErrorChain;
 use std::collections::BTreeMap;
 use std::collections::BTreeSet;
+use std::fs::OpenOptions;
 use std::str::FromStr;
 use std::sync::Arc;
+use support_bundle_viewer::LocalFileAccess;
+use support_bundle_viewer::SupportBundleAccessor;
 use tabled::Tabled;
 use tabled::settings::Padding;
 use tabled::settings::object::Columns;
@@ -495,17 +498,38 @@ enum SupportBundleCommands {
     Create,
     /// Delete a support bundle
     Delete(SupportBundleDeleteArgs),
+    /// Download an entire support bundle
+    Download(SupportBundleDownloadArgs),
     /// Download the index of a support bundle
     ///
     /// This is a "list of files", from which individual files can be accessed
     GetIndex(SupportBundleIndexArgs),
-    /// View a file within a support bundle
+    /// Download a single file within a support bundle
     GetFile(SupportBundleFileArgs),
+    /// Creates a dashboard for viewing the contents of a support bundle
+    Inspect(SupportBundleInspectArgs),
 }
 
 #[derive(Debug, Args)]
 struct SupportBundleDeleteArgs {
     id: SupportBundleUuid,
+}
+
+#[derive(Debug, Args)]
+struct SupportBundleDownloadArgs {
+    id: SupportBundleUuid,
+
+    /// Optional output path where the file should be written,
+    /// instead of stdout.
+    #[arg(short, long)]
+    output: Option<Utf8PathBuf>,
+
+    /// If "true" and using an output path, resumes downloading.
+    ///
+    /// This assumes the contents of "output" are already valid, and resumes
+    /// downloading at the end of the file.
+    #[arg(short, long, default_value_t = false)]
+    resume: bool,
 }
 
 #[derive(Debug, Args)]
@@ -521,6 +545,23 @@ struct SupportBundleFileArgs {
     /// instead of stdout.
     #[arg(short, long)]
     output: Option<Utf8PathBuf>,
+}
+
+#[derive(Debug, Args)]
+struct SupportBundleInspectArgs {
+    /// A specific bundle to inspect.
+    ///
+    /// If none is supplied, the latest active bundle is used.
+    /// Mutually exclusive with "path".
+    #[arg(short, long)]
+    id: Option<SupportBundleUuid>,
+
+    /// A local bundle file to inspect.
+    ///
+    /// If none is supplied, the latest active bundle is used.
+    /// Mutually exclusive with "id".
+    #[arg(short, long)]
+    path: Option<Utf8PathBuf>,
 }
 
 impl NexusArgs {
@@ -732,11 +773,17 @@ impl NexusArgs {
                 cmd_nexus_support_bundles_delete(&client, args, token).await
             }
             NexusCommands::SupportBundles(SupportBundleArgs {
+                command: SupportBundleCommands::Download(args),
+            }) => cmd_nexus_support_bundles_download(&client, args).await,
+            NexusCommands::SupportBundles(SupportBundleArgs {
                 command: SupportBundleCommands::GetIndex(args),
             }) => cmd_nexus_support_bundles_get_index(&client, args).await,
             NexusCommands::SupportBundles(SupportBundleArgs {
                 command: SupportBundleCommands::GetFile(args),
             }) => cmd_nexus_support_bundles_get_file(&client, args).await,
+            NexusCommands::SupportBundles(SupportBundleArgs {
+                command: SupportBundleCommands::Inspect(args),
+            }) => cmd_nexus_support_bundles_inspect(&client, args).await,
         }
     }
 }
@@ -1087,8 +1134,8 @@ fn print_task_details(bgtask: &BackgroundTask, details: &serde_json::Value) {
         "tuf_artifact_replication" => {
             print_task_tuf_artifact_replication(details);
         }
-        "webhook_dispatcher" => {
-            print_task_webhook_dispatcher(details);
+        "alert_dispatcher" => {
+            print_task_alert_dispatcher(details);
         }
         "webhook_deliverator" => {
             print_task_webhook_deliverator(details);
@@ -2308,6 +2355,7 @@ fn print_task_support_bundle_collector(details: &serde_json::Value) {
             if let Some(SupportBundleCollectionReport {
                 bundle,
                 listed_in_service_sleds,
+                listed_sps,
                 activated_in_db_ok,
             }) = collection_report
             {
@@ -2315,6 +2363,9 @@ fn print_task_support_bundle_collector(details: &serde_json::Value) {
                 println!("      Bundle ID: {bundle}");
                 println!(
                     "      Bundle was able to list in-service sleds: {listed_in_service_sleds}"
+                );
+                println!(
+                    "      Bundle was able to list service processors: {listed_sps}"
                 );
                 println!(
                     "      Bundle was activated in the database: {activated_in_db_ok}"
@@ -2390,19 +2441,18 @@ fn print_task_tuf_artifact_replication(details: &serde_json::Value) {
     }
 }
 
-fn print_task_webhook_dispatcher(details: &serde_json::Value) {
-    use nexus_types::internal_api::background::WebhookDispatched;
-    use nexus_types::internal_api::background::WebhookDispatcherStatus;
-    use nexus_types::internal_api::background::WebhookGlobStatus;
+fn print_task_alert_dispatcher(details: &serde_json::Value) {
+    use nexus_types::internal_api::background::AlertDispatched;
+    use nexus_types::internal_api::background::AlertDispatcherStatus;
+    use nexus_types::internal_api::background::AlertGlobStatus;
 
-    let WebhookDispatcherStatus {
+    let AlertDispatcherStatus {
         globs_reprocessed,
         glob_version,
         errors,
         dispatched,
         no_receivers,
-    } = match serde_json::from_value::<WebhookDispatcherStatus>(details.clone())
-    {
+    } = match serde_json::from_value::<AlertDispatcherStatus>(details.clone()) {
         Err(error) => {
             eprintln!(
                 "warning: failed to interpret task details: {:?}: {:?}",
@@ -2423,8 +2473,8 @@ fn print_task_webhook_dispatcher(details: &serde_json::Value) {
         }
     }
 
-    const DISPATCHED: &str = "events dispatched:";
-    const NO_RECEIVERS: &str = "events with no receivers subscribed:";
+    const DISPATCHED: &str = "alerts dispatched:";
+    const NO_RECEIVERS: &str = "alerts with no receivers subscribed:";
     const OUTDATED_GLOBS: &str = "outdated glob subscriptions:";
     const GLOBS_REPROCESSED: &str = "glob subscriptions reprocessed:";
     const ALREADY_REPROCESSED: &str =
@@ -2452,9 +2502,9 @@ fn print_task_webhook_dispatcher(details: &serde_json::Value) {
             dispatched: usize,
         }
         let table_rows = dispatched.iter().map(
-            |&WebhookDispatched { event_id, subscribed, dispatched }| {
+            |&AlertDispatched { alert_id, subscribed, dispatched }| {
                 DispatchedRow {
-                    event: event_id.into_untyped_uuid(),
+                    event: alert_id.into_untyped_uuid(),
                     subscribed,
                     dispatched,
                 }
@@ -2487,11 +2537,11 @@ fn print_task_webhook_dispatcher(details: &serde_json::Value) {
             println!("      receiver {rx_id:?}:");
             for (glob, status) in globs {
                 match status {
-                    Ok(WebhookGlobStatus::AlreadyReprocessed) => {
+                    Ok(AlertGlobStatus::AlreadyReprocessed) => {
                         println!("      > {glob:?}: already reprocessed");
                         already_reprocessed += 1;
                     }
-                    Ok(WebhookGlobStatus::Reprocessed {
+                    Ok(AlertGlobStatus::Reprocessed {
                         created,
                         deleted,
                         prev_version,
@@ -2622,7 +2672,7 @@ fn print_task_webhook_deliverator(details: &serde_json::Value) {
             let table_rows = failed_deliveries.into_iter().map(
                 |WebhookDeliveryFailure {
                      delivery_id,
-                     event_id,
+                     alert_id,
                      attempt,
                      result,
                      response_status,
@@ -2631,7 +2681,7 @@ fn print_task_webhook_deliverator(details: &serde_json::Value) {
                     // Turn these into untyped `Uuid`s so that the Display impl
                     // doesn't include the UUID kind in the table.
                     delivery: delivery_id.into_untyped_uuid(),
-                    event: event_id.into_untyped_uuid(),
+                    event: alert_id.into_untyped_uuid(),
                     attempt,
                     result,
                     status: response_status,
@@ -3819,10 +3869,10 @@ async fn cmd_nexus_support_bundles_delete(
 }
 
 async fn write_stream_to_sink(
-    mut stream: impl futures::Stream<Item = reqwest::Result<bytes::Bytes>>
-    + std::marker::Unpin,
+    mut stream: impl futures::Stream<Item = anyhow::Result<bytes::Bytes>>,
     mut sink: impl std::io::Write,
 ) -> Result<(), anyhow::Error> {
+    let mut stream = std::pin::pin!(stream);
     while let Some(data) = stream.next().await {
         match data {
             Err(err) => return Err(anyhow::anyhow!(err)),
@@ -3832,18 +3882,107 @@ async fn write_stream_to_sink(
     Ok(())
 }
 
+// Downloads a portion of a support bundle using range requests.
+//
+// "range" is in bytes, and is inclusive on both sides.
+async fn support_bundle_download_range(
+    client: &nexus_client::Client,
+    id: SupportBundleUuid,
+    range: (u64, u64),
+) -> anyhow::Result<impl futures::Stream<Item = anyhow::Result<bytes::Bytes>>> {
+    let range = format!("bytes={}-{}", range.0, range.1);
+    Ok(client
+        .support_bundle_download(id.as_untyped_uuid(), Some(&range))
+        .await
+        .with_context(|| format!("downloading support bundle {}", id))?
+        .into_inner_stream()
+        .map(|r| r.map_err(|err| anyhow::anyhow!(err))))
+}
+
+// Downloads all ranges of a support bundle, and combines them into a single
+// stream.
+//
+// Starts the download at "start" bytes (inclusive) and continues up to "end"
+// bytes (exclusive).
+fn support_bundle_download_ranges(
+    client: &nexus_client::Client,
+    id: SupportBundleUuid,
+    start: u64,
+    end: u64,
+) -> impl futures::Stream<Item = anyhow::Result<bytes::Bytes>> + use<'_> {
+    // Arbitrary chunk size of 100 MiB.
+    //
+    // Note that we'll still stream data in packets which are smaller than this,
+    // but we won't keep a single connection to Nexus open for longer than a 100
+    // MiB download.
+    const CHUNK_SIZE: u64 = 100 * (1 << 20);
+    futures::stream::try_unfold(
+        (start, start + CHUNK_SIZE - 1),
+        move |range| async move {
+            if end <= range.0 {
+                return Ok(None);
+            }
+
+            let stream =
+                support_bundle_download_range(client, id, range).await?;
+            let next_range = (range.0 + CHUNK_SIZE, range.1 + CHUNK_SIZE);
+            Ok::<_, anyhow::Error>(Some((stream, next_range)))
+        },
+    )
+    .try_flatten()
+}
+
+/// Runs `omdb nexus support-bundles download`
+async fn cmd_nexus_support_bundles_download(
+    client: &nexus_client::Client,
+    args: &SupportBundleDownloadArgs,
+) -> Result<(), anyhow::Error> {
+    let total_length = client
+        .support_bundle_head(args.id.as_untyped_uuid(), None)
+        .await?
+        .content_length()
+        .ok_or_else(|| anyhow::anyhow!("No content length"))?;
+
+    let start = match &args.output {
+        Some(output) if output.exists() && args.resume => {
+            output.metadata()?.len()
+        }
+        _ => 0,
+    };
+
+    let stream =
+        support_bundle_download_ranges(client, args.id, start, total_length);
+
+    let sink: Box<dyn std::io::Write> = match &args.output {
+        Some(path) => Box::new(
+            OpenOptions::new()
+                .create(true)
+                .append(true)
+                .truncate(!args.resume)
+                .open(path)?,
+        ),
+        None => Box::new(std::io::stdout()),
+    };
+
+    write_stream_to_sink(stream, sink)
+        .await
+        .with_context(|| format!("streaming support bundle {}", args.id))?;
+    Ok(())
+}
+
 /// Runs `omdb nexus support-bundles get-index`
 async fn cmd_nexus_support_bundles_get_index(
     client: &nexus_client::Client,
     args: &SupportBundleIndexArgs,
 ) -> Result<(), anyhow::Error> {
     let stream = client
-        .support_bundle_index(args.id.as_untyped_uuid())
+        .support_bundle_index(args.id.as_untyped_uuid(), None)
         .await
         .with_context(|| {
             format!("downloading support bundle index {}", args.id)
         })?
-        .into_inner_stream();
+        .into_inner_stream()
+        .map(|r| r.map_err(|err| anyhow::anyhow!(err)));
 
     write_stream_to_sink(stream, std::io::stdout()).await.with_context(
         || format!("streaming support bundle index {}", args.id),
@@ -3860,6 +3999,7 @@ async fn cmd_nexus_support_bundles_get_file(
         .support_bundle_download_file(
             args.id.as_untyped_uuid(),
             args.path.as_str(),
+            None,
         )
         .await
         .with_context(|| {
@@ -3868,7 +4008,8 @@ async fn cmd_nexus_support_bundles_get_file(
                 args.id, args.path
             )
         })?
-        .into_inner_stream();
+        .into_inner_stream()
+        .map(|r| r.map_err(|err| anyhow::anyhow!(err)));
 
     let sink: Box<dyn std::io::Write> = match &args.output {
         Some(path) => Box::new(std::fs::File::create(path)?),
@@ -3879,4 +4020,23 @@ async fn cmd_nexus_support_bundles_get_file(
         format!("streaming support bundle file {}: {}", args.id, args.path)
     })?;
     Ok(())
+}
+
+/// Runs `omdb nexus support-bundles inspect`
+async fn cmd_nexus_support_bundles_inspect(
+    client: &nexus_client::Client,
+    args: &SupportBundleInspectArgs,
+) -> Result<(), anyhow::Error> {
+    let accessor: Box<dyn SupportBundleAccessor> = match (args.id, &args.path) {
+        (None, Some(path)) => Box::new(LocalFileAccess::new(path)?),
+        (maybe_id, None) => Box::new(
+            crate::support_bundle::access_bundle_from_id(client, maybe_id)
+                .await?,
+        ),
+        (Some(_), Some(_)) => {
+            bail!("Cannot specify both UUID and path");
+        }
+    };
+
+    support_bundle_viewer::run_dashboard(accessor).await
 }

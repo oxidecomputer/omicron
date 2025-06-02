@@ -822,14 +822,14 @@
         }
       }
     },
-    "/experimental/v1/system/support-bundles/{support_bundle}": {
+    "/experimental/v1/system/support-bundles/{bundle_id}": {
       "get": {
         "summary": "View a support bundle",
         "operationId": "support_bundle_view",
         "parameters": [
           {
             "in": "path",
-            "name": "support_bundle",
+            "name": "bundle_id",
             "description": "ID of the support bundle",
             "required": true,
             "schema": {
@@ -864,7 +864,7 @@
         "parameters": [
           {
             "in": "path",
-            "name": "support_bundle",
+            "name": "bundle_id",
             "description": "ID of the support bundle",
             "required": true,
             "schema": {
@@ -886,14 +886,22 @@
         }
       }
     },
-    "/experimental/v1/system/support-bundles/{support_bundle}/download": {
+    "/experimental/v1/system/support-bundles/{bundle_id}/download": {
       "get": {
         "summary": "Download the contents of a support bundle",
         "operationId": "support_bundle_download",
         "parameters": [
           {
+            "in": "header",
+            "name": "range",
+            "description": "A request to access a portion of the resource, such as `bytes=0-499`\n\nSee: <https://developer.mozilla.org/en-US/docs/Web/HTTP/Reference/Headers/Range>",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
             "in": "path",
-            "name": "support_bundle",
+            "name": "bundle_id",
             "description": "ID of the support bundle",
             "required": true,
             "schema": {
@@ -918,8 +926,16 @@
         "operationId": "support_bundle_head",
         "parameters": [
           {
+            "in": "header",
+            "name": "range",
+            "description": "A request to access a portion of the resource, such as `bytes=0-499`\n\nSee: <https://developer.mozilla.org/en-US/docs/Web/HTTP/Reference/Headers/Range>",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
             "in": "path",
-            "name": "support_bundle",
+            "name": "bundle_id",
             "description": "ID of the support bundle",
             "required": true,
             "schema": {
@@ -940,11 +956,29 @@
         }
       }
     },
-    "/experimental/v1/system/support-bundles/{support_bundle}/download/{file}": {
+    "/experimental/v1/system/support-bundles/{bundle_id}/download/{file}": {
       "get": {
         "summary": "Download a file within a support bundle",
         "operationId": "support_bundle_download_file",
         "parameters": [
+          {
+            "in": "header",
+            "name": "range",
+            "description": "A request to access a portion of the resource, such as `bytes=0-499`\n\nSee: <https://developer.mozilla.org/en-US/docs/Web/HTTP/Reference/Headers/Range>",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "bundle_id",
+            "description": "ID of the support bundle",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
           {
             "in": "path",
             "name": "file",
@@ -952,16 +986,6 @@
             "required": true,
             "schema": {
               "type": "string"
-            }
-          },
-          {
-            "in": "path",
-            "name": "support_bundle",
-            "description": "ID of the support bundle",
-            "required": true,
-            "schema": {
-              "type": "string",
-              "format": "uuid"
             }
           }
         ],
@@ -981,22 +1005,30 @@
         "operationId": "support_bundle_head_file",
         "parameters": [
           {
-            "in": "path",
-            "name": "file",
-            "description": "The file within the bundle to download",
-            "required": true,
+            "in": "header",
+            "name": "range",
+            "description": "A request to access a portion of the resource, such as `bytes=0-499`\n\nSee: <https://developer.mozilla.org/en-US/docs/Web/HTTP/Reference/Headers/Range>",
             "schema": {
               "type": "string"
             }
           },
           {
             "in": "path",
-            "name": "support_bundle",
+            "name": "bundle_id",
             "description": "ID of the support bundle",
             "required": true,
             "schema": {
               "type": "string",
               "format": "uuid"
+            }
+          },
+          {
+            "in": "path",
+            "name": "file",
+            "description": "The file within the bundle to download",
+            "required": true,
+            "schema": {
+              "type": "string"
             }
           }
         ],
@@ -1012,14 +1044,22 @@
         }
       }
     },
-    "/experimental/v1/system/support-bundles/{support_bundle}/index": {
+    "/experimental/v1/system/support-bundles/{bundle_id}/index": {
       "get": {
         "summary": "Download the index of a support bundle",
         "operationId": "support_bundle_index",
         "parameters": [
           {
+            "in": "header",
+            "name": "range",
+            "description": "A request to access a portion of the resource, such as `bytes=0-499`\n\nSee: <https://developer.mozilla.org/en-US/docs/Web/HTTP/Reference/Headers/Range>",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
             "in": "path",
-            "name": "support_bundle",
+            "name": "bundle_id",
             "description": "ID of the support bundle",
             "required": true,
             "schema": {
@@ -2302,7 +2342,7 @@
             "type": "string"
           },
           "external_dns_version": {
-            "description": "external DNS version when thi blueprint was created",
+            "description": "external DNS version when this blueprint was created",
             "allOf": [
               {
                 "$ref": "#/components/schemas/Generation"
@@ -2630,6 +2670,14 @@
           },
           "disks": {
             "$ref": "#/components/schemas/IdMapBlueprintPhysicalDiskConfig"
+          },
+          "remove_mupdate_override": {
+            "nullable": true,
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/TypedUuidForMupdateOverrideKind"
+              }
+            ]
           },
           "sled_agent_generation": {
             "description": "Generation number used when this type is converted into an `OmicronSledConfig` for use by sled-agent.\n\nThis field is explicitly named `sled_agent_generation` to indicate that it is only required to cover information that changes what Reconfigurator sends to sled agent. For example, changing the sled `state` from `Active` to `Decommissioned` would not require a bump to `sled_agent_generation`, because a `Decommissioned` sled will never be sent an `OmicronSledConfig`.",
@@ -4011,6 +4059,12 @@
           "generation": {
             "$ref": "#/components/schemas/Generation"
           },
+          "serial": {
+            "description": "See [`DnsConfig`]'s `serial` field for how this is different from `generation`",
+            "type": "integer",
+            "format": "uint32",
+            "minimum": 0
+          },
           "time_created": {
             "type": "string",
             "format": "date-time"
@@ -4024,11 +4078,13 @@
         },
         "required": [
           "generation",
+          "serial",
           "time_created",
           "zones"
         ]
       },
       "DnsConfigZone": {
+        "description": "Configuration for a specific DNS zone, as opposed to illumos zones in which the services described by these records run.\n\nThe name `@` is special: it describes records that should be provided for queries about `zone_name`. This is used in favor of the empty string as `@` is the name used for this purpose in zone files for most DNS configurations. It also avoids potentially-confusing debug output from naively printing out records and their names - if you've seen an `@` record and tools are unclear about what that means, hopefully you've arrived here!",
         "type": "object",
         "properties": {
           "records": {
@@ -4099,6 +4155,24 @@
                 "type": "string",
                 "enum": [
                   "SRV"
+                ]
+              }
+            },
+            "required": [
+              "data",
+              "type"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "data": {
+                "type": "string"
+              },
+              "type": {
+                "type": "string",
+                "enum": [
+                  "NS"
                 ]
               }
             },
@@ -4220,6 +4294,22 @@
         "required": [
           "message",
           "request_id"
+        ]
+      },
+      "ExpectedActiveRotSlot": {
+        "description": "Describes the expected active RoT slot, and the version we expect to find for it",
+        "type": "object",
+        "properties": {
+          "slot": {
+            "$ref": "#/components/schemas/RotSlot"
+          },
+          "version": {
+            "$ref": "#/components/schemas/ArtifactVersion"
+          }
+        },
+        "required": [
+          "slot",
+          "version"
         ]
       },
       "ExpectedVersion": {
@@ -5377,6 +5467,56 @@
               "expected_active_version",
               "expected_inactive_version"
             ]
+          },
+          {
+            "description": "the RoT is being updated",
+            "type": "object",
+            "properties": {
+              "component": {
+                "type": "string",
+                "enum": [
+                  "rot"
+                ]
+              },
+              "expected_active_slot": {
+                "$ref": "#/components/schemas/ExpectedActiveRotSlot"
+              },
+              "expected_inactive_version": {
+                "$ref": "#/components/schemas/ExpectedVersion"
+              },
+              "expected_pending_persistent_boot_preference": {
+                "nullable": true,
+                "description": "the persistent boot preference written into the CFPA scratch page that will become the persistent boot preference in the authoritative CFPA page upon reboot, unless CFPA update of the authoritative page fails for some reason.",
+                "allOf": [
+                  {
+                    "$ref": "#/components/schemas/RotSlot"
+                  }
+                ]
+              },
+              "expected_persistent_boot_preference": {
+                "description": "the persistent boot preference written into the current authoritative CFPA page (ping or pong)",
+                "allOf": [
+                  {
+                    "$ref": "#/components/schemas/RotSlot"
+                  }
+                ]
+              },
+              "expected_transient_boot_preference": {
+                "nullable": true,
+                "description": "override persistent preference selection for a single boot",
+                "allOf": [
+                  {
+                    "$ref": "#/components/schemas/RotSlot"
+                  }
+                ]
+              }
+            },
+            "required": [
+              "component",
+              "expected_active_slot",
+              "expected_inactive_version",
+              "expected_persistent_boot_preference"
+            ]
           }
         ]
       },
@@ -6013,6 +6153,38 @@
           "time"
         ]
       },
+      "RotSlot": {
+        "oneOf": [
+          {
+            "type": "object",
+            "properties": {
+              "slot": {
+                "type": "string",
+                "enum": [
+                  "a"
+                ]
+              }
+            },
+            "required": [
+              "slot"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "slot": {
+                "type": "string",
+                "enum": [
+                  "b"
+                ]
+              }
+            },
+            "required": [
+              "slot"
+            ]
+          }
+        ]
+      },
       "RouteConfig": {
         "type": "object",
         "properties": {
@@ -6535,7 +6707,7 @@
         ]
       },
       "SpType": {
-        "description": "SpType\n\n<details><summary>JSON schema</summary>\n\n```json { \"type\": \"string\", \"enum\": [ \"sled\", \"power\", \"switch\" ] } ``` </details>",
+        "description": "`SpType`\n\n<details><summary>JSON schema</summary>\n\n```json { \"type\": \"string\", \"enum\": [ \"sled\", \"power\", \"switch\" ] } ``` </details>",
         "type": "string",
         "enum": [
           "sled",
@@ -6744,6 +6916,10 @@
         "format": "uuid"
       },
       "TypedUuidForExternalIpKind": {
+        "type": "string",
+        "format": "uuid"
+      },
+      "TypedUuidForMupdateOverrideKind": {
         "type": "string",
         "format": "uuid"
       },

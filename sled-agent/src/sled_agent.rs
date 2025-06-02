@@ -32,8 +32,9 @@ use futures::StreamExt;
 use futures::stream::FuturesUnordered;
 use illumos_utils::opte::PortManager;
 use nexus_sled_agent_shared::inventory::{
-    Inventory, InventoryDataset, InventoryDisk, InventoryZpool,
-    OmicronSledConfig, OmicronSledConfigResult, OmicronZonesConfig, SledRole,
+    ConfigReconcilerInventoryStatus, Inventory, InventoryDataset,
+    InventoryDisk, InventoryZpool, OmicronSledConfig, OmicronSledConfigResult,
+    OmicronZonesConfig, SledRole,
 };
 use omicron_common::address::{
     Ipv6Subnet, SLED_PREFIX, get_sled_address, get_switch_zone_address,
@@ -67,12 +68,14 @@ use sled_agent_types::zone_bundle::{
     BundleUtilization, CleanupContext, CleanupCount, CleanupPeriod,
     PriorityOrder, StorageLimit, ZoneBundleMetadata,
 };
-use sled_diagnostics::{SledDiagnosticsCmdError, SledDiagnosticsCmdOutput};
+use sled_diagnostics::SledDiagnosticsCmdError;
+use sled_diagnostics::SledDiagnosticsCmdOutput;
 use sled_hardware::{HardwareManager, MemoryReservations, underlay};
 use sled_hardware_types::Baseboard;
 use sled_hardware_types::underlay::BootstrapInterface;
 use sled_storage::manager::StorageHandle;
 use slog::Logger;
+use slog_error_chain::InlineErrorChain;
 use sprockets_tls::keys::SprocketsConfig;
 use std::collections::BTreeMap;
 use std::net::{Ipv6Addr, SocketAddrV6};
@@ -293,16 +296,21 @@ pub enum InventoryError {
     // system.
     #[error(transparent)]
     BadByteCount(#[from] ByteCountRangeError),
+    #[error("failed to get current ledgered disks")]
+    GetDisksConfig(#[source] sled_storage::error::Error),
+    #[error("failed to get current ledgered datasets")]
+    GetDatasetsConfig(#[source] sled_storage::error::Error),
 }
 
 impl From<InventoryError> for omicron_common::api::external::Error {
     fn from(inventory_error: InventoryError) -> Self {
         match inventory_error {
-            e @ InventoryError::BadByteCount(..) => {
-                omicron_common::api::external::Error::internal_error(&format!(
-                    "{:#}",
-                    e
-                ))
+            e @ (InventoryError::BadByteCount(..)
+            | InventoryError::GetDisksConfig(_)
+            | InventoryError::GetDatasetsConfig(_)) => {
+                omicron_common::api::external::Error::internal_error(
+                    &InlineErrorChain::new(&e).to_string(),
+                )
             }
         }
     }
@@ -419,7 +427,8 @@ impl SledAgent {
         sled_diagnostics::LogsHandle::new(
             log.new(o!("component" => "sled-diagnostics-cleanup")),
         )
-        .cleanup_snapshots();
+        .cleanup_snapshots()
+        .await;
 
         let storage_manager = &long_running_task_handles.storage_manager;
         let boot_disk = storage_manager
@@ -447,7 +456,7 @@ impl SledAgent {
         }
 
         info!(log, "Mounting backing filesystems");
-        crate::backing_fs::ensure_backing_fs(&parent_log, &boot_disk.1)?;
+        crate::backing_fs::ensure_backing_fs(&parent_log, &boot_disk.1).await?;
 
         // TODO-correctness Bootstrap-agent already ensures the underlay
         // etherstub and etherstub VNIC exist on startup - could it pass them
@@ -455,8 +464,10 @@ impl SledAgent {
         let etherstub = Dladm::ensure_etherstub(
             illumos_utils::dladm::UNDERLAY_ETHERSTUB_NAME,
         )
+        .await
         .map_err(|e| Error::Etherstub(e))?;
         let etherstub_vnic = Dladm::ensure_etherstub_vnic(&etherstub)
+            .await
             .map_err(|e| Error::EtherstubVnic(e))?;
 
         // Ensure the global zone has a functioning IPv6 address.
@@ -466,10 +477,11 @@ impl SledAgent {
             *sled_address.ip(),
             "sled6",
         )
+        .await
         .map_err(|err| Error::SledSubnet { err })?;
 
         // Initialize the xde kernel driver with the underlay devices.
-        let underlay_nics = underlay::find_nics(&config.data_links)?;
+        let underlay_nics = underlay::find_nics(&config.data_links).await?;
         illumos_utils::opte::initialize_xde_driver(&log, &underlay_nics)?;
 
         // Start collecting metric data.
@@ -485,7 +497,7 @@ impl SledAgent {
             MetricsManager::new(&log, identifiers.clone(), *sled_address.ip())?;
 
         // Start tracking the underlay physical links.
-        for link in underlay::find_chelsio_links(&config.data_links)? {
+        for link in underlay::find_chelsio_links(&config.data_links).await? {
             match metrics_manager
                 .request_queue()
                 .track_physical("global", &link.0)
@@ -1350,10 +1362,31 @@ impl SledAgent {
         let mut disks = vec![];
         let mut zpools = vec![];
         let mut datasets = vec![];
-        let (all_disks, omicron_zones) = tokio::join!(
+        let (all_disks, disks_config, datasets_config, omicron_zones) = tokio::join!(
             self.storage().get_latest_disks(),
+            self.storage().omicron_physical_disks_list(),
+            self.storage().datasets_config_list(),
             self.inner.services.omicron_zones_list()
         );
+
+        // RSS asks for our inventory _before_ it sends us an
+        // `OmicronSledConfig`; echo back the default (empty) disk and dataset
+        // configs if we have no ledger at all.
+        let disks_config = match disks_config {
+            Ok(disks_config) => disks_config,
+            Err(sled_storage::error::Error::LedgerNotFound) => {
+                OmicronPhysicalDisksConfig::default()
+            }
+            Err(err) => return Err(InventoryError::GetDisksConfig(err)),
+        };
+        let datasets_config = match datasets_config {
+            Ok(datasets_config) => datasets_config,
+            Err(sled_storage::error::Error::LedgerNotFound) => {
+                DatasetsConfig::default()
+            }
+            Err(err) => return Err(InventoryError::GetDatasetsConfig(err)),
+        };
+
         for (identity, variant, slot, firmware) in all_disks.iter_all() {
             disks.push(InventoryDisk {
                 identity: identity.clone(),
@@ -1369,6 +1402,7 @@ impl SledAgent {
         for zpool in all_disks.all_u2_zpools() {
             let info =
                 match illumos_utils::zpool::Zpool::get_info(&zpool.to_string())
+                    .await
                 {
                     Ok(info) => info,
                     Err(err) => {
@@ -1404,6 +1438,16 @@ impl SledAgent {
             datasets.extend(inv_props);
         }
 
+        // Reassemble our combined sled config from its separate pieces. (This
+        // will go away once we start ledgering the config as a single unit.)
+        let sled_config = OmicronSledConfig {
+            generation: omicron_zones.generation,
+            disks: disks_config.disks.into_iter().collect(),
+            datasets: datasets_config.datasets.into_values().collect(),
+            zones: omicron_zones.zones.into_iter().collect(),
+            remove_mupdate_override: None,
+        };
+
         Ok(Inventory {
             sled_id,
             sled_agent_address,
@@ -1412,11 +1456,14 @@ impl SledAgent {
             usable_hardware_threads,
             usable_physical_ram: ByteCount::try_from(usable_physical_ram)?,
             reservoir_size,
-            omicron_zones,
             disks,
             zpools,
             datasets,
-            omicron_physical_disks_generation: *all_disks.generation(),
+            // These fields will come from the reconciler once it's integrated.
+            // For now, we can report our ledgered config but nothing else.
+            ledgered_sled_config: Some(sled_config),
+            reconciler_status: ConfigReconcilerInventoryStatus::NotYetRun,
+            last_reconciliation: None,
         })
     }
 
@@ -1472,6 +1519,12 @@ impl SledAgent {
         &self,
     ) -> Result<SledDiagnosticsCmdOutput, SledDiagnosticsCmdError> {
         sled_diagnostics::zpool_info().await
+    }
+
+    pub(crate) async fn support_health_check(
+        &self,
+    ) -> Vec<Result<SledDiagnosticsCmdOutput, SledDiagnosticsCmdError>> {
+        sled_diagnostics::health_check().await
     }
 }
 

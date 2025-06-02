@@ -13,6 +13,7 @@ use nexus_test_utils::{
         create_local_user, create_project, create_route, create_router,
         create_vpc, delete_internet_gateway, detach_ip_address_from_igw,
         detach_ip_pool_from_igw, link_ip_pool, objects_list_page_authz,
+        test_params,
     },
 };
 use nexus_test_utils_macros::nexus_test;
@@ -271,7 +272,7 @@ async fn test_igw_ip_pool_attach_silo_user(ctx: &ControlPlaneTestContext) {
         c,
         &silo,
         &"user".parse().unwrap(),
-        params::UserPassword::LoginDisallowed,
+        test_params::UserPassword::LoginDisallowed,
     )
     .await;
 

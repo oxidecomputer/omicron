@@ -659,6 +659,33 @@
         }
       }
     },
+    "/support/health-check": {
+      "get": {
+        "operationId": "support_health_check",
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "title": "Array_of_SledDiagnosticsQueryOutput",
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/SledDiagnosticsQueryOutput"
+                  }
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
     "/support/ipadm-info": {
       "get": {
         "operationId": "support_ipadm_info",
@@ -1097,6 +1124,14 @@
         "operationId": "support_bundle_download",
         "parameters": [
           {
+            "in": "header",
+            "name": "range",
+            "description": "A request to access a portion of the resource, such as `bytes=0-499`\n\nSee: <https://developer.mozilla.org/en-US/docs/Web/HTTP/Reference/Headers/Range>",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
             "in": "path",
             "name": "dataset_id",
             "description": "The dataset on which this support bundle was provisioned",
@@ -1139,6 +1174,14 @@
         "summary": "Fetch metadata about a support bundle from a particular dataset",
         "operationId": "support_bundle_head",
         "parameters": [
+          {
+            "in": "header",
+            "name": "range",
+            "description": "A request to access a portion of the resource, such as `bytes=0-499`\n\nSee: <https://developer.mozilla.org/en-US/docs/Web/HTTP/Reference/Headers/Range>",
+            "schema": {
+              "type": "string"
+            }
+          },
           {
             "in": "path",
             "name": "dataset_id",
@@ -1184,6 +1227,14 @@
         "summary": "Fetch a file within a support bundle from a particular dataset",
         "operationId": "support_bundle_download_file",
         "parameters": [
+          {
+            "in": "header",
+            "name": "range",
+            "description": "A request to access a portion of the resource, such as `bytes=0-499`\n\nSee: <https://developer.mozilla.org/en-US/docs/Web/HTTP/Reference/Headers/Range>",
+            "schema": {
+              "type": "string"
+            }
+          },
           {
             "in": "path",
             "name": "dataset_id",
@@ -1236,6 +1287,14 @@
         "summary": "Fetch metadata about a file within a support bundle from a particular dataset",
         "operationId": "support_bundle_head_file",
         "parameters": [
+          {
+            "in": "header",
+            "name": "range",
+            "description": "A request to access a portion of the resource, such as `bytes=0-499`\n\nSee: <https://developer.mozilla.org/en-US/docs/Web/HTTP/Reference/Headers/Range>",
+            "schema": {
+              "type": "string"
+            }
+          },
           {
             "in": "path",
             "name": "dataset_id",
@@ -1291,6 +1350,14 @@
         "operationId": "support_bundle_index",
         "parameters": [
           {
+            "in": "header",
+            "name": "range",
+            "description": "A request to access a portion of the resource, such as `bytes=0-499`\n\nSee: <https://developer.mozilla.org/en-US/docs/Web/HTTP/Reference/Headers/Range>",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
             "in": "path",
             "name": "dataset_id",
             "description": "The dataset on which this support bundle was provisioned",
@@ -1333,6 +1400,14 @@
         "summary": "Fetch metadata about the list of files within a support bundle",
         "operationId": "support_bundle_head_index",
         "parameters": [
+          {
+            "in": "header",
+            "name": "range",
+            "description": "A request to access a portion of the resource, such as `bytes=0-499`\n\nSee: <https://developer.mozilla.org/en-US/docs/Web/HTTP/Reference/Headers/Range>",
+            "schema": {
+              "type": "string"
+            }
+          },
           {
             "in": "path",
             "name": "dataset_id",
@@ -3486,6 +3561,147 @@
           }
         ]
       },
+      "ConfigReconcilerInventory": {
+        "description": "Describes the last attempt made by the sled-agent-config-reconciler to reconcile the current sled config against the actual state of the sled.",
+        "type": "object",
+        "properties": {
+          "datasets": {
+            "type": "object",
+            "additionalProperties": {
+              "$ref": "#/components/schemas/ConfigReconcilerInventoryResult"
+            }
+          },
+          "external_disks": {
+            "type": "object",
+            "additionalProperties": {
+              "$ref": "#/components/schemas/ConfigReconcilerInventoryResult"
+            }
+          },
+          "last_reconciled_config": {
+            "$ref": "#/components/schemas/OmicronSledConfig"
+          },
+          "zones": {
+            "type": "object",
+            "additionalProperties": {
+              "$ref": "#/components/schemas/ConfigReconcilerInventoryResult"
+            }
+          }
+        },
+        "required": [
+          "datasets",
+          "external_disks",
+          "last_reconciled_config",
+          "zones"
+        ]
+      },
+      "ConfigReconcilerInventoryResult": {
+        "oneOf": [
+          {
+            "type": "object",
+            "properties": {
+              "result": {
+                "type": "string",
+                "enum": [
+                  "ok"
+                ]
+              }
+            },
+            "required": [
+              "result"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "message": {
+                "type": "string"
+              },
+              "result": {
+                "type": "string",
+                "enum": [
+                  "err"
+                ]
+              }
+            },
+            "required": [
+              "message",
+              "result"
+            ]
+          }
+        ]
+      },
+      "ConfigReconcilerInventoryStatus": {
+        "description": "Status of the sled-agent-config-reconciler task.",
+        "oneOf": [
+          {
+            "description": "The reconciler task has not yet run for the first time since sled-agent started.",
+            "type": "object",
+            "properties": {
+              "status": {
+                "type": "string",
+                "enum": [
+                  "not_yet_run"
+                ]
+              }
+            },
+            "required": [
+              "status"
+            ]
+          },
+          {
+            "description": "The reconciler task is actively running.",
+            "type": "object",
+            "properties": {
+              "config": {
+                "$ref": "#/components/schemas/OmicronSledConfig"
+              },
+              "running_for": {
+                "$ref": "#/components/schemas/Duration"
+              },
+              "started_at": {
+                "type": "string",
+                "format": "date-time"
+              },
+              "status": {
+                "type": "string",
+                "enum": [
+                  "running"
+                ]
+              }
+            },
+            "required": [
+              "config",
+              "running_for",
+              "started_at",
+              "status"
+            ]
+          },
+          {
+            "description": "The reconciler task is currently idle, but previously did complete a reconciliation attempt.\n\nThis variant does not include the `OmicronSledConfig` used in the last attempt, because that's always available via [`ConfigReconcilerInventory::last_reconciled_config`].",
+            "type": "object",
+            "properties": {
+              "completed_at": {
+                "type": "string",
+                "format": "date-time"
+              },
+              "ran_for": {
+                "$ref": "#/components/schemas/Duration"
+              },
+              "status": {
+                "type": "string",
+                "enum": [
+                  "idle"
+                ]
+              }
+            },
+            "required": [
+              "completed_at",
+              "ran_for",
+              "status"
+            ]
+          }
+        ]
+      },
       "Cpuid": {
         "description": "A set of CPUID values to expose to a guest.",
         "type": "object",
@@ -3791,6 +4007,24 @@
             },
             "required": [
               "type"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "internal_disk_control_plane_request"
+                ]
+              },
+              "value": {
+                "$ref": "#/components/schemas/TypedUuidForPhysicalDiskKind"
+              }
+            },
+            "required": [
+              "type",
+              "value"
             ]
           },
           {
@@ -4844,11 +5078,24 @@
               "$ref": "#/components/schemas/InventoryDisk"
             }
           },
-          "omicron_physical_disks_generation": {
-            "$ref": "#/components/schemas/Generation"
+          "last_reconciliation": {
+            "nullable": true,
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/ConfigReconcilerInventory"
+              }
+            ]
           },
-          "omicron_zones": {
-            "$ref": "#/components/schemas/OmicronZonesConfig"
+          "ledgered_sled_config": {
+            "nullable": true,
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/OmicronSledConfig"
+              }
+            ]
+          },
+          "reconciler_status": {
+            "$ref": "#/components/schemas/ConfigReconcilerInventoryStatus"
           },
           "reservoir_size": {
             "$ref": "#/components/schemas/ByteCount"
@@ -4881,8 +5128,7 @@
           "baseboard",
           "datasets",
           "disks",
-          "omicron_physical_disks_generation",
-          "omicron_zones",
+          "reconciler_status",
           "reservoir_size",
           "sled_agent_address",
           "sled_id",
@@ -5467,6 +5713,14 @@
           "generation": {
             "$ref": "#/components/schemas/Generation"
           },
+          "remove_mupdate_override": {
+            "nullable": true,
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/TypedUuidForMupdateOverrideKind"
+              }
+            ]
+          },
           "zones": {
             "$ref": "#/components/schemas/IdMapOmicronZoneConfig"
           }
@@ -5936,31 +6190,6 @@
               "type"
             ]
           }
-        ]
-      },
-      "OmicronZonesConfig": {
-        "description": "Describes the set of Omicron-managed zones running on a sled",
-        "type": "object",
-        "properties": {
-          "generation": {
-            "description": "generation number of this configuration\n\nThis generation number is owned by the control plane (i.e., RSS or Nexus, depending on whether RSS-to-Nexus handoff has happened).  It should not be bumped within Sled Agent.\n\nSled Agent rejects attempts to set the configuration to a generation older than the one it's currently running.",
-            "allOf": [
-              {
-                "$ref": "#/components/schemas/Generation"
-              }
-            ]
-          },
-          "zones": {
-            "description": "list of running zones",
-            "type": "array",
-            "items": {
-              "$ref": "#/components/schemas/OmicronZoneConfig"
-            }
-          }
-        },
-        "required": [
-          "generation",
-          "zones"
         ]
       },
       "P9fs": {
@@ -7055,6 +7284,10 @@
         "format": "uuid"
       },
       "TypedUuidForInstanceKind": {
+        "type": "string",
+        "format": "uuid"
+      },
+      "TypedUuidForMupdateOverrideKind": {
         "type": "string",
         "format": "uuid"
       },

@@ -216,7 +216,7 @@ pub(crate) async fn ensure_zpool_has_datasets(
             illumos_utils::zfs::Keypath::new(disk_identity, &mount_config.root);
 
         let epoch = if let Ok(epoch_str) =
-            Zfs::get_oxide_value(dataset, "epoch")
+            Zfs::get_oxide_value(dataset, "epoch").await
         {
             if let Ok(epoch) = epoch_str.parse::<u64>() {
                 epoch
@@ -274,6 +274,7 @@ pub(crate) async fn ensure_zpool_has_datasets(
             id: None,
             additional_options: None,
         })
+        .await
         .inspect_err(|err| {
             warn!(
                 log,
@@ -307,13 +308,13 @@ pub(crate) async fn ensure_zpool_has_datasets(
         });
 
         if dataset.wipe {
-            match Zfs::get_oxide_value(name, "agent") {
+            match Zfs::get_oxide_value(name, "agent").await {
                 Ok(v) if &v == agent_local_value => {
                     info!(log, "Skipping automatic wipe for dataset: {}", name);
                 }
                 Ok(_) | Err(_) => {
                     info!(log, "Automatically destroying dataset: {}", name);
-                    Zfs::destroy_dataset(name).or_else(|err| {
+                    Zfs::destroy_dataset(name).await.or_else(|err| {
                         // If we can't find the dataset, that's fine -- it might
                         // not have been formatted yet.
                         if matches!(
@@ -345,6 +346,7 @@ pub(crate) async fn ensure_zpool_has_datasets(
             id: None,
             additional_options: None,
         })
+        .await
         .inspect_err(|err| {
             warn!(
                 log,
@@ -355,12 +357,12 @@ pub(crate) async fn ensure_zpool_has_datasets(
         })?;
 
         if dataset.wipe {
-            Zfs::set_oxide_value(name, "agent", agent_local_value).map_err(
-                |err| DatasetError::CannotSetAgentProperty {
+            Zfs::set_oxide_value(name, "agent", agent_local_value)
+                .await
+                .map_err(|err| DatasetError::CannotSetAgentProperty {
                     dataset: name.clone(),
                     err: Box::new(err),
-                },
-            )?;
+                })?;
         }
     }
     info!(log, "Finished ensuring zpool has datasets"; "zpool" => ?zpool_name, "disk_identity" => ?disk_identity);

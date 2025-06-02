@@ -415,10 +415,11 @@ impl Plan {
 
             let id = OmicronZoneUuid::new_v4();
             dns_builder
-                .host_zone_with_one_backend(
+                .host_zone_internal_dns(
                     id,
                     ServiceName::InternalDns,
                     http_address,
+                    dns_address,
                 )
                 .unwrap();
             let dataset_name =
@@ -495,6 +496,9 @@ impl Plan {
             let internal_ip = sled.addr_alloc.next().expect("Not enough addrs");
             let http_port = omicron_common::address::DNS_HTTP_PORT;
             let http_address = SocketAddrV6::new(internal_ip, http_port, 0, 0);
+            // With respect to internal DNS configuration, there's only one
+            // address for external DNS that matters: the management (HTTP)
+            // interface.
             dns_builder
                 .host_zone_with_one_backend(
                     id,
@@ -1150,10 +1154,9 @@ impl ServicePortBuilder {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use nexus_sled_agent_shared::inventory::OmicronZonesConfig;
+    use nexus_sled_agent_shared::inventory::ConfigReconcilerInventoryStatus;
     use omicron_common::address::IpRange;
     use omicron_common::api::external::ByteCount;
-    use omicron_common::api::external::Generation;
     use omicron_common::api::internal::shared::AllowedSourceIps;
     use omicron_common::api::internal::shared::RackNetworkConfig;
     use oxnet::Ipv6Net;
@@ -1369,14 +1372,12 @@ mod tests {
                 usable_hardware_threads: 32,
                 usable_physical_ram: ByteCount::try_from(1_u64 << 40).unwrap(),
                 reservoir_size: ByteCount::try_from(1_u64 << 40).unwrap(),
-                omicron_zones: OmicronZonesConfig {
-                    generation: OmicronZonesConfig::INITIAL_GENERATION,
-                    zones: vec![],
-                },
                 disks,
                 zpools: vec![],
                 datasets: vec![],
-                omicron_physical_disks_generation: Generation::new(),
+                ledgered_sled_config: None,
+                reconciler_status: ConfigReconcilerInventoryStatus::NotYetRun,
+                last_reconciliation: None,
             },
             is_scrimlet,
         )];

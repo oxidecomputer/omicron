@@ -249,6 +249,7 @@ async fn switch_zone_setup(
                 format!("invalid link name for addrobj: {link:?}")
             })?;
             Zones::ensure_has_link_local_v6_address(None, &addrobj)
+                .await
                 .with_context(|| {
                     format!("Could not ensure link local link {link:?}")
                 })?;
@@ -269,6 +270,7 @@ async fn switch_zone_setup(
         })?;
 
     let _ = Zones::create_address_internal(None, &addrobj, addrtype)
+        .await
         .with_context(|| {
             format!("Could not create bootstrap address {addrobj} {addrtype:?}")
         })?;
@@ -283,6 +285,7 @@ async fn switch_zone_setup(
         gz_local_link_addr,
         &bootstrap_vnic,
     )
+    .await
     .with_context(|| {
         format!(
             "Could not add bootstrap route via {bootstrap_vnic} \
@@ -342,6 +345,7 @@ async fn chrony_setup(
         "logadm config" => ?LOGADM_CONFIG_FILE,
     );
     Svcadm::refresh_logadm_upgrade()
+        .await
         .context("failed to refresh logadm-upgrade")?;
 
     Ok(())
@@ -620,7 +624,7 @@ async fn common_nw_set_up(
         "Ensuring IP interface exists on datalink";
         "datalink" => &datalink
     );
-    Ipadm::ensure_ip_interface_exists(&datalink).with_context(|| {
+    Ipadm::ensure_ip_interface_exists(&datalink).await.with_context(|| {
         format!(
             "failed to ensure temporary IP interface on datalink {datalink}",
         )
@@ -631,17 +635,19 @@ async fn common_nw_set_up(
         "datalink" => &datalink,
     );
     Ipadm::set_interface_mtu(&datalink)
+        .await
         .with_context(|| format!("failed to set MTU on datalink {datalink}"))?;
 
     info!(
         log, "Setting TCP recv_buf size to 1 MB";
     );
-    Ipadm::set_tcp_recv_buf().context("failed to set TCP recv_buf")?;
+    Ipadm::set_tcp_recv_buf().await.context("failed to set TCP recv_buf")?;
 
     info!(
         log, "Setting TCP congestion control algorithm to cubic";
     );
     Ipadm::set_tcp_congestion_control()
+        .await
         .context("failed to set TCP congestion_control")?;
 
     if static_addrs.is_empty() {
@@ -660,6 +666,7 @@ async fn common_nw_set_up(
                     "data link" => ?datalink,
                     "static address" => %addr);
                 Ipadm::create_static_and_autoconfigured_addrs(&datalink, &addr)
+                    .await
                     .with_context(|| {
                         format!(
                             "failed to ensure static address {addr} on \
@@ -736,8 +743,8 @@ async fn ensure_default_route_via_gateway_with_retries(
                 log, "Ensuring there is a default route";
                 "gateway" => ?gateway,
             );
-            Route::ensure_default_route_with_gateway(gateway).map_err(|err| {
-                match err {
+            Route::ensure_default_route_with_gateway(gateway).await.map_err(
+                |err| match err {
                     ExecutionError::CommandFailure(ref e) => {
                         if e.stdout.contains("Network is unreachable") {
                             BackoffError::transient(err_with_context(err))
@@ -746,8 +753,8 @@ async fn ensure_default_route_via_gateway_with_retries(
                         }
                     }
                     _ => BackoffError::permanent(err_with_context(err)),
-                }
-            })
+                },
+            )
         },
         |err, delay| {
             info!(
@@ -771,7 +778,7 @@ async fn opte_interface_set_up(
         "Creating gateway on the OPTE IP interface if it doesn't already exist";
         "OPTE interface" => ?interface
     );
-    Ipadm::create_opte_gateway(&interface).with_context(|| {
+    Ipadm::create_opte_gateway(&interface).await.with_context(|| {
         format!("failed to create OPTE gateway on interface {interface}")
     })?;
 
@@ -781,18 +788,21 @@ async fn opte_interface_set_up(
         "OPTE interface" => ?interface,
         "OPTE IP" => ?ip,
     );
-    Route::ensure_opte_route(&gateway, &interface, &ip).with_context(|| {
-        format!(
-            "failed to ensure OPTE gateway route on interface {interface} \
+    Route::ensure_opte_route(&gateway, &interface, &ip).await.with_context(
+        || {
+            format!(
+                "failed to ensure OPTE gateway route on interface {interface} \
                  with gateway {gateway} and IP {ip}",
-        )
-    })?;
+            )
+        },
+    )?;
 
     info!(
         log, "Ensuring there is a default route";
         "gateway" => ?gateway,
     );
     Route::ensure_default_route_with_gateway(Gateway::Ipv4(gateway))
+        .await
         .with_context(|| {
             format!("failed to ensure default route via gateway {gateway}")
         })?;

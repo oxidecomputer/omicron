@@ -142,6 +142,7 @@ function install_packages {
     packages=(
       "pkg:/package/pkg"
       "build-essential"
+      "cmake"
       "library/postgresql-$PGVER"
       "pkg-config"
       "library/libxmlsec1"

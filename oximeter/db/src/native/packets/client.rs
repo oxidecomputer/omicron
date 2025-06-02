@@ -21,9 +21,9 @@ use uuid::Uuid;
 #[allow(dead_code)]
 pub enum Packet {
     /// The initial packet to the server, to say hello.
-    Hello(Hello),
+    Hello(Box<Hello>),
     /// Send a query to the server.
-    Query(Query),
+    Query(Box<Query>),
     /// Send a block of data to the server.
     Data(Block),
     /// Cancel the current query.

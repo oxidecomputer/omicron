@@ -25,7 +25,7 @@ use omicron_uuid_kinds::{BlueprintUuid, CollectionUuid, SledUuid};
 use crate::{
     LoadSerializedResultBuilder,
     errors::{DuplicateError, KeyError, NonEmptySystemError},
-    utils::join_comma_or_none,
+    utils::{insert_sorted_by, join_comma_or_none},
 };
 
 /// A versioned, simulated reconfigurator system.
@@ -69,12 +69,14 @@ pub struct SimSystem {
     /// describe the system.
     description: SystemDescription,
 
-    /// Inventory collections created by the user.
+    /// Inventory collections created by the user. Invariant: the `IndexMap`
+    /// is ordered by time started.
     ///
     /// Stored with `Arc` to allow cheap cloning.
     collections: IndexMap<CollectionUuid, Arc<Collection>>,
 
-    /// Blueprints created by the user.
+    /// Blueprints created by the user. Invariant: the `IndexMap` is ordered by
+    /// time created.
     ///
     /// Stored with `Arc` to allow cheap cloning.
     blueprints: IndexMap<BlueprintUuid, Arc<Blueprint>>,
@@ -135,14 +137,50 @@ impl SimSystem {
         self.collections.values().map(|c| &**c)
     }
 
+    pub fn resolve_blueprint_id(
+        &self,
+        original: BlueprintId,
+    ) -> Result<ResolvedBlueprintId, KeyError> {
+        let resolved = match original {
+            BlueprintId::Target => {
+                self.target_blueprint
+                    .ok_or_else(|| KeyError::blueprint(original))?
+                    .target_id
+            }
+            BlueprintId::Latest => {
+                // The invariant of self.blueprints is that the last element is
+                // the latest.
+                let (id, _) = self
+                    .blueprints
+                    .last()
+                    .ok_or_else(|| KeyError::blueprint(original))?;
+                *id
+            }
+            BlueprintId::Id(id) => id,
+        };
+        Ok(ResolvedBlueprintId { original, resolved })
+    }
+
     pub fn get_blueprint(
         &self,
-        id: BlueprintUuid,
+        id: &ResolvedBlueprintId,
     ) -> Result<&Blueprint, KeyError> {
-        match self.blueprints.get(&id) {
+        match self.blueprints.get(&id.resolved()) {
             Some(b) => Ok(&**b),
-            None => Err(KeyError::blueprint(id)),
+            None => Err(KeyError::resolved_blueprint(id.clone())),
         }
+    }
+
+    /// Combines `self.resolve_blueprint_id` and `self.get_blueprint`.
+    ///
+    /// This can be convenient when the intermediate [`ResolvedBlueprintId`] is
+    /// not needed.
+    pub fn resolve_and_get_blueprint(
+        &self,
+        original: BlueprintId,
+    ) -> Result<&Blueprint, KeyError> {
+        let id = self.resolve_blueprint_id(original)?;
+        self.get_blueprint(&id)
     }
 
     pub fn target_blueprint(&self) -> Option<BlueprintTarget> {
@@ -239,9 +277,17 @@ impl SimSystemBuilder {
     }
 
     #[inline]
+    pub fn resolve_blueprint_id(
+        &self,
+        original: BlueprintId,
+    ) -> Result<ResolvedBlueprintId, KeyError> {
+        self.inner.system.resolve_blueprint_id(original)
+    }
+
+    #[inline]
     pub fn get_blueprint(
         &self,
-        id: BlueprintUuid,
+        id: &ResolvedBlueprintId,
     ) -> Result<&Blueprint, KeyError> {
         self.inner.system.get_blueprint(id)
     }
@@ -394,6 +440,55 @@ impl SimSystemBuilder {
     }
 }
 
+/// An identifier for a blueprint.
+#[derive(Clone, Copy, Debug)]
+pub enum BlueprintId {
+    /// The target blueprint.
+    Target,
+
+    /// The latest blueprint added to the system.
+    Latest,
+
+    /// The specified blueprint.
+    Id(BlueprintUuid),
+}
+
+/// An identifier for a blueprint after it has been resolved.
+#[derive(Clone, Debug)]
+pub struct ResolvedBlueprintId {
+    /// The original blueprint ID.
+    original: BlueprintId,
+
+    /// The resolved blueprint ID.
+    resolved: BlueprintUuid,
+}
+
+impl ResolvedBlueprintId {
+    /// Return the original blueprint ID.
+    pub fn original(&self) -> BlueprintId {
+        self.original
+    }
+
+    /// Return the resolved blueprint ID.
+    pub fn resolved(&self) -> BlueprintUuid {
+        self.resolved
+    }
+}
+
+impl fmt::Display for ResolvedBlueprintId {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self.original {
+            BlueprintId::Target => {
+                write!(f, "target blueprint ({})", self.resolved)
+            }
+            BlueprintId::Latest => {
+                write!(f, "latest blueprint ({})", self.resolved)
+            }
+            BlueprintId::Id(id) => write!(f, "blueprint {id}"),
+        }
+    }
+}
+
 /// A log entry corresponding to an individual operation on a
 /// [`SimSystemBuilder`].
 #[derive(Clone, Debug)]
@@ -515,13 +610,19 @@ impl SimSystemBuilderInner {
         external_dns: DnsConfigZone,
     ) {
         self.system.description = example.system;
-        self.system
-            .collections
-            .insert(example.collection.id, Arc::new(example.collection));
+
+        self.add_collection_inner(Arc::new(example.collection))
+            .expect("already checked that system is empty");
+
+        let generation_to_serial = |generation: Generation| -> u32 {
+            generation.as_u64().try_into().expect("generation fits into a u32")
+        };
+
         self.system.internal_dns.insert(
             blueprint.internal_dns_version,
             Arc::new(DnsConfigParams {
                 generation: blueprint.internal_dns_version,
+                serial: generation_to_serial(blueprint.internal_dns_version),
                 // TODO: probably want to make time controllable by the caller.
                 time_created: Utc::now(),
                 zones: vec![internal_dns],
@@ -531,21 +632,35 @@ impl SimSystemBuilderInner {
             blueprint.external_dns_version,
             Arc::new(DnsConfigParams {
                 generation: blueprint.external_dns_version,
+                serial: generation_to_serial(blueprint.external_dns_version),
                 // TODO: probably want to make time controllable by the caller.
                 time_created: Utc::now(),
                 zones: vec![external_dns],
             }),
         );
-        self.system.blueprints.insert(
-            example.initial_blueprint.id,
-            Arc::new(example.initial_blueprint),
-        );
+
+        let initial_blueprint_id = example.initial_blueprint.id;
+        let target_blueprint_id = blueprint.id;
+
+        self.add_blueprint_inner(Arc::new(example.initial_blueprint))
+            .expect("already checked that system is empty");
+
         self.system.target_blueprint = Some(BlueprintTarget {
-            target_id: blueprint.id,
+            target_id: target_blueprint_id,
             enabled: true,
             time_made_target: blueprint.time_created,
         });
-        self.system.blueprints.insert(blueprint.id, Arc::new(blueprint));
+
+        // XXX: it's not normal, but hypothetically possible, that the initial
+        // and target blueprints have the same ID. This will panic if so. Maybe
+        // we should make it not panic.
+        self.add_blueprint_inner(Arc::new(blueprint)).unwrap_or_else(|_| {
+            panic!(
+                "possible conflict between initial blueprint \
+                 (ID {initial_blueprint_id}) and target blueprint \
+                 (ID {target_blueprint_id}"
+            )
+        });
     }
 
     // This method MUST be infallible. It should only be called after checking
@@ -672,14 +787,16 @@ impl SimSystemBuilderInner {
         collection: Arc<Collection>,
     ) -> Result<(), DuplicateError> {
         let collection_id = collection.id;
-        match self.system.collections.entry(collection_id) {
-            indexmap::map::Entry::Vacant(entry) => {
-                entry.insert(collection);
-                Ok(())
-            }
-            indexmap::map::Entry::Occupied(_) => {
-                Err(DuplicateError::collection(collection_id))
-            }
+        let time_started = collection.time_started;
+
+        match insert_sorted_by(
+            &mut self.system.collections,
+            collection_id,
+            collection,
+            |_, other| other.time_started <= time_started,
+        ) {
+            Ok(()) => Ok(()),
+            Err(_) => Err(DuplicateError::collection(collection_id)),
         }
     }
 
@@ -688,13 +805,17 @@ impl SimSystemBuilderInner {
         blueprint: Arc<Blueprint>,
     ) -> Result<(), DuplicateError> {
         let blueprint_id = blueprint.id;
-        match self.system.blueprints.entry(blueprint_id) {
-            indexmap::map::Entry::Vacant(entry) => {
-                entry.insert(blueprint);
-                Ok(())
-            }
-            indexmap::map::Entry::Occupied(_) => {
-                Err(DuplicateError::blueprint(blueprint_id))
+        let time_created = blueprint.time_created;
+
+        match insert_sorted_by(
+            &mut self.system.blueprints,
+            blueprint_id,
+            blueprint,
+            |_, other| other.time_created <= time_created,
+        ) {
+            Ok(()) => Ok(()),
+            Err(_) => {
+                Err(DuplicateError::blueprint(BlueprintId::Id(blueprint_id)))
             }
         }
     }

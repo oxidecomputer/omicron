@@ -167,13 +167,22 @@ struct InstallOpts {
     data_link1: String,
 
     // TODO: checksum?
-
-    // The destination to write to.
+    /// The first destination to write to, representing M.2 slot A.
+    ///
+    /// This is mutually exclusive with --install-on-gimlet. At least one of the
+    /// two must be provided.
     #[clap(
         required_unless_present = "install_on_gimlet",
         conflicts_with = "install_on_gimlet"
     )]
-    destination: Option<Utf8PathBuf>,
+    a_destination: Option<Utf8PathBuf>,
+
+    /// The second destination to write to, representing M.2 slot B.
+    ///
+    /// This is mutually exclusive with --install-on-gimlet, and is optional to
+    /// provide.
+    #[clap(conflicts_with = "install_on_gimlet")]
+    b_destination: Option<Utf8PathBuf>,
 }
 
 impl InstallOpts {
@@ -296,10 +305,13 @@ impl InstallOpts {
                 )
                 .register()
         } else {
-            // clap ensures `self.destination` is not `None` if
+            // clap ensures `self.a_destination` is not `None` if
             // `install_on_gimlet` is false.
-            let destination = self.destination.as_ref().unwrap();
-            StepHandle::ready(WriteDestination::in_directory(destination)?)
+            let a_destination = self.a_destination.as_ref().unwrap();
+            StepHandle::ready(WriteDestination::in_directories(
+                a_destination,
+                self.b_destination.as_deref(),
+            )?)
         };
 
         let control_plane_zones = engine

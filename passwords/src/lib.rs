@@ -16,6 +16,7 @@ use rand::CryptoRng;
 use rand::RngCore;
 use rand::prelude::ThreadRng;
 use schemars::JsonSchema;
+use secrecy::ExposeSecret;
 use serde::Deserialize;
 use serde_with::SerializeDisplay;
 use std::fmt;
@@ -83,14 +84,14 @@ pub fn external_password_argon() -> Argon2<'static> {
 // This type deliberately does not allow someone to get the string back out, not
 // even for serde::Serialize or Debug.
 #[derive(Clone)]
-pub struct Password(String);
+pub struct Password(secrecy::SecretString);
 
 impl Password {
     pub fn new(password: &str) -> Result<Password, PasswordTooLongError> {
         if password.len() > MAX_PASSWORD_LENGTH {
             Err(PasswordTooLongError)
         } else {
-            Ok(Password(password.to_owned()))
+            Ok(Password(secrecy::SecretString::from(password)))
         }
     }
 }
@@ -220,7 +221,10 @@ impl<R: CryptoRng + RngCore> Hasher<R> {
         password: &Password,
     ) -> Result<PasswordHashString, PasswordSetError> {
         let salt = SaltString::generate(&mut self.rng);
-        Ok(self.argon2.hash_password(password.0.as_bytes(), &salt)?.serialize())
+        Ok(self
+            .argon2
+            .hash_password(password.0.expose_secret().as_bytes(), &salt)?
+            .serialize())
     }
 
     pub fn verify_password(
@@ -229,7 +233,10 @@ impl<R: CryptoRng + RngCore> Hasher<R> {
         hashed: &PasswordHashString,
     ) -> Result<bool, PasswordVerifyError> {
         let parsed = hashed.password_hash();
-        match self.argon2.verify_password(password.0.as_bytes(), &parsed) {
+        match self
+            .argon2
+            .verify_password(password.0.expose_secret().as_bytes(), &parsed)
+        {
             Ok(_) => Ok(true),
             Err(PasswordHashError::Password) => Ok(false),
             Err(error) => Err(PasswordVerifyError(error)),

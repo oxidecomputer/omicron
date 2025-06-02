@@ -26,15 +26,15 @@ pub struct Encoder;
 
 impl Encoder {
     /// Encode a client hello packet.
-    fn encode_hello(&self, hello: Hello, mut dst: &mut BytesMut) {
+    fn encode_hello(&self, hello: &Hello, mut dst: &mut BytesMut) {
         dst.put_u8(Packet::HELLO);
-        io::string::encode(hello.client_name, &mut dst);
+        io::string::encode(&hello.client_name, &mut dst);
         io::varuint::encode(hello.version_major, &mut dst);
         io::varuint::encode(hello.version_minor, &mut dst);
         io::varuint::encode(hello.protocol_version, &mut dst);
-        io::string::encode(hello.database, &mut dst);
-        io::string::encode(hello.username, &mut dst);
-        io::string::encode(hello.password, &mut dst);
+        io::string::encode(&hello.database, &mut dst);
+        io::string::encode(&hello.username, &mut dst);
+        io::string::encode(&hello.password, &mut dst);
 
         // NOTE: It's not described in the documentation for the protocol, but
         // recent client versions are required so send an "addendum" packet
@@ -48,7 +48,7 @@ impl Encoder {
     }
 
     /// Encode the client query packet.
-    fn encode_query(&self, query: Query, mut dst: &mut BytesMut) {
+    fn encode_query(&self, query: Box<Query>, mut dst: &mut BytesMut) {
         dst.put_u8(Packet::QUERY);
         io::string::encode(query.id, &mut dst);
         self.encode_client_info(query.client_info, &mut dst);
@@ -151,7 +151,7 @@ impl tokio_util::codec::Encoder<Packet> for Encoder {
     ) -> Result<(), Self::Error> {
         let kind = item.kind();
         match item {
-            Packet::Hello(hello) => self.encode_hello(hello, dst),
+            Packet::Hello(hello) => self.encode_hello(&hello, dst),
             Packet::Query(query) => self.encode_query(query, dst),
             Packet::Data(block) => self.encode_block(block, dst)?,
             Packet::Cancel => dst.put_u8(Packet::CANCEL),

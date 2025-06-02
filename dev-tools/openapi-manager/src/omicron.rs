@@ -9,7 +9,6 @@ use clickhouse_admin_api::{
 };
 use cockroach_admin_api::cockroach_admin_api_mod;
 use dns_server_api::dns_server_api_mod;
-use ereport_api::ereport_api_mod;
 use gateway_api::gateway_api_mod;
 use installinator_api::installinator_api_mod;
 use nexus_external_api::nexus_external_api_mod;
@@ -86,15 +85,6 @@ pub fn all_apis() -> Vec<ManagedApiConfig> {
             boundary: ApiBoundary::Internal,
             api_description: dns_server_api_mod::stub_api_description,
             ident: "dns-server",
-            extra_validation: None,
-        },
-        ManagedApiConfig {
-            title: "Ereport Reporter API",
-            versions: Versions::new_versioned(ereport_api::supported_versions()),
-            description: "API for ereport producers",
-            boundary: ApiBoundary::Internal,
-            api_description: ereport_api_mod::stub_api_description,
-            ident: "ereport",
             extra_validation: None,
         },
         ManagedApiConfig {

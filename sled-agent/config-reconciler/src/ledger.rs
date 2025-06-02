@@ -117,6 +117,7 @@ pub(crate) enum CurrentSledConfig {
 #[derive(Debug)]
 pub(crate) struct LedgerTaskHandle {
     request_tx: mpsc::Sender<LedgerTaskRequest>,
+    current_config_rx: watch::Receiver<CurrentSledConfig>,
 }
 
 impl LedgerTaskHandle {
@@ -160,7 +161,14 @@ impl LedgerTaskHandle {
             .run(),
         );
 
-        (Self { request_tx }, current_config_rx)
+        (
+            Self { request_tx, current_config_rx: current_config_rx.clone() },
+            current_config_rx,
+        )
+    }
+
+    pub(crate) fn current_config(&self) -> CurrentSledConfig {
+        self.current_config_rx.borrow().clone()
     }
 
     pub async fn set_new_config(
@@ -846,6 +854,7 @@ mod tests {
                 .collect(),
             datasets: IdMap::default(),
             zones: IdMap::default(),
+            remove_mupdate_override: None,
         }
     }
 
@@ -1046,6 +1055,7 @@ mod tests {
             )]
             .into_iter()
             .collect(),
+            remove_mupdate_override: None,
         };
 
         // The ledger task should reject this config due to a missing artifact.
@@ -1071,6 +1081,7 @@ mod tests {
             )]
             .into_iter()
             .collect(),
+            remove_mupdate_override: None,
         };
 
         test_harness

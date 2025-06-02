@@ -48,7 +48,9 @@ use gateway_types::update::HostPhase2Progress;
 use gateway_types::update::HostPhase2RecoveryImageId;
 use gateway_types::update::InstallinatorImageId;
 use gateway_types::update::SpUpdateStatus;
+use omicron_uuid_kinds::GenericUuid;
 use std::io::Cursor;
+use std::num::NonZeroU8;
 use std::str;
 use std::sync::Arc;
 use tufaceous_artifact::ArtifactHash;
@@ -814,9 +816,24 @@ impl GatewayApi for GatewayImpl {
             let sp = apictx.mgmt_switch.sp(sp_id)?;
             let power_state = body.into_inner();
 
-            sp.set_power_state(power_state.into()).await.map_err(|err| {
-                SpCommsError::SpCommunicationFailed { sp: sp_id, err }
-            })?;
+            let transition = sp
+                .set_power_state(power_state.into())
+                .await
+                .map_err(|err| SpCommsError::SpCommunicationFailed {
+                    sp: sp_id,
+                    err,
+                })?;
+
+            // Log whether the power state actually changed, or if the SP was
+            // already in the desired state.
+            slog::debug!(
+                &rqctx.log,
+                "sp_power_state_set";
+                "type" => ?sp_id.typ,
+                "slot" => sp_id.slot,
+                "power_state" => ?power_state,
+                "transition" => ?transition,
+            );
 
             Ok(HttpResponseUpdatedNoContent {})
         };
@@ -986,6 +1003,71 @@ impl GatewayApi for GatewayImpl {
                 .collect();
 
             Ok(HttpResponseOk(all_ids))
+        };
+        apictx.latencies.instrument_dropshot_handler(&rqctx, handler).await
+    }
+
+    async fn sp_ereports_ingest(
+        rqctx: RequestContext<Self::Context>,
+        path: Path<PathSp>,
+        query: Query<ereport_types::EreportQuery>,
+    ) -> Result<HttpResponseOk<ereport_types::Ereports>, HttpError> {
+        let apictx = rqctx.context();
+        let handler = async {
+            use crate::EreportError;
+            use gateway_sp_comms::ereport;
+
+            let ereport_types::EreportQuery {
+                restart_id,
+                start_at,
+                committed,
+                limit,
+            } = query.into_inner();
+
+            let sp_id = path.into_inner().sp.into();
+            let sp = apictx.mgmt_switch.sp(sp_id)?;
+
+            let req_restart_id = restart_id.into_untyped_uuid();
+            let start_ena = start_at
+                .map(|ereport_types::Ena(e)| ereport::Ena::new(e))
+                .unwrap_or(ereport::Ena::new(0));
+
+            // If the limit is greater than 255, just clamp to that for now.
+            // TODO(eliza): eventually, we may want to request multiple tranches
+            // from the SP until we either receive an empty one or satisfy the
+            // limit requested by Nexus.
+            let limit = NonZeroU8::try_from(limit).unwrap_or(NonZeroU8::MAX);
+            let committed_ena =
+                committed.map(|ereport_types::Ena(e)| ereport::Ena::new(e));
+
+            let ereport::EreportTranche { restart_id, ereports } = sp
+                .ereports(req_restart_id, start_ena, limit, committed_ena)
+                .await
+                .map_err(|error| match error {
+                    gateway_sp_comms::error::EreportError::Communication(
+                        err,
+                    ) => EreportError::SpCommunicationFailed { sp: sp_id, err },
+                    err => EreportError::Ereport { sp: sp_id, err },
+                })?;
+            let restart_id =
+                ereport_types::EreporterRestartUuid::from_untyped_uuid(
+                    restart_id,
+                );
+            let ereports = ereports
+                .into_iter()
+                .map(|ereport::Ereport { ena: ereport::Ena(ena), data }| {
+                    ereport_types::Ereport {
+                        ena: ereport_types::Ena(ena.into()),
+                        data,
+                    }
+                })
+                .collect();
+            let reports = dropshot::ResultsPage::new(
+                ereports,
+                &dropshot::EmptyScanParams {},
+                |ereport_types::Ereport { ena, .. }, _| *ena,
+            )?;
+            Ok(HttpResponseOk(ereport_types::Ereports { restart_id, reports }))
         };
         apictx.latencies.instrument_dropshot_handler(&rqctx, handler).await
     }
