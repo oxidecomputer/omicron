@@ -1617,6 +1617,7 @@ dependencies = [
  "schemars",
  "serde",
  "test-strategy",
+ "thiserror 1.0.69",
 ]
 
 [[package]]

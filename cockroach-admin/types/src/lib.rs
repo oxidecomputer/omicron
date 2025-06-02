@@ -2,11 +2,45 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-use std::{io, net::SocketAddr};
-
 use chrono::{DateTime, NaiveDateTime, Utc};
+use csv::StringRecord;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize, de};
+use std::{io, net::SocketAddr};
+
+#[derive(Debug, thiserror::Error)]
+pub enum ParseError {
+    #[error(transparent)]
+    NodeStatus(#[from] NodeStatusError),
+    #[error(transparent)]
+    Decommission(#[from] DecommissionError),
+}
+
+#[derive(Debug, thiserror::Error)]
+pub enum NodeStatusError {
+    #[error("missing `membership` header (found: {0:?})")]
+    MissingMembershipHeader(StringRecord),
+    #[error("failed to parse header row")]
+    ParseHeaderRow(#[source] csv::Error),
+    #[error("failed to parse record row")]
+    ParseRecordRow(#[source] csv::Error),
+    #[error("fewer fields than expected in status row: {0:?}")]
+    StatusRowMissingFields(StringRecord),
+    #[error("failed to parse node status row {row:?}")]
+    ParseStatusRow {
+        row: StringRecord,
+        #[source]
+        err: csv::Error,
+    },
+}
+
+#[derive(Debug, thiserror::Error)]
+pub enum DecommissionError {
+    #[error("missing output row after headers")]
+    MissingOutputRow,
+    #[error("failed to parse row")]
+    ParseRow(#[from] csv::Error),
+}
 
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize, JsonSchema)]
 #[serde(rename_all = "snake_case")]
@@ -37,13 +71,45 @@ pub struct NodeStatus {
 }
 
 impl NodeStatus {
-    pub fn parse_from_csv(data: &[u8]) -> Result<Vec<Self>, csv::Error> {
+    pub fn parse_from_csv(data: &[u8]) -> Result<Vec<Self>, ParseError> {
         let mut statuses = Vec::new();
         let mut reader = csv::Reader::from_reader(io::Cursor::new(data));
-        for result in reader.deserialize() {
-            let record: CliNodeStatus = result?;
+
+        // We can't naively deserialize every record as a `CliNodeStatus`
+        // directly, because the `node status --all` flag to get all details
+        // also causes cockroach to emit statuses for decommissioned nodes,
+        // which report `NULL` for most fields. For now, we want to skip
+        // decommissioned nodes entirely, so we'll parse each record
+        // individually after checking first for whether it's decommissioned.
+        let headers =
+            reader.headers().map_err(NodeStatusError::ParseHeaderRow)?.clone();
+        let Some(membership_idx) =
+            headers.iter().position(|h| h == "membership")
+        else {
+            return Err(
+                NodeStatusError::MissingMembershipHeader(headers).into()
+            );
+        };
+
+        for row in reader.into_records() {
+            let row = row.map_err(NodeStatusError::ParseRecordRow)?;
+
+            // Skip decommissioned nodes without attempting to parse them
+            // further, as noted above
+            let Some(membership) = row.get(membership_idx) else {
+                return Err(NodeStatusError::StatusRowMissingFields(row).into());
+            };
+            if membership == "decommissioned" {
+                continue;
+            }
+
+            let record: CliNodeStatus =
+                row.deserialize(Some(&headers)).map_err(|err| {
+                    NodeStatusError::ParseStatusRow { row: row.clone(), err }
+                })?;
             statuses.push(record.into());
         }
+
         Ok(statuses)
     }
 }
@@ -153,7 +219,7 @@ pub struct NodeDecommission {
 }
 
 impl NodeDecommission {
-    pub fn parse_from_csv(data: &[u8]) -> Result<Self, csv::Error> {
+    pub fn parse_from_csv(data: &[u8]) -> Result<Self, ParseError> {
         // Reading the node decommission output is awkward because it isn't
         // fully CSV. We expect a CSV header, then a row for each node being
         // decommissioned, then (maybe) a blank line followed by a note that is
@@ -171,10 +237,11 @@ impl NodeDecommission {
         // First we'll run the data through a csv::Reader; this will pull out
         // the header row and the one row of data.
         let mut reader = csv::Reader::from_reader(io::Cursor::new(data));
-        let record: CliNodeDecommission =
-            reader.deserialize().next().ok_or_else(|| {
-                io::Error::other("fewer than two lines of output")
-            })??;
+        let record: CliNodeDecommission = reader
+            .deserialize()
+            .next()
+            .ok_or_else(|| DecommissionError::MissingOutputRow)?
+            .map_err(DecommissionError::ParseRow)?;
 
         // Get the position where the reader ended after that one row; we'll
         // collect any remaining nonempty lines as `notes`.
@@ -276,30 +343,44 @@ mod tests {
 
     #[test]
     fn test_node_status_parse_single_line_from_csv() {
-        let input = br#"id,address,sql_address,build,started_at,updated_at,locality,is_available,is_live
-1,[::1]:42021,[::1]:42021,v22.1.9,2024-05-21 15:19:50.523796,2024-05-21 16:31:28.050069,,true,true"#;
+        let input = br#"id,address,sql_address,build,started_at,updated_at,locality,is_available,is_live,replicas_leaders,replicas_leaseholders,ranges,ranges_unavailable,ranges_underreplicated,live_bytes,key_bytes,value_bytes,intent_bytes,system_bytes,gossiped_replicas,is_decommissioning,membership,is_draining
+5,[fd00:1122:3344:103::3]:32221,[fd00:1122:3344:103::3]:32221,v22.1.22-29-g865aff1595,2025-05-30 21:10:30.527658,2025-06-02 14:00:36.749872,,true,true,38,38,210,0,0,3958791538,846009128,5249950302,0,108083397,210,false,active,false"#;
         let expected = NodeStatus {
-            node_id: "1".to_string(),
-            address: "[::1]:42021".parse().unwrap(),
-            sql_address: "[::1]:42021".parse().unwrap(),
-            build: "v22.1.9".to_string(),
+            node_id: "5".to_string(),
+            address: "[fd00:1122:3344:103::3]:32221".parse().unwrap(),
+            sql_address: "[fd00:1122:3344:103::3]:32221".parse().unwrap(),
+            build: "v22.1.22-29-g865aff1595".to_string(),
             started_at: DateTime::from_naive_utc_and_offset(
-                NaiveDate::from_ymd_opt(2024, 5, 21)
+                NaiveDate::from_ymd_opt(2025, 5, 30)
                     .unwrap()
-                    .and_hms_micro_opt(15, 19, 50, 523796)
+                    .and_hms_micro_opt(21, 10, 30, 527658)
                     .unwrap(),
                 Utc,
             ),
             updated_at: DateTime::from_naive_utc_and_offset(
-                NaiveDate::from_ymd_opt(2024, 5, 21)
+                NaiveDate::from_ymd_opt(2025, 6, 2)
                     .unwrap()
-                    .and_hms_micro_opt(16, 31, 28, 50069)
+                    .and_hms_micro_opt(14, 0, 36, 749872)
                     .unwrap(),
                 Utc,
             ),
             locality: String::new(),
             is_available: true,
             is_live: true,
+            replicas_leaders: 38,
+            replicas_leaseholders: 38,
+            ranges: 210,
+            ranges_unavailable: 0,
+            ranges_underreplicated: 0,
+            live_bytes: 3958791538,
+            key_bytes: 846009128,
+            value_bytes: 5249950302,
+            intent_bytes: 0,
+            system_bytes: 108083397,
+            gossiped_replicas: 210,
+            is_decommissioning: false,
+            membership: "active".to_string(),
+            is_draining: false,
         };
 
         let statuses = NodeStatus::parse_from_csv(input).expect("parsed input");
@@ -308,127 +389,123 @@ mod tests {
 
     #[test]
     fn test_node_status_parse_multiple_lines_from_csv() {
-        let input = br#"id,address,sql_address,build,started_at,updated_at,locality,is_available,is_live
-1,[fd00:1122:3344:109::3]:32221,[fd00:1122:3344:109::3]:32221,v22.1.9-dirty,2024-05-18 19:18:00.597145,2024-05-21 15:22:34.290434,,true,true
-2,[fd00:1122:3344:105::3]:32221,[fd00:1122:3344:105::3]:32221,v22.1.9-dirty,2024-05-18 19:17:01.796714,2024-05-21 15:22:34.901268,,true,true
-3,[fd00:1122:3344:10b::3]:32221,[fd00:1122:3344:10b::3]:32221,v22.1.9-dirty,2024-05-18 19:18:52.37564,2024-05-21 15:22:36.341146,,true,true
-4,[fd00:1122:3344:107::3]:32221,[fd00:1122:3344:107::3]:32221,v22.1.9-dirty,2024-05-18 19:16:22.788276,2024-05-21 15:22:34.897047,,true,true
-5,[fd00:1122:3344:108::3]:32221,[fd00:1122:3344:108::3]:32221,v22.1.9-dirty,2024-05-18 19:18:09.196634,2024-05-21 15:22:35.168738,,true,true"#;
+        let input = br#"id,address,sql_address,build,started_at,updated_at,locality,is_available,is_live,replicas_leaders,replicas_leaseholders,ranges,ranges_unavailable,ranges_underreplicated,live_bytes,key_bytes,value_bytes,intent_bytes,system_bytes,gossiped_replicas,is_decommissioning,membership,is_draining
+1,[fd00:1122:3344:101::3]:32221,[fd00:1122:3344:101::3]:32221,v22.1.22-29-g865aff1595,2025-05-30 21:10:26.237011,2025-06-02 14:05:05.508688,,true,true,41,41,210,0,0,3967748150,846544773,5119261316,34,108060755,210,false,active,false
+2,[fd00:1122:3344:102::3]:32221,[fd00:1122:3344:102::3]:32221,v22.1.22-29-g865aff1595,2025-05-30 21:10:30.00501,2025-06-02 14:05:05.090293,,true,true,44,44,210,0,0,3967896249,846559229,5119394994,861,108017090,210,false,active,false
+3,NULL,NULL,NULL,NULL,2025-05-30 21:11:45.350419,NULL,false,false,NULL,NULL,NULL,NULL,NULL,NULL,NULL,NULL,NULL,NULL,NULL,true,decommissioned,false
+4,NULL,NULL,NULL,NULL,2025-05-30 21:11:45.668157,NULL,false,false,NULL,NULL,NULL,NULL,NULL,NULL,NULL,NULL,NULL,NULL,NULL,true,decommissioned,false
+6,[fd00:1122:3344:102::21]:32221,[fd00:1122:3344:102::21]:32221,v22.1.22-29-g865aff1595,2025-05-30 21:10:26.26209,2025-06-02 14:05:05.906022,,true,true,41,41,210,0,0,3967896044,846559229,5119394789,0,108016856,210,false,active,false"#;
         let expected = vec![
             NodeStatus {
                 node_id: "1".to_string(),
-                address: "[fd00:1122:3344:109::3]:32221".parse().unwrap(),
-                sql_address: "[fd00:1122:3344:109::3]:32221".parse().unwrap(),
-                build: "v22.1.9-dirty".to_string(),
+                address: "[fd00:1122:3344:101::3]:32221".parse().unwrap(),
+                sql_address: "[fd00:1122:3344:101::3]:32221".parse().unwrap(),
+                build: "v22.1.22-29-g865aff1595".to_string(),
                 started_at: DateTime::from_naive_utc_and_offset(
-                    NaiveDate::from_ymd_opt(2024, 5, 18)
+                    NaiveDate::from_ymd_opt(2025, 5, 30)
                         .unwrap()
-                        .and_hms_micro_opt(19, 18, 0, 597145)
+                        .and_hms_micro_opt(21, 10, 26, 237011)
                         .unwrap(),
                     Utc,
                 ),
                 updated_at: DateTime::from_naive_utc_and_offset(
-                    NaiveDate::from_ymd_opt(2024, 5, 21)
+                    NaiveDate::from_ymd_opt(2025, 6, 2)
                         .unwrap()
-                        .and_hms_micro_opt(15, 22, 34, 290434)
+                        .and_hms_micro_opt(14, 5, 5, 508688)
                         .unwrap(),
                     Utc,
                 ),
                 locality: String::new(),
                 is_available: true,
                 is_live: true,
+                replicas_leaders: 41,
+                replicas_leaseholders: 41,
+                ranges: 210,
+                ranges_unavailable: 0,
+                ranges_underreplicated: 0,
+                live_bytes: 3967748150,
+                key_bytes: 846544773,
+                value_bytes: 5119261316,
+                intent_bytes: 34,
+                system_bytes: 108060755,
+                gossiped_replicas: 210,
+                is_decommissioning: false,
+                membership: "active".to_string(),
+                is_draining: false,
             },
             NodeStatus {
                 node_id: "2".to_string(),
-                address: "[fd00:1122:3344:105::3]:32221".parse().unwrap(),
-                sql_address: "[fd00:1122:3344:105::3]:32221".parse().unwrap(),
-                build: "v22.1.9-dirty".to_string(),
+                address: "[fd00:1122:3344:102::3]:32221".parse().unwrap(),
+                sql_address: "[fd00:1122:3344:102::3]:32221".parse().unwrap(),
+                build: "v22.1.22-29-g865aff1595".to_string(),
                 started_at: DateTime::from_naive_utc_and_offset(
-                    NaiveDate::from_ymd_opt(2024, 5, 18)
+                    NaiveDate::from_ymd_opt(2025, 5, 30)
                         .unwrap()
-                        .and_hms_micro_opt(19, 17, 1, 796714)
+                        .and_hms_micro_opt(21, 10, 30, 5010)
                         .unwrap(),
                     Utc,
                 ),
                 updated_at: DateTime::from_naive_utc_and_offset(
-                    NaiveDate::from_ymd_opt(2024, 5, 21)
+                    NaiveDate::from_ymd_opt(2025, 6, 2)
                         .unwrap()
-                        .and_hms_micro_opt(15, 22, 34, 901268)
+                        .and_hms_micro_opt(14, 5, 5, 90293)
                         .unwrap(),
                     Utc,
                 ),
                 locality: String::new(),
                 is_available: true,
                 is_live: true,
+                replicas_leaders: 44,
+                replicas_leaseholders: 44,
+                ranges: 210,
+                ranges_unavailable: 0,
+                ranges_underreplicated: 0,
+                live_bytes: 3967896249,
+                key_bytes: 846559229,
+                value_bytes: 5119394994,
+                intent_bytes: 861,
+                system_bytes: 108017090,
+                gossiped_replicas: 210,
+                is_decommissioning: false,
+                membership: "active".to_string(),
+                is_draining: false,
             },
             NodeStatus {
-                node_id: "3".to_string(),
-                address: "[fd00:1122:3344:10b::3]:32221".parse().unwrap(),
-                sql_address: "[fd00:1122:3344:10b::3]:32221".parse().unwrap(),
-                build: "v22.1.9-dirty".to_string(),
+                node_id: "6".to_string(),
+                address: "[fd00:1122:3344:102::21]:32221".parse().unwrap(),
+                sql_address: "[fd00:1122:3344:102::21]:32221".parse().unwrap(),
+                build: "v22.1.22-29-g865aff1595".to_string(),
                 started_at: DateTime::from_naive_utc_and_offset(
-                    NaiveDate::from_ymd_opt(2024, 5, 18)
+                    NaiveDate::from_ymd_opt(2025, 5, 30)
                         .unwrap()
-                        .and_hms_micro_opt(19, 18, 52, 375640)
+                        .and_hms_micro_opt(21, 10, 26, 262090)
                         .unwrap(),
                     Utc,
                 ),
                 updated_at: DateTime::from_naive_utc_and_offset(
-                    NaiveDate::from_ymd_opt(2024, 5, 21)
+                    NaiveDate::from_ymd_opt(2025, 6, 2)
                         .unwrap()
-                        .and_hms_micro_opt(15, 22, 36, 341146)
+                        .and_hms_micro_opt(14, 5, 5, 906022)
                         .unwrap(),
                     Utc,
                 ),
                 locality: String::new(),
                 is_available: true,
                 is_live: true,
-            },
-            NodeStatus {
-                node_id: "4".to_string(),
-                address: "[fd00:1122:3344:107::3]:32221".parse().unwrap(),
-                sql_address: "[fd00:1122:3344:107::3]:32221".parse().unwrap(),
-                build: "v22.1.9-dirty".to_string(),
-                started_at: DateTime::from_naive_utc_and_offset(
-                    NaiveDate::from_ymd_opt(2024, 5, 18)
-                        .unwrap()
-                        .and_hms_micro_opt(19, 16, 22, 788276)
-                        .unwrap(),
-                    Utc,
-                ),
-                updated_at: DateTime::from_naive_utc_and_offset(
-                    NaiveDate::from_ymd_opt(2024, 5, 21)
-                        .unwrap()
-                        .and_hms_micro_opt(15, 22, 34, 897047)
-                        .unwrap(),
-                    Utc,
-                ),
-                locality: String::new(),
-                is_available: true,
-                is_live: true,
-            },
-            NodeStatus {
-                node_id: "5".to_string(),
-                address: "[fd00:1122:3344:108::3]:32221".parse().unwrap(),
-                sql_address: "[fd00:1122:3344:108::3]:32221".parse().unwrap(),
-                build: "v22.1.9-dirty".to_string(),
-                started_at: DateTime::from_naive_utc_and_offset(
-                    NaiveDate::from_ymd_opt(2024, 5, 18)
-                        .unwrap()
-                        .and_hms_micro_opt(19, 18, 9, 196634)
-                        .unwrap(),
-                    Utc,
-                ),
-                updated_at: DateTime::from_naive_utc_and_offset(
-                    NaiveDate::from_ymd_opt(2024, 5, 21)
-                        .unwrap()
-                        .and_hms_micro_opt(15, 22, 35, 168738)
-                        .unwrap(),
-                    Utc,
-                ),
-                locality: String::new(),
-                is_available: true,
-                is_live: true,
+                replicas_leaders: 41,
+                replicas_leaseholders: 41,
+                ranges: 210,
+                ranges_unavailable: 0,
+                ranges_underreplicated: 0,
+                live_bytes: 3967896044,
+                key_bytes: 846559229,
+                value_bytes: 5119394789,
+                intent_bytes: 0,
+                system_bytes: 108016856,
+                gossiped_replicas: 210,
+                is_decommissioning: false,
+                membership: "active".to_string(),
+                is_draining: false,
             },
         ];
 

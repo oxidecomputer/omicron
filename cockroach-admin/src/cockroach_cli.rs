@@ -5,6 +5,7 @@
 use camino::Utf8PathBuf;
 use cockroach_admin_types::NodeDecommission;
 use cockroach_admin_types::NodeStatus;
+use cockroach_admin_types::ParseError;
 use dropshot::HttpError;
 use illumos_utils::ExecutionError;
 use illumos_utils::output_to_exec_error;
@@ -36,16 +37,12 @@ pub enum CockroachCliError {
     NodeDecommissionNotAllowed { node_id: String, reason: String },
     #[error(transparent)]
     ExecutionError(#[from] ExecutionError),
-    #[error(
-        "failed to parse `cockroach {subcommand}` output \
-         (stdout: {stdout}, stderr: {stderr})"
-    )]
+    #[error("failed to parse stdout {stdout:?}, stderr {stderr:?}")]
     ParseOutput {
-        subcommand: &'static str,
         stdout: String,
         stderr: String,
         #[source]
-        err: csv::Error,
+        err: ParseError,
     },
 }
 
@@ -214,7 +211,7 @@ impl CockroachCli {
         subcommand_description: &'static str,
     ) -> Result<T, CockroachCliError>
     where
-        F: FnOnce(&[u8]) -> Result<T, csv::Error>,
+        F: FnOnce(&[u8]) -> Result<T, ParseError>,
         I: IntoIterator<Item = &'a str>,
     {
         self.invoke_cli_checking_status(
@@ -222,7 +219,6 @@ impl CockroachCli {
             |output| {
                 parse_output(&output.stdout).map_err(|err| {
                     CockroachCliError::ParseOutput {
-                        subcommand: subcommand_description,
                         stdout: String::from_utf8_lossy(&output.stdout)
                             .to_string(),
                         stderr: String::from_utf8_lossy(&output.stderr)
