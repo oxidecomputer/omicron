@@ -6180,6 +6180,7 @@ dependencies = [
  "diesel",
  "diesel-dtrace",
  "dropshot",
+ "ereport-types",
  "expectorate",
  "futures",
  "gateway-client",

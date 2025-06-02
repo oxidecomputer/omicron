@@ -37,7 +37,7 @@ pub struct Ena(pub u64);
 
 impl fmt::Display for Ena {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "{:#x}", self.0)
+        write!(f, "{:x}", self.0)
     }
 }
 
@@ -68,6 +68,19 @@ impl TryFrom<i64> for Ena {
 
     fn try_from(value: i64) -> Result<Self, Self::Error> {
         u64::try_from(value).map(Ena).map_err(|_| EnaNegativeError(value))
+    }
+}
+
+/// Unique identifier for an ereport.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub struct EreportId {
+    pub restart_id: EreporterRestartUuid,
+    pub ena: Ena,
+}
+
+impl fmt::Display for EreportId {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{:?}:{:x}", self.restart_id, self.ena)
     }
 }
 
