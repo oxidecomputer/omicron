@@ -18,9 +18,8 @@ use omicron_common::api::external::Error;
 use omicron_common::api::external::LookupResult;
 use omicron_common::api::external::LookupType;
 use omicron_common::api::external::UpdateResult;
-use omicron_uuid_kinds::ConsoleSessionKind;
+use omicron_uuid_kinds::ConsoleSessionUuid;
 use omicron_uuid_kinds::GenericUuid;
-use omicron_uuid_kinds::TypedUuid;
 use rand::{RngCore, SeedableRng, rngs::StdRng};
 use uuid::Uuid;
 
@@ -71,7 +70,7 @@ impl super::Nexus {
     pub(crate) async fn session_update_last_used(
         &self,
         opctx: &OpContext,
-        id: TypedUuid<ConsoleSessionKind>,
+        id: ConsoleSessionUuid,
     ) -> UpdateResult<authn::ConsoleSessionWithSiloId> {
         let authz_session = authz::ConsoleSession::new(
             authz::FLEET,
@@ -84,7 +83,7 @@ impl super::Nexus {
     pub(crate) async fn session_hard_delete(
         &self,
         opctx: &OpContext,
-        id: TypedUuid<ConsoleSessionKind>,
+        id: ConsoleSessionUuid,
     ) -> DeleteResult {
         let authz_session = authz::ConsoleSession::new(
             authz::FLEET,

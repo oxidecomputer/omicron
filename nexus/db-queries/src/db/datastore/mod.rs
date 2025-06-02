@@ -651,9 +651,6 @@ mod test {
             renewed.console_session.time_last_used > session.time_last_used
         );
 
-        // TODO: check the opctx on these changes, make sure we're using the
-        // right thing between opctx or authn_opctx
-
         // time_last_used change persists in DB
         let (.., fetched) = datastore
             .session_lookup_by_token(&opctx, token.clone())

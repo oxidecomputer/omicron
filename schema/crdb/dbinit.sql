@@ -2416,22 +2416,20 @@ CREATE TABLE IF NOT EXISTS omicron.public.console_session (
 -- to be used for cleaning up old tokens
 -- It's okay that this index is non-unique because we don't need to page through
 -- this list.  We'll just grab the next N, delete them, then repeat.
-CREATE INDEX IF NOT EXISTS lookup_console_by_creation ON omicron.public.console_session (
-    time_created
-);
+CREATE INDEX IF NOT EXISTS lookup_console_by_creation
+    ON omicron.public.console_session (time_created);
 
 -- This index is used to remove sessions for a user that's being deleted.
-CREATE INDEX IF NOT EXISTS lookup_console_by_silo_user ON omicron.public.console_session (
-    silo_user_id
-);
+CREATE INDEX IF NOT EXISTS lookup_console_by_silo_user
+    ON omicron.public.console_session (silo_user_id);
 
--- We added a UUID as the primary key, but we need the token to keep acting like it did before.
--- "When you change a primary key with ALTER PRIMARY KEY, the old primary key index becomes a secondary index."
--- We chose to use DROP CONSTRAINT and ADD CONSTRAINT instead and manually create the index.
+-- We added a UUID as the primary key, but we need the token to keep acting like
+-- it did before. "When you change a primary key with ALTER PRIMARY KEY, the old
+-- primary key index becomes a secondary index." We chose to use DROP CONSTRAINT
+-- and ADD CONSTRAINT instead and manually create the index.
 -- https://www.cockroachlabs.com/docs/v22.1/primary-key#changing-primary-key-columns
-CREATE UNIQUE INDEX IF NOT EXISTS console_session_token_unique ON omicron.public.console_session (
-    token
-);
+CREATE UNIQUE INDEX IF NOT EXISTS console_session_token_unique
+	ON omicron.public.console_session (token);
 
 /*******************************************************************/
 
@@ -2822,19 +2820,17 @@ CREATE TABLE IF NOT EXISTS omicron.public.device_access_token (
 
 -- This UNIQUE constraint is critical for ensuring that at most
 -- one token is ever created for a given device authorization flow.
-CREATE UNIQUE INDEX IF NOT EXISTS lookup_device_access_token_by_client ON omicron.public.device_access_token (
-    client_id, device_code
-);
+CREATE UNIQUE INDEX IF NOT EXISTS lookup_device_access_token_by_client
+    ON omicron.public.device_access_token (client_id, device_code);
 
--- We added a UUID as the primary key, but we need the token to keep acting like it did before
-CREATE UNIQUE INDEX IF NOT EXISTS device_access_token_unique ON omicron.public.device_access_token (
-    token
-);
+-- We added a UUID as the primary key, but we need the token to keep acting like
+-- it did before
+CREATE UNIQUE INDEX IF NOT EXISTS device_access_token_unique
+    ON omicron.public.device_access_token (token);
 
 -- This index is used to remove tokens for a user that's being deleted.
-CREATE INDEX IF NOT EXISTS lookup_device_access_token_by_silo_user ON omicron.public.device_access_token (
-    silo_user_id
-);
+CREATE INDEX IF NOT EXISTS lookup_device_access_token_by_silo_user
+    ON omicron.public.device_access_token (silo_user_id);
 
 /*
  * Roles built into the system

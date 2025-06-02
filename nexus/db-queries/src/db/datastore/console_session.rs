@@ -25,6 +25,12 @@ use omicron_common::api::external::UpdateResult;
 use omicron_uuid_kinds::GenericUuid;
 
 impl DataStore {
+    /// Look up session by token. The token is a kind of password, so simply
+    /// having the token _is_ in a sense the primary authz check here.
+    ///
+    /// We need to define this lookup function manually because `token` is not
+    /// the primary key on the session (sessions have IDs), so we can't use the
+    /// automatically-generated lookup methods we use for IDs or names.
     pub async fn session_lookup_by_token(
         &self,
         opctx: &OpContext,

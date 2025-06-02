@@ -13,7 +13,7 @@ use chrono::{DateTime, Duration, Utc};
 use dropshot::HttpError;
 use http::HeaderValue;
 use nexus_types::authn::cookies::parse_cookies;
-use omicron_uuid_kinds::{ConsoleSessionKind, TypedUuid};
+use omicron_uuid_kinds::ConsoleSessionUuid;
 use slog::debug;
 use uuid::Uuid;
 
@@ -21,7 +21,7 @@ use uuid::Uuid;
 // https://cheatsheetseries.owasp.org/cheatsheets/Session_Management_Cheat_Sheet.html
 
 pub trait Session {
-    fn id(&self) -> TypedUuid<ConsoleSessionKind>;
+    fn id(&self) -> ConsoleSessionUuid;
     fn silo_user_id(&self) -> Uuid;
     fn silo_id(&self) -> Uuid;
     fn time_last_used(&self) -> DateTime<Utc>;
@@ -41,14 +41,11 @@ pub trait SessionStore {
     /// Extend session by updating time_last_used to now
     async fn session_update_last_used(
         &self,
-        id: TypedUuid<ConsoleSessionKind>,
+        id: ConsoleSessionUuid,
     ) -> Option<Self::SessionModel>;
 
     /// Mark session expired
-    async fn session_expire(
-        &self,
-        id: TypedUuid<ConsoleSessionKind>,
-    ) -> Option<()>;
+    async fn session_expire(&self, id: ConsoleSessionUuid) -> Option<()>;
 
     /// Maximum time session can remain idle before expiring
     fn session_idle_timeout(&self) -> Duration;
@@ -204,8 +201,7 @@ mod test {
     use async_trait::async_trait;
     use chrono::{DateTime, Duration, Utc};
     use http;
-    use omicron_uuid_kinds::ConsoleSessionKind;
-    use omicron_uuid_kinds::TypedUuid;
+    use omicron_uuid_kinds::ConsoleSessionUuid;
     use slog;
     use std::sync::Mutex;
     use uuid::Uuid;
@@ -218,7 +214,7 @@ mod test {
 
     #[derive(Clone)]
     struct FakeSession {
-        id: TypedUuid<ConsoleSessionKind>,
+        id: ConsoleSessionUuid,
         token: String,
         silo_user_id: Uuid,
         silo_id: Uuid,
@@ -227,7 +223,7 @@ mod test {
     }
 
     impl Session for FakeSession {
-        fn id(&self) -> TypedUuid<ConsoleSessionKind> {
+        fn id(&self) -> ConsoleSessionUuid {
             self.id
         }
         fn silo_user_id(&self) -> Uuid {
@@ -262,7 +258,7 @@ mod test {
 
         async fn session_update_last_used(
             &self,
-            id: TypedUuid<ConsoleSessionKind>,
+            id: ConsoleSessionUuid,
         ) -> Option<Self::SessionModel> {
             let mut sessions = self.sessions.lock().unwrap();
             if let Some(pos) = sessions.iter().position(|s| s.id == id) {
@@ -277,10 +273,7 @@ mod test {
             }
         }
 
-        async fn session_expire(
-            &self,
-            id: TypedUuid<ConsoleSessionKind>,
-        ) -> Option<()> {
+        async fn session_expire(&self, id: ConsoleSessionUuid) -> Option<()> {
             let mut sessions = self.sessions.lock().unwrap();
             sessions.retain(|s| s.id != id);
             Some(())
@@ -336,7 +329,7 @@ mod test {
     async fn test_expired_cookie_idle() {
         let context = TestServerContext {
             sessions: Mutex::new(vec![FakeSession {
-                id: TypedUuid::new_v4(),
+                id: ConsoleSessionUuid::new_v4(),
                 token: "abc".to_string(),
                 silo_user_id: Uuid::new_v4(),
                 silo_id: Uuid::new_v4(),
@@ -362,7 +355,7 @@ mod test {
     async fn test_expired_cookie_absolute() {
         let context = TestServerContext {
             sessions: Mutex::new(vec![FakeSession {
-                id: TypedUuid::new_v4(),
+                id: ConsoleSessionUuid::new_v4(),
                 token: "abc".to_string(),
                 silo_user_id: Uuid::new_v4(),
                 silo_id: Uuid::new_v4(),
@@ -389,7 +382,7 @@ mod test {
         let time_last_used = Utc::now() - Duration::seconds(5);
         let context = TestServerContext {
             sessions: Mutex::new(vec![FakeSession {
-                id: TypedUuid::new_v4(),
+                id: ConsoleSessionUuid::new_v4(),
                 token: "abc".to_string(),
                 silo_user_id: Uuid::new_v4(),
                 silo_id: Uuid::new_v4(),

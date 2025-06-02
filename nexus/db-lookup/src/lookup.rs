@@ -29,7 +29,7 @@ use omicron_common::api::external::{LookupResult, LookupType, ResourceType};
 use omicron_uuid_kinds::AccessTokenKind;
 use omicron_uuid_kinds::AlertReceiverUuid;
 use omicron_uuid_kinds::AlertUuid;
-use omicron_uuid_kinds::ConsoleSessionKind;
+use omicron_uuid_kinds::ConsoleSessionUuid;
 use omicron_uuid_kinds::PhysicalDiskUuid;
 use omicron_uuid_kinds::SupportBundleUuid;
 use omicron_uuid_kinds::TufArtifactKind;
@@ -204,7 +204,7 @@ impl<'a> LookupPath<'a> {
     /// Select a resource of type ConsoleSession, identified by its `id`
     pub fn console_session_id(
         self,
-        id: TypedUuid<ConsoleSessionKind>,
+        id: ConsoleSessionUuid,
     ) -> ConsoleSession<'a> {
         ConsoleSession::PrimaryKey(Root { lookup_root: self }, id)
     }

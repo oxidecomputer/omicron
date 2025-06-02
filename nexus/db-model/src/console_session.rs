@@ -5,7 +5,7 @@
 use chrono::{DateTime, Utc};
 use nexus_db_schema::schema::console_session;
 use omicron_uuid_kinds::ConsoleSessionKind;
-use omicron_uuid_kinds::TypedUuid;
+use omicron_uuid_kinds::ConsoleSessionUuid;
 use uuid::Uuid;
 
 use crate::typed_uuid::DbTypedUuid;
@@ -26,7 +26,7 @@ impl ConsoleSession {
     pub fn new(token: String, silo_user_id: Uuid) -> Self {
         let now = Utc::now();
         Self {
-            id: TypedUuid::new_v4().into(),
+            id: ConsoleSessionUuid::new_v4().into(),
             token,
             silo_user_id,
             time_last_used: now,
@@ -34,7 +34,7 @@ impl ConsoleSession {
         }
     }
 
-    pub fn id(&self) -> TypedUuid<ConsoleSessionKind> {
+    pub fn id(&self) -> ConsoleSessionUuid {
         self.id.0
     }
 }
