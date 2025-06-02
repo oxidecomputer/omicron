@@ -33,8 +33,18 @@ pub enum CockroachCliError {
     NodeNotFound(String),
     #[error("multiple nodes found when asking for status of node {0}")]
     MultipleNodesFound(String),
-    #[error("cannot decommission node {node_id}: {reason}")]
-    NodeDecommissionNotAllowed { node_id: String, reason: String },
+    #[error("cannot decommission node {0}: node is still alive")]
+    DecommissionLiveNode(String),
+    #[error(
+        "cannot decommission node {node_id}: {total_underreplicated_ranges} \
+         ranges across nodes {}",
+         .nodes_with_underreplicated_ranges.join(",")
+    )]
+    DecommissionUnderreplicatedRanges {
+        node_id: String,
+        total_underreplicated_ranges: i64,
+        nodes_with_underreplicated_ranges: Vec<String>,
+    },
     #[error(transparent)]
     ExecutionError(#[from] ExecutionError),
     #[error("failed to parse stdout {stdout:?}, stderr {stderr:?}")]
@@ -53,7 +63,8 @@ impl From<CockroachCliError> for HttpError {
                 let message = InlineErrorChain::new(&err).to_string();
                 HttpError::for_bad_request(None, message)
             }
-            CockroachCliError::NodeDecommissionNotAllowed { .. } => {
+            CockroachCliError::DecommissionLiveNode(_)
+            | CockroachCliError::DecommissionUnderreplicatedRanges { .. } => {
                 let message = InlineErrorChain::new(&err).to_string();
                 HttpError {
                     status_code: dropshot::ErrorStatusCode::SERVICE_UNAVAILABLE,
@@ -152,50 +163,74 @@ impl CockroachCli {
         .await
     }
 
-    async fn single_node_status(
-        &self,
-        node_id: &str,
-    ) -> Result<NodeStatus, CockroachCliError> {
-        let mut statuses = self
-            .invoke_cli_with_format_csv(
-                ["node", "status", node_id, "--all"],
-                NodeStatus::parse_from_csv,
-                "node status",
-            )
-            .await?;
-
-        let Some(status) = statuses.pop() else {
-            return Err(CockroachCliError::NodeNotFound(node_id.to_string()));
-        };
-
-        if !statuses.is_empty() {
-            return Err(CockroachCliError::MultipleNodesFound(
-                node_id.to_string(),
-            ));
-        }
-
-        Ok(status)
-    }
-
     pub async fn node_decommission(
         &self,
         node_id: &str,
     ) -> Result<NodeDecommission, CockroachCliError> {
-        let status = self.single_node_status(node_id).await?;
-        self.node_decommission_if_allowed(node_id, status).await
+        let statuses = self.node_status().await?;
+        self.validate_node_decommissionable(node_id, statuses)?;
+        self.invoke_node_decommission(node_id).await
     }
 
-    async fn node_decommission_if_allowed(
+    fn validate_node_decommissionable(
         &self,
         node_id: &str,
-        status: NodeStatus,
-    ) -> Result<NodeDecommission, CockroachCliError> {
-        if status.ranges > 0 {
-            return Err(CockroachCliError::NodeDecommissionNotAllowed {
+        statuses: Vec<NodeStatus>,
+    ) -> Result<(), CockroachCliError> {
+        // We have two gates for decommissioning a node:
+        //
+        // 1. The node most not be `live`
+        // 2. The range descriptor for all ranges must not include the node we
+        //    want to decommission. This gate shouldn't be necessary, but exists
+        //    as a safeguard to avoid triggering what appears to be a CRDB race
+        //    condition: https://github.com/oxidecomputer/omicron/issues/8239
+        //
+        // Cockroach doesn't expose an operation that would let us check gate 2.
+        // As a proxy, instead check for a nonzero number of underreplicated
+        // ranges _on any nodes_. If there is only 1 dead node, this proxy is
+        // exactly equivalent: a range will be underreplicated IFF its range
+        // descriptor references the dead node. If there are multiple dead
+        // nodes, this proxy becomes fuzzier: we'll refuse to decommission every
+        // dead node if any of those dead nodes is not decommissionable. This
+        // seems fine in practice.
+        let this_node_is_live = statuses
+            .iter()
+            .any(|status| status.node_id == node_id && status.is_live);
+        if this_node_is_live {
+            return Err(CockroachCliError::DecommissionLiveNode(
+                node_id.to_string(),
+            ));
+        }
+
+        let mut nodes_with_underreplicated_ranges = Vec::new();
+        let mut total_underreplicated_ranges: i64 = 0;
+        for status in statuses {
+            if status.ranges_underreplicated > 0 {
+                nodes_with_underreplicated_ranges.push(status.node_id);
+                // `saturating_add` is almost certainly overly conservative:
+                // we'll never have anywhere near i64::MAX ranges. But we're
+                // accepting output from another utility, so it seems prudent to
+                // guard against that utility misbehaving and reporting a bogus
+                // count of underreplicated ranges.
+                total_underreplicated_ranges = total_underreplicated_ranges
+                    .saturating_add(status.ranges_underreplicated);
+            }
+        }
+        if total_underreplicated_ranges > 0 {
+            return Err(CockroachCliError::DecommissionUnderreplicatedRanges {
                 node_id: node_id.to_string(),
-                reason: format!("{} ranges", status.ranges),
+                total_underreplicated_ranges,
+                nodes_with_underreplicated_ranges,
             });
         }
+
+        Ok(())
+    }
+
+    async fn invoke_node_decommission(
+        &self,
+        node_id: &str,
+    ) -> Result<NodeDecommission, CockroachCliError> {
         self.invoke_cli_with_format_csv(
             ["node", "decommission", node_id, "--wait", "none"],
             NodeDecommission::parse_from_csv,
@@ -295,10 +330,16 @@ mod tests {
     use nexus_test_utils::db::TestDatabase;
     use omicron_test_utils::dev;
     use omicron_test_utils::dev::poll;
+    use proptest::collection::btree_map;
+    use proptest::prelude::any;
+    use proptest::sample::Index;
+    use std::collections::BTreeMap;
     use std::net::SocketAddr;
     use std::process::Child;
     use std::process::ExitStatus;
     use std::time::Duration;
+    use test_strategy::Arbitrary;
+    use test_strategy::proptest;
     use url::Url;
 
     const DBINIT_RELATIVE_PATH: &str = "../schema/crdb/dbinit.sql";
@@ -395,15 +436,6 @@ mod tests {
         assert_eq!(status[0].is_available, true);
         assert_eq!(status[0].is_live, true);
 
-        let status =
-            cli.single_node_status("1").await.expect("got node status");
-
-        assert_eq!(status.node_id, "1");
-        assert_eq!(status.address, SocketAddr::V6(cockroach_address));
-        assert_eq!(status.sql_address, SocketAddr::V6(cockroach_address));
-        assert_eq!(status.is_available, true);
-        assert_eq!(status.is_live, true);
-
         db.terminate().await;
         logctx.cleanup_successful();
     }
@@ -456,36 +488,7 @@ mod tests {
         .expect("valid SocketAddrV6");
         let cli = CockroachCli::new("cockroach".into(), cockroach_address);
         let result = cli
-            .node_decommission_if_allowed(
-                "1",
-                // Only fields relevant to "is decommissioning okay" are
-                // meaningful
-                NodeStatus {
-                    node_id: "1".to_string(),
-                    address: SocketAddr::V6(cockroach_address),
-                    sql_address: SocketAddr::V6(cockroach_address),
-                    build: "test-build".to_string(),
-                    started_at: Utc::now(),
-                    updated_at: Utc::now(),
-                    locality: "".to_string(),
-                    is_available: true,
-                    is_live: true,
-                    replicas_leaders: 0,
-                    replicas_leaseholders: 0,
-                    ranges: 0,
-                    ranges_unavailable: 0,
-                    ranges_underreplicated: 0,
-                    live_bytes: 0,
-                    key_bytes: 0,
-                    value_bytes: 0,
-                    intent_bytes: 0,
-                    system_bytes: 0,
-                    gossiped_replicas: 0,
-                    is_decommissioning: false,
-                    membership: "active".to_string(),
-                    is_draining: false,
-                },
-            )
+            .invoke_node_decommission("1")
             .await
             .expect("got node decommission result");
 
@@ -684,5 +687,114 @@ mod tests {
             .expect("schema still initialized");
 
         logctx.cleanup_successful();
+    }
+
+    #[derive(Debug, Arbitrary)]
+    struct ValidateDecommissionableInput {
+        is_live: bool,
+        #[strategy(0i64..1_000_000)]
+        ranges_underreplicated: i64,
+    }
+
+    impl ValidateDecommissionableInput {
+        fn into_node_status(self, node_id: String) -> NodeStatus {
+            let Self { is_live, ranges_underreplicated } = self;
+            NodeStatus {
+                node_id,
+                address: "[::1]:0".parse().unwrap(),
+                sql_address: "[::1]:0".parse().unwrap(),
+                build: "test-build".to_string(),
+                started_at: Utc::now(),
+                updated_at: Utc::now(),
+                locality: "".to_string(),
+                is_available: true,
+                is_live,
+                replicas_leaders: 0,
+                replicas_leaseholders: 0,
+                ranges: 0,
+                ranges_unavailable: 0,
+                ranges_underreplicated,
+                live_bytes: 0,
+                key_bytes: 0,
+                value_bytes: 0,
+                intent_bytes: 0,
+                system_bytes: 0,
+                gossiped_replicas: 0,
+                is_decommissioning: false,
+                membership: "active".to_string(),
+                is_draining: false,
+            }
+        }
+    }
+
+    #[proptest]
+    fn proptest_validate_decommissionable(
+        #[strategy(btree_map(
+              ".+",
+              any::<ValidateDecommissionableInput>(),
+              1..32,
+        ))]
+        input: BTreeMap<String, ValidateDecommissionableInput>,
+        node_to_decommission: Index,
+    ) {
+        let statuses = input
+            .into_iter()
+            .map(|(node_id, input)| input.into_node_status(node_id))
+            .collect::<Vec<_>>();
+        let node_to_decommission = node_to_decommission.get(&statuses);
+
+        let cli = CockroachCli::new(
+            "never-called".into(),
+            "[::1]:0".parse().unwrap(),
+        );
+
+        match cli.validate_node_decommissionable(
+            &node_to_decommission.node_id,
+            statuses.clone(),
+        ) {
+            Ok(()) => {
+                assert!(!node_to_decommission.is_live);
+                assert_eq!(
+                    statuses
+                        .iter()
+                        .map(|s| s.ranges_underreplicated)
+                        .sum::<i64>(),
+                    0
+                );
+            }
+            Err(CockroachCliError::DecommissionLiveNode(node_id)) => {
+                assert_eq!(node_id, node_to_decommission.node_id);
+                assert!(node_to_decommission.is_live);
+            }
+            Err(CockroachCliError::DecommissionUnderreplicatedRanges {
+                node_id,
+                total_underreplicated_ranges,
+                nodes_with_underreplicated_ranges: nodes,
+            }) => {
+                // If node is live, should've returned `DecommissionLiveNode`
+                assert!(!node_to_decommission.is_live);
+
+                // Confirm error details
+                assert_eq!(node_id, node_to_decommission.node_id);
+                let mut expected_total_underreplicated = 0;
+                for node in statuses {
+                    if node.ranges_underreplicated > 0 {
+                        expected_total_underreplicated +=
+                            node.ranges_underreplicated;
+                        assert!(nodes.contains(&node.node_id));
+                    } else {
+                        assert!(!nodes.contains(&node.node_id));
+                    }
+                }
+                assert!(expected_total_underreplicated > 0);
+                assert_eq!(
+                    total_underreplicated_ranges,
+                    expected_total_underreplicated
+                );
+            }
+            Err(err) => {
+                panic!("unexpected error: {}", InlineErrorChain::new(&err));
+            }
+        }
     }
 }

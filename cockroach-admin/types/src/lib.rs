@@ -10,9 +10,9 @@ use std::{io, net::SocketAddr};
 
 #[derive(Debug, thiserror::Error)]
 pub enum ParseError {
-    #[error(transparent)]
+    #[error("failed to parse `cockroach node status` output")]
     NodeStatus(#[from] NodeStatusError),
-    #[error(transparent)]
+    #[error("failed to parse `cockroach decommission` output")]
     Decommission(#[from] DecommissionError),
 }
 
