@@ -527,24 +527,38 @@ fn poll_nvme_node(
     let controller_info = controller_lock.get_info()?;
     let serial_no = controller_info.serial();
 
+    let nvme_vendor = controller_info.pci_vid()?;
+    // Ideally we could just use this directly in `DiskIdentity` but previously
+    // we were walking the device tree looking for blkdev nodes and
+    // reconstructing the model from the 'inquiry-vendor-id' and
+    // 'inquiry-product-id'.
     let nvme_model = controller_info.model();
-    // The illumos NVMe driver will attempt to split the NVMe model info into
-    // a vendor-id and product-id. These are what get used for a blkdev node in
-    // the device tree.
-    let (model, vendor) = match sata_split_model(&nvme_model).map_err(|_| {
+
+    // Because we are reconstructing the model to match what was previously
+    // stored in the database we need to mimic what the illumos NVMe driver
+    // does. The NVMe model is split into a possible vendor-id and product-id.
+    let model = match sata_split_model(&nvme_model).map_err(|_| {
         Error::NvmeInvalidModelString {
             instance: nvme_instance,
             serial: serial_no.to_string(),
         }
     })? {
+        // We have both a vendor and a product so we join them with a space.
         (Some(vendor_id), product_id) => {
-            (format!("{vendor_id}, {product_id}"), vendor_id)
+            format!("{vendor_id} {product_id}")
         }
-        // If no vendor is found we opt reuse the entire product_id as the model
-        (None, product_id) => (product_id.clone(), product_id),
+        // The NVMe driver sets a missing vendor-id to "NVMe" in the blkdev
+        // node, but in our case `sata_split_model` will just return a `None`.
+        // The previous code matched on an emptry string or "NVMe" and
+        // returned just the product-id, so we can just return the product-id
+        // here as the model.
+        (None, product_id) => product_id.clone(),
     };
-    let device_id =
-        DiskIdentity { vendor, serial: serial_no.to_string(), model };
+    let device_id = DiskIdentity {
+        vendor: nvme_vendor.to_string(),
+        serial: serial_no.to_string(),
+        model,
+    };
 
     let firmware_log_page = controller_lock.get_firmware_log_page()?;
     let firmware = DiskFirmware::new(
