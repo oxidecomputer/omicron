@@ -5636,7 +5636,7 @@ CREATE TABLE IF NOT EXISTS omicron.public.webhook_delivery (
             deliverator_id IS NOT NULL AND time_leased IS NOT NULL
         )
     ),
-    CONSTRAINT time_completed_iff_not_pending CHECK (
+    CONSTRAINT time_completed_iff_not_pending CHECK (9
         (state = 'pending' AND time_completed IS NULL) OR
             (state != 'pending' AND time_completed IS NOT NULL)
     )
@@ -5747,6 +5747,36 @@ ON omicron.public.webhook_delivery_attempt (
 CREATE INDEX IF NOT EXISTS lookup_webhook_delivery_attempts_to_rx
 ON omicron.public.webhook_delivery_attempt (
     rx_id
+);
+
+/*
+ * Ereports
+ */
+
+-- Ereports from service processors
+CREATE TABLE IF NOT EXISTS omicron.public.sp_ereport (
+    restart_id UUID NOT NULL,
+    ena INT8 NOT NULL,
+
+    -- time at which the ereport was collected
+    time_collected TIMESTAMPTZ NOT NULL,
+    -- UUID of the Nexus instance that collected the ereport
+    collector_id UUID NOT NULL,
+
+    -- identity of the reporting SP
+    sp_type omicron.public.sp_type NOT NULL,
+    sp_slot INT4 NOT NULL,
+
+    -- JSON representation of the ereport
+    report JSONB NOT NULL,
+
+    PRIMARY KEY (restart_id, ena),
+);
+
+CREATE INDEX IF NOT EXISTS lookup_sp_ereports_by_slot ON omicron.public.sp_ereport (
+    sp_type,
+    sp_slot,
+    time_collected,
 );
 
 /*

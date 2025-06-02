@@ -3096,6 +3096,7 @@ dependencies = [
  "schemars",
  "serde",
  "serde_json",
+ "thiserror 1.0.69",
 ]
 
 [[package]]
@@ -6123,6 +6124,7 @@ dependencies = [
  "db-macros",
  "derive-where",
  "diesel",
+ "ereport-types",
  "expectorate",
  "hex",
  "ipnetwork",

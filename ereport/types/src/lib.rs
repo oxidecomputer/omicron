@@ -59,6 +59,18 @@ impl fmt::LowerHex for Ena {
     }
 }
 
+#[derive(Clone, Debug, thiserror::Error)]
+#[error("ENA value ({0}) is negative")]
+pub struct EnaNegativeError(i64);
+
+impl TryFrom<i64> for Ena {
+    type Error = EnaNegativeError;
+
+    fn try_from(value: i64) -> Result<Self, Self::Error> {
+        u64::try_from(value).map(Ena).map_err(|_| EnaNegativeError(value))
+    }
+}
+
 /// Query parameters to request a tranche of ereports from a reporter.
 #[derive(Clone, Debug, Serialize, Deserialize, JsonSchema)]
 pub struct EreportQuery {

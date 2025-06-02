@@ -2442,3 +2442,31 @@ allow_tables_to_appear_in_same_query!(
     webhook_delivery_attempt
 );
 joinable!(webhook_delivery_attempt -> webhook_delivery (delivery_id));
+
+table! {
+    sp_ereport (restart_id, ena) {
+        restart_id -> Uuid,
+        ena -> Uuid,
+        time_collected -> Timestamptz,
+        collector_id -> Uuid,
+
+        sp_type -> crate::enums::SpTypeEnum,
+        sp_slot -> Int4,
+
+        report -> Jsonb,
+    }
+}
+
+table! {
+    host_ereport (restart_id, ena) {
+        restart_id -> Uuid,
+        ena -> Uuid,
+        time_collected -> Timestamptz,
+        collector_id -> Uuid,
+
+        sled_id -> Uuid,
+        sled_serial -> Text,
+
+        report -> Jsonb,
+    }
+}
