@@ -529,3 +529,28 @@ pub struct ReadOnlyRegionReplacementStartStatus {
     pub requests_created_ok: Vec<String>,
     pub errors: Vec<String>,
 }
+
+#[derive(Serialize, Deserialize, Default, Debug, PartialEq, Eq)]
+pub struct SpEreportIngesterStatus {
+    pub sps: BTreeMap<Sp, EreporterStatus>,
+    pub error: Option<String>,
+}
+
+#[derive(Serialize, Deserialize, Debug, PartialEq, Eq, PartialOrd, Ord)]
+pub struct Sp {
+    pub sp_type: crate::inventory::SpType,
+    pub slot: u16,
+}
+
+#[derive(Serialize, Deserialize, Default, Debug, PartialEq, Eq)]
+pub struct EreporterStatus {
+    /// total number of ereports received from this reporter
+    pub ereports_received: usize,
+    /// number of new ereports ingested from this reporter (this may be less
+    /// than `ereports_received` if some ereports were collected by another
+    /// Nexus)
+    pub new_ereports: usize,
+    /// total number of HTTP requests sent.
+    pub requests: usize,
+    pub errors: Vec<String>,
+}

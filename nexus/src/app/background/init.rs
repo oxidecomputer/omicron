@@ -100,6 +100,7 @@ use super::tasks::decommissioned_disk_cleaner;
 use super::tasks::dns_config;
 use super::tasks::dns_propagation;
 use super::tasks::dns_servers;
+use super::tasks::ereport_ingester;
 use super::tasks::external_endpoints;
 use super::tasks::instance_reincarnation;
 use super::tasks::instance_updater;
@@ -226,6 +227,7 @@ impl BackgroundTasksInitializer {
             task_read_only_region_replacement_start: Activator::new(),
             task_alert_dispatcher: Activator::new(),
             task_webhook_deliverator: Activator::new(),
+            task_sp_ereport_ingester: Activator::new(),
 
             task_internal_dns_propagation: Activator::new(),
             task_external_dns_propagation: Activator::new(),
@@ -300,6 +302,7 @@ impl BackgroundTasksInitializer {
             task_read_only_region_replacement_start,
             task_alert_dispatcher,
             task_webhook_deliverator,
+            task_sp_ereport_ingester,
             // Add new background tasks here.  Be sure to use this binding in a
             // call to `Driver::register()` below.  That's what actually wires
             // up the Activator to the corresponding background task.
