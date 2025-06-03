@@ -388,24 +388,22 @@ enum Component {
         /// whether we expect the "A" or "B" slot to be active
         #[arg(long, short = 's')]
         expected_active_slot: RotSlot,
-        /// expected version of the "A" or "B" slot (as per the
-        /// active slot specified in expected_active_slot)
+        /// expected version of the "A" slot
         #[arg(long, short = 'a')]
-        expected_active_version: ArtifactVersion,
-        /// expected version of the "A" or "B" slot (opposite to
-        /// the active slot as specified in expected_active_slot)
-        #[arg(long, short = 'i')]
-        expected_inactive_version: ExpectedVersion,
+        expected_slot_a_version: ExpectedVersion,
+        /// expected version of the "B" slot
+        #[arg(long, short = 'b')]
+        expected_slot_b_version: ExpectedVersion,
         /// the expected persistent boot preference written into the current
         /// authoritative CFPA page (ping or pong).
         /// Will default to the value of expected_active_version when not set
-        #[arg(long, short = 'b')]
+        #[arg(long, short = 'p')]
         expected_persistent_boot_preference: Option<RotSlot>,
         /// the expected persistent boot preference written into the CFPA scratch
         /// page that will become the persistent boot preference in the authoritative
         /// CFPA page upon reboot, unless CFPA update of the authoritative page fails
         /// for some reason
-        #[arg(long, short = 'p')]
+        #[arg(long, short = 'x')]
         expected_pending_persistent_boot_preference: Option<RotSlot>,
         // this field is not in use yet.
         //
@@ -435,29 +433,44 @@ fn cmd_set(
             },
             Component::Rot {
                 expected_active_slot,
-                expected_active_version,
-                expected_inactive_version,
+                expected_slot_a_version,
+                expected_slot_b_version,
                 expected_persistent_boot_preference,
                 expected_pending_persistent_boot_preference,
                 expected_transient_boot_preference,
             } => {
-            //    let active_version = match expected_active_version {
-            //        ExpectedVersion::Version(v) => v,
-            //        ExpectedVersion::NoValidVersion => return Err(anyhow!("bob")),
-            //    };
+                let (active_version, expected_inactive_version) =
+                    match expected_active_slot {
+                        RotSlot::A => {
+                            (expected_slot_a_version, expected_slot_b_version)
+                        }
+                        RotSlot::B => {
+                            (expected_slot_b_version, expected_slot_a_version)
+                        }
+                    };
+
+                let expected_active_version = match active_version {
+                    ExpectedVersion::Version(v) => v,
+                    ExpectedVersion::NoValidVersion => {
+                        return Err(anyhow!(
+                            "the expected active slot version must have a valid version"
+                        ));
+                    }
+                };
+
                 PendingMgsUpdateDetails::Rot {
-                expected_active_slot: ExpectedActiveRotSlot {
-                    slot: expected_active_slot,
-                    version: expected_active_version,
-                },
-                expected_inactive_version,
-                expected_persistent_boot_preference:
-                    expected_persistent_boot_preference
-                        .unwrap_or(expected_active_slot),
-                expected_pending_persistent_boot_preference,
-                expected_transient_boot_preference,
+                    expected_active_slot: ExpectedActiveRotSlot {
+                        slot: expected_active_slot,
+                        version: expected_active_version,
+                    },
+                    expected_inactive_version,
+                    expected_persistent_boot_preference:
+                        expected_persistent_boot_preference
+                            .unwrap_or(expected_active_slot),
+                    expected_pending_persistent_boot_preference,
+                    expected_transient_boot_preference,
+                }
             }
-        },
         },
         artifact_hash: args.artifact_hash,
         artifact_version: ArtifactVersion::new(args.version)
