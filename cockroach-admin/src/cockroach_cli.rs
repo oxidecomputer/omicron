@@ -36,6 +36,11 @@ pub enum CockroachCliError {
     #[error("cannot decommission node {0}: node is still alive")]
     DecommissionLiveNode(String),
     #[error(
+        "cannot decommission node {node_id}: \
+            node has {gossiped_replicas} gossipped replicas"
+    )]
+    DecommissionGossipedReplicas { node_id: String, gossiped_replicas: i64 },
+    #[error(
         "cannot decommission node {node_id}: {total_underreplicated_ranges} \
          range(s) underreplicated across node(s) {}",
          .nodes_with_underreplicated_ranges.join(",")
@@ -64,6 +69,7 @@ impl From<CockroachCliError> for HttpError {
                 HttpError::for_bad_request(None, message)
             }
             CockroachCliError::DecommissionLiveNode(_)
+            | CockroachCliError::DecommissionGossipedReplicas { .. }
             | CockroachCliError::DecommissionUnderreplicatedRanges { .. } => {
                 let message = InlineErrorChain::new(&err).to_string();
                 HttpError {
@@ -177,15 +183,20 @@ impl CockroachCli {
         node_id: &str,
         statuses: Vec<NodeStatus>,
     ) -> Result<(), CockroachCliError> {
-        // We have two gates for decommissioning a node:
+        // We have three gates for decommissioning a node:
         //
-        // 1. The node most not be `live`
-        // 2. The range descriptor for all ranges must not include the node we
+        // 1. The node most not be `live` (the cockroach cluster must realize
+        //    it's dead)
+        // 2. The node must not have any `gossiped_replicas` (the cockroach
+        //    cluster must not think this node is an active member of any ranges
+        //    - in practice, we see this go to 0 about 60 seconds after a node
+        //    goes offline)
+        // 3. The range descriptor for all ranges must not include the node we
         //    want to decommission. This gate shouldn't be necessary, but exists
         //    as a safeguard to avoid triggering what appears to be a CRDB race
         //    condition: https://github.com/oxidecomputer/omicron/issues/8239
         //
-        // Cockroach doesn't expose an operation that would let us check gate 2.
+        // Cockroach doesn't expose an operation that would let us check gate 3.
         // As a proxy, instead check for a nonzero number of underreplicated
         // ranges _on any nodes_. If there is only 1 dead node, this proxy is
         // exactly equivalent: a range will be underreplicated IFF its range
@@ -193,15 +204,32 @@ impl CockroachCli {
         // nodes, this proxy becomes fuzzier: we'll refuse to decommission every
         // dead node if any of those dead nodes is not decommissionable. This
         // seems fine in practice.
-        let this_node_is_live = statuses
-            .iter()
-            .any(|status| status.node_id == node_id && status.is_live);
-        if this_node_is_live {
-            return Err(CockroachCliError::DecommissionLiveNode(
-                node_id.to_string(),
-            ));
+
+        // Find the status for the node we want to decommission. If this node
+        // has _already_ been decommissioned, we'll get `None` here. This is
+        // fine: decommissioning a decommissioned node is a no-op, so we'll skip
+        // the first two gates that are specific to the node being
+        // decommissioned.
+        if let Some(this_node) =
+            statuses.iter().find(|status| status.node_id == node_id)
+        {
+            // Gate 1 - node must be live
+            if this_node.is_live {
+                return Err(CockroachCliError::DecommissionLiveNode(
+                    node_id.to_string(),
+                ));
+            }
+
+            // Gate 2 - node must not have gossiped_replicas
+            if this_node.gossiped_replicas > 0 {
+                return Err(CockroachCliError::DecommissionGossipedReplicas {
+                    node_id: node_id.to_string(),
+                    gossiped_replicas: this_node.gossiped_replicas,
+                });
+            }
         }
 
+        // Gate 3 - there must be no underreplicated ranges
         let mut nodes_with_underreplicated_ranges = Vec::new();
         let mut total_underreplicated_ranges: i64 = 0;
         for status in statuses {
@@ -331,7 +359,7 @@ mod tests {
     use omicron_test_utils::dev;
     use omicron_test_utils::dev::poll;
     use proptest::collection::btree_map;
-    use proptest::prelude::any;
+    use proptest::prelude::*;
     use proptest::sample::Index;
     use std::collections::BTreeMap;
     use std::net::SocketAddr;
@@ -689,16 +717,29 @@ mod tests {
         logctx.cleanup_successful();
     }
 
+    // proptest strategy that produces 0 50% of the time and some positive
+    // number 50% of the time. We want this because decommissioning gates care
+    // specifically about 0, so we want those to show up pretty frequently.
+    fn zero_or_positive_i64() -> impl Strategy<Value = i64> {
+        prop_oneof![
+            1 => Just(0),
+            1 => 1i64..=i64::MAX,
+        ]
+    }
+
     #[derive(Debug, Arbitrary)]
     struct ValidateDecommissionableInput {
         is_live: bool,
-        #[strategy(0i64..1_000_000)]
+        #[strategy(zero_or_positive_i64())]
         ranges_underreplicated: i64,
+        #[strategy(zero_or_positive_i64())]
+        gossiped_replicas: i64,
     }
 
     impl ValidateDecommissionableInput {
         fn into_node_status(self, node_id: String) -> NodeStatus {
-            let Self { is_live, ranges_underreplicated } = self;
+            let Self { is_live, ranges_underreplicated, gossiped_replicas } =
+                self;
             NodeStatus {
                 node_id,
                 address: "[::1]:0".parse().unwrap(),
@@ -719,7 +760,7 @@ mod tests {
                 value_bytes: 0,
                 intent_bytes: 0,
                 system_bytes: 0,
-                gossiped_replicas: 0,
+                gossiped_replicas,
                 is_decommissioning: false,
                 membership: "active".to_string(),
                 is_draining: false,
@@ -753,18 +794,23 @@ mod tests {
             statuses.clone(),
         ) {
             Ok(()) => {
+                // Check all 3 gates (see `validate_node_decommissionable`)
                 assert!(!node_to_decommission.is_live);
-                assert_eq!(
-                    statuses
-                        .iter()
-                        .map(|s| s.ranges_underreplicated)
-                        .sum::<i64>(),
-                    0
-                );
+                assert_eq!(node_to_decommission.gossiped_replicas, 0);
+                for status in &statuses {
+                    assert_eq!(status.ranges_underreplicated, 0);
+                }
             }
             Err(CockroachCliError::DecommissionLiveNode(node_id)) => {
                 assert_eq!(node_id, node_to_decommission.node_id);
                 assert!(node_to_decommission.is_live);
+            }
+            Err(CockroachCliError::DecommissionGossipedReplicas {
+                node_id,
+                gossiped_replicas,
+            }) => {
+                assert_eq!(node_id, node_to_decommission.node_id);
+                assert_ne!(gossiped_replicas, 0);
             }
             Err(CockroachCliError::DecommissionUnderreplicatedRanges {
                 node_id,
@@ -774,13 +820,18 @@ mod tests {
                 // If node is live, should've returned `DecommissionLiveNode`
                 assert!(!node_to_decommission.is_live);
 
+                // If node has gossiped replicas, should've returned
+                // `DecommissionGossipedReplicas`
+                assert_eq!(node_to_decommission.gossiped_replicas, 0);
+
                 // Confirm error details
                 assert_eq!(node_id, node_to_decommission.node_id);
-                let mut expected_total_underreplicated = 0;
+                let mut expected_total_underreplicated: i64 = 0;
                 for node in statuses {
                     if node.ranges_underreplicated > 0 {
-                        expected_total_underreplicated +=
-                            node.ranges_underreplicated;
+                        expected_total_underreplicated =
+                            expected_total_underreplicated
+                                .saturating_add(node.ranges_underreplicated);
                         assert!(nodes.contains(&node.node_id));
                     } else {
                         assert!(!nodes.contains(&node.node_id));
