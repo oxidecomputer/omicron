@@ -126,7 +126,8 @@ impl super::Nexus {
         if let (Some(requested), Some(max)) = (requested_ttl, silo_max_ttl) {
             if requested > max.0.into() {
                 return Err(Error::invalid_request(&format!(
-                    "Requested TTL {} seconds exceeds maximum allowed TTL {} seconds for this silo",
+                    "Requested TTL {} seconds exceeds maximum \
+                     allowed TTL for this silo of {} seconds",
                     requested, max
                 )));
             }

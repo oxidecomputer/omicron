@@ -465,7 +465,8 @@ async fn test_device_token_request_ttl_invalid(
         serde_json::from_slice(&auth_response.body).unwrap();
     assert_eq!(
         error_body.get("message").unwrap().to_string(),
-        "\"unable to parse URL-encoded body: ttl_seconds: invalid value: integer `0`, expected a nonzero u32\""
+        "\"unable to parse URL-encoded body: ttl_seconds: \
+         invalid value: integer `0`, expected a nonzero u32\""
     );
 
     let auth_response = NexusRequest::new(
@@ -486,7 +487,8 @@ async fn test_device_token_request_ttl_invalid(
         serde_json::from_slice(&auth_response.body).unwrap();
     assert_eq!(
         error_body.get("message").unwrap().to_string(),
-        "\"unable to parse URL-encoded body: ttl_seconds: invalid digit found in string\""
+        "\"unable to parse URL-encoded body: ttl_seconds: \
+         invalid digit found in string\""
     );
 }
 
@@ -532,7 +534,8 @@ async fn test_device_token_request_ttl(cptestctx: &ControlPlaneTestContext) {
     assert_eq!(confirm_error.error_code, Some("InvalidRequest".to_string()));
     assert_eq!(
         confirm_error.message,
-        "Requested TTL 20 seconds exceeds maximum allowed TTL 10 seconds for this silo"
+        "Requested TTL 20 seconds exceeds maximum allowed TTL \
+         for this silo of 10 seconds"
     );
 
     // Request TTL below the max should succeed and be used
