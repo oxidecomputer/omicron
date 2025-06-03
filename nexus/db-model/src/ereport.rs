@@ -90,7 +90,7 @@ impl From<EreportMetadataTuple> for EreportMetadata {
     }
 }
 
-#[derive(Clone, Debug, Queryable, Selectable)]
+#[derive(Clone, Debug, Insertable, Queryable, Selectable)]
 #[diesel(table_name = sp_ereport)]
 pub struct SpEreport {
     pub restart_id: DbTypedUuid<EreporterRestartKind>,
@@ -105,7 +105,7 @@ pub struct SpEreport {
     pub report: serde_json::Value,
 }
 
-#[derive(Clone, Debug, Queryable, Selectable)]
+#[derive(Clone, Debug, Insertable, Queryable, Selectable)]
 #[diesel(table_name = host_ereport)]
 pub struct HostEreport {
     pub restart_id: DbTypedUuid<EreporterRestartKind>,
