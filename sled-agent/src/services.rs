@@ -3050,7 +3050,7 @@ impl ServiceManager {
         Ok(running_zone)
     }
 
-    // Attempt to start a single Omicron zone is running.
+    // Attempt to start a single Omicron zone.
     //
     // This method is NOT idempotent.
     //
