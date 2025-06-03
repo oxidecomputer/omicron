@@ -4,20 +4,28 @@
 
 use http::StatusCode;
 use http::method::Method;
-use nexus_test_utils::http_testing::{AuthnMode, NexusRequest};
+use nexus_auth::authn;
+use nexus_auth::context::OpContext;
+use nexus_db_lookup::LookupPath;
+use nexus_db_queries::db::fixed_data::vpc_firewall_rule::NEXUS_ICMP_FW_RULE_NAME;
+use nexus_db_queries::db::{self, DataStore};
+use nexus_networking::vpc_list_firewall_rules;
+use nexus_test_utils::http_testing::{AuthnMode, NexusRequest, RequestBuilder};
 use nexus_test_utils::resource_helpers::{
     create_project, create_vpc, object_get, object_put, object_put_error,
 };
 use nexus_test_utils_macros::nexus_test;
 use nexus_types::external_api::views::Vpc;
 use omicron_common::api::external::{
-    IdentityMetadata, L4Port, L4PortRange, VpcFirewallRule,
+    IdentityMetadata, L4Port, L4PortRange, ServiceIcmpConfig, VpcFirewallRule,
     VpcFirewallRuleAction, VpcFirewallRuleDirection, VpcFirewallRuleFilter,
     VpcFirewallRuleHostFilter, VpcFirewallRulePriority,
     VpcFirewallRuleProtocol, VpcFirewallRuleStatus, VpcFirewallRuleTarget,
     VpcFirewallRuleUpdate, VpcFirewallRuleUpdateParams, VpcFirewallRules,
 };
+use omicron_nexus::Nexus;
 use std::convert::TryFrom;
+use std::sync::Arc;
 use uuid::Uuid;
 
 type ControlPlaneTestContext =
@@ -90,7 +98,7 @@ async fn test_vpc_firewall(cptestctx: &ControlPlaneTestContext) {
             filters: VpcFirewallRuleFilter {
                 hosts: None,
                 ports: None,
-                protocols: Some(vec![VpcFirewallRuleProtocol::Icmp]),
+                protocols: Some(vec![VpcFirewallRuleProtocol::Icmp(None)]),
             },
             direction: VpcFirewallRuleDirection::Inbound,
             priority: VpcFirewallRulePriority(10),
@@ -191,7 +199,7 @@ fn is_default_firewall_rules(
             )],
             filters: VpcFirewallRuleFilter {
                 hosts: None,
-                protocols: Some(vec![VpcFirewallRuleProtocol::Icmp]),
+                protocols: Some(vec![VpcFirewallRuleProtocol::Icmp(None)]),
                 ports: None,
             },
             action: VpcFirewallRuleAction::Allow,
@@ -581,4 +589,85 @@ async fn test_firewall_rules_max_lengths(cptestctx: &ControlPlaneTestContext) {
             "unsupported value for \"filters.protocols\": max length {max_parts}"
         )
     );
+}
+
+async fn icmp_rule_is_enabled(
+    enabled: bool,
+    datastore: &DataStore,
+    nexus: &Nexus,
+    opctx: &OpContext,
+) -> bool {
+    // (Partly) reimplementing opctx_for_internal_api.
+    // This is necessary to *reach* the services VPC.
+    let opctx = OpContext::for_background(
+        opctx.log.clone(),
+        Arc::clone(nexus.authz()),
+        authn::Context::internal_api(),
+        Arc::clone(nexus.datastore()) as Arc<dyn nexus_auth::storage::Storage>,
+    );
+    let svcs_vpc = LookupPath::new(&opctx, datastore)
+        .vpc_id(*db::fixed_data::vpc::SERVICES_VPC_ID);
+
+    let fw_rules =
+        vpc_list_firewall_rules(&datastore, &opctx, &svcs_vpc).await.unwrap();
+    let the_rule = fw_rules
+        .iter()
+        .find(|v| v.identity.name.as_str() == NEXUS_ICMP_FW_RULE_NAME)
+        .unwrap();
+
+    the_rule.status.0
+        == if enabled {
+            VpcFirewallRuleStatus::Enabled
+        } else {
+            VpcFirewallRuleStatus::Disabled
+        }
+}
+
+#[nexus_test]
+async fn test_nexus_firewall_icmp(cptestctx: &ControlPlaneTestContext) {
+    let client = &cptestctx.external_client;
+    let apictx = &cptestctx.server.server_context();
+    let nexus = &apictx.nexus;
+    let datastore = nexus.datastore();
+    let opctx =
+        OpContext::for_tests(cptestctx.logctx.log.new(o!()), datastore.clone());
+
+    const NEXUS_ICMP_URL: &str = "/v1/system/networking/inbound-icmp";
+
+    // ICMP access should be enabled by default.
+    let icmp_allowed: ServiceIcmpConfig =
+        NexusRequest::object_get(client, NEXUS_ICMP_URL)
+            .authn_as(AuthnMode::PrivilegedUser)
+            .execute()
+            .await
+            .unwrap()
+            .parsed_body()
+            .unwrap();
+
+    assert!(icmp_allowed.enabled);
+    assert!(icmp_rule_is_enabled(true, datastore, nexus, &opctx).await);
+
+    // Disabling this should propagate to the rule.
+    NexusRequest::new(
+        RequestBuilder::new(client, http::Method::PUT, NEXUS_ICMP_URL)
+            .body(Some(&ServiceIcmpConfig { enabled: false }))
+            .expect_status(Some(http::StatusCode::NO_CONTENT)),
+    )
+    .authn_as(AuthnMode::PrivilegedUser)
+    .execute()
+    .await
+    .unwrap();
+    assert!(icmp_rule_is_enabled(false, datastore, nexus, &opctx).await);
+
+    // Now, re-anable the rule.
+    NexusRequest::new(
+        RequestBuilder::new(client, http::Method::PUT, NEXUS_ICMP_URL)
+            .body(Some(&ServiceIcmpConfig { enabled: true }))
+            .expect_status(Some(http::StatusCode::NO_CONTENT)),
+    )
+    .authn_as(AuthnMode::PrivilegedUser)
+    .execute()
+    .await
+    .unwrap();
+    assert!(icmp_rule_is_enabled(true, datastore, nexus, &opctx).await);
 }
