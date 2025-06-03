@@ -427,6 +427,10 @@ CREATE TYPE IF NOT EXISTS omicron.public.physical_disk_state AS ENUM (
 );
 
 -- A physical disk which exists inside the rack.
+--
+-- This is currently limited to U.2 disks, which are managed by the
+-- control plane. A disk may exist within inventory, but not in this row:
+-- if that's the case, it is not explicitly "managed" by Nexus.
 CREATE TABLE IF NOT EXISTS omicron.public.physical_disk (
     id UUID PRIMARY KEY,
     time_created TIMESTAMPTZ NOT NULL,
@@ -444,7 +448,9 @@ CREATE TABLE IF NOT EXISTS omicron.public.physical_disk (
     sled_id UUID NOT NULL,
 
     disk_policy omicron.public.physical_disk_policy NOT NULL,
-    disk_state omicron.public.physical_disk_state NOT NULL
+    disk_state omicron.public.physical_disk_state NOT NULL,
+
+    CONSTRAINT physical_disk_variant_u2 CHECK (variant = 'u2')
 );
 
 -- This constraint only needs to be upheld for disks that are not deleted
@@ -5682,7 +5688,7 @@ INSERT INTO omicron.public.db_metadata (
     version,
     target_version
 ) VALUES
-    (TRUE, NOW(), NOW(), '145.0.0', NULL)
+    (TRUE, NOW(), NOW(), '146.0.0', NULL)
 ON CONFLICT DO NOTHING;
 
 COMMIT;
