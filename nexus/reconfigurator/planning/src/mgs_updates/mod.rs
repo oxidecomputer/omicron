@@ -20,6 +20,19 @@ use thiserror::Error;
 use tufaceous_artifact::ArtifactVersion;
 use tufaceous_artifact::KnownArtifactKind;
 
+/// Generates a new set of `PendingMgsUpdates` based on:
+///
+/// * `inventory`: the latest inventory
+/// * `current_boards`: a set of baseboards to consider updating
+///   (it is possible to have baseboards in inventory that would never be
+///   updated because they're not considered part of the current system)
+/// * `current_updates`: the most recent set of configured `PendingMgsUpdates`
+/// * `current_artifacts`: information about artifacts frmo the current target
+///   release (if any)
+/// * `nmax_updates`: the maximum number of updates allowed at once
+///
+/// By current policy, `nmax_updates` is always 1, but the implementation here
+/// supports more than one update per invocation.
 pub fn plan_mgs_updates(
     log: &slog::Logger,
     inventory: &Collection,
@@ -233,6 +246,8 @@ fn mgs_update_status(
     }
 }
 
+/// Compares a configured SP update with information from inventory and
+/// determines the current status of the update.  See `MgsUpdateStatus`.
 fn mgs_update_status_sp(
     desired_version: &ArtifactVersion,
     expected_active_version: &ArtifactVersion,
@@ -304,6 +319,8 @@ fn mgs_update_status_sp(
     }
 }
 
+/// Determine if the given baseboard needs any MGS-driven update (e.g., update
+/// to its SP, RoT, etc.).  If so, returns the update.  If not, returns `None`.
 fn try_make_update(
     log: &slog::Logger,
     baseboard_id: &Arc<BaseboardId>,
@@ -316,6 +333,7 @@ fn try_make_update(
     try_make_update_sp(log, baseboard_id, inventory, current_artifacts)
 }
 
+/// Determine if the given baseboard needs an SP update and, if so, returns it.
 fn try_make_update_sp(
     log: &slog::Logger,
     baseboard_id: &Arc<BaseboardId>,
