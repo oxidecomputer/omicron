@@ -211,15 +211,10 @@ impl<'a> Planner<'a> {
         &mut self,
         sled_id: SledUuid,
     ) -> Result<(), Error> {
-        // The sled is not expunged. We have to see if the inventory
-        // reflects the parent blueprint disk generation. If it does
-        // then we mark any expunged disks decommissioned.
-        //
-        // TODO-correctness We inspect `last_reconciliation` here to confirm
-        // that the config reconciler has acted on the generation we're waiting
-        // for. This might be overly conservative - would it be okay to act on
-        // `ledgered_sled_config` instead, and decommission disks as long as the
-        // sled knows it should stop using it (even if it hasn't yet)?
+        // The sled is not expunged. We have to see if the inventory reflects a
+        // reconciled config generation. If it does, we'll check below whether
+        // the reconciled generation is sufficiently advanced to decommission
+        // any disks.
         let Some(seen_generation) = self
             .inventory
             .sled_agents
