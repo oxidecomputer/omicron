@@ -140,8 +140,6 @@ const LIMIT: std::num::NonZeroU32 = match std::num::NonZeroU32::new(255) {
     Some(l) => l,
 };
 
-type GatewayClientError = gateway_client::Error<gateway_client::types::Error>;
-
 impl Ingester {
     async fn ingest_sp_ereports(
         &self,
