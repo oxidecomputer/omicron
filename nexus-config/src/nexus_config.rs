@@ -439,6 +439,8 @@ pub struct BackgroundTaskConfig {
     pub alert_dispatcher: AlertDispatcherConfig,
     /// configuration for webhook deliverator task
     pub webhook_deliverator: WebhookDeliveratorConfig,
+    /// configuration for SP ereport ingester task
+    pub sp_ereport_ingester: SpEreportIngesterConfig,
 }
 
 #[serde_as]
@@ -801,6 +803,22 @@ pub struct WebhookDeliveratorConfig {
         default = "WebhookDeliveratorConfig::default_second_retry_backoff"
     )]
     pub second_retry_backoff_secs: u64,
+}
+
+#[serde_as]
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+pub struct SpEreportIngesterConfig {
+    /// period (in seconds) for periodic activations of this background task
+    #[serde_as(as = "DurationSeconds<u64>")]
+    pub period_secs: Duration,
+}
+
+impl Default for SpEreportIngesterConfig {
+    fn default() -> Self {
+        Self {
+            period_secs: Duration::from_secs(30),
+        }
+    }
 }
 
 /// Configuration for a nexus server
@@ -1300,6 +1318,9 @@ mod test {
                             lease_timeout_secs: 44,
                             first_retry_backoff_secs: 45,
                             second_retry_backoff_secs: 46,
+                        },
+                        sp_ereport_ingester: SpEreportIngesterConfig {
+                            period_secs: Duration::from_secs(47),
                         },
                     },
                     default_region_allocation_strategy:
