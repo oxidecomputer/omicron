@@ -4,8 +4,12 @@
 
 //! Module for Omicron datasets.
 //!
-//! There is no separate tokio task here; our parent reconciler task owns this
-//! set of datasets and is able to mutate it in place during reconciliation.
+//! This module does not spawn a separate tokio task: our parent reconciler task
+//! owns an [`OmicronDatasets`] and is able to mutate it in place during
+//! reconciliation. However, we do need a [`DatasetTaskHandle`] to perform some
+//! operations. This handle is shared with other "needs to perform dataset
+//! operations" consumers (e.g., inventory requests perform operations to check
+//! the live state of datasets directly from ZFS).
 
 use crate::dataset_serialization_task::DatasetEnsureError;
 use crate::dataset_serialization_task::DatasetEnsureResult;
