@@ -450,6 +450,12 @@ CREATE TABLE IF NOT EXISTS omicron.public.physical_disk (
     disk_policy omicron.public.physical_disk_policy NOT NULL,
     disk_state omicron.public.physical_disk_state NOT NULL,
 
+    -- This table should be limited to U.2s, and disallow inserting
+    -- other disk kinds, unless we explicitly want them to be controlled
+    -- by Nexus.
+    --
+    -- See https://github.com/oxidecomputer/omicron/issues/8258 for additional
+    -- context.
     CONSTRAINT physical_disk_variant_u2 CHECK (variant = 'u2')
 );
 
