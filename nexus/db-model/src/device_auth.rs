@@ -13,6 +13,7 @@ use chrono::{DateTime, Duration, Utc};
 use nexus_types::external_api::views;
 use omicron_uuid_kinds::{AccessTokenKind, GenericUuid, TypedUuid};
 use rand::{Rng, RngCore, SeedableRng, distributions::Slice, rngs::StdRng};
+use std::num::NonZeroU32;
 use uuid::Uuid;
 
 use crate::SqlU32;
@@ -102,7 +103,10 @@ fn generate_user_code() -> String {
 }
 
 impl DeviceAuthRequest {
-    pub fn new(client_id: Uuid, requested_ttl_seconds: Option<u32>) -> Self {
+    pub fn new(
+        client_id: Uuid,
+        requested_ttl_seconds: Option<NonZeroU32>,
+    ) -> Self {
         let now = Utc::now();
         Self {
             client_id,
@@ -111,7 +115,8 @@ impl DeviceAuthRequest {
             time_created: now,
             time_expires: now
                 + Duration::seconds(CLIENT_AUTHENTICATION_TIMEOUT),
-            token_ttl_seconds: requested_ttl_seconds.map(SqlU32::from),
+            token_ttl_seconds: requested_ttl_seconds
+                .map(|ttl| ttl.get().into()),
         }
     }
 

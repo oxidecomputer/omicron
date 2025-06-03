@@ -433,6 +433,63 @@ async fn test_device_token_expiration(cptestctx: &ControlPlaneTestContext) {
     assert_eq!(settings.device_token_max_ttl_seconds, None);
 }
 
+// lets me stick whatever I want in this thing to be URL-encoded
+#[derive(serde::Serialize)]
+struct BadAuthReq {
+    client_id: String,
+    ttl_seconds: String,
+}
+
+/// Test that 0 and negative values for ttl_seconds give immediate 400s
+#[nexus_test]
+async fn test_device_token_request_ttl_invalid(
+    cptestctx: &ControlPlaneTestContext,
+) {
+    let testctx = &cptestctx.external_client;
+
+    let auth_response = NexusRequest::new(
+        RequestBuilder::new(testctx, Method::POST, "/device/auth")
+            .allow_non_dropshot_errors()
+            .body_urlencoded(Some(&BadAuthReq {
+                client_id: Uuid::new_v4().to_string(),
+                ttl_seconds: "0".to_string(),
+            }))
+            .expect_status(Some(StatusCode::BAD_REQUEST)),
+    )
+    .execute()
+    // .execute_and_parse_unwrap::<DeviceAuthResponse>()
+    .await
+    .expect("expected an Ok(TestResponse)");
+
+    let error_body: serde_json::Value =
+        serde_json::from_slice(&auth_response.body).unwrap();
+    assert_eq!(
+        error_body.get("message").unwrap().to_string(),
+        "\"unable to parse URL-encoded body: ttl_seconds: invalid value: integer `0`, expected a nonzero u32\""
+    );
+
+    let auth_response = NexusRequest::new(
+        RequestBuilder::new(testctx, Method::POST, "/device/auth")
+            .allow_non_dropshot_errors()
+            .body_urlencoded(Some(&BadAuthReq {
+                client_id: Uuid::new_v4().to_string(),
+                ttl_seconds: "-3".to_string(),
+            }))
+            .expect_status(Some(StatusCode::BAD_REQUEST)),
+    )
+    .execute()
+    // .execute_and_parse_unwrap::<DeviceAuthResponse>()
+    .await
+    .expect("expected an Ok(TestResponse)");
+
+    let error_body: serde_json::Value =
+        serde_json::from_slice(&auth_response.body).unwrap();
+    assert_eq!(
+        error_body.get("message").unwrap().to_string(),
+        "\"unable to parse URL-encoded body: ttl_seconds: invalid digit found in string\""
+    );
+}
+
 #[nexus_test]
 async fn test_device_token_request_ttl(cptestctx: &ControlPlaneTestContext) {
     let testctx = &cptestctx.external_client;
@@ -444,10 +501,10 @@ async fn test_device_token_request_ttl(cptestctx: &ControlPlaneTestContext) {
     let _: views::SiloAuthSettings =
         object_put(testctx, "/v1/auth-settings", &settings).await;
 
-    // Test 1: Request TTL above the max should fail at verification time
+    // Request TTL above the max should fail at verification time
     let invalid_ttl = DeviceAuthRequest {
         client_id: Uuid::new_v4(),
-        ttl_seconds: Some(20), // Above the 10 second max
+        ttl_seconds: NonZeroU32::new(20), // Above the 10 second max
     };
 
     let auth_response = NexusRequest::new(
@@ -478,10 +535,10 @@ async fn test_device_token_request_ttl(cptestctx: &ControlPlaneTestContext) {
         "Requested TTL 20 seconds exceeds maximum allowed TTL 10 seconds for this silo"
     );
 
-    // Test 2: Request TTL below the max should succeed and be used
+    // Request TTL below the max should succeed and be used
     let valid_ttl = DeviceAuthRequest {
         client_id: Uuid::new_v4(),
-        ttl_seconds: Some(3), // Below the 10 second max
+        ttl_seconds: NonZeroU32::new(3), // Below the 10 second max
     };
 
     let auth_response = NexusRequest::new(
