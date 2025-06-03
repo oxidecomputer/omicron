@@ -527,7 +527,9 @@ fn poll_nvme_node(
     let controller_info = controller_lock.get_info()?;
     let serial_no = controller_info.serial();
 
-    let nvme_vendor = controller_info.pci_vid()?;
+    // The existing database entries on deployed racks expect this to be a
+    // lowercase hex string.
+    let nvme_vendor = format!("{:x}", controller_info.pci_vid()?);
     // Ideally we could just use this directly in `DiskIdentity` but previously
     // we were walking the device tree looking for blkdev nodes and
     // reconstructing the model from the 'inquiry-vendor-id' and
@@ -555,7 +557,7 @@ fn poll_nvme_node(
         (None, product_id) => product_id.clone(),
     };
     let device_id = DiskIdentity {
-        vendor: nvme_vendor.to_string(),
+        vendor: nvme_vendor,
         serial: serial_no.to_string(),
         model,
     };
