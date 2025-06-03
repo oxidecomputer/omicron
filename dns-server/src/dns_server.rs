@@ -281,7 +281,12 @@ async fn handle_dns_message(
     let store = &request.store;
     debug!(&log, "message_request"; "mr" => #?mr);
 
-    let header = Header::response_from_request(mr.header());
+    let mut header = Header::response_from_request(mr.header());
+    // We only serve answers for names for which we are authoritative.  If we
+    // bail from this function, our caller will produce their own header and
+    // have to decide if the error is authoritative.
+    header.set_authoritative(true);
+
     let query = mr.query();
     let name = query.original().name().clone();
     let answer = store.query(mr)?;
@@ -430,7 +435,25 @@ async fn respond_nxdomain(
     header: &Header,
 ) {
     let log = &request.log;
-    let mresp = rb_nxdomain.error_msg(&header, ResponseCode::NXDomain);
+    let mut mresp = rb_nxdomain.error_msg(&header, ResponseCode::NXDomain);
+
+    // If we would return NXDOMAIN, the query was for a name in a zone which we
+    // are authoritative for.  So, we set the authoritative bit to confirm in the
+    // answer that no other server would have records for this name either.
+    //
+    // It might make more sense to set the authoritative bit in the caller,
+    // where we'd know about the conditions from which we are constructing an
+    // NXDOMAIN.  This won't do for a boring reason: `error_msg` above includes
+    // a `Header::response_from_request`, which discards the authoritative bit
+    // (and some others, if set).  So we must set the authoritative bit on the
+    // response before encoding and sending it, here.
+    //
+    // If we fail to serialize and respond SERVFAIL, the above applies in
+    // `respond_servfail` as well, and the response will be non-authoritative
+    // even if we were authoritative for the name.  Authoritative SERVFAIL
+    // doesn't cary any RFC meaning anyway.
+    mresp.header_mut().set_authoritative(true);
+
     if let Err(error) = encode_and_send(request, mresp, "NXDOMAIN").await {
         error!(
             log,
