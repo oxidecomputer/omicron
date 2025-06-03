@@ -37,7 +37,7 @@ pub enum CockroachCliError {
     DecommissionLiveNode(String),
     #[error(
         "cannot decommission node {node_id}: \
-            node has {gossiped_replicas} gossipped replicas"
+         node has {gossiped_replicas} gossiped replicas"
     )]
     DecommissionGossipedReplicas { node_id: String, gossiped_replicas: i64 },
     #[error(
@@ -213,7 +213,7 @@ impl CockroachCli {
         if let Some(this_node) =
             statuses.iter().find(|status| status.node_id == node_id)
         {
-            // Gate 1 - node must be live
+            // Gate 1 - node must not be live
             if this_node.is_live {
                 return Err(CockroachCliError::DecommissionLiveNode(
                     node_id.to_string(),
