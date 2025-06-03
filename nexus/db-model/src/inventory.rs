@@ -631,6 +631,12 @@ where
     }
 }
 
+impl From<u16> for SpMgsSlot {
+    fn from(slot: u16) -> Self {
+        Self(SqlU16::new(slot))
+    }
+}
+
 /// Newtype wrapping the revision number for a particular baseboard
 ///
 /// MGS reports this as a u32 and we represent it the same way, though that
