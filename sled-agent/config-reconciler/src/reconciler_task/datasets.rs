@@ -86,7 +86,7 @@ impl OmicronDatasets {
             return Err(ZoneDatasetDependencyError::MissingFilesystemPool);
         };
 
-        let filesystem_dataset_name = DatasetName::new(
+        let transient_dataset_name = DatasetName::new(
             filesystem_pool,
             DatasetKind::TransientZone { name: zone.zone_name() },
         );
@@ -96,11 +96,11 @@ impl OmicronDatasets {
         // https://github.com/oxidecomputer/omicron/issues/7214
         if !self.datasets.iter().any(|d| {
             matches!(d.state, DatasetState::Ensured)
-                && d.config.name == filesystem_dataset_name
+                && d.config.name == transient_dataset_name
         }) {
             return Err(
                 ZoneDatasetDependencyError::TransientZoneDatasetNotAvailable(
-                    filesystem_dataset_name,
+                    transient_dataset_name,
                 ),
             );
         }
@@ -131,20 +131,6 @@ impl OmicronDatasets {
                 ),
             );
         }
-
-        // TODO-correctness Before we moved the logic of this method here, it
-        // was performed by
-        // `ServiceManager::validate_storage_and_pick_mountpoint()`. That method
-        // did not have access to `self.datasets`, so it issued an explicit
-        // `zfs` command to check the `zoned`, `canmount`, and `encryption`
-        // properties of the durable dataset. Should we:
-        //
-        // * Do that here
-        // * Do nothing here, as the dataset task should have have already done
-        //   this
-        // * Check the dataset config properties? (All three of the properties
-        //   are implied by the dataset kind, so this is probably equivalent to
-        //   "do nothing")
 
         Ok(zone_root_path)
     }
