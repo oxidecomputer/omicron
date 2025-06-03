@@ -326,6 +326,10 @@ internal DNS:
         AAAA fd00:1122:3344:101::23
     name: 868d5b02-7792-4fc0-b6a9-654afcae9ea0.sled          (records: 1)
         AAAA fd00:1122:3344:101::1
+    name: @                                                  (records: 3)
+        NS   ns1.control-plane.oxide.internal
+        NS   ns2.control-plane.oxide.internal
+        NS   ns3.control-plane.oxide.internal
     name: _clickhouse-admin-single-server._tcp               (records: 1)
         SRV  port  8888 4fc6cb68-8ce9-4171-91b3-0106b8fed386.host.control-plane.oxide.internal
     name: _clickhouse-native._tcp                            (records: 1)
@@ -374,13 +378,29 @@ internal DNS:
         AAAA fd00:1122:3344:101::27
     name: fe8bca28-44ac-4968-ba32-292dede5953f.host          (records: 1)
         AAAA fd00:1122:3344:3::1
+    name: ns1                                                (records: 1)
+        AAAA fd00:1122:3344:1::1
+    name: ns2                                                (records: 1)
+        AAAA fd00:1122:3344:2::1
+    name: ns3                                                (records: 1)
+        AAAA fd00:1122:3344:3::1
 
 external DNS:
   DNS zone: "oxide.example" (unchanged)
+    name: @                                                  (records: 3)
+        NS   ns1.oxide.example
+        NS   ns2.oxide.example
+        NS   ns3.oxide.example
     name: example-silo.sys                                   (records: 3)
         A    192.0.2.4
         A    192.0.2.2
         A    192.0.2.3
+    name: ns1                                                (records: 1)
+        A    198.51.100.1
+    name: ns2                                                (records: 1)
+        A    198.51.100.2
+    name: ns3                                                (records: 1)
+        A    198.51.100.3
 
 
 
@@ -607,6 +627,10 @@ internal DNS:
         AAAA fd00:1122:3344:101::23
     name: 868d5b02-7792-4fc0-b6a9-654afcae9ea0.sled          (records: 1)
         AAAA fd00:1122:3344:101::1
+    name: @                                                  (records: 3)
+        NS   ns1.control-plane.oxide.internal
+        NS   ns2.control-plane.oxide.internal
+        NS   ns3.control-plane.oxide.internal
     name: _clickhouse-admin-single-server._tcp               (records: 1)
         SRV  port  8888 4fc6cb68-8ce9-4171-91b3-0106b8fed386.host.control-plane.oxide.internal
     name: _clickhouse-native._tcp                            (records: 1)
@@ -655,13 +679,29 @@ internal DNS:
         AAAA fd00:1122:3344:101::27
     name: fe8bca28-44ac-4968-ba32-292dede5953f.host          (records: 1)
         AAAA fd00:1122:3344:3::1
+    name: ns1                                                (records: 1)
+        AAAA fd00:1122:3344:1::1
+    name: ns2                                                (records: 1)
+        AAAA fd00:1122:3344:2::1
+    name: ns3                                                (records: 1)
+        AAAA fd00:1122:3344:3::1
 
 external DNS:
   DNS zone: "oxide.example" (unchanged)
+    name: @                                                  (records: 3)
+        NS   ns1.oxide.example
+        NS   ns2.oxide.example
+        NS   ns3.oxide.example
     name: example-silo.sys                                   (records: 3)
         A    192.0.2.4
         A    192.0.2.2
         A    192.0.2.3
+    name: ns1                                                (records: 1)
+        A    198.51.100.1
+    name: ns2                                                (records: 1)
+        A    198.51.100.2
+    name: ns3                                                (records: 1)
+        A    198.51.100.3
 
 
 
@@ -678,6 +718,7 @@ Commands:
   set-zone-image               set the image source for a zone
   set-remove-mupdate-override  set the remove_mupdate_override field for a sled
   expunge-zone                 expunge a zone
+  mark-for-cleanup             mark an expunged zone ready for cleanup
   set-sp-update                configure an SP update
   delete-sp-update             delete a configured SP update
   debug                        debug commands that bypass normal checks

@@ -170,7 +170,7 @@ pub struct Blueprint {
     // See blueprint execution for more on this.
     pub internal_dns_version: Generation,
 
-    /// external DNS version when thi blueprint was created
+    /// external DNS version when this blueprint was created
     // See blueprint execution for more on this.
     pub external_dns_version: Generation,
 
