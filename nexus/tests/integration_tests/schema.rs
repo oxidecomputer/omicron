@@ -2271,7 +2271,7 @@ fn before_146_0_0<'a>(ctx: &'a MigrationContext<'a>) -> BoxFuture<'a, ()> {
     Box::pin(async move {
         ctx.client
             .batch_execute(
-                format!("
+                &format!("
         INSERT INTO omicron.public.physical_disk
           (id, time_created, time_modified, time_deleted, rcgen, vendor, serial, model, variant, sled_id, disk_policy, disk_state)
         VALUES
@@ -2304,7 +2304,7 @@ fn after_146_0_0<'a>(ctx: &'a MigrationContext<'a>) -> BoxFuture<'a, ()> {
             .expect("failed to query post-migration disks");
         assert_eq!(rows.len(), 1);
 
-        let id: Uuid = (&rows[0]).get("id").unwrap();
+        let id: Uuid = (&rows[0]).get::<&str, Uuid>("id");
         assert_eq!(id.to_string(), U2_DISK);
 
         let rows = ctx
@@ -2314,7 +2314,7 @@ fn after_146_0_0<'a>(ctx: &'a MigrationContext<'a>) -> BoxFuture<'a, ()> {
             .expect("failed to query post-migration zpools");
         assert_eq!(rows.len(), 1);
 
-        let id: Uuid = (&rows[0]).get("id").unwrap();
+        let id: Uuid = (&rows[0]).get::<&str, Uuid>("id");
         assert_eq!(id.to_string(), U2_ZPOOL);
     })
 }
