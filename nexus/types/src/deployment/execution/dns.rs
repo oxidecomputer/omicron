@@ -61,7 +61,6 @@ pub fn blueprint_internal_dns_config(
                 // falling through to call `host_zone_with_one_backend()`.
                 dns_builder.host_zone_clickhouse_single_node(
                     zone.id,
-                    ServiceName::Clickhouse,
                     *address,
                     blueprint.oximeter_read_mode.single_node_enabled(),
                 )?;
@@ -76,7 +75,6 @@ pub fn blueprint_internal_dns_config(
                 // falling through to call `host_zone_with_one_backend()`.
                 dns_builder.host_zone_clickhouse_cluster(
                     zone.id,
-                    ServiceName::ClickhouseServer,
                     *address,
                     blueprint.oximeter_read_mode.cluster_enabled(),
                 )?;
@@ -88,11 +86,7 @@ pub fn blueprint_internal_dns_config(
                 // Add the Clickhouse keeper service and `clickhouse-admin`
                 // service used for managing the keeper. We continue below so we
                 // don't fall through and call `host_zone_with_one_backend`.
-                dns_builder.host_zone_clickhouse_keeper(
-                    zone.id,
-                    ServiceName::ClickhouseKeeper,
-                    *address,
-                )?;
+                dns_builder.host_zone_clickhouse_keeper(zone.id, *address)?;
                 continue 'all_zones;
             }
             BlueprintZoneType::CockroachDb(
@@ -124,7 +118,6 @@ pub fn blueprint_internal_dns_config(
             ) => {
                 dns_builder.host_zone_internal_dns(
                     zone.id,
-                    ServiceName::InternalDns,
                     *http_address,
                     dns_address.to_owned(),
                 )?;
