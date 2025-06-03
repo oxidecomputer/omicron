@@ -55,7 +55,6 @@ use nexus_types::{
         shared::{BfdStatus, ProbeInfo},
     },
 };
-use omicron_common::api::external::AddressLot;
 use omicron_common::api::external::AddressLotBlock;
 use omicron_common::api::external::AddressLotCreateResponse;
 use omicron_common::api::external::AffinityGroupMember;
@@ -102,6 +101,7 @@ use omicron_common::api::external::http_pagination::marker_for_id;
 use omicron_common::api::external::http_pagination::marker_for_name;
 use omicron_common::api::external::http_pagination::marker_for_name_or_id;
 use omicron_common::api::external::http_pagination::name_or_id_pagination;
+use omicron_common::api::external::{AddressLot, ResourceType};
 use omicron_common::bail_unless;
 use omicron_uuid_kinds::GenericUuid;
 use omicron_uuid_kinds::SupportBundleUuid;
@@ -6841,11 +6841,32 @@ impl NexusExternalApi for NexusExternalApiImpl {
         let handler = async {
             let opctx =
                 crate::context::op_context_for_external_api(&rqctx).await?;
+
             let user = nexus.silo_user_fetch_self(&opctx).await?;
-            let (_, silo) = nexus.current_silo_lookup(&opctx)?.fetch().await?;
+            let (authz_silo, db_silo) =
+                nexus.current_silo_lookup(&opctx)?.fetch().await?;
+
+            // it seems like fleet role comes back in the silo roles list, so we might only need the one call
+            // let fleet_roles = opctx.get_roles(&authz::FLEET).await;
+            // dbg!(fleet_roles);
+            let silo_roles = opctx.get_roles(&authz_silo).await;
             Ok(HttpResponseOk(views::CurrentUser {
                 user: user.into(),
-                silo_name: silo.name().clone(),
+                silo_name: db_silo.name().clone(),
+                fleet_role: silo_roles.clone().map_or(None, |roleset| {
+                    roleset
+                        .roles
+                        .iter()
+                        .find(|triple| triple.0 == ResourceType::Fleet)
+                        .map(|triple| triple.2.clone())
+                }),
+                silo_role: silo_roles.map_or(None, |roleset| {
+                    roleset
+                        .roles
+                        .iter()
+                        .find(|triple| triple.0 == ResourceType::Silo)
+                        .map(|triple| triple.2.clone())
+                }),
             }))
         };
         apictx

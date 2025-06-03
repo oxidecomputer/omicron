@@ -49,7 +49,7 @@ use uuid::Uuid;
 /// For more on roles, see dbinit.rs.
 #[derive(Clone, Debug)]
 pub struct RoleSet {
-    roles: BTreeSet<(ResourceType, Uuid, String)>,
+    pub roles: BTreeSet<(ResourceType, Uuid, String)>,
 }
 
 impl RoleSet {

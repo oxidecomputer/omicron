@@ -924,6 +924,11 @@ pub struct CurrentUser {
 
     /** Name of the silo to which this user belongs. */
     pub silo_name: Name,
+
+    // pub fleet_role: Option<shared::FleetRole>,
+    // pub silo_role: Option<shared::SiloRole>,
+    pub fleet_role: Option<String>,
+    pub silo_role: Option<String>,
 }
 
 // SILO GROUPS

@@ -28,7 +28,9 @@ use nexus_test_utils::{
 };
 use nexus_test_utils_macros::nexus_test;
 use nexus_types::external_api::params::{self, ProjectCreate};
-use nexus_types::external_api::shared::{SiloIdentityMode, SiloRole};
+use nexus_types::external_api::shared::{
+    FleetRole, SiloIdentityMode, SiloRole,
+};
 use nexus_types::external_api::{shared, views};
 use omicron_common::api::external::IdentityMetadataCreateParams;
 use omicron_sled_agent::sim;
@@ -428,7 +430,9 @@ async fn test_session_me(cptestctx: &ControlPlaneTestContext) {
                 display_name: USER_TEST_PRIVILEGED.external_id.clone(),
                 silo_id: DEFAULT_SILO.id(),
             },
-            silo_name: DEFAULT_SILO.name().clone()
+            silo_name: DEFAULT_SILO.name().clone(),
+            fleet_role: Some("admin".to_string()),
+            silo_role: Some("admin".to_string()),
         }
     );
 
@@ -445,9 +449,51 @@ async fn test_session_me(cptestctx: &ControlPlaneTestContext) {
                 display_name: USER_TEST_UNPRIVILEGED.external_id.clone(),
                 silo_id: DEFAULT_SILO.id(),
             },
-            silo_name: DEFAULT_SILO.name().clone()
+            silo_name: DEFAULT_SILO.name().clone(),
+            fleet_role: None,
+            silo_role: None,
         }
     );
+
+    // add roles to unprive and check roles again
+    let silo_url = format!("/v1/system/silos/{}", DEFAULT_SILO.identity().name);
+    grant_iam(
+        testctx,
+        &silo_url,
+        SiloRole::Collaborator,
+        USER_TEST_UNPRIVILEGED.id(),
+        AuthnMode::PrivilegedUser,
+    )
+    .await;
+
+    let unpriv_user = NexusRequest::object_get(testctx, "/v1/me")
+        .authn_as(AuthnMode::UnprivilegedUser)
+        .execute_and_parse_unwrap::<views::CurrentUser>()
+        .await;
+
+    assert_eq!(unpriv_user.fleet_role, None);
+    assert_eq!(unpriv_user.silo_role, Some("collaborator".to_string()));
+
+    // now add fleet viewer
+    grant_iam(
+        testctx,
+        "/v1/system", // fleet
+        FleetRole::Viewer,
+        USER_TEST_UNPRIVILEGED.id(),
+        AuthnMode::PrivilegedUser,
+    )
+    .await;
+
+    let unpriv_user = NexusRequest::object_get(testctx, "/v1/me")
+        .authn_as(AuthnMode::UnprivilegedUser)
+        .execute_and_parse_unwrap::<views::CurrentUser>()
+        .await;
+    assert_eq!(unpriv_user.fleet_role, Some("viewer".to_string()));
+    assert_eq!(unpriv_user.silo_role, Some("collaborator".to_string()));
+
+    // TODO: need to add unpriv to a group that confers a different role and see
+    // how it interacts. presumably it's just another entry in the list, so it's
+    // up to the handler to find the "strongest" role
 }
 
 #[nexus_test]
