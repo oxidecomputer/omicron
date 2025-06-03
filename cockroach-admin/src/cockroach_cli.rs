@@ -29,10 +29,6 @@ pub enum CockroachCliError {
         #[source]
         err: io::Error,
     },
-    #[error("node {0} not found")]
-    NodeNotFound(String),
-    #[error("multiple nodes found when asking for status of node {0}")]
-    MultipleNodesFound(String),
     #[error("cannot decommission node {0}: node is still alive")]
     DecommissionLiveNode(String),
     #[error(
@@ -64,10 +60,6 @@ pub enum CockroachCliError {
 impl From<CockroachCliError> for HttpError {
     fn from(err: CockroachCliError) -> Self {
         match err {
-            CockroachCliError::NodeNotFound(_) => {
-                let message = InlineErrorChain::new(&err).to_string();
-                HttpError::for_bad_request(None, message)
-            }
             CockroachCliError::DecommissionLiveNode(_)
             | CockroachCliError::DecommissionGossipedReplicas { .. }
             | CockroachCliError::DecommissionUnderreplicatedRanges { .. } => {
@@ -81,7 +73,6 @@ impl From<CockroachCliError> for HttpError {
                 }
             }
             CockroachCliError::InvokeCli { .. }
-            | CockroachCliError::MultipleNodesFound(_)
             | CockroachCliError::ExecutionError(_)
             | CockroachCliError::ParseOutput { .. } => {
                 let message = InlineErrorChain::new(&err).to_string();
