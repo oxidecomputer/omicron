@@ -359,6 +359,7 @@ impl CockroachStarter {
                 // referencing "self".
                 let exited = process_exited(&mut child_process);
                 let listen_url_file = self.listen_url_file.clone();
+                let stdout_path = stdout_path.clone();
                 async move {
                     if let Some(exit_error) = exited {
                         return Err(poll::CondCheckError::Failed(exit_error));
@@ -372,42 +373,72 @@ impl CockroachStarter {
                     // of tokio::fs::read_to_string() that accepted a maximum
                     // byte count so that this couldn't, say, use up all of
                     // memory.
-                    match tokio::fs::read_to_string(&listen_url_file).await {
-                        Ok(listen_url) if listen_url.contains('\n') => {
-                            // The file is fully written.
-                            // We're ready to move on.
-                            let listen_url = listen_url.trim_end();
-                            make_pg_config(listen_url).map_err(|source| {
-                                poll::CondCheckError::Failed(
-                                    CockroachStartError::BadListenUrl {
-                                        listen_url: listen_url.to_string(),
-                                        source,
-                                    },
-                                )
-                            })
-                        }
-
-                        Ok(_) => {
-                            // The file hasn't been fully written yet.
-                            // Keep waiting.
-                            Err(poll::CondCheckError::NotYet)
-                        }
-
-                        Err(error)
-                            if error.kind() == std::io::ErrorKind::NotFound =>
+                    let pg_config =
+                        match tokio::fs::read_to_string(&listen_url_file).await
                         {
-                            // The file doesn't exist yet.
-                            // Keep waiting.
+                            Ok(listen_url) if listen_url.contains('\n') => {
+                                // The file is fully written.
+                                // We're ready to move on.
+                                let listen_url = listen_url.trim_end();
+                                make_pg_config(listen_url).map_err(
+                                    |source| {
+                                        poll::CondCheckError::Failed(
+                                            CockroachStartError::BadListenUrl {
+                                                listen_url: listen_url
+                                                    .to_string(),
+                                                source,
+                                            },
+                                        )
+                                    },
+                                )?
+                            }
+
+                            Ok(_) => {
+                                // The file hasn't been fully written yet.
+                                // Keep waiting.
+                                return Err(poll::CondCheckError::NotYet);
+                            }
+
+                            Err(error)
+                                if error.kind()
+                                    == std::io::ErrorKind::NotFound =>
+                            {
+                                // The file doesn't exist yet.
+                                // Keep waiting.
+                                return Err(poll::CondCheckError::NotYet);
+                            }
+
+                            Err(error) => {
+                                // Something else has gone wrong.  Stop immediately
+                                // and report the problem.
+                                let source = anyhow!(error).context(format!(
+                                    "checking listen file {:?}",
+                                    listen_url_file
+                                ));
+                                return Err(poll::CondCheckError::Failed(
+                                    CockroachStartError::Unknown { source },
+                                ));
+                            }
+                        };
+
+                    // Now try to parse the HTTP address from stdout.
+                    //
+                    // Unfortunately, unlike "--listening-url-file", there is no
+                    // equivalent way to isolate the chosen HTTP address from
+                    // the Cockroach process. In lieu of that, we parse that
+                    // information out of stdout.
+                    match parse_http_addr_from_stdout(&stdout_path).await
+                    {
+                        Ok(Some(http_addr)) => {
+                            // We have both the PG config and HTTP address
+                            Ok((pg_config, http_addr))
+                        }
+                        Ok(None) => {
+                            // HTTP address not available yet, keep waiting
                             Err(poll::CondCheckError::NotYet)
                         }
-
-                        Err(error) => {
-                            // Something else has gone wrong.  Stop immediately
-                            // and report the problem.
-                            let source = anyhow!(error).context(format!(
-                                "checking listen file {:?}",
-                                listen_url_file
-                            ));
+                        Err(source) => {
+                            // Error parsing HTTP address
                             Err(poll::CondCheckError::Failed(
                                 CockroachStartError::Unknown { source },
                             ))
@@ -421,17 +452,14 @@ impl CockroachStarter {
         .await;
 
         match wait_result {
-            Ok(pg_config) => {
-                let http_addr = SocketAddr::V4(std::net::SocketAddrV4::new(std::net::Ipv4Addr::LOCALHOST, 0));
-                Ok(CockroachInstance {
-                    pid,
-                    http_addr,
-                    pg_config,
-                    temp_dir_path: self.temp_dir.path().to_owned(),
-                    temp_dir: Some(self.temp_dir),
-                    child_process: Some(child_process),
-                })
-            },
+            Ok((pg_config, http_addr)) => Ok(CockroachInstance {
+                pid,
+                http_addr,
+                pg_config,
+                temp_dir_path: self.temp_dir.path().to_owned(),
+                temp_dir: Some(self.temp_dir),
+                child_process: Some(child_process),
+            }),
             Err(poll_error) => {
                 // Abort and tell the user.  We'll leave CockroachDB running so
                 // the user can debug if they want.  We'll skip cleanup of the
@@ -551,6 +579,11 @@ impl CockroachInstance {
     /// Returns the pid of the child process running CockroachDB
     pub fn pid(&self) -> u32 {
         self.pid
+    }
+
+    /// Returns the HTTP address where CockroachDB's web UI is accessible
+    pub fn http_addr(&self) -> SocketAddr {
+        self.http_addr
     }
 
     /// Returns a printable form of the PostgreSQL config provided by
@@ -855,6 +888,62 @@ pub async fn wipe(
     client.batch_execute(sql).await.context("wiping Omicron database")
 }
 
+/// Parses the HTTP address from CockroachDB's stdout file.
+///
+/// Looks for a line like "webui: http://127.0.0.1:39953"
+/// and extracts the socket address.
+async fn parse_http_addr_from_stdout(
+    stdout_path: &std::path::Path,
+) -> Result<Option<SocketAddr>, anyhow::Error> {
+    use std::str::FromStr;
+
+    // Try to read the stdout file
+    let stdout_content = match tokio::fs::read_to_string(stdout_path).await {
+        Ok(content) => content,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+            // File doesn't exist yet, keep waiting
+            return Ok(None);
+        }
+        Err(error) => {
+            return Err(anyhow!(error)
+                .context(format!("reading stdout file {:?}", stdout_path)));
+        }
+    };
+
+    // Look for the webui line
+    for line in stdout_content.lines() {
+        if let Some(webui_part) = line.strip_prefix("webui:") {
+            // Extract the URL part after "webui:"
+            let url_str = webui_part.trim();
+            // Parse the URL to extract host and port
+            if let Some(http_part) = url_str.strip_prefix("http://") {
+                // Parse the host:port part (before any path)
+                let host_port =
+                    http_part.split('/').next().unwrap_or(http_part);
+                // Parse as a socket address
+                match SocketAddr::from_str(host_port) {
+                    Ok(addr) => return Ok(Some(addr)),
+                    Err(parse_err) => {
+                        return Err(anyhow!(
+                            "failed to parse HTTP address '{}' from webui line: {}",
+                            host_port,
+                            parse_err
+                        ));
+                    }
+                }
+            } else {
+                return Err(anyhow!(
+                    "unexpected webui URL format (expected http://): '{}'",
+                    url_str
+                ));
+            }
+        }
+    }
+
+    // Webui line not found yet, keep waiting
+    Ok(None)
+}
+
 /// Given a listen URL reported by CockroachDB, returns a parsed
 /// [`PostgresConfigWithUrl`] suitable for connecting to a database backed by a
 /// [`CockroachInstance`].
@@ -1072,6 +1161,8 @@ impl Client {
 // These are more integration tests than unit tests.
 #[cfg(test)]
 mod test {
+    use super::COCKROACHDB_STDERR;
+    use super::COCKROACHDB_STDOUT;
     use super::CockroachStartError;
     use super::CockroachStarter;
     use super::CockroachStarterBuilder;
@@ -1486,6 +1577,46 @@ mod test {
         eprintln!("cleaned up database and temporary directory");
     }
 
+    // Test that we can get the actual HTTP address from a running CockroachDB instance
+    #[tokio::test]
+    async fn test_http_addr_integration() {
+        let mut database = new_builder()
+            .build()
+            .expect("failed to create starter")
+            .start()
+            .await
+            .expect("failed to start database");
+
+        let http_addr = database.http_addr();
+
+        // The HTTP address should not be port 0 (which was the old hardcoded value)
+        assert_ne!(
+            http_addr.port(),
+            0,
+            "HTTP address should have a real port, not 0"
+        );
+
+        // The HTTP address should be on localhost
+        match http_addr.ip() {
+            std::net::IpAddr::V4(ipv4) => {
+                assert!(
+                    ipv4.is_loopback(),
+                    "HTTP address should be on loopback interface"
+                );
+            }
+            std::net::IpAddr::V6(ipv6) => {
+                assert!(
+                    ipv6.is_loopback(),
+                    "HTTP address should be on loopback interface"
+                );
+            }
+        }
+
+        eprintln!("CockroachDB HTTP address: {}", http_addr);
+
+        database.cleanup().await.expect("failed to clean up database");
+    }
+
     #[cfg(target_os = "illumos")]
     async fn verify_environment(env_expected: &BTreeMap<&str, &str>, pid: u32) {
         use std::io::BufRead;
@@ -1674,6 +1805,62 @@ mod test {
         assert!(matches!(exit_status,
             CockroachStartError::Exited { exit_code } if exit_code == 3
         ));
+    }
+
+    // Test parsing HTTP address from stdout
+    #[tokio::test]
+    async fn test_parse_http_addr() {
+        let temp_dir = tempdir().expect("failed to create temp directory");
+        let stdout_path = temp_dir.path().join("test_stdout");
+
+        // Test case: webui line not present yet
+        fs::write(&stdout_path, "some random log line\nanother line\n")
+            .await
+            .expect("failed to write test stdout");
+        let result = super::parse_http_addr_from_stdout(&stdout_path)
+            .await
+            .expect("parsing should succeed");
+        assert!(
+            result.is_none(),
+            "should return None when webui line not found"
+        );
+
+        // Test case: webui line present
+        fs::write(
+            &stdout_path,
+            "some random log line\n\
+             webui:               http://127.0.0.1:39953\n\
+             another line\n",
+        )
+        .await
+        .expect("failed to write test stdout");
+        let result = super::parse_http_addr_from_stdout(&stdout_path)
+            .await
+            .expect("parsing should succeed");
+        assert!(result.is_some(), "should return Some when webui line found");
+        let addr = result.unwrap();
+        assert_eq!(
+            addr.ip(),
+            std::net::IpAddr::V4(std::net::Ipv4Addr::new(127, 0, 0, 1))
+        );
+        assert_eq!(addr.port(), 39953);
+
+        // Test case: IPv6 address
+        fs::write(&stdout_path, "webui:               http://[::1]:12345\n")
+            .await
+            .expect("failed to write test stdout");
+        let result = super::parse_http_addr_from_stdout(&stdout_path)
+            .await
+            .expect("parsing should succeed");
+        assert!(result.is_some(), "should return Some for IPv6 address");
+        let addr = result.unwrap();
+        assert_eq!(
+            addr.ip(),
+            std::net::IpAddr::V6(std::net::Ipv6Addr::new(
+                0, 0, 0, 0, 0, 0, 0, 1
+            ))
+        );
+        assert_eq!(addr.port(), 12345);
     }
 
     // Tests the way `process_exited()` checks and interprets the exit status
