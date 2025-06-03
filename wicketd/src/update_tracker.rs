@@ -843,8 +843,6 @@ impl UpdateDriver {
     ) {
         let update_cx = &update_cx;
 
-        // TODO-K: This is were I can check the way the bootloader update happens today
-
         // TODO: We currently do updates in the order RoT -> SP -> host. This is
         // generally the correct order, but in some cases there might be a bug
         // which forces us to update components in the order SP -> RoT -> host.

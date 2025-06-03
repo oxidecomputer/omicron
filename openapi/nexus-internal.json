@@ -5500,10 +5500,28 @@
                 "enum": [
                   "rot_bootloader"
                 ]
+              },
+              "expected_stage_0_next_version": {
+                "description": "expected contents of the stage 0 next",
+                "allOf": [
+                  {
+                    "$ref": "#/components/schemas/ExpectedVersion"
+                  }
+                ]
+              },
+              "expected_stage_0_version": {
+                "description": "expected contents of the stage 0",
+                "allOf": [
+                  {
+                    "$ref": "#/components/schemas/ArtifactVersion"
+                  }
+                ]
               }
             },
             "required": [
-              "component"
+              "component",
+              "expected_stage_0_next_version",
+              "expected_stage_0_version"
             ]
           }
         ]

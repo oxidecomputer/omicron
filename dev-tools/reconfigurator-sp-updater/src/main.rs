@@ -343,8 +343,15 @@ fn cmd_config(
                     expected_transient_boot_preference,
                 )?;
             }
-            PendingMgsUpdateDetails::RotBootloader {} => {
-                writeln!(&mut s, "        preconditions: ",)?;
+            PendingMgsUpdateDetails::RotBootloader {
+                expected_stage_0_version,
+                expected_stage_0_next_version,
+            } => {
+                writeln!(
+                    &mut s,
+                    "        preconditions: stage 0 {:?}, stage 0 next {:?}",
+                    expected_stage_0_version, expected_stage_0_next_version,
+                )?;
             }
         }
 

@@ -103,9 +103,10 @@ impl SpComponentUpdate {
                     target_sp_type: request.sp_type,
                     target_sp_slot: request.slot_id,
                     // The RoT bootlaoder has two firmware slots, stage0 and
-                    // stage0next. We always request an update to slot stage0,
-                    // which will always mean "the inactive slot".
-                    firmware_slot: 0,
+                    // stage0next. We always request an update to stage0next, which
+                    // is the staging area for the bootloader and in this context
+                    // means "the inactive slot".
+                    firmware_slot: 1,
                     update_id,
                 }
             }

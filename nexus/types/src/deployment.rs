@@ -1287,7 +1287,14 @@ pub enum PendingMgsUpdateDetails {
         /// override persistent preference selection for a single boot
         expected_transient_boot_preference: Option<RotSlot>,
     },
-    RotBootloader {},
+    RotBootloader {
+        // implicit: component = STAGE0
+        // implicit: firmware slot id = 1 (always 1 (Stage0Next) for RoT bootloader)
+        /// expected contents of the stage 0
+        expected_stage_0_version: ArtifactVersion,
+        /// expected contents of the stage 0 next
+        expected_stage_0_next_version: ExpectedVersion,
+    },
 }
 
 impl slog::KV for PendingMgsUpdateDetails {
@@ -1343,8 +1350,20 @@ impl slog::KV for PendingMgsUpdateDetails {
                     &format!("{:?}", expected_transient_boot_preference),
                 )
             }
-            PendingMgsUpdateDetails::RotBootloader {} => {
-                serializer.emit_str(Key::from("component"), "rot_bootloader") //?;
+            PendingMgsUpdateDetails::RotBootloader {
+                expected_stage_0_version,
+                expected_stage_0_next_version,
+            } => {
+                serializer
+                    .emit_str(Key::from("component"), "rot_bootloader")?;
+                serializer.emit_str(
+                    Key::from("expected_stage_0_version"),
+                    &expected_stage_0_version.to_string(),
+                )?;
+                serializer.emit_str(
+                    Key::from("expected_stage_0_next_version"),
+                    &format!("{:?}", expected_stage_0_next_version),
+                )
             }
         }
     }

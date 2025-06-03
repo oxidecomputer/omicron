@@ -22,6 +22,7 @@ impl SpComponentUpdateHelper for ReconfiguratorRotBootloaderUpdater {
         _mgs_clients: &'a mut MgsClients,
         _update: &'a PendingMgsUpdate,
     ) -> BoxFuture<'a, Result<PrecheckStatus, PrecheckError>> {
+        // TODO-K: To be completed in a follow up PR
         todo!()
     }
 
@@ -33,6 +34,7 @@ impl SpComponentUpdateHelper for ReconfiguratorRotBootloaderUpdater {
         _mgs_clients: &'a mut MgsClients,
         _update: &'a PendingMgsUpdate,
     ) -> BoxFuture<'a, Result<(), GatewayClientError>> {
+        // TODO-K: To be completed in a follow up PR
         todo!()
     }
 }
