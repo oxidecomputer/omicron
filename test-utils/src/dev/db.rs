@@ -427,8 +427,7 @@ impl CockroachStarter {
                     // equivalent way to isolate the chosen HTTP address from
                     // the Cockroach process. In lieu of that, we parse that
                     // information out of stdout.
-                    match parse_http_addr_from_stdout(&stdout_path).await
-                    {
+                    match parse_http_addr_from_stdout(&stdout_path).await {
                         Ok(Some(http_addr)) => {
                             // We have both the PG config and HTTP address
                             Ok((pg_config, http_addr))
