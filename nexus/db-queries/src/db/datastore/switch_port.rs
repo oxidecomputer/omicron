@@ -1263,7 +1263,7 @@ async fn do_switch_port_settings_create(
     for c in &params.links {
         let lldp_link_config = LldpLinkConfig::new(
             c.lldp.enabled,
-            c.lldp.link_name.clone().map(Into::into),
+            c.lldp.link_name.clone(),
             c.lldp.link_description.clone(),
             c.lldp.chassis_id.clone(),
             c.lldp.system_name.clone(),
