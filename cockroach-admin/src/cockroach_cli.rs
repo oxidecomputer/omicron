@@ -37,7 +37,7 @@ pub enum CockroachCliError {
     DecommissionLiveNode(String),
     #[error(
         "cannot decommission node {node_id}: {total_underreplicated_ranges} \
-         ranges across nodes {}",
+         range(s) underreplicated across node(s) {}",
          .nodes_with_underreplicated_ranges.join(",")
     )]
     DecommissionUnderreplicatedRanges {
