@@ -12,6 +12,7 @@ use nexus_config::PostgresConfigWithUrl;
 use std::collections::BTreeMap;
 use std::ffi::{OsStr, OsString};
 use std::fmt;
+use std::net::SocketAddr;
 use std::ops::Deref;
 use std::os::unix::process::ExitStatusExt;
 use std::path::Path;
@@ -48,6 +49,11 @@ const COCKROACHDB_USER: &'static str = "root";
 /// Path to the CockroachDB binary
 const COCKROACHDB_BIN: &str = "cockroach";
 
+// Filename of Cockroachdb's stdout
+const COCKROACHDB_STDOUT: &str = "cockroach_stdout";
+// Filename of Cockroachdb's stderr
+const COCKROACHDB_STDERR: &str = "cockroach_stderr";
+
 /// The expected CockroachDB version
 const COCKROACHDB_VERSION: &str =
     include_str!("../../../tools/cockroachdb_version");
@@ -78,8 +84,6 @@ pub struct CockroachStarterBuilder {
     cmd_builder: tokio::process::Command,
     /// how long to wait for CockroachDB to report itself listening
     start_timeout: Duration,
-    /// redirect stdout and stderr to files
-    redirect_stdio: bool,
 }
 
 impl CockroachStarterBuilder {
@@ -133,17 +137,7 @@ impl CockroachStarterBuilder {
             args: vec![String::from(cmd)],
             cmd_builder: tokio::process::Command::new(cmd),
             start_timeout: COCKROACHDB_START_TIMEOUT_DEFAULT,
-            redirect_stdio: false,
         }
-    }
-
-    /// Redirect stdout and stderr for the "cockroach" process to files within
-    /// the temporary directory.  This is used by the test suite so that people
-    /// don't get reams of irrelevant output when running `cargo nextest run`.
-    /// This will be cleaned up as usual on success.
-    pub fn redirect_stdio_to_files(&mut self) -> &mut Self {
-        self.redirect_stdio = true;
-        self
     }
 
     pub fn start_timeout(&mut self, duration: &Duration) -> &mut Self {
@@ -229,15 +223,13 @@ impl CockroachStarterBuilder {
             .arg("--listening-url-file")
             .arg(listen_url_file.as_os_str());
 
-        if self.redirect_stdio {
-            let temp_dir_path = temp_dir.path();
-            self.cmd_builder.stdout(Stdio::from(
-                self.redirect_file(temp_dir_path, "cockroachdb_stdout")?,
-            ));
-            self.cmd_builder.stderr(Stdio::from(
-                self.redirect_file(temp_dir_path, "cockroachdb_stderr")?,
-            ));
-        }
+        let temp_dir_path = temp_dir.path();
+        self.cmd_builder.stdout(Stdio::from(
+            self.redirect_file(temp_dir_path, COCKROACHDB_STDOUT)?,
+        ));
+        self.cmd_builder.stderr(Stdio::from(
+            self.redirect_file(temp_dir_path, COCKROACHDB_STDERR)?,
+        ));
 
         Ok(CockroachStarter {
             temp_dir,
@@ -348,6 +340,8 @@ impl CockroachStarter {
         })?;
         let pid = child_process.id().unwrap();
 
+        let stdout_path = self.temp_dir().join(COCKROACHDB_STDOUT);
+
         // Wait for CockroachDB to write out its URL information.  There's not a
         // great way for us to know when this has happened, unfortunately.  So
         // we just poll for it up to some maximum timeout.
@@ -427,13 +421,17 @@ impl CockroachStarter {
         .await;
 
         match wait_result {
-            Ok(pg_config) => Ok(CockroachInstance {
-                pid,
-                pg_config,
-                temp_dir_path: self.temp_dir.path().to_owned(),
-                temp_dir: Some(self.temp_dir),
-                child_process: Some(child_process),
-            }),
+            Ok(pg_config) => {
+                let http_addr = SocketAddr::V4(std::net::SocketAddrV4::new(std::net::Ipv4Addr::LOCALHOST, 0));
+                Ok(CockroachInstance {
+                    pid,
+                    http_addr,
+                    pg_config,
+                    temp_dir_path: self.temp_dir.path().to_owned(),
+                    temp_dir: Some(self.temp_dir),
+                    child_process: Some(child_process),
+                })
+            },
             Err(poll_error) => {
                 // Abort and tell the user.  We'll leave CockroachDB running so
                 // the user can debug if they want.  We'll skip cleanup of the
@@ -537,6 +535,8 @@ impl From<Signal> for libc::c_int {
 pub struct CockroachInstance {
     /// child process id
     pid: u32,
+    /// address of the HTTP API
+    http_addr: SocketAddr,
     /// PostgreSQL config to use to connect to CockroachDB as a SQL client
     pg_config: PostgresConfigWithUrl,
     /// handle to child process, if it hasn't been cleaned up already
@@ -1090,9 +1090,7 @@ mod test {
     use tokio::fs;
 
     fn new_builder() -> CockroachStarterBuilder {
-        let mut builder = CockroachStarterBuilder::new();
-        builder.redirect_stdio_to_files();
-        builder
+        CockroachStarterBuilder::new()
     }
 
     // Tests that we clean up the temporary directory correctly when the starter
@@ -1146,10 +1144,10 @@ mod test {
         // incorrect, we could accidentally do a lot of damage.  Instead, remove
         // just the files we expect to be present, and then remove the
         // (now-empty) directory.
-        fs::remove_file(temp_dir.join("cockroachdb_stdout"))
+        fs::remove_file(temp_dir.join(COCKROACHDB_STDOUT))
             .await
             .expect("failed to remove cockroachdb stdout file");
-        fs::remove_file(temp_dir.join("cockroachdb_stderr"))
+        fs::remove_file(temp_dir.join(COCKROACHDB_STDERR))
             .await
             .expect("failed to remove cockroachdb stderr file");
         fs::remove_dir(temp_dir)
@@ -1306,7 +1304,10 @@ mod test {
         fs::remove_dir(&listen_url_file)
             .await
             .expect("failed to remove listen-url directory");
-        fs::remove_dir(temp_dir)
+
+        // We're now redirecting output to files by default; it's fine to
+        // destroy them here.
+        fs::remove_dir_all(temp_dir)
             .await
             .expect("failed to remove temporary directory");
     }
