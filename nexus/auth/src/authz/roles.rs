@@ -49,7 +49,7 @@ use uuid::Uuid;
 /// For more on roles, see dbinit.rs.
 #[derive(Clone, Debug)]
 pub struct RoleSet {
-    roles: BTreeSet<(ResourceType, Uuid, String)>,
+    pub roles: BTreeSet<(ResourceType, Uuid, String)>,
 }
 
 impl RoleSet {
@@ -81,6 +81,28 @@ impl RoleSet {
             resource_id,
             String::from(role_name),
         ));
+    }
+
+    /// Effective, i.e., strongest, role in set for specified resource
+    pub fn effective_role(
+        &self,
+        resource_type: &ResourceType,
+        resource_id: &Uuid,
+    ) -> Option<String> {
+        self.roles
+            .iter()
+            .filter(|(typ, id, _)| typ == resource_type && id == resource_id)
+            .max_by_key(|(_, _, role)| role_num(role))
+            .map(|(_, _, role)| role.clone())
+    }
+}
+
+fn role_num(role: &str) -> u8 {
+    match role {
+        "viewer" => 1,
+        "collaborator" => 2,
+        "admin" => 3,
+        _ => 0,
     }
 }
 

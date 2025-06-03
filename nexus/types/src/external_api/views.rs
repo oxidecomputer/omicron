@@ -924,15 +924,32 @@ pub struct User {
 
 // SESSION
 
-// Add silo name to User because the console needs to display it
 /// Info about the current user
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize, JsonSchema)]
 pub struct CurrentUser {
     #[serde(flatten)]
     pub user: User,
 
-    /** Name of the silo to which this user belongs. */
+    /// Name of the silo to which this user belongs
     pub silo_name: Name,
+
+    /// This user's effective IAM role on the fleet resource. This determines
+    /// the user's level of access to system-level resources under the
+    /// `/v1/system/*` endpoints.
+    ///
+    /// If the user has multiple role assignments on a resource, for example,
+    /// an `admin` role assigned directly to the user and a `viewer` role
+    /// inherited through a group membership, the strongest role (`admin`) is
+    /// the effective role. A null value means no role is assigned.
+    pub fleet_role: Option<String>,
+    /// This user's effective IAM role on their silo. This determines the user's
+    /// level of access to the silo itself and resources within it.
+    ///
+    /// If the user has multiple role assignments on a resource, for example,
+    /// an `admin` role assigned directly to the user and a `viewer` role
+    /// inherited through a group membership, the strongest role (`admin`) is
+    /// the effective role. A null value means no role is assigned.
+    pub silo_role: Option<String>,
 }
 
 // SILO GROUPS

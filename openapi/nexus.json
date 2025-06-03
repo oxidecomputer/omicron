@@ -16173,6 +16173,11 @@
             "description": "Human-readable name that can identify the user",
             "type": "string"
           },
+          "fleet_role": {
+            "nullable": true,
+            "description": "This user's effective IAM role on the fleet resource. This determines the user's level of access to system-level resources under the `/v1/system/*` endpoints.\n\nIf the user has multiple role assignments on a resource, for example, an `admin` role assigned directly to the user and a `viewer` role inherited through a group membership, the strongest role (`admin`) is the effective role. A null value means no role is assigned.",
+            "type": "string"
+          },
           "id": {
             "type": "string",
             "format": "uuid"
@@ -16183,12 +16188,17 @@
             "format": "uuid"
           },
           "silo_name": {
-            "description": "Name of the silo to which this user belongs.",
+            "description": "Name of the silo to which this user belongs",
             "allOf": [
               {
                 "$ref": "#/components/schemas/Name"
               }
             ]
+          },
+          "silo_role": {
+            "nullable": true,
+            "description": "This user's effective IAM role on their silo. This determines the user's level of access to the silo itself and resources within it.\n\nIf the user has multiple role assignments on a resource, for example, an `admin` role assigned directly to the user and a `viewer` role inherited through a group membership, the strongest role (`admin`) is the effective role. A null value means no role is assigned.",
+            "type": "string"
           }
         },
         "required": [

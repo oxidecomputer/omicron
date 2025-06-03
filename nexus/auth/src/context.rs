@@ -8,6 +8,7 @@ use super::authz;
 use crate::authn::ConsoleSessionWithSiloId;
 use crate::authn::external::session_cookie::Session;
 use crate::authz::AuthorizedResource;
+use crate::authz::RoleSet;
 use crate::storage::Storage;
 use chrono::{DateTime, Utc};
 use omicron_common::api::external::Error;
@@ -283,6 +284,16 @@ impl OpContext {
             "result" => ?result,
         );
         result
+    }
+
+    pub async fn get_roles<Resource>(
+        &self,
+        resource: &Resource,
+    ) -> Result<RoleSet, Error>
+    where
+        Resource: AuthorizedResource + Debug + Clone,
+    {
+        self.authz.get_roles(self, resource.clone()).await
     }
 
     /// Returns an error if we're currently in a context where expensive or
