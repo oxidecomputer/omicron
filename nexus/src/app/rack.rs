@@ -616,7 +616,7 @@ impl super::Nexus {
                     bgp_config: NameOrId::Name(
                         format!("as{}", r.asn).parse().unwrap(),
                     ),
-                    interface_name: link_name.to_string(),
+                    interface_name: link_name.clone(),
                     addr: r.addr.into(),
                     hold_time: r.hold_time() as u32,
                     idle_hold_time: r.idle_hold_time() as u32,

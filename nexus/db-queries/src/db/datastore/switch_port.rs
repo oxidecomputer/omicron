@@ -50,7 +50,7 @@ use uuid::Uuid;
 pub struct BgpPeerConfig {
     pub port_settings_id: Uuid,
     pub bgp_config_id: Uuid,
-    pub interface_name: String,
+    pub interface_name: Name,
     pub addr: IpNetwork,
     pub hold_time: SqlU32,
     pub idle_hold_time: SqlU32,
@@ -73,7 +73,7 @@ impl Into<external::BgpPeer> for BgpPeerConfig {
     fn into(self) -> external::BgpPeer {
         external::BgpPeer {
             bgp_config: self.bgp_config_id.into(),
-            interface_name: self.interface_name.clone(),
+            interface_name: self.interface_name.into(),
             addr: self.addr.ip(),
             hold_time: self.hold_time.into(),
             idle_hold_time: self.idle_hold_time.into(),
@@ -158,7 +158,7 @@ pub struct SwitchPortSettingsGroupCreateResult {
 #[derive(Clone, Debug, Deserialize, Serialize)]
 pub struct LinkConfigCombinedResult {
     pub port_settings_id: Uuid,
-    pub link_name: String,
+    pub link_name: Name,
     pub mtu: SqlU16,
     pub fec: Option<SwitchLinkFec>,
     pub speed: SwitchLinkSpeed,
@@ -171,7 +171,7 @@ impl From<LinkConfigCombinedResult> for external::SwitchPortLinkConfig {
     fn from(value: LinkConfigCombinedResult) -> Self {
         Self {
             port_settings_id: value.port_settings_id,
-            link_name: value.link_name,
+            link_name: value.link_name.into(),
             mtu: *value.mtu,
             fec: value.fec.map(Into::into),
             speed: value.speed.into(),
@@ -743,11 +743,8 @@ impl DataStore {
         let err = OptionalError::new();
 
         let conn = self.pool_connection_authorized(opctx).await?;
-        let switch_port = SwitchPort::new(
-            rack_id,
-            switch_location.to_string(),
-            port.to_string(),
-        );
+        let switch_port =
+            SwitchPort::new(rack_id, switch_location.to_string(), port.clone());
 
         // TODO https://github.com/oxidecomputer/omicron/issues/2811
         // Audit external networking database transaction usage
@@ -1266,7 +1263,7 @@ async fn do_switch_port_settings_create(
     for c in &params.links {
         let lldp_link_config = LldpLinkConfig::new(
             c.lldp.enabled,
-            c.lldp.link_name.clone(),
+            c.lldp.link_name.clone().map(Into::into),
             c.lldp.link_description.clone(),
             c.lldp.chassis_id.clone(),
             c.lldp.system_name.clone(),
@@ -1290,7 +1287,7 @@ async fn do_switch_port_settings_create(
         link_config.push(SwitchPortLinkConfig::new(
             psid,
             lldp_config_id,
-            c.link_name.to_string(),
+            c.link_name.clone().into(),
             c.mtu,
             c.fec.map(|fec| fec.into()),
             c.speed.into(),
@@ -1352,7 +1349,7 @@ async fn do_switch_port_settings_create(
     for i in &params.interfaces {
         let ifx_config = SwitchInterfaceConfig::new(
             psid,
-            i.link_name.to_string(),
+            i.link_name.clone().into(),
             i.v6_enabled,
             i.kind.into(),
         );
@@ -1384,7 +1381,7 @@ async fn do_switch_port_settings_create(
         for route in &r.routes {
             route_config.push(SwitchPortRouteConfig::new(
                 psid,
-                r.link_name.to_string(),
+                r.link_name.clone().into(),
                 route.dst.into(),
                 route.gw.into(),
                 route.vid.map(Into::into),
@@ -1447,7 +1444,7 @@ async fn do_switch_port_settings_create(
                     .into_iter()
                     .map(|x| SwitchPortBgpPeerConfigAllowImport {
                         port_settings_id: id,
-                        interface_name: peer_config.link_name.to_string(),
+                        interface_name: peer_config.link_name.clone().into(),
                         addr: p.addr.into(),
                         prefix: x.into(),
                     })
@@ -1466,7 +1463,7 @@ async fn do_switch_port_settings_create(
                     .into_iter()
                     .map(|x| SwitchPortBgpPeerConfigAllowExport {
                         port_settings_id: id,
-                        interface_name: peer_config.link_name.to_string(),
+                        interface_name: peer_config.link_name.clone().into(),
                         addr: p.addr.into(),
                         prefix: x.into(),
                     })
@@ -1486,7 +1483,7 @@ async fn do_switch_port_settings_create(
                     .into_iter()
                     .map(|x| SwitchPortBgpPeerConfigCommunity {
                         port_settings_id: id,
-                        interface_name: peer_config.link_name.to_string(),
+                        interface_name: peer_config.link_name.clone().into(),
                         addr: p.addr.into(),
                         community: x.into(),
                     })
@@ -1501,7 +1498,7 @@ async fn do_switch_port_settings_create(
             bgp_peer_config.push(SwitchPortBgpPeerConfig::new(
                 psid,
                 bgp_config_id,
-                peer_config.link_name.to_string(),
+                peer_config.link_name.clone().into(),
                 p,
             ));
         }
@@ -1610,7 +1607,7 @@ async fn do_switch_port_settings_create(
                 block.id,
                 rsvd_block.id,
                 address.address.into(),
-                a.link_name.to_string(),
+                a.link_name.clone().into(),
                 address.vlan_id,
             ));
         }
@@ -1655,7 +1652,7 @@ async fn switch_port_address_view(
             address_lot_block_id: address.address_lot_block_id,
             address: address.address.into(),
             vlan_id: address.vlan_id.map(Into::into),
-            interface_name: address.interface_name,
+            interface_name: address.interface_name.into(),
         })
     }
 
@@ -1926,7 +1923,7 @@ mod test {
                     bgp_config: NameOrId::Name(
                         "test-bgp-config".parse().unwrap(),
                     ),
-                    interface_name: "qsfp0".into(),
+                    interface_name: "qsfp0".parse().unwrap(),
                     addr: "192.168.1.1".parse().unwrap(),
                     hold_time: 0,
                     idle_hold_time: 0,
@@ -2001,7 +1998,7 @@ mod test {
 
         for link in settings.links {
             let db_link = db_links
-                .get(&link.link_name.to_string())
+                .get(&link.link_name.into())
                 .expect("requested link should be present");
 
             assert_eq!(link.mtu, *db_link.mtu);
@@ -2085,7 +2082,7 @@ mod test {
             for route in config.routes {
                 let db_route = db_routes
                     .get(&(
-                        config.link_name.to_string(),
+                        config.link_name.clone().into(),
                         route.dst.into(),
                         route.gw,
                     ))
@@ -2109,7 +2106,7 @@ mod test {
 
         for config in settings.addresses {
             let db_address = db_addresses
-                .get(&config.link_name.to_string())
+                .get(&config.link_name)
                 .expect("requested address should be present");
 
             for address in config.addresses {
@@ -2137,7 +2134,7 @@ mod test {
 
         for config in settings.bgp_peers {
             let db_peer = db_peers
-                .get(&config.link_name.to_string())
+                .get(&config.link_name.into())
                 .expect("requested peer should be present");
 
             for peer in config.peers {
