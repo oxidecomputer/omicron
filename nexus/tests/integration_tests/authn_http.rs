@@ -27,7 +27,7 @@ use nexus_db_queries::authn::external::spoof;
 use nexus_db_queries::authn::external::spoof::HttpAuthnSpoof;
 use nexus_db_queries::authn::external::spoof::SPOOF_SCHEME_NAME;
 use nexus_types::silo::DEFAULT_SILO_ID;
-use std::collections::HashMap;
+use omicron_uuid_kinds::ConsoleSessionUuid;
 use std::sync::Mutex;
 use uuid::Uuid;
 
@@ -42,12 +42,9 @@ async fn test_authn_spoof_allowed() {
     let authn_schemes_configured: Vec<
         Box<dyn HttpAuthnScheme<WhoamiServerState> + 'static>,
     > = vec![Box::new(HttpAuthnSpoof)];
-    let testctx = start_whoami_server(
-        test_name,
-        authn_schemes_configured,
-        HashMap::new(),
-    )
-    .await;
+    let testctx =
+        start_whoami_server(test_name, authn_schemes_configured, Vec::new())
+            .await;
     let tried_spoof = [SPOOF_SCHEME_NAME]
         .iter()
         .map(|s| s.to_string())
@@ -108,18 +105,24 @@ async fn test_authn_session_cookie() {
         Box<dyn HttpAuthnScheme<WhoamiServerState> + 'static>,
     > = vec![Box::new(session_cookie::HttpAuthnSessionCookie)];
     let valid_session = FakeSession {
+        id: ConsoleSessionUuid::new_v4(),
+        token: "valid".to_string(),
         silo_user_id: Uuid::new_v4(),
         silo_id: Uuid::new_v4(),
         time_last_used: Utc::now() - Duration::seconds(5),
         time_created: Utc::now() - Duration::seconds(5),
     };
     let idle_expired_session = FakeSession {
+        id: ConsoleSessionUuid::new_v4(),
+        token: "idle_expired".to_string(),
         silo_user_id: Uuid::new_v4(),
         silo_id: Uuid::new_v4(),
         time_last_used: Utc::now() - Duration::hours(2),
         time_created: Utc::now() - Duration::hours(3),
     };
     let abs_expired_session = FakeSession {
+        id: ConsoleSessionUuid::new_v4(),
+        token: "abs_expired".to_string(),
         silo_user_id: Uuid::new_v4(),
         silo_id: Uuid::new_v4(),
         time_last_used: Utc::now(),
@@ -128,11 +131,7 @@ async fn test_authn_session_cookie() {
     let testctx = start_whoami_server(
         test_name,
         authn_schemes_configured,
-        HashMap::from([
-            ("valid".to_string(), valid_session),
-            ("idle_expired".to_string(), idle_expired_session),
-            ("abs_expired".to_string(), abs_expired_session),
-        ]),
+        vec![valid_session.clone(), idle_expired_session, abs_expired_session],
     )
     .await;
 
@@ -192,8 +191,7 @@ async fn test_authn_session_cookie() {
 #[tokio::test]
 async fn test_authn_spoof_unconfigured() {
     let test_name = "test_authn_spoof_disallowed";
-    let testctx =
-        start_whoami_server(test_name, Vec::new(), HashMap::new()).await;
+    let testctx = start_whoami_server(test_name, Vec::new(), Vec::new()).await;
 
     let values = [
         None,
@@ -283,7 +281,7 @@ fn assert_authn_failed(
 async fn start_whoami_server(
     test_name: &str,
     authn_schemes_configured: Vec<Box<dyn HttpAuthnScheme<WhoamiServerState>>>,
-    sessions: HashMap<String, FakeSession>,
+    sessions: Vec<FakeSession>,
 ) -> TestContext<WhoamiServerState> {
     let config = nexus_test_utils::load_test_config();
     let logctx = LogContext::new(test_name, &config.pkg.log);
@@ -316,7 +314,7 @@ async fn start_whoami_server(
 
 struct WhoamiServerState {
     authn: nexus_db_queries::authn::external::Authenticator<WhoamiServerState>,
-    sessions: Mutex<HashMap<String, FakeSession>>,
+    sessions: Mutex<Vec<FakeSession>>,
 }
 
 #[async_trait]
@@ -346,8 +344,10 @@ impl SiloUserSilo for WhoamiServerState {
     }
 }
 
-#[derive(Clone, Copy)]
+#[derive(Clone)]
 struct FakeSession {
+    id: ConsoleSessionUuid,
+    token: String,
     silo_user_id: Uuid,
     silo_id: Uuid,
     time_created: DateTime<Utc>,
@@ -355,6 +355,9 @@ struct FakeSession {
 }
 
 impl session_cookie::Session for FakeSession {
+    fn id(&self) -> ConsoleSessionUuid {
+        self.id
+    }
     fn silo_user_id(&self) -> Uuid {
         self.silo_user_id
     }
@@ -374,22 +377,29 @@ impl session_cookie::SessionStore for WhoamiServerState {
     type SessionModel = FakeSession;
 
     async fn session_fetch(&self, token: String) -> Option<Self::SessionModel> {
-        self.sessions.lock().unwrap().get(&token).map(|s| *s)
+        self.sessions.lock().unwrap().iter().find(|s| s.token == token).cloned()
     }
 
     async fn session_update_last_used(
         &self,
-        token: String,
+        id: ConsoleSessionUuid,
     ) -> Option<Self::SessionModel> {
         let mut sessions = self.sessions.lock().unwrap();
-        let session = *sessions.get(&token).unwrap();
-        let new_session = FakeSession { time_last_used: Utc::now(), ..session };
-        (*sessions).insert(token, new_session)
+        if let Some(pos) = sessions.iter().position(|s| s.id == id) {
+            let new_session = FakeSession {
+                time_last_used: Utc::now(),
+                ..sessions[pos].clone()
+            };
+            sessions[pos] = new_session.clone();
+            Some(new_session)
+        } else {
+            None
+        }
     }
 
-    async fn session_expire(&self, token: String) -> Option<()> {
+    async fn session_expire(&self, id: ConsoleSessionUuid) -> Option<()> {
         let mut sessions = self.sessions.lock().unwrap();
-        (*sessions).remove(&token);
+        sessions.retain(|s| s.id != id);
         Some(())
     }
 

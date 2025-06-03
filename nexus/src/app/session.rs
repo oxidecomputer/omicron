@@ -18,6 +18,8 @@ use omicron_common::api::external::Error;
 use omicron_common::api::external::LookupResult;
 use omicron_common::api::external::LookupType;
 use omicron_common::api::external::UpdateResult;
+use omicron_uuid_kinds::ConsoleSessionUuid;
+use omicron_uuid_kinds::GenericUuid;
 use rand::{RngCore, SeedableRng, rngs::StdRng};
 use uuid::Uuid;
 
@@ -50,19 +52,16 @@ impl super::Nexus {
         opctx: &OpContext,
         token: String,
     ) -> LookupResult<authn::ConsoleSessionWithSiloId> {
-        let (.., db_console_session) =
-            LookupPath::new(opctx, &self.db_datastore)
-                .console_session_token(&token)
-                .fetch()
-                .await?;
+        let (.., db_session) =
+            self.db_datastore.session_lookup_by_token(&opctx, token).await?;
 
         let (.., db_silo_user) = LookupPath::new(opctx, &self.db_datastore)
-            .silo_user_id(db_console_session.silo_user_id)
+            .silo_user_id(db_session.silo_user_id)
             .fetch()
             .await?;
 
         Ok(authn::ConsoleSessionWithSiloId {
-            console_session: db_console_session,
+            console_session: db_session,
             silo_id: db_silo_user.silo_id,
         })
     }
@@ -71,12 +70,12 @@ impl super::Nexus {
     pub(crate) async fn session_update_last_used(
         &self,
         opctx: &OpContext,
-        token: &str,
+        id: ConsoleSessionUuid,
     ) -> UpdateResult<authn::ConsoleSessionWithSiloId> {
         let authz_session = authz::ConsoleSession::new(
             authz::FLEET,
-            token.to_string(),
-            LookupType::ByCompositeId(token.to_string()),
+            id,
+            LookupType::ById(id.into_untyped_uuid()),
         );
         self.db_datastore.session_update_last_used(opctx, &authz_session).await
     }
@@ -84,14 +83,22 @@ impl super::Nexus {
     pub(crate) async fn session_hard_delete(
         &self,
         opctx: &OpContext,
-        token: &str,
+        id: ConsoleSessionUuid,
     ) -> DeleteResult {
         let authz_session = authz::ConsoleSession::new(
             authz::FLEET,
-            token.to_string(),
-            LookupType::ByCompositeId(token.to_string()),
+            id,
+            LookupType::ById(id.into_untyped_uuid()),
         );
         self.db_datastore.session_hard_delete(opctx, &authz_session).await
+    }
+
+    pub(crate) async fn session_hard_delete_by_token(
+        &self,
+        opctx: &OpContext,
+        token: String,
+    ) -> DeleteResult {
+        self.db_datastore.session_hard_delete_by_token(opctx, token).await
     }
 
     pub(crate) async fn lookup_silo_for_authn(
