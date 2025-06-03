@@ -2276,10 +2276,10 @@ fn before_146_0_0<'a>(ctx: &'a MigrationContext<'a>) -> BoxFuture<'a, ()> {
           (id, time_created, time_modified, time_deleted, rcgen, vendor, serial, model, variant, sled_id, disk_policy, disk_state)
         VALUES
           (
-            '{M2_DISK}', now(), now(), NULL, 0, 'vend', 'serial-m2', 'model', 'm2', gen_random_uuid(), 'in_service');, 'active'
+            '{M2_DISK}', now(), now(), NULL, 0, 'vend', 'serial-m2', 'model', 'm2', gen_random_uuid(), 'in_service', 'active'
           ),
           (
-            '{U2_DISK}', now(), now(), NULL, 0, 'vend', 'serial-u2', 'model', 'u2', gen_random_uuid(), 'in_service');, 'active'
+            '{U2_DISK}', now(), now(), NULL, 0, 'vend', 'serial-u2', 'model', 'u2', gen_random_uuid(), 'in_service', 'active'
           );
 
         INSERT INTO omicron.public.zpool
