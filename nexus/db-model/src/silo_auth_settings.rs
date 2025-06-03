@@ -1,3 +1,4 @@
+use crate::SqlU32;
 use chrono::{DateTime, Utc};
 use nexus_db_schema::schema::silo_auth_settings;
 use nexus_types::external_api::{params, views};
@@ -22,7 +23,7 @@ pub struct SiloAuthSettings {
 
     /// Max token lifetime in seconds. Null means no max: users can create
     /// tokens that never expire.
-    pub device_token_max_ttl_seconds: Option<i64>,
+    pub device_token_max_ttl_seconds: Option<SqlU32>,
 }
 
 impl SiloAuthSettings {
@@ -41,7 +42,8 @@ impl From<SiloAuthSettings> for views::SiloAuthSettings {
         Self {
             silo_id: silo_auth_settings.silo_id,
             device_token_max_ttl_seconds: silo_auth_settings
-                .device_token_max_ttl_seconds,
+                .device_token_max_ttl_seconds
+                .map(|ttl| ttl.0),
         }
     }
 }

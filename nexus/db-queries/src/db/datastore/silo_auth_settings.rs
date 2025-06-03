@@ -48,7 +48,7 @@ impl DataStore {
             .map(|_| ())
     }
 
-    pub async fn silo_auth_settings_delete(
+    pub(crate) async fn silo_auth_settings_delete(
         &self,
         opctx: &OpContext,
         conn: &async_bb8_diesel::Connection<DbConnection>,

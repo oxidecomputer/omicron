@@ -123,7 +123,7 @@ impl super::Nexus {
             // build a way for the user to ask for a different TTL
             silo_auth_settings
                 .device_token_max_ttl_seconds
-                .map(|ttl| Utc::now() + Duration::seconds(ttl)),
+                .map(|ttl| Utc::now() + Duration::seconds(ttl.0.into())),
         );
 
         if db_request.time_expires < Utc::now() {

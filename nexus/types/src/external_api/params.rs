@@ -494,7 +494,6 @@ pub struct SiloQuotasUpdate {
 pub struct SiloAuthSettingsUpdate {
     /// Maximum lifetime of a device token in seconds. If set to null, users
     /// will be able to create tokens that do not expire.
-    #[schemars(range(min = 1))]
     pub device_token_max_ttl_seconds: Nullable<NonZeroU32>,
 }
 

@@ -166,7 +166,8 @@ async fn test_device_auth_flow(cptestctx: &ControlPlaneTestContext) {
     assert_eq!(token.access_token.len(), 52);
     assert!(token.access_token.starts_with("oxide-token-"));
 
-    // now make a request with the token. it 403s because unpriv user has no roles
+    // now make a request with the token. it 403s because unpriv user has no
+    // roles
     project_list(&testctx, &token.access_token, StatusCode::FORBIDDEN)
         .await
         .expect("projects list should 403 with no roles");
@@ -275,7 +276,8 @@ async fn test_device_token_expiration(cptestctx: &ControlPlaneTestContext) {
             StatusCode::BAD_REQUEST,
         )
         .await;
-        let msg = "unable to parse JSON body: device_token_max_ttl_seconds: invalid value";
+        let msg = "unable to parse JSON body: \
+                   device_token_max_ttl_seconds: invalid value";
         assert!(error.message.starts_with(&msg));
     }
     for value in [-3, 0] {
@@ -286,7 +288,8 @@ async fn test_device_token_expiration(cptestctx: &ControlPlaneTestContext) {
             StatusCode::BAD_REQUEST,
         )
         .await;
-        let msg = "unable to parse JSON body: device_token_max_ttl_seconds: invalid value";
+        let msg = "unable to parse JSON body: \
+                   device_token_max_ttl_seconds: invalid value";
         assert!(error.message.starts_with(&msg));
     }
 
@@ -298,7 +301,9 @@ async fn test_device_token_expiration(cptestctx: &ControlPlaneTestContext) {
         StatusCode::BAD_REQUEST,
     )
     .await;
-    assert!(error.message.starts_with("unable to parse JSON body: missing field `device_token_max_ttl_seconds`"));
+    let msg = "unable to parse JSON body: \
+         missing field `device_token_max_ttl_seconds`";
+    assert!(error.message.starts_with(&msg));
 
     // set token expiration on silo to 3 seconds
     let settings: views::SiloAuthSettings = object_put(
@@ -333,7 +338,7 @@ async fn test_device_token_expiration(cptestctx: &ControlPlaneTestContext) {
         .await
         .expect("expiring token should fail after expiration");
 
-    // original token should still work (it was created before the expiration setting)
+    // original token should still work (created before the expiration setting)
     project_list(&testctx, &initial_token, StatusCode::OK)
         .await
         .expect("initial token should still work");

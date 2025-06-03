@@ -226,18 +226,17 @@ impl super::Nexus {
         Ok(shared::Policy { role_assignments })
     }
 
-    pub(crate) async fn silo_fetch_settings(
+    pub(crate) async fn silo_fetch_auth_settings(
         &self,
         opctx: &OpContext,
         silo_lookup: &lookup::Silo<'_>,
     ) -> LookupResult<SiloAuthSettings> {
-        // TODO: can everyone view this on their own silo? why not, right?
         let (.., authz_silo) =
             silo_lookup.lookup_for(authz::Action::Read).await?;
         self.db_datastore.silo_auth_settings_view(opctx, &authz_silo).await
     }
 
-    pub(crate) async fn silo_update_settings(
+    pub(crate) async fn silo_update_auth_settings(
         &self,
         opctx: &OpContext,
         silo_lookup: &lookup::Silo<'_>,

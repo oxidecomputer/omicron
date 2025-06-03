@@ -22607,13 +22607,15 @@
         ]
       },
       "SiloAuthSettings": {
-        "description": "A collection of resource counts used to set the virtual capacity of a silo",
+        "description": "View of silo authentication settings",
         "type": "object",
         "properties": {
           "device_token_max_ttl_seconds": {
             "nullable": true,
+            "description": "Maximum lifetime of a device token in seconds. If set to null, users will be able to create tokens that do not expire.",
             "type": "integer",
-            "format": "int64"
+            "format": "uint32",
+            "minimum": 0
           },
           "silo_id": {
             "type": "string",

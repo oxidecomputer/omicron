@@ -116,11 +116,13 @@ impl SimpleIdentityOrName for SiloUtilization {
     }
 }
 
-/// A collection of resource counts used to set the virtual capacity of a silo
+/// View of silo authentication settings
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
 pub struct SiloAuthSettings {
     pub silo_id: Uuid,
-    pub device_token_max_ttl_seconds: Option<i64>,
+    /// Maximum lifetime of a device token in seconds. If set to null, users
+    /// will be able to create tokens that do not expire.
+    pub device_token_max_ttl_seconds: Option<u32>,
 }
 
 // AFFINITY GROUPS

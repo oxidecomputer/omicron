@@ -246,7 +246,7 @@ impl NexusExternalApi for NexusExternalApiImpl {
 
             let silo_lookup = nexus.silo_lookup(&opctx, silo)?;
             let settings =
-                nexus.silo_fetch_settings(&opctx, &silo_lookup).await?;
+                nexus.silo_fetch_auth_settings(&opctx, &silo_lookup).await?;
             Ok(HttpResponseOk(settings.into()))
         };
         apictx
@@ -274,7 +274,7 @@ impl NexusExternalApi for NexusExternalApiImpl {
                 .into();
             let silo_lookup = nexus.silo_lookup(&opctx, silo)?;
             let settings = nexus
-                .silo_update_settings(&opctx, &silo_lookup, &new_settings)
+                .silo_update_auth_settings(&opctx, &silo_lookup, &new_settings)
                 .await?;
             Ok(HttpResponseOk(settings.into()))
         };
