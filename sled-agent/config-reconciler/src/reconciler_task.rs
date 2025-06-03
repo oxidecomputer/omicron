@@ -227,7 +227,7 @@ impl LatestReconciliationResult {
         };
         self.datasets
             .iter()
-            // Fitler down to successfully-ensured datasets
+            // Filter down to successfully-ensured datasets
             .filter_map(|(dataset_id, result)| match result {
                 ConfigReconcilerInventoryResult::Ok => {
                     self.sled_config.datasets.get(dataset_id)
