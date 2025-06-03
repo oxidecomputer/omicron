@@ -918,7 +918,7 @@ impl BackgroundTasksInitializer {
                 period: period_secs,
                 task_impl: Box::new(
                     webhook_deliverator::WebhookDeliverator::new(
-                        datastore,
+                        datastore.clone(),
                         cfg,
                         nexus_id,
                         args.webhook_delivery_client,
@@ -934,13 +934,9 @@ impl BackgroundTasksInitializer {
             name: "sp_ereport_ingester",
             description: "collects error reports from service processors",
             period: config.sp_ereport_ingester.period_secs,
-            task_impl: Box::new(
-                ereport_ingester::SpEreportIngester::new(
-                    datastore,
-                    resolver,
-                    nexus_id,
-                ),
-            ),
+            task_impl: Box::new(ereport_ingester::SpEreportIngester::new(
+                datastore, resolver, nexus_id,
+            )),
             opctx: opctx.child(BTreeMap::new()),
             watchers: vec![],
             activator: task_sp_ereport_ingester,
