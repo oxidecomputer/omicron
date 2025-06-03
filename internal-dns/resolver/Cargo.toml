@@ -11,6 +11,7 @@ workspace = true
 futures.workspace = true
 hickory-resolver.workspace = true
 internal-dns-types.workspace = true
+dns-server-api.workspace = true
 omicron-common.workspace = true
 omicron-workspace-hack.workspace = true
 qorb.workspace = true
