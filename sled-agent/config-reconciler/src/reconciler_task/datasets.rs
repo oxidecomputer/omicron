@@ -28,9 +28,11 @@ use omicron_uuid_kinds::DatasetUuid;
 use sled_storage::config::MountConfig;
 use sled_storage::dataset::ZONE_DATASET;
 use slog::Logger;
+use slog::info;
 use slog::warn;
 use slog_error_chain::InlineErrorChain;
 use std::collections::BTreeMap;
+use std::collections::BTreeSet;
 use std::sync::Arc;
 
 #[derive(Debug, thiserror::Error)]
@@ -48,6 +50,7 @@ pub(super) enum ZoneDatasetDependencyError {
 #[derive(Debug)]
 pub(super) struct OmicronDatasets {
     datasets: IdMap<OmicronDataset>,
+    orphaned_datasets: BTreeSet<DatasetName>,
     dataset_task: DatasetTaskHandle,
 }
 
@@ -67,11 +70,15 @@ impl OmicronDatasets {
                 },
             })
             .collect();
-        Self { datasets, dataset_task }
+        Self { datasets, orphaned_datasets: BTreeSet::new(), dataset_task }
     }
 
     pub(super) fn new(dataset_task: DatasetTaskHandle) -> Self {
-        Self { datasets: IdMap::default(), dataset_task }
+        Self {
+            datasets: IdMap::default(),
+            orphaned_datasets: BTreeSet::new(),
+            dataset_task,
+        }
     }
 
     /// Confirm that any dataset dependencies of `zone` have been ensured
@@ -140,32 +147,82 @@ impl OmicronDatasets {
         Ok(zone_root_path)
     }
 
-    pub(super) fn remove_datasets_if_needed(
+    pub(super) async fn remove_datasets_if_needed(
         &mut self,
         datasets: &IdMap<DatasetConfig>,
+        currently_managed_zpools: Arc<CurrentlyManagedZpools>,
         log: &Logger,
     ) {
         let mut datasets_to_remove = Vec::new();
 
-        for dataset in &self.datasets {
+        // Make a pass through our in-memory dataset states:
+        //
+        // * Remember any that are no longer present in `datasets`
+        // * Mark any whose parent zpool has disappeared as failed, unless
+        //   they're already in a failed state.
+        for mut dataset in &mut self.datasets {
             if !datasets.contains_key(&dataset.config.id) {
                 datasets_to_remove.push(dataset.config.id);
+                continue;
+            }
+
+            match &dataset.state {
+                DatasetState::Ensured => {
+                    if !currently_managed_zpools
+                        .contains(dataset.config.name.pool())
+                    {
+                        dataset.state = DatasetState::FailedToEnsure(Arc::new(
+                            DatasetEnsureError::ZpoolNotFound(
+                                *dataset.config.name.pool(),
+                            ),
+                        ));
+                    }
+                }
+                DatasetState::FailedToEnsure(_) => (),
             }
         }
 
+        // Actually remove the gone-from-config datasets
         for dataset_id in datasets_to_remove {
-            // TODO We should delete these datasets! (We should also delete any
-            // on-disk Omicron datasets that aren't present in `config`).
-            //
-            // https://github.com/oxidecomputer/omicron/issues/6177
-            let dataset = self.datasets.remove(&dataset_id).expect(
-                "datasets_to_remove only has existing datasets by construction",
-            );
-            warn!(
-                log, "leaking ZFS dataset (should be deleted: omicron#6177)";
-                "id" => %dataset_id,
-                "name" => dataset.config.name.full_name(),
+            self.datasets.remove(&dataset_id);
+        }
+
+        // Check against the filesystem for any orphaned datasets; this should
+        // eventually _remove_ orphaned datasets instead of reporting them.
+        match self
+            .dataset_task
+            .datasets_report_orphans(
+                datasets.iter().map(|d| d.name.clone()).collect(),
+                currently_managed_zpools,
             )
+            .await
+        {
+            Ok(Ok(mut orphaned)) => {
+                // Accumulate into our set of orphaned datasets
+                let old_size = self.orphaned_datasets.len();
+                self.orphaned_datasets.append(&mut orphaned);
+                let new_size = self.orphaned_datasets.len();
+                let newly_orphaned = new_size - old_size;
+                if newly_orphaned > 0 {
+                    info!(
+                        log,
+                        "found {newly_orphaned} newly-orphaned datasets"
+                    );
+                }
+            }
+            Ok(Err(err)) => {
+                warn!(
+                    log,
+                    "failed to check for orphaned datasets";
+                    InlineErrorChain::new(err.as_ref()),
+                );
+            }
+            Err(err) => {
+                warn!(
+                    log, "failed to contact dataset task";
+                    InlineErrorChain::new(&err),
+                );
+            }
         }
     }
 
@@ -229,6 +286,10 @@ impl OmicronDatasets {
                 (dataset.config.id, result)
             })
             .collect()
+    }
+
+    pub(crate) fn orphaned_datasets(&self) -> &BTreeSet<DatasetName> {
+        &self.orphaned_datasets
     }
 }
 
