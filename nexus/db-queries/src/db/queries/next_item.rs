@@ -235,9 +235,10 @@ where
 }
 
 const TIME_DELETED_COLUMN_IDENT: &str = "time_deleted";
-const NEXT_ITEM_COLUMN_IDENT: &str = "next_item";
 const SHIFT_COLUMN_IDENT: &str = "shift";
 const INDEX_COLUMN_IDENT: &str = "index";
+const SELF_JOIN_FIRST_TABLE_ALIAS: &str = "self_join_table1";
+const SELF_JOIN_SECOND_TABLE_ALIAS: &str = "self_join_table2";
 
 impl<Table, Item, ItemColumn, ScopeKey, ScopeColumn, Generator>
     QueryFragment<Pg>
@@ -609,54 +610,63 @@ impl<Item> ShiftGenerator<Item> for DefaultShiftGenerator<Item> {
 /// list must be materialized and held in memory.
 ///
 /// In contrast, this query is implemented using a self-join between the
-/// existing table to be searched and the "next entry" (e.g., the value of the
-/// target column plus 1). This can result in lower memory consumption, since
-/// that series need not be stored in memory. Note that this relies on an index
-/// on the item column, which may be partial.
+/// existing table to be searched and the "next gaps" (e.g., the value of the
+/// target column plus or minus 1). This can result in lower memory consumption,
+/// since that series need not be stored in memory. Note that this relies on an
+/// index on the item column, which may be partial.
 ///
 /// The full query looks like this:
 ///
 /// ```sql
-/// SELECT IF(
-///     -- This condition detects if the table is empty.
-///     EXISTS(
-///         SELECT
-///             1
-///         FROM
-///             <table>
-///         WHERE
-///             <scope_column> = <scope_key> AND
-///             time_deleted IS NULL
-///         LIMIT 1
-///     ),
-///     -- If the table is _not_ empty, we do the self-join between `item` and
-///     -- `item + 1`, and take the first value where `item` is NULL, i.e., the
-///     -- smallest value of `item + 1` where there is no corresponding `item`
-///     -- in the table.
+/// SELECT (
+///     -- If the table is empty, select the minimum possible value.
+///     SELECT <min_item> WHERE NOT EXISTS (
+///         SELECT 1
+///         FROM <table>
+///         WHERE <scope_column> = <scope_key>
+///         AND time_deleted IS NULL
+///     )
+///
+///     UNION ALL
+///
+///     -- Select the first item with a gap _below_ it, that's also between the
+///     -- minimum and maximum supported.
 ///     (
-///         SELECT next_item AS <item_column>
-///         FROM (
-///             SELECT
-///                 <item_column> + 1 AS next_item
-///             FROM
-///                 <table>
-///             WHERE
-///                 <scope_column> = <scope_key> AND
-///                 time_deleted IS NULL
-///         )
-///         LEFT OUTER JOIN
-///             <table>
-///         ON
-///             (<scope_column>, next_item <= <max_item>, time_deleted IS NULL) =
-///             (<scope_key>, TRUE, TRUE)
-///         WHERE
-///             <item_column> IS NULL AND next_item <= <max_item>
-///         ORDER BY next_item
+///         SELECT self_join_table1.<item> - 1
+///         FROM <table> self_join_table1
+///         LEFT JOIN <table> self_join_table2
+///             ON self_join_table2.<scope_column> = self_join_table1.<scope_column
+///             AND self_join_table2.<item> = self_join_table1.<item> - 1
+///             AND self_join_table2.time_deleted IS NULL
+///         WHERE self_join_table1.<scope_column> = <scope_key>
+///             AND self_join_table1.time_deleted IS NULL
+///             AND self_join_table1.<item> - 1 BETWEEN <min_item> AND <max_item>
+///             AND self_join_table2.<item> IS NULL
 ///         LIMIT 1
-///     ),
-///     -- If the table _is_ empty, just insert the minimum value.
-///     <min_item>
-/// )
+///     )
+///
+///     UNION ALL
+///
+///     -- Select the first item with a gap _above_ it, that's also between the
+///     -- minimum and maximum supported.
+///     (
+///         SELECT self_join_table1.<item> + 1
+///         FROM <table> self_join_table1
+///         LEFT JOIN <table> self_join_table2
+///             ON self_join_table2.<scope_column> = self_join_table1.<scope_column
+///             AND self_join_table2.<item> = self_join_table1.<item> + 1
+///             AND self_join_table2.time_deleted IS NULL
+///         WHERE self_join_table1.<scope_column> = <scope_key>
+///             AND self_join_table1.time_deleted IS NULL
+///             AND self_join_table1.<item> + 1 BETWEEN <min_item> AND <max_item>
+///             AND self_join_table2.<item> IS NULL
+///         LIMIT 1
+///     )
+///
+///     -- Take the first matching item, or return NULL to signal exhaustion.
+///     LIMIT 1
+///
+/// ) AS <item_column>
 /// ```
 ///
 /// # Which one to use?
@@ -741,6 +751,142 @@ where
     }
 }
 
+// Direction in which to look for gaps.
+enum Direction {
+    Up,
+    Down,
+}
+
+impl<Table, Item, ItemColumn, ScopeKey, ScopeColumn>
+    NextItemSelfJoined<Table, Item, ItemColumn, ScopeKey, ScopeColumn>
+where
+    Table: diesel::Table + HasTable<Table = Table> + QueryFragment<Pg> + Copy,
+    Item: ToSql<<ItemColumn as Expression>::SqlType, Pg> + Copy,
+    ItemColumn: Column<Table = Table> + Copy,
+    ScopeKey: ToSql<<ScopeColumn as Expression>::SqlType, Pg>,
+    ScopeColumn: Column<Table = Table>,
+    Pg: HasSqlType<<ScopeColumn as Expression>::SqlType>
+        + HasSqlType<<ItemColumn as Expression>::SqlType>,
+{
+    fn push_select_min_item_subquery<'a>(
+        &'a self,
+        mut out: AstPass<'_, 'a, Pg>,
+    ) -> diesel::QueryResult<()> {
+        out.push_sql("SELECT ");
+        out.push_bind_param::<<ItemColumn as Expression>::SqlType, Item>(
+            &self.item_min,
+        )?;
+        out.push_sql(" AS ");
+        out.push_identifier(ItemColumn::NAME)?;
+        out.push_sql(" WHERE NOT EXISTS (SELECT 1 FROM ");
+        self.table.walk_ast(out.reborrow())?;
+        out.push_sql(" WHERE ");
+        out.push_identifier(ScopeColumn::NAME)?;
+        out.push_sql(" = ");
+        out.push_bind_param::<<ScopeColumn as Expression>::SqlType, ScopeKey>(
+            &self.scope_key,
+        )?;
+        out.push_sql(" AND ");
+        out.push_identifier(TIME_DELETED_COLUMN_IDENT)?;
+        out.push_sql(" IS NULL LIMIT 1)");
+        Ok(())
+    }
+
+    fn push_select_item_from_gap<'a>(
+        &'a self,
+        mut out: AstPass<'_, 'a, Pg>,
+        direction: Direction,
+    ) -> diesel::QueryResult<()> {
+        let op_for_next = match direction {
+            Direction::Up => " + 1",
+            Direction::Down => " - 1",
+        };
+
+        // SELECT alias1.item + 1
+        // FROM table alias1
+        // LEFT JOIN table alias2
+        // ON alias2.scope_column = alias1.scope_column
+        // AND alias2.item = alias1.item + 1
+        // AND alias2.time_deleted IS NULL
+        // WHERE alias1.scope_column = scope_key
+        // AND alias1.time_deleted IS NULL
+        // AND alias1.item + 1 BETWEEN min_item AND max_item
+        // AND alias2.item IS NULL LIMIT 1;
+        out.push_sql(" SELECT ");
+        out.push_identifier(SELF_JOIN_FIRST_TABLE_ALIAS)?;
+        out.push_sql(".");
+        out.push_identifier(ItemColumn::NAME)?;
+        out.push_sql(op_for_next);
+        out.push_sql(" FROM ");
+        self.table.walk_ast(out.reborrow())?;
+        out.push_sql(" ");
+        out.push_identifier(SELF_JOIN_FIRST_TABLE_ALIAS)?;
+        out.push_sql(" LEFT JOIN ");
+        self.table.walk_ast(out.reborrow())?;
+        out.push_sql(" ");
+        out.push_identifier(SELF_JOIN_SECOND_TABLE_ALIAS)?;
+
+        out.push_sql(" ON ");
+        out.push_identifier(SELF_JOIN_SECOND_TABLE_ALIAS)?;
+        out.push_sql(".");
+        out.push_identifier(ScopeColumn::NAME)?;
+        out.push_sql(" = ");
+        out.push_identifier(SELF_JOIN_FIRST_TABLE_ALIAS)?;
+        out.push_sql(".");
+        out.push_identifier(ScopeColumn::NAME)?;
+
+        out.push_sql(" AND ");
+        out.push_identifier(SELF_JOIN_SECOND_TABLE_ALIAS)?;
+        out.push_sql(".");
+        out.push_identifier(ItemColumn::NAME)?;
+        out.push_sql(" = ");
+        out.push_identifier(SELF_JOIN_FIRST_TABLE_ALIAS)?;
+        out.push_sql(".");
+        out.push_identifier(ItemColumn::NAME)?;
+        out.push_sql(op_for_next);
+
+        out.push_sql(" AND ");
+        out.push_identifier(SELF_JOIN_SECOND_TABLE_ALIAS)?;
+        out.push_sql(".");
+        out.push_identifier(TIME_DELETED_COLUMN_IDENT)?;
+        out.push_sql(" IS NULL WHERE ");
+
+        out.push_identifier(SELF_JOIN_FIRST_TABLE_ALIAS)?;
+        out.push_sql(".");
+        out.push_identifier(ScopeColumn::NAME)?;
+        out.push_sql(" = ");
+        out.push_bind_param::<<ScopeColumn as Expression>::SqlType, ScopeKey>(
+            &self.scope_key,
+        )?;
+
+        out.push_sql(" AND ");
+        out.push_identifier(SELF_JOIN_FIRST_TABLE_ALIAS)?;
+        out.push_sql(".");
+        out.push_identifier(TIME_DELETED_COLUMN_IDENT)?;
+        out.push_sql(" IS NULL AND ");
+
+        out.push_identifier(SELF_JOIN_FIRST_TABLE_ALIAS)?;
+        out.push_sql(".");
+        out.push_identifier(ItemColumn::NAME)?;
+        out.push_sql(op_for_next);
+        out.push_sql(" BETWEEN ");
+        out.push_bind_param::<<ItemColumn as Expression>::SqlType, Item>(
+            &self.item_min,
+        )?;
+        out.push_sql(" AND ");
+        out.push_bind_param::<<ItemColumn as Expression>::SqlType, Item>(
+            &self.item_max,
+        )?;
+        out.push_sql(" AND ");
+
+        out.push_identifier(SELF_JOIN_SECOND_TABLE_ALIAS)?;
+        out.push_sql(".");
+        out.push_identifier(ItemColumn::NAME)?;
+        out.push_sql(" IS NULL LIMIT 1");
+        Ok(())
+    }
+}
+
 impl<Table, Item, ItemColumn, ScopeKey, ScopeColumn> QueryFragment<Pg>
     for NextItemSelfJoined<Table, Item, ItemColumn, ScopeKey, ScopeColumn>
 where
@@ -756,70 +902,14 @@ where
         &'a self,
         mut out: AstPass<'_, 'a, Pg>,
     ) -> diesel::QueryResult<()> {
-        out.push_sql("SELECT IF(EXISTS(SELECT 1 FROM ");
-        self.table.walk_ast(out.reborrow())?;
-        out.push_sql(" WHERE ");
-        out.push_identifier(ScopeColumn::NAME)?;
-        out.push_sql(" = ");
-        out.push_bind_param::<<ScopeColumn as Expression>::SqlType, ScopeKey>(
-            &self.scope_key,
-        )?;
-        out.push_sql(" AND ");
-        out.push_identifier(TIME_DELETED_COLUMN_IDENT)?;
-        out.push_sql(" IS NULL LIMIT 1), (SELECT ");
-        out.push_identifier(NEXT_ITEM_COLUMN_IDENT)?;
-        out.push_sql(" AS ");
-        out.push_identifier(ItemColumn::NAME)?;
-        out.push_sql(" FROM (SELECT ");
-        out.push_identifier(ItemColumn::NAME)?;
-        out.push_sql(" + 1 AS ");
-        out.push_identifier(NEXT_ITEM_COLUMN_IDENT)?;
-        out.push_sql(" FROM ");
-        self.table.walk_ast(out.reborrow())?;
-        out.push_sql(" WHERE ");
-        out.push_identifier(ScopeColumn::NAME)?;
-        out.push_sql(" = ");
-        out.push_bind_param::<<ScopeColumn as Expression>::SqlType, ScopeKey>(
-            &self.scope_key,
-        )?;
-        out.push_sql(" AND ");
-        out.push_identifier(TIME_DELETED_COLUMN_IDENT)?;
-        out.push_sql(" IS NULL) LEFT OUTER JOIN ");
-        self.table.walk_ast(out.reborrow())?;
-        out.push_sql(" ON (");
-        out.push_identifier(ScopeColumn::NAME)?;
-        out.push_sql(", ");
-        out.push_identifier(NEXT_ITEM_COLUMN_IDENT)?;
-        out.push_sql(", ");
-        out.push_identifier(NEXT_ITEM_COLUMN_IDENT)?;
-        out.push_sql(" <= ");
-        out.push_bind_param::<<ItemColumn as Expression>::SqlType, Item>(
-            &self.item_max,
-        )?;
-        out.push_sql(", ");
-        out.push_identifier(TIME_DELETED_COLUMN_IDENT)?;
-        out.push_sql(" IS NULL) = (");
-        out.push_bind_param::<<ScopeColumn as Expression>::SqlType, ScopeKey>(
-            &self.scope_key,
-        )?;
-        out.push_sql(", ");
-        out.push_identifier(ItemColumn::NAME)?;
-        out.push_sql(", TRUE, TRUE) WHERE ");
-        out.push_identifier(ItemColumn::NAME)?;
-        out.push_sql(" IS NULL AND ");
-        out.push_identifier(NEXT_ITEM_COLUMN_IDENT)?;
-        out.push_sql(" <= ");
-        out.push_bind_param::<<ItemColumn as Expression>::SqlType, Item>(
-            &self.item_max,
-        )?;
-        out.push_sql(" ORDER BY ");
-        out.push_identifier(NEXT_ITEM_COLUMN_IDENT)?;
-        out.push_sql(" LIMIT 1), ");
-        out.push_bind_param::<<ItemColumn as Expression>::SqlType, Item>(
-            &self.item_min,
-        )?;
-        out.push_sql(")");
-        Ok(())
+        out.push_sql("SELECT (");
+        self.push_select_min_item_subquery(out.reborrow())?;
+        out.push_sql(" UNION ALL (");
+        self.push_select_item_from_gap(out.reborrow(), Direction::Down)?;
+        out.push_sql(") UNION ALL (");
+        self.push_select_item_from_gap(out.reborrow(), Direction::Up)?;
+        out.push_sql(") LIMIT 1) AS ");
+        out.push_identifier(ItemColumn::NAME)
     }
 }
 
@@ -845,6 +935,107 @@ impl<Table, Item, ItemColumn, ScopeKey, ScopeColumn> RunQueryDsl<DbConnection>
 {
 }
 
+impl<Table, Item, ItemColumn>
+    NextItemSelfJoined<Table, Item, ItemColumn, NoScopeKey, NoScopeColumn>
+where
+    Table: diesel::Table + HasTable<Table = Table> + QueryFragment<Pg> + Copy,
+    Item: ToSql<<ItemColumn as Expression>::SqlType, Pg> + Copy,
+    ItemColumn: Column<Table = Table> + Copy,
+    Pg: HasSqlType<<ItemColumn as Expression>::SqlType>,
+{
+    fn push_select_min_item_subquery<'a>(
+        &'a self,
+        mut out: AstPass<'_, 'a, Pg>,
+    ) -> diesel::QueryResult<()> {
+        out.push_sql("SELECT ");
+        out.push_bind_param::<<ItemColumn as Expression>::SqlType, Item>(
+            &self.item_min,
+        )?;
+        out.push_sql(" AS ");
+        out.push_identifier(ItemColumn::NAME)?;
+        out.push_sql(" WHERE NOT EXISTS (SELECT 1 FROM ");
+        self.table.walk_ast(out.reborrow())?;
+        out.push_sql(" WHERE ");
+        out.push_identifier(TIME_DELETED_COLUMN_IDENT)?;
+        out.push_sql(" IS NULL LIMIT 1)");
+        Ok(())
+    }
+
+    fn push_select_item_from_gap<'a>(
+        &'a self,
+        mut out: AstPass<'_, 'a, Pg>,
+        direction: Direction,
+    ) -> diesel::QueryResult<()> {
+        let op_for_next = match direction {
+            Direction::Up => " + 1",
+            Direction::Down => " - 1",
+        };
+
+        // SELECT alias1.item + 1
+        // FROM table alias1
+        // LEFT JOIN table alias2
+        // ON alias2.item = alias1.item + 1
+        // AND alias2.time_deleted IS NULL
+        // WHERE alias1.time_deleted IS NULL
+        // AND alias1.item + 1 BETWEEN min_item AND max_item
+        // AND alias2.item IS NULL LIMIT 1;
+        out.push_sql(" SELECT ");
+        out.push_identifier(SELF_JOIN_FIRST_TABLE_ALIAS)?;
+        out.push_sql(".");
+        out.push_identifier(ItemColumn::NAME)?;
+        out.push_sql(op_for_next);
+        out.push_sql(" FROM ");
+        self.table.walk_ast(out.reborrow())?;
+        out.push_sql(" ");
+        out.push_identifier(SELF_JOIN_FIRST_TABLE_ALIAS)?;
+        out.push_sql(" LEFT JOIN ");
+        self.table.walk_ast(out.reborrow())?;
+        out.push_sql(" ");
+        out.push_identifier(SELF_JOIN_SECOND_TABLE_ALIAS)?;
+
+        out.push_sql(" ON ");
+        out.push_identifier(SELF_JOIN_SECOND_TABLE_ALIAS)?;
+        out.push_sql(".");
+        out.push_identifier(ItemColumn::NAME)?;
+        out.push_sql(" = ");
+        out.push_identifier(SELF_JOIN_FIRST_TABLE_ALIAS)?;
+        out.push_sql(".");
+        out.push_identifier(ItemColumn::NAME)?;
+        out.push_sql(op_for_next);
+
+        out.push_sql(" AND ");
+        out.push_identifier(SELF_JOIN_SECOND_TABLE_ALIAS)?;
+        out.push_sql(".");
+        out.push_identifier(TIME_DELETED_COLUMN_IDENT)?;
+        out.push_sql(" IS NULL WHERE ");
+
+        out.push_identifier(SELF_JOIN_FIRST_TABLE_ALIAS)?;
+        out.push_sql(".");
+        out.push_identifier(TIME_DELETED_COLUMN_IDENT)?;
+        out.push_sql(" IS NULL AND ");
+
+        out.push_identifier(SELF_JOIN_FIRST_TABLE_ALIAS)?;
+        out.push_sql(".");
+        out.push_identifier(ItemColumn::NAME)?;
+        out.push_sql(op_for_next);
+        out.push_sql(" BETWEEN ");
+        out.push_bind_param::<<ItemColumn as Expression>::SqlType, Item>(
+            &self.item_min,
+        )?;
+        out.push_sql(" AND ");
+        out.push_bind_param::<<ItemColumn as Expression>::SqlType, Item>(
+            &self.item_max,
+        )?;
+        out.push_sql(" AND ");
+
+        out.push_identifier(SELF_JOIN_SECOND_TABLE_ALIAS)?;
+        out.push_sql(".");
+        out.push_identifier(ItemColumn::NAME)?;
+        out.push_sql(" IS NULL LIMIT 1");
+        Ok(())
+    }
+}
+
 impl<Table, Item, ItemColumn> QueryFragment<Pg>
     for NextItemSelfJoined<Table, Item, ItemColumn, NoScopeKey, NoScopeColumn>
 where
@@ -857,52 +1048,14 @@ where
         &'a self,
         mut out: AstPass<'_, 'a, Pg>,
     ) -> diesel::QueryResult<()> {
-        out.push_sql("SELECT IF(EXISTS(SELECT 1 FROM ");
-        self.table.walk_ast(out.reborrow())?;
-        out.push_sql(" WHERE ");
-        out.push_identifier(TIME_DELETED_COLUMN_IDENT)?;
-        out.push_sql(" IS NULL LIMIT 1), (SELECT ");
-        out.push_identifier(NEXT_ITEM_COLUMN_IDENT)?;
-        out.push_sql(" AS ");
-        out.push_identifier(ItemColumn::NAME)?;
-        out.push_sql(" FROM (SELECT ");
-        out.push_identifier(ItemColumn::NAME)?;
-        out.push_sql(" + 1 AS ");
-        out.push_identifier(NEXT_ITEM_COLUMN_IDENT)?;
-        out.push_sql(" FROM ");
-        self.table.walk_ast(out.reborrow())?;
-        out.push_sql(" WHERE ");
-        out.push_identifier(TIME_DELETED_COLUMN_IDENT)?;
-        out.push_sql(" IS NULL) LEFT OUTER JOIN ");
-        self.table.walk_ast(out.reborrow())?;
-        out.push_sql(" ON (");
-        out.push_identifier(NEXT_ITEM_COLUMN_IDENT)?;
-        out.push_sql(", ");
-        out.push_identifier(NEXT_ITEM_COLUMN_IDENT)?;
-        out.push_sql(" <= ");
-        out.push_bind_param::<<ItemColumn as Expression>::SqlType, Item>(
-            &self.item_max,
-        )?;
-        out.push_sql(", ");
-        out.push_identifier(TIME_DELETED_COLUMN_IDENT)?;
-        out.push_sql(" IS NULL) = (");
-        out.push_identifier(ItemColumn::NAME)?;
-        out.push_sql(", TRUE, TRUE) WHERE ");
-        out.push_identifier(ItemColumn::NAME)?;
-        out.push_sql(" IS NULL AND ");
-        out.push_identifier(NEXT_ITEM_COLUMN_IDENT)?;
-        out.push_sql(" <= ");
-        out.push_bind_param::<<ItemColumn as Expression>::SqlType, Item>(
-            &self.item_max,
-        )?;
-        out.push_sql(" ORDER BY ");
-        out.push_identifier(NEXT_ITEM_COLUMN_IDENT)?;
-        out.push_sql(" LIMIT 1), ");
-        out.push_bind_param::<<ItemColumn as Expression>::SqlType, Item>(
-            &self.item_min,
-        )?;
-        out.push_sql(")");
-        Ok(())
+        out.push_sql("SELECT (");
+        self.push_select_min_item_subquery(out.reborrow())?;
+        out.push_sql(" UNION ALL (");
+        self.push_select_item_from_gap(out.reborrow(), Direction::Down)?;
+        out.push_sql(") UNION ALL (");
+        self.push_select_item_from_gap(out.reborrow(), Direction::Up)?;
+        out.push_sql(") LIMIT 1) AS ");
+        out.push_identifier(ItemColumn::NAME)
     }
 }
 
@@ -1303,7 +1456,10 @@ mod tests {
         setup_test_schema(&pool).await;
 
         // Insert mostly the same items, but leave some gaps.
-        const TO_SKIP: [i32; 2] = [3, 7];
+        //
+        // It's important that we skip the _first_ item here. See
+        // https://github.com/oxidecomputer/omicron/issues/8208 for details.
+        const TO_SKIP: [i32; 3] = [0, 3, 7];
         let items: Vec<_> = (0..10)
             .filter_map(|value| {
                 if TO_SKIP.contains(&value) {

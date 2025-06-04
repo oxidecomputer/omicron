@@ -10,6 +10,7 @@ use crate::context::ApiContext;
 use crate::external_api::shared;
 use dropshot::ApiDescription;
 use dropshot::Body;
+use dropshot::Header;
 use dropshot::HttpError;
 use dropshot::HttpResponseCreated;
 use dropshot::HttpResponseDeleted;
@@ -28,6 +29,7 @@ use nexus_types::deployment::BlueprintTarget;
 use nexus_types::deployment::BlueprintTargetSet;
 use nexus_types::deployment::ClickhousePolicy;
 use nexus_types::deployment::OximeterReadPolicy;
+use nexus_types::external_api::headers::RangeRequest;
 use nexus_types::external_api::params::PhysicalDiskPath;
 use nexus_types::external_api::params::SledSelector;
 use nexus_types::external_api::params::SupportBundleFilePath;
@@ -63,7 +65,7 @@ use omicron_common::api::internal::nexus::SledVmmState;
 use omicron_uuid_kinds::GenericUuid;
 use omicron_uuid_kinds::InstanceUuid;
 use omicron_uuid_kinds::SupportBundleUuid;
-use range_requests::RequestContextEx;
+use range_requests::PotentialRange;
 use std::collections::BTreeMap;
 
 type NexusApiDescription = ApiDescription<ApiContext>;
@@ -994,6 +996,7 @@ impl NexusInternalApi for NexusInternalApiImpl {
 
     async fn support_bundle_index(
         rqctx: RequestContext<Self::Context>,
+        headers: Header<RangeRequest>,
         path_params: Path<SupportBundlePath>,
     ) -> Result<Response<Body>, HttpError> {
         let apictx = rqctx.context();
@@ -1004,7 +1007,10 @@ impl NexusInternalApi for NexusInternalApiImpl {
                 crate::context::op_context_for_internal_api(&rqctx).await;
 
             let head = false;
-            let range = rqctx.range();
+            let range = headers
+                .into_inner()
+                .range
+                .map(|r| PotentialRange::new(r.as_bytes()));
 
             let body = nexus
                 .support_bundle_download(
@@ -1026,6 +1032,7 @@ impl NexusInternalApi for NexusInternalApiImpl {
 
     async fn support_bundle_download(
         rqctx: RequestContext<Self::Context>,
+        headers: Header<RangeRequest>,
         path_params: Path<SupportBundlePath>,
     ) -> Result<Response<Body>, HttpError> {
         let apictx = rqctx.context();
@@ -1036,7 +1043,10 @@ impl NexusInternalApi for NexusInternalApiImpl {
                 crate::context::op_context_for_internal_api(&rqctx).await;
 
             let head = false;
-            let range = rqctx.range();
+            let range = headers
+                .into_inner()
+                .range
+                .map(|r| PotentialRange::new(r.as_bytes()));
 
             let body = nexus
                 .support_bundle_download(
@@ -1058,6 +1068,7 @@ impl NexusInternalApi for NexusInternalApiImpl {
 
     async fn support_bundle_download_file(
         rqctx: RequestContext<Self::Context>,
+        headers: Header<RangeRequest>,
         path_params: Path<SupportBundleFilePath>,
     ) -> Result<Response<Body>, HttpError> {
         let apictx = rqctx.context();
@@ -1067,7 +1078,10 @@ impl NexusInternalApi for NexusInternalApiImpl {
             let opctx =
                 crate::context::op_context_for_internal_api(&rqctx).await;
             let head = false;
-            let range = rqctx.range();
+            let range = headers
+                .into_inner()
+                .range
+                .map(|r| PotentialRange::new(r.as_bytes()));
 
             let body = nexus
                 .support_bundle_download(
@@ -1089,6 +1103,7 @@ impl NexusInternalApi for NexusInternalApiImpl {
 
     async fn support_bundle_head(
         rqctx: RequestContext<Self::Context>,
+        headers: Header<RangeRequest>,
         path_params: Path<SupportBundlePath>,
     ) -> Result<Response<Body>, HttpError> {
         let apictx = rqctx.context();
@@ -1098,7 +1113,10 @@ impl NexusInternalApi for NexusInternalApiImpl {
             let opctx =
                 crate::context::op_context_for_internal_api(&rqctx).await;
             let head = true;
-            let range = rqctx.range();
+            let range = headers
+                .into_inner()
+                .range
+                .map(|r| PotentialRange::new(r.as_bytes()));
 
             let body = nexus
                 .support_bundle_download(
@@ -1120,6 +1138,7 @@ impl NexusInternalApi for NexusInternalApiImpl {
 
     async fn support_bundle_head_file(
         rqctx: RequestContext<Self::Context>,
+        headers: Header<RangeRequest>,
         path_params: Path<SupportBundleFilePath>,
     ) -> Result<Response<Body>, HttpError> {
         let apictx = rqctx.context();
@@ -1129,7 +1148,10 @@ impl NexusInternalApi for NexusInternalApiImpl {
             let opctx =
                 crate::context::op_context_for_internal_api(&rqctx).await;
             let head = true;
-            let range = rqctx.range();
+            let range = headers
+                .into_inner()
+                .range
+                .map(|r| PotentialRange::new(r.as_bytes()));
 
             let body = nexus
                 .support_bundle_download(

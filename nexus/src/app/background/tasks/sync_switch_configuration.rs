@@ -491,7 +491,7 @@ impl BackgroundTask for SwitchPortSettingsManager {
                 // build a list of desired settings for each switch
                 let mut desired_bgp_configs: HashMap<
                     SwitchLocation,
-                    Vec<ApplyRequest>,
+                    ApplyRequest,
                 > = HashMap::new();
 
                 // we currently only support one bgp config per switch
@@ -785,31 +785,32 @@ impl BackgroundTask for SwitchPortSettingsManager {
                         },
                     };
 
-                    let request = ApplyRequest {
-                        asn: *request_bgp_config.asn,
-                        peers,
-                        originate: request_prefixes.clone(),
-                        checker: request_bgp_config.checker.as_ref().map(|code| CheckerSource{
-                            asn: *request_bgp_config.asn,
-                            code: code.clone(),
-                        }),
-                        shaper: request_bgp_config.shaper.as_ref().map(|code| ShaperSource{
-                            asn: *request_bgp_config.asn,
-                            code: code.clone(),
-                        }),
-                    };
-
                     match desired_bgp_configs.entry(*location) {
                         Entry::Occupied(mut occupied_entry) => {
-                            occupied_entry.get_mut().push(request);
+                            let config = occupied_entry.get_mut();
+                            // peers are the only per-port part of the config.
+                            config.peers.extend(peers);
                         }
                         Entry::Vacant(vacant_entry) => {
-                            vacant_entry.insert(vec![request]);
+                            vacant_entry.insert(
+                                ApplyRequest {
+                                    asn: *request_bgp_config.asn,
+                                    peers,
+                                    originate: request_prefixes.clone(),
+                                    checker: request_bgp_config.checker.as_ref().map(|code| CheckerSource{
+                                        asn: *request_bgp_config.asn,
+                                        code: code.clone(),
+                                    }),
+                                    shaper: request_bgp_config.shaper.as_ref().map(|code| ShaperSource{
+                                        asn: *request_bgp_config.asn,
+                                        code: code.clone(),
+                                    }),
+                                });
                         }
                     }
                 }
 
-                for (location, configs) in &desired_bgp_configs {
+                for (location, config) in &desired_bgp_configs {
                     let client = match mgd_clients.get(location) {
                         Some(client) => client,
                         None => {
@@ -817,16 +818,14 @@ impl BackgroundTask for SwitchPortSettingsManager {
                             continue;
                         },
                     };
-                    for config in configs {
-                        info!(
-                            &log,
-                            "applying bgp config";
-                            "switch_location" => ?location,
-                            "config" => ?config,
-                        );
-                        if let Err(e) = client.bgp_apply(config).await {
-                            error!(log, "error while applying bgp configuration"; "error" => ?e);
-                        }
+                    info!(
+                        &log,
+                        "applying bgp config";
+                        "switch_location" => ?location,
+                        "config" => ?config,
+                    );
+                    if let Err(e) = client.bgp_apply(config).await {
+                        error!(log, "error while applying bgp configuration"; "error" => ?e);
                     }
                 }
 
@@ -930,24 +929,24 @@ impl BackgroundTask for SwitchPortSettingsManager {
                         },
                     };
 
-		    // TODO https://github.com/oxidecomputer/omicron/issues/3062
-		    let tx_eq = if let Some(Some(c)) = info.tx_eq.get(0) {
-			Some(TxEqConfig {
-			    pre1: c.pre1,
-			    pre2: c.pre2,
-			    main: c.main,
-			    post2: c.post2,
-			    post1: c.post1,
-			})
-		    } else {
-			None
-		    };
+                    // TODO https://github.com/oxidecomputer/omicron/issues/3062
+                    let tx_eq = if let Some(c) = info.tx_eq.get(0) {
+                        Some(TxEqConfig {
+                            pre1: c.pre1,
+                            pre2: c.pre2,
+                            main: c.main,
+                            post2: c.post2,
+                            post1: c.post1,
+                        })
+                    } else {
+                        None
+                    };
 
                     let mut port_config = PortConfigV2 {
                         addresses: info.addresses.iter().map(|a|
 			    UplinkAddressConfig {
-				    address: a.address.into(),
-				    vlan_id: a.vlan_id.map(|v| v.into())
+				    address: a.address,
+				    vlan_id: a.vlan_id
 			    }).collect(),
                         autoneg: info
                             .links
@@ -1556,7 +1555,7 @@ fn uplinks(
             })
         };
 
-        let tx_eq = if let Some(Some(c)) = config.tx_eq.get(0) {
+        let tx_eq = if let Some(c) = config.tx_eq.get(0) {
             Some(TxEqConfig {
                 pre1: c.pre1,
                 pre2: c.pre2,
@@ -1574,8 +1573,8 @@ fn uplinks(
                 .addresses
                 .iter()
                 .map(|a| UplinkAddressConfig {
-                    address: a.address.into(),
-                    vlan_id: a.vlan_id.map(|v| v.into()),
+                    address: a.address,
+                    vlan_id: a.vlan_id,
                 })
                 .collect(),
             lldp,

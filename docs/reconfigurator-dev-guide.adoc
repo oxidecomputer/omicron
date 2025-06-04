@@ -1,0 +1,1373 @@
+:showtitle:
+:numbered:
+:toc: left
+
+// TODO: This guide could use more sections:
+// - task: previewing what changes a blueprint will make
+// - task: trigger inventory collection (and add back reference from `omdb` section)
+// - task: wait for inventory collection to complete
+
+= Reconfigurator Developer Guide
+
+This document covers practical tips for working on Reconfigurator.  For principles and design, see xref:reconfigurator.adoc[Reconfigurator Overview].
+
+NOTE: Documents like this tend to get out of date as the software evolves.  If you notice errors, _please_ consider fixing it.  If you're not sure how, reach out for help.
+
+== Introduction
+
+Reconfigurator is a control plane subsystem that's responsible for runtime changes to the control plane.  It's used to add, remove, and upgrade components.  It's divided into two big pieces:
+
+* The **planner** generates **blueprints**, which are complete descriptions of how the system _should_ look (in terms of what components exist, at what versions, etc.)
+* The **executor** takes a given blueprint and attempts to make reality match it.
+
+Blueprints are stored in CockroachDB (the control plane database).  This makes them available to all Nexus instances.  It also ensures strong consistency in what the system's current blueprint is supposed to be.
+
+Reconfigurator is designed to run autonomously as part of **Nexus** (see xref:control-plane-architecture.adoc[]).  But as much as possible, the pieces are factored into self-contained packages that don't know about most of Nexus.  As a concrete example:
+
+* Autonomous blueprint execution in real systems is driven by the Nexus `blueprint_execution` background task.  But that task essentially just invokes `nexus_reconfigurator_execution::realize_blueprint`.
+* Execution itself is encapsulated within this `nexus_reconfigurator_execution` package.
+
+This has some big benefits:
+
+* When working on blueprint execution, you usually only need to run `cargo check` and `cargo test` on the `nexus_reconfigurator_execution` package.  You don't need to build and link Nexus (which involves a lot more code and takes a lot more time).
+* It's possible to build developer tools like `reconfigurator-exec-unsafe`, which directly uses the `nexus_reconfigurator_execution` package.  This gives developers finer control over blueprint execution and more direct visibility, while still using the exact same interfaces that the autonomous system in Nexus is using.
+
+It does mean there are lots of layers, though.  Here's a conceptual map of components involved in blueprint execution:
+
+```mermaid
+graph TD
+    Executor["Executor"]
+    MgsUpdateDriver["MgsUpdateDriver<br />(updates SPs, RoTs, etc.)"]
+    LiveSystem["Live System<br />(rack/racklette/a4x2/simulated))"]
+
+    subgraph Nexus ["Nexus (real systems)"]
+        NexusUsesExecutor["Executor<br/>(background task)"]
+    end
+
+    %% Dev tools - right side: Executor tools
+    subgraph ExecutorTools ["Execution Tools (dev/test)"]
+        ExecUnsafe(["reconfigurator-exec-unsafe<br/>(execute blueprints manually)"])
+        SPUpdater(["reconfigurator-sp-updater<br/>(updates SPs, RoTs, etc.)"])
+    end
+
+    NexusUsesExecutor --> |blueprint from database| Executor
+    ExecUnsafe -->|blueprint from file| Executor
+
+    Executor -->|Modifies| LiveSystem
+    Executor --> |input: from blueprint| MgsUpdateDriver
+    MgsUpdateDriver --> |Modifies| LiveSystem
+    SPUpdater --> |input: REPL| MgsUpdateDriver
+
+    %% Styling
+    style Nexus fill:#c8e6c9,stroke:#388e3c
+    style ExecutorTools fill:#f3e5f5,stroke:#8e24aa
+    style Executor fill:#ffe0b2,stroke:#fb8c00
+    style MgsUpdateDriver fill:#ffe0b2,stroke:#fb8c00
+```
+
+== Key Rust packages
+
+Below are some of the most important Rust packages to know about.  This is not a complete list.
+
+.Key Rust packages used in Reconfigurator
+[cols="1,1,3",options="header"]
+|===
+h|Area
+|Omicron repo path (Rust package)
+|Description
+
+.2+|Not Reconfigurator-specific
+
+|`nexus/types` (`nexus_types`)
+|Very widely-used package containing types common to many parts of Nexus (shared with lots of components that are used within Nexus, but aren't generally aware of the rest of Nexus).  (Not Reconfigurator-specific.)
+
+|`nexus/db-model`/`nexus/db-queries` (`nexus_db_model`, `nexus_db_queries`)
+|Everything related to the control plane database: Rust types representing the database schema itself, types that model the various tables in the database, and implementations of database queries that fetch/insert/update/delete data in the database.  (Not Reconfigurator-specific.)
+
+.4+|Reconfigurator (and Reconfigurator-adjacent)
+
+|`nexus/inventory` (`nexus_inventory`)
+|Inventory subsystem.  Collects information from the whole system about its current state, stores it in the database, and makes it available to the rest of Nexus.  Inventory collection is driven periodically and on-demand by a Nexus background task that just calls into this package.
+
+|`nexus/reconfigurator/planning` (`nexus_reconfigurator_planning`)
+|Implementation of the planner.  Currently, this is driven only by explicit calls to the Nexus internal API, which in turn come from a person running `omdb`.  In the medium term, this will be driven periodically and on-demand by a Nexus background task.
+
+|`nexus/reconfigurator/execution` (`nexus_reconfigurator_execution`)
+|Implementation of blueprint execution.  Blueprint execution is driven periodically and on-demand by a Nexus background task that just calls into this package.
+
+|`nexus/mgs-updates` (`nexus_mgs_updates`)
+a|Implementation of software update for components that are updated through Management Gateway Service (MGS) and the service processor (SP).  This includes the service processor Hubris image, the root of trust Hubris image, the root of trust bootloader, and phase 1 of the host operating system (the part that's stored in flash).
+
+This is used as part of execution.
+|===
+
+== Developer tools
+
+.Key developer tools for working on Reconfigurator
+[cols="1,1,1,3",options="header"]
+|===
+h|Area
+|Tool
+|Omicron repo path
+|Description
+
+.4+|Reconfigurator-specific
+|`reconfigurator-cli`
+|`dev-tools/reconfigurator-cli`
+|Directly edit blueprints or run the planner in-memory.  Can import state from real systems and export blueprints back to real systems.  Essential tool for observing and testing planner behavior and for generating blueprints that a real system might not otherwise do.  This in turn is useful for development and for operational emergencies.
+
+|`reconfigurator-exec-unsafe`
+|`dev-tools/reconfigurator-exec-unsafe`
+|Directly execute blueprints against a live system (outside the context of Nexus).  The main use of this tool is to be able to precisely control blueprint execution (usually for testing) and to be able to execute blueprints whose JSON representation does not match the database representation (common while features are under development, but never expected in a real system).
+
+|`reconfigurator-sp-updater`
+|`dev-tools/reconfigurator-sp-updater`
+|Directly runs Reconfigurator-style updates of MGS/SP-managed software.  This is used for development and testing of `nexus_mgs_updates` without having to create blueprints or go through real blueprint execution.
+
+|`repo-depot-standalone`
+|`dev-tools/repo-depot-standalone`
+a|Standalone command line tool for serving the Repo Depot API (which serves TUF repo artifacts over HTTP) from any TUF repository in your local filesystem.
++
+This is especially useful with `reconfigurator-sp-updater`.
+
+.2+|Non-Reconfigurator-specific (general tools)
+|`omdb`
+|`dev-tools/omdb`
+a|`omdb` is a general tool for inspecting and controlling various Omicron components.
+
+* You can control blueprint planning and execution with `omdb nexus blueprints`.
+* You can monitor blueprint execution with `omdb nexus background-tasks show blueprint_executor`.
+* You can view database state with `omdb db` (e.g., `omdb db inventory collections show latest`).
+
+|`cargo xtask omicron-dev run-all`
+|`dev-tools/omicron-dev`
+|Stands up a whole control plane using simulated sled agents.  This is by far the quickest and simplest way to test quite a lot of the system, but of course has limitations on what it's able to simulate.
+
+|===
+
+Here's a conceptual map of components involved in planning and execution and the tools you can use to work on them directly:
+
+```mermaid
+graph TD
+    Planner["Planner / Blueprint Editor"]
+    subgraph Nexus ["Nexus (real systems)"]
+        NexusUsesPlanner["Planner<br/>(background task)<br/>(eventually)"]
+        NexusUsesExecutor["Executor<br/>(background task)"]
+    end
+
+    NexusUsesPlanner -->|blueprint: <br />from database| Planner
+
+    subgraph PlannerTools ["Planner Tools (dev/test/support)"]
+        CLI(["reconfigurator-cli<br />(dev/test/support tool)"])
+    end
+    CLI -->|"blueprint: synthetic (REPL) or loaded from a real system"| Planner
+
+    style Nexus fill:#c8e6c9,stroke:#388e3c
+    style Planner fill:#ffe0b2,stroke:#fb8c00
+    style PlannerTools fill:#f3e5f5,stroke:#8e24aa
+
+    Executor["Executor"]
+    MgsUpdateDriver["MgsUpdateDriver<br />(updates SPs, RoTs, etc.)"]
+    LiveSystem["Live System<br />(rack/racklette/a4x2/simulated))"]
+
+    %% Dev tools - right side: Executor tools
+    subgraph ExecutorTools ["Execution Tools (dev/test)"]
+        ExecUnsafe(["reconfigurator-exec-unsafe<br/>(execute blueprints manually)"])
+        SPUpdater(["reconfigurator-sp-updater<br/>(updates SPs, RoTs, etc.)"])
+    end
+
+    NexusUsesExecutor --> |blueprint: from database| Executor
+    ExecUnsafe -->|blueprint: from file| Executor
+
+    Executor -->|Modifies| LiveSystem
+    Executor --> |input: from blueprint| MgsUpdateDriver
+    MgsUpdateDriver --> |Modifies| LiveSystem
+    SPUpdater --> |input: REPL| MgsUpdateDriver
+
+
+    %% Styling
+    style Nexus fill:#c8e6c9,stroke:#388e3c
+    style ExecutorTools fill:#f3e5f5,stroke:#8e24aa
+    style Executor fill:#ffe0b2,stroke:#fb8c00
+    style MgsUpdateDriver fill:#ffe0b2,stroke:#fb8c00
+
+```
+
+== Nexus background tasks
+
+Background operations in the control plane are driven by Nexus **background tasks**.  See xref:../nexus/src/app/background/mod.rs[] for important background on the design of background tasks.  Most importantly, the system has been designed to streamline writing background activities that:
+
+* correctly handle crashing in the middle of execution
+* correctly handle being executed concurrently (in other Nexus instances)
+* make their status observable
+* can be activated on-demand by a developer or support technician
+
+Again, there's a lot more about this in the comment in the file linked above.
+
+**In general, the Rust module that implements the background task does almost nothing except call into an implementation that's in some other Rust package.**  Generally, this approach:
+
+* Makes it easier to write comprehensive tests for the background task.  That's because the background task abstraction itself is intentionally very opaque.  It just has one `activate()` function.  So to test it exhaustively, it's helpful to put the bulk of the implementation into something with a richer interface for control and observability.
+* Makes it faster to iterate on the implementation because you need only run `cargo check`, `cargo nextest`, etc. on your implementation package, which usually won't require building and linking the rest of Nexus.  By contrast, the background tasks themselves are part of Nexus so rebuilding them takes more time.
+
+Each background task has a fixed name (e.g., `blueprint_executor`).  You can use `omdb nexus background-tasks` to list, activate, observe the status of background tasks.
+
+Here are the most important background tasks related to Reconfigurator:
+
+.Key Reconfigurator-related background tasks
+[cols="1h,4",options="header"]
+|===
+|Task name
+|Description
+
+|`inventory_collection`
+|Fetches information about the current state of all hardware and software in the system (the whole rack)
+
+|`blueprint_executor`
+|Executes the most recently loaded blueprint
+
+|`blueprint_loader`
+|Loads the latest target blueprint from the database
+
+|`blueprint_rendezvous`
+|Updates rendezvous tables based on the most recent target blueprint
+
+|`dns_config_internal`, `dns_servers_internal`, `dns_propagation_internal`,
+`dns_config_external`, `dns_servers_external`, `dns_propagation_external`
+|Drives the propagation of internal and external DNS.  Configuration changes start in Nexus and get written to the database.  Then these background tasks load the configuration (`dns_config_*`), load the list of servers to propagate it to (`dns_servers_*`), and propagate the config to the servers (`dns_propagation_*`).
+
+|`tuf_artifact_replication`
+|Distributes all artifact files in all user-uploaded TUF repositories to all sleds
+
+|===
+
+Many other tasks work with Reconfigurator, too (e.g., region replacement and region snapshot replacement).
+
+Notably absent from this list is anything related to planning.  This has not been automated as a background task yet.
+
+== Manual testing and developer workflow
+
+There are a bunch of different environments that you can set up and use to test Omicron.
+
+.Kinds of Omicron test environments
+[cols="1,2,2a,2a,2a",options="header"]
+|===
+|Name
+|Summary
+|Pros
+|Good for
+|Limitations
+
+|xref:how-to-run-simulated.adoc[`cargo xtask omicron-dev run-all`]
+|Command-line tool that stands up real instances of much of the control plane locally (in-process and child processes): Nexus, CockroachDB, Clickhouse, Management Gateway Service, Oximeter, Crucible Pantry.  Limitations result from using simulated sled agent, simulated service processors, and loopback networking.
+|
+* Easy (one command), quick (starts in ~10s)
+* Fast to iterate (rebuilds in a minute or two, depending on what component you're changing)
+* Exactly matches the environment provided to Nexus integration tests (so it can be useful for developing and debugging these tests).
+|
+* Nexus internal/external API changes
+* Most of development for anything that can be simulated (e.g., inventory, most parts of execution)
+* `omdb`-only changes
+|
+* Simulated sled agent has many limitations: cannot run VMs, does not simulate the actual control plane components that it pretends to run, no simulation of Crucible storage, etc.
+* Simulated SPs have limited fidelity to the real thing (e.g., resetting SP will not simulate reset of the sled, even though a real one would)
+* No Wicket, no full RSS path
+* No meaningful simulation of networking (so can't be used to test behavior of underlay connectivity, external connectivity, configuring Dendrite, etc.)
+
+|https://github.com/oxidecomputer/testbed/tree/main/a4x2[`a4x2`]
+|Uses VMs, fancy local networking config, and a software-based switch (https://github.com/oxidecomputer/softnpu[softnpu]) to create a multi-sled environment that looks much more realistic to the control plane than `omicron-dev run-all`.
+|
+* Much higher fidelity to real systems than `omicron-dev run-all`:
+** most components' environments look largely like a real system (e.g., run in a zone, using the SMF start methods)
+** softnpu implements the same (runtime-configurable) networking behavior that real switches do
+** real sled agent runs real instances of all components except simulated networking (which is full-fidelity) and simulated service processors
+|
+* Testing that can't be done with `omicron-dev run-all`
+|
+* More time required up front to get started (may need beefier dev machine)
+* Somewhat bumpy developer experience (see README)
+* Longer iteration time (rebuild and redeploy takes ~30-60 minutes)
+* Limitations in fidelity:
+** Cannot run instances (sleds are running in VMs and we don't support nested virt)
+** Service processors are simulated (just like `omicron-dev run-all`)
+
+|xref:how-to-run.adoc[Running non-simulated Omicron on a single system]
+|Runs real Sled Agent and all other components directly on your dev system the same way they'd run on a real system
+|
+* Moderate iteration time (rebuild and redeploy could take minutes, depending on what you're changing)
+* Could support running VMs
+| ?
+|
+* "Takes over" your dev system -- does not clearly delineate what global state it's responsible for and have a way to clean it all up
+* Somewhat brittle (e.g., after reboot, SMF service for sled agent may start but not find the files it needs)
+* Limitations in fidelity:
+** Only one sled
+** No service processors
+** Networking simulation is incomplete (connectivity depends on how your dev system is set up)
+
+|https://inventron.eng.oxide.computer/env?group=testrack[Racklette]
+|Real Oxide hardware (sleds and switches)
+|
+* Essentially indistinguishable from a real Oxide rack
+|Everything.  Worthwhile for:
+* any testing involving real "customer" VMs
+* final smoke testing for work developed with simulated components
+|
+* Very limited, shared resource
+
+|===
+
+https://github.com/oxidecomputer/omicron/pull/7424[Work is ongoing] to add `cargo xtask` commands for launching an a4x2 environment.  This would significantly streamline the process of using a4x2 and also make it possible to use a4x2 in CI.
+
+A common development workflow is:
+
+* "inner loop" as you work on code: run `cargo check`
+* some combination of:
+** use `cargo xtask omicron-dev run-all` and various developer tools to test it out
+** add unit tests run with `cargo nextest run`
+* once things are working, test end-to-end on a4x2 (if that's faithful enough) or a racklette
+
+== Automated testing
+
+Broadly, we have several kinds of tests:
+
+* Various levels of unit test and small-scale integration tests for most components, including the planner, execution, etc.  The integration tests use an environment identical to `cargo xtask omicron-dev run-all`.
+* For testing the planner and blueprint builder: we have `reconfigurator-cli` _scripts_ that run a bunch of commands print the contents of blueprints and diffs between blueprints and verify that these look like we expect.
+* Omicron CI runs xref:../end-to-end-tests["end-to-end"] tests in the "Running non-simulated Omicron on a single system" environment.
+* We have a small number of xref:../live-tests["live tests"] that can be run on-demand in a4x2 or a racklette that exercise behavior that can't currently be tested in CI.
+
+The https://github.com/oxidecomputer/omicron/pull/7424[ongoing work mentioned above] will make it possible to run the live tests in a4x2 in CI.
+
+== Working with blueprints
+
+In deployed systems (including those simulated with `cargo xtask omicron-dev run-all`), blueprints are _stored_ in the database and managed using the Nexus internal API, using `omdb`.
+
+```
+$ omdb nexus blueprints --help
+interact with blueprints
+
+Usage: omdb nexus blueprints [OPTIONS] <COMMAND>
+
+Commands:
+  list        List all blueprints
+  show        Show a blueprint
+  diff        Diff two blueprints
+  delete      Delete a blueprint
+  target      Interact with the current target blueprint
+  regenerate  Generate a new blueprint
+  import      Import a blueprint
+  help        Print this message or the help of the given subcommand(s)
+
+Options:
+      --log-level <LOG_LEVEL>  log level filter [env: LOG_LEVEL=] [default: warn]
+      --color <COLOR>          Color output [default: auto] [possible values: auto,
+                               always, never]
+  -h, --help                   Print help
+
+Connection Options:
+  --nexus-internal-url <NEXUS_INTERNAL_URL>
+          URL of the Nexus internal API [env: OMDB_NEXUS_URL=]
+  --dns-server <DNS_SERVER>
+          [env: OMDB_DNS_SERVER=[::1]:41524]
+
+Safety Options:
+  -w, --destructive  Allow potentially-destructive subcommands
+```
+
+Commands that modify the system in any way, even in ways that should be safe, require passing the `-w`/`--destructive` option.
+
+When testing with `omicron-dev run-all`, you generally need to use the `--dns-server` / `OMDB_DNS_SERVER` option to point `omdb` at the DNS server for your deployment.  For example, `omicron-dev run-all` outputs:
+
+```
+...
+omicron-dev: internal DNS:          [::1]:63673
+...
+```
+
+Then you can run `omdb --dns-server [::1]:63673` or set `OMDB_DNS_SERVER=[::1]:63673` in the environment.
+
+In a4x2 and racklettes, if you run `omdb` from the switch zone, you generally don't need to do this.  `omdb` knows how to find the internal DNS servers in these environments.
+
+=== Task: running the planner to generate a new blueprint
+
+At any time, you can run the planner to generate a new blueprint based on the current target blueprint and current system state:
+
+```
+$ omdb nexus blueprints list
+note: Nexus URL not specified.  Will pick one from DNS.
+note: using DNS server for subnet fd00:1122:3344::/48
+note: (if this is not right, use --dns-server to specify an alternate DNS server)
+note: using Nexus URL http://[fd00:1122:3344:101::6]:12221
+T ENA ID                                   PARENT TIME_CREATED
+* no  c43bd021-5982-48a0-b139-07180717a5f9 <none> 2025-05-27T18:01:00.567Z
+
+$ omdb --destructive nexus blueprints regenerate
+note: Nexus URL not specified.  Will pick one from DNS.
+note: using DNS server for subnet fd00:1122:3344::/48
+note: (if this is not right, use --dns-server to specify an alternate DNS server)
+note: using Nexus URL http://[fd00:1122:3344:101::6]:12221
+generated new blueprint f48b5b5a-05dd-4fab-95a9-e062ae8704b1
+
+$ omdb nexus blueprints list
+note: Nexus URL not specified.  Will pick one from DNS.
+note: using DNS server for subnet fd00:1122:3344::/48
+note: (if this is not right, use --dns-server to specify an alternate DNS server)
+note: using Nexus URL http://[fd00:1122:3344:101::6]:12221
+T ENA ID                                   PARENT                               TIME_CREATED             
+* no  c43bd021-5982-48a0-b139-07180717a5f9 <none>                               2025-05-27T18:01:00.567Z 
+      f48b5b5a-05dd-4fab-95a9-e062ae8704b1 c43bd021-5982-48a0-b139-07180717a5f9 2025-05-27T18:30:06.338Z 
+
+$ omdb nexus blueprints show f48b5b5a-05dd-4fab-95a9-e062ae8704b1
+note: Nexus URL not specified.  Will pick one from DNS.
+note: using DNS server for subnet fd00:1122:3344::/48
+note: (if this is not right, use --dns-server to specify an alternate DNS server)
+note: using Nexus URL http://[fd00:1122:3344:101::6]:12221
+blueprint  f48b5b5a-05dd-4fab-95a9-e062ae8704b1
+parent:    c43bd021-5982-48a0-b139-07180717a5f9
+
+  sled: 2fd3f2ad-1386-4606-bb9c-a8336fde2e9e (active, config generation 5)
+
+...
+
+
+ COCKROACHDB SETTINGS:
+    state fingerprint:::::::::::::::::   d4d87aa2ad877a4cc2fddd0573952362739110de
+    cluster.preserve_downgrade_option:   "22.1"
+
+ OXIMETER SETTINGS:
+    generation:   1
+    read from::   SingleNode
+
+ METADATA:
+    created by:::::::::::   5fad2dd8-a448-4592-a5a0-0ef319610c2f
+    created at:::::::::::   2025-05-27T18:30:06.338Z
+    comment::::::::::::::   (none)
+    internal DNS version:   1
+    external DNS version:   2
+
+ PENDING MGS-MANAGED UPDATES: 0
+
+$
+```
+
+Under normal conditions, when the system does not need to make any changes, this blueprint will show no differences from its parent:
+
+```
+$ omdb nexus blueprints diff c43bd021-5982-48a0-b139-07180717a5f9 f48b5b5a-05dd-4fab-95a9-e062ae8704b1
+note: Nexus URL not specified.  Will pick one from DNS.
+note: using DNS server for subnet fd00:1122:3344::/48
+note: (if this is not right, use --dns-server to specify an alternate DNS server)
+note: using Nexus URL http://[fd00:1122:3344:101::6]:12221
+from: blueprint c43bd021-5982-48a0-b139-07180717a5f9
+to:   blueprint f48b5b5a-05dd-4fab-95a9-e062ae8704b1
+
+ UNCHANGED SLEDS:
+
+  sled 2fd3f2ad-1386-4606-bb9c-a8336fde2e9e (active, config generation 5):
+
+...
+
+  sled a9bee580-305e-4377-8d13-b8e327bf2370 (active, config generation 5):
+
+...
+
+  sled f8c21585-7094-44e0-a230-389988225cc1 (active, config generation 5):
+
+...
+
+
+ COCKROACHDB SETTINGS:
+    state fingerprint:::::::::::::::::   d4d87aa2ad877a4cc2fddd0573952362739110de (unchanged)
+    cluster.preserve_downgrade_option:   "22.1" (unchanged)
+
+ METADATA:
+    internal DNS version:   1 (unchanged)
+    external DNS version:   2 (unchanged)
+
+ OXIMETER SETTINGS:
+    generation:   1 (unchanged)
+    read from::   SingleNode (unchanged)
+
+```
+
+[#task-blueprint-set-target]
+=== Task: Setting a new target blueprint
+
+If we want the system to execute our blueprint, we must set it as the current **target blueprint** and make sure that it's _enabled_.  We can do that in one step:
+
+```
+$ omdb --destructive nexus blueprints target set f48b5b5a-05dd-4fab-95a9-e062ae8704b1 enabled
+note: Nexus URL not specified.  Will pick one from DNS.
+note: using DNS server for subnet fd00:1122:3344::/48
+note: (if this is not right, use --dns-server to specify an alternate DNS server)
+note: using Nexus URL http://[fd00:1122:3344:101::6]:12221
+set target blueprint to f48b5b5a-05dd-4fab-95a9-e062ae8704b1
+
+$ omdb nexus blueprints target show
+note: Nexus URL not specified.  Will pick one from DNS.
+note: using DNS server for subnet fd00:1122:3344::/48
+note: (if this is not right, use --dns-server to specify an alternate DNS server)
+note: using Nexus URL http://[fd00:1122:3344:101::6]:12221
+target blueprint: f48b5b5a-05dd-4fab-95a9-e062ae8704b1
+made target at:   2025-05-27 18:36:12.227236 UTC
+enabled:          true
+```
+
+Note that you can only set a blueprint as the target if it was generated from the _current_ target.  This is how the system ensures strong consistency in the planning process.  If you try to, say, set an old blueprint as the target, you'll get an error:
+
+```
+$ omdb --destructive nexus blueprints target set c43bd021-5982-48a0-b139-07180717a5f9 enabled
+note: Nexus URL not specified.  Will pick one from DNS.
+note: using DNS server for subnet fd00:1122:3344::/48
+note: (if this is not right, use --dns-server to specify an alternate DNS server)
+note: using Nexus URL http://[fd00:1122:3344:101::6]:12221
+Error: setting target to blueprint c43bd021-5982-48a0-b139-07180717a5f9
+
+Caused by:
+    Error Response: status: 400 Bad Request; headers: {"content-type": "application/json", "x-request-id": "5535a0e0-b431-4018-8d3f-6d3e4f1393fc", "content-length": "210", "date": "Tue, 27 May 2025 18:37:36 GMT"}; value: Error { error_code: Some("InvalidRequest"), message: "Blueprint c43bd021-5982-48a0-b139-07180717a5f9's parent blueprint is not the current target blueprint", request_id: "5535a0e0-b431-4018-8d3f-6d3e4f1393fc" }
+
+```
+
+You'll get a similar error if somebody else manages to set a different target blueprint before you do, since yours is no longer based on the current target.
+
+=== Task: monitoring blueprint execution
+
+It's common for users (developers and support technicians) to want to know when a blueprint has been executed so they can verify things are behaving as expected or move onto the next step in some multi-step process.
+
+WARNING: It's also common to want to know when a blueprint has been executed in automated tests so that the test can then verify some behavior that depended on the blueprint being executed.  **But this approach can lead to flaky tests or implicit breakage** when, say, the planner is changed to do things in a different order or split one complicated step into two steps.  The test might fail even though the system is working because the test encodes an assumption about how planning and execution work.  Consider using `wait_for_condition` on the specific condition you care about instead of waiting for a specific blueprint to complete.
+
+CAUTION: Parts of the control plane sometimes want to know when a blueprint is executed so they can take some follow-on action.  **This is almost certainly the wrong approach**, for the same reason that it leads to flaky and brittle tests.  Components should identify what specific condition they care about (e.g., some zone being deployed) and then find a way to be notified or poll on that condition rather than wait for specific blueprints to be planned and executed.
+
+The easiest way to do this is to look at the status of the `blueprint_executor` background task using `omdb nexus background-tasks`.  For example:
+
+```
+$ omdb nexus background-tasks show blueprint_executor
+note: Nexus URL not specified.  Will pick one from DNS.
+note: using Nexus URL http://[::1]:12221
+task: "blueprint_executor"
+  configured period: every 1m
+  currently executing: no
+  last completed activation: iter 22, triggered by a periodic timer firing
+    started at 2025-05-27T17:53:38.363Z (33s ago) and ran for 0ms
+    target blueprint: 184d8b69-bfdf-4b68-b8a7-f79412b40003 
+    execution:        disabled                             
+    status:           (no event report found)              
+    error:            (none)      
+
+```
+
+This status shows that the executor saw the target blueprint `184d8b69-bfdf-4b68-b8a7-f79412b40003` but didn't do anything because execution is currently disabled.
+
+Here's an example where execution was enabled and completed successfully:
+
+```
+$ omdb nexus background-tasks show blueprint_executor
+note: Nexus URL not specified.  Will pick one from DNS.
+note: using DNS server for subnet fd00:1122:3344::/48
+note: (if this is not right, use --dns-server to specify an alternate DNS server)
+note: using Nexus URL http://[fd00:1122:3344:101::6]:12221
+task: "blueprint_executor"
+  configured period: every 1m
+  currently executing: no
+  last completed activation: iter 37, triggered by a dependent task completing
+    started at 2025-05-27T18:36:12.348Z (26s ago) and ran for 8582ms
+    target blueprint: f48b5b5a-05dd-4fab-95a9-e062ae8704b1
+    execution:        enabled
+    status:           completed (14 steps)
+    error:            (none)
+
+```
+
+You can print a summary of steps taken:
+
+```
+$ omdb nexus background-tasks print-report blueprint_executor
+note: Nexus URL not specified.  Will pick one from DNS.
+note: using DNS server for subnet fd00:1122:3344::/48
+note: (if this is not right, use --dns-server to specify an alternate DNS server)
+note: using Nexus URL http://[fd00:1122:3344:101::6]:12221
+[May 27 18:36:12]   Running ( 1/14) Ensure external networking resources
+[May 27 18:36:13] Completed ( 1/14) Ensure external networking resources: after 1.12s
+[May 27 18:36:13]   Running ( 2/14) Fetch sled list
+[May 27 18:36:14] Completed ( 2/14) Fetch sled list: after 646.93ms
+[May 27 18:36:14]   Running ( 3/14) Deploy sled configs
+[May 27 18:36:16] Completed ( 3/14) Deploy sled configs: after 2.28s
+[May 27 18:36:16]   Running ( 4/14) Plumb service firewall rules
+[May 27 18:36:18] Completed ( 4/14) Plumb service firewall rules: after 2.44s
+[May 27 18:36:18]   Running ( 5/14) Deploy DNS records
+[May 27 18:36:19] Completed ( 5/14) Deploy DNS records: after 1.11s
+[May 27 18:36:19]   Running ( 6/14) Cleanup expunged zones
+[May 27 18:36:19] Completed ( 6/14) Cleanup expunged zones: after 9.54µs
+[May 27 18:36:19]   Running ( 7/14) Decommission sleds
+[May 27 18:36:19] Completed ( 7/14) Decommission sleds: after 4.33µs
+[May 27 18:36:19]   Running ( 8/14) Decommission expunged disks
+[May 27 18:36:19] Completed ( 8/14) Decommission expunged disks: after 5.65µs
+[May 27 18:36:19]   Running ( 9/14) Deploy clickhouse cluster nodes
+[May 27 18:36:19] Completed ( 9/14) Deploy clickhouse cluster nodes: after 28.65µs
+[May 27 18:36:19]   Running (10/14) Deploy single-node clickhouse cluster
+[May 27 18:36:20] Completed (10/14) Deploy single-node clickhouse cluster: after 237.21ms
+[May 27 18:36:20]   Running (11/14) Mark support bundles as failed if they rely on an expunged disk or sled
+[May 27 18:36:20] Completed (11/14) Mark support bundles as failed if they rely on an expunged disk or sled: after 71.84ms with message: support bundle expunge report: SupportBundleExpungementReport { bundles_failed_missing_datasets: 0, bundles_deleted_missing_datasets: 0, bundles_failing_missing_nexus: 0, bundles_reassigned: 0 }
+[May 27 18:36:20]   Running (12/14) Reassign sagas
+[May 27 18:36:20] Completed (12/14) Reassign sagas: after 625.62ms
+[May 27 18:36:20]   Running (13/14) Ensure CockroachDB settings
+[May 27 18:36:20] Completed (13/14) Ensure CockroachDB settings: after 23.43ms
+[May 27 18:36:20]   Running (14/14) Kick off MGS-managed updates
+[May 27 18:36:20] Completed (14/14) Kick off MGS-managed updates: after 7.28µs
+```
+
+=== Task: making custom changes to live systems
+
+Separating planning from execution makes it possible to create your own blueprints (different from what the system would create for itself) and have the system execute those.  This is intended for development, testing, and product support (for emergencies).  It's a multi-step process:
+
+* <<task-omdb-export>>
+* <<task-cli-edit>> (if needed, you can build a custom `reconfigurator-cli` that makes specific blueprint changes that you need)
+* <<task-cli-export>>
+* <<task-blueprint-import>>
+* <<task-blueprint-set-target>>
+
+Broadly, it looks like this:
+
+```mermaid
+flowchart TD
+    subgraph "Real or simulated system"
+        nexus["Nexus"]
+        db["Database"]    
+    end
+
+    cli["reconfigurator-cli<br />(edit/generate new blueprints)"]
+    state_file["reconfigurator state file"]
+    blueprint_file["blueprint file"]
+    omdb["omdb"]
+
+    db --> |read state| omdb
+    omdb --> |reconfigurator export| state_file
+
+    state_file --> |load system state| cli
+    cli --> |save blueprint| blueprint_file
+
+    blueprint_file --> |import| omdb
+    omdb --> |import blueprint| nexus
+
+    style state_file fill:#c8e6c9,stroke:#388e3c
+    style blueprint_file fill:#c8e6c9,stroke:#388e3c
+    style cli fill:#f3e5f5,stroke:#8e24aa
+    style omdb fill:#f3e5f5,stroke:#8e24aa
+```
+
+[#task-omdb-export]
+=== Task: exporting live system state for `reconfigurator-cli`
+
+You can bundle up all the Reconfigurator-related state from a live system with:
+
+```
+$ omdb reconfigurator export reconfigurator.out
+note: database URL not specified.  Will search DNS.
+note: (override with --db-url or OMDB_DB_URL)
+note: using DNS server for subnet fd00:1122:3344::/48
+note: (if this is not right, use --dns-server to specify an alternate DNS server)
+note: using database URL postgresql://root@[fd00:1122:3344:102::4]:32221,[fd00:1122:3344:101::3]:32221,[fd00:1122:3344:101::4]:32221,[fd00:1122:3344:102::3]:32221,[fd00:1122:3344:103::3]:32221/omicron?sslmode=disable
+note: database schema version matches expected (144.0.0)
+assembling reconfigurator state ... done
+wrote reconfigurator.out
+
+```
+
+You can copy that file around as needed and then import it into `reconfigurator-cli`.  For historical reasons (that should be fixed), when you do this, you need to pick an inventory collection to use as the basis for creating `reconfigurator-cli`'s model of the sleds in the system.  You can usually pick any one.  Usually, you can just try the import:
+
+```
+# ./reconfigurator-cli
+generated RNG seed: reportedly-vivacious-scad
+〉load reconfigurator.out
+error: no collection_id specified and file contains 4 collections: 1f397505-6ec3-4d23-9aae-bb331e2caf9f, 5febd3ec-e68d-48f5-966f-c88990d14ef3, 346d8c4d-7b99-4af7-a76e-f7a37c8780b5, 80ae5780-1806-438b-ad64-7a6b1d4e8543
+```
+
+then pick one of the ones from the error message:
+
+```
+〉load reconfigurator.out 80ae5780-1806-438b-ad64-7a6b1d4e8543
+loaded data from "reconfigurator.out"
+result:
+  system:
+    using collection 80ae5780-1806-438b-ad64-7a6b1d4e8543 as source of sled inventory data
+    loaded sleds: 2fd3f2ad-1386-4606-bb9c-a8336fde2e9e, a9bee580-305e-4377-8d13-b8e327bf2370, f8c21585-7094-44e0-a230-389988225cc1
+    loaded collections: 1f397505-6ec3-4d23-9aae-bb331e2caf9f, 5febd3ec-e68d-48f5-966f-c88990d14ef3, 346d8c4d-7b99-4af7-a76e-f7a37c8780b5, 80ae5780-1806-438b-ad64-7a6b1d4e8543
+    loaded blueprints: c43bd021-5982-48a0-b139-07180717a5f9, f48b5b5a-05dd-4fab-95a9-e062ae8704b1
+    loaded service IP pool ranges: [V4(Ipv4Range { first: 198.51.100.20, last: 198.51.100.29 })]
+    loaded internal DNS generations: (none)
+    loaded external DNS generations: (none)
+  config:
+    configured external DNS zone name: oxide.test
+    configured silo names: default-silo, recovery
+
+```
+
+[#task-cli-edit]
+=== Task: editing a blueprint in `reconfigurator-cli`
+
+Whether you loaded state from a live system or used the `load-example` command, `reconfigurator-cli` maintains an in-memory model of the system that you can change.  A key use case is "editing" a blueprint, by which we really mean creating a _new_ blueprint based on an existing one.  Here's an example (continuing from the previous one):
+
+```
+〉sled-list
+ID                                   NZPOOLS SUBNET
+2fd3f2ad-1386-4606-bb9c-a8336fde2e9e 5       fd00:1122:3344:103::/64
+a9bee580-305e-4377-8d13-b8e327bf2370 5       fd00:1122:3344:102::/64
+f8c21585-7094-44e0-a230-389988225cc1 5       fd00:1122:3344:101::/64
+
+〉blueprint-edit f48b5b5a-05dd-4fab-95a9-e062ae8704b1 add-nexus 2fd3f2ad-1386-4606-bb9c-a8336fde2e9e
+blueprint d00e6de7-26d4-498e-a5d6-6f92498c7a57 created from blueprint f48b5b5a-05dd-4fab-95a9-e062ae8704b1: added Nexus zone to sled 2fd3f2ad-1386-4606-bb9c-a8336fde2e9e
+```
+
+This added a Nexus zone to sled `2fd3f2ad-1386-4606-bb9c-a8336fde2e9e`.  Keep in mind that all this did was create a new blueprint in `reconfigurator-cli`'s in-memory state.  To actually take this action on a real system, we have to <<task-cli-export,export the blueprint>>, <<task-blueprint-import,import it back into the live system>>, and <<task-blueprint-set-target,make it the target>>.
+
+[#task-cli-export]
+=== Task: exporting from `reconfigurator-cli`
+
+You can save _just_ one blueprint from `reconfigurator-cli` to a file:
+
+```
+〉blueprint-save d00e6de7-26d4-498e-a5d6-6f92498c7a57 d00e6de7-26d4-498e-a5d6-6f92498c7a57.out
+saved blueprint d00e6de7-26d4-498e-a5d6-6f92498c7a57 to "d00e6de7-26d4-498e-a5d6-6f92498c7a57.out"
+```
+
+This is only useful for importing with `omdb nexus blueprints import`.
+
+You can also save the entire in-memory model, in the same form that gets exported from a live system with `omdb reconfigurator export`:
+
+```
+〉save reconfigurator1.out
+saved planning input, collections, and blueprints to "reconfigurator1.out"
+```
+
+This is only useful for importing back into another `reconfigurator-cli` session.
+
+[#task-blueprint-import]
+=== Task: importing a saved blueprint
+
+If you've saved a blueprint from `reconfigurator-cli` to a file, you can import it into a live system:
+
+```
+root@oxz_switch:~# omdb --destructive nexus blueprints import d00e6de7-26d4-498e-a5d6-6f92498c7a57.out
+note: Nexus URL not specified.  Will pick one from DNS.
+note: using DNS server for subnet fd00:1122:3344::/48
+note: (if this is not right, use --dns-server to specify an alternate DNS server)
+note: using Nexus URL http://[fd00:1122:3344:101::6]:12221
+uploaded new blueprint d00e6de7-26d4-498e-a5d6-6f92498c7a57
+```
+
+Note that this doesn't take any other action because the blueprint is not the current target.  See <<task-blueprint-set-target>>.
+
+== Updating SPs
+
+Updates for the following components get lumped together:
+
+* service processor Hubris image
+* root of trust Hubris image
+* root of trust bootloader Hubris image
+* host OS phase 1 image
+
+That's because all of these are managed by the service processor (SP).  They all follow a similar flow.  The control plane talks to SPs through Management Gateway Service, so we often call these MGS-managed updates or just "MGS Updates" (or sometimes "SP-managed updates").
+
+There are a few ways to update SPs and their associated components:
+
+* via Wicket, which uses MGS to deploy an artifact from the TUF repo.  This is the way we update most systems in development and production today.  Since you're supplying the TUF repo, Wicket is doing the work to figure out which artifact is appropriate for the hardware being updated.
+* via `faux-mgs`, which talks directly to the SP and deploys an image directly from a file you give it.  Since you're giving it the specific file to use, you do the work of figuring out what that should be (e.g., picking which artifact from a TUF repo is appropriate for the hardware you're updating).  Updating with `faux-mgs` is outside the scope of this document but there's some information and links below on how to do this.
+* via `humility` or other low-level tools (outside the scope of this document)
+* "Reconfigurator-driven": what this section is about.
+
+"Reconfigurator-driven" means that we're using `nexus_mgs_updates` to perform the update.  That implementation is designed to support:
+
+* updating to software images stored in a TUF repository
+* resuming after crashing at any point
+* executing concurrently (in different Nexus instances)
+
+The easiest way to test Reconfigurator-driven updates is using `reconfigurator-sp-updater` (more on this below).  You can also use `reconfigurator-cli` to generate a blueprint that specifies an MGS-managed update and then use `reconfigurator-exec-unsafe` to execute it.  This is more cumbersome but tests the integration of `nexus_mgs_updates` into blueprint execution.  (That's pretty simple and tested at this point so this is probably not a very useful flow unless something is broken.)  Eventually, you'll be able to test these updates through normal, Nexus-driven blueprint execution.  This is blocked on database support for the parts of blueprints that specify MGS-managed updates.
+
+Regardless of how you perform updates, it's useful to use `faux-mgs` to read the ground truth state from the SP about its configuration (what versions are in each slot and which slots are active).  More on this below.
+
+```mermaid
+flowchart TD
+    nexus["Reconfigurator<br/>(Nexus, sp-updater)"]
+
+    subgraph "Switch zone"
+        mgs["MGS<br/>(management gateway)"]
+        wicket["Wicket<br/>(mupdate)"]
+        faux-mgs["faux-mgs"]
+    end
+
+    network["Management Network"]
+    sp["SP"]
+
+    nexus --> mgs
+    wicket --> mgs
+    mgs --> network
+    faux-mgs --> network
+
+    network --> sp
+    sp --> network
+
+    classDef noStyle fill:transparent,stroke:transparent,color:black;
+    class network noStyle
+```
+
+[#task-testing-reconfigurator-driven-sp-updates]
+=== Testing Reconfigurator-driven updates
+
+You can test Reconfigurator-driven updates using any of the test environments mentioned above (`omicron-dev run-all`, a4x2, or a racklette).  However, the flow is a bit different in each case.
+
+With **`omicron-dev run-all`**, the flow is:
+
+. Build the binaries you need (by cloning the corresponding repo and using `cargo build --bin=BINARY`):
+** `reconfigurator-sp-updater` (built from Omicron repo)
+** `repo-depot-standalone` (built from Omicron repo)
+** `faux-mgs` (built from `management-gateway-service` repo)
+. Get _and unpack_ at least one TUF repository with images for **simulated** SPs (probably by <<task-build-fake-TUF-repo,building your own>>).  You'll want two different TUF repos if you want to be able to do multiple updates, switching between two different versions.
+. Start `cargo xtask omicron-dev run-all`.
+. <<task-decide-sp-artifact,Figure out which artifacts you want to use for testing.>>
+. <<task-repo-depot-standalone,Start `repo-depot-standalone`>> backed by this TUF repository.
+. <<task-start-sp-updater,Start `reconfigurator-sp-updater`>>.
+. <<task-sp-update,Do an SP update>>.
+
+With **a4x2**, the flow is:
+
+. Build the binaries you need (by cloning the corresponding repo and using `cargo build --bin=BINARY`):
+** `reconfigurator-sp-updater` (built from Omicron repo)
+** `repo-depot-standalone` (built from Omicron repo)
+** `faux-mgs` (built from `management-gateway-service` repo)
+. Get at least one TUF repository with images for **simulated** SPs (probably by <<task-build-fake-TUF-repo,building your own>>).  You'll want two different TUF repos if you want to be able to do multiple updates, switching between two different versions.
+. Use `scp` to copy the TUF repository and the binaries to a switch zone in your racklette.  For example:
++
+```
+scp \
+    my-tuf-repo.zip \
+    omicron/target/debug/repo-depot-standalone \
+    omicron/target/debug/reconfigurator-sp-updater \
+    management-gateway-service/target/debug/faux-mgs \
+    root@MY_A4X2_G0_GZ_IP:/zone/oxz_switch/root/root
+```
+. <<task-decide-sp-artifact,Figure out which artifacts you want to use for testing.>>
+. From inside the switch zone:
+.. Unpack the TUF repository (with `unzip`).
+.. <<task-repo-depot-standalone,Start `repo-depot-standalone`>> backed by this TUF repository.
+.. <<task-start-sp-updater,Start `reconfigurator-sp-updater`>>.
+.. <<task-sp-update,Do an SP update>>.
+
+With a **racklette**, the flow is:
+
+. Build the binaries you need (by cloning the corresponding repo and using `cargo build --bin=BINARY`):
+** `reconfigurator-sp-updater` (built from Omicron repo)
+** `repo-depot-standalone` (built from Omicron repo)
+** `faux-mgs` (built from `management-gateway-service` repo)
+. Get at least one TUF repository with images for **real** SPs (probably by <<task-download-TUF-repo,getting one from CI>> or using an official release one).  You'll want two different TUF repos if you want to be able to do multiple updates, switching between two different versions.
+. <<task-trim-TUF-repo,Trim the TUF repo(s) that you want to use>> so that they will fit in the switch zone of your racklette.
+. Use `scp` to copy the _trimmed_ TUF repository and the binaries to a switch zone in your racklette.  For example:
++
+```
+scp \
+    my-trimmed-tuf-repo.zip \
+    omicron/target/debug/repo-depot-standalone \
+    omicron/target/debug/reconfigurator-sp-updater \
+    management-gateway-service/target/debug/faux-mgs \
+    root@racklet_gz_ip:/zone/oxz_switch/root/root
+```
+. <<task-decide-sp-artifact,Figure out which artifacts you want to use for testing.>>
+. From inside the switch zone:
+.. Unpack the TUF repository (with `unzip`).
+.. <<task-repo-depot-standalone,Start `repo-depot-standalone`>> backed by this TUF repository.
+.. <<task-start-sp-updater,Start `reconfigurator-sp-updater`>>.
+.. <<task-sp-update,Do an SP update>>.
+
+
+These steps are described in sections below.
+
+[#task-build-fake-TUF-repo]
+=== Task: build a TUF repo with images targeting simulated SPs
+
+The artifacts in TUF repos built by the Omicron build process do not work with simulated SPs.  That's because simulated SPs report a different board type than real Oxide hardware.  But you can easily build your own TUF repo with images that do work with simulated SPs.
+
+. You'll need a copy of the `tufaceous` binary.
+.. Clone the https://github.com/oxidecomputer/tufaceous[tufaceous] repository.
+.. Build with `cargo build --bin=tufaceous`.
+. You'll need a TUF repository manifest that specifies that `tufaceous` should conjure up fake Hubris images for simulated SPs.  There's one in the Omicron repo at xref:../update-common/manifests/fake.toml[].
+. Run:
++
+```
+$ tufaceous assemble update-common/manifests/fake.toml /var/tmp/my-fake-repo.zip
+```
+. Confirm the contents of the repo:
++
+```
+$ zipinfo /var/tmp/my-fake-repo.zip
+```
+
+[#task-download-TUF-repo]
+=== Task: downloading a TUF repo from CI
+
+To test Reconfigurator-driven updates of real SPs, you can use the artifacts from TUF repositories that are built with each Omicron commit on GitHub, including those on "main" and pull request branches.
+
+First, decide the commit you want to use.  We'll call that `OMICRON_COMMIT`.  If you don't care all that much (because you're just testing update itself, not the image that you're deploying), just https://github.com/oxidecomputer/omicron/commits/main/[list the recent commits to "main"] and pick the latest one that has passed all CI checks.
+
+For our example, we'll use `OMICRON_COMMIT=630cc10930c448ce5c3e92b65be3a66ed73bbb64`:
+
+```
+$ OMICRON_COMMIT=630cc10930c448ce5c3e92b65be3a66ed73bbb64
+```
+
+Check that its TUF repo build job completed by visiting `https://github.com/oxidecomputer/omicron/commit/OMICRON_COMMIT`. Just below the title, where it says who authored the commit, there should be green checkmark showing that all CI jobs passed.  If you see a green checkmark here, you should be set.  If not, some jobs failed.  You can click the icon to see the list of checks run and see if the "build TUF repo" one passed or not.  If not, pick another commit.
+
+Now, construct the download URL like this:
+
+```
+$ TUF_REPO_DOWNLOAD_URL=https://buildomat.eng.oxide.computer/public/file/oxidecomputer/omicron/rot-all/$OMICRON_COMMIT/repo.zip
+```
+
+Now `cd` to the directory you want to download the TUF repo to.  You should have at least 4-5 GiB of free disk space (enough for the zipped and unzipped copies of the TUF repo).  We'll create a directory named for the commit:
+
+```
+$ mkdir $OMICRON_COMMIT
+$ cd $OMICRON_COMMIT
+```
+
+Download the repo with:
+
+```
+$ curl -L -C - -O $TUF_REPO_DOWNLOAD_URL
+```
+
+Sometimes this download gets interrupted.  If that happens, you can run the same command again to resume the download where it left off.
+
+For some of the workflows here, you'll want an _unpacked_ TUF repo.  You can unpack it with:
+
+```
+$ unzip FILENAME
+```
+
+This should create a directory called `repo` with subdirectories `metadata` and `targets`.
+
+
+[#task-trim-TUF-repo]
+=== Task: trim TUF repo for shipping to a switch zone
+
+On a4x2 or a racklette, it's handy to run `reconfigurator-sp-updater` and `repo-depot-standalone` from the switch zone, with the TUF repo you're using also in the switch zone.  But the switch zone generally doesn't have enough space for a full TUF repo.  You can work around this by deleting some large artifacts that we don't need for our purposes.
+
+Prerequisite: you must already have an _unpacked_ TUF repo.  You could <<task-download-TUF-repo,download one from CI>>.
+
+For testing SP updates, we don't need the host OS and control plane images, which are by far the largest files in the repo.  You can delete them with:
+
+```
+$ rm -f repo/targets/*.host* repo/targets/*.trampoline-* repo/targets/*.control_plane-*
+```
+
+Then copy this directory tree over to the switch zone.
+
+[#task-decide-sp-artifact]
+=== Task: decide which SP artifact you want to deploy
+
+Prerequisite:
+
+* You must have an unpacked TUF repo.
+
+You must first decide which SP you're going to update.  With simulated SPs (`cargo xtask omicron-dev run-all` and a4x2), this choice doesn't matter much.  With real hardware, it's a bigger deal because resetting the SP will reset the corresponding host.  You don't want to update the SP for the host you're doing your testing from!
+
+If you don't particularly care because you just to want to test update itself, sled 15 is a good choice on a racklette (since it's not a Scrimlet) and `SimGimlet00` (the first sled) is a good choice in simulated deployments.
+
+Once you've picked an SP, you need to know what kind of board it is.
+
+* With real hardware, it will be specific Gimlet revision (e.g., `gimlet-e`), Sidecar revision (`sidecar-c`), or PSC (e.g., `psc-c`).
+* With simulated SPs, it will be `SimGimletSp` or `SimSidecarSp`.
+
+Once you know which SP you're going to update, you can identify the board in one of two ways:
+
+* Using <<task-using-omdb,omdb>> to view inventory, you want the value of the BOARD column for the `SpSlot0` caboose.  (It will be the same for `SpSlot1`.)
+* Using <<task-using-faux-mgs,faux-mgs>>, you first need to figure out how to get `faux-mgs` to talk to the SP you care about (described in the linked section), and then you can use the `read-component-caboose` command, like this:
++
+```
+$ faux-mgs --log-level warn --sp-sim-addr [::1]:42084 read-component-caboose --component sp --slot 0 BORD
+SimGimletSp
+```
+
+Finally, you need to find the artifact in your TUF repo that corresponds to the SP image for this type of board.  Here's an example list of TUF repo artifacts:
+
+```
+repo $ ls targets/
+005ea358f1cd316df42465b1e3a0334ea22cc0c0442cf9ddf9b42fbf49780236.gimlet_rot_bootloader-fake-gimlet-rot-bootloader-1.0.0.tar.gz
+005ea358f1cd316df42465b1e3a0334ea22cc0c0442cf9ddf9b42fbf49780236.psc_rot_bootloader-fake-psc-rot-bootloader-1.0.0.tar.gz
+005ea358f1cd316df42465b1e3a0334ea22cc0c0442cf9ddf9b42fbf49780236.switch_rot_bootloader-fake-switch-rot-bootloader-1.0.0.tar.gz
+019d84b563f32a85467235d23142de2fff11eb4e70b18c9567a374af8aa2422b.control_plane-fake-control-plane-1.0.0.tar.gz
+339cb54072f5f61b36377062e64e6e41f5491e5eccbf1caec637bfbf1ae069ac.psc_rot-fake-psc-rot-1.0.0.tar.gz
+4cd56ec2380cbbbc1da842c44776e421bf0cb2362e22dd2ff65eb8cba337fe00.artifacts.json
+64f911b96c7b2f08222d25c1a37f039173da7461897ec28d5850c986c9e29e50.trampoline-fake-trampoline-1.0.0.tar.gz
+727d2cc5e0d4677940fb8a66156ab376f7485bde7e55963694913d94aa92d119.gimlet_rot-fake-gimlet-rot-1.0.0.tar.gz
+727d2cc5e0d4677940fb8a66156ab376f7485bde7e55963694913d94aa92d119.switch_rot-fake-switch-rot-1.0.0.tar.gz
+7e6667e646ad001b54c8365a3d309c03f89c59102723d38d01697ee8079fe670.gimlet_sp-fake-gimlet-sp-1.0.0.tar.gz
+ab32ec86e942e1a16c8d43ea143cd80dd05a9639529d3569b1c24dfa2587ee74.switch_sp-fake-switch-sp-1.0.0.tar.gz
+d51b8fd66c631346459725b8868d0614f0884dba05faec20fc0fdd334eb5d0fd.host-fake-host-1.0.0.tar.gz
+f896cf5b19ca85864d470ad8587f980218bff3954e7f52bbd999699cd0f9635b.psc_sp-fake-psc-sp-1.0.0.tar.gz
+```
+
+For the SP, we want an artifact whose name looks like `\*.*_sp*`.  It's one of these:
+
+```
+repo $ ls targets/*.*_sp*
+targets/7e6667e646ad001b54c8365a3d309c03f89c59102723d38d01697ee8079fe670.gimlet_sp-fake-gimlet-sp-1.0.0.tar.gz
+targets/ab32ec86e942e1a16c8d43ea143cd80dd05a9639529d3569b1c24dfa2587ee74.switch_sp-fake-switch-sp-1.0.0.tar.gz
+targets/f896cf5b19ca85864d470ad8587f980218bff3954e7f52bbd999699cd0f9635b.psc_sp-fake-psc-sp-1.0.0.tar.gz
+```
+
+This is a TUF repo for simulated hardware.  In that case, there's only one image for each type of board so it's pretty easy.  A TUF repo for real hardware will look more like this:
+
+```
+repo $ ls targets/*.*_sp*
+targets/48d00f59dacc27e8cbb3abcfff2a263d5dbd361fe018e1bf06fb936811cc2446.switch_sp-sidecar-b-1.0.32.tar.gz
+targets/556dcf6416e6da79d49657c0cf77d02e286ba28dc481f92e87136c44b1e9f329.gimlet_sp-gimlet-f-1.0.32.tar.gz
+targets/7576f5a13feefe75f6390c78666cc62ebef4b36d16959dc38141497ece21198b.psc_sp-psc-b-1.0.31.tar.gz
+targets/7f6cf23a3cf26fe9c7a40a76d7e2be8a418723ef505786c8e41df89fd8d1f77e.gimlet_sp-gimlet-d-1.0.32.tar.gz
+targets/90d483ff62ad16fb82d7e8831f222071dda4aba046fba1603b823555c6bb096e.switch_sp-sidecar-d-1.0.32.tar.gz
+targets/9e53e5f408e9a0026955c31ae52d222ed192f098de57f24855e67fda114a4ed7.psc_sp-psc-c-1.0.31.tar.gz
+targets/c9cb6c6d2b3fd9e198074b4160119caa21ca88632b218420a570725ffd0b8616.gimlet_sp-gimlet-e-1.0.32.tar.gz
+targets/d761c7f19bb33c9250c847ce83ade57a137013b8497ffa81e4ded85014571dd0.gimlet_sp-gimlet-c-1.0.32.tar.gz
+targets/e151c800331d0e20a9be15eecd1511dcd576f16bc5c4deebcf2d7bf48e77e0f6.switch_sp-sidecar-c-1.0.32.tar.gz
+targets/f2fcb24dbb85a8be78235226fc95dd183250f75819bc813befdf5a166a72acd0.gimlet_sp-gimlet-b-1.0.32.tar.gz
+```
+
+Find the one that matches your board (e.g., `gimlet-e`).
+
+In either case, the artifact id is the long shasum at the beginning of the filename.  If you wanted the `gimlet-e` SP image, you'd use `c9cb6c6d2b3fd9e198074b4160119caa21ca88632b218420a570725ffd0b8616`.
+
+This document uses simulated images, and we'll update a simulated sled SP, so we'll choose `7e6667e646ad001b54c8365a3d309c03f89c59102723d38d01697ee8079fe670` from the output above.
+
+---
+
+That's the quick-and-dirty way.  The more precise way to work this out is:
+
+. Look at `targets/*.artifacts.json` and find the entry in the `artifacts` array having `kind` = `gimlet_sp` (or `switch_sp` or `psc_sp`, if you're updating a switch or PSC) and `name` matching your board.  Note the `"target"` property.
+. Find the file in `targets` whose suffix matches the `"target"` property.
+
+For example, in our case, the first entry in `artifacts` is the one that we want:
+
+```json
+{
+  "system_version": "1.0.0",
+  "artifacts": [
+    {
+      "name": "fake-gimlet-sp",
+      "version": "1.0.0",
+      "kind": "gimlet_sp",
+      "target": "gimlet_sp-fake-gimlet-sp-1.0.0.tar.gz"
+    },
+    ...
+```
+
+That tells us that we want `targets/*.gimlet_sp-fake-gimlet-sp-1.0.0.tar.gz`, which is `targets/7e6667e646ad001b54c8365a3d309c03f89c59102723d38d01697ee8079fe670.gimlet_sp-fake-gimlet-sp-1.0.0.tar.gz`, whose artifact id is `7e6667e646ad001b54c8365a3d309c03f89c59102723d38d01697ee8079fe670`.
+
+[#task-repo-depot-standalone]
+=== Task: use `repo-depot-standalone` to serve artifacts from a local TUF repo
+
+Prerequisite: you must already have one or more _unpacked_ TUF repos.  See above for which ones to use.
+
+If you're testing with `cargo xtask omicron-dev run-all`, you can run `repo-depot-standalone` right in the repo.  If you're testing on a4x2 or a racklette, you'll want to copy this binary (and the TUF repo(s)) to the switch zone.  See above for more on this.
+
+Once you have the binary and unpacked TUF repo(s) where you want them, you just run the command with one or more paths to the "repo" directory in each unpacked TUF repo.  We'll also use the `--listen-addr` argument to start it on a predictable port, but you can leave this off to pick any unused port:
+
+```
+$ ./repo-depot-standalone --listen-addr [::]:64761 /home/dap/tuf-repos/R12/repo
+May 22 23:05:52.057 INFO loaded Omicron TUF repository, path: /home/dap/tuf-repos/R12/repo
+May 22 23:05:52.061 INFO listening, local_addr: [::]:64761
+```
+
+As the log implies, this is now running a repo depot server on IPv6 localhost (`::`) port 64761.
+
+[#task-start-sp-updater]
+=== Task: start `reconfigurator-sp-updater`
+
+Prerequisites:
+
+* you must have something serving the TUF repo depot API (see above)
+* you have a system running a DNS server and MGS that points at one or more SPs to update.  This is usually `cargo xtask omicron-dev run-all`, a4x2, or a racklette.
+
+In our example, we'll assume the repo depot server is running on `[::]:64761`.
+
+If you're using a4x2 or a racklette, you can start the updater with:
+
+```
+$ reconfigurator-sp-updater [::1]:64761
+```
+
+If you're using `omicron-dev run-all`, you'll also need the IP:port where the internal DNS server is running.  This is printed out by `omicron-dev run-all`, which emits a line like this:
+
+```
+...
+omicron-dev: internal DNS:          [::1]:63673
+...
+```
+
+In this case, we'd say:
+
+```
+$ reconfigurator-sp-updater --dns-server [::1]:63673 [::1]:64761
+
+```
+
+Once `reconfigurator-sp-updater` starts, you'll get a REPL and can try an SP update.
+
+[#task-sp-update]
+=== Task: Do an SP update
+
+Prerequisites:
+
+* you must already be running `reconfigurator-sp-updater` (see above)
+* you must have already decided which SP to update and which artifact to deploy.  See <<task-decide-sp-artifact>>.  Here, we're going to update `SimGimlet00` to artifact id `7e6667e646ad001b54c8365a3d309c03f89c59102723d38d01697ee8079fe670`.
+
+In the `reconfigurator-sp-updater` REPL, you can use `help` to see what's available:
+
+```
+〉help
+reconfigurator-sp-updater: interactively manage SP updates
+
+Usage: <COMMAND>
+
+Commands:
+  config  Show configured updates
+  status  Show status of recent and in-progress updates
+  set     Configure an update
+  delete  Delete a configured update
+  help    Print this message or the help of the given subcommand(s)
+```
+
+Initially, `config` will show no configured updates:
+
+```
+〉config
+configured updates (0):
+
+```
+
+and `status` will show nothing in progress or completed:
+
+```
+〉status
+recent completed attempts:
+
+currently in progress:
+
+waiting for retry:
+
+```
+
+In order to configure an SP update, you need to know what software is currently running on the SP.  You can view this with `omdb`:
+
+```
+$ omdb  --dns-server [::1]:63673 db inventory collections show latest sp
+...
+Sled SimGimlet00
+    part number: i86pc
+    power:    A2
+    revision: 0
+    MGS slot: Sled 0 (cubby 0)
+    found at: 2025-05-23 17:36:11.421897 UTC from http://[::1]:58672
+    cabooses:
+        SLOT       BOARD        NAME         VERSION GIT_COMMIT
+        SpSlot0    SimGimletSp  SimGimlet    0.0.2   ffffffff
+        SpSlot1    SimGimletSp  SimGimlet    0.0.1   fefefefe
+        RotSlotA   SimRot       SimGimletRot 0.0.4   eeeeeeee
+        RotSlotB   SimRot       SimGimletRot 0.0.3   edededed
+        Stage0     SimRotStage0 SimGimletRot 0.0.200 ddddddddd
+        Stage0Next SimRotStage0 SimGimletRot 0.0.200 dadadadad
+...
+```
+
+That shows version 0.0.2 in the SP active slot (slot 0) and 0.0.1 in the SP inactive slot (slot 1).  For more on using inventory like this, see <<task-using-omdb,Using `omdb`>> -- note that this information is cached and will not necessarily show the right thing after you perform the update.
+
+You can view the very latest state with `faux-mgs` (see <<task-using-faux-mgs,Using `faux-mgs`>>):
+
+```
+$ faux-mgs --log-level warn --sp-sim-addr [::1]:42084 read-component-caboose --component sp --slot 0 VERS
+0.0.2
+$ faux-mgs --log-level warn --sp-sim-addr [::1]:42084 read-component-caboose --component sp --slot 1 VERS
+0.0.1
+```
+
+Now we have enough information to configure an SP update:
+
+```
+〉help set
+Configure an update
+
+Usage: set <SERIAL> <ARTIFACT_HASH> <VERSION> <COMMAND>
+
+Commands:
+  sp
+  help  Print this message or the help of the given subcommand(s)
+
+Arguments:
+  <SERIAL>         serial number to update
+  <ARTIFACT_HASH>  artifact hash id
+  <VERSION>        version
+
+Options:
+  -h, --help  Print help
+
+〉set SimGimlet00 7e6667e646ad001b54c8365a3d309c03f89c59102723d38d01697ee8079fe670 1.0.0 sp help
+error: the following required arguments were not provided:
+  <EXPECTED_INACTIVE_VERSION>
+
+Usage: set <SERIAL> <ARTIFACT_HASH> <VERSION> sp <EXPECTED_ACTIVE_VERSION> <EXPECTED_INACTIVE_VERSION>
+
+For more information, try '--help'.
+
+〉set SimGimlet00 7e6667e646ad001b54c8365a3d309c03f89c59102723d38d01697ee8079fe670 1.0.0 sp 0.0.2 0.0.1
+updated configuration for SimGimlet00
+```
+
+NOTE: You will immediately start seeing log messages from `nexus_mgs_updates` spewing to the console.  This is ugly, but it's been convenient to be able to see these logs in real time.
+
+After a few seconds (20+ seconds on a racklette), you'd expect to see status like this:
+
+```
+〉status
+recent completed attempts:
+    2025-05-23T17:46:18.020Z to 2025-05-23T17:46:19.156Z (took 1s 135ms): serial SimGimlet00
+        attempt#: 1
+        version:  1.0.0
+        hash:     7e6667e646ad001b54c8365a3d309c03f89c59102723d38d01697ee8079fe670
+        result:   Ok(CompletedUpdate)
+
+currently in progress:
+
+waiting for retry:
+    serial SimGimlet00: will try again at 2025-05-23 17:46:39.156210419 UTC (attempt 2)
+
+```
+
+We can see that it successfully performed the update.
+
+All updates (even successful ones) are re-attempted after 20 seconds.  So if you wait for another lap:
+
+```
+〉status
+recent completed attempts:
+    2025-05-23T17:46:18.020Z to 2025-05-23T17:46:19.156Z (took 1s 135ms): serial SimGimlet00
+        attempt#: 1
+        version:  1.0.0
+        hash:     7e6667e646ad001b54c8365a3d309c03f89c59102723d38d01697ee8079fe670
+        result:   Ok(CompletedUpdate)
+    2025-05-23T17:46:39.158Z to 2025-05-23T17:46:39.238Z (took 79ms): serial SimGimlet00
+        attempt#: 2
+        version:  1.0.0
+        hash:     7e6667e646ad001b54c8365a3d309c03f89c59102723d38d01697ee8079fe670
+        result:   Ok(FoundNoChangesNeeded)
+
+currently in progress:
+
+waiting for retry:
+    serial SimGimlet00: will try again at 2025-05-23 17:46:59.238220447 UTC (attempt 3)
+```
+
+This time, it was able to tell that it didn't need to do anything.
+
+To stop trying, unconfigure the update:
+
+```
+〉delete SimGimlet00
+deleted configured update for serial SimGimlet00
+```
+
+[#task-using-faux-mgs]
+=== Using `faux-mgs`
+
+https://github.com/oxidecomputer/management-gateway-service/tree/main/faux-mgs[`faux-mgs`] is a command-line tool that talks directly to SPs (without using MGS).  For Omicron developers, it's the lowest level tool we usually need to directly inspect SP state and issue commands to the SP.
+
+This tool is most useful for:
+
+* directly inspecting the current SP state (while debugging or learning)
+* manually performing SP-managed updates as part of understanding how they work
+
+To use: first clone the above repo and build with `cargo build --bin=faux-mgs`.
+
+For racklettes: copy this binary to the switch zone and run it from there.  Use `faux-mgs --interface gimlet14 ...` to use it against the SP for sled 14 (just as an example).  Use `dladm show-vlan` in the switch zone to see what other interfaces exist to talk to switches, PSCs, etc.
+
+For a4x2: copy this binary to the switch zone and run it from there.  You'll need to find the IP and ports of the simulated SPs running in this zone.  TODO how do you do that?
+
+For `omicron-dev run-all`, you can run this command from the same system where you're running `omicron-dev`.  Instead of `--interface`, you need to use the `--sp-sim-addr IPV6_ADDR:PORT` option to point `faux-mgs` at the simulated SP.  Unfortunately, the easiest way to find the address and port of the simulated SP is in the log file whose path is printed out by `omicron-dev run-all`.
+
+You can find the necessary addresses for each interface during the initial SP discovery phase:
+
+```
+$ cat /tmp/omicron-dev-omicron-dev.20224.2.log | grep "SP discovery" | looker
+01:08:25.680Z DEBG 645532bc-27f9-4602-bd3a-cff17d678bde (ManagementSwitch): attempting initial SP discovery
+    discovery_addr = [::1]:36109
+    interface = fake-switch0
+01:08:25.680Z DEBG 645532bc-27f9-4602-bd3a-cff17d678bde (ManagementSwitch): attempting initial SP discovery
+    discovery_addr = [::1]:47800
+    interface = fake-switch1
+01:08:25.680Z DEBG 645532bc-27f9-4602-bd3a-cff17d678bde (ManagementSwitch): attempting initial SP discovery
+    discovery_addr = [::1]:55043
+    interface = fake-sled0
+01:08:25.680Z DEBG 645532bc-27f9-4602-bd3a-cff17d678bde (ManagementSwitch): attempting initial SP discovery
+    discovery_addr = [::1]:50632
+    interface = fake-sled1
+```
+
+---
+
+However you get `faux-mgs` running, you can use it to inspect state and https://github.com/oxidecomputer/meta/blob/master/engineering/mupdate/manual-rot-sp-updates.adoc[perform updates by hand].  (If you follow those linked instructions, note that they use `pilot sp exec -e CMD SERIAL`.  This is a thin wrapper that finds the right interface for the host with serial `SERIAL` and then runs `faux-mgs --interface INTERFACE CMD`.  You can just do this transformation yourself.)
+
+The most useful commands for inspecting state are:
+
+* `faux-mgs ... state`: summarizes the SP and RoT information
+* `faux-mgs ... update-status`: reports whether any SP-managed update is in progress
+* `faux-mgs ... read-component-caboose`: reports one piece of metadata about the software in a particular firmware slot.  You need to specify the component (e.g., `sp` or `rot`), the slot (e.g., `0` or `1`), and the key (`VERS` for version, `SIGN` for a hash of the signing key, etc.)
+
+Also useful are:
+
+* `faux-mgs ... reset`: resets a componnet (SP, RoT, etc.)
+* `faux-mgs ... update`: uploads a new software image for a particular component (SP, RoT, etc.) slot
+
+[#task-using-omdb]
+=== Using `omdb` to read inventory
+
+The system inventory includes all the information we need about SPs and what software they're running.  You can print this with:
+
+```
+$ omdb db inventory collections show latest sp
+...
+
+Sled SimGimlet00
+    part number: i86pc
+    power:    A2
+    revision: 0
+    MGS slot: Sled 0 (cubby 0)
+    found at: 2025-05-22 21:49:54.267308 UTC from http://[::1]:63421
+    cabooses:
+        SLOT       BOARD        NAME         VERSION GIT_COMMIT
+        SpSlot0    SimGimletSp  SimGimlet    0.0.2   ffffffff
+        SpSlot1    SimGimletSp  SimGimlet    0.0.1   fefefefe
+        RotSlotA   SimRot       SimGimletRot 0.0.4   eeeeeeee
+        RotSlotB   SimRot       SimGimletRot 0.0.3   edededed
+        Stage0     SimRotStage0 SimGimletRot 0.0.200 ddddddddd
+        Stage0Next SimRotStage0 SimGimletRot 0.0.200 dadadadad
+    RoT pages:
+        SLOT         DATA_BASE64
+        Cmpa         Z2ltbGV0LWNtcGEAAAAAAAAAAAAAAAAA...
+        CfpaActive   Z2ltbGV0LWNmcGEtYWN0aXZlAAAAAAAA...
+        CfpaInactive Z2ltbGV0LWNmcGEtaW5hY3RpdmUAAAAA...
+        CfpaScratch  Z2ltbGV0LWNmcGEtc2NyYXRjaAAAAAAA...
+    RoT: active slot: slot A
+    RoT: persistent boot preference: slot A
+    RoT: pending persistent boot preference: -
+    RoT: transient boot preference: -
+    RoT: slot A SHA3-256: aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+    RoT: slot B SHA3-256: bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb
+
+...
+```
+
+If you're running `omicron-dev run-all`, you'll need to use the `--dns-server` flag to specify
+the DNS server `omdb` will use. You can find this information within the `omicron-dev run-all` output:
+
+```
+...
+omicron-dev: internal DNS:          [::1]:63673
+...
+```
+
+This is a handy summary, but it only gets updated when inventory is collected.  This is more cumbersome than `faux-mgs` when you only need to get one piece of information and need it to be up-to-date.

@@ -15,7 +15,7 @@ use daft::Diffable;
 use omicron_common::api::external::{
     AffinityPolicy, AllowedSourceIps as ExternalAllowedSourceIps, ByteCount,
     Digest, Error, FailureDomain, IdentityMetadata, InstanceState, Name,
-    ObjectIdentity, RoleName, SimpleIdentityOrName,
+    ObjectIdentity, RoleName, SimpleIdentity, SimpleIdentityOrName,
 };
 use omicron_uuid_kinds::{AlertReceiverUuid, AlertUuid};
 use oxnet::{Ipv4Net, Ipv6Net};
@@ -114,6 +114,15 @@ impl SimpleIdentityOrName for SiloUtilization {
     fn name(&self) -> &Name {
         &self.silo_name
     }
+}
+
+/// View of silo authentication settings
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
+pub struct SiloAuthSettings {
+    pub silo_id: Uuid,
+    /// Maximum lifetime of a device token in seconds. If set to null, users
+    /// will be able to create tokens that do not expire.
+    pub device_token_max_ttl_seconds: Option<u32>,
 }
 
 // AFFINITY GROUPS
@@ -980,6 +989,23 @@ pub struct SshKey {
     pub public_key: String,
 }
 
+/// View of a device access token
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema, PartialEq)]
+pub struct DeviceAccessToken {
+    /// A unique, immutable, system-controlled identifier for the token.
+    /// Note that this ID is not the bearer token itself, which starts with
+    /// "oxide-token-"
+    pub id: Uuid,
+    pub time_created: DateTime<Utc>,
+    pub time_expires: Option<DateTime<Utc>>,
+}
+
+impl SimpleIdentity for DeviceAccessToken {
+    fn id(&self) -> Uuid {
+        self.id
+    }
+}
+
 // OAUTH 2.0 DEVICE AUTHORIZATION REQUESTS & TOKENS
 
 /// Response to an initial device authorization request.
@@ -1090,7 +1116,7 @@ pub struct AlertSubscriptionCreated {
 
 /// The possible alert delivery mechanisms for an alert receiver.
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema, PartialEq)]
-#[serde(rename_all = "snake_case")]
+#[serde(rename_all = "snake_case", tag = "kind")]
 pub enum AlertReceiverKind {
     Webhook(WebhookReceiverConfig),
 }

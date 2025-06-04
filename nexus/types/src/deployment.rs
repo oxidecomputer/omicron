@@ -62,7 +62,6 @@ mod clickhouse;
 pub mod execution;
 mod network_resources;
 mod planning_input;
-mod tri_map;
 mod zone_type;
 
 use crate::inventory::BaseboardId;
@@ -172,7 +171,7 @@ pub struct Blueprint {
     // See blueprint execution for more on this.
     pub internal_dns_version: Generation,
 
-    /// external DNS version when thi blueprint was created
+    /// external DNS version when this blueprint was created
     // See blueprint execution for more on this.
     pub external_dns_version: Generation,
 
@@ -1201,7 +1200,6 @@ pub struct PendingMgsUpdate {
     pub details: PendingMgsUpdateDetails,
 
     /// which artifact to apply to this device
-    /// (implies which component is being updated)
     pub artifact_hash: ArtifactHash,
     pub artifact_version: ArtifactVersion,
 }
