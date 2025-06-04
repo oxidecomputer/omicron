@@ -7,6 +7,7 @@
 
 use anyhow::{Context, anyhow, bail, ensure};
 use gateway_client::types::RotState;
+use gateway_client::types::SpComponentCaboose;
 use gateway_client::types::SpState;
 use indexmap::IndexMap;
 use ipnet::Ipv6Net;
@@ -23,6 +24,7 @@ use nexus_sled_agent_shared::inventory::SledRole;
 use nexus_types::deployment::ClickhousePolicy;
 use nexus_types::deployment::CockroachDbClusterVersion;
 use nexus_types::deployment::CockroachDbSettings;
+use nexus_types::deployment::ExpectedVersion;
 use nexus_types::deployment::OximeterReadPolicy;
 use nexus_types::deployment::PlanningInputBuilder;
 use nexus_types::deployment::Policy;
@@ -35,6 +37,8 @@ use nexus_types::external_api::views::SledPolicy;
 use nexus_types::external_api::views::SledProvisionPolicy;
 use nexus_types::external_api::views::SledState;
 use nexus_types::inventory::BaseboardId;
+use nexus_types::inventory::Caboose;
+use nexus_types::inventory::CabooseWhich;
 use nexus_types::inventory::PowerState;
 use nexus_types::inventory::RotSlot;
 use nexus_types::inventory::SpType;
@@ -58,6 +62,7 @@ use std::fmt::Debug;
 use std::net::Ipv4Addr;
 use std::net::Ipv6Addr;
 use std::sync::Arc;
+use tufaceous_artifact::ArtifactVersion;
 
 /// Describes an actual or synthetic Oxide rack for planning and testing
 ///
@@ -415,6 +420,43 @@ impl SystemDescription {
         Ok(self)
     }
 
+    /// Update the SP versions reported for a sled.
+    ///
+    /// Where `None` is provided, no changes are made.
+    pub fn sled_update_sp_versions(
+        &mut self,
+        sled_id: SledUuid,
+        active_version: Option<ArtifactVersion>,
+        inactive_version: Option<ExpectedVersion>,
+    ) -> anyhow::Result<&mut Self> {
+        let sled = self.sleds.get_mut(&sled_id).with_context(|| {
+            format!("attempted to access sled {} not found in system", sled_id)
+        })?;
+        let sled = Arc::make_mut(sled);
+        sled.set_sp_versions(active_version, inactive_version);
+        Ok(self)
+    }
+
+    pub fn sled_sp_active_version(
+        &self,
+        sled_id: SledUuid,
+    ) -> anyhow::Result<Option<&str>> {
+        let sled = self.sleds.get(&sled_id).with_context(|| {
+            format!("attempted to access sled {} not found in system", sled_id)
+        })?;
+        Ok(sled.sp_active_caboose().map(|c| c.version.as_ref()))
+    }
+
+    pub fn sled_sp_inactive_version(
+        &self,
+        sled_id: SledUuid,
+    ) -> anyhow::Result<Option<&str>> {
+        let sled = self.sleds.get(&sled_id).with_context(|| {
+            format!("attempted to access sled {} not found in system", sled_id)
+        })?;
+        Ok(sled.sp_inactive_caboose().map(|c| c.version.as_ref()))
+    }
+
     pub fn to_collection_builder(&self) -> anyhow::Result<CollectionBuilder> {
         let collector_label = self
             .collector
@@ -433,6 +475,46 @@ impl SystemDescription {
                         sp_state.clone(),
                     )
                     .context("recording SP state")?;
+
+                let baseboard_id = BaseboardId {
+                    part_number: sp_state.model.clone(),
+                    serial_number: sp_state.serial_number.clone(),
+                };
+                if let Some(active) = &s.sp_active_caboose() {
+                    builder
+                        .found_caboose(
+                            &baseboard_id,
+                            CabooseWhich::SpSlot0,
+                            "fake MGS 1",
+                            SpComponentCaboose {
+                                board: active.board.clone(),
+                                epoch: None,
+                                git_commit: active.git_commit.clone(),
+                                name: active.name.clone(),
+                                sign: active.sign.clone(),
+                                version: active.version.clone(),
+                            },
+                        )
+                        .context("recording SP active caboose")?;
+                }
+
+                if let Some(inactive) = &s.sp_inactive_caboose() {
+                    builder
+                        .found_caboose(
+                            &baseboard_id,
+                            CabooseWhich::SpSlot1,
+                            "fake MGS 1",
+                            SpComponentCaboose {
+                                board: inactive.board.clone(),
+                                epoch: None,
+                                git_commit: inactive.git_commit.clone(),
+                                name: inactive.name.clone(),
+                                sign: inactive.sign.clone(),
+                                version: inactive.version.clone(),
+                            },
+                        )
+                        .context("recording SP inactive caboose")?;
+                }
             }
 
             builder
@@ -597,6 +679,8 @@ pub struct SledHwInventory<'a> {
     pub baseboard_id: &'a BaseboardId,
     pub sp: &'a nexus_types::inventory::ServiceProcessor,
     pub rot: &'a nexus_types::inventory::RotState,
+    pub sp_active: Option<Arc<nexus_types::inventory::Caboose>>,
+    pub sp_inactive: Option<Arc<nexus_types::inventory::Caboose>>,
 }
 
 /// Our abstract description of a `Sled`
@@ -611,6 +695,8 @@ pub struct Sled {
     policy: SledPolicy,
     state: SledState,
     resources: SledResources,
+    sp_active_caboose: Option<Arc<nexus_types::inventory::Caboose>>,
+    sp_inactive_caboose: Option<Arc<nexus_types::inventory::Caboose>>,
 }
 
 impl Sled {
@@ -750,6 +836,10 @@ impl Sled {
             },
             state: SledState::Active,
             resources: SledResources { subnet: sled_subnet, zpools },
+            sp_active_caboose: Some(Arc::new(Self::default_sp_caboose(
+                String::from("0.0.1"),
+            ))),
+            sp_inactive_caboose: None,
         }
     }
 
@@ -780,6 +870,10 @@ impl Sled {
             })
             .unwrap_or(Baseboard::Unknown);
 
+        let sp_active_caboose =
+            inventory_sp.as_ref().and_then(|hw| hw.sp_active.clone());
+        let sp_inactive_caboose =
+            inventory_sp.as_ref().and_then(|hw| hw.sp_inactive.clone());
         let inventory_sp = inventory_sp.map(|sledhw| {
             // RotStateV3 unconditionally sets all of these
             let sp_state = if sledhw.rot.slot_a_sha3_256_digest.is_some()
@@ -887,6 +981,8 @@ impl Sled {
             policy: sled_policy,
             state: sled_state,
             resources: sled_resources,
+            sp_active_caboose,
+            sp_inactive_caboose,
         }
     }
 
@@ -915,6 +1011,68 @@ impl Sled {
 
     fn sled_agent_inventory(&self) -> &Inventory {
         &self.inventory_sled_agent
+    }
+
+    fn sp_active_caboose(&self) -> Option<&Caboose> {
+        self.sp_active_caboose.as_deref()
+    }
+
+    fn sp_inactive_caboose(&self) -> Option<&Caboose> {
+        self.sp_inactive_caboose.as_deref()
+    }
+
+    /// Update the reported SP versions
+    ///
+    /// If either field is `None`, that field is _unchanged_.
+    // Note that this means there's no way to _unset_ the version.
+    fn set_sp_versions(
+        &mut self,
+        active_version: Option<ArtifactVersion>,
+        inactive_version: Option<ExpectedVersion>,
+    ) {
+        if let Some(active_version) = active_version {
+            match &mut self.sp_active_caboose {
+                Some(caboose) => {
+                    Arc::make_mut(caboose).version = active_version.to_string()
+                }
+                new @ None => {
+                    *new = Some(Arc::new(Self::default_sp_caboose(
+                        active_version.to_string(),
+                    )));
+                }
+            }
+        }
+
+        if let Some(inactive_version) = inactive_version {
+            match inactive_version {
+                ExpectedVersion::NoValidVersion => {
+                    self.sp_inactive_caboose = None;
+                }
+                ExpectedVersion::Version(v) => {
+                    match &mut self.sp_inactive_caboose {
+                        Some(caboose) => {
+                            Arc::make_mut(caboose).version = v.to_string()
+                        }
+                        new @ None => {
+                            *new = Some(Arc::new(Self::default_sp_caboose(
+                                v.to_string(),
+                            )));
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    fn default_sp_caboose(version: String) -> Caboose {
+        let board = "SimGimletSp".to_string(); // XXX-dap constant
+        Caboose {
+            board: board.clone(),
+            git_commit: String::from("unknown"),
+            name: board,
+            version: version.to_string(),
+            sign: None,
+        }
     }
 }
 
