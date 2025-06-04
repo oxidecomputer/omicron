@@ -7350,30 +7350,28 @@ fn inv_collection_print_sleds(collection: &Collection) {
                     "LAST RECONCILED CONFIG",
                     &last_reconciliation.last_reconciled_config,
                 );
-                let disk_errs = collect_config_reconciler_errors(
-                    &last_reconciliation.external_disks,
-                );
-                let dataset_errs = collect_config_reconciler_errors(
-                    &last_reconciliation.datasets,
-                );
-                let zone_errs = collect_config_reconciler_errors(
-                    &last_reconciliation.zones,
-                );
-                for (label, errs) in [
-                    ("disk", disk_errs),
-                    ("dataset", dataset_errs),
-                    ("zone", zone_errs),
-                ] {
-                    if errs.is_empty() {
-                        println!("    all {label}s reconciled successfully");
-                    } else {
-                        println!(
-                            "    {} {label} reconciliation errors:",
-                            errs.len()
-                        );
-                        for err in errs {
-                            println!("      {err}");
-                        }
+            }
+            let disk_errs = collect_config_reconciler_errors(
+                &last_reconciliation.external_disks,
+            );
+            let dataset_errs =
+                collect_config_reconciler_errors(&last_reconciliation.datasets);
+            let zone_errs =
+                collect_config_reconciler_errors(&last_reconciliation.zones);
+            for (label, errs) in [
+                ("disk", disk_errs),
+                ("dataset", dataset_errs),
+                ("zone", zone_errs),
+            ] {
+                if errs.is_empty() {
+                    println!("        all {label}s reconciled successfully");
+                } else {
+                    println!(
+                        "        {} {label} reconciliation errors:",
+                        errs.len()
+                    );
+                    for err in errs {
+                        println!("          {err}");
                     }
                 }
             }
