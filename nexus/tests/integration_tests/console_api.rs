@@ -975,4 +975,6 @@ async fn test_session_idle_timeout_deletes_session() {
         db_token_error,
         Error::ObjectNotFound { .. }
     );
+
+    cptestctx.teardown().await;
 }
