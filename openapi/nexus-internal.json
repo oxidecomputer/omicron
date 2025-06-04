@@ -5501,7 +5501,7 @@
                   "rot_bootloader"
                 ]
               },
-              "expected_stage_0_next_version": {
+              "expected_stage0_next_version": {
                 "description": "expected contents of the stage 0 next",
                 "allOf": [
                   {
@@ -5509,7 +5509,7 @@
                   }
                 ]
               },
-              "expected_stage_0_version": {
+              "expected_stage0_version": {
                 "description": "expected contents of the stage 0",
                 "allOf": [
                   {
@@ -5520,8 +5520,8 @@
             },
             "required": [
               "component",
-              "expected_stage_0_next_version",
-              "expected_stage_0_version"
+              "expected_stage0_next_version",
+              "expected_stage0_version"
             ]
           }
         ]

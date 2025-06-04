@@ -344,13 +344,13 @@ fn cmd_config(
                 )?;
             }
             PendingMgsUpdateDetails::RotBootloader {
-                expected_stage_0_version,
-                expected_stage_0_next_version,
+                expected_stage0_version,
+                expected_stage0_next_version,
             } => {
                 writeln!(
                     &mut s,
                     "        preconditions: stage 0 {:?}, stage 0 next {:?}",
-                    expected_stage_0_version, expected_stage_0_next_version,
+                    expected_stage0_version, expected_stage0_next_version,
                 )?;
             }
         }
