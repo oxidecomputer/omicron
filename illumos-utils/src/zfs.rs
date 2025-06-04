@@ -4,6 +4,7 @@
 
 //! Utilities for poking at ZFS.
 
+use crate::ExecutionError;
 use crate::{PFEXEC, execute_async};
 use anyhow::Context;
 use anyhow::anyhow;
@@ -17,6 +18,7 @@ use omicron_common::disk::DiskIdentity;
 use omicron_common::disk::SharedDatasetConfig;
 use omicron_uuid_kinds::DatasetUuid;
 use std::collections::BTreeMap;
+use std::ffi::OsStr;
 use std::fmt;
 
 use tokio::process::Command;
@@ -852,6 +854,29 @@ impl Zfs {
             })
             .collect();
         Ok(filesystems)
+    }
+
+    /// Lists all datasets within a set of parent filesystems.
+    ///
+    /// Unlike [`Zfs::list_datasets()`], this method does _not_ strip the input
+    /// names from the output names: assuming the input filesystems exist, the
+    /// output list will contain each requested filesystem itself, and will
+    /// include the full names of all direct children.
+    pub async fn list_datasets_full<I, S>(
+        names: I,
+    ) -> Result<Vec<String>, ExecutionError>
+    where
+        I: IntoIterator<Item = S>,
+        S: AsRef<OsStr>,
+    {
+        let output = execute_async(
+            Command::new(ZFS)
+                .args(&["list", "-d", "1", "-Hpo", "name"])
+                .args(names),
+        )
+        .await?;
+        let stdout = String::from_utf8_lossy(&output.stdout);
+        Ok(stdout.trim().split('\n').map(String::from).collect())
     }
 
     /// Get information about datasets within a list of zpools / datasets.
