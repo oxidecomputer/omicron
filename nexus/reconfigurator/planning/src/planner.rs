@@ -13,7 +13,9 @@ use crate::blueprint_builder::Error;
 use crate::blueprint_builder::Operation;
 use crate::blueprint_editor::DisksEditError;
 use crate::blueprint_editor::SledEditError;
+use crate::mgs_updates::plan_mgs_updates;
 use crate::planner::omicron_zone_placement::PlacementError;
+use gateway_client::types::SpType;
 use nexus_sled_agent_shared::inventory::OmicronZoneType;
 use nexus_sled_agent_shared::inventory::ZoneKind;
 use nexus_types::deployment::Blueprint;
@@ -49,6 +51,11 @@ pub use self::rng::SledPlannerRng;
 
 mod omicron_zone_placement;
 pub(crate) mod rng;
+
+enum UpdateStepResult {
+    ContinueToNextStep,
+    Waiting,
+}
 
 pub struct Planner<'a> {
     log: Logger,
@@ -115,7 +122,11 @@ impl<'a> Planner<'a> {
         self.do_plan_expunge()?;
         self.do_plan_add()?;
         self.do_plan_decommission()?;
-        self.do_plan_zone_updates()?;
+        if let UpdateStepResult::ContinueToNextStep =
+            self.do_plan_mgs_updates()?
+        {
+            self.do_plan_zone_updates()?;
+        }
         self.do_plan_cockroachdb_settings();
         Ok(())
     }
@@ -893,6 +904,65 @@ impl<'a> Planner<'a> {
         }
 
         Ok(())
+    }
+
+    /// Update at most one MGS-managed device (SP, RoT, etc.), if any are out of
+    /// date.
+    fn do_plan_mgs_updates(&mut self) -> Result<UpdateStepResult, Error> {
+        // Determine which baseboards we will consider updating.
+        //
+        // Sleds may be present but not adopted as part of the control plane.
+        // In deployed systems, this would probably only happen if a sled was
+        // about to be added.  In dev/test environments, it's common to leave
+        // some number of sleds out of the control plane for various reasons.
+        // Inventory will still report them, but we don't want to touch them.
+        //
+        // For better or worse, switches and PSCs do not have the same idea of
+        // being adopted into the control plane.  If they're present, they're
+        // part of the system, and we will update them.
+        let included_sled_baseboards: BTreeSet<_> = self
+            .input
+            .all_sleds(SledFilter::SpsUpdatedByReconfigurator)
+            .map(|(_sled_id, details)| &details.baseboard_id)
+            .collect();
+        let included_baseboards = self
+            .inventory
+            .sps
+            .iter()
+            .filter_map(|(baseboard_id, sp_state)| {
+                let do_include = match sp_state.sp_type {
+                    SpType::Sled => {
+                        included_sled_baseboards.contains(baseboard_id.as_ref())
+                    }
+                    SpType::Power => true,
+                    SpType::Switch => true,
+                };
+                do_include.then_some(baseboard_id.clone())
+            })
+            .collect();
+
+        // Compute the new set of PendingMgsUpdates.
+        let current_updates =
+            &self.blueprint.parent_blueprint().pending_mgs_updates;
+        let current_artifacts = self.input.tuf_repo();
+        let next = plan_mgs_updates(
+            &self.log,
+            &self.inventory,
+            &included_baseboards,
+            &current_updates,
+            current_artifacts,
+            1,
+        );
+
+        // XXX-dap this is not quite right.  It's possible that no updates were
+        // planned but SPs aren't yet updated.
+        let rv = if next.is_empty() {
+            UpdateStepResult::ContinueToNextStep
+        } else {
+            UpdateStepResult::Waiting
+        };
+        self.blueprint.pending_mgs_updates_replace_all(next);
+        Ok(rv)
     }
 
     /// Update at most one existing zone to use a new image source.
