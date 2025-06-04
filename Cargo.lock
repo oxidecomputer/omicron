@@ -14953,6 +14953,8 @@ dependencies = [
  "fs-err 3.1.0",
  "macaddr",
  "nexus-db-model",
+ "omicron-rpaths",
+ "pq-sys",
  "semver 1.0.26",
  "serde",
  "swrite",
