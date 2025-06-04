@@ -10,7 +10,7 @@
 # Check out the immediately preceding schema, whatever it is.
 PREVIOUS
 
-# Data migrations to: 145.0.0, 146.0.0
+# Data migrations to: 145.0.0
 144.0.0
 
 # Data migrations to: 133.0.0, 134.0.0, 139.0.0, 140.0.0
