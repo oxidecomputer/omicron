@@ -29,6 +29,7 @@ use similar_asserts;
 use slog::Logger;
 use slog_error_chain::InlineErrorChain;
 use std::collections::BTreeMap;
+use std::collections::BTreeSet;
 use std::net::IpAddr;
 use tokio::time::Duration;
 use tokio::time::timeout;
@@ -278,6 +279,14 @@ fn read_all_schema_versions() -> AllSchemaVersions {
     AllSchemaVersions::load(camino::Utf8Path::new(SCHEMA_DIR)).unwrap()
 }
 
+async fn disable_fsync(client: &Client) {
+    let setting =
+        "SET CLUSTER SETTING kv.raft_log.disable_synchronization_unsafe = true";
+    if let Err(e) = client.batch_execute(setting).await {
+        panic!("Failed to apply setting '{}': {}", setting, e);
+    }
+}
+
 async fn apply_database_version(crdb: &CockroachInstance, version: &Version) {
     let old_dbinit = match get_old_dbinit_for_version(version).await {
         Ok(sql) => {
@@ -295,6 +304,7 @@ async fn apply_database_version(crdb: &CockroachInstance, version: &Version) {
     let client = crdb.connect().await.expect("failed to connect");
 
     // Apply dbinit.sql
+    disable_fsync(&client).await;
     client
         .batch_execute(&old_dbinit)
         .await
@@ -428,10 +438,10 @@ async fn nexus_cannot_apply_update_from_unknown_version() {
 // This attempts to be a rough approximation for multiple Nexuses each
 // simultaneously executing these operations.
 #[tokio::test]
-async fn versions_have_idempotent_up() {
+async fn last_update_has_idempotent_up() {
     let config = load_test_config();
     let logctx =
-        LogContext::new("versions_have_idempotent_up", &config.pkg.log);
+        LogContext::new("last_update_has_idempotent_up", &config.pkg.log);
     let log = &logctx.log;
     let db = TestDatabase::new_populate_nothing(&logctx.log).await;
     let crdb = db.crdb();
@@ -2243,72 +2253,8 @@ fn get_migration_checks() -> BTreeMap<Version, DataMigrationFns> {
     map
 }
 
-// Performs all schema changes and runs version-specific assertions.
-//
-// HOW TO ADD A MIGRATION CHECK:
-// - Add a new "map.insert" line to "get_migration_checks", with the semver of
-// the version you'd like to inspect before / after.
-// - Define your "before" (optional) and "after" (required) functions. These
-// act on a connection to CockroachDB, and can observe and mutate arbitrary
-// state.
-//
-// ADVICE FOR MIGRATION CHECKS:
-// - Your migration check will run in the same test as all other migration
-// checks, because performing schema migrations isn't that fast. If you
-// perform an operation that could be disruptive to subsequent checks, I
-// recommend cleaning up after yourself (e.g., DELETE relevant rows).
-// - I recommend using schema checks that are NOT strongly-typed. When you
-// add a migration check, it'll happen to match the "latest" static schemas
-// defined by Nexus, but that won't always be the case. As the schema
-// continues to change (maybe a table you're trying to check gets a new column
-// in a later version), your code should continue operating on the OLD version,
-// and as such, should avoid needing any updates.
-#[tokio::test]
-async fn validate_data_migration() {
-    let config = load_test_config();
-    let logctx = LogContext::new("validate_data_migration", &config.pkg.log);
-    let log = &logctx.log;
-
-    let db = TestDatabase::new_populate_nothing(&logctx.log).await;
-    let crdb = db.crdb();
-    let ctx = MigrationContext {
-        log,
-        client: crdb.connect().await.expect("Failed to access CRDB client"),
-    };
-
-    let all_versions = read_all_schema_versions();
-    let all_checks = get_migration_checks();
-
-    // Go from the first version to the latest version.
-    for version in all_versions.iter_versions() {
-        // If this check has preconditions (or setup), run them.
-        let checks = all_checks.get(version.semver());
-        if let Some(before) = checks.and_then(|check| check.before) {
-            before(&ctx).await;
-        }
-
-        apply_update(log, &crdb, version, 1).await;
-        assert_eq!(
-            version.semver().to_string(),
-            query_crdb_schema_version(&crdb).await
-        );
-
-        // If this check has postconditions (or cleanup), run them.
-        if let Some(after) = checks.and_then(|check| check.after) {
-            after(&ctx).await;
-        }
-    }
-    assert_eq!(
-        LATEST_SCHEMA_VERSION.to_string(),
-        query_crdb_schema_version(&crdb).await
-    );
-
-    db.terminate().await;
-    logctx.cleanup_successful();
-}
-
 // Parse the previous-schemas.txt config file to get starting versions
-fn parse_previous_schemas_config() -> Result<Vec<semver::Version>, anyhow::Error>
+fn parse_previous_schemas() -> Result<BTreeSet<semver::Version>, anyhow::Error>
 {
     let config_file =
         std::path::Path::new(SCHEMA_DIR).join("previous-schemas.txt");
@@ -2316,7 +2262,7 @@ fn parse_previous_schemas_config() -> Result<Vec<semver::Version>, anyhow::Error
         format!("Failed to read config file: {:?}", config_file)
     })?;
 
-    let mut versions = Vec::new();
+    let mut versions = BTreeSet::new();
 
     for line in content.lines() {
         let line = line.trim();
@@ -2334,26 +2280,17 @@ fn parse_previous_schemas_config() -> Result<Vec<semver::Version>, anyhow::Error
                 );
             }
             let previous_version = KNOWN_VERSIONS[1].semver().clone();
-            versions.push(previous_version);
+            versions.insert(previous_version);
         } else {
             // Parse as semver
             let version = semver::Version::parse(line).with_context(|| {
                 format!("Failed to parse version: {}", line)
             })?;
-            versions.push(version);
+            versions.insert(version);
         }
     }
 
-    // Remove duplicates while preserving order
-    let mut seen = std::collections::HashSet::new();
-    let mut unique_versions = Vec::new();
-    for version in versions {
-        if seen.insert(version.clone()) {
-            unique_versions.push(version);
-        }
-    }
-
-    Ok(unique_versions)
+    Ok(versions)
 }
 
 // Load dbinit.sql from a previous schema version for migration testing
@@ -2381,19 +2318,26 @@ async fn validate_data_migration_from_version_to_target(
     target_version: semver::Version,
     test_name: &str,
 ) {
+    let overall_start = std::time::Instant::now();
+
     let config = load_test_config();
     let logctx = LogContext::new(test_name, &config.pkg.log);
     let log = &logctx.log;
 
+    // Time database creation
+    let db_start = std::time::Instant::now();
     let db = TestDatabase::new_populate_nothing(&logctx.log).await;
     let crdb = db.crdb();
+    let db_creation_time = db_start.elapsed();
 
-    // Load and apply the starting schema version
+    // Time starting schema application
+    let schema_start = std::time::Instant::now();
     let starting_sql = load_dbinit_from_previous_schema(&starting_version)
         .await
         .expect("Failed to load starting schema");
 
     let client = crdb.connect().await.expect("Failed to access CRDB client");
+    disable_fsync(&client).await;
     client
         .batch_execute(&starting_sql)
         .await
@@ -2402,6 +2346,7 @@ async fn validate_data_migration_from_version_to_target(
     // Verify we're at the expected starting version
     let actual_version = query_crdb_schema_version(&crdb).await;
     assert_eq!(starting_version.to_string(), actual_version);
+    let schema_apply_time = schema_start.elapsed();
 
     let ctx = MigrationContext { log, client };
 
@@ -2428,15 +2373,14 @@ async fn validate_data_migration_from_version_to_target(
         })
         .collect();
 
-    println!(
-        "  Test {} will apply {} migrations: {:?}",
-        test_name,
-        versions_to_apply.len(),
-        versions_to_apply.iter().map(|v| v.semver()).collect::<Vec<_>>()
-    );
+    // Time migration steps
+    let migrations_start = std::time::Instant::now();
+    let mut migration_times = Vec::new();
 
     // Apply each migration step
     for version in &versions_to_apply {
+        let migration_start = std::time::Instant::now();
+
         // If this check has preconditions (or setup), run them.
         let checks = all_checks.get(version.semver());
         if let Some(before) = checks.and_then(|check| check.before) {
@@ -2453,7 +2397,12 @@ async fn validate_data_migration_from_version_to_target(
         if let Some(after) = checks.and_then(|check| check.after) {
             after(&ctx).await;
         }
+
+        let migration_time = migration_start.elapsed();
+        migration_times.push((version.semver().clone(), migration_time));
     }
+
+    let total_migration_time = migrations_start.elapsed();
 
     // Verify we reached the target version
     assert_eq!(
@@ -2463,14 +2412,33 @@ async fn validate_data_migration_from_version_to_target(
 
     db.terminate().await;
     logctx.cleanup_successful();
+
+    let total_time = overall_start.elapsed();
+
+    // Print detailed timing information
+    println!("  {} timing breakdown:", test_name);
+    println!("    Database creation: {:.2}s", db_creation_time.as_secs_f64());
+    println!(
+        "    Starting schema ({}): {:.2}s",
+        starting_version,
+        schema_apply_time.as_secs_f64()
+    );
+    println!(
+        "    Migrations ({} steps): {:.2}s",
+        migration_times.len(),
+        total_migration_time.as_secs_f64()
+    );
+    for (version, time) in &migration_times {
+        println!("      → {}: {:.2}s", version, time.as_secs_f64());
+    }
+    println!("    Total test time: {:.2}s", total_time.as_secs_f64());
 }
 
 // Find migration test ranges based on checkpoints in previous-schemas.txt
 fn get_migration_test_ranges()
 -> Result<Vec<(semver::Version, semver::Version)>, anyhow::Error> {
     // Get checkpoint versions from previous-schemas.txt
-    let mut checkpoints = parse_previous_schemas_config()?;
-    checkpoints.sort();
+    let checkpoints: Vec<_> = parse_previous_schemas()?.into_iter().collect();
 
     // Get all migration check versions
     let migration_checks = get_migration_checks();
@@ -2487,7 +2455,9 @@ fn get_migration_test_ranges()
             &checkpoints[i + 1]
         } else {
             // For the last checkpoint, find the highest migration check version
-            all_migration_versions.last().unwrap_or(start_checkpoint)
+            all_migration_versions
+                .last()
+                .expect("Expected at least one migration check")
         };
 
         // Find migration versions in this range
@@ -2506,9 +2476,123 @@ fn get_migration_test_ranges()
     Ok(ranges)
 }
 
-// Generate individual data migration tests for logical ranges of migration checks
+// Verify that all migration checks are covered by our test ranges
+fn verify_migration_coverage() {
+    let checkpoints: Vec<_> = parse_previous_schemas()
+        .expect("Failed to parse previous-schemas.txt")
+        .into_iter()
+        .collect();
+    let migration_checks = get_migration_checks();
+    let test_ranges = get_migration_test_ranges()
+        .expect("Failed to get migration test ranges");
+
+    // Get all migration check versions
+    let mut all_migration_versions: Vec<_> =
+        migration_checks.keys().cloned().collect();
+    all_migration_versions.sort();
+
+    // Find which migrations are covered by our test ranges
+    let mut covered_migrations = std::collections::HashSet::new();
+    for (start, end) in &test_ranges {
+        for version in &all_migration_versions {
+            if version > start && version <= end {
+                covered_migrations.insert(version);
+            }
+        }
+    }
+
+    // Find uncovered migrations
+    let mut uncovered_migrations = Vec::new();
+    for version in &all_migration_versions {
+        if !covered_migrations.contains(version) {
+            uncovered_migrations.push(version);
+        }
+    }
+
+    if uncovered_migrations.is_empty() {
+        println!("  ✅ All migration checks are covered by test ranges");
+        return;
+    }
+    eprintln!(
+        "❌ UNCOVERED migration checks found: {:?}",
+        uncovered_migrations
+    );
+    eprintln!("These migration checks are not covered by any test range!");
+    eprintln!(
+        "To fix this, update schema/crdb/previous-schemas.txt to add checkpoints that cover these versions."
+    );
+
+    // Provide specific suggestions
+    for uncovered in &uncovered_migrations {
+        let before_checkpoint =
+            checkpoints.iter().filter(|cp| **cp < **uncovered).max();
+        let after_checkpoint =
+            checkpoints.iter().filter(|cp| **cp > **uncovered).min();
+
+        match (before_checkpoint, after_checkpoint) {
+            (Some(before), Some(after)) => {
+                eprintln!(
+                    "  → {} falls between checkpoints {} and {} - this should be covered automatically",
+                    uncovered, before, after
+                );
+            }
+            (None, Some(after)) => {
+                eprintln!(
+                    "  → {} is before first checkpoint {} - add an earlier checkpoint like {}",
+                    uncovered, after, uncovered
+                );
+            }
+            (Some(before), None) => {
+                eprintln!(
+                    "  → {} is after last checkpoint {} - this should be covered automatically",
+                    uncovered, before
+                );
+            }
+            (None, None) => {
+                eprintln!(
+                    "  → {} has no nearby checkpoints - do any checkpoints exist?",
+                    uncovered
+                );
+            }
+        }
+    }
+
+    panic!(
+        "Migration coverage verification failed! {} migration checks are not covered by test ranges.",
+        uncovered_migrations.len()
+    );
+}
+
+// Performs all schema changes and runs version-specific assertions.
+//
+// HOW TO ADD A MIGRATION CHECK:
+// - Add a new "map.insert" line to "get_migration_checks", with the semver of the version you'd
+// like to inspect before / after.
+// - Define your "before" (optional) and "after" (required) functions. These act on a connection to
+// CockroachDB, and can observe and mutate arbitrary state.
+// - Migrations will start at one of the schemas defined in "schema/crdb/previous-schemas.txt".
+// Migrations will be executed between these checkpoint schemas. If a particular migration is
+// taking a long time - for example, suppose it's going through hundreds of expensive upgrade
+// operations - consider adding a "checkpoint" in this file and re-running the command: "cargo
+// xtask schema generate-previous". This will save a whole copy of "dbinit.sql" from when the old
+// schema migration was added, and these checkpoints can be used as starting points for upgrade
+// tests.
+//
+// ADVICE FOR MIGRATION CHECKS:
+// - Your migration check will run in the same test as all other migration checks (between
+// checkpoints), because performing schema migrations isn't that fast. If you perform an operation
+// that could be disruptive to subsequent checks, I recommend cleaning up after yourself (e.g.,
+// DELETE relevant rows).
+// - I recommend using schema checks that are NOT strongly-typed. When you add a migration check,
+// it'll happen to match the "latest" static schemas defined by Nexus, but that won't always be the
+// case. As the schema continues to change (maybe a table you're trying to check gets a new column
+// in a later version), your code should continue operating on the OLD version, and as such, should
+// avoid needing any updates.
 #[tokio::test]
 async fn validate_data_migration_from_configured_versions() {
+    // First, verify that all migration checks are covered by our test ranges
+    verify_migration_coverage();
+
     let test_ranges = get_migration_test_ranges()
         .expect("Failed to get migration test ranges");
 
