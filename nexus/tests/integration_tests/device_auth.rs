@@ -5,8 +5,8 @@
 use std::num::NonZeroU32;
 
 use chrono::Utc;
-use dropshot::ResultsPage;
 use dropshot::test_util::ClientTestContext;
+use dropshot::{HttpErrorResponseBody, ResultsPage};
 use nexus_auth::authn::USER_TEST_UNPRIVILEGED;
 use nexus_db_queries::db::fixed_data::silo::DEFAULT_SILO;
 use nexus_db_queries::db::identity::{Asset, Resource};
@@ -55,7 +55,9 @@ async fn test_device_auth_flow(cptestctx: &ControlPlaneTestContext) {
         .expect("failed to reject device auth start without client_id");
 
     let client_id = Uuid::new_v4();
-    let authn_params = DeviceAuthRequest { client_id };
+    // note that this exercises ttl_seconds being omitted from the body because
+    // it's URL encoded, so None means it's omitted
+    let authn_params = DeviceAuthRequest { client_id, ttl_seconds: None };
 
     // Using a JSON encoded body fails.
     RequestBuilder::new(testctx, Method::POST, "/device/auth")
@@ -241,7 +243,7 @@ async fn test_device_auth_flow(cptestctx: &ControlPlaneTestContext) {
 /// as a string
 async fn get_device_token(testctx: &ClientTestContext) -> String {
     let client_id = Uuid::new_v4();
-    let authn_params = DeviceAuthRequest { client_id };
+    let authn_params = DeviceAuthRequest { client_id, ttl_seconds: None };
 
     // Start a device authentication flow
     let auth_response: DeviceAuthResponse =
@@ -429,6 +431,184 @@ async fn test_device_token_expiration(cptestctx: &ControlPlaneTestContext) {
     let settings: views::SiloAuthSettings =
         object_get(testctx, "/v1/auth-settings").await;
     assert_eq!(settings.device_token_max_ttl_seconds, None);
+}
+
+// lets me stick whatever I want in this thing to be URL-encoded
+#[derive(serde::Serialize)]
+struct BadAuthReq {
+    client_id: String,
+    ttl_seconds: String,
+}
+
+/// Test that 0 and negative values for ttl_seconds give immediate 400s
+#[nexus_test]
+async fn test_device_token_request_ttl_invalid(
+    cptestctx: &ControlPlaneTestContext,
+) {
+    let testctx = &cptestctx.external_client;
+
+    let auth_response = NexusRequest::new(
+        RequestBuilder::new(testctx, Method::POST, "/device/auth")
+            .allow_non_dropshot_errors()
+            .body_urlencoded(Some(&BadAuthReq {
+                client_id: Uuid::new_v4().to_string(),
+                ttl_seconds: "0".to_string(),
+            }))
+            .expect_status(Some(StatusCode::BAD_REQUEST)),
+    )
+    .execute()
+    // .execute_and_parse_unwrap::<DeviceAuthResponse>()
+    .await
+    .expect("expected an Ok(TestResponse)");
+
+    let error_body: serde_json::Value =
+        serde_json::from_slice(&auth_response.body).unwrap();
+    assert_eq!(
+        error_body.get("message").unwrap().to_string(),
+        "\"unable to parse URL-encoded body: ttl_seconds: \
+         invalid value: integer `0`, expected a nonzero u32\""
+    );
+
+    let auth_response = NexusRequest::new(
+        RequestBuilder::new(testctx, Method::POST, "/device/auth")
+            .allow_non_dropshot_errors()
+            .body_urlencoded(Some(&BadAuthReq {
+                client_id: Uuid::new_v4().to_string(),
+                ttl_seconds: "-3".to_string(),
+            }))
+            .expect_status(Some(StatusCode::BAD_REQUEST)),
+    )
+    .execute()
+    // .execute_and_parse_unwrap::<DeviceAuthResponse>()
+    .await
+    .expect("expected an Ok(TestResponse)");
+
+    let error_body: serde_json::Value =
+        serde_json::from_slice(&auth_response.body).unwrap();
+    assert_eq!(
+        error_body.get("message").unwrap().to_string(),
+        "\"unable to parse URL-encoded body: ttl_seconds: \
+         invalid digit found in string\""
+    );
+}
+
+#[nexus_test]
+async fn test_device_token_request_ttl(cptestctx: &ControlPlaneTestContext) {
+    let testctx = &cptestctx.external_client;
+
+    // Set silo max TTL to 10 seconds
+    let settings = params::SiloAuthSettingsUpdate {
+        device_token_max_ttl_seconds: NonZeroU32::new(10).into(),
+    };
+    let _: views::SiloAuthSettings =
+        object_put(testctx, "/v1/auth-settings", &settings).await;
+
+    // Request TTL above the max should fail at verification time
+    let invalid_ttl = DeviceAuthRequest {
+        client_id: Uuid::new_v4(),
+        ttl_seconds: NonZeroU32::new(20), // Above the 10 second max
+    };
+
+    let auth_response = NexusRequest::new(
+        RequestBuilder::new(testctx, Method::POST, "/device/auth")
+            .body_urlencoded(Some(&invalid_ttl))
+            .expect_status(Some(StatusCode::OK)),
+    )
+    .execute_and_parse_unwrap::<DeviceAuthResponse>()
+    .await;
+
+    let confirm_params =
+        DeviceAuthVerify { user_code: auth_response.user_code };
+
+    // Confirmation fails because requested TTL exceeds max
+    let confirm_error = NexusRequest::new(
+        RequestBuilder::new(testctx, Method::POST, "/device/confirm")
+            .body(Some(&confirm_params))
+            .expect_status(Some(StatusCode::BAD_REQUEST)),
+    )
+    .authn_as(AuthnMode::PrivilegedUser)
+    .execute_and_parse_unwrap::<HttpErrorResponseBody>()
+    .await;
+
+    // Check that the error message mentions TTL
+    assert_eq!(confirm_error.error_code, Some("InvalidRequest".to_string()));
+    assert_eq!(
+        confirm_error.message,
+        "Requested TTL 20 seconds exceeds maximum allowed TTL \
+         for this silo of 10 seconds"
+    );
+
+    // Request TTL below the max should succeed and be used
+    let valid_ttl = DeviceAuthRequest {
+        client_id: Uuid::new_v4(),
+        ttl_seconds: NonZeroU32::new(3), // Below the 10 second max
+    };
+
+    let auth_response = NexusRequest::new(
+        RequestBuilder::new(testctx, Method::POST, "/device/auth")
+            .body_urlencoded(Some(&valid_ttl))
+            .expect_status(Some(StatusCode::OK)),
+    )
+    .execute_and_parse_unwrap::<DeviceAuthResponse>()
+    .await;
+
+    let device_code = auth_response.device_code;
+    let user_code = auth_response.user_code;
+    let confirm_params = DeviceAuthVerify { user_code };
+
+    // this time will be pretty close to the now() used on the server when
+    // calculating expiration time
+    let t0 = Utc::now();
+
+    // Confirmation should succeed
+    NexusRequest::new(
+        RequestBuilder::new(testctx, Method::POST, "/device/confirm")
+            .body(Some(&confirm_params))
+            .expect_status(Some(StatusCode::NO_CONTENT)),
+    )
+    .authn_as(AuthnMode::PrivilegedUser)
+    .execute()
+    .await
+    .expect("failed to confirm");
+
+    let token_params = DeviceAccessTokenRequest {
+        grant_type: "urn:ietf:params:oauth:grant-type:device_code".to_string(),
+        device_code,
+        client_id: valid_ttl.client_id,
+    };
+
+    // Get the token
+    let token_grant = NexusRequest::new(
+        RequestBuilder::new(testctx, Method::POST, "/device/token")
+            .allow_non_dropshot_errors()
+            .body_urlencoded(Some(&token_params))
+            .expect_status(Some(StatusCode::OK)),
+    )
+    .authn_as(AuthnMode::PrivilegedUser)
+    .execute_and_parse_unwrap::<DeviceAccessTokenGrant>()
+    .await;
+
+    // Verify the token has roughly the correct expiration time. One second
+    // threshold is sufficient to confirm it's not getting the silo max of 10
+    // seconds. Locally, I saw diffs as low as 14ms.
+    let tokens = get_tokens_priv(testctx).await;
+    let time_expires = tokens[0].time_expires.unwrap();
+    let expected_expires = t0 + Duration::from_secs(3);
+    let diff_ms = (time_expires - expected_expires).num_milliseconds().abs();
+    assert!(diff_ms <= 1000, "time diff was {diff_ms} ms. should be near zero");
+
+    // Token should work initially
+    project_list(&testctx, &token_grant.access_token, StatusCode::OK)
+        .await
+        .expect("token should work initially");
+
+    // Wait for token to expire
+    sleep(Duration::from_secs(4)).await;
+
+    // Token is expired
+    project_list(&testctx, &token_grant.access_token, StatusCode::UNAUTHORIZED)
+        .await
+        .expect("token should be expired");
 }
 
 async fn get_tokens_priv(
