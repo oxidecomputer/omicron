@@ -31,7 +31,7 @@ use futures::StreamExt;
 use futures::stream::FuturesUnordered;
 use illumos_utils::opte::PortManager;
 use illumos_utils::running_zone::RunningZone;
-use illumos_utils::zpool::ZpoolName;
+use illumos_utils::zpool::PathInPool;
 use itertools::Itertools as _;
 use nexus_sled_agent_shared::inventory::{
     Inventory, OmicronSledConfig, OmicronZoneConfig, SledRole,
@@ -76,7 +76,6 @@ use sled_hardware::{
 };
 use sled_hardware_types::Baseboard;
 use sled_hardware_types::underlay::BootstrapInterface;
-use sled_storage::config::MountConfig;
 use slog::Logger;
 use slog_error_chain::InlineErrorChain;
 use sprockets_tls::keys::SprocketsConfig;
@@ -1328,18 +1327,11 @@ impl SledAgentFacilities for ReconcilerFacilities {
     async fn start_omicron_zone(
         &self,
         zone_config: &OmicronZoneConfig,
-        mount_config: &MountConfig,
-        is_time_synchronized: bool,
-        all_u2_pools: &[ZpoolName],
+        zone_root_path: PathInPool,
     ) -> anyhow::Result<RunningZone> {
         let zone = self
             .service_manager
-            .start_omicron_zone(
-                mount_config,
-                zone_config,
-                is_time_synchronized,
-                all_u2_pools,
-            )
+            .start_omicron_zone(zone_config, zone_root_path)
             .await?;
         Ok(zone)
     }

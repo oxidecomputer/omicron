@@ -25,9 +25,6 @@ use illumos_utils::zfs::DestroyDatasetError;
 use illumos_utils::zfs::Mountpoint;
 use illumos_utils::zfs::WhichDatasets;
 use illumos_utils::zfs::Zfs;
-use illumos_utils::zpool::PathInPool;
-use illumos_utils::zpool::ZpoolOrRamdisk;
-use nexus_sled_agent_shared::inventory::ConfigReconcilerInventoryResult;
 use nexus_sled_agent_shared::inventory::InventoryDataset;
 use omicron_common::disk::DatasetConfig;
 use omicron_common::disk::DatasetKind;
@@ -37,7 +34,6 @@ use omicron_common::zpool_name::ZpoolName;
 use omicron_uuid_kinds::DatasetUuid;
 use sled_storage::config::MountConfig;
 use sled_storage::dataset::CRYPT_DATASET;
-use sled_storage::dataset::U2_DEBUG_DATASET;
 use sled_storage::dataset::ZONE_DATASET;
 use sled_storage::manager::NestedDatasetConfig;
 use sled_storage::manager::NestedDatasetListOptions;
@@ -91,7 +87,7 @@ pub enum DatasetEnsureError {
 }
 
 impl DatasetEnsureError {
-    fn is_retryable(&self) -> bool {
+    pub(crate) fn is_retryable(&self) -> bool {
         match self {
             // These errors might be retryable; there are probably cases where
             // they won't be, but we need more context than we have available
@@ -161,89 +157,13 @@ pub enum NestedDatasetListError {
     },
 }
 
-#[derive(Debug, Clone, Default)]
-pub(crate) struct DatasetEnsureResult(IdMap<SingleDatasetEnsureResult>);
-
-impl DatasetEnsureResult {
-    pub(crate) fn has_retryable_error(&self) -> bool {
-        self.0.iter().any(|result| match &result.state {
-            DatasetState::Ensured => false,
-            DatasetState::FailedToEnsure(err) => err.is_retryable(),
-        })
-    }
-
-    pub(crate) fn to_inventory(
-        &self,
-    ) -> BTreeMap<DatasetUuid, ConfigReconcilerInventoryResult> {
-        self.0
-            .iter()
-            .map(|dataset| match &dataset.state {
-                DatasetState::Ensured => {
-                    (dataset.config.id, ConfigReconcilerInventoryResult::Ok)
-                }
-                DatasetState::FailedToEnsure(err) => (
-                    dataset.config.id,
-                    ConfigReconcilerInventoryResult::Err {
-                        message: InlineErrorChain::new(err).to_string(),
-                    },
-                ),
-            })
-            .collect()
-    }
-
-    pub(crate) fn all_mounted_debug_datasets<'a>(
-        &'a self,
-        mount_config: &'a MountConfig,
-    ) -> impl Iterator<Item = PathInPool> + 'a {
-        self.all_mounted_datasets(mount_config, DatasetKind::Debug)
-    }
-
-    pub(crate) fn all_mounted_zone_root_datasets<'a>(
-        &'a self,
-        mount_config: &'a MountConfig,
-    ) -> impl Iterator<Item = PathInPool> + 'a {
-        self.all_mounted_datasets(mount_config, DatasetKind::TransientZoneRoot)
-    }
-
-    fn all_mounted_datasets<'a>(
-        &'a self,
-        mount_config: &'a MountConfig,
-        kind: DatasetKind,
-    ) -> impl Iterator<Item = PathInPool> + 'a {
-        // We're a helper called by the pub methods on this type, so we only
-        // have to handle the `kind`s they call us with.
-        let mountpoint = match &kind {
-            DatasetKind::Debug => U2_DEBUG_DATASET,
-            DatasetKind::TransientZoneRoot => ZONE_DATASET,
-            _ => unreachable!(
-                "private function called with unexpected kind {kind:?}"
-            ),
-        };
-        self.0
-            .iter()
-            .filter(|result| match &result.state {
-                DatasetState::Ensured => true,
-                DatasetState::FailedToEnsure(_) => false,
-            })
-            .filter(move |result| *result.config.name.kind() == kind)
-            .map(|result| {
-                let pool = *result.config.name.pool();
-                PathInPool {
-                    pool: ZpoolOrRamdisk::Zpool(pool),
-                    path: pool
-                        .dataset_mountpoint(&mount_config.root, mountpoint),
-                }
-            })
-    }
+#[derive(Debug)]
+pub(crate) struct DatasetEnsureResult {
+    pub(crate) config: DatasetConfig,
+    pub(crate) result: Result<(), Arc<DatasetEnsureError>>,
 }
 
-#[derive(Debug, Clone)]
-struct SingleDatasetEnsureResult {
-    config: DatasetConfig,
-    state: DatasetState,
-}
-
-impl IdMappable for SingleDatasetEnsureResult {
+impl IdMappable for DatasetEnsureResult {
     type Id = DatasetUuid;
 
     fn id(&self) -> Self::Id {
@@ -252,15 +172,17 @@ impl IdMappable for SingleDatasetEnsureResult {
 }
 
 #[derive(Debug, Clone)]
-enum DatasetState {
-    Ensured,
-    FailedToEnsure(Arc<DatasetEnsureError>),
-}
-
-#[derive(Debug, Clone)]
 pub(crate) struct DatasetTaskHandle(mpsc::Sender<DatasetTaskRequest>);
 
 impl DatasetTaskHandle {
+    // For testing, create a handle on which requests will always fail with a
+    // `DatasetTaskError`.
+    #[cfg(any(test, feature = "testing"))]
+    pub(crate) fn spawn_noop() -> Self {
+        let (tx, _rx) = mpsc::channel(1);
+        Self(tx)
+    }
+
     pub fn spawn_dataset_task(
         mount_config: Arc<MountConfig>,
         currently_managed_zpools_rx: CurrentlyManagedZpoolsReceiver,
@@ -296,7 +218,7 @@ impl DatasetTaskHandle {
                 mount_config,
                 currently_managed_zpools_rx,
                 request_rx,
-                datasets: DatasetEnsureResult::default(),
+                ensured_datasets: BTreeSet::new(),
                 log: base_log.new(slog::o!("component" => "DatasetTask")),
             }
             .run(zfs),
@@ -317,7 +239,7 @@ impl DatasetTaskHandle {
     pub async fn datasets_ensure(
         &self,
         datasets: IdMap<DatasetConfig>,
-    ) -> Result<DatasetEnsureResult, DatasetTaskError> {
+    ) -> Result<IdMap<DatasetEnsureResult>, DatasetTaskError> {
         self.try_send_request(|tx| DatasetTaskRequest::DatasetsEnsure {
             datasets,
             tx,
@@ -403,7 +325,7 @@ struct DatasetTask {
     mount_config: Arc<MountConfig>,
     request_rx: mpsc::Receiver<DatasetTaskRequest>,
     currently_managed_zpools_rx: CurrentlyManagedZpoolsReceiver,
-    datasets: DatasetEnsureResult,
+    ensured_datasets: BTreeSet<DatasetName>,
     log: Logger,
 }
 
@@ -426,8 +348,7 @@ impl DatasetTask {
                 _ = tx.0.send(self.inventory(zpools, zfs).await);
             }
             DatasetTaskRequest::DatasetsEnsure { datasets, tx } => {
-                self.datasets_ensure(datasets, zfs).await;
-                _ = tx.0.send(self.datasets.clone());
+                _ = tx.0.send(self.datasets_ensure(datasets, zfs).await);
             }
             DatasetTaskRequest::NestedDatasetMount { name, tx } => {
                 _ = tx.0.send(self.nested_dataset_mount(name, zfs).await);
@@ -482,7 +403,9 @@ impl DatasetTask {
         &mut self,
         config: IdMap<DatasetConfig>,
         zfs: &T,
-    ) {
+    ) -> IdMap<DatasetEnsureResult> {
+        let mut ensure_results = IdMap::new();
+
         // There's an implicit hierarchy inside the list of `DatasetConfig`s:
         //
         // 1. Each zpool may contain many datasets
@@ -535,9 +458,9 @@ impl DatasetTask {
                     "dataset" => ?dataset,
                 );
                 let err = DatasetEnsureError::ZpoolNotFound(*zpool);
-                self.datasets.0.insert(SingleDatasetEnsureResult {
+                ensure_results.insert(DatasetEnsureResult {
                     config: dataset,
-                    state: DatasetState::FailedToEnsure(Arc::new(err)),
+                    result: Err(Arc::new(err)),
                 });
                 continue;
             }
@@ -613,7 +536,7 @@ impl DatasetTask {
         const DATASET_ENSURE_CONCURRENCY_LIMIT: usize = 16;
         let mut non_transient_zones = futures::stream::iter(
             non_transient_zone_configs.into_iter().map(|dataset| async move {
-                let state = match Self::ensure_one_dataset(
+                let result = Self::ensure_one_dataset(
                     DatasetCreationDetails::Config(
                         &dataset,
                         old_datasets.get(&dataset.name.full_name()),
@@ -622,18 +545,14 @@ impl DatasetTask {
                     &log,
                     zfs,
                 )
-                .await
-                {
-                    Ok(state) => state,
-                    Err(err) => DatasetState::FailedToEnsure(Arc::new(err)),
-                };
-                (dataset, state)
+                .await;
+                (dataset, result.map_err(Arc::new))
             }),
         )
         .buffer_unordered(DATASET_ENSURE_CONCURRENCY_LIMIT);
 
-        while let Some((config, state)) = non_transient_zones.next().await {
-            self.datasets.0.insert(SingleDatasetEnsureResult { config, state });
+        while let Some((config, result)) = non_transient_zones.next().await {
+            ensure_results.insert(DatasetEnsureResult { config, result });
         }
 
         // For each transient zone dataset: either ensure it or mark down why we
@@ -649,30 +568,28 @@ impl DatasetTask {
                 else {
                     let err =
                         DatasetEnsureError::TransientZoneRootNoConfig(zpool);
-                    self.datasets.0.insert(SingleDatasetEnsureResult {
+                    ensure_results.insert(DatasetEnsureResult {
                         config: dataset,
-                        state: DatasetState::FailedToEnsure(Arc::new(err)),
+                        result: Err(Arc::new(err)),
                     });
                     continue;
                 };
 
                 // Have we successfully ensured that parent dataset?
-                match self
-                    .datasets
-                    .0
+                match ensure_results
                     .get(zpool_transient_zone_root_dataset_id)
-                    .map(|d| &d.state)
+                    .map(|d| &d.result)
                 {
-                    Some(DatasetState::Ensured) => (),
-                    Some(DatasetState::FailedToEnsure(err)) => {
+                    Some(Ok(())) => (),
+                    Some(Err(err)) => {
                         let err =
                             DatasetEnsureError::TransientZoneRootFailure {
                                 zpool,
                                 err: Arc::clone(err),
                             };
-                        self.datasets.0.insert(SingleDatasetEnsureResult {
+                        ensure_results.insert(DatasetEnsureResult {
                             config: dataset,
-                            state: DatasetState::FailedToEnsure(Arc::new(err)),
+                            result: Err(Arc::new(err)),
                         });
                         continue;
                     }
@@ -685,7 +602,7 @@ impl DatasetTask {
                 }
 
                 transient_zone_futures.push(async move {
-                    let state = match Self::ensure_one_dataset(
+                    let result = Self::ensure_one_dataset(
                         DatasetCreationDetails::Config(
                             &dataset,
                             old_datasets.get(&dataset.name.full_name()),
@@ -694,32 +611,44 @@ impl DatasetTask {
                         &log,
                         zfs,
                     )
-                    .await
-                    {
-                        Ok(state) => state,
-                        Err(err) => DatasetState::FailedToEnsure(Arc::new(err)),
-                    };
-                    (dataset, state)
+                    .await;
+                    (dataset, result.map_err(Arc::new))
                 });
             }
         }
 
         let mut transient_zones = futures::stream::iter(transient_zone_futures)
             .buffer_unordered(DATASET_ENSURE_CONCURRENCY_LIMIT);
-        while let Some((config, state)) = transient_zones.next().await {
-            self.datasets.0.insert(SingleDatasetEnsureResult { config, state });
+        while let Some((config, result)) = transient_zones.next().await {
+            ensure_results.insert(DatasetEnsureResult { config, result });
         }
+
+        // Remember all successfully-ensured datasets (used by
+        // `nested_dataset_ensure()` to check that any nested datasets' parents
+        // have been ensured).
+        self.ensured_datasets = ensure_results
+            .iter()
+            .filter_map(|d| {
+                if d.result.is_ok() {
+                    Some(d.config.name.clone())
+                } else {
+                    None
+                }
+            })
+            .collect();
+
+        ensure_results
     }
 
     /// Compare `dataset`'s properties against `old_dataset` (an set of
     /// recently-retrieved properties from ZFS). If we already know
     /// the state of `dataset` based on those properties, return `Some(state)`;
     /// otherwise, return `None`.
-    fn is_dataset_state_known(
+    fn is_dataset_ensure_result_known(
         dataset: &DatasetConfig,
         old_dataset: Option<&DatasetProperties>,
         log: &Logger,
-    ) -> Option<DatasetState> {
+    ) -> Option<Result<(), DatasetEnsureError>> {
         let log = log.new(slog::o!("dataset" => dataset.name.full_name()));
 
         let Some(old_dataset) = old_dataset else {
@@ -736,13 +665,11 @@ impl DatasetTask {
             // We cannot do anything here: we already have a dataset with this
             // name, but it has a different ID. Nexus has sent us bad
             // information (or we have a bug somewhere); refuse to proceed.
-            return Some(DatasetState::FailedToEnsure(Arc::new(
-                DatasetEnsureError::UuidMismatch {
-                    name: dataset.name.full_name(),
-                    expected: dataset.id,
-                    got: old_id,
-                },
-            )));
+            return Some(Err(DatasetEnsureError::UuidMismatch {
+                name: dataset.name.full_name(),
+                expected: dataset.id,
+                got: old_id,
+            }));
         }
 
         let old_props = match SharedDatasetConfig::try_from(old_dataset) {
@@ -778,7 +705,7 @@ impl DatasetTask {
         }
 
         info!(log, "No changes necessary, returning early");
-        return Some(DatasetState::Ensured);
+        return Some(Ok(()));
     }
 
     // Ensures a dataset exists within a zpool.
@@ -792,7 +719,7 @@ impl DatasetTask {
         mount_config: &MountConfig,
         log: &Logger,
         zfs: &T,
-    ) -> Result<DatasetState, DatasetEnsureError> {
+    ) -> Result<(), DatasetEnsureError> {
         info!(log, "ensure_dataset"; "details" => ?details);
 
         // Unpack the particulars of the kind of dataset we're creating.
@@ -810,10 +737,10 @@ impl DatasetTask {
                 DatasetCreationDetails::Config(config, old_props) => {
                     // Do we alread know the state of this dataset based on
                     // `old_props`?
-                    if let Some(state) =
-                        Self::is_dataset_state_known(config, old_props, log)
-                    {
-                        return Ok(state);
+                    if let Some(result) = Self::is_dataset_ensure_result_known(
+                        config, old_props, log,
+                    ) {
+                        return result;
                     }
 
                     let dataset_id = Some(config.id);
@@ -848,8 +775,7 @@ impl DatasetTask {
             id: dataset_id,
             additional_options: None,
         })
-        .await?;
-        Ok(DatasetState::Ensured)
+        .await
     }
 
     async fn nested_dataset_mount<T: ZfsImpl>(
@@ -876,13 +802,7 @@ impl DatasetTask {
         let log = self.log.new(slog::o!("request" => "nested_dataset_ensure"));
 
         // Has our parent dataset been mounted?
-        //
-        // TODO-cleanup Could we get the parent dataset ID instead of its name?
-        // Then we could do a lookup instead of a scan.
-        if !self.datasets.0.iter().any(|result| {
-            result.config.name == config.name.root
-                && matches!(result.state, DatasetState::Ensured)
-        }) {
+        if !self.ensured_datasets.contains(&config.name.root) {
             return Err(NestedDatasetEnsureError::ParentDatasetNotMounted(
                 config.name.root,
             ));
@@ -1014,7 +934,7 @@ enum DatasetTaskRequest {
     },
     DatasetsEnsure {
         datasets: IdMap<DatasetConfig>,
-        tx: DebugIgnore<oneshot::Sender<DatasetEnsureResult>>,
+        tx: DebugIgnore<oneshot::Sender<IdMap<DatasetEnsureResult>>>,
     },
     NestedDatasetMount {
         name: NestedDatasetLocation,
@@ -1396,21 +1316,20 @@ mod tests {
 
         // The returned map should record success for all datasets on managed
         // zpools and errors on all unmanaged pools.
-        assert_eq!(result.0.len(), datasets.len());
+        assert_eq!(result.len(), datasets.len());
         let mut num_datasets_on_managed_pools = 0;
         for dataset in &datasets {
-            let single_result = result
-                .0
+            let single_dataset = result
                 .get(&dataset.id)
                 .expect("result contains entry for each dataset");
 
             if managed_pools.contains(dataset.name.pool()) {
-                assert_matches!(single_result.state, DatasetState::Ensured);
+                assert_matches!(single_dataset.result, Ok(()));
                 num_datasets_on_managed_pools += 1;
             } else {
                 assert_matches!(
-                    &single_result.state,
-                    DatasetState::FailedToEnsure(err)
+                    &single_dataset.result,
+                    Err(err)
                         if matches!(**err, DatasetEnsureError::ZpoolNotFound(_))
                 );
             }
@@ -1533,35 +1452,32 @@ mod tests {
         //   the `Succeed` behavior
         // * errors for all other transient zones (with the specific error
         //   depending on whether the parent failed or was omitted)
-        assert_eq!(result.0.len(), datasets.len());
+        assert_eq!(result.len(), datasets.len());
         for dataset in &datasets {
             let behavior = pools
                 .get(dataset.name.pool())
                 .expect("datasets only exist for pools we have");
-            let result = result
-                .0
+            let result = &result
                 .get(&dataset.id)
-                .expect("result contains entry for each dataset");
+                .expect("result contains entry for each dataset")
+                .result;
 
             match (behavior, dataset.name.kind()) {
                 (
                     TransientZoneRootBehavior::Succeed,
                     DatasetKind::TransientZoneRoot
                     | DatasetKind::TransientZone { .. },
-                ) => assert_matches!(result.state, DatasetState::Ensured),
+                ) => assert_matches!(result, Ok(())),
                 (
                     TransientZoneRootBehavior::Fail,
                     DatasetKind::TransientZoneRoot,
-                ) => assert_matches!(
-                    result.state,
-                    DatasetState::FailedToEnsure(_)
-                ),
+                ) => assert_matches!(result, Err(_)),
                 (
                     TransientZoneRootBehavior::Fail,
                     DatasetKind::TransientZone { .. },
                 ) => assert_matches!(
-                    &result.state,
-                    DatasetState::FailedToEnsure(err) if matches!(
+                    result,
+                    Err(err) if matches!(
                         **err,
                         DatasetEnsureError::TransientZoneRootFailure { .. }
                     )
@@ -1570,8 +1486,8 @@ mod tests {
                     TransientZoneRootBehavior::Omit,
                     DatasetKind::TransientZone { .. },
                 ) => assert_matches!(
-                    &result.state,
-                    DatasetState::FailedToEnsure(err) if matches!(
+                    result,
+                    Err(err) if matches!(
                         **err, DatasetEnsureError::TransientZoneRootNoConfig(_)
                     )
                 ),
@@ -1649,11 +1565,11 @@ mod tests {
         // Our in-memory ZFS will return an error if we tried to mount a
         // transient zone before its parent zone root, so it's sufficient to
         // check that all the datasets ensured successfully.
-        assert_eq!(result.0.len(), datasets.len());
-        for single_result in result.0 {
+        assert_eq!(result.len(), datasets.len());
+        for single_result in result {
             assert_matches!(
-                single_result.state,
-                DatasetState::Ensured,
+                single_result.result,
+                Ok(()),
                 "bad state for {:?}",
                 single_result.config
             );
@@ -1712,13 +1628,13 @@ mod tests {
             .expect("no task error");
 
         // Each dataset should have been ensured exactly once.
-        assert_eq!(result.0.len(), datasets.len());
+        assert_eq!(result.len(), datasets.len());
         {
             let zfs = zfs.inner.lock().unwrap();
             for dataset in &datasets {
                 assert_matches!(
-                    result.0.get(&dataset.id).unwrap().state,
-                    DatasetState::Ensured
+                    result.get(&dataset.id).unwrap().result,
+                    Ok(())
                 );
                 assert_eq!(
                     zfs.ensure_call_counts.get(&dataset.name.full_name()),
@@ -1733,13 +1649,13 @@ mod tests {
             .datasets_ensure(datasets.clone())
             .await
             .expect("no task error");
-        assert_eq!(result.0.len(), datasets.len());
+        assert_eq!(result.len(), datasets.len());
         {
             let zfs = zfs.inner.lock().unwrap();
             for dataset in &datasets {
                 assert_matches!(
-                    result.0.get(&dataset.id).unwrap().state,
-                    DatasetState::Ensured
+                    result.get(&dataset.id).unwrap().result,
+                    Ok(())
                 );
                 assert_eq!(
                     zfs.ensure_call_counts.get(&dataset.name.full_name()),
@@ -1783,13 +1699,13 @@ mod tests {
             .datasets_ensure(datasets.clone())
             .await
             .expect("no task error");
-        assert_eq!(result.0.len(), datasets.len());
+        assert_eq!(result.len(), datasets.len());
         {
             let zfs = zfs.inner.lock().unwrap();
             for dataset in &datasets {
                 assert_matches!(
-                    result.0.get(&dataset.id).unwrap().state,
-                    DatasetState::Ensured
+                    result.get(&dataset.id).unwrap().result,
+                    Ok(())
                 );
                 let expected_count =
                     if mutated_datasets.contains(&dataset.id) { 2 } else { 1 };
@@ -1893,10 +1809,8 @@ mod tests {
             .datasets_ensure(datasets.clone())
             .await
             .expect("no task error");
-        assert_eq!(result.0.len(), datasets.len());
-        assert!(
-            result.0.iter().all(|r| matches!(r.state, DatasetState::Ensured))
-        );
+        assert_eq!(result.len(), datasets.len());
+        assert!(result.iter().all(|r| matches!(r.result, Ok(()))));
 
         // Try to ensure each of the nested datasets. This should succeed for
         // any where the debug dataset was mounted, and fail with an appropriate
@@ -2260,14 +2174,13 @@ mod illumos_tests {
             .datasets_ensure([dataset.clone()].into_iter().collect())
             .await
             .expect("task should not fail");
-        assert_eq!(result.0.len(), 1);
+        assert_eq!(result.len(), 1);
         assert_matches!(
             result
-                .0
                 .get(&dataset.id)
                 .expect("result contains entry for dataset")
-                .state,
-            DatasetState::Ensured
+                .result,
+            Ok(())
         );
 
         // Calling "datasets_ensure" with the same input should succeed.
@@ -2275,14 +2188,13 @@ mod illumos_tests {
             .datasets_ensure([dataset.clone()].into_iter().collect())
             .await
             .expect("task should not fail");
-        assert_eq!(result.0.len(), 1);
+        assert_eq!(result.len(), 1);
         assert_matches!(
             result
-                .0
                 .get(&dataset.id)
                 .expect("result contains entry for dataset")
-                .state,
-            DatasetState::Ensured
+                .result,
+            Ok(())
         );
 
         harness.cleanup().await;
@@ -2334,14 +2246,13 @@ mod illumos_tests {
             .datasets_ensure([dataset.clone()].into_iter().collect())
             .await
             .expect("task should not fail");
-        assert_eq!(result.0.len(), 1);
+        assert_eq!(result.len(), 1);
         assert_matches!(
             result
-                .0
                 .get(&dataset.id)
                 .expect("result contains entry for dataset")
-                .state,
-            DatasetState::Ensured
+                .result,
+            Ok(())
         );
 
         // Creating the dataset should have mounted it
@@ -2356,14 +2267,13 @@ mod illumos_tests {
             .datasets_ensure([dataset.clone()].into_iter().collect())
             .await
             .expect("task should not fail");
-        assert_eq!(result.0.len(), 1);
+        assert_eq!(result.len(), 1);
         assert_matches!(
             result
-                .0
                 .get(&dataset.id)
                 .expect("result contains entry for dataset")
-                .state,
-            DatasetState::Ensured
+                .result,
+            Ok(())
         );
 
         // ... and doing so mounts the dataset again.
@@ -2418,9 +2328,9 @@ mod illumos_tests {
             .datasets_ensure(dataset_configs.clone())
             .await
             .expect("task should not fail");
-        assert_eq!(result.0.len(), dataset_configs.len());
-        for result in &result.0 {
-            assert_matches!(result.state, DatasetState::Ensured);
+        assert_eq!(result.len(), dataset_configs.len());
+        for result in &result {
+            assert_matches!(result.result, Ok(()));
         }
 
         // Creating the dataset should have mounted it
@@ -2496,9 +2406,9 @@ mod illumos_tests {
             .datasets_ensure(datasets.clone())
             .await
             .expect("task should not fail");
-        assert_eq!(result.0.len(), datasets.len());
-        for result in &result.0 {
-            assert_matches!(result.state, DatasetState::Ensured);
+        assert_eq!(result.len(), datasets.len());
+        for result in &result {
+            assert_matches!(result.result, Ok(()));
         }
 
         // Calling "datasets_ensure" with the same input should succeed.
@@ -2506,9 +2416,9 @@ mod illumos_tests {
             .datasets_ensure(datasets.clone())
             .await
             .expect("task should not fail");
-        assert_eq!(result.0.len(), datasets.len());
-        for result in &result.0 {
-            assert_matches!(result.state, DatasetState::Ensured);
+        assert_eq!(result.len(), datasets.len());
+        for result in &result {
+            assert_matches!(result.result, Ok(()));
         }
 
         harness.cleanup().await;
@@ -2535,14 +2445,13 @@ mod illumos_tests {
             .datasets_ensure([debug_dataset.clone()].into_iter().collect())
             .await
             .expect("task should not fail");
-        assert_eq!(result.0.len(), 1);
+        assert_eq!(result.len(), 1);
         assert_matches!(
             result
-                .0
                 .get(&debug_dataset.id)
                 .expect("result contains entry for dataset")
-                .state,
-            DatasetState::Ensured
+                .result,
+            Ok(())
         );
 
         // Start querying the state of nested datasets.
