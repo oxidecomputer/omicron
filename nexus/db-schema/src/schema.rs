@@ -552,6 +552,15 @@ table! {
 }
 
 table! {
+    silo_auth_settings(silo_id) {
+        silo_id -> Uuid,
+        time_created -> Timestamptz,
+        time_modified -> Timestamptz,
+        device_token_max_ttl_seconds -> Nullable<Int8>,
+    }
+}
+
+table! {
     network_interface (id) {
         id -> Uuid,
         name -> Text,
@@ -1351,6 +1360,7 @@ table! {
         device_code -> Text,
         time_created -> Timestamptz,
         time_expires -> Timestamptz,
+        token_ttl_seconds -> Nullable<Int8>,
     }
 }
 

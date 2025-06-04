@@ -34,6 +34,7 @@ use omicron_common::api::external::IdentityMetadataUpdateParams;
 use omicron_common::api::external::InstanceCpuCount;
 use omicron_common::api::external::Name;
 use omicron_common::api::external::NameOrId;
+use omicron_common::api::external::Nullable;
 use omicron_common::api::external::RouteDestination;
 use omicron_common::api::external::RouteTarget;
 use omicron_common::api::external::UserId;
@@ -42,6 +43,7 @@ use omicron_test_utils::certificates::CertificateChain;
 use semver::Version;
 use std::net::IpAddr;
 use std::net::Ipv4Addr;
+use std::num::NonZeroU32;
 use std::str::FromStr;
 use std::sync::LazyLock;
 
@@ -1633,6 +1635,22 @@ pub static VERIFY_ENDPOINTS: LazyLock<Vec<VerifyEndpoint>> =
                 ],
             },
             VerifyEndpoint {
+                url: "/v1/auth-settings",
+                visibility: Visibility::Public,
+                unprivileged_access: UnprivilegedAccess::ReadOnly,
+                allowed_methods: vec![
+                    AllowedMethod::Get,
+                    AllowedMethod::Put(
+                        serde_json::to_value(&params::SiloAuthSettingsUpdate {
+                            device_token_max_ttl_seconds: Nullable(
+                                NonZeroU32::new(3),
+                            ),
+                        })
+                        .unwrap(),
+                    ),
+                ],
+            },
+            VerifyEndpoint {
                 url: "/v1/users",
                 visibility: Visibility::Public,
                 unprivileged_access: UnprivilegedAccess::ReadOnly,
@@ -2579,6 +2597,25 @@ pub static VERIFY_ENDPOINTS: LazyLock<Vec<VerifyEndpoint>> =
                     AllowedMethod::Delete,
                 ],
             },
+            /* Tokens */
+            VerifyEndpoint {
+                url: "/v1/me/access-tokens",
+                visibility: Visibility::Public,
+                unprivileged_access: UnprivilegedAccess::ReadOnly,
+                allowed_methods: vec![AllowedMethod::Get],
+            },
+            // Creating the resource here with SetupReqs is more complicated
+            // than with other resources because it's a multi-step process where
+            // later steps depend on earlier ones, so for now we will be lazy
+            // and opt out.
+
+            // VerifyEndpoint {
+            //     url: "/v1/me/access-tokens/token-id",
+            //     visibility: Visibility::Public,
+            //     unprivileged_access: UnprivilegedAccess::None,
+            //     allowed_methods: vec![AllowedMethod::Delete],
+            // },
+
             /* Certificates */
             VerifyEndpoint {
                 url: &DEMO_CERTIFICATES_URL,

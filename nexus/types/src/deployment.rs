@@ -1188,7 +1188,6 @@ pub struct PendingMgsUpdate {
     pub details: PendingMgsUpdateDetails,
 
     /// which artifact to apply to this device
-    /// (implies which component is being updated)
     pub artifact_hash: ArtifactHash,
     pub artifact_version: ArtifactVersion,
 }

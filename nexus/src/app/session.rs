@@ -80,19 +80,6 @@ impl super::Nexus {
         self.db_datastore.session_update_last_used(opctx, &authz_session).await
     }
 
-    pub(crate) async fn session_hard_delete(
-        &self,
-        opctx: &OpContext,
-        id: ConsoleSessionUuid,
-    ) -> DeleteResult {
-        let authz_session = authz::ConsoleSession::new(
-            authz::FLEET,
-            id,
-            LookupType::ById(id.into_untyped_uuid()),
-        );
-        self.db_datastore.session_hard_delete(opctx, &authz_session).await
-    }
-
     pub(crate) async fn session_hard_delete_by_token(
         &self,
         opctx: &OpContext,
