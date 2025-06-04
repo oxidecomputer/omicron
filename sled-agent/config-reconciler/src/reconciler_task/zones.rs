@@ -630,7 +630,16 @@ impl OmicronZone {
                 )
                 .await
             }
-            ZoneState::FailedToStart(_) => {
+            // With these errors, we never even tried to start the zone, so
+            // there's no cleanup required: we can just return.
+            ZoneState::FailedToStart(ZoneStartError::TimeNotSynchronized)
+            | ZoneState::FailedToStart(ZoneStartError::CheckZoneExists(_))
+            | ZoneState::FailedToStart(ZoneStartError::DatasetDependency(_)) => {
+                Ok(())
+            }
+            ZoneState::FailedToStart(ZoneStartError::SledAgentStartFailed(
+                err,
+            )) => {
                 // TODO-correctness What do we need to do to try to shut down a
                 // zone that we tried to start? We need fine-grained status of
                 // what startup things succeeded that need to be cleaned up. For
@@ -639,7 +648,8 @@ impl OmicronZone {
                     log,
                     "need to shut down zone that failed to start, but this \
                      is currently unimplemented: assuming no cleanup work \
-                     required"
+                     required";
+                    "start-err" => InlineErrorChain::new(err.as_ref()),
                 );
                 Ok(())
             }
