@@ -10,7 +10,7 @@
 //! It uses the common pattern of "a task with a mpsc channel to send requests,
 //! using oneshot channels to send responses".
 
-use crate::CurrentlyManagedZpoolsReceiver;
+use crate::CurrentlyManagedZpools;
 use crate::InventoryError;
 use camino::Utf8PathBuf;
 use debug_ignore::DebugIgnore;
@@ -185,20 +185,13 @@ impl DatasetTaskHandle {
 
     pub fn spawn_dataset_task(
         mount_config: Arc<MountConfig>,
-        currently_managed_zpools_rx: CurrentlyManagedZpoolsReceiver,
         base_log: &Logger,
     ) -> Self {
-        Self::spawn_with_zfs_impl(
-            mount_config,
-            currently_managed_zpools_rx,
-            base_log,
-            RealZfs,
-        )
+        Self::spawn_with_zfs_impl(mount_config, base_log, RealZfs)
     }
 
     fn spawn_with_zfs_impl<T: ZfsImpl>(
         mount_config: Arc<MountConfig>,
-        currently_managed_zpools_rx: CurrentlyManagedZpoolsReceiver,
         base_log: &Logger,
         zfs: T,
     ) -> Self {
@@ -216,7 +209,6 @@ impl DatasetTaskHandle {
         tokio::spawn(
             DatasetTask {
                 mount_config,
-                currently_managed_zpools_rx,
                 request_rx,
                 ensured_datasets: BTreeSet::new(),
                 log: base_log.new(slog::o!("component" => "DatasetTask")),
@@ -239,9 +231,11 @@ impl DatasetTaskHandle {
     pub async fn datasets_ensure(
         &self,
         datasets: IdMap<DatasetConfig>,
+        currently_managed_zpools: Arc<CurrentlyManagedZpools>,
     ) -> Result<IdMap<DatasetEnsureResult>, DatasetTaskError> {
         self.try_send_request(|tx| DatasetTaskRequest::DatasetsEnsure {
             datasets,
+            currently_managed_zpools,
             tx,
         })
         .await
@@ -324,7 +318,6 @@ impl DatasetTaskHandle {
 struct DatasetTask {
     mount_config: Arc<MountConfig>,
     request_rx: mpsc::Receiver<DatasetTaskRequest>,
-    currently_managed_zpools_rx: CurrentlyManagedZpoolsReceiver,
     ensured_datasets: BTreeSet<DatasetName>,
     log: Logger,
 }
@@ -347,8 +340,19 @@ impl DatasetTask {
             DatasetTaskRequest::Inventory { zpools, tx } => {
                 _ = tx.0.send(self.inventory(zpools, zfs).await);
             }
-            DatasetTaskRequest::DatasetsEnsure { datasets, tx } => {
-                _ = tx.0.send(self.datasets_ensure(datasets, zfs).await);
+            DatasetTaskRequest::DatasetsEnsure {
+                datasets,
+                currently_managed_zpools,
+                tx,
+            } => {
+                _ = tx.0.send(
+                    self.datasets_ensure(
+                        datasets,
+                        currently_managed_zpools,
+                        zfs,
+                    )
+                    .await,
+                );
             }
             DatasetTaskRequest::NestedDatasetMount { name, tx } => {
                 _ = tx.0.send(self.nested_dataset_mount(name, zfs).await);
@@ -402,6 +406,7 @@ impl DatasetTask {
     async fn datasets_ensure<T: ZfsImpl>(
         &mut self,
         config: IdMap<DatasetConfig>,
+        currently_managed_zpools: Arc<CurrentlyManagedZpools>,
         zfs: &T,
     ) -> IdMap<DatasetEnsureResult> {
         let mut ensure_results = IdMap::new();
@@ -435,18 +440,6 @@ impl DatasetTask {
         // check whether they already exist, are mounted, and have the expected
         // properties to avoid doing unnecessary work.
         let mut dataset_names = Vec::new();
-
-        // Grab a snapshot of the currently-managed zpools. We'll refuse to
-        // create any datasets on zpools that aren't in this set.
-        //
-        // This looks like a TOCTOU problem: what if the set of managed zpools
-        // changed in between this snapshot and when we actually create datasets
-        // below? In practice it isn't, although this feels a little fragile:
-        // only the reconciler task calls this method, and only the reconciler
-        // task changes the set of managed disks. It will not change the set of
-        // managed disks while waiting for us to ensure datasets on its behalf.
-        let currently_managed_zpools =
-            self.currently_managed_zpools_rx.current();
 
         for dataset in config {
             let zpool = dataset.name.pool();
@@ -934,6 +927,7 @@ enum DatasetTaskRequest {
     },
     DatasetsEnsure {
         datasets: IdMap<DatasetConfig>,
+        currently_managed_zpools: Arc<CurrentlyManagedZpools>,
         tx: DebugIgnore<oneshot::Sender<IdMap<DatasetEnsureResult>>>,
     },
     NestedDatasetMount {
@@ -1041,6 +1035,7 @@ impl ZfsImpl for RealZfs {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::CurrentlyManagedZpoolsReceiver;
     use assert_matches::assert_matches;
     use illumos_utils::zfs::DestroyDatasetErrorVariant;
     use omicron_common::api::external::ByteCount;
@@ -1298,19 +1293,19 @@ mod tests {
             .collect::<IdMap<_>>();
 
         // Send this pile of datasets to the task as a set to ensure.
-        let currently_managed_zpools_rx =
+        let currently_managed_zpools =
             CurrentlyManagedZpoolsReceiver::fake_static(
                 managed_pools.clone().into_iter(),
-            );
+            )
+            .current();
         let zfs = InMemoryZfs::default();
         let task_handle = DatasetTaskHandle::spawn_with_zfs_impl(
             nonexistent_mount_config(),
-            currently_managed_zpools_rx,
             &logctx.log,
             zfs.clone(),
         );
         let result = task_handle
-            .datasets_ensure(datasets.clone())
+            .datasets_ensure(datasets.clone(), currently_managed_zpools)
             .await
             .expect("no task error");
 
@@ -1431,16 +1426,16 @@ mod tests {
         }
 
         // Send this pile of datasets to the task as a set to ensure.
-        let currently_managed_zpools_rx =
-            CurrentlyManagedZpoolsReceiver::fake_static(pools.keys().cloned());
+        let currently_managed_zpools =
+            CurrentlyManagedZpoolsReceiver::fake_static(pools.keys().cloned())
+                .current();
         let task_handle = DatasetTaskHandle::spawn_with_zfs_impl(
             nonexistent_mount_config(),
-            currently_managed_zpools_rx,
             &logctx.log,
             zfs.clone(),
         );
         let result = task_handle
-            .datasets_ensure(datasets.clone())
+            .datasets_ensure(datasets.clone(), currently_managed_zpools)
             .await
             .expect("no task error");
 
@@ -1548,17 +1543,17 @@ mod tests {
             .collect::<IdMap<_>>();
 
         // Send this pile of datasets to the task as a set to ensure.
-        let currently_managed_zpools_rx =
-            CurrentlyManagedZpoolsReceiver::fake_static(pools.iter().cloned());
+        let currently_managed_zpools =
+            CurrentlyManagedZpoolsReceiver::fake_static(pools.iter().cloned())
+                .current();
         let zfs = InMemoryZfs::default();
         let task_handle = DatasetTaskHandle::spawn_with_zfs_impl(
             nonexistent_mount_config(),
-            currently_managed_zpools_rx,
             &logctx.log,
             zfs.clone(),
         );
         let result = task_handle
-            .datasets_ensure(datasets.clone())
+            .datasets_ensure(datasets.clone(), currently_managed_zpools)
             .await
             .expect("no task error");
 
@@ -1613,17 +1608,17 @@ mod tests {
             .collect::<IdMap<_>>();
 
         // Send this pile of datasets to the task as a set to ensure.
-        let currently_managed_zpools_rx =
-            CurrentlyManagedZpoolsReceiver::fake_static(pools.iter().cloned());
+        let currently_managed_zpools =
+            CurrentlyManagedZpoolsReceiver::fake_static(pools.iter().cloned())
+                .current();
         let zfs = InMemoryZfs::default();
         let task_handle = DatasetTaskHandle::spawn_with_zfs_impl(
             nonexistent_mount_config(),
-            currently_managed_zpools_rx,
             &logctx.log,
             zfs.clone(),
         );
         let result = task_handle
-            .datasets_ensure(datasets.clone())
+            .datasets_ensure(datasets.clone(), currently_managed_zpools.clone())
             .await
             .expect("no task error");
 
@@ -1646,7 +1641,7 @@ mod tests {
         // Ensuring the exact same set of datasets should not cause any more
         // calls to ZFS, because they all have the properties they need already.
         let result = task_handle
-            .datasets_ensure(datasets.clone())
+            .datasets_ensure(datasets.clone(), currently_managed_zpools.clone())
             .await
             .expect("no task error");
         assert_eq!(result.len(), datasets.len());
@@ -1696,7 +1691,7 @@ mod tests {
         // Ensure the same set of datasets again; the ones we mutated should get
         // re-ensured.
         let result = task_handle
-            .datasets_ensure(datasets.clone())
+            .datasets_ensure(datasets.clone(), currently_managed_zpools)
             .await
             .expect("no task error");
         assert_eq!(result.len(), datasets.len());
@@ -1786,10 +1781,11 @@ mod tests {
 
         // Setup: Create our pile of zpools, and a pile of debug datasets for a
         // subset of them.
-        let currently_managed_zpools_rx =
+        let currently_managed_zpools =
             CurrentlyManagedZpoolsReceiver::fake_static(
                 inputs.iter().map(|input| input.pool),
-            );
+            )
+            .current();
         let datasets = inputs
             .iter()
             .filter(|input| input.is_debug_datset_mounted)
@@ -1801,12 +1797,11 @@ mod tests {
         let zfs = InMemoryZfs::default();
         let task_handle = DatasetTaskHandle::spawn_with_zfs_impl(
             nonexistent_mount_config(),
-            currently_managed_zpools_rx,
             &logctx.log,
             zfs.clone(),
         );
         let result = task_handle
-            .datasets_ensure(datasets.clone())
+            .datasets_ensure(datasets.clone(), currently_managed_zpools)
             .await
             .expect("no task error");
         assert_eq!(result.len(), datasets.len());
@@ -1924,6 +1919,7 @@ mod tests {
 mod illumos_tests {
     use super::tests::make_dataset_config;
     use super::*;
+    use crate::CurrentlyManagedZpoolsReceiver;
     use assert_matches::assert_matches;
     use camino_tempfile::Utf8TempDir;
     use illumos_utils::zpool::Zpool;
@@ -2048,6 +2044,10 @@ mod illumos_tests {
             }
         }
 
+        fn current_zpools(&self) -> Arc<CurrentlyManagedZpools> {
+            self.currently_managed_zpools_rx.current()
+        }
+
         async fn add_zpool(&mut self, kind: ZpoolKind) -> ZpoolName {
             self.add_zpool_with_size(kind, Self::DEFAULT_VDEV_SIZE).await
         }
@@ -2164,14 +2164,16 @@ mod illumos_tests {
         let zpool = harness.add_zpool(ZpoolKind::External).await;
         let task_handle = DatasetTaskHandle::spawn_dataset_task(
             Arc::new(harness.mount_config.clone()),
-            harness.currently_managed_zpools_rx.clone(),
             &logctx.log,
         );
 
         // Create a dataset on the newly formatted U.2
         let dataset = make_dataset_config(zpool, DatasetKind::Crucible);
         let result = task_handle
-            .datasets_ensure([dataset.clone()].into_iter().collect())
+            .datasets_ensure(
+                [dataset.clone()].into_iter().collect(),
+                harness.current_zpools(),
+            )
             .await
             .expect("task should not fail");
         assert_eq!(result.len(), 1);
@@ -2185,7 +2187,10 @@ mod illumos_tests {
 
         // Calling "datasets_ensure" with the same input should succeed.
         let result = task_handle
-            .datasets_ensure([dataset.clone()].into_iter().collect())
+            .datasets_ensure(
+                [dataset.clone()].into_iter().collect(),
+                harness.current_zpools(),
+            )
             .await
             .expect("task should not fail");
         assert_eq!(result.len(), 1);
@@ -2234,7 +2239,6 @@ mod illumos_tests {
         let zpool = harness.add_zpool(ZpoolKind::External).await;
         let task_handle = DatasetTaskHandle::spawn_dataset_task(
             Arc::new(harness.mount_config.clone()),
-            harness.currently_managed_zpools_rx.clone(),
             &logctx.log,
         );
 
@@ -2243,7 +2247,10 @@ mod illumos_tests {
         let name = &dataset.name;
 
         let result = task_handle
-            .datasets_ensure([dataset.clone()].into_iter().collect())
+            .datasets_ensure(
+                [dataset.clone()].into_iter().collect(),
+                harness.current_zpools(),
+            )
             .await
             .expect("task should not fail");
         assert_eq!(result.len(), 1);
@@ -2264,7 +2271,10 @@ mod illumos_tests {
 
         // We can re-apply the same config...
         let result = task_handle
-            .datasets_ensure([dataset.clone()].into_iter().collect())
+            .datasets_ensure(
+                [dataset.clone()].into_iter().collect(),
+                harness.current_zpools(),
+            )
             .await
             .expect("task should not fail");
         assert_eq!(result.len(), 1);
@@ -2293,7 +2303,6 @@ mod illumos_tests {
         let zpool = harness.add_zpool(ZpoolKind::External).await;
         let task_handle = DatasetTaskHandle::spawn_dataset_task(
             Arc::new(harness.mount_config.clone()),
-            harness.currently_managed_zpools_rx.clone(),
             &logctx.log,
         );
 
@@ -2325,7 +2334,7 @@ mod illumos_tests {
 
         // Create the datasets.
         let result = task_handle
-            .datasets_ensure(dataset_configs.clone())
+            .datasets_ensure(dataset_configs.clone(), harness.current_zpools())
             .await
             .expect("task should not fail");
         assert_eq!(result.len(), dataset_configs.len());
@@ -2386,7 +2395,6 @@ mod illumos_tests {
         };
         let task_handle = DatasetTaskHandle::spawn_dataset_task(
             Arc::new(harness.mount_config.clone()),
-            harness.currently_managed_zpools_rx.clone(),
             &logctx.log,
         );
 
@@ -2403,7 +2411,7 @@ mod illumos_tests {
 
         // Create the datasets.
         let result = task_handle
-            .datasets_ensure(datasets.clone())
+            .datasets_ensure(datasets.clone(), harness.current_zpools())
             .await
             .expect("task should not fail");
         assert_eq!(result.len(), datasets.len());
@@ -2413,7 +2421,7 @@ mod illumos_tests {
 
         // Calling "datasets_ensure" with the same input should succeed.
         let result = task_handle
-            .datasets_ensure(datasets.clone())
+            .datasets_ensure(datasets.clone(), harness.current_zpools())
             .await
             .expect("task should not fail");
         assert_eq!(result.len(), datasets.len());
@@ -2435,14 +2443,16 @@ mod illumos_tests {
         let zpool = harness.add_zpool(ZpoolKind::External).await;
         let task_handle = DatasetTaskHandle::spawn_dataset_task(
             Arc::new(harness.mount_config.clone()),
-            harness.currently_managed_zpools_rx.clone(),
             &logctx.log,
         );
 
         // Add a `Debug` dataset to our zpool.
         let debug_dataset = make_dataset_config(zpool, DatasetKind::Debug);
         let result = task_handle
-            .datasets_ensure([debug_dataset.clone()].into_iter().collect())
+            .datasets_ensure(
+                [debug_dataset.clone()].into_iter().collect(),
+                harness.current_zpools(),
+            )
             .await
             .expect("task should not fail");
         assert_eq!(result.len(), 1);
