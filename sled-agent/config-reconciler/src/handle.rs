@@ -149,7 +149,6 @@ impl ConfigReconcilerHandle {
         // Spawn the task that serializes dataset operations.
         let dataset_task = DatasetTaskHandle::spawn_dataset_task(
             Arc::clone(&mount_config),
-            currently_managed_zpools_rx.clone(),
             base_log,
         );
 

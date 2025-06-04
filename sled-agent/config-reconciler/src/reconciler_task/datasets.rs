@@ -11,6 +11,7 @@
 //! operations" consumers (e.g., inventory requests perform operations to check
 //! the live state of datasets directly from ZFS).
 
+use super::CurrentlyManagedZpools;
 use crate::dataset_serialization_task::DatasetEnsureError;
 use crate::dataset_serialization_task::DatasetEnsureResult;
 use crate::dataset_serialization_task::DatasetTaskHandle;
@@ -171,9 +172,14 @@ impl OmicronDatasets {
     pub(super) async fn ensure_datasets_if_needed(
         &mut self,
         datasets: IdMap<DatasetConfig>,
+        currently_managed_zpools: Arc<CurrentlyManagedZpools>,
         log: &Logger,
     ) {
-        let results = match self.dataset_task.datasets_ensure(datasets).await {
+        let results = match self
+            .dataset_task
+            .datasets_ensure(datasets, currently_managed_zpools)
+            .await
+        {
             Ok(results) => results,
             Err(err) => {
                 // If we can't contact the dataset task, we leave

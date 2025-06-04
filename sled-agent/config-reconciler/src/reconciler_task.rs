@@ -440,7 +440,11 @@ impl ReconcilerTask {
 
         // Ensure all the datasets we want exist.
         self.datasets
-            .ensure_datasets_if_needed(sled_config.datasets.clone(), &self.log)
+            .ensure_datasets_if_needed(
+                sled_config.datasets.clone(),
+                self.external_disks.currently_managed_zpools(),
+                &self.log,
+            )
             .await;
 
         // Collect the current timesync status (needed to start any new zones,
