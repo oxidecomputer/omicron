@@ -493,8 +493,7 @@ impl DatasetTask {
                 | DatasetKind::ClickhouseServer
                 | DatasetKind::ExternalDns
                 | DatasetKind::InternalDns
-                | DatasetKind::Debug
-                | DatasetKind::Update => {
+                | DatasetKind::Debug => {
                     non_transient_zone_configs.push(dataset);
                 }
             }

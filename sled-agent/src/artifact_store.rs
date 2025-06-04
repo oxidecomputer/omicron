@@ -904,16 +904,11 @@ mod test {
     use std::sync::Arc;
 
     use bytes::Bytes;
+    use camino::Utf8PathBuf;
     use camino_tempfile::Utf8TempDir;
     use futures::stream::{self, StreamExt};
     use hex_literal::hex;
-    use omicron_common::disk::{
-        DatasetConfig, DatasetKind, DatasetName, DatasetsConfig,
-        SharedDatasetConfig,
-    };
-    use omicron_common::zpool_name::ZpoolName;
     use omicron_test_utils::dev::test_setup_log;
-    use omicron_uuid_kinds::{DatasetUuid, ZpoolUuid};
     use sled_agent_api::ArtifactConfig;
     use tokio::io::AsyncReadExt;
     use tokio::sync::oneshot;
@@ -923,34 +918,23 @@ mod test {
 
     #[derive(Clone)]
     struct TestBackend {
-        datasets: DatasetsConfig,
-        mountpoint_root: Arc<Utf8TempDir>,
+        datasets: Vec<Utf8PathBuf>,
+        _tempdir: Arc<Utf8TempDir>,
     }
 
     impl TestBackend {
         fn new(len: usize) -> TestBackend {
-            let mountpoint_root = Arc::new(camino_tempfile::tempdir().unwrap());
+            let tempdir = Arc::new(camino_tempfile::tempdir().unwrap());
 
-            let mut datasets = DatasetsConfig::default();
-            if len > 0 {
-                datasets.generation = datasets.generation.next();
-            }
-            for _ in 0..len {
-                let dataset = DatasetConfig {
-                    id: DatasetUuid::new_v4(),
-                    name: DatasetName::new(
-                        ZpoolName::new_external(ZpoolUuid::new_v4()),
-                        DatasetKind::Update,
-                    ),
-                    inner: SharedDatasetConfig::default(),
-                };
-                let mountpoint =
-                    dataset.name.mountpoint(mountpoint_root.path());
-                std::fs::create_dir_all(mountpoint).unwrap();
-                datasets.datasets.insert(dataset.id, dataset);
+            let mut datasets = Vec::new();
+            for i in 0..len {
+                let dataset =
+                    tempdir.path().join(format!("test_backed_dataset_{i}"));
+                std::fs::create_dir_all(&dataset).unwrap();
+                datasets.push(dataset)
             }
 
-            TestBackend { datasets, mountpoint_root }
+            TestBackend { datasets, _tempdir: tempdir }
         }
     }
 
@@ -958,13 +942,7 @@ mod test {
         async fn artifact_storage_paths(
             &self,
         ) -> impl Iterator<Item = camino::Utf8PathBuf> + '_ {
-            self.datasets
-                .datasets
-                .values()
-                .filter(|dataset| *dataset.name.kind() == DatasetKind::Update)
-                .map(|dataset| {
-                    dataset.name.mountpoint(self.mountpoint_root.path())
-                })
+            self.datasets.iter().cloned()
         }
     }
 
