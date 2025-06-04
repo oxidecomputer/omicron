@@ -11,7 +11,7 @@ use nexus_db_schema::schema::{device_access_token, device_auth_request};
 
 use chrono::{DateTime, Duration, Utc};
 use nexus_types::external_api::views;
-use omicron_uuid_kinds::{AccessTokenKind, TypedUuid};
+use omicron_uuid_kinds::{AccessTokenKind, GenericUuid, TypedUuid};
 use rand::{Rng, RngCore, SeedableRng, distributions::Slice, rngs::StdRng};
 use uuid::Uuid;
 
@@ -169,6 +169,16 @@ impl From<DeviceAccessToken> for views::DeviceAccessTokenGrant {
         Self {
             access_token: format!("oxide-token-{}", access_token.token),
             token_type: views::DeviceAccessTokenType::Bearer,
+        }
+    }
+}
+
+impl From<DeviceAccessToken> for views::DeviceAccessToken {
+    fn from(access_token: DeviceAccessToken) -> Self {
+        Self {
+            id: access_token.id.into_untyped_uuid(),
+            time_created: access_token.time_created,
+            time_expires: access_token.time_expires,
         }
     }
 }

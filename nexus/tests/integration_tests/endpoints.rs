@@ -2597,6 +2597,25 @@ pub static VERIFY_ENDPOINTS: LazyLock<Vec<VerifyEndpoint>> =
                     AllowedMethod::Delete,
                 ],
             },
+            /* Tokens */
+            VerifyEndpoint {
+                url: "/v1/me/access-tokens",
+                visibility: Visibility::Public,
+                unprivileged_access: UnprivilegedAccess::ReadOnly,
+                allowed_methods: vec![AllowedMethod::Get],
+            },
+            // Creating the resource here with SetupReqs is more complicated
+            // than with other resources because it's a multi-step process where
+            // later steps depend on earlier ones, so for now we will be lazy
+            // and opt out.
+
+            // VerifyEndpoint {
+            //     url: "/v1/me/access-tokens/token-id",
+            //     visibility: Visibility::Public,
+            //     unprivileged_access: UnprivilegedAccess::None,
+            //     allowed_methods: vec![AllowedMethod::Delete],
+            // },
+
             /* Certificates */
             VerifyEndpoint {
                 url: &DEMO_CERTIFICATES_URL,

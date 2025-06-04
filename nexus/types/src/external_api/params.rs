@@ -96,6 +96,7 @@ path_param!(CertificatePath, certificate, "certificate");
 
 id_path_param!(SupportBundlePath, bundle_id, "support bundle");
 id_path_param!(GroupPath, group_id, "group");
+id_path_param!(TokenPath, token_id, "token");
 
 // TODO: The hardware resources should be represented by its UUID or a hardware
 // ID that can be used to deterministically generate the UUID.

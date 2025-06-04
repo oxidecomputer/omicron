@@ -55,7 +55,9 @@ use nexus_db_queries::db::model::{DeviceAccessToken, DeviceAuthRequest};
 use anyhow::anyhow;
 use nexus_types::external_api::params::DeviceAccessTokenRequest;
 use nexus_types::external_api::views;
-use omicron_common::api::external::{CreateResult, Error};
+use omicron_common::api::external::{
+    CreateResult, DataPageParams, Error, ListResultVec,
+};
 
 use chrono::{Duration, Utc};
 use serde::Serialize;
@@ -290,5 +292,21 @@ impl super::Nexus {
             .status(status)
             .header(header::CONTENT_TYPE, "application/json")
             .body(body.into())?)
+    }
+
+    pub(crate) async fn current_user_token_list(
+        &self,
+        opctx: &OpContext,
+        pagparams: &DataPageParams<'_, Uuid>,
+    ) -> ListResultVec<DeviceAccessToken> {
+        self.db_datastore.current_user_token_list(opctx, pagparams).await
+    }
+
+    pub(crate) async fn current_user_token_delete(
+        &self,
+        opctx: &OpContext,
+        token_id: Uuid,
+    ) -> Result<(), Error> {
+        self.db_datastore.current_user_token_delete(opctx, token_id).await
     }
 }

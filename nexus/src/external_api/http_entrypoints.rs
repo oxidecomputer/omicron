@@ -7068,6 +7068,57 @@ impl NexusExternalApi for NexusExternalApiImpl {
             .await
     }
 
+    async fn current_user_access_token_list(
+        rqctx: RequestContext<Self::Context>,
+        query_params: Query<PaginatedById>,
+    ) -> Result<HttpResponseOk<ResultsPage<views::DeviceAccessToken>>, HttpError>
+    {
+        let apictx = rqctx.context();
+        let handler = async {
+            let opctx =
+                crate::context::op_context_for_external_api(&rqctx).await?;
+            let nexus = &apictx.context.nexus;
+            let query = query_params.into_inner();
+            let pag_params = data_page_params_for(&rqctx, &query)?;
+            let tokens = nexus
+                .current_user_token_list(&opctx, &pag_params)
+                .await?
+                .into_iter()
+                .map(views::DeviceAccessToken::from)
+                .collect();
+            Ok(HttpResponseOk(ScanById::results_page(
+                &query,
+                tokens,
+                &marker_for_id,
+            )?))
+        };
+        apictx
+            .context
+            .external_latencies
+            .instrument_dropshot_handler(&rqctx, handler)
+            .await
+    }
+
+    async fn current_user_access_token_delete(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<params::TokenPath>,
+    ) -> Result<HttpResponseDeleted, HttpError> {
+        let apictx = rqctx.context();
+        let handler = async {
+            let opctx =
+                crate::context::op_context_for_external_api(&rqctx).await?;
+            let nexus = &apictx.context.nexus;
+            let path = path_params.into_inner();
+            nexus.current_user_token_delete(&opctx, path.token_id).await?;
+            Ok(HttpResponseDeleted())
+        };
+        apictx
+            .context
+            .external_latencies
+            .instrument_dropshot_handler(&rqctx, handler)
+            .await
+    }
+
     async fn support_bundle_list(
         rqctx: RequestContext<ApiContext>,
         query_params: Query<PaginatedById>,

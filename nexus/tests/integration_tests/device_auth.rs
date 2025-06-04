@@ -4,13 +4,15 @@
 
 use std::num::NonZeroU32;
 
+use chrono::Utc;
+use dropshot::ResultsPage;
 use dropshot::test_util::ClientTestContext;
 use nexus_auth::authn::USER_TEST_UNPRIVILEGED;
 use nexus_db_queries::db::fixed_data::silo::DEFAULT_SILO;
 use nexus_db_queries::db::identity::{Asset, Resource};
 use nexus_test_utils::http_testing::TestResponse;
 use nexus_test_utils::resource_helpers::{
-    object_get, object_put, object_put_error,
+    object_delete_error, object_get, object_put, object_put_error,
 };
 use nexus_test_utils::{
     http_testing::{AuthnMode, NexusRequest, RequestBuilder},
@@ -138,6 +140,10 @@ async fn test_device_auth_flow(cptestctx: &ControlPlaneTestContext) {
             .expect("failed to deserialize OAuth error");
     assert_eq!(&error.error, "authorization_pending");
 
+    // Check tokens before creating the device token
+    assert_eq!(get_tokens_priv(testctx).await.len(), 0);
+    assert_eq!(get_tokens_unpriv(testctx).await.len(), 0);
+
     // Authenticated confirmation should succeed.
     NexusRequest::new(
         RequestBuilder::new(testctx, Method::POST, "/device/confirm")
@@ -162,9 +168,16 @@ async fn test_device_auth_flow(cptestctx: &ControlPlaneTestContext) {
     .expect("failed to get token")
     .parsed_body()
     .expect("failed to deserialize token response");
+
     assert_eq!(token.token_type, DeviceAccessTokenType::Bearer);
     assert_eq!(token.access_token.len(), 52);
     assert!(token.access_token.starts_with("oxide-token-"));
+
+    // Check token list endpoints after creating the device token
+    assert_eq!(get_tokens_priv(testctx).await.len(), 0);
+    let tokens_unpriv_after = get_tokens_unpriv(testctx).await;
+    assert_eq!(tokens_unpriv_after.len(), 1);
+    assert_eq!(tokens_unpriv_after[0].time_expires, None);
 
     // now make a request with the token. it 403s because unpriv user has no
     // roles
@@ -191,6 +204,37 @@ async fn test_device_auth_flow(cptestctx: &ControlPlaneTestContext) {
     project_list(&testctx, &token.access_token, StatusCode::OK)
         .await
         .expect("failed to get projects with token");
+
+    let token_id = tokens_unpriv_after[0].id;
+
+    // Priv user cannot delete unpriv's token through this endpoint by ID
+    let token_url = format!("/v1/me/access-tokens/{}", token_id);
+    object_delete_error(testctx, &token_url, StatusCode::NOT_FOUND).await;
+
+    // Test deleting the token as the owner
+    NexusRequest::object_delete(testctx, &token_url)
+        .authn_as(AuthnMode::UnprivilegedUser)
+        .execute()
+        .await
+        .expect("failed to delete token");
+
+    // Verify token is gone from the list
+    assert_eq!(get_tokens_unpriv(testctx).await.len(), 0);
+
+    // Token should no longer work for API calls
+    project_list(&testctx, &token.access_token, StatusCode::UNAUTHORIZED)
+        .await
+        .expect("deleted token should be unauthorized");
+
+    // Trying to delete the same token again should 404
+    NexusRequest::new(
+        RequestBuilder::new(testctx, Method::DELETE, &token_url)
+            .expect_status(Some(StatusCode::NOT_FOUND)),
+    )
+    .authn_as(AuthnMode::UnprivilegedUser)
+    .execute()
+    .await
+    .expect("double delete should 404");
 }
 
 /// Helper to make the test cute. Goes through the whole flow, returns the token
@@ -258,9 +302,17 @@ async fn test_device_token_expiration(cptestctx: &ControlPlaneTestContext) {
         object_get(testctx, "/v1/auth-settings").await;
     assert_eq!(settings.device_token_max_ttl_seconds, None);
 
+    // no tokens in the list
+    assert_eq!(get_tokens_priv(testctx).await.len(), 0);
+
     // get a token for the privileged user. default silo max token expiration
     // is null, so tokens don't expire
     let initial_token = get_device_token(testctx).await;
+
+    // now there is a token in the list
+    let tokens = get_tokens_priv(testctx).await;
+    assert_eq!(tokens.len(), 1);
+    assert_eq!(tokens[0].time_expires, None);
 
     // test token works on project list
     project_list(&testctx, &initial_token, StatusCode::OK)
@@ -325,6 +377,21 @@ async fn test_device_token_expiration(cptestctx: &ControlPlaneTestContext) {
     // create token again (this one will have the 3-second expiration)
     let expiring_token = get_device_token(testctx).await;
 
+    // use a block so we don't touch expiring_token
+    {
+        // now there are two tokens in the list
+        let tokens = get_tokens_priv(testctx).await;
+        assert_eq!(tokens.len(), 2);
+
+        let permanent_token =
+            tokens.iter().find(|t| t.time_expires.is_none()).unwrap();
+        let expiring_token =
+            tokens.iter().find(|t| t.time_expires.is_some()).unwrap();
+
+        assert_eq!(permanent_token.time_expires, None);
+        assert!(expiring_token.time_expires.unwrap() > Utc::now());
+    }
+
     // immediately use token, it should work
     project_list(&testctx, &expiring_token, StatusCode::OK)
         .await
@@ -343,6 +410,11 @@ async fn test_device_token_expiration(cptestctx: &ControlPlaneTestContext) {
         .await
         .expect("initial token should still work");
 
+    // back down to one non-expiring token
+    let tokens = get_tokens_priv(testctx).await;
+    assert_eq!(tokens.len(), 1);
+    assert_eq!(tokens[0].time_expires, None);
+
     // now test setting the silo max TTL back to null
     let settings: views::SiloAuthSettings = object_put(
         testctx,
@@ -357,6 +429,26 @@ async fn test_device_token_expiration(cptestctx: &ControlPlaneTestContext) {
     let settings: views::SiloAuthSettings =
         object_get(testctx, "/v1/auth-settings").await;
     assert_eq!(settings.device_token_max_ttl_seconds, None);
+}
+
+async fn get_tokens_priv(
+    testctx: &ClientTestContext,
+) -> Vec<views::DeviceAccessToken> {
+    NexusRequest::object_get(testctx, "/v1/me/access-tokens")
+        .authn_as(AuthnMode::PrivilegedUser)
+        .execute_and_parse_unwrap::<ResultsPage<views::DeviceAccessToken>>()
+        .await
+        .items
+}
+
+async fn get_tokens_unpriv(
+    testctx: &ClientTestContext,
+) -> Vec<views::DeviceAccessToken> {
+    NexusRequest::object_get(testctx, "/v1/me/access-tokens")
+        .authn_as(AuthnMode::UnprivilegedUser)
+        .execute_and_parse_unwrap::<ResultsPage<views::DeviceAccessToken>>()
+        .await
+        .items
 }
 
 async fn project_list(

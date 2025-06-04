@@ -162,6 +162,12 @@ const PUT_UPDATE_REPOSITORY_MAX_BYTES: usize = 4 * GIB;
                     url = "http://docs.oxide.computer/api/snapshots"
                 }
             },
+            "tokens" = {
+                description = "API clients use device access tokens for authentication.",
+                external_docs = {
+                    url = "http://docs.oxide.computer/api/tokens"
+                }
+            },
             "vpcs" = {
                 description = "Virtual Private Clouds (VPCs) provide isolated network environments for managing and deploying services.",
                 external_docs = {
@@ -3147,6 +3153,32 @@ pub trait NexusExternalApi {
     async fn current_user_ssh_key_delete(
         rqctx: RequestContext<Self::Context>,
         path_params: Path<params::SshKeyPath>,
+    ) -> Result<HttpResponseDeleted, HttpError>;
+
+    /// List access tokens
+    ///
+    /// List device access tokens for the currently authenticated user.
+    #[endpoint {
+        method = GET,
+        path = "/v1/me/access-tokens",
+        tags = ["tokens"],
+    }]
+    async fn current_user_access_token_list(
+        rqctx: RequestContext<Self::Context>,
+        query_params: Query<PaginatedById>,
+    ) -> Result<HttpResponseOk<ResultsPage<views::DeviceAccessToken>>, HttpError>;
+
+    /// Delete access token
+    ///
+    /// Delete a device access token for the currently authenticated user.
+    #[endpoint {
+        method = DELETE,
+        path = "/v1/me/access-tokens/{token_id}",
+        tags = ["tokens"],
+    }]
+    async fn current_user_access_token_delete(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<params::TokenPath>,
     ) -> Result<HttpResponseDeleted, HttpError>;
 
     // Support bundles (experimental)
