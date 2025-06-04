@@ -20,6 +20,7 @@ mod common;
 #[cfg_attr(not(target_os = "illumos"), allow(dead_code))]
 mod external;
 mod live_tests;
+mod schema;
 mod usdt;
 
 #[cfg(target_os = "illumos")]
@@ -107,6 +108,9 @@ enum Cmds {
         /// substring of its name will be examined for probes.
         filter: Option<String>,
     },
+
+    /// Schema management utilities
+    Schema(schema::SchemaArgs),
 }
 
 fn main() -> Result<()> {
@@ -154,6 +158,7 @@ fn main() -> Result<()> {
             anyhow::bail!("this command is only available on illumos");
         }
         Cmds::Probes { filter } => usdt::print_probes(filter),
+        Cmds::Schema(args) => schema::run_cmd(args),
     }
 }
 

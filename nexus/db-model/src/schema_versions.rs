@@ -21,7 +21,7 @@ pub const SCHEMA_VERSION: Version = Version::new(146, 0, 0);
 /// List of all past database schema versions, in *reverse* order
 ///
 /// If you want to change the Omicron database schema, you must update this.
-static KNOWN_VERSIONS: LazyLock<Vec<KnownVersion>> = LazyLock::new(|| {
+pub static KNOWN_VERSIONS: LazyLock<Vec<KnownVersion>> = LazyLock::new(|| {
     vec![
         // +- The next version goes here!  Duplicate this line, uncomment
         // |  the *second* copy, then update that copy for your version,
@@ -192,7 +192,7 @@ pub const EARLIEST_SUPPORTED_VERSION: Version = Version::new(1, 0, 0);
 
 /// Describes one version of the database schema
 #[derive(Debug, Clone)]
-struct KnownVersion {
+pub struct KnownVersion {
     /// All versions have an associated SemVer.  We only use the major number in
     /// terms of determining compatibility.
     semver: Version,
@@ -227,6 +227,11 @@ impl KnownVersion {
         let semver = Version::new(major, 0, patch);
         let relative_path = semver.to_string();
         KnownVersion { semver, relative_path }
+    }
+
+    /// Returns the semver for this known version
+    pub fn semver(&self) -> &Version {
+        &self.semver
     }
 }
 

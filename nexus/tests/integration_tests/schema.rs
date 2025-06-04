@@ -2,6 +2,7 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
+use anyhow::{self, Context};
 use camino::Utf8PathBuf;
 use dropshot::test_util::LogContext;
 use futures::future::BoxFuture;
@@ -9,6 +10,7 @@ use nexus_config::NexusConfig;
 use nexus_config::SchemaConfig;
 use nexus_db_lookup::DataStoreConnection;
 use nexus_db_model::EARLIEST_SUPPORTED_VERSION;
+use nexus_db_model::KNOWN_VERSIONS;
 use nexus_db_model::SCHEMA_VERSION as LATEST_SCHEMA_VERSION;
 use nexus_db_model::SchemaUpgradeStep;
 use nexus_db_model::{AllSchemaVersions, SchemaVersion};
@@ -2733,5 +2735,162 @@ async fn compare_table_differing_not_null_order() {
     .await;
 
     schema1.pretty_assert_eq(&schema2);
+    logctx.cleanup_successful();
+}
+
+// Helper function to get historical dbinit.sql from pre-generated files
+async fn get_historical_dbinit_for_version(
+    version: &Version,
+) -> Result<String, anyhow::Error> {
+    // Path to the pre-generated schema file using SCHEMA_DIR
+    let schema_file = Utf8PathBuf::from(SCHEMA_DIR)
+        .join("previous-schema")
+        .join(version.to_string())
+        .join("dbinit.sql");
+
+    if !schema_file.exists() {
+        anyhow::bail!(
+            "Pre-generated schema file not found: {:?}. Run 'cargo xtask schema generate-previous' to generate it.",
+            schema_file
+        );
+    }
+
+    let content = std::fs::read_to_string(&schema_file).with_context(|| {
+        format!("Failed to read schema file: {:?}", schema_file)
+    })?;
+
+    Ok(content)
+}
+
+#[tokio::test]
+async fn validate_migration_from_last_version() {
+    let config = load_test_config();
+    let logctx = LogContext::new(
+        "validate_migration_from_last_version",
+        &config.pkg.log,
+    );
+    let log = &logctx.log;
+
+    // KNOWN_VERSIONS is in reverse order (newest first), so the previous version is the second item
+    let previous_version = if KNOWN_VERSIONS.len() >= 2 {
+        KNOWN_VERSIONS[1].semver()
+    } else {
+        panic!(
+            "Need at least 2 known versions to test migration from previous version"
+        );
+    };
+
+    // Critical validations: The first entry is the latest version,
+    // and it is not the same as the version before.
+    assert_eq!(KNOWN_VERSIONS[0].semver(), &LATEST_SCHEMA_VERSION);
+    assert_ne!(KNOWN_VERSIONS[0].semver(), KNOWN_VERSIONS[1].semver());
+
+    println!(
+        "Testing migration from previous version {} to current version {}",
+        previous_version, LATEST_SCHEMA_VERSION
+    );
+
+    // Verify that the pre-generated schema file exists for the previous version
+    let previous_schema_dir =
+        Utf8PathBuf::from(SCHEMA_DIR).join("previous-schema");
+    let previous_version_dir =
+        previous_schema_dir.join(previous_version.to_string());
+
+    if !previous_version_dir.join("dbinit.sql").exists() {
+        panic!(
+            "Pre-generated schema file not found for version {}: {:?}. Run 'cargo xtask schema generate-previous' first.",
+            previous_version,
+            previous_version_dir.join("dbinit.sql")
+        );
+    }
+
+    let start_version = previous_version;
+    println!("Testing migration from version {}", start_version);
+
+    // Get historical dbinit.sql for this version
+    let historical_dbinit = match get_historical_dbinit_for_version(
+        start_version,
+    )
+    .await
+    {
+        Ok(sql) => {
+            println!(
+                "Successfully retrieved historical dbinit.sql for version {} ({} bytes)",
+                start_version,
+                sql.len()
+            );
+            sql
+        }
+        Err(e) => {
+            panic!(
+                "Failed to get historical dbinit.sql for version {}: {}",
+                start_version, e
+            );
+        }
+    };
+
+    // Create a new database and apply the historical dbinit.sql
+    let db = TestDatabase::new_populate_nothing(&logctx.log).await;
+    let crdb = db.crdb();
+    let client = crdb.connect().await.expect("failed to connect");
+
+    // Apply the historical dbinit.sql
+    client
+        .batch_execute(&historical_dbinit)
+        .await
+        .expect("Failed to apply historical dbinit.sql");
+
+    // Verify we're at the expected schema version
+    let current_version = query_crdb_schema_version(&crdb).await;
+    assert_eq!(start_version.to_string(), current_version);
+
+    // Load all schema versions and apply migrations from start_version to latest
+    let all_versions = read_all_schema_versions();
+    let migrations_to_apply: Vec<_> = all_versions
+        .versions_range((
+            std::ops::Bound::Excluded(start_version.clone()),
+            std::ops::Bound::Unbounded,
+        ))
+        .collect();
+
+    // Apply each migration
+    for version in migrations_to_apply {
+        apply_update(log, &crdb, version, 1).await;
+        assert_eq!(
+            version.semver().to_string(),
+            query_crdb_schema_version(&crdb).await
+        );
+    }
+
+    // Verify we're now at the latest version
+    assert_eq!(
+        LATEST_SCHEMA_VERSION.to_string(),
+        query_crdb_schema_version(&crdb).await
+    );
+
+    // Query the schema from our migrated database
+    let migrated_schema = InformationSchema::new(&crdb).await;
+    let migrated_data = migrated_schema.query_all_tables(log, &crdb).await;
+
+    db.terminate().await;
+
+    // Create a fresh database with current dbinit.sql for comparison
+    let fresh_db = TestDatabase::new_populate_schema_only(&logctx.log).await;
+    let fresh_crdb = fresh_db.crdb();
+    let expected_schema = InformationSchema::new(&fresh_crdb).await;
+    let expected_data =
+        expected_schema.query_all_tables(log, &fresh_crdb).await;
+
+    // Compare the schemas and data
+    migrated_schema.pretty_assert_eq(&expected_schema);
+    assert_eq!(
+        migrated_data, expected_data,
+        "Data mismatch when migrating from version {}",
+        start_version
+    );
+
+    fresh_db.terminate().await;
+    println!("Successfully validated migration from version {}", start_version);
+
     logctx.cleanup_successful();
 }
