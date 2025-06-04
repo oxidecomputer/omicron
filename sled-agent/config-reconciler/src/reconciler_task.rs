@@ -458,14 +458,12 @@ impl ReconcilerTask {
         // the old instance.
         match zone_shutdown_result {
             Ok(()) => {
-                let currently_managed_zpools =
-                    self.external_disks.currently_managed_zpools();
                 self.zones
                     .start_zones_if_needed(
                         &sled_config.zones,
                         sled_agent_facilities,
                         timesync_status.is_synchronized(),
-                        &currently_managed_zpools,
+                        &self.datasets,
                         &self.log,
                     )
                     .await;

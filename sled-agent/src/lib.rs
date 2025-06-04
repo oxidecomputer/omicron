@@ -28,7 +28,6 @@ mod instance_manager;
 mod long_running_tasks;
 mod metrics;
 mod nexus;
-pub mod params;
 mod probe_manager;
 mod profile;
 pub mod rack_setup;
