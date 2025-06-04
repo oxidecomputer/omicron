@@ -193,14 +193,30 @@ impl Ingester {
             }
             let db_ereports = items
                 .into_iter()
-                .map(|Ereport { ena, data }| db::model::SpEreport {
-                    restart_id: restart_id.into(),
-                    ena: ena.into(),
-                    time_collected: Utc::now(),
-                    collector_id: self.nexus_id.into(),
-                    sp_type: sp_type.into(),
-                    sp_slot: slot.into(),
-                    report: serde_json::Value::Object(data),
+                .map(|ereport| {
+                    let part_number = get_sp_metadata_string(
+                        "baseboard_part_number",
+                        &ereport,
+                        &restart_id,
+                        &opctx.log,
+                    );
+                    let serial_number = get_sp_metadata_string(
+                        "baseboard_serial_number",
+                        &ereport,
+                        &restart_id,
+                        &opctx.log,
+                    );
+                    db::model::SpEreport {
+                        restart_id: restart_id.into(),
+                        ena: ereport.ena.into(),
+                        time_collected: Utc::now(),
+                        collector_id: self.nexus_id.into(),
+                        sp_type: sp_type.into(),
+                        sp_slot: slot.into(),
+                        part_number,
+                        serial_number,
+                        report: serde_json::Value::Object(ereport.data),
+                    }
                 })
                 .collect::<Vec<_>>();
             let received = db_ereports.len();
@@ -308,6 +324,41 @@ impl Ingester {
         }
 
         None
+    }
+}
+
+/// Attempt to extract a VPD metadata from an SP ereport, logging a warning if
+/// it's missing. We still want to keep such ereports, as the error condition
+/// could be that the SP couldn't determine the metadata field, but it's
+/// uncomfortable, so we ought to complain about it.
+fn get_sp_metadata_string(
+    key: &str,
+    ereport: &Ereport,
+    restart_id: &EreporterRestartUuid,
+    log: &slog::Logger,
+) -> Option<String> {
+    match ereport.data.get(key) {
+        Some(serde_json::Value::String(s)) => Some(s.clone()),
+        Some(v) => {
+            slog::warn!(
+                &log,
+                "malformed ereport: value for '{key}' should be a string, \
+                 but found: {v:?}";
+                "ena" => ?ereport.ena,
+                "restart_id" => ?restart_id,
+            );
+            None
+        }
+        None => {
+            slog::warn!(
+                &log,
+                "ereport missing '{key}'; perhaps the SP doesn't know its own \
+                 VPD!";
+                "ena" => ?ereport.ena,
+                "restart_id" => ?restart_id,
+            );
+            None
+        }
     }
 }
 
