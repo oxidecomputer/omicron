@@ -6645,7 +6645,7 @@ fn print_name(
     if records.len() == 1 {
         match &records[0] {
             DnsRecord::Srv(_) => (),
-            DnsRecord::Aaaa(_) | DnsRecord::A(_) | DnsRecord::Ns(_) => {
+            DnsRecord::Aaaa(_) | DnsRecord::A(_) => {
                 println!(
                     "{}  {:50} {}",
                     prefix,
@@ -6670,7 +6670,6 @@ fn format_record(record: &DnsRecord) -> impl Display {
         DnsRecord::Srv(Srv { port, target, .. }) => {
             format!("SRV  port {:5} {}", port, target)
         }
-        DnsRecord::Ns(ns) => format!("NS   {}", ns),
     }
 }
 

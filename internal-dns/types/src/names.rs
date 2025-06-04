@@ -20,17 +20,6 @@ pub const DNS_ZONE: &str = "control-plane.oxide.internal";
 /// development
 pub const DNS_ZONE_EXTERNAL_TESTING: &str = "oxide-dev.test";
 
-/// Label for records associated with a zone itself, rather than any names
-/// inside it.
-///
-/// This string is not part of a valid DNS name; no query can actually be
-/// issued for `@.<ZONE>`. The string is chosen to match with what users might
-/// expect with the prior experience of zone files for more traditional DNS
-/// servers - in cases where zone files are actual literal text files either
-/// manually or programmatically constructed, records of this nature are
-/// typically described with the name "@".
-pub const ZONE_APEX_NAME: &str = "@";
-
 /// Names of services within the control plane
 #[derive(Clone, Copy, Debug, Hash, Eq, Ord, PartialEq, PartialOrd)]
 pub enum ServiceName {

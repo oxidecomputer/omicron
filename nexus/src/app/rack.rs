@@ -22,8 +22,11 @@ use nexus_db_queries::db;
 use nexus_db_queries::db::datastore::DnsVersionUpdateBuilder;
 use nexus_db_queries::db::datastore::RackInit;
 use nexus_db_queries::db::datastore::SledUnderlayAllocationResult;
+use nexus_types::deployment::BlueprintZoneDisposition;
+use nexus_types::deployment::BlueprintZoneType;
 use nexus_types::deployment::CockroachDbClusterVersion;
 use nexus_types::deployment::SledFilter;
+use nexus_types::deployment::blueprint_zone_type;
 use nexus_types::external_api::params::Address;
 use nexus_types::external_api::params::AddressConfig;
 use nexus_types::external_api::params::AddressLotBlockCreate;
@@ -45,6 +48,7 @@ use nexus_types::external_api::shared::SiloIdentityMode;
 use nexus_types::external_api::shared::SiloRole;
 use nexus_types::external_api::shared::UninitializedSled;
 use nexus_types::external_api::views;
+use nexus_types::internal_api::params::DnsRecord;
 use nexus_types::silo::silo_dns_name;
 use omicron_common::address::{Ipv6Subnet, RACK_PREFIX, get_64_subnet};
 use omicron_common::api::external::AddressLotKind;
@@ -185,12 +189,6 @@ impl super::Nexus {
                 )
             })?;
 
-        // sled-agent, in service of RSS, has configured internal DNS. We record
-        // its reported initial DNS config in this `InitialDnsGroup`. sled-agent
-        // has not configured external DNS at all, so create a similar external
-        // `InitialDnsGroup` and initialize it in accordance with the initial
-        // system blueprint.
-
         let internal_dns = InitialDnsGroup::new(
             DnsGroup::Internal,
             &dns_zone.zone_name,
@@ -208,7 +206,20 @@ impl super::Nexus {
         );
 
         let silo_name = &request.recovery_silo.silo_name;
-
+        let dns_records = request
+            .blueprint
+            .all_omicron_zones(BlueprintZoneDisposition::is_in_service)
+            .filter_map(|(_, zc)| match zc.zone_type {
+                BlueprintZoneType::Nexus(blueprint_zone_type::Nexus {
+                    external_ip,
+                    ..
+                }) => Some(match external_ip.ip {
+                    IpAddr::V4(addr) => DnsRecord::A(addr),
+                    IpAddr::V6(addr) => DnsRecord::Aaaa(addr),
+                }),
+                _ => None,
+            })
+            .collect();
         let mut dns_update = DnsVersionUpdateBuilder::new(
             DnsGroup::External,
             format!("create silo: {:?}", silo_name.as_str()),
@@ -217,16 +228,7 @@ impl super::Nexus {
         let silo_dns_name = silo_dns_name(silo_name);
         let recovery_silo_fq_dns_name =
             format!("{silo_dns_name}.{}", request.external_dns_zone_name);
-
-        let external_dns_config =
-            nexus_types::deployment::execution::blueprint_external_dns_config(
-                &request.blueprint,
-                vec![silo_name],
-                request.external_dns_zone_name,
-            );
-        for (name, records) in external_dns_config.records.into_iter() {
-            dns_update.add_name(name, records)?;
-        }
+        dns_update.add_name(silo_dns_name, dns_records)?;
 
         // We're providing an update to the initial `external_dns` group we
         // defined above; also bump RSS's blueprint's `external_dns_version` to

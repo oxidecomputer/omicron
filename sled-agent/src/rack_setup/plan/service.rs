@@ -415,11 +415,10 @@ impl Plan {
 
             let id = OmicronZoneUuid::new_v4();
             dns_builder
-                .host_zone_internal_dns(
+                .host_zone_with_one_backend(
                     id,
                     ServiceName::InternalDns,
                     http_address,
-                    dns_address,
                 )
                 .unwrap();
             let dataset_name =
@@ -496,9 +495,6 @@ impl Plan {
             let internal_ip = sled.addr_alloc.next().expect("Not enough addrs");
             let http_port = omicron_common::address::DNS_HTTP_PORT;
             let http_address = SocketAddrV6::new(internal_ip, http_port, 0, 0);
-            // With respect to internal DNS configuration, there's only one
-            // address for external DNS that matters: the management (HTTP)
-            // interface.
             dns_builder
                 .host_zone_with_one_backend(
                     id,

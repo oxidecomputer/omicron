@@ -14,7 +14,6 @@
 
 use anyhow::Context;
 use anyhow::Result;
-use anyhow::anyhow;
 use anyhow::ensure;
 use clap::{Args, Parser, Subcommand};
 use dns_service_client::Client;
@@ -154,9 +153,6 @@ async fn main() -> Result<()> {
                                     srv.weight
                                 );
                             }
-                            DnsRecord::Ns(name) => {
-                                println!("        NS: {:?}", name);
-                            }
                         }
                     }
                 }
@@ -225,7 +221,6 @@ async fn main() -> Result<()> {
 
             let new_config = DnsConfigParams {
                 generation: old_config.generation.next(),
-                serial: old_config.serial + 1,
                 time_created: chrono::Utc::now(),
                 zones,
             };
@@ -264,9 +259,6 @@ fn add_record(
     verify_zone_name(zone_name)?;
 
     let generation = config.generation;
-    let serial = config.serial.checked_add(1).ok_or_else(|| {
-        anyhow!("Cannot produce new serial for {}", config.serial)
-    })?;
     let (our_zone, other_zones): (Vec<_>, Vec<_>) =
         config.zones.into_iter().partition(|z| z.zone_name == zone_name);
     let our_records = our_zone
@@ -284,7 +276,6 @@ fn add_record(
 
     Ok(DnsConfigParams {
         generation: generation.next(),
-        serial,
         time_created: chrono::Utc::now(),
         zones: other_zones
             .into_iter()

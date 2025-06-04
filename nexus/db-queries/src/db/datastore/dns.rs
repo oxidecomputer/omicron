@@ -288,12 +288,6 @@ impl DataStore {
 
         Ok(DnsConfigParams {
             generation: version.version.0,
-            serial: version.version.0.as_u64().try_into().map_err(|_| {
-                Error::internal_error(&format!(
-                    "DNS config would wrap the DNS serial number: {}",
-                    version.version.0.as_u64()
-                ))
-            })?,
             time_created: version.time_created,
             zones,
         })

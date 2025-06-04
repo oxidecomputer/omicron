@@ -28,10 +28,8 @@ DNS zone:                   oxide-dev.test (External)
 requested version:          2 (created at <REDACTED_TIMESTAMP>)
 version created by Nexus:   ..........<REDACTED_UUID>...........
 version created because:    create silo: "test-suite-silo"
-changes:                    names added: 3, names removed: 0
+changes:                    names added: 1, names removed: 0
 
-+  @                                                  NS   ns1.oxide-dev.test
-+  ns1                                                AAAA ::1
 +  test-suite-silo.sys                                A    127.0.0.1
 ---------------------------------------------
 stderr:
@@ -44,8 +42,6 @@ termination: Exited(0)
 stdout:
 External zone: oxide-dev.test
   NAME                                               RECORDS
-  @                                                  NS   ns1.oxide-dev.test
-  ns1                                                AAAA ::1
   test-suite-silo.sys                                A    127.0.0.1
 ---------------------------------------------
 stderr:

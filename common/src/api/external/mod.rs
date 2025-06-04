@@ -749,10 +749,6 @@ impl Generation {
         );
         Generation(next_gen)
     }
-
-    pub const fn as_u64(self) -> u64 {
-        self.0
-    }
 }
 
 impl<'de> Deserialize<'de> for Generation {
