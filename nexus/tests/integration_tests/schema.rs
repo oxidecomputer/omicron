@@ -32,6 +32,7 @@ use std::collections::BTreeMap;
 use std::collections::BTreeSet;
 use std::net::IpAddr;
 use tokio::time::Duration;
+use tokio::time::Instant;
 use tokio::time::timeout;
 use uuid::Uuid;
 
@@ -2312,26 +2313,28 @@ async fn load_dbinit_from_previous_schema(
     })
 }
 
+struct MigrationTimingInfo {
+    entire_task: Duration,
+    schema_setup: Duration,
+    migration_times: Vec<(semver::Version, Duration)>,
+}
+
 // Test data migration from a starting schema version to a target version
 async fn validate_data_migration_from_version_to_target(
     starting_version: semver::Version,
     target_version: semver::Version,
     test_name: &str,
-) {
-    let overall_start = std::time::Instant::now();
-
+) -> MigrationTimingInfo {
+    let start = Instant::now();
     let config = load_test_config();
     let logctx = LogContext::new(test_name, &config.pkg.log);
     let log = &logctx.log;
 
     // Time database creation
-    let db_start = std::time::Instant::now();
     let db = TestDatabase::new_populate_nothing(&logctx.log).await;
     let crdb = db.crdb();
-    let db_creation_time = db_start.elapsed();
 
     // Time starting schema application
-    let schema_start = std::time::Instant::now();
     let starting_sql = load_dbinit_from_previous_schema(&starting_version)
         .await
         .expect("Failed to load starting schema");
@@ -2346,7 +2349,7 @@ async fn validate_data_migration_from_version_to_target(
     // Verify we're at the expected starting version
     let actual_version = query_crdb_schema_version(&crdb).await;
     assert_eq!(starting_version.to_string(), actual_version);
-    let schema_apply_time = schema_start.elapsed();
+    let schema_setup = start.elapsed();
 
     let ctx = MigrationContext { log, client };
 
@@ -2374,12 +2377,11 @@ async fn validate_data_migration_from_version_to_target(
         .collect();
 
     // Time migration steps
-    let migrations_start = std::time::Instant::now();
     let mut migration_times = Vec::new();
 
     // Apply each migration step
     for version in &versions_to_apply {
-        let migration_start = std::time::Instant::now();
+        let migration_start = Instant::now();
 
         // If this check has preconditions (or setup), run them.
         let checks = all_checks.get(version.semver());
@@ -2402,8 +2404,6 @@ async fn validate_data_migration_from_version_to_target(
         migration_times.push((version.semver().clone(), migration_time));
     }
 
-    let total_migration_time = migrations_start.elapsed();
-
     // Verify we reached the target version
     assert_eq!(
         target_version.to_string(),
@@ -2413,25 +2413,11 @@ async fn validate_data_migration_from_version_to_target(
     db.terminate().await;
     logctx.cleanup_successful();
 
-    let total_time = overall_start.elapsed();
-
-    // Print detailed timing information
-    println!("  {} timing breakdown:", test_name);
-    println!("    Database creation: {:.2}s", db_creation_time.as_secs_f64());
-    println!(
-        "    Starting schema ({}): {:.2}s",
-        starting_version,
-        schema_apply_time.as_secs_f64()
-    );
-    println!(
-        "    Migrations ({} steps): {:.2}s",
-        migration_times.len(),
-        total_migration_time.as_secs_f64()
-    );
-    for (version, time) in &migration_times {
-        println!("      → {}: {:.2}s", version, time.as_secs_f64());
+    MigrationTimingInfo {
+        entire_task: start.elapsed(),
+        schema_setup,
+        migration_times,
     }
-    println!("    Total test time: {:.2}s", total_time.as_secs_f64());
 }
 
 // Find migration test ranges based on checkpoints in previous-schemas.txt
@@ -2612,28 +2598,19 @@ async fn validate_data_migration_from_configured_versions() {
         );
 
         let handle = tokio::spawn(async move {
-            let start_time = std::time::Instant::now();
             println!(
                 "Starting migration test: {} → {}",
                 start_version, end_version
             );
 
-            validate_data_migration_from_version_to_target(
+            let timing = validate_data_migration_from_version_to_target(
                 start_version.clone(),
                 end_version.clone(),
                 &test_name,
             )
             .await;
 
-            let duration = start_time.elapsed();
-            println!(
-                "Completed migration test: {} → {} in {:.2}s",
-                start_version,
-                end_version,
-                duration.as_secs_f64()
-            );
-
-            (start_version, end_version, duration)
+            (start_version, end_version, timing)
         });
 
         handles.push(handle);
@@ -2645,19 +2622,23 @@ async fn validate_data_migration_from_configured_versions() {
         let result = handle.await.expect("Migration test task failed");
         results.push(result);
     }
+    results.sort_by(|(s1, _, _), (s2, _, _)| s1.cmp(s2));
 
-    // Print summary
-    let total_duration: std::time::Duration =
-        results.iter().map(|(_, _, d)| *d).sum();
     println!("\nMigration test summary:");
-    for (start, end, duration) in &results {
-        println!("  {} → {}: {:.2}s", start, end, duration.as_secs_f64());
+    for (start, end, timing) in &results {
+        println!(
+            "Range: {start} -> {end}: {:.2}s",
+            timing.entire_task.as_secs_f64()
+        );
+        println!(
+            "  Apply dbinit @ {}: {:.2}s",
+            start,
+            timing.schema_setup.as_secs_f64()
+        );
+        for (version, duration) in &timing.migration_times {
+            println!("  Upgrade → {version}: {:.2}s", duration.as_secs_f64());
+        }
     }
-    println!(
-        "Total execution time: {:.2}s (if run serially: {:.2}s)",
-        results.iter().map(|(_, _, d)| d.as_secs_f64()).fold(0.0, f64::max),
-        total_duration.as_secs_f64()
-    );
 }
 
 // Returns the InformationSchema object for a database populated via `sql`.
