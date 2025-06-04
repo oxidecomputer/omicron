@@ -90,6 +90,7 @@ mod rendezvous_debug_dataset;
 mod role;
 mod saga;
 mod silo;
+mod silo_auth_settings;
 mod silo_group;
 mod silo_user;
 mod sled;

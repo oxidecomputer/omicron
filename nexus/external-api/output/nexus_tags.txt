@@ -142,6 +142,8 @@ current_user_view                        GET      /v1/me
 
 API operations found with tag "silos"
 OPERATION ID                             METHOD   URL PATH
+auth_settings_update                     PUT      /v1/auth-settings
+auth_settings_view                       GET      /v1/auth-settings
 certificate_create                       POST     /v1/certificates
 certificate_delete                       DELETE   /v1/certificates/{certificate}
 certificate_list                         GET      /v1/certificates

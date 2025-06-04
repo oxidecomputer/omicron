@@ -52,11 +52,12 @@ use nexus_db_queries::authz;
 use nexus_db_queries::context::OpContext;
 use nexus_db_queries::db::model::{DeviceAccessToken, DeviceAuthRequest};
 
+use anyhow::anyhow;
 use nexus_types::external_api::params::DeviceAccessTokenRequest;
 use nexus_types::external_api::views;
 use omicron_common::api::external::{CreateResult, Error};
 
-use chrono::Utc;
+use chrono::{Duration, Utc};
 use serde::Serialize;
 use uuid::Uuid;
 
@@ -100,11 +101,17 @@ impl super::Nexus {
                 .fetch()
                 .await?;
 
-        let (.., authz_user) = LookupPath::new(opctx, &self.db_datastore)
-            .silo_user_id(silo_user_id)
-            .lookup_for(authz::Action::CreateChild)
-            .await?;
+        let (authz_silo, authz_user) =
+            LookupPath::new(opctx, &self.db_datastore)
+                .silo_user_id(silo_user_id)
+                .lookup_for(authz::Action::CreateChild)
+                .await?;
         assert_eq!(authz_user.id(), silo_user_id);
+
+        let silo_auth_settings = self
+            .db_datastore
+            .silo_auth_settings_view(opctx, &authz_silo)
+            .await?;
 
         // Create an access token record.
         let token = DeviceAccessToken::new(
@@ -112,6 +119,11 @@ impl super::Nexus {
             db_request.device_code,
             db_request.time_created,
             silo_user_id,
+            // Token gets the max TTL for the silo (if there is one) until we
+            // build a way for the user to ask for a different TTL
+            silo_auth_settings
+                .device_token_max_ttl_seconds
+                .map(|ttl| Utc::now() + Duration::seconds(ttl.0.into())),
         );
 
         if db_request.time_expires < Utc::now() {
@@ -189,6 +201,20 @@ impl super::Nexus {
                 e => Reason::UnknownError { source: e },
             })?;
         let silo_id = db_silo_user.silo_id;
+
+        if let Some(time_expires) = db_access_token.time_expires {
+            let now = Utc::now();
+            if time_expires < now {
+                return Err(Reason::BadCredentials {
+                    actor: Actor::SiloUser { silo_user_id, silo_id },
+                    source: anyhow!(
+                        "token expired at {} (current time: {})",
+                        time_expires,
+                        now
+                    ),
+                });
+            }
+        }
 
         Ok(Actor::SiloUser { silo_user_id, silo_id })
     }

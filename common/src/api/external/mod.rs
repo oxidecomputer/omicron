@@ -43,6 +43,7 @@ use std::fmt::Result as FormatResult;
 use std::net::IpAddr;
 use std::net::Ipv4Addr;
 use std::num::{NonZeroU16, NonZeroU32};
+use std::ops::Deref;
 use std::str::FromStr;
 use tufaceous_artifact::ArtifactHash;
 use uuid::Uuid;
@@ -1008,6 +1009,7 @@ pub enum ResourceType {
     ProjectImage,
     Instance,
     LoopbackAddress,
+    SiloAuthSettings,
     SwitchPortSettings,
     SupportBundle,
     IpPool,
@@ -3275,6 +3277,68 @@ pub enum ImportExportPolicy {
     #[default]
     NoFiltering,
     Allow(Vec<oxnet::IpNet>),
+}
+
+/// Use instead of Option in API request body structs to get a field that can
+/// be null (parsed as `None`) but is not optional. Unlike Option, Nullable
+/// will fail to parse if the key is not present. The JSON Schema in the
+/// OpenAPI definition will also reflect that the field is required. See
+/// <https://github.com/serde-rs/serde/issues/2753>.
+#[derive(Clone, Debug, Serialize)]
+pub struct Nullable<T>(pub Option<T>);
+
+impl<T> From<Option<T>> for Nullable<T> {
+    fn from(option: Option<T>) -> Self {
+        Nullable(option)
+    }
+}
+
+impl<T> Deref for Nullable<T> {
+    type Target = Option<T>;
+
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
+
+// it looks like we're just using Option's impl here, so why not derive instead?
+// For some reason, deriving JsonSchema + #[serde(transparent)] doesn't work --
+// it almost does, but the field does not end up marked required in the schema.
+// There must be some special handling of Option somewhere causing it to be
+// marked optional rather than nullable + required.
+
+impl<T: JsonSchema> JsonSchema for Nullable<T> {
+    fn schema_name() -> String {
+        T::schema_name()
+    }
+
+    fn json_schema(
+        generator: &mut schemars::r#gen::SchemaGenerator,
+    ) -> schemars::schema::Schema {
+        Option::<T>::json_schema(generator)
+    }
+
+    fn is_referenceable() -> bool {
+        Option::<T>::is_referenceable()
+    }
+}
+
+impl<'de, T: serde::Deserialize<'de>> serde::Deserialize<'de> for Nullable<T> {
+    fn deserialize<D: serde::Deserializer<'de>>(
+        deserializer: D,
+    ) -> Result<Self, D::Error> {
+        // This line is required to get a parse error on missing fields.
+        // It seems that when the field is missing in the JSON, struct
+        // deserialization produces an error before this function is even hit,
+        // and that error is passed in here inside `deserializer`. If we don't
+        // do this Value::deserialize to cause that error to be returned as a
+        // missing field error, Option's deserialize will eat it by turning it
+        // into a successful parse as None.
+        let value = serde_json::Value::deserialize(deserializer)?;
+
+        use serde::de::Error;
+        Option::<T>::deserialize(value).map_err(D::Error::custom).map(Nullable)
+    }
 }
 
 #[cfg(test)]
