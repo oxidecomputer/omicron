@@ -43,6 +43,7 @@ omicron-workspace-hack.workspace = true
 assert_matches.workspace = true
 expectorate.workspace = true
 illumos-utils = { workspace = true, features = ["testing"] }
+omicron-common = { workspace = true, features = ["testing"] }
 omicron-test-utils.workspace = true
 proptest.workspace = true
 schemars.workspace = true

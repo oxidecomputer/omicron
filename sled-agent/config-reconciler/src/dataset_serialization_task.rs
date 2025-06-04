@@ -47,6 +47,7 @@ use std::collections::BTreeMap;
 use std::collections::BTreeSet;
 use std::ffi::OsStr;
 use std::future::Future;
+use std::str::FromStr;
 use std::sync::Arc;
 use tokio::sync::mpsc;
 use tokio::sync::mpsc::error::TrySendError;
@@ -230,6 +231,19 @@ impl DatasetTaskHandle {
             .await
     }
 
+    pub async fn datasets_report_orphans(
+        &self,
+        config_datasets: BTreeSet<DatasetName>,
+        currently_managed_zpools: Arc<CurrentlyManagedZpools>,
+    ) -> Result<anyhow::Result<BTreeSet<DatasetName>>, DatasetTaskError> {
+        self.try_send_request(|tx| DatasetTaskRequest::DatasetsReportOrphans {
+            config_datasets,
+            currently_managed_zpools,
+            tx,
+        })
+        .await
+    }
+
     pub async fn datasets_ensure(
         &self,
         datasets: IdMap<DatasetConfig>,
@@ -342,6 +356,20 @@ impl DatasetTask {
             DatasetTaskRequest::Inventory { zpools, tx } => {
                 _ = tx.0.send(self.inventory(zpools, zfs).await);
             }
+            DatasetTaskRequest::DatasetsReportOrphans {
+                config_datasets,
+                currently_managed_zpools,
+                tx,
+            } => {
+                _ = tx.0.send(
+                    self.datasets_report_orphans(
+                        config_datasets,
+                        currently_managed_zpools,
+                        zfs,
+                    )
+                    .await,
+                );
+            }
             DatasetTaskRequest::DatasetsEnsure {
                 datasets,
                 currently_managed_zpools,
@@ -403,6 +431,92 @@ impl DatasetTask {
             .map_err(InventoryError::ListDatasetProperties)?;
 
         Ok(props.into_iter().map(From::from).collect())
+    }
+
+    async fn datasets_report_orphans<T: ZfsImpl>(
+        &mut self,
+        config_datasets: BTreeSet<DatasetName>,
+        currently_managed_zpools: Arc<CurrentlyManagedZpools>,
+        zfs: &T,
+    ) -> anyhow::Result<BTreeSet<DatasetName>> {
+        let mut orphaned_datasets = BTreeSet::new();
+
+        let datasets_of_interest =
+            currently_managed_zpools.iter().flat_map(|zpool| {
+                [
+                    // We care about the direct children of the zpool itself.
+                    // (This will include any unencrypted datasets, such as
+                    // `crucible`.)
+                    zpool.to_string(),
+                    // We also care about the direct children of the encrypted
+                    // dataset. (This includes non-crucible Omicron zone durable
+                    // datasets.)
+                    format!("{zpool}/{CRYPT_DATASET}"),
+                    // We _don't_ need to check children of
+                    // `{zpool}/{ZONE_DATASET}`: these are all transient, and
+                    // should be destroyed/created on demand.
+                ]
+            });
+
+        for dataset in zfs.list_datasets_full(datasets_of_interest).await? {
+            // Skip any errors parsing dataset names: we expect to get some
+            // errors! We won't be able to parse any dataset names that can't be
+            // represented by `DatasetKind`, which will always include at least
+            // the two parent datasets we asked for above (`zpool` and
+            // `zpool/crypt`).
+            //
+            // Our goal here is to prune datasets that _we_ created; we only
+            // create datasets that have representable `DatasetName`s, so this
+            // also acts as a safeguard that we should never delete datasets we
+            // don't fully understand.
+            let Ok(dataset) = DatasetName::from_str(&dataset) else {
+                continue;
+            };
+
+            // Explicitly match all variants here, so if we expand this list
+            // we're forced to consider whether they should be removeable.
+            match dataset.kind() {
+                // Zone durable datasets: these are the kinds we expect to
+                // remove (e.g., when the corresponding zone is expunged).
+                DatasetKind::Cockroach
+                | DatasetKind::Crucible
+                | DatasetKind::Clickhouse
+                | DatasetKind::ClickhouseKeeper
+                | DatasetKind::ClickhouseServer
+                | DatasetKind::ExternalDns
+                | DatasetKind::InternalDns => {
+                    if !config_datasets.contains(&dataset) {
+                        orphaned_datasets.insert(dataset);
+                    }
+                }
+
+                // These kinds are part of our config, but it would be
+                // surprising to have them disappear: they should always be
+                // present for any managed disk. Refuse to remove them.
+                DatasetKind::TransientZoneRoot | DatasetKind::Debug => {
+                    warn!(
+                        self.log,
+                        "refusing to delete should-always-exist dataset; \
+                         did it get dropped from the blueprint?";
+                        "dataset" => dataset.full_name(),
+                    );
+                }
+
+                // These should be grandchildren of the datasets we asked for;
+                // we shouldn't see them as direct children. Refuse to remove
+                // them. (They should also be recreated on demand anyway.)
+                DatasetKind::TransientZone { .. } => {
+                    warn!(
+                        self.log,
+                        "unexpectedly found transient zone dataset; refusing \
+                         to remove it";
+                        "dataset" => dataset.full_name(),
+                    );
+                }
+            }
+        }
+
+        Ok(orphaned_datasets)
     }
 
     async fn datasets_ensure<T: ZfsImpl>(
@@ -926,6 +1040,11 @@ enum DatasetTaskRequest {
             oneshot::Sender<Result<Vec<InventoryDataset>, InventoryError>>,
         >,
     },
+    DatasetsReportOrphans {
+        config_datasets: BTreeSet<DatasetName>,
+        currently_managed_zpools: Arc<CurrentlyManagedZpools>,
+        tx: DebugIgnore<oneshot::Sender<anyhow::Result<BTreeSet<DatasetName>>>>,
+    },
     DatasetsEnsure {
         datasets: IdMap<DatasetConfig>,
         currently_managed_zpools: Arc<CurrentlyManagedZpools>,
@@ -1240,7 +1359,13 @@ mod tests {
                 let name = name.as_ref().to_str().expect("valid string");
                 for dataset in state.datasets.keys() {
                     if dataset.starts_with(name) {
-                        datasets.push(dataset.clone());
+                        // Restrict to dataset and its immediate children
+                        if dataset
+                            .strip_prefix(&format!("{name}/"))
+                            .map_or(true, |rest| !rest.contains('/'))
+                        {
+                            datasets.push(dataset.clone());
+                        }
                     }
                 }
             }
@@ -1754,6 +1879,137 @@ mod tests {
                     Some(&expected_count),
                     "unexpected count for dataset {dataset:?}"
                 );
+            }
+        }
+
+        logctx.cleanup_successful();
+    }
+
+    #[derive(Debug, Arbitrary, PartialEq, PartialOrd, Eq, Ord)]
+    struct ZpoolWithDatasets {
+        name: ArbitraryZpoolName,
+        datasets: BTreeMap<DatasetKind, bool>,
+    }
+
+    #[proptest]
+    fn find_orphaned_datasets(
+        #[any(size_range(1..20).lift())] pools: BTreeSet<ZpoolWithDatasets>,
+    ) {
+        with_test_runtime(async move {
+            find_orphaned_datasets_impl(pools).await;
+        })
+    }
+
+    async fn find_orphaned_datasets_impl(inputs: BTreeSet<ZpoolWithDatasets>) {
+        let logctx = dev::test_setup_log("find_orphaned_datasets");
+
+        // Convert our test input into:
+        //
+        // 1. The set of pools
+        // 2. The set of `DatasetConfig`s
+        // 3. The set of datasets that don't have `DatasetConfig`s
+        let mut pools: BTreeSet<ZpoolName> = BTreeSet::new();
+        let mut dataset_configs = IdMap::new();
+        let mut datasets_in_config = BTreeSet::new();
+        let mut datasets_not_in_config = BTreeSet::new();
+        for input in inputs {
+            let ZpoolWithDatasets { name, datasets } = input;
+            let name = name.into();
+            pools.insert(name);
+            for (kind, in_config) in datasets {
+                let name = DatasetName::new(name, kind);
+                if in_config {
+                    assert!(!datasets_not_in_config.contains(&name));
+                    assert!(datasets_in_config.insert(name.clone()));
+                    dataset_configs.insert(DatasetConfig {
+                        id: DatasetUuid::new_v4(),
+                        name,
+                        inner: SharedDatasetConfig::default(),
+                    });
+                } else {
+                    assert!(!datasets_in_config.contains(&name));
+                    assert!(datasets_not_in_config.insert(name));
+                }
+            }
+        }
+
+        // Build up our in-memory ZFS: insert _all_ the datasets.
+        let zfs = InMemoryZfs::default();
+        {
+            let mut zfs = zfs.inner.lock().unwrap();
+            for dataset in
+                datasets_in_config.iter().chain(datasets_not_in_config.iter())
+            {
+                let name = dataset.full_name();
+                zfs.datasets.insert(
+                    name.clone(),
+                    DatasetProperties {
+                        id: None,
+                        name,
+                        mounted: false,
+                        avail: ByteCount::from_gibibytes_u32(1),
+                        used: ByteCount::from_gibibytes_u32(0),
+                        quota: None,
+                        reservation: None,
+                        compression: CompressionAlgorithm::On.to_string(),
+                    },
+                );
+            }
+        }
+
+        // Spawn our task.
+        let currently_managed_zpools =
+            CurrentlyManagedZpoolsReceiver::fake_static(pools.iter().copied())
+                .current();
+        let task_handle = DatasetTaskHandle::spawn_with_zfs_impl(
+            nonexistent_mount_config(),
+            &logctx.log,
+            zfs.clone(),
+        );
+
+        // Check for orphans.
+        let orphans = task_handle
+            .datasets_report_orphans(
+                datasets_in_config.clone(),
+                currently_managed_zpools,
+            )
+            .await
+            .expect("no task error")
+            .expect("no zfs error");
+
+        // We should report no orphans that were present in the config.
+        assert_eq!(
+            orphans.intersection(&datasets_in_config).collect::<BTreeSet<_>>(),
+            BTreeSet::new()
+        );
+
+        // All the datasets in `datasets_not_in_config` should be orphans, but
+        // we skip some particular dataset kinds that we refuse to delete for
+        // safety.
+        for dataset in datasets_not_in_config {
+            match dataset.kind() {
+                DatasetKind::Cockroach
+                | DatasetKind::Crucible
+                | DatasetKind::Clickhouse
+                | DatasetKind::ClickhouseKeeper
+                | DatasetKind::ClickhouseServer
+                | DatasetKind::ExternalDns
+                | DatasetKind::InternalDns => {
+                    assert!(
+                        orphans.contains(&dataset),
+                        "didn't find expected orphan {}",
+                        dataset.full_name()
+                    );
+                }
+                DatasetKind::TransientZoneRoot
+                | DatasetKind::TransientZone { .. }
+                | DatasetKind::Debug => {
+                    assert!(
+                        !orphans.contains(&dataset),
+                        "found unexpected orphan {}",
+                        dataset.full_name()
+                    );
+                }
             }
         }
 
