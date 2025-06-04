@@ -397,9 +397,9 @@ impl session_cookie::SessionStore for WhoamiServerState {
         }
     }
 
-    async fn session_expire(&self, id: ConsoleSessionUuid) -> Option<()> {
+    async fn session_expire(&self, token: String) -> Option<()> {
         let mut sessions = self.sessions.lock().unwrap();
-        sessions.retain(|s| s.id != id);
+        sessions.retain(|s| s.token != token);
         Some(())
     }
 

@@ -477,9 +477,9 @@ impl SessionStore for ServerContext {
         self.nexus.session_update_last_used(&opctx, id).await.ok()
     }
 
-    async fn session_expire(&self, id: ConsoleSessionUuid) -> Option<()> {
+    async fn session_expire(&self, token: String) -> Option<()> {
         let opctx = self.nexus.opctx_external_authn();
-        self.nexus.session_hard_delete(opctx, id).await.ok()
+        self.nexus.session_hard_delete_by_token(opctx, token).await.ok()
     }
 
     fn session_idle_timeout(&self) -> Duration {
