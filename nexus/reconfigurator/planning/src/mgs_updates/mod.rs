@@ -27,7 +27,7 @@ use tufaceous_artifact::KnownArtifactKind;
 ///   (it is possible to have baseboards in inventory that would never be
 ///   updated because they're not considered part of the current system)
 /// * `current_updates`: the most recent set of configured `PendingMgsUpdates`
-/// * `current_artifacts`: information about artifacts frmo the current target
+/// * `current_artifacts`: information about artifacts from the current target
 ///   release (if any)
 /// * `nmax_updates`: the maximum number of updates allowed at once
 ///
@@ -71,7 +71,7 @@ pub fn plan_mgs_updates(
             Ok(MgsUpdateStatus::Impossible) => {
                 info!(
                     log,
-                    "SP update impossible
+                    "SP update impossible \
                      (will remove it and re-evaluate board)";
                     update
                 );
@@ -115,7 +115,7 @@ pub fn plan_mgs_updates(
         current_boards.iter().filter(|b| !boards_preferred.contains(*b));
     let candidates = boards_preferred.iter().chain(non_preferred);
     for board in candidates {
-        if rv.len() == nmax_updates {
+        if rv.len() >= nmax_updates {
             info!(
                 log,
                 "reached maximum number of pending SP updates";
@@ -454,7 +454,7 @@ fn try_make_update_sp(
         Err(_) => {
             warn!(
                 log,
-                "cannot configure SP update for board
+                "cannot configure SP update for board \
                  (found inactive slot contents but version was not valid)";
                 baseboard_id
             );
@@ -834,7 +834,7 @@ mod test {
         assert_eq!(updates, later_updates);
 
         // At this point, we're ready to test that when the first update
-        // completes, then th esecond one *is* started.  This tests two
+        // completes, then the second one *is* started.  This tests two
         // different things: first that we noticed the first one completed, and
         // second that we noticed another thing needed an update
         let later_collection = make_collection(
