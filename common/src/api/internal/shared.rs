@@ -920,7 +920,7 @@ pub struct ExternalIpGatewayMap {
 #[derive(
     Debug, Clone, PartialEq, Eq, Ord, PartialOrd, Hash, EnumCount, Diffable,
 )]
-#[cfg_attr(feature = "testing", derive(test_strategy::Arbitrary))]
+#[cfg_attr(any(test, feature = "testing"), derive(test_strategy::Arbitrary))]
 pub enum DatasetKind {
     // Durable datasets for zones
     Cockroach,
