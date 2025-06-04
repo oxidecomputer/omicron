@@ -12,6 +12,7 @@ use chrono::{DateTime, Utc};
 use daft::Diffable;
 use id_map::IdMap;
 use id_map::IdMappable;
+use omicron_common::disk::{DatasetKind, DatasetName};
 use omicron_common::ledger::Ledgerable;
 use omicron_common::{
     api::{
@@ -327,6 +328,10 @@ impl OmicronZoneConfig {
             Some(self.id),
         )
     }
+
+    pub fn dataset_name(&self) -> Option<DatasetName> {
+        self.zone_type.dataset_name()
+    }
 }
 
 /// Describes a persistent ZFS dataset associated with an Omicron zone
@@ -612,6 +617,41 @@ impl OmicronZoneType {
             | OmicronZoneType::InternalDns { .. }
             | OmicronZoneType::Oximeter { .. } => None,
         }
+    }
+
+    /// If this kind of zone has an associated dataset, return the dataset's
+    /// name. Otherwise, return `None`.
+    pub fn dataset_name(&self) -> Option<DatasetName> {
+        let (dataset, dataset_kind) = match self {
+            OmicronZoneType::BoundaryNtp { .. }
+            | OmicronZoneType::InternalNtp { .. }
+            | OmicronZoneType::Nexus { .. }
+            | OmicronZoneType::Oximeter { .. }
+            | OmicronZoneType::CruciblePantry { .. } => None,
+            OmicronZoneType::Clickhouse { dataset, .. } => {
+                Some((dataset, DatasetKind::Clickhouse))
+            }
+            OmicronZoneType::ClickhouseKeeper { dataset, .. } => {
+                Some((dataset, DatasetKind::ClickhouseKeeper))
+            }
+            OmicronZoneType::ClickhouseServer { dataset, .. } => {
+                Some((dataset, DatasetKind::ClickhouseServer))
+            }
+            OmicronZoneType::CockroachDb { dataset, .. } => {
+                Some((dataset, DatasetKind::Cockroach))
+            }
+            OmicronZoneType::Crucible { dataset, .. } => {
+                Some((dataset, DatasetKind::Crucible))
+            }
+            OmicronZoneType::ExternalDns { dataset, .. } => {
+                Some((dataset, DatasetKind::ExternalDns))
+            }
+            OmicronZoneType::InternalDns { dataset, .. } => {
+                Some((dataset, DatasetKind::InternalDns))
+            }
+        }?;
+
+        Some(DatasetName::new(dataset.pool_name, dataset_kind))
     }
 }
 
