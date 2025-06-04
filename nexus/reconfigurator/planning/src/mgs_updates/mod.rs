@@ -150,6 +150,13 @@ enum MgsUpdateStatus {
     NotDone,
     /// the requested update has not completed and the preconditions are not
     /// currently met
+    ///
+    /// The only way for this update to complete as-written is if reality
+    /// changes such that the preconditions become met.  But the only normal
+    /// operation that could make that happen is blueprint execution, which
+    /// won't do anything while the preconditions aren't met.  So if an update
+    /// is in this state, generally the planner must remove this update (and
+    /// presumably add one with updated preconditions).
     Impossible,
 }
 
@@ -329,7 +336,8 @@ fn try_make_update(
 ) -> Option<PendingMgsUpdate> {
     // TODO When we add support for planning RoT, RoT bootloader, and host OS
     // updates, we'll try these in a hardcoded priority order until any of them
-    // returns `Some`.  For now, we only plan SP updates.
+    // returns `Some`.  The order is described in RFD 565 section "Update
+    // Sequence".  For now, we only plan SP updates.
     try_make_update_sp(log, baseboard_id, inventory, current_artifacts)
 }
 
@@ -420,7 +428,9 @@ fn try_make_update_sp(
     }
 
     if matching_artifacts.len() > 1 {
-        // This is noteworthy, but not a problem.  We'll just pick one.
+        // This should be impossible unless we shipped a TUF repo with multiple
+        // artifacts for the same board.  But it doesn't prevent us from picking
+        // one and proceeding.  Make a note and proceed.
         warn!(log, "found more than one matching artifact for SP update");
     }
 
