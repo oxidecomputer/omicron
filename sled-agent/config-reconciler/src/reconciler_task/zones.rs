@@ -637,7 +637,9 @@ impl OmicronZone {
             | ZoneState::FailedToStart(ZoneStartError::DatasetDependency(_)) => {
                 Ok(())
             }
-            ZoneState::FailedToStart(ZoneStartError::SledAgentStartFailed(err)) => {
+            ZoneState::FailedToStart(ZoneStartError::SledAgentStartFailed(
+                err,
+            )) => {
                 // TODO-correctness What do we need to do to try to shut down a
                 // zone that we tried to start? We need fine-grained status of
                 // what startup things succeeded that need to be cleaned up. For
