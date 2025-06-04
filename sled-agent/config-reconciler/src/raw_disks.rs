@@ -252,7 +252,7 @@ mod tests {
                     match kind {
                         ArbitraryDiskKind::Real => {
                             RawDisk::Real(UnparsedDisk::new(
-                                //`nvme_instanced` is only used on a real illumos system so it's
+                                //`nvme_instance` is only used on a real illumos system so it's
                                 // bogus here
                                 0,
                                 slot,

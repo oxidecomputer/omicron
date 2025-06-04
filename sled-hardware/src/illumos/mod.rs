@@ -441,7 +441,7 @@ fn find_properties<'a, const N: usize>(
 
 // The illumos NVMe driver uses `sata_split_model` to split the nvme model into
 // vid and pid if possible.
-// Seehttps://github.com/illumos/illumos-gate/blob/8c91f274084b61c5ccfc1e0e27de9d353785c4c0/usr/src/uts/common/io/sata/impl/sata.c#L2129
+// See https://github.com/illumos/illumos-gate/blob/8c91f274084b61c5ccfc1e0e27de9d353785c4c0/usr/src/uts/common/io/sata/impl/sata.c#L2129
 fn sata_split_model(
     model: &str,
 ) -> Result<(Option<String>, String), Utf8Error> {

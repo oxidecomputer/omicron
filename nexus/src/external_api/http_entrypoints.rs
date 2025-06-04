@@ -82,7 +82,7 @@ use omicron_common::api::external::RouterRoute;
 use omicron_common::api::external::RouterRouteKind;
 use omicron_common::api::external::SwitchPort;
 use omicron_common::api::external::SwitchPortSettings;
-use omicron_common::api::external::SwitchPortSettingsView;
+use omicron_common::api::external::SwitchPortSettingsIdentity;
 use omicron_common::api::external::TufRepoGetResponse;
 use omicron_common::api::external::TufRepoInsertResponse;
 use omicron_common::api::external::VpcFirewallRuleUpdateParams;
@@ -3591,7 +3591,7 @@ impl NexusExternalApi for NexusExternalApiImpl {
     async fn networking_switch_port_settings_create(
         rqctx: RequestContext<ApiContext>,
         new_settings: TypedBody<params::SwitchPortSettingsCreate>,
-    ) -> Result<HttpResponseCreated<SwitchPortSettingsView>, HttpError> {
+    ) -> Result<HttpResponseCreated<SwitchPortSettings>, HttpError> {
         let apictx = rqctx.context();
         let handler = async {
             let nexus = &apictx.context.nexus;
@@ -3601,7 +3601,7 @@ impl NexusExternalApi for NexusExternalApiImpl {
             let result =
                 nexus.switch_port_settings_post(&opctx, params).await?;
 
-            let settings: SwitchPortSettingsView = result.into();
+            let settings: SwitchPortSettings = result.into();
             Ok(HttpResponseCreated(settings))
         };
         apictx
@@ -3636,8 +3636,10 @@ impl NexusExternalApi for NexusExternalApiImpl {
         query_params: Query<
             PaginatedByNameOrId<params::SwitchPortSettingsSelector>,
         >,
-    ) -> Result<HttpResponseOk<ResultsPage<SwitchPortSettings>>, HttpError>
-    {
+    ) -> Result<
+        HttpResponseOk<ResultsPage<SwitchPortSettingsIdentity>>,
+        HttpError,
+    > {
         let apictx = rqctx.context();
         let handler = async {
             let nexus = &apictx.context.nexus;
@@ -3670,7 +3672,7 @@ impl NexusExternalApi for NexusExternalApiImpl {
     async fn networking_switch_port_settings_view(
         rqctx: RequestContext<ApiContext>,
         path_params: Path<params::SwitchPortSettingsInfoSelector>,
-    ) -> Result<HttpResponseOk<SwitchPortSettingsView>, HttpError> {
+    ) -> Result<HttpResponseOk<SwitchPortSettings>, HttpError> {
         let apictx = rqctx.context();
         let handler = async {
             let nexus = &apictx.context.nexus;
@@ -4048,7 +4050,7 @@ impl NexusExternalApi for NexusExternalApiImpl {
     async fn networking_bgp_announce_set_update(
         rqctx: RequestContext<ApiContext>,
         config: TypedBody<params::BgpAnnounceSetCreate>,
-    ) -> Result<HttpResponseCreated<BgpAnnounceSet>, HttpError> {
+    ) -> Result<HttpResponseOk<BgpAnnounceSet>, HttpError> {
         let apictx = rqctx.context();
         let handler = async {
             let nexus = &apictx.context.nexus;
@@ -4056,7 +4058,7 @@ impl NexusExternalApi for NexusExternalApiImpl {
             let opctx =
                 crate::context::op_context_for_external_api(&rqctx).await?;
             let result = nexus.bgp_update_announce_set(&opctx, &config).await?;
-            Ok(HttpResponseCreated::<BgpAnnounceSet>(result.0.into()))
+            Ok(HttpResponseOk::<BgpAnnounceSet>(result.0.into()))
         };
         apictx
             .context
@@ -7581,20 +7583,25 @@ impl NexusExternalApi for NexusExternalApiImpl {
         let apictx = rqctx.context();
         let handler = async {
             let nexus = &apictx.context.nexus;
-            let opctx =
-                crate::context::op_context_for_external_api(&rqctx).await;
-            let token = cookies.get(session_cookie::SESSION_COOKIE_COOKIE_NAME);
+            // this is kind of a weird one, but we're only doing things here
+            // that are authorized directly by the possession of the token,
+            // which makes it somewhat like a login
+            let opctx = nexus.opctx_external_authn();
+            let session_cookie =
+                cookies.get(session_cookie::SESSION_COOKIE_COOKIE_NAME);
 
-            if let Ok(opctx) = opctx {
-                if let Some(token) = token {
-                    nexus.session_hard_delete(&opctx, token.value()).await?;
-                }
+            // Look up session and delete it if present
+            if let Some(cookie) = session_cookie {
+                let token = cookie.value().to_string();
+                nexus.session_hard_delete_by_token(&opctx, token).await?;
             }
 
-            // If user's session was already expired, they failed auth and their
-            // session was automatically deleted by the auth scheme. If they have no
-            // session (e.g., they cleared their cookies while sitting on the page)
-            // they will also fail auth.
+            // If user's session was already expired, they fail auth and their
+            // session is automatically deleted by the auth scheme. If they
+            // have no session at all (because, e.g., they cleared their cookies
+            // while sitting on the page) they will also fail auth, but nothing
+            // is deleted and the above lookup by token fails (but doesn't early
+            // return).
 
             // Even if the user failed auth, we don't want to send them back a 401
             // like we would for a normal request. They are in fact logged out like

@@ -1669,7 +1669,7 @@ pub trait NexusExternalApi {
     async fn networking_switch_port_settings_create(
         rqctx: RequestContext<Self::Context>,
         new_settings: TypedBody<params::SwitchPortSettingsCreate>,
-    ) -> Result<HttpResponseCreated<SwitchPortSettingsView>, HttpError>;
+    ) -> Result<HttpResponseCreated<SwitchPortSettings>, HttpError>;
 
     /// Delete switch port settings
     #[endpoint {
@@ -1693,7 +1693,10 @@ pub trait NexusExternalApi {
         query_params: Query<
             PaginatedByNameOrId<params::SwitchPortSettingsSelector>,
         >,
-    ) -> Result<HttpResponseOk<ResultsPage<SwitchPortSettings>>, HttpError>;
+    ) -> Result<
+        HttpResponseOk<ResultsPage<SwitchPortSettingsIdentity>>,
+        HttpError,
+    >;
 
     /// Get information about switch port
     #[endpoint {
@@ -1704,7 +1707,7 @@ pub trait NexusExternalApi {
     async fn networking_switch_port_settings_view(
         rqctx: RequestContext<Self::Context>,
         path_params: Path<params::SwitchPortSettingsInfoSelector>,
-    ) -> Result<HttpResponseOk<SwitchPortSettingsView>, HttpError>;
+    ) -> Result<HttpResponseOk<SwitchPortSettings>, HttpError>;
 
     /// List switch ports
     #[endpoint {
@@ -1881,7 +1884,7 @@ pub trait NexusExternalApi {
     async fn networking_bgp_announce_set_update(
         rqctx: RequestContext<Self::Context>,
         config: TypedBody<params::BgpAnnounceSetCreate>,
-    ) -> Result<HttpResponseCreated<BgpAnnounceSet>, HttpError>;
+    ) -> Result<HttpResponseOk<BgpAnnounceSet>, HttpError>;
 
     /// List BGP announce sets
     #[endpoint {

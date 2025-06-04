@@ -19,6 +19,7 @@ use nexus_db_queries::authn::external::session_cookie::SessionStore;
 use nexus_db_queries::context::{OpContext, OpKind};
 use nexus_db_queries::{authn, authz, db};
 use omicron_common::address::{AZ_PREFIX, Ipv6Subnet};
+use omicron_uuid_kinds::ConsoleSessionUuid;
 use omicron_uuid_kinds::GenericUuid;
 use oximeter::types::ProducerRegistry;
 use oximeter_instruments::http::{HttpService, LatencyTracker};
@@ -470,15 +471,15 @@ impl SessionStore for ServerContext {
 
     async fn session_update_last_used(
         &self,
-        token: String,
+        id: ConsoleSessionUuid,
     ) -> Option<Self::SessionModel> {
         let opctx = self.nexus.opctx_external_authn();
-        self.nexus.session_update_last_used(&opctx, &token).await.ok()
+        self.nexus.session_update_last_used(&opctx, id).await.ok()
     }
 
-    async fn session_expire(&self, token: String) -> Option<()> {
+    async fn session_expire(&self, id: ConsoleSessionUuid) -> Option<()> {
         let opctx = self.nexus.opctx_external_authn();
-        self.nexus.session_hard_delete(opctx, &token).await.ok()
+        self.nexus.session_hard_delete(opctx, id).await.ok()
     }
 
     fn session_idle_timeout(&self) -> Duration {

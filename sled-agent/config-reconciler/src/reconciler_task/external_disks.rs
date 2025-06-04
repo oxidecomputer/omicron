@@ -680,7 +680,7 @@ mod tests {
                     devfs_path: "/fake-disk".into(),
                     dev_path: None,
                 },
-                //`nvme_instanced` is only used on a real illumos system so it's
+                //`nvme_instance` is only used on a real illumos system so it's
                 // bogus here
                 nvme_instance: 0,
                 slot: raw_disk.slot(),
@@ -708,7 +708,7 @@ mod tests {
 
     fn make_raw_test_disk(variant: DiskVariant, serial: &str) -> RawDiskWithId {
         RawDisk::Real(UnparsedDisk::new(
-            //`nvme_instanced` is only used on a real illumos system so it's
+            //`nvme_instance` is only used on a real illumos system so it's
             // bogus here
             0,
             0,

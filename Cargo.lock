@@ -1617,6 +1617,7 @@ dependencies = [
  "schemars",
  "serde",
  "test-strategy",
+ "thiserror 1.0.69",
 ]
 
 [[package]]
@@ -2629,7 +2630,10 @@ dependencies = [
  "openapi-lint",
  "openapiv3",
  "pretty-hex 0.4.1",
+ "progenitor 0.10.0",
+ "reqwest",
  "schemars",
+ "semver 1.0.26",
  "serde",
  "serde_json",
  "sled",
@@ -10317,6 +10321,7 @@ dependencies = [
  "dropshot",
  "futures",
  "gateway-client",
+ "gateway-types",
  "humantime",
  "internal-dns-resolver",
  "internal-dns-types",

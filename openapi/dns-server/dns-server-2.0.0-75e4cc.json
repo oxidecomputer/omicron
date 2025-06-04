@@ -1,0 +1,296 @@
+{
+  "openapi": "3.0.3",
+  "info": {
+    "title": "Internal DNS",
+    "description": "API for the internal DNS server",
+    "contact": {
+      "url": "https://oxide.computer",
+      "email": "api@oxide.computer"
+    },
+    "version": "2.0.0"
+  },
+  "paths": {
+    "/config": {
+      "get": {
+        "operationId": "dns_config_get",
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DnsConfig"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      },
+      "put": {
+        "operationId": "dns_config_put",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/DnsConfigParams"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "204": {
+            "description": "resource updated"
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    }
+  },
+  "components": {
+    "schemas": {
+      "DnsConfig": {
+        "type": "object",
+        "properties": {
+          "generation": {
+            "$ref": "#/components/schemas/Generation"
+          },
+          "serial": {
+            "description": "A serial number for this DNS configuration, as should be used in SOA records describing the configuration's zones. This is a property of the overall DNS configuration for convenience: Nexus versions DNS configurations at this granularity, and we expect Nexus will derive serial numbers from that version.",
+            "type": "integer",
+            "format": "uint32",
+            "minimum": 0
+          },
+          "time_applied": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "time_created": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "zones": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/DnsConfigZone"
+            }
+          }
+        },
+        "required": [
+          "generation",
+          "serial",
+          "time_applied",
+          "time_created",
+          "zones"
+        ]
+      },
+      "DnsConfigParams": {
+        "type": "object",
+        "properties": {
+          "generation": {
+            "$ref": "#/components/schemas/Generation"
+          },
+          "serial": {
+            "description": "See [`DnsConfig`]'s `serial` field for how this is different from `generation`",
+            "type": "integer",
+            "format": "uint32",
+            "minimum": 0
+          },
+          "time_created": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "zones": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/DnsConfigZone"
+            }
+          }
+        },
+        "required": [
+          "generation",
+          "serial",
+          "time_created",
+          "zones"
+        ]
+      },
+      "DnsConfigZone": {
+        "description": "Configuration for a specific DNS zone, as opposed to illumos zones in which the services described by these records run.\n\nThe name `@` is special: it describes records that should be provided for queries about `zone_name`. This is used in favor of the empty string as `@` is the name used for this purpose in zone files for most DNS configurations. It also avoids potentially-confusing debug output from naively printing out records and their names - if you've seen an `@` record and tools are unclear about what that means, hopefully you've arrived here!",
+        "type": "object",
+        "properties": {
+          "records": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "array",
+              "items": {
+                "$ref": "#/components/schemas/DnsRecord"
+              }
+            }
+          },
+          "zone_name": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "records",
+          "zone_name"
+        ]
+      },
+      "DnsRecord": {
+        "oneOf": [
+          {
+            "type": "object",
+            "properties": {
+              "data": {
+                "type": "string",
+                "format": "ipv4"
+              },
+              "type": {
+                "type": "string",
+                "enum": [
+                  "A"
+                ]
+              }
+            },
+            "required": [
+              "data",
+              "type"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "data": {
+                "type": "string",
+                "format": "ipv6"
+              },
+              "type": {
+                "type": "string",
+                "enum": [
+                  "AAAA"
+                ]
+              }
+            },
+            "required": [
+              "data",
+              "type"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "data": {
+                "$ref": "#/components/schemas/Srv"
+              },
+              "type": {
+                "type": "string",
+                "enum": [
+                  "SRV"
+                ]
+              }
+            },
+            "required": [
+              "data",
+              "type"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "data": {
+                "type": "string"
+              },
+              "type": {
+                "type": "string",
+                "enum": [
+                  "NS"
+                ]
+              }
+            },
+            "required": [
+              "data",
+              "type"
+            ]
+          }
+        ]
+      },
+      "Error": {
+        "description": "Error information from a response.",
+        "type": "object",
+        "properties": {
+          "error_code": {
+            "type": "string"
+          },
+          "message": {
+            "type": "string"
+          },
+          "request_id": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "message",
+          "request_id"
+        ]
+      },
+      "Generation": {
+        "description": "Generation numbers stored in the database, used for optimistic concurrency control",
+        "type": "integer",
+        "format": "uint64",
+        "minimum": 0
+      },
+      "Srv": {
+        "type": "object",
+        "properties": {
+          "port": {
+            "type": "integer",
+            "format": "uint16",
+            "minimum": 0
+          },
+          "prio": {
+            "type": "integer",
+            "format": "uint16",
+            "minimum": 0
+          },
+          "target": {
+            "type": "string"
+          },
+          "weight": {
+            "type": "integer",
+            "format": "uint16",
+            "minimum": 0
+          }
+        },
+        "required": [
+          "port",
+          "prio",
+          "target",
+          "weight"
+        ]
+      }
+    },
+    "responses": {
+      "Error": {
+        "description": "Error",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/Error"
+            }
+          }
+        }
+      }
+    }
+  }
+}

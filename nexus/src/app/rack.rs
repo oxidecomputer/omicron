@@ -22,11 +22,8 @@ use nexus_db_queries::db;
 use nexus_db_queries::db::datastore::DnsVersionUpdateBuilder;
 use nexus_db_queries::db::datastore::RackInit;
 use nexus_db_queries::db::datastore::SledUnderlayAllocationResult;
-use nexus_types::deployment::BlueprintZoneDisposition;
-use nexus_types::deployment::BlueprintZoneType;
 use nexus_types::deployment::CockroachDbClusterVersion;
 use nexus_types::deployment::SledFilter;
-use nexus_types::deployment::blueprint_zone_type;
 use nexus_types::external_api::params::Address;
 use nexus_types::external_api::params::AddressConfig;
 use nexus_types::external_api::params::AddressLotBlockCreate;
@@ -48,7 +45,6 @@ use nexus_types::external_api::shared::SiloIdentityMode;
 use nexus_types::external_api::shared::SiloRole;
 use nexus_types::external_api::shared::UninitializedSled;
 use nexus_types::external_api::views;
-use nexus_types::internal_api::params::DnsRecord;
 use nexus_types::silo::silo_dns_name;
 use omicron_common::address::{Ipv6Subnet, RACK_PREFIX, get_64_subnet};
 use omicron_common::api::external::AddressLotKind;
@@ -189,6 +185,12 @@ impl super::Nexus {
                 )
             })?;
 
+        // sled-agent, in service of RSS, has configured internal DNS. We record
+        // its reported initial DNS config in this `InitialDnsGroup`. sled-agent
+        // has not configured external DNS at all, so create a similar external
+        // `InitialDnsGroup` and initialize it in accordance with the initial
+        // system blueprint.
+
         let internal_dns = InitialDnsGroup::new(
             DnsGroup::Internal,
             &dns_zone.zone_name,
@@ -206,20 +208,7 @@ impl super::Nexus {
         );
 
         let silo_name = &request.recovery_silo.silo_name;
-        let dns_records = request
-            .blueprint
-            .all_omicron_zones(BlueprintZoneDisposition::is_in_service)
-            .filter_map(|(_, zc)| match zc.zone_type {
-                BlueprintZoneType::Nexus(blueprint_zone_type::Nexus {
-                    external_ip,
-                    ..
-                }) => Some(match external_ip.ip {
-                    IpAddr::V4(addr) => DnsRecord::A(addr),
-                    IpAddr::V6(addr) => DnsRecord::Aaaa(addr),
-                }),
-                _ => None,
-            })
-            .collect();
+
         let mut dns_update = DnsVersionUpdateBuilder::new(
             DnsGroup::External,
             format!("create silo: {:?}", silo_name.as_str()),
@@ -228,7 +217,16 @@ impl super::Nexus {
         let silo_dns_name = silo_dns_name(silo_name);
         let recovery_silo_fq_dns_name =
             format!("{silo_dns_name}.{}", request.external_dns_zone_name);
-        dns_update.add_name(silo_dns_name, dns_records)?;
+
+        let external_dns_config =
+            nexus_types::deployment::execution::blueprint_external_dns_config(
+                &request.blueprint,
+                vec![silo_name],
+                request.external_dns_zone_name,
+            );
+        for (name, records) in external_dns_config.records.into_iter() {
+            dns_update.add_name(name, records)?;
+        }
 
         // We're providing an update to the initial `external_dns` group we
         // defined above; also bump RSS's blueprint's `external_dns_version` to
@@ -569,11 +567,11 @@ impl super::Nexus {
                 identity,
                 port_config,
                 groups: vec![],
-                links: HashMap::new(),
-                interfaces: HashMap::new(),
-                routes: HashMap::new(),
-                bgp_peers: HashMap::new(),
-                addresses: HashMap::new(),
+                links: vec![],
+                interfaces: vec![],
+                routes: vec![],
+                bgp_peers: vec![],
+                addresses: vec![],
             };
 
             let addresses: Vec<Address> = uplink_config
@@ -586,9 +584,13 @@ impl super::Nexus {
                 })
                 .collect();
 
-            port_settings_params
-                .addresses
-                .insert("phy0".to_string(), AddressConfig { addresses });
+            let link_name =
+                Name::from_str("phy0").expect("interface name should be valid");
+
+            port_settings_params.addresses.push(AddressConfig {
+                link_name: link_name.clone(),
+                addresses,
+            });
 
             let routes: Vec<Route> = uplink_config
                 .routes
@@ -603,7 +605,7 @@ impl super::Nexus {
 
             port_settings_params
                 .routes
-                .insert("phy0".to_string(), RouteConfig { routes });
+                .push(RouteConfig { link_name: link_name.clone(), routes });
 
             let peers: Vec<BgpPeer> = uplink_config
                 .bgp_peers
@@ -612,7 +614,7 @@ impl super::Nexus {
                     bgp_config: NameOrId::Name(
                         format!("as{}", r.asn).parse().unwrap(),
                     ),
-                    interface_name: "phy0".into(),
+                    interface_name: link_name.to_string(),
                     addr: r.addr.into(),
                     hold_time: r.hold_time() as u32,
                     idle_hold_time: r.idle_hold_time() as u32,
@@ -634,7 +636,7 @@ impl super::Nexus {
 
             port_settings_params
                 .bgp_peers
-                .insert("phy0".to_string(), BgpPeerConfig { peers });
+                .push(BgpPeerConfig { link_name: link_name.clone(), peers });
 
             let lldp = match &uplink_config.lldp {
                 None => LldpLinkConfigCreate {
@@ -656,6 +658,7 @@ impl super::Nexus {
             };
 
             let link = LinkConfigCreate {
+                link_name: link_name.clone(),
                 //TODO https://github.com/oxidecomputer/omicron/issues/2274
                 mtu: 1500,
                 fec: uplink_config.uplink_port_fec.map(|fec| fec.into()),
@@ -665,7 +668,7 @@ impl super::Nexus {
                 tx_eq: uplink_config.tx_eq.map(|t| t.into()),
             };
 
-            port_settings_params.links.insert("phy".to_string(), link);
+            port_settings_params.links.push(link);
 
             match self
                 .db_datastore

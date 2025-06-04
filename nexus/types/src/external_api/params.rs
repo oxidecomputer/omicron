@@ -14,7 +14,7 @@ use omicron_common::api::external::{
     ByteCount, FailureDomain, Hostname, IdentityMetadataCreateParams,
     IdentityMetadataUpdateParams, InstanceAutoRestartPolicy, InstanceCpuCount,
     LinkFec, LinkSpeed, Name, NameOrId, PaginationOrder, RouteDestination,
-    RouteTarget, TxEqConfig, UserId,
+    RouteTarget, UserId,
 };
 use omicron_common::disk::DiskVariant;
 use oxnet::{IpNet, Ipv4Net, Ipv6Net};
@@ -27,7 +27,6 @@ use serde::{
 };
 use std::collections::BTreeMap;
 use std::collections::BTreeSet;
-use std::collections::HashMap;
 use std::{net::IpAddr, str::FromStr};
 use url::Url;
 use uuid::Uuid;
@@ -1737,20 +1736,31 @@ pub struct SwtichPortSettingsGroupCreate {
 pub struct SwitchPortSettingsCreate {
     #[serde(flatten)]
     pub identity: IdentityMetadataCreateParams,
+
     pub port_config: SwitchPortConfigCreate,
+
+    #[serde(default)]
     pub groups: Vec<NameOrId>,
+
     /// Links indexed by phy name. On ports that are not broken out, this is
     /// always phy0. On a 2x breakout the options are phy0 and phy1, on 4x
     /// phy0-phy3, etc.
-    pub links: HashMap<String, LinkConfigCreate>,
+    pub links: Vec<LinkConfigCreate>,
+
     /// Interfaces indexed by link name.
-    pub interfaces: HashMap<String, SwitchInterfaceConfigCreate>,
+    #[serde(default)]
+    pub interfaces: Vec<SwitchInterfaceConfigCreate>,
+
     /// Routes indexed by interface name.
-    pub routes: HashMap<String, RouteConfig>,
+    #[serde(default)]
+    pub routes: Vec<RouteConfig>,
+
     /// BGP peers indexed by interface name.
-    pub bgp_peers: HashMap<String, BgpPeerConfig>,
+    #[serde(default)]
+    pub bgp_peers: Vec<BgpPeerConfig>,
+
     /// Addresses indexed by interface name.
-    pub addresses: HashMap<String, AddressConfig>,
+    pub addresses: Vec<AddressConfig>,
 }
 
 impl SwitchPortSettingsCreate {
@@ -1761,11 +1771,11 @@ impl SwitchPortSettingsCreate {
                 geometry: SwitchPortGeometry::Qsfp28x1,
             },
             groups: Vec::new(),
-            links: HashMap::new(),
-            interfaces: HashMap::new(),
-            routes: HashMap::new(),
-            bgp_peers: HashMap::new(),
-            addresses: HashMap::new(),
+            links: Vec::new(),
+            interfaces: Vec::new(),
+            routes: Vec::new(),
+            bgp_peers: Vec::new(),
+            addresses: Vec::new(),
         }
     }
 }
@@ -1795,6 +1805,9 @@ pub enum SwitchPortGeometry {
 /// Switch link configuration.
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
 pub struct LinkConfigCreate {
+    /// Link name
+    pub link_name: Name,
+
     /// Maximum transmission unit for the link.
     pub mtu: u16,
 
@@ -1814,6 +1827,36 @@ pub struct LinkConfigCreate {
 
     /// Optional tx_eq settings
     pub tx_eq: Option<TxEqConfig>,
+}
+
+/// Per-port tx-eq overrides.  This can be used to fine-tune the transceiver
+/// equalization settings to improve signal integrity.
+#[derive(Clone, Debug, Deserialize, JsonSchema, Serialize, PartialEq)]
+pub struct TxEqConfig {
+    /// Pre-cursor tap1
+    pub pre1: Option<i32>,
+    /// Pre-cursor tap2
+    pub pre2: Option<i32>,
+    /// Main tap
+    pub main: Option<i32>,
+    /// Post-cursor tap2
+    pub post2: Option<i32>,
+    /// Post-cursor tap1
+    pub post1: Option<i32>,
+}
+
+impl From<omicron_common::api::internal::shared::TxEqConfig> for TxEqConfig {
+    fn from(
+        x: omicron_common::api::internal::shared::TxEqConfig,
+    ) -> TxEqConfig {
+        TxEqConfig {
+            pre1: x.pre1,
+            pre2: x.pre2,
+            main: x.main,
+            post2: x.post2,
+            post1: x.post1,
+        }
+    }
 }
 
 /// The LLDP configuration associated with a port.
@@ -1841,10 +1884,44 @@ pub struct LldpLinkConfigCreate {
     pub management_ip: Option<IpAddr>,
 }
 
+impl PartialEq<LldpLinkConfigCreate>
+    for omicron_common::api::external::LldpLinkConfig
+{
+    fn eq(&self, other: &LldpLinkConfigCreate) -> bool {
+        self.enabled == other.enabled
+            && self.link_name == other.link_name
+            && self.link_description == other.link_description
+            && self.chassis_id == other.chassis_id
+            && self.system_name == other.system_name
+            && self.system_description == other.system_description
+            && self.management_ip == other.management_ip
+    }
+}
+
+impl PartialEq<omicron_common::api::external::LldpLinkConfig>
+    for LldpLinkConfigCreate
+{
+    fn eq(
+        &self,
+        other: &omicron_common::api::external::LldpLinkConfig,
+    ) -> bool {
+        self.enabled == other.enabled
+            && self.link_name == other.link_name
+            && self.link_description == other.link_description
+            && self.chassis_id == other.chassis_id
+            && self.system_name == other.system_name
+            && self.system_description == other.system_description
+            && self.management_ip == other.management_ip
+    }
+}
+
 /// A layer-3 switch interface configuration. When IPv6 is enabled, a link local
 /// address will be created for the interface.
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
 pub struct SwitchInterfaceConfigCreate {
+    /// Link the interface will be assigned to
+    pub link_name: Name,
+
     /// Whether or not IPv6 is enabled.
     pub v6_enabled: bool,
 
@@ -1883,6 +1960,9 @@ pub struct SwitchVlanInterface {
 /// Route configuration data associated with a switch port configuration.
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
 pub struct RouteConfig {
+    /// Link the route should be active on
+    pub link_name: Name,
+
     /// The set of routes assigned to a switch port.
     pub routes: Vec<Route>,
 }
@@ -1913,6 +1993,9 @@ pub struct BgpConfigSelector {
 
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
 pub struct BgpPeerConfig {
+    /// Link that the peer is reachable on
+    pub link_name: Name,
+
     pub peers: Vec<BgpPeer>,
 }
 
@@ -2028,6 +2111,9 @@ pub struct BfdSessionDisable {
 /// A set of addresses associated with a port configuration.
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
 pub struct AddressConfig {
+    /// Link to assign the address to
+    pub link_name: Name,
+
     /// The set of addresses assigned to the port configuration.
     pub addresses: Vec<Address>,
 }
