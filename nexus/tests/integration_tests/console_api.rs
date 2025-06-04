@@ -8,6 +8,7 @@ use dropshot::ResultsPage;
 use dropshot::test_util::ClientTestContext;
 use http::header::HeaderName;
 use http::{StatusCode, header, method::Method};
+use nexus_auth::context::OpContext;
 use std::env::current_dir;
 
 use crate::integration_tests::saml::SAML_RESPONSE_IDP_DESCRIPTOR;
@@ -30,7 +31,7 @@ use nexus_test_utils_macros::nexus_test;
 use nexus_types::external_api::params::{self, ProjectCreate};
 use nexus_types::external_api::shared::{SiloIdentityMode, SiloRole};
 use nexus_types::external_api::{shared, views};
-use omicron_common::api::external::IdentityMetadataCreateParams;
+use omicron_common::api::external::{Error, IdentityMetadataCreateParams};
 use omicron_sled_agent::sim;
 use omicron_test_utils::dev::poll::{CondCheckError, wait_for_condition};
 
@@ -917,4 +918,63 @@ async fn expect_redirect(testctx: &ClientTestContext, from: &str, to: &str) {
         .execute()
         .await
         .expect("did not find expected redirect");
+}
+
+/// Make sure an expired session gets deleted when you try to use it
+///
+/// This is not the best kind of test because it breaks the API abstraction
+/// boundary, but in this case it's necessary because by design we do not
+/// expose through the API why authn failed, i.e., whether it's because
+/// the session was found but is expired. vs not found at all
+#[tokio::test]
+async fn test_session_idle_timeout_deletes_session() {
+    // set idle timeout to 1 second so we can test expiration
+    let mut config = load_test_config();
+    config.pkg.console.session_idle_timeout_minutes = 0;
+    let cptestctx = test_setup_with_config::<omicron_nexus::Server>(
+        "test_session_idle_timeout_deletes_session",
+        &mut config,
+        sim::SimMode::Explicit,
+        None,
+        0,
+    )
+    .await;
+    let testctx = &cptestctx.external_client;
+
+    // Start session
+    let session_cookie = log_in_and_extract_token(&cptestctx).await;
+
+    // sleep here not necessary given TTL of 0
+
+    // Make a request with the expired session cookie
+    let me_response = RequestBuilder::new(testctx, Method::GET, "/v1/me")
+        .header(header::COOKIE, &session_cookie)
+        .expect_status(Some(StatusCode::UNAUTHORIZED))
+        .execute()
+        .await
+        .expect("first request with expired cookie did not 401");
+
+    let error_body: dropshot::HttpErrorResponseBody =
+        me_response.parsed_body().unwrap();
+    assert_eq!(error_body.message, "credentials missing or invalid");
+
+    // check that the session actually got deleted
+
+    let nexus = &cptestctx.server.server_context().nexus;
+    let datastore = nexus.datastore();
+    let opctx =
+        OpContext::for_tests(cptestctx.logctx.log.new(o!()), datastore.clone());
+
+    let token = session_cookie.strip_prefix("session=").unwrap();
+    let db_token_error = nexus
+        .datastore()
+        .session_lookup_by_token(&opctx, token.to_string())
+        .await
+        .expect_err("session should be deleted");
+    assert_matches::assert_matches!(
+        db_token_error,
+        Error::ObjectNotFound { .. }
+    );
+
+    cptestctx.teardown().await;
 }

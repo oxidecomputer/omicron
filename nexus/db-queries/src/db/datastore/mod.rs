@@ -659,17 +659,6 @@ mod test {
             .unwrap();
         assert!(fetched.time_last_used > session.time_last_used);
 
-        // deleting it using `opctx` (which represents the test-privileged user)
-        // should succeed but not do anything -- you can't delete someone else's
-        // session
-        let delete =
-            datastore.session_hard_delete(&opctx, &authz_session).await;
-        assert_eq!(delete, Ok(()));
-        let fetched = datastore
-            .session_lookup_by_token(&authn_opctx, token.clone())
-            .await;
-        assert!(fetched.is_ok());
-
         // delete it and fetch should come back with nothing
         let silo_user_opctx = OpContext::for_background(
             logctx.log.new(o!()),
@@ -682,7 +671,7 @@ mod test {
             Arc::clone(&datastore) as Arc<dyn nexus_auth::storage::Storage>,
         );
         let delete = datastore
-            .session_hard_delete(&silo_user_opctx, &authz_session)
+            .session_hard_delete_by_token(&silo_user_opctx, token.clone())
             .await;
         assert_eq!(delete, Ok(()));
         let fetched = datastore
@@ -695,7 +684,7 @@ mod test {
 
         // deleting an already nonexistent is considered a success
         let delete_again =
-            datastore.session_hard_delete(&opctx, &authz_session).await;
+            datastore.session_hard_delete_by_token(&opctx, token.clone()).await;
         assert_eq!(delete_again, Ok(()));
 
         let delete_again =
