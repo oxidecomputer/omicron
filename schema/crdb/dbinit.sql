@@ -604,6 +604,8 @@ CREATE INDEX IF NOT EXISTS lookup_zpool_by_disk on omicron.public.zpool (
     id
 ) WHERE physical_disk_id IS NOT NULL AND time_deleted IS NULL;
 
+-- TODO-cleanup If modifying this enum, please remove 'update'; see
+-- https://github.com/oxidecomputer/omicron/issues/8268.
 CREATE TYPE IF NOT EXISTS omicron.public.dataset_kind AS ENUM (
   'crucible',
   'cockroach',
