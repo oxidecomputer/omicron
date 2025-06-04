@@ -925,21 +925,20 @@ impl<'a> Planner<'a> {
             .all_sleds(SledFilter::SpsUpdatedByReconfigurator)
             .map(|(_sled_id, details)| &details.baseboard_id)
             .collect();
-        let included_baseboards = self
-            .inventory
-            .sps
-            .iter()
-            .filter_map(|(baseboard_id, sp_state)| {
-                let do_include = match sp_state.sp_type {
-                    SpType::Sled => {
-                        included_sled_baseboards.contains(baseboard_id.as_ref())
-                    }
-                    SpType::Power => true,
-                    SpType::Switch => true,
-                };
-                do_include.then_some(baseboard_id.clone())
-            })
-            .collect();
+        let included_baseboards =
+            self.inventory
+                .sps
+                .iter()
+                .filter_map(|(baseboard_id, sp_state)| {
+                    let do_include = match sp_state.sp_type {
+                        SpType::Sled => included_sled_baseboards
+                            .contains(baseboard_id.as_ref()),
+                        SpType::Power => true,
+                        SpType::Switch => true,
+                    };
+                    do_include.then_some(baseboard_id.clone())
+                })
+                .collect();
 
         // Compute the new set of PendingMgsUpdates.
         let current_updates =
