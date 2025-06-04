@@ -589,7 +589,7 @@ pub struct Sled {
     pub rack_id: Uuid,
     /// The operator-defined policy of a sled.
     pub policy: SledPolicy,
-    /// The current state Nexus believes the sled to be in.
+    /// The current state of the sled.
     pub state: SledState,
     /// The number of hardware threads which can execute on this sled
     pub usable_hardware_threads: u32,
@@ -729,7 +729,7 @@ impl fmt::Display for SledPolicy {
     }
 }
 
-/// The current state of the sled, as determined by Nexus.
+/// The current state of the sled.
 #[derive(
     Copy,
     Clone,
