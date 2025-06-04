@@ -12,6 +12,7 @@
 
 use crate::CurrentlyManagedZpools;
 use crate::InventoryError;
+use anyhow::Context as _;
 use camino::Utf8PathBuf;
 use debug_ignore::DebugIgnore;
 use futures::StreamExt;
@@ -44,6 +45,7 @@ use slog::warn;
 use slog_error_chain::InlineErrorChain;
 use std::collections::BTreeMap;
 use std::collections::BTreeSet;
+use std::ffi::OsStr;
 use std::future::Future;
 use std::sync::Arc;
 use tokio::sync::mpsc;
@@ -779,8 +781,8 @@ impl DatasetTask {
         let mountpoint = name.mountpoint(&self.mount_config.root);
 
         zfs.ensure_nested_dataset_mounted(
-            name.full_name(),
-            Mountpoint(mountpoint.clone()),
+            &name.full_name(),
+            &Mountpoint(mountpoint.clone()),
         )
         .await?;
 
@@ -848,7 +850,7 @@ impl DatasetTask {
             return Err(err);
         }
 
-        zfs.destroy_dataset(full_name).await.map_err(From::from)
+        zfs.destroy_dataset(&full_name).await.map_err(From::from)
     }
 
     async fn nested_dataset_list<T: ZfsImpl>(
@@ -972,13 +974,13 @@ trait ZfsImpl: Send + Sync + 'static {
 
     fn ensure_nested_dataset_mounted(
         &self,
-        name: String,
-        mountpoint: Mountpoint,
+        name: &str,
+        mountpoint: &Mountpoint,
     ) -> impl Future<Output = Result<(), NestedDatasetMountError>> + Send;
 
     fn destroy_dataset(
         &self,
-        name: String,
+        name: &str,
     ) -> impl Future<Output = Result<(), DestroyDatasetError>> + Send;
 
     fn get_dataset_properties(
@@ -986,6 +988,14 @@ trait ZfsImpl: Send + Sync + 'static {
         datasets: &[String],
         which: WhichDatasets,
     ) -> impl Future<Output = anyhow::Result<Vec<DatasetProperties>>> + Send;
+
+    fn list_datasets_full<I, S>(
+        &self,
+        names: I,
+    ) -> impl Future<Output = anyhow::Result<Vec<String>>> + Send
+    where
+        I: IntoIterator<Item = S> + Send,
+        S: AsRef<OsStr>;
 }
 
 struct RealZfs;
@@ -1006,20 +1016,22 @@ impl ZfsImpl for RealZfs {
 
     async fn ensure_nested_dataset_mounted(
         &self,
-        name: String,
-        mountpoint: Mountpoint,
+        name: &str,
+        mountpoint: &Mountpoint,
     ) -> Result<(), NestedDatasetMountError> {
-        let name_cloned = name.clone();
-        Zfs::ensure_dataset_mounted_and_exists(&name_cloned, &mountpoint)
-            .await
-            .map_err(|err| NestedDatasetMountError::MountFailed { name, err })
+        Zfs::ensure_dataset_mounted_and_exists(name, mountpoint).await.map_err(
+            |err| NestedDatasetMountError::MountFailed {
+                name: name.to_string(),
+                err,
+            },
+        )
     }
 
     async fn destroy_dataset(
         &self,
-        name: String,
+        name: &str,
     ) -> Result<(), DestroyDatasetError> {
-        Zfs::destroy_dataset(&name).await
+        Zfs::destroy_dataset(name).await
     }
 
     async fn get_dataset_properties(
@@ -1027,8 +1039,18 @@ impl ZfsImpl for RealZfs {
         datasets: &[String],
         which: WhichDatasets,
     ) -> anyhow::Result<Vec<DatasetProperties>> {
-        let datasets = datasets.to_vec();
-        Zfs::get_dataset_properties(&datasets, which).await
+        Zfs::get_dataset_properties(datasets, which).await
+    }
+
+    async fn list_datasets_full<I, S>(
+        &self,
+        names: I,
+    ) -> anyhow::Result<Vec<String>>
+    where
+        I: IntoIterator<Item = S> + Send,
+        S: AsRef<OsStr>,
+    {
+        Zfs::list_datasets_full(names).await.context("failed to list datasets")
     }
 }
 
@@ -1124,8 +1146,8 @@ mod tests {
 
         async fn ensure_nested_dataset_mounted(
             &self,
-            name: String,
-            _mountpoint: Mountpoint,
+            name: &str,
+            _mountpoint: &Mountpoint,
         ) -> Result<(), NestedDatasetMountError> {
             let mut state = self.inner.lock().unwrap();
 
@@ -1139,7 +1161,7 @@ mod tests {
             }
 
             // Dataset must exist
-            let dataset = match state.datasets.get_mut(&name) {
+            let dataset = match state.datasets.get_mut(name) {
                 Some(ds) => ds,
                 None => {
                     return Err(NestedDatasetMountError::TestError(
@@ -1154,14 +1176,14 @@ mod tests {
 
         async fn destroy_dataset(
             &self,
-            name: String,
+            name: &str,
         ) -> Result<(), DestroyDatasetError> {
             let mut state = self.inner.lock().unwrap();
 
             // Remove the dataset...
-            if state.datasets.remove(&name).is_none() {
+            if state.datasets.remove(name).is_none() {
                 return Err(DestroyDatasetError {
-                    name,
+                    name: name.to_string(),
                     err: DestroyDatasetErrorVariant::NotFound,
                 });
             }
@@ -1201,6 +1223,30 @@ mod tests {
             }
 
             Ok(result)
+        }
+
+        async fn list_datasets_full<I, S>(
+            &self,
+            names: I,
+        ) -> anyhow::Result<Vec<String>>
+        where
+            I: IntoIterator<Item = S> + Send,
+            S: AsRef<OsStr>,
+        {
+            let state = self.inner.lock().unwrap();
+
+            let mut datasets = Vec::new();
+
+            for name in names {
+                let name = name.as_ref().to_str().expect("valid string");
+                for dataset in state.datasets.keys() {
+                    if dataset.starts_with(name) {
+                        datasets.push(dataset.clone());
+                    }
+                }
+            }
+
+            Ok(datasets)
         }
     }
 
