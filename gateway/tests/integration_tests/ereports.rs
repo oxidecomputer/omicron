@@ -74,8 +74,8 @@ mod sled0 {
 
     def_ereport! {
         EREPORT_1: {
-            "chassis_model": "SimGimletSp",
-            "chassis_serial": "SimGimlet00",
+            "baseboard_part_number": "SimGimletSp",
+            "baseboard_serial_number": "SimGimlet00",
             "hubris_archive_id": "ffffffff",
             "hubris_version": "0.0.2",
             "hubris_task_name": "task_apollo_server",
@@ -88,8 +88,8 @@ mod sled0 {
     }
     def_ereport! {
         EREPORT_2: {
-            "chassis_model": "SimGimletSp",
-            "chassis_serial": "SimGimlet00",
+            "baseboard_part_number": "SimGimletSp",
+            "baseboard_serial_number": "SimGimlet00",
             "hubris_archive_id": "ffffffff",
             "hubris_version": "0.0.2",
             "hubris_task_name": "drv_ae35_server",
@@ -111,8 +111,8 @@ mod sled0 {
     }
     def_ereport! {
         EREPORT_3: {
-            "chassis_model": "SimGimletSp",
-            "chassis_serial": "SimGimlet00",
+            "baseboard_part_number": "SimGimletSp",
+            "baseboard_serial_number": "SimGimlet00",
             "hubris_archive_id": "ffffffff",
             "hubris_version": "0.0.2",
             "hubris_task_name": "task_apollo_server",
@@ -131,8 +131,8 @@ mod sled0 {
 
     def_ereport! {
         EREPORT_4: {
-            "chassis_model": "SimGimletSp",
-            "chassis_serial": "SimGimlet00",
+            "baseboard_part_number": "SimGimletSp",
+            "baseboard_serial_number": "SimGimlet00",
             "hubris_archive_id": "ffffffff",
             "hubris_version": "0.0.2",
             "hubris_task_name": "drv_thingy_server",
@@ -146,8 +146,8 @@ mod sled0 {
 
     def_ereport! {
         EREPORT_5: {
-            "chassis_model": "SimGimletSp",
-            "chassis_serial": "SimGimlet00",
+            "baseboard_part_number": "SimGimletSp",
+            "baseboard_serial_number": "SimGimlet00",
             "hubris_archive_id": "ffffffff",
             "hubris_version": "0.0.2",
             "hubris_task_name": "task_latex_server",
@@ -168,8 +168,8 @@ mod sled1 {
 
     def_ereport! {
         EREPORT_1: {
-            "chassis_model": "SimGimletSp",
-            "chassis_serial": "SimGimlet01",
+            "baseboard_part_number": "SimGimletSp",
+            "baseboard_serial_number": "SimGimlet01",
             "hubris_archive_id": "ffffffff",
             "hubris_version": "0.0.2",
             "hubris_task_name": "task_thermal_server",

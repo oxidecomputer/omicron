@@ -99,8 +99,34 @@ pub struct SpEreport {
     pub time_collected: DateTime<Utc>,
     pub collector_id: DbTypedUuid<OmicronZoneKind>,
 
+    //
+    // The physical location of the reporting SP.
+    //
+    /// SP location: the type of SP slot (sled, switch, power shelf).
+    ///
+    /// This is always known, as SPs are indexed by physical location when
+    /// collecting ereports from MGS.
     pub sp_type: SpType,
+    /// SP location: the slot number.
+    ///
+    /// This is always known, as SPs are indexed by physical location when
+    /// collecting ereports from MGS.
     pub sp_slot: SpMgsSlot,
+
+    /// SP VPD identity: the baseboard part number of the reporting SP.
+    ///
+    /// This is nullable, as the ereport may have been generated in a condition
+    /// where the SP was unable to determine its own part number. Consider that
+    /// "I don't know what I am!" is an error condition for which we might want
+    /// to generate an ereport!
+    pub part_number: Option<String>,
+    /// SP VPD identity: the baseboard serial number of the reporting SP.
+    ///
+    /// This is nullable, as the ereport may have been generated in a condition
+    /// where the SP was unable to determine its own serial number. Consider that
+    /// "I don't know who I am!" is an error condition for which we might want
+    /// to generate an ereport!
+    pub serial_number: Option<String>,
 
     pub report: serde_json::Value,
 }
