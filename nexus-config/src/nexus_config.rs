@@ -815,9 +815,7 @@ pub struct SpEreportIngesterConfig {
 
 impl Default for SpEreportIngesterConfig {
     fn default() -> Self {
-        Self {
-            period_secs: Duration::from_secs(30),
-        }
+        Self { period_secs: Duration::from_secs(30) }
     }
 }
 
@@ -1102,6 +1100,7 @@ mod test {
             webhook_deliverator.lease_timeout_secs = 44
             webhook_deliverator.first_retry_backoff_secs = 45
             webhook_deliverator.second_retry_backoff_secs = 46
+            sp_ereport_ingester.period_secs = 47
             [default_region_allocation_strategy]
             type = "random"
             seed = 0
