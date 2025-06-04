@@ -6,6 +6,7 @@
 
 use anyhow::{Context, Result};
 use clap::Args;
+use nexus_db_model::KNOWN_VERSIONS;
 use std::fs;
 use std::path::PathBuf;
 use std::process::Command;
@@ -49,14 +50,59 @@ fn generate_previous_schema() -> Result<()> {
         format!("Failed to create directory: {:?}", previous_schema_dir)
     })?;
 
-    // Find the previous schema version (second in git history)
+    // Get the previous schema version from KNOWN_VERSIONS
+    // KNOWN_VERSIONS is in reverse order (newest first), so index 1 is the previous version
+    if KNOWN_VERSIONS.len() < 2 {
+        anyhow::bail!(
+            "Need at least 2 known versions to find previous version. Current count: {}",
+            KNOWN_VERSIONS.len()
+        );
+    }
+
+    let previous_version = KNOWN_VERSIONS[1].semver();
+    println!("Previous version from KNOWN_VERSIONS: {}", previous_version);
+
+    // Find the git commit where this version was the current SCHEMA_VERSION
+    let commit_hash =
+        find_commit_for_schema_version(&workspace_root, previous_version)?;
+    println!(
+        "Found commit {} for version {}",
+        &commit_hash[..8],
+        previous_version
+    );
+
+    // Get the dbinit.sql from this commit
+    let dbinit_content = get_dbinit_from_commit(&workspace_root, &commit_hash)?;
+
+    // Save it to the previous-schema directory
+    let version_dir = previous_schema_dir.join(&previous_version.to_string());
+    fs::create_dir_all(&version_dir).with_context(|| {
+        format!("Failed to create version directory: {:?}", version_dir)
+    })?;
+
+    let dbinit_file = version_dir.join("dbinit.sql");
+    fs::write(&dbinit_file, dbinit_content).with_context(|| {
+        format!("Failed to write dbinit.sql to {:?}", dbinit_file)
+    })?;
+
+    println!(
+        "Saved dbinit.sql for previous version {} in {:?}",
+        previous_version, version_dir
+    );
+    Ok(())
+}
+
+fn find_commit_for_schema_version(
+    workspace_root: &PathBuf,
+    target_version: &semver::Version,
+) -> Result<String> {
+    // Search through git history to find the commit where this version was current
     let git_log_output = Command::new("git")
-        .current_dir(&workspace_root)
+        .current_dir(workspace_root)
         .args([
             "log",
             "--oneline",
-            "--format=%H %s",
-            "-10", // Get recent commits
+            "--format=%H",
             "nexus/db-model/src/schema_versions.rs",
         ])
         .output()
@@ -68,80 +114,26 @@ fn generate_previous_schema() -> Result<()> {
     }
 
     let commits = String::from_utf8(git_log_output.stdout)?;
-    let mut found_versions = Vec::new();
 
-    // Find the first two unique schema versions in git history
-    for line in commits.lines() {
-        let parts: Vec<&str> = line.splitn(2, ' ').collect();
-        if parts.len() < 2 {
+    for commit_hash in commits.lines() {
+        let commit_hash = commit_hash.trim();
+        if commit_hash.is_empty() {
             continue;
         }
 
-        let commit_hash = parts[0];
-        let commit_message = parts[1];
-
         if let Some(version) =
-            get_schema_version_from_commit(&workspace_root, commit_hash)?
+            get_schema_version_from_commit(workspace_root, commit_hash)?
         {
-            // Skip if we already found this version (avoid duplicates)
-            if !found_versions.iter().any(|(v, _, _)| v == &version) {
-                found_versions.push((
-                    version,
-                    commit_hash.to_string(),
-                    commit_message.to_string(),
-                ));
-
-                // Stop after finding 2 unique versions (current and previous)
-                if found_versions.len() >= 2 {
-                    break;
-                }
+            if version == *target_version {
+                return Ok(commit_hash.to_string());
             }
         }
     }
 
-    if found_versions.len() < 2 {
-        anyhow::bail!(
-            "Could not find previous schema version. Need at least 2 schema versions in git history."
-        );
-    }
-
-    // Use the second version found (previous version)
-    let (previous_version, commit_hash, commit_message) = &found_versions[1];
-
-    println!(
-        "Processing previous version {} from commit {}: {}",
-        previous_version,
-        &commit_hash[..8],
-        commit_message
-    );
-
-    // Get the dbinit.sql from this commit
-    if let Some(dbinit_content) =
-        get_dbinit_from_commit(&workspace_root, commit_hash)?
-    {
-        // Save it to the previous-schema directory
-        let version_dir =
-            previous_schema_dir.join(&previous_version.to_string());
-        fs::create_dir_all(&version_dir).with_context(|| {
-            format!("Failed to create version directory: {:?}", version_dir)
-        })?;
-
-        let dbinit_file = version_dir.join("dbinit.sql");
-        fs::write(&dbinit_file, dbinit_content).with_context(|| {
-            format!("Failed to write dbinit.sql to {:?}", dbinit_file)
-        })?;
-
-        println!(
-            "Saved dbinit.sql for previous version {} in {:?}",
-            previous_version, version_dir
-        );
-    } else {
-        anyhow::bail!(
-            "Could not find dbinit.sql for previous version {}",
-            previous_version
-        );
-    }
-    Ok(())
+    anyhow::bail!(
+        "Could not find git commit for schema version {}",
+        target_version
+    )
 }
 
 fn find_workspace_root() -> Result<PathBuf> {
@@ -204,7 +196,7 @@ fn get_schema_version_from_commit(
 fn get_dbinit_from_commit(
     workspace_root: &PathBuf,
     commit_hash: &str,
-) -> Result<Option<String>> {
+) -> Result<String> {
     let show_output = Command::new("git")
         .current_dir(workspace_root)
         .args(["show", &format!("{}:schema/crdb/dbinit.sql", commit_hash)])
@@ -212,8 +204,8 @@ fn get_dbinit_from_commit(
         .context("Failed to run git show for dbinit.sql")?;
 
     if !show_output.status.success() {
-        return Ok(None); // dbinit.sql might not exist in this commit
+        anyhow::bail!("dbinit.sql not found in commit");
     }
 
-    Ok(Some(String::from_utf8(show_output.stdout)?))
+    Ok(String::from_utf8(show_output.stdout)?)
 }

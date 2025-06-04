@@ -14952,6 +14952,7 @@ dependencies = [
  "dev-tools-common",
  "fs-err 3.1.0",
  "macaddr",
+ "nexus-db-model",
  "semver 1.0.26",
  "serde",
  "swrite",
