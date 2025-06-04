@@ -2128,7 +2128,7 @@ const U2_DISK: &str = "5d21f0d6-8af3-4d33-977d-63b2a79d6a58";
 const U2_ZPOOL: &str = "dc28856d-3896-4b3c-bd3d-33a770d49c92";
 
 // Insert two disks with a zpool on each: one m.2, one u.2
-fn before_146_0_0<'a>(ctx: &'a MigrationContext<'a>) -> BoxFuture<'a, ()> {
+fn before_148_0_0<'a>(ctx: &'a MigrationContext<'a>) -> BoxFuture<'a, ()> {
     Box::pin(async move {
         ctx.client
             .batch_execute(
@@ -2151,12 +2151,12 @@ fn before_146_0_0<'a>(ctx: &'a MigrationContext<'a>) -> BoxFuture<'a, ()> {
         "),
             )
             .await
-            .expect("failed to insert pre-migration rows for 146");
+            .expect("failed to insert pre-migration rows for 148");
     })
 }
 
 // Validate that the m.2 is gone, and the u.2 still exists
-fn after_146_0_0<'a>(ctx: &'a MigrationContext<'a>) -> BoxFuture<'a, ()> {
+fn after_148_0_0<'a>(ctx: &'a MigrationContext<'a>) -> BoxFuture<'a, ()> {
     Box::pin(async move {
         let rows = ctx
             .client
@@ -2246,8 +2246,8 @@ fn get_migration_checks() -> BTreeMap<Version, DataMigrationFns> {
         DataMigrationFns::new().before(before_145_0_0).after(after_145_0_0),
     );
     map.insert(
-        Version::new(146, 0, 0),
-        DataMigrationFns::new().before(before_146_0_0).after(after_146_0_0),
+        Version::new(148, 0, 0),
+        DataMigrationFns::new().before(before_148_0_0).after(after_148_0_0),
     );
 
     map
