@@ -13,7 +13,7 @@
     "/device/auth": {
       "post": {
         "tags": [
-          "hidden"
+          "console-auth"
         ],
         "summary": "Start an OAuth 2.0 Device Authorization Grant",
         "description": "This endpoint is designed to be accessed from an *unauthenticated* API client. It generates and records a `device_code` and `user_code` which must be verified and confirmed prior to a token being granted.",
@@ -43,7 +43,7 @@
     "/device/confirm": {
       "post": {
         "tags": [
-          "hidden"
+          "console-auth"
         ],
         "summary": "Confirm an OAuth 2.0 Device Authorization Grant",
         "description": "This endpoint is designed to be accessed by the user agent (browser), not the client requesting the token. So we do not actually return the token here; it will be returned in response to the poll on `/device/token`.",
@@ -74,7 +74,7 @@
     "/device/token": {
       "post": {
         "tags": [
-          "hidden"
+          "console-auth"
         ],
         "summary": "Request a device access token",
         "description": "This endpoint should be polled by the client until the user code is verified and the grant is confirmed.",
@@ -104,7 +104,7 @@
     "/experimental/v1/probes": {
       "get": {
         "tags": [
-          "hidden"
+          "experimental"
         ],
         "summary": "List instrumentation probes",
         "operationId": "probe_list",
@@ -171,7 +171,7 @@
       },
       "post": {
         "tags": [
-          "hidden"
+          "experimental"
         ],
         "summary": "Create instrumentation probe",
         "operationId": "probe_create",
@@ -219,7 +219,7 @@
     "/experimental/v1/probes/{probe}": {
       "get": {
         "tags": [
-          "hidden"
+          "experimental"
         ],
         "summary": "View instrumentation probe",
         "operationId": "probe_view",
@@ -264,7 +264,7 @@
       },
       "delete": {
         "tags": [
-          "hidden"
+          "experimental"
         ],
         "summary": "Delete instrumentation probe",
         "operationId": "probe_delete",
@@ -304,7 +304,7 @@
     "/experimental/v1/system/support-bundles": {
       "get": {
         "tags": [
-          "hidden"
+          "experimental"
         ],
         "summary": "List all support bundles",
         "operationId": "support_bundle_list",
@@ -361,7 +361,7 @@
       },
       "post": {
         "tags": [
-          "hidden"
+          "experimental"
         ],
         "summary": "Create a new support bundle",
         "operationId": "support_bundle_create",
@@ -388,7 +388,7 @@
     "/experimental/v1/system/support-bundles/{bundle_id}": {
       "get": {
         "tags": [
-          "hidden"
+          "experimental"
         ],
         "summary": "View a support bundle",
         "operationId": "support_bundle_view",
@@ -425,7 +425,7 @@
       },
       "delete": {
         "tags": [
-          "hidden"
+          "experimental"
         ],
         "summary": "Delete an existing support bundle",
         "description": "May also be used to cancel a support bundle which is currently being collected, or to remove metadata for a support bundle that has failed.",
@@ -458,7 +458,7 @@
     "/experimental/v1/system/support-bundles/{bundle_id}/download": {
       "get": {
         "tags": [
-          "hidden"
+          "experimental"
         ],
         "summary": "Download the contents of a support bundle",
         "operationId": "support_bundle_download",
@@ -495,7 +495,7 @@
       },
       "head": {
         "tags": [
-          "hidden"
+          "experimental"
         ],
         "summary": "Download the metadata of a support bundle",
         "operationId": "support_bundle_head",
@@ -534,7 +534,7 @@
     "/experimental/v1/system/support-bundles/{bundle_id}/download/{file}": {
       "get": {
         "tags": [
-          "hidden"
+          "experimental"
         ],
         "summary": "Download a file within a support bundle",
         "operationId": "support_bundle_download_file",
@@ -580,7 +580,7 @@
       },
       "head": {
         "tags": [
-          "hidden"
+          "experimental"
         ],
         "summary": "Download the metadata of a file within the support bundle",
         "operationId": "support_bundle_head_file",
@@ -628,7 +628,7 @@
     "/experimental/v1/system/support-bundles/{bundle_id}/index": {
       "get": {
         "tags": [
-          "hidden"
+          "experimental"
         ],
         "summary": "Download the index of a support bundle",
         "operationId": "support_bundle_index",
@@ -726,7 +726,7 @@
     "/v1/affinity-groups": {
       "get": {
         "tags": [
-          "hidden"
+          "experimental"
         ],
         "summary": "List affinity groups",
         "operationId": "affinity_group_list",
@@ -793,7 +793,7 @@
       },
       "post": {
         "tags": [
-          "hidden"
+          "experimental"
         ],
         "summary": "Create affinity group",
         "operationId": "affinity_group_create",
@@ -841,7 +841,7 @@
     "/v1/affinity-groups/{affinity_group}": {
       "get": {
         "tags": [
-          "hidden"
+          "experimental"
         ],
         "summary": "Fetch affinity group",
         "operationId": "affinity_group_view",
@@ -885,7 +885,7 @@
       },
       "put": {
         "tags": [
-          "hidden"
+          "experimental"
         ],
         "summary": "Update affinity group",
         "operationId": "affinity_group_update",
@@ -939,7 +939,7 @@
       },
       "delete": {
         "tags": [
-          "hidden"
+          "experimental"
         ],
         "summary": "Delete affinity group",
         "operationId": "affinity_group_delete",
@@ -978,7 +978,7 @@
     "/v1/affinity-groups/{affinity_group}/members": {
       "get": {
         "tags": [
-          "hidden"
+          "experimental"
         ],
         "summary": "List affinity group members",
         "operationId": "affinity_group_member_list",
@@ -1054,7 +1054,7 @@
     "/v1/affinity-groups/{affinity_group}/members/instance/{instance}": {
       "get": {
         "tags": [
-          "hidden"
+          "experimental"
         ],
         "summary": "Fetch affinity group member",
         "operationId": "affinity_group_member_instance_view",
@@ -1105,7 +1105,7 @@
       },
       "post": {
         "tags": [
-          "hidden"
+          "experimental"
         ],
         "summary": "Add member to affinity group",
         "operationId": "affinity_group_member_instance_add",
@@ -1156,7 +1156,7 @@
       },
       "delete": {
         "tags": [
-          "hidden"
+          "experimental"
         ],
         "summary": "Remove member from affinity group",
         "operationId": "affinity_group_member_instance_delete",
@@ -3850,7 +3850,7 @@
     "/v1/instances/{instance}/affinity-groups": {
       "get": {
         "tags": [
-          "hidden"
+          "experimental"
         ],
         "summary": "List affinity groups containing instance",
         "operationId": "instance_affinity_group_list",
@@ -5468,7 +5468,7 @@
     "/v1/logout": {
       "post": {
         "tags": [
-          "hidden"
+          "console-auth"
         ],
         "summary": "Log user out of web console by deleting session on client and server",
         "operationId": "logout",
@@ -5488,7 +5488,7 @@
     "/v1/me": {
       "get": {
         "tags": [
-          "session"
+          "current-user"
         ],
         "summary": "Fetch user for current session",
         "operationId": "current_user_view",
@@ -5608,7 +5608,7 @@
     "/v1/me/groups": {
       "get": {
         "tags": [
-          "session"
+          "current-user"
         ],
         "summary": "Fetch current user's groups",
         "operationId": "current_user_groups",
@@ -5667,7 +5667,7 @@
     "/v1/me/ssh-keys": {
       "get": {
         "tags": [
-          "session"
+          "current-user"
         ],
         "summary": "List SSH public keys",
         "description": "Lists SSH public keys for the currently authenticated user.",
@@ -5725,7 +5725,7 @@
       },
       "post": {
         "tags": [
-          "session"
+          "current-user"
         ],
         "summary": "Create SSH public key",
         "description": "Create an SSH public key for the currently authenticated user.",
@@ -5763,7 +5763,7 @@
     "/v1/me/ssh-keys/{ssh_key}": {
       "get": {
         "tags": [
-          "session"
+          "current-user"
         ],
         "summary": "Fetch SSH public key",
         "description": "Fetch SSH public key associated with the currently authenticated user.",
@@ -5800,7 +5800,7 @@
       },
       "delete": {
         "tags": [
-          "session"
+          "current-user"
         ],
         "summary": "Delete SSH public key",
         "description": "Delete an SSH public key associated with the currently authenticated user.",
@@ -10869,10 +10869,99 @@
         }
       }
     },
+    "/v1/system/update/repository": {
+      "put": {
+        "tags": [
+          "experimental"
+        ],
+        "summary": "Upload TUF repository",
+        "operationId": "system_update_put_repository",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "file_name",
+            "description": "The name of the uploaded file.",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/octet-stream": {
+              "schema": {
+                "type": "string",
+                "format": "binary"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TufRepoInsertResponse"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/v1/system/update/repository/{system_version}": {
+      "get": {
+        "tags": [
+          "experimental"
+        ],
+        "summary": "Fetch TUF repository description",
+        "description": "Fetch description of TUF repository by system version.",
+        "operationId": "system_update_get_repository",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "system_version",
+            "description": "The version to get.",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "pattern": "^(0|[1-9]\\d*)\\.(0|[1-9]\\d*)\\.(0|[1-9]\\d*)(?:-((?:0|[1-9]\\d*|\\d*[a-zA-Z-][0-9a-zA-Z-]*)(?:\\.(?:0|[1-9]\\d*|\\d*[a-zA-Z-][0-9a-zA-Z-]*))*))?(?:\\+([0-9a-zA-Z-]+(?:\\.[0-9a-zA-Z-]+)*))?$"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TufRepoGetResponse"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
     "/v1/system/update/target-release": {
       "get": {
         "tags": [
-          "hidden"
+          "experimental"
         ],
         "summary": "Get the current target release of the rack's system software",
         "description": "This may not correspond to the actual software running on the rack at the time of request; it is instead the release that the rack reconfigurator should be moving towards as a goal state. After some number of planning and execution phases, the software running on the rack should eventually correspond to the release described here.",
@@ -10898,7 +10987,7 @@
       },
       "put": {
         "tags": [
-          "hidden"
+          "experimental"
         ],
         "summary": "Set the current target release of the rack's system software",
         "description": "The rack reconfigurator will treat the software specified here as a goal state for the rack's software, and attempt to asynchronously update to that release.",
@@ -11246,7 +11335,7 @@
     "/v1/timeseries/query": {
       "post": {
         "tags": [
-          "hidden"
+          "experimental"
         ],
         "summary": "Run project-scoped timeseries query",
         "description": "Queries are written in OxQL. Project must be specified by name or ID in URL query parameter. The OxQL query will only return timeseries data from the specified project.",
@@ -14075,6 +14164,29 @@
             ]
           }
         }
+      },
+      "ArtifactId": {
+        "description": "An identifier for an artifact.",
+        "type": "object",
+        "properties": {
+          "kind": {
+            "description": "The kind of artifact this is.",
+            "type": "string"
+          },
+          "name": {
+            "description": "The artifact's name.",
+            "type": "string"
+          },
+          "version": {
+            "description": "The artifact's version.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "kind",
+          "name",
+          "version"
+        ]
       },
       "AuthzScope": {
         "description": "Authorization scope for a timeseries.\n\nThis describes the level at which a user must be authorized to read data from a timeseries. For example, fleet-scoping means the data is only visible to an operator or fleet reader. Project-scoped, on the other hand, indicates that a user will see data limited to the projects on which they have read permissions.",
@@ -24847,6 +24959,161 @@
           "items"
         ]
       },
+      "TufArtifactMeta": {
+        "description": "Metadata about an individual TUF artifact.\n\nFound within a `TufRepoDescription`.",
+        "type": "object",
+        "properties": {
+          "hash": {
+            "description": "The hash of the artifact.",
+            "type": "string",
+            "format": "hex string (32 bytes)"
+          },
+          "id": {
+            "description": "The artifact ID.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/ArtifactId"
+              }
+            ]
+          },
+          "size": {
+            "description": "The size of the artifact in bytes.",
+            "type": "integer",
+            "format": "uint64",
+            "minimum": 0
+          }
+        },
+        "required": [
+          "hash",
+          "id",
+          "size"
+        ]
+      },
+      "TufRepoDescription": {
+        "description": "A description of an uploaded TUF repository.",
+        "type": "object",
+        "properties": {
+          "artifacts": {
+            "description": "Information about the artifacts present in the repository.",
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/TufArtifactMeta"
+            }
+          },
+          "repo": {
+            "description": "Information about the repository.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/TufRepoMeta"
+              }
+            ]
+          }
+        },
+        "required": [
+          "artifacts",
+          "repo"
+        ]
+      },
+      "TufRepoGetResponse": {
+        "description": "Data about a successful TUF repo get from Nexus.",
+        "type": "object",
+        "properties": {
+          "description": {
+            "description": "The description of the repository.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/TufRepoDescription"
+              }
+            ]
+          }
+        },
+        "required": [
+          "description"
+        ]
+      },
+      "TufRepoInsertResponse": {
+        "description": "Data about a successful TUF repo import into Nexus.",
+        "type": "object",
+        "properties": {
+          "recorded": {
+            "description": "The repository as present in the database.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/TufRepoDescription"
+              }
+            ]
+          },
+          "status": {
+            "description": "Whether this repository already existed or is new.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/TufRepoInsertStatus"
+              }
+            ]
+          }
+        },
+        "required": [
+          "recorded",
+          "status"
+        ]
+      },
+      "TufRepoInsertStatus": {
+        "description": "Status of a TUF repo import.\n\nPart of `TufRepoInsertResponse`.",
+        "oneOf": [
+          {
+            "description": "The repository already existed in the database.",
+            "type": "string",
+            "enum": [
+              "already_exists"
+            ]
+          },
+          {
+            "description": "The repository did not exist, and was inserted into the database.",
+            "type": "string",
+            "enum": [
+              "inserted"
+            ]
+          }
+        ]
+      },
+      "TufRepoMeta": {
+        "description": "Metadata about a TUF repository.\n\nFound within a `TufRepoDescription`.",
+        "type": "object",
+        "properties": {
+          "file_name": {
+            "description": "The file name of the repository.\n\nThis is purely used for debugging and may not always be correct (e.g. with wicket, we read the file contents from stdin so we don't know the correct file name).",
+            "type": "string"
+          },
+          "hash": {
+            "description": "The hash of the repository.\n\nThis is a slight abuse of `ArtifactHash`, since that's the hash of individual artifacts within the repository. However, we use it here for convenience.",
+            "type": "string",
+            "format": "hex string (32 bytes)"
+          },
+          "system_version": {
+            "description": "The system version in artifacts.json.",
+            "type": "string",
+            "pattern": "^(0|[1-9]\\d*)\\.(0|[1-9]\\d*)\\.(0|[1-9]\\d*)(?:-((?:0|[1-9]\\d*|\\d*[a-zA-Z-][0-9a-zA-Z-]*)(?:\\.(?:0|[1-9]\\d*|\\d*[a-zA-Z-][0-9a-zA-Z-]*))*))?(?:\\+([0-9a-zA-Z-]+(?:\\.[0-9a-zA-Z-]+)*))?$"
+          },
+          "targets_role_version": {
+            "description": "The version of the targets role.",
+            "type": "integer",
+            "format": "uint64",
+            "minimum": 0
+          },
+          "valid_until": {
+            "description": "The time until which the repo is valid.",
+            "type": "string",
+            "format": "date-time"
+          }
+        },
+        "required": [
+          "file_name",
+          "hash",
+          "system_version",
+          "targets_role_version",
+          "valid_until"
+        ]
+      },
       "TxEqConfig": {
         "description": "Per-port tx-eq overrides.  This can be used to fine-tune the transceiver equalization settings to improve signal integrity.",
         "type": "object",
@@ -26724,6 +26991,20 @@
       }
     },
     {
+      "name": "console-auth",
+      "description": "API for console authentication",
+      "externalDocs": {
+        "url": "http://docs.oxide.computer/api/console-auth"
+      }
+    },
+    {
+      "name": "current-user",
+      "description": "Information pertaining to the current user.",
+      "externalDocs": {
+        "url": "http://docs.oxide.computer/api/current-user"
+      }
+    },
+    {
       "name": "disks",
       "description": "Virtual disks are used to store instance-local data which includes the operating system.",
       "externalDocs": {
@@ -26731,17 +27012,17 @@
       }
     },
     {
+      "name": "experimental",
+      "description": "Experimental, unstable interfaces, primarily for use by Oxide personnel",
+      "externalDocs": {
+        "url": "http://docs.oxide.computer/api/experimental"
+      }
+    },
+    {
       "name": "floating-ips",
       "description": "Floating IPs allow a project to allocate well-known IPs to instances.",
       "externalDocs": {
         "url": "http://docs.oxide.computer/api/floating-ips"
-      }
-    },
-    {
-      "name": "hidden",
-      "description": "TODO operations that will not ship to customers",
-      "externalDocs": {
-        "url": "http://docs.oxide.computer/api"
       }
     },
     {
@@ -26791,13 +27072,6 @@
       "description": "Roles are a component of Identity and Access Management (IAM) that allow a user or agent account access to additional permissions.",
       "externalDocs": {
         "url": "http://docs.oxide.computer/api/roles"
-      }
-    },
-    {
-      "name": "session",
-      "description": "Information pertaining to the current session.",
-      "externalDocs": {
-        "url": "http://docs.oxide.computer/api/session"
       }
     },
     {
@@ -26869,9 +27143,6 @@
       "externalDocs": {
         "url": "http://docs.oxide.computer/api/system-status"
       }
-    },
-    {
-      "name": "system/update"
     },
     {
       "name": "tokens",
