@@ -16,6 +16,7 @@ use nexus_sled_agent_shared::inventory::ConfigReconcilerInventoryResult;
 use nexus_sled_agent_shared::inventory::ConfigReconcilerInventoryStatus;
 use nexus_sled_agent_shared::inventory::OmicronSledConfig;
 use omicron_common::disk::DatasetKind;
+use omicron_common::disk::DatasetName;
 use omicron_uuid_kinds::DatasetUuid;
 use omicron_uuid_kinds::OmicronZoneUuid;
 use omicron_uuid_kinds::PhysicalDiskUuid;
@@ -27,6 +28,7 @@ use slog::Logger;
 use slog::info;
 use slog::warn;
 use std::collections::BTreeMap;
+use std::collections::BTreeSet;
 use std::collections::HashSet;
 use std::sync::Arc;
 use std::time::Duration;
@@ -197,6 +199,7 @@ struct LatestReconciliationResult {
     external_disks_inventory:
         BTreeMap<PhysicalDiskUuid, ConfigReconcilerInventoryResult>,
     datasets: BTreeMap<DatasetUuid, ConfigReconcilerInventoryResult>,
+    orphaned_datasets: BTreeSet<DatasetName>,
     zones_inventory: BTreeMap<OmicronZoneUuid, ConfigReconcilerInventoryResult>,
     timesync_status: TimeSyncStatus,
 }
@@ -394,8 +397,8 @@ impl ReconcilerTask {
         };
 
         // ---
-        // We go through the removal process first: shut down zones, then remove
-        // datasets, then remove disks.
+        // We go through the removal process first: shut down zones, then stop
+        // managing disks, then remove any orphaned datasets.
         // ---
 
         // First, shut down zones if needed.
@@ -408,20 +411,29 @@ impl ReconcilerTask {
             )
             .await;
 
-        // Next, remove datasets we have but that aren't present in the config.
-        //
-        // Note: this doesn't actually delete them yet!
-        // https://github.com/oxidecomputer/omicron/issues/6177
-        self.datasets
-            .remove_datasets_if_needed(&sled_config.datasets, &self.log);
-
-        // Finally, remove any external disks we're no longer supposed to use
+        // Next, remove any external disks we're no longer supposed to use
         // (either due to config changes or the raw disk being gone).
         self.external_disks.stop_managing_if_needed(
             &current_raw_disks,
             &sled_config.disks,
             &self.log,
         );
+
+        // Finally, remove any "orphaned" datasets (i.e., datasets of a kind
+        // that we ought to be managing that exist on disks we're managing but
+        // don't have entries in our current config).
+        //
+        // Note: this doesn't actually delete them yet! We only report the
+        // orphans; after some bake time where we build confidence this won't
+        // remove datasets it shouldn't, we'll change this to actually remove
+        // them. https://github.com/oxidecomputer/omicron/issues/6177
+        self.datasets
+            .remove_datasets_if_needed(
+                &sled_config.datasets,
+                self.external_disks.currently_managed_zpools(),
+                &self.log,
+            )
+            .await;
 
         // ---
         // Now go through the add process: start managing disks, create
@@ -498,6 +510,7 @@ impl ReconcilerTask {
             sled_config,
             external_disks_inventory: self.external_disks.to_inventory(),
             datasets: self.datasets.to_inventory(),
+            orphaned_datasets: self.datasets.orphaned_datasets().clone(),
             zones_inventory: self.zones.to_inventory(),
             timesync_status,
         };
