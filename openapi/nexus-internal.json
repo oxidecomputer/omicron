@@ -5385,7 +5385,7 @@
         "type": "object",
         "properties": {
           "artifact_hash": {
-            "description": "which artifact to apply to this device (implies which component is being updated)",
+            "description": "which artifact to apply to this device",
             "type": "string",
             "format": "hex string (32 bytes)"
           },
