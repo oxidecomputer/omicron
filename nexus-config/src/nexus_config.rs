@@ -1409,6 +1409,7 @@ mod test {
             read_only_region_replacement_start.period_secs = 30
             alert_dispatcher.period_secs = 42
             webhook_deliverator.period_secs = 43
+            sp_ereport_ingester.period_secs = 44
             [default_region_allocation_strategy]
             type = "random"
             "##,
