@@ -5776,8 +5776,8 @@ CREATE TABLE IF NOT EXISTS omicron.public.sp_ereport (
     -- may be generated in a state where the SP doesn't know who or what it is.
     -- consider that "i don't know my own identity" is a reasonable condition to
     -- might want to generate an ereport about!
-    serial_number STRING(11),
-    part_number STRING(11),
+    serial_number STRING,
+    part_number STRING,
 
     -- JSON representation of the ereport
     report JSONB NOT NULL,
