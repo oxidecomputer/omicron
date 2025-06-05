@@ -22,6 +22,7 @@ pub struct BackgroundTasks {
     pub task_decommissioned_disk_cleaner: Activator,
     pub task_phantom_disks: Activator,
     pub task_blueprint_loader: Activator,
+    pub task_blueprint_planner: Activator,
     pub task_blueprint_executor: Activator,
     pub task_blueprint_rendezvous: Activator,
     pub task_crdb_node_id_collector: Activator,
