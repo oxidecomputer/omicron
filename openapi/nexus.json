@@ -20457,7 +20457,7 @@
         "type": "object",
         "properties": {
           "autoneg": {
-            "description": "Whether or not to set autonegotiation",
+            "description": "Whether or not to set autonegotiation.",
             "type": "boolean"
           },
           "fec": {
@@ -20501,7 +20501,7 @@
           },
           "tx_eq": {
             "nullable": true,
-            "description": "Optional tx_eq settings",
+            "description": "Optional tx_eq settings.",
             "allOf": [
               {
                 "$ref": "#/components/schemas/TxEqConfig"
@@ -24266,7 +24266,7 @@
             }
           },
           "links": {
-            "description": "Link configurations",
+            "description": "Link configurations.",
             "type": "array",
             "items": {
               "$ref": "#/components/schemas/LinkConfigCreate"
