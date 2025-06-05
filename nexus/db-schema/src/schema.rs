@@ -1623,6 +1623,11 @@ table! {
         pool_id -> Uuid,
         kind -> crate::enums::DatasetKindEnum,
         zone_name -> Text,
+        reason -> Text,
+        id -> Nullable<Uuid>,
+        mounted -> Bool,
+        available -> Int8,
+        used -> Int8,
     }
 }
 
