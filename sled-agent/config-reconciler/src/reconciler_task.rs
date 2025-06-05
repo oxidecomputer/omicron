@@ -8,6 +8,7 @@ use chrono::DateTime;
 use chrono::Utc;
 use either::Either;
 use futures::future;
+use iddqd::IdOrdMap;
 use illumos_utils::zpool::PathInPool;
 use illumos_utils::zpool::ZpoolOrRamdisk;
 use key_manager::StorageKeyRequester;
@@ -16,7 +17,6 @@ use nexus_sled_agent_shared::inventory::ConfigReconcilerInventoryResult;
 use nexus_sled_agent_shared::inventory::ConfigReconcilerInventoryStatus;
 use nexus_sled_agent_shared::inventory::OmicronSledConfig;
 use omicron_common::disk::DatasetKind;
-use omicron_common::disk::DatasetName;
 use omicron_uuid_kinds::DatasetUuid;
 use omicron_uuid_kinds::OmicronZoneUuid;
 use omicron_uuid_kinds::PhysicalDiskUuid;
@@ -28,13 +28,13 @@ use slog::Logger;
 use slog::info;
 use slog::warn;
 use std::collections::BTreeMap;
-use std::collections::BTreeSet;
 use std::collections::HashSet;
 use std::sync::Arc;
 use std::time::Duration;
 use std::time::Instant;
 use tokio::sync::watch;
 
+use crate::dataset_serialization_task::OrphanedDataset;
 use crate::TimeSyncConfig;
 use crate::dataset_serialization_task::DatasetTaskHandle;
 use crate::ledger::CurrentSledConfig;
@@ -199,7 +199,7 @@ struct LatestReconciliationResult {
     external_disks_inventory:
         BTreeMap<PhysicalDiskUuid, ConfigReconcilerInventoryResult>,
     datasets: BTreeMap<DatasetUuid, ConfigReconcilerInventoryResult>,
-    orphaned_datasets: BTreeSet<DatasetName>,
+    orphaned_datasets: IdOrdMap<OrphanedDataset>,
     zones_inventory: BTreeMap<OmicronZoneUuid, ConfigReconcilerInventoryResult>,
     timesync_status: TimeSyncStatus,
 }

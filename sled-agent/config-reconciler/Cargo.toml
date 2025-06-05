@@ -20,6 +20,7 @@ either.workspace = true
 futures.workspace = true
 glob.workspace = true
 id-map.workspace = true
+iddqd.workspace = true
 illumos-utils.workspace = true
 key-manager.workspace = true
 nexus-sled-agent-shared.workspace = true

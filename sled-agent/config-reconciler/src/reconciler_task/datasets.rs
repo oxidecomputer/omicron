@@ -15,8 +15,10 @@ use super::CurrentlyManagedZpools;
 use crate::dataset_serialization_task::DatasetEnsureError;
 use crate::dataset_serialization_task::DatasetEnsureResult;
 use crate::dataset_serialization_task::DatasetTaskHandle;
+use crate::dataset_serialization_task::OrphanedDataset;
 use id_map::IdMap;
 use id_map::IdMappable;
+use iddqd::IdOrdMap;
 use illumos_utils::zpool::PathInPool;
 use illumos_utils::zpool::ZpoolOrRamdisk;
 use nexus_sled_agent_shared::inventory::ConfigReconcilerInventoryResult;
@@ -32,7 +34,6 @@ use slog::info;
 use slog::warn;
 use slog_error_chain::InlineErrorChain;
 use std::collections::BTreeMap;
-use std::collections::BTreeSet;
 use std::sync::Arc;
 
 #[derive(Debug, thiserror::Error)]
@@ -50,7 +51,7 @@ pub(super) enum ZoneDatasetDependencyError {
 #[derive(Debug)]
 pub(super) struct OmicronDatasets {
     datasets: IdMap<OmicronDataset>,
-    orphaned_datasets: BTreeSet<DatasetName>,
+    orphaned_datasets: IdOrdMap<OrphanedDataset>,
     dataset_task: DatasetTaskHandle,
 }
 
@@ -76,7 +77,7 @@ impl OmicronDatasets {
     pub(super) fn new(dataset_task: DatasetTaskHandle) -> Self {
         Self {
             datasets: IdMap::default(),
-            orphaned_datasets: BTreeSet::new(),
+            orphaned_datasets: IdOrdMap::new(),
             dataset_task,
         }
     }
@@ -197,12 +198,19 @@ impl OmicronDatasets {
             )
             .await
         {
-            Ok(Ok(mut orphaned)) => {
-                // Accumulate into our set of orphaned datasets
-                let old_size = self.orphaned_datasets.len();
-                self.orphaned_datasets.append(&mut orphaned);
-                let new_size = self.orphaned_datasets.len();
-                let newly_orphaned = new_size - old_size;
+            Ok(Ok(orphaned)) => {
+                // Accumulate into our set of orphaned datasets. We never remove
+                // entries from this set for monitoring omicron#6177: we want to
+                // report any datasets we _might have deleted_ at any point.
+                // Once we start actually deleting, we should remove this
+                // accumulation and only report the currently-orphaned datasets.
+                let mut newly_orphaned = 0_usize;
+                for orphan in orphaned {
+                    if self.orphaned_datasets.insert_overwrite(orphan).is_none()
+                    {
+                        newly_orphaned += 1;
+                    }
+                }
                 if newly_orphaned > 0 {
                     info!(
                         log,
@@ -288,7 +296,7 @@ impl OmicronDatasets {
             .collect()
     }
 
-    pub(crate) fn orphaned_datasets(&self) -> &BTreeSet<DatasetName> {
+    pub(crate) fn orphaned_datasets(&self) -> &IdOrdMap<OrphanedDataset> {
         &self.orphaned_datasets
     }
 }
