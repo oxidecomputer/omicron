@@ -201,6 +201,33 @@ impl TryFrom<ConfigWithoutSerial> for CurrentConfig {
     }
 }
 
+impl CurrentConfig {
+    /// Try parsing the provided bytes as JSON representing a `CurrentConfig`.
+    /// If not a `CurrentConfig`, try parsing as a `ConfigWithoutSerial` and
+    /// converting it forward.
+    fn parse_with_fallback(bytes: &[u8]) -> anyhow::Result<Self> {
+        let current_result = serde_json::from_slice::<Self>(&bytes)
+            .context("parsing current config");
+
+        // If we can't parse the current on-disk configuration format,
+        // it may just be in the old format. Try parsing it that way
+        // instead; if we can read it as an old configuration, we can
+        // translate it forward and move on. If we still can't read it,
+        // the initial result is more representative of whatever went
+        // wrong, so if there's an error here we ignore it.
+        if current_result.is_err() {
+            let without_serial =
+                serde_json::from_slice::<ConfigWithoutSerial>(&bytes);
+
+            if let Ok(without_serial) = without_serial {
+                return CurrentConfig::try_from(without_serial);
+            }
+        }
+
+        current_result
+    }
+}
+
 #[derive(Debug, Error)]
 pub enum UpdateError {
     #[error(
@@ -295,26 +322,7 @@ impl Store {
             .get(KEY_CONFIG)
             .context("fetching current config")?
             .map(|config_bytes| {
-                let current_result = serde_json::from_slice(&config_bytes)
-                    .context("parsing current config");
-
-                // If we can't parse the current on-disk configuration format,
-                // it may just be in the old format. Try parsing it that way
-                // instead; if we can read it as an old configuration, we can
-                // translate it forward and move on. If we still can't read it,
-                // the initial result is more representative of whatever went
-                // wrong, so if there's an error here we ignore it.
-                if current_result.is_err() {
-                    let without_serial = serde_json::from_slice::<
-                        ConfigWithoutSerial,
-                    >(&config_bytes);
-
-                    if let Ok(without_serial) = without_serial {
-                        return CurrentConfig::try_from(without_serial);
-                    }
-                }
-
-                current_result
+                CurrentConfig::parse_with_fallback(config_bytes.as_ref())
             })
             .transpose()
     }
@@ -624,7 +632,8 @@ impl Store {
             })?;
 
             let old_config: CurrentConfig =
-                serde_json::from_slice(&old_config_bytes).map_err(|error| {
+                CurrentConfig::parse_with_fallback(old_config_bytes.as_ref())
+                    .map_err(|error| {
                     ConflictableTransactionError::Abort(anyhow!(
                         "parsing config: {:#}",
                         error
