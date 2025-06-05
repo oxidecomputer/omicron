@@ -1742,7 +1742,7 @@ pub struct SwitchPortSettingsCreate {
     #[serde(default)]
     pub groups: Vec<NameOrId>,
 
-    /// Link configurations
+    /// Link configurations.
     pub links: Vec<LinkConfigCreate>,
 
     /// Interface configurations.
@@ -1822,10 +1822,10 @@ pub struct LinkConfigCreate {
     /// The speed of the link.
     pub speed: LinkSpeed,
 
-    /// Whether or not to set autonegotiation
+    /// Whether or not to set autonegotiation.
     pub autoneg: bool,
 
-    /// Optional tx_eq settings
+    /// Optional tx_eq settings.
     pub tx_eq: Option<TxEqConfig>,
 }
 
