@@ -12,8 +12,8 @@ use chrono::{DateTime, Utc};
 use daft::Diffable;
 use id_map::IdMap;
 use id_map::IdMappable;
-use iddqd::id_upcast;
 use iddqd::IdOrdItem;
+use iddqd::id_upcast;
 use omicron_common::disk::{DatasetKind, DatasetName};
 use omicron_common::ledger::Ledgerable;
 use omicron_common::{
