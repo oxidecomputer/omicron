@@ -638,10 +638,10 @@ source.repo = "maghemite"
 # `tools/maghemite_openapi_version`. Failing to do so will cause a failure when
 # building `ddm-admin-client` (which will instruct you to update
 # `tools/maghemite_openapi_version`).
-source.commit = "d418e65524be938563ba3daa541067aa8e066ca1"
+source.commit = "760b4b547e301a31d4dcb92ba97aabdb2a3e0cba"
 # The SHA256 digest is automatically posted to:
 # https://buildomat.eng.oxide.computer/public/file/oxidecomputer/maghemite/image/<commit>/mg-ddm-gz.sha256.txt
-source.sha256 = "6be08b0532184df60d2a2df7f8ca81edf7a7878c2ef80f1c271b04a8f7717ede"
+source.sha256 = "181f5e4605b9c9f2395cb5044d523e2ce0b66420036f6ec67595993ff7b0d7af"
 output.type = "tarball"
 
 [package.mg-ddm]
@@ -654,10 +654,10 @@ source.repo = "maghemite"
 # `tools/maghemite_openapi_version`. Failing to do so will cause a failure when
 # building `ddm-admin-client` (which will instruct you to update
 # `tools/maghemite_openapi_version`).
-source.commit = "d418e65524be938563ba3daa541067aa8e066ca1"
+source.commit = "760b4b547e301a31d4dcb92ba97aabdb2a3e0cba"
 # The SHA256 digest is automatically posted to:
 # https://buildomat.eng.oxide.computer/public/file/oxidecomputer/maghemite/image/<commit>/mg-ddm.sha256.txt
-source.sha256 = "f00aa7c7378dbd1b9d11c93d5507327295a511dd08d1b86f54bd612a9270ffe6"
+source.sha256 = "3d5a3d0ed9eadbe599eefd38844b040bd151d98274ac1b60562f4ff0e42e3d83"
 output.type = "zone"
 output.intermediate_only = true
 
@@ -669,7 +669,7 @@ source.repo = "maghemite"
 # `tools/maghemite_openapi_version`. Failing to do so will cause a failure when
 # building `ddm-admin-client` (which will instruct you to update
 # `tools/maghemite_openapi_version`).
-source.commit = "d418e65524be938563ba3daa541067aa8e066ca1"
+source.commit = "760b4b547e301a31d4dcb92ba97aabdb2a3e0cba"
 # The SHA256 digest is automatically posted to:
 # https://buildomat.eng.oxide.computer/public/file/oxidecomputer/maghemite/image/<commit>/mgd.sha256.txt
 source.sha256 = "5f87a6bd81e5bc83e4755dba31a0df75883888b00596fb70a5c5200dfedbdddd"

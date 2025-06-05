@@ -2274,7 +2274,7 @@ dependencies = [
 [[package]]
 name = "ddm-admin-client"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/maghemite?rev=d418e65524be938563ba3daa541067aa8e066ca1#d418e65524be938563ba3daa541067aa8e066ca1"
+source = "git+https://github.com/oxidecomputer/maghemite?rev=760b4b547e301a31d4dcb92ba97aabdb2a3e0cba#760b4b547e301a31d4dcb92ba97aabdb2a3e0cba"
 dependencies = [
  "oxnet",
  "percent-encoding",
@@ -5735,7 +5735,7 @@ dependencies = [
 [[package]]
 name = "mg-admin-client"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/maghemite?rev=d418e65524be938563ba3daa541067aa8e066ca1#d418e65524be938563ba3daa541067aa8e066ca1"
+source = "git+https://github.com/oxidecomputer/maghemite?rev=760b4b547e301a31d4dcb92ba97aabdb2a3e0cba#760b4b547e301a31d4dcb92ba97aabdb2a3e0cba"
 dependencies = [
  "anyhow",
  "chrono",
