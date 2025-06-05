@@ -132,6 +132,34 @@ pub struct Store {
     poisoned: Arc<AtomicBool>,
 }
 
+/// A temporary schema for DNS configurations from before the presence of the
+/// `serial` field.
+///
+/// This form of `CurrentConfig` can be removed once we are certain all DNS
+/// configurations have been updated to include a `serial` field.
+///
+/// This is necessary for an unfortunate chicken-and-egg problem: each DNS zone
+/// (both internal and external) has a copy of its current configuration as a
+/// JSON file in its zone. When upgraded, Nexus will be able to provide a new
+/// configuration consistent with `CurrentConfig`. But to get Nexus running,
+/// internal DNS must be able to function sufficiently for internal services to
+/// start - Nexus, CockroachDB, etc. And herein lies the problem; immediately
+/// after upgrading, internal DNS will have a configuration without `serial` on
+/// disk, so it won't be able to load the configuration, won't serve any
+/// records, and sled-agent will get stuck very early on in bringing up the
+/// system post-upgrade.
+///
+/// So, we maintain support for reading the previous configuration schema which
+/// is trivially and (almost) infallibly convertable to the new schema with
+/// `serial`.
+#[derive(Debug, Deserialize, Eq, PartialEq, Serialize)]
+struct ConfigWithoutSerial {
+    generation: Generation,
+    zones: Vec<String>,
+    time_created: chrono::DateTime<chrono::Utc>,
+    time_applied: chrono::DateTime<chrono::Utc>,
+}
+
 #[derive(Debug, Deserialize, Eq, PartialEq, Serialize)]
 struct CurrentConfig {
     generation: Generation,
@@ -139,6 +167,65 @@ struct CurrentConfig {
     zones: Vec<String>,
     time_created: chrono::DateTime<chrono::Utc>,
     time_applied: chrono::DateTime<chrono::Utc>,
+}
+
+impl TryFrom<ConfigWithoutSerial> for CurrentConfig {
+    type Error = anyhow::Error;
+
+    fn try_from(value: ConfigWithoutSerial) -> Result<Self, Self::Error> {
+        let ConfigWithoutSerial {
+            generation,
+            zones,
+            time_created,
+            time_applied,
+        } = value;
+
+        // This is.. unlikely to say the least, but it would be impolite to
+        // panic here. To overflow a u32, the generation number would have had
+        // to be bumped on average 68 times a second, every second, for two
+        // years. If the generation number were this high, it would certainly
+        // imply other issues (and we would imminently have issues when Nexus
+        // tries this same conversion).
+        let serial = generation
+            .as_u64()
+            .try_into()
+            .context("generation overflows u32?")?;
+
+        Ok(CurrentConfig {
+            generation,
+            serial,
+            zones,
+            time_created,
+            time_applied,
+        })
+    }
+}
+
+impl CurrentConfig {
+    /// Try parsing the provided bytes as JSON representing a `CurrentConfig`.
+    /// If not a `CurrentConfig`, try parsing as a `ConfigWithoutSerial` and
+    /// converting it forward.
+    fn parse_with_fallback(bytes: &[u8]) -> anyhow::Result<Self> {
+        let current_result = serde_json::from_slice::<Self>(&bytes)
+            .context("parsing current config");
+
+        // If we can't parse the current on-disk configuration format,
+        // it may just be in the old format. Try parsing it that way
+        // instead; if we can read it as an old configuration, we can
+        // translate it forward and move on. If we still can't read it,
+        // the initial result is more representative of whatever went
+        // wrong, so if there's an error here we ignore it.
+        if current_result.is_err() {
+            let without_serial =
+                serde_json::from_slice::<ConfigWithoutSerial>(&bytes);
+
+            if let Ok(without_serial) = without_serial {
+                return CurrentConfig::try_from(without_serial);
+            }
+        }
+
+        current_result
+    }
 }
 
 #[derive(Debug, Error)]
@@ -235,8 +322,7 @@ impl Store {
             .get(KEY_CONFIG)
             .context("fetching current config")?
             .map(|config_bytes| {
-                serde_json::from_slice(&config_bytes)
-                    .context("parsing current config")
+                CurrentConfig::parse_with_fallback(config_bytes.as_ref())
             })
             .transpose()
     }
@@ -546,7 +632,8 @@ impl Store {
             })?;
 
             let old_config: CurrentConfig =
-                serde_json::from_slice(&old_config_bytes).map_err(|error| {
+                CurrentConfig::parse_with_fallback(old_config_bytes.as_ref())
+                    .map_err(|error| {
                     ConflictableTransactionError::Abort(anyhow!(
                         "parsing config: {:#}",
                         error

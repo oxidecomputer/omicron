@@ -436,7 +436,7 @@ mod test {
             String::from("Noxide"),
             String::from("456"),
             String::from("UnrealDisk"),
-            PhysicalDiskKind::M2,
+            PhysicalDiskKind::U2,
             sled_id,
         );
         datastore
