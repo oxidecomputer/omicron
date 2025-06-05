@@ -18,6 +18,9 @@ use debug_ignore::DebugIgnore;
 use futures::StreamExt;
 use id_map::IdMap;
 use id_map::IdMappable;
+use iddqd::IdOrdItem;
+use iddqd::IdOrdMap;
+use iddqd::id_upcast;
 use illumos_utils::zfs;
 use illumos_utils::zfs::CanMount;
 use illumos_utils::zfs::DatasetEnsureArgs;
@@ -87,6 +90,22 @@ pub enum DatasetEnsureError {
     #[cfg(test)]
     #[error("test error: {0}")]
     TestError(&'static str),
+}
+
+#[derive(Debug, Clone)]
+pub struct OrphanedDataset {
+    pub name: DatasetName,
+    pub reason: String,
+}
+
+impl IdOrdItem for OrphanedDataset {
+    type Key<'a> = &'a DatasetName;
+
+    fn key(&self) -> Self::Key<'_> {
+        &self.name
+    }
+
+    id_upcast!();
 }
 
 impl DatasetEnsureError {
@@ -235,7 +254,8 @@ impl DatasetTaskHandle {
         &self,
         config_datasets: BTreeSet<DatasetName>,
         currently_managed_zpools: Arc<CurrentlyManagedZpools>,
-    ) -> Result<anyhow::Result<BTreeSet<DatasetName>>, DatasetTaskError> {
+    ) -> Result<anyhow::Result<IdOrdMap<OrphanedDataset>>, DatasetTaskError>
+    {
         self.try_send_request(|tx| DatasetTaskRequest::DatasetsReportOrphans {
             config_datasets,
             currently_managed_zpools,
@@ -438,8 +458,8 @@ impl DatasetTask {
         config_datasets: BTreeSet<DatasetName>,
         currently_managed_zpools: Arc<CurrentlyManagedZpools>,
         zfs: &T,
-    ) -> anyhow::Result<BTreeSet<DatasetName>> {
-        let mut orphaned_datasets = BTreeSet::new();
+    ) -> anyhow::Result<IdOrdMap<OrphanedDataset>> {
+        let mut orphaned_datasets = IdOrdMap::new();
 
         let datasets_of_interest =
             currently_managed_zpools.iter().flat_map(|zpool| {
@@ -473,6 +493,11 @@ impl DatasetTask {
                 continue;
             };
 
+            // If this dataset is still in our config set, it isn't orphaned.
+            if config_datasets.contains(&dataset) {
+                continue;
+            }
+
             // Explicitly match all variants here, so if we expand this list
             // we're forced to consider whether they should be removeable.
             match dataset.kind() {
@@ -485,33 +510,40 @@ impl DatasetTask {
                 | DatasetKind::ClickhouseServer
                 | DatasetKind::ExternalDns
                 | DatasetKind::InternalDns => {
-                    if !config_datasets.contains(&dataset) {
-                        orphaned_datasets.insert(dataset);
-                    }
+                    // We should attempt to delete this; for now, just report it
+                    // as orphaned because we don't.
+                    orphaned_datasets.insert_overwrite(OrphanedDataset {
+                        name: dataset,
+                        reason: "dataset deletion not yet implemented \
+                                 (omicron#6177)"
+                            .to_string(),
+                    });
                 }
 
                 // These kinds are part of our config, but it would be
                 // surprising to have them disappear: they should always be
                 // present for any managed disk. Refuse to remove them.
                 DatasetKind::TransientZoneRoot | DatasetKind::Debug => {
-                    warn!(
-                        self.log,
-                        "refusing to delete should-always-exist dataset; \
-                         did it get dropped from the blueprint?";
-                        "dataset" => dataset.full_name(),
+                    let reason = format!(
+                        "refusing to delete dataset of kind {:?} \
+                         (expected to exist for all managed disks)",
+                        dataset.kind(),
                     );
+                    orphaned_datasets.insert_overwrite(OrphanedDataset {
+                        name: dataset,
+                        reason,
+                    });
                 }
 
                 // These should be grandchildren of the datasets we asked for;
                 // we shouldn't see them as direct children. Refuse to remove
                 // them. (They should also be recreated on demand anyway.)
                 DatasetKind::TransientZone { .. } => {
-                    warn!(
-                        self.log,
-                        "unexpectedly found transient zone dataset; refusing \
-                         to remove it";
-                        "dataset" => dataset.full_name(),
-                    );
+                    orphaned_datasets.insert_overwrite(OrphanedDataset {
+                        name: dataset,
+                        reason: "unexpectedly found transient zone root"
+                            .to_string(),
+                    });
                 }
             }
         }
@@ -1043,7 +1075,9 @@ enum DatasetTaskRequest {
     DatasetsReportOrphans {
         config_datasets: BTreeSet<DatasetName>,
         currently_managed_zpools: Arc<CurrentlyManagedZpools>,
-        tx: DebugIgnore<oneshot::Sender<anyhow::Result<BTreeSet<DatasetName>>>>,
+        tx: DebugIgnore<
+            oneshot::Sender<anyhow::Result<IdOrdMap<OrphanedDataset>>>,
+        >,
     },
     DatasetsEnsure {
         datasets: IdMap<DatasetConfig>,
