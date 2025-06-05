@@ -41,6 +41,7 @@ use nexus_db_model::InvConfigReconcilerStatusKind;
 use nexus_db_model::InvDataset;
 use nexus_db_model::InvLastReconciliationDatasetResult;
 use nexus_db_model::InvLastReconciliationDiskResult;
+use nexus_db_model::InvLastReconciliationOrphanedDataset;
 use nexus_db_model::InvLastReconciliationZoneResult;
 use nexus_db_model::InvNvmeDiskFirmware;
 use nexus_db_model::InvOmicronSledConfig;
@@ -84,6 +85,7 @@ use omicron_common::api::external::InternalContext;
 use omicron_common::api::external::LookupType;
 use omicron_common::api::external::ResourceType;
 use omicron_common::bail_unless;
+use omicron_common::disk::DatasetName;
 use omicron_uuid_kinds::CollectionUuid;
 use omicron_uuid_kinds::DatasetUuid;
 use omicron_uuid_kinds::GenericUuid;
@@ -241,6 +243,7 @@ impl DataStore {
             zone_nics: omicron_sled_config_zone_nics,
             disk_results: reconciler_disk_results,
             dataset_results: reconciler_dataset_results,
+            orphaned_datasets: reconciler_orphaned_datasets,
             zone_results: reconciler_zone_results,
             mut config_reconciler_fields_by_sled,
         } = ConfigReconcilerRows::new(collection_id, collection)
@@ -1008,6 +1011,25 @@ impl DataStore {
                 }
             }
 
+            // Insert rows for all the sled config reconciler orphaned datasets
+            {
+                use nexus_db_schema::schema::inv_last_reconciliation_orphaned_dataset::dsl;
+
+                let batch_size = SQL_BATCH_SIZE.get().try_into().unwrap();
+                let mut orphaned_datasets = reconciler_orphaned_datasets.into_iter();
+                loop {
+                    let some_orphaned_datasets =
+                        orphaned_datasets.by_ref().take(batch_size).collect::<Vec<_>>();
+                    if some_orphaned_datasets.is_empty() {
+                        break;
+                    }
+                    let _ = diesel::insert_into(dsl::inv_last_reconciliation_orphaned_dataset)
+                        .values(some_orphaned_datasets)
+                        .execute_async(&conn)
+                        .await?;
+                }
+            }
+
             // Insert rows for all the sled config reconciler zone results
             {
                 use nexus_db_schema::schema::inv_last_reconciliation_zone_result::dsl;
@@ -1448,6 +1470,7 @@ impl DataStore {
             nnvme_disk_firmware: usize,
             nlast_reconciliation_disk_results: usize,
             nlast_reconciliation_dataset_results: usize,
+            nlast_reconciliation_orphaned_datasets: usize,
             nlast_reconciliation_zone_results: usize,
             nomicron_sled_configs: usize,
             nomicron_sled_config_disks: usize,
@@ -1471,6 +1494,7 @@ impl DataStore {
             nnvme_disk_firmware,
             nlast_reconciliation_disk_results,
             nlast_reconciliation_dataset_results,
+            nlast_reconciliation_orphaned_datasets,
             nlast_reconciliation_zone_results,
             nomicron_sled_configs,
             nomicron_sled_config_disks,
@@ -1592,6 +1616,14 @@ impl DataStore {
                         .execute_async(&conn)
                         .await?
                     };
+                    let nlast_reconciliation_orphaned_datasets = {
+                        use nexus_db_schema::schema::inv_last_reconciliation_orphaned_dataset::dsl;
+                        diesel::delete(dsl::inv_last_reconciliation_orphaned_dataset.filter(
+                            dsl::inv_collection_id.eq(db_collection_id),
+                        ))
+                        .execute_async(&conn)
+                        .await?
+                    };
                     let nlast_reconciliation_zone_results = {
                         use nexus_db_schema::schema::inv_last_reconciliation_zone_result::dsl;
                         diesel::delete(dsl::inv_last_reconciliation_zone_result.filter(
@@ -1686,6 +1718,7 @@ impl DataStore {
                         nnvme_disk_firmware,
                         nlast_reconciliation_disk_results,
                         nlast_reconciliation_dataset_results,
+                        nlast_reconciliation_orphaned_datasets,
                         nlast_reconciliation_zone_results,
                         nomicron_sled_configs,
                         nomicron_sled_config_disks,
@@ -1717,6 +1750,8 @@ impl DataStore {
                 nlast_reconciliation_disk_results,
             "nlast_reconciliation_dataset_results" =>
                 nlast_reconciliation_dataset_results,
+            "nlast_reconciliation_orphaned_datasets" =>
+                nlast_reconciliation_orphaned_datasets,
             "nlast_reconciliation_zone_results" =>
                 nlast_reconciliation_zone_results,
             "nomicron_sled_configs" => nomicron_sled_configs,
@@ -2688,6 +2723,43 @@ impl DataStore {
             results
         };
 
+        // Load all the config reconciler orphaned dataset rows; built a map
+        // of sets keyed by sled ID.
+        let mut last_reconciliation_orphaned_datasets = {
+            use nexus_db_schema::schema::inv_last_reconciliation_orphaned_dataset::dsl;
+
+            let mut orphaned: BTreeMap<SledUuid, BTreeSet<DatasetName>> =
+                BTreeMap::new();
+
+            // TODO-performance This ought to be paginated like the other
+            // queries in this method, but
+            //
+            // (a) this table's primary key is 5 columns, and we don't have
+            //     `paginated` support that wide
+            // (b) we expect a very small number of orphaned datasets, generally
+            // (c) this table is going to go away in the near future anyway
+            //     (https://github.com/oxidecomputer/omicron/issues/6177)
+            //
+            // so we just do the lazy thing and load all the rows at once.
+            let rows = dsl::inv_last_reconciliation_orphaned_dataset
+                .filter(dsl::inv_collection_id.eq(db_id))
+                .select(InvLastReconciliationOrphanedDataset::as_select())
+                .load_async(&*conn)
+                .await
+                .map_err(|e| {
+                    public_error_from_diesel(e, ErrorHandler::Server)
+                })?;
+
+            for row in rows {
+                orphaned
+                    .entry(row.sled_id.into())
+                    .or_default()
+                    .insert(row.try_into()?);
+            }
+
+            orphaned
+        };
+
         // Load all the config reconciler zone results; build a map of maps
         // keyed by sled ID.
         let mut last_reconciliation_zone_results = {
@@ -2819,6 +2891,10 @@ impl DataStore {
                         datasets: last_reconciliation_dataset_results
                             .remove(&sled_id)
                             .unwrap_or_default(),
+                        orphaned_datasets:
+                            last_reconciliation_orphaned_datasets
+                                .remove(&sled_id)
+                                .unwrap_or_default(),
                         zones: last_reconciliation_zone_results
                             .remove(&sled_id)
                             .unwrap_or_default(),
@@ -2933,6 +3009,7 @@ struct ConfigReconcilerRows {
     zone_nics: Vec<InvOmicronSledConfigZoneNic>,
     disk_results: Vec<InvLastReconciliationDiskResult>,
     dataset_results: Vec<InvLastReconciliationDatasetResult>,
+    orphaned_datasets: Vec<InvLastReconciliationOrphanedDataset>,
     zone_results: Vec<InvLastReconciliationZoneResult>,
     config_reconciler_fields_by_sled:
         BTreeMap<SledUuid, ConfigReconcilerFields>,
@@ -3001,6 +3078,15 @@ impl ConfigReconcilerRows {
                         )
                     },
                 ),
+            );
+            self.orphaned_datasets.extend(
+                last_reconciliation.orphaned_datasets.iter().map(|dataset| {
+                    InvLastReconciliationOrphanedDataset::new(
+                        collection_id,
+                        sled_id,
+                        dataset,
+                    )
+                }),
             );
             self.zone_results.extend(last_reconciliation.zones.iter().map(
                 |(zone_id, result)| {
@@ -3197,9 +3283,13 @@ mod test {
     use nexus_types::inventory::CabooseWhich;
     use nexus_types::inventory::RotPageWhich;
     use omicron_common::api::external::Error;
+    use omicron_common::disk::DatasetKind;
+    use omicron_common::disk::DatasetName;
+    use omicron_common::zpool_name::ZpoolName;
     use omicron_test_utils::dev;
     use omicron_uuid_kinds::{
         CollectionUuid, DatasetUuid, OmicronZoneUuid, PhysicalDiskUuid,
+        ZpoolUuid,
     };
     use pretty_assertions::assert_eq;
     use std::num::NonZeroU32;
@@ -4002,6 +4092,14 @@ mod test {
                     .collect(),
                 datasets: (0..10)
                     .map(|i| (DatasetUuid::new_v4(), make_result("dataset", i)))
+                    .collect(),
+                orphaned_datasets: (0..5)
+                    .map(|_| {
+                        DatasetName::new(
+                            ZpoolName::new_external(ZpoolUuid::new_v4()),
+                            DatasetKind::Cockroach,
+                        )
+                    })
                     .collect(),
                 zones: (0..10)
                     .map(|i| {

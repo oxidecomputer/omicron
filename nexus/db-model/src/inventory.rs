@@ -28,13 +28,14 @@ use nexus_db_schema::schema::{
     hw_baseboard_id, inv_caboose, inv_clickhouse_keeper_membership,
     inv_collection, inv_collection_error, inv_dataset,
     inv_last_reconciliation_dataset_result,
-    inv_last_reconciliation_disk_result, inv_last_reconciliation_zone_result,
-    inv_nvme_disk_firmware, inv_omicron_sled_config,
-    inv_omicron_sled_config_dataset, inv_omicron_sled_config_disk,
-    inv_omicron_sled_config_zone, inv_omicron_sled_config_zone_nic,
-    inv_physical_disk, inv_root_of_trust, inv_root_of_trust_page,
-    inv_service_processor, inv_sled_agent, inv_zpool, sw_caboose,
-    sw_root_of_trust_page,
+    inv_last_reconciliation_disk_result,
+    inv_last_reconciliation_orphaned_dataset,
+    inv_last_reconciliation_zone_result, inv_nvme_disk_firmware,
+    inv_omicron_sled_config, inv_omicron_sled_config_dataset,
+    inv_omicron_sled_config_disk, inv_omicron_sled_config_zone,
+    inv_omicron_sled_config_zone_nic, inv_physical_disk, inv_root_of_trust,
+    inv_root_of_trust_page, inv_service_processor, inv_sled_agent, inv_zpool,
+    sw_caboose, sw_root_of_trust_page,
 };
 use nexus_sled_agent_shared::inventory::ConfigReconcilerInventoryStatus;
 use nexus_sled_agent_shared::inventory::{
@@ -1046,6 +1047,53 @@ impl From<InvLastReconciliationDatasetResult>
             None => Self::Ok,
             Some(message) => Self::Err { message },
         }
+    }
+}
+
+#[derive(Queryable, Clone, Debug, Selectable, Insertable)]
+#[diesel(table_name = inv_last_reconciliation_orphaned_dataset)]
+pub struct InvLastReconciliationOrphanedDataset {
+    pub inv_collection_id: DbTypedUuid<CollectionKind>,
+    pub sled_id: DbTypedUuid<SledKind>,
+    pool_id: DbTypedUuid<ZpoolKind>,
+    kind: crate::DatasetKind,
+    zone_name: String,
+}
+
+impl InvLastReconciliationOrphanedDataset {
+    pub fn new(
+        inv_collection_id: CollectionUuid,
+        sled_id: SledUuid,
+        dataset_name: &DatasetName,
+    ) -> Self {
+        Self {
+            inv_collection_id: inv_collection_id.into(),
+            sled_id: sled_id.into(),
+            pool_id: dataset_name.pool().id().into(),
+            kind: dataset_name.kind().into(),
+            zone_name: dataset_name
+                .kind()
+                .zone_name()
+                .map(String::from)
+                .unwrap_or_default(),
+        }
+    }
+}
+
+impl TryFrom<InvLastReconciliationOrphanedDataset> for DatasetName {
+    type Error = omicron_common::api::external::Error;
+
+    fn try_from(
+        row: InvLastReconciliationOrphanedDataset,
+    ) -> Result<Self, Self::Error> {
+        let pool = ZpoolName::new_external(row.pool_id.into());
+        // See comment in `dbinit.sql`; we treat the empty string as "no zone
+        // name" so the zone name can be a part of the primary key, but need to
+        // convert that back into an option here for `try_into_api()`.
+        let zone_name =
+            if row.zone_name.is_empty() { None } else { Some(row.zone_name) };
+        let kind = crate::DatasetKind::try_into_api(row.kind, zone_name)?;
+        Ok(Self::new(pool, kind))
     }
 }
 

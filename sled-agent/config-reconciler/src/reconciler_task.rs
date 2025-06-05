@@ -210,6 +210,7 @@ impl LatestReconciliationResult {
             last_reconciled_config: self.sled_config.clone(),
             external_disks: self.external_disks_inventory.clone(),
             datasets: self.datasets.clone(),
+            orphaned_datasets: self.orphaned_datasets.clone(),
             zones: self.zones_inventory.clone(),
         }
     }

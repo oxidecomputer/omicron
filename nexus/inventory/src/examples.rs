@@ -642,9 +642,15 @@ pub fn sled_agent(
     ledgered_sled_config: Option<OmicronSledConfig>,
 ) -> Inventory {
     // Assume the `ledgered_sled_config` was reconciled successfully.
-    let last_reconciliation = ledgered_sled_config
-        .clone()
-        .map(ConfigReconcilerInventory::debug_assume_success);
+    let last_reconciliation = ledgered_sled_config.clone().map(|config| {
+        let mut inv = ConfigReconcilerInventory::debug_assume_success(config);
+        // Add an orphaned dataset with no tie to other pools/datasets.
+        inv.orphaned_datasets.insert(DatasetName::new(
+            ZpoolName::new_external(ZpoolUuid::new_v4()),
+            DatasetKind::ExternalDns,
+        ));
+        inv
+    });
 
     let reconciler_status = if last_reconciliation.is_some() {
         ConfigReconcilerInventoryStatus::Idle {
