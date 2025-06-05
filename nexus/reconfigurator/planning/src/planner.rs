@@ -953,8 +953,7 @@ impl<'a> Planner<'a> {
             1,
         );
 
-        // XXX-dap this is not quite right.  It's possible that no updates were
-        // planned but SPs aren't yet updated.
+        // TODO This is not quite right.  See oxidecomputer/omicron#8285.
         let rv = if next.is_empty() {
             UpdateStepResult::ContinueToNextStep
         } else {
