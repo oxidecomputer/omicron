@@ -10,6 +10,7 @@ use schemars::JsonSchema;
 use serde::Deserialize;
 use serde::Serialize;
 use std::num::NonZeroU32;
+use std::str::FromStr;
 
 /// An ereport message.
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, JsonSchema)]
@@ -56,6 +57,22 @@ impl fmt::UpperHex for Ena {
 impl fmt::LowerHex for Ena {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         fmt::LowerHex::fmt(&self.0, f)
+    }
+}
+
+impl FromStr for Ena {
+    type Err = std::num::ParseIntError;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        let s = s.trim();
+        let value = if let Some(hex_str) =
+            s.strip_prefix("0x").or_else(|| s.strip_prefix("0X"))
+        {
+            u64::from_str_radix(hex_str, 16)?
+        } else {
+            s.parse::<u64>()?
+        };
+        Ok(Self(value))
     }
 }
 

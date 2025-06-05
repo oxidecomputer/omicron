@@ -14,7 +14,9 @@ use diesel::serialize::{self, ToSql};
 use diesel::sql_types;
 use ereport_types::{Ena, EreportId};
 use nexus_db_schema::schema::{host_ereport, sp_ereport};
-use omicron_uuid_kinds::{EreporterRestartKind, OmicronZoneKind, SledKind};
+use omicron_uuid_kinds::{
+    EreporterRestartKind, OmicronZoneKind, OmicronZoneUuid, SledKind, SledUuid,
+};
 use serde::{Deserialize, Serialize};
 use std::convert::TryFrom;
 
@@ -61,33 +63,77 @@ where
 }
 
 #[derive(Clone, Debug)]
+pub struct Ereport {
+    pub id: EreportId,
+    pub metadata: EreportMetadata,
+    pub reporter: Reporter,
+    pub report: serde_json::Value,
+}
+
+impl From<SpEreport> for Ereport {
+    fn from(sp_report: SpEreport) -> Self {
+        let SpEreport {
+            restart_id,
+            ena,
+            time_collected,
+            collector_id,
+            part_number,
+            serial_number,
+            sp_type,
+            sp_slot,
+            report,
+        } = sp_report;
+        Ereport {
+            id: EreportId { restart_id: restart_id.into(), ena: ena.into() },
+            metadata: EreportMetadata {
+                time_collected,
+                collector_id: collector_id.into(),
+                part_number,
+                serial_number,
+            },
+            reporter: Reporter::Sp { sp_type, slot: sp_slot.0.into() },
+            report,
+        }
+    }
+}
+
+impl From<HostEreport> for Ereport {
+    fn from(host_report: HostEreport) -> Self {
+        let HostEreport {
+            restart_id,
+            ena,
+            time_collected,
+            collector_id,
+            sled_serial,
+            sled_id,
+            report,
+        } = host_report;
+        Ereport {
+            id: EreportId { restart_id: restart_id.into(), ena: ena.into() },
+            metadata: EreportMetadata {
+                time_collected,
+                collector_id: collector_id.into(),
+                part_number: None, // TODO
+                serial_number: Some(sled_serial),
+            },
+            reporter: Reporter::HostOs { sled: sled_id.into() },
+            report,
+        }
+    }
+}
+
+#[derive(Clone, Debug)]
 pub struct EreportMetadata {
-    pub restart_id: DbTypedUuid<EreporterRestartKind>,
-    pub ena: DbEna,
-
     pub time_collected: DateTime<Utc>,
-    pub collector_id: DbTypedUuid<OmicronZoneKind>,
+    pub collector_id: OmicronZoneUuid,
+    pub part_number: Option<String>,
+    pub serial_number: Option<String>,
 }
 
-pub type EreportMetadataTuple = (
-    DbTypedUuid<EreporterRestartKind>,
-    DbEna,
-    DateTime<Utc>,
-    DbTypedUuid<OmicronZoneKind>,
-);
-
-impl EreportMetadata {
-    pub fn id(&self) -> EreportId {
-        EreportId { restart_id: self.restart_id.into(), ena: self.ena.into() }
-    }
-}
-
-impl From<EreportMetadataTuple> for EreportMetadata {
-    fn from(
-        (restart_id, ena, time_collected, collector_id): EreportMetadataTuple,
-    ) -> Self {
-        EreportMetadata { restart_id, ena, time_collected, collector_id }
-    }
+#[derive(Clone, Debug, Eq, PartialEq, Ord, PartialOrd)]
+pub enum Reporter {
+    Sp { sp_type: SpType, slot: u16 },
+    HostOs { sled: SledUuid },
 }
 
 #[derive(Clone, Debug, Insertable, Queryable, Selectable)]
