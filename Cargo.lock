@@ -6493,6 +6493,7 @@ dependencies = [
  "sled-agent-client",
  "slog",
  "slog-error-chain",
+ "sp-sim",
  "static_assertions",
  "strum",
  "test-strategy",

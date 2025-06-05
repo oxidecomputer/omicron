@@ -1077,7 +1077,7 @@ impl Sled {
     }
 
     fn default_sp_caboose(version: String) -> Caboose {
-        let board = "SimGimletSp".to_string(); // XXX-dap constant
+        let board = sp_sim::SIM_GIMLET_BOARD.to_string();
         Caboose {
             board: board.clone(),
             git_commit: String::from("unknown"),
