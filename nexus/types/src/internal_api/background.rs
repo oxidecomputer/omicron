@@ -532,14 +532,16 @@ pub struct ReadOnlyRegionReplacementStartStatus {
 
 #[derive(Serialize, Deserialize, Default, Debug, PartialEq, Eq)]
 pub struct SpEreportIngesterStatus {
-    pub sps: BTreeMap<Sp, EreporterStatus>,
+    pub sps: Vec<SpEreporterStatus>,
     pub error: Option<String>,
 }
 
-#[derive(Serialize, Deserialize, Debug, PartialEq, Eq, PartialOrd, Ord)]
-pub struct Sp {
+#[derive(Serialize, Deserialize, Debug, PartialEq, Eq)]
+pub struct SpEreporterStatus {
     pub sp_type: crate::inventory::SpType,
     pub slot: u16,
+    #[serde(flatten)]
+    pub status: EreporterStatus,
 }
 
 #[derive(Serialize, Deserialize, Default, Debug, PartialEq, Eq)]
