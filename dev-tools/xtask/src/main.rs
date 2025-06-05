@@ -19,6 +19,7 @@ mod clippy;
 mod common;
 #[cfg_attr(not(target_os = "illumos"), allow(dead_code))]
 mod external;
+mod hist;
 mod live_tests;
 mod usdt;
 
@@ -61,6 +62,9 @@ enum Cmds {
     CheckWorkspaceDeps,
     /// Run configured clippy checks
     Clippy(clippy::ClippyArgs),
+
+    /// Analyze historical build and test timing information
+    Hist(hist::HistArgs),
     /// Download binaries, OpenAPI specs, and other out-of-repo utilities.
     Download(external::External),
 
@@ -120,6 +124,7 @@ fn main() -> Result<()> {
         Cmds::Clippy(args) => clippy::run_cmd(args),
         Cmds::CheckFeatures(args) => check_features::run_cmd(args),
         Cmds::CheckWorkspaceDeps => check_workspace_deps::run_cmd(),
+        Cmds::Hist(args) => hist::run_cmd(args),
         Cmds::DbDev(external) => external.exec_bin("db-dev"),
         Cmds::Download(external) => {
             // Allow specialized environments (e.g., testbed/a4x2) that can't
