@@ -65,8 +65,7 @@
             "description": "A unique identifier for the update.",
             "required": true,
             "schema": {
-              "type": "string",
-              "format": "uuid"
+              "$ref": "#/components/schemas/TypedUuidForMupdateKind"
             }
           }
         ],
@@ -2310,6 +2309,10 @@
           "slots_attempted",
           "slots_written"
         ]
+      },
+      "TypedUuidForMupdateKind": {
+        "type": "string",
+        "format": "uuid"
       }
     },
     "responses": {

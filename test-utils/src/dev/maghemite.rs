@@ -65,7 +65,7 @@ impl MgdInstance {
 
         let child = Some(child);
 
-        let temp_dir = temp_dir.into_path();
+        let temp_dir = temp_dir.keep();
         if port == 0 {
             port = discover_port(
                 temp_dir.join("mgd_stdout").display().to_string(),
