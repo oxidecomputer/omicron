@@ -1193,8 +1193,9 @@ pub struct InstanceCreate {
     /// Disk attachments of type "create" will be created, while those of type
     /// "attach" must already exist.
     ///
-    /// The order of this list does not guarantee a boot order for the
-    /// instance. Use the boot_disk attribute to specify a boot disk.
+    /// The order of this list does not guarantee a boot order for the instance.
+    /// Use the boot_disk attribute to specify a boot disk. When boot_disk is
+    /// specified it will count against the disk attachment limit.
     #[serde(default)]
     pub disks: Vec<InstanceDiskAttachment>,
 
@@ -1205,7 +1206,8 @@ pub struct InstanceCreate {
     ///
     /// Specifying a boot disk is optional but recommended to ensure predictable
     /// boot behavior. The boot disk can be set during instance creation or
-    /// later if the instance is stopped.
+    /// later if the instance is stopped. The boot disk counts against the disk
+    /// attachment limit.
     ///
     /// An instance that does not have a boot disk set will use the boot
     /// options specified in its UEFI settings, which are controlled by both the

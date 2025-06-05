@@ -208,7 +208,8 @@ fn mgs_update_status(
                 found_inactive_version,
             ))
         }
-        PendingMgsUpdateDetails::Rot { .. } => {
+        PendingMgsUpdateDetails::Rot { .. }
+        | PendingMgsUpdateDetails::RotBootloader { .. } => {
             return Err(MgsUpdateStatusError::NotYetImplemented);
         }
     };

@@ -19495,7 +19495,7 @@
           },
           "boot_disk": {
             "nullable": true,
-            "description": "The disk the instance is configured to boot from.\n\nThis disk can either be attached if it already exists or created along with the instance.\n\nSpecifying a boot disk is optional but recommended to ensure predictable boot behavior. The boot disk can be set during instance creation or later if the instance is stopped.\n\nAn instance that does not have a boot disk set will use the boot options specified in its UEFI settings, which are controlled by both the instance's UEFI firmware and the guest operating system. Boot options can change as disks are attached and detached, which may result in an instance that only boots to the EFI shell until a boot disk is set.",
+            "description": "The disk the instance is configured to boot from.\n\nThis disk can either be attached if it already exists or created along with the instance.\n\nSpecifying a boot disk is optional but recommended to ensure predictable boot behavior. The boot disk can be set during instance creation or later if the instance is stopped. The boot disk counts against the disk attachment limit.\n\nAn instance that does not have a boot disk set will use the boot options specified in its UEFI settings, which are controlled by both the instance's UEFI firmware and the guest operating system. Boot options can change as disks are attached and detached, which may result in an instance that only boots to the EFI shell until a boot disk is set.",
             "default": null,
             "allOf": [
               {
@@ -19507,7 +19507,7 @@
             "type": "string"
           },
           "disks": {
-            "description": "A list of disks to be attached to the instance.\n\nDisk attachments of type \"create\" will be created, while those of type \"attach\" must already exist.\n\nThe order of this list does not guarantee a boot order for the instance. Use the boot_disk attribute to specify a boot disk.",
+            "description": "A list of disks to be attached to the instance.\n\nDisk attachments of type \"create\" will be created, while those of type \"attach\" must already exist.\n\nThe order of this list does not guarantee a boot order for the instance. Use the boot_disk attribute to specify a boot disk. When boot_disk is specified it will count against the disk attachment limit.",
             "default": [],
             "type": "array",
             "items": {
