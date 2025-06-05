@@ -5,6 +5,7 @@
 //! Inventory types shared between Nexus and sled-agent.
 
 use std::collections::BTreeMap;
+use std::collections::BTreeSet;
 use std::net::{IpAddr, Ipv6Addr, SocketAddr, SocketAddrV6};
 use std::time::Duration;
 
@@ -127,6 +128,7 @@ pub struct ConfigReconcilerInventory {
     pub external_disks:
         BTreeMap<PhysicalDiskUuid, ConfigReconcilerInventoryResult>,
     pub datasets: BTreeMap<DatasetUuid, ConfigReconcilerInventoryResult>,
+    pub orphaned_datasets: BTreeSet<DatasetName>,
     pub zones: BTreeMap<OmicronZoneUuid, ConfigReconcilerInventoryResult>,
 }
 
@@ -169,7 +171,13 @@ impl ConfigReconcilerInventory {
             .iter()
             .map(|z| (z.id, ConfigReconcilerInventoryResult::Ok))
             .collect();
-        Self { last_reconciled_config: config, external_disks, datasets, zones }
+        Self {
+            last_reconciled_config: config,
+            external_disks,
+            datasets,
+            orphaned_datasets: BTreeSet::new(),
+            zones,
+        }
     }
 }
 

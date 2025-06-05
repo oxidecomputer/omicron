@@ -3836,6 +3836,37 @@ CREATE TABLE IF NOT EXISTS omicron.public.inv_last_reconciliation_dataset_result
     PRIMARY KEY (inv_collection_id, sled_id, dataset_id)
 );
 
+-- This table should be temporary! It exists so we can report orphaned datasets,
+-- confirm they look like what we expect, then start automatically deleting them
+-- (at which point we don't need to report them, because they won't be orphans
+-- any longer). https://github.com/oxidecomputer/omicron/issues/6177
+CREATE TABLE IF NOT EXISTS omicron.public.inv_last_reconciliation_orphaned_dataset (
+    -- where this observation came from
+    -- (foreign key into `inv_collection` table)
+    inv_collection_id UUID NOT NULL,
+
+    -- unique id for this sled (should be foreign keys into `sled` table, though
+    -- it's conceivable a sled will report an id that we don't know about)
+    sled_id UUID NOT NULL,
+
+    -- These three columns compose a `DatasetName`. Other tables that store a
+    -- `DatasetName` use a nullable `zone_name` (since it's only supposed to be
+    -- set for datasets with `kind = 'zone'`). This table instead uses the empty
+    -- string for non-'zone' kinds, which allows the column to be NOT NULL and
+    -- hence be a member of our primary key. (We have no other unique ID to
+    -- distinguish different `DatasetName`s.)
+    pool_id UUID NOT NULL,
+    kind omicron.public.dataset_kind NOT NULL,
+    zone_name TEXT NOT NULL,
+
+    CONSTRAINT zone_name_for_zone_kind CHECK (
+      (kind != 'zone' AND zone_name = '') OR
+      (kind = 'zone' AND zone_name != '')
+    ),
+
+    PRIMARY KEY (inv_collection_id, sled_id, pool_id, kind, zone_name)
+);
+
 CREATE TABLE IF NOT EXISTS omicron.public.inv_last_reconciliation_zone_result (
     -- where this observation came from
     -- (foreign key into `inv_collection` table)

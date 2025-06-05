@@ -1627,6 +1627,18 @@ table! {
 }
 
 table! {
+    inv_last_reconciliation_orphaned_dataset
+        (inv_collection_id, sled_id, pool_id, kind, zone_name)
+    {
+        inv_collection_id -> Uuid,
+        sled_id -> Uuid,
+        pool_id -> Uuid,
+        kind -> crate::enums::DatasetKindEnum,
+        zone_name -> Text,
+    }
+}
+
+table! {
     inv_last_reconciliation_zone_result (inv_collection_id, sled_id, zone_id) {
         inv_collection_id -> Uuid,
         sled_id -> Uuid,
