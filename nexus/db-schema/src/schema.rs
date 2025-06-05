@@ -2422,8 +2422,8 @@ table! {
         sp_type -> crate::enums::SpTypeEnum,
         sp_slot -> Int4,
 
-        part_number -> Text,
-        serial_number -> Text,
+        part_number -> Nullable<Text>,
+        serial_number -> Nullable<Text>,
 
         report -> Jsonb,
     }
