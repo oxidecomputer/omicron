@@ -259,6 +259,10 @@ task: "blueprint_loader"
     Loads the current target blueprint from the DB
 
 
+task: "blueprint_planner"
+    Updates the target blueprint
+
+
 task: "blueprint_rendezvous"
     reconciles blueprints and inventory collection, updating Reconfigurator-
     owned rendezvous tables that other subsystems consume
@@ -520,6 +524,13 @@ task: "bfd_manager"
   last completed activation: <REDACTED ITERATIONS>, triggered by a periodic timer firing
     started at <REDACTED_TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
     last completion reported error: failed to resolve addresses for Dendrite services: no record found for Query { name: Name("_dendrite._tcp.control-plane.oxide.internal."), query_type: SRV, query_class: IN }
+
+task: "blueprint_planner"
+  configured period: every <REDACTED_DURATION>m
+  currently executing: no
+  last completed activation: <REDACTED ITERATIONS>, triggered by a periodic timer firing
+    started at <REDACTED_TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
+    last completion reported error: no target blueprint to use as parent for planning
 
 task: "blueprint_rendezvous"
   configured period: every <REDACTED_DURATION>m
@@ -1039,6 +1050,13 @@ task: "bfd_manager"
   last completed activation: <REDACTED ITERATIONS>, triggered by a periodic timer firing
     started at <REDACTED_TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
     last completion reported error: failed to resolve addresses for Dendrite services: no record found for Query { name: Name("_dendrite._tcp.control-plane.oxide.internal."), query_type: SRV, query_class: IN }
+
+task: "blueprint_planner"
+  configured period: every <REDACTED_DURATION>m
+  currently executing: no
+  last completed activation: <REDACTED ITERATIONS>, triggered by a periodic timer firing
+    started at <REDACTED_TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
+    last completion reported error: no target blueprint to use as parent for planning
 
 task: "blueprint_rendezvous"
   configured period: every <REDACTED_DURATION>m

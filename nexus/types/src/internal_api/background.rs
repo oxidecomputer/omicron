@@ -459,6 +459,22 @@ impl slog::KV for DebugDatasetsRendezvousStats {
     }
 }
 
+/// The status of a `blueprint_planner` background task activation.
+#[derive(Clone, Debug, Default, Deserialize, Serialize, PartialEq, Eq)]
+pub struct BlueprintPlannerStatus {
+    /// `true` iff automatic blueprint planning has been explicitly disabled
+    /// by the config file.
+    pub disabled: bool,
+
+    /// `Some(message)` iff an error occurred during planning or blueprint
+    /// manipulation.
+    pub error: Option<String>,
+
+    /// `true` iff the planning run generated a blueprint that is identical
+    /// to the current target.
+    pub unchanged: bool,
+}
+
 /// The status of a `alert_dispatcher` background task activation.
 #[derive(Debug, Clone, Eq, PartialEq, Serialize, Deserialize)]
 pub struct AlertDispatcherStatus {
