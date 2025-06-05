@@ -787,6 +787,10 @@ impl SimSystemBuilderInner {
         self.set_internal_dns(state.internal_dns);
         self.set_external_dns(state.external_dns);
 
+        self.system
+            .description
+            .set_target_release(state.planning_input.tuf_repo().cloned());
+
         system_res
     }
 

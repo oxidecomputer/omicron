@@ -465,6 +465,10 @@ impl SystemDescription {
         self
     }
 
+    pub fn target_release(&self) -> Option<&TufRepoDescription> {
+        self.tuf_repo.as_ref()
+    }
+
     pub fn to_collection_builder(&self) -> anyhow::Result<CollectionBuilder> {
         let collector_label = self
             .collector
