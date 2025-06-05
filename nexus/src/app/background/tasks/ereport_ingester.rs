@@ -16,8 +16,8 @@ use nexus_db_queries::context::OpContext;
 use nexus_db_queries::db;
 use nexus_db_queries::db::DataStore;
 use nexus_types::internal_api::background::EreporterStatus;
-use nexus_types::internal_api::background::SpEreporterStatus;
 use nexus_types::internal_api::background::SpEreportIngesterStatus;
+use nexus_types::internal_api::background::SpEreporterStatus;
 use omicron_uuid_kinds::EreporterRestartUuid;
 use omicron_uuid_kinds::OmicronZoneUuid;
 use parallel_task_set::ParallelTaskSet;
@@ -107,9 +107,10 @@ impl SpEreportIngester {
                     let clients = mgs_clients.clone();
                     let ingester = self.inner.clone();
                     async move {
-                       ingester
+                        let status = ingester
                             .ingest_sp_ereports(opctx, &clients, sp_type, slot)
-                            .await
+                            .await?;
+                        Some(SpEreporterStatus { sp_type, slot, status })
                     }
                 })
                 .await;
@@ -149,7 +150,7 @@ impl Ingester {
         clients: &[GatewayClient],
         sp_type: nexus_types::inventory::SpType,
         slot: u16,
-    ) -> Option<SpEreporterStatus> {
+    ) -> Option<EreporterStatus> {
         // Fetch the latest ereport from this SP.
         let latest = match self
             .datastore
@@ -158,15 +159,11 @@ impl Ingester {
         {
             Ok(latest) => latest,
             Err(error) => {
-                return Some(SpEreporterStatus {
-                    sp_type,
-                    slot,
-                    EreporterStatus {
+                return Some(EreporterStatus {
                     errors: vec![format!(
                         "failed to query for latest ereport: {error}"
                     )],
                     ..Default::default()
-                }
                 });
             }
         };
@@ -269,11 +266,7 @@ impl Ingester {
             );
         }
 
-        status.map(|status| SpEreporterStatus {
-            sp_type,
-            slot,
-            status,
-        })
+        status
     }
 
     async fn mgs_requests(
