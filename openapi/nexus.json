@@ -16732,6 +16732,7 @@
           },
           "time_expires": {
             "nullable": true,
+            "description": "Expiration timestamp. A null value means the token does not automatically expire.",
             "type": "string",
             "format": "date-time"
           }
