@@ -7529,6 +7529,7 @@ dependencies = [
  "diesel",
  "dropshot",
  "dyn-clone",
+ "ereport-types",
  "expectorate",
  "futures",
  "gateway-client",

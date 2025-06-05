@@ -19,6 +19,7 @@
 
 use crate::Omdb;
 use crate::check_allow_destructive::DestructiveOperationToken;
+use crate::db::ereport::cmd_db_ereport;
 use crate::helpers::CONNECTION_OPTIONS_HEADING;
 use crate::helpers::DATABASE_OPTIONS_HEADING;
 use crate::helpers::const_max_len;
@@ -177,6 +178,7 @@ use tabled::Tabled;
 use uuid::Uuid;
 
 mod alert;
+mod ereport;
 mod saga;
 
 const NO_ACTIVE_PROPOLIS_MSG: &str = "<no active Propolis>";
@@ -353,6 +355,8 @@ enum DbCommands {
     Disks(DiskArgs),
     /// Print information about internal and external DNS
     Dns(DnsArgs),
+    /// Query and display error reports
+    Ereport(ereport::EreportArgs),
     /// Print information about collected hardware/software inventory
     Inventory(InventoryArgs),
     /// Print information about physical disks
@@ -1485,6 +1489,9 @@ impl DbArgs {
                             &args,
                             token,
                         ).await
+                    },
+                    DbCommands::Ereport(args) => {
+                        cmd_db_ereport(&opctx, &datastore, &fetch_opts, &args).await
                     }
                 }
             }
