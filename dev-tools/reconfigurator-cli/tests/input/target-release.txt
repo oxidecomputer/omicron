@@ -65,4 +65,4 @@ blueprint-diff df06bb57-ad42-4431-9206-abff322896c7 7f976e0d-d2a5-4eeb-9e82-c82b
 sled-update-sp d81c6a84-79b8-4958-ae41-ea46c9b19763 --active 1.0.0
 inventory-generate
 blueprint-plan 7f976e0d-d2a5-4eeb-9e82-c82bc2824aba a71f7a73-35a6-45e8-acbe-f1c5925eed69
-blueprint-diff 9034c710-3e57-45f3-99e5-4316145e87ac 7f976e0d-d2a5-4eeb-9e82-c82bc2824aba
+blueprint-diff 7f976e0d-d2a5-4eeb-9e82-c82bc2824aba 9034c710-3e57-45f3-99e5-4316145e87ac
