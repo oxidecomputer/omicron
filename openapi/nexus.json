@@ -23310,7 +23310,7 @@
             "format": "uuid"
           },
           "state": {
-            "description": "The current state Nexus believes the sled to be in.",
+            "description": "The current state of the sled.",
             "allOf": [
               {
                 "$ref": "#/components/schemas/SledState"
@@ -23578,7 +23578,7 @@
         ]
       },
       "SledState": {
-        "description": "The current state of the sled, as determined by Nexus.",
+        "description": "The current state of the sled.",
         "oneOf": [
           {
             "description": "The sled is currently active, and has resources allocated on it.",
