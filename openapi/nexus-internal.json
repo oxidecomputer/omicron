@@ -5385,7 +5385,7 @@
         "type": "object",
         "properties": {
           "artifact_hash": {
-            "description": "which artifact to apply to this device (implies which component is being updated)",
+            "description": "which artifact to apply to this device",
             "type": "string",
             "format": "hex string (32 bytes)"
           },
@@ -5516,6 +5516,38 @@
               "expected_active_slot",
               "expected_inactive_version",
               "expected_persistent_boot_preference"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "component": {
+                "type": "string",
+                "enum": [
+                  "rot_bootloader"
+                ]
+              },
+              "expected_stage0_next_version": {
+                "description": "expected contents of the stage 0 next",
+                "allOf": [
+                  {
+                    "$ref": "#/components/schemas/ExpectedVersion"
+                  }
+                ]
+              },
+              "expected_stage0_version": {
+                "description": "expected contents of the stage 0",
+                "allOf": [
+                  {
+                    "$ref": "#/components/schemas/ArtifactVersion"
+                  }
+                ]
+              }
+            },
+            "required": [
+              "component",
+              "expected_stage0_next_version",
+              "expected_stage0_version"
             ]
           }
         ]

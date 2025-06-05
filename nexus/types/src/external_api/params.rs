@@ -13,8 +13,8 @@ use omicron_common::api::external::{
     AddressLotKind, AffinityPolicy, AllowedSourceIps, BfdMode, BgpPeer,
     ByteCount, FailureDomain, Hostname, IdentityMetadataCreateParams,
     IdentityMetadataUpdateParams, InstanceAutoRestartPolicy, InstanceCpuCount,
-    LinkFec, LinkSpeed, Name, NameOrId, PaginationOrder, RouteDestination,
-    RouteTarget, UserId,
+    LinkFec, LinkSpeed, Name, NameOrId, Nullable, PaginationOrder,
+    RouteDestination, RouteTarget, UserId,
 };
 use omicron_common::disk::DiskVariant;
 use oxnet::{IpNet, Ipv4Net, Ipv6Net};
@@ -27,6 +27,7 @@ use serde::{
 };
 use std::collections::BTreeMap;
 use std::collections::BTreeSet;
+use std::num::NonZeroU32;
 use std::{net::IpAddr, str::FromStr};
 use url::Url;
 use uuid::Uuid;
@@ -95,6 +96,7 @@ path_param!(CertificatePath, certificate, "certificate");
 
 id_path_param!(SupportBundlePath, bundle_id, "support bundle");
 id_path_param!(GroupPath, group_id, "group");
+id_path_param!(TokenPath, token_id, "token");
 
 // TODO: The hardware resources should be represented by its UUID or a hardware
 // ID that can be used to deterministically generate the UUID.
@@ -479,6 +481,21 @@ pub struct SiloQuotasUpdate {
     pub memory: Option<ByteCount>,
     /// The amount of storage (in bytes) available for disks or snapshots
     pub storage: Option<ByteCount>,
+}
+
+// TODO: Unlike quota values, silo settings are nullable, so we need passing
+// null to be meaningful here. But it's confusing for it to work that way here
+// and differently for quotas. Maybe the best thing would be to make them all
+// non-nullable on SiloQuotasUpdate. I vaguely remember the latter being the
+// direction we wanted to go in general anyway. Can't find the issue where it
+// was discussed.
+
+/// Updateable properties of a silo's settings.
+#[derive(Clone, Debug, Serialize, Deserialize, JsonSchema)]
+pub struct SiloAuthSettingsUpdate {
+    /// Maximum lifetime of a device token in seconds. If set to null, users
+    /// will be able to create tokens that do not expire.
+    pub device_token_max_ttl_seconds: Nullable<NonZeroU32>,
 }
 
 /// Create-time parameters for a `User`
@@ -1176,8 +1193,9 @@ pub struct InstanceCreate {
     /// Disk attachments of type "create" will be created, while those of type
     /// "attach" must already exist.
     ///
-    /// The order of this list does not guarantee a boot order for the
-    /// instance. Use the boot_disk attribute to specify a boot disk.
+    /// The order of this list does not guarantee a boot order for the instance.
+    /// Use the boot_disk attribute to specify a boot disk. When boot_disk is
+    /// specified it will count against the disk attachment limit.
     #[serde(default)]
     pub disks: Vec<InstanceDiskAttachment>,
 
@@ -1188,7 +1206,8 @@ pub struct InstanceCreate {
     ///
     /// Specifying a boot disk is optional but recommended to ensure predictable
     /// boot behavior. The boot disk can be set during instance creation or
-    /// later if the instance is stopped.
+    /// later if the instance is stopped. The boot disk counts against the disk
+    /// attachment limit.
     ///
     /// An instance that does not have a boot disk set will use the boot
     /// options specified in its UEFI settings, which are controlled by both the
@@ -2450,6 +2469,9 @@ impl TryFrom<String> for RelativeUri {
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
 pub struct DeviceAuthRequest {
     pub client_id: Uuid,
+    /// Optional lifetime for the access token in seconds. If not specified, the
+    /// silo's max TTL will be used (if set).
+    pub ttl_seconds: Option<NonZeroU32>,
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]

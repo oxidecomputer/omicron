@@ -2140,6 +2140,68 @@
         }
       }
     },
+    "/v1/auth-settings": {
+      "get": {
+        "tags": [
+          "silos"
+        ],
+        "summary": "Fetch current silo's auth settings",
+        "operationId": "auth_settings_view",
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SiloAuthSettings"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      },
+      "put": {
+        "tags": [
+          "silos"
+        ],
+        "summary": "Update current silo's auth settings",
+        "operationId": "auth_settings_update",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SiloAuthSettingsUpdate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SiloAuthSettings"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
     "/v1/certificates": {
       "get": {
         "tags": [
@@ -5440,6 +5502,99 @@
                 }
               }
             }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/v1/me/access-tokens": {
+      "get": {
+        "tags": [
+          "tokens"
+        ],
+        "summary": "List access tokens",
+        "description": "List device access tokens for the currently authenticated user.",
+        "operationId": "current_user_access_token_list",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "limit",
+            "description": "Maximum number of items returned by a single call",
+            "schema": {
+              "nullable": true,
+              "type": "integer",
+              "format": "uint32",
+              "minimum": 1
+            }
+          },
+          {
+            "in": "query",
+            "name": "page_token",
+            "description": "Token returned by previous call to retrieve the subsequent page",
+            "schema": {
+              "nullable": true,
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "sort_by",
+            "schema": {
+              "$ref": "#/components/schemas/IdSortMode"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DeviceAccessTokenResultsPage"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "x-dropshot-pagination": {
+          "required": []
+        }
+      }
+    },
+    "/v1/me/access-tokens/{token_id}": {
+      "delete": {
+        "tags": [
+          "tokens"
+        ],
+        "summary": "Delete access token",
+        "description": "Delete a device access token for the currently authenticated user.",
+        "operationId": "current_user_access_token_delete",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "token_id",
+            "description": "ID of the token",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "successful deletion"
           },
           "4XX": {
             "$ref": "#/components/responses/Error"
@@ -16450,6 +16605,30 @@
           "public_cert"
         ]
       },
+      "DeviceAccessToken": {
+        "description": "View of a device access token",
+        "type": "object",
+        "properties": {
+          "id": {
+            "description": "A unique, immutable, system-controlled identifier for the token. Note that this ID is not the bearer token itself, which starts with \"oxide-token-\"",
+            "type": "string",
+            "format": "uuid"
+          },
+          "time_created": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "time_expires": {
+            "nullable": true,
+            "type": "string",
+            "format": "date-time"
+          }
+        },
+        "required": [
+          "id",
+          "time_created"
+        ]
+      },
       "DeviceAccessTokenRequest": {
         "type": "object",
         "properties": {
@@ -16470,12 +16649,40 @@
           "grant_type"
         ]
       },
+      "DeviceAccessTokenResultsPage": {
+        "description": "A single page of results",
+        "type": "object",
+        "properties": {
+          "items": {
+            "description": "list of items on this page of results",
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/DeviceAccessToken"
+            }
+          },
+          "next_page": {
+            "nullable": true,
+            "description": "token used to fetch the next page of results (if any)",
+            "type": "string"
+          }
+        },
+        "required": [
+          "items"
+        ]
+      },
       "DeviceAuthRequest": {
         "type": "object",
         "properties": {
           "client_id": {
             "type": "string",
             "format": "uuid"
+          },
+          "ttl_seconds": {
+            "nullable": true,
+            "description": "Optional lifetime for the access token in seconds. If not specified, the silo's max TTL will be used (if set).",
+            "type": "integer",
+            "format": "uint32",
+            "minimum": 1
           }
         },
         "required": [
@@ -19176,7 +19383,7 @@
           },
           "boot_disk": {
             "nullable": true,
-            "description": "The disk the instance is configured to boot from.\n\nThis disk can either be attached if it already exists or created along with the instance.\n\nSpecifying a boot disk is optional but recommended to ensure predictable boot behavior. The boot disk can be set during instance creation or later if the instance is stopped.\n\nAn instance that does not have a boot disk set will use the boot options specified in its UEFI settings, which are controlled by both the instance's UEFI firmware and the guest operating system. Boot options can change as disks are attached and detached, which may result in an instance that only boots to the EFI shell until a boot disk is set.",
+            "description": "The disk the instance is configured to boot from.\n\nThis disk can either be attached if it already exists or created along with the instance.\n\nSpecifying a boot disk is optional but recommended to ensure predictable boot behavior. The boot disk can be set during instance creation or later if the instance is stopped. The boot disk counts against the disk attachment limit.\n\nAn instance that does not have a boot disk set will use the boot options specified in its UEFI settings, which are controlled by both the instance's UEFI firmware and the guest operating system. Boot options can change as disks are attached and detached, which may result in an instance that only boots to the EFI shell until a boot disk is set.",
             "default": null,
             "allOf": [
               {
@@ -19188,7 +19395,7 @@
             "type": "string"
           },
           "disks": {
-            "description": "A list of disks to be attached to the instance.\n\nDisk attachments of type \"create\" will be created, while those of type \"attach\" must already exist.\n\nThe order of this list does not guarantee a boot order for the instance. Use the boot_disk attribute to specify a boot disk.",
+            "description": "A list of disks to be attached to the instance.\n\nDisk attachments of type \"create\" will be created, while those of type \"attach\" must already exist.\n\nThe order of this list does not guarantee a boot order for the instance. Use the boot_disk attribute to specify a boot disk. When boot_disk is specified it will count against the disk attachment limit.",
             "default": [],
             "type": "array",
             "items": {
@@ -22542,6 +22749,42 @@
           "name",
           "time_created",
           "time_modified"
+        ]
+      },
+      "SiloAuthSettings": {
+        "description": "View of silo authentication settings",
+        "type": "object",
+        "properties": {
+          "device_token_max_ttl_seconds": {
+            "nullable": true,
+            "description": "Maximum lifetime of a device token in seconds. If set to null, users will be able to create tokens that do not expire.",
+            "type": "integer",
+            "format": "uint32",
+            "minimum": 0
+          },
+          "silo_id": {
+            "type": "string",
+            "format": "uuid"
+          }
+        },
+        "required": [
+          "silo_id"
+        ]
+      },
+      "SiloAuthSettingsUpdate": {
+        "description": "Updateable properties of a silo's settings.",
+        "type": "object",
+        "properties": {
+          "device_token_max_ttl_seconds": {
+            "nullable": true,
+            "description": "Maximum lifetime of a device token in seconds. If set to null, users will be able to create tokens that do not expire.",
+            "type": "integer",
+            "format": "uint32",
+            "minimum": 1
+          }
+        },
+        "required": [
+          "device_token_max_ttl_seconds"
         ]
       },
       "SiloCreate": {
@@ -26629,6 +26872,13 @@
     },
     {
       "name": "system/update"
+    },
+    {
+      "name": "tokens",
+      "description": "API clients use device access tokens for authentication.",
+      "externalDocs": {
+        "url": "http://docs.oxide.computer/api/tokens"
+      }
     },
     {
       "name": "vpcs",

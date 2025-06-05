@@ -52,11 +52,14 @@ use nexus_db_queries::authz;
 use nexus_db_queries::context::OpContext;
 use nexus_db_queries::db::model::{DeviceAccessToken, DeviceAuthRequest};
 
-use nexus_types::external_api::params::DeviceAccessTokenRequest;
+use anyhow::anyhow;
+use nexus_types::external_api::params;
 use nexus_types::external_api::views;
-use omicron_common::api::external::{CreateResult, Error};
+use omicron_common::api::external::{
+    CreateResult, DataPageParams, Error, ListResultVec,
+};
 
-use chrono::Utc;
+use chrono::{Duration, Utc};
 use serde::Serialize;
 use uuid::Uuid;
 
@@ -74,13 +77,17 @@ impl super::Nexus {
     pub(crate) async fn device_auth_request_create(
         &self,
         opctx: &OpContext,
-        client_id: Uuid,
+        params: params::DeviceAuthRequest,
     ) -> CreateResult<DeviceAuthRequest> {
         // TODO-correctness: the `user_code` generated for a new request
         // is used as a primary key, but may potentially collide with an
         // existing outstanding request. So we should retry some (small)
         // number of times if inserting the new request fails.
-        let auth_request = DeviceAuthRequest::new(client_id);
+
+        // Note that we cannot validate the TTL here against the silo max
+        // because we do not know what silo we're talking about until verify
+        let auth_request =
+            DeviceAuthRequest::new(params.client_id, params.ttl_seconds);
         self.db_datastore.device_auth_request_create(opctx, auth_request).await
     }
 
@@ -100,18 +107,42 @@ impl super::Nexus {
                 .fetch()
                 .await?;
 
-        let (.., authz_user) = LookupPath::new(opctx, &self.db_datastore)
-            .silo_user_id(silo_user_id)
-            .lookup_for(authz::Action::CreateChild)
-            .await?;
+        let (authz_silo, authz_user) =
+            LookupPath::new(opctx, &self.db_datastore)
+                .silo_user_id(silo_user_id)
+                .lookup_for(authz::Action::CreateChild)
+                .await?;
         assert_eq!(authz_user.id(), silo_user_id);
 
-        // Create an access token record.
+        let silo_auth_settings = self
+            .db_datastore
+            .silo_auth_settings_view(opctx, &authz_silo)
+            .await?;
+
+        let silo_max_ttl = silo_auth_settings.device_token_max_ttl_seconds;
+        let requested_ttl = db_request.token_ttl_seconds;
+
+        // Validate the requested TTL against the silo's max TTL
+        if let (Some(requested), Some(max)) = (requested_ttl, silo_max_ttl) {
+            if requested > max.0.into() {
+                return Err(Error::invalid_request(&format!(
+                    "Requested TTL {} seconds exceeds maximum \
+                     allowed TTL for this silo of {} seconds",
+                    requested, max
+                )));
+            }
+        }
+
+        let time_expires = requested_ttl
+            .or(silo_max_ttl)
+            .map(|ttl| Utc::now() + Duration::seconds(ttl.0.into()));
+
         let token = DeviceAccessToken::new(
             db_request.client_id,
             db_request.device_code,
             db_request.time_created,
             silo_user_id,
+            time_expires,
         );
 
         if db_request.time_expires < Utc::now() {
@@ -166,9 +197,9 @@ impl super::Nexus {
         opctx: &OpContext,
         token: String,
     ) -> Result<Actor, Reason> {
-        let (.., db_access_token) = LookupPath::new(opctx, &self.db_datastore)
-            .device_access_token(&token)
-            .fetch()
+        let (.., db_access_token) = self
+            .db_datastore
+            .device_token_lookup_by_token(opctx, token)
             .await
             .map_err(|e| match e {
                 Error::ObjectNotFound { .. } => Reason::UnknownActor {
@@ -190,13 +221,27 @@ impl super::Nexus {
             })?;
         let silo_id = db_silo_user.silo_id;
 
+        if let Some(time_expires) = db_access_token.time_expires {
+            let now = Utc::now();
+            if time_expires < now {
+                return Err(Reason::BadCredentials {
+                    actor: Actor::SiloUser { silo_user_id, silo_id },
+                    source: anyhow!(
+                        "token expired at {} (current time: {})",
+                        time_expires,
+                        now
+                    ),
+                });
+            }
+        }
+
         Ok(Actor::SiloUser { silo_user_id, silo_id })
     }
 
     pub(crate) async fn device_access_token(
         &self,
         opctx: &OpContext,
-        params: DeviceAccessTokenRequest,
+        params: params::DeviceAccessTokenRequest,
     ) -> Result<Response<Body>, HttpError> {
         // RFC 8628 §3.4
         if params.grant_type != "urn:ietf:params:oauth:grant-type:device_code" {
@@ -264,5 +309,21 @@ impl super::Nexus {
             .status(status)
             .header(header::CONTENT_TYPE, "application/json")
             .body(body.into())?)
+    }
+
+    pub(crate) async fn current_user_token_list(
+        &self,
+        opctx: &OpContext,
+        pagparams: &DataPageParams<'_, Uuid>,
+    ) -> ListResultVec<DeviceAccessToken> {
+        self.db_datastore.current_user_token_list(opctx, pagparams).await
+    }
+
+    pub(crate) async fn current_user_token_delete(
+        &self,
+        opctx: &OpContext,
+        token_id: Uuid,
+    ) -> Result<(), Error> {
+        self.db_datastore.current_user_token_delete(opctx, token_id).await
     }
 }

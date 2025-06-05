@@ -67,6 +67,11 @@ impl CockroachAdminApi for CockroachAdminImpl {
         let NodeId { node_id } = body.into_inner();
         let decommission_status =
             ctx.cockroach_cli().node_decommission(&node_id).await?;
+        info!(
+            ctx.log(), "successfully decommissioned node";
+            "node_id" => node_id,
+            "status" => ?decommission_status,
+        );
         Ok(HttpResponseOk(decommission_status))
     }
 }

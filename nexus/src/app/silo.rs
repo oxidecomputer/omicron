@@ -9,6 +9,7 @@ use crate::external_api::shared;
 use anyhow::Context;
 use nexus_db_lookup::LookupPath;
 use nexus_db_lookup::lookup;
+use nexus_db_model::SiloAuthSettings;
 use nexus_db_model::{DnsGroup, UserProvisionType};
 use nexus_db_queries::authz::ApiResource;
 use nexus_db_queries::context::OpContext;
@@ -223,6 +224,35 @@ impl super::Nexus {
             .collect::<Result<Vec<_>, _>>()?;
 
         Ok(shared::Policy { role_assignments })
+    }
+
+    pub(crate) async fn silo_fetch_auth_settings(
+        &self,
+        opctx: &OpContext,
+        silo_lookup: &lookup::Silo<'_>,
+    ) -> LookupResult<SiloAuthSettings> {
+        let (.., authz_silo) =
+            silo_lookup.lookup_for(authz::Action::Read).await?;
+        self.db_datastore.silo_auth_settings_view(opctx, &authz_silo).await
+    }
+
+    pub(crate) async fn silo_update_auth_settings(
+        &self,
+        opctx: &OpContext,
+        silo_lookup: &lookup::Silo<'_>,
+        settings: &params::SiloAuthSettingsUpdate,
+    ) -> UpdateResult<SiloAuthSettings> {
+        // TODO: modify seems fine, but look into why policy has its own
+        // separate permission
+        let (.., authz_silo) =
+            silo_lookup.lookup_for(authz::Action::Modify).await?;
+        self.db_datastore
+            .silo_auth_settings_update(
+                opctx,
+                &authz_silo,
+                settings.clone().into(),
+            )
+            .await
     }
 
     // Users
