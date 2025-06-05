@@ -180,6 +180,7 @@ async fn test_device_auth_flow(cptestctx: &ControlPlaneTestContext) {
     let tokens_unpriv_after = get_tokens_unpriv(testctx).await;
     assert_eq!(tokens_unpriv_after.len(), 1);
     assert_eq!(tokens_unpriv_after[0].id, token.token_id);
+    assert_eq!(token.time_expires, None);
     assert_eq!(tokens_unpriv_after[0].time_expires, None);
 
     // now make a request with the token. it 403s because unpriv user has no
@@ -242,7 +243,9 @@ async fn test_device_auth_flow(cptestctx: &ControlPlaneTestContext) {
 
 /// Helper to make the test cute. Goes through the whole flow, returns the token
 /// as a string
-async fn get_device_token(testctx: &ClientTestContext) -> String {
+async fn get_device_token(
+    testctx: &ClientTestContext,
+) -> DeviceAccessTokenGrant {
     let client_id = Uuid::new_v4();
     let authn_params = DeviceAuthRequest { client_id, ttl_seconds: None };
 
@@ -280,8 +283,8 @@ async fn get_device_token(testctx: &ClientTestContext) -> String {
         client_id,
     };
 
-    // Get the token
-    let token: DeviceAccessTokenGrant = NexusRequest::new(
+    // Get the token and return it
+    NexusRequest::new(
         RequestBuilder::new(testctx, Method::POST, "/device/token")
             .allow_non_dropshot_errors()
             .body_urlencoded(Some(&token_params))
@@ -292,9 +295,7 @@ async fn get_device_token(testctx: &ClientTestContext) -> String {
     .await
     .expect("failed to get token")
     .parsed_body()
-    .expect("failed to deserialize token response");
-
-    token.access_token
+    .expect("failed to deserialize token response")
 }
 
 #[nexus_test]
@@ -310,12 +311,14 @@ async fn test_device_token_expiration(cptestctx: &ControlPlaneTestContext) {
 
     // get a token for the privileged user. default silo max token expiration
     // is null, so tokens don't expire
-    let initial_token = get_device_token(testctx).await;
+    let initial_token_grant = get_device_token(testctx).await;
+    let initial_token = initial_token_grant.access_token;
 
     // now there is a token in the list
     let tokens = get_tokens_priv(testctx).await;
     assert_eq!(tokens.len(), 1);
     assert_eq!(tokens[0].time_expires, None);
+    assert_eq!(tokens[0].id, initial_token_grant.token_id);
 
     // test token works on project list
     project_list(&testctx, &initial_token, StatusCode::OK)
@@ -378,7 +381,16 @@ async fn test_device_token_expiration(cptestctx: &ControlPlaneTestContext) {
     assert_eq!(settings.device_token_max_ttl_seconds, Some(3));
 
     // create token again (this one will have the 3-second expiration)
-    let expiring_token = get_device_token(testctx).await;
+    let expiring_token_grant = get_device_token(testctx).await;
+
+    // check that expiration time is there and in the right range
+    let exp = expiring_token_grant
+        .time_expires
+        .expect("Expiring token should have an expiration time");
+    let exp = (exp - Utc::now()).num_seconds();
+    assert!(exp > 0 && exp < 5, "should be around 3 seconds from now");
+
+    let expiring_token = expiring_token_grant.access_token;
 
     // use a block so we don't touch expiring_token
     {

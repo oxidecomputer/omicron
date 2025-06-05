@@ -997,6 +997,8 @@ pub struct DeviceAccessToken {
     /// "oxide-token-"
     pub id: Uuid,
     pub time_created: DateTime<Utc>,
+
+    /// Expiration timestamp. A null value means the token does not automatically expire.
     pub time_expires: Option<DateTime<Utc>>,
 }
 
@@ -1038,6 +1040,9 @@ pub struct DeviceAccessTokenGrant {
 
     /// A unique, immutable, system-controlled identifier for the token
     pub token_id: Uuid,
+
+    /// Expiration timestamp. A null value means the token does not automatically expire.
+    pub time_expires: Option<DateTime<Utc>>,
 }
 
 /// The kind of token granted.
