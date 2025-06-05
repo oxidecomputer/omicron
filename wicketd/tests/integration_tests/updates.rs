@@ -13,11 +13,11 @@ use gateway_messages::SpPort;
 use gateway_test_utils::setup as gateway_setup;
 use installinator::HOST_PHASE_2_FILE_NAME;
 use maplit::btreeset;
-use omicron_common::update::MupdateOverrideInfo;
+use omicron_common::update::{MupdateOverrideInfo, OmicronZoneManifest};
+use omicron_uuid_kinds::MupdateUuid;
 use tokio::sync::oneshot;
 use tufaceous_artifact::{ArtifactHashId, ArtifactKind, KnownArtifactKind};
 use update_engine::NestedError;
-use uuid::Uuid;
 use wicket::OutputKind;
 use wicket_common::{
     inventory::{SpIdentifier, SpType},
@@ -345,7 +345,7 @@ async fn test_installinator_fetch() {
 
     // Create a new update ID and register it. This is required to ensure the
     // installinator reaches completion.
-    let update_id = Uuid::new_v4();
+    let update_id = MupdateUuid::new_v4();
     let start_receiver =
         wicketd_testctx.server.ipr_update_tracker.register(update_id);
 
@@ -447,16 +447,44 @@ async fn test_installinator_fetch() {
         "mupdate override info matches across A and B drives",
     );
 
+    // Ensure that the zone manifest can be parsed.
+    let a_manifest_path =
+        a_path.join("zones").join(OmicronZoneManifest::FILE_NAME);
+    let a_manifest_bytes = std::fs::read(a_manifest_path)
+        .expect("zone manifest file successfully read");
+    let a_manifest =
+        serde_json::from_slice::<OmicronZoneManifest>(&a_manifest_bytes)
+            .expect("zone manifest file successfully deserialized");
+
+    // Check that the mupdate ID matches.
+    assert_eq!(a_manifest.mupdate_id, update_id, "mupdate ID matches");
+
     // Check that the zone1 and zone2 images are present in the zone set. (The
     // names come from fake-non-semver.toml, under
     // [artifact.control-plane.source]).
     assert!(
-        a_override_info.zones.contains_key("zone1.tar.gz"),
+        a_manifest.zones.contains_key("zone1.tar.gz"),
         "zone1 is present in the zone set"
     );
     assert!(
-        a_override_info.zones.contains_key("zone2.tar.gz"),
+        a_manifest.zones.contains_key("zone2.tar.gz"),
         "zone2 is present in the zone set"
+    );
+
+    // Ensure that the B path also had the same file written out.
+    let b_manifest_path =
+        b_path.join("zones").join(OmicronZoneManifest::FILE_NAME);
+    assert!(b_manifest_path.is_file(), "{b_manifest_path} was written out");
+    // Ensure that the zone manifest can be parsed.
+    let b_override_bytes = std::fs::read(b_manifest_path)
+        .expect("zone manifest file successfully read");
+    let b_manifest =
+        serde_json::from_slice::<OmicronZoneManifest>(&b_override_bytes)
+            .expect("zone manifest file successfully deserialized");
+
+    assert_eq!(
+        a_manifest, b_manifest,
+        "zone manifests match across A and B drives"
     );
 
     recv_handle.await.expect("recv_handle succeeded");

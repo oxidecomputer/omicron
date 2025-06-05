@@ -10,9 +10,9 @@ use futures::StreamExt;
 use installinator_client::ClientError;
 use installinator_common::EventReport;
 use ipcc::{InstallinatorImageId, Ipcc};
+use omicron_uuid_kinds::MupdateUuid;
 use tokio::sync::mpsc;
 use tufaceous_artifact::{ArtifactHash, ArtifactHashId};
-use uuid::Uuid;
 
 use crate::{errors::HttpError, fetch::FetchReceiver};
 
@@ -27,7 +27,7 @@ pub(crate) struct ArtifactIdOpts {
         conflicts_with = "from_ipcc",
         required_unless_present = "from_ipcc"
     )]
-    update_id: Option<Uuid>,
+    update_id: Option<MupdateUuid>,
 
     #[clap(
         long,
@@ -134,7 +134,7 @@ impl ArtifactClient {
 
     pub(crate) async fn report_progress(
         &self,
-        update_id: Uuid,
+        update_id: MupdateUuid,
         report: EventReport,
     ) -> Result<(), ClientError> {
         self.client
