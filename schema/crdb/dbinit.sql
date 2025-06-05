@@ -5785,9 +5785,16 @@ CREATE TABLE IF NOT EXISTS omicron.public.sp_ereport (
     PRIMARY KEY (restart_id, ena)
 );
 
-CREATE INDEX IF NOT EXISTS lookup_sp_ereports_by_slot ON omicron.public.sp_ereport (
+CREATE INDEX IF NOT EXISTS lookup_sp_ereports_by_slot
+ON omicron.public.sp_ereport (
     sp_type,
     sp_slot,
+    time_collected
+);
+
+CREATE INDEX IF NOT EXISTS order_sp_ereports_by_timestamp
+ON omicron.public.sp_ereport
+USING BTREE (
     time_collected
 );
 
@@ -5813,6 +5820,12 @@ CREATE TABLE IF NOT EXISTS omicron.public.host_ereport (
 
 CREATE INDEX IF NOT EXISTS lookup_host_ereports_by_sled ON omicron.public.host_ereport (
     sled_id,
+    time_collected
+);
+
+CREATE INDEX IF NOT EXISTS order_host_ereports_by_timestamp
+ON omicron.public.host_ereport
+USING BTREE (
     time_collected
 );
 
