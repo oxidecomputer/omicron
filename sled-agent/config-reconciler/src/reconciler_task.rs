@@ -16,6 +16,7 @@ use nexus_sled_agent_shared::inventory::ConfigReconcilerInventory;
 use nexus_sled_agent_shared::inventory::ConfigReconcilerInventoryResult;
 use nexus_sled_agent_shared::inventory::ConfigReconcilerInventoryStatus;
 use nexus_sled_agent_shared::inventory::OmicronSledConfig;
+use nexus_sled_agent_shared::inventory::OrphanedDataset;
 use omicron_common::disk::DatasetKind;
 use omicron_uuid_kinds::DatasetUuid;
 use omicron_uuid_kinds::OmicronZoneUuid;
@@ -210,7 +211,8 @@ impl LatestReconciliationResult {
             last_reconciled_config: self.sled_config.clone(),
             external_disks: self.external_disks_inventory.clone(),
             datasets: self.datasets.clone(),
-            orphaned_datasets: self.orphaned_datasets.clone(),
+            // TODO-john change to clone once iddqd supports JsonSchema
+            orphaned_datasets: self.orphaned_datasets.iter().cloned().collect(),
             zones: self.zones_inventory.clone(),
         }
     }

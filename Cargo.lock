@@ -6660,6 +6660,7 @@ dependencies = [
  "chrono",
  "daft",
  "id-map",
+ "iddqd",
  "illumos-utils",
  "omicron-common",
  "omicron-passwords",

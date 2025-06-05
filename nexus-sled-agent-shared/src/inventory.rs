@@ -5,7 +5,6 @@
 //! Inventory types shared between Nexus and sled-agent.
 
 use std::collections::BTreeMap;
-use std::collections::BTreeSet;
 use std::net::{IpAddr, Ipv6Addr, SocketAddr, SocketAddrV6};
 use std::time::Duration;
 
@@ -13,6 +12,8 @@ use chrono::{DateTime, Utc};
 use daft::Diffable;
 use id_map::IdMap;
 use id_map::IdMappable;
+use iddqd::id_upcast;
+use iddqd::IdOrdItem;
 use omicron_common::disk::{DatasetKind, DatasetName};
 use omicron_common::ledger::Ledgerable;
 use omicron_common::{
@@ -128,7 +129,9 @@ pub struct ConfigReconcilerInventory {
     pub external_disks:
         BTreeMap<PhysicalDiskUuid, ConfigReconcilerInventoryResult>,
     pub datasets: BTreeMap<DatasetUuid, ConfigReconcilerInventoryResult>,
-    pub orphaned_datasets: BTreeSet<DatasetName>,
+    // TODO-john replace once JsonSchema support lands
+    //pub orphaned_datasets: IdOrdMap<OrphanedDataset>,
+    pub orphaned_datasets: Vec<OrphanedDataset>,
     pub zones: BTreeMap<OmicronZoneUuid, ConfigReconcilerInventoryResult>,
 }
 
@@ -175,10 +178,30 @@ impl ConfigReconcilerInventory {
             last_reconciled_config: config,
             external_disks,
             datasets,
-            orphaned_datasets: BTreeSet::new(),
+            orphaned_datasets: Vec::new(),
             zones,
         }
     }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Deserialize, JsonSchema, Serialize)]
+pub struct OrphanedDataset {
+    pub name: DatasetName,
+    pub reason: String,
+    pub id: Option<DatasetUuid>,
+    pub mounted: bool,
+    pub available: ByteCount,
+    pub used: ByteCount,
+}
+
+impl IdOrdItem for OrphanedDataset {
+    type Key<'a> = &'a DatasetName;
+
+    fn key(&self) -> Self::Key<'_> {
+        &self.name
+    }
+
+    id_upcast!();
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Deserialize, JsonSchema, Serialize)]

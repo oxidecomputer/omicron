@@ -76,6 +76,7 @@ use nexus_sled_agent_shared::inventory::ConfigReconcilerInventory;
 use nexus_sled_agent_shared::inventory::ConfigReconcilerInventoryResult;
 use nexus_sled_agent_shared::inventory::ConfigReconcilerInventoryStatus;
 use nexus_sled_agent_shared::inventory::OmicronSledConfig;
+use nexus_sled_agent_shared::inventory::OrphanedDataset;
 use nexus_types::inventory::BaseboardId;
 use nexus_types::inventory::Collection;
 use nexus_types::inventory::PhysicalDiskFirmware;
@@ -85,7 +86,6 @@ use omicron_common::api::external::InternalContext;
 use omicron_common::api::external::LookupType;
 use omicron_common::api::external::ResourceType;
 use omicron_common::bail_unless;
-use omicron_common::disk::DatasetName;
 use omicron_uuid_kinds::CollectionUuid;
 use omicron_uuid_kinds::DatasetUuid;
 use omicron_uuid_kinds::GenericUuid;
@@ -2728,7 +2728,7 @@ impl DataStore {
         let mut last_reconciliation_orphaned_datasets = {
             use nexus_db_schema::schema::inv_last_reconciliation_orphaned_dataset::dsl;
 
-            let mut orphaned: BTreeMap<SledUuid, BTreeSet<DatasetName>> =
+            let mut orphaned: BTreeMap<SledUuid, Vec<OrphanedDataset>> =
                 BTreeMap::new();
 
             // TODO-performance This ought to be paginated like the other
@@ -2737,8 +2737,6 @@ impl DataStore {
             // (a) this table's primary key is 5 columns, and we don't have
             //     `paginated` support that wide
             // (b) we expect a very small number of orphaned datasets, generally
-            // (c) this table is going to go away in the near future anyway
-            //     (https://github.com/oxidecomputer/omicron/issues/6177)
             //
             // so we just do the lazy thing and load all the rows at once.
             let rows = dsl::inv_last_reconciliation_orphaned_dataset
@@ -2754,7 +2752,7 @@ impl DataStore {
                 orphaned
                     .entry(row.sled_id.into())
                     .or_default()
-                    .insert(row.try_into()?);
+                    .push(row.try_into()?);
             }
 
             orphaned
@@ -2883,6 +2881,13 @@ impl DataStore {
                         })?
                         .config
                         .clone();
+                    // TODO-john remove once we collect into an IdOrdMap
+                    let mut orphaned_datasets =
+                        last_reconciliation_orphaned_datasets
+                            .remove(&sled_id)
+                            .unwrap_or_default();
+                    orphaned_datasets
+                        .sort_unstable_by(|a, b| a.name.cmp(&b.name));
                     Ok::<_, Error>(ConfigReconcilerInventory {
                         last_reconciled_config,
                         external_disks: last_reconciliation_disk_results
@@ -2891,10 +2896,7 @@ impl DataStore {
                         datasets: last_reconciliation_dataset_results
                             .remove(&sled_id)
                             .unwrap_or_default(),
-                        orphaned_datasets:
-                            last_reconciliation_orphaned_datasets
-                                .remove(&sled_id)
-                                .unwrap_or_default(),
+                        orphaned_datasets,
                         zones: last_reconciliation_zone_results
                             .remove(&sled_id)
                             .unwrap_or_default(),
@@ -3084,7 +3086,7 @@ impl ConfigReconcilerRows {
                     InvLastReconciliationOrphanedDataset::new(
                         collection_id,
                         sled_id,
-                        dataset,
+                        dataset.clone(),
                     )
                 }),
             );
@@ -3274,6 +3276,7 @@ mod test {
     use nexus_inventory::examples::Representative;
     use nexus_inventory::examples::representative;
     use nexus_inventory::now_db_precision;
+    use nexus_sled_agent_shared::inventory::OrphanedDataset;
     use nexus_sled_agent_shared::inventory::{
         ConfigReconcilerInventory, ConfigReconcilerInventoryResult,
         ConfigReconcilerInventoryStatus, OmicronZoneImageSource,
@@ -4080,6 +4083,25 @@ mod test {
                     }
                 }
             };
+            // TODO-john remove once we collect into an IdOrdMap
+            let mut orphaned_datasets = (0..5)
+                .map(|i| OrphanedDataset {
+                    name: DatasetName::new(
+                        ZpoolName::new_external(ZpoolUuid::new_v4()),
+                        DatasetKind::Cockroach,
+                    ),
+                    reason: format!("test orphan {i}"),
+                    id: if i % 2 == 0 {
+                        Some(DatasetUuid::new_v4())
+                    } else {
+                        None
+                    },
+                    mounted: i % 2 == 1,
+                    available: (10 * i).into(),
+                    used: i.into(),
+                })
+                .collect::<Vec<_>>();
+            orphaned_datasets.sort_unstable_by(|a, b| a.name.cmp(&b.name));
             ConfigReconcilerInventory {
                 last_reconciled_config: sa2
                     .ledgered_sled_config
@@ -4093,14 +4115,7 @@ mod test {
                 datasets: (0..10)
                     .map(|i| (DatasetUuid::new_v4(), make_result("dataset", i)))
                     .collect(),
-                orphaned_datasets: (0..5)
-                    .map(|_| {
-                        DatasetName::new(
-                            ZpoolName::new_external(ZpoolUuid::new_v4()),
-                            DatasetKind::Cockroach,
-                        )
-                    })
-                    .collect(),
+                orphaned_datasets,
                 zones: (0..10)
                     .map(|i| {
                         (OmicronZoneUuid::new_v4(), make_result("zone", i))

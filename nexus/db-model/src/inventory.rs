@@ -38,6 +38,7 @@ use nexus_db_schema::schema::{
     sw_caboose, sw_root_of_trust_page,
 };
 use nexus_sled_agent_shared::inventory::ConfigReconcilerInventoryStatus;
+use nexus_sled_agent_shared::inventory::OrphanedDataset;
 use nexus_sled_agent_shared::inventory::{
     ConfigReconcilerInventoryResult, OmicronSledConfig, OmicronZoneConfig,
     OmicronZoneDataset, OmicronZoneImageSource, OmicronZoneType,
@@ -1058,29 +1059,39 @@ pub struct InvLastReconciliationOrphanedDataset {
     pool_id: DbTypedUuid<ZpoolKind>,
     kind: crate::DatasetKind,
     zone_name: String,
+    pub reason: String,
+    pub id: Option<DbTypedUuid<DatasetKind>>,
+    pub mounted: bool,
+    pub available: ByteCount,
+    pub used: ByteCount,
 }
 
 impl InvLastReconciliationOrphanedDataset {
     pub fn new(
         inv_collection_id: CollectionUuid,
         sled_id: SledUuid,
-        dataset_name: &DatasetName,
+        orphan: OrphanedDataset,
     ) -> Self {
+        let OrphanedDataset { name, reason, id, mounted, available, used } =
+            orphan;
+        let (pool, kind) = name.into_parts();
+
         Self {
             inv_collection_id: inv_collection_id.into(),
             sled_id: sled_id.into(),
-            pool_id: dataset_name.pool().id().into(),
-            kind: dataset_name.kind().into(),
-            zone_name: dataset_name
-                .kind()
-                .zone_name()
-                .map(String::from)
-                .unwrap_or_default(),
+            pool_id: pool.id().into(),
+            kind: (&kind).into(),
+            zone_name: kind.zone_name().map(String::from).unwrap_or_default(),
+            reason,
+            id: id.map(From::from),
+            mounted,
+            available: ByteCount(available),
+            used: ByteCount(used),
         }
     }
 }
 
-impl TryFrom<InvLastReconciliationOrphanedDataset> for DatasetName {
+impl TryFrom<InvLastReconciliationOrphanedDataset> for OrphanedDataset {
     type Error = omicron_common::api::external::Error;
 
     fn try_from(
@@ -1093,7 +1104,15 @@ impl TryFrom<InvLastReconciliationOrphanedDataset> for DatasetName {
         let zone_name =
             if row.zone_name.is_empty() { None } else { Some(row.zone_name) };
         let kind = crate::DatasetKind::try_into_api(row.kind, zone_name)?;
-        Ok(Self::new(pool, kind))
+        let name = DatasetName::new(pool, kind);
+        Ok(Self {
+            name,
+            reason: row.reason,
+            id: row.id.map(From::from),
+            mounted: row.mounted,
+            available: *row.available,
+            used: *row.used,
+        })
     }
 }
 

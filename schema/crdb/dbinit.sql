@@ -3762,7 +3762,7 @@ CREATE TABLE IF NOT EXISTS omicron.public.inv_dataset (
     inv_collection_id UUID NOT NULL,
     sled_id UUID NOT NULL,
 
-    -- The control plane ID of the zpool.
+    -- The control plane ID of the dataset.
     -- This is nullable because datasets have been historically
     -- self-managed by the Sled Agent, and some don't have explicit UUIDs.
     id UUID,
@@ -3836,10 +3836,6 @@ CREATE TABLE IF NOT EXISTS omicron.public.inv_last_reconciliation_dataset_result
     PRIMARY KEY (inv_collection_id, sled_id, dataset_id)
 );
 
--- This table should be temporary! It exists so we can report orphaned datasets,
--- confirm they look like what we expect, then start automatically deleting them
--- (at which point we don't need to report them, because they won't be orphans
--- any longer). https://github.com/oxidecomputer/omicron/issues/6177
 CREATE TABLE IF NOT EXISTS omicron.public.inv_last_reconciliation_orphaned_dataset (
     -- where this observation came from
     -- (foreign key into `inv_collection` table)
@@ -3858,11 +3854,22 @@ CREATE TABLE IF NOT EXISTS omicron.public.inv_last_reconciliation_orphaned_datas
     pool_id UUID NOT NULL,
     kind omicron.public.dataset_kind NOT NULL,
     zone_name TEXT NOT NULL,
-
     CONSTRAINT zone_name_for_zone_kind CHECK (
       (kind != 'zone' AND zone_name = '') OR
       (kind = 'zone' AND zone_name != '')
     ),
+
+    reason TEXT NOT NULL,
+
+    -- The control plane ID of the dataset.
+    -- This is nullable because this is attached as the `oxide:uuid` property in
+    -- ZFS, and we can't guarantee it exists for any given dataset.
+    id UUID,
+
+    -- Properties of the dataset at the time we detected it was an orphan.
+    mounted BOOL NOT NULL,
+    available INT8 NOT NULL,
+    used INT8 NOT NULL,
 
     PRIMARY KEY (inv_collection_id, sled_id, pool_id, kind, zone_name)
 );
