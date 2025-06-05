@@ -10310,6 +10310,7 @@ dependencies = [
  "tabled 0.15.0",
  "tokio",
  "tufaceous-artifact",
+ "update-common",
  "uuid",
 ]
 

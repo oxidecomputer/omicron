@@ -59,6 +59,7 @@ use tabled::Tabled;
 use tufaceous_artifact::ArtifactHash;
 use tufaceous_artifact::ArtifactVersion;
 use tufaceous_artifact::ArtifactVersionError;
+use update_common::artifacts::{ArtifactsWithPlan, ControlPlaneZonesMode};
 
 mod log_capture;
 
@@ -679,6 +680,11 @@ enum SetArgs {
     NumNexus { num_nexus: u16 },
     /// system's external DNS zone name (suffix)
     ExternalDnsZoneName { zone_name: String },
+    /// system target release
+    TargetRelease {
+        /// TUF repo containing release artifacts
+        filename: Utf8PathBuf,
+    },
 }
 
 #[derive(Debug, Args)]
@@ -1624,6 +1630,31 @@ fn cmd_set(
             );
             state.config_mut().set_external_dns_zone_name(zone_name);
             rv
+        }
+        SetArgs::TargetRelease { filename } => {
+            let file = std::fs::File::open(&filename)
+                .with_context(|| format!("open {:?}", filename))?;
+            let buf = std::io::BufReader::new(file);
+            let rt = tokio::runtime::Runtime::new()
+                .context("creating tokio runtime")?;
+            let artifacts_with_plan = rt.block_on(async {
+                ArtifactsWithPlan::from_zip(
+                    buf,
+                    None,
+                    ArtifactHash([0; 32]), // XXX-dap
+                    ControlPlaneZonesMode::Split,
+                    &sim.log,
+                )
+                .await
+                .with_context(|| format!("unpacking {:?}", filename))
+            })?;
+            let description = artifacts_with_plan.description().clone();
+            drop(artifacts_with_plan);
+            state
+                .system_mut()
+                .description_mut()
+                .set_target_release(Some(description));
+            format!("set target release based on {}", filename)
         }
     };
 

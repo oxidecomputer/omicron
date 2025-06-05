@@ -457,6 +457,14 @@ impl SystemDescription {
         Ok(sled.sp_inactive_caboose().map(|c| c.version.as_ref()))
     }
 
+    pub fn set_target_release(
+        &mut self,
+        tuf_repo: Option<TufRepoDescription>,
+    ) -> &mut Self {
+        self.tuf_repo = tuf_repo;
+        self
+    }
+
     pub fn to_collection_builder(&self) -> anyhow::Result<CollectionBuilder> {
         let collector_label = self
             .collector

@@ -40,7 +40,9 @@ slog-term.workspace = true
 slog.workspace = true
 swrite.workspace = true
 tabled.workspace = true
+tokio.workspace = true
 tufaceous-artifact.workspace = true
+update-common.workspace = true
 uuid.workspace = true
 omicron-workspace-hack.workspace = true
 
