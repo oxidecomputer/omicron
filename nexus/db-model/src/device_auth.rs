@@ -177,6 +177,7 @@ impl DeviceAccessToken {
 impl From<DeviceAccessToken> for views::DeviceAccessTokenGrant {
     fn from(access_token: DeviceAccessToken) -> Self {
         Self {
+            token_id: access_token.id.into_untyped_uuid(),
             access_token: format!("oxide-token-{}", access_token.token),
             token_type: views::DeviceAccessTokenType::Bearer,
         }

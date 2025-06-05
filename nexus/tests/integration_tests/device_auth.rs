@@ -179,6 +179,7 @@ async fn test_device_auth_flow(cptestctx: &ControlPlaneTestContext) {
     assert_eq!(get_tokens_priv(testctx).await.len(), 0);
     let tokens_unpriv_after = get_tokens_unpriv(testctx).await;
     assert_eq!(tokens_unpriv_after.len(), 1);
+    assert_eq!(tokens_unpriv_after[0].id, token.token_id);
     assert_eq!(tokens_unpriv_after[0].time_expires, None);
 
     // now make a request with the token. it 403s because unpriv user has no
