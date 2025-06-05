@@ -24,8 +24,8 @@ pub struct HistArgs {
 
 #[derive(clap::Subcommand)]
 pub enum HistCommand {
-    /// Analyze historical test timing for recent commits
-    Summary {
+    /// Compare test timing across recent commits or between specific commits
+    Compare {
         /// Number of recent commits to analyze
         #[arg(short = 'n', long, default_value = "10")]
         count: usize,
@@ -33,6 +33,14 @@ pub enum HistCommand {
         /// Include commits without timing data (show errors)
         #[arg(long)]
         include_missing: bool,
+
+        /// Compare performance of a specific test suite across commits
+        #[arg(long)]
+        suite: Option<String>,
+
+        /// Compare performance of a specific test within the specified test suite across commits
+        #[arg(long, requires = "suite")]
+        test: Option<String>,
     },
     /// Show test suite breakdown for a specific commit
     Testsuites {
@@ -89,7 +97,6 @@ pub struct TestCaseInfo {
 #[derive(Debug, Default, Clone)]
 pub struct TestSuiteInfo {
     pub name: String,
-    pub tests: u32,
     pub time: Duration,
     pub test_cases: Vec<TestCaseInfo>,
 }
@@ -111,8 +118,15 @@ pub fn run_cmd(args: HistArgs) -> Result<()> {
 
 async fn run_cmd_async(args: HistArgs) -> Result<()> {
     match args.command {
-        HistCommand::Summary { count, include_missing } => {
-            run_summary_command(count, args.platform, include_missing).await
+        HistCommand::Compare { count, include_missing, suite, test } => {
+            run_compare_command(
+                count,
+                args.platform,
+                include_missing,
+                suite,
+                test,
+            )
+            .await
         }
         HistCommand::Testsuites { commit, reverse } => {
             let commit_hash = get_commit_hash(commit).await?;
@@ -151,7 +165,43 @@ async fn get_commit_hash(commit: Option<String>) -> Result<String> {
     }
 }
 
-async fn run_summary_command(
+async fn run_compare_command(
+    count: usize,
+    platform: Platform,
+    include_missing: bool,
+    suite: Option<String>,
+    test: Option<String>,
+) -> Result<()> {
+    // Route to specific comparison type based on arguments
+    if let Some(test_name) = test {
+        // test requires suite, so suite should be Some here due to clap validation
+        let suite_name =
+            suite.expect("test argument requires suite to be specified");
+        return compare_test_across_commits(
+            count,
+            platform,
+            include_missing,
+            &suite_name,
+            &test_name,
+        )
+        .await;
+    }
+
+    if let Some(suite_name) = suite {
+        return compare_test_suite_across_commits(
+            count,
+            platform,
+            include_missing,
+            &suite_name,
+        )
+        .await;
+    }
+
+    // Default: show overall summary comparison (existing functionality)
+    compare_overall_across_commits(count, platform, include_missing).await
+}
+
+async fn compare_overall_across_commits(
     count: usize,
     platform: Platform,
     include_missing: bool,
@@ -282,6 +332,326 @@ async fn run_summary_command(
     Ok(())
 }
 
+async fn compare_test_suite_across_commits(
+    count: usize,
+    platform: Platform,
+    include_missing: bool,
+    suite_name: &str,
+) -> Result<()> {
+    println!(
+        "Comparing '{}' test suite performance across {} recent commits ({})...",
+        suite_name,
+        count,
+        platform.series()
+    );
+
+    let mut analyzed_count = 0;
+    let mut skipped_count = 0;
+    let mut commit_offset = 0;
+    let mut first_result = true;
+
+    // Keep fetching commits until we have enough data points or run out of commits
+    while analyzed_count < count {
+        let batch_size = std::cmp::max(count - analyzed_count, 10);
+        let commits =
+            get_recent_commits_with_offset(batch_size, commit_offset).await?;
+
+        if commits.is_empty() {
+            break;
+        }
+
+        // Concurrently fetch timing data for all commits in this batch
+        let fetch_tasks: Vec<_> = commits
+            .iter()
+            .map(|commit_line| {
+                let commit_hash =
+                    commit_line.split_whitespace().next().unwrap_or("");
+                let platform = platform.clone();
+                let commit_line = commit_line.clone();
+
+                async move {
+                    let result =
+                        fetch_test_timing_data_async(&commit_hash, &platform)
+                            .await;
+                    (commit_line, commit_hash.to_string(), result)
+                }
+            })
+            .collect();
+
+        let fetch_results = join_all(fetch_tasks).await;
+        let mut found_data_in_batch = false;
+
+        // Process results in order
+        for (commit_line, commit_hash, fetch_result) in fetch_results {
+            match fetch_result {
+                Ok(timing_data) => match parse_junit_xml(&timing_data) {
+                    Ok(summary) => {
+                        // Find the specific test suite
+                        if let Some(suite) = summary
+                            .test_suites
+                            .iter()
+                            .find(|s| s.name == suite_name)
+                        {
+                            analyzed_count += 1;
+                            found_data_in_batch = true;
+
+                            // Print header on first result
+                            if first_result {
+                                println!(
+                                    "{:>12}   {:>6}   {}",
+                                    "DURATION", "TESTS", "COMMIT"
+                                );
+                                first_result = false;
+                            }
+
+                            // Extract abbreviated commit hash and commit message
+                            let short_hash = &commit_hash
+                                [..std::cmp::min(8, commit_hash.len())];
+                            let commit_msg = commit_line
+                                .split_whitespace()
+                                .skip(1)
+                                .collect::<Vec<_>>()
+                                .join(" ");
+
+                            println!(
+                                "{:>12}   {:>6}   {} {}",
+                                format!("{:.2}s", suite.time.as_secs_f64()),
+                                suite.test_cases.len(),
+                                short_hash,
+                                commit_msg
+                            );
+
+                            if analyzed_count >= count {
+                                break;
+                            }
+                        } else {
+                            if include_missing {
+                                println!("  (skipped): {}", commit_line);
+                                println!(
+                                    "    Test suite '{}' not found",
+                                    suite_name
+                                );
+                            } else {
+                                skipped_count += 1;
+                            }
+                        }
+                    }
+                    Err(e) => {
+                        if include_missing {
+                            println!("  (skipped): {}", commit_line);
+                            println!(
+                                "    Could not parse test timing data: {}",
+                                e
+                            );
+                        } else {
+                            skipped_count += 1;
+                        }
+                    }
+                },
+                Err(e) => {
+                    if include_missing {
+                        println!("  (skipped): {}", commit_line);
+                        println!("    No timing data available: {}", e);
+                    } else {
+                        skipped_count += 1;
+                    }
+                }
+            }
+        }
+
+        commit_offset += commits.len();
+
+        if !found_data_in_batch {
+            break;
+        }
+    }
+
+    if skipped_count > 0 {
+        println!(
+            "\nSkipped {} commits without timing data (use --include-missing to show them)",
+            skipped_count
+        );
+    }
+
+    if analyzed_count == 0 {
+        println!("\nNo commits with test suite '{}' found!", suite_name);
+    }
+
+    Ok(())
+}
+
+async fn compare_test_across_commits(
+    count: usize,
+    platform: Platform,
+    include_missing: bool,
+    suite_name: &str,
+    test_name: &str,
+) -> Result<()> {
+    println!(
+        "Comparing '{}' test performance in suite '{}' across {} recent commits ({})...",
+        test_name,
+        suite_name,
+        count,
+        platform.series()
+    );
+
+    let mut analyzed_count = 0;
+    let mut skipped_count = 0;
+    let mut commit_offset = 0;
+    let mut first_result = true;
+
+    // Keep fetching commits until we have enough data points or run out of commits
+    while analyzed_count < count {
+        let batch_size = std::cmp::max(count - analyzed_count, 10);
+        let commits =
+            get_recent_commits_with_offset(batch_size, commit_offset).await?;
+
+        if commits.is_empty() {
+            break;
+        }
+
+        // Concurrently fetch timing data for all commits in this batch
+        let fetch_tasks: Vec<_> = commits
+            .iter()
+            .map(|commit_line| {
+                let commit_hash =
+                    commit_line.split_whitespace().next().unwrap_or("");
+                let platform = platform.clone();
+                let commit_line = commit_line.clone();
+
+                async move {
+                    let result =
+                        fetch_test_timing_data_async(&commit_hash, &platform)
+                            .await;
+                    (commit_line, commit_hash.to_string(), result)
+                }
+            })
+            .collect();
+
+        let fetch_results = join_all(fetch_tasks).await;
+        let mut found_data_in_batch = false;
+
+        // Process results in order
+        for (commit_line, commit_hash, fetch_result) in fetch_results {
+            match fetch_result {
+                Ok(timing_data) => match parse_junit_xml(&timing_data) {
+                    Ok(summary) => {
+                        // Find the specific test suite
+                        if let Some(suite) = summary
+                            .test_suites
+                            .iter()
+                            .find(|s| s.name == suite_name)
+                        {
+                            // Find the specific test within the suite
+                            if let Some(test_case) = suite
+                                .test_cases
+                                .iter()
+                                .find(|tc| tc.name == test_name)
+                            {
+                                analyzed_count += 1;
+                                found_data_in_batch = true;
+
+                                // Print header on first result
+                                if first_result {
+                                    println!(
+                                        "{:>12}   {}",
+                                        "DURATION", "COMMIT"
+                                    );
+                                    first_result = false;
+                                }
+
+                                // Extract abbreviated commit hash and commit message
+                                let short_hash = &commit_hash
+                                    [..std::cmp::min(8, commit_hash.len())];
+                                let commit_msg = commit_line
+                                    .split_whitespace()
+                                    .skip(1)
+                                    .collect::<Vec<_>>()
+                                    .join(" ");
+
+                                println!(
+                                    "{:>12}   {} {}",
+                                    format!(
+                                        "{:.3}s",
+                                        test_case.time.as_secs_f64()
+                                    ),
+                                    short_hash,
+                                    commit_msg
+                                );
+
+                                if analyzed_count >= count {
+                                    break;
+                                }
+                            } else {
+                                if include_missing {
+                                    println!("  (skipped): {}", commit_line);
+                                    println!(
+                                        "    Test '{}' not found in suite '{}'",
+                                        test_name, suite_name
+                                    );
+                                } else {
+                                    skipped_count += 1;
+                                }
+                            }
+                        } else {
+                            if include_missing {
+                                println!("  (skipped): {}", commit_line);
+                                println!(
+                                    "    Test suite '{}' not found",
+                                    suite_name
+                                );
+                            } else {
+                                skipped_count += 1;
+                            }
+                        }
+                    }
+                    Err(e) => {
+                        if include_missing {
+                            println!("  (skipped): {}", commit_line);
+                            println!(
+                                "    Could not parse test timing data: {}",
+                                e
+                            );
+                        } else {
+                            skipped_count += 1;
+                        }
+                    }
+                },
+                Err(e) => {
+                    if include_missing {
+                        println!("  (skipped): {}", commit_line);
+                        println!("    No timing data available: {}", e);
+                    } else {
+                        skipped_count += 1;
+                    }
+                }
+            }
+        }
+
+        commit_offset += commits.len();
+
+        if !found_data_in_batch {
+            break;
+        }
+    }
+
+    if skipped_count > 0 {
+        println!(
+            "\nSkipped {} commits without timing data (use --include-missing to show them)",
+            skipped_count
+        );
+    }
+
+    if analyzed_count == 0 {
+        println!(
+            "\nNo commits with test '{}' in suite '{}' found!",
+            test_name, suite_name
+        );
+    }
+
+    Ok(())
+}
+
 async fn show_commit_detail(
     commit_hash: &str,
     platform: &Platform,
@@ -326,7 +696,7 @@ async fn show_commit_detail(
                         "{:<width$}   {:8.2}s   {:>10}",
                         suite.name,
                         suite.time.as_secs_f64(),
-                        suite.tests,
+                        suite.test_cases.len(),
                         width = max_name_len
                     );
                 }
@@ -413,7 +783,7 @@ async fn show_tests_in_suite(
 
                         println!(
                             "\nSummary: {} tests, total duration: {:.3}s",
-                            suite.tests,
+                            suite.test_cases.len(),
                             suite.time.as_secs_f64()
                         );
                     }
@@ -594,12 +964,6 @@ fn parse_junit_xml(junit_xml: &str) -> Result<JunitSummary> {
                                         String::from_utf8_lossy(&attr.value)
                                             .to_string();
                                 }
-                                b"tests" => {
-                                    suite_info.tests = parse_attribute(
-                                        &attr,
-                                        "suite tests count",
-                                    )?;
-                                }
                                 _ => {}
                             }
                         }
@@ -734,7 +1098,7 @@ mod tests {
             .iter()
             .find(|suite| suite.name == "omicron-nexus")
             .expect("Should find omicron-nexus test suite");
-        assert_eq!(nexus_suite.tests, 171);
+        assert_eq!(nexus_suite.test_cases.len(), 171);
         assert_eq!(nexus_suite.time.as_secs_f64(), 5383.757);
 
         let setup_script = summary
@@ -742,7 +1106,7 @@ mod tests {
             .iter()
             .find(|suite| suite.name == "@setup-script:crdb-seed")
             .expect("Should find @setup-script:crdb-seed test suite");
-        assert_eq!(setup_script.tests, 1);
+        assert_eq!(setup_script.test_cases.len(), 1);
         assert_eq!(setup_script.time.as_secs_f64(), 25.965);
     }
 
