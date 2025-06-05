@@ -1889,9 +1889,9 @@ INFO all zones up-to-date
 INFO will ensure cockroachdb setting, setting: cluster.preserve_downgrade_option, value: DoNotModify
 generated blueprint 9034c710-3e57-45f3-99e5-4316145e87ac based on parent blueprint 7f976e0d-d2a5-4eeb-9e82-c82bc2824aba
 
-> blueprint-diff 9034c710-3e57-45f3-99e5-4316145e87ac 7f976e0d-d2a5-4eeb-9e82-c82bc2824aba
-from: blueprint 9034c710-3e57-45f3-99e5-4316145e87ac
-to:   blueprint 7f976e0d-d2a5-4eeb-9e82-c82bc2824aba
+> blueprint-diff 7f976e0d-d2a5-4eeb-9e82-c82bc2824aba 9034c710-3e57-45f3-99e5-4316145e87ac
+from: blueprint 7f976e0d-d2a5-4eeb-9e82-c82bc2824aba
+to:   blueprint 9034c710-3e57-45f3-99e5-4316145e87ac
 
  UNCHANGED SLEDS:
 
@@ -2066,7 +2066,7 @@ to:   blueprint 7f976e0d-d2a5-4eeb-9e82-c82bc2824aba
     ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
     sp_type   slot   part_number   serial_number   artifact_hash                                                      artifact_version   details                                                                                            
     ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
-+   sled      2      model2        serial2         7e6667e646ad001b54c8365a3d309c03f89c59102723d38d01697ee8079fe670   1.0.0              Sp { expected_active_version: ArtifactVersion("0.0.1"), expected_inactive_version: NoValidVersion }
+-   sled      2      model2        serial2         7e6667e646ad001b54c8365a3d309c03f89c59102723d38d01697ee8079fe670   1.0.0              Sp { expected_active_version: ArtifactVersion("0.0.1"), expected_inactive_version: NoValidVersion }
 
 
 internal DNS:
