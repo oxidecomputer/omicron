@@ -16,7 +16,7 @@ use nexus_db_queries::context::OpContext;
 use nexus_db_queries::db;
 use nexus_db_queries::db::DataStore;
 use nexus_types::internal_api::background::EreporterStatus;
-use nexus_types::internal_api::background::Sp;
+use nexus_types::internal_api::background::SpEreporterStatus;
 use nexus_types::internal_api::background::SpEreportIngesterStatus;
 use omicron_uuid_kinds::EreporterRestartUuid;
 use omicron_uuid_kinds::OmicronZoneUuid;
@@ -107,24 +107,26 @@ impl SpEreportIngester {
                     let clients = mgs_clients.clone();
                     let ingester = self.inner.clone();
                     async move {
-                        let status = ingester
+                       ingester
                             .ingest_sp_ereports(opctx, &clients, sp_type, slot)
-                            .await?;
-                        Some((Sp { sp_type, slot }, status))
+                            .await
                     }
                 })
                 .await;
-            if let Some(Some((sp, sp_status))) = sp_result {
-                status.sps.insert(sp, sp_status);
+            if let Some(Some(sp_status)) = sp_result {
+                status.sps.push(sp_status);
             }
         }
 
         // Wait for remaining ingestion tasks to come back.
         while let Some(sp_result) = tasks.join_next().await {
-            if let Some((sp, sp_status)) = sp_result {
-                status.sps.insert(sp, sp_status);
+            if let Some(sp_status) = sp_result {
+                status.sps.push(sp_status);
             }
         }
+
+        // Sort statuses for consistent output in OMDB commands.
+        status.sps.sort_unstable_by_key(|sp| (sp.sp_type, sp.slot));
 
         Ok(status)
     }
@@ -147,7 +149,7 @@ impl Ingester {
         clients: &[GatewayClient],
         sp_type: nexus_types::inventory::SpType,
         slot: u16,
-    ) -> Option<EreporterStatus> {
+    ) -> Option<SpEreporterStatus> {
         // Fetch the latest ereport from this SP.
         let latest = match self
             .datastore
@@ -156,11 +158,15 @@ impl Ingester {
         {
             Ok(latest) => latest,
             Err(error) => {
-                return Some(EreporterStatus {
+                return Some(SpEreporterStatus {
+                    sp_type,
+                    slot,
+                    EreporterStatus {
                     errors: vec![format!(
                         "failed to query for latest ereport: {error}"
                     )],
                     ..Default::default()
+                }
                 });
             }
         };
@@ -263,7 +269,11 @@ impl Ingester {
             );
         }
 
-        status
+        status.map(|status| SpEreporterStatus {
+            sp_type,
+            slot,
+            status,
+        })
     }
 
     async fn mgs_requests(
