@@ -1661,11 +1661,13 @@ fn cmd_set(
             let buf = std::io::BufReader::new(file);
             let rt = tokio::runtime::Runtime::new()
                 .context("creating tokio runtime")?;
+            // We're not using the repo hash here.  Make one up.
+            let repo_hash = ArtifactHash([0; 32]);
             let artifacts_with_plan = rt.block_on(async {
                 ArtifactsWithPlan::from_zip(
                     buf,
                     None,
-                    ArtifactHash([0; 32]), // XXX-dap
+                    repo_hash,
                     ControlPlaneZonesMode::Split,
                     &sim.log,
                 )
