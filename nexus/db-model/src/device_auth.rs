@@ -179,6 +179,8 @@ impl From<DeviceAccessToken> for views::DeviceAccessTokenGrant {
         Self {
             access_token: format!("oxide-token-{}", access_token.token),
             token_type: views::DeviceAccessTokenType::Bearer,
+            token_id: access_token.id.into_untyped_uuid(),
+            time_expires: access_token.time_expires,
         }
     }
 }

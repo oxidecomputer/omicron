@@ -11,7 +11,6 @@ use oxide_vpc::api::ClearVirt2PhysReq;
 use oxide_vpc::api::DelRouterEntryReq;
 use oxide_vpc::api::DhcpCfg;
 use oxide_vpc::api::Direction;
-use oxide_vpc::api::DumpVirt2PhysReq;
 use oxide_vpc::api::DumpVirt2PhysResp;
 use oxide_vpc::api::IpCfg;
 use oxide_vpc::api::IpCidr;
@@ -230,7 +229,10 @@ impl Handle {
     }
 
     /// Set new firewall rules.
-    pub fn set_fw_rules(&self, _: &SetFwRulesReq) -> Result<NoResp, OpteError> {
+    pub fn set_firewall_rules(
+        &self,
+        _: &SetFwRulesReq,
+    ) -> Result<NoResp, OpteError> {
         Ok(NO_RESPONSE)
     }
 
@@ -289,10 +291,7 @@ impl Handle {
     }
 
     /// Dump a mapping from a virtual NIC to a physical host.
-    pub fn dump_v2p(
-        &self,
-        _: &DumpVirt2PhysReq,
-    ) -> Result<DumpVirt2PhysResp, OpteError> {
+    pub fn dump_v2p(&self) -> Result<DumpVirt2PhysResp, OpteError> {
         unimplemented!("Not yet used in tests")
     }
 
