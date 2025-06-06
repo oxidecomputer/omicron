@@ -3484,6 +3484,7 @@ dependencies = [
  "gateway-client",
  "gateway-messages",
  "omicron-common",
+ "omicron-uuid-kinds",
  "omicron-workspace-hack",
  "reqwest",
  "serde",
@@ -3507,6 +3508,7 @@ dependencies = [
  "daft",
  "gateway-messages",
  "gateway-types",
+ "omicron-uuid-kinds",
  "omicron-workspace-hack",
  "progenitor 0.10.0",
  "rand 0.8.5",
@@ -3610,6 +3612,7 @@ dependencies = [
  "hex",
  "ipcc",
  "omicron-common",
+ "omicron-uuid-kinds",
  "omicron-workspace-hack",
  "schemars",
  "serde",
@@ -4850,7 +4853,6 @@ dependencies = [
  "tufaceous-artifact",
  "tufaceous-lib",
  "update-engine",
- "uuid",
 ]
 
 [[package]]
@@ -4862,6 +4864,7 @@ dependencies = [
  "hyper",
  "installinator-common",
  "omicron-common",
+ "omicron-uuid-kinds",
  "omicron-workspace-hack",
  "schemars",
  "serde",
@@ -4876,6 +4879,7 @@ version = "0.1.0"
 dependencies = [
  "installinator-common",
  "omicron-common",
+ "omicron-uuid-kinds",
  "omicron-workspace-hack",
  "progenitor 0.10.0",
  "regress",
@@ -4885,7 +4889,6 @@ dependencies = [
  "serde_json",
  "slog",
  "update-engine",
- "uuid",
 ]
 
 [[package]]
@@ -5003,13 +5006,13 @@ dependencies = [
  "ciborium",
  "libipcc",
  "omicron-common",
+ "omicron-uuid-kinds",
  "omicron-workspace-hack",
  "proptest",
  "serde",
  "test-strategy",
  "thiserror 1.0.69",
  "tufaceous-artifact",
- "uuid",
 ]
 
 [[package]]
