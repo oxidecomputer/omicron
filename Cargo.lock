@@ -7286,6 +7286,22 @@ dependencies = [
 ]
 
 [[package]]
+name = "omicron-hist"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "clap",
+ "crossterm",
+ "futures",
+ "omicron-workspace-hack",
+ "quick-xml",
+ "ratatui",
+ "reqwest",
+ "sigpipe",
+ "tokio",
+]
+
+[[package]]
 name = "omicron-live-tests"
 version = "0.1.0"
 dependencies = [

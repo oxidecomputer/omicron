@@ -5,7 +5,7 @@
 //! Historical build and test timing analysis
 
 use anyhow::{Context, Result};
-use clap::{Args, ValueEnum};
+use clap::{Parser, ValueEnum};
 use crossterm::{
     event::{
         self, DisableMouseCapture, EnableMouseCapture, Event as CrosstermEvent,
@@ -36,14 +36,16 @@ use std::io;
 use std::time::Duration;
 use tokio::process::Command;
 
-#[derive(Args)]
-pub struct HistArgs {
+#[derive(Parser)]
+#[command(name = "omicron-hist")]
+#[command(about = "Historical build and test timing analysis")]
+struct HistArgs {
     /// Platform to analyze (helios or linux)
     #[arg(short = 'p', long, default_value = "linux")]
-    pub platform: Platform,
+    platform: Platform,
 
     #[command(subcommand)]
-    pub command: HistCommand,
+    command: HistCommand,
 }
 
 #[derive(clap::Subcommand)]
@@ -110,6 +112,14 @@ impl Platform {
             Platform::Linux => "junit-linux",
         }
     }
+}
+
+#[tokio::main]
+async fn main() -> Result<()> {
+    sigpipe::reset();
+    
+    let args = HistArgs::parse();
+    run_cmd_async(args).await
 }
 
 #[derive(Debug, Default, Clone)]
@@ -258,14 +268,6 @@ impl SeriesSpec {
             SeriesSpec::Test { .. } => "Test Performance",
         }
     }
-}
-
-pub fn run_cmd(args: HistArgs) -> Result<()> {
-    sigpipe::reset();
-
-    let rt = tokio::runtime::Runtime::new()
-        .context("Failed to create tokio runtime")?;
-    rt.block_on(run_cmd_async(args))
 }
 
 async fn run_cmd_async(args: HistArgs) -> Result<()> {
@@ -676,36 +678,36 @@ async fn fetch_test_timing_data(
         commit_hash
     );
 
-    let output = Command::new("curl")
-        .args([
-            "--silent",
-            "--fail",
-            "--max-time",
-            "30", // Total operation timeout
-            "--connect-timeout",
-            "10", // Connection timeout
-            "--retry",
-            "3", // Retry 3 times on transient failures
-            "--retry-delay",
-            "2", // Wait 2 seconds between retries
-            "--retry-max-time",
-            "60", // Don't retry longer than 60 seconds total
-            "--retry-connrefused", // Retry on connection refused
-            &url,
-        ])
-        .output()
-        .await
-        .context("Failed to run curl command")?;
+    // Create a persistent HTTP client with connection pooling for better performance
+    static HTTP_CLIENT: std::sync::OnceLock<reqwest::Client> = std::sync::OnceLock::new();
+    let client = HTTP_CLIENT.get_or_init(|| {
+        reqwest::Client::builder()
+            .timeout(Duration::from_secs(30))
+            .connect_timeout(Duration::from_secs(10))
+            .pool_idle_timeout(Duration::from_secs(90))
+            .pool_max_idle_per_host(8)
+            .build()
+            .expect("Failed to create HTTP client")
+    });
 
-    if !output.status.success() {
+    let response = client
+        .get(&url)
+        .send()
+        .await
+        .context("Failed to send HTTP request")?;
+
+    if !response.status().is_success() {
         anyhow::bail!(
-            "Failed to fetch data from {}: {}",
+            "Failed to fetch data from {}: HTTP {}",
             url,
-            String::from_utf8_lossy(&output.stderr)
+            response.status()
         );
     }
 
-    String::from_utf8(output.stdout).context("Response was not valid UTF-8")
+    response
+        .text()
+        .await
+        .context("Failed to read response body as text")
 }
 
 fn parse_attribute<T: std::str::FromStr>(
