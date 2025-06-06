@@ -16,6 +16,7 @@ gateway-messages.workspace = true
 hex.workspace = true
 ipcc.workspace = true
 omicron-common.workspace = true
+omicron-uuid-kinds.workspace = true
 omicron-workspace-hack.workspace = true
 schemars.workspace = true
 serde.workspace = true

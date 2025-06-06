@@ -13,9 +13,9 @@ use std::{
 };
 
 use installinator_api::EventReportStatus;
+use omicron_uuid_kinds::MupdateUuid;
 use tokio::sync::{oneshot, watch};
 use update_engine::events::StepEventIsTerminal;
-use uuid::Uuid;
 
 /// Creates the artifact server and update tracker's interfaces to the
 /// installinator progress tracker.
@@ -45,13 +45,13 @@ pub(crate) struct IprArtifactServer {
     log: slog::Logger,
     // Note: this is a std::sync::Mutex because it isn't held past an await
     // point. Tokio mutexes have cancel-safety issues.
-    running_updates: Arc<Mutex<HashMap<Uuid, RunningUpdate>>>,
+    running_updates: Arc<Mutex<HashMap<MupdateUuid, RunningUpdate>>>,
 }
 
 impl IprArtifactServer {
     pub(crate) fn report_progress(
         &self,
-        update_id: Uuid,
+        update_id: MupdateUuid,
         report: installinator_common::EventReport,
     ) -> EventReportStatus {
         let mut running_updates = self.running_updates.lock().unwrap();
@@ -120,7 +120,7 @@ impl IprArtifactServer {
 #[must_use]
 pub struct IprUpdateTracker {
     log: slog::Logger,
-    running_updates: Arc<Mutex<HashMap<Uuid, RunningUpdate>>>,
+    running_updates: Arc<Mutex<HashMap<MupdateUuid, RunningUpdate>>>,
 }
 
 impl IprUpdateTracker {
@@ -131,7 +131,7 @@ impl IprUpdateTracker {
     ///
     /// Exposed for testing.
     #[doc(hidden)]
-    pub fn register(&self, update_id: Uuid) -> IprStartReceiver {
+    pub fn register(&self, update_id: MupdateUuid) -> IprStartReceiver {
         slog::debug!(self.log, "registering new update id"; "update_id" => %update_id);
         let (start_sender, start_receiver) = oneshot::channel();
 
@@ -142,7 +142,10 @@ impl IprUpdateTracker {
 
     /// Returns the status of a running update, or None if the update ID hasn't
     /// been registered.
-    pub fn update_state(&self, update_id: Uuid) -> Option<RunningUpdateState> {
+    pub fn update_state(
+        &self,
+        update_id: MupdateUuid,
+    ) -> Option<RunningUpdateState> {
         let running_updates = self.running_updates.lock().unwrap();
         running_updates.get(&update_id).map(|x| x.to_state())
     }
@@ -302,6 +305,7 @@ mod tests {
     use omicron_test_utils::dev::test_setup_log;
     use schemars::JsonSchema;
     use update_engine::ExecutionId;
+    use uuid::Uuid;
 
     use super::*;
 
@@ -311,11 +315,11 @@ mod tests {
 
         let (ipr_artifact, ipr_update_tracker) = new(&logctx.log);
 
-        let update_id = Uuid::new_v4();
+        let update_id = MupdateUuid::new_v4();
 
         assert_eq!(
             ipr_artifact.report_progress(
-                Uuid::new_v4(),
+                MupdateUuid::new_v4(),
                 installinator_common::EventReport::default()
             ),
             EventReportStatus::UnrecognizedUpdateId,
