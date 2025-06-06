@@ -40,10 +40,6 @@ use tokio::process::Command;
 #[command(name = "omicron-hist")]
 #[command(about = "Historical build and test timing analysis")]
 struct HistArgs {
-    /// Platform to analyze (helios or linux)
-    #[arg(short = 'p', long, default_value = "linux")]
-    platform: Platform,
-
     #[command(subcommand)]
     command: HistCommand,
 }
@@ -56,12 +52,21 @@ pub enum HistCommand {
         #[arg(short = 'n', long, default_value = "10")]
         count: usize,
 
+        /// Platform to analyze (helios or linux)
+        #[arg(
+            short = 'p',
+            long,
+            default_value = "linux",
+            value_delimiter = ','
+        )]
+        platforms: Vec<Platform>,
+
         /// Compare performance of specific test suites across commits (can specify multiple)
-        #[arg(long)]
+        #[arg(long, value_delimiter = ',')]
         suite: Vec<String>,
 
         /// Compare performance of specific tests within the specified test suite (requires --suite)
-        #[arg(long, requires = "suite")]
+        #[arg(long, requires = "suite", value_delimiter = ',')]
         test: Vec<String>,
 
         /// Display results as an interactive graph instead of a table
@@ -70,6 +75,10 @@ pub enum HistCommand {
     },
     /// Show test suite breakdown for a specific commit
     Testsuites {
+        /// Platform to analyze (helios or linux)
+        #[arg(short = 'p', long, default_value = "linux")]
+        platform: Platform,
+
         /// Specific commit hash (defaults to most recent commit)
         #[arg(long)]
         commit: Option<String>,
@@ -82,6 +91,10 @@ pub enum HistCommand {
     },
     /// Show individual tests within a specific test suite
     Tests {
+        /// Platform to analyze (helios or linux)
+        #[arg(short = 'p', long, default_value = "linux")]
+        platform: Platform,
+
         /// Name of the test suite to analyze
         suite_name: String,
 
@@ -106,7 +119,14 @@ pub enum Platform {
 }
 
 impl Platform {
-    fn series(&self) -> &'static str {
+    fn as_str(&self) -> &'static str {
+        match self {
+            Platform::Helios => "helios",
+            Platform::Linux => "linux",
+        }
+    }
+
+    fn junit_series(&self) -> &'static str {
         match self {
             Platform::Helios => "junit-helios",
             Platform::Linux => "junit-linux",
@@ -122,45 +142,99 @@ async fn main() -> Result<()> {
     run_cmd_async(args).await
 }
 
-#[derive(Debug, Default, Clone)]
-pub struct TestCaseInfo {
-    pub name: String,
-    pub time: Duration,
+#[derive(Debug, Clone)]
+struct RawTestArtifacts {
+    junit_xml: String,
+    environment_json: String,
+}
+
+impl RawTestArtifacts {
+    fn parse(self) -> Result<(JunitSummary, EnvironmentName)> {
+        let junit = parse_junit_xml(&self.junit_xml)?;
+        let environment_name = parse_environment_json(&self.environment_json)?;
+        Ok((junit, environment_name))
+    }
+}
+
+// Helps identify the environment on which this test ran.
+//
+// Examples can include: "aws", a specific gimlet name, etc.
+#[derive(Debug, Clone)]
+struct EnvironmentName(String);
+
+impl EnvironmentName {
+    fn as_str(&self) -> &str {
+        &self.0
+    }
 }
 
 #[derive(Debug, Default, Clone)]
-pub struct TestSuiteInfo {
-    pub name: String,
-    pub time: Duration,
-    pub test_cases: Vec<TestCaseInfo>,
+struct TestCaseInfo {
+    name: String,
+    time: Duration,
+}
+
+#[derive(Debug, Default, Clone)]
+struct TestSuiteInfo {
+    name: String,
+    time: Duration,
+    test_cases: Vec<TestCaseInfo>,
 }
 
 #[derive(Debug, Default)]
-pub struct JunitSummary {
-    pub test_suites: Vec<TestSuiteInfo>,
-    pub total_tests: u32,
-    pub total_time: Duration,
+struct JunitSummary {
+    test_suites: Vec<TestSuiteInfo>,
+    total_tests: u32,
+    total_time: Duration,
 }
 
-#[derive(Debug, Default)]
-pub struct JunitSummaryByCommit {
-    pub summary: JunitSummary,
-    pub commit_hash: String,
-    pub commit_message: String,
+#[derive(Debug)]
+struct JunitSummaryByCommit {
+    summary: JunitSummary,
+    commit_hash: String,
+    commit_message: String,
+    environment: Option<EnvironmentName>,
+    platform: Platform,
 }
 
 impl JunitSummaryByCommit {
+    // Returns a combined "platform + environment" string to uniquely identify
+    // this runner.
+    //
+    // It's useful for this to be appended to a data series name to uniquely
+    // identify it from the same test on a different environment.
+    fn host(&self) -> String {
+        format!(
+            "{}, {}",
+            self.platform.as_str(),
+            self.environment
+                .as_ref()
+                .map(|e| e.as_str().to_string())
+                .unwrap_or_else(|| "<unknown>".to_string())
+        )
+    }
+
     fn extract_total_times(
         summaries: Vec<JunitSummaryByCommit>,
     ) -> Vec<DataPoint> {
         let mut data = Vec::new();
-        for (commit_index, input) in summaries.into_iter().enumerate() {
+
+        let mut last_commit_hash = summaries[0].commit_hash.clone();
+        let mut commit_index = 0;
+
+        for input in summaries.into_iter() {
+            if last_commit_hash != input.commit_hash {
+                commit_index += 1;
+                last_commit_hash = input.commit_hash.clone();
+            }
+
+            let series_name = format!("Overall ({})", input.host());
             data.push(DataPoint {
                 commit_index,
                 value: input.summary.total_time.as_secs_f64(),
                 commit_hash: input.commit_hash,
                 commit_message: input.commit_message,
-                series_name: "Overall".to_string(),
+                series_name,
             });
         }
         data
@@ -171,7 +245,16 @@ impl JunitSummaryByCommit {
         suites: HashSet<String>,
     ) -> Vec<DataPoint> {
         let mut data = Vec::new();
-        for (commit_index, input) in summaries.into_iter().enumerate() {
+
+        let mut last_commit_hash = summaries[0].commit_hash.clone();
+        let mut commit_index = 0;
+
+        for input in summaries.into_iter() {
+            if last_commit_hash != input.commit_hash {
+                commit_index += 1;
+                last_commit_hash = input.commit_hash.clone();
+            }
+
             for suite in &input.summary.test_suites {
                 if suites.contains(&suite.name) {
                     data.push(DataPoint {
@@ -179,7 +262,11 @@ impl JunitSummaryByCommit {
                         value: suite.time.as_secs_f64(),
                         commit_hash: input.commit_hash.clone(),
                         commit_message: input.commit_message.clone(),
-                        series_name: suite.name.to_string(),
+                        series_name: format!(
+                            "{} ({})",
+                            suite.name.to_string(),
+                            input.host()
+                        ),
                     });
                 }
             }
@@ -193,7 +280,16 @@ impl JunitSummaryByCommit {
         tests: HashSet<String>,
     ) -> Vec<DataPoint> {
         let mut data = Vec::new();
-        for (commit_index, input) in summaries.into_iter().enumerate() {
+
+        let mut last_commit_hash = summaries[0].commit_hash.clone();
+        let mut commit_index = 0;
+
+        for input in summaries.into_iter() {
+            if last_commit_hash != input.commit_hash {
+                commit_index += 1;
+                last_commit_hash = input.commit_hash.clone();
+            }
+
             for observed_suite in &input.summary.test_suites {
                 if observed_suite.name == suite {
                     for test in &observed_suite.test_cases {
@@ -203,7 +299,11 @@ impl JunitSummaryByCommit {
                                 value: test.time.as_secs_f64(),
                                 commit_hash: input.commit_hash.clone(),
                                 commit_message: input.commit_message.clone(),
-                                series_name: test.name.to_string(),
+                                series_name: format!(
+                                    "{} ({})",
+                                    test.name.to_string(),
+                                    input.host()
+                                ),
                             });
                         }
                     }
@@ -235,10 +335,14 @@ impl SeriesSpec {
     async fn collect_data_points(
         self,
         count: usize,
-        platform: Platform,
+        platforms: Vec<Platform>,
     ) -> Result<Vec<DataPoint>> {
-        let collector = DataCollector::new(platform, count);
+        let collector = DataCollector::new(platforms, count);
         let data = collector.collect_junit().await?;
+
+        if data.is_empty() {
+            anyhow::bail!("No data collected")
+        };
 
         match self {
             SeriesSpec::Overall => {
@@ -272,16 +376,16 @@ impl SeriesSpec {
 
 async fn run_cmd_async(args: HistArgs) -> Result<()> {
     match args.command {
-        HistCommand::Compare { count, suite, test, graph } => {
-            run_compare_command(count, args.platform, suite, test, graph).await
+        HistCommand::Compare { count, platforms, suite, test, graph } => {
+            run_compare_command(count, platforms, suite, test, graph).await
         }
-        HistCommand::Testsuites { commit, reverse } => {
+        HistCommand::Testsuites { platform, commit, reverse } => {
             let commit_hash = get_commit_hash(commit).await?;
-            show_testsuites(&commit_hash, &args.platform, reverse).await
+            show_testsuites(&commit_hash, platform, reverse).await
         }
-        HistCommand::Tests { suite_name, commit, reverse } => {
+        HistCommand::Tests { platform, suite_name, commit, reverse } => {
             let commit_hash = get_commit_hash(commit).await?;
-            show_tests(&commit_hash, &args.platform, &suite_name, reverse).await
+            show_tests(&commit_hash, platform, &suite_name, reverse).await
         }
     }
 }
@@ -308,7 +412,7 @@ async fn get_commit_hash(commit: Option<String>) -> Result<String> {
 
 async fn run_compare_command(
     count: usize,
-    platform: Platform,
+    platforms: Vec<Platform>,
     suites: Vec<String>,
     tests: Vec<String>,
     graph: bool,
@@ -323,52 +427,61 @@ async fn run_compare_command(
         }
         let suite_name = &suites[0];
         if graph {
-            return compare_tests_graph(count, platform, suite_name, tests)
+            return compare_tests_graph(count, platforms, suite_name, tests)
                 .await;
         } else {
-            return compare_tests_table(count, platform, suite_name, tests)
+            return compare_tests_table(count, platforms, suite_name, tests)
                 .await;
         }
     }
 
     if !suites.is_empty() {
         if graph {
-            return compare_testsuites_graph(count, platform, suites).await;
+            return compare_testsuites_graph(count, platforms, suites).await;
         } else {
-            return compare_testsuites_table(count, platform, suites).await;
+            return compare_testsuites_table(count, platforms, suites).await;
         }
     }
 
     // Default: show overall summary comparison
     if graph {
-        compare_overall_graph(count, platform).await
+        compare_overall_graph(count, platforms).await
     } else {
-        compare_overall_table(count, platform).await
+        compare_overall_table(count, platforms).await
     }
 }
 
-async fn compare_overall_table(count: usize, platform: Platform) -> Result<()> {
+async fn compare_overall_table(
+    count: usize,
+    platforms: Vec<Platform>,
+) -> Result<()> {
+    let platform_names: Vec<_> =
+        platforms.iter().map(|p| p.junit_series()).collect();
     println!(
         "Analyzing historical {} test timing for {} recent commits...",
-        platform.series(),
+        platform_names.join(", "),
         count
     );
-    let collector = DataCollector::new(platform, count);
+    let collector = DataCollector::new(platforms, count);
     let summaries = collector.collect_junit().await?;
 
     if summaries.is_empty() {
         anyhow::bail!("\nNo commits with timing data found!");
     }
     println!(
-        "{:>12}   {:>6}   {:>11}   {}",
-        "TOTAL TIME", "TESTS", "TEST SUITES", "COMMIT"
+        "{:>12}   {:>6}   {:>11}   {:>28} {}",
+        "TOTAL TIME", "TESTS", "TEST SUITES", "ENVIRONMENT", "COMMIT"
     );
     for summary in summaries {
         println!(
-            "{:>12}   {:>6}   {:>11}   {} {}",
+            "{:>12}   {:>6}   {:>11}   {:>28} {} {}",
             format!("{:.2}s", summary.summary.total_time.as_secs_f64()),
             summary.summary.total_tests,
             summary.summary.test_suites.len(),
+            summary
+                .environment
+                .map(|e| e.as_str().to_string())
+                .unwrap_or_else(|| "-".to_string()),
             &summary.commit_hash[..8],
             summary.commit_message,
         );
@@ -379,7 +492,7 @@ async fn compare_overall_table(count: usize, platform: Platform) -> Result<()> {
 
 async fn compare_testsuites_table(
     count: usize,
-    platform: Platform,
+    platforms: Vec<Platform>,
     suites: Vec<String>,
 ) -> Result<()> {
     if suites.len() != 1 {
@@ -388,15 +501,21 @@ async fn compare_testsuites_table(
         );
     }
     let suite_name = &suites[0];
+    if platforms.len() != 1 {
+        anyhow::bail!(
+            "Multiple platform comparison table not yet implemented - use --graph for visualization"
+        );
+    }
+    let platform = platforms[0];
 
     println!(
         "Comparing '{}' test suite performance across {} recent commits ({})...",
         suite_name,
         count,
-        platform.series()
+        platform.junit_series()
     );
 
-    let collector = DataCollector::new(platform, count);
+    let collector = DataCollector::new(vec![platform], count);
     let summaries = collector.collect_junit().await?;
 
     if summaries.is_empty() {
@@ -423,26 +542,32 @@ async fn compare_testsuites_table(
 
 async fn compare_tests_table(
     count: usize,
-    platform: Platform,
+    platforms: Vec<Platform>,
     suite_name: &str,
     test_names: Vec<String>,
 ) -> Result<()> {
     if test_names.len() != 1 {
-        println!(
+        anyhow::bail!(
             "Multiple test comparison table not yet implemented - use --graph for visualization"
         );
     }
     let test_name = &test_names[0];
+    if platforms.len() != 1 {
+        anyhow::bail!(
+            "Multiple platform comparison table not yet implemented - use --graph for visualization"
+        );
+    }
+    let platform = platforms[0];
 
     println!(
         "Comparing '{}' test performance in suite '{}' across {} recent commits ({})...",
         test_name,
         suite_name,
         count,
-        platform.series()
+        platform.junit_series()
     );
 
-    let collector = DataCollector::new(platform, count);
+    let collector = DataCollector::new(vec![platform], count);
     let summaries = collector.collect_junit().await?;
 
     if summaries.is_empty() {
@@ -473,17 +598,17 @@ async fn compare_tests_table(
 
 async fn show_testsuites(
     commit_hash: &str,
-    platform: &Platform,
+    platform: Platform,
     reverse: bool,
 ) -> Result<()> {
     println!(
         "Analyzing {} test suite details for commit {}...",
-        platform.series(),
+        platform.junit_series(),
         commit_hash
     );
 
-    match fetch_test_timing_data(commit_hash, platform).await {
-        Ok(timing_data) => match parse_junit_xml(&timing_data) {
+    match fetch_test_artifacts(commit_hash, platform).await {
+        Ok(artifacts) => match parse_junit_xml(&artifacts.junit_xml) {
             Ok(summary) => {
                 // Sort test suites by execution time
                 let mut suites = summary.test_suites;
@@ -537,19 +662,19 @@ async fn show_testsuites(
 
 async fn show_tests(
     commit_hash: &str,
-    platform: &Platform,
+    platform: Platform,
     suite_name: &str,
     reverse: bool,
 ) -> Result<()> {
     println!(
         "Analyzing {} tests within '{}' for commit {}...",
-        platform.series(),
+        platform.junit_series(),
         suite_name,
         commit_hash
     );
 
-    match fetch_test_timing_data(commit_hash, platform).await {
-        Ok(timing_data) => match parse_junit_xml(&timing_data) {
+    match fetch_test_artifacts(commit_hash, platform).await {
+        Ok(artifacts) => match parse_junit_xml(&artifacts.junit_xml) {
             Ok(summary) => {
                 // Find the specific test suite
                 let target_suite = summary
@@ -668,15 +793,20 @@ async fn get_commits_at_offset(offset: usize) -> Result<Vec<String>> {
     Ok(commits)
 }
 
-async fn fetch_test_timing_data(
+fn buildomat_url(series: &str, commit: &str, file: &str) -> String {
+    format!(
+        "https://buildomat.eng.oxide.computer/wg/0/public/file/oxidecomputer/omicron/{series}/{commit}/{file}",
+    )
+}
+
+async fn fetch_test_artifacts(
     commit_hash: &str,
-    platform: &Platform,
-) -> Result<String> {
-    let url = format!(
-        "https://buildomat.eng.oxide.computer/wg/0/public/file/oxidecomputer/omicron/{}/{}/junit.xml",
-        platform.series(),
-        commit_hash
-    );
+    platform: Platform,
+) -> Result<RawTestArtifacts> {
+    let junit_url =
+        buildomat_url(platform.junit_series(), commit_hash, "junit.xml");
+    let env_url =
+        buildomat_url(platform.junit_series(), commit_hash, "environment.json");
 
     // Create a persistent HTTP client with connection pooling for better performance
     static HTTP_CLIENT: std::sync::OnceLock<reqwest::Client> =
@@ -686,23 +816,68 @@ async fn fetch_test_timing_data(
             .timeout(Duration::from_secs(30))
             .connect_timeout(Duration::from_secs(10))
             .pool_idle_timeout(Duration::from_secs(90))
-            .pool_max_idle_per_host(8)
+            .pool_max_idle_per_host(32)
             .build()
             .expect("Failed to create HTTP client")
     });
 
-    let response =
-        client.get(&url).send().await.context("Failed to send HTTP request")?;
+    // Fetch both files concurrently
+    let (junit_result, env_result) = tokio::join!(
+        client.get(&junit_url).send(),
+        client.get(&env_url).send()
+    );
 
-    if !response.status().is_success() {
+    let junit_response =
+        junit_result.context("Failed to send junit.xml request")?;
+    let env_response =
+        env_result.context("Failed to send environment.json request")?;
+
+    if !junit_response.status().is_success() {
         anyhow::bail!(
-            "Failed to fetch data from {}: HTTP {}",
-            url,
-            response.status()
+            "Failed to fetch junit.xml from {}: HTTP {}",
+            junit_url,
+            junit_response.status()
         );
     }
 
-    response.text().await.context("Failed to read response body as text")
+    if !env_response.status().is_success() {
+        anyhow::bail!(
+            "Failed to fetch environment.json from {}: HTTP {}",
+            env_url,
+            env_response.status()
+        );
+    }
+
+    // Extract text from both responses concurrently
+    let (junit_text_result, env_text_result) =
+        tokio::join!(junit_response.text(), env_response.text());
+
+    let junit_xml =
+        junit_text_result.context("Failed to read junit.xml response body")?;
+    let environment_json = env_text_result
+        .context("Failed to read environment.json response body")?;
+
+    Ok(RawTestArtifacts { junit_xml, environment_json })
+}
+
+fn parse_environment_json(json_str: &str) -> Result<EnvironmentName> {
+    use serde_json::Value;
+
+    let json: Value = serde_json::from_str(json_str)
+        .context("Failed to parse environment.json as JSON")?;
+
+    let factory_name = json
+        .get("buildomat")
+        .and_then(|buildomat| buildomat.get("factory"))
+        .and_then(|factory| factory.get("name"))
+        .and_then(|name| name.as_str())
+        .ok_or_else(|| {
+            anyhow::anyhow!(
+                "Missing buildomat.factory.name in environment.json"
+            )
+        })?;
+
+    Ok(EnvironmentName(factory_name.to_string()))
 }
 
 fn parse_attribute<T: std::str::FromStr>(
@@ -876,12 +1051,12 @@ fn parse_junit_xml(junit_xml: &str) -> Result<JunitSummary> {
 
 async fn collect_data_and_show_graph(
     count: usize,
-    platform: Platform,
+    platforms: Vec<Platform>,
     series: SeriesSpec,
 ) -> Result<()> {
     // Generate title and labels based on series
     let title = series.category();
-    let mut data_points = series.collect_data_points(count, platform).await?;
+    let mut data_points = series.collect_data_points(count, platforms).await?;
     if data_points.is_empty() {
         anyhow::bail!("No data points available");
     }
@@ -902,52 +1077,61 @@ async fn collect_data_and_show_graph(
     show_graph(data_points, &title)
 }
 
-async fn compare_overall_graph(count: usize, platform: Platform) -> Result<()> {
-    collect_data_and_show_graph(count, platform, SeriesSpec::Overall).await
+async fn compare_overall_graph(
+    count: usize,
+    platforms: Vec<Platform>,
+) -> Result<()> {
+    collect_data_and_show_graph(count, platforms, SeriesSpec::Overall).await
 }
 
 struct DataCollector {
-    platform: Platform,
+    platforms: Vec<Platform>,
     count: usize,
 }
 
 impl DataCollector {
-    fn new(platform: Platform, count: usize) -> Self {
-        Self { platform, count }
+    fn new(platforms: Vec<Platform>, count: usize) -> Self {
+        Self { platforms, count }
     }
 
     async fn collect_junit(&self) -> Result<Vec<JunitSummaryByCommit>> {
         let mut summaries = Vec::new();
-        let mut analyzed_count = 0;
+        let mut unique_commits = HashSet::new();
         let mut commit_offset = 0;
 
-        while analyzed_count < self.count {
+        while unique_commits.len() < self.count {
             let commits = get_commits_at_offset(commit_offset).await?;
             if commits.is_empty() {
                 break;
             }
 
-            // Concurrently fetch timing data for all commits in this batch
+            // Concurrently fetch timing data for all platform/commit combinations
             let fetch_tasks: Vec<_> = commits
                 .iter()
-                .map(|commit_line| {
-                    let commit_hash =
-                        commit_line.split_whitespace().next().unwrap_or("");
-                    let platform = self.platform;
-                    let commit_line = commit_line.clone();
-                    let commit_hash = commit_hash.to_string();
+                .flat_map(|commit_line| {
+                    self.platforms.iter().map(move |&platform| {
+                        let commit_hash =
+                            commit_line.split_whitespace().next().unwrap_or("");
+                        let commit_line = commit_line.clone();
+                        let commit_hash = commit_hash.to_string();
 
-                    tokio::spawn(async move {
-                        let fetch_result =
-                            fetch_test_timing_data(&commit_hash, &platform)
-                                .await;
-                        let parse_result = match fetch_result {
-                            Ok(timing_data) => parse_junit_xml(&timing_data),
-                            Err(e) => {
-                                return (commit_line, commit_hash, Err(e));
-                            }
-                        };
-                        (commit_line, commit_hash, parse_result)
+                        tokio::spawn(async move {
+                            let fetch_result =
+                                fetch_test_artifacts(&commit_hash, platform)
+                                    .await;
+                            let parse_result = match fetch_result {
+                                Ok(artifacts) => artifacts.parse(),
+                                Err(e) => {
+                                    return (
+                                        commit_line,
+                                        commit_hash,
+                                        platform,
+                                        Err(e),
+                                    );
+                                }
+                            };
+                            (commit_line, commit_hash, platform, parse_result)
+                        })
                     })
                 })
                 .collect();
@@ -958,10 +1142,16 @@ impl DataCollector {
             let fetch_results = fetch_results.context("Task join error")?;
             let mut found_data_in_batch = false;
 
-            for (commit_line, commit_hash, parse_result) in fetch_results {
+            for (commit_line, commit_hash, platform, parse_result) in
+                fetch_results
+            {
                 match parse_result {
-                    Ok(summary) => {
-                        analyzed_count += 1;
+                    Ok((summary, environment)) => {
+                        unique_commits.insert(commit_hash.clone());
+                        if unique_commits.len() > self.count {
+                            break;
+                        }
+
                         found_data_in_batch = true;
 
                         let commit_message = commit_line
@@ -974,13 +1164,17 @@ impl DataCollector {
                             summary,
                             commit_hash,
                             commit_message,
+                            environment: Some(environment),
+                            platform,
                         });
-
-                        if analyzed_count >= self.count {
-                            break;
-                        }
                     }
-                    Err(_) => {}
+                    Err(_err) => {
+                        // Showing this error spews a lot of noise about "404 not found", from
+                        // junit.xml files that appear to not exist.
+                        //
+                        // This appears to just be a normal byproduct of our environment;
+                        // let's focus attention on the data points which do exist.
+                    }
                 }
             }
 
@@ -997,22 +1191,22 @@ impl DataCollector {
 
 async fn compare_testsuites_graph(
     count: usize,
-    platform: Platform,
+    platforms: Vec<Platform>,
     suite_names: Vec<String>,
 ) -> Result<()> {
     let series = SeriesSpec::Suite(suite_names);
-    collect_data_and_show_graph(count, platform, series).await
+    collect_data_and_show_graph(count, platforms, series).await
 }
 
 async fn compare_tests_graph(
     count: usize,
-    platform: Platform,
+    platforms: Vec<Platform>,
     suite_name: &str,
     test_names: Vec<String>,
 ) -> Result<()> {
     let series =
         SeriesSpec::Test { suite: suite_name.to_string(), tests: test_names };
-    collect_data_and_show_graph(count, platform, series).await
+    collect_data_and_show_graph(count, platforms, series).await
 }
 
 fn show_graph(data_points: Vec<DataPoint>, title: &str) -> Result<()> {
@@ -1354,5 +1548,13 @@ mod tests {
         let result = parse_duration_seconds(&attr, "test time")
             .expect("Should parse duration");
         assert_eq!(result.as_secs_f64(), 123.45);
+    }
+
+    #[test]
+    fn test_parse_environment_json() {
+        let json_str = r#"{"buildomat":{"factory":{"name":"gimlet-EVT22200007-propolis","private":"EVT22200007/29699"}}}"#;
+        let env_name =
+            parse_environment_json(json_str).expect("Should parse environment");
+        assert_eq!(env_name.as_str(), "gimlet-EVT22200007-propolis");
     }
 }

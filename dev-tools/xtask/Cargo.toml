@@ -37,9 +37,3 @@ tabled.workspace = true
 textwrap.workspace = true
 toml.workspace = true
 usdt.workspace = true
-crossterm.workspace = true
-quick-xml.workspace = true
-ratatui.workspace = true
-sigpipe = "0.1.3"
-tokio = { workspace = true, features = ["rt", "rt-multi-thread", "process", "macros"] }
-futures.workspace = true
