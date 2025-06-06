@@ -1761,24 +1761,22 @@ pub struct SwitchPortSettingsCreate {
     #[serde(default)]
     pub groups: Vec<NameOrId>,
 
-    /// Links indexed by phy name. On ports that are not broken out, this is
-    /// always phy0. On a 2x breakout the options are phy0 and phy1, on 4x
-    /// phy0-phy3, etc.
+    /// Link configurations.
     pub links: Vec<LinkConfigCreate>,
 
-    /// Interfaces indexed by link name.
+    /// Interface configurations.
     #[serde(default)]
     pub interfaces: Vec<SwitchInterfaceConfigCreate>,
 
-    /// Routes indexed by interface name.
+    /// Route configurations.
     #[serde(default)]
     pub routes: Vec<RouteConfig>,
 
-    /// BGP peers indexed by interface name.
+    /// BGP peer configurations.
     #[serde(default)]
     pub bgp_peers: Vec<BgpPeerConfig>,
 
-    /// Addresses indexed by interface name.
+    /// Address configurations.
     pub addresses: Vec<AddressConfig>,
 }
 
@@ -1824,7 +1822,9 @@ pub enum SwitchPortGeometry {
 /// Switch link configuration.
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
 pub struct LinkConfigCreate {
-    /// Link name
+    /// Link name. On ports that are not broken out, this is always phy0.
+    /// On a 2x breakout the options are phy0 and phy1, on 4x
+    /// phy0-phy3, etc.
     pub link_name: Name,
 
     /// Maximum transmission unit for the link.
@@ -1841,10 +1841,10 @@ pub struct LinkConfigCreate {
     /// The speed of the link.
     pub speed: LinkSpeed,
 
-    /// Whether or not to set autonegotiation
+    /// Whether or not to set autonegotiation.
     pub autoneg: bool,
 
-    /// Optional tx_eq settings
+    /// Optional tx_eq settings.
     pub tx_eq: Option<TxEqConfig>,
 }
 
@@ -1938,7 +1938,9 @@ impl PartialEq<omicron_common::api::external::LldpLinkConfig>
 /// address will be created for the interface.
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
 pub struct SwitchInterfaceConfigCreate {
-    /// Link the interface will be assigned to
+    /// Link name. On ports that are not broken out, this is always phy0.
+    /// On a 2x breakout the options are phy0 and phy1, on 4x
+    /// phy0-phy3, etc.
     pub link_name: Name,
 
     /// Whether or not IPv6 is enabled.
@@ -1979,7 +1981,9 @@ pub struct SwitchVlanInterface {
 /// Route configuration data associated with a switch port configuration.
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
 pub struct RouteConfig {
-    /// Link the route should be active on
+    /// Link name. On ports that are not broken out, this is always phy0.
+    /// On a 2x breakout the options are phy0 and phy1, on 4x
+    /// phy0-phy3, etc.
     pub link_name: Name,
 
     /// The set of routes assigned to a switch port.
@@ -2012,7 +2016,10 @@ pub struct BgpConfigSelector {
 
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
 pub struct BgpPeerConfig {
-    /// Link that the peer is reachable on
+    /// Link that the peer is reachable on.
+    /// On ports that are not broken out, this is always phy0.
+    /// On a 2x breakout the options are phy0 and phy1, on 4x
+    /// phy0-phy3, etc.
     pub link_name: Name,
 
     pub peers: Vec<BgpPeer>,
@@ -2130,7 +2137,10 @@ pub struct BfdSessionDisable {
 /// A set of addresses associated with a port configuration.
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
 pub struct AddressConfig {
-    /// Link to assign the address to
+    /// Link to assign the addresses to.
+    /// On ports that are not broken out, this is always phy0.
+    /// On a 2x breakout the options are phy0 and phy1, on 4x
+    /// phy0-phy3, etc.
     pub link_name: Name,
 
     /// The set of addresses assigned to the port configuration.
