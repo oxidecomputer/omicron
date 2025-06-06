@@ -750,6 +750,10 @@ impl Generation {
         Generation(next_gen)
     }
 
+    pub const fn prev(&self) -> Option<Generation> {
+        if self.0 > 1 { Some(Generation(self.0 - 1)) } else { None }
+    }
+
     pub const fn as_u64(self) -> u64 {
         self.0
     }
