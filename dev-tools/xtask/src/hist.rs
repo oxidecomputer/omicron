@@ -31,6 +31,7 @@ use ratatui::{
         Axis, Block, Borders, Chart, Dataset, GraphType, Paragraph, Wrap,
     },
 };
+use std::collections::HashSet;
 use std::io;
 use std::time::Duration;
 use tokio::process::Command;
@@ -52,10 +53,6 @@ pub enum HistCommand {
         /// Number of recent commits to analyze
         #[arg(short = 'n', long, default_value = "10")]
         count: usize,
-
-        /// Include commits without timing data (show errors)
-        #[arg(long)]
-        include_missing: bool,
 
         /// Compare performance of specific test suites across commits (can specify multiple)
         #[arg(long)]
@@ -135,6 +132,78 @@ pub struct JunitSummary {
     pub total_time: Duration,
 }
 
+#[derive(Debug, Default)]
+pub struct JunitSummaryByCommit {
+    pub summary: JunitSummary,
+    pub commit_hash: String,
+    pub commit_message: String,
+}
+
+impl JunitSummaryByCommit {
+    fn extract_total_times(
+        summaries: Vec<JunitSummaryByCommit>,
+    ) -> Vec<DataPoint> {
+        let mut data = Vec::new();
+        for (commit_index, input) in summaries.into_iter().enumerate() {
+            data.push(DataPoint {
+                commit_index,
+                value: input.summary.total_time.as_secs_f64(),
+                commit_hash: input.commit_hash,
+                commit_message: input.commit_message,
+                series_name: "Overall".to_string(),
+            });
+        }
+        data
+    }
+
+    fn extract_suite_times(
+        summaries: Vec<JunitSummaryByCommit>,
+        suites: HashSet<String>,
+    ) -> Vec<DataPoint> {
+        let mut data = Vec::new();
+        for (commit_index, input) in summaries.into_iter().enumerate() {
+            for suite in &input.summary.test_suites {
+                if suites.contains(&suite.name) {
+                    data.push(DataPoint {
+                        commit_index,
+                        value: suite.time.as_secs_f64(),
+                        commit_hash: input.commit_hash.clone(),
+                        commit_message: input.commit_message.clone(),
+                        series_name: suite.name.to_string(),
+                    });
+                }
+            }
+        }
+        data
+    }
+
+    fn extract_test_times(
+        summaries: Vec<JunitSummaryByCommit>,
+        suite: &str,
+        tests: HashSet<String>,
+    ) -> Vec<DataPoint> {
+        let mut data = Vec::new();
+        for (commit_index, input) in summaries.into_iter().enumerate() {
+            for observed_suite in &input.summary.test_suites {
+                if observed_suite.name == suite {
+                    for test in &observed_suite.test_cases {
+                        if tests.contains(&test.name) {
+                            data.push(DataPoint {
+                                commit_index,
+                                value: test.time.as_secs_f64(),
+                                commit_hash: input.commit_hash.clone(),
+                                commit_message: input.commit_message.clone(),
+                                series_name: test.name.to_string(),
+                            });
+                        }
+                    }
+                }
+            }
+        }
+        data
+    }
+}
+
 #[derive(Debug, Clone)]
 pub struct DataPoint {
     pub commit_index: usize, // X-axis: commit index (0 = oldest)
@@ -147,48 +216,37 @@ pub struct DataPoint {
 #[derive(Debug)]
 pub enum SeriesSpec {
     Overall,
-    Suite(String),
-    Test { suite: String, test: String },
+    Suite(Vec<String>),
+    Test { suite: String, tests: Vec<String> },
 }
 
 impl SeriesSpec {
     /// Collect data points for this series specification
     async fn collect_data_points(
-        &self,
+        self,
         count: usize,
         platform: Platform,
-        include_missing: bool,
     ) -> Result<Vec<DataPoint>> {
+        let collector = DataCollector::new(platform, count);
+        let data = collector.collect_junit().await?;
+
         match self {
             SeriesSpec::Overall => {
-                collect_overall_data_points(count, platform, include_missing).await
+                Ok(JunitSummaryByCommit::extract_total_times(data))
             }
-            SeriesSpec::Suite(suite_name) => {
-                collect_suite_data_points(count, platform, include_missing, suite_name).await
+            SeriesSpec::Suite(suites) => {
+                Ok(JunitSummaryByCommit::extract_suite_times(
+                    data,
+                    HashSet::from_iter(suites.into_iter()),
+                ))
             }
-            SeriesSpec::Test { suite, test } => {
-                collect_test_data_points(count, platform, include_missing, suite, test).await
+            SeriesSpec::Test { suite, tests } => {
+                Ok(JunitSummaryByCommit::extract_test_times(
+                    data,
+                    &suite,
+                    HashSet::from_iter(tests.into_iter()),
+                ))
             }
-        }
-    }
-
-    /// Get a human-readable description of this series
-    fn description(&self) -> String {
-        match self {
-            SeriesSpec::Overall => "overall".to_string(),
-            SeriesSpec::Suite(name) => format!("suite '{}'", name),
-            SeriesSpec::Test { suite, test } => {
-                format!("test '{}' in suite '{}'", test, suite)
-            }
-        }
-    }
-
-    /// Get a short name for display in titles
-    fn display_name(&self) -> String {
-        match self {
-            SeriesSpec::Overall => "Overall".to_string(),
-            SeriesSpec::Suite(name) => name.clone(),
-            SeriesSpec::Test { test, .. } => test.clone(),
         }
     }
 
@@ -196,15 +254,10 @@ impl SeriesSpec {
     fn category(&self) -> &'static str {
         match self {
             SeriesSpec::Overall => "Overall Test Performance",
-            SeriesSpec::Suite(_) => "Test Suite Performance", 
+            SeriesSpec::Suite(_) => "Test Suite Performance",
             SeriesSpec::Test { .. } => "Test Performance",
         }
     }
-}
-
-#[derive(Debug)]
-pub struct GraphDataType {
-    pub series: Vec<SeriesSpec>,
 }
 
 pub fn run_cmd(args: HistArgs) -> Result<()> {
@@ -217,30 +270,16 @@ pub fn run_cmd(args: HistArgs) -> Result<()> {
 
 async fn run_cmd_async(args: HistArgs) -> Result<()> {
     match args.command {
-        HistCommand::Compare { count, include_missing, suite, test, graph } => {
-            run_compare_command(
-                count,
-                args.platform,
-                include_missing,
-                suite,
-                test,
-                graph,
-            )
-            .await
+        HistCommand::Compare { count, suite, test, graph } => {
+            run_compare_command(count, args.platform, suite, test, graph).await
         }
         HistCommand::Testsuites { commit, reverse } => {
             let commit_hash = get_commit_hash(commit).await?;
-            show_commit_detail(&commit_hash, &args.platform, reverse).await
+            show_testsuites(&commit_hash, &args.platform, reverse).await
         }
         HistCommand::Tests { suite_name, commit, reverse } => {
             let commit_hash = get_commit_hash(commit).await?;
-            show_tests_in_suite(
-                &commit_hash,
-                &args.platform,
-                &suite_name,
-                reverse,
-            )
-            .await
+            show_tests(&commit_hash, &args.platform, &suite_name, reverse).await
         }
     }
 }
@@ -250,7 +289,7 @@ async fn get_commit_hash(commit: Option<String>) -> Result<String> {
         Some(hash) => Ok(hash),
         None => {
             // Get the most recent commit
-            let commits = get_recent_commits_with_offset(1, 0).await?;
+            let commits = get_commits_at_offset(0).await?;
             if commits.is_empty() {
                 anyhow::bail!("No commits found");
             }
@@ -268,7 +307,6 @@ async fn get_commit_hash(commit: Option<String>) -> Result<String> {
 async fn run_compare_command(
     count: usize,
     platform: Platform,
-    include_missing: bool,
     suites: Vec<String>,
     tests: Vec<String>,
     graph: bool,
@@ -283,186 +321,63 @@ async fn run_compare_command(
         }
         let suite_name = &suites[0];
         if graph {
-            return show_tests_graph(
-                count,
-                platform,
-                include_missing,
-                suite_name,
-                tests,
-            )
-            .await;
+            return compare_tests_graph(count, platform, suite_name, tests)
+                .await;
         } else {
-            return show_tests_table(
-                count,
-                platform,
-                include_missing,
-                suite_name,
-                tests,
-            )
-            .await;
+            return compare_tests_table(count, platform, suite_name, tests)
+                .await;
         }
     }
 
     if !suites.is_empty() {
         if graph {
-            return show_suites_graph(
-                count,
-                platform,
-                include_missing,
-                suites,
-            )
-            .await;
+            return compare_testsuites_graph(count, platform, suites).await;
         } else {
-            return show_testsuites_table(
-                count,
-                platform,
-                include_missing,
-                suites,
-            )
-            .await;
+            return compare_testsuites_table(count, platform, suites).await;
         }
     }
 
     // Default: show overall summary comparison
     if graph {
-        show_overall_graph(count, platform, include_missing).await
+        compare_overall_graph(count, platform).await
     } else {
-        show_overall_table(count, platform, include_missing).await
+        compare_overall_table(count, platform).await
     }
 }
 
-async fn show_overall_table(
-    count: usize,
-    platform: Platform,
-    include_missing: bool,
-) -> Result<()> {
+async fn compare_overall_table(count: usize, platform: Platform) -> Result<()> {
     println!(
         "Analyzing historical {} test timing for {} recent commits...",
         platform.series(),
         count
     );
+    let collector = DataCollector::new(platform, count);
+    let summaries = collector.collect_junit().await?;
 
-    let mut analyzed_count = 0;
-    let mut skipped_count = 0;
-    let mut commit_offset = 0;
-    let mut first_result = true;
-
-    while analyzed_count < count {
-        let batch_size = std::cmp::max(count - analyzed_count, 10);
-        let commits =
-            get_recent_commits_with_offset(batch_size, commit_offset).await?;
-
-        if commits.is_empty() {
-            break;
-        }
-
-        // Concurrently fetch timing data for all commits in this batch
-        let fetch_tasks: Vec<_> = commits
-            .iter()
-            .map(|commit_line| {
-                let commit_hash =
-                    commit_line.split_whitespace().next().unwrap_or("");
-                let commit_line = commit_line.clone();
-
-                async move {
-                    let result =
-                        fetch_test_timing_data(&commit_hash, &platform).await;
-                    (commit_line, commit_hash.to_string(), result)
-                }
-            })
-            .collect();
-
-        let fetch_results = join_all(fetch_tasks).await;
-        let mut found_data_in_batch = false;
-
-        // Process results in order
-        for (commit_line, commit_hash, fetch_result) in fetch_results {
-            match fetch_result {
-                Ok(timing_data) => match parse_junit_xml(&timing_data) {
-                    Ok(summary) => {
-                        analyzed_count += 1;
-                        found_data_in_batch = true;
-
-                        // Print header on first result
-                        if first_result {
-                            println!(
-                                "{:>12}   {:>6}   {:>11}   {}",
-                                "TOTAL TIME", "TESTS", "TEST SUITES", "COMMIT"
-                            );
-                            first_result = false;
-                        }
-
-                        // Extract abbreviated commit hash (first 8 chars) and commit message
-                        let short_hash =
-                            &commit_hash[..std::cmp::min(8, commit_hash.len())];
-                        let commit_msg = commit_line
-                            .split_whitespace()
-                            .skip(1) // Skip the full hash
-                            .collect::<Vec<_>>()
-                            .join(" ");
-
-                        println!(
-                            "{:>12}   {:>6}   {:>11}   {} {}",
-                            format!("{:.2}s", summary.total_time.as_secs_f64()),
-                            summary.total_tests,
-                            summary.test_suites.len(),
-                            short_hash,
-                            commit_msg
-                        );
-
-                        if analyzed_count >= count {
-                            break; // Got enough data points
-                        }
-                    }
-                    Err(e) => {
-                        if include_missing {
-                            println!("  (skipped): {}", commit_line);
-                            println!(
-                                "    Could not parse test timing data: {}",
-                                e
-                            );
-                        } else {
-                            skipped_count += 1;
-                        }
-                    }
-                },
-                Err(e) => {
-                    if include_missing {
-                        println!("  (skipped): {}", commit_line);
-                        println!("    No timing data available: {}", e);
-                    } else {
-                        skipped_count += 1;
-                    }
-                }
-            }
-        }
-
-        commit_offset += commits.len();
-
-        // If we didn't find any data in this batch, stop trying
-        if !found_data_in_batch {
-            break;
-        }
+    if summaries.is_empty() {
+        anyhow::bail!("\nNo commits with timing data found!");
     }
-
-    if skipped_count > 0 {
+    println!(
+        "{:>12}   {:>6}   {:>11}   {}",
+        "TOTAL TIME", "TESTS", "TEST SUITES", "COMMIT"
+    );
+    for summary in summaries {
         println!(
-            "\nSkipped {} commits without timing data (use --include-missing to show them)",
-            skipped_count
+            "{:>12}   {:>6}   {:>11}   {} {}",
+            format!("{:.2}s", summary.summary.total_time.as_secs_f64()),
+            summary.summary.total_tests,
+            summary.summary.test_suites.len(),
+            &summary.commit_hash[..8],
+            summary.commit_message,
         );
-    }
-
-    if analyzed_count == 0 {
-        println!("\nNo commits with timing data found!");
     }
 
     Ok(())
 }
 
-async fn show_testsuites_table(
+async fn compare_testsuites_table(
     count: usize,
     platform: Platform,
-    include_missing: bool,
     suites: Vec<String>,
 ) -> Result<()> {
     if suites.len() != 1 {
@@ -479,143 +394,34 @@ async fn show_testsuites_table(
         platform.series()
     );
 
-    let mut analyzed_count = 0;
-    let mut skipped_count = 0;
-    let mut commit_offset = 0;
-    let mut first_result = true;
+    let collector = DataCollector::new(platform, count);
+    let summaries = collector.collect_junit().await?;
 
-    // Keep fetching commits until we have enough data points or run out of commits
-    while analyzed_count < count {
-        let batch_size = std::cmp::max(count - analyzed_count, 10);
-        let commits =
-            get_recent_commits_with_offset(batch_size, commit_offset).await?;
-
-        if commits.is_empty() {
-            break;
-        }
-
-        // Concurrently fetch timing data for all commits in this batch
-        let fetch_tasks: Vec<_> = commits
-            .iter()
-            .map(|commit_line| {
-                let commit_hash =
-                    commit_line.split_whitespace().next().unwrap_or("");
-                let commit_line = commit_line.clone();
-
-                async move {
-                    let result =
-                        fetch_test_timing_data(&commit_hash, &platform).await;
-                    (commit_line, commit_hash.to_string(), result)
-                }
-            })
-            .collect();
-
-        let fetch_results = join_all(fetch_tasks).await;
-        let mut found_data_in_batch = false;
-
-        // Process results in order
-        for (commit_line, commit_hash, fetch_result) in fetch_results {
-            match fetch_result {
-                Ok(timing_data) => match parse_junit_xml(&timing_data) {
-                    Ok(summary) => {
-                        // Find the specific test suite
-                        if let Some(suite) = summary
-                            .test_suites
-                            .iter()
-                            .find(|s| s.name == *suite_name)
-                        {
-                            analyzed_count += 1;
-                            found_data_in_batch = true;
-
-                            // Print header on first result
-                            if first_result {
-                                println!(
-                                    "{:>12}   {:>6}   {}",
-                                    "DURATION", "TESTS", "COMMIT"
-                                );
-                                first_result = false;
-                            }
-
-                            // Extract abbreviated commit hash and commit message
-                            let short_hash = &commit_hash
-                                [..std::cmp::min(8, commit_hash.len())];
-                            let commit_msg = commit_line
-                                .split_whitespace()
-                                .skip(1)
-                                .collect::<Vec<_>>()
-                                .join(" ");
-
-                            println!(
-                                "{:>12}   {:>6}   {} {}",
-                                format!("{:.2}s", suite.time.as_secs_f64()),
-                                suite.test_cases.len(),
-                                short_hash,
-                                commit_msg
-                            );
-
-                            if analyzed_count >= count {
-                                break;
-                            }
-                        } else {
-                            if include_missing {
-                                println!("  (skipped): {}", commit_line);
-                                println!(
-                                    "    Test suite '{}' not found",
-                                    suite_name
-                                );
-                            } else {
-                                skipped_count += 1;
-                            }
-                        }
-                    }
-                    Err(e) => {
-                        if include_missing {
-                            println!("  (skipped): {}", commit_line);
-                            println!(
-                                "    Could not parse test timing data: {}",
-                                e
-                            );
-                        } else {
-                            skipped_count += 1;
-                        }
-                    }
-                },
-                Err(e) => {
-                    if include_missing {
-                        println!("  (skipped): {}", commit_line);
-                        println!("    No timing data available: {}", e);
-                    } else {
-                        skipped_count += 1;
-                    }
-                }
-            }
-        }
-
-        commit_offset += commits.len();
-
-        if !found_data_in_batch {
-            break;
-        }
+    if summaries.is_empty() {
+        anyhow::bail!("\nNo commits with timing data found!");
     }
-
-    if skipped_count > 0 {
-        println!(
-            "\nSkipped {} commits without timing data (use --include-missing to show them)",
-            skipped_count
-        );
-    }
-
-    if analyzed_count == 0 {
-        println!("\nNo commits with test suite '{}' found!", suite_name);
+    println!("{:>12}   {:>6}   {}", "DURATION", "TESTS", "COMMIT");
+    for summary in summaries {
+        // Find the specific test suite
+        if let Some(suite) =
+            summary.summary.test_suites.iter().find(|s| s.name == *suite_name)
+        {
+            println!(
+                "{:>12}   {:>6}   {} {}",
+                format!("{:.2}s", suite.time.as_secs_f64()),
+                suite.test_cases.len(),
+                &summary.commit_hash[..8],
+                summary.commit_message,
+            );
+        }
     }
 
     Ok(())
 }
 
-async fn show_tests_table(
+async fn compare_tests_table(
     count: usize,
     platform: Platform,
-    include_missing: bool,
     suite_name: &str,
     test_names: Vec<String>,
 ) -> Result<()> {
@@ -634,161 +440,36 @@ async fn show_tests_table(
         platform.series()
     );
 
-    let mut analyzed_count = 0;
-    let mut skipped_count = 0;
-    let mut commit_offset = 0;
-    let mut first_result = true;
+    let collector = DataCollector::new(platform, count);
+    let summaries = collector.collect_junit().await?;
 
-    while analyzed_count < count {
-        let batch_size = std::cmp::max(count - analyzed_count, 10);
-        let commits =
-            get_recent_commits_with_offset(batch_size, commit_offset).await?;
-
-        if commits.is_empty() {
-            break;
-        }
-
-        // Concurrently fetch timing data for all commits in this batch
-        let fetch_tasks: Vec<_> = commits
-            .iter()
-            .map(|commit_line| {
-                let commit_hash =
-                    commit_line.split_whitespace().next().unwrap_or("");
-                let commit_line = commit_line.clone();
-
-                async move {
-                    let result =
-                        fetch_test_timing_data(&commit_hash, &platform).await;
-                    (commit_line, commit_hash.to_string(), result)
-                }
-            })
-            .collect();
-
-        let fetch_results = join_all(fetch_tasks).await;
-        let mut found_data_in_batch = false;
-
-        // Process results in order
-        for (commit_line, commit_hash, fetch_result) in fetch_results {
-            match fetch_result {
-                Ok(timing_data) => match parse_junit_xml(&timing_data) {
-                    Ok(summary) => {
-                        // Find the specific test suite
-                        if let Some(suite) = summary
-                            .test_suites
-                            .iter()
-                            .find(|s| s.name == suite_name)
-                        {
-                            // Find the specific test within the suite
-                            if let Some(test_case) = suite
-                                .test_cases
-                                .iter()
-                                .find(|tc| tc.name == *test_name)
-                            {
-                                analyzed_count += 1;
-                                found_data_in_batch = true;
-
-                                // Print header on first result
-                                if first_result {
-                                    println!(
-                                        "{:>12}   {}",
-                                        "DURATION", "COMMIT"
-                                    );
-                                    first_result = false;
-                                }
-
-                                // Extract abbreviated commit hash and commit message
-                                let short_hash = &commit_hash
-                                    [..std::cmp::min(8, commit_hash.len())];
-                                let commit_msg = commit_line
-                                    .split_whitespace()
-                                    .skip(1)
-                                    .collect::<Vec<_>>()
-                                    .join(" ");
-
-                                println!(
-                                    "{:>12}   {} {}",
-                                    format!(
-                                        "{:.3}s",
-                                        test_case.time.as_secs_f64()
-                                    ),
-                                    short_hash,
-                                    commit_msg
-                                );
-
-                                if analyzed_count >= count {
-                                    break;
-                                }
-                            } else {
-                                if include_missing {
-                                    println!("  (skipped): {}", commit_line);
-                                    println!(
-                                        "    Test '{}' not found in suite '{}'",
-                                        test_name, suite_name
-                                    );
-                                } else {
-                                    skipped_count += 1;
-                                }
-                            }
-                        } else {
-                            if include_missing {
-                                println!("  (skipped): {}", commit_line);
-                                println!(
-                                    "    Test suite '{}' not found",
-                                    suite_name
-                                );
-                            } else {
-                                skipped_count += 1;
-                            }
-                        }
-                    }
-                    Err(e) => {
-                        if include_missing {
-                            println!("  (skipped): {}", commit_line);
-                            println!(
-                                "    Could not parse test timing data: {}",
-                                e
-                            );
-                        } else {
-                            skipped_count += 1;
-                        }
-                    }
-                },
-                Err(e) => {
-                    if include_missing {
-                        println!("  (skipped): {}", commit_line);
-                        println!("    No timing data available: {}", e);
-                    } else {
-                        skipped_count += 1;
-                    }
-                }
+    if summaries.is_empty() {
+        anyhow::bail!("\nNo commits with timing data found!");
+    }
+    println!("{:>12}   {}", "DURATION", "COMMIT");
+    for summary in summaries {
+        // Find the specific test suite
+        if let Some(suite) =
+            summary.summary.test_suites.iter().find(|s| s.name == suite_name)
+        {
+            // Find the specific test within the suite
+            if let Some(test_case) =
+                suite.test_cases.iter().find(|tc| tc.name == *test_name)
+            {
+                println!(
+                    "{:>12}   {} {}",
+                    format!("{:.3}s", test_case.time.as_secs_f64()),
+                    &summary.commit_hash[..8],
+                    summary.commit_message,
+                );
             }
         }
-
-        commit_offset += commits.len();
-
-        if !found_data_in_batch {
-            break;
-        }
-    }
-
-    if skipped_count > 0 {
-        println!(
-            "\nSkipped {} commits without timing data (use --include-missing to show them)",
-            skipped_count
-        );
-    }
-
-    if analyzed_count == 0 {
-        println!(
-            "\nNo commits with test '{}' in suite '{}' found!",
-            test_name, suite_name
-        );
     }
 
     Ok(())
 }
 
-async fn show_commit_detail(
+async fn show_testsuites(
     commit_hash: &str,
     platform: &Platform,
     reverse: bool,
@@ -852,7 +533,7 @@ async fn show_commit_detail(
     Ok(())
 }
 
-async fn show_tests_in_suite(
+async fn show_tests(
     commit_hash: &str,
     platform: &Platform,
     suite_name: &str,
@@ -955,10 +636,8 @@ async fn show_tests_in_suite(
     Ok(())
 }
 
-async fn get_recent_commits_with_offset(
-    count: usize,
-    offset: usize,
-) -> Result<Vec<String>> {
+async fn get_commits_at_offset(offset: usize) -> Result<Vec<String>> {
+    let count = 128;
     let output = Command::new("git")
         .args([
             "log",
@@ -1201,396 +880,142 @@ fn parse_junit_xml(junit_xml: &str) -> Result<JunitSummary> {
 async fn collect_data_and_show_graph(
     count: usize,
     platform: Platform,
-    include_missing: bool,
-    data_type: GraphDataType,
+    series: SeriesSpec,
 ) -> Result<()> {
-    let mut data_points = Vec::new();
-    for series_spec in &data_type.series {
-        let points = series_spec.collect_data_points(count, platform, include_missing).await?;
-        data_points.extend(points);
-    }
-
-    if data_points.is_empty() {
-        let series_names: Vec<String> = data_type
-            .series
-            .iter()
-            .map(|spec| spec.description())
-            .collect();
-        println!("No data points available for: {}", series_names.join(", "));
-        return Ok(());
-    }
-
     // Generate title and labels based on series
-    let title = data_type.series[0].category();
+    let title = series.category();
+    let mut data_points = series.collect_data_points(count, platform).await?;
+    if data_points.is_empty() {
+        anyhow::bail!("No data points available");
+    }
+
+    // Before this point: "commit_index" is "offset from the most recent commit".
+    // E.g.: "0" -> "The most recent commit to main".
+    //
+    // However, it's nice to show time progressing from old -> new on an X-axis,
+    // so we flip the ordering here.
+    //
+    // This transformation makes "X = 0" refer to the oldest commit in the observed data.
+    let max_commit_index =
+        data_points.iter().map(|p| p.commit_index).fold(0, usize::max);
+    for data_point in &mut data_points {
+        data_point.commit_index = max_commit_index - data_point.commit_index;
+    }
 
     show_graph(data_points, &title)
 }
 
-async fn show_overall_graph(
-    count: usize,
-    platform: Platform,
-    include_missing: bool,
-) -> Result<()> {
-    collect_data_and_show_graph(
-        count,
-        platform,
-        include_missing,
-        GraphDataType { series: vec![SeriesSpec::Overall] },
-    )
-    .await
+async fn compare_overall_graph(count: usize, platform: Platform) -> Result<()> {
+    collect_data_and_show_graph(count, platform, SeriesSpec::Overall).await
 }
 
-async fn collect_overall_data_points(
-    count: usize,
+struct DataCollector {
     platform: Platform,
-    include_missing: bool,
-) -> Result<Vec<DataPoint>> {
-    let mut data_points = Vec::new();
-    let mut analyzed_count = 0;
-    let mut commit_offset = 0;
+    count: usize,
+}
 
-    while analyzed_count < count {
-        let batch_size = std::cmp::max(count - analyzed_count, 10);
-        let commits =
-            get_recent_commits_with_offset(batch_size, commit_offset).await?;
+impl DataCollector {
+    fn new(platform: Platform, count: usize) -> Self {
+        Self { platform, count }
+    }
 
-        if commits.is_empty() {
-            break;
-        }
+    async fn collect_junit(&self) -> Result<Vec<JunitSummaryByCommit>> {
+        let mut summaries = Vec::new();
+        let mut analyzed_count = 0;
+        let mut commit_offset = 0;
 
-        // Concurrently fetch timing data for all commits in this batch
-        let fetch_tasks: Vec<_> = commits
-            .iter()
-            .enumerate()
-            .map(|(index, commit_line)| {
-                let commit_hash =
-                    commit_line.split_whitespace().next().unwrap_or("");
-                let commit_line = commit_line.clone();
-                let commit_index = commit_offset + index;
+        while analyzed_count < self.count {
+            let commits = get_commits_at_offset(commit_offset).await?;
+            if commits.is_empty() {
+                break;
+            }
 
-                async move {
-                    let result =
-                        fetch_test_timing_data(&commit_hash, &platform).await;
-                    (commit_line, commit_hash.to_string(), commit_index, result)
-                }
-            })
-            .collect();
+            // Concurrently fetch timing data for all commits in this batch
+            let fetch_tasks: Vec<_> = commits
+                .iter()
+                .map(|commit_line| {
+                    let commit_hash =
+                        commit_line.split_whitespace().next().unwrap_or("");
+                    let platform = self.platform;
+                    let commit_line = commit_line.clone();
+                    let commit_hash = commit_hash.to_string();
 
-        let fetch_results = join_all(fetch_tasks).await;
-        let mut found_data_in_batch = false;
+                    tokio::spawn(async move {
+                        let fetch_result =
+                            fetch_test_timing_data(&commit_hash, &platform)
+                                .await;
+                        let parse_result = match fetch_result {
+                            Ok(timing_data) => parse_junit_xml(&timing_data),
+                            Err(e) => {
+                                return (commit_line, commit_hash, Err(e));
+                            }
+                        };
+                        (commit_line, commit_hash, parse_result)
+                    })
+                })
+                .collect();
 
-        for (commit_line, commit_hash, commit_index, fetch_result) in
-            fetch_results
-        {
-            match fetch_result {
-                Ok(timing_data) => match parse_junit_xml(&timing_data) {
+            let fetch_results = join_all(fetch_tasks).await;
+            let fetch_results: Result<Vec<_>, _> =
+                fetch_results.into_iter().collect();
+            let fetch_results = fetch_results.context("Task join error")?;
+            let mut found_data_in_batch = false;
+
+            for (commit_line, commit_hash, parse_result) in fetch_results {
+                match parse_result {
                     Ok(summary) => {
                         analyzed_count += 1;
                         found_data_in_batch = true;
 
-                        let commit_msg = commit_line
+                        let commit_message = commit_line
                             .split_whitespace()
                             .skip(1)
                             .collect::<Vec<_>>()
                             .join(" ");
-
-                        data_points.push(DataPoint {
-                            commit_index,
-                            value: summary.total_time.as_secs_f64(),
-                            commit_hash: commit_hash
-                                [..std::cmp::min(8, commit_hash.len())]
-                                .to_string(),
-                            commit_message: commit_msg,
-                            series_name: SeriesSpec::Overall.display_name(),
+                        let commit_hash = commit_hash[..8].to_string();
+                        summaries.push(JunitSummaryByCommit {
+                            summary,
+                            commit_hash,
+                            commit_message,
                         });
 
-                        if analyzed_count >= count {
+                        if analyzed_count >= self.count {
                             break;
                         }
                     }
-                    Err(_) => {
-                        if include_missing {
-                            // For now, skip missing data in graphs
-                        }
-                    }
-                },
-                Err(_) => {
-                    if include_missing {
-                        // For now, skip missing data in graphs
-                    }
+                    Err(_) => {}
                 }
+            }
+
+            commit_offset += commits.len();
+
+            if !found_data_in_batch {
+                break;
             }
         }
 
-        commit_offset += commits.len();
-
-        if !found_data_in_batch {
-            break;
-        }
+        Ok(summaries)
     }
-
-    // Reverse X coordinates so oldest commit is at x=0
-    for (i, point) in data_points.iter_mut().enumerate() {
-        point.commit_index = i;
-    }
-    data_points.reverse();
-
-    Ok(data_points)
 }
 
-async fn collect_suite_data_points(
+async fn compare_testsuites_graph(
     count: usize,
     platform: Platform,
-    include_missing: bool,
-    suite_name: &str,
-) -> Result<Vec<DataPoint>> {
-    let mut data_points = Vec::new();
-    let mut analyzed_count = 0;
-    let mut commit_offset = 0;
-
-    while analyzed_count < count {
-        let batch_size = std::cmp::max(count - analyzed_count, 10);
-        let commits =
-            get_recent_commits_with_offset(batch_size, commit_offset).await?;
-
-        if commits.is_empty() {
-            break;
-        }
-
-        let fetch_tasks: Vec<_> = commits
-            .iter()
-            .enumerate()
-            .map(|(index, commit_line)| {
-                let commit_hash =
-                    commit_line.split_whitespace().next().unwrap_or("");
-                let commit_line = commit_line.clone();
-                let commit_index = commit_offset + index;
-
-                async move {
-                    let result =
-                        fetch_test_timing_data(&commit_hash, &platform).await;
-                    (commit_line, commit_hash.to_string(), commit_index, result)
-                }
-            })
-            .collect();
-
-        let fetch_results = join_all(fetch_tasks).await;
-        let mut found_data_in_batch = false;
-
-        for (commit_line, commit_hash, commit_index, fetch_result) in
-            fetch_results
-        {
-            match fetch_result {
-                Ok(timing_data) => match parse_junit_xml(&timing_data) {
-                    Ok(summary) => {
-                        if let Some(suite) = summary
-                            .test_suites
-                            .iter()
-                            .find(|s| s.name == suite_name)
-                        {
-                            analyzed_count += 1;
-                            found_data_in_batch = true;
-
-                            let commit_msg = commit_line
-                                .split_whitespace()
-                                .skip(1)
-                                .collect::<Vec<_>>()
-                                .join(" ");
-
-                            data_points.push(DataPoint {
-                                commit_index,
-                                value: suite.time.as_secs_f64(),
-                                commit_hash: commit_hash
-                                    [..std::cmp::min(8, commit_hash.len())]
-                                    .to_string(),
-                                commit_message: commit_msg,
-                                series_name: SeriesSpec::Suite(suite_name.to_string()).display_name(),
-                            });
-
-                            if analyzed_count >= count {
-                                break;
-                            }
-                        }
-                    }
-                    Err(_) => {
-                        if include_missing {
-                            // For now, skip missing data in graphs
-                        }
-                    }
-                },
-                Err(_) => {
-                    if include_missing {
-                        // For now, skip missing data in graphs
-                    }
-                }
-            }
-        }
-
-        commit_offset += commits.len();
-
-        if !found_data_in_batch {
-            break;
-        }
-    }
-
-    // Reverse X coordinates so oldest commit is at x=0
-    for (i, point) in data_points.iter_mut().enumerate() {
-        point.commit_index = i;
-    }
-    data_points.reverse();
-
-    Ok(data_points)
-}
-
-async fn collect_test_data_points(
-    count: usize,
-    platform: Platform,
-    include_missing: bool,
-    suite_name: &str,
-    test_name: &str,
-) -> Result<Vec<DataPoint>> {
-    let mut data_points = Vec::new();
-    let mut analyzed_count = 0;
-    let mut commit_offset = 0;
-
-    while analyzed_count < count {
-        let batch_size = std::cmp::max(count - analyzed_count, 10);
-        let commits =
-            get_recent_commits_with_offset(batch_size, commit_offset).await?;
-
-        if commits.is_empty() {
-            break;
-        }
-
-        let fetch_tasks: Vec<_> = commits
-            .iter()
-            .enumerate()
-            .map(|(index, commit_line)| {
-                let commit_hash =
-                    commit_line.split_whitespace().next().unwrap_or("");
-                let commit_line = commit_line.clone();
-                let commit_index = commit_offset + index;
-
-                async move {
-                    let result =
-                        fetch_test_timing_data(&commit_hash, &platform).await;
-                    (commit_line, commit_hash.to_string(), commit_index, result)
-                }
-            })
-            .collect();
-
-        let fetch_results = join_all(fetch_tasks).await;
-        let mut found_data_in_batch = false;
-
-        for (commit_line, commit_hash, commit_index, fetch_result) in
-            fetch_results
-        {
-            match fetch_result {
-                Ok(timing_data) => match parse_junit_xml(&timing_data) {
-                    Ok(summary) => {
-                        if let Some(suite) = summary
-                            .test_suites
-                            .iter()
-                            .find(|s| s.name == suite_name)
-                        {
-                            if let Some(test_case) = suite
-                                .test_cases
-                                .iter()
-                                .find(|tc| tc.name == test_name)
-                            {
-                                analyzed_count += 1;
-                                found_data_in_batch = true;
-
-                                let commit_msg = commit_line
-                                    .split_whitespace()
-                                    .skip(1)
-                                    .collect::<Vec<_>>()
-                                    .join(" ");
-
-                                data_points.push(DataPoint {
-                                    commit_index,
-                                    value: test_case.time.as_secs_f64(),
-                                    commit_hash: commit_hash
-                                        [..std::cmp::min(8, commit_hash.len())]
-                                        .to_string(),
-                                    commit_message: commit_msg,
-                                    series_name: SeriesSpec::Test { suite: suite_name.to_string(), test: test_name.to_string() }.display_name(),
-                                });
-
-                                if analyzed_count >= count {
-                                    break;
-                                }
-                            }
-                        }
-                    }
-                    Err(_) => {
-                        if include_missing {
-                            // For now, skip missing data in graphs
-                        }
-                    }
-                },
-                Err(_) => {
-                    if include_missing {
-                        // For now, skip missing data in graphs
-                    }
-                }
-            }
-        }
-
-        commit_offset += commits.len();
-
-        if !found_data_in_batch {
-            break;
-        }
-    }
-
-    // Reverse X coordinates so oldest commit is at x=0
-    for (i, point) in data_points.iter_mut().enumerate() {
-        point.commit_index = i;
-    }
-    data_points.reverse();
-
-    Ok(data_points)
-}
-
-async fn show_suites_graph(
-    count: usize,
-    platform: Platform,
-    include_missing: bool,
     suite_names: Vec<String>,
 ) -> Result<()> {
-    let series =
-        suite_names.into_iter().map(|name| SeriesSpec::Suite(name)).collect();
-    collect_data_and_show_graph(
-        count,
-        platform,
-        include_missing,
-        GraphDataType { series },
-    )
-    .await
+    let series = SeriesSpec::Suite(suite_names);
+    collect_data_and_show_graph(count, platform, series).await
 }
 
-async fn show_tests_graph(
+async fn compare_tests_graph(
     count: usize,
     platform: Platform,
-    include_missing: bool,
     suite_name: &str,
     test_names: Vec<String>,
 ) -> Result<()> {
-    let series = test_names
-        .into_iter()
-        .map(|test_name| SeriesSpec::Test {
-            suite: suite_name.to_string(),
-            test: test_name,
-        })
-        .collect();
-    collect_data_and_show_graph(
-        count,
-        platform,
-        include_missing,
-        GraphDataType { series },
-    )
-    .await
+    let series =
+        SeriesSpec::Test { suite: suite_name.to_string(), tests: test_names };
+    collect_data_and_show_graph(count, platform, series).await
 }
 
 fn show_graph(data_points: Vec<DataPoint>, title: &str) -> Result<()> {
@@ -1640,10 +1065,7 @@ fn show_graph(data_points: Vec<DataPoint>, title: &str) -> Result<()> {
         .iter()
         .map(|p| p.commit_index as f64)
         .fold(f64::INFINITY, f64::min);
-    let max_x = all_points
-        .iter()
-        .map(|p| p.commit_index as f64)
-        .fold(f64::NEG_INFINITY, f64::max);
+    let max_x = all_points.iter().map(|p| p.commit_index).fold(0, usize::max);
     let max_y =
         all_points.iter().map(|p| p.value).fold(f64::NEG_INFINITY, f64::max);
 
@@ -1663,17 +1085,7 @@ fn show_graph(data_points: Vec<DataPoint>, title: &str) -> Result<()> {
         legend_info.push((series_name.clone(), color));
     }
 
-    // Event loop with scrolling support
-    let mut scroll_offset = 0;
-    let commits_per_page = 1;
-
-    // Get all unique commits for the commit index (use first series as reference)
-    let reference_commits: Vec<&DataPoint> =
-        if let Some((_, points)) = series_data.iter().next() {
-            points.iter().collect()
-        } else {
-            Vec::new()
-        };
+    let mut highlighted_x = max_x;
 
     loop {
         // Redraw with current scroll position
@@ -1686,8 +1098,8 @@ fn show_graph(data_points: Vec<DataPoint>, title: &str) -> Result<()> {
                     Constraint::Length(3),                        // Title
                     Constraint::Length(legend_info.len() as u16), // Legend
                     Constraint::Min(0),                           // Chart
-                    Constraint::Length(3), // Commits info
-                    Constraint::Length(1), // Help text
+                    Constraint::Length(3),                        // Commit info
+                    Constraint::Length(1),                        // Help text
                 ])
                 .split(size);
 
@@ -1699,27 +1111,6 @@ fn show_graph(data_points: Vec<DataPoint>, title: &str) -> Result<()> {
                 ))]);
             f.render_widget(title_paragraph, chunks[0]);
 
-            // Create datasets for this frame, separating highlighted points
-            let end_idx =
-                (scroll_offset + commits_per_page).min(reference_commits.len());
-            let highlighted_x_range = if !reference_commits.is_empty()
-                && scroll_offset < reference_commits.len()
-            {
-                let start_x =
-                    reference_commits[scroll_offset].commit_index as f64;
-                let end_x = reference_commits[end_idx.saturating_sub(1)]
-                    .commit_index as f64;
-                // Ensure the range is properly ordered (min to max)
-                let (min_x, max_x) = if start_x <= end_x {
-                    (start_x, end_x)
-                } else {
-                    (end_x, start_x)
-                };
-                Some((min_x, max_x))
-            } else {
-                None
-            };
-
             // Collect all normal and highlighted points with their colors first
             let mut all_normal_points: Vec<(Vec<(f64, f64)>, Color)> =
                 Vec::new();
@@ -1729,37 +1120,26 @@ fn show_graph(data_points: Vec<DataPoint>, title: &str) -> Result<()> {
             for (chart_data, (_series_name, color)) in
                 chart_data_sets.iter().zip(legend_info.iter())
             {
-                // Split data into highlighted and normal points
                 let normal_points: Vec<(f64, f64)> = chart_data
                     .iter()
                     .filter_map(|&(x, y)| {
-                        if let Some((min_x, max_x)) = highlighted_x_range {
-                            if x >= min_x && x <= max_x {
-                                None // This point is highlighted
-                            } else {
-                                Some((x, y)) // This point is normal
-                            }
+                        if x == highlighted_x as f64 {
+                            None
                         } else {
-                            Some((x, y)) // All points normal if no highlighting
+                            Some((x, y))
                         }
                     })
                     .collect();
-
-                let highlighted_points: Vec<(f64, f64)> =
-                    if let Some((min_x, max_x)) = highlighted_x_range {
-                        chart_data
-                            .iter()
-                            .filter_map(|&(x, y)| {
-                                if x >= min_x && x <= max_x {
-                                    Some((x, y))
-                                } else {
-                                    None
-                                }
-                            })
-                            .collect()
-                    } else {
-                        Vec::new()
-                    };
+                let highlighted_points: Vec<(f64, f64)> = chart_data
+                    .iter()
+                    .filter_map(|&(x, y)| {
+                        if x == highlighted_x as f64 {
+                            Some((x, y))
+                        } else {
+                            None
+                        }
+                    })
+                    .collect();
 
                 if !normal_points.is_empty() {
                     all_normal_points.push((normal_points, *color));
@@ -1799,7 +1179,7 @@ fn show_graph(data_points: Vec<DataPoint>, title: &str) -> Result<()> {
                     Axis::default()
                         .title("Commits (oldest → newest)")
                         .style(Style::default().fg(Color::Gray))
-                        .bounds([min_x, max_x])
+                        .bounds([min_x, max_x as f64])
                         .labels(vec![
                             Span::styled(
                                 "oldest",
@@ -1839,13 +1219,9 @@ fn show_graph(data_points: Vec<DataPoint>, title: &str) -> Result<()> {
             let legend_paragraph = Paragraph::new(legend_lines);
             f.render_widget(legend_paragraph, chunks[1]);
 
-            // Commits info panel with scrolling
-            let start_idx = scroll_offset;
-
-            let commits_text: Vec<Line> = reference_commits
+            let commits_text: Line = all_points
                 .iter()
-                .skip(start_idx)
-                .take(commits_per_page)
+                .find(|p| p.commit_index == highlighted_x)
                 .map(|point| {
                     Line::from(vec![
                         Span::styled(
@@ -1856,14 +1232,13 @@ fn show_graph(data_points: Vec<DataPoint>, title: &str) -> Result<()> {
                         Span::raw(point.commit_message.clone()),
                     ])
                 })
-                .collect();
+                .unwrap_or_else(|| {
+                    Line::from(Span::raw("No data found at this commit"))
+                });
 
-            let commits_title = format!(
-                "Commit {} of {}",
-                scroll_offset + 1,
-                reference_commits.len()
-            );
-            let commits_paragraph = Paragraph::new(commits_text)
+            let commits_title =
+                format!("Commit {} of {}", highlighted_x + 1, max_x + 1);
+            let commits_paragraph = Paragraph::new(vec![commits_text])
                 .block(
                     Block::default().title(commits_title).borders(Borders::ALL),
                 )
@@ -1871,7 +1246,7 @@ fn show_graph(data_points: Vec<DataPoint>, title: &str) -> Result<()> {
             f.render_widget(commits_paragraph, chunks[3]);
 
             // Help text with navigation instructions
-            let help_text = "Press 'q' to quit, ↑/↓ or j/k to scroll commits";
+            let help_text = "Press 'q' to quit, ←/→ or h/l to scroll commits";
             let help = Paragraph::new(help_text)
                 .style(Style::default().fg(Color::Gray));
             f.render_widget(help, chunks[4]);
@@ -1891,25 +1266,21 @@ fn show_graph(data_points: Vec<DataPoint>, title: &str) -> Result<()> {
         match event::read().context("Failed to read terminal event")? {
             CrosstermEvent::Key(key_event) => match key_event.code {
                 KeyCode::Char('q') | KeyCode::Esc => break,
-                KeyCode::Up | KeyCode::Char('k') => {
-                    if scroll_offset > 0 {
-                        scroll_offset = scroll_offset.saturating_sub(1);
+                KeyCode::Left | KeyCode::Char('h') => {
+                    if highlighted_x > 0 {
+                        highlighted_x = highlighted_x.saturating_sub(1);
                     }
                 }
-                KeyCode::Down | KeyCode::Char('j') => {
-                    if scroll_offset + commits_per_page
-                        < reference_commits.len()
-                    {
-                        scroll_offset += 1;
+                KeyCode::Right | KeyCode::Char('l') => {
+                    if highlighted_x < max_x {
+                        highlighted_x += 1;
                     }
                 }
                 KeyCode::Home => {
-                    scroll_offset = 0;
+                    highlighted_x = 0;
                 }
                 KeyCode::End => {
-                    scroll_offset = reference_commits
-                        .len()
-                        .saturating_sub(commits_per_page);
+                    highlighted_x = max_x;
                 }
                 _ => {}
             },
