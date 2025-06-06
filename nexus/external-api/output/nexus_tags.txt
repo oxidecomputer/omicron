@@ -10,6 +10,22 @@ anti_affinity_group_member_list          GET      /v1/anti-affinity-groups/{anti
 anti_affinity_group_update               PUT      /v1/anti-affinity-groups/{anti_affinity_group}
 anti_affinity_group_view                 GET      /v1/anti-affinity-groups/{anti_affinity_group}
 
+API operations found with tag "console-auth"
+OPERATION ID                             METHOD   URL PATH
+device_access_token                      POST     /device/token
+device_auth_confirm                      POST     /device/confirm
+device_auth_request                      POST     /device/auth
+logout                                   POST     /v1/logout
+
+API operations found with tag "current-user"
+OPERATION ID                             METHOD   URL PATH
+current_user_groups                      GET      /v1/me/groups
+current_user_ssh_key_create              POST     /v1/me/ssh-keys
+current_user_ssh_key_delete              DELETE   /v1/me/ssh-keys/{ssh_key}
+current_user_ssh_key_list                GET      /v1/me/ssh-keys
+current_user_ssh_key_view                GET      /v1/me/ssh-keys/{ssh_key}
+current_user_view                        GET      /v1/me
+
 API operations found with tag "disks"
 OPERATION ID                             METHOD   URL PATH
 disk_bulk_write_import                   POST     /v1/disks/{disk}/bulk-write
@@ -22,17 +38,7 @@ disk_list                                GET      /v1/disks
 disk_metrics_list                        GET      /v1/disks/{disk}/metrics/{metric}
 disk_view                                GET      /v1/disks/{disk}
 
-API operations found with tag "floating-ips"
-OPERATION ID                             METHOD   URL PATH
-floating_ip_attach                       POST     /v1/floating-ips/{floating_ip}/attach
-floating_ip_create                       POST     /v1/floating-ips
-floating_ip_delete                       DELETE   /v1/floating-ips/{floating_ip}
-floating_ip_detach                       POST     /v1/floating-ips/{floating_ip}/detach
-floating_ip_list                         GET      /v1/floating-ips
-floating_ip_update                       PUT      /v1/floating-ips/{floating_ip}
-floating_ip_view                         GET      /v1/floating-ips/{floating_ip}
-
-API operations found with tag "hidden"
+API operations found with tag "experimental"
 OPERATION ID                             METHOD   URL PATH
 affinity_group_create                    POST     /v1/affinity-groups
 affinity_group_delete                    DELETE   /v1/affinity-groups/{affinity_group}
@@ -43,11 +49,7 @@ affinity_group_member_instance_view      GET      /v1/affinity-groups/{affinity_
 affinity_group_member_list               GET      /v1/affinity-groups/{affinity_group}/members
 affinity_group_update                    PUT      /v1/affinity-groups/{affinity_group}
 affinity_group_view                      GET      /v1/affinity-groups/{affinity_group}
-device_access_token                      POST     /device/token
-device_auth_confirm                      POST     /device/confirm
-device_auth_request                      POST     /device/auth
 instance_affinity_group_list             GET      /v1/instances/{instance}/affinity-groups
-logout                                   POST     /v1/logout
 probe_create                             POST     /experimental/v1/probes
 probe_delete                             DELETE   /experimental/v1/probes/{probe}
 probe_list                               GET      /experimental/v1/probes
@@ -61,9 +63,21 @@ support_bundle_head_file                 HEAD     /experimental/v1/system/suppor
 support_bundle_index                     GET      /experimental/v1/system/support-bundles/{bundle_id}/index
 support_bundle_list                      GET      /experimental/v1/system/support-bundles
 support_bundle_view                      GET      /experimental/v1/system/support-bundles/{bundle_id}
+system_update_get_repository             GET      /v1/system/update/repository/{system_version}
+system_update_put_repository             PUT      /v1/system/update/repository
 target_release_update                    PUT      /v1/system/update/target-release
 target_release_view                      GET      /v1/system/update/target-release
 timeseries_query                         POST     /v1/timeseries/query
+
+API operations found with tag "floating-ips"
+OPERATION ID                             METHOD   URL PATH
+floating_ip_attach                       POST     /v1/floating-ips/{floating_ip}/attach
+floating_ip_create                       POST     /v1/floating-ips
+floating_ip_delete                       DELETE   /v1/floating-ips/{floating_ip}
+floating_ip_detach                       POST     /v1/floating-ips/{floating_ip}/detach
+floating_ip_list                         GET      /v1/floating-ips
+floating_ip_update                       PUT      /v1/floating-ips/{floating_ip}
+floating_ip_view                         GET      /v1/floating-ips/{floating_ip}
 
 API operations found with tag "images"
 OPERATION ID                             METHOD   URL PATH
@@ -130,15 +144,6 @@ API operations found with tag "roles"
 OPERATION ID                             METHOD   URL PATH
 role_list                                GET      /v1/system/roles
 role_view                                GET      /v1/system/roles/{role_name}
-
-API operations found with tag "session"
-OPERATION ID                             METHOD   URL PATH
-current_user_groups                      GET      /v1/me/groups
-current_user_ssh_key_create              POST     /v1/me/ssh-keys
-current_user_ssh_key_delete              DELETE   /v1/me/ssh-keys/{ssh_key}
-current_user_ssh_key_list                GET      /v1/me/ssh-keys
-current_user_ssh_key_view                GET      /v1/me/ssh-keys/{ssh_key}
-current_user_view                        GET      /v1/me
 
 API operations found with tag "silos"
 OPERATION ID                             METHOD   URL PATH

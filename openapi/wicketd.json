@@ -890,7 +890,7 @@
         ]
       },
       "ArtifactId": {
-        "description": "An identifier for an artifact.\n\nThe kind is [`ArtifactKind`], indicating that it might represent an artifact whose kind is unknown.",
+        "description": "An identifier for an artifact.",
         "type": "object",
         "properties": {
           "kind": {
@@ -903,11 +903,7 @@
           },
           "version": {
             "description": "The artifact's version.",
-            "allOf": [
-              {
-                "$ref": "#/components/schemas/ArtifactVersion"
-              }
-            ]
+            "type": "string"
           }
         },
         "required": [
@@ -915,11 +911,6 @@
           "name",
           "version"
         ]
-      },
-      "ArtifactVersion": {
-        "description": "An artifact version.\n\nThis is a freeform identifier with some basic validation. It may be the serialized form of a semver version, or a custom identifier that uses the same character set as a semver, plus `_`.\n\nThe exact pattern accepted is `^[a-zA-Z0-9._+-]{1,63}$`.\n\n# Ord implementation\n\n`ArtifactVersion`s are not intended to be sorted, just compared for equality. `ArtifactVersion` implements `Ord` only for storage within sorted collections.",
-        "type": "string",
-        "pattern": "^[a-zA-Z0-9._+-]{1,63}$"
       },
       "Aux1Monitor": {
         "description": "The first auxlliary CMIS monitor.",

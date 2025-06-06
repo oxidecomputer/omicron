@@ -25,7 +25,7 @@ use omicron_common::api::internal::nexus::Certificate as InternalCertificate;
 use omicron_test_utils::certificates::CertificateChain;
 use omicron_test_utils::dev::poll::CondCheckError;
 use omicron_test_utils::dev::poll::wait_for_condition;
-use oxide_client::ClientSessionExt;
+use oxide_client::ClientCurrentUserExt;
 use oxide_client::ClientSilosExt;
 use oxide_client::ClientSystemSilosExt;
 use oxide_client::CustomDnsResolver;

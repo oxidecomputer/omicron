@@ -1,3 +1,1 @@
 API endpoints tested by unauthorized.rs but not found in the OpenAPI spec:
-PUT    "/v1/system/update/repository?file_name=demo-repo.zip"
-GET    "/v1/system/update/repository/1.0.0"
