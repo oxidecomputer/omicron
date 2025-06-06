@@ -11733,7 +11733,6 @@ dependencies = [
 name = "sled-agent-zone-images"
 version = "0.1.0"
 dependencies = [
- "anyhow",
  "camino",
  "camino-tempfile-ext",
  "dropshot",
