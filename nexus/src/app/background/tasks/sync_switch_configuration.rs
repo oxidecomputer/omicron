@@ -608,7 +608,7 @@ impl BackgroundTask for SwitchPortSettingsManager {
                         let communities = match self.datastore.communities_for_peer(
                             opctx,
                             peer.port_settings_id,
-                            &peer.interface_name,
+                            &peer.interface_name.to_string(),
                             peer.addr,
                         ).await {
                             Ok(cs) => cs,
@@ -632,7 +632,7 @@ impl BackgroundTask for SwitchPortSettingsManager {
                         let allow_import = match self.datastore.allow_import_for_peer(
                             opctx,
                             peer.port_settings_id,
-                            &peer.interface_name,
+                            &peer.interface_name.to_string(),
                             peer.addr,
                         ).await {
                             Ok(cs) => cs,
@@ -682,7 +682,7 @@ impl BackgroundTask for SwitchPortSettingsManager {
                         let allow_export = match self.datastore.allow_export_for_peer(
                             opctx,
                             peer.port_settings_id,
-                            &peer.interface_name,
+                            &peer.interface_name.to_string(),
                             peer.addr,
                         ).await {
                             Ok(cs) => cs,
@@ -753,7 +753,7 @@ impl BackgroundTask for SwitchPortSettingsManager {
                         };
 
                         // update the stored vec if it exists, create a new on if it doesn't exist
-                        match peers.entry(port.port_name.clone()) {
+                        match peers.entry(port.port_name.clone().to_string()) {
                             Entry::Occupied(mut occupied_entry) => {
                                 occupied_entry.get_mut().push(peer_config);
                             },
@@ -915,38 +915,38 @@ impl BackgroundTask for SwitchPortSettingsManager {
                         continue;
                     };
 
-                    let peer_configs = match self.datastore.bgp_peer_configs(opctx, *location, port.port_name.clone()).await {
+                    let peer_configs = match self.datastore.bgp_peer_configs(opctx, *location, port.port_name.to_string()).await {
                         Ok(v) => v,
                         Err(e) => {
                             error!(
                                 log,
                                 "failed to fetch bgp peer config for switch port";
                                 "switch_location" => ?location,
-                                "port" => &port.port_name,
+                                "port" => &port.port_name.to_string(),
                                 "error" => %DisplayErrorChain::new(&e)
                             );
                             continue;
                         },
                     };
 
-		    // TODO https://github.com/oxidecomputer/omicron/issues/3062
-		    let tx_eq = if let Some(Some(c)) = info.tx_eq.get(0) {
-			Some(TxEqConfig {
-			    pre1: c.pre1,
-			    pre2: c.pre2,
-			    main: c.main,
-			    post2: c.post2,
-			    post1: c.post1,
-			})
-		    } else {
-			None
-		    };
+                    // TODO https://github.com/oxidecomputer/omicron/issues/3062
+                    let tx_eq = if let Some(c) = info.tx_eq.get(0) {
+                        Some(TxEqConfig {
+                            pre1: c.pre1,
+                            pre2: c.pre2,
+                            main: c.main,
+                            post2: c.post2,
+                            post1: c.post1,
+                        })
+                    } else {
+                        None
+                    };
 
                     let mut port_config = PortConfigV2 {
                         addresses: info.addresses.iter().map(|a|
 			    UplinkAddressConfig {
-				    address: a.address.into(),
-				    vlan_id: a.vlan_id.map(|v| v.into())
+				    address: a.address,
+				    vlan_id: a.vlan_id
 			    }).collect(),
                         autoneg: info
                             .links
@@ -981,7 +981,7 @@ impl BackgroundTask for SwitchPortSettingsManager {
                                     vlan_id: c.vlan_id.map(|x| x.0),
                                 }
                         }).collect(),
-                        port: port.port_name.clone(),
+                        port: port.port_name.to_string(),
                         routes: info
                             .routes
                             .iter()
@@ -1012,7 +1012,7 @@ impl BackgroundTask for SwitchPortSettingsManager {
 				    true => LldpAdminStatus::Enabled,
 				    false=> LldpAdminStatus::Disabled,
 				},
-				port_id: c.link_name.clone(),
+				port_id: c.link_name.clone().map(|p| p.to_string()),
 				port_description: c.link_description.clone(),
 				chassis_id: c.chassis_id.clone(),
 				system_name: c.system_name.clone(),
@@ -1543,7 +1543,7 @@ fn uplinks(
                 } else {
                     LldpAdminStatus::Disabled
                 },
-                port_id: x.link_name.clone(),
+                port_id: x.link_name.clone().map(|p| p.to_string()),
                 port_description: x.link_description.clone(),
                 chassis_id: x.chassis_id.clone(),
                 system_name: x.system_name.clone(),
@@ -1555,7 +1555,7 @@ fn uplinks(
             })
         };
 
-        let tx_eq = if let Some(Some(c)) = config.tx_eq.get(0) {
+        let tx_eq = if let Some(c) = config.tx_eq.get(0) {
             Some(TxEqConfig {
                 pre1: c.pre1,
                 pre2: c.pre2,
@@ -1568,13 +1568,13 @@ fn uplinks(
         };
 
         let config = HostPortConfig {
-            port: port.port_name.clone(),
+            port: port.port_name.to_string(),
             addrs: config
                 .addresses
                 .iter()
                 .map(|a| UplinkAddressConfig {
-                    address: a.address.into(),
-                    vlan_id: a.vlan_id.map(|v| v.into()),
+                    address: a.address,
+                    vlan_id: a.vlan_id,
                 })
                 .collect(),
             lldp,
