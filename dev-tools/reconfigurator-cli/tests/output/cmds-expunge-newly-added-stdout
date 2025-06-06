@@ -301,11 +301,12 @@ parent:    06c88262-f435-410e-ba98-101bed41ec27
     read from::   SingleNode
 
  METADATA:
-    created by:::::::::::   test suite
-    created at:::::::::::   <REDACTED_TIMESTAMP>
-    comment::::::::::::::   (none)
-    internal DNS version:   1
-    external DNS version:   1
+    created by:::::::::::::   test suite
+    created at:::::::::::::   <REDACTED_TIMESTAMP>
+    comment::::::::::::::::   (none)
+    internal DNS version:::   1
+    external DNS version:::   1
+    target release min gen:   1
 
  PENDING MGS-MANAGED UPDATES: 0
 
@@ -608,11 +609,12 @@ parent:    3f00b694-1b16-4aaa-8f78-e6b3a527b434
     read from::   SingleNode
 
  METADATA:
-    created by:::::::::::   reconfigurator-cli
-    created at:::::::::::   <REDACTED_TIMESTAMP>
-    comment::::::::::::::   (none)
-    internal DNS version:   1
-    external DNS version:   1
+    created by:::::::::::::   reconfigurator-cli
+    created at:::::::::::::   <REDACTED_TIMESTAMP>
+    comment::::::::::::::::   (none)
+    internal DNS version:::   1
+    external DNS version:::   1
+    target release min gen:   1
 
  PENDING MGS-MANAGED UPDATES: 0
 
@@ -929,11 +931,12 @@ parent:    366b0b68-d80e-4bc1-abd3-dc69837847e0
     read from::   SingleNode
 
  METADATA:
-    created by:::::::::::   reconfigurator-sim
-    created at:::::::::::   <REDACTED_TIMESTAMP>
-    comment::::::::::::::   (none)
-    internal DNS version:   1
-    external DNS version:   1
+    created by:::::::::::::   reconfigurator-sim
+    created at:::::::::::::   <REDACTED_TIMESTAMP>
+    comment::::::::::::::::   (none)
+    internal DNS version:::   1
+    external DNS version:::   1
+    target release min gen:   1
 
  PENDING MGS-MANAGED UPDATES: 0
 
