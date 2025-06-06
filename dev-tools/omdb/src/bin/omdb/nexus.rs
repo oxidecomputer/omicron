@@ -58,7 +58,6 @@ use nexus_types::internal_api::background::RegionSnapshotReplacementFinishStatus
 use nexus_types::internal_api::background::RegionSnapshotReplacementGarbageCollectStatus;
 use nexus_types::internal_api::background::RegionSnapshotReplacementStartStatus;
 use nexus_types::internal_api::background::RegionSnapshotReplacementStepStatus;
-use nexus_types::internal_api::background::SpEreportIngesterStatus;
 use nexus_types::internal_api::background::SupportBundleCleanupReport;
 use nexus_types::internal_api::background::SupportBundleCollectionReport;
 use nexus_types::internal_api::background::TufArtifactReplicationCounters;
@@ -2746,6 +2745,41 @@ fn print_task_sp_ereport_ingester(details: &serde_json::Value) {
     }
 
     print_ereporter_status_totals(sps.iter().map(|sp| &sp.status));
+
+    const NEW_EREPORTS: &str = "new ereports ingested:";
+    const HTTP_REQUESTS: &str = "HTTP requests sent:";
+    const ERRORS: &str = "errors:";
+    const WIDTH: usize =
+        const_max_len(&[NEW_EREPORTS, HTTP_REQUESTS, ERRORS]) + 1;
+    const NUM_WIDTH: usize = 3;
+
+    if !sps.is_empty() {
+        println!("\n    Service processors:");
+        for SpEreporterStatus { sp_type, slot, status } in &sps {
+            println!(
+                "    - {sp_type:<6} {slot:02}: {:>NUM_WIDTH$} ereports",
+                status.ereports_received
+            );
+            println!(
+                "      {NEW_EREPORTS:<WIDTH$}{:>NUM_WIDTH$}",
+                status.new_ereports
+            );
+            println!(
+                "      {HTTP_REQUESTS:<WIDTH$}{:>NUM_WIDTH$}",
+                status.requests
+            );
+
+            if !status.errors.is_empty() {
+                println!(
+                    "{ERRICON}   {ERRORS:<WIDTH$}{:>NUM_WIDTH$}",
+                    status.errors.len()
+                );
+                for error in &status.errors {
+                    println!("      - {error}");
+                }
+            }
+        }
+    }
 }
 
 fn print_ereporter_status_totals<'status>(
@@ -2777,12 +2811,12 @@ fn print_ereporter_status_totals<'status>(
         }
     }
 
-    const EREPORTS_RECEIVED: &str = "total ereports received";
-    const NEW_EREPORTS: &str = "  new ereports ingested";
-    const HTTP_REQUESTS: &str = "total HTTP requests sent";
-    const ERRORS: &str = "  total collection errors";
-    const REPORTERS_WITH_EREPORTS: &str = "reporters with ereports";
-    const REPORTERS_WITH_ERRORS: &str = "reporters with collection errors";
+    const EREPORTS_RECEIVED: &str = "total ereports received:";
+    const NEW_EREPORTS: &str = "  new ereports ingested:";
+    const HTTP_REQUESTS: &str = "total HTTP requests sent:";
+    const ERRORS: &str = "  total collection errors:";
+    const REPORTERS_WITH_EREPORTS: &str = "reporters with ereports:";
+    const REPORTERS_WITH_ERRORS: &str = "reporters with collection errors:";
     const WIDTH: usize = const_max_len(&[
         EREPORTS_RECEIVED,
         NEW_EREPORTS,
