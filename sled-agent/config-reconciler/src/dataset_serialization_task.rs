@@ -30,6 +30,7 @@ use illumos_utils::zfs::Mountpoint;
 use illumos_utils::zfs::WhichDatasets;
 use illumos_utils::zfs::Zfs;
 use nexus_sled_agent_shared::inventory::InventoryDataset;
+use omicron_common::api::external::ByteCount;
 use omicron_common::disk::DatasetConfig;
 use omicron_common::disk::DatasetKind;
 use omicron_common::disk::DatasetName;
@@ -96,6 +97,10 @@ pub enum DatasetEnsureError {
 pub struct OrphanedDataset {
     pub name: DatasetName,
     pub reason: String,
+    pub id: Option<DatasetUuid>,
+    pub mounted: bool,
+    pub avail: ByteCount,
+    pub used: ByteCount,
 }
 
 impl IdOrdItem for OrphanedDataset {
@@ -570,8 +575,14 @@ impl DatasetTask {
                 }
             };
 
-            orphaned_datasets
-                .insert_overwrite(OrphanedDataset { name: dataset, reason });
+            orphaned_datasets.insert_overwrite(OrphanedDataset {
+                name: dataset,
+                reason,
+                id: properties.id,
+                mounted: properties.mounted,
+                avail: properties.avail,
+                used: properties.used,
+            });
         }
 
         Ok(orphaned_datasets)
