@@ -9,5 +9,9 @@ CREATE TABLE IF NOT EXISTS omicron.public.inv_last_reconciliation_orphaned_datas
       (kind = 'zone' AND zone_name != '')
     ),
     reason TEXT NOT NULL,
+    id UUID,
+    mounted BOOL NOT NULL,
+    available INT8 NOT NULL,
+    used INT8 NOT NULL,
     PRIMARY KEY (inv_collection_id, sled_id, pool_id, kind, zone_name)
 );
