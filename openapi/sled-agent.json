@@ -5920,16 +5920,36 @@
       "OrphanedDataset": {
         "type": "object",
         "properties": {
+          "available": {
+            "$ref": "#/components/schemas/ByteCount"
+          },
+          "id": {
+            "nullable": true,
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/TypedUuidForDatasetKind"
+              }
+            ]
+          },
+          "mounted": {
+            "type": "boolean"
+          },
           "name": {
             "$ref": "#/components/schemas/DatasetName"
           },
           "reason": {
             "type": "string"
+          },
+          "used": {
+            "$ref": "#/components/schemas/ByteCount"
           }
         },
         "required": [
+          "available",
+          "mounted",
           "name",
-          "reason"
+          "reason",
+          "used"
         ]
       },
       "P9fs": {
