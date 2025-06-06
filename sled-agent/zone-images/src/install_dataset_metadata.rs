@@ -27,6 +27,17 @@ impl<T> AllInstallMetadataFiles<T>
 where
     T: DeserializeOwned + PartialEq,
 {
+    /// Attempt to find manifest files.
+    ///
+    /// For now we treat the boot disk as authoritative, since install-dataset
+    /// artifacts are always served from the boot disk. There is a class of
+    /// issues here related to transient failures on one of the M.2s that we're
+    /// acknowledging but not tackling for now.
+    ///
+    /// In general, this API follows an interpreter pattern: first read all the
+    /// results and put them in a map, then make decisions based on them in a
+    /// separate step. This enables better testing and ensures that changes to
+    /// behavior are described in the type system.
     pub(crate) fn read_all(
         _log: &slog::Logger,
         metadata_file_name: &str,

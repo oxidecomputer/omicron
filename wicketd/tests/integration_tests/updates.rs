@@ -507,8 +507,22 @@ async fn test_installinator_fetch() {
         ZoneImageSourceResolver::new(&log, &zpools, &boot_zpool);
 
     // Ensure that the resolver picks up the mupdate override.
-    let override_status = image_resolver.status().mupdate_override;
-    eprintln!("override_status: {:#?}", override_status);
+    let status = image_resolver.status();
+    eprintln!("status: {:#?}", status);
+
+    let zone_manifest_status = status.zone_manifest;
+    let result = zone_manifest_status
+        .boot_disk_result
+        .expect("zone manifest successful");
+    assert!(result.is_valid(), "boot disk result is valid");
+
+    let non_boot_result = zone_manifest_status
+        .non_boot_disk_metadata
+        .get(&non_boot_zpool)
+        .expect("non-boot disk result should be present");
+    assert!(non_boot_result.result.is_valid(), "non-boot disk result is valid");
+
+    let override_status = status.mupdate_override;
 
     let info = override_status
         .boot_disk_override

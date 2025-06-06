@@ -8,7 +8,7 @@ use illumos_utils::zpool::ZpoolName;
 use omicron_common::update::{OmicronZoneFileMetadata, OmicronZoneManifest};
 use rayon::iter::{ParallelBridge, ParallelIterator};
 use sha2::{Digest, Sha256};
-use slog::{error, info, o};
+use slog::{error, info, o, warn};
 use slog_error_chain::InlineErrorChain;
 use std::{
     fmt,
@@ -23,6 +23,21 @@ use crate::{
     InstallMetadataNonBootMismatch, InstallMetadataNonBootResult,
     InstallMetadataReadError, ZoneImageZpools,
 };
+
+/// Describes the current state of mupdate overrides.
+#[derive(Clone, Debug)]
+pub struct ZoneManifestStatus {
+    /// The path to the zone manifest JSON on the boot disk.
+    pub boot_disk_path: Utf8PathBuf,
+
+    /// Status of the boot disk.
+    pub boot_disk_result:
+        Result<ZoneManifestArtifactsResult, ZoneManifestReadError>,
+
+    /// Status of the non-boot disks. This results in warnings in case of a
+    /// mismatch.
+    pub non_boot_disk_metadata: IdOrdMap<ZoneManifestNonBootInfo>,
+}
 
 #[derive(Debug)]
 pub(crate) struct AllZoneManifests {
@@ -80,6 +95,14 @@ impl AllZoneManifests {
 
         ret.log_results(&log);
         ret
+    }
+
+    pub(crate) fn status(&self) -> ZoneManifestStatus {
+        ZoneManifestStatus {
+            boot_disk_path: self.boot_disk_path.clone(),
+            boot_disk_result: self.boot_disk_result.clone(),
+            non_boot_disk_metadata: self.non_boot_disk_metadata.clone(),
+        }
     }
 
     fn log_results(&self, log: &slog::Logger) {
@@ -257,6 +280,17 @@ impl ZoneManifestNonBootResult {
             InstallMetadataNonBootResult::ReadError(error) => {
                 Self::ReadError(error)
             }
+        }
+    }
+
+    /// Returns true if the status is valid.
+    ///
+    /// The only valid status is `Self::Matches` along with the result inside
+    /// being valid.
+    pub fn is_valid(&self) -> bool {
+        match self {
+            Self::Matches(result) => result.is_valid(),
+            Self::NotFound | Self::Mismatch(_) | Self::ReadError(_) => false,
         }
     }
 
@@ -468,7 +502,7 @@ impl IdOrdItem for ZoneManifestArtifactResult {
     id_upcast!();
 }
 
-#[derive(Debug, Error)]
+#[derive(Clone, Debug, Error, PartialEq)]
 pub enum ZoneManifestReadError {
     #[error("error reading install metadata")]
     InstallMetadata(#[from] InstallMetadataReadError),
@@ -540,14 +574,115 @@ mod tests {
     use super::*;
 
     use crate::test_utils::{
-        BOOT_PATHS, BOOT_ZPOOL, NON_BOOT_PATHS, NON_BOOT_ZPOOL,
-        WriteInstallDatasetContext,
+        BOOT_PATHS, BOOT_ZPOOL, NON_BOOT_2_PATHS, NON_BOOT_2_ZPOOL,
+        NON_BOOT_3_PATHS, NON_BOOT_3_ZPOOL, NON_BOOT_PATHS, NON_BOOT_ZPOOL,
+        WriteInstallDatasetContext, deserialize_error,
     };
 
     use camino_tempfile_ext::prelude::*;
     use dropshot::{ConfigLogging, ConfigLoggingLevel, test_util::LogContext};
     use iddqd::id_ord_map;
     use pretty_assertions::assert_eq;
+
+    // Much of the logic in this module is shared with mupdate_override.rs, and
+    // tested there.
+
+    /// Success case: zone manifest JSON present on boot and non-boot disk and matches.
+    #[test]
+    fn read_success() {
+        let logctx = LogContext::new(
+            "zone_manifest_read_success",
+            &ConfigLogging::StderrTerminal { level: ConfigLoggingLevel::Debug },
+        );
+        let dir = Utf8TempDir::new().unwrap();
+        let cx = WriteInstallDatasetContext::new_basic();
+
+        // Write the valid manifest to both boot and non-boot disks.
+        cx.write_to(&dir.child(&BOOT_PATHS.install_dataset)).unwrap();
+        cx.write_to(&dir.child(&NON_BOOT_PATHS.install_dataset)).unwrap();
+
+        let zpools = ZoneImageZpools {
+            root: dir.path(),
+            all_m2_zpools: vec![BOOT_ZPOOL, NON_BOOT_ZPOOL],
+        };
+
+        let manifests =
+            AllZoneManifests::read_all(&logctx.log, &zpools, &BOOT_ZPOOL);
+
+        // Boot disk should be valid.
+        assert_eq!(
+            manifests.boot_disk_result.as_ref().unwrap(),
+            &cx.expected_result(&dir.path().join(&BOOT_PATHS.install_dataset))
+        );
+
+        // Non-boot disk should match boot disk.
+        assert_eq!(
+            manifests.non_boot_disk_metadata,
+            id_ord_map! {
+                ZoneManifestNonBootInfo {
+                    zpool_name: NON_BOOT_ZPOOL,
+                    dataset_dir: dir.path().join(&NON_BOOT_PATHS.install_dataset),
+                    path: dir.path().join(&NON_BOOT_PATHS.zones_json),
+                    result: ZoneManifestNonBootResult::Matches(
+                        cx.expected_result(
+                            &dir.path().join(&NON_BOOT_PATHS.install_dataset)
+                        )
+                    )
+                }
+            }
+        );
+
+        logctx.cleanup_successful();
+    }
+
+    /// Error case: zone manifest JSON missing from boot disk.
+    #[test]
+    fn read_boot_disk_missing() {
+        let logctx = LogContext::new(
+            "zone_manifest_read_boot_disk_missing",
+            &ConfigLogging::StderrTerminal { level: ConfigLoggingLevel::Debug },
+        );
+        let dir = Utf8TempDir::new().unwrap();
+        let cx = WriteInstallDatasetContext::new_basic();
+
+        // Write the valid manifest to the non-boot disk.
+        cx.write_to(&dir.child(&NON_BOOT_PATHS.install_dataset)).unwrap();
+        // Create the install dataset directory, but not the manifest, on the
+        // boot disk.
+        dir.child(&BOOT_PATHS.install_dataset).create_dir_all().unwrap();
+
+        let zpools = ZoneImageZpools {
+            root: dir.path(),
+            all_m2_zpools: vec![BOOT_ZPOOL, NON_BOOT_ZPOOL],
+        };
+
+        let manifests =
+            AllZoneManifests::read_all(&logctx.log, &zpools, &BOOT_ZPOOL);
+        assert_eq!(
+            manifests.boot_disk_result.as_ref().unwrap_err(),
+            &ZoneManifestReadError::NotFound(
+                dir.path().join(&BOOT_PATHS.zones_json)
+            ),
+        );
+
+        assert_eq!(
+            manifests.non_boot_disk_metadata,
+            id_ord_map! {
+                ZoneManifestNonBootInfo {
+                    zpool_name: NON_BOOT_ZPOOL,
+                    dataset_dir: dir.path().join(&NON_BOOT_PATHS.install_dataset),
+                    path: dir.path().join(&NON_BOOT_PATHS.zones_json),
+                    result: ZoneManifestNonBootResult::Mismatch(
+                        ZoneManifestNonBootMismatch::BootAbsentOtherPresent {
+                            non_boot_disk_result: cx.expected_result(
+                                &dir.path().join(&NON_BOOT_PATHS.install_dataset)
+                            ),
+                        }
+                    )
+                }
+            }
+        );
+    }
 
     /// Error case: zones don't match expected ones on boot disk.
     #[test]
@@ -605,11 +740,12 @@ mod tests {
         logctx.cleanup_successful();
     }
 
-    /// Warning case: zones don't match expected ones on non-boot disk.
+    /// Warning case: zones don't match expected ones on non-boot
+    /// disk/error/absent.
     #[test]
     fn read_non_boot_disk_zone_mismatch() {
         let logctx = LogContext::new(
-            "mupdate_override_read_non_boot_disk_zone_mismatch",
+            "zone_manifest_read_non_boot_disk_zone_mismatch",
             &ConfigLogging::StderrTerminal { level: ConfigLoggingLevel::Debug },
         );
         let dir = Utf8TempDir::new().unwrap();
@@ -621,10 +757,19 @@ mod tests {
         invalid_cx
             .write_to(&dir.child(&NON_BOOT_PATHS.install_dataset))
             .unwrap();
+        // Zone manifest file that's absent.
+        dir.child(&NON_BOOT_2_PATHS.install_dataset).create_dir_all().unwrap();
+        // Read error (empty file).
+        dir.child(&NON_BOOT_3_PATHS.zones_json).touch().unwrap();
 
         let zpools = ZoneImageZpools {
             root: dir.path(),
-            all_m2_zpools: vec![BOOT_ZPOOL, NON_BOOT_ZPOOL],
+            all_m2_zpools: vec![
+                BOOT_ZPOOL,
+                NON_BOOT_ZPOOL,
+                NON_BOOT_2_ZPOOL,
+                NON_BOOT_3_ZPOOL,
+            ],
         };
 
         let manifests =
@@ -635,7 +780,7 @@ mod tests {
             &cx.expected_result(&dir.path().join(&BOOT_PATHS.install_dataset))
         );
 
-        // The non-boot disk has an error.
+        // The non-boot disks have various error cases.
         assert_eq!(
             manifests.non_boot_disk_metadata,
             id_ord_map! {
@@ -649,6 +794,25 @@ mod tests {
                                 dir.child(&NON_BOOT_PATHS.install_dataset).as_path()
                             ),
                         }
+                    )
+                },
+                ZoneManifestNonBootInfo {
+                    zpool_name: NON_BOOT_2_ZPOOL,
+                    dataset_dir: dir.path().join(&NON_BOOT_2_PATHS.install_dataset),
+                    path: dir.path().join(&NON_BOOT_2_PATHS.zones_json),
+                    result: ZoneManifestNonBootResult::NotFound
+                },
+                ZoneManifestNonBootInfo {
+                    zpool_name: NON_BOOT_3_ZPOOL,
+                    dataset_dir: dir.path().join(&NON_BOOT_3_PATHS.install_dataset),
+                    path: dir.path().join(&NON_BOOT_3_PATHS.zones_json),
+                    result: ZoneManifestNonBootResult::ReadError(
+                        deserialize_error(
+                            dir.path(),
+                            &NON_BOOT_3_PATHS.zones_json,
+                            "",
+                        )
+                        .into()
                     )
                 }
             },

@@ -28,10 +28,7 @@ use thiserror::Error;
 /// Describes the current state of mupdate overrides.
 #[derive(Clone, Debug)]
 pub struct MupdateOverrideStatus {
-    /// The boot zpool.
-    pub boot_zpool: ZpoolName,
-
-    /// The boot disk path.
+    /// The path to the mupdate override JSON on the boot disk.
     pub boot_disk_path: Utf8PathBuf,
 
     /// Status of the boot disk.
@@ -56,22 +53,7 @@ impl AllMupdateOverrides {
     /// Attempt to find MUPdate override files. If present, this file will cause
     /// install-dataset artifacts to be used even if the image source is Artifact.
     ///
-    /// For now we treat the boot disk as authoritative, since install-dataset
-    /// artifacts are always served from the boot disk. There is a class of issues
-    /// here related to transient failures on one of the M.2s that we're
-    /// acknowledging but not tackling for now.
-    ///
-    /// In general, this API follows an interpreter pattern: first read all the
-    /// results and put them in a map, then make decisions based on them in a
-    /// separate step. This enables better testing and ensures that changes to
-    /// behavior are described in the type system.
-    ///
     /// For more about commingling MUPdate and update, see RFD 556.
-    ///
-    /// TODO: This is somewhat complex error handling logic that's similar to,
-    /// but different from, `Ledgerable` (for example, it only does an equality
-    /// check, not an ordering check, and it always considers the boot disk to
-    /// be authoritative). Consider extracting this out into something generic.
     pub(crate) fn read_all(
         log: &slog::Logger,
         zpools: &ZoneImageZpools<'_>,
@@ -106,7 +88,6 @@ impl AllMupdateOverrides {
 
     pub(crate) fn status(&self) -> MupdateOverrideStatus {
         MupdateOverrideStatus {
-            boot_zpool: self.boot_zpool,
             boot_disk_path: self.boot_disk_path.clone(),
             boot_disk_override: self.boot_disk_override.clone(),
             non_boot_disk_overrides: self.non_boot_disk_overrides.clone(),
