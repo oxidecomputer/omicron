@@ -5,7 +5,7 @@ using provided RNG seed: reconfigurator-cli-test
 new RNG seed: test_basic
 
 > sled-list
-ID NZPOOLS SUBNET 
+ID SERIAL NZPOOLS SUBNET 
 
 > inventory-list
 ID NERRORS TIME_DONE 
@@ -21,8 +21,8 @@ error: attempted to access sled dde1c0e2-b10d-4621-b420-f179f7a7a00a not found i
 added sled dde1c0e2-b10d-4621-b420-f179f7a7a00a
 
 > sled-list
-ID                                   NZPOOLS SUBNET                  
-dde1c0e2-b10d-4621-b420-f179f7a7a00a 10      fd00:1122:3344:101::/64 
+ID                                   SERIAL  NZPOOLS SUBNET                  
+dde1c0e2-b10d-4621-b420-f179f7a7a00a serial0 10      fd00:1122:3344:101::/64 
 
 > sled-show dde1c0e2-b10d-4621-b420-f179f7a7a00a
 sled dde1c0e2-b10d-4621-b420-f179f7a7a00a
@@ -60,10 +60,10 @@ added sled 90c1102a-b9f5-4d88-92a2-60d54a2d98cc
 added sled 04ef3330-c682-4a08-8def-fcc4bef31bcd
 
 > sled-list
-ID                                   NZPOOLS SUBNET                  
-04ef3330-c682-4a08-8def-fcc4bef31bcd 10      fd00:1122:3344:103::/64 
-90c1102a-b9f5-4d88-92a2-60d54a2d98cc 10      fd00:1122:3344:102::/64 
-dde1c0e2-b10d-4621-b420-f179f7a7a00a 10      fd00:1122:3344:101::/64 
+ID                                   SERIAL  NZPOOLS SUBNET                  
+04ef3330-c682-4a08-8def-fcc4bef31bcd serial2 10      fd00:1122:3344:103::/64 
+90c1102a-b9f5-4d88-92a2-60d54a2d98cc serial1 10      fd00:1122:3344:102::/64 
+dde1c0e2-b10d-4621-b420-f179f7a7a00a serial0 10      fd00:1122:3344:101::/64 
 
 
 > sled-update-sp dde1c0e2-b10d-4621-b420-f179f7a7a00a

@@ -5,7 +5,7 @@
 system_version = "1.0.0"
 
 [[artifact.gimlet_sp]]
-name = "fake-gimlet-sp"
+name = "SimGimletSp"
 version = "1.0.0"
 source = { kind = "fake", size = "1MiB" }
 
