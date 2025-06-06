@@ -352,6 +352,7 @@ async fn cmd_db_ereporters(
         #[tabled(display_with = "display_option_blank", rename = "P/N")]
         part_number: Option<String>,
         id: Uuid,
+        ereports: i64,
     }
 
     let sp_ereports = sp_query
@@ -360,16 +361,24 @@ async fn cmd_db_ereporters(
         )
         .await
         .context("listing SP reporter entries")?;
+    let mut rows = Vec::with_capacity(sp_ereports.len());
 
-    let mut table = tabled::Table::new(sp_ereports.into_iter().map(
-        |(restart_id, slot, sp_type, serial, part_number)| ReporterRow {
+    for (restart_id, slot, sp_type, serial, part_number) in sp_ereports {
+        let ereports = sp_dsl::sp_ereport
+            .filter(sp_dsl::restart_id.eq(restart_id))
+            .count()
+            .get_result_async(&*conn)
+            .await?;
+        rows.push(ReporterRow {
             ty: sp_type.into(),
             slot: slot.into(),
             serial,
             part_number,
             id: restart_id,
-        },
-    ));
+            ereports,
+        });
+    }
+    let mut table = tabled::Table::new(rows.into_iter());
 
     table
         .with(tabled::settings::Style::empty())
