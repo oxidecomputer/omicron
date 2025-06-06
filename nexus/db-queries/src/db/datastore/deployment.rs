@@ -1881,6 +1881,7 @@ mod tests {
     use nexus_types::external_api::views::PhysicalDiskState;
     use nexus_types::external_api::views::SledPolicy;
     use nexus_types::external_api::views::SledState;
+    use nexus_types::inventory::BaseboardId;
     use nexus_types::inventory::Collection;
     use omicron_common::address::IpRange;
     use omicron_common::address::Ipv6Subnet;
@@ -1999,6 +2000,10 @@ mod tests {
             policy: SledPolicy::provisionable(),
             state: SledState::Active,
             resources,
+            baseboard_id: BaseboardId {
+                part_number: String::from("unused"),
+                serial_number: String::from("unused"),
+            },
         }
     }
 
