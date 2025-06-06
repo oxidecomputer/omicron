@@ -17,11 +17,11 @@
 //! Operations that list or modify artifacts or the configuration are called by
 //! Nexus and handled by the Sled Agent API.
 
-use std::collections::BTreeMap;
 use std::future::Future;
 use std::io::{ErrorKind, Write};
 use std::net::SocketAddrV6;
 use std::str::FromStr;
+use std::sync::Arc;
 use std::time::Duration;
 
 use atomicwrites::{AtomicFile, OverwriteBehavior};
@@ -40,16 +40,14 @@ use sha2::{Digest, Sha256};
 use sled_agent_api::{
     ArtifactConfig, ArtifactListResponse, ArtifactPutResponse,
 };
-use sled_storage::dataset::M2_ARTIFACT_DATASET;
-use sled_storage::manager::StorageHandle;
+use sled_agent_config_reconciler::ConfigReconcilerHandle;
+use sled_agent_config_reconciler::InternalDisksReceiver;
 use slog::{Logger, error, info};
 use slog_error_chain::{InlineErrorChain, SlogInlineError};
 use tokio::fs::File;
 use tokio::sync::{OwnedSemaphorePermit, mpsc, oneshot, watch};
 use tokio::task::JoinSet;
 use tufaceous_artifact::ArtifactHash;
-
-use crate::services::ServiceManager;
 
 // These paths are defined under the artifact storage dataset. They
 // cannot conflict with any artifact paths because all artifact paths are
@@ -93,7 +91,7 @@ impl<T: DatasetsManager> ArtifactStore<T> {
     pub(crate) async fn new(
         log: &Logger,
         storage: T,
-        services: Option<ServiceManager>,
+        config_reconciler: Option<Arc<ConfigReconcilerHandle>>,
     ) -> ArtifactStore<T> {
         let log = log.new(slog::o!("component" => "ArtifactStore"));
 
@@ -133,7 +131,7 @@ impl<T: DatasetsManager> ArtifactStore<T> {
         tokio::task::spawn(ledger_manager(
             log.clone(),
             ledger_paths,
-            services,
+            config_reconciler,
             ledger_rx,
             config_tx,
         ));
@@ -164,13 +162,15 @@ impl<T: DatasetsManager> ArtifactStore<T> {
     }
 }
 
-impl ArtifactStore<StorageHandle> {
+impl ArtifactStore<InternalDisksReceiver> {
     pub(crate) async fn start(
-        self,
+        self: Arc<Self>,
         sled_address: SocketAddrV6,
         dropshot_config: &ConfigDropshot,
-    ) -> Result<dropshot::HttpServer<ArtifactStore<StorageHandle>>, StartError>
-    {
+    ) -> Result<
+        dropshot::HttpServer<Arc<ArtifactStore<InternalDisksReceiver>>>,
+        StartError,
+    > {
         let mut depot_address = sled_address;
         depot_address.set_port(REPO_DEPOT_PORT);
 
@@ -259,7 +259,7 @@ impl<T: DatasetsManager> ArtifactStore<T> {
     /// Open an artifact file by hash from a storage handle.
     ///
     /// This is the same as [ArtifactStore::get], but can be called with only
-    /// a [StorageHandle].
+    /// a storage implementation.
     pub(crate) async fn get_from_storage(
         storage: &T,
         log: &Logger,
@@ -452,11 +452,11 @@ type LedgerManagerRequest =
 async fn ledger_manager(
     log: Logger,
     ledger_paths: Vec<Utf8PathBuf>,
-    services: Option<ServiceManager>,
+    config_reconciler: Option<Arc<ConfigReconcilerHandle>>,
     mut rx: mpsc::Receiver<LedgerManagerRequest>,
     config_channel: watch::Sender<Option<ArtifactConfig>>,
 ) {
-    let services = services.as_ref();
+    let config_reconciler = config_reconciler.as_ref();
     let handle_request = async |new_config: ArtifactConfig| {
         if ledger_paths.is_empty() {
             return Err(Error::NoUpdateDataset);
@@ -466,21 +466,11 @@ async fn ledger_manager(
         {
             if new_config.generation > ledger.data().generation {
                 // New config generation. First check that the configuration
-                // contains all artifacts that are presently in use.
-                let mut missing = BTreeMap::new();
-                // Check artifacts from the current zone configuration.
-                if let Some(services) = services {
-                    for zone in services.omicron_zones_list().await.zones {
-                        if let Some(hash) = zone.image_source.artifact_hash() {
-                            if !new_config.artifacts.contains(&hash) {
-                                missing
-                                    .insert(hash, "current zone configuration");
-                            }
-                        }
-                    }
-                }
-                if !missing.is_empty() {
-                    return Err(Error::InUseArtifactsMissing(missing));
+                // is valid against the current ledgered sled config.
+                if let Some(config_reconciler) = config_reconciler {
+                    config_reconciler
+                        .validate_artifact_config(new_config.clone())
+                        .await??;
                 }
 
                 // Everything looks okay; update the ledger.
@@ -614,14 +604,11 @@ pub trait DatasetsManager: Clone + Send + Sync + 'static {
     }
 }
 
-impl DatasetsManager for StorageHandle {
+impl DatasetsManager for InternalDisksReceiver {
     async fn artifact_storage_paths(
         &self,
     ) -> impl Iterator<Item = Utf8PathBuf> + '_ {
-        self.get_latest_disks()
-            .await
-            .all_m2_mountpoints(M2_ARTIFACT_DATASET)
-            .into_iter()
+        self.current().all_artifact_datasets().collect::<Vec<_>>().into_iter()
     }
 }
 
@@ -766,11 +753,11 @@ impl ArtifactWriter {
 }
 
 /// Implementation of the Repo Depot API backed by an
-/// `ArtifactStore<StorageHandle>`.
+/// `ArtifactStore<InternalDisksReceiver>`.
 enum RepoDepotImpl {}
 
 impl RepoDepotApi for RepoDepotImpl {
-    type Context = ArtifactStore<StorageHandle>;
+    type Context = Arc<ArtifactStore<InternalDisksReceiver>>;
 
     async fn artifact_get_by_sha256(
         rqctx: RequestContext<Self::Context>,
@@ -831,8 +818,15 @@ pub enum Error {
     #[error("Digest mismatch: expected {expected}, actual {actual}")]
     HashMismatch { expected: ArtifactHash, actual: ArtifactHash },
 
-    #[error("Artifacts in use are not present in new config: {0:?}")]
-    InUseArtifactsMissing(BTreeMap<ArtifactHash, &'static str>),
+    #[error("New config is invalid per current sled config")]
+    InvalidPerSledConfig(
+        #[from] sled_agent_config_reconciler::LedgerArtifactConfigError,
+    ),
+
+    #[error("Cannot validate incoming config against sled config")]
+    CannotValidateAgainstSledConfig(
+        #[from] sled_agent_config_reconciler::LedgerTaskError,
+    ),
 
     #[error("Blocking task failed")]
     Join(#[source] tokio::task::JoinError),
@@ -863,7 +857,7 @@ impl From<Error> for HttpError {
         match err {
             // 4xx errors
             Error::HashMismatch { .. }
-            | Error::InUseArtifactsMissing { .. }
+            | Error::InvalidPerSledConfig { .. }
             | Error::NoConfig
             | Error::NotInConfig { .. } => {
                 HttpError::for_bad_request(None, err.to_string())
@@ -894,9 +888,12 @@ impl From<Error> for HttpError {
             | Error::File { .. }
             | Error::Join(_)
             | Error::LedgerCommit(_)
-            | Error::LedgerChannel => HttpError::for_internal_error(
-                InlineErrorChain::new(&err).to_string(),
-            ),
+            | Error::LedgerChannel
+            | Error::CannotValidateAgainstSledConfig(_) => {
+                HttpError::for_internal_error(
+                    InlineErrorChain::new(&err).to_string(),
+                )
+            }
         }
     }
 }
