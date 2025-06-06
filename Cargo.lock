@@ -11747,6 +11747,7 @@ dependencies = [
  "omicron-workspace-hack",
  "pretty_assertions",
  "rayon",
+ "serde",
  "serde_json",
  "sha2",
  "sled-storage",

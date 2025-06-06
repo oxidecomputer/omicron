@@ -457,7 +457,7 @@ async fn test_installinator_fetch() {
 
     // Ensure that the zone manifest can be parsed.
     let a_manifest_path =
-        a_path.join("zones").join(OmicronZoneManifest::FILE_NAME);
+        a_path.join("install").join(OmicronZoneManifest::FILE_NAME);
     let a_manifest_bytes = std::fs::read(a_manifest_path)
         .expect("zone manifest file successfully read");
     let a_manifest =
@@ -479,10 +479,9 @@ async fn test_installinator_fetch() {
         "zone2 is present in the zone set"
     );
 
-
     // Ensure that the B path also had the same file written out.
     let b_manifest_path =
-        b_path.join("zones").join(OmicronZoneManifest::FILE_NAME);
+        b_path.join("install").join(OmicronZoneManifest::FILE_NAME);
     assert!(b_manifest_path.is_file(), "{b_manifest_path} was written out");
     // Ensure that the zone manifest can be parsed.
     let b_override_bytes = std::fs::read(b_manifest_path)
@@ -526,7 +525,6 @@ async fn test_installinator_fetch() {
         MupdateOverrideNonBootResult::MatchesPresent,
     );
 
->>>>>>> Conflict 2 of 2 ends
     recv_handle.await.expect("recv_handle succeeded");
 
     wicketd_testctx.teardown().await;

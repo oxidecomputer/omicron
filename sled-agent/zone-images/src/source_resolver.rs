@@ -5,6 +5,7 @@
 //! Zone image lookup.
 
 use crate::AllMupdateOverrides;
+use crate::AllZoneManifests;
 use crate::MupdateOverrideStatus;
 use camino::Utf8Path;
 use camino::Utf8PathBuf;
@@ -102,6 +103,10 @@ struct ResolverInner {
     #[expect(unused)]
     log: slog::Logger,
     image_directory_override: Option<Utf8PathBuf>,
+    // Store all collected information for zones -- we're going to need to
+    // report this via inventory.
+    #[expect(unused)]
+    zone_manifests: AllZoneManifests,
     // Store all collected information for mupdate overrides -- we're going to
     // need to report this via inventory.
     mupdate_overrides: AllMupdateOverrides,
@@ -115,10 +120,17 @@ impl ResolverInner {
     ) -> Self {
         let log = log.new(o!("component" => "ZoneImageSourceResolver"));
 
+        let zone_manifests =
+            AllZoneManifests::read_all(&log, zpools, boot_zpool);
         let mupdate_overrides =
             AllMupdateOverrides::read_all(&log, zpools, boot_zpool);
 
-        Self { log, image_directory_override: None, mupdate_overrides }
+        Self {
+            log,
+            image_directory_override: None,
+            zone_manifests,
+            mupdate_overrides,
+        }
     }
 
     fn override_image_directory(
