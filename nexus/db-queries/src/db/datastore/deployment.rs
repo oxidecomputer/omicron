@@ -26,6 +26,7 @@ use diesel::NullableExpressionMethods;
 use diesel::OptionalExtension;
 use diesel::QueryDsl;
 use diesel::RunQueryDsl;
+use diesel::Table;
 use diesel::expression::SelectableHelper;
 use diesel::pg::Pg;
 use diesel::query_builder::AstPass;
@@ -34,6 +35,7 @@ use diesel::query_builder::QueryId;
 use diesel::result::DatabaseErrorKind;
 use diesel::result::Error as DieselError;
 use diesel::sql_types;
+use diesel::sql_types::Nullable;
 use futures::FutureExt;
 use id_map::IdMap;
 use nexus_db_errors::ErrorHandler;
@@ -41,6 +43,7 @@ use nexus_db_errors::OptionalError;
 use nexus_db_errors::TransactionError;
 use nexus_db_errors::public_error_from_diesel;
 use nexus_db_lookup::DbConnection;
+use nexus_db_model::ArtifactHash;
 use nexus_db_model::Blueprint as DbBlueprint;
 use nexus_db_model::BpClickhouseClusterConfig;
 use nexus_db_model::BpClickhouseKeeperZoneIdToNodeId;
@@ -50,18 +53,29 @@ use nexus_db_model::BpOmicronPhysicalDisk;
 use nexus_db_model::BpOmicronZone;
 use nexus_db_model::BpOmicronZoneNic;
 use nexus_db_model::BpOximeterReadPolicy;
+use nexus_db_model::BpPendingMgsUpdateSp;
 use nexus_db_model::BpSledMetadata;
 use nexus_db_model::BpTarget;
+use nexus_db_model::DbArtifactVersion;
+use nexus_db_model::DbTypedUuid;
+use nexus_db_model::HwBaseboardId;
+use nexus_db_model::SpMgsSlot;
+use nexus_db_model::SpType;
+use nexus_db_model::SqlU16;
 use nexus_db_model::TufArtifact;
 use nexus_db_model::to_db_typed_uuid;
+use nexus_db_schema::enums::SpTypeEnum;
 use nexus_types::deployment::Blueprint;
 use nexus_types::deployment::BlueprintMetadata;
 use nexus_types::deployment::BlueprintSledConfig;
 use nexus_types::deployment::BlueprintTarget;
 use nexus_types::deployment::ClickhouseClusterConfig;
 use nexus_types::deployment::CockroachDbPreserveDowngrade;
+use nexus_types::deployment::ExpectedVersion;
 use nexus_types::deployment::OximeterReadMode;
+use nexus_types::deployment::PendingMgsUpdateDetails;
 use nexus_types::deployment::PendingMgsUpdates;
+use nexus_types::inventory::BaseboardId;
 use omicron_common::api::external::DataPageParams;
 use omicron_common::api::external::Error;
 use omicron_common::api::external::Generation;
@@ -74,6 +88,9 @@ use omicron_uuid_kinds::GenericUuid;
 use omicron_uuid_kinds::OmicronZoneUuid;
 use omicron_uuid_kinds::SledUuid;
 use std::collections::BTreeMap;
+use std::collections::BTreeSet;
+use std::sync::Arc;
+use thiserror::Error;
 use tufaceous_artifact::KnownArtifactKind;
 use uuid::Uuid;
 
@@ -299,6 +316,22 @@ impl DataStore {
             &blueprint.oximeter_read_mode,
         );
 
+        #[derive(Debug, Error)]
+        enum TxnError {
+            #[error("database error")]
+            Diesel(#[from] DieselError),
+
+            #[error(
+                "aborting transaction after unexpectedly inserting {count} rows \
+                 for baseboard {baseboard_id:?} into {table_name}"
+            )]
+            BadInsertCount {
+                table_name: &'static str,
+                baseboard_id: Arc<BaseboardId>,
+                count: usize,
+            },
+        }
+
         // This implementation inserts all records associated with the
         // blueprint in one transaction.  This is required: we don't want
         // any planner or executor to see a half-inserted blueprint, nor do we
@@ -410,11 +443,132 @@ impl DataStore {
                         .await?;
             }
 
+            // Insert pending MGS updates for service processors for this
+            // blueprint.  These include foreign keys into the hw_baseboard_id
+            // table that we don't have handy.  To achieve this, we use the same
+            // pattern used during inventory insertion:
+            //   INSERT INTO bp_pending_mgs_update_sp
+            //       SELECT
+            //           id
+            //           [other column values as literals]
+            //         FROM hw_baseboard_id
+            //         WHERE part_number = ... AND serial_number = ...;
+            //
+            // This way, we don't need to know the id.  The database looks it up
+            // for us as it does the INSERT.
+            for update in &blueprint.pending_mgs_updates
+            {
+                // Right now, we only implement support for storing SP updates.
+                let PendingMgsUpdateDetails::Sp {
+                    expected_active_version,
+                    expected_inactive_version
+                } = &update.details else {
+                    continue;
+                };
+
+                use nexus_db_schema::schema::hw_baseboard_id::dsl as baseboard_dsl;
+                use nexus_db_schema::schema::bp_pending_mgs_update_sp::dsl as update_dsl;
+                let selection = nexus_db_schema::schema::hw_baseboard_id::table
+                    .select((
+                        DbTypedUuid::from(blueprint_id).into_sql::<diesel::sql_types::Uuid>(),
+                        baseboard_dsl::id,
+                        SpType::from(update.sp_type).into_sql::<SpTypeEnum>(),
+                        // XXX-dap size of int
+                        SpMgsSlot::from(SqlU16::from(u16::try_from(update.slot_id).unwrap())).into_sql::<diesel::sql_types::Int4>(),
+                        ArtifactHash::from(update.artifact_hash).into_sql::<diesel::sql_types::Text>(),
+                        DbArtifactVersion::from(update.artifact_version.clone()).into_sql::<diesel::sql_types::Text>(),
+                        DbArtifactVersion::from(expected_active_version.clone()).into_sql::<diesel::sql_types::Text>(),
+                        match expected_inactive_version {
+                            ExpectedVersion::NoValidVersion => None,
+                            ExpectedVersion::Version(v) => Some(DbArtifactVersion::from(v.clone())),
+                        }
+                        .into_sql::<Nullable<diesel::sql_types::Text>>(),
+                    ))
+                    .filter(
+                        baseboard_dsl::part_number
+                            .eq(update.baseboard_id.part_number.clone()),
+                    )
+                    .filter(
+                        baseboard_dsl::serial_number
+                            .eq(update.baseboard_id.serial_number.clone()),
+                    );
+                let count =
+                   diesel::insert_into(update_dsl::bp_pending_mgs_update_sp)
+                       .values(selection)
+                       .into_columns((
+                           update_dsl::blueprint_id,
+                           update_dsl::hw_baseboard_id,
+                           update_dsl::sp_type,
+                           update_dsl::sp_slot,
+                           update_dsl::artifact_sha256,
+                           update_dsl::artifact_version,
+                           update_dsl::expected_active_version,
+                           update_dsl::expected_inactive_version,
+                       ))
+                       .execute_async(&conn)
+                       .await?;
+                if count != 1 {
+                    // This should be impossible in practice.  We will insert
+                    // however many rows matched the `baseboard_id` parts of
+                    // the query above.  It can't be more than one 1 because
+                    // we've filtered on a pair of columns that are unique
+                    // together.  It could only be 0 if the baseboard id had
+                    // never been seen before in an inventory collection.  But
+                    // in that case, how did we manage to construct a blueprint
+                    // with it?
+                    //
+                    // This could happen in the test suite or with
+                    // `reconfigurator-cli`, which both let you create any
+                    // blueprint you like.  In the test suite, the test just has
+                    // to deal with this behavior (e.g., by inserting an
+                    // inventory collection containing this SP).  With
+                    // `reconfigurator-cli`, this amounts to user error.
+                    error!(&opctx.log,
+                        "blueprint insertion: unexpectedly tried to insert wrong number of
+                         rows into bp_pending_mgs_update_sp (aborting transaction)";
+                        "count" => count,
+                        &update.baseboard_id,
+                    );
+                    return Err(TxnError::BadInsertCount {
+                        table_name: "bp_pending_mgs_update_sp",
+                        count,
+                        baseboard_id: update.baseboard_id.clone(),
+                    });
+                }
+
+                // This statement is just here to force a compilation error
+                // if the set of columns in `bp_pending_mgs_update_sp`
+                // changes because that will affect the correctness of the
+                // above statement.
+                //
+                // If you're here because of a compile error, you might be
+                // changing the `bp_pending_mgs_update_sp` table.  Update
+                // the statement below and be sure to update the code above,
+                // too!
+                let (
+                    _blueprint_id,
+                    _hw_baseboard_id,
+                    _sp_type,
+                    _sp_slot,
+                    _artifact_sha256,
+                    _artifact_version,
+                    _expected_active_version,
+                    _expected_inactive_version,
+                ) = update_dsl::bp_pending_mgs_update_sp::all_columns();
+            }
+
             Ok(())
 
         })
         .await
-        .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))?;
+        .map_err(|e| match e {
+            TxnError::Diesel(e) => public_error_from_diesel(e, ErrorHandler::Server),
+            e @ TxnError::BadInsertCount { .. } => {
+                // This variant is always an internal error and has no causes so
+                // we don't need to use InlineErrorChain here.
+                Error::internal_error(&e.to_string())
+            }
+        })?;
 
         info!(
             &opctx.log,
@@ -940,11 +1094,96 @@ impl DataStore {
             }
         };
 
+        // Load all pending SP updates.
+        //
+        // Pagination is a little silly here because we will only allow one at a
+        // time in practice for a while, but it's easy enough to do.
+        let mut pending_updates_sp = Vec::new();
+        {
+            use nexus_db_schema::schema::bp_pending_mgs_update_sp::dsl;
+
+            let mut paginator = Paginator::new(SQL_BATCH_SIZE);
+            while let Some(p) = paginator.next() {
+                let batch = paginated(
+                    dsl::bp_pending_mgs_update_sp,
+                    dsl::hw_baseboard_id,
+                    &p.current_pagparams(),
+                )
+                .filter(dsl::blueprint_id.eq(to_db_typed_uuid(blueprint_id)))
+                .select(BpPendingMgsUpdateSp::as_select())
+                .load_async(&*conn)
+                .await
+                .map_err(|e| {
+                    public_error_from_diesel(e, ErrorHandler::Server)
+                })?;
+
+                paginator = p.found_batch(&batch, &|d| d.hw_baseboard_id);
+                for row in batch {
+                    pending_updates_sp.push(row);
+                }
+            }
+        }
+
+        // Collect the unique baseboard ids referenced by pending updates.
+        let baseboard_id_ids: BTreeSet<_> =
+            pending_updates_sp.iter().map(|s| s.hw_baseboard_id).collect();
+        // XXX-dap could commonize with inventory
+        // Fetch the corresponding baseboard records.
+        let baseboards_by_id: BTreeMap<_, _> = {
+            use nexus_db_schema::schema::hw_baseboard_id::dsl;
+
+            let mut bbs = BTreeMap::new();
+
+            let mut paginator = Paginator::new(SQL_BATCH_SIZE);
+            while let Some(p) = paginator.next() {
+                let batch = paginated(
+                    dsl::hw_baseboard_id,
+                    dsl::id,
+                    &p.current_pagparams(),
+                )
+                .filter(dsl::id.eq_any(baseboard_id_ids.clone()))
+                .select(HwBaseboardId::as_select())
+                .load_async(&*conn)
+                .await
+                .map_err(|e| {
+                    public_error_from_diesel(e, ErrorHandler::Server)
+                })?;
+                paginator = p.found_batch(&batch, &|row| row.id);
+                bbs.extend(
+                    batch
+                        .into_iter()
+                        .map(|bb| (bb.id, Arc::new(BaseboardId::from(bb)))),
+                );
+            }
+
+            bbs
+        };
+
+        // Combine this information to assemble the set of pending MGS updates.
+        let mut pending_mgs_updates = PendingMgsUpdates::new();
+        for row in pending_updates_sp {
+            let Some(baseboard) = baseboards_by_id.get(&row.hw_baseboard_id)
+            else {
+                // This should be impossible.
+                return Err(Error::internal_error(&format!(
+                    "loading blueprint {}: missing baseboard that we should have fetched: {}",
+                    blueprint_id, row.hw_baseboard_id
+                )));
+            };
+
+            let update = row.into_generic(baseboard.clone());
+            if let Some(previous) = pending_mgs_updates.insert(update) {
+                // This should be impossible.
+                return Err(Error::internal_error(&format!(
+                    "blueprint {}: found multiple pending updates for baseboard {:?}",
+                    blueprint_id, previous.baseboard_id
+                )));
+            }
+        }
+
         Ok(Blueprint {
             id: blueprint_id,
-            // TODO these need to be serialized to the database.
-            // See oxidecomputer/omicron#7981.
-            pending_mgs_updates: PendingMgsUpdates::new(),
+            pending_mgs_updates,
             sleds: sled_configs,
             parent_blueprint_id,
             internal_dns_version,
@@ -1870,6 +2109,7 @@ mod tests {
     use nexus_types::deployment::BlueprintZoneImageVersion;
     use nexus_types::deployment::BlueprintZoneType;
     use nexus_types::deployment::OmicronZoneExternalFloatingIp;
+    use nexus_types::deployment::PendingMgsUpdate;
     use nexus_types::deployment::PlanningInput;
     use nexus_types::deployment::PlanningInputBuilder;
     use nexus_types::deployment::SledDetails;
@@ -2314,6 +2554,21 @@ mod tests {
                 .unwrap();
         }
 
+        // Configure an SP update.
+        let (baseboard_id, sp) =
+            collection.sps.iter().next().expect("at least one SP");
+        builder.pending_mgs_update_insert(PendingMgsUpdate {
+            baseboard_id: baseboard_id.clone(),
+            sp_type: sp.sp_type,
+            slot_id: u32::from(sp.sp_slot),
+            details: PendingMgsUpdateDetails::Sp {
+                expected_active_version: "1.0.0".parse().unwrap(),
+                expected_inactive_version: ExpectedVersion::NoValidVersion,
+            },
+            artifact_hash: ArtifactHash([72; 32]),
+            artifact_version: "2.0.0".parse().unwrap(),
+        });
+
         let num_new_ntp_zones = 1;
         let num_new_crucible_zones = new_sled_zpools.len();
         let num_new_sled_zones = num_new_ntp_zones + num_new_crucible_zones;
@@ -2345,6 +2600,14 @@ mod tests {
         // All zones should be in service.
         assert_all_zones_in_service(&blueprint2);
         assert_eq!(blueprint2.parent_blueprint_id, Some(blueprint1.id));
+
+        // This blueprint contains a PendingMgsUpdate that references an SP from
+        // `collection`.  This must already be present in the database for
+        // blueprint insertion to work.
+        datastore
+            .inventory_insert_collection(&opctx, &collection)
+            .await
+            .expect("failed to insert inventory collection");
 
         // Check that we can write it to the DB and read it back.
         datastore
