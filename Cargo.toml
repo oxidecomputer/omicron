@@ -184,6 +184,7 @@ default-members = [
     "dev-tools/crdb-seed",
     "dev-tools/db-dev",
     "dev-tools/downloader",
+    "dev-tools/hist",
     "dev-tools/ls-apis",
     "dev-tools/mgs-dev",
     "dev-tools/omdb",

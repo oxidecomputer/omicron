@@ -264,7 +264,7 @@ impl JunitSummaryByCommit {
                         commit_message: input.commit_message.clone(),
                         series_name: format!(
                             "{} ({})",
-                            suite.name.to_string(),
+                            suite.name,
                             input.host()
                         ),
                     });
@@ -301,7 +301,7 @@ impl JunitSummaryByCommit {
                                 commit_message: input.commit_message.clone(),
                                 series_name: format!(
                                     "{} ({})",
-                                    test.name.to_string(),
+                                    test.name,
                                     input.host()
                                 ),
                             });
