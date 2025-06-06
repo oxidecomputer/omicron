@@ -997,6 +997,8 @@ pub struct DeviceAccessToken {
     /// "oxide-token-"
     pub id: Uuid,
     pub time_created: DateTime<Utc>,
+
+    /// Expiration timestamp. A null value means the token does not automatically expire.
     pub time_expires: Option<DateTime<Utc>>,
 }
 
@@ -1012,10 +1014,10 @@ impl SimpleIdentity for DeviceAccessToken {
 /// See RFC 8628 §3.2 (Device Authorization Response).
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
 pub struct DeviceAuthResponse {
-    /// The device verification code.
+    /// The device verification code
     pub device_code: String,
 
-    /// The end-user verification code.
+    /// The end-user verification code
     pub user_code: String,
 
     /// The end-user verification URI on the authorization server.
@@ -1023,18 +1025,24 @@ pub struct DeviceAuthResponse {
     /// may be asked to manually type it into their user agent.
     pub verification_uri: String,
 
-    /// The lifetime in seconds of the `device_code` and `user_code`.
+    /// The lifetime in seconds of the `device_code` and `user_code`
     pub expires_in: u16,
 }
 
 /// Successful access token grant. See RFC 6749 §5.1.
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
 pub struct DeviceAccessTokenGrant {
-    /// The access token issued to the client.
+    /// The access token issued to the client
     pub access_token: String,
 
     /// The type of the token issued, as described in RFC 6749 §7.1.
     pub token_type: DeviceAccessTokenType,
+
+    /// A unique, immutable, system-controlled identifier for the token
+    pub token_id: Uuid,
+
+    /// Expiration timestamp. A null value means the token does not automatically expire.
+    pub time_expires: Option<DateTime<Utc>>,
 }
 
 /// The kind of token granted.

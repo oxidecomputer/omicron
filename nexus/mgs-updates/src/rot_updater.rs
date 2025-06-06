@@ -405,7 +405,8 @@ impl SpComponentUpdateHelper for ReconfiguratorRotUpdater {
                     PendingMgsUpdateDetails::Rot { expected_active_slot, .. } => {
                         expected_active_slot.slot().toggled().to_u16()
                     },
-                    PendingMgsUpdateDetails::Sp { .. } => unreachable!(
+                    PendingMgsUpdateDetails::Sp { .. }
+                    | PendingMgsUpdateDetails::RotBootloader { .. } => unreachable!(
                         "pending MGS update details within ReconfiguratorRotUpdater \
                         will always be for the RoT"
                     )
