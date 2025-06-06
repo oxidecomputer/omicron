@@ -19,6 +19,7 @@ use omicron_common::api::internal::shared::{
 use omicron_uuid_kinds::{GenericUuid, OmicronZoneUuid};
 use rand::SeedableRng;
 use rand::prelude::IteratorRandom;
+use sled_agent_zone_images::ramdisk_file_source;
 use sled_storage::dataset::ZONE_DATASET;
 use sled_storage::manager::StorageHandle;
 use sled_storage::resources::AllDisks;
@@ -334,7 +335,7 @@ impl ProbeManagerInner {
             .with_log(self.log.clone())
             .with_underlay_vnic_allocator(&self.vnic_allocator)
             .with_zone_root_path(zone_root_path)
-            .with_zone_image_paths(&["/opt/oxide".into()])
+            .with_file_source(&ramdisk_file_source("probe"))
             .with_zone_type("probe")
             .with_unique_name(OmicronZoneUuid::from_untyped_uuid(probe.id))
             .with_datasets(&[])

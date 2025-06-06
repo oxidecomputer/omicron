@@ -7,9 +7,12 @@
 use crate::AllMupdateOverrides;
 use crate::AllZoneManifests;
 use crate::MupdateOverrideStatus;
+use crate::RAMDISK_IMAGE_PATH;
 use crate::ZoneManifestStatus;
+use crate::install_dataset_file_name;
 use camino::Utf8Path;
 use camino::Utf8PathBuf;
+use illumos_utils::running_zone::ZoneImageFileSource;
 use illumos_utils::zpool::ZpoolName;
 use nexus_sled_agent_shared::inventory::OmicronZoneImageSource;
 use sled_storage::dataset::INSTALL_DATASET;
@@ -17,20 +20,6 @@ use sled_storage::dataset::M2_ARTIFACT_DATASET;
 use slog::o;
 use std::sync::Arc;
 use std::sync::Mutex;
-
-/// Places to look for an Omicron zone image.
-pub struct ZoneImageFileSource {
-    /// A custom file name to look for, if provided.
-    ///
-    /// The default file name is `<zone_type>.tar.gz`.
-    pub file_name: Option<String>,
-
-    /// The paths to look for the zone image in.
-    ///
-    /// This represents a high-confidence belief, but not a guarantee, that the
-    /// zone image will be found in one of these locations.
-    pub search_paths: Vec<Utf8PathBuf>,
-}
 
 /// A description of zpools to examine for zone images.
 pub struct ZoneImageZpools<'a> {
@@ -86,12 +75,13 @@ impl ZoneImageSourceResolver {
     /// list of potential paths to search, for a zone image.
     pub fn file_source_for(
         &self,
+        zone_type: &str,
         image_source: &OmicronZoneImageSource,
         zpools: &ZoneImageZpools<'_>,
         boot_zpool: Option<&ZpoolName>,
     ) -> ZoneImageFileSource {
         let inner = self.inner.lock().unwrap();
-        inner.file_source_for(image_source, zpools, boot_zpool)
+        inner.file_source_for(zone_type, image_source, zpools, boot_zpool)
     }
 }
 
@@ -158,23 +148,16 @@ impl ResolverInner {
 
     fn file_source_for(
         &self,
+        zone_type: &str,
         image_source: &OmicronZoneImageSource,
         zpools: &ZoneImageZpools<'_>,
         boot_zpool: Option<&ZpoolName>,
     ) -> ZoneImageFileSource {
-        let file_name = match image_source {
-            OmicronZoneImageSource::InstallDataset => {
-                // Use the default file name for install-dataset lookups.
-                None
-            }
-            OmicronZoneImageSource::Artifact { hash } => Some(hash.to_string()),
-        };
-
-        let search_paths = match image_source {
+        match image_source {
             OmicronZoneImageSource::InstallDataset => {
                 // Look for the image in the ramdisk first
                 let mut zone_image_paths =
-                    vec![Utf8PathBuf::from("/opt/oxide")];
+                    vec![Utf8PathBuf::from(RAMDISK_IMAGE_PATH)];
                 // Inject an image path if requested by a test.
                 if let Some(path) = &self.image_directory_override {
                     zone_image_paths.push(path.clone());
@@ -189,9 +172,12 @@ impl ResolverInner {
                     );
                 }
 
-                zone_image_paths
+                ZoneImageFileSource {
+                    file_name: install_dataset_file_name(zone_type),
+                    search_paths: zone_image_paths,
+                }
             }
-            OmicronZoneImageSource::Artifact { .. } => {
+            OmicronZoneImageSource::Artifact { hash } => {
                 // Search both artifact datasets, but look on the boot disk first.
                 // This iterator starts with the zpool for the boot disk (if it
                 // exists), and then is followed by all other zpools.
@@ -201,17 +187,21 @@ impl ResolverInner {
                         .iter()
                         .filter(|zpool| Some(zpool) != boot_zpool.as_ref()),
                 );
-                zpool_iter
+                let search_paths = zpool_iter
                     .map(|zpool| {
                         zpool.dataset_mountpoint(
                             zpools.root,
                             M2_ARTIFACT_DATASET,
                         )
                     })
-                    .collect()
+                    .collect();
+                ZoneImageFileSource {
+                    // Images in the artifact store are named by just their
+                    // hash.
+                    file_name: hash.to_string(),
+                    search_paths,
+                }
             }
-        };
-
-        ZoneImageFileSource { file_name, search_paths }
+        }
     }
 }
