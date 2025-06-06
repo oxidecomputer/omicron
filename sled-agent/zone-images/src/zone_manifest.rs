@@ -63,7 +63,8 @@ impl AllZoneManifests {
             Err(error) => Err(ZoneManifestReadError::InstallMetadata(error)),
         };
 
-        // Validate files on non-boot disks (non-fatal, will produce a warning).
+        // Validate files on non-boot disks (non-fatal, will produce warnings if
+        // errors or mismatches are encountered).
         let non_boot_disk_metadata = files
             .non_boot_disk_metadata
             .into_iter()
@@ -83,6 +84,7 @@ impl AllZoneManifests {
 
     fn log_results(&self, log: &slog::Logger) {
         let log = log.new(o!(
+            "component" => "zone_manifest",
             "boot_zpool" => self.boot_zpool.to_string(),
             "boot_disk_path" => self.boot_disk_path.to_string(),
         ));
@@ -115,6 +117,14 @@ impl AllZoneManifests {
                     "error" => InlineErrorChain::new(error),
                 );
             }
+        }
+
+        if self.non_boot_disk_metadata.is_empty() {
+            warn!(
+                log,
+                "no non-boot zpools found, unable to verify consistency -- \
+                 this may be a hardware issue with the non-boot M.2"
+            );
         }
 
         for info in &self.non_boot_disk_metadata {
@@ -410,7 +420,12 @@ impl fmt::Display for ZoneManifestArtifactsDisplay<'_> {
                     )?;
                 }
                 ArtifactReadResult::Error(error) => {
-                    writeln!(f, "  {}: error ({})", artifact.file_name, error)?;
+                    writeln!(
+                        f,
+                        "  {}: error ({})",
+                        artifact.file_name,
+                        InlineErrorChain::new(error)
+                    )?;
                 }
             }
         }

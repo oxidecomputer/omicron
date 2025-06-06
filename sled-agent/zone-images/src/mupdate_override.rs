@@ -38,7 +38,8 @@ pub struct MupdateOverrideStatus {
     pub boot_disk_override:
         Result<Option<MupdateOverrideInfo>, MupdateOverrideReadError>,
 
-    /// Status of the non-boot disks. This results in warnings.
+    /// Status of the non-boot disks. This results in warnings in case of a
+    /// mismatch.
     pub non_boot_disk_overrides: IdOrdMap<MupdateOverrideNonBootInfo>,
 }
 
@@ -114,6 +115,7 @@ impl AllMupdateOverrides {
 
     fn log_results(&self, log: &slog::Logger) {
         let log = log.new(o!(
+            "component" => "mupdate_override",
             "boot_zpool" => self.boot_zpool.to_string(),
             "boot_disk_path" => self.boot_disk_path.to_string(),
         ));
