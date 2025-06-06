@@ -12,7 +12,6 @@
 
 use crate::CurrentlyManagedZpools;
 use crate::InventoryError;
-use anyhow::Context as _;
 use camino::Utf8PathBuf;
 use debug_ignore::DebugIgnore;
 use futures::StreamExt;
@@ -49,7 +48,6 @@ use slog::warn;
 use slog_error_chain::InlineErrorChain;
 use std::collections::BTreeMap;
 use std::collections::BTreeSet;
-use std::ffi::OsStr;
 use std::future::Future;
 use std::str::FromStr;
 use std::sync::Arc;
@@ -1177,15 +1175,6 @@ trait ZfsImpl: Send + Sync + 'static {
         datasets: &[String],
         which: WhichDatasets,
     ) -> impl Future<Output = anyhow::Result<Vec<DatasetProperties>>> + Send;
-
-    // TODO-john remove
-    fn list_datasets_full<I, S>(
-        &self,
-        names: I,
-    ) -> impl Future<Output = anyhow::Result<Vec<String>>> + Send
-    where
-        I: IntoIterator<Item = S> + Send,
-        S: AsRef<OsStr>;
 }
 
 struct RealZfs;
@@ -1230,17 +1219,6 @@ impl ZfsImpl for RealZfs {
         which: WhichDatasets,
     ) -> anyhow::Result<Vec<DatasetProperties>> {
         Zfs::get_dataset_properties(datasets, which).await
-    }
-
-    async fn list_datasets_full<I, S>(
-        &self,
-        names: I,
-    ) -> anyhow::Result<Vec<String>>
-    where
-        I: IntoIterator<Item = S> + Send,
-        S: AsRef<OsStr>,
-    {
-        Zfs::list_datasets_full(names).await.context("failed to list datasets")
     }
 }
 
@@ -1413,36 +1391,6 @@ mod tests {
             }
 
             Ok(result)
-        }
-
-        async fn list_datasets_full<I, S>(
-            &self,
-            names: I,
-        ) -> anyhow::Result<Vec<String>>
-        where
-            I: IntoIterator<Item = S> + Send,
-            S: AsRef<OsStr>,
-        {
-            let state = self.inner.lock().unwrap();
-
-            let mut datasets = Vec::new();
-
-            for name in names {
-                let name = name.as_ref().to_str().expect("valid string");
-                for dataset in state.datasets.keys() {
-                    if dataset.starts_with(name) {
-                        // Restrict to dataset and its immediate children
-                        if dataset
-                            .strip_prefix(&format!("{name}/"))
-                            .map_or(true, |rest| !rest.contains('/'))
-                        {
-                            datasets.push(dataset.clone());
-                        }
-                    }
-                }
-            }
-
-            Ok(datasets)
         }
     }
 
