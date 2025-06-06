@@ -7295,6 +7295,23 @@ dependencies = [
 ]
 
 [[package]]
+name = "omicron-hist"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "clap",
+ "crossterm",
+ "futures",
+ "omicron-workspace-hack",
+ "quick-xml",
+ "ratatui",
+ "reqwest",
+ "serde_json",
+ "sigpipe",
+ "tokio",
+]
+
+[[package]]
 name = "omicron-live-tests"
 version = "0.1.0"
 dependencies = [
@@ -8022,6 +8039,7 @@ dependencies = [
  "postgres-types",
  "predicates",
  "proc-macro2",
+ "quick-xml",
  "quote",
  "rand 0.8.5",
  "regex",
