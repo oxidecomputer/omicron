@@ -3480,6 +3480,7 @@ dependencies = [
  "gateway-client",
  "gateway-messages",
  "omicron-common",
+ "omicron-uuid-kinds",
  "omicron-workspace-hack",
  "reqwest",
  "serde",
@@ -3503,6 +3504,7 @@ dependencies = [
  "daft",
  "gateway-messages",
  "gateway-types",
+ "omicron-uuid-kinds",
  "omicron-workspace-hack",
  "progenitor 0.10.0",
  "rand 0.8.5",
@@ -3606,6 +3608,7 @@ dependencies = [
  "hex",
  "ipcc",
  "omicron-common",
+ "omicron-uuid-kinds",
  "omicron-workspace-hack",
  "schemars",
  "serde",
@@ -4554,14 +4557,12 @@ dependencies = [
 
 [[package]]
 name = "iddqd"
-version = "0.3.3"
+version = "0.3.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "7c3407dc49fe79cf7281b48d3a251cf8c11ff960a652e32cbef8848216c4b3c8"
+checksum = "fb5b72a689cecdaca7349c7fd30715e3f494945e60c480de56a7089c814fa622"
 dependencies = [
  "allocator-api2",
  "daft",
- "debug-ignore",
- "derive-where",
  "equivalent",
  "foldhash",
  "hashbrown 0.15.3",
@@ -4849,7 +4850,6 @@ dependencies = [
  "tufaceous-artifact",
  "tufaceous-lib",
  "update-engine",
- "uuid",
 ]
 
 [[package]]
@@ -4861,6 +4861,7 @@ dependencies = [
  "hyper",
  "installinator-common",
  "omicron-common",
+ "omicron-uuid-kinds",
  "omicron-workspace-hack",
  "schemars",
  "serde",
@@ -4875,6 +4876,7 @@ version = "0.1.0"
 dependencies = [
  "installinator-common",
  "omicron-common",
+ "omicron-uuid-kinds",
  "omicron-workspace-hack",
  "progenitor 0.10.0",
  "regress",
@@ -4884,7 +4886,6 @@ dependencies = [
  "serde_json",
  "slog",
  "update-engine",
- "uuid",
 ]
 
 [[package]]
@@ -5002,13 +5003,13 @@ dependencies = [
  "ciborium",
  "libipcc",
  "omicron-common",
+ "omicron-uuid-kinds",
  "omicron-workspace-hack",
  "proptest",
  "serde",
  "test-strategy",
  "thiserror 1.0.69",
  "tufaceous-artifact",
- "uuid",
 ]
 
 [[package]]
@@ -11746,6 +11747,7 @@ dependencies = [
  "omicron-workspace-hack",
  "pretty_assertions",
  "rayon",
+ "serde",
  "serde_json",
  "sha2",
  "sled-storage",

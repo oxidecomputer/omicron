@@ -37,6 +37,7 @@ use installinator_common::InstallinatorCompletionMetadata;
 use installinator_common::InstallinatorSpec;
 use installinator_common::WriteOutput;
 use omicron_common::disk::M2Slot;
+use omicron_uuid_kinds::MupdateUuid;
 use semver::Version;
 use slog::Logger;
 use slog::error;
@@ -496,7 +497,7 @@ impl SpawnUpdateDriver for RealSpawnUpdateDriver<'_> {
         // Generate an ID for this update; the update tracker will send it to the
         // sled as part of the InstallinatorImageId, and installinator will send it
         // back to our artifact server with its progress reports.
-        let update_id = Uuid::new_v4();
+        let update_id = MupdateUuid::new_v4();
 
         let event_buffer = Arc::new(StdMutex::new(EventBuffer::new(16)));
         let ipr_start_receiver =
@@ -1748,7 +1749,7 @@ fn simulate_result(
 }
 
 struct UpdateContext {
-    update_id: Uuid,
+    update_id: MupdateUuid,
     sp: SpIdentifier,
     mgs_client: gateway_client::Client,
     upload_trampoline_phase_2_to_mgs:

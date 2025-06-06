@@ -16,17 +16,17 @@ use dropshot::{
 };
 use hyper::header;
 use installinator_common::EventReport;
+use omicron_uuid_kinds::MupdateUuid;
 use schemars::JsonSchema;
 use serde::Deserialize;
 use tufaceous_artifact::ArtifactHashId;
-use uuid::Uuid;
 
 const PROGRESS_REPORT_MAX_BYTES: usize = 4 * 1024 * 1024;
 
 #[derive(Debug, Deserialize, JsonSchema)]
 pub struct ReportQuery {
     /// A unique identifier for the update.
-    pub update_id: Uuid,
+    pub update_id: MupdateUuid,
 }
 
 #[dropshot::api_description]
@@ -95,7 +95,7 @@ impl EventReportStatus {
     /// Intended to be called by `report_progress` implementations.
     pub fn to_http_result(
         self,
-        update_id: Uuid,
+        update_id: MupdateUuid,
     ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
         match self {
             EventReportStatus::Processed => Ok(HttpResponseUpdatedNoContent()),
