@@ -16,6 +16,7 @@ nexus-sled-agent-shared.workspace = true
 omicron-common.workspace = true
 omicron-workspace-hack.workspace = true
 rayon.workspace = true
+serde.workspace = true
 serde_json.workspace = true
 sha2.workspace = true
 sled-storage.workspace = true

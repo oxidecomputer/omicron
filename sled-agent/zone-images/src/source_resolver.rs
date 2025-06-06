@@ -5,7 +5,9 @@
 //! Zone image lookup.
 
 use crate::AllMupdateOverrides;
+use crate::AllZoneManifests;
 use crate::MupdateOverrideStatus;
+use crate::ZoneManifestStatus;
 use crate::RAMDISK_IMAGE_PATH;
 use crate::install_dataset_file_name;
 use camino::Utf8Path;
@@ -63,7 +65,10 @@ impl ZoneImageSourceResolver {
     /// Returns current information about resolver status and health.
     pub fn status(&self) -> ResolverStatus {
         let inner = self.inner.lock().unwrap();
-        ResolverStatus { mupdate_override: inner.mupdate_overrides.status() }
+        let zone_manifest = inner.zone_manifests.status();
+        let mupdate_override = inner.mupdate_overrides.status();
+
+        ResolverStatus { mupdate_override, zone_manifest }
     }
 
     /// Returns a [`ZoneImageFileSource`] consisting of the file name, plus a
@@ -83,6 +88,9 @@ impl ZoneImageSourceResolver {
 /// Current status of the zone image resolver.
 #[derive(Clone, Debug)]
 pub struct ResolverStatus {
+    /// The zone manifest status.
+    pub zone_manifest: ZoneManifestStatus,
+
     /// The mupdate override status.
     pub mupdate_override: MupdateOverrideStatus,
 }
@@ -92,6 +100,9 @@ struct ResolverInner {
     #[expect(unused)]
     log: slog::Logger,
     image_directory_override: Option<Utf8PathBuf>,
+    // Store all collected information for zones -- we're going to need to
+    // report this via inventory.
+    zone_manifests: AllZoneManifests,
     // Store all collected information for mupdate overrides -- we're going to
     // need to report this via inventory.
     mupdate_overrides: AllMupdateOverrides,
@@ -105,10 +116,17 @@ impl ResolverInner {
     ) -> Self {
         let log = log.new(o!("component" => "ZoneImageSourceResolver"));
 
+        let zone_manifests =
+            AllZoneManifests::read_all(&log, zpools, boot_zpool);
         let mupdate_overrides =
             AllMupdateOverrides::read_all(&log, zpools, boot_zpool);
 
-        Self { log, image_directory_override: None, mupdate_overrides }
+        Self {
+            log,
+            image_directory_override: None,
+            zone_manifests,
+            mupdate_overrides,
+        }
     }
 
     fn override_image_directory(

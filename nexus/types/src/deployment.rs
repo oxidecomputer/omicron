@@ -26,6 +26,7 @@ use nexus_sled_agent_shared::inventory::OmicronZoneImageSource;
 use nexus_sled_agent_shared::inventory::ZoneKind;
 use omicron_common::api::external::ByteCount;
 use omicron_common::api::external::Generation;
+use omicron_common::api::external::TufArtifactMeta;
 use omicron_common::api::internal::shared::DatasetKind;
 use omicron_common::disk::CompressionAlgorithm;
 use omicron_common::disk::DatasetConfig;
@@ -170,7 +171,7 @@ pub struct Blueprint {
     // See blueprint execution for more on this.
     pub internal_dns_version: Generation,
 
-    /// external DNS version when thi blueprint was created
+    /// external DNS version when this blueprint was created
     // See blueprint execution for more on this.
     pub external_dns_version: Generation,
 
@@ -184,9 +185,9 @@ pub struct Blueprint {
     /// * the target release is ignored in favor of the install dataset
     /// * this field is set to 6
     ///
-    /// Once the target release generation is updated to 6 or higher,
-    /// Reconfigurator knows that it is back in charge of driving the system to
-    /// the target release.
+    /// Once an operator sets a new target release, its generation will be 6 or
+    /// higher. Reconfigurator will then know that it is back in charge of
+    /// driving the system to the target release.
     pub target_release_minimum_generation: Generation,
 
     /// CockroachDB state fingerprint when this blueprint was created
@@ -981,7 +982,7 @@ impl fmt::Display for BlueprintZoneDisposition {
     }
 }
 
-/// Where a blueprint's image source is located.
+/// Where the zone's image source is located.
 ///
 /// This is the blueprint version of [`OmicronZoneImageSource`].
 #[derive(
@@ -1018,6 +1019,17 @@ pub enum BlueprintZoneImageSource {
     /// replicated out to all sleds.
     #[serde(rename_all = "snake_case")]
     Artifact { version: BlueprintZoneImageVersion, hash: ArtifactHash },
+}
+
+impl BlueprintZoneImageSource {
+    pub fn from_available_artifact(artifact: &TufArtifactMeta) -> Self {
+        BlueprintZoneImageSource::Artifact {
+            version: BlueprintZoneImageVersion::Available {
+                version: artifact.id.version.clone(),
+            },
+            hash: artifact.hash,
+        }
+    }
 }
 
 impl From<BlueprintZoneImageSource> for OmicronZoneImageSource {
@@ -1212,7 +1224,6 @@ pub struct PendingMgsUpdate {
     pub details: PendingMgsUpdateDetails,
 
     /// which artifact to apply to this device
-    /// (implies which component is being updated)
     pub artifact_hash: ArtifactHash,
     pub artifact_version: ArtifactVersion,
 }
@@ -1311,6 +1322,14 @@ pub enum PendingMgsUpdateDetails {
         /// override persistent preference selection for a single boot
         expected_transient_boot_preference: Option<RotSlot>,
     },
+    RotBootloader {
+        // implicit: component = STAGE0
+        // implicit: firmware slot id = 1 (always 1 (Stage0Next) for RoT bootloader)
+        /// expected contents of the stage 0
+        expected_stage0_version: ArtifactVersion,
+        /// expected contents of the stage 0 next
+        expected_stage0_next_version: ExpectedVersion,
+    },
 }
 
 impl slog::KV for PendingMgsUpdateDetails {
@@ -1364,6 +1383,21 @@ impl slog::KV for PendingMgsUpdateDetails {
                 serializer.emit_str(
                     Key::from("expected_transient_boot_preference"),
                     &format!("{:?}", expected_transient_boot_preference),
+                )
+            }
+            PendingMgsUpdateDetails::RotBootloader {
+                expected_stage0_version,
+                expected_stage0_next_version,
+            } => {
+                serializer
+                    .emit_str(Key::from("component"), "rot_bootloader")?;
+                serializer.emit_str(
+                    Key::from("expected_stage0_version"),
+                    &expected_stage0_version.to_string(),
+                )?;
+                serializer.emit_str(
+                    Key::from("expected_stage0_next_version"),
+                    &format!("{:?}", expected_stage0_next_version),
                 )
             }
         }

@@ -30,6 +30,7 @@ use nexus_db_fixed_data::silo::{DEFAULT_SILO, INTERNAL_SILO};
 use nexus_db_lookup::DbConnection;
 use nexus_db_model::Certificate;
 use nexus_db_model::ServiceKind;
+use nexus_db_model::SiloAuthSettings;
 use nexus_db_model::SiloQuotas;
 use nexus_types::external_api::params;
 use nexus_types::external_api::shared;
@@ -64,24 +65,31 @@ impl DataStore {
 
         debug!(opctx.log, "attempting to create built-in silos");
 
-        use nexus_db_schema::schema::silo::dsl;
-        use nexus_db_schema::schema::silo_quotas::dsl as quotas_dsl;
+        use nexus_db_schema::schema::silo;
+        use nexus_db_schema::schema::silo_auth_settings;
+        use nexus_db_schema::schema::silo_quotas;
         let conn = self.pool_connection_authorized(opctx).await?;
 
         let count = self
             .transaction_retry_wrapper("load_builtin_silos")
             .transaction(&conn, |conn| async move {
-                diesel::insert_into(quotas_dsl::silo_quotas)
+                diesel::insert_into(silo_quotas::table)
                     .values(SiloQuotas::arbitrarily_high_default(
                         DEFAULT_SILO.id(),
                     ))
-                    .on_conflict(quotas_dsl::silo_id)
+                    .on_conflict(silo_quotas::silo_id)
                     .do_nothing()
                     .execute_async(&conn)
                     .await?;
-                let count = diesel::insert_into(dsl::silo)
+                diesel::insert_into(silo_auth_settings::table)
+                    .values(SiloAuthSettings::new(DEFAULT_SILO.id()))
+                    .on_conflict(silo_auth_settings::silo_id)
+                    .do_nothing()
+                    .execute_async(&conn)
+                    .await?;
+                let count = diesel::insert_into(silo::table)
                     .values([&*DEFAULT_SILO, &*INTERNAL_SILO])
-                    .on_conflict(dsl::id)
+                    .on_conflict(silo::id)
                     .do_nothing()
                     .execute_async(&conn)
                     .await?;
@@ -300,6 +308,12 @@ impl DataStore {
                     ),
                 )
                 .await?;
+                self.silo_auth_settings_create(
+                    &conn,
+                    &authz_silo,
+                    SiloAuthSettings::new(authz_silo.id()),
+                )
+                .await?;
 
                 Ok::<Silo, TransactionError<Error>>(silo)
             })
@@ -451,6 +465,8 @@ impl DataStore {
                 }
 
                 self.silo_quotas_delete(opctx, &conn, &authz_silo).await?;
+                self.silo_auth_settings_delete(opctx, &conn, &authz_silo)
+                    .await?;
 
                 self.virtual_provisioning_collection_delete_on_connection(
                     &opctx.log, &conn, id,
