@@ -119,6 +119,7 @@ Commands:
   rack                         Print information about the rack
   disks                        Print information about virtual disks
   dns                          Print information about internal and external DNS
+  ereport                      Query and display error reports
   inventory                    Print information about collected hardware/software inventory
   physical-disks               Print information about physical disks
   region                       Print information about regions
@@ -176,6 +177,7 @@ Commands:
   rack                         Print information about the rack
   disks                        Print information about virtual disks
   dns                          Print information about internal and external DNS
+  ereport                      Query and display error reports
   inventory                    Print information about collected hardware/software inventory
   physical-disks               Print information about physical disks
   region                       Print information about regions
