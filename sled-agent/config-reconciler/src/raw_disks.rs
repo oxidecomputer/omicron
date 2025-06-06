@@ -252,8 +252,9 @@ mod tests {
                     match kind {
                         ArbitraryDiskKind::Real => {
                             RawDisk::Real(UnparsedDisk::new(
-                                path.clone(),
-                                Some(path),
+                                //`nvme_instance` is only used on a real illumos system so it's
+                                // bogus here
+                                0,
                                 slot,
                                 variant,
                                 identity,
