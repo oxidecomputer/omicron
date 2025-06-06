@@ -7371,8 +7371,7 @@ fn inv_collection_print_sleds(collection: &Collection) {
                     last_reconciliation.orphaned_datasets.len()
                 );
                 for orphan in &last_reconciliation.orphaned_datasets {
-                    let OrphanedDataset { name, reason } = orphan;
-                    println!("            {}: {reason}", name.full_name());
+                    print_one_orphaned_dataset("            ", orphan);
                 }
             }
             let disk_errs = collect_config_reconciler_errors(
@@ -7456,11 +7455,24 @@ fn inv_collection_print_orphaned_datasets(collection: &Collection) {
         } else {
             println!("    {} orphaned dataset(s):", orphaned_datasets.len());
             for orphan in orphaned_datasets {
-                let OrphanedDataset { name, reason } = orphan;
-                println!("        {}: {reason}", name.full_name());
+                print_one_orphaned_dataset("        ", orphan);
             }
         }
     }
+}
+
+fn print_one_orphaned_dataset(indent: &str, orphan: &OrphanedDataset) {
+    let OrphanedDataset { name, reason, id, mounted, available, used } = orphan;
+    let id = match id {
+        Some(id) => id as &dyn Display,
+        None => &"none (this is unexpected!)",
+    };
+    println!("{indent}{}", name.full_name());
+    println!("{indent}    reason: {reason}");
+    println!("{indent}    dataset ID: {id}");
+    println!("{indent}    mounted: {mounted}");
+    println!("{indent}    available: {available}");
+    println!("{indent}    used: {used}");
 }
 
 fn collect_config_reconciler_errors<T: Ord + Display>(
