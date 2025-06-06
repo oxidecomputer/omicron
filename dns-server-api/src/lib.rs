@@ -90,7 +90,6 @@
 //! we'll need to stop queueing them.  So why bother at all?
 
 use dropshot::{HttpError, HttpResponseOk, RequestContext};
-use internal_dns_types::config::{DnsConfig, DnsConfigParams};
 use openapi_manager_types::{
     SupportedVersion, SupportedVersions, api_versions,
 };
@@ -107,6 +106,7 @@ api_versions!([
     // |  example for the next person.
     // v
     // (next_int, IDENT),
+    (2, SOA_AND_NS),
     (1, INITIAL),
 ]);
 
@@ -129,17 +129,52 @@ pub trait DnsServerApi {
     #[endpoint(
         method = GET,
         path = "/config",
+        operation_id = "dns_config_get",
+        versions = VERSION_INITIAL..VERSION_SOA_AND_NS
     )]
-    async fn dns_config_get(
+    async fn dns_config_get_v1(
         rqctx: RequestContext<Self::Context>,
-    ) -> Result<HttpResponseOk<DnsConfig>, HttpError>;
+    ) -> Result<
+        HttpResponseOk<internal_dns_types::v1::config::DnsConfig>,
+        HttpError,
+    >;
+
+    #[endpoint(
+        method = GET,
+        path = "/config",
+        operation_id = "dns_config_get",
+        versions = VERSION_SOA_AND_NS..
+    )]
+    async fn dns_config_get_v2(
+        rqctx: RequestContext<Self::Context>,
+    ) -> Result<
+        HttpResponseOk<internal_dns_types::v2::config::DnsConfig>,
+        HttpError,
+    >;
 
     #[endpoint(
         method = PUT,
         path = "/config",
+        operation_id = "dns_config_put",
+        versions = VERSION_INITIAL..VERSION_SOA_AND_NS,
     )]
-    async fn dns_config_put(
+    async fn dns_config_put_v1(
         rqctx: RequestContext<Self::Context>,
-        rq: dropshot::TypedBody<DnsConfigParams>,
+        rq: dropshot::TypedBody<
+            internal_dns_types::v1::config::DnsConfigParams,
+        >,
+    ) -> Result<dropshot::HttpResponseUpdatedNoContent, dropshot::HttpError>;
+
+    #[endpoint(
+        method = PUT,
+        path = "/config",
+        operation_id = "dns_config_put",
+        versions = VERSION_SOA_AND_NS..
+    )]
+    async fn dns_config_put_v2(
+        rqctx: RequestContext<Self::Context>,
+        rq: dropshot::TypedBody<
+            internal_dns_types::v2::config::DnsConfigParams,
+        >,
     ) -> Result<dropshot::HttpResponseUpdatedNoContent, dropshot::HttpError>;
 }
