@@ -22,8 +22,7 @@ pub struct MupdateOverrideInfo {
     /// Artifact hashes written out to the install dataset.
     ///
     /// Currently includes the host phase 2 and composite control plane
-    /// artifacts. Information about individual zones is included in
-    /// [`Self::zones`].
+    /// artifacts.
     pub hash_ids: BTreeSet<ArtifactHashId>,
 }
 
