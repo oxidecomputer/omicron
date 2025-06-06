@@ -2342,7 +2342,7 @@
             "type": "string"
           },
           "external_dns_version": {
-            "description": "external DNS version when thi blueprint was created",
+            "description": "external DNS version when this blueprint was created",
             "allOf": [
               {
                 "$ref": "#/components/schemas/Generation"
@@ -4059,6 +4059,12 @@
           "generation": {
             "$ref": "#/components/schemas/Generation"
           },
+          "serial": {
+            "description": "See [`DnsConfig`]'s `serial` field for how this is different from `generation`",
+            "type": "integer",
+            "format": "uint32",
+            "minimum": 0
+          },
           "time_created": {
             "type": "string",
             "format": "date-time"
@@ -4072,11 +4078,13 @@
         },
         "required": [
           "generation",
+          "serial",
           "time_created",
           "zones"
         ]
       },
       "DnsConfigZone": {
+        "description": "Configuration for a specific DNS zone, as opposed to illumos zones in which the services described by these records run.\n\nThe name `@` is special: it describes records that should be provided for queries about `zone_name`. This is used in favor of the empty string as `@` is the name used for this purpose in zone files for most DNS configurations. It also avoids potentially-confusing debug output from naively printing out records and their names - if you've seen an `@` record and tools are unclear about what that means, hopefully you've arrived here!",
         "type": "object",
         "properties": {
           "records": {
@@ -4147,6 +4155,24 @@
                 "type": "string",
                 "enum": [
                   "SRV"
+                ]
+              }
+            },
+            "required": [
+              "data",
+              "type"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "data": {
+                "type": "string"
+              },
+              "type": {
+                "type": "string",
+                "enum": [
+                  "NS"
                 ]
               }
             },
@@ -5359,7 +5385,7 @@
         "type": "object",
         "properties": {
           "artifact_hash": {
-            "description": "which artifact to apply to this device (implies which component is being updated)",
+            "description": "which artifact to apply to this device",
             "type": "string",
             "format": "hex string (32 bytes)"
           },
@@ -5490,6 +5516,38 @@
               "expected_active_slot",
               "expected_inactive_version",
               "expected_persistent_boot_preference"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "component": {
+                "type": "string",
+                "enum": [
+                  "rot_bootloader"
+                ]
+              },
+              "expected_stage0_next_version": {
+                "description": "expected contents of the stage 0 next",
+                "allOf": [
+                  {
+                    "$ref": "#/components/schemas/ExpectedVersion"
+                  }
+                ]
+              },
+              "expected_stage0_version": {
+                "description": "expected contents of the stage 0",
+                "allOf": [
+                  {
+                    "$ref": "#/components/schemas/ArtifactVersion"
+                  }
+                ]
+              }
+            },
+            "required": [
+              "component",
+              "expected_stage0_next_version",
+              "expected_stage0_version"
             ]
           }
         ]

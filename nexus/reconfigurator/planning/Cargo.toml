@@ -42,9 +42,11 @@ uuid.workspace = true
 omicron-workspace-hack.workspace = true
 
 [dev-dependencies]
+dropshot.workspace = true
 expectorate.workspace = true
 maplit.workspace = true
 omicron-common = { workspace = true, features = ["testing"] }
 omicron-test-utils.workspace = true
 proptest.workspace = true
+semver.workspace = true
 test-strategy.workspace = true

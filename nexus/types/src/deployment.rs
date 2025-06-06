@@ -170,7 +170,7 @@ pub struct Blueprint {
     // See blueprint execution for more on this.
     pub internal_dns_version: Generation,
 
-    /// external DNS version when thi blueprint was created
+    /// external DNS version when this blueprint was created
     // See blueprint execution for more on this.
     pub external_dns_version: Generation,
 
@@ -1188,7 +1188,6 @@ pub struct PendingMgsUpdate {
     pub details: PendingMgsUpdateDetails,
 
     /// which artifact to apply to this device
-    /// (implies which component is being updated)
     pub artifact_hash: ArtifactHash,
     pub artifact_version: ArtifactVersion,
 }
@@ -1287,6 +1286,14 @@ pub enum PendingMgsUpdateDetails {
         /// override persistent preference selection for a single boot
         expected_transient_boot_preference: Option<RotSlot>,
     },
+    RotBootloader {
+        // implicit: component = STAGE0
+        // implicit: firmware slot id = 1 (always 1 (Stage0Next) for RoT bootloader)
+        /// expected contents of the stage 0
+        expected_stage0_version: ArtifactVersion,
+        /// expected contents of the stage 0 next
+        expected_stage0_next_version: ExpectedVersion,
+    },
 }
 
 impl slog::KV for PendingMgsUpdateDetails {
@@ -1340,6 +1347,21 @@ impl slog::KV for PendingMgsUpdateDetails {
                 serializer.emit_str(
                     Key::from("expected_transient_boot_preference"),
                     &format!("{:?}", expected_transient_boot_preference),
+                )
+            }
+            PendingMgsUpdateDetails::RotBootloader {
+                expected_stage0_version,
+                expected_stage0_next_version,
+            } => {
+                serializer
+                    .emit_str(Key::from("component"), "rot_bootloader")?;
+                serializer.emit_str(
+                    Key::from("expected_stage0_version"),
+                    &expected_stage0_version.to_string(),
+                )?;
+                serializer.emit_str(
+                    Key::from("expected_stage0_next_version"),
+                    &format!("{:?}", expected_stage0_next_version),
                 )
             }
         }

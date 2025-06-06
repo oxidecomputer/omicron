@@ -2198,6 +2198,127 @@ fn after_140_0_0<'a>(ctx: &'a MigrationContext<'a>) -> BoxFuture<'a, ()> {
     })
 }
 
+fn before_145_0_0<'a>(ctx: &'a MigrationContext<'a>) -> BoxFuture<'a, ()> {
+    Box::pin(async move {
+        // Create one console_session without id, and one device_access_token without id.
+        ctx.client
+            .batch_execute(
+                "
+        INSERT INTO omicron.public.console_session
+          (token, time_created, time_last_used, silo_user_id)
+        VALUES
+          ('tok-console-145', now(), now(), gen_random_uuid());
+
+        INSERT INTO omicron.public.device_access_token
+          (token, client_id, device_code, silo_user_id, time_created, time_requested)
+        VALUES
+          ('tok-device-145', gen_random_uuid(), 'code-145', gen_random_uuid(), now(), now());
+        ",
+            )
+            .await
+            .expect("failed to insert pre-migration rows for 145");
+    })
+}
+
+fn after_145_0_0<'a>(ctx: &'a MigrationContext<'a>) -> BoxFuture<'a, ()> {
+    Box::pin(async move {
+        // After the migration each row should have a non-null id,
+        // keep its token, and enforce primary-key/unique index.
+
+        // console_session: check id ≠ NULL and token unchanged
+        let rows = ctx
+            .client
+            .query(
+                "SELECT id, token FROM omicron.public.console_session WHERE token = 'tok-console-145';",
+                &[],
+            )
+            .await
+            .expect("failed to query post-migration console_session");
+        assert_eq!(rows.len(), 1);
+
+        let id: Option<Uuid> = (&rows[0]).get("id");
+        assert!(id.is_some());
+
+        let token: &str = (&rows[0]).get("token");
+        assert_eq!(token, "tok-console-145");
+
+        // device_access_token: same checks
+        let rows = ctx
+            .client
+            .query(
+                "SELECT id, token FROM omicron.public.device_access_token WHERE token = 'tok-device-145';",
+                &[],
+            )
+            .await
+            .expect("failed to query post-migration device_access_token");
+        assert_eq!(rows.len(), 1);
+
+        let id: Option<Uuid> = (&rows[0]).get("id");
+        assert!(id.is_some());
+
+        let token: &str = (&rows[0]).get("token");
+        assert_eq!(token, "tok-device-145",);
+    })
+}
+
+const M2_DISK: &str = "db7d37d5-b32c-42cd-b871-598cf9d46782";
+const M2_ZPOOL: &str = "8117dbdb-0112-4c4e-ac41-500b8ab0aaf7";
+const U2_DISK: &str = "5d21f0d6-8af3-4d33-977d-63b2a79d6a58";
+const U2_ZPOOL: &str = "dc28856d-3896-4b3c-bd3d-33a770d49c92";
+
+// Insert two disks with a zpool on each: one m.2, one u.2
+fn before_148_0_0<'a>(ctx: &'a MigrationContext<'a>) -> BoxFuture<'a, ()> {
+    Box::pin(async move {
+        ctx.client
+            .batch_execute(
+                &format!("
+        INSERT INTO omicron.public.physical_disk
+          (id, time_created, time_modified, time_deleted, rcgen, vendor, serial, model, variant, sled_id, disk_policy, disk_state)
+        VALUES
+          (
+            '{M2_DISK}', now(), now(), NULL, 0, 'vend', 'serial-m2', 'model', 'm2', gen_random_uuid(), 'in_service', 'active'
+          ),
+          (
+            '{U2_DISK}', now(), now(), NULL, 0, 'vend', 'serial-u2', 'model', 'u2', gen_random_uuid(), 'in_service', 'active'
+          );
+
+        INSERT INTO omicron.public.zpool
+          (id, time_created, time_modified, time_deleted, rcgen, sled_id, physical_disk_id, control_plane_storage_buffer)
+        VALUES
+          ('{M2_ZPOOL}', now(), now(), NULL, 0, gen_random_uuid(), '{M2_DISK}', 0),
+          ('{U2_ZPOOL}', now(), now(), NULL, 0, gen_random_uuid(), '{U2_DISK}', 0)
+        "),
+            )
+            .await
+            .expect("failed to insert pre-migration rows for 148");
+    })
+}
+
+// Validate that the m.2 is gone, and the u.2 still exists
+fn after_148_0_0<'a>(ctx: &'a MigrationContext<'a>) -> BoxFuture<'a, ()> {
+    Box::pin(async move {
+        let rows = ctx
+            .client
+            .query("SELECT id FROM omicron.public.physical_disk;", &[])
+            .await
+            .expect("failed to query post-migration disks");
+        assert_eq!(rows.len(), 1);
+
+        let id: Uuid = (&rows[0]).get::<&str, Uuid>("id");
+        assert_eq!(id.to_string(), U2_DISK);
+
+        let rows = ctx
+            .client
+            .query("SELECT id FROM omicron.public.zpool;", &[])
+            .await
+            .expect("failed to query post-migration zpools");
+        assert_eq!(rows.len(), 1);
+
+        let id: Uuid = (&rows[0]).get::<&str, Uuid>("id");
+        assert_eq!(id.to_string(), U2_ZPOOL);
+    })
+}
+
 // Lazily initializes all migration checks. The combination of Rust function
 // pointers and async makes defining a static table fairly painful, so we're
 // using lazy initialization instead.
@@ -2261,6 +2382,14 @@ fn get_migration_checks() -> BTreeMap<Version, DataMigrationFns> {
     map.insert(
         Version::new(140, 0, 0),
         DataMigrationFns::new().before(before_140_0_0).after(after_140_0_0),
+    );
+    map.insert(
+        Version::new(145, 0, 0),
+        DataMigrationFns::new().before(before_145_0_0).after(after_145_0_0),
+    );
+    map.insert(
+        Version::new(148, 0, 0),
+        DataMigrationFns::new().before(before_148_0_0).after(after_148_0_0),
     );
 
     map
