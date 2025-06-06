@@ -954,7 +954,6 @@ mod tests {
         MupdateOverrideInfo {
             mupdate_uuid: OVERRIDE_UUID,
             hash_ids: BTreeSet::new(),
-            zones: IdOrdMap::new(),
         }
     }
 
@@ -962,7 +961,6 @@ mod tests {
         MupdateOverrideInfo {
             mupdate_uuid: OVERRIDE_2_UUID,
             hash_ids: BTreeSet::new(),
-            zones: IdOrdMap::new(),
         }
     }
 

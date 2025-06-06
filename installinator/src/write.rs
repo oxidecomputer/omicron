@@ -23,9 +23,11 @@ use installinator_common::{
 };
 use omicron_common::{
     disk::M2Slot,
-    update::{MupdateOverrideInfo, MupdateOverrideZone},
+    update::{
+        MupdateOverrideInfo, OmicronZoneFileMetadata, OmicronZoneManifest,
+    },
 };
-use omicron_uuid_kinds::MupdateOverrideUuid;
+use omicron_uuid_kinds::{MupdateOverrideUuid, MupdateUuid};
 use sha2::{Digest, Sha256};
 use slog::{Logger, info, warn};
 use tokio::{
@@ -205,6 +207,7 @@ pub(crate) struct ArtifactWriter<'a> {
 
 impl<'a> ArtifactWriter<'a> {
     pub(crate) fn new(
+        mupdate_id: MupdateUuid,
         host_phase_2_id: &'a ArtifactHashId,
         host_phase_2_data: &'a BufList,
         control_plane_id: &'a ArtifactHashId,
@@ -221,7 +224,7 @@ impl<'a> ArtifactWriter<'a> {
         // At the moment, there's no reason to have it be passed in via Wicket
         // or some other means, though there are conceivably reasons to do so in
         // the future.
-        let mupdate_uuid = MupdateOverrideUuid::new_v4();
+        let mupdate_override_uuid = MupdateOverrideUuid::new_v4();
 
         Self {
             drives,
@@ -232,7 +235,8 @@ impl<'a> ArtifactWriter<'a> {
                 host_phase_2_data,
                 control_plane_id,
                 control_plane_zones,
-                mupdate_uuid,
+                mupdate_id,
+                mupdate_override_uuid,
             },
         }
     }
@@ -538,7 +542,8 @@ struct ArtifactsToWrite<'a> {
     host_phase_2_data: &'a BufList,
     control_plane_id: &'a ArtifactHashId,
     control_plane_zones: &'a ControlPlaneZoneImages,
-    mupdate_uuid: MupdateOverrideUuid,
+    mupdate_id: MupdateUuid,
+    mupdate_override_uuid: MupdateOverrideUuid,
 }
 
 impl ArtifactsToWrite<'_> {
@@ -586,7 +591,8 @@ impl ArtifactsToWrite<'_> {
             zones: self.control_plane_zones,
             host_phase_2_id: self.host_phase_2_id,
             control_plane_id: self.control_plane_id,
-            mupdate_uuid: self.mupdate_uuid,
+            mupdate_id: self.mupdate_id,
+            mupdate_override_uuid: self.mupdate_override_uuid,
         };
         cx.with_nested_engine(|engine| {
             inner_cx.register_steps(
@@ -622,7 +628,8 @@ struct ControlPlaneZoneWriteContext<'a> {
     zones: &'a ControlPlaneZoneImages,
     host_phase_2_id: &'a ArtifactHashId,
     control_plane_id: &'a ArtifactHashId,
-    mupdate_uuid: MupdateOverrideUuid,
+    mupdate_id: MupdateUuid,
+    mupdate_override_uuid: MupdateOverrideUuid,
 }
 
 impl ControlPlaneZoneWriteContext<'_> {
@@ -635,7 +642,7 @@ impl ControlPlaneZoneWriteContext<'_> {
         use update_engine::StepHandle;
 
         let slot = self.slot;
-        let mupdate_uuid = self.mupdate_uuid;
+        let mupdate_override_uuid = self.mupdate_override_uuid;
 
         // If we're on a gimlet, remove any files in the control plane
         // destination directory.
@@ -683,7 +690,7 @@ impl ControlPlaneZoneWriteContext<'_> {
                 async move |cx| {
                     let transport = transport.into_value(cx.token()).await;
                     let mupdate_json =
-                        self.mupdate_override_artifact(mupdate_uuid).await;
+                        self.mupdate_override_artifact(mupdate_override_uuid);
 
                     let out_path = self
                         .output_directory
@@ -701,7 +708,42 @@ impl ControlPlaneZoneWriteContext<'_> {
 
                     StepSuccess::new(transport)
                         .with_message(format!(
-                            "{out_path} written with UUID: {mupdate_uuid}",
+                            "{out_path} written with mupdate override UUID: \
+                             {mupdate_override_uuid}",
+                        ))
+                        .into()
+                },
+            )
+            .register();
+
+        transport = engine
+            .new_step(
+                WriteComponent::ControlPlane,
+                ControlPlaneZonesStepId::ZoneManifest,
+                "Writing zone manifest",
+                async move |cx| {
+                    let transport = transport.into_value(cx.token()).await;
+                    let zone_manifest_json =
+                        self.omicron_zone_manifest_artifact().await;
+
+                    let out_path = self
+                        .output_directory
+                        .join(OmicronZoneManifest::FILE_NAME);
+
+                    write_artifact_impl(
+                        WriteComponent::ControlPlane,
+                        slot,
+                        zone_manifest_json,
+                        &out_path,
+                        transport,
+                        &cx,
+                    )
+                    .await?;
+
+                    StepSuccess::new(transport)
+                        .with_message(format!(
+                            "{out_path} written with mupdate UUID: {}",
+                            self.mupdate_id,
                         ))
                         .into()
                 },
@@ -764,19 +806,30 @@ impl ControlPlaneZoneWriteContext<'_> {
             .register();
     }
 
-    async fn mupdate_override_artifact(
+    fn mupdate_override_artifact(
         &self,
-        mupdate_uuid: MupdateOverrideUuid,
+        mupdate_override_uuid: MupdateOverrideUuid,
     ) -> BufList {
         let hash_ids =
             [self.host_phase_2_id.clone(), self.control_plane_id.clone()]
                 .into_iter()
                 .collect();
+
+        let mupdate_override = MupdateOverrideInfo {
+            mupdate_uuid: mupdate_override_uuid,
+            hash_ids,
+        };
+        let json_bytes = serde_json::to_vec(&mupdate_override)
+            .expect("this serialization is infallible");
+        BufList::from(json_bytes)
+    }
+
+    async fn omicron_zone_manifest_artifact(&self) -> BufList {
         let zones = compute_zone_hashes(&self.zones).await;
 
-        let mupdate_override =
-            MupdateOverrideInfo { mupdate_uuid, hash_ids, zones };
-        let json_bytes = serde_json::to_vec(&mupdate_override)
+        let omicron_zone_manifest =
+            OmicronZoneManifest { mupdate_id: self.mupdate_id, zones };
+        let json_bytes = serde_json::to_vec(&omicron_zone_manifest)
             .expect("this serialization is infallible");
         BufList::from(json_bytes)
     }
@@ -791,7 +844,7 @@ impl ControlPlaneZoneWriteContext<'_> {
 /// Panics if the runtime shuts down causing a task abort, or a task panics.
 async fn compute_zone_hashes(
     images: &ControlPlaneZoneImages,
-) -> IdOrdMap<MupdateOverrideZone> {
+) -> IdOrdMap<OmicronZoneFileMetadata> {
     let mut tasks = JoinSet::new();
     for (file_name, data) in &images.zones {
         let file_name = file_name.clone();
@@ -802,7 +855,7 @@ async fn compute_zone_hashes(
             let mut hasher = Sha256::new();
             hasher.update(&data);
             let hash = hasher.finalize();
-            MupdateOverrideZone {
+            OmicronZoneFileMetadata {
                 file_name,
                 file_size: u64::try_from(data.len()).unwrap(),
                 hash: ArtifactHash(hash.into()),
@@ -1231,6 +1284,7 @@ mod tests {
         };
 
         let mut writer = ArtifactWriter::new(
+            MupdateUuid::new_v4(),
             &host_id,
             &artifact_host,
             &control_plane_id,

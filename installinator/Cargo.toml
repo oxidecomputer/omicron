@@ -48,7 +48,6 @@ tokio = { workspace = true, features = ["full"] }
 tufaceous-artifact.workspace = true
 tufaceous-lib.workspace = true
 update-engine.workspace = true
-uuid.workspace = true
 omicron-workspace-hack.workspace = true
 
 [dev-dependencies]
