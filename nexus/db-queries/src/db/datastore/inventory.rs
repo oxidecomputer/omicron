@@ -26,6 +26,7 @@ use diesel::sql_types::Nullable;
 use futures::FutureExt;
 use futures::future::BoxFuture;
 use id_map::{IdMap, IdMappable};
+use iddqd::IdOrdMap;
 use nexus_db_errors::ErrorHandler;
 use nexus_db_errors::public_error_from_diesel;
 use nexus_db_errors::public_error_from_diesel_lookup;
@@ -93,6 +94,7 @@ use omicron_uuid_kinds::OmicronSledConfigUuid;
 use omicron_uuid_kinds::OmicronZoneUuid;
 use omicron_uuid_kinds::PhysicalDiskUuid;
 use omicron_uuid_kinds::SledUuid;
+use slog_error_chain::InlineErrorChain;
 use std::collections::BTreeMap;
 use std::collections::BTreeSet;
 use std::num::NonZeroU32;
@@ -2728,7 +2730,7 @@ impl DataStore {
         let mut last_reconciliation_orphaned_datasets = {
             use nexus_db_schema::schema::inv_last_reconciliation_orphaned_dataset::dsl;
 
-            let mut orphaned: BTreeMap<SledUuid, Vec<OrphanedDataset>> =
+            let mut orphaned: BTreeMap<SledUuid, IdOrdMap<OrphanedDataset>> =
                 BTreeMap::new();
 
             // TODO-performance This ought to be paginated like the other
@@ -2752,7 +2754,15 @@ impl DataStore {
                 orphaned
                     .entry(row.sled_id.into())
                     .or_default()
-                    .push(row.try_into()?);
+                    .insert_unique(row.try_into()?)
+                    .map_err(|err| {
+                        // We should never get duplicates: the table's primary
+                        // key is the dataset name (same as the IdOrdMap)
+                        Error::internal_error(&format!(
+                            "unexpected duplicate orphaned dataset: {}",
+                            InlineErrorChain::new(&err)
+                        ))
+                    })?;
             }
 
             orphaned
@@ -2881,13 +2891,6 @@ impl DataStore {
                         })?
                         .config
                         .clone();
-                    // TODO-john remove once we collect into an IdOrdMap
-                    let mut orphaned_datasets =
-                        last_reconciliation_orphaned_datasets
-                            .remove(&sled_id)
-                            .unwrap_or_default();
-                    orphaned_datasets
-                        .sort_unstable_by(|a, b| a.name.cmp(&b.name));
                     Ok::<_, Error>(ConfigReconcilerInventory {
                         last_reconciled_config,
                         external_disks: last_reconciliation_disk_results
@@ -2896,7 +2899,10 @@ impl DataStore {
                         datasets: last_reconciliation_dataset_results
                             .remove(&sled_id)
                             .unwrap_or_default(),
-                        orphaned_datasets,
+                        orphaned_datasets:
+                            last_reconciliation_orphaned_datasets
+                                .remove(&sled_id)
+                                .unwrap_or_default(),
                         zones: last_reconciliation_zone_results
                             .remove(&sled_id)
                             .unwrap_or_default(),
@@ -4083,25 +4089,6 @@ mod test {
                     }
                 }
             };
-            // TODO-john remove once we collect into an IdOrdMap
-            let mut orphaned_datasets = (0..5)
-                .map(|i| OrphanedDataset {
-                    name: DatasetName::new(
-                        ZpoolName::new_external(ZpoolUuid::new_v4()),
-                        DatasetKind::Cockroach,
-                    ),
-                    reason: format!("test orphan {i}"),
-                    id: if i % 2 == 0 {
-                        Some(DatasetUuid::new_v4())
-                    } else {
-                        None
-                    },
-                    mounted: i % 2 == 1,
-                    available: (10 * i).into(),
-                    used: i.into(),
-                })
-                .collect::<Vec<_>>();
-            orphaned_datasets.sort_unstable_by(|a, b| a.name.cmp(&b.name));
             ConfigReconcilerInventory {
                 last_reconciled_config: sa2
                     .ledgered_sled_config
@@ -4115,7 +4102,23 @@ mod test {
                 datasets: (0..10)
                     .map(|i| (DatasetUuid::new_v4(), make_result("dataset", i)))
                     .collect(),
-                orphaned_datasets,
+                orphaned_datasets: (0..5)
+                    .map(|i| OrphanedDataset {
+                        name: DatasetName::new(
+                            ZpoolName::new_external(ZpoolUuid::new_v4()),
+                            DatasetKind::Cockroach,
+                        ),
+                        reason: format!("test orphan {i}"),
+                        id: if i % 2 == 0 {
+                            Some(DatasetUuid::new_v4())
+                        } else {
+                            None
+                        },
+                        mounted: i % 2 == 1,
+                        available: (10 * i).into(),
+                        used: i.into(),
+                    })
+                    .collect(),
                 zones: (0..10)
                     .map(|i| {
                         (OmicronZoneUuid::new_v4(), make_result("zone", i))

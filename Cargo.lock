@@ -4623,7 +4623,9 @@ dependencies = [
  "hashbrown 0.15.3",
  "ref-cast",
  "rustc-hash 2.1.1",
+ "schemars",
  "serde",
+ "serde_json",
 ]
 
 [[package]]
@@ -6179,6 +6181,7 @@ dependencies = [
  "gateway-client",
  "hyper-rustls 0.26.0",
  "id-map",
+ "iddqd",
  "illumos-utils",
  "internal-dns-resolver",
  "internal-dns-types",
@@ -7586,6 +7589,7 @@ dependencies = [
  "gateway-types",
  "http",
  "humantime",
+ "iddqd",
  "indicatif",
  "internal-dns-resolver",
  "internal-dns-types",

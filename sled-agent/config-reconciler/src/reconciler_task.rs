@@ -211,8 +211,7 @@ impl LatestReconciliationResult {
             last_reconciled_config: self.sled_config.clone(),
             external_disks: self.external_disks_inventory.clone(),
             datasets: self.datasets.clone(),
-            // TODO-john change to clone once iddqd supports JsonSchema
-            orphaned_datasets: self.orphaned_datasets.iter().cloned().collect(),
+            orphaned_datasets: self.orphaned_datasets.clone(),
             zones: self.zones_inventory.clone(),
         }
     }

@@ -50,6 +50,7 @@ use diesel::TextExpressionMethods;
 use diesel::expression::SelectableHelper;
 use diesel::query_dsl::QueryDsl;
 use gateway_client::types::SpType;
+use iddqd::IdOrdMap;
 use indicatif::ProgressBar;
 use indicatif::ProgressDrawTarget;
 use indicatif::ProgressStyle;
@@ -173,6 +174,7 @@ use std::future::Future;
 use std::num::NonZeroU32;
 use std::str::FromStr;
 use std::sync::Arc;
+use std::sync::LazyLock;
 use strum::IntoEnumIterator;
 use tabled::Tabled;
 use uuid::Uuid;
@@ -7431,7 +7433,8 @@ fn inv_collection_print_sleds(collection: &Collection) {
 
 fn inv_collection_print_orphaned_datasets(collection: &Collection) {
     // Helper for `unwrap_or()` passing borrow check below
-    static EMPTY_SET: Vec<OrphanedDataset> = Vec::new();
+    static EMPTY_SET: LazyLock<IdOrdMap<OrphanedDataset>> =
+        LazyLock::new(IdOrdMap::new);
 
     println!("ORPHANED DATASETS");
     for sled in collection.sled_agents.values() {
@@ -7447,7 +7450,7 @@ fn inv_collection_print_orphaned_datasets(collection: &Collection) {
             .last_reconciliation
             .as_ref()
             .map(|r| &r.orphaned_datasets)
-            .unwrap_or(&EMPTY_SET);
+            .unwrap_or(&*EMPTY_SET);
         if orphaned_datasets.is_empty() {
             println!("    no orphaned datasets");
         } else {

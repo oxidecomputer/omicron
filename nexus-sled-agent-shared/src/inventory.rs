@@ -13,6 +13,7 @@ use daft::Diffable;
 use id_map::IdMap;
 use id_map::IdMappable;
 use iddqd::IdOrdItem;
+use iddqd::IdOrdMap;
 use iddqd::id_upcast;
 use omicron_common::disk::{DatasetKind, DatasetName};
 use omicron_common::ledger::Ledgerable;
@@ -129,9 +130,7 @@ pub struct ConfigReconcilerInventory {
     pub external_disks:
         BTreeMap<PhysicalDiskUuid, ConfigReconcilerInventoryResult>,
     pub datasets: BTreeMap<DatasetUuid, ConfigReconcilerInventoryResult>,
-    // TODO-john replace once JsonSchema support lands
-    //pub orphaned_datasets: IdOrdMap<OrphanedDataset>,
-    pub orphaned_datasets: Vec<OrphanedDataset>,
+    pub orphaned_datasets: IdOrdMap<OrphanedDataset>,
     pub zones: BTreeMap<OmicronZoneUuid, ConfigReconcilerInventoryResult>,
 }
 
@@ -178,7 +177,7 @@ impl ConfigReconcilerInventory {
             last_reconciled_config: config,
             external_disks,
             datasets,
-            orphaned_datasets: Vec::new(),
+            orphaned_datasets: IdOrdMap::new(),
             zones,
         }
     }
