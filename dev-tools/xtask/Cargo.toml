@@ -7,9 +7,6 @@ license = "MPL-2.0"
 [lints]
 workspace = true
 
-[build-dependencies]
-omicron-rpaths.workspace = true
-
 [dependencies]
 # Please read before adding a new dependency!
 #
@@ -34,10 +31,6 @@ clap.workspace = true
 dev-tools-common.workspace = true
 fs-err.workspace = true
 macaddr.workspace = true
-nexus-db-model.workspace = true
-# See omicron-rpaths for more about the "pq-sys" dependency.
-pq-sys = "*"
-semver.workspace = true
 serde.workspace = true
 swrite.workspace = true
 tabled.workspace = true

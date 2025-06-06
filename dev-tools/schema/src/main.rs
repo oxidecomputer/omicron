@@ -5,28 +5,30 @@
 //! Schema management utilities
 
 use anyhow::{Context, Result};
-use clap::Args;
+use clap::{Parser, Subcommand};
 use nexus_db_model::KNOWN_VERSIONS;
 use std::collections::HashSet;
 use std::fs;
 use std::path::PathBuf;
 use std::process::Command;
 
-#[derive(Args)]
-pub struct SchemaArgs {
+#[derive(Parser)]
+#[command(name = "schema", about = "Schema management utilities")]
+struct Args {
     #[command(subcommand)]
-    cmd: SchemaCommands,
+    cmd: Commands,
 }
 
-#[derive(clap::Subcommand)]
-enum SchemaCommands {
+#[derive(Subcommand)]
+enum Commands {
     /// Generate previous schema file for testing migration from last version
     GeneratePrevious,
 }
 
-pub fn run_cmd(args: SchemaArgs) -> Result<()> {
+fn main() -> Result<()> {
+    let args = Args::parse();
     match args.cmd {
-        SchemaCommands::GeneratePrevious => generate_previous_schema(),
+        Commands::GeneratePrevious => generate_previous_schema(),
     }
 }
 
