@@ -43,6 +43,9 @@ enum Commands {
     /// Show an ereport
     #[clap(alias = "show")]
     Info(InfoArgs),
+
+    /// List ereport reporters
+    Reporters(ReportersArgs),
 }
 
 #[derive(Debug, Args, Clone)]
@@ -66,6 +69,17 @@ struct ListArgs {
     after: Option<DateTime<Utc>>,
 }
 
+#[derive(Debug, Args, Clone)]
+struct ReportersArgs {
+    #[clap(long = "type", short = 't')]
+    slot_type: Option<nexus_types::inventory::SpType>,
+
+    #[clap(long = "slot", short = 's', requires = "slot_type")]
+    slot: Option<u16>,
+
+    serial: Option<String>,
+}
+
 pub(super) async fn cmd_db_ereport(
     opctx: &OpContext,
     datastore: &DataStore,
@@ -78,6 +92,10 @@ pub(super) async fn cmd_db_ereport(
         }
         Commands::Info(ref args) => {
             cmd_db_ereport_info(opctx, datastore, args).await
+        }
+
+        Commands::Reporters(ref args) => {
+            cmd_db_ereporters(datastore, args).await
         }
     }
 }
@@ -121,16 +139,11 @@ async fn cmd_db_ereport_list(
                 sp_slot,
                 ..
             } = ereport;
-            let src = match sp_type {
-                SpType::Power => SrcType::Power,
-                SpType::Sled => SrcType::SledSp,
-                SpType::Switch => SrcType::Switch,
-            };
             EreportRow {
                 time_collected,
                 restart_id: restart_id.into_untyped_uuid(),
                 ena: ena.into(),
-                src,
+                src: sp_type.into(),
                 slot: sp_slot.0.into(),
             }
         }
@@ -212,6 +225,16 @@ enum SrcType {
     // SledOS,
 }
 
+impl From<SpType> for SrcType {
+    fn from(sp_type: SpType) -> Self {
+        match sp_type {
+            SpType::Power => SrcType::Power,
+            SpType::Sled => SrcType::SledSp,
+            SpType::Switch => SrcType::Switch,
+        }
+    }
+}
+
 async fn cmd_db_ereport_info(
     opctx: &OpContext,
     datastore: &DataStore,
@@ -269,6 +292,90 @@ async fn cmd_db_ereport_info(
     println!("\n{:=<80}", "== EREPORT ");
     serde_json::to_writer_pretty(std::io::stdout(), &report)
         .with_context(|| format!("failed to serialize ereport: {report:?}"))?;
+
+    Ok(())
+}
+
+async fn cmd_db_ereporters(
+    datastore: &DataStore,
+    args: &ReportersArgs,
+) -> anyhow::Result<()> {
+    let &ReportersArgs { slot, slot_type, ref serial } = args;
+
+    let conn = datastore.pool_connection_for_tests().await?;
+    let mut sp_query = sp_dsl::sp_ereport
+        .select((
+            sp_dsl::restart_id,
+            sp_dsl::sp_slot,
+            sp_dsl::sp_type,
+            sp_dsl::serial_number,
+            sp_dsl::part_number,
+        ))
+        .order_by((
+            sp_dsl::sp_type,
+            sp_dsl::sp_slot,
+            sp_dsl::serial_number,
+            sp_dsl::restart_id,
+        ))
+        .distinct()
+        .into_boxed();
+
+    if let Some(slot) = slot {
+        if slot_type.is_some() {
+            sp_query = sp_query
+                .filter(sp_dsl::sp_slot.eq(db::model::SqlU16::new(slot)));
+        } else {
+            anyhow::bail!(
+                "cannot filter reporters by slot without a value for `--type`"
+            )
+        }
+    }
+
+    if let Some(slot_type) = slot_type {
+        sp_query = sp_query
+            .filter(sp_dsl::sp_type.eq(SpType::from(slot_type.clone())));
+    }
+
+    if let Some(serial) = serial {
+        sp_query = sp_query.filter(sp_dsl::serial_number.eq(serial.clone()));
+    }
+
+    #[derive(Tabled)]
+    #[tabled(rename_all = "SCREAMING_SNAKE_CASE")]
+    struct ReporterRow {
+        #[tabled(rename = "TYPE")]
+        ty: SrcType,
+        #[tabled(rename = "#")]
+        slot: u16,
+        #[tabled(display_with = "display_option_blank", rename = "S/N")]
+        serial: Option<String>,
+        #[tabled(display_with = "display_option_blank", rename = "P/N")]
+        part_number: Option<String>,
+        id: Uuid,
+    }
+
+    let sp_ereports = sp_query
+        .load_async::<(Uuid, db::model::SqlU16, SpType, Option<String>, Option<String>)>(
+            &*conn,
+        )
+        .await
+        .context("listing SP reporter entries")?;
+
+    let mut table = tabled::Table::new(sp_ereports.into_iter().map(
+        |(restart_id, slot, sp_type, serial, part_number)| ReporterRow {
+            ty: sp_type.into(),
+            slot: slot.into(),
+            serial,
+            part_number,
+            id: restart_id,
+        },
+    ));
+
+    table
+        .with(tabled::settings::Style::empty())
+        .with(tabled::settings::Padding::new(0, 1, 0, 0));
+
+    println!("{table}");
 
     Ok(())
 }
