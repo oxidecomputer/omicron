@@ -24,7 +24,7 @@ use crate::{
     InstallMetadataReadError, ZoneImageZpools,
 };
 
-/// Describes the current state of mupdate overrides.
+/// Describes the current state of zone manifests.
 #[derive(Clone, Debug)]
 pub struct ZoneManifestStatus {
     /// The path to the zone manifest JSON on the boot disk.
@@ -175,8 +175,11 @@ impl ZoneManifestNonBootInfo {
     pub(crate) fn new(
         info: InstallMetadataNonBootInfo<OmicronZoneManifest>,
     ) -> Self {
-        let result =
-            ZoneManifestNonBootResult::new(&info.dataset_dir, info.result);
+        let result = ZoneManifestNonBootResult::new(
+            &info.dataset_dir,
+            &info.path,
+            info.result,
+        );
         Self {
             zpool_name: info.zpool_name,
             dataset_dir: info.dataset_dir,
@@ -211,20 +214,17 @@ pub enum ZoneManifestNonBootResult {
     /// `ZoneManifestArtifactsResult`.
     Matches(ZoneManifestArtifactsResult),
 
-    /// The manifest is absent -- this is an error case because it is expected
-    /// to be present.
-    NotFound,
-
     /// A mismatch between the boot disk and the other disk was detected.
     Mismatch(ZoneManifestNonBootMismatch),
 
-    /// An error occurred while reading the mupdate override info on this disk.
-    ReadError(InstallMetadataReadError),
+    /// An error occurred while reading the zone manifest on this disk.
+    ReadError(ZoneManifestReadError),
 }
 
 impl ZoneManifestNonBootResult {
     fn new(
         dataset_dir: &Utf8Path,
+        path: &Utf8Path,
         result: InstallMetadataNonBootResult<OmicronZoneManifest>,
     ) -> Self {
         match result {
@@ -236,12 +236,16 @@ impl ZoneManifestNonBootResult {
             )),
             InstallMetadataNonBootResult::MatchesAbsent => {
                 // Error case.
-                Self::NotFound
+                Self::ReadError(ZoneManifestReadError::NotFound(
+                    path.to_owned(),
+                ))
             }
             InstallMetadataNonBootResult::Mismatch(mismatch) => match mismatch {
                 InstallMetadataNonBootMismatch::BootPresentOtherAbsent => {
                     // Error case.
-                    Self::NotFound
+                    Self::ReadError(ZoneManifestReadError::NotFound(
+                        path.to_owned(),
+                    ))
                 }
                 InstallMetadataNonBootMismatch::BootAbsentOtherPresent {
                     non_boot_disk_info,
@@ -275,10 +279,12 @@ impl ZoneManifestNonBootResult {
                 ),
                 InstallMetadataNonBootMismatch::BootDiskReadError {
                     non_boot_disk_info: None,
-                } => Self::NotFound,
+                } => Self::ReadError(ZoneManifestReadError::NotFound(
+                    path.to_owned(),
+                )),
             },
             InstallMetadataNonBootResult::ReadError(error) => {
-                Self::ReadError(error)
+                Self::ReadError(error.into())
             }
         }
     }
@@ -290,7 +296,7 @@ impl ZoneManifestNonBootResult {
     pub fn is_valid(&self) -> bool {
         match self {
             Self::Matches(result) => result.is_valid(),
-            Self::NotFound | Self::Mismatch(_) | Self::ReadError(_) => false,
+            Self::Mismatch(_) | Self::ReadError(_) => false,
         }
     }
 
@@ -310,12 +316,6 @@ impl ZoneManifestNonBootResult {
                         "data" => %result.display(),
                     );
                 }
-            }
-            Self::NotFound => {
-                slog::warn!(
-                    log,
-                    "zone manifest not found on non-boot disk";
-                );
             }
             Self::Mismatch(mismatch) => match mismatch {
                 ZoneManifestNonBootMismatch::BootAbsentOtherPresent {
@@ -800,7 +800,11 @@ mod tests {
                     zpool_name: NON_BOOT_2_ZPOOL,
                     dataset_dir: dir.path().join(&NON_BOOT_2_PATHS.install_dataset),
                     path: dir.path().join(&NON_BOOT_2_PATHS.zones_json),
-                    result: ZoneManifestNonBootResult::NotFound
+                    result: ZoneManifestNonBootResult::ReadError(
+                        ZoneManifestReadError::NotFound(
+                            dir.path().join(&NON_BOOT_2_PATHS.zones_json)
+                        ),
+                    )
                 },
                 ZoneManifestNonBootInfo {
                     zpool_name: NON_BOOT_3_ZPOOL,

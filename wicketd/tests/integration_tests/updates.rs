@@ -506,29 +506,41 @@ async fn test_installinator_fetch() {
     let image_resolver =
         ZoneImageSourceResolver::new(&log, &zpools, &boot_zpool);
 
-    // Ensure that the resolver picks up the mupdate override.
+    // Ensure that the resolver picks up the zone manifest and mupdate override.
     let status = image_resolver.status();
     eprintln!("status: {:#?}", status);
 
+    // Zone manifest:
     let zone_manifest_status = status.zone_manifest;
     let result = zone_manifest_status
         .boot_disk_result
         .expect("zone manifest successful");
-    assert!(result.is_valid(), "boot disk result is valid");
+    assert!(result.is_valid(), "zone manifest: boot disk result is valid");
+    assert_eq!(
+        result.manifest, a_manifest,
+        "zone manifest: manifest matches a_manifest"
+    );
 
     let non_boot_result = zone_manifest_status
         .non_boot_disk_metadata
         .get(&non_boot_zpool)
         .expect("non-boot disk result should be present");
-    assert!(non_boot_result.result.is_valid(), "non-boot disk result is valid");
+    assert!(
+        non_boot_result.result.is_valid(),
+        "zone manifest: non-boot disk result is valid"
+    );
 
+    // Mupdate override:
     let override_status = status.mupdate_override;
 
     let info = override_status
         .boot_disk_override
         .expect("mupdate override successful")
         .expect("mupdate override present");
-    assert_eq!(info, a_override_info, "info matches a_override_info");
+    assert_eq!(
+        info, a_override_info,
+        "mupdate override: info matches a_override_info"
+    );
 
     let non_boot_status = override_status
         .non_boot_disk_overrides
@@ -537,6 +549,7 @@ async fn test_installinator_fetch() {
     assert_eq!(
         non_boot_status.result,
         MupdateOverrideNonBootResult::MatchesPresent,
+        "mupdate override: non-boot disk status matches present",
     );
 
     recv_handle.await.expect("recv_handle succeeded");
