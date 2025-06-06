@@ -71,7 +71,7 @@ impl OmicronDatasets {
                 },
             })
             .collect();
-        Self { datasets, orphaned_datasets: BTreeSet::new(), dataset_task }
+        Self { datasets, orphaned_datasets: IdOrdMap::new(), dataset_task }
     }
 
     pub(super) fn new(dataset_task: DatasetTaskHandle) -> Self {
@@ -192,10 +192,7 @@ impl OmicronDatasets {
         // eventually _remove_ orphaned datasets instead of reporting them.
         match self
             .dataset_task
-            .datasets_report_orphans(
-                datasets.iter().map(|d| d.name.clone()).collect(),
-                currently_managed_zpools,
-            )
+            .datasets_report_orphans(datasets.clone(), currently_managed_zpools)
             .await
         {
             Ok(Ok(orphaned)) => {
