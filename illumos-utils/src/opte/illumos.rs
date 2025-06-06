@@ -141,7 +141,7 @@ pub struct Handle {
 impl Handle {
     /// Construct a new handle to the OPTE kernel driver.
     pub fn new() -> Result<Self, OpteError> {
-        OpteHdl::open(OpteHdl::XDE_CTL).map(|inner| Self { inner })
+        OpteHdl::open().map(|inner| Self { inner })
     }
 }
 

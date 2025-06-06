@@ -338,6 +338,24 @@ impl RackInitRequestBuilder {
             )
             .expect("Failed to setup ClickHouse DNS");
     }
+
+    // Special handling of internal DNS, which has a second A/AAAA record and an
+    // NS record pointing to it.
+    fn add_internal_name_server_to_dns(
+        &mut self,
+        zone_id: OmicronZoneUuid,
+        http_address: SocketAddrV6,
+        dns_address: SocketAddrV6,
+    ) {
+        self.internal_dns_config
+            .host_zone_internal_dns(
+                zone_id,
+                ServiceName::InternalDns,
+                http_address,
+                dns_address,
+            )
+            .expect("Failed to setup internal DNS");
+    }
 }
 
 pub struct ControlPlaneTestContextBuilder<'a, N: NexusServer> {
@@ -1291,10 +1309,10 @@ impl<'a, N: NexusServer> ControlPlaneTestContextBuilder<'a, N> {
             panic!("Unsupported IPv4 DNS address");
         };
         let zone_id = OmicronZoneUuid::new_v4();
-        self.rack_init_builder.add_service_to_dns(
+        self.rack_init_builder.add_internal_name_server_to_dns(
             zone_id,
             http_address,
-            ServiceName::InternalDns,
+            dns_address,
         );
 
         let zpool_id = ZpoolUuid::new_v4();

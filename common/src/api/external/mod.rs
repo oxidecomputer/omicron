@@ -43,6 +43,7 @@ use std::fmt::Result as FormatResult;
 use std::net::IpAddr;
 use std::net::Ipv4Addr;
 use std::num::{NonZeroU16, NonZeroU32};
+use std::ops::Deref;
 use std::str::FromStr;
 use tufaceous_artifact::ArtifactHash;
 use uuid::Uuid;
@@ -748,6 +749,14 @@ impl Generation {
         );
         Generation(next_gen)
     }
+
+    pub const fn prev(&self) -> Option<Generation> {
+        if self.0 > 1 { Some(Generation(self.0 - 1)) } else { None }
+    }
+
+    pub const fn as_u64(self) -> u64 {
+        self.0
+    }
 }
 
 impl<'de> Deserialize<'de> for Generation {
@@ -1004,6 +1013,7 @@ pub enum ResourceType {
     ProjectImage,
     Instance,
     LoopbackAddress,
+    SiloAuthSettings,
     SwitchPortSettings,
     SupportBundle,
     IpPool,
@@ -2452,9 +2462,7 @@ pub struct SwitchPort {
     pub switch_location: String,
 
     /// The name of this switch port.
-    // TODO: possibly re-export and use the dpd_client::types::PortId here
-    // https://github.com/oxidecomputer/omicron/issues/3059
-    pub port_name: String,
+    pub port_name: Name,
 
     /// The primary settings group of this switch port. Will be `None` until
     /// this switch port is configured.
@@ -2466,7 +2474,7 @@ pub struct SwitchPort {
 #[derive(
     ObjectIdentity, Clone, Debug, Deserialize, JsonSchema, Serialize, PartialEq,
 )]
-pub struct SwitchPortSettings {
+pub struct SwitchPortSettingsIdentity {
     #[serde(flatten)]
     pub identity: IdentityMetadata,
 }
@@ -2475,9 +2483,9 @@ pub struct SwitchPortSettings {
 /// convenience data structure for getting a complete view of a particular
 /// port's settings.
 #[derive(Clone, Debug, Deserialize, JsonSchema, Serialize, PartialEq)]
-pub struct SwitchPortSettingsView {
-    /// The primary switch port settings handle.
-    pub settings: SwitchPortSettings,
+pub struct SwitchPortSettings {
+    #[serde(flatten)]
+    pub identity: IdentityMetadata,
 
     /// Switch port settings included from other switch port settings groups.
     pub groups: Vec<SwitchPortSettingsGroups>,
@@ -2487,13 +2495,6 @@ pub struct SwitchPortSettingsView {
 
     /// Layer 2 link settings.
     pub links: Vec<SwitchPortLinkConfig>,
-
-    /// Link-layer discovery protocol (LLDP) settings.
-    pub link_lldp: Vec<LldpLinkConfig>,
-
-    /// TX equalization settings.  These are optional, and most links will not
-    /// need them.
-    pub tx_eq: Vec<Option<TxEqConfig>>,
 
     /// Layer 3 interface settings.
     pub interfaces: Vec<SwitchInterfaceConfig>,
@@ -2508,7 +2509,7 @@ pub struct SwitchPortSettingsView {
     pub bgp_peers: Vec<BgpPeer>,
 
     /// Layer 3 IP address settings.
-    pub addresses: Vec<SwitchPortAddressConfig>,
+    pub addresses: Vec<SwitchPortAddressView>,
 }
 
 /// This structure maps a port settings object to a port settings groups. Port
@@ -2633,15 +2634,8 @@ pub struct SwitchPortLinkConfig {
     /// The port settings this link configuration belongs to.
     pub port_settings_id: Uuid,
 
-    /// The link-layer discovery protocol service configuration id for this
-    /// link.
-    pub lldp_link_config_id: Option<Uuid>,
-
-    /// The tx_eq configuration id for this link.
-    pub tx_eq_config_id: Option<Uuid>,
-
     /// The name of this link.
-    pub link_name: String,
+    pub link_name: Name,
 
     /// The maximum transmission unit for this link.
     pub mtu: u16,
@@ -2656,6 +2650,13 @@ pub struct SwitchPortLinkConfig {
 
     /// Whether or not the link has autonegotiation enabled.
     pub autoneg: bool,
+
+    /// The link-layer discovery protocol service configuration for this
+    /// link.
+    pub lldp_link_config: Option<LldpLinkConfig>,
+
+    /// The tx_eq configuration for this link.
+    pub tx_eq_config: Option<TxEqConfig>,
 }
 
 /// A link layer discovery protocol (LLDP) service configuration.
@@ -2683,7 +2684,7 @@ pub struct LldpLinkConfig {
     pub system_description: Option<String>,
 
     /// The LLDP management IP TLV.
-    pub management_ip: Option<oxnet::IpNet>,
+    pub management_ip: Option<IpAddr>,
 }
 
 /// Information about LLDP advertisements from other network entities directly
@@ -2746,18 +2747,6 @@ pub struct TxEqConfig {
     pub post1: Option<i32>,
 }
 
-impl From<crate::api::internal::shared::TxEqConfig> for TxEqConfig {
-    fn from(x: crate::api::internal::shared::TxEqConfig) -> TxEqConfig {
-        TxEqConfig {
-            pre1: x.pre1,
-            pre2: x.pre2,
-            main: x.main,
-            post2: x.post2,
-            post1: x.post1,
-        }
-    }
-}
-
 /// Describes the kind of an switch interface.
 #[derive(Clone, Debug, Deserialize, JsonSchema, Serialize, PartialEq)]
 #[serde(rename_all = "snake_case")]
@@ -2786,9 +2775,7 @@ pub struct SwitchInterfaceConfig {
     pub id: Uuid,
 
     /// The name of this switch interface.
-    // TODO: https://github.com/oxidecomputer/omicron/issues/3050
-    // Use `Name` instead of `String` for `interface_name` type
-    pub interface_name: String,
+    pub interface_name: Name,
 
     /// Whether or not IPv6 is enabled on this interface.
     pub v6_enabled: bool,
@@ -2817,15 +2804,13 @@ pub struct SwitchPortRouteConfig {
     pub port_settings_id: Uuid,
 
     /// The interface name this route configuration is assigned to.
-    // TODO: https://github.com/oxidecomputer/omicron/issues/3050
-    // Use `Name` instead of `String` for `interface_name` type
-    pub interface_name: String,
+    pub interface_name: Name,
 
     /// The route's destination network.
     pub dst: oxnet::IpNet,
 
     /// The route's gateway address.
-    pub gw: oxnet::IpNet,
+    pub gw: IpAddr,
 
     /// The VLAN identifier for the route. Use this if the gateway is reachable
     /// over an 802.1Q tagged L2 segment.
@@ -2834,27 +2819,6 @@ pub struct SwitchPortRouteConfig {
     /// RIB Priority indicating priority within and across protocols.
     pub rib_priority: Option<u8>,
 }
-
-/*
-/// A BGP peer configuration for a port settings object.
-#[derive(Clone, Debug, Deserialize, JsonSchema, Serialize, PartialEq)]
-pub struct SwitchPortBgpPeerConfig {
-    /// The port settings object this BGP configuration belongs to.
-    pub port_settings_id: Uuid,
-
-    /// The id of the global BGP configuration referenced by this peer
-    /// configuration.
-    pub bgp_config_id: Uuid,
-
-    /// The interface name used to establish a peer session.
-    // TODO: https://github.com/oxidecomputer/omicron/issues/3050
-    // Use `Name` instead of `String` for `interface_name` type
-    pub interface_name: String,
-
-    /// The address of the peer.
-    pub addr: IpAddr,
-}
-*/
 
 /// A BGP peer configuration for an interface. Includes the set of announcements
 /// that will be advertised to the peer identified by `addr`. The `bgp_config`
@@ -2870,7 +2834,7 @@ pub struct BgpPeer {
     /// configuration this BGP peer configuration is a part of. For example this
     /// value could be phy0 to refer to a primary physical interface. Or it
     /// could be vlan47 to refer to a VLAN interface.
-    pub interface_name: String,
+    pub interface_name: Name,
 
     /// The address of the host to peer with.
     pub addr: IpAddr,
@@ -2976,9 +2940,32 @@ pub struct SwitchPortAddressConfig {
     pub vlan_id: Option<u16>,
 
     /// The interface name this address belongs to.
-    // TODO: https://github.com/oxidecomputer/omicron/issues/3050
-    // Use `Name` instead of `String` for `interface_name` type
-    pub interface_name: String,
+    pub interface_name: Name,
+}
+
+/// An IP address configuration for a port settings object.
+#[derive(Clone, Debug, Deserialize, JsonSchema, Serialize, PartialEq)]
+pub struct SwitchPortAddressView {
+    /// The port settings object this address configuration belongs to.
+    pub port_settings_id: Uuid,
+
+    /// The id of the address lot this address is drawn from.
+    pub address_lot_id: Uuid,
+
+    /// The name of the address lot this address is drawn from.
+    pub address_lot_name: Name,
+
+    /// The id of the address lot block this address is drawn from.
+    pub address_lot_block_id: Uuid,
+
+    /// The IP address and prefix.
+    pub address: oxnet::IpNet,
+
+    /// An optional VLAN ID
+    pub vlan_id: Option<u16>,
+
+    /// The interface name this address belongs to.
+    pub interface_name: Name,
 }
 
 /// The current state of a BGP peer.
@@ -3263,6 +3250,68 @@ pub enum ImportExportPolicy {
     #[default]
     NoFiltering,
     Allow(Vec<oxnet::IpNet>),
+}
+
+/// Use instead of Option in API request body structs to get a field that can
+/// be null (parsed as `None`) but is not optional. Unlike Option, Nullable
+/// will fail to parse if the key is not present. The JSON Schema in the
+/// OpenAPI definition will also reflect that the field is required. See
+/// <https://github.com/serde-rs/serde/issues/2753>.
+#[derive(Clone, Debug, Serialize)]
+pub struct Nullable<T>(pub Option<T>);
+
+impl<T> From<Option<T>> for Nullable<T> {
+    fn from(option: Option<T>) -> Self {
+        Nullable(option)
+    }
+}
+
+impl<T> Deref for Nullable<T> {
+    type Target = Option<T>;
+
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
+
+// it looks like we're just using Option's impl here, so why not derive instead?
+// For some reason, deriving JsonSchema + #[serde(transparent)] doesn't work --
+// it almost does, but the field does not end up marked required in the schema.
+// There must be some special handling of Option somewhere causing it to be
+// marked optional rather than nullable + required.
+
+impl<T: JsonSchema> JsonSchema for Nullable<T> {
+    fn schema_name() -> String {
+        T::schema_name()
+    }
+
+    fn json_schema(
+        generator: &mut schemars::r#gen::SchemaGenerator,
+    ) -> schemars::schema::Schema {
+        Option::<T>::json_schema(generator)
+    }
+
+    fn is_referenceable() -> bool {
+        Option::<T>::is_referenceable()
+    }
+}
+
+impl<'de, T: serde::Deserialize<'de>> serde::Deserialize<'de> for Nullable<T> {
+    fn deserialize<D: serde::Deserializer<'de>>(
+        deserializer: D,
+    ) -> Result<Self, D::Error> {
+        // This line is required to get a parse error on missing fields.
+        // It seems that when the field is missing in the JSON, struct
+        // deserialization produces an error before this function is even hit,
+        // and that error is passed in here inside `deserializer`. If we don't
+        // do this Value::deserialize to cause that error to be returned as a
+        // missing field error, Option's deserialize will eat it by turning it
+        // into a successful parse as None.
+        let value = serde_json::Value::deserialize(deserializer)?;
+
+        use serde::de::Error;
+        Option::<T>::deserialize(value).map_err(D::Error::custom).map(Nullable)
+    }
 }
 
 #[cfg(test)]

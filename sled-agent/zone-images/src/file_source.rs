@@ -6,6 +6,8 @@
 
 use illumos_utils::running_zone::ZoneImageFileSource;
 
+/// The zone in which the sled is running.
+
 /// The location to look for images shipped with the RAM disk.
 pub const RAMDISK_IMAGE_PATH: &str = "/opt/oxide";
 

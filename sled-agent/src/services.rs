@@ -68,8 +68,7 @@ use internal_dns_types::names::DNS_ZONE;
 use itertools::Itertools;
 use nexus_config::{ConfigDropshotWithTls, DeploymentConfig};
 use nexus_sled_agent_shared::inventory::{
-    OmicronZoneConfig, OmicronZoneImageSource, OmicronZoneType,
-    OmicronZonesConfig, ZoneKind,
+    OmicronZoneConfig, OmicronZoneType, OmicronZonesConfig, ZoneKind,
 };
 use omicron_common::address::AZ_PREFIX;
 use omicron_common::address::DENDRITE_PORT;
@@ -103,7 +102,8 @@ use sled_agent_types::{
     zone_bundle::ZoneBundleCause,
 };
 use sled_agent_zone_images::{
-    MupdateOverrideReadError, ZoneImageSourceResolver, ZoneImageZpools,
+    MupdateOverrideReadError, ZoneImageSource, ZoneImageSourceResolver,
+    ZoneImageZpools,
 };
 use sled_hardware::SledMode;
 use sled_hardware::is_gimlet;
@@ -1737,14 +1737,21 @@ impl ServiceManager {
         };
 
         // TODO: `InstallDataset` should be renamed to something more accurate
-        // when all the major changes here have landed. Some zones are
-        // distributed from the host OS image and are never placed in the
-        // install dataset; that enum variant more accurately reflects that we
-        // are falling back to searching `/opt/oxide` in addition to the install
-        // datasets.
+        // when all the major changes here have landed.
+        //
+        // Some zones are distributed from the host OS image and are never
+        // placed in the install dataset; the Ramdisk enum variant more
+        // accurately reflects that we are only search `/opt/oxide` for those
+        // zones.
+        //
+        // (Currently, only the switch zone goes through this code path. Other
+        // ramdisk zones like the probe zone construct the file source
+        // directly.)
         let image_source = match &request {
-            ZoneArgs::Omicron(zone_config) => &zone_config.zone.image_source,
-            ZoneArgs::Switch(_) => &OmicronZoneImageSource::InstallDataset,
+            ZoneArgs::Omicron(zone_config) => {
+                ZoneImageSource::Omicron(zone_config.zone.image_source.clone())
+            }
+            ZoneArgs::Switch(_) => ZoneImageSource::Ramdisk,
         };
         let all_disks = self.inner.storage.get_latest_disks().await;
         let zpools = ZoneImageZpools {
@@ -1758,7 +1765,7 @@ impl ServiceManager {
             .zone_image_resolver
             .file_source_for(
                 zone_type_str,
-                image_source,
+                &image_source,
                 &zpools,
                 boot_zpool.as_ref(),
             )

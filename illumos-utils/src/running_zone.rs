@@ -1328,7 +1328,7 @@ impl<'a> ZoneBuilder<'a> {
 }
 
 /// Places to look for a zone's image.
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ZoneImageFileSource {
     /// The file name to look for.
     pub file_name: String,

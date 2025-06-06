@@ -2,7 +2,7 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-use crate::{SqlU8, SqlU16};
+use crate::{Name, SqlU8, SqlU16};
 use crate::{SqlU32, impl_enum_type};
 use chrono::{DateTime, Utc};
 use db_macros::Resource;
@@ -46,6 +46,28 @@ impl_enum_type!(
     Qsfp28x2 => b"Qsfp28x2"
     Sfp28x4 => b"Sfp28x4"
 );
+
+impl PartialEq<params::SwitchPortGeometry> for SwitchPortGeometry {
+    fn eq(&self, other: &params::SwitchPortGeometry) -> bool {
+        match self {
+            Self::Qsfp28x1 => {
+                return matches!(other, params::SwitchPortGeometry::Qsfp28x1);
+            }
+            Self::Qsfp28x2 => {
+                return matches!(other, params::SwitchPortGeometry::Qsfp28x2);
+            }
+            Self::Sfp28x4 => {
+                return matches!(other, params::SwitchPortGeometry::Sfp28x4);
+            }
+        }
+    }
+}
+
+impl PartialEq<SwitchPortGeometry> for params::SwitchPortGeometry {
+    fn eq(&self, other: &SwitchPortGeometry) -> bool {
+        other.eq(self)
+    }
+}
 
 impl_enum_type!(
     SwitchLinkFecEnum:
@@ -220,7 +242,7 @@ pub struct SwitchPort {
     // TODO: #3594 Correctness
     // Change this field to a `SwitchLocation` type.
     pub switch_location: String,
-    pub port_name: String,
+    pub port_name: Name,
     pub port_settings_id: Option<Uuid>,
 }
 
@@ -228,7 +250,7 @@ impl SwitchPort {
     pub fn new(
         rack_id: Uuid,
         switch_location: String,
-        port_name: String,
+        port_name: Name,
     ) -> Self {
         Self {
             id: Uuid::new_v4(),
@@ -246,7 +268,7 @@ impl Into<external::SwitchPort> for SwitchPort {
             id: self.id,
             rack_id: self.rack_id,
             switch_location: self.switch_location,
-            port_name: self.port_name,
+            port_name: self.port_name.into(),
             port_settings_id: self.port_settings_id,
         }
     }
@@ -286,9 +308,9 @@ impl SwitchPortSettings {
     }
 }
 
-impl Into<external::SwitchPortSettings> for SwitchPortSettings {
-    fn into(self) -> external::SwitchPortSettings {
-        external::SwitchPortSettings { identity: self.identity() }
+impl Into<external::SwitchPortSettingsIdentity> for SwitchPortSettings {
+    fn into(self) -> external::SwitchPortSettingsIdentity {
+        external::SwitchPortSettingsIdentity { identity: self.identity() }
     }
 }
 
@@ -374,7 +396,7 @@ impl Into<external::SwitchPortConfig> for SwitchPortConfig {
 pub struct SwitchPortLinkConfig {
     pub port_settings_id: Uuid,
     pub lldp_link_config_id: Option<Uuid>,
-    pub link_name: String,
+    pub link_name: Name,
     pub mtu: SqlU16,
     pub fec: Option<SwitchLinkFec>,
     pub speed: SwitchLinkSpeed,
@@ -387,7 +409,7 @@ impl SwitchPortLinkConfig {
     pub fn new(
         port_settings_id: Uuid,
         lldp_link_config_id: Uuid,
-        link_name: String,
+        link_name: Name,
         mtu: u16,
         fec: Option<SwitchLinkFec>,
         speed: SwitchLinkSpeed,
@@ -403,21 +425,6 @@ impl SwitchPortLinkConfig {
             autoneg,
             mtu: mtu.into(),
             tx_eq_config_id,
-        }
-    }
-}
-
-impl Into<external::SwitchPortLinkConfig> for SwitchPortLinkConfig {
-    fn into(self) -> external::SwitchPortLinkConfig {
-        external::SwitchPortLinkConfig {
-            port_settings_id: self.port_settings_id,
-            lldp_link_config_id: self.lldp_link_config_id,
-            tx_eq_config_id: self.tx_eq_config_id,
-            link_name: self.link_name.clone(),
-            mtu: self.mtu.into(),
-            fec: self.fec.map(|fec| fec.into()),
-            speed: self.speed.into(),
-            autoneg: self.autoneg,
         }
     }
 }
@@ -486,7 +493,7 @@ impl Into<external::LldpLinkConfig> for LldpLinkConfig {
             chassis_id: self.chassis_id.clone(),
             system_name: self.system_name.clone(),
             system_description: self.system_description.clone(),
-            management_ip: self.management_ip.map(|a| a.into()),
+            management_ip: self.management_ip.map(|a| a.ip()),
         }
     }
 }
@@ -551,7 +558,7 @@ impl Into<external::TxEqConfig> for TxEqConfig {
 pub struct SwitchInterfaceConfig {
     pub port_settings_id: Uuid,
     pub id: Uuid,
-    pub interface_name: String,
+    pub interface_name: Name,
     pub v6_enabled: bool,
     pub kind: crate::DbSwitchInterfaceKind,
 }
@@ -559,7 +566,7 @@ pub struct SwitchInterfaceConfig {
 impl SwitchInterfaceConfig {
     pub fn new(
         port_settings_id: Uuid,
-        interface_name: String,
+        interface_name: Name,
         v6_enabled: bool,
         kind: crate::DbSwitchInterfaceKind,
     ) -> Self {
@@ -578,7 +585,7 @@ impl Into<external::SwitchInterfaceConfig> for SwitchInterfaceConfig {
         external::SwitchInterfaceConfig {
             port_settings_id: self.port_settings_id,
             id: self.id,
-            interface_name: self.interface_name,
+            interface_name: self.interface_name.into(),
             v6_enabled: self.v6_enabled,
             kind: self.kind.into(),
         }
@@ -598,7 +605,7 @@ impl Into<external::SwitchInterfaceConfig> for SwitchInterfaceConfig {
 #[diesel(table_name = switch_port_settings_route_config)]
 pub struct SwitchPortRouteConfig {
     pub port_settings_id: Uuid,
-    pub interface_name: String,
+    pub interface_name: Name,
     pub dst: IpNetwork,
     pub gw: IpNetwork,
     pub vid: Option<SqlU16>,
@@ -609,7 +616,7 @@ pub struct SwitchPortRouteConfig {
 impl SwitchPortRouteConfig {
     pub fn new(
         port_settings_id: Uuid,
-        interface_name: String,
+        interface_name: Name,
         dst: IpNetwork,
         gw: IpNetwork,
         vid: Option<SqlU16>,
@@ -623,9 +630,9 @@ impl Into<external::SwitchPortRouteConfig> for SwitchPortRouteConfig {
     fn into(self) -> external::SwitchPortRouteConfig {
         external::SwitchPortRouteConfig {
             port_settings_id: self.port_settings_id,
-            interface_name: self.interface_name.clone(),
+            interface_name: self.interface_name.into(),
             dst: self.dst.into(),
-            gw: self.gw.into(),
+            gw: self.gw.ip(),
             vlan_id: self.vid.map(Into::into),
             rib_priority: self.rib_priority.map(Into::into),
         }
@@ -646,7 +653,7 @@ impl Into<external::SwitchPortRouteConfig> for SwitchPortRouteConfig {
 pub struct SwitchPortBgpPeerConfig {
     pub port_settings_id: Uuid,
     pub bgp_config_id: Uuid,
-    pub interface_name: String,
+    pub interface_name: Name,
     pub addr: IpNetwork,
     pub hold_time: SqlU32,
     pub idle_hold_time: SqlU32,
@@ -677,7 +684,7 @@ pub struct SwitchPortBgpPeerConfig {
 #[diesel(table_name = switch_port_settings_bgp_peer_config_communities)]
 pub struct SwitchPortBgpPeerConfigCommunity {
     pub port_settings_id: Uuid,
-    pub interface_name: String,
+    pub interface_name: Name,
     pub addr: IpNetwork,
     pub community: SqlU32,
 }
@@ -697,7 +704,7 @@ pub struct SwitchPortBgpPeerConfigAllowExport {
     /// Parent switch port configuration
     pub port_settings_id: Uuid,
     /// Interface peer is reachable on
-    pub interface_name: String,
+    pub interface_name: Name,
     /// Peer Address
     pub addr: IpNetwork,
     /// Allowed Prefix
@@ -719,7 +726,7 @@ pub struct SwitchPortBgpPeerConfigAllowImport {
     /// Parent switch port configuration
     pub port_settings_id: Uuid,
     /// Interface peer is reachable on
-    pub interface_name: String,
+    pub interface_name: Name,
     /// Peer Address
     pub addr: IpNetwork,
     /// Allowed Prefix
@@ -727,11 +734,10 @@ pub struct SwitchPortBgpPeerConfigAllowImport {
 }
 
 impl SwitchPortBgpPeerConfig {
-    #[allow(clippy::too_many_arguments)]
     pub fn new(
         port_settings_id: Uuid,
         bgp_config_id: Uuid,
-        interface_name: String,
+        interface_name: Name,
         p: &BgpPeer,
     ) -> Self {
         Self {
@@ -781,7 +787,7 @@ pub struct SwitchPortAddressConfig {
     pub address_lot_block_id: Uuid,
     pub rsvd_address_lot_block_id: Uuid,
     pub address: IpNetwork,
-    pub interface_name: String,
+    pub interface_name: Name,
     pub vlan_id: Option<SqlU16>,
 }
 
@@ -791,7 +797,7 @@ impl SwitchPortAddressConfig {
         address_lot_block_id: Uuid,
         rsvd_address_lot_block_id: Uuid,
         address: IpNetwork,
-        interface_name: String,
+        interface_name: Name,
         vlan_id: Option<u16>,
     ) -> Self {
         Self {
@@ -811,7 +817,7 @@ impl Into<external::SwitchPortAddressConfig> for SwitchPortAddressConfig {
             port_settings_id: self.port_settings_id,
             address_lot_block_id: self.address_lot_block_id,
             address: self.address.into(),
-            interface_name: self.interface_name,
+            interface_name: self.interface_name.into(),
             vlan_id: self.vlan_id.map(|x| x.into()),
         }
     }
