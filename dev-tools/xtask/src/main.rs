@@ -130,9 +130,8 @@ fn main() -> Result<()> {
         Cmds::Hist { args } => {
             // Delegate to the separate omicron-hist binary for performance
             let mut cmd = Command::new("cargo");
-            cmd.args(["run", "-p", "omicron-hist", "--"])
-                .args(args);
-            
+            cmd.args(["run", "-p", "omicron-hist", "--"]).args(args);
+
             let error = cmd.exec();
             Err(error).context("failed to exec omicron-hist binary")
         }

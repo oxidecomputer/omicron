@@ -117,7 +117,7 @@ impl Platform {
 #[tokio::main]
 async fn main() -> Result<()> {
     sigpipe::reset();
-    
+
     let args = HistArgs::parse();
     run_cmd_async(args).await
 }
@@ -639,7 +639,7 @@ async fn show_tests(
 }
 
 async fn get_commits_at_offset(offset: usize) -> Result<Vec<String>> {
-    let count = 128;
+    let count = 32;
     let output = Command::new("git")
         .args([
             "log",
@@ -679,7 +679,8 @@ async fn fetch_test_timing_data(
     );
 
     // Create a persistent HTTP client with connection pooling for better performance
-    static HTTP_CLIENT: std::sync::OnceLock<reqwest::Client> = std::sync::OnceLock::new();
+    static HTTP_CLIENT: std::sync::OnceLock<reqwest::Client> =
+        std::sync::OnceLock::new();
     let client = HTTP_CLIENT.get_or_init(|| {
         reqwest::Client::builder()
             .timeout(Duration::from_secs(30))
@@ -690,11 +691,8 @@ async fn fetch_test_timing_data(
             .expect("Failed to create HTTP client")
     });
 
-    let response = client
-        .get(&url)
-        .send()
-        .await
-        .context("Failed to send HTTP request")?;
+    let response =
+        client.get(&url).send().await.context("Failed to send HTTP request")?;
 
     if !response.status().is_success() {
         anyhow::bail!(
@@ -704,10 +702,7 @@ async fn fetch_test_timing_data(
         );
     }
 
-    response
-        .text()
-        .await
-        .context("Failed to read response body as text")
+    response.text().await.context("Failed to read response body as text")
 }
 
 fn parse_attribute<T: std::str::FromStr>(
