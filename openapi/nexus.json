@@ -12984,7 +12984,7 @@
             }
           },
           "link_name": {
-            "description": "Link to assign the address to",
+            "description": "Link to assign the addresses to. On ports that are not broken out, this is always phy0. On a 2x breakout the options are phy0 and phy1, on 4x phy0-phy3, etc.",
             "allOf": [
               {
                 "$ref": "#/components/schemas/Name"
@@ -14646,7 +14646,11 @@
           },
           "interface_name": {
             "description": "The name of interface to peer on. This is relative to the port configuration this BGP peer configuration is a part of. For example this value could be phy0 to refer to a primary physical interface. Or it could be vlan47 to refer to a VLAN interface.",
-            "type": "string"
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/Name"
+              }
+            ]
           },
           "keepalive": {
             "description": "How often to send keepalive requests (seconds).",
@@ -14714,7 +14718,7 @@
         "type": "object",
         "properties": {
           "link_name": {
-            "description": "Link that the peer is reachable on",
+            "description": "Link that the peer is reachable on. On ports that are not broken out, this is always phy0. On a 2x breakout the options are phy0 and phy1, on 4x phy0-phy3, etc.",
             "allOf": [
               {
                 "$ref": "#/components/schemas/Name"
@@ -16620,6 +16624,7 @@
           },
           "time_expires": {
             "nullable": true,
+            "description": "Expiration timestamp. A null value means the token does not automatically expire.",
             "type": "string",
             "format": "date-time"
           }
@@ -19383,7 +19388,7 @@
           },
           "boot_disk": {
             "nullable": true,
-            "description": "The disk the instance is configured to boot from.\n\nThis disk can either be attached if it already exists or created along with the instance.\n\nSpecifying a boot disk is optional but recommended to ensure predictable boot behavior. The boot disk can be set during instance creation or later if the instance is stopped.\n\nAn instance that does not have a boot disk set will use the boot options specified in its UEFI settings, which are controlled by both the instance's UEFI firmware and the guest operating system. Boot options can change as disks are attached and detached, which may result in an instance that only boots to the EFI shell until a boot disk is set.",
+            "description": "The disk the instance is configured to boot from.\n\nThis disk can either be attached if it already exists or created along with the instance.\n\nSpecifying a boot disk is optional but recommended to ensure predictable boot behavior. The boot disk can be set during instance creation or later if the instance is stopped. The boot disk counts against the disk attachment limit.\n\nAn instance that does not have a boot disk set will use the boot options specified in its UEFI settings, which are controlled by both the instance's UEFI firmware and the guest operating system. Boot options can change as disks are attached and detached, which may result in an instance that only boots to the EFI shell until a boot disk is set.",
             "default": null,
             "allOf": [
               {
@@ -19395,7 +19400,7 @@
             "type": "string"
           },
           "disks": {
-            "description": "A list of disks to be attached to the instance.\n\nDisk attachments of type \"create\" will be created, while those of type \"attach\" must already exist.\n\nThe order of this list does not guarantee a boot order for the instance. Use the boot_disk attribute to specify a boot disk.",
+            "description": "A list of disks to be attached to the instance.\n\nDisk attachments of type \"create\" will be created, while those of type \"attach\" must already exist.\n\nThe order of this list does not guarantee a boot order for the instance. Use the boot_disk attribute to specify a boot disk. When boot_disk is specified it will count against the disk attachment limit.",
             "default": [],
             "type": "array",
             "items": {
@@ -20660,7 +20665,7 @@
         "type": "object",
         "properties": {
           "autoneg": {
-            "description": "Whether or not to set autonegotiation",
+            "description": "Whether or not to set autonegotiation.",
             "type": "boolean"
           },
           "fec": {
@@ -20673,7 +20678,7 @@
             ]
           },
           "link_name": {
-            "description": "Link name",
+            "description": "Link name. On ports that are not broken out, this is always phy0. On a 2x breakout the options are phy0 and phy1, on 4x phy0-phy3, etc.",
             "allOf": [
               {
                 "$ref": "#/components/schemas/Name"
@@ -20704,7 +20709,7 @@
           },
           "tx_eq": {
             "nullable": true,
-            "description": "Optional tx_eq settings",
+            "description": "Optional tx_eq settings.",
             "allOf": [
               {
                 "$ref": "#/components/schemas/TxEqConfig"
@@ -22102,7 +22107,7 @@
         "type": "object",
         "properties": {
           "link_name": {
-            "description": "Link the route should be active on",
+            "description": "Link name. On ports that are not broken out, this is always phy0. On a 2x breakout the options are phy0 and phy1, on 4x phy0-phy3, etc.",
             "allOf": [
               {
                 "$ref": "#/components/schemas/Name"
@@ -23843,7 +23848,11 @@
           },
           "interface_name": {
             "description": "The name of this switch interface.",
-            "type": "string"
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/Name"
+              }
+            ]
           },
           "kind": {
             "description": "The switch interface kind.",
@@ -23884,7 +23893,7 @@
             ]
           },
           "link_name": {
-            "description": "Link the interface will be assigned to",
+            "description": "Link name. On ports that are not broken out, this is always phy0. On a 2x breakout the options are phy0 and phy1, on 4x phy0-phy3, etc.",
             "allOf": [
               {
                 "$ref": "#/components/schemas/Name"
@@ -24016,7 +24025,11 @@
           },
           "port_name": {
             "description": "The name of this switch port.",
-            "type": "string"
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/Name"
+              }
+            ]
           },
           "port_settings_id": {
             "nullable": true,
@@ -24073,7 +24086,11 @@
           },
           "interface_name": {
             "description": "The interface name this address belongs to.",
-            "type": "string"
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/Name"
+              }
+            ]
           },
           "port_settings_id": {
             "description": "The port settings object this address configuration belongs to.",
@@ -24225,7 +24242,11 @@
           },
           "link_name": {
             "description": "The name of this link.",
-            "type": "string"
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/Name"
+              }
+            ]
           },
           "lldp_link_config": {
             "nullable": true,
@@ -24313,7 +24334,11 @@
           },
           "interface_name": {
             "description": "The interface name this route configuration is assigned to.",
-            "type": "string"
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/Name"
+              }
+            ]
           },
           "port_settings_id": {
             "description": "The port settings object this route configuration belongs to.",
@@ -24452,14 +24477,14 @@
         "type": "object",
         "properties": {
           "addresses": {
-            "description": "Addresses indexed by interface name.",
+            "description": "Address configurations.",
             "type": "array",
             "items": {
               "$ref": "#/components/schemas/AddressConfig"
             }
           },
           "bgp_peers": {
-            "description": "BGP peers indexed by interface name.",
+            "description": "BGP peer configurations.",
             "default": [],
             "type": "array",
             "items": {
@@ -24477,7 +24502,7 @@
             }
           },
           "interfaces": {
-            "description": "Interfaces indexed by link name.",
+            "description": "Interface configurations.",
             "default": [],
             "type": "array",
             "items": {
@@ -24485,7 +24510,7 @@
             }
           },
           "links": {
-            "description": "Links indexed by phy name. On ports that are not broken out, this is always phy0. On a 2x breakout the options are phy0 and phy1, on 4x phy0-phy3, etc.",
+            "description": "Link configurations.",
             "type": "array",
             "items": {
               "$ref": "#/components/schemas/LinkConfigCreate"
@@ -24498,7 +24523,7 @@
             "$ref": "#/components/schemas/SwitchPortConfigCreate"
           },
           "routes": {
-            "description": "Routes indexed by interface name.",
+            "description": "Route configurations.",
             "default": [],
             "type": "array",
             "items": {
