@@ -178,14 +178,14 @@ async fn test_port_settings_basic_crud(ctx: &ControlPlaneTestContext) {
     assert_eq!(created.addresses.len(), 1);
 
     let link0 = &created.links[0];
-    assert_eq!(&link0.link_name, "phy0");
+    assert_eq!(&link0.link_name.to_string(), "phy0");
     assert_eq!(link0.mtu, 4700);
 
     let lldp0 = link0.lldp_link_config.clone().unwrap();
     assert_eq!(lldp0, lldp_params);
 
     let ifx0 = &created.interfaces[0];
-    assert_eq!(&ifx0.interface_name, "phy0");
+    assert_eq!(&ifx0.interface_name.to_string(), "phy0");
     assert_eq!(ifx0.v6_enabled, true);
     assert_eq!(ifx0.kind, external::SwitchInterfaceKind::Primary);
 
@@ -213,14 +213,14 @@ async fn test_port_settings_basic_crud(ctx: &ControlPlaneTestContext) {
     assert_eq!(roundtrip.addresses.len(), 1);
 
     let link0 = &roundtrip.links[0];
-    assert_eq!(&link0.link_name, "phy0");
+    assert_eq!(&link0.link_name.to_string(), "phy0");
     assert_eq!(link0.mtu, 4700);
 
     let lldp0 = link0.lldp_link_config.clone().unwrap();
     assert_eq!(lldp0, lldp_params);
 
     let ifx0 = &roundtrip.interfaces[0];
-    assert_eq!(&ifx0.interface_name, "phy0");
+    assert_eq!(&ifx0.interface_name.to_string(), "phy0");
     assert_eq!(ifx0.v6_enabled, true);
     assert_eq!(ifx0.kind, external::SwitchInterfaceKind::Primary);
 
@@ -262,7 +262,7 @@ async fn test_port_settings_basic_crud(ctx: &ControlPlaneTestContext) {
         link_name: link_name.clone(),
         peers: vec![BgpPeer {
             bgp_config: NameOrId::Name("as47".parse().unwrap()),
-            interface_name: "phy0".to_string(),
+            interface_name: "phy0".parse().unwrap(),
             addr: "1.2.3.4".parse().unwrap(),
             hold_time: 6,
             idle_hold_time: 6,

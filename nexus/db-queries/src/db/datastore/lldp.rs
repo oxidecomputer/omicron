@@ -163,14 +163,14 @@ impl DataStore {
             .filter(dsl::id.eq(id))
             .set((
                 dsl::time_modified.eq(Utc::now()),
-		dsl::enabled.eq( config.enabled),
-		dsl::link_name.eq( config.link_name.clone()),
-		dsl::link_description.eq( config.link_description.clone()),
-		dsl::chassis_id.eq( config.chassis_id.clone()),
-		dsl::system_name.eq( config.system_name.clone()),
-		dsl::system_description.eq( config.system_description.clone()),
-		dsl::management_ip.eq( config.management_ip.map(|a| IpNetwork::from(a)))))
-	    .execute_async(&*self.pool_connection_authorized(opctx).await?)
+                dsl::enabled.eq(config.enabled),
+                dsl::link_name.eq(config.link_name.map(|n| n.to_string())),
+                dsl::link_description.eq(config.link_description.clone()),
+                dsl::chassis_id.eq(config.chassis_id.clone()),
+                dsl::system_name.eq(config.system_name.clone()),
+                dsl::system_description.eq(config.system_description.clone()),
+                dsl::management_ip.eq(config.management_ip.map(|a| IpNetwork::from(a)))))
+            .execute_async(&*self.pool_connection_authorized(opctx).await?)
             .await
             .map_err(|err| {
                 error!(opctx.log, "lldp link config update failed"; "error" => ?err);

@@ -2458,9 +2458,7 @@ pub struct SwitchPort {
     pub switch_location: String,
 
     /// The name of this switch port.
-    // TODO: possibly re-export and use the dpd_client::types::PortId here
-    // https://github.com/oxidecomputer/omicron/issues/3059
-    pub port_name: String,
+    pub port_name: Name,
 
     /// The primary settings group of this switch port. Will be `None` until
     /// this switch port is configured.
@@ -2633,7 +2631,7 @@ pub struct SwitchPortLinkConfig {
     pub port_settings_id: Uuid,
 
     /// The name of this link.
-    pub link_name: String,
+    pub link_name: Name,
 
     /// The maximum transmission unit for this link.
     pub mtu: u16,
@@ -2773,9 +2771,7 @@ pub struct SwitchInterfaceConfig {
     pub id: Uuid,
 
     /// The name of this switch interface.
-    // TODO: https://github.com/oxidecomputer/omicron/issues/3050
-    // Use `Name` instead of `String` for `interface_name` type
-    pub interface_name: String,
+    pub interface_name: Name,
 
     /// Whether or not IPv6 is enabled on this interface.
     pub v6_enabled: bool,
@@ -2804,9 +2800,7 @@ pub struct SwitchPortRouteConfig {
     pub port_settings_id: Uuid,
 
     /// The interface name this route configuration is assigned to.
-    // TODO: https://github.com/oxidecomputer/omicron/issues/3050
-    // Use `Name` instead of `String` for `interface_name` type
-    pub interface_name: String,
+    pub interface_name: Name,
 
     /// The route's destination network.
     pub dst: oxnet::IpNet,
@@ -2822,27 +2816,6 @@ pub struct SwitchPortRouteConfig {
     pub rib_priority: Option<u8>,
 }
 
-/*
-/// A BGP peer configuration for a port settings object.
-#[derive(Clone, Debug, Deserialize, JsonSchema, Serialize, PartialEq)]
-pub struct SwitchPortBgpPeerConfig {
-    /// The port settings object this BGP configuration belongs to.
-    pub port_settings_id: Uuid,
-
-    /// The id of the global BGP configuration referenced by this peer
-    /// configuration.
-    pub bgp_config_id: Uuid,
-
-    /// The interface name used to establish a peer session.
-    // TODO: https://github.com/oxidecomputer/omicron/issues/3050
-    // Use `Name` instead of `String` for `interface_name` type
-    pub interface_name: String,
-
-    /// The address of the peer.
-    pub addr: IpAddr,
-}
-*/
-
 /// A BGP peer configuration for an interface. Includes the set of announcements
 /// that will be advertised to the peer identified by `addr`. The `bgp_config`
 /// parameter is a reference to global BGP parameters. The `interface_name`
@@ -2857,7 +2830,7 @@ pub struct BgpPeer {
     /// configuration this BGP peer configuration is a part of. For example this
     /// value could be phy0 to refer to a primary physical interface. Or it
     /// could be vlan47 to refer to a VLAN interface.
-    pub interface_name: String,
+    pub interface_name: Name,
 
     /// The address of the host to peer with.
     pub addr: IpAddr,
@@ -2963,9 +2936,7 @@ pub struct SwitchPortAddressConfig {
     pub vlan_id: Option<u16>,
 
     /// The interface name this address belongs to.
-    // TODO: https://github.com/oxidecomputer/omicron/issues/3050
-    // Use `Name` instead of `String` for `interface_name` type
-    pub interface_name: String,
+    pub interface_name: Name,
 }
 
 /// An IP address configuration for a port settings object.
@@ -2990,9 +2961,7 @@ pub struct SwitchPortAddressView {
     pub vlan_id: Option<u16>,
 
     /// The interface name this address belongs to.
-    // TODO: https://github.com/oxidecomputer/omicron/issues/3050
-    // Use `Name` instead of `String` for `interface_name` type
-    pub interface_name: String,
+    pub interface_name: Name,
 }
 
 /// The current state of a BGP peer.
