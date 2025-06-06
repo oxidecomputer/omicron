@@ -1260,7 +1260,10 @@ pub struct BpPendingMgsUpdateSp {
 }
 
 impl BpPendingMgsUpdateSp {
-    pub fn into_generic(self, baseboard_id: Arc<BaseboardId>) -> PendingMgsUpdate {
+    pub fn into_generic(
+        self,
+        baseboard_id: Arc<BaseboardId>,
+    ) -> PendingMgsUpdate {
         PendingMgsUpdate {
             baseboard_id,
             sp_type: self.sp_type.into(),
