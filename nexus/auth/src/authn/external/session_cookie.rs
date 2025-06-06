@@ -13,6 +13,7 @@ use chrono::{DateTime, Duration, Utc};
 use dropshot::HttpError;
 use http::HeaderValue;
 use nexus_types::authn::cookies::parse_cookies;
+use omicron_uuid_kinds::ConsoleSessionUuid;
 use slog::debug;
 use uuid::Uuid;
 
@@ -20,6 +21,7 @@ use uuid::Uuid;
 // https://cheatsheetseries.owasp.org/cheatsheets/Session_Management_Cheat_Sheet.html
 
 pub trait Session {
+    fn id(&self) -> ConsoleSessionUuid;
     fn silo_user_id(&self) -> Uuid;
     fn silo_id(&self) -> Uuid;
     fn time_last_used(&self) -> DateTime<Utc>;
@@ -39,7 +41,7 @@ pub trait SessionStore {
     /// Extend session by updating time_last_used to now
     async fn session_update_last_used(
         &self,
-        token: String,
+        id: ConsoleSessionUuid,
     ) -> Option<Self::SessionModel>;
 
     /// Mark session expired
@@ -131,7 +133,7 @@ where
         // expired
         let now = Utc::now();
         if session.time_last_used() + ctx.session_idle_timeout() < now {
-            let expired_session = ctx.session_expire(token.clone()).await;
+            let expired_session = ctx.session_expire(token).await;
             if expired_session.is_none() {
                 debug!(log, "failed to expire session")
             }
@@ -151,7 +153,7 @@ where
         // existed longer than absolute_timeout, it is expired and we can no
         // longer extend the session
         if session.time_created() + ctx.session_absolute_timeout() < now {
-            let expired_session = ctx.session_expire(token.clone()).await;
+            let expired_session = ctx.session_expire(token).await;
             if expired_session.is_none() {
                 debug!(log, "failed to expire session")
             }
@@ -172,7 +174,7 @@ where
         // authenticated for this request at this point. The next request might
         // be wrongly considered idle, but that's a problem for the next
         // request.
-        let updated_session = ctx.session_update_last_used(token).await;
+        let updated_session = ctx.session_update_last_used(session.id()).await;
         if updated_session.is_none() {
             debug!(log, "failed to extend session")
         }
@@ -199,19 +201,21 @@ mod test {
     use async_trait::async_trait;
     use chrono::{DateTime, Duration, Utc};
     use http;
+    use omicron_uuid_kinds::ConsoleSessionUuid;
     use slog;
-    use std::collections::HashMap;
     use std::sync::Mutex;
     use uuid::Uuid;
 
     // the mutex is annoying, but we need it in order to mutate the hashmap
     // without passing TestServerContext around as mutable
     struct TestServerContext {
-        sessions: Mutex<HashMap<String, FakeSession>>,
+        sessions: Mutex<Vec<FakeSession>>,
     }
 
-    #[derive(Clone, Copy)]
+    #[derive(Clone)]
     struct FakeSession {
+        id: ConsoleSessionUuid,
+        token: String,
         silo_user_id: Uuid,
         silo_id: Uuid,
         time_created: DateTime<Utc>,
@@ -219,6 +223,9 @@ mod test {
     }
 
     impl Session for FakeSession {
+        fn id(&self) -> ConsoleSessionUuid {
+            self.id
+        }
         fn silo_user_id(&self) -> Uuid {
             self.silo_user_id
         }
@@ -241,23 +248,34 @@ mod test {
             &self,
             token: String,
         ) -> Option<Self::SessionModel> {
-            self.sessions.lock().unwrap().get(&token).map(|s| *s)
+            self.sessions
+                .lock()
+                .unwrap()
+                .iter()
+                .find(|s| s.token == token)
+                .map(|s| s.clone())
         }
 
         async fn session_update_last_used(
             &self,
-            token: String,
+            id: ConsoleSessionUuid,
         ) -> Option<Self::SessionModel> {
             let mut sessions = self.sessions.lock().unwrap();
-            let session = *sessions.get(&token).unwrap();
-            let new_session =
-                FakeSession { time_last_used: Utc::now(), ..session };
-            (*sessions).insert(token, new_session)
+            if let Some(pos) = sessions.iter().position(|s| s.id == id) {
+                let new_session = FakeSession {
+                    time_last_used: Utc::now(),
+                    ..sessions[pos].clone()
+                };
+                sessions[pos] = new_session.clone();
+                Some(new_session)
+            } else {
+                None
+            }
         }
 
         async fn session_expire(&self, token: String) -> Option<()> {
             let mut sessions = self.sessions.lock().unwrap();
-            (*sessions).remove(&token);
+            sessions.retain(|s| s.token != token);
             Some(())
         }
 
@@ -295,16 +313,14 @@ mod test {
 
     #[tokio::test]
     async fn test_missing_cookie() {
-        let context =
-            TestServerContext { sessions: Mutex::new(HashMap::new()) };
+        let context = TestServerContext { sessions: Mutex::new(Vec::new()) };
         let result = authn_with_cookie(&context, None).await;
         assert!(matches!(result, SchemeResult::NotRequested));
     }
 
     #[tokio::test]
     async fn test_other_cookie() {
-        let context =
-            TestServerContext { sessions: Mutex::new(HashMap::new()) };
+        let context = TestServerContext { sessions: Mutex::new(Vec::new()) };
         let result = authn_with_cookie(&context, Some("other=def")).await;
         assert!(matches!(result, SchemeResult::NotRequested));
     }
@@ -312,41 +328,14 @@ mod test {
     #[tokio::test]
     async fn test_expired_cookie_idle() {
         let context = TestServerContext {
-            sessions: Mutex::new(HashMap::from([(
-                "abc".to_string(),
-                FakeSession {
-                    silo_user_id: Uuid::new_v4(),
-                    silo_id: Uuid::new_v4(),
-                    time_last_used: Utc::now() - Duration::hours(2),
-                    time_created: Utc::now() - Duration::hours(2),
-                },
-            )])),
-        };
-        let result = authn_with_cookie(&context, Some("session=abc")).await;
-        assert!(matches!(
-            result,
-            SchemeResult::Failed(Reason::BadCredentials {
-                actor: _,
-                source: _
-            })
-        ));
-
-        // key should be removed from sessions dict, i.e., session deleted
-        assert!(!context.sessions.lock().unwrap().contains_key("abc"))
-    }
-
-    #[tokio::test]
-    async fn test_expired_cookie_absolute() {
-        let context = TestServerContext {
-            sessions: Mutex::new(HashMap::from([(
-                "abc".to_string(),
-                FakeSession {
-                    silo_user_id: Uuid::new_v4(),
-                    silo_id: Uuid::new_v4(),
-                    time_last_used: Utc::now(),
-                    time_created: Utc::now() - Duration::hours(20),
-                },
-            )])),
+            sessions: Mutex::new(vec![FakeSession {
+                id: ConsoleSessionUuid::new_v4(),
+                token: "abc".to_string(),
+                silo_user_id: Uuid::new_v4(),
+                silo_id: Uuid::new_v4(),
+                time_last_used: Utc::now() - Duration::hours(2),
+                time_created: Utc::now() - Duration::hours(2),
+            }]),
         };
         let result = authn_with_cookie(&context, Some("session=abc")).await;
         assert!(matches!(
@@ -359,22 +348,47 @@ mod test {
 
         // key should be removed from sessions dict, i.e., session deleted
         let sessions = context.sessions.lock().unwrap();
-        assert!(!sessions.contains_key("abc"))
+        assert!(!sessions.iter().any(|s| s.token == "abc"))
+    }
+
+    #[tokio::test]
+    async fn test_expired_cookie_absolute() {
+        let context = TestServerContext {
+            sessions: Mutex::new(vec![FakeSession {
+                id: ConsoleSessionUuid::new_v4(),
+                token: "abc".to_string(),
+                silo_user_id: Uuid::new_v4(),
+                silo_id: Uuid::new_v4(),
+                time_last_used: Utc::now(),
+                time_created: Utc::now() - Duration::hours(20),
+            }]),
+        };
+        let result = authn_with_cookie(&context, Some("session=abc")).await;
+        assert!(matches!(
+            result,
+            SchemeResult::Failed(Reason::BadCredentials {
+                actor: _,
+                source: _
+            })
+        ));
+
+        // key should be removed from sessions dict, i.e., session deleted
+        let sessions = context.sessions.lock().unwrap();
+        assert!(!sessions.iter().any(|s| s.token == "abc"))
     }
 
     #[tokio::test]
     async fn test_valid_cookie() {
         let time_last_used = Utc::now() - Duration::seconds(5);
         let context = TestServerContext {
-            sessions: Mutex::new(HashMap::from([(
-                "abc".to_string(),
-                FakeSession {
-                    silo_user_id: Uuid::new_v4(),
-                    silo_id: Uuid::new_v4(),
-                    time_last_used,
-                    time_created: Utc::now(),
-                },
-            )])),
+            sessions: Mutex::new(vec![FakeSession {
+                id: ConsoleSessionUuid::new_v4(),
+                token: "abc".to_string(),
+                silo_user_id: Uuid::new_v4(),
+                silo_id: Uuid::new_v4(),
+                time_last_used,
+                time_created: Utc::now(),
+            }]),
         };
         let result = authn_with_cookie(&context, Some("session=abc")).await;
         assert!(matches!(
@@ -384,13 +398,13 @@ mod test {
 
         // valid cookie should have updated time_last_used
         let sessions = context.sessions.lock().unwrap();
-        assert!(sessions.get("abc").unwrap().time_last_used > time_last_used)
+        let session = sessions.iter().find(|s| s.token == "abc").unwrap();
+        assert!(session.time_last_used > time_last_used)
     }
 
     #[tokio::test]
     async fn test_garbage_cookie() {
-        let context =
-            TestServerContext { sessions: Mutex::new(HashMap::new()) };
+        let context = TestServerContext { sessions: Mutex::new(Vec::new()) };
         let result =
             authn_with_cookie(&context, Some("unparsable garbage!!!!!1")).await;
         assert!(matches!(result, SchemeResult::NotRequested));
