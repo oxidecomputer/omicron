@@ -1803,6 +1803,8 @@ table! {
         cockroachdb_fingerprint -> Text,
 
         cockroachdb_setting_preserve_downgrade -> Nullable<Text>,
+
+        target_release_minimum_generation -> Int8,
     }
 }
 
