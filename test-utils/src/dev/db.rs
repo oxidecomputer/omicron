@@ -586,6 +586,21 @@ impl CockroachInstance {
         client.cleanup().await.context("cleaning up after wipe")
     }
 
+    /// Disables fsync synchronization for the underlying storage layer.
+    ///
+    /// This is not a recommended operation in production, but it can
+    /// drastically improve the performance of test databases.
+    pub async fn disable_synchronization(&self) -> Result<(), anyhow::Error> {
+        let client = self.connect().await.context("connect")?;
+        client.batch_execute(
+            "SET CLUSTER SETTING kv.raft_log.disable_synchronization_unsafe = true"
+        ).await.context("disabling database synchronization")?;
+        client
+            .cleanup()
+            .await
+            .context("cleaning up after changing cluster settings")
+    }
+
     /// Wrapper around [`populate()`] using a connection to this database.
     pub async fn populate(&self) -> Result<(), anyhow::Error> {
         let client = self.connect().await.context("connect")?;
