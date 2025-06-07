@@ -50,12 +50,14 @@ use nexus_types::deployment::BlueprintZoneType;
 use nexus_types::deployment::CockroachDbPreserveDowngrade;
 use nexus_types::deployment::OmicronZoneExternalFloatingAddr;
 use nexus_types::deployment::OmicronZoneExternalFloatingIp;
+use nexus_types::deployment::OmicronZoneExternalSnatIp;
 use nexus_types::deployment::OximeterReadMode;
 use nexus_types::deployment::blueprint_zone_type;
 use nexus_types::external_api::views::SledState;
 use nexus_types::internal_api::params::DnsConfigParams;
 use omicron_common::address::DNS_OPTE_IPV4_SUBNET;
 use omicron_common::address::NEXUS_OPTE_IPV4_SUBNET;
+use omicron_common::address::NTP_OPTE_IPV4_SUBNET;
 use omicron_common::api::external::Generation;
 use omicron_common::api::external::MacAddr;
 use omicron_common::api::external::UserId;
@@ -67,6 +69,7 @@ use omicron_common::api::internal::nexus::ProducerKind;
 use omicron_common::api::internal::shared::DatasetKind;
 use omicron_common::api::internal::shared::NetworkInterface;
 use omicron_common::api::internal::shared::NetworkInterfaceKind;
+use omicron_common::api::internal::shared::SourceNatConfig;
 use omicron_common::api::internal::shared::SwitchLocation;
 use omicron_common::disk::CompressionAlgorithm;
 use omicron_common::zpool_name::ZpoolName;
@@ -91,7 +94,7 @@ use slog::{Logger, debug, error, o};
 use std::collections::BTreeMap;
 use std::collections::HashMap;
 use std::fmt::Debug;
-use std::net::{IpAddr, Ipv6Addr, SocketAddr, SocketAddrV6};
+use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr, SocketAddrV6};
 use std::sync::Arc;
 use std::time::Duration;
 use uuid::Uuid;
@@ -1199,6 +1202,57 @@ impl<'a, N: NexusServer> ControlPlaneTestContextBuilder<'a, N> {
         })
     }
 
+    /// Configure a mock boundary-NTP server on the first sled agent
+    pub async fn configure_boundary_ntp(&mut self) {
+        let mac = self
+            .rack_init_builder
+            .mac_addrs
+            .next()
+            .expect("ran out of MAC addresses");
+        let internal_ip = NTP_OPTE_IPV4_SUBNET
+            .nth(NUM_INITIAL_RESERVED_IP_ADDRESSES + 1)
+            .unwrap();
+        let external_ip = IpAddr::V4(Ipv4Addr::new(1, 2, 3, 4));
+        let zone_id = OmicronZoneUuid::new_v4();
+        let zpool_id = ZpoolUuid::new_v4();
+
+        self.blueprint_zones.push(BlueprintZoneConfig {
+            disposition: BlueprintZoneDisposition::InService,
+            id: zone_id,
+            filesystem_pool: ZpoolName::new_external(zpool_id),
+            zone_type: BlueprintZoneType::BoundaryNtp(
+                blueprint_zone_type::BoundaryNtp {
+                    address: "[::1]:80".parse().unwrap(),
+                    ntp_servers: vec![],
+                    dns_servers: vec![],
+                    domain: None,
+                    nic: NetworkInterface {
+                        id: Uuid::new_v4(),
+                        kind: NetworkInterfaceKind::Service {
+                            id: zone_id.into_untyped_uuid(),
+                        },
+                        ip: internal_ip.into(),
+                        mac,
+                        name: format!("boundary-ntp-{zone_id}")
+                            .parse()
+                            .unwrap(),
+                        primary: true,
+                        slot: 0,
+                        subnet: (*NTP_OPTE_IPV4_SUBNET).into(),
+                        vni: Vni::SERVICES_VNI,
+                        transit_ips: vec![],
+                    },
+                    external_ip: OmicronZoneExternalSnatIp {
+                        id: ExternalIpUuid::new_v4(),
+                        snat_cfg: SourceNatConfig::new(external_ip, 0, 16383)
+                            .unwrap(),
+                    },
+                },
+            ),
+            image_source: BlueprintZoneImageSource::InstallDataset,
+        });
+    }
+
     /// Set up the Crucible Pantry on the first sled agent
     pub async fn start_crucible_pantry(&mut self) {
         let pantry = self.sled_agents[0].start_pantry().await;
@@ -1685,6 +1739,12 @@ async fn setup_with_config_impl<N: NexusServer>(
     builder
         .init_with_steps(
             vec![
+                (
+                    "configure_boundary_ntp",
+                    Box::new(|builder| {
+                        builder.configure_boundary_ntp().boxed()
+                    }),
+                ),
                 (
                     "start_crucible_pantry",
                     Box::new(|builder| builder.start_crucible_pantry().boxed()),

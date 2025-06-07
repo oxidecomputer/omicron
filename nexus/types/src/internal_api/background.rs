@@ -470,12 +470,17 @@ pub struct BlueprintPlannerStatus {
     /// manipulation.
     pub error: Option<String>,
 
-    /// `true` iff the planning run generated a blueprint that is identical
-    /// to the target before planning.
-    pub unchanged: bool,
+    /// The id of the target blueprint at the start of planning.
+    pub parent_id: BlueprintUuid,
 
-    /// The id of the (new) current target blueprint.
-    pub blueprint_id: BlueprintUuid,
+    /// The id of the newly planned blueprint, if planning was successful
+    /// and the result differs from its parent.
+    pub blueprint_id: Option<BlueprintUuid>,
+
+    /// Whether the newly planned blueprint was able to be set as the
+    /// current target. If `false`, this Nexus probably lost the race
+    /// to another, and the new blueprint may be safely deleted.
+    pub new_target: bool,
 }
 
 /// The status of a `alert_dispatcher` background task activation.

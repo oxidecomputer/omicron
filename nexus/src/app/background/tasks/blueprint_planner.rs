@@ -69,7 +69,7 @@ impl BlueprintPlanner {
             return status;
         };
         let (target, parent) = &*loaded;
-        status.blueprint_id = parent.id;
+        status.parent_id = parent.id;
 
         // Get the inventory most recently seen by the collection
         // background task. The value is `Copy`, so with the deref
@@ -105,7 +105,7 @@ impl BlueprintPlanner {
             }
         };
 
-        // Assemble the planning context.
+        // Assemble and adjust the planning context.
         let input =
             match PlanningInputFromDb::assemble(opctx, &self.datastore).await {
                 Ok(input) => input,
@@ -155,71 +155,70 @@ impl BlueprintPlanner {
 
         // Compare the new blueprint to its parent.
         let summary = blueprint.diff_since_blueprint(&parent);
-        if summary.has_changes() {
-            info!(
-                &opctx.log,
-                "planning produced new blueprint";
-                "parent_blueprint_id" => %parent.id,
-                "blueprint_id" => %blueprint.id,
-            );
-            status.blueprint_id = blueprint.id;
-
-            // Save it.
-            match self.datastore.blueprint_insert(opctx, &blueprint).await {
-                Ok(()) => (),
-                Err(error) => {
-                    error!(
-                        &opctx.log,
-                        "can't save blueprint";
-                        "error" => %error,
-                        "blueprint_id" => %blueprint.id,
-                    );
-                    status.error = Some(format!(
-                        "can't save blueprint {}: {}",
-                        blueprint.id, error
-                    ));
-                    return status;
-                }
-            }
-
-            // Make it the current target.
-            let target = BlueprintTarget {
-                target_id: blueprint.id,
-                enabled: target.enabled,
-                time_made_target: Utc::now(),
-            };
-            match self
-                .datastore
-                .blueprint_target_set_current(opctx, target)
-                .await
-            {
-                Ok(()) => (),
-                Err(error) => {
-                    warn!(
-                        &opctx.log,
-                        "can't make blueprint the current target";
-                        "error" => %error,
-                        "blueprint_id" => %blueprint.id
-                    );
-                    status.error = Some(format!(
-                        "can't make blueprint {} the current target: {}",
-                        blueprint.id, error,
-                    ));
-                    return status;
-                }
-            }
-
-            // Notify watchers that we have a new target.
-            self.tx_blueprint.send_replace(Some(Arc::new((target, blueprint))));
-        } else {
+        if !summary.has_changes() {
             // Blueprint is unchanged, do nothing.
             info!(
                 &opctx.log,
                 "blueprint unchanged from current target";
                 "parent_blueprint_id" => %parent.id,
             );
-            status.unchanged = true;
+            return status;
         }
+
+        // We have a fresh blueprint.
+        info!(
+            &opctx.log,
+            "planning produced new blueprint";
+            "parent_blueprint_id" => %parent.id,
+            "blueprint_id" => %blueprint.id,
+        );
+        status.blueprint_id = Some(blueprint.id);
+
+        // Save it.
+        match self.datastore.blueprint_insert(opctx, &blueprint).await {
+            Ok(()) => (),
+            Err(error) => {
+                error!(
+                    &opctx.log,
+                    "can't save blueprint";
+                    "error" => %error,
+                    "blueprint_id" => %blueprint.id,
+                );
+                status.error = Some(format!(
+                    "can't save blueprint {}: {}",
+                    blueprint.id, error
+                ));
+                return status;
+            }
+        }
+
+        // Try to make it the current target.
+        let target = BlueprintTarget {
+            target_id: blueprint.id,
+            enabled: target.enabled,
+            time_made_target: Utc::now(),
+        };
+        match self.datastore.blueprint_target_set_current(opctx, target).await {
+            Ok(()) => {
+                status.new_target = true;
+            }
+            Err(error) => {
+                warn!(
+                    &opctx.log,
+                    "can't make blueprint the current target";
+                    "error" => %error,
+                    "blueprint_id" => %blueprint.id
+                );
+                status.error = Some(format!(
+                    "can't make blueprint {} the current target: {}",
+                    blueprint.id, error,
+                ));
+                return status;
+            }
+        }
+
+        // Notify watchers that we have a new target.
+        self.tx_blueprint.send_replace(Some(Arc::new((target, blueprint))));
 
         status
     }
@@ -231,5 +230,102 @@ impl BackgroundTask for BlueprintPlanner {
         opctx: &'a OpContext,
     ) -> BoxFuture<'a, serde_json::Value> {
         Box::pin(async move { json!(self.plan(opctx).await) })
+    }
+}
+
+#[cfg(test)]
+mod test {
+    use super::*;
+    use crate::app::background::tasks::blueprint_load::TargetBlueprintLoader;
+    use crate::app::background::tasks::inventory_collection::InventoryCollector;
+    use nexus_test_utils_macros::nexus_test;
+
+    type ControlPlaneTestContext =
+        nexus_test_utils::ControlPlaneTestContext<crate::Server>;
+
+    #[nexus_test(server = crate::Server)]
+    async fn test_blueprint_planner(cptestctx: &ControlPlaneTestContext) {
+        // Set up the test context.
+        let nexus = &cptestctx.server.server_context().nexus;
+        let datastore = nexus.datastore();
+        let opctx = OpContext::for_tests(
+            cptestctx.logctx.log.clone(),
+            datastore.clone(),
+        );
+
+        // Spin up the blueprint loader background task.
+        let mut loader = TargetBlueprintLoader::new(datastore.clone());
+        let mut rx_loader = loader.watcher();
+        loader.activate(&opctx).await;
+        let (_initial_target, initial_blueprint) = &*rx_loader
+            .borrow_and_update()
+            .clone()
+            .expect("no initial blueprint");
+
+        // Spin up the inventory collector background task.
+        let resolver = internal_dns_resolver::Resolver::new_from_addrs(
+            cptestctx.logctx.log.clone(),
+            &[cptestctx.internal_dns.dns_server.local_address()],
+        )
+        .unwrap();
+        let mut collector = InventoryCollector::new(
+            datastore.clone(),
+            resolver.clone(),
+            "test_planner",
+            1,
+            false,
+        );
+        let rx_collector = collector.watcher();
+        collector.activate(&opctx).await;
+
+        // Finally, spin up the planner background task.
+        let mut planner = BlueprintPlanner::new(
+            datastore.clone(),
+            false,
+            rx_collector,
+            rx_loader.clone(),
+        );
+        let _rx_planner = planner.watcher();
+
+        // On activation, the planner should run successfully and generate
+        // a new target blueprint.
+        let status = serde_json::from_value::<BlueprintPlannerStatus>(
+            planner.activate(&opctx).await,
+        )
+        .unwrap();
+        assert!(!status.disabled);
+        assert!(status.error.is_none());
+        assert_eq!(status.parent_id, initial_blueprint.id);
+        let blueprint_id = status.blueprint_id.unwrap();
+        assert_ne!(blueprint_id, initial_blueprint.id);
+        assert!(status.new_target);
+
+        // Load and check the new target blueprint.
+        loader.activate(&opctx).await;
+        let (target, blueprint) = &*rx_loader
+            .borrow_and_update()
+            .clone()
+            .expect("failed to load blueprint");
+        assert_eq!(target.target_id, blueprint.id);
+        assert_eq!(target.target_id, blueprint_id);
+        assert!(
+            blueprint.diff_since_blueprint(initial_blueprint).has_changes()
+        );
+
+        // Planning again should not change the plan.
+        let status = serde_json::from_value::<BlueprintPlannerStatus>(
+            planner.activate(&opctx).await,
+        )
+        .unwrap();
+        assert_eq!(
+            status,
+            BlueprintPlannerStatus {
+                disabled: false,
+                error: None,
+                parent_id: blueprint_id,
+                blueprint_id: None,
+                new_target: false,
+            }
+        );
     }
 }
