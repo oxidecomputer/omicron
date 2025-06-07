@@ -552,6 +552,15 @@ table! {
 }
 
 table! {
+    silo_auth_settings(silo_id) {
+        silo_id -> Uuid,
+        time_created -> Timestamptz,
+        time_modified -> Timestamptz,
+        device_token_max_ttl_seconds -> Nullable<Int8>,
+    }
+}
+
+table! {
     network_interface (id) {
         id -> Uuid,
         name -> Text,
@@ -928,7 +937,8 @@ table! {
 }
 
 table! {
-    console_session (token) {
+    console_session (id) {
+        id -> Uuid,
         token -> Text,
         time_created -> Timestamptz,
         time_last_used -> Timestamptz,
@@ -1350,11 +1360,13 @@ table! {
         device_code -> Text,
         time_created -> Timestamptz,
         time_expires -> Timestamptz,
+        token_ttl_seconds -> Nullable<Int8>,
     }
 }
 
 table! {
-    device_access_token (token) {
+    device_access_token (id) {
+        id -> Uuid,
         token -> Text,
         client_id -> Uuid,
         device_code -> Text,
@@ -2268,6 +2280,12 @@ allow_tables_to_appear_in_same_query!(
     switch_port,
     switch_port_settings_bgp_peer_config,
     bgp_config
+);
+
+allow_tables_to_appear_in_same_query!(
+    address_lot,
+    address_lot_block,
+    switch_port_settings,
 );
 
 allow_tables_to_appear_in_same_query!(disk, virtual_provisioning_resource);

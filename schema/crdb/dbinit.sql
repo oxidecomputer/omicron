@@ -427,6 +427,10 @@ CREATE TYPE IF NOT EXISTS omicron.public.physical_disk_state AS ENUM (
 );
 
 -- A physical disk which exists inside the rack.
+--
+-- This is currently limited to U.2 disks, which are managed by the
+-- control plane. A disk may exist within inventory, but not in this row:
+-- if that's the case, it is not explicitly "managed" by Nexus.
 CREATE TABLE IF NOT EXISTS omicron.public.physical_disk (
     id UUID PRIMARY KEY,
     time_created TIMESTAMPTZ NOT NULL,
@@ -444,7 +448,15 @@ CREATE TABLE IF NOT EXISTS omicron.public.physical_disk (
     sled_id UUID NOT NULL,
 
     disk_policy omicron.public.physical_disk_policy NOT NULL,
-    disk_state omicron.public.physical_disk_state NOT NULL
+    disk_state omicron.public.physical_disk_state NOT NULL,
+
+    -- This table should be limited to U.2s, and disallow inserting
+    -- other disk kinds, unless we explicitly want them to be controlled
+    -- by Nexus.
+    --
+    -- See https://github.com/oxidecomputer/omicron/issues/8258 for additional
+    -- context.
+    CONSTRAINT physical_disk_variant_u2 CHECK (variant = 'u2')
 );
 
 -- This constraint only needs to be upheld for disks that are not deleted
@@ -1065,6 +1077,14 @@ WHERE
 AND
     s.time_deleted IS NULL;
 
+CREATE TABLE IF NOT EXISTS omicron.public.silo_auth_settings (
+    silo_id UUID PRIMARY KEY,
+    time_created TIMESTAMPTZ NOT NULL,
+    time_modified TIMESTAMPTZ NOT NULL,
+
+    -- null means no max: users can tokens that never expire
+    device_token_max_ttl_seconds INT8 CHECK (device_token_max_ttl_seconds > 0)
+);
 /*
  * Projects
  */
@@ -2406,7 +2426,8 @@ CREATE TABLE IF NOT EXISTS omicron.public.saga_node_event (
  * Sessions for use by web console.
  */
 CREATE TABLE IF NOT EXISTS omicron.public.console_session (
-    token STRING(40) PRIMARY KEY,
+    id UUID PRIMARY KEY,
+    token STRING(40) NOT NULL,
     time_created TIMESTAMPTZ NOT NULL,
     time_last_used TIMESTAMPTZ NOT NULL,
     silo_user_id UUID NOT NULL
@@ -2415,14 +2436,20 @@ CREATE TABLE IF NOT EXISTS omicron.public.console_session (
 -- to be used for cleaning up old tokens
 -- It's okay that this index is non-unique because we don't need to page through
 -- this list.  We'll just grab the next N, delete them, then repeat.
-CREATE INDEX IF NOT EXISTS lookup_console_by_creation ON omicron.public.console_session (
-    time_created
-);
+CREATE INDEX IF NOT EXISTS lookup_console_by_creation
+    ON omicron.public.console_session (time_created);
 
 -- This index is used to remove sessions for a user that's being deleted.
-CREATE INDEX IF NOT EXISTS lookup_console_by_silo_user ON omicron.public.console_session (
-    silo_user_id
-);
+CREATE INDEX IF NOT EXISTS lookup_console_by_silo_user
+    ON omicron.public.console_session (silo_user_id);
+
+-- We added a UUID as the primary key, but we need the token to keep acting like
+-- it did before. "When you change a primary key with ALTER PRIMARY KEY, the old
+-- primary key index becomes a secondary index." We chose to use DROP CONSTRAINT
+-- and ADD CONSTRAINT instead and manually create the index.
+-- https://www.cockroachlabs.com/docs/v22.1/primary-key#changing-primary-key-columns
+CREATE UNIQUE INDEX IF NOT EXISTS console_session_token_unique
+	ON omicron.public.console_session (token);
 
 /*******************************************************************/
 
@@ -2796,12 +2823,15 @@ CREATE TABLE IF NOT EXISTS omicron.public.device_auth_request (
     client_id UUID NOT NULL,
     device_code STRING(40) NOT NULL,
     time_created TIMESTAMPTZ NOT NULL,
-    time_expires TIMESTAMPTZ NOT NULL
+    time_expires TIMESTAMPTZ NOT NULL,
+    -- requested TTL for the token in seconds (if specified by the user)
+    token_ttl_seconds INT8 CHECK (token_ttl_seconds > 0)
 );
 
 -- Access tokens granted in response to successful device authorization flows.
 CREATE TABLE IF NOT EXISTS omicron.public.device_access_token (
-    token STRING(40) PRIMARY KEY,
+    id UUID PRIMARY KEY,
+    token STRING(40) NOT NULL,
     client_id UUID NOT NULL,
     device_code STRING(40) NOT NULL,
     silo_user_id UUID NOT NULL,
@@ -2812,14 +2842,17 @@ CREATE TABLE IF NOT EXISTS omicron.public.device_access_token (
 
 -- This UNIQUE constraint is critical for ensuring that at most
 -- one token is ever created for a given device authorization flow.
-CREATE UNIQUE INDEX IF NOT EXISTS lookup_device_access_token_by_client ON omicron.public.device_access_token (
-    client_id, device_code
-);
+CREATE UNIQUE INDEX IF NOT EXISTS lookup_device_access_token_by_client
+    ON omicron.public.device_access_token (client_id, device_code);
+
+-- We added a UUID as the primary key, but we need the token to keep acting like
+-- it did before
+CREATE UNIQUE INDEX IF NOT EXISTS device_access_token_unique
+    ON omicron.public.device_access_token (token);
 
 -- This index is used to remove tokens for a user that's being deleted.
-CREATE INDEX IF NOT EXISTS lookup_device_access_token_by_silo_user ON omicron.public.device_access_token (
-    silo_user_id
-);
+CREATE INDEX IF NOT EXISTS lookup_device_access_token_by_silo_user
+    ON omicron.public.device_access_token (silo_user_id);
 
 /*
  * Roles built into the system
@@ -5671,7 +5704,7 @@ INSERT INTO omicron.public.db_metadata (
     version,
     target_version
 ) VALUES
-    (TRUE, NOW(), NOW(), '144.0.0', NULL)
+    (TRUE, NOW(), NOW(), '148.0.0', NULL)
 ON CONFLICT DO NOTHING;
 
 COMMIT;

@@ -85,3 +85,19 @@ pub fn blueprint_nexus_external_ips(blueprint: &Blueprint) -> Vec<IpAddr> {
         })
         .collect()
 }
+
+/// Return the addresses on which this blueprint's external DNS servers listen
+/// for DNS queries.
+pub fn blueprint_external_dns_nameserver_ips(
+    blueprint: &Blueprint,
+) -> Vec<IpAddr> {
+    blueprint
+        .all_omicron_zones(BlueprintZoneDisposition::is_in_service)
+        .filter_map(|(_, z)| match z.zone_type {
+            BlueprintZoneType::ExternalDns(
+                blueprint_zone_type::ExternalDns { dns_address, .. },
+            ) => Some(dns_address.addr.ip()),
+            _ => None,
+        })
+        .collect()
+}

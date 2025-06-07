@@ -5,6 +5,7 @@
 use daft::Diffable;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
+use std::str::FromStr;
 
 #[derive(
     Debug,
@@ -195,6 +196,22 @@ impl RotSlot {
         match self {
             RotSlot::A => RotSlot::B,
             RotSlot::B => RotSlot::A,
+        }
+    }
+}
+
+impl FromStr for RotSlot {
+    type Err = String;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        match s {
+            "a" | "A" => Ok(RotSlot::A),
+            "b" | "B" => Ok(RotSlot::B),
+            _ => Err(format!(
+                "unrecognized value {} for RoT slot. \
+                Must be one of `a`, `A`, `b`, or `B`",
+                s
+            )),
         }
     }
 }
