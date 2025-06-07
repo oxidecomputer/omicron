@@ -69,6 +69,7 @@ impl BlueprintPlanner {
             return status;
         };
         let (target, parent) = &*loaded;
+        status.blueprint_id = parent.id;
 
         // Get the inventory most recently seen by the collection
         // background task. The value is `Copy`, so with the deref
@@ -161,6 +162,7 @@ impl BlueprintPlanner {
                 "parent_blueprint_id" => %parent.id,
                 "blueprint_id" => %blueprint.id,
             );
+            status.blueprint_id = blueprint.id;
 
             // Save it.
             match self.datastore.blueprint_insert(opctx, &blueprint).await {

@@ -471,8 +471,11 @@ pub struct BlueprintPlannerStatus {
     pub error: Option<String>,
 
     /// `true` iff the planning run generated a blueprint that is identical
-    /// to the current target.
+    /// to the target before planning.
     pub unchanged: bool,
+
+    /// The id of the (new) current target blueprint.
+    pub blueprint_id: BlueprintUuid,
 }
 
 /// The status of a `alert_dispatcher` background task activation.
