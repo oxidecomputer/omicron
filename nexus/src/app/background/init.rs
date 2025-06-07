@@ -94,6 +94,7 @@ use super::tasks::alert_dispatcher::AlertDispatcher;
 use super::tasks::bfd;
 use super::tasks::blueprint_execution;
 use super::tasks::blueprint_load;
+use super::tasks::blueprint_planner;
 use super::tasks::blueprint_rendezvous;
 use super::tasks::crdb_node_id_collector;
 use super::tasks::decommissioned_disk_cleaner;
@@ -201,6 +202,7 @@ impl BackgroundTasksInitializer {
             task_decommissioned_disk_cleaner: Activator::new(),
             task_phantom_disks: Activator::new(),
             task_blueprint_loader: Activator::new(),
+            task_blueprint_planner: Activator::new(),
             task_blueprint_executor: Activator::new(),
             task_blueprint_rendezvous: Activator::new(),
             task_crdb_node_id_collector: Activator::new(),
@@ -276,6 +278,7 @@ impl BackgroundTasksInitializer {
             task_decommissioned_disk_cleaner,
             task_phantom_disks,
             task_blueprint_loader,
+            task_blueprint_planner,
             task_blueprint_executor,
             task_blueprint_rendezvous,
             task_crdb_node_id_collector,
@@ -418,13 +421,32 @@ impl BackgroundTasksInitializer {
         let blueprint_loader =
             blueprint_load::TargetBlueprintLoader::new(datastore.clone());
         let rx_blueprint = blueprint_loader.watcher();
+
+        // Background task: blueprint planner
+        let blueprint_planner = blueprint_planner::BlueprintPlanner::new(
+            datastore.clone(),
+            false,
+            rx_blueprint.clone(),
+        );
+        let rx_planner = blueprint_planner.watcher();
+        driver.register(TaskDefinition {
+            name: "blueprint_planner",
+            description: "Updates the target blueprint",
+            period: config.blueprints.period_secs_plan,
+            task_impl: Box::new(blueprint_planner),
+            opctx: opctx.child(BTreeMap::new()),
+            watchers: vec![Box::new(rx_blueprint.clone())],
+            activator: task_blueprint_planner,
+        });
+
+        // The planner notifies the loader when it has generated a new target blueprint.
         driver.register(TaskDefinition {
             name: "blueprint_loader",
             description: "Loads the current target blueprint from the DB",
             period: config.blueprints.period_secs_load,
             task_impl: Box::new(blueprint_loader),
             opctx: opctx.child(BTreeMap::new()),
-            watchers: vec![],
+            watchers: vec![Box::new(rx_planner.clone())],
             activator: task_blueprint_loader,
         });
 

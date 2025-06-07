@@ -592,10 +592,19 @@ pub struct PhantomDiskConfig {
 #[serde_as]
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 pub struct BlueprintTasksConfig {
+    /// background planner chicken switch
+    #[serde(default)]
+    pub disable_planner: bool,
+
     /// period (in seconds) for periodic activations of the background task that
     /// reads the latest target blueprint from the database
     #[serde_as(as = "DurationSeconds<u64>")]
     pub period_secs_load: Duration,
+
+    /// period (in seconds) for periodic activations of the background task that
+    /// plans and updates the target blueprint
+    #[serde_as(as = "DurationSeconds<u64>")]
+    pub period_secs_plan: Duration,
 
     /// period (in seconds) for periodic activations of the background task that
     /// executes the latest target blueprint
@@ -604,7 +613,7 @@ pub struct BlueprintTasksConfig {
 
     /// period (in seconds) for periodic activations of the background task that
     /// reconciles the latest blueprint and latest inventory collection into
-    /// Rencofigurator rendezvous tables
+    /// Reconfigurator rendezvous tables
     #[serde_as(as = "DurationSeconds<u64>")]
     pub period_secs_rendezvous: Duration,
 
@@ -1055,7 +1064,9 @@ mod test {
             physical_disk_adoption.period_secs = 30
             decommissioned_disk_cleaner.period_secs = 30
             phantom_disks.period_secs = 30
+            blueprints.disable_planner = false
             blueprints.period_secs_load = 10
+            blueprints.period_secs_plan = 60
             blueprints.period_secs_execute = 60
             blueprints.period_secs_rendezvous = 300
             blueprints.period_secs_collect_crdb_node_ids = 180
@@ -1220,7 +1231,9 @@ mod test {
                             period_secs: Duration::from_secs(30),
                         },
                         blueprints: BlueprintTasksConfig {
+                            disable_planner: false,
                             period_secs_load: Duration::from_secs(10),
+                            period_secs_plan: Duration::from_secs(60),
                             period_secs_execute: Duration::from_secs(60),
                             period_secs_collect_crdb_node_ids:
                                 Duration::from_secs(180),
@@ -1364,7 +1377,9 @@ mod test {
             physical_disk_adoption.period_secs = 30
             decommissioned_disk_cleaner.period_secs = 30
             phantom_disks.period_secs = 30
+            blueprints.disable_planner = true
             blueprints.period_secs_load = 10
+            blueprints.period_secs_plan = 60
             blueprints.period_secs_execute = 60
             blueprints.period_secs_rendezvous = 300
             blueprints.period_secs_collect_crdb_node_ids = 180
