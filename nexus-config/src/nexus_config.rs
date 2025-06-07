@@ -593,7 +593,6 @@ pub struct PhantomDiskConfig {
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 pub struct BlueprintTasksConfig {
     /// background planner chicken switch
-    #[serde(default)]
     pub disable_planner: bool,
 
     /// period (in seconds) for periodic activations of the background task that
