@@ -528,7 +528,7 @@ task: "bfd_manager"
 task: "blueprint_planner"
   configured period: every <REDACTED_DURATION>m
   currently executing: no
-  last completed activation: <REDACTED ITERATIONS>, triggered by a periodic timer firing
+  last completed activation: <REDACTED ITERATIONS>, triggered by a dependent task completing
     started at <REDACTED_TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
     last completion reported error: no target blueprint to use as parent for planning
 
@@ -1054,7 +1054,7 @@ task: "bfd_manager"
 task: "blueprint_planner"
   configured period: every <REDACTED_DURATION>m
   currently executing: no
-  last completed activation: <REDACTED ITERATIONS>, triggered by a periodic timer firing
+  last completed activation: <REDACTED ITERATIONS>, triggered by a dependent task completing
     started at <REDACTED_TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
     last completion reported error: no target blueprint to use as parent for planning
 

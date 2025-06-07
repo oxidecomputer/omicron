@@ -13,6 +13,7 @@ use nexus_reconfigurator_planning::planner::Planner;
 use nexus_reconfigurator_preparation::PlanningInputFromDb;
 use nexus_types::deployment::{Blueprint, BlueprintTarget};
 use nexus_types::internal_api::background::BlueprintPlannerStatus;
+use omicron_uuid_kinds::CollectionUuid;
 use serde_json::json;
 use std::sync::Arc;
 use tokio::sync::watch::{self, Receiver, Sender};
@@ -21,6 +22,7 @@ use tokio::sync::watch::{self, Receiver, Sender};
 pub struct BlueprintPlanner {
     datastore: Arc<DataStore>,
     disabled: bool,
+    rx_inventory: Receiver<Option<CollectionUuid>>,
     rx_blueprint: Receiver<Option<Arc<(BlueprintTarget, Blueprint)>>>,
     tx_blueprint: Sender<Option<Arc<(BlueprintTarget, Blueprint)>>>,
 }
@@ -29,10 +31,11 @@ impl BlueprintPlanner {
     pub fn new(
         datastore: Arc<DataStore>,
         disabled: bool,
+        rx_inventory: Receiver<Option<CollectionUuid>>,
         rx_blueprint: Receiver<Option<Arc<(BlueprintTarget, Blueprint)>>>,
     ) -> Self {
         let (tx_blueprint, _) = watch::channel(None);
-        Self { datastore, disabled, rx_blueprint, tx_blueprint }
+        Self { datastore, disabled, rx_inventory, rx_blueprint, tx_blueprint }
     }
 
     pub fn watcher(
@@ -53,7 +56,8 @@ impl BlueprintPlanner {
         }
 
         // Get the current target blueprint to use as a parent.
-        let Some(rx) = self.rx_blueprint.borrow_and_update().clone() else {
+        // Cloned so that we don't block the channel.
+        let Some(loaded) = self.rx_blueprint.borrow_and_update().clone() else {
             warn!(
                 &opctx.log,
                 "blueprint planning skipped";
@@ -64,34 +68,54 @@ impl BlueprintPlanner {
             ));
             return status;
         };
-        let (target, parent) = &*rx;
+        let (target, parent) = &*loaded;
 
-        // Assemble the planning context.
-        let input = match PlanningInputFromDb::assemble(opctx, &self.datastore)
+        // Get the inventory most recently seen by the collection
+        // background task. The value is `Copy`, so with the deref
+        // we don't block the channel.
+        let Some(collection_id) = *self.rx_inventory.borrow_and_update() else {
+            warn!(
+                &opctx.log,
+                "blueprint planning skipped";
+                "reason" => "no inventory collection available"
+            );
+            status.error =
+                Some(String::from("no inventory collection available"));
+            return status;
+        };
+        let collection = match self
+            .datastore
+            .inventory_collection_read(opctx, collection_id)
             .await
         {
-            Ok(input) => input,
+            Ok(collection) => collection,
             Err(error) => {
-                error!(&opctx.log, "can't assemble planning input: {error}");
-                status.error = Some(error.to_string());
+                error!(
+                    &opctx.log,
+                    "can't read inventory collection";
+                    "collection_id" => %collection_id,
+                    "error" => %error,
+                );
+                status.error = Some(format!(
+                    "can't read inventory collection {}: {}",
+                    collection_id, error
+                ));
                 return status;
             }
         };
-        let inventory =
-            match self.datastore.inventory_get_latest_collection(opctx).await {
-                Ok(Some(inventory)) => inventory,
-                Ok(None) => {
-                    error!(&opctx.log, "no recent inventory collection");
-                    status.error =
-                        Some(String::from("no recent inventory collection"));
-                    return status;
-                }
+
+        // Assemble the planning context.
+        let input =
+            match PlanningInputFromDb::assemble(opctx, &self.datastore).await {
+                Ok(input) => input,
                 Err(error) => {
                     error!(
                         &opctx.log,
-                        "can't get latest inventory collection: {error}"
+                        "can't assemble planning input";
+                        "error" => %error,
                     );
-                    status.error = Some(error.to_string());
+                    status.error =
+                        Some(format!("can't assemble planning input: {error}"));
                     return status;
                 }
             };
@@ -102,7 +126,7 @@ impl BlueprintPlanner {
             &parent,
             &input,
             "blueprint_planner",
-            &inventory,
+            &collection,
         ) {
             Ok(planner) => planner,
             Err(error) => {
@@ -169,7 +193,7 @@ impl BlueprintPlanner {
             {
                 Ok(()) => (),
                 Err(error) => {
-                    error!(
+                    warn!(
                         &opctx.log,
                         "can't make blueprint the current target";
                         "error" => %error,
