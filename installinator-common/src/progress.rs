@@ -297,6 +297,9 @@ pub enum ControlPlaneZonesStepId {
     /// Writing the MUPdate override file.
     MupdateOverride,
 
+    /// Writing the zone manifest.
+    ZoneManifest,
+
     /// Syncing writes to disk.
     Fsync,
 
