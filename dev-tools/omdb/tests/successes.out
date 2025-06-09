@@ -744,7 +744,7 @@ task: "sp_ereport_ingester"
   currently executing: no
   last completed activation: <REDACTED ITERATIONS>, triggered by a periodic timer firing
     started at <REDACTED_TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
-    last completion reported error: looking up MGS addresses
+    last completion reported error: looking up MGS addresses: no record found for Query { name: Name("_mgs._tcp.control-plane.oxide.internal."), query_type: SRV, query_class: IN }
 
 task: "support_bundle_collector"
   configured period: every <REDACTED_DURATION>days <REDACTED_DURATION>h <REDACTED_DURATION>m <REDACTED_DURATION>s
@@ -1270,7 +1270,7 @@ task: "sp_ereport_ingester"
   currently executing: no
   last completed activation: <REDACTED ITERATIONS>, triggered by a periodic timer firing
     started at <REDACTED_TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
-    last completion reported error: looking up MGS addresses
+    last completion reported error: looking up MGS addresses: no record found for Query { name: Name("_mgs._tcp.control-plane.oxide.internal."), query_type: SRV, query_class: IN }
 
 task: "support_bundle_collector"
   configured period: every <REDACTED_DURATION>days <REDACTED_DURATION>h <REDACTED_DURATION>m <REDACTED_DURATION>s
