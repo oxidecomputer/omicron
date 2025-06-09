@@ -17,6 +17,7 @@ mod driver;
 mod driver_update;
 mod host_phase1_updater;
 mod mgs_clients;
+mod rot_bootloader_updater;
 mod rot_updater;
 mod sp_updater;
 #[cfg(test)]

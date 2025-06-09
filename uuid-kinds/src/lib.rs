@@ -51,12 +51,14 @@ macro_rules! impl_typed_uuid_kind {
 // Please keep this list in alphabetical order.
 
 impl_typed_uuid_kind! {
+    AccessToken => "access_token",
     AffinityGroup => "affinity_group",
     Alert => "alert",
     AlertReceiver => "alert_receiver",
     AntiAffinityGroup => "anti_affinity_group",
     Blueprint => "blueprint",
     Collection => "collection",
+    ConsoleSession => "console_session",
     Dataset => "dataset",
     DemoSaga => "demo_saga",
     Downstairs => "downstairs",
@@ -65,6 +67,7 @@ impl_typed_uuid_kind! {
     ExternalIp => "external_ip",
     Instance => "instance",
     LoopbackAddress => "loopback_address",
+    Mupdate => "mupdate",
     MupdateOverride => "mupdate_override",
     // `OmicronSledConfig`s do not themselves contain IDs, but we generate IDs
     // for them when they're serialized to the database during inventory

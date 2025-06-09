@@ -473,7 +473,7 @@ hyper = "1.6.0"
 hyper-util = "0.1.11"
 hyper-rustls = "0.26.0"
 hyper-staticfile = "0.10.1"
-iddqd = { version = "0.3.3", features = ["daft", "serde"] }
+iddqd = { version = "0.3.6", features = ["daft", "serde"] }
 id-map = { path = "id-map" }
 illumos-utils = { path = "illumos-utils" }
 iana-time-zone = "0.1.63"
@@ -507,8 +507,8 @@ lldp_protocol = { git = "https://github.com/oxidecomputer/lldp", package = "prot
 macaddr = { version = "1.0.1", features = ["serde_std"] }
 maplit = "1.0.2"
 newtype_derive = "0.1.6"
-mg-admin-client = { git = "https://github.com/oxidecomputer/maghemite", rev = "875ae5b7f8f0e32e9be672a36b5dda109b9b2450" }
-ddm-admin-client = { git = "https://github.com/oxidecomputer/maghemite", rev = "875ae5b7f8f0e32e9be672a36b5dda109b9b2450" }
+mg-admin-client = { git = "https://github.com/oxidecomputer/maghemite", rev = "760b4b547e301a31d4dcb92ba97aabdb2a3e0cba" }
+ddm-admin-client = { git = "https://github.com/oxidecomputer/maghemite", rev = "760b4b547e301a31d4dcb92ba97aabdb2a3e0cba" }
 multimap = "0.10.1"
 nexus-auth = { path = "nexus/auth" }
 nexus-background-task-interface = { path = "nexus/background-task-interface" }
@@ -562,7 +562,7 @@ omicron-test-utils = { path = "test-utils" }
 omicron-workspace-hack = "0.1.0"
 omicron-zone-package = "0.12.2"
 oxide-client = { path = "clients/oxide-client" }
-oxide-vpc = { git = "https://github.com/oxidecomputer/opte", rev = "9e79588b11a69ff3d40f9aa29af97e31a0045c4b", features = [ "api", "std" ] }
+oxide-vpc = { git = "https://github.com/oxidecomputer/opte", rev = "f5560fae02ad3fc349fabc6454c321143199ca9e", features = [ "api", "std" ] }
 oxlog = { path = "dev-tools/oxlog" }
 oxnet = "0.1.2"
 once_cell = "1.21.3"
@@ -572,7 +572,7 @@ openapiv3 = "2.0.0"
 # must match samael's crate!
 openssl = "0.10"
 openssl-sys = "0.9"
-opte-ioctl = { git = "https://github.com/oxidecomputer/opte", rev = "9e79588b11a69ff3d40f9aa29af97e31a0045c4b" }
+opte-ioctl = { git = "https://github.com/oxidecomputer/opte", rev = "f5560fae02ad3fc349fabc6454c321143199ca9e" }
 oso = "0.27"
 owo-colors = "4.2.0"
 oximeter = { path = "oximeter/oximeter" }

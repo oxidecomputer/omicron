@@ -210,6 +210,7 @@ mod test {
 
         let dns_config = DnsConfigParams {
             generation: Generation::from_u32(1),
+            serial: 1,
             time_created: chrono::Utc::now(),
             zones: vec![],
         };
