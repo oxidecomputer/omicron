@@ -32,6 +32,7 @@ type InMemoryRepoDepotServerContext = Arc<ArtifactData>;
 /// Together, this makes it easy to write SP update tests that use these
 /// artifacts.
 pub struct TestArtifacts {
+    // TODO-K: Add rot artifacts
     pub sp_gimlet_artifact_hash: ArtifactHash,
     pub sp_sidecar_artifact_hash: ArtifactHash,
     pub artifact_cache: Arc<ArtifactCache>,

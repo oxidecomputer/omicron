@@ -630,6 +630,7 @@ async fn wait_for_update_done(
 mod test {
     use super::ApplyUpdateError;
     use crate::test_util::test_artifacts::TestArtifacts;
+    use crate::test_util::updates::ExpectedSpComponent;
     use crate::test_util::updates::UpdateDescription;
     use assert_matches::assert_matches;
     use gateway_client::types::SpType;
@@ -700,6 +701,7 @@ mod test {
         gwtestctx.teardown().await;
     }
 
+    // TODO-K: test same but for rot
     async fn run_one_successful_update(
         gwtestctx: &GatewayTestContext,
         artifacts: &TestArtifacts,
@@ -715,8 +717,10 @@ mod test {
             slot_id,
             artifact_hash,
             override_baseboard_id: None,
-            override_expected_active: None,
-            override_expected_inactive: None,
+            expected_sp_component: ExpectedSpComponent::Sp {
+                override_expected_active: None,
+                override_expected_inactive: None,
+            },
             override_progress_timeout: None,
         };
 
@@ -756,8 +760,10 @@ mod test {
             slot_id: 1,
             artifact_hash: &artifacts.sp_gimlet_artifact_hash,
             override_baseboard_id: None,
-            override_expected_active: None,
-            override_expected_inactive: None,
+            expected_sp_component: ExpectedSpComponent::Sp {
+                override_expected_active: None,
+                override_expected_inactive: None,
+            },
             override_progress_timeout: None,
         };
 
@@ -768,19 +774,23 @@ mod test {
             slot_id: 1,
             artifact_hash: &artifacts.sp_gimlet_artifact_hash,
             override_baseboard_id: None,
-            override_expected_active: None,
-            override_expected_inactive: Some(ExpectedVersion::Version(
-                std::str::from_utf8(
-                    artifacts
-                        .deployed_caboose(&artifacts.sp_gimlet_artifact_hash)
-                        .expect("deployed caboose for generated artifact")
-                        .version()
-                        .expect("valid version"),
-                )
-                .expect("version is UTF-8")
-                .parse()
-                .expect("version is valid"),
-            )),
+            expected_sp_component: ExpectedSpComponent::Sp {
+                override_expected_active: None,
+                override_expected_inactive: Some(ExpectedVersion::Version(
+                    std::str::from_utf8(
+                        artifacts
+                            .deployed_caboose(
+                                &artifacts.sp_gimlet_artifact_hash,
+                            )
+                            .expect("deployed caboose for generated artifact")
+                            .version()
+                            .expect("valid version"),
+                    )
+                    .expect("version is UTF-8")
+                    .parse()
+                    .expect("version is valid"),
+                )),
+            },
             override_progress_timeout: None,
         };
 
@@ -825,8 +835,10 @@ mod test {
             slot_id: 1,
             artifact_hash: &artifacts.sp_gimlet_artifact_hash,
             override_baseboard_id: None,
-            override_expected_active: None,
-            override_expected_inactive: None,
+            expected_sp_component: ExpectedSpComponent::Sp {
+                override_expected_active: None,
+                override_expected_inactive: None,
+            },
             override_progress_timeout: None,
         };
 
@@ -837,19 +849,23 @@ mod test {
             slot_id: 1,
             artifact_hash: &artifacts.sp_gimlet_artifact_hash,
             override_baseboard_id: None,
-            override_expected_active: None,
-            override_expected_inactive: Some(ExpectedVersion::Version(
-                std::str::from_utf8(
-                    artifacts
-                        .deployed_caboose(&artifacts.sp_gimlet_artifact_hash)
-                        .expect("deployed caboose for generated artifact")
-                        .version()
-                        .expect("valid version"),
-                )
-                .expect("version is UTF-8")
-                .parse()
-                .expect("version is valid"),
-            )),
+            expected_sp_component: ExpectedSpComponent::Sp {
+                override_expected_active: None,
+                override_expected_inactive: Some(ExpectedVersion::Version(
+                    std::str::from_utf8(
+                        artifacts
+                            .deployed_caboose(
+                                &artifacts.sp_gimlet_artifact_hash,
+                            )
+                            .expect("deployed caboose for generated artifact")
+                            .version()
+                            .expect("valid version"),
+                    )
+                    .expect("version is UTF-8")
+                    .parse()
+                    .expect("version is valid"),
+                )),
+            },
             // This timeout (10 seconds) seeks to balance being long enough to
             // be relevant without making the tests take too long.  (It's
             // assumed that 10 seconds here is not a huge deal because this is
@@ -911,8 +927,10 @@ mod test {
                 part_number: String::from("i86pc"),
                 serial_number: String::from("SimGimlet0"),
             }),
-            override_expected_active: None,
-            override_expected_inactive: None,
+            expected_sp_component: ExpectedSpComponent::Sp {
+                override_expected_active: None,
+                override_expected_inactive: None,
+            },
             override_progress_timeout: None,
         };
 
@@ -938,8 +956,10 @@ mod test {
             slot_id: 1,
             artifact_hash: &artifacts.sp_gimlet_artifact_hash,
             override_baseboard_id: None,
-            override_expected_active: Some("not-right".parse().unwrap()),
-            override_expected_inactive: None,
+            expected_sp_component: ExpectedSpComponent::Sp {
+                override_expected_active: Some("not-right".parse().unwrap()),
+                override_expected_inactive: None,
+            },
             override_progress_timeout: None,
         };
 
@@ -965,8 +985,12 @@ mod test {
             slot_id: 1,
             artifact_hash: &artifacts.sp_gimlet_artifact_hash,
             override_baseboard_id: None,
-            override_expected_active: None,
-            override_expected_inactive: Some(ExpectedVersion::NoValidVersion),
+            expected_sp_component: ExpectedSpComponent::Sp {
+                override_expected_active: None,
+                override_expected_inactive: Some(
+                    ExpectedVersion::NoValidVersion,
+                ),
+            },
             override_progress_timeout: None,
         };
 
@@ -992,10 +1016,12 @@ mod test {
             slot_id: 1,
             artifact_hash: &artifacts.sp_gimlet_artifact_hash,
             override_baseboard_id: None,
-            override_expected_active: None,
-            override_expected_inactive: Some(ExpectedVersion::Version(
-                "something-else".parse().unwrap(),
-            )),
+            expected_sp_component: ExpectedSpComponent::Sp {
+                override_expected_active: None,
+                override_expected_inactive: Some(ExpectedVersion::Version(
+                    "something-else".parse().unwrap(),
+                )),
+            },
             override_progress_timeout: None,
         };
 
@@ -1022,8 +1048,10 @@ mod test {
             slot_id: 1,
             artifact_hash: &artifacts.sp_gimlet_artifact_hash,
             override_baseboard_id: None,
-            override_expected_active: None,
-            override_expected_inactive: None,
+            expected_sp_component: ExpectedSpComponent::Sp {
+                override_expected_active: None,
+                override_expected_inactive: None,
+            },
             override_progress_timeout: None,
         };
         let in_progress = desc.setup().await;

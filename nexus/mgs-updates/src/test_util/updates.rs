@@ -21,6 +21,8 @@ use crate::test_util::test_artifacts::TestArtifacts;
 use futures::FutureExt;
 use gateway_client::types::SpType;
 use gateway_test_utils::setup::GatewayTestContext;
+use gateway_types::rot::RotSlot;
+use nexus_types::deployment::ExpectedActiveRotSlot;
 use nexus_types::deployment::ExpectedVersion;
 use nexus_types::deployment::PendingMgsUpdate;
 use nexus_types::deployment::PendingMgsUpdateDetails;
@@ -36,6 +38,21 @@ use std::time::Duration;
 use tokio::sync::watch;
 use tufaceous_artifact::ArtifactHash;
 use tufaceous_artifact::ArtifactVersion;
+
+pub enum ExpectedSpComponent {
+    Sp {
+        override_expected_active: Option<ArtifactVersion>,
+        override_expected_inactive: Option<ExpectedVersion>,
+    },
+    Rot {
+        override_expected_active_slot: ExpectedActiveRotSlot,
+        override_expected_inactive_version: ExpectedVersion,
+        override_expected_persistent_boot_preference: RotSlot,
+        override_expected_pending_persistent_boot_preference: Option<RotSlot>,
+        override_expected_transient_boot_preference: Option<RotSlot>,
+    },
+    RotBootloader {},
+}
 
 /// Describes an update operation that can later be executed any number of times
 pub struct UpdateDescription<'a> {
@@ -53,8 +70,8 @@ pub struct UpdateDescription<'a> {
     // If `None`, the correct value is determined automatically.  These are
     // overridable in order to induce specific kinds of failures.
     pub override_baseboard_id: Option<BaseboardId>,
-    pub override_expected_active: Option<ArtifactVersion>,
-    pub override_expected_inactive: Option<ExpectedVersion>,
+    // TODO-K: change description "Overrides" above
+    pub expected_sp_component: ExpectedSpComponent,
     pub override_progress_timeout: Option<Duration>,
 }
 
@@ -77,14 +94,28 @@ impl UpdateDescription<'_> {
                 .clone()
                 .unwrap_or_else(|| sp1.baseboard_id()),
         );
-        let expected_active_version = self
-            .override_expected_active
-            .clone()
-            .unwrap_or_else(|| sp1.expect_sp_active_version());
-        let expected_inactive_version = self
-            .override_expected_inactive
-            .clone()
-            .unwrap_or_else(|| sp1.expect_sp_inactive_version());
+
+        let details = match &self.expected_sp_component {
+            ExpectedSpComponent::Sp {
+                override_expected_active,
+                override_expected_inactive,
+            } => {
+                let expected_active_version = override_expected_active
+                    .clone()
+                    .unwrap_or_else(|| sp1.expect_sp_active_version());
+                let expected_inactive_version = override_expected_inactive
+                    .clone()
+                    .unwrap_or_else(|| sp1.expect_sp_inactive_version());
+
+                PendingMgsUpdateDetails::Sp {
+                    expected_active_version,
+                    expected_inactive_version,
+                }
+            }
+            // TODO-K: Do Rot
+            _ => unimplemented!(),
+        };
+
         let deployed_caboose = self
             .artifacts
             .deployed_caboose(self.artifact_hash)
@@ -96,10 +127,7 @@ impl UpdateDescription<'_> {
             baseboard_id: baseboard_id.clone(),
             sp_type: self.sp_type,
             slot_id: self.slot_id,
-            details: PendingMgsUpdateDetails::Sp {
-                expected_active_version,
-                expected_inactive_version,
-            },
+            details,
             artifact_hash: *self.artifact_hash,
             artifact_version: std::str::from_utf8(
                 deployed_caboose.version().unwrap(),
