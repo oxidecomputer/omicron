@@ -125,16 +125,25 @@ impl UpdateDescription<'_> {
             } => {
                 let expected_active_slot = override_expected_active_slot
                     .clone()
-                    .unwrap_or_else(|| sp1.expect_rot_active_slot());
-                // TODO-K: fill these out
+                    .unwrap_or_else(|| sp1.expected_active_rot_slot());
                 let expected_inactive_version =
-                    override_expected_inactive_version.clone().unwrap();
+                    override_expected_inactive_version
+                        .clone()
+                        .unwrap_or_else(|| sp1.expect_rot_inactive_version());
                 let expected_persistent_boot_preference =
-                    override_expected_persistent_boot_preference.unwrap();
+                    override_expected_persistent_boot_preference
+                        .unwrap_or_else(|| {
+                            sp1.expect_rot_persistent_boot_preference()
+                        });
                 let expected_pending_persistent_boot_preference =
-                    *override_expected_pending_persistent_boot_preference;
+                    override_expected_pending_persistent_boot_preference
+                        .or_else(|| {
+                            sp1.expect_rot_pending_persistent_boot_preference()
+                        });
                 let expected_transient_boot_preference =
-                    *override_expected_transient_boot_preference;
+                    override_expected_transient_boot_preference
+                        .or_else(|| sp1.expect_rot_transient_boot_preference());
+
                 PendingMgsUpdateDetails::Rot {
                     expected_active_slot,
                     expected_inactive_version,

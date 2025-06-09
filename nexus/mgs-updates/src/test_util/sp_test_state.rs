@@ -161,16 +161,54 @@ impl SpTestState {
         self.sp_boot_info.clone()
     }
 
-    pub fn expect_active_rot_slot(&self) -> RotSlot {
+    pub fn expect_rot_active_slot(&self) -> RotSlot {
         match self.expect_rot_state() {
             RotState::V2 { active, .. } | RotState::V3 { active, .. } => active,
             RotState::CommunicationFailed { .. } => panic!("ROT active slot"),
         }
     }
 
-    pub fn expect_rot_active_slot(&self) -> ExpectedActiveRotSlot {
-        let slot = self.expect_active_rot_slot();
-        let version: ArtifactVersion = match slot {
+    pub fn expect_rot_persistent_boot_preference(&self) -> RotSlot {
+        match self.expect_rot_state() {
+            RotState::V2 { persistent_boot_preference, .. }
+            | RotState::V3 { persistent_boot_preference, .. } => {
+                persistent_boot_preference
+            }
+            RotState::CommunicationFailed { .. } => {
+                panic!("ROT persistent boot preference")
+            }
+        }
+    }
+
+    pub fn expect_rot_pending_persistent_boot_preference(
+        &self,
+    ) -> Option<RotSlot> {
+        match self.expect_rot_state() {
+            RotState::V2 { pending_persistent_boot_preference, .. }
+            | RotState::V3 { pending_persistent_boot_preference, .. } => {
+                pending_persistent_boot_preference
+            }
+            RotState::CommunicationFailed { .. } => {
+                panic!("ROT pending persistent boot preference")
+            }
+        }
+    }
+
+    pub fn expect_rot_transient_boot_preference(&self) -> Option<RotSlot> {
+        match self.expect_rot_state() {
+            RotState::V2 { transient_boot_preference, .. }
+            | RotState::V3 { transient_boot_preference, .. } => {
+                transient_boot_preference
+            }
+            RotState::CommunicationFailed { .. } => {
+                panic!("ROT pending persistent boot preference")
+            }
+        }
+    }
+
+    pub fn expected_active_rot_slot(&self) -> ExpectedActiveRotSlot {
+        let slot = self.expect_rot_active_slot();
+        let version = match slot {
             RotSlot::A => self
                 .expect_caboose_rot_a()
                 .version
@@ -183,6 +221,24 @@ impl SpTestState {
                 .expect("valid artifact version"),
         };
         ExpectedActiveRotSlot { slot, version }
+    }
+
+    pub fn expect_rot_inactive_version(&self) -> ExpectedVersion {
+        let slot = self.expect_rot_active_slot().toggled();
+        match slot {
+            RotSlot::A => match &self.caboose_rot_a {
+                Some(v) => ExpectedVersion::Version(
+                    v.version.parse().expect("valid SP inactive slot version"),
+                ),
+                None => ExpectedVersion::NoValidVersion,
+            },
+            RotSlot::B => match &self.caboose_rot_b {
+                Some(v) => ExpectedVersion::Version(
+                    v.version.parse().expect("valid SP inactive slot version"),
+                ),
+                None => ExpectedVersion::NoValidVersion,
+            },
+        }
     }
 }
 
