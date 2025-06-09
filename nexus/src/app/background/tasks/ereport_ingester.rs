@@ -45,7 +45,7 @@ impl BackgroundTask for SpEreportIngester {
             let status =
                 self.actually_activate(opctx).await.unwrap_or_else(|error| {
                     SpEreportIngesterStatus {
-                        error: Some(error.to_string()),
+                        error: Some(format!("{error:#}")),
                         ..Default::default()
                     }
                 });
@@ -161,7 +161,7 @@ impl Ingester {
             Err(error) => {
                 return Some(EreporterStatus {
                     errors: vec![format!(
-                        "failed to query for latest ereport: {error}"
+                        "failed to query for latest ereport: {error:#}"
                     )],
                     ..Default::default()
                 });
@@ -245,7 +245,7 @@ impl Ingester {
                         "error" => %e,
                     );
                     status.errors.push(format!(
-                        "failed to insert {received} ereports: {e}"
+                        "failed to insert {received} ereports: {e:#}"
                     ));
                     break;
                 }
@@ -321,7 +321,7 @@ impl Ingester {
                 Err(e) => {
                     let stats = status.get_or_insert_default();
                     stats.requests += 1;
-                    stats.errors.push(format!("MGS {addr}: {e}"));
+                    stats.errors.push(format!("MGS {addr}: {e:#}"));
                 }
             }
         }
