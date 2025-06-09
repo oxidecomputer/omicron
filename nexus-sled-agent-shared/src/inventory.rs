@@ -138,12 +138,11 @@ impl ConfigReconcilerInventory {
     pub fn running_omicron_zones(
         &self,
     ) -> impl Iterator<Item = &OmicronZoneConfig> {
-        self.zones.iter().filter_map(|(zone_id, result)| {
-            match result {
-                ConfigReconcilerInventoryResult::Ok => (),
-                ConfigReconcilerInventoryResult::Err { .. } => return None,
-            };
-            self.last_reconciled_config.zones.get(zone_id)
+        self.zones.iter().filter_map(|(zone_id, result)| match result {
+            ConfigReconcilerInventoryResult::Ok => {
+                self.last_reconciled_config.zones.get(zone_id)
+            }
+            ConfigReconcilerInventoryResult::Err { .. } => None,
         })
     }
 

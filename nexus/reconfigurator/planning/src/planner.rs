@@ -913,7 +913,7 @@ impl<'a> Planner<'a> {
         // Wait for zones to appear up-to-date in the inventory.
         let inventory_zones = self
             .inventory
-            .all_ledgered_omicron_zones()
+            .all_running_omicron_zones()
             .map(|z| (z.id, z.image_source.clone()))
             .collect::<BTreeMap<_, _>>();
         for &sled_id in &sleds {
