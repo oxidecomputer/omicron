@@ -76,6 +76,8 @@ progenitor::generate_api!(
     },
     replace = {
         RotSlot = gateway_types::rot::RotSlot,
+        Ena = ereport_types::Ena,
+        TypedUuidForEreporterRestartKind = omicron_uuid_kinds::EreporterRestartUuid,
         TypedUuidForMupdateKind = omicron_uuid_kinds::MupdateUuid,
     },
 );
