@@ -1491,7 +1491,7 @@ impl DbArgs {
                         ).await
                     },
                     DbCommands::Ereport(args) => {
-                        cmd_db_ereport(&opctx, &datastore, &fetch_opts, &args).await
+                        cmd_db_ereport(&datastore, &fetch_opts, &args).await
                     }
                 }
             }

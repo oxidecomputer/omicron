@@ -213,6 +213,7 @@ impl Ingester {
                         restart_id: restart_id.into(),
                         ena: ereport.ena.into(),
                         time_collected: Utc::now(),
+                        time_deleted: None,
                         collector_id: self.nexus_id.into(),
                         sp_type: sp_type.into(),
                         sp_slot: slot.into(),

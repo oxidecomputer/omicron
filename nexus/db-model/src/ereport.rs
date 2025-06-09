@@ -76,6 +76,7 @@ impl From<SpEreport> for Ereport {
             restart_id,
             ena,
             time_collected,
+            time_deleted,
             collector_id,
             part_number,
             serial_number,
@@ -87,6 +88,7 @@ impl From<SpEreport> for Ereport {
             id: EreportId { restart_id: restart_id.into(), ena: ena.into() },
             metadata: EreportMetadata {
                 time_collected,
+                time_deleted,
                 collector_id: collector_id.into(),
                 part_number,
                 serial_number,
@@ -103,6 +105,7 @@ impl From<HostEreport> for Ereport {
             restart_id,
             ena,
             time_collected,
+            time_deleted,
             collector_id,
             sled_serial,
             sled_id,
@@ -112,6 +115,7 @@ impl From<HostEreport> for Ereport {
             id: EreportId { restart_id: restart_id.into(), ena: ena.into() },
             metadata: EreportMetadata {
                 time_collected,
+                time_deleted,
                 collector_id: collector_id.into(),
                 part_number: None, // TODO
                 serial_number: Some(sled_serial),
@@ -125,6 +129,7 @@ impl From<HostEreport> for Ereport {
 #[derive(Clone, Debug)]
 pub struct EreportMetadata {
     pub time_collected: DateTime<Utc>,
+    pub time_deleted: Option<DateTime<Utc>>,
     pub collector_id: OmicronZoneUuid,
     pub part_number: Option<String>,
     pub serial_number: Option<String>,
@@ -141,6 +146,7 @@ pub enum Reporter {
 pub struct SpEreport {
     pub restart_id: DbTypedUuid<EreporterRestartKind>,
     pub ena: DbEna,
+    pub time_deleted: Option<DateTime<Utc>>,
 
     pub time_collected: DateTime<Utc>,
     pub collector_id: DbTypedUuid<OmicronZoneKind>,
@@ -182,6 +188,7 @@ pub struct SpEreport {
 pub struct HostEreport {
     pub restart_id: DbTypedUuid<EreporterRestartKind>,
     pub ena: DbEna,
+    pub time_deleted: Option<DateTime<Utc>>,
 
     pub time_collected: DateTime<Utc>,
     pub collector_id: DbTypedUuid<OmicronZoneKind>,

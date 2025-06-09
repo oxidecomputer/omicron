@@ -5717,6 +5717,7 @@ ON omicron.public.webhook_delivery_attempt (
 CREATE TABLE IF NOT EXISTS omicron.public.sp_ereport (
     restart_id UUID NOT NULL,
     ena INT8 NOT NULL,
+    time_deleted TIMESTAMPTZ,
 
     -- time at which the ereport was collected
     time_collected TIMESTAMPTZ NOT NULL,
@@ -5756,12 +5757,15 @@ CREATE INDEX IF NOT EXISTS order_sp_ereports_by_timestamp
 ON omicron.public.sp_ereport
 USING BTREE (
     time_collected
-);
+)
+WHERE
+    time_deleted IS NULL;
 
 -- Ereports from the host operating system
 CREATE TABLE IF NOT EXISTS omicron.public.host_ereport (
     restart_id UUID NOT NULL,
     ena INT8 NOT NULL,
+    time_deleted TIMESTAMPTZ,
 
     -- time at which the ereport was collected
     time_collected TIMESTAMPTZ NOT NULL,
@@ -5787,7 +5791,9 @@ CREATE INDEX IF NOT EXISTS order_host_ereports_by_timestamp
 ON omicron.public.host_ereport
 USING BTREE (
     time_collected
-);
+)
+WHERE
+    time_deleted IS NULL;
 
 /*
  * Keep this at the end of file so that the database does not contain a version
