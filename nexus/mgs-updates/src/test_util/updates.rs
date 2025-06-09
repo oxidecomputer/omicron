@@ -44,13 +44,17 @@ pub enum ExpectedSpComponent {
         override_expected_active: Option<ArtifactVersion>,
         override_expected_inactive: Option<ExpectedVersion>,
     },
+    // TODO-K: Remove once fully implemented
+    #[allow(dead_code)]
     Rot {
-        override_expected_active_slot: ExpectedActiveRotSlot,
-        override_expected_inactive_version: ExpectedVersion,
-        override_expected_persistent_boot_preference: RotSlot,
+        override_expected_active_slot: Option<ExpectedActiveRotSlot>,
+        override_expected_inactive_version: Option<ExpectedVersion>,
+        override_expected_persistent_boot_preference: Option<RotSlot>,
         override_expected_pending_persistent_boot_preference: Option<RotSlot>,
         override_expected_transient_boot_preference: Option<RotSlot>,
     },
+    // TODO-K: Remove once fully implemented
+    #[allow(dead_code)]
     RotBootloader {},
 }
 
@@ -112,8 +116,34 @@ impl UpdateDescription<'_> {
                     expected_inactive_version,
                 }
             }
-            // TODO-K: Do Rot
-            _ => unimplemented!(),
+            ExpectedSpComponent::Rot {
+                override_expected_active_slot,
+                override_expected_inactive_version,
+                override_expected_persistent_boot_preference,
+                override_expected_pending_persistent_boot_preference,
+                override_expected_transient_boot_preference,
+            } => {
+                let expected_active_slot = override_expected_active_slot
+                    .clone()
+                    .unwrap_or_else(|| sp1.expect_rot_active_slot());
+                // TODO-K: fill these out
+                let expected_inactive_version =
+                    override_expected_inactive_version.clone().unwrap();
+                let expected_persistent_boot_preference =
+                    override_expected_persistent_boot_preference.unwrap();
+                let expected_pending_persistent_boot_preference =
+                    *override_expected_pending_persistent_boot_preference;
+                let expected_transient_boot_preference =
+                    *override_expected_transient_boot_preference;
+                PendingMgsUpdateDetails::Rot {
+                    expected_active_slot,
+                    expected_inactive_version,
+                    expected_persistent_boot_preference,
+                    expected_pending_persistent_boot_preference,
+                    expected_transient_boot_preference,
+                }
+            }
+            ExpectedSpComponent::RotBootloader {} => unimplemented!(),
         };
 
         let deployed_caboose = self

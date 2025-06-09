@@ -10,6 +10,8 @@ use gateway_client::types::SpComponentCaboose;
 use gateway_client::types::SpState;
 use gateway_client::types::SpType;
 use gateway_messages::RotBootInfo;
+use gateway_types::rot::RotSlot;
+use nexus_types::deployment::ExpectedActiveRotSlot;
 use nexus_types::deployment::ExpectedVersion;
 use nexus_types::inventory::BaseboardId;
 use slog_error_chain::InlineErrorChain;
@@ -153,6 +155,34 @@ impl SpTestState {
             ),
             None => ExpectedVersion::NoValidVersion,
         }
+    }
+
+    pub fn expect_rot_state(&self) -> RotState {
+        self.sp_boot_info.clone()
+    }
+
+    pub fn expect_active_rot_slot(&self) -> RotSlot {
+        match self.expect_rot_state() {
+            RotState::V2 { active, .. } | RotState::V3 { active, .. } => active,
+            RotState::CommunicationFailed { .. } => panic!("ROT active slot"),
+        }
+    }
+
+    pub fn expect_rot_active_slot(&self) -> ExpectedActiveRotSlot {
+        let slot = self.expect_active_rot_slot();
+        let version: ArtifactVersion = match slot {
+            RotSlot::A => self
+                .expect_caboose_rot_a()
+                .version
+                .parse()
+                .expect("valid artifact version"),
+            RotSlot::B => self
+                .expect_caboose_rot_b()
+                .version
+                .parse()
+                .expect("valid artifact version"),
+        };
+        ExpectedActiveRotSlot { slot, version }
     }
 }
 
