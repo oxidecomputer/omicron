@@ -100,7 +100,7 @@ pub enum InsertError {
     /// interface that is associated with another VPC.
     ResourceSpansMultipleVpcs(Uuid),
     /// There are no available IP addresses in the requested subnet
-    NoAvailableIpAddresses,
+    NoAvailableIpAddresses { name: String, id: Uuid },
     /// An explicitly-requested IP address is already in use
     IpAddressNotAvailable(std::net::IpAddr),
     /// An explicity-requested MAC address is already in use
@@ -170,10 +170,11 @@ impl InsertError {
             ) => {
                 unimplemented!("probe network interface")
             }
-            InsertError::NoAvailableIpAddresses => {
-                external::Error::invalid_request(
-                    "No available IP addresses for interface",
-                )
+            InsertError::NoAvailableIpAddresses { name, id } => {
+                external::Error::invalid_request(format!(
+                    "No available IP addresses for interface in \
+                        subnet '{name}' with ID '{id}'"
+                ))
             }
             InsertError::ResourceSpansMultipleVpcs(_) => {
                 external::Error::invalid_request(concat!(
@@ -326,7 +327,10 @@ fn decode_database_error(
             DatabaseErrorKind::NotNullViolation,
             info,
         ) if info.message() == IP_EXHAUSTION_ERROR_MESSAGE => {
-            InsertError::NoAvailableIpAddresses
+            InsertError::NoAvailableIpAddresses {
+                name: interface.subnet.identity.name.to_string(),
+                id: interface.subnet.identity.id,
+            }
         }
 
         // This catches the error intentionally introduced by the
@@ -2078,6 +2082,22 @@ mod tests {
             )
             .await
         }
+
+        async fn delete_instance_nics(&self, instance_id: Uuid) {
+            let (.., authz_instance) =
+                LookupPath::new(self.opctx(), self.datastore())
+                    .instance_id(instance_id)
+                    .lookup_for(authz::Action::Modify)
+                    .await
+                    .expect("Failed to lookup instance");
+            self.datastore()
+                .instance_delete_all_network_interfaces(
+                    self.opctx(),
+                    &authz_instance,
+                )
+                .await
+                .expect("Failed to delete NICs");
+        }
     }
 
     #[tokio::test]
@@ -2810,7 +2830,7 @@ mod tests {
             .instance_create_network_interface_raw(context.opctx(), interface)
             .await;
         assert!(
-            matches!(result, Err(InsertError::NoAvailableIpAddresses)),
+            matches!(result, Err(InsertError::NoAvailableIpAddresses { .. })),
             "Address exhaustion should be detected and handled, found {:?}",
             result,
         );
@@ -2950,6 +2970,178 @@ mod tests {
             .await
             .expect_err("Should not be able to insert more than 8 interfaces");
         assert!(matches!(result, InsertError::NoSlotsAvailable,));
+
+        context.success().await;
+    }
+
+    // Regression for https://github.com/oxidecomputer/omicron/issues/8208
+    #[tokio::test]
+    async fn allocation_and_deallocation_takes_next_smallest_address() {
+        let context = TestContext::new(
+            "allocation_and_deallocation_takes_next_smallest_address",
+            1,
+        )
+        .await;
+
+        // Create three instances, each with an interface.
+        const N_INSTANCES: usize = 3;
+        let mut instances = Vec::with_capacity(N_INSTANCES);
+        for _ in 0..N_INSTANCES {
+            let instance = context.create_stopped_instance().await;
+            let instance_id = InstanceUuid::from_untyped_uuid(instance.id());
+            let interface = IncompleteNetworkInterface::new_instance(
+                Uuid::new_v4(),
+                instance_id,
+                context.net1.subnets[0].clone(),
+                IdentityMetadataCreateParams {
+                    name: "interface-c".parse().unwrap(),
+                    description: String::from("description"),
+                },
+                None,
+            )
+            .unwrap();
+            let intf = context
+                .datastore()
+                .instance_create_network_interface_raw(
+                    context.opctx(),
+                    interface,
+                )
+                .await
+                .expect("Failed to insert interface");
+            instances.push((instance, intf));
+        }
+
+        // Delete the NIC on the first instance.
+        let original_ip = instances[0].1.ip.ip();
+        context.delete_instance_nics(instances[0].0.id()).await;
+
+        // And recreate it, ensuring we get the same IP address again.
+        let interface = IncompleteNetworkInterface::new_instance(
+            Uuid::new_v4(),
+            InstanceUuid::from_untyped_uuid(instances[0].0.id()),
+            context.net1.subnets[0].clone(),
+            IdentityMetadataCreateParams {
+                name: "interface-c".parse().unwrap(),
+                description: String::from("description"),
+            },
+            None,
+        )
+        .unwrap();
+        let intf = context
+            .datastore()
+            .instance_create_network_interface_raw(context.opctx(), interface)
+            .await
+            .expect("Failed to insert interface");
+        instances[0].1 = intf;
+        assert_eq!(
+            instances[0].1.ip.ip(),
+            original_ip,
+            "Should have recreated the first available IP address again"
+        );
+
+        // Now delete the NICs from the first and second instances.
+        for (inst, _) in instances[..2].iter() {
+            context.delete_instance_nics(inst.id()).await;
+        }
+
+        // Create a new one, and ensure we've taken the _second_ address. The
+        // allocation query looks at the first gap upwards and the first gap
+        // downwards from any allocated items.
+        let interface = IncompleteNetworkInterface::new_instance(
+            Uuid::new_v4(),
+            InstanceUuid::from_untyped_uuid(instances[0].0.id()),
+            context.net1.subnets[0].clone(),
+            IdentityMetadataCreateParams {
+                name: "interface-c".parse().unwrap(),
+                description: String::from("description"),
+            },
+            None,
+        )
+        .unwrap();
+        let intf = context
+            .datastore()
+            .instance_create_network_interface_raw(context.opctx(), interface)
+            .await
+            .expect("Failed to insert interface");
+        assert_eq!(
+            intf.ip.ip(),
+            instances[1].1.ip.ip(),
+            "Should have used the second address",
+        );
+
+        context.success().await;
+    }
+
+    // Regression for https://github.com/oxidecomputer/omicron/issues/8208
+    #[tokio::test]
+    async fn allocation_after_explicit_ip_address_takes_next_smallest_address()
+    {
+        let context = TestContext::new(
+            "allocation_after_explicit_ip_address_takes_next_smallest_address",
+            1,
+        )
+        .await;
+
+        // Create one instance, with a specific address.
+        let instance = context.create_stopped_instance().await;
+        let instance_id = InstanceUuid::from_untyped_uuid(instance.id());
+        const NTH: usize = 8;
+        let addr =
+            context.net2.subnets[0].ipv4_block.nth(NTH).unwrap_or_else(|| {
+                panic!("Should have been able to get the {NTH}-th address")
+            });
+        let interface = IncompleteNetworkInterface::new_instance(
+            Uuid::new_v4(),
+            instance_id,
+            context.net2.subnets[0].clone(),
+            IdentityMetadataCreateParams {
+                name: "interface-c".parse().unwrap(),
+                description: String::from("description"),
+            },
+            Some(IpAddr::V4(addr)),
+        )
+        .unwrap();
+        let _ = context
+            .datastore()
+            .instance_create_network_interface_raw(context.opctx(), interface)
+            .await
+            .expect("Failed to insert interface");
+
+        // Now create another one, attaching an automatic address.
+        let instance2 = context.create_stopped_instance().await;
+        let instance_id = InstanceUuid::from_untyped_uuid(instance2.id());
+        let interface = IncompleteNetworkInterface::new_instance(
+            Uuid::new_v4(),
+            instance_id,
+            context.net2.subnets[0].clone(),
+            IdentityMetadataCreateParams {
+                name: "interface-c".parse().unwrap(),
+                description: String::from("description"),
+            },
+            None,
+        )
+        .unwrap();
+
+        // The new address should be 1 less than the previous one.
+        let interface2 = context
+            .datastore()
+            .instance_create_network_interface_raw(context.opctx(), interface)
+            .await
+            .expect("Failed to insert interface");
+        assert_eq!(
+            IpAddr::V4(
+                context
+                    .net2
+                    .subnets[0]
+                    .ipv4_block
+                    .nth(NTH - 1)
+                    .unwrap_or_else(|| {
+                        panic!("Should have been able to get the {NTH}-1-th address")
+                    })
+            ),
+            interface2.ip.ip(),
+            "Should have allocated 1 less than the smallest existing address"
+        );
 
         context.success().await;
     }

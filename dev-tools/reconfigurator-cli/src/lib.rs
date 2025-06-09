@@ -53,6 +53,7 @@ use std::borrow::Cow;
 use std::collections::BTreeMap;
 use std::fmt::{self, Write};
 use std::io::IsTerminal;
+use std::num::ParseIntError;
 use std::str::FromStr;
 use swrite::{SWrite, swriteln};
 use tabled::Tabled;
@@ -439,8 +440,20 @@ enum BlueprintEditCommands {
         /// the UUID to set the field to, or "unset"
         value: MupdateOverrideUuidOpt,
     },
+    /// set the minimum generation for which target releases are accepted
+    ///
+    /// At the moment, this just sets the field to the given value. In the
+    /// future, we'll likely want to set this based on the current target
+    /// release generation.
+    #[clap(visible_alias = "set-target-release-min-gen")]
+    SetTargetReleaseMinimumGeneration {
+        /// the minimum target release generation
+        generation: Generation,
+    },
     /// expunge a zone
     ExpungeZone { zone_id: OmicronZoneUuid },
+    /// mark an expunged zone ready for cleanup
+    MarkForCleanup { zone_id: OmicronZoneUuid },
     /// configure an SP update
     SetSpUpdate {
         /// serial number to update
@@ -555,6 +568,42 @@ impl From<MupdateOverrideUuidOpt> for Option<MupdateOverrideUuid> {
         match value {
             MupdateOverrideUuidOpt::Unset => None,
             MupdateOverrideUuidOpt::Set(uuid) => Some(uuid),
+        }
+    }
+}
+
+/// Clap field for an optional generation.
+///
+/// This structure is similar to `Option`, but is specified separately to:
+///
+/// 1. Disable clap's magic around `Option`.
+/// 2. Provide a custom parser.
+///
+/// There are other ways to do both 1 and 2 (e.g. specify the type as
+/// `std::option::Option`), but when combined they're uglier than this.
+#[derive(Clone, Copy, Debug)]
+enum GenerationOpt {
+    Unset,
+    Set(Generation),
+}
+
+impl FromStr for GenerationOpt {
+    type Err = ParseIntError;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        if s == "unset" || s == "none" {
+            Ok(Self::Unset)
+        } else {
+            Ok(Self::Set(s.parse::<Generation>()?))
+        }
+    }
+}
+
+impl From<GenerationOpt> for Option<Generation> {
+    fn from(value: GenerationOpt) -> Self {
+        match value {
+            GenerationOpt::Unset => None,
+            GenerationOpt::Set(generation) => Some(generation),
         }
     }
 }
@@ -1104,6 +1153,17 @@ fn cmd_blueprint_edit(
                 }
             }
         }
+        BlueprintEditCommands::SetTargetReleaseMinimumGeneration {
+            generation,
+        } => {
+            builder
+                .set_target_release_minimum_generation(
+                    blueprint.target_release_minimum_generation,
+                    generation,
+                )
+                .context("failed to set target release minimum generation")?;
+            format!("set target release minimum generation to {generation}")
+        }
         BlueprintEditCommands::SetZoneImage { zone_id, image_source } => {
             let sled_id = sled_with_zone(&builder, &zone_id)?;
             let source = BlueprintZoneImageSource::from(image_source);
@@ -1122,6 +1182,13 @@ fn cmd_blueprint_edit(
                 .sled_expunge_zone(sled_id, zone_id)
                 .context("failed to expunge zone")?;
             format!("expunged zone {zone_id} from sled {sled_id}")
+        }
+        BlueprintEditCommands::MarkForCleanup { zone_id } => {
+            let sled_id = sled_with_zone(&builder, &zone_id)?;
+            builder
+                .sled_mark_expunged_zone_ready_for_cleanup(sled_id, zone_id)
+                .context("failed to mark zone ready for cleanup")?;
+            format!("marked zone {zone_id} ready for cleanup")
         }
         BlueprintEditCommands::SetSpUpdate {
             serial,

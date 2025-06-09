@@ -5,3 +5,4 @@
 # It is recommended to check this file in to source control so that
 # everyone who runs the test benefits from these saved cases.
 cc 924830db4b84d94683d81ff27010fec0df19a72155729e60fda503b58460390e # shrinks to input = _NodeDecommissionParseDoesntPanicOnArbitraryInputArgs { input: [10, 10] }
+cc 0c2744ab45893af7ba9e65adecdb12c1989e8d0cb6247e4f05bcae972a99c439 # shrinks to input = _ProptestValidateDecommissionableArgs { input: {" ": ValidateDecommissionableInput { is_live: false, ranges_underreplicated: 1357941318973793623, gossiped_replicas: 0 }, "0": ValidateDecommissionableInput { is_live: false, ranges_underreplicated: 7865430717880982185, gossiped_replicas: 0 }, "¡": ValidateDecommissionableInput { is_live: false, ranges_underreplicated: 0, gossiped_replicas: 0 }}, node_to_decommission: Index(0) }

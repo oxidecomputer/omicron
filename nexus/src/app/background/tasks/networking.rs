@@ -63,7 +63,7 @@ pub(crate) fn api_to_dpd_port_settings(
 
     //TODO breakouts
     let link_id = LinkId(0);
-    let tx_eq = if let Some(Some(t)) = settings.tx_eq.get(0) {
+    let tx_eq = if let Some(t) = settings.tx_eq.get(0) {
         Some(TxEq {
             pre1: t.pre1,
             pre2: t.pre2,
@@ -104,7 +104,7 @@ pub(crate) fn api_to_dpd_port_settings(
                 addrs: settings
                     .addresses
                     .iter()
-                    .map(|a| a.address.ip())
+                    .map(|a| a.address.addr())
                     .collect(),
             },
         );
