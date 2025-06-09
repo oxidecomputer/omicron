@@ -61,6 +61,7 @@ impl DataStore {
         if let Some(report) = sp_dsl::sp_ereport
             .filter(sp_dsl::restart_id.eq(restart_id))
             .filter(sp_dsl::ena.eq(ena))
+            .filter(sp_dsl::time_deleted.is_null())
             .select(SpEreport::as_select())
             .first_async(&*conn)
             .await
@@ -73,6 +74,7 @@ impl DataStore {
         if let Some(report) = host_dsl::host_ereport
             .filter(host_dsl::restart_id.eq(restart_id))
             .filter(host_dsl::ena.eq(ena))
+            .filter(host_dsl::time_deleted.is_null())
             .select(HostEreport::as_select())
             .first_async(&*conn)
             .await

@@ -2447,6 +2447,7 @@ table! {
     sp_ereport (restart_id, ena) {
         restart_id -> Uuid,
         ena -> Int8,
+        time_deleted -> Nullable<Timestamptz>,
         time_collected -> Timestamptz,
         collector_id -> Uuid,
 
@@ -2464,6 +2465,7 @@ table! {
     host_ereport (restart_id, ena) {
         restart_id -> Uuid,
         ena -> Int8,
+        time_deleted -> Nullable<Timestamptz>,
         time_collected -> Timestamptz,
         collector_id -> Uuid,
 

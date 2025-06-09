@@ -19,10 +19,11 @@ use clap::Subcommand;
 use diesel::prelude::*;
 use ereport_types::Ena;
 use ereport_types::EreporterRestartUuid;
+use nexus_db_lookup::DbConnection;
 use nexus_db_model::SpType;
-use nexus_db_queries::context::OpContext;
 use nexus_db_queries::db;
 use nexus_db_queries::db::DataStore;
+use nexus_db_schema::schema::host_ereport::dsl as host_dsl;
 use nexus_db_schema::schema::sp_ereport::dsl as sp_dsl;
 use omicron_uuid_kinds::GenericUuid;
 use tabled::Tabled;
@@ -81,17 +82,16 @@ struct ReportersArgs {
 }
 
 pub(super) async fn cmd_db_ereport(
-    opctx: &OpContext,
     datastore: &DataStore,
     fetch_opts: &DbFetchOptions,
     args: &EreportArgs,
 ) -> anyhow::Result<()> {
     match args.command {
         Commands::List(ref args) => {
-            cmd_db_ereport_list(opctx, datastore, fetch_opts, args).await
+            cmd_db_ereport_list(datastore, fetch_opts, args).await
         }
         Commands::Info(ref args) => {
-            cmd_db_ereport_info(opctx, datastore, args).await
+            cmd_db_ereport_info(datastore, fetch_opts, args).await
         }
 
         Commands::Reporters(ref args) => {
@@ -101,7 +101,6 @@ pub(super) async fn cmd_db_ereport(
 }
 
 async fn cmd_db_ereport_list(
-    _: &OpContext,
     datastore: &DataStore,
     fetch_opts: &DbFetchOptions,
     args: &ListArgs,
@@ -193,6 +192,10 @@ async fn cmd_db_ereport_list(
         query = query.filter(sp_dsl::time_collected.gt(after));
     }
 
+    if !fetch_opts.include_deleted {
+        query = query.filter(sp_dsl::time_deleted.is_null());
+    }
+
     let sp_ereports = query.load_async(&*conn).await.with_context(ctx)?;
     check_limit(&sp_ereports, fetch_opts.fetch_limit, ctx);
 
@@ -236,23 +239,26 @@ impl From<SpType> for SrcType {
 }
 
 async fn cmd_db_ereport_info(
-    opctx: &OpContext,
     datastore: &DataStore,
+    fetch_opts: &DbFetchOptions,
     args: &InfoArgs,
 ) -> anyhow::Result<()> {
     let &InfoArgs { restart_id, ena } = args;
     let ereport_id = ereport_types::EreportId { restart_id, ena };
+    let conn = datastore.pool_connection_for_tests().await?;
     let db::model::Ereport { id, metadata, reporter, report } =
-        datastore.ereport_fetch(opctx, ereport_id).await?;
+        ereport_fetch(&*conn, fetch_opts, ereport_id).await?;
 
     let db::model::EreportMetadata {
         time_collected,
+        time_deleted,
         collector_id,
         part_number,
         serial_number,
     } = metadata;
     const ENA: &str = "ENA";
     const TIME_COLLECTED: &str = "collected at";
+    const TIME_DELETED: &str = "deleted at";
     const COLLECTOR_ID: &str = "collected by";
     const REPORTER: &str = "reported by";
     const RESTART_ID: &str = "restart ID";
@@ -260,6 +266,7 @@ async fn cmd_db_ereport_info(
     const SERIAL_NUMBER: &str = "  serial number";
     const WIDTH: usize = const_max_len(&[
         TIME_COLLECTED,
+        TIME_DELETED,
         COLLECTOR_ID,
         REPORTER,
         PART_NUMBER,
@@ -267,6 +274,9 @@ async fn cmd_db_ereport_info(
     ]);
     println!("\n{:=<80}", "== EREPORT METADATA ");
     println!("    {ENA:>WIDTH$}: {}", id.ena);
+    if let Some(time_deleted) = time_deleted {
+        println!("(i) {TIME_DELETED:>WIDTH$}: {time_deleted}");
+    }
     println!("    {TIME_COLLECTED:>WIDTH$}: {time_collected}");
     println!("    {COLLECTOR_ID:>WIDTH$}: {collector_id}");
     match reporter {
@@ -294,6 +304,55 @@ async fn cmd_db_ereport_info(
         .with_context(|| format!("failed to serialize ereport: {report:?}"))?;
 
     Ok(())
+}
+
+async fn ereport_fetch(
+    conn: &async_bb8_diesel::Connection<DbConnection>,
+    fetch_opts: &DbFetchOptions,
+    id: ereport_types::EreportId,
+) -> anyhow::Result<db::model::Ereport> {
+    let restart_id = id.restart_id.into_untyped_uuid();
+    let ena = db::model::DbEna::from(id.ena);
+
+    let sp_query = sp_dsl::sp_ereport
+        .filter(sp_dsl::restart_id.eq(restart_id.clone()))
+        .filter(sp_dsl::ena.eq(ena.clone()))
+        .filter(sp_dsl::time_deleted.is_null())
+        .select(db::model::SpEreport::as_select());
+    let sp_result = if !fetch_opts.include_deleted {
+        sp_query
+            .filter(sp_dsl::time_deleted.is_null())
+            .first_async(&*conn)
+            .await
+    } else {
+        sp_query.first_async(&*conn).await
+    };
+    if let Some(report) = sp_result.optional().with_context(|| {
+        format!("failed to query for SP ereport matching {id}")
+    })? {
+        return Ok(report.into());
+    }
+
+    let host_query = host_dsl::host_ereport
+        .filter(host_dsl::restart_id.eq(restart_id))
+        .filter(host_dsl::ena.eq(ena))
+        .filter(host_dsl::time_deleted.is_null())
+        .select(db::model::HostEreport::as_select());
+    let host_result = if !fetch_opts.include_deleted {
+        host_query
+            .filter(host_dsl::time_deleted.is_null())
+            .first_async(&*conn)
+            .await
+    } else {
+        host_query.first_async(&*conn).await
+    };
+    if let Some(report) = host_result.optional().with_context(|| {
+        format!("failed to query for host OS ereport matching {id}")
+    })? {
+        return Ok(report.into());
+    }
+
+    Err(anyhow::anyhow!("no ereport {id} found"))
 }
 
 async fn cmd_db_ereporters(
