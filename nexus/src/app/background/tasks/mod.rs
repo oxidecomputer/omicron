@@ -15,6 +15,7 @@ pub mod decommissioned_disk_cleaner;
 pub mod dns_config;
 pub mod dns_propagation;
 pub mod dns_servers;
+pub mod ereport_ingester;
 pub mod external_endpoints;
 pub mod instance_reincarnation;
 pub mod instance_updater;
