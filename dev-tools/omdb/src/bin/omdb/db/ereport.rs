@@ -9,9 +9,12 @@ use super::check_limit;
 use crate::helpers::const_max_len;
 use crate::helpers::datetime_rfc3339_concise;
 use crate::helpers::display_option_blank;
+use crate::helpers::display_option_error;
 
 use anyhow::Context;
+use async_bb8_diesel::AsyncConnection;
 use async_bb8_diesel::AsyncRunQueryDsl;
+use async_bb8_diesel::AsyncSimpleConnection;
 use chrono::DateTime;
 use chrono::Utc;
 use clap::Args;
@@ -23,6 +26,7 @@ use nexus_db_lookup::DbConnection;
 use nexus_db_model::SpType;
 use nexus_db_queries::db;
 use nexus_db_queries::db::DataStore;
+use nexus_db_queries::db::queries::ALLOW_FULL_TABLE_SCAN_SQL;
 use nexus_db_schema::schema::host_ereport::dsl as host_dsl;
 use nexus_db_schema::schema::sp_ereport::dsl as sp_dsl;
 use omicron_uuid_kinds::GenericUuid;
@@ -362,42 +366,56 @@ async fn cmd_db_ereporters(
     let &ReportersArgs { slot, slot_type, ref serial } = args;
 
     let conn = datastore.pool_connection_for_tests().await?;
-    let mut sp_query = sp_dsl::sp_ereport
-        .select((
-            sp_dsl::restart_id,
-            sp_dsl::sp_slot,
-            sp_dsl::sp_type,
-            sp_dsl::serial_number,
-            sp_dsl::part_number,
-        ))
-        .order_by((
-            sp_dsl::sp_type,
-            sp_dsl::sp_slot,
-            sp_dsl::serial_number,
-            sp_dsl::restart_id,
-        ))
-        .distinct()
-        .into_boxed();
+    let sp_ereporters = (*conn).transaction_async({
+        let serial = serial.clone();
+        async move |conn| {
+            // Selecting all reporters may require a full table scan, depending
+            // on filters.
+            conn.batch_execute_async(ALLOW_FULL_TABLE_SCAN_SQL).await?;
+            let mut sp_query = sp_dsl::sp_ereport
+                .select((
+                    sp_dsl::restart_id,
+                    sp_dsl::sp_slot,
+                    sp_dsl::sp_type,
+                    sp_dsl::serial_number,
+                    sp_dsl::part_number,
+                ))
+                .order_by((
+                    sp_dsl::sp_type,
+                    sp_dsl::sp_slot,
+                    sp_dsl::serial_number,
+                    sp_dsl::restart_id,
+                ))
+                .distinct()
+                .into_boxed();
 
-    if let Some(slot) = slot {
-        if slot_type.is_some() {
-            sp_query = sp_query
-                .filter(sp_dsl::sp_slot.eq(db::model::SqlU16::new(slot)));
-        } else {
-            anyhow::bail!(
-                "cannot filter reporters by slot without a value for `--type`"
-            )
+            if let Some(slot) = slot {
+                if slot_type.is_some() {
+                    sp_query = sp_query
+                        .filter(sp_dsl::sp_slot.eq(db::model::SqlU16::new(slot)));
+                } else {
+                    anyhow::bail!(
+                        "cannot filter reporters by slot without a value for `--type`"
+                    )
+                }
+            }
+
+            if let Some(slot_type) = slot_type {
+                sp_query = sp_query
+                    .filter(sp_dsl::sp_type.eq(SpType::from(slot_type.clone())));
+            }
+
+            if let Some(serial) = serial {
+                sp_query = sp_query.filter(sp_dsl::serial_number.eq(serial.clone()));
+            }
+
+            sp_query
+                .load_async::<(Uuid, db::model::SqlU16, SpType, Option<String>, Option<String>)>(
+                    &conn,
+                )
+                .await.context("listing SP reporter entries")
         }
-    }
-
-    if let Some(slot_type) = slot_type {
-        sp_query = sp_query
-            .filter(sp_dsl::sp_type.eq(SpType::from(slot_type.clone())));
-    }
-
-    if let Some(serial) = serial {
-        sp_query = sp_query.filter(sp_dsl::serial_number.eq(serial.clone()));
-    }
+    }).await?;
 
     #[derive(Tabled)]
     #[tabled(rename_all = "SCREAMING_SNAKE_CASE")]
@@ -411,23 +429,28 @@ async fn cmd_db_ereporters(
         #[tabled(display_with = "display_option_blank", rename = "P/N")]
         part_number: Option<String>,
         id: Uuid,
-        ereports: i64,
+        #[tabled(display_with = "display_option_error", rename = "P/N")]
+        ereports: Option<i64>,
     }
 
-    let sp_ereports = sp_query
-        .load_async::<(Uuid, db::model::SqlU16, SpType, Option<String>, Option<String>)>(
-            &*conn,
-        )
-        .await
-        .context("listing SP reporter entries")?;
-    let mut rows = Vec::with_capacity(sp_ereports.len());
+    let mut rows = Vec::with_capacity(sp_ereporters.len());
 
-    for (restart_id, slot, sp_type, serial, part_number) in sp_ereports {
-        let ereports = sp_dsl::sp_ereport
+    for (restart_id, slot, sp_type, serial, part_number) in sp_ereporters {
+        let count_result = sp_dsl::sp_ereport
             .filter(sp_dsl::restart_id.eq(restart_id))
             .count()
             .get_result_async(&*conn)
-            .await?;
+            .await;
+        let ereports = match count_result {
+            Ok(count) => Some(count),
+            Err(err) => {
+                eprintln!(
+                    "WARN: could not count ereports for {restart_id} \
+                     ({sp_type} {slot}): {err}",
+                );
+                None
+            }
+        };
         rows.push(ReporterRow {
             ty: sp_type.into(),
             slot: slot.into(),
