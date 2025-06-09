@@ -11,7 +11,6 @@ workspace = true
 anyhow.workspace = true
 camino.workspace = true
 iddqd.workspace = true
-id-map.workspace = true
 illumos-utils.workspace = true
 nexus-sled-agent-shared.workspace = true
 omicron-common.workspace = true
