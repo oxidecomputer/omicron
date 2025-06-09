@@ -12,6 +12,7 @@ use super::views::SledAgentResponse;
 use crate::bootstrap::config::BOOTSTRAP_AGENT_RACK_INIT_PORT;
 use crate::bootstrap::http_entrypoints::BootstrapServerContext;
 use crate::bootstrap::maghemite;
+use crate::bootstrap::measurements::MeasurementError;
 use crate::bootstrap::pre_server::BootstrapAgentStartup;
 use crate::bootstrap::pumpkind;
 use crate::bootstrap::rack_ops::RssAccess;
@@ -154,6 +155,9 @@ pub enum StartError {
 
     #[error("Failed to initialize lrtq node as learner: {0}")]
     FailedLearnerInit(bootstore::NodeRequestError),
+
+    #[error("Measurment error: {0}")]
+    MeasurementError(MeasurementError),
 }
 
 /// Server for the bootstrap agent.
@@ -235,7 +239,15 @@ impl Server {
         )
         .await
         .map_err(StartError::BindSprocketsServer)?;
-        let sprockets_server_handle = tokio::spawn(sprockets_server.run());
+        // FIXME errors
+        let all_measurements =
+            crate::bootstrap::measurements::sled_new_measurement_paths(
+                &long_running_task_handles.storage_manager,
+            )
+            .await
+            .map_err(StartError::MeasurementError)?;
+        let sprockets_server_handle =
+            tokio::spawn(sprockets_server.run(all_measurements));
 
         // Do we have a persistent sled-agent request that we need to restore?
         let state = if let Some(ledger) = maybe_ledger {

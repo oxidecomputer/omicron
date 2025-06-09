@@ -217,6 +217,7 @@ impl RssAccess {
         &self,
         parent_log: &Logger,
         sprockets: SprocketsConfig,
+        storage_manager: StorageHandle,
         global_zone_bootstrap_ip: Ipv6Addr,
     ) -> Result<RackResetUuid, RssAccessError> {
         let mut status = self.status.lock().unwrap();
@@ -255,6 +256,7 @@ impl RssAccess {
                     let result = rack_reset(
                         &parent_log,
                         sprockets,
+                        storage_manager,
                         global_zone_bootstrap_ip,
                     )
                     .await;
@@ -348,8 +350,14 @@ async fn rack_initialize(
 async fn rack_reset(
     parent_log: &Logger,
     sprockets: SprocketsConfig,
+    storage_manager: StorageHandle,
     global_zone_bootstrap_ip: Ipv6Addr,
 ) -> Result<(), SetupServiceError> {
-    RssHandle::run_rss_reset(parent_log, global_zone_bootstrap_ip, sprockets)
-        .await
+    RssHandle::run_rss_reset(
+        parent_log,
+        global_zone_bootstrap_ip,
+        sprockets,
+        storage_manager,
+    )
+    .await
 }
