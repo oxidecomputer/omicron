@@ -64,7 +64,7 @@ use internal_dns_types::names::BOUNDARY_NTP_DNS_NAME;
 use internal_dns_types::names::DNS_ZONE;
 use nexus_config::{ConfigDropshotWithTls, DeploymentConfig};
 use nexus_sled_agent_shared::inventory::{
-    OmicronZoneConfig, OmicronZoneImageSource, OmicronZoneType, ZoneKind,
+    OmicronZoneConfig, OmicronZoneType, ZoneKind,
 };
 use omicron_common::address::AZ_PREFIX;
 use omicron_common::address::DENDRITE_PORT;
@@ -94,6 +94,7 @@ use omicron_uuid_kinds::OmicronZoneUuid;
 use sled_agent_config_reconciler::InternalDisksReceiver;
 use sled_agent_types::sled::SWITCH_ZONE_BASEBOARD_FILE;
 use sled_agent_zone_images::ZoneImageSourceResolver;
+use sled_agent_zone_images::{MupdateOverrideReadError, ZoneImageSource};
 use sled_hardware::DendriteAsic;
 use sled_hardware::SledMode;
 use sled_hardware::is_gimlet;
@@ -261,6 +262,9 @@ pub enum Error {
 
     #[error("Unexpected zone config: zone {zone_id} is running on ramdisk ?!")]
     ZoneIsRunningOnRamdisk { zone_id: OmicronZoneUuid },
+
+    #[error("failed to read mupdate override info, not starting zones")]
+    MupdateOverrideRead(#[source] MupdateOverrideReadError),
 
     #[error(
         "Couldn't find requested zone image ({hash}) for \
@@ -1363,20 +1367,31 @@ impl ServiceManager {
         };
 
         // TODO: `InstallDataset` should be renamed to something more accurate
-        // when all the major changes here have landed. Some zones are
-        // distributed from the host OS image and are never placed in the
-        // install dataset; that enum variant more accurately reflects that we
-        // are falling back to searching `/opt/oxide` in addition to the install
-        // datasets.
+        // when all the major changes here have landed.
+        //
+        // Some zones are distributed from the host OS image and are never
+        // placed in the install dataset; the Ramdisk enum variant more
+        // accurately reflects that we are only search `/opt/oxide` for those
+        // zones.
+        //
+        // (Currently, only the switch zone goes through this code path. Other
+        // ramdisk zones like the probe zone construct the file source
+        // directly.)
         let image_source = match &request {
-            ZoneArgs::Omicron(zone_config) => &zone_config.image_source,
-            ZoneArgs::Switch(_) => &OmicronZoneImageSource::InstallDataset,
+            ZoneArgs::Omicron(zone_config) => {
+                ZoneImageSource::Omicron(zone_config.image_source.clone())
+            }
+            ZoneArgs::Switch(_) => ZoneImageSource::Ramdisk,
         };
-        let file_source = self.inner.zone_image_resolver.file_source_for(
-            zone_type_str,
-            image_source,
-            self.inner.internal_disks_rx.current(),
-        );
+        let file_source = self
+            .inner
+            .zone_image_resolver
+            .file_source_for(
+                zone_type_str,
+                &image_source,
+                self.inner.internal_disks_rx.current(),
+            )
+            .map_err(|error| Error::MupdateOverrideRead(error))?;
 
         // We use the fake initialiser for testing
         let mut zone_builder = match self.inner.system_api.fake_install_dir() {

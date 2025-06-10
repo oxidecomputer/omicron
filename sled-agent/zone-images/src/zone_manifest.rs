@@ -104,6 +104,12 @@ impl AllZoneManifests {
         }
     }
 
+    pub(crate) fn boot_disk_result(
+        &self,
+    ) -> &Result<ZoneManifestArtifactsResult, ZoneManifestReadError> {
+        &self.boot_disk_result
+    }
+
     fn log_results(&self, log: &slog::Logger) {
         let log = log.new(o!(
             "component" => "zone_manifest",
