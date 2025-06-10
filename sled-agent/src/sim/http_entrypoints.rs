@@ -26,7 +26,6 @@ use dropshot::TypedBody;
 use dropshot::endpoint;
 use nexus_sled_agent_shared::inventory::Inventory;
 use nexus_sled_agent_shared::inventory::OmicronSledConfig;
-use nexus_sled_agent_shared::inventory::OmicronSledConfigResult;
 use nexus_sled_agent_shared::inventory::SledRole;
 use omicron_common::api::internal::nexus::DiskRuntimeState;
 use omicron_common::api::internal::nexus::SledVmmState;
@@ -36,8 +35,6 @@ use omicron_common::api::internal::shared::VirtualNetworkInterfaceHost;
 use omicron_common::api::internal::shared::{
     ResolvedVpcRouteSet, ResolvedVpcRouteState, SwitchPorts,
 };
-use omicron_common::disk::DatasetsConfig;
-use omicron_common::disk::OmicronPhysicalDisksConfig;
 use range_requests::PotentialRange;
 use sled_agent_api::*;
 use sled_agent_types::boot_disk::BootDiskOsWriteStatus;
@@ -340,28 +337,14 @@ impl SledAgentApi for SledAgentSimImpl {
         ))
     }
 
-    async fn datasets_get(
-        rqctx: RequestContext<Self::Context>,
-    ) -> Result<HttpResponseOk<DatasetsConfig>, HttpError> {
-        let sa = rqctx.context();
-        Ok(HttpResponseOk(sa.datasets_config_list()?))
-    }
-
-    async fn omicron_physical_disks_get(
-        rqctx: RequestContext<Self::Context>,
-    ) -> Result<HttpResponseOk<OmicronPhysicalDisksConfig>, HttpError> {
-        let sa = rqctx.context();
-        Ok(HttpResponseOk(sa.omicron_physical_disks_list()?))
-    }
-
     async fn omicron_config_put(
         rqctx: RequestContext<Self::Context>,
         body: TypedBody<OmicronSledConfig>,
-    ) -> Result<HttpResponseOk<OmicronSledConfigResult>, HttpError> {
+    ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
         let sa = rqctx.context();
         let body_args = body.into_inner();
-        let result = sa.set_omicron_config(body_args)?;
-        Ok(HttpResponseOk(result))
+        sa.set_omicron_config(body_args)?;
+        Ok(HttpResponseUpdatedNoContent())
     }
 
     async fn sled_add(
@@ -655,12 +638,6 @@ impl SledAgentApi for SledAgentSimImpl {
     async fn zones_list(
         _rqctx: RequestContext<Self::Context>,
     ) -> Result<HttpResponseOk<Vec<String>>, HttpError> {
-        method_unimplemented()
-    }
-
-    async fn zpools_get(
-        _rqctx: RequestContext<Self::Context>,
-    ) -> Result<HttpResponseOk<Vec<Zpool>>, HttpError> {
         method_unimplemented()
     }
 

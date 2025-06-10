@@ -2,7 +2,11 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-use std::{collections::BTreeSet, fs, io, sync::LazyLock};
+use std::{
+    collections::BTreeSet,
+    fs, io,
+    sync::{Arc, LazyLock},
+};
 
 use camino::{Utf8Path, Utf8PathBuf};
 use camino_tempfile_ext::{
@@ -11,11 +15,16 @@ use camino_tempfile_ext::{
 };
 use iddqd::{IdOrdItem, IdOrdMap, id_upcast};
 use illumos_utils::zpool::ZpoolName;
-use omicron_common::update::{
-    MupdateOverrideInfo, OmicronZoneFileMetadata, OmicronZoneManifest,
+use omicron_common::{
+    disk::DiskIdentity,
+    update::{
+        MupdateOverrideInfo, OmicronZoneFileMetadata, OmicronZoneManifest,
+    },
 };
 use omicron_uuid_kinds::{MupdateOverrideUuid, MupdateUuid, ZpoolUuid};
 use sha2::{Digest, Sha256};
+use sled_agent_config_reconciler::InternalDisksReceiver;
+use sled_storage::config::MountConfig;
 use tufaceous_artifact::ArtifactHash;
 
 use crate::{
@@ -67,6 +76,31 @@ pub(crate) const NON_BOOT_3_ZPOOL: ZpoolName =
     ZpoolName::new_internal(NON_BOOT_3_UUID);
 pub(crate) static NON_BOOT_3_PATHS: LazyLock<OverridePaths> =
     LazyLock::new(|| OverridePaths::for_uuid(NON_BOOT_3_UUID));
+
+pub(crate) fn make_internal_disks_rx(
+    root: &Utf8Path,
+    boot_zpool: ZpoolName,
+    other_zpools: &[ZpoolName],
+) -> InternalDisksReceiver {
+    let identity_from_zpool = |zpool: ZpoolName| DiskIdentity {
+        vendor: "sled-agent-zone-images-tests".to_string(),
+        model: "fake-disk".to_string(),
+        serial: zpool.id().to_string(),
+    };
+    let mount_config = MountConfig {
+        root: root.to_path_buf(),
+        synthetic_disk_root: root.to_path_buf(),
+    };
+    InternalDisksReceiver::fake_static(
+        Arc::new(mount_config),
+        std::iter::once((identity_from_zpool(boot_zpool), boot_zpool)).chain(
+            other_zpools
+                .iter()
+                .copied()
+                .map(|pool| (identity_from_zpool(pool), pool)),
+        ),
+    )
+}
 
 /// Context for writing out fake zones to install dataset directories.
 ///
