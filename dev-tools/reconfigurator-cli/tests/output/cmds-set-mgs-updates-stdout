@@ -590,6 +590,10 @@ internal DNS:
         AAAA fd00:1122:3344:103::23
     name: 9b8c5aff-3892-4645-8c66-c540456f05af.host          (records: 1)
         AAAA fd00:1122:3344:101::27
+    name: @                                                  (records: 3)
+        NS   ns1.control-plane.oxide.internal
+        NS   ns2.control-plane.oxide.internal
+        NS   ns3.control-plane.oxide.internal
     name: _clickhouse-admin-single-server._tcp               (records: 1)
         SRV  port  8888 c138c88c-a83d-4e2d-a8f8-e8e715d8e5f7.host.control-plane.oxide.internal
     name: _clickhouse-native._tcp                            (records: 1)
@@ -664,13 +668,29 @@ internal DNS:
         AAAA fd00:1122:3344:3::1
     name: f282c429-5f5e-4430-8f71-600cf61ded56.host          (records: 1)
         AAAA fd00:1122:3344:103::21
+    name: ns1                                                (records: 1)
+        AAAA fd00:1122:3344:1::1
+    name: ns2                                                (records: 1)
+        AAAA fd00:1122:3344:2::1
+    name: ns3                                                (records: 1)
+        AAAA fd00:1122:3344:3::1
 
 external DNS:
   DNS zone: "oxide.example" (unchanged)
+    name: @                                                  (records: 3)
+        NS   ns1.oxide.example
+        NS   ns2.oxide.example
+        NS   ns3.oxide.example
     name: example-silo.sys                                   (records: 3)
         A    192.0.2.2
         A    192.0.2.3
         A    192.0.2.4
+    name: ns1                                                (records: 1)
+        A    198.51.100.1
+    name: ns2                                                (records: 1)
+        A    198.51.100.2
+    name: ns3                                                (records: 1)
+        A    198.51.100.3
 
 
 
@@ -890,6 +910,10 @@ internal DNS:
         AAAA fd00:1122:3344:103::23
     name: 9b8c5aff-3892-4645-8c66-c540456f05af.host          (records: 1)
         AAAA fd00:1122:3344:101::27
+    name: @                                                  (records: 3)
+        NS   ns1.control-plane.oxide.internal
+        NS   ns2.control-plane.oxide.internal
+        NS   ns3.control-plane.oxide.internal
     name: _clickhouse-admin-single-server._tcp               (records: 1)
         SRV  port  8888 c138c88c-a83d-4e2d-a8f8-e8e715d8e5f7.host.control-plane.oxide.internal
     name: _clickhouse-native._tcp                            (records: 1)
@@ -964,13 +988,29 @@ internal DNS:
         AAAA fd00:1122:3344:3::1
     name: f282c429-5f5e-4430-8f71-600cf61ded56.host          (records: 1)
         AAAA fd00:1122:3344:103::21
+    name: ns1                                                (records: 1)
+        AAAA fd00:1122:3344:1::1
+    name: ns2                                                (records: 1)
+        AAAA fd00:1122:3344:2::1
+    name: ns3                                                (records: 1)
+        AAAA fd00:1122:3344:3::1
 
 external DNS:
   DNS zone: "oxide.example" (unchanged)
+    name: @                                                  (records: 3)
+        NS   ns1.oxide.example
+        NS   ns2.oxide.example
+        NS   ns3.oxide.example
     name: example-silo.sys                                   (records: 3)
         A    192.0.2.2
         A    192.0.2.3
         A    192.0.2.4
+    name: ns1                                                (records: 1)
+        A    198.51.100.1
+    name: ns2                                                (records: 1)
+        A    198.51.100.2
+    name: ns3                                                (records: 1)
+        A    198.51.100.3
 
 
 
@@ -1381,6 +1421,10 @@ internal DNS:
         AAAA fd00:1122:3344:103::23
     name: 9b8c5aff-3892-4645-8c66-c540456f05af.host          (records: 1)
         AAAA fd00:1122:3344:101::27
+    name: @                                                  (records: 3)
+        NS   ns1.control-plane.oxide.internal
+        NS   ns2.control-plane.oxide.internal
+        NS   ns3.control-plane.oxide.internal
     name: _clickhouse-admin-single-server._tcp               (records: 1)
         SRV  port  8888 c138c88c-a83d-4e2d-a8f8-e8e715d8e5f7.host.control-plane.oxide.internal
     name: _clickhouse-native._tcp                            (records: 1)
@@ -1455,13 +1499,29 @@ internal DNS:
         AAAA fd00:1122:3344:3::1
     name: f282c429-5f5e-4430-8f71-600cf61ded56.host          (records: 1)
         AAAA fd00:1122:3344:103::21
+    name: ns1                                                (records: 1)
+        AAAA fd00:1122:3344:1::1
+    name: ns2                                                (records: 1)
+        AAAA fd00:1122:3344:2::1
+    name: ns3                                                (records: 1)
+        AAAA fd00:1122:3344:3::1
 
 external DNS:
   DNS zone: "oxide.example" (unchanged)
+    name: @                                                  (records: 3)
+        NS   ns1.oxide.example
+        NS   ns2.oxide.example
+        NS   ns3.oxide.example
     name: example-silo.sys                                   (records: 3)
         A    192.0.2.2
         A    192.0.2.3
         A    192.0.2.4
+    name: ns1                                                (records: 1)
+        A    198.51.100.1
+    name: ns2                                                (records: 1)
+        A    198.51.100.2
+    name: ns3                                                (records: 1)
+        A    198.51.100.3
 
 
 
@@ -1682,6 +1742,10 @@ internal DNS:
         AAAA fd00:1122:3344:103::23
     name: 9b8c5aff-3892-4645-8c66-c540456f05af.host          (records: 1)
         AAAA fd00:1122:3344:101::27
+    name: @                                                  (records: 3)
+        NS   ns1.control-plane.oxide.internal
+        NS   ns2.control-plane.oxide.internal
+        NS   ns3.control-plane.oxide.internal
     name: _clickhouse-admin-single-server._tcp               (records: 1)
         SRV  port  8888 c138c88c-a83d-4e2d-a8f8-e8e715d8e5f7.host.control-plane.oxide.internal
     name: _clickhouse-native._tcp                            (records: 1)
@@ -1756,13 +1820,29 @@ internal DNS:
         AAAA fd00:1122:3344:3::1
     name: f282c429-5f5e-4430-8f71-600cf61ded56.host          (records: 1)
         AAAA fd00:1122:3344:103::21
+    name: ns1                                                (records: 1)
+        AAAA fd00:1122:3344:1::1
+    name: ns2                                                (records: 1)
+        AAAA fd00:1122:3344:2::1
+    name: ns3                                                (records: 1)
+        AAAA fd00:1122:3344:3::1
 
 external DNS:
   DNS zone: "oxide.example" (unchanged)
+    name: @                                                  (records: 3)
+        NS   ns1.oxide.example
+        NS   ns2.oxide.example
+        NS   ns3.oxide.example
     name: example-silo.sys                                   (records: 3)
         A    192.0.2.2
         A    192.0.2.3
         A    192.0.2.4
+    name: ns1                                                (records: 1)
+        A    198.51.100.1
+    name: ns2                                                (records: 1)
+        A    198.51.100.2
+    name: ns3                                                (records: 1)
+        A    198.51.100.3
 
 
 
@@ -2175,6 +2255,10 @@ internal DNS:
         AAAA fd00:1122:3344:103::23
     name: 9b8c5aff-3892-4645-8c66-c540456f05af.host          (records: 1)
         AAAA fd00:1122:3344:101::27
+    name: @                                                  (records: 3)
+        NS   ns1.control-plane.oxide.internal
+        NS   ns2.control-plane.oxide.internal
+        NS   ns3.control-plane.oxide.internal
     name: _clickhouse-admin-single-server._tcp               (records: 1)
         SRV  port  8888 c138c88c-a83d-4e2d-a8f8-e8e715d8e5f7.host.control-plane.oxide.internal
     name: _clickhouse-native._tcp                            (records: 1)
@@ -2249,13 +2333,29 @@ internal DNS:
         AAAA fd00:1122:3344:3::1
     name: f282c429-5f5e-4430-8f71-600cf61ded56.host          (records: 1)
         AAAA fd00:1122:3344:103::21
+    name: ns1                                                (records: 1)
+        AAAA fd00:1122:3344:1::1
+    name: ns2                                                (records: 1)
+        AAAA fd00:1122:3344:2::1
+    name: ns3                                                (records: 1)
+        AAAA fd00:1122:3344:3::1
 
 external DNS:
   DNS zone: "oxide.example" (unchanged)
+    name: @                                                  (records: 3)
+        NS   ns1.oxide.example
+        NS   ns2.oxide.example
+        NS   ns3.oxide.example
     name: example-silo.sys                                   (records: 3)
         A    192.0.2.2
         A    192.0.2.3
         A    192.0.2.4
+    name: ns1                                                (records: 1)
+        A    198.51.100.1
+    name: ns2                                                (records: 1)
+        A    198.51.100.2
+    name: ns3                                                (records: 1)
+        A    198.51.100.3
 
 
 
@@ -2664,6 +2764,10 @@ internal DNS:
         AAAA fd00:1122:3344:103::23
     name: 9b8c5aff-3892-4645-8c66-c540456f05af.host          (records: 1)
         AAAA fd00:1122:3344:101::27
+    name: @                                                  (records: 3)
+        NS   ns1.control-plane.oxide.internal
+        NS   ns2.control-plane.oxide.internal
+        NS   ns3.control-plane.oxide.internal
     name: _clickhouse-admin-single-server._tcp               (records: 1)
         SRV  port  8888 c138c88c-a83d-4e2d-a8f8-e8e715d8e5f7.host.control-plane.oxide.internal
     name: _clickhouse-native._tcp                            (records: 1)
@@ -2738,13 +2842,29 @@ internal DNS:
         AAAA fd00:1122:3344:3::1
     name: f282c429-5f5e-4430-8f71-600cf61ded56.host          (records: 1)
         AAAA fd00:1122:3344:103::21
+    name: ns1                                                (records: 1)
+        AAAA fd00:1122:3344:1::1
+    name: ns2                                                (records: 1)
+        AAAA fd00:1122:3344:2::1
+    name: ns3                                                (records: 1)
+        AAAA fd00:1122:3344:3::1
 
 external DNS:
   DNS zone: "oxide.example" (unchanged)
+    name: @                                                  (records: 3)
+        NS   ns1.oxide.example
+        NS   ns2.oxide.example
+        NS   ns3.oxide.example
     name: example-silo.sys                                   (records: 3)
         A    192.0.2.2
         A    192.0.2.3
         A    192.0.2.4
+    name: ns1                                                (records: 1)
+        A    198.51.100.1
+    name: ns2                                                (records: 1)
+        A    198.51.100.2
+    name: ns3                                                (records: 1)
+        A    198.51.100.3
 
 
 
@@ -2769,6 +2889,8 @@ Commands:
           set-target-release-min-gen]
   expunge-zone
           expunge a zone
+  mark-for-cleanup
+          mark an expunged zone ready for cleanup
   set-sp-update
           configure an SP update
   delete-sp-update

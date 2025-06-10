@@ -28,5 +28,6 @@ tufaceous-artifact.workspace = true
 [dev-dependencies]
 camino-tempfile-ext.workspace = true
 dropshot.workspace = true
+expectorate.workspace = true
 omicron-uuid-kinds.workspace = true
 pretty_assertions.workspace = true
