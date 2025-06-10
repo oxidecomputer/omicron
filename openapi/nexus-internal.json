@@ -6686,7 +6686,7 @@
         ]
       },
       "SledState": {
-        "description": "The current state of the sled, as determined by Nexus.",
+        "description": "The current state of the sled.",
         "oneOf": [
           {
             "description": "The sled is currently active, and has resources allocated on it.",
