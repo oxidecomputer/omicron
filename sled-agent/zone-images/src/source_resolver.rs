@@ -19,8 +19,10 @@ use illumos_utils::zpool::ZpoolName;
 use nexus_sled_agent_shared::inventory::OmicronZoneImageSource;
 use sled_storage::dataset::INSTALL_DATASET;
 use sled_storage::dataset::M2_ARTIFACT_DATASET;
+use slog::error;
 use slog::o;
 use slog::warn;
+use slog_error_chain::InlineErrorChain;
 use std::sync::Arc;
 use std::sync::Mutex;
 
@@ -199,33 +201,44 @@ impl ResolverInner {
                 // `AllZoneImages` also caches the boot zpool. How should we
                 // reconcile the two?
                 if let Some(boot_zpool) = boot_zpool {
-                    if let Ok(result) = self.zone_manifests.boot_disk_result() {
-                        if let Some(result) =
-                            result.data.get(file_name.as_str())
-                        {
-                            if result.is_valid() {
-                                zone_image_paths.push(
-                                    boot_zpool.dataset_mountpoint(
-                                        zpools.root,
-                                        INSTALL_DATASET,
-                                    ),
-                                );
-                            } else {
-                                // If the zone is not valid, we refuse to start
-                                // it.
-                                warn!(
-                                    self.log,
-                                    "zone {} is not valid in the zone manifest, \
-                                     not returning it as a source",
-                                    file_name;
-                                    "error" => %result.display()
-                                );
+                    match self.zone_manifests.boot_disk_result() {
+                        Ok(result) => {
+                            match result.data.get(file_name.as_str()) {
+                                Some(result) => {
+                                    if result.is_valid() {
+                                        zone_image_paths.push(
+                                            boot_zpool.dataset_mountpoint(
+                                                zpools.root,
+                                                INSTALL_DATASET,
+                                            ),
+                                        );
+                                    } else {
+                                        // If the zone is not valid, we refuse to start
+                                        // it.
+                                        error!(
+                                            self.log,
+                                            "zone {} is not valid in the zone manifest, \
+                                             not returning it as a source",
+                                            file_name;
+                                            "error" => %result.display()
+                                        );
+                                    }
+                                }
+                                None => {
+                                    error!(
+                                        self.log,
+                                        "zone {} is not present in the boot disk zone manifest",
+                                        file_name,
+                                    );
+                                }
                             }
-                        } else {
-                            warn!(
+                        }
+                        Err(error) => {
+                            error!(
                                 self.log,
-                                "zone {} is not present in the zone manifest",
-                                file_name,
+                                "error parsing boot disk zone manifest, not returning \
+                                 install dataset as a source";
+                                "error" => InlineErrorChain::new(error),
                             );
                         }
                     }
