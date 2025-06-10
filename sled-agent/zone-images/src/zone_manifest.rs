@@ -454,37 +454,7 @@ impl fmt::Display for ZoneManifestArtifactsDisplay<'_> {
         )?;
 
         for artifact in self.artifacts {
-            match &artifact.status {
-                ArtifactReadResult::Valid => {
-                    writeln!(
-                        f,
-                        "  - {}: valid ({} bytes, {})",
-                        artifact.file_name,
-                        artifact.expected_size,
-                        artifact.expected_hash
-                    )?;
-                }
-                ArtifactReadResult::Mismatch { actual_size, actual_hash } => {
-                    writeln!(
-                        f,
-                        "  - {}: mismatch (expected {} bytes, {}; \
-                         found {} bytes, {})",
-                        artifact.file_name,
-                        artifact.expected_size,
-                        artifact.expected_hash,
-                        actual_size,
-                        actual_hash
-                    )?;
-                }
-                ArtifactReadResult::Error(error) => {
-                    writeln!(
-                        f,
-                        "  - {}: error ({})",
-                        artifact.file_name,
-                        InlineErrorChain::new(error)
-                    )?;
-                }
-            }
+            writeln!(f, "  - {}", artifact.display())?;
         }
 
         Ok(())
@@ -510,8 +480,12 @@ pub struct ZoneManifestArtifactResult {
 }
 
 impl ZoneManifestArtifactResult {
-    fn is_valid(&self) -> bool {
+    pub(crate) fn is_valid(&self) -> bool {
         matches!(self.status, ArtifactReadResult::Valid)
+    }
+
+    pub(crate) fn display(&self) -> ZoneManifestArtifactDisplay<'_> {
+        ZoneManifestArtifactDisplay { artifact: self }
     }
 }
 
@@ -523,6 +497,46 @@ impl IdOrdItem for ZoneManifestArtifactResult {
     }
 
     id_upcast!();
+}
+
+pub(crate) struct ZoneManifestArtifactDisplay<'a> {
+    artifact: &'a ZoneManifestArtifactResult,
+}
+
+impl fmt::Display for ZoneManifestArtifactDisplay<'_> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match &self.artifact.status {
+            ArtifactReadResult::Valid => {
+                write!(
+                    f,
+                    "{}: valid ({} bytes, {})",
+                    self.artifact.file_name,
+                    self.artifact.expected_size,
+                    self.artifact.expected_hash
+                )
+            }
+            ArtifactReadResult::Mismatch { actual_size, actual_hash } => {
+                write!(
+                    f,
+                    "{}: mismatch (expected {} bytes, {}; \
+                     found {} bytes, {})",
+                    self.artifact.file_name,
+                    self.artifact.expected_size,
+                    self.artifact.expected_hash,
+                    actual_size,
+                    actual_hash
+                )
+            }
+            ArtifactReadResult::Error(error) => {
+                write!(
+                    f,
+                    "{}: error ({})",
+                    self.artifact.file_name,
+                    InlineErrorChain::new(error)
+                )
+            }
+        }
+    }
 }
 
 #[derive(Clone, Debug, Error, PartialEq)]
