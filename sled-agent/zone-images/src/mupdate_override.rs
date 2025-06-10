@@ -287,7 +287,7 @@ mod tests {
     use crate::test_utils::dataset_missing_error;
     use crate::test_utils::dataset_not_dir_error;
     use crate::test_utils::deserialize_error;
-    use crate::test_utils::make_internal_disks;
+    use crate::test_utils::make_internal_disks_rx;
 
     use camino_tempfile_ext::prelude::*;
     use dropshot::ConfigLogging;
@@ -309,7 +309,9 @@ mod tests {
         let info = cx.override_info();
         cx.write_to(&dir.child(&BOOT_PATHS.install_dataset)).unwrap();
 
-        let internal_disks = make_internal_disks(dir.path(), BOOT_ZPOOL, &[]);
+        let internal_disks =
+            make_internal_disks_rx(dir.path(), BOOT_ZPOOL, &[])
+                .current_with_boot_disk();
         let overrides =
             AllMupdateOverrides::read_all(&logctx.log, &internal_disks);
         assert_eq!(
@@ -335,7 +337,8 @@ mod tests {
         cx.write_to(&dir.child(&NON_BOOT_PATHS.install_dataset)).unwrap();
 
         let internal_disks =
-            make_internal_disks(dir.path(), BOOT_ZPOOL, &[NON_BOOT_ZPOOL]);
+            make_internal_disks_rx(dir.path(), BOOT_ZPOOL, &[NON_BOOT_ZPOOL])
+                .current_with_boot_disk();
 
         let overrides =
             AllMupdateOverrides::read_all(&logctx.log, &internal_disks);
@@ -372,7 +375,8 @@ mod tests {
         dir.child(&NON_BOOT_PATHS.install_dataset).create_dir_all().unwrap();
 
         let internal_disks =
-            make_internal_disks(dir.path(), BOOT_ZPOOL, &[NON_BOOT_ZPOOL]);
+            make_internal_disks_rx(dir.path(), BOOT_ZPOOL, &[NON_BOOT_ZPOOL])
+                .current_with_boot_disk();
 
         let overrides =
             AllMupdateOverrides::read_all(&logctx.log, &internal_disks);
@@ -410,7 +414,8 @@ mod tests {
         dir.child(&NON_BOOT_PATHS.install_dataset).create_dir_all().unwrap();
 
         let internal_disks =
-            make_internal_disks(dir.path(), BOOT_ZPOOL, &[NON_BOOT_ZPOOL]);
+            make_internal_disks_rx(dir.path(), BOOT_ZPOOL, &[NON_BOOT_ZPOOL])
+                .current_with_boot_disk();
 
         let overrides =
             AllMupdateOverrides::read_all(&logctx.log, &internal_disks);
@@ -451,7 +456,8 @@ mod tests {
         cx.write_to(&dir.child(&NON_BOOT_PATHS.install_dataset)).unwrap();
 
         let internal_disks =
-            make_internal_disks(dir.path(), BOOT_ZPOOL, &[NON_BOOT_ZPOOL]);
+            make_internal_disks_rx(dir.path(), BOOT_ZPOOL, &[NON_BOOT_ZPOOL])
+                .current_with_boot_disk();
         let overrides =
             AllMupdateOverrides::read_all(&logctx.log, &internal_disks);
         assert_eq!(
@@ -496,7 +502,8 @@ mod tests {
         cx2.write_to(&dir.child(&NON_BOOT_PATHS.install_dataset)).unwrap();
 
         let internal_disks =
-            make_internal_disks(dir.path(), BOOT_ZPOOL, &[NON_BOOT_ZPOOL]);
+            make_internal_disks_rx(dir.path(), BOOT_ZPOOL, &[NON_BOOT_ZPOOL])
+                .current_with_boot_disk();
         let overrides =
             AllMupdateOverrides::read_all(&logctx.log, &internal_disks);
         assert_eq!(
@@ -540,7 +547,8 @@ mod tests {
             .unwrap();
 
         let internal_disks =
-            make_internal_disks(dir.path(), BOOT_ZPOOL, &[NON_BOOT_ZPOOL]);
+            make_internal_disks_rx(dir.path(), BOOT_ZPOOL, &[NON_BOOT_ZPOOL])
+                .current_with_boot_disk();
         let overrides =
             AllMupdateOverrides::read_all(&logctx.log, &internal_disks);
         assert_eq!(
@@ -583,7 +591,8 @@ mod tests {
         dir.child(&NON_BOOT_PATHS.install_dataset).touch().unwrap();
 
         let internal_disks =
-            make_internal_disks(dir.path(), BOOT_ZPOOL, &[NON_BOOT_ZPOOL]);
+            make_internal_disks_rx(dir.path(), BOOT_ZPOOL, &[NON_BOOT_ZPOOL])
+                .current_with_boot_disk();
         let overrides =
             AllMupdateOverrides::read_all(&logctx.log, &internal_disks);
         assert_eq!(
@@ -632,11 +641,12 @@ mod tests {
         // Read error (empty file).
         dir.child(&NON_BOOT_3_PATHS.mupdate_override_json).touch().unwrap();
 
-        let internal_disks = make_internal_disks(
+        let internal_disks = make_internal_disks_rx(
             dir.path(),
             BOOT_ZPOOL,
             &[NON_BOOT_ZPOOL, NON_BOOT_2_ZPOOL, NON_BOOT_3_ZPOOL],
-        );
+        )
+        .current_with_boot_disk();
         let overrides =
             AllMupdateOverrides::read_all(&logctx.log, &internal_disks);
         assert_eq!(

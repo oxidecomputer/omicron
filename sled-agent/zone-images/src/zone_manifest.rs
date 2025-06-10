@@ -612,7 +612,7 @@ mod tests {
     use crate::test_utils::{
         BOOT_PATHS, BOOT_ZPOOL, NON_BOOT_2_PATHS, NON_BOOT_2_ZPOOL,
         NON_BOOT_3_PATHS, NON_BOOT_3_ZPOOL, NON_BOOT_PATHS, NON_BOOT_ZPOOL,
-        WriteInstallDatasetContext, deserialize_error, make_internal_disks,
+        WriteInstallDatasetContext, deserialize_error, make_internal_disks_rx,
     };
 
     use camino_tempfile_ext::prelude::*;
@@ -639,7 +639,8 @@ mod tests {
         cx.write_to(&dir.child(&NON_BOOT_PATHS.install_dataset)).unwrap();
 
         let internal_disks =
-            make_internal_disks(dir.path(), BOOT_ZPOOL, &[NON_BOOT_ZPOOL]);
+            make_internal_disks_rx(dir.path(), BOOT_ZPOOL, &[NON_BOOT_ZPOOL])
+                .current_with_boot_disk();
         let manifests =
             AllZoneManifests::read_all(&logctx.log, &internal_disks);
 
@@ -686,7 +687,8 @@ mod tests {
         dir.child(&BOOT_PATHS.install_dataset).create_dir_all().unwrap();
 
         let internal_disks =
-            make_internal_disks(dir.path(), BOOT_ZPOOL, &[NON_BOOT_ZPOOL]);
+            make_internal_disks_rx(dir.path(), BOOT_ZPOOL, &[NON_BOOT_ZPOOL])
+                .current_with_boot_disk();
         let manifests =
             AllZoneManifests::read_all(&logctx.log, &internal_disks);
         assert_eq!(
@@ -731,7 +733,8 @@ mod tests {
         dir.child(&BOOT_PATHS.zones_json).touch().unwrap();
 
         let internal_disks =
-            make_internal_disks(dir.path(), BOOT_ZPOOL, &[NON_BOOT_ZPOOL]);
+            make_internal_disks_rx(dir.path(), BOOT_ZPOOL, &[NON_BOOT_ZPOOL])
+                .current_with_boot_disk();
         let manifests =
             AllZoneManifests::read_all(&logctx.log, &internal_disks);
         assert_eq!(
@@ -778,7 +781,8 @@ mod tests {
         invalid_cx.write_to(&dir.child(&BOOT_PATHS.install_dataset)).unwrap();
 
         let internal_disks =
-            make_internal_disks(dir.path(), BOOT_ZPOOL, &[NON_BOOT_ZPOOL]);
+            make_internal_disks_rx(dir.path(), BOOT_ZPOOL, &[NON_BOOT_ZPOOL])
+                .current_with_boot_disk();
         let manifests =
             AllZoneManifests::read_all(&logctx.log, &internal_disks);
         assert_eq!(
@@ -835,11 +839,12 @@ mod tests {
         // Read error (empty file).
         dir.child(&NON_BOOT_3_PATHS.zones_json).touch().unwrap();
 
-        let internal_disks = make_internal_disks(
+        let internal_disks = make_internal_disks_rx(
             dir.path(),
             BOOT_ZPOOL,
             &[NON_BOOT_ZPOOL, NON_BOOT_2_ZPOOL, NON_BOOT_3_ZPOOL],
-        );
+        )
+        .current_with_boot_disk();
         let manifests =
             AllZoneManifests::read_all(&logctx.log, &internal_disks);
         // The boot disk is valid.

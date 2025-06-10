@@ -23,9 +23,7 @@ use omicron_common::{
 };
 use omicron_uuid_kinds::{MupdateOverrideUuid, MupdateUuid, ZpoolUuid};
 use sha2::{Digest, Sha256};
-use sled_agent_config_reconciler::{
-    InternalDisksReceiver, InternalDisksWithBootDisk,
-};
+use sled_agent_config_reconciler::InternalDisksReceiver;
 use sled_storage::config::MountConfig;
 use tufaceous_artifact::ArtifactHash;
 
@@ -79,11 +77,11 @@ pub(crate) const NON_BOOT_3_ZPOOL: ZpoolName =
 pub(crate) static NON_BOOT_3_PATHS: LazyLock<OverridePaths> =
     LazyLock::new(|| OverridePaths::for_uuid(NON_BOOT_3_UUID));
 
-pub(crate) fn make_internal_disks(
+pub(crate) fn make_internal_disks_rx(
     root: &Utf8Path,
     boot_zpool: ZpoolName,
     other_zpools: &[ZpoolName],
-) -> InternalDisksWithBootDisk {
+) -> InternalDisksReceiver {
     let identity_from_zpool = |zpool: ZpoolName| DiskIdentity {
         vendor: "sled-agent-zone-images-tests".to_string(),
         model: "fake-disk".to_string(),
@@ -102,7 +100,6 @@ pub(crate) fn make_internal_disks(
                 .map(|pool| (identity_from_zpool(pool), pool)),
         ),
     )
-    .current_with_boot_disk()
 }
 
 /// Context for writing out fake zones to install dataset directories.
