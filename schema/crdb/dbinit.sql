@@ -427,6 +427,10 @@ CREATE TYPE IF NOT EXISTS omicron.public.physical_disk_state AS ENUM (
 );
 
 -- A physical disk which exists inside the rack.
+--
+-- This is currently limited to U.2 disks, which are managed by the
+-- control plane. A disk may exist within inventory, but not in this row:
+-- if that's the case, it is not explicitly "managed" by Nexus.
 CREATE TABLE IF NOT EXISTS omicron.public.physical_disk (
     id UUID PRIMARY KEY,
     time_created TIMESTAMPTZ NOT NULL,
@@ -444,7 +448,15 @@ CREATE TABLE IF NOT EXISTS omicron.public.physical_disk (
     sled_id UUID NOT NULL,
 
     disk_policy omicron.public.physical_disk_policy NOT NULL,
-    disk_state omicron.public.physical_disk_state NOT NULL
+    disk_state omicron.public.physical_disk_state NOT NULL,
+
+    -- This table should be limited to U.2s, and disallow inserting
+    -- other disk kinds, unless we explicitly want them to be controlled
+    -- by Nexus.
+    --
+    -- See https://github.com/oxidecomputer/omicron/issues/8258 for additional
+    -- context.
+    CONSTRAINT physical_disk_variant_u2 CHECK (variant = 'u2')
 );
 
 -- This constraint only needs to be upheld for disks that are not deleted
@@ -1065,6 +1077,14 @@ WHERE
 AND
     s.time_deleted IS NULL;
 
+CREATE TABLE IF NOT EXISTS omicron.public.silo_auth_settings (
+    silo_id UUID PRIMARY KEY,
+    time_created TIMESTAMPTZ NOT NULL,
+    time_modified TIMESTAMPTZ NOT NULL,
+
+    -- null means no max: users can tokens that never expire
+    device_token_max_ttl_seconds INT8 CHECK (device_token_max_ttl_seconds > 0)
+);
 /*
  * Projects
  */
@@ -2803,7 +2823,9 @@ CREATE TABLE IF NOT EXISTS omicron.public.device_auth_request (
     client_id UUID NOT NULL,
     device_code STRING(40) NOT NULL,
     time_created TIMESTAMPTZ NOT NULL,
-    time_expires TIMESTAMPTZ NOT NULL
+    time_expires TIMESTAMPTZ NOT NULL,
+    -- requested TTL for the token in seconds (if specified by the user)
+    token_ttl_seconds INT8 CHECK (token_ttl_seconds > 0)
 );
 
 -- Access tokens granted in response to successful device authorization flows.
@@ -4085,7 +4107,23 @@ CREATE TABLE IF NOT EXISTS omicron.public.blueprint (
     -- represented by the presence of the default value in that field.
     --
     -- `cluster.preserve_downgrade_option`
-    cockroachdb_setting_preserve_downgrade TEXT
+    cockroachdb_setting_preserve_downgrade TEXT,
+
+    -- The smallest value of the target_release table's generation field that's
+    -- accepted by the blueprint.
+    --
+    -- For example, let's say that the current target release generation is 5.
+    -- Then, when reconfigurator detects a MUPdate:
+    --
+    -- * the target release is ignored in favor of the install dataset
+    -- * this field is set to 6
+    --
+    -- Once an operator sets a new target release, its generation will be 6 or
+    -- higher. Reconfigurator will then know that it is back in charge of
+    -- driving the system to the target release.
+    --
+    -- This is set to 1 by default in application code.
+    target_release_minimum_generation INT8 NOT NULL
 );
 
 -- table describing both the current and historical target blueprints of the
@@ -5682,7 +5720,7 @@ INSERT INTO omicron.public.db_metadata (
     version,
     target_version
 ) VALUES
-    (TRUE, NOW(), NOW(), '145.0.0', NULL)
+    (TRUE, NOW(), NOW(), '149.0.0', NULL)
 ON CONFLICT DO NOTHING;
 
 COMMIT;

@@ -848,50 +848,48 @@ mod tests {
     }
 }
 
-// XXX TODO: Make this not run by default until we can require root for specific
-// tests
-// #[cfg(all(target_os = "illumos", test))]
-// mod illumos_specific_tests {
-//     use illumos_devinfo::DevInfo;
-//     use libnvme::{Nvme, controller::Controller};
+#[cfg(all(target_os = "illumos", test))]
+mod illumos_specific_tests {
+    use illumos_devinfo::DevInfo;
+    use libnvme::{Nvme, controller::Controller};
 
-//     use super::{find_properties, sata_split_model, string_from_property};
+    use super::{find_properties, sata_split_model, string_from_property};
 
-//     #[test]
-//     fn compare_nvme_to_blkdev_nodes() {
-//         let nvme = Nvme::new().unwrap();
+    #[test]
+    fn compare_nvme_to_blkdev_nodes() {
+        let nvme = Nvme::new().unwrap();
 
-//         let mut devinfo = DevInfo::new_force_load().unwrap();
-//         for node in devinfo.walk_driver("blkdev").map(Result::unwrap) {
-//             let properties = find_properties(
-//                 &node,
-//                 ["inquiry-product-id", "inquiry-vendor-id"],
-//             )
-//             .unwrap();
-//             let inquiry_product_id =
-//                 string_from_property(&properties[0]).unwrap();
-//             let inquiry_vendor_id =
-//                 string_from_property(&properties[1]).unwrap();
+        let mut devinfo = DevInfo::new_force_load().unwrap();
+        for node in devinfo.walk_driver("blkdev").map(Result::unwrap) {
+            let properties = find_properties(
+                &node,
+                ["inquiry-product-id", "inquiry-vendor-id"],
+            )
+            .unwrap();
+            let inquiry_product_id =
+                string_from_property(&properties[0]).unwrap();
+            let inquiry_vendor_id =
+                string_from_property(&properties[1]).unwrap();
 
-//             let nvme_node = node.parent().unwrap().unwrap();
-//             let nvme_instance = nvme_node.instance().unwrap();
+            let nvme_node = node.parent().unwrap().unwrap();
+            let nvme_instance = nvme_node.instance().unwrap();
 
-//             let controller =
-//                 Controller::init_by_instance(&nvme, nvme_instance).unwrap();
-//             let nvme_info = controller.get_info().unwrap();
-//             let nvme_model = nvme_info.model();
-//             let (vendor, product) = sata_split_model(&nvme_model).unwrap();
-//             println!("{product}");
+            let controller =
+                Controller::init_by_instance(&nvme, nvme_instance).unwrap();
+            let nvme_info = controller.get_info().unwrap();
+            let nvme_model = nvme_info.model();
+            let (vendor, product) = sata_split_model(&nvme_model).unwrap();
+            println!("{product}");
 
-//             assert_eq!(
-//                 inquiry_vendor_id,
-//                 vendor.unwrap_or("NVMe".to_string()),
-//                 "nvme and blkdev vendor match"
-//             );
-//             assert_eq!(
-//                 inquiry_product_id, product,
-//                 "nvme and blkdev product match"
-//             );
-//         }
-//     }
-// }
+            assert_eq!(
+                inquiry_vendor_id,
+                vendor.unwrap_or("NVMe".to_string()),
+                "nvme and blkdev vendor match"
+            );
+            assert_eq!(
+                inquiry_product_id, product,
+                "nvme and blkdev product match"
+            );
+        }
+    }
+}

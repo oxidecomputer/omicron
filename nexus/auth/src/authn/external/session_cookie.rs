@@ -45,7 +45,7 @@ pub trait SessionStore {
     ) -> Option<Self::SessionModel>;
 
     /// Mark session expired
-    async fn session_expire(&self, id: ConsoleSessionUuid) -> Option<()>;
+    async fn session_expire(&self, token: String) -> Option<()>;
 
     /// Maximum time session can remain idle before expiring
     fn session_idle_timeout(&self) -> Duration;
@@ -133,7 +133,7 @@ where
         // expired
         let now = Utc::now();
         if session.time_last_used() + ctx.session_idle_timeout() < now {
-            let expired_session = ctx.session_expire(session.id()).await;
+            let expired_session = ctx.session_expire(token).await;
             if expired_session.is_none() {
                 debug!(log, "failed to expire session")
             }
@@ -153,7 +153,7 @@ where
         // existed longer than absolute_timeout, it is expired and we can no
         // longer extend the session
         if session.time_created() + ctx.session_absolute_timeout() < now {
-            let expired_session = ctx.session_expire(session.id()).await;
+            let expired_session = ctx.session_expire(token).await;
             if expired_session.is_none() {
                 debug!(log, "failed to expire session")
             }
@@ -273,9 +273,9 @@ mod test {
             }
         }
 
-        async fn session_expire(&self, id: ConsoleSessionUuid) -> Option<()> {
+        async fn session_expire(&self, token: String) -> Option<()> {
             let mut sessions = self.sessions.lock().unwrap();
-            sessions.retain(|s| s.id != id);
+            sessions.retain(|s| s.token != token);
             Some(())
         }
 

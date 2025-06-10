@@ -178,6 +178,17 @@ impl Collection {
             .flat_map(|config| config.zones.iter())
     }
 
+    /// Iterate over all the successfully-started Omicron zones (as reported by
+    /// each sled-agent's last reconciliation attempt)
+    pub fn all_running_omicron_zones(
+        &self,
+    ) -> impl Iterator<Item = &OmicronZoneConfig> {
+        self.sled_agents
+            .values()
+            .filter_map(|sa| sa.last_reconciliation.as_ref())
+            .flat_map(|reconciliation| reconciliation.running_omicron_zones())
+    }
+
     /// Iterate over the sled ids of sleds identified as Scrimlets
     pub fn scrimlets(&self) -> impl Iterator<Item = SledUuid> + '_ {
         self.sled_agents
