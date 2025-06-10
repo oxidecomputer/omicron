@@ -886,9 +886,12 @@ pub enum InstallZoneError {
         err: crate::zone::AdmError,
     },
 
-    #[error("Failed to find zone image '{image}' from {paths:?}")]
-    ImageNotFound { image: String, paths: Vec<Utf8PathBuf> },
-
+    #[error(
+        "Failed to find zone image '{}' from {:?}",
+        file_source.file_name,
+        file_source.search_paths,
+    )]
+    ImageNotFound { file_source: ZoneImageFileSource },
     #[error("Attempted to call install() on underspecified ZoneBuilder")]
     IncompleteBuilder,
 }
@@ -1050,12 +1053,8 @@ pub struct ZoneBuilder<'a> {
     underlay_vnic_allocator: Option<&'a VnicAllocator<Etherstub>>,
     /// Filesystem path at which the installed zone will reside.
     zone_root_path: Option<PathInPool>,
-    /// The directories that will be searched for the image tarball for the
-    /// provided zone type ([`Self::with_zone_type`]).
-    zone_image_paths: Option<&'a [Utf8PathBuf]>,
-    /// The file name of the zone image to search for in [`Self::zone_image_paths`].
-    /// If unset, defaults to `{zone_type}.tar.gz`.
-    zone_image_file_name: Option<&'a str>,
+    /// The file source.
+    file_source: Option<&'a ZoneImageFileSource>,
     /// The name of the type of zone being created (e.g. "propolis-server")
     zone_type: Option<&'a str>,
     /// Unique ID of the instance of the zone being created. (optional)
@@ -1112,24 +1111,12 @@ impl<'a> ZoneBuilder<'a> {
         self
     }
 
-    /// The directories that will be searched for the image tarball for the
-    /// provided zone type ([`Self::with_zone_type`]).
-    pub fn with_zone_image_paths(
+    /// The file name and image source.
+    pub fn with_file_source(
         mut self,
-        image_paths: &'a [Utf8PathBuf],
+        file_source: &'a ZoneImageFileSource,
     ) -> Self {
-        self.zone_image_paths = Some(image_paths);
-        self
-    }
-
-    /// The file name of the zone image to search for in the zone image
-    /// paths ([`Self::with_zone_image_paths`]). If unset, defaults to
-    /// `{zone_type}.tar.gz`.
-    pub fn with_zone_image_file_name(
-        mut self,
-        image_file_name: &'a str,
-    ) -> Self {
-        self.zone_image_file_name = Some(image_file_name);
+        self.file_source = Some(file_source);
         self
     }
 
@@ -1250,8 +1237,7 @@ impl<'a> ZoneBuilder<'a> {
             log: Some(log),
             underlay_vnic_allocator: Some(underlay_vnic_allocator),
             zone_root_path: Some(mut zone_root_path),
-            zone_image_paths: Some(zone_image_paths),
-            zone_image_file_name,
+            file_source: Some(file_source),
             zone_type: Some(zone_type),
             unique_name,
             datasets: Some(datasets),
@@ -1279,23 +1265,16 @@ impl<'a> ZoneBuilder<'a> {
         let full_zone_name =
             InstalledZone::get_zone_name(zone_type, unique_name);
 
-        // Looks for the image within `zone_image_path`, in order.
-        let image_file_name = match zone_image_file_name {
-            Some(image) => image,
-            None => &format!("{}.tar.gz", zone_type),
-        };
-        let zone_image_path = zone_image_paths
+        // Look for the image within `file_source.search_paths`, in order.
+        let zone_image_path = file_source
+            .search_paths
             .iter()
             .find_map(|image_path| {
-                let path = image_path.join(image_file_name);
+                let path = image_path.join(&file_source.file_name);
                 if path.exists() { Some(path) } else { None }
             })
             .ok_or_else(|| InstallZoneError::ImageNotFound {
-                image: image_file_name.to_string(),
-                paths: zone_image_paths
-                    .iter()
-                    .map(|p| p.to_path_buf())
-                    .collect(),
+                file_source: file_source.clone(),
             })?;
 
         let mut net_device_names: Vec<String> = opte_ports
@@ -1346,6 +1325,19 @@ impl<'a> ZoneBuilder<'a> {
             zones_api: DebugIgnore(zones_api),
         })
     }
+}
+
+/// Places to look for a zone's image.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ZoneImageFileSource {
+    /// The file name to look for.
+    pub file_name: String,
+
+    /// The paths to look for the zone image in.
+    ///
+    /// This represents a high-confidence belief, but not a guarantee, that the
+    /// zone image will be found in one of these locations.
+    pub search_paths: Vec<Utf8PathBuf>,
 }
 
 /// Return true if the service with the given FMRI appears to be an

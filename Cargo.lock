@@ -11733,10 +11733,10 @@ dependencies = [
 name = "sled-agent-zone-images"
 version = "0.1.0"
 dependencies = [
- "anyhow",
  "camino",
  "camino-tempfile-ext",
  "dropshot",
+ "expectorate",
  "iddqd",
  "illumos-utils",
  "nexus-sled-agent-shared",
@@ -11744,11 +11744,15 @@ dependencies = [
  "omicron-uuid-kinds",
  "omicron-workspace-hack",
  "pretty_assertions",
+ "rayon",
+ "serde",
  "serde_json",
+ "sha2",
  "sled-storage",
  "slog",
  "slog-error-chain",
  "thiserror 1.0.69",
+ "tufaceous-artifact",
 ]
 
 [[package]]
@@ -14447,6 +14451,7 @@ dependencies = [
  "serde",
  "serde_json",
  "sha2",
+ "sled-agent-zone-images",
  "sled-hardware-types",
  "slog",
  "slog-dtrace",
