@@ -118,14 +118,14 @@ impl AllZoneManifests {
                     info!(
                         log,
                         "found zone manifest for boot disk";
-                        "data" => %result.display(),
+                        "boot_disk_result" => %result.display(),
                     );
                 } else {
                     error!(
                         log,
                         "zone manifest for boot disk is invalid, \
                          will not bring up zones that mismatch";
-                        "data" => %result.display(),
+                        "boot_disk_result" => %result.display(),
                     );
                 }
             }
@@ -210,7 +210,9 @@ impl IdOrdItem for ZoneManifestNonBootInfo {
 #[derive(Clone, Debug, PartialEq)]
 pub enum ZoneManifestNonBootResult {
     /// The manifest is present and matches the value on the boot disk.
-    /// Information about individual zone hashes matching is stored in the
+    ///
+    /// This does not necessarily mean that the zone tarballs on the non-boot
+    /// disk match the manifest. Information about that is stored in the
     /// `ZoneManifestArtifactsResult`.
     Matches(ZoneManifestArtifactsResult),
 
@@ -291,8 +293,10 @@ impl ZoneManifestNonBootResult {
 
     /// Returns true if the status is valid.
     ///
-    /// The only valid status is `Self::Matches` along with the result inside
-    /// being valid.
+    /// The necessary conditions for validity are:
+    ///
+    /// 1. `Self::Matches` being true
+    /// 2. The result inside is valid.
     pub fn is_valid(&self) -> bool {
         match self {
             Self::Matches(result) => result.is_valid(),
@@ -306,14 +310,14 @@ impl ZoneManifestNonBootResult {
                 if result.is_valid() {
                     info!(
                         log,
-                        "found zone manifest for non-boot disk";
-                        "data" => %result.display(),
+                        "found valid, matching zone manifest for non-boot disk";
+                        "non_boot_disk_result" => %result.display(),
                     );
                 } else {
-                    slog::warn!(
+                    warn!(
                         log,
                         "zone manifest for non-boot disk is invalid";
-                        "data" => %result.display(),
+                        "non_boot_disk_result" => %result.display(),
                     );
                 }
             }
@@ -321,34 +325,34 @@ impl ZoneManifestNonBootResult {
                 ZoneManifestNonBootMismatch::BootAbsentOtherPresent {
                     non_boot_disk_result,
                 } => {
-                    slog::warn!(
+                    warn!(
                         log,
                         "zone manifest absent on boot disk but present on non-boot disk";
-                        "data" => %non_boot_disk_result.display(),
+                        "non_boot_disk_result" => %non_boot_disk_result.display(),
                     );
                 }
                 ZoneManifestNonBootMismatch::ValueMismatch {
                     non_boot_disk_result,
                 } => {
-                    slog::warn!(
+                    warn!(
                         log,
                         "zone manifest contents differ between boot disk and non-boot disk";
-                        "data" => %non_boot_disk_result.display(),
+                        "non_boot_disk_result" => %non_boot_disk_result.display(),
                     );
                 }
                 ZoneManifestNonBootMismatch::BootDiskReadError {
                     non_boot_disk_result,
                 } => {
-                    slog::warn!(
+                    warn!(
                         log,
                         "unable to verify zone manifest consistency between \
                          boot disk and non-boot disk due to boot disk read error";
-                        "data" => %non_boot_disk_result.display(),
+                        "non_boot_disk_result" => %non_boot_disk_result.display(),
                     );
                 }
             },
             Self::ReadError(error) => {
-                slog::warn!(
+                warn!(
                     log,
                     "error reading zone manifest on non-boot disk";
                     "error" => InlineErrorChain::new(error),
@@ -430,38 +434,27 @@ pub struct ZoneManifestArtifactsDisplay<'a> {
 
 impl fmt::Display for ZoneManifestArtifactsDisplay<'_> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        // First, display a summary of the artifacts.
+        let (valid, mismatch, error) = self.artifacts.iter().fold(
+            (0, 0, 0),
+            |(valid, mismatch, error), artifact| match &artifact.status {
+                ArtifactReadResult::Valid => (valid + 1, mismatch, error),
+                ArtifactReadResult::Mismatch { .. } => {
+                    (valid, mismatch + 1, error)
+                }
+                ArtifactReadResult::Error { .. } => {
+                    (valid, mismatch, error + 1)
+                }
+            },
+        );
+        writeln!(
+            f,
+            "{} artifacts in manifest: {valid} valid, {mismatch} mismatched, {error} errors:",
+            self.artifacts.len(),
+        )?;
+
         for artifact in self.artifacts {
-            match &artifact.status {
-                ArtifactReadResult::Valid => {
-                    writeln!(
-                        f,
-                        "  {}: ok ({} bytes, {})",
-                        artifact.file_name,
-                        artifact.expected_size,
-                        artifact.expected_hash
-                    )?;
-                }
-                ArtifactReadResult::Mismatch { actual_size, actual_hash } => {
-                    writeln!(
-                        f,
-                        "  {}: mismatch (expected {} bytes, {}; \
-                         found {} bytes, {})",
-                        artifact.file_name,
-                        artifact.expected_size,
-                        artifact.expected_hash,
-                        actual_size,
-                        actual_hash
-                    )?;
-                }
-                ArtifactReadResult::Error(error) => {
-                    writeln!(
-                        f,
-                        "  {}: error ({})",
-                        artifact.file_name,
-                        InlineErrorChain::new(error)
-                    )?;
-                }
-            }
+            writeln!(f, "  - {}", artifact.display())?;
         }
 
         Ok(())
@@ -487,8 +480,12 @@ pub struct ZoneManifestArtifactResult {
 }
 
 impl ZoneManifestArtifactResult {
-    fn is_valid(&self) -> bool {
+    pub(crate) fn is_valid(&self) -> bool {
         matches!(self.status, ArtifactReadResult::Valid)
+    }
+
+    pub(crate) fn display(&self) -> ZoneManifestArtifactDisplay<'_> {
+        ZoneManifestArtifactDisplay { artifact: self }
     }
 }
 
@@ -500,6 +497,46 @@ impl IdOrdItem for ZoneManifestArtifactResult {
     }
 
     id_upcast!();
+}
+
+pub(crate) struct ZoneManifestArtifactDisplay<'a> {
+    artifact: &'a ZoneManifestArtifactResult,
+}
+
+impl fmt::Display for ZoneManifestArtifactDisplay<'_> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match &self.artifact.status {
+            ArtifactReadResult::Valid => {
+                write!(
+                    f,
+                    "{}: valid ({} bytes, {})",
+                    self.artifact.file_name,
+                    self.artifact.expected_size,
+                    self.artifact.expected_hash
+                )
+            }
+            ArtifactReadResult::Mismatch { actual_size, actual_hash } => {
+                write!(
+                    f,
+                    "{}: mismatch (expected {} bytes, {}; \
+                     found {} bytes, {})",
+                    self.artifact.file_name,
+                    self.artifact.expected_size,
+                    self.artifact.expected_hash,
+                    actual_size,
+                    actual_hash
+                )
+            }
+            ArtifactReadResult::Error(error) => {
+                write!(
+                    f,
+                    "{}: error ({})",
+                    self.artifact.file_name,
+                    InlineErrorChain::new(error)
+                )
+            }
+        }
+    }
 }
 
 #[derive(Clone, Debug, Error, PartialEq)]
@@ -581,6 +618,7 @@ mod tests {
 
     use camino_tempfile_ext::prelude::*;
     use dropshot::{ConfigLogging, ConfigLoggingLevel, test_util::LogContext};
+    use expectorate::assert_contents;
     use iddqd::id_ord_map;
     use pretty_assertions::assert_eq;
 
@@ -684,6 +722,54 @@ mod tests {
         );
     }
 
+    /// Error case: zone manifest JSON on boot disk has a read error.
+    #[test]
+    fn read_boot_disk_read_error() {
+        let logctx = LogContext::new(
+            "zone_manifest_read_boot_disk_read_error",
+            &ConfigLogging::StderrTerminal { level: ConfigLoggingLevel::Debug },
+        );
+        let dir = Utf8TempDir::new().unwrap();
+        let cx = WriteInstallDatasetContext::new_basic();
+
+        // Write the valid manifest to the non-boot disk.
+        cx.write_to(&dir.child(&NON_BOOT_PATHS.install_dataset)).unwrap();
+        // Create an empty file on the boot disk (will cause a read error).
+        dir.child(&BOOT_PATHS.zones_json).touch().unwrap();
+
+        let zpools = ZoneImageZpools {
+            root: dir.path(),
+            all_m2_zpools: vec![BOOT_ZPOOL, NON_BOOT_ZPOOL],
+        };
+
+        let manifests =
+            AllZoneManifests::read_all(&logctx.log, &zpools, &BOOT_ZPOOL);
+        assert_eq!(
+            manifests.boot_disk_result.as_ref().unwrap_err(),
+            &deserialize_error(dir.path(), &BOOT_PATHS.zones_json, "").into(),
+        );
+
+        assert_eq!(
+            manifests.non_boot_disk_metadata,
+            id_ord_map! {
+                ZoneManifestNonBootInfo {
+                    zpool_name: NON_BOOT_ZPOOL,
+                    dataset_dir: dir.path().join(&NON_BOOT_PATHS.install_dataset),
+                    path: dir.path().join(&NON_BOOT_PATHS.zones_json),
+                    result: ZoneManifestNonBootResult::Mismatch(
+                        ZoneManifestNonBootMismatch::BootDiskReadError {
+                            non_boot_disk_result: cx.expected_result(
+                                &dir.path().join(&NON_BOOT_PATHS.install_dataset)
+                            ),
+                        }
+                    )
+                }
+            }
+        );
+
+        logctx.cleanup_successful();
+    }
+
     /// Error case: zones don't match expected ones on boot disk.
     #[test]
     fn read_boot_disk_zone_mismatch() {
@@ -722,11 +808,11 @@ mod tests {
                     dataset_dir: dir.path().join(&NON_BOOT_PATHS.install_dataset),
                     path: dir.path().join(&NON_BOOT_PATHS.zones_json),
                     result: ZoneManifestNonBootResult::Mismatch(
-                        // The boot disk was read successfully but the zones
-                        // didn't match what was on disk. We could treat this as
-                        // either a ValueMismatch or a BootDiskReadError --
-                        // currently, we treat it as a ValueMismatch for
-                        // convenience.
+                        // The boot disk was read successfully but the zones on
+                        // the boot disk didn't match what was on disk. We could
+                        // treat this as either a ValueMismatch or a
+                        // BootDiskReadError -- currently, we treat it as a
+                        // ValueMismatch for convenience.
                         ZoneManifestNonBootMismatch::ValueMismatch {
                             non_boot_disk_result: cx.expected_result(
                                 &dir.path().join(&NON_BOOT_PATHS.install_dataset)
@@ -775,12 +861,16 @@ mod tests {
         let manifests =
             AllZoneManifests::read_all(&logctx.log, &zpools, &BOOT_ZPOOL);
         // The boot disk is valid.
+        let boot_disk_result = manifests.boot_disk_result.as_ref().unwrap();
         assert_eq!(
-            manifests.boot_disk_result.as_ref().unwrap(),
+            boot_disk_result,
             &cx.expected_result(&dir.path().join(&BOOT_PATHS.install_dataset))
         );
 
         // The non-boot disks have various error cases.
+        let non_boot_disk_result = invalid_cx.expected_result(
+            dir.child(&NON_BOOT_PATHS.install_dataset).as_path(),
+        );
         assert_eq!(
             manifests.non_boot_disk_metadata,
             id_ord_map! {
@@ -790,9 +880,7 @@ mod tests {
                     path: dir.path().join(&NON_BOOT_PATHS.zones_json),
                     result: ZoneManifestNonBootResult::Mismatch(
                         ZoneManifestNonBootMismatch::ValueMismatch {
-                            non_boot_disk_result: invalid_cx.expected_result(
-                                dir.child(&NON_BOOT_PATHS.install_dataset).as_path()
-                            ),
+                            non_boot_disk_result: non_boot_disk_result.clone(),
                         }
                     )
                 },
@@ -820,6 +908,16 @@ mod tests {
                     )
                 }
             },
+        );
+
+        // Also use the opportunity to test display output.
+        assert_contents(
+            "tests/output/zone_manifest_match_result.txt",
+            &boot_disk_result.display().to_string(),
+        );
+        assert_contents(
+            "tests/output/zone_manifest_mismatch_result.txt",
+            &non_boot_disk_result.display().to_string(),
         );
 
         logctx.cleanup_successful();
