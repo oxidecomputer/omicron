@@ -7,6 +7,7 @@
 use std::collections::BTreeSet;
 
 use omicron_uuid_kinds::MupdateOverrideUuid;
+use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use tufaceous_artifact::ArtifactHashId;
 
@@ -14,7 +15,7 @@ use tufaceous_artifact::ArtifactHashId;
 ///
 /// When a MUPdate occurs, a file containing this information is created on the
 /// install dataset of the system.
-#[derive(Clone, Debug, Eq, PartialEq, Deserialize, Serialize)]
+#[derive(Clone, Debug, Eq, PartialEq, Deserialize, Serialize, JsonSchema)]
 pub struct MupdateOverrideInfo {
     /// A UUID that identifies a MUPdate that occurred.
     pub mupdate_uuid: MupdateOverrideUuid,

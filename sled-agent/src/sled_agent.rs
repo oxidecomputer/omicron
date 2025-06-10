@@ -1368,6 +1368,8 @@ impl SledAgent {
             self.storage().datasets_config_list(),
             self.inner.services.omicron_zones_list()
         );
+        let zone_image_resolver =
+            self.inner.services.zone_image_resolver().status();
 
         // RSS asks for our inventory _before_ it sends us an
         // `OmicronSledConfig`; echo back the default (empty) disk and dataset
@@ -1464,6 +1466,7 @@ impl SledAgent {
             ledgered_sled_config: Some(sled_config),
             reconciler_status: ConfigReconcilerInventoryStatus::NotYetRun,
             last_reconciliation: None,
+            zone_image_resolver,
         })
     }
 

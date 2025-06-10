@@ -20,6 +20,7 @@ use nexus_sled_agent_shared::inventory::InventoryDisk;
 use nexus_sled_agent_shared::inventory::InventoryZpool;
 use nexus_sled_agent_shared::inventory::OmicronSledConfig;
 use nexus_sled_agent_shared::inventory::SledRole;
+use nexus_sled_agent_shared::zone_images::ZoneImageResolverStatus;
 use nexus_types::deployment::ClickhousePolicy;
 use nexus_types::deployment::CockroachDbClusterVersion;
 use nexus_types::deployment::CockroachDbSettings;
@@ -726,6 +727,7 @@ impl Sled {
                 ledgered_sled_config: Some(sled_config),
                 reconciler_status: ConfigReconcilerInventoryStatus::NotYetRun,
                 last_reconciliation: None,
+                zone_image_resolver: ZoneImageResolverStatus::new_fake(),
             }
         };
 
@@ -866,6 +868,7 @@ impl Sled {
             ledgered_sled_config: inv_sled_agent.ledgered_sled_config.clone(),
             reconciler_status: inv_sled_agent.reconciler_status.clone(),
             last_reconciliation: inv_sled_agent.last_reconciliation.clone(),
+            zone_image_resolver: ZoneImageResolverStatus::new_fake(),
         };
 
         Sled {

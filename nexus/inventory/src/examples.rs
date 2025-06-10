@@ -25,6 +25,7 @@ use nexus_sled_agent_shared::inventory::InventoryZpool;
 use nexus_sled_agent_shared::inventory::OmicronSledConfig;
 use nexus_sled_agent_shared::inventory::OmicronZonesConfig;
 use nexus_sled_agent_shared::inventory::SledRole;
+use nexus_sled_agent_shared::zone_images::ZoneImageResolverStatus;
 use nexus_types::inventory::BaseboardId;
 use nexus_types::inventory::CabooseWhich;
 use nexus_types::inventory::RotPage;
@@ -690,5 +691,6 @@ pub fn sled_agent(
         ledgered_sled_config,
         reconciler_status,
         last_reconciliation,
+        zone_image_resolver: ZoneImageResolverStatus::new_fake(),
     }
 }

@@ -84,11 +84,13 @@ http.workspace = true
 installinator.workspace = true
 installinator-client.workspace = true
 maplit.workspace = true
+nexus-sled-agent-shared.workspace = true
 omicron-test-utils.workspace = true
 openapi-lint.workspace = true
 openapiv3.workspace = true
 rand.workspace = true
 serde_json.workspace = true
+sled-agent-zone-images.workspace = true
 subprocess.workspace = true
 tar.workspace = true
 tokio = { workspace = true, features = ["test-util"] }

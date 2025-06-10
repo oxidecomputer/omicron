@@ -1155,6 +1155,7 @@ impl ServicePortBuilder {
 mod tests {
     use super::*;
     use nexus_sled_agent_shared::inventory::ConfigReconcilerInventoryStatus;
+    use nexus_sled_agent_shared::zone_images::ZoneImageResolverStatus;
     use omicron_common::address::IpRange;
     use omicron_common::api::external::ByteCount;
     use omicron_common::api::internal::shared::AllowedSourceIps;
@@ -1378,6 +1379,7 @@ mod tests {
                 ledgered_sled_config: None,
                 reconciler_status: ConfigReconcilerInventoryStatus::NotYetRun,
                 last_reconciliation: None,
+                zone_image_resolver: ZoneImageResolverStatus::new_fake(),
             },
             is_scrimlet,
         )];

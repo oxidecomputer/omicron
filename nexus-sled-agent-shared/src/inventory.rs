@@ -36,6 +36,8 @@ pub use sled_hardware_types::Baseboard;
 use strum::EnumIter;
 use tufaceous_artifact::{ArtifactHash, KnownArtifactKind};
 
+use crate::zone_images::ZoneImageResolverStatus;
+
 /// Identifies information about disks which may be attached to Sleds.
 #[derive(Clone, Debug, Deserialize, JsonSchema, Serialize)]
 pub struct InventoryDisk {
@@ -118,6 +120,7 @@ pub struct Inventory {
     pub ledgered_sled_config: Option<OmicronSledConfig>,
     pub reconciler_status: ConfigReconcilerInventoryStatus,
     pub last_reconciliation: Option<ConfigReconcilerInventory>,
+    pub zone_image_resolver: ZoneImageResolverStatus,
 }
 
 /// Describes the last attempt made by the sled-agent-config-reconciler to

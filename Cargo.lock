@@ -4572,7 +4572,9 @@ dependencies = [
  "hashbrown 0.15.3",
  "ref-cast",
  "rustc-hash 2.1.1",
+ "schemars",
  "serde",
+ "serde_json",
 ]
 
 [[package]]
@@ -6606,9 +6608,11 @@ dependencies = [
 name = "nexus-sled-agent-shared"
 version = "0.1.0"
 dependencies = [
+ "camino",
  "chrono",
  "daft",
  "id-map",
+ "iddqd",
  "illumos-utils",
  "omicron-common",
  "omicron-passwords",
@@ -6618,6 +6622,7 @@ dependencies = [
  "serde",
  "serde_json",
  "sled-hardware-types",
+ "slog",
  "strum",
  "thiserror 1.0.69",
  "tufaceous-artifact",
@@ -7802,6 +7807,7 @@ dependencies = [
  "hyper",
  "hyper-staticfile",
  "id-map",
+ "iddqd",
  "illumos-utils",
  "installinator-common",
  "internal-dns-resolver",
@@ -11733,10 +11739,10 @@ dependencies = [
 name = "sled-agent-zone-images"
 version = "0.1.0"
 dependencies = [
- "anyhow",
  "camino",
  "camino-tempfile-ext",
  "dropshot",
+ "expectorate",
  "iddqd",
  "illumos-utils",
  "nexus-sled-agent-shared",
@@ -11744,11 +11750,15 @@ dependencies = [
  "omicron-uuid-kinds",
  "omicron-workspace-hack",
  "pretty_assertions",
+ "rayon",
+ "serde",
  "serde_json",
+ "sha2",
  "sled-storage",
  "slog",
  "slog-error-chain",
  "thiserror 1.0.69",
+ "tufaceous-artifact",
 ]
 
 [[package]]
@@ -14430,6 +14440,7 @@ dependencies = [
  "internal-dns-types",
  "itertools 0.14.0",
  "maplit",
+ "nexus-sled-agent-shared",
  "omicron-certificates",
  "omicron-common",
  "omicron-ddm-admin-client",
@@ -14447,6 +14458,7 @@ dependencies = [
  "serde",
  "serde_json",
  "sha2",
+ "sled-agent-zone-images",
  "sled-hardware-types",
  "slog",
  "slog-dtrace",

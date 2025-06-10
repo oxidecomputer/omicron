@@ -28,6 +28,7 @@ use nexus_sled_agent_shared::inventory::{
     InventoryDisk, InventoryZpool, OmicronSledConfig, OmicronSledConfigResult,
     OmicronZonesConfig, SledRole,
 };
+use nexus_sled_agent_shared::zone_images::ZoneImageResolverStatus;
 use omicron_common::api::external::{
     ByteCount, DiskState, Error, Generation, ResourceType,
 };
@@ -743,6 +744,17 @@ impl SledAgent {
             remove_mupdate_override: None,
         };
 
+        // TODO: use the real zone image resolver here. We currently have a few
+        // different sources of truth for zone images and/or the artifact store:
+        //
+        // - SimArtifactStorage
+        // - the sled-config PUT API
+        // - the real zone image resolver
+        //
+        // We'll want to have a coherent view of all of that, ideally using the
+        // real zone image resolver if possible.
+        let zone_image_resolver = ZoneImageResolverStatus::new_fake();
+
         Ok(Inventory {
             sled_id: self.id,
             sled_agent_address,
@@ -807,6 +819,7 @@ impl SledAgent {
             ledgered_sled_config: Some(sled_config),
             reconciler_status: ConfigReconcilerInventoryStatus::NotYetRun,
             last_reconciliation: None,
+            zone_image_resolver,
         })
     }
 
