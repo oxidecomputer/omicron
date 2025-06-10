@@ -23,6 +23,7 @@ use sled_agent_config_reconciler::{
     AvailableDatasetsReceiver, CurrentlyManagedZpools,
     CurrentlyManagedZpoolsReceiver,
 };
+use sled_agent_zone_images::ramdisk_file_source;
 use slog::{Logger, error, warn};
 use std::collections::{HashMap, HashSet};
 use std::hash::{Hash, Hasher};
@@ -354,7 +355,7 @@ impl ProbeManagerInner {
             .with_log(self.log.clone())
             .with_underlay_vnic_allocator(&self.vnic_allocator)
             .with_zone_root_path(zone_root_path)
-            .with_zone_image_paths(&["/opt/oxide".into()])
+            .with_file_source(&ramdisk_file_source("probe"))
             .with_zone_type("probe")
             .with_unique_name(OmicronZoneUuid::from_untyped_uuid(probe.id))
             .with_datasets(&[])
