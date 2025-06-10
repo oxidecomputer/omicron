@@ -479,7 +479,7 @@ impl BackgroundTasksInitializer {
         // target blueprint.
         let blueprint_planner = blueprint_planner::BlueprintPlanner::new(
             datastore.clone(),
-            false,
+            config.blueprints.disable_planner,
             inventory_watcher.clone(),
             rx_blueprint.clone(),
         );

@@ -1063,7 +1063,7 @@ mod test {
             physical_disk_adoption.period_secs = 30
             decommissioned_disk_cleaner.period_secs = 30
             phantom_disks.period_secs = 30
-            blueprints.disable_planner = false
+            blueprints.disable_planner = true
             blueprints.period_secs_load = 10
             blueprints.period_secs_plan = 60
             blueprints.period_secs_execute = 60
@@ -1230,7 +1230,7 @@ mod test {
                             period_secs: Duration::from_secs(30),
                         },
                         blueprints: BlueprintTasksConfig {
-                            disable_planner: false,
+                            disable_planner: true,
                             period_secs_load: Duration::from_secs(10),
                             period_secs_plan: Duration::from_secs(60),
                             period_secs_execute: Duration::from_secs(60),
