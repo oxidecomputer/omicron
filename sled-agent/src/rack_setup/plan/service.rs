@@ -21,10 +21,10 @@ use nexus_types::deployment::{
     blueprint_zone_type,
 };
 use omicron_common::address::{
-    DENDRITE_PORT, DNS_HTTP_PORT, DNS_PORT, Ipv6Subnet, MGD_PORT, MGS_PORT,
-    NEXUS_INTERNAL_PORT, NTP_PORT, NUM_SOURCE_NAT_PORTS, REPO_DEPOT_PORT,
-    RSS_RESERVED_ADDRESSES, ReservedRackSubnet, SLED_PREFIX, get_sled_address,
-    get_switch_zone_address,
+    COCKROACH_HTTP_PORT, COCKROACH_PORT, DENDRITE_PORT, DNS_HTTP_PORT,
+    DNS_PORT, Ipv6Subnet, MGD_PORT, MGS_PORT, NEXUS_INTERNAL_PORT, NTP_PORT,
+    NUM_SOURCE_NAT_PORTS, REPO_DEPOT_PORT, RSS_RESERVED_ADDRESSES,
+    ReservedRackSubnet, SLED_PREFIX, get_sled_address, get_switch_zone_address,
 };
 use omicron_common::api::external::{MacAddr, Vni};
 use omicron_common::api::internal::shared::{
@@ -454,10 +454,10 @@ impl Plan {
             };
             let id = OmicronZoneUuid::new_v4();
             let ip = sled.addr_alloc.next().expect("Not enough addrs");
-            let port = omicron_common::address::COCKROACH_PORT;
-            let address = SocketAddrV6::new(ip, port, 0, 0);
+            let listen_address = SocketAddrV6::new(ip, COCKROACH_PORT, 0, 0);
+            let http_address = SocketAddrV6::new(ip, COCKROACH_HTTP_PORT, 0, 0);
             dns_builder
-                .host_zone_with_one_backend(id, ServiceName::Cockroach, address)
+                .host_zone_cockroach(id, listen_address, http_address)
                 .unwrap();
             let dataset_name =
                 sled.alloc_dataset_from_u2s(DatasetKind::Cockroach)?;
@@ -467,7 +467,7 @@ impl Plan {
                 id,
                 zone_type: BlueprintZoneType::CockroachDb(
                     blueprint_zone_type::CockroachDb {
-                        address,
+                        address: listen_address,
                         dataset: OmicronZoneDataset {
                             pool_name: *dataset_name.pool(),
                         },

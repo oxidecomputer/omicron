@@ -75,7 +75,9 @@ use omicron_common::address::SLED_PREFIX;
 use omicron_common::address::TFPORTD_PORT;
 use omicron_common::address::WICKETD_NEXUS_PROXY_PORT;
 use omicron_common::address::WICKETD_PORT;
-use omicron_common::address::{BOOTSTRAP_ARTIFACT_PORT, COCKROACH_ADMIN_PORT};
+use omicron_common::address::{
+    BOOTSTRAP_ARTIFACT_PORT, COCKROACH_ADMIN_PORT, COCKROACH_HTTP_PORT,
+};
 use omicron_common::address::{
     CLICKHOUSE_ADMIN_PORT, CLICKHOUSE_TCP_PORT,
     get_internal_dns_server_addresses,
@@ -1687,6 +1689,11 @@ impl ServiceManager {
                     addr.set_port(COCKROACH_ADMIN_PORT);
                     addr.to_string()
                 };
+                let http_address = {
+                    let mut addr = *address;
+                    addr.set_port(COCKROACH_HTTP_PORT);
+                    addr.to_string()
+                };
 
                 let nw_setup_service = Self::zone_network_setup_install(
                     Some(&info.underlay_address),
@@ -1699,6 +1706,11 @@ impl ServiceManager {
                 // Configure the CockroachDB service.
                 let cockroachdb_config = PropertyGroupBuilder::new("config")
                     .add_property("listen_addr", "astring", address.to_string())
+                    .add_property(
+                        "http_addr",
+                        "astring",
+                        http_address.to_string(),
+                    )
                     .add_property("store", "astring", "/data");
                 let cockroachdb_service =
                     ServiceBuilder::new("oxide/cockroachdb").add_instance(

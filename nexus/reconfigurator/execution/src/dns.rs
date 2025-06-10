@@ -977,6 +977,7 @@ mod test {
             ServiceName::Clickhouse,
             ServiceName::ClickhouseNative,
             ServiceName::Cockroach,
+            ServiceName::CockroachHttp,
             ServiceName::InternalDns,
             ServiceName::ExternalDns,
             ServiceName::Nexus,

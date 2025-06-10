@@ -54,7 +54,10 @@ pub enum ServiceName {
     ClickhouseKeeper,
     /// The HTTP interface to a replicated ClickHouse server.
     ClickhouseServer,
+    /// The listen address of CockroachDB, for accessing the postgres interface
     Cockroach,
+    /// The http address of CockroachDB, for accessing metrics
+    CockroachHttp,
     InternalDns,
     ExternalDns,
     Nexus,
@@ -90,6 +93,7 @@ impl ServiceName {
             ServiceName::ClickhouseKeeper => "clickhouse-keeper",
             ServiceName::ClickhouseServer => "clickhouse-server",
             ServiceName::Cockroach => "cockroach",
+            ServiceName::CockroachHttp => "cockroach-http",
             ServiceName::ExternalDns => "external-dns",
             ServiceName::InternalDns => "nameservice",
             ServiceName::Nexus => "nexus",
@@ -123,6 +127,7 @@ impl ServiceName {
             | ServiceName::ClickhouseKeeper
             | ServiceName::ClickhouseServer
             | ServiceName::Cockroach
+            | ServiceName::CockroachHttp
             | ServiceName::InternalDns
             | ServiceName::ExternalDns
             | ServiceName::Nexus

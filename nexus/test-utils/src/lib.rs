@@ -515,11 +515,13 @@ impl<'a, N: NexusServer> ControlPlaneTestContextBuilder<'a, N> {
         let zone_id = OmicronZoneUuid::new_v4();
         let zpool_id = ZpoolUuid::new_v4();
         eprintln!("DB address: {}", address);
-        self.rack_init_builder.add_service_to_dns(
-            zone_id,
-            address,
-            ServiceName::Cockroach,
-        );
+
+        let http_address = database.http_addr();
+        self.rack_init_builder
+            .internal_dns_config
+            .host_zone_cockroach(zone_id, address, http_address)
+            .expect("Failed to set up CockroachDB DNS");
+
         let pool_name = illumos_utils::zpool::ZpoolName::new_external(zpool_id)
             .to_string()
             .parse()

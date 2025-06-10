@@ -97,7 +97,27 @@ pub fn blueprint_internal_dns_config(
             }
             BlueprintZoneType::CockroachDb(
                 blueprint_zone_type::CockroachDb { address, .. },
-            ) => (ServiceName::Cockroach, address),
+            ) => {
+                let listen_addr = *address;
+                // TODO(https://github.com/oxidecomputer/omicron/issues/6796):
+                // We should probably be storing this address in the
+                // blueprint and propagating it to DNS, and doing the same for
+                // the "Cockroach Admin" server, which isn't in DNS.
+                //
+                // In production, however, we expect this address to always be
+                // using this hardcoded port anyway.
+                let http_addr = {
+                    let mut addr = *address;
+                    addr.set_port(omicron_common::address::COCKROACH_HTTP_PORT);
+                    addr
+                };
+                dns_builder.host_zone_cockroach(
+                    zone.id,
+                    listen_addr,
+                    http_addr,
+                )?;
+                continue 'all_zones;
+            }
             BlueprintZoneType::Nexus(blueprint_zone_type::Nexus {
                 internal_address,
                 ..

@@ -12,7 +12,7 @@ use nexus_config::PostgresConfigWithUrl;
 use std::collections::BTreeMap;
 use std::ffi::{OsStr, OsString};
 use std::fmt;
-use std::net::SocketAddr;
+use std::net::SocketAddrV6;
 use std::ops::Deref;
 use std::os::unix::process::ExitStatusExt;
 use std::path::Path;
@@ -119,7 +119,7 @@ impl CockroachStarterBuilder {
         builder
             .arg("start-single-node")
             .arg("--insecure")
-            .arg("--http-addr=:0");
+            .arg("--http-addr=[::1]:0");
         builder
     }
 
@@ -563,7 +563,7 @@ pub struct CockroachInstance {
     /// child process id
     pid: u32,
     /// address of the HTTP API
-    http_addr: SocketAddr,
+    http_addr: SocketAddrV6,
     /// PostgreSQL config to use to connect to CockroachDB as a SQL client
     pg_config: PostgresConfigWithUrl,
     /// handle to child process, if it hasn't been cleaned up already
@@ -581,7 +581,7 @@ impl CockroachInstance {
     }
 
     /// Returns the HTTP address where CockroachDB's web UI is accessible
-    pub fn http_addr(&self) -> SocketAddr {
+    pub fn http_addr(&self) -> SocketAddrV6 {
         self.http_addr
     }
 
@@ -904,11 +904,11 @@ pub async fn wipe(
 
 /// Parses the HTTP address from CockroachDB's stdout file.
 ///
-/// Looks for a line like "webui: http://127.0.0.1:39953"
+/// Looks for a line like "webui: http://[::1]:39953"
 /// and extracts the socket address.
 async fn parse_http_addr_from_stdout(
     stdout_path: &std::path::Path,
-) -> Result<Option<SocketAddr>, anyhow::Error> {
+) -> Result<Option<SocketAddrV6>, anyhow::Error> {
     use std::str::FromStr;
 
     // Try to read the stdout file
@@ -935,7 +935,7 @@ async fn parse_http_addr_from_stdout(
                 let host_port =
                     http_part.split('/').next().unwrap_or(http_part);
                 // Parse as a socket address
-                match SocketAddr::from_str(host_port) {
+                match SocketAddrV6::from_str(host_port) {
                     Ok(addr) => return Ok(Some(addr)),
                     Err(parse_err) => {
                         return Err(anyhow!(
@@ -1611,20 +1611,10 @@ mod test {
         );
 
         // The HTTP address should be on localhost
-        match http_addr.ip() {
-            std::net::IpAddr::V4(ipv4) => {
-                assert!(
-                    ipv4.is_loopback(),
-                    "HTTP address should be on loopback interface"
-                );
-            }
-            std::net::IpAddr::V6(ipv6) => {
-                assert!(
-                    ipv6.is_loopback(),
-                    "HTTP address should be on loopback interface"
-                );
-            }
-        }
+        assert!(
+            http_addr.ip().is_loopback(),
+            "HTTP address should be on loopback interface"
+        );
 
         eprintln!("CockroachDB HTTP address: {}", http_addr);
 
@@ -1848,16 +1838,9 @@ mod test {
         )
         .await
         .expect("failed to write test stdout");
-        let result = super::parse_http_addr_from_stdout(&stdout_path)
+        super::parse_http_addr_from_stdout(&stdout_path)
             .await
-            .expect("parsing should succeed");
-        assert!(result.is_some(), "should return Some when webui line found");
-        let addr = result.unwrap();
-        assert_eq!(
-            addr.ip(),
-            std::net::IpAddr::V4(std::net::Ipv4Addr::new(127, 0, 0, 1))
-        );
-        assert_eq!(addr.port(), 39953);
+            .expect_err("parsing should not succeed for IPv4 address");
 
         // Test case: IPv6 address
         fs::write(&stdout_path, "webui:               http://[::1]:12345\n")
@@ -1868,12 +1851,7 @@ mod test {
             .expect("parsing should succeed");
         assert!(result.is_some(), "should return Some for IPv6 address");
         let addr = result.unwrap();
-        assert_eq!(
-            addr.ip(),
-            std::net::IpAddr::V6(std::net::Ipv6Addr::new(
-                0, 0, 0, 0, 0, 0, 0, 1
-            ))
-        );
+        assert_eq!(addr.ip(), &std::net::Ipv6Addr::new(0, 0, 0, 0, 0, 0, 0, 1));
         assert_eq!(addr.port(), 12345);
     }
 

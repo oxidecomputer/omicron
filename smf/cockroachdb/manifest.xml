@@ -29,6 +29,7 @@
 
   <property_group name='config' type='application'>
     <propval name='listen_addr' type='astring' value='unknown' />
+    <propval name='http_addr' type='astring' value='unknown' />
     <propval name='store' type='astring' value='unknown' />
   </property_group>
 
