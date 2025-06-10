@@ -21,7 +21,6 @@ use sled_storage::dataset::INSTALL_DATASET;
 use sled_storage::dataset::M2_ARTIFACT_DATASET;
 use slog::error;
 use slog::o;
-use slog::warn;
 use slog_error_chain::InlineErrorChain;
 use std::sync::Arc;
 use std::sync::Mutex;
