@@ -7,13 +7,16 @@
 use crate::app::background::BackgroundTask;
 use chrono::Utc;
 use futures::future::BoxFuture;
+use nexus_auth::authz;
 use nexus_db_queries::context::OpContext;
 use nexus_db_queries::db::DataStore;
 use nexus_reconfigurator_planning::planner::Planner;
 use nexus_reconfigurator_preparation::PlanningInputFromDb;
 use nexus_types::deployment::{Blueprint, BlueprintTarget};
 use nexus_types::internal_api::background::BlueprintPlannerStatus;
+use omicron_common::api::external::LookupType;
 use omicron_uuid_kinds::CollectionUuid;
+use omicron_uuid_kinds::GenericUuid as _;
 use serde_json::json;
 use std::sync::Arc;
 use tokio::sync::watch::{self, Receiver, Sender};
@@ -48,11 +51,9 @@ impl BlueprintPlanner {
     /// If it is different from the current target blueprint,
     /// save it and make it the current target.
     pub async fn plan(&mut self, opctx: &OpContext) -> BlueprintPlannerStatus {
-        let mut status = BlueprintPlannerStatus::default();
         if self.disabled {
             debug!(&opctx.log, "blueprint planning disabled, doing nothing");
-            status.disabled = true;
-            return status;
+            return BlueprintPlannerStatus::Disabled;
         }
 
         // Get the current target blueprint to use as a parent.
@@ -63,13 +64,12 @@ impl BlueprintPlanner {
                 "blueprint planning skipped";
                 "reason" => "no target blueprint loaded"
             );
-            status.error = Some(String::from(
+            return BlueprintPlannerStatus::Error(String::from(
                 "no target blueprint to use as parent for planning",
             ));
-            return status;
         };
         let (target, parent) = &*loaded;
-        status.parent_id = parent.id;
+        let parent_blueprint_id = parent.id;
 
         // Get the inventory most recently seen by the collection
         // background task. The value is `Copy`, so with the deref
@@ -80,9 +80,9 @@ impl BlueprintPlanner {
                 "blueprint planning skipped";
                 "reason" => "no inventory collection available"
             );
-            status.error =
-                Some(String::from("no inventory collection available"));
-            return status;
+            return BlueprintPlannerStatus::Error(String::from(
+                "no inventory collection available",
+            ));
         };
         let collection = match self
             .datastore
@@ -97,15 +97,14 @@ impl BlueprintPlanner {
                     "collection_id" => %collection_id,
                     "error" => %error,
                 );
-                status.error = Some(format!(
+                return BlueprintPlannerStatus::Error(format!(
                     "can't read inventory collection {}: {}",
                     collection_id, error
                 ));
-                return status;
             }
         };
 
-        // Assemble and adjust the planning context.
+        // Assemble the planning context.
         let input =
             match PlanningInputFromDb::assemble(opctx, &self.datastore).await {
                 Ok(input) => input,
@@ -115,9 +114,9 @@ impl BlueprintPlanner {
                         "can't assemble planning input";
                         "error" => %error,
                     );
-                    status.error =
-                        Some(format!("can't assemble planning input: {error}"));
-                    return status;
+                    return BlueprintPlannerStatus::Error(format!(
+                        "can't assemble planning input: {error}"
+                    ));
                 }
             };
 
@@ -135,21 +134,21 @@ impl BlueprintPlanner {
                     &opctx.log,
                     "can't make planner";
                     "error" => %error,
-                    "parent_blueprint_id" => %parent.id,
+                    "parent_blueprint_id" => %parent_blueprint_id,
                 );
-                status.error = Some(format!(
+                return BlueprintPlannerStatus::Error(format!(
                     "can't make planner based on {}: {}",
-                    parent.id, error
+                    parent_blueprint_id, error
                 ));
-                return status;
             }
         };
         let blueprint = match planner.plan() {
             Ok(blueprint) => blueprint,
             Err(error) => {
                 error!(&opctx.log, "can't plan: {error}");
-                status.error = Some(format!("can't plan: {error}"));
-                return status;
+                return BlueprintPlannerStatus::Error(format!(
+                    "can't plan: {error}"
+                ));
             }
         };
 
@@ -160,21 +159,19 @@ impl BlueprintPlanner {
             info!(
                 &opctx.log,
                 "blueprint unchanged from current target";
-                "parent_blueprint_id" => %parent.id,
+                "parent_blueprint_id" => %parent_blueprint_id,
             );
-            return status;
+            return BlueprintPlannerStatus::Unchanged { parent_blueprint_id };
         }
 
-        // We have a fresh blueprint.
+        // We have a fresh blueprint; save it.
+        let blueprint_id = blueprint.id;
         info!(
             &opctx.log,
             "planning produced new blueprint";
-            "parent_blueprint_id" => %parent.id,
-            "blueprint_id" => %blueprint.id,
+            "parent_blueprint_id" => %parent_blueprint_id,
+            "blueprint_id" => %blueprint_id,
         );
-        status.blueprint_id = Some(blueprint.id);
-
-        // Save it.
         match self.datastore.blueprint_insert(opctx, &blueprint).await {
             Ok(()) => (),
             Err(error) => {
@@ -182,45 +179,61 @@ impl BlueprintPlanner {
                     &opctx.log,
                     "can't save blueprint";
                     "error" => %error,
-                    "blueprint_id" => %blueprint.id,
+                    "blueprint_id" => %blueprint_id,
                 );
-                status.error = Some(format!(
+                return BlueprintPlannerStatus::Error(format!(
                     "can't save blueprint {}: {}",
-                    blueprint.id, error
+                    blueprint_id, error
                 ));
-                return status;
             }
         }
 
         // Try to make it the current target.
         let target = BlueprintTarget {
-            target_id: blueprint.id,
-            enabled: target.enabled,
+            target_id: blueprint_id,
+            enabled: target.enabled, // copy previous `enabled` flag
             time_made_target: Utc::now(),
         };
         match self.datastore.blueprint_target_set_current(opctx, target).await {
-            Ok(()) => {
-                status.new_target = true;
-            }
+            Ok(()) => (),
             Err(error) => {
                 warn!(
                     &opctx.log,
-                    "can't make blueprint the current target";
+                    "can't make blueprint the current target, deleting it";
                     "error" => %error,
-                    "blueprint_id" => %blueprint.id
+                    "blueprint_id" => %blueprint_id
                 );
-                status.error = Some(format!(
-                    "can't make blueprint {} the current target: {}",
-                    blueprint.id, error,
-                ));
-                return status;
+                let blueprint_id = blueprint_id.into_untyped_uuid();
+                let authz_blueprint = authz::Blueprint::new(
+                    authz::FLEET,
+                    blueprint_id,
+                    LookupType::ById(blueprint_id),
+                );
+                match self
+                    .datastore
+                    .blueprint_delete(&opctx, &authz_blueprint)
+                    .await
+                {
+                    Ok(()) => (),
+                    Err(error) => {
+                        warn!(
+                            &opctx.log,
+                            "can't delete blueprint";
+                            "error" => %error,
+                            "blueprint_id" => %blueprint_id,
+                        );
+                    }
+                }
+                return BlueprintPlannerStatus::Planned {
+                    parent_blueprint_id,
+                    error: format!("{error}"),
+                };
             }
         }
 
-        // Notify watchers that we have a new target.
+        // We have a new target!
         self.tx_blueprint.send_replace(Some(Arc::new((target, blueprint))));
-
-        status
+        BlueprintPlannerStatus::Targeted { parent_blueprint_id, blueprint_id }
     }
 }
 
@@ -293,12 +306,17 @@ mod test {
             planner.activate(&opctx).await,
         )
         .unwrap();
-        assert!(!status.disabled);
-        assert!(status.error.is_none());
-        assert_eq!(status.parent_id, initial_blueprint.id);
-        let blueprint_id = status.blueprint_id.unwrap();
-        assert_ne!(blueprint_id, initial_blueprint.id);
-        assert!(status.new_target);
+        let blueprint_id = match status {
+            BlueprintPlannerStatus::Targeted {
+                parent_blueprint_id,
+                blueprint_id,
+            } if parent_blueprint_id == initial_blueprint.id
+                && blueprint_id != initial_blueprint.id =>
+            {
+                blueprint_id
+            }
+            _ => panic!("expected new target blueprint"),
+        };
 
         // Load and check the new target blueprint.
         loader.activate(&opctx).await;
@@ -319,12 +337,8 @@ mod test {
         .unwrap();
         assert_eq!(
             status,
-            BlueprintPlannerStatus {
-                disabled: false,
-                error: None,
-                parent_id: blueprint_id,
-                blueprint_id: None,
-                new_target: false,
+            BlueprintPlannerStatus::Unchanged {
+                parent_blueprint_id: blueprint_id,
             }
         );
     }

@@ -460,27 +460,26 @@ impl slog::KV for DebugDatasetsRendezvousStats {
 }
 
 /// The status of a `blueprint_planner` background task activation.
-#[derive(Clone, Debug, Default, Deserialize, Serialize, PartialEq, Eq)]
-pub struct BlueprintPlannerStatus {
-    /// `true` iff automatic blueprint planning has been explicitly disabled
+#[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
+pub enum BlueprintPlannerStatus {
+    /// Automatic blueprint planning has been explicitly disabled
     /// by the config file.
-    pub disabled: bool,
+    Disabled,
 
-    /// `Some(message)` iff an error occurred during planning or blueprint
-    /// manipulation.
-    pub error: Option<String>,
+    /// An error occurred during planning or blueprint insertion.
+    Error(String),
 
-    /// The id of the target blueprint at the start of planning.
-    pub parent_id: BlueprintUuid,
+    /// Planning produced a blueprint identital to the current target,
+    /// so we threw it away and did nothing.
+    Unchanged { parent_blueprint_id: BlueprintUuid },
 
-    /// The id of the newly planned blueprint, if planning was successful
-    /// and the result differs from its parent.
-    pub blueprint_id: Option<BlueprintUuid>,
+    /// Planning produced a new blueprint, but we failed to make it
+    /// the current target and so deleted it.
+    Planned { parent_blueprint_id: BlueprintUuid, error: String },
 
-    /// Whether the newly planned blueprint was able to be set as the
-    /// current target. If `false`, this Nexus probably lost the race
-    /// to another, and the new blueprint may be safely deleted.
-    pub new_target: bool,
+    /// Planing succeeded, and we saved and made the new blueprint the
+    /// current target.
+    Targeted { parent_blueprint_id: BlueprintUuid, blueprint_id: BlueprintUuid },
 }
 
 /// The status of a `alert_dispatcher` background task activation.
