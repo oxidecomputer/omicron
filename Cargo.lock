@@ -11762,6 +11762,7 @@ dependencies = [
  "omicron-uuid-kinds",
  "omicron-workspace-hack",
  "proptest",
+ "schemars",
  "scopeguard",
  "serde",
  "serde_json",
