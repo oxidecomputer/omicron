@@ -134,6 +134,21 @@ impl SpTestState {
         self.caboose_rot_b.as_ref().expect("ROT slot B caboose")
     }
 
+    pub fn expect_caboose_rot_active(&self) -> &SpComponentCaboose {
+        match self.expect_rot_active_slot() {
+            RotSlot::A => self.expect_caboose_rot_a(),
+            RotSlot::B => self.expect_caboose_rot_b(),
+        }
+    }
+
+    pub fn expect_caboose_rot_inactive(&self) -> &SpComponentCaboose {
+        let slot = self.expect_rot_active_slot().toggled();
+        match slot {
+            RotSlot::A => self.expect_caboose_rot_a(),
+            RotSlot::B => self.expect_caboose_rot_b(),
+        }
+    }
+
     pub fn baseboard_id(&self) -> BaseboardId {
         BaseboardId {
             part_number: self.sp_state.model.clone(),

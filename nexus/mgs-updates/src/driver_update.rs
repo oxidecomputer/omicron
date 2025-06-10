@@ -656,7 +656,7 @@ mod test {
         let artifacts = TestArtifacts::new(log).await.unwrap();
 
         // Basic case: normal update
-        run_one_successful_update(
+        run_one_successful_sp_update(
             &gwtestctx,
             &artifacts,
             SpType::Sled,
@@ -667,7 +667,7 @@ mod test {
         .await;
 
         // Basic case: attempted update, found no changes needed
-        run_one_successful_update(
+        run_one_successful_sp_update(
             &gwtestctx,
             &artifacts,
             SpType::Sled,
@@ -678,7 +678,7 @@ mod test {
         .await;
 
         // Run the same two tests for a switch SP.
-        run_one_successful_update(
+        run_one_successful_sp_update(
             &gwtestctx,
             &artifacts,
             SpType::Switch,
@@ -687,7 +687,7 @@ mod test {
             UpdateCompletedHow::CompletedUpdate,
         )
         .await;
-        run_one_successful_update(
+        run_one_successful_sp_update(
             &gwtestctx,
             &artifacts,
             SpType::Switch,
@@ -702,7 +702,7 @@ mod test {
     }
 
     // TODO-K: test same but for rot
-    async fn run_one_successful_update(
+    async fn run_one_successful_sp_update(
         gwtestctx: &GatewayTestContext,
         artifacts: &TestArtifacts,
         sp_type: SpType,
@@ -726,7 +726,95 @@ mod test {
 
         let in_progress = desc.setup().await;
         let finished = in_progress.finish().await;
-        finished.expect_success(expected_result);
+        finished.expect_sp_success(expected_result);
+    }
+
+    /// Tests several happy-path cases of updating an RoT
+    #[tokio::test]
+    async fn test_rot_update_basic() {
+        let gwtestctx = gateway_test_utils::setup::test_setup(
+            "test_sp_update_basic",
+            SpPort::One,
+        )
+        .await;
+        let log = &gwtestctx.logctx.log;
+        let artifacts = TestArtifacts::new(log).await.unwrap();
+
+        // Basic case: normal update
+        run_one_successful_rot_update(
+            &gwtestctx,
+            &artifacts,
+            SpType::Sled,
+            1,
+            &artifacts.rot_gimlet_artifact_hash,
+            UpdateCompletedHow::CompletedUpdate,
+        )
+        .await;
+
+        //           // Basic case: attempted update, found no changes needed
+        //           run_one_successful_sp_update(
+        //               &gwtestctx,
+        //               &artifacts,
+        //               SpType::Sled,
+        //               1,
+        //               &artifacts.sp_gimlet_artifact_hash,
+        //               UpdateCompletedHow::FoundNoChangesNeeded,
+        //           )
+        //           .await;
+        //
+        //           // Run the same two tests for a switch SP.
+        //           run_one_successful_sp_update(
+        //               &gwtestctx,
+        //               &artifacts,
+        //               SpType::Switch,
+        //               0,
+        //               &artifacts.sp_sidecar_artifact_hash,
+        //               UpdateCompletedHow::CompletedUpdate,
+        //           )
+        //           .await;
+        //           run_one_successful_sp_update(
+        //               &gwtestctx,
+        //               &artifacts,
+        //               SpType::Switch,
+        //               0,
+        //               &artifacts.sp_sidecar_artifact_hash,
+        //               UpdateCompletedHow::FoundNoChangesNeeded,
+        //           )
+        //           .await;
+
+        artifacts.teardown().await;
+        gwtestctx.teardown().await;
+    }
+
+    // TODO-K: test same but for rot
+    async fn run_one_successful_rot_update(
+        gwtestctx: &GatewayTestContext,
+        artifacts: &TestArtifacts,
+        sp_type: SpType,
+        slot_id: u32,
+        artifact_hash: &ArtifactHash,
+        expected_result: UpdateCompletedHow,
+    ) {
+        let desc = UpdateDescription {
+            gwtestctx,
+            artifacts,
+            sp_type,
+            slot_id,
+            artifact_hash,
+            override_baseboard_id: None,
+            expected_sp_component: ExpectedSpComponent::Rot {
+                override_expected_active_slot: None,
+                override_expected_inactive_version: None,
+                override_expected_persistent_boot_preference: None,
+                override_expected_pending_persistent_boot_preference: None,
+                override_expected_transient_boot_preference: None,
+            },
+            override_progress_timeout: None,
+        };
+
+        let in_progress = desc.setup().await;
+        let finished = in_progress.finish().await;
+        finished.expect_rot_success(expected_result);
     }
 
     /// Tests the case where two updates run concurrently.  One notices another
@@ -809,8 +897,9 @@ mod test {
         let finished2 = in_progress2.finish().await;
 
         // Both should succeed, but with different codes.
-        finished1.expect_success(UpdateCompletedHow::CompletedUpdate);
-        finished2.expect_success(UpdateCompletedHow::WaitedForConcurrentUpdate);
+        finished1.expect_sp_success(UpdateCompletedHow::CompletedUpdate);
+        finished2
+            .expect_sp_success(UpdateCompletedHow::WaitedForConcurrentUpdate);
 
         artifacts.teardown().await;
         gwtestctx.teardown().await;
@@ -886,7 +975,8 @@ mod test {
         // This time, resume the second update first.  It will take over the
         // first one.
         let finished2 = in_progress2.finish().await;
-        finished2.expect_success(UpdateCompletedHow::TookOverConcurrentUpdate);
+        finished2
+            .expect_sp_success(UpdateCompletedHow::TookOverConcurrentUpdate);
 
         // Now if we resume the first update, it will find that the SP has been
         // reset out from under it.  This is the closest thing we have to a test

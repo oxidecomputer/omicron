@@ -7,11 +7,14 @@
 //! These are factored to make it easy to write a variety of different kinds of
 //! tests without having to put together too much boilerplate in each test.
 
+use crate::SpComponentUpdateHelper;
 use crate::driver::UpdateAttemptStatusUpdater;
 use crate::driver_update::ApplyUpdateError;
 use crate::driver_update::PROGRESS_TIMEOUT;
 use crate::driver_update::SpComponentUpdate;
 use crate::driver_update::apply_update;
+use crate::rot_bootloader_updater::ReconfiguratorRotBootloaderUpdater;
+use crate::rot_updater::ReconfiguratorRotUpdater;
 use crate::sp_updater::ReconfiguratorSpUpdater;
 use crate::test_util::cabooses_equal;
 use crate::test_util::sp_test_state::SpTestState;
@@ -44,8 +47,6 @@ pub enum ExpectedSpComponent {
         override_expected_active: Option<ArtifactVersion>,
         override_expected_inactive: Option<ExpectedVersion>,
     },
-    // TODO-K: Remove once fully implemented
-    #[allow(dead_code)]
     Rot {
         override_expected_active_slot: Option<ExpectedActiveRotSlot>,
         override_expected_inactive_version: Option<ExpectedVersion>,
@@ -211,7 +212,19 @@ impl UpdateDescription<'_> {
                 &request,
                 update_id,
             );
-            let sp_update_helper = Box::new(ReconfiguratorSpUpdater {});
+            let sp_update_helper: Box<
+                dyn SpComponentUpdateHelper + Send + Sync,
+            > = match request.details {
+                PendingMgsUpdateDetails::Sp { .. } => {
+                    Box::new(ReconfiguratorSpUpdater {})
+                }
+                PendingMgsUpdateDetails::Rot { .. } => {
+                    Box::new(ReconfiguratorRotUpdater {})
+                }
+                PendingMgsUpdateDetails::RotBootloader { .. } => {
+                    Box::new(ReconfiguratorRotBootloaderUpdater {})
+                }
+            };
             apply_update(
                 artifact_cache,
                 &sp_update,
@@ -385,8 +398,8 @@ impl FinishedUpdateAttempt {
         FinishedUpdateAttempt { result, deployed_caboose, sp1, sp2 }
     }
 
-    /// Asserts various conditions associated with successful updates.
-    pub fn expect_success(&self, expected_result: UpdateCompletedHow) {
+    /// Asserts various conditions associated with successful SP updates.
+    pub fn expect_sp_success(&self, expected_result: UpdateCompletedHow) {
         let how = match self.result {
             Ok(how) if how == expected_result => how,
             _ => {
@@ -423,6 +436,59 @@ impl FinishedUpdateAttempt {
             assert_eq!(
                 sp1.expect_caboose_sp_active(),
                 sp2.expect_caboose_sp_inactive()
+            );
+        }
+    }
+
+    /// Asserts various conditions associated with successful RoT updates.
+    pub fn expect_rot_success(&self, expected_result: UpdateCompletedHow) {
+        let how = match self.result {
+            Ok(how) if how == expected_result => how,
+            _ => {
+                panic!(
+                    "unexpected result from apply_update(): {:?}",
+                    self.result,
+                );
+            }
+        };
+
+        eprintln!("apply_update() -> {:?}", how);
+        let sp2 = &self.sp2;
+
+        // The active slot should contain what we just updated to.
+        let deployed_caboose = &self.deployed_caboose;
+        assert!(cabooses_equal(
+            &sp2.expect_caboose_rot_active(),
+            &deployed_caboose
+        ));
+
+        // SP information should not have changed
+        let sp1 = &self.sp1;
+        assert_eq!(
+            sp1.expect_caboose_sp_inactive(),
+            sp2.expect_caboose_sp_inactive(),
+        );
+        assert_eq!(
+            sp1.expect_caboose_sp_active(),
+            sp2.expect_caboose_sp_active(),
+        );
+
+        if how == UpdateCompletedHow::FoundNoChangesNeeded {
+            assert_eq!(sp1.expect_caboose_rot_a(), sp2.expect_caboose_rot_a());
+            assert_eq!(sp1.expect_caboose_rot_b(), sp2.expect_caboose_rot_b());
+            assert_eq!(sp1.sp_state, sp2.sp_state);
+            assert_eq!(sp1.sp_boot_info, sp2.sp_boot_info);
+        } else {
+            // An update was completed. The active slot should be what was the
+            // inactive one before and the inactive slot should contain what was
+            // in the active slot before
+            assert_eq!(
+                sp1.expect_rot_active_slot().toggled(),
+                sp2.expect_rot_active_slot()
+            );
+            assert_eq!(
+                sp1.expect_caboose_rot_active(),
+                sp2.expect_caboose_rot_inactive()
             );
         }
     }
