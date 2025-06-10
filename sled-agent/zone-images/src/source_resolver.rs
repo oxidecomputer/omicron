@@ -8,10 +8,10 @@ use crate::RAMDISK_IMAGE_PATH;
 use crate::install_dataset_file_name;
 use crate::mupdate_override::AllMupdateOverrides;
 use crate::ramdisk_file_source;
+use crate::zone_manifest::AllZoneManifests;
 use camino::Utf8PathBuf;
 use illumos_utils::running_zone::ZoneImageFileSource;
 use nexus_sled_agent_shared::inventory::OmicronZoneImageSource;
-use crate::zone_manifest::AllZoneManifests;
 use nexus_sled_agent_shared::zone_images::ZoneImageResolverStatus;
 use sled_agent_config_reconciler::InternalDisks;
 use sled_agent_config_reconciler::InternalDisksWithBootDisk;
@@ -43,45 +43,45 @@ pub struct ZoneImageSourceResolver {
 impl ZoneImageSourceResolver {
     /// Creates a new `ZoneImageSourceResolver`.
     pub fn new(
-    log: &slog::Logger,
-    internal_disks: InternalDisksWithBootDisk,
-) -> Self {
-    Self {
-        inner: Arc::new(Mutex::new(ResolverInner::new(
-            log,
-            internal_disks,
-        ))),
+        log: &slog::Logger,
+        internal_disks: InternalDisksWithBootDisk,
+    ) -> Self {
+        Self {
+            inner: Arc::new(Mutex::new(ResolverInner::new(
+                log,
+                internal_disks,
+            ))),
+        }
     }
-}
 
     /// Returns current information about resolver status and health.
     pub fn status(&self) -> ZoneImageResolverStatus {
-    let inner = self.inner.lock().unwrap();
-    let zone_manifest = inner.zone_manifests.status();
-    let mupdate_override = inner.mupdate_overrides.status();
+        let inner = self.inner.lock().unwrap();
+        let zone_manifest = inner.zone_manifests.status();
+        let mupdate_override = inner.mupdate_overrides.status();
 
-    ZoneImageResolverStatus { mupdate_override, zone_manifest }
-}
+        ZoneImageResolverStatus { mupdate_override, zone_manifest }
+    }
 
     /// Returns a [`ZoneImageFileSource`] consisting of the file name, plus a
     /// list of potential paths to search, for a zone image.
     pub fn file_source_for(
-    &self,
-    zone_type: &str,
-    image_source: &ZoneImageSource,
-    internal_disks: InternalDisks,
-) -> Result<ZoneImageFileSource, String> {
-    match image_source {
-        ZoneImageSource::Ramdisk => {
-            // RAM disk images are always stored on the RAM disk path.
-            Ok(ramdisk_file_source(zone_type))
-        }
-        ZoneImageSource::Omicron(image_source) => {
-            let inner = self.inner.lock().unwrap();
-            inner.file_source_for(zone_type, image_source, internal_disks)
+        &self,
+        zone_type: &str,
+        image_source: &ZoneImageSource,
+        internal_disks: InternalDisks,
+    ) -> Result<ZoneImageFileSource, String> {
+        match image_source {
+            ZoneImageSource::Ramdisk => {
+                // RAM disk images are always stored on the RAM disk path.
+                Ok(ramdisk_file_source(zone_type))
+            }
+            ZoneImageSource::Omicron(image_source) => {
+                let inner = self.inner.lock().unwrap();
+                inner.file_source_for(zone_type, image_source, internal_disks)
+            }
         }
     }
-}
 }
 
 #[derive(Debug)]
