@@ -32,6 +32,7 @@ use slog::Logger;
 use slog::info;
 use slog::warn;
 use slog_error_chain::InlineErrorChain;
+use std::borrow::Cow;
 use std::collections::BTreeMap;
 use std::net::IpAddr;
 use std::net::Ipv6Addr;
@@ -39,7 +40,8 @@ use std::num::NonZeroUsize;
 use std::str::FromStr as _;
 use std::sync::Arc;
 
-use super::CurrentlyManagedZpools;
+use super::OmicronDatasets;
+use super::datasets::ZoneDatasetDependencyError;
 
 #[derive(Debug, Clone)]
 pub enum TimeSyncStatus {
@@ -246,7 +248,30 @@ impl OmicronZones {
         desired_zones: &IdMap<OmicronZoneConfig>,
         sled_agent_facilities: &T,
         is_time_synchronized: bool,
-        all_u2_pools: &CurrentlyManagedZpools,
+        datasets: &OmicronDatasets,
+        log: &Logger,
+    ) {
+        self.start_zones_if_needed_impl(
+            desired_zones,
+            sled_agent_facilities,
+            &RealZoneFacilities,
+            is_time_synchronized,
+            datasets,
+            log,
+        )
+        .await
+    }
+
+    async fn start_zones_if_needed_impl<
+        T: SledAgentFacilities,
+        U: ZoneFacilities,
+    >(
+        &mut self,
+        desired_zones: &IdMap<OmicronZoneConfig>,
+        sled_agent_facilities: &T,
+        zone_facilities: &U,
+        is_time_synchronized: bool,
+        datasets: &OmicronDatasets,
         log: &Logger,
     ) {
         // Filter desired zones down to just those that we need to start. See
@@ -293,31 +318,129 @@ impl OmicronZones {
         });
 
         // Build up the futures for starting each zone.
-        let all_u2_pools = all_u2_pools.clone().into_vec();
         let start_futures = zones_to_start.map(|zone| {
-            sled_agent_facilities
-                .start_omicron_zone(
-                    zone,
-                    &self.mount_config,
-                    is_time_synchronized,
-                    &all_u2_pools,
-                )
-                .map(move |result| {
-                    (
-                        zone.clone(),
-                        result.map_err(ZoneStartError::SledAgentStartFailed),
-                    )
-                })
+            self.start_single_zone(
+                zone,
+                sled_agent_facilities,
+                zone_facilities,
+                is_time_synchronized,
+                datasets,
+                log,
+            )
+            .map(move |result| (zone.clone(), result))
         });
 
         // Concurrently start all zones, then record the results.
         let start_results = future::join_all(start_futures).await;
         for (config, result) in start_results {
             let state = match result {
-                Ok(running_zone) => ZoneState::Running(Arc::new(running_zone)),
+                Ok(state) => state,
                 Err(err) => ZoneState::FailedToStart(err),
             };
             self.zones.insert(OmicronZone { config, state });
+        }
+    }
+
+    async fn start_single_zone<T: SledAgentFacilities, U: ZoneFacilities>(
+        &self,
+        zone: &OmicronZoneConfig,
+        sled_agent_facilities: &T,
+        zone_facilities: &U,
+        is_time_synchronized: bool,
+        datasets: &OmicronDatasets,
+        log: &Logger,
+    ) -> Result<ZoneState, ZoneStartError> {
+        // Ensure no zone by this name exists. This should only happen in the
+        // event of a sled-agent restart, in which case all the zones the
+        // previous sled-agent process had started are still running.
+        if let Some(state) = self
+            .ensure_removed_before_starting(
+                zone,
+                sled_agent_facilities,
+                zone_facilities,
+                log,
+            )
+            .await?
+        {
+            return Ok(state);
+        }
+
+        // Ensure that time is sync'd, if needed by this zone.
+        if zone.zone_type.requires_timesync() && !is_time_synchronized {
+            return Err(ZoneStartError::TimeNotSynchronized);
+        }
+
+        // Ensure all dataset dependencies of this zone are okay.
+        let zone_root_path =
+            datasets.validate_zone_storage(zone, &self.mount_config)?;
+
+        // The zone is not running - start it.
+        match sled_agent_facilities
+            .start_omicron_zone(zone, zone_root_path)
+            .await
+        {
+            Ok(running_zone) => Ok(ZoneState::Running(Arc::new(running_zone))),
+            Err(err) => Err(ZoneStartError::SledAgentStartFailed(err)),
+        }
+    }
+
+    // The return type of this function is strange. The possible values are:
+    //
+    // * `Ok(None)` - the zone is not running
+    // * `Err(_)` - we had an error related to zone startup
+    // * `Ok(Some(state))` - the zone is still running and is in some state that
+    //    we need to do more work to handle (e.g., we found a running zone but
+    //    failed to shut it down cleanly, in which case we'll return
+    //    `Ok(Some(ZoneState::PartiallyShutDown { .. }))`). In this case, our
+    //    caller should do no further work to try to start `zone`, and should
+    //    instead bubble the `state` up to be recorded.
+    async fn ensure_removed_before_starting<
+        T: SledAgentFacilities,
+        U: ZoneFacilities,
+    >(
+        &self,
+        zone: &OmicronZoneConfig,
+        sled_agent_facilities: &T,
+        zone_facilities: &U,
+        log: &Logger,
+    ) -> Result<Option<ZoneState>, ZoneStartError> {
+        let zone_name = ZoneName::new(zone);
+
+        // If no zone by this name exists, there's nothing to remove.
+        if !zone_facilities.zone_with_name_exists(&zone_name).await? {
+            return Ok(None);
+        }
+
+        // NOTE: We might want to tell the sled-agent's metrics task to stop
+        // tracking any links in this zone. However, we don't have very easy
+        // access to them, without running a command in the zone. These links
+        // are about to be deleted, and the metrics task will expire them after
+        // a while anyway, but it might be worth the trouble to do that in the
+        // future.
+        //
+        // Skipping that for now, follow the normal zone shutdown process
+        // _after_ metrics (i.e., shut down and clean up the zone).
+        //
+        // TODO-correctness There's a (very unlikely?) chance that this cleanup
+        // isn't right: if the running zone (which we have no active knowledge
+        // of) was started with a different `OmicronZoneConfig`, the cleanup
+        // steps we do here might not be right.
+        match resume_shutdown_from_stop(
+            zone,
+            sled_agent_facilities,
+            zone_facilities,
+            &zone_name,
+            log,
+        )
+        .await
+        {
+            Ok(()) => Ok(None),
+            Err((state, err)) => {
+                // We didn't fail to _start_ the zone, so it doesn't make sense
+                // to return a `ZoneStartError`, but the zone is in a state that
+                // we need to remember.
+                Ok(Some(ZoneState::PartiallyShutDown { state, err }))
+            }
         }
     }
 
@@ -486,7 +609,8 @@ impl OmicronZone {
                 state: PartiallyShutDownState::FailedToStop(running_zone),
                 ..
             } => {
-                self.resume_shutdown_from_stop(
+                resume_shutdown_from_stop(
+                    &self.config,
                     sled_agent_facilities,
                     zone_facilities,
                     running_zone,
@@ -498,14 +622,24 @@ impl OmicronZone {
                 state: PartiallyShutDownState::FailedToCleanUp,
                 ..
             } => {
-                self.resume_shutdown_from_cleanup(
+                resume_shutdown_from_cleanup(
+                    &self.config,
                     sled_agent_facilities,
                     zone_facilities,
                     &log,
                 )
                 .await
             }
-            ZoneState::FailedToStart(_) => {
+            // With these errors, we never even tried to start the zone, so
+            // there's no cleanup required: we can just return.
+            ZoneState::FailedToStart(ZoneStartError::TimeNotSynchronized)
+            | ZoneState::FailedToStart(ZoneStartError::CheckZoneExists(_))
+            | ZoneState::FailedToStart(ZoneStartError::DatasetDependency(_)) => {
+                Ok(())
+            }
+            ZoneState::FailedToStart(ZoneStartError::SledAgentStartFailed(
+                err,
+            )) => {
                 // TODO-correctness What do we need to do to try to shut down a
                 // zone that we tried to start? We need fine-grained status of
                 // what startup things succeeded that need to be cleaned up. For
@@ -514,7 +648,8 @@ impl OmicronZone {
                     log,
                     "need to shut down zone that failed to start, but this \
                      is currently unimplemented: assuming no cleanup work \
-                     required"
+                     required";
+                    "start-err" => InlineErrorChain::new(err.as_ref()),
                 );
                 Ok(())
             }
@@ -548,83 +683,83 @@ impl OmicronZone {
             ));
         }
 
-        self.resume_shutdown_from_stop(
+        resume_shutdown_from_stop(
+            &self.config,
             sled_agent_facilities,
             zone_facilities,
-            running_zone,
+            &ZoneName::from(running_zone.name()),
             log,
         )
         .await
     }
+}
 
-    async fn resume_shutdown_from_stop<
-        T: SledAgentFacilities,
-        U: ZoneFacilities,
-    >(
-        &self,
-        sled_agent_facilities: &T,
-        zone_facilities: &U,
-        running_zone: &Arc<RunningZone>,
-        log: &Logger,
-    ) -> Result<(), (PartiallyShutDownState, ZoneShutdownError)> {
-        if let Err(err) = zone_facilities.halt_zone(running_zone, log).await {
+async fn resume_shutdown_from_stop<
+    T: SledAgentFacilities,
+    U: ZoneFacilities,
+>(
+    config: &OmicronZoneConfig,
+    sled_agent_facilities: &T,
+    zone_facilities: &U,
+    zone_name: &ZoneName<'_>,
+    log: &Logger,
+) -> Result<(), (PartiallyShutDownState, ZoneShutdownError)> {
+    if let Err(err) = zone_facilities.halt_zone(zone_name, log).await {
+        warn!(
+            log,
+            "Failed to stop running zone";
+            InlineErrorChain::new(&err),
+        );
+        return Err((
+            PartiallyShutDownState::FailedToStop(zone_name.to_static()),
+            err,
+        ));
+    }
+
+    resume_shutdown_from_cleanup(
+        config,
+        sled_agent_facilities,
+        zone_facilities,
+        log,
+    )
+    .await
+}
+
+async fn resume_shutdown_from_cleanup<
+    T: SledAgentFacilities,
+    U: ZoneFacilities,
+>(
+    config: &OmicronZoneConfig,
+    sled_agent_facilities: &T,
+    zone_facilities: &U,
+    log: &Logger,
+) -> Result<(), (PartiallyShutDownState, ZoneShutdownError)> {
+    // Special teardown for internal DNS zones: delete the global zone
+    // address we created for it, and tell DDM to stop advertising the
+    // prefix of that address.
+    if let OmicronZoneType::InternalDns {
+        gz_address, gz_address_index, ..
+    } = &config.zone_type
+    {
+        let addrobj = AddrObject::new(
+            &sled_agent_facilities.underlay_vnic().0,
+            &internal_dns_addrobj_name(*gz_address_index),
+        )
+        .expect("internal DNS address object name is well-formed");
+        if let Err(err) = zone_facilities.delete_gz_address(addrobj).await {
             warn!(
                 log,
-                "Failed to stop running zone";
+                "Failed to delete internal-dns gz address";
                 InlineErrorChain::new(&err),
             );
-            return Err((
-                PartiallyShutDownState::FailedToStop(Arc::clone(running_zone)),
-                err,
-            ));
+            return Err((PartiallyShutDownState::FailedToCleanUp, err));
         }
 
-        self.resume_shutdown_from_cleanup(
-            sled_agent_facilities,
-            zone_facilities,
-            log,
-        )
-        .await
+        sled_agent_facilities
+            .ddm_remove_internal_dns_prefix(Ipv6Subnet::new(*gz_address));
     }
 
-    async fn resume_shutdown_from_cleanup<
-        T: SledAgentFacilities,
-        U: ZoneFacilities,
-    >(
-        &self,
-        sled_agent_facilities: &T,
-        zone_facilities: &U,
-        log: &Logger,
-    ) -> Result<(), (PartiallyShutDownState, ZoneShutdownError)> {
-        // Special teardown for internal DNS zones: delete the global zone
-        // address we created for it, and tell DDM to stop advertising the
-        // prefix of that address.
-        if let OmicronZoneType::InternalDns {
-            gz_address,
-            gz_address_index,
-            ..
-        } = &self.config.zone_type
-        {
-            let addrobj = AddrObject::new(
-                &sled_agent_facilities.underlay_vnic().0,
-                &internal_dns_addrobj_name(*gz_address_index),
-            )
-            .expect("internal DNS address object name is well-formed");
-            if let Err(err) = zone_facilities.delete_gz_address(addrobj).await {
-                warn!(
-                    log,
-                    "Failed to delete internal-dns gz address";
-                    InlineErrorChain::new(&err),
-                );
-                return Err((PartiallyShutDownState::FailedToCleanUp, err));
-            }
-
-            sled_agent_facilities
-                .ddm_remove_internal_dns_prefix(Ipv6Subnet::new(*gz_address));
-        }
-
-        Ok(())
-    }
+    Ok(())
 }
 
 fn internal_dns_addrobj_name(gz_address_index: u32) -> String {
@@ -688,17 +823,62 @@ enum ZoneState {
     FailedToStart(ZoneStartError),
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
+struct ZoneName<'a>(Cow<'a, str>);
+
+impl<'a> From<&'a str> for ZoneName<'a> {
+    fn from(value: &'a str) -> Self {
+        Self(Cow::Borrowed(value))
+    }
+}
+
+impl From<String> for ZoneName<'static> {
+    fn from(value: String) -> Self {
+        Self(Cow::Owned(value))
+    }
+}
+
+impl ZoneName<'_> {
+    fn new(config: &OmicronZoneConfig) -> Self {
+        Self(Cow::Owned(config.zone_name()))
+    }
+
+    fn to_string(&self) -> String {
+        self.0.clone().into_owned()
+    }
+
+    fn to_static(&self) -> ZoneName<'static> {
+        ZoneName(Cow::Owned(self.0.clone().into_owned()))
+    }
+}
+
 #[derive(Debug)]
 enum PartiallyShutDownState {
     FailedToUntrackMetrics(Arc<RunningZone>),
-    FailedToStop(Arc<RunningZone>),
+    FailedToStop(ZoneName<'static>),
     FailedToCleanUp,
 }
 
 #[derive(Debug, thiserror::Error)]
 enum ZoneStartError {
+    #[error("could not determine whether zone already exists")]
+    CheckZoneExists(#[from] CheckZoneExistsError),
+    #[error("Time not yet synchronized")]
+    TimeNotSynchronized,
+    #[error(transparent)]
+    DatasetDependency(#[from] ZoneDatasetDependencyError),
     #[error("sled agent failed to start service")]
     SledAgentStartFailed(#[source] anyhow::Error),
+}
+
+#[derive(Debug, thiserror::Error)]
+enum CheckZoneExistsError {
+    #[error("failed to find zone {name}")]
+    FindByName {
+        name: String,
+        #[source]
+        err: AdmError,
+    },
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -712,9 +892,14 @@ enum ZoneShutdownError {
 }
 
 trait ZoneFacilities {
+    async fn zone_with_name_exists(
+        &self,
+        name: &ZoneName<'_>,
+    ) -> Result<bool, CheckZoneExistsError>;
+
     async fn halt_zone(
         &self,
-        zone: &RunningZone,
+        zone: &ZoneName,
         log: &Logger,
     ) -> Result<(), ZoneShutdownError>;
 
@@ -727,20 +912,32 @@ trait ZoneFacilities {
 struct RealZoneFacilities;
 
 impl ZoneFacilities for RealZoneFacilities {
+    async fn zone_with_name_exists(
+        &self,
+        name: &ZoneName<'_>,
+    ) -> Result<bool, CheckZoneExistsError> {
+        match Zones::real_api().find(&name.0).await {
+            Ok(maybe_zone) => Ok(maybe_zone.is_some()),
+            Err(err) => Err(CheckZoneExistsError::FindByName {
+                name: name.to_string(),
+                err,
+            }),
+        }
+    }
+
     async fn halt_zone(
         &self,
-        zone: &RunningZone,
+        zone: &ZoneName<'_>,
         log: &Logger,
     ) -> Result<(), ZoneShutdownError> {
-        // We don't use `zone.stop()` here because it doesn't allow repeated
-        // attempts after a failure:
-        // https://github.com/oxidecomputer/omicron/issues/7881. Instead, use
-        // the lower-level `Zones::halt_and_remove_logged()` function directly.
-        // This may leave our `RunningZone` is a bogus state where it still
-        // holds a `zoneid_t` that doesn't exist anymore, but if we're in the
-        // shutdown path we never use that `zoneid_t`.
+        // We don't use `RunningZone::stop()` here because it doesn't allow
+        // repeated attempts after a failure
+        // (https://github.com/oxidecomputer/omicron/issues/7881) and because in
+        // the case of "an unexpected zone is running", all we have is the name.
+        // Instead, use the lower-level `Zones::halt_and_remove_logged()`
+        // function directly.
         Zones::real_api()
-            .halt_and_remove_logged(log, zone.name())
+            .halt_and_remove_logged(log, &zone.0)
             .await
             .map_err(ZoneShutdownError::HaltAndRemove)
     }
@@ -758,8 +955,9 @@ impl ZoneFacilities for RealZoneFacilities {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::CurrentlyManagedZpoolsReceiver;
+    use crate::dataset_serialization_task::DatasetEnsureError;
     use anyhow::anyhow;
+    use assert_matches::assert_matches;
     use camino_tempfile::Utf8TempDir;
     use illumos_utils::dladm::Etherstub;
     use illumos_utils::dladm::EtherstubVnic;
@@ -771,7 +969,12 @@ mod tests {
     use nexus_sled_agent_shared::inventory::OmicronZoneDataset;
     use nexus_sled_agent_shared::inventory::OmicronZoneImageSource;
     use omicron_common::address::SLED_PREFIX;
+    use omicron_common::disk::DatasetConfig;
+    use omicron_common::disk::DatasetKind;
+    use omicron_common::disk::DatasetName;
+    use omicron_common::disk::SharedDatasetConfig;
     use omicron_test_utils::dev;
+    use omicron_uuid_kinds::DatasetUuid;
     use omicron_uuid_kinds::ZpoolUuid;
     use std::collections::BTreeSet;
     use std::collections::VecDeque;
@@ -833,11 +1036,17 @@ mod tests {
 
     #[derive(Debug, Default)]
     struct FakeZoneFacilitiesInner {
+        existing_zones: BTreeSet<String>,
         halt_responses: Option<VecDeque<Result<(), ZoneShutdownError>>>,
         removed_gz_addresses: BTreeSet<AddrObject>,
     }
 
     impl FakeZoneFacilities {
+        fn push_existing_zone(&self, name: String) {
+            let mut inner = self.inner.lock().unwrap();
+            inner.existing_zones.insert(name);
+        }
+
         fn push_halt_response(&self, response: Result<(), ZoneShutdownError>) {
             let mut inner = self.inner.lock().unwrap();
             inner.halt_responses.get_or_insert_default().push_back(response);
@@ -845,9 +1054,17 @@ mod tests {
     }
 
     impl ZoneFacilities for FakeZoneFacilities {
+        async fn zone_with_name_exists(
+            &self,
+            name: &ZoneName<'_>,
+        ) -> Result<bool, CheckZoneExistsError> {
+            let inner = self.inner.lock().unwrap();
+            Ok(inner.existing_zones.contains(&*name.0))
+        }
+
         async fn halt_zone(
             &self,
-            _zone: &RunningZone,
+            zone: &ZoneName<'_>,
             _log: &Logger,
         ) -> Result<(), ZoneShutdownError> {
             // If a test has called `push_halt_response`, respsect that;
@@ -855,9 +1072,18 @@ mod tests {
             let mut inner = self.inner.lock().unwrap();
             match inner.halt_responses.as_mut() {
                 Some(resp) => {
-                    resp.pop_front().expect("have a response for halt_zone()")
+                    let resp = resp
+                        .pop_front()
+                        .expect("have a response for halt_zone()");
+                    if resp.is_ok() {
+                        inner.existing_zones.remove(&*zone.0);
+                    }
+                    resp
                 }
-                None => Ok(()),
+                None => {
+                    inner.existing_zones.remove(&*zone.0);
+                    Ok(())
+                }
             }
         }
 
@@ -908,9 +1134,7 @@ mod tests {
         async fn start_omicron_zone(
             &self,
             _zone_config: &OmicronZoneConfig,
-            _mount_config: &MountConfig,
-            _is_time_synchronized: bool,
-            _all_u2_pools: &[ZpoolName],
+            _zone_root_path: PathInPool,
         ) -> anyhow::Result<RunningZone> {
             let mut inner = self.inner.lock().unwrap();
             inner
@@ -963,6 +1187,69 @@ mod tests {
             },
             image_source: OmicronZoneImageSource::InstallDataset,
         }
+    }
+
+    #[derive(Default)]
+    struct DatasetsBuilder {
+        datasets: Vec<(DatasetConfig, Result<(), DatasetEnsureError>)>,
+    }
+
+    impl DatasetsBuilder {
+        fn push_root(
+            &mut self,
+            zone: &OmicronZoneConfig,
+            result: Result<(), DatasetEnsureError>,
+        ) {
+            let Some(pool) = zone.filesystem_pool else {
+                return;
+            };
+            self.datasets.push((
+                DatasetConfig {
+                    id: DatasetUuid::new_v4(),
+                    name: DatasetName::new(
+                        pool,
+                        DatasetKind::TransientZone { name: zone.zone_name() },
+                    ),
+                    inner: SharedDatasetConfig::default(),
+                },
+                result,
+            ));
+        }
+
+        fn push_durable(
+            &mut self,
+            zone: &OmicronZoneConfig,
+            result: Result<(), DatasetEnsureError>,
+        ) {
+            let Some(dataset) = zone.dataset_name() else {
+                return;
+            };
+            self.datasets.push((
+                DatasetConfig {
+                    id: DatasetUuid::new_v4(),
+                    name: dataset,
+                    inner: SharedDatasetConfig::default(),
+                },
+                result,
+            ));
+        }
+
+        fn build(self) -> OmicronDatasets {
+            OmicronDatasets::with_datasets(self.datasets.into_iter())
+        }
+    }
+
+    // Helper to build an all-dependencies-met `OmicronDatasets` for the given
+    // zone config.
+    fn make_datasets<'a>(
+        zones: impl Iterator<Item = &'a OmicronZoneConfig>,
+    ) -> OmicronDatasets {
+        let mut builder = DatasetsBuilder::default();
+        for zone in zones {
+            builder.push_root(zone, Ok(()));
+            builder.push_durable(zone, Ok(()));
+        }
+        builder.build()
     }
 
     #[tokio::test]
@@ -1055,26 +1342,24 @@ mod tests {
         let fake_zone_id = OmicronZoneUuid::new_v4();
         let desired_zones: IdMap<_> =
             [make_zone_config(fake_zone_id)].into_iter().collect();
-        let currently_managed_zpools =
-            CurrentlyManagedZpoolsReceiver::fake_static(
-                desired_zones.iter().map(|z| z.filesystem_pool.unwrap()),
-            )
-            .current();
+        let datasets = make_datasets(desired_zones.iter());
 
         // Configure our fake sled-agent to fail to start a zone.
         let sled_agent_facilities = FakeSledAgentFacilities::default();
         sled_agent_facilities.push_start_response(Err(anyhow!("test-boom")));
+        let zone_facilities = FakeZoneFacilities::default();
 
         // Starting with no zones, we should try and fail to start the one zone
         // in `desired_zones`.
         let mut zones =
             OmicronZones::new(nonexistent_mount_config(), TimeSyncConfig::Skip);
         zones
-            .start_zones_if_needed(
+            .start_zones_if_needed_impl(
                 &desired_zones,
                 &sled_agent_facilities,
+                &zone_facilities,
                 true,
-                &currently_managed_zpools,
+                &datasets,
                 &logctx.log,
             )
             .await;
@@ -1104,11 +1389,12 @@ mod tests {
         // Starting from the "zone failed to start" state, we should try again
         // to start the zone (and succeed this time).
         zones
-            .start_zones_if_needed(
+            .start_zones_if_needed_impl(
                 &desired_zones,
                 &sled_agent_facilities,
+                &zone_facilities,
                 true,
-                &currently_managed_zpools,
+                &datasets,
                 &logctx.log,
             )
             .await;
@@ -1122,6 +1408,168 @@ mod tests {
         );
         match &zone_should_be_running.state {
             ZoneState::Running(_) => (),
+            other => panic!("unexpected zone state: {other:?}"),
+        }
+
+        logctx.cleanup_successful();
+    }
+
+    #[tokio::test]
+    async fn start_zone_stops_preexisting_zones() {
+        let logctx = dev::test_setup_log("start_zone_stops_preexisting_zones");
+
+        // Construct a zone we want to start.
+        let fake_zone = make_zone_config(OmicronZoneUuid::new_v4());
+        let desired_zones: IdMap<_> = [fake_zone.clone()].into_iter().collect();
+        let datasets = make_datasets(desired_zones.iter());
+
+        // Configure our fake zone facilities to report a zone with this name as
+        // already running.
+        let sled_agent_facilities = FakeSledAgentFacilities::default();
+        let zone_facilities = FakeZoneFacilities::default();
+        zone_facilities.push_existing_zone(fake_zone.zone_name());
+
+        let mut zones =
+            OmicronZones::new(nonexistent_mount_config(), TimeSyncConfig::Skip);
+
+        // Set up our fake sled-agent to return success once the old zone has
+        // been halted.
+        let fake_zone_builder = FakeZoneBuilder::new();
+        sled_agent_facilities.push_start_response(Ok(fake_zone_builder
+            .make_running_zone("test", logctx.log.clone())
+            .await));
+
+        // Start zones: this should halt the preexisting zone.
+        zones
+            .start_zones_if_needed_impl(
+                &desired_zones,
+                &sled_agent_facilities,
+                &zone_facilities,
+                true,
+                &datasets,
+                &logctx.log,
+            )
+            .await;
+
+        assert_eq!(
+            zone_facilities.inner.lock().unwrap().existing_zones,
+            BTreeSet::new()
+        );
+
+        assert_eq!(zones.zones.len(), 1);
+        let zone_should_be_running =
+            zones.zones.get(&fake_zone.id).expect("zone is present");
+        assert_eq!(
+            zone_should_be_running.config,
+            *desired_zones.get(&fake_zone.id).unwrap()
+        );
+        match &zone_should_be_running.state {
+            ZoneState::Running(_) => (),
+            other => panic!("unexpected zone state: {other:?}"),
+        }
+
+        logctx.cleanup_successful();
+    }
+
+    #[tokio::test]
+    async fn start_zone_fails_if_time_not_synced_when_required() {
+        let logctx = dev::test_setup_log(
+            "start_zone_fails_if_time_not_synced_when_required",
+        );
+
+        // Construct a zone we want to start, of a type that requires time to be
+        // sync'd.
+        let fake_zone = make_zone_config(OmicronZoneUuid::new_v4());
+        assert!(fake_zone.zone_type.requires_timesync());
+        let desired_zones: IdMap<_> = [fake_zone.clone()].into_iter().collect();
+        let datasets = make_datasets(desired_zones.iter());
+
+        let zone_facilities = FakeZoneFacilities::default();
+        let sled_agent_facilities = FakeSledAgentFacilities::default();
+
+        let mut zones = OmicronZones::new(
+            nonexistent_mount_config(),
+            TimeSyncConfig::Normal,
+        );
+
+        // Start zones: this should refuse to start the zone.
+        zones
+            .start_zones_if_needed_impl(
+                &desired_zones,
+                &sled_agent_facilities,
+                &zone_facilities,
+                false, // is_time_synchronized
+                &datasets,
+                &logctx.log,
+            )
+            .await;
+
+        assert_eq!(zones.zones.len(), 1);
+        let zone = zones.zones.get(&fake_zone.id).expect("zone is present");
+        assert_eq!(zone.config, *desired_zones.get(&fake_zone.id).unwrap());
+
+        // The zone should now be in the expected error state.
+        match &zone.state {
+            ZoneState::FailedToStart(err) => {
+                assert_matches!(err, ZoneStartError::TimeNotSynchronized);
+            }
+            other => panic!("unexpected zone state: {other:?}"),
+        }
+
+        logctx.cleanup_successful();
+    }
+
+    #[tokio::test]
+    async fn start_zone_fails_if_halting_preexisting_zone_fails() {
+        let logctx = dev::test_setup_log(
+            "start_zone_fails_if_halting_preexisting_zone_fails",
+        );
+
+        // Construct a zone we want to start.
+        let fake_zone = make_zone_config(OmicronZoneUuid::new_v4());
+        let desired_zones: IdMap<_> = [fake_zone.clone()].into_iter().collect();
+        let datasets = make_datasets(desired_zones.iter());
+
+        // Configure our fake zone facilities to report a zone with this name as
+        // already running, and configure halting this zone to fail.
+        let zone_facilities = FakeZoneFacilities::default();
+        zone_facilities.push_existing_zone(fake_zone.zone_name());
+        zone_facilities.push_halt_response(Err(
+            ZoneShutdownError::UntrackMetrics(anyhow!("boom")),
+        ));
+        let sled_agent_facilities = FakeSledAgentFacilities::default();
+
+        let mut zones =
+            OmicronZones::new(nonexistent_mount_config(), TimeSyncConfig::Skip);
+
+        // Start zones: this should try and fail to halt the preexisting zone.
+        zones
+            .start_zones_if_needed_impl(
+                &desired_zones,
+                &sled_agent_facilities,
+                &zone_facilities,
+                true,
+                &datasets,
+                &logctx.log,
+            )
+            .await;
+
+        assert_eq!(
+            zone_facilities.inner.lock().unwrap().existing_zones,
+            [fake_zone.zone_name()].into_iter().collect::<BTreeSet<_>>(),
+        );
+
+        assert_eq!(zones.zones.len(), 1);
+        let zone = zones.zones.get(&fake_zone.id).expect("zone is present");
+        assert_eq!(zone.config, *desired_zones.get(&fake_zone.id).unwrap());
+
+        // The zone should now be in the "partially shut down" state.
+        match &zone.state {
+            ZoneState::PartiallyShutDown { state, err } => {
+                assert_matches!(state, PartiallyShutDownState::FailedToStop(_));
+                let err = InlineErrorChain::new(err).to_string();
+                assert!(err.contains("boom"), "unexpected error: {err}");
+            }
             other => panic!("unexpected zone state: {other:?}"),
         }
 
@@ -1191,6 +1639,163 @@ mod tests {
             zone_facilities.inner.lock().unwrap().removed_gz_addresses,
             [expected_addr].into_iter().collect::<BTreeSet<_>>(),
         );
+
+        logctx.cleanup_successful();
+    }
+
+    #[tokio::test]
+    async fn start_zone_fails_if_missing_root_dataset() {
+        let logctx =
+            dev::test_setup_log("start_zone_fails_if_missing_root_dataset");
+
+        // Construct a zone we want to start.
+        let fake_zone = make_zone_config(OmicronZoneUuid::new_v4());
+        let desired_zones: IdMap<_> = [fake_zone.clone()].into_iter().collect();
+
+        // datasets0: missing root dataset entirely
+        let datasets0 = {
+            let mut builder = DatasetsBuilder::default();
+            for zone in &desired_zones {
+                builder.push_durable(zone, Ok(()));
+            }
+            builder.build()
+        };
+
+        // datasets1: root exists but failed to ensure
+        let datasets1 = {
+            let mut builder = DatasetsBuilder::default();
+            for zone in &desired_zones {
+                builder.push_root(
+                    zone,
+                    Err(DatasetEnsureError::TestError("boom")),
+                );
+                builder.push_durable(zone, Ok(()));
+            }
+            builder.build()
+        };
+
+        let zone_facilities = FakeZoneFacilities::default();
+        let sled_agent_facilities = FakeSledAgentFacilities::default();
+
+        // Both dataset variations should fail the same way.
+        for datasets in [&datasets0, &datasets1] {
+            let mut zones = OmicronZones::new(
+                nonexistent_mount_config(),
+                TimeSyncConfig::Skip,
+            );
+
+            zones
+                .start_zones_if_needed_impl(
+                    &desired_zones,
+                    &sled_agent_facilities,
+                    &zone_facilities,
+                    true,
+                    datasets,
+                    &logctx.log,
+                )
+                .await;
+
+            assert_eq!(zones.zones.len(), 1);
+            let zone = zones.zones.get(&fake_zone.id).expect("zone is present");
+            assert_eq!(zone.config, *desired_zones.get(&fake_zone.id).unwrap());
+
+            // The zone should now be in the "partially shut down" state.
+            match &zone.state {
+                ZoneState::FailedToStart(err) => {
+                    assert_matches!(
+                        err,
+                        ZoneStartError::DatasetDependency(
+                            ZoneDatasetDependencyError::TransientZoneDatasetNotAvailable(_)
+                        )
+                    );
+                }
+                other => panic!("unexpected zone state: {other:?}"),
+            }
+        }
+
+        logctx.cleanup_successful();
+    }
+
+    #[tokio::test]
+    async fn start_zone_fails_if_missing_durable_dataset() {
+        let logctx =
+            dev::test_setup_log("start_zone_fails_if_missing_durable_dataset");
+
+        // Construct a zone we want to start, using a zone type that has a
+        // durable dataset.
+        let fake_zone = OmicronZoneConfig {
+            id: OmicronZoneUuid::new_v4(),
+            filesystem_pool: Some(ZpoolName::new_external(ZpoolUuid::new_v4())),
+            zone_type: OmicronZoneType::Crucible {
+                address: "[::1]:0".parse().unwrap(),
+                dataset: OmicronZoneDataset {
+                    pool_name: ZpoolName::new_external(ZpoolUuid::new_v4()),
+                },
+            },
+            image_source: OmicronZoneImageSource::InstallDataset,
+        };
+        let desired_zones: IdMap<_> = [fake_zone.clone()].into_iter().collect();
+
+        // datasets0: missing durable dataset entirely
+        let datasets0 = {
+            let mut builder = DatasetsBuilder::default();
+            for zone in &desired_zones {
+                builder.push_root(zone, Ok(()));
+            }
+            builder.build()
+        };
+
+        // datasets1: durable exists but failed to ensure
+        let datasets1 = {
+            let mut builder = DatasetsBuilder::default();
+            for zone in &desired_zones {
+                builder.push_root(zone, Ok(()));
+                builder.push_durable(
+                    zone,
+                    Err(DatasetEnsureError::TestError("boom")),
+                );
+            }
+            builder.build()
+        };
+
+        let zone_facilities = FakeZoneFacilities::default();
+        let sled_agent_facilities = FakeSledAgentFacilities::default();
+
+        // Both dataset variations should fail the same way.
+        for datasets in [&datasets0, &datasets1] {
+            let mut zones = OmicronZones::new(
+                nonexistent_mount_config(),
+                TimeSyncConfig::Skip,
+            );
+
+            zones
+                .start_zones_if_needed_impl(
+                    &desired_zones,
+                    &sled_agent_facilities,
+                    &zone_facilities,
+                    true,
+                    datasets,
+                    &logctx.log,
+                )
+                .await;
+
+            assert_eq!(zones.zones.len(), 1);
+            let zone = zones.zones.get(&fake_zone.id).expect("zone is present");
+            assert_eq!(zone.config, *desired_zones.get(&fake_zone.id).unwrap());
+
+            // The zone should now be in the "partially shut down" state.
+            match &zone.state {
+                ZoneState::FailedToStart(err) => {
+                    assert_matches!(
+                        err,
+                        ZoneStartError::DatasetDependency(
+                            ZoneDatasetDependencyError::DurableDatasetNotAvailable(_)
+                        )
+                    );
+                }
+                other => panic!("unexpected zone state: {other:?}"),
+            }
+        }
 
         logctx.cleanup_successful();
     }

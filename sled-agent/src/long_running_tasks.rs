@@ -20,39 +20,30 @@ use crate::config::Config;
 use crate::hardware_monitor::HardwareMonitor;
 use crate::services::ServiceManager;
 use crate::sled_agent::SledAgent;
-use crate::storage_monitor::{StorageMonitor, StorageMonitorHandle};
 use crate::zone_bundle::ZoneBundler;
 use bootstore::schemes::v0 as bootstore;
-use illumos_utils::zpool::ZpoolName;
 use key_manager::{KeyManager, StorageKeyRequester};
+use sled_agent_config_reconciler::{
+    ConfigReconcilerHandle, ConfigReconcilerSpawnToken, RawDisksSender,
+    TimeSyncConfig,
+};
 use sled_agent_types::zone_bundle::CleanupContext;
-use sled_agent_zone_images::{ZoneImageSourceResolver, ZoneImageZpools};
+use sled_agent_zone_images::ZoneImageSourceResolver;
 use sled_hardware::{HardwareManager, SledMode, UnparsedDisk};
 use sled_storage::config::MountConfig;
 use sled_storage::disk::RawSyntheticDisk;
-use sled_storage::manager::{StorageHandle, StorageManager};
-use sled_storage::resources::AllDisks;
 use slog::{Logger, info};
 use std::net::Ipv6Addr;
+use std::sync::Arc;
 use tokio::sync::oneshot;
 
 /// A mechanism for interacting with all long running tasks that can be shared
 /// between the bootstrap-agent and sled-agent code.
 #[derive(Clone)]
 pub struct LongRunningTaskHandles {
-    /// A mechanism for retrieving storage keys. This interacts with the
-    /// [`KeyManager`] task. In the future, there may be other handles for
-    /// retrieving different types of keys. Separating the handles limits the
-    /// access for a given key type to the code that holds the handle.
-    pub storage_key_requester: StorageKeyRequester,
-
-    /// A mechanism for talking to the [`StorageManager`] which is responsible
-    /// for establishing zpools on disks and managing their datasets.
-    pub storage_manager: StorageHandle,
-
-    /// A mechanism for talking to the [`StorageMonitor`], which reacts to disk
-    /// changes and updates the dump devices.
-    pub storage_monitor_handle: StorageMonitorHandle,
+    /// A handle to the set of tasks managed by the sled-agent-config-reconciler
+    /// system.
+    pub config_reconciler: Arc<ConfigReconcilerHandle>,
 
     /// A mechanism for interacting with the hardware device tree
     pub hardware_manager: HardwareManager,
@@ -79,15 +70,24 @@ pub async fn spawn_all_longrunning_tasks(
     config: &Config,
 ) -> (
     LongRunningTaskHandles,
+    ConfigReconcilerSpawnToken,
     oneshot::Sender<SledAgent>,
     oneshot::Sender<ServiceManager>,
 ) {
     let storage_key_requester = spawn_key_manager(log);
-    let mut storage_manager =
-        spawn_storage_manager(log, storage_key_requester.clone());
 
-    let storage_monitor_handle =
-        spawn_storage_monitor(log, storage_manager.clone());
+    let time_sync_config = if let Some(true) = config.skip_timesync {
+        TimeSyncConfig::Skip
+    } else {
+        TimeSyncConfig::Normal
+    };
+    let (mut config_reconciler, config_reconciler_spawn_token) =
+        ConfigReconcilerHandle::new(
+            MountConfig::default(),
+            storage_key_requester,
+            time_sync_config,
+            log,
+        );
 
     let nongimlet_observed_disks =
         config.nongimlet_observed_disks.clone().unwrap_or(vec![]);
@@ -95,43 +95,39 @@ pub async fn spawn_all_longrunning_tasks(
     let hardware_manager =
         spawn_hardware_manager(log, sled_mode, nongimlet_observed_disks).await;
 
-    // Start monitoring for hardware changes
+    // Start monitoring for hardware changes, adding some synthetic disks if
+    // necessary.
+    let raw_disks_tx = config_reconciler.raw_disks_tx();
+    upsert_synthetic_disks_if_needed(&log, &raw_disks_tx, &config).await;
     let (sled_agent_started_tx, service_manager_ready_tx) =
-        spawn_hardware_monitor(log, &hardware_manager, &storage_manager);
-
-    // Add some synthetic disks if necessary.
-    upsert_synthetic_disks_if_needed(&log, &storage_manager, &config).await;
+        spawn_hardware_monitor(log, &hardware_manager, raw_disks_tx);
 
     // Wait for the boot disk so that we can work with any ledgers,
     // such as those needed by the bootstore and sled-agent
     info!(log, "Waiting for boot disk");
-    let (disk_id, boot_zpool) = storage_manager.wait_for_boot_disk().await;
-    info!(log, "Found boot disk {:?}", disk_id);
+    let internal_disks = config_reconciler.wait_for_boot_disk().await;
+    info!(log, "Found boot disk {:?}", internal_disks.boot_disk_id());
 
-    let all_disks = storage_manager.get_latest_disks().await;
     let bootstore = spawn_bootstore_tasks(
         log,
-        &all_disks,
+        &config_reconciler,
         &hardware_manager,
         global_zone_bootstrap_ip,
     )
     .await;
 
-    let zone_bundler =
-        spawn_zone_bundler_tasks(log, &mut storage_manager).await;
-    let zone_image_resolver =
-        make_zone_image_resolver(log, &all_disks, &boot_zpool);
+    let zone_bundler = spawn_zone_bundler_tasks(log, &config_reconciler).await;
+    let zone_image_resolver = ZoneImageSourceResolver::new(log, internal_disks);
 
     (
         LongRunningTaskHandles {
-            storage_key_requester,
-            storage_manager,
-            storage_monitor_handle,
+            config_reconciler: Arc::new(config_reconciler),
             hardware_manager,
             bootstore,
             zone_bundler,
             zone_image_resolver,
         },
+        config_reconciler_spawn_token,
         sled_agent_started_tx,
         service_manager_ready_tx,
     )
@@ -144,32 +140,6 @@ fn spawn_key_manager(log: &Logger) -> StorageKeyRequester {
         KeyManager::new(log, secret_retriever);
     tokio::spawn(async move { key_manager.run().await });
     storage_key_requester
-}
-
-fn spawn_storage_manager(
-    log: &Logger,
-    key_requester: StorageKeyRequester,
-) -> StorageHandle {
-    info!(log, "Starting StorageManager");
-    let (manager, handle) =
-        StorageManager::new(log, MountConfig::default(), key_requester);
-    tokio::spawn(async move {
-        manager.run().await;
-    });
-    handle
-}
-
-fn spawn_storage_monitor(
-    log: &Logger,
-    storage_handle: StorageHandle,
-) -> StorageMonitorHandle {
-    info!(log, "Starting StorageMonitor");
-    let (storage_monitor, handle) =
-        StorageMonitor::new(log, MountConfig::default(), storage_handle);
-    tokio::spawn(async move {
-        storage_monitor.run().await;
-    });
-    handle
 }
 
 async fn spawn_hardware_manager(
@@ -197,11 +167,11 @@ async fn spawn_hardware_manager(
 fn spawn_hardware_monitor(
     log: &Logger,
     hardware_manager: &HardwareManager,
-    storage_handle: &StorageHandle,
+    raw_disks_tx: RawDisksSender,
 ) -> (oneshot::Sender<SledAgent>, oneshot::Sender<ServiceManager>) {
     info!(log, "Starting HardwareMonitor");
     let (mut monitor, sled_agent_started_tx, service_manager_ready_tx) =
-        HardwareMonitor::new(log, hardware_manager, storage_handle);
+        HardwareMonitor::new(log, hardware_manager, raw_disks_tx);
     tokio::spawn(async move {
         monitor.run().await;
     });
@@ -210,12 +180,16 @@ fn spawn_hardware_monitor(
 
 async fn spawn_bootstore_tasks(
     log: &Logger,
-    all_disks: &AllDisks,
+    config_reconciler: &ConfigReconcilerHandle,
     hardware_manager: &HardwareManager,
     global_zone_bootstrap_ip: Ipv6Addr,
 ) -> bootstore::NodeHandle {
     let config = new_bootstore_config(
-        all_disks,
+        &config_reconciler
+            .internal_disks_rx()
+            .current()
+            .all_cluster_datasets()
+            .collect::<Vec<_>>(),
         hardware_manager.baseboard(),
         global_zone_bootstrap_ip,
     )
@@ -240,29 +214,22 @@ async fn spawn_bootstore_tasks(
 // `ZoneBundler::new` spawns a periodic cleanup task that runs indefinitely
 async fn spawn_zone_bundler_tasks(
     log: &Logger,
-    storage_handle: &mut StorageHandle,
+    config_reconciler: &ConfigReconcilerHandle,
 ) -> ZoneBundler {
     info!(log, "Starting ZoneBundler related tasks");
     let log = log.new(o!("component" => "ZoneBundler"));
-    ZoneBundler::new(log, storage_handle.clone(), CleanupContext::default())
-        .await
-}
-
-fn make_zone_image_resolver(
-    log: &Logger,
-    all_disks: &AllDisks,
-    boot_zpool: &ZpoolName,
-) -> ZoneImageSourceResolver {
-    let zpools = ZoneImageZpools {
-        root: &all_disks.mount_config().root,
-        all_m2_zpools: all_disks.all_m2_zpools(),
-    };
-    ZoneImageSourceResolver::new(log, &zpools, boot_zpool)
+    ZoneBundler::new(
+        log,
+        config_reconciler.internal_disks_rx().clone(),
+        config_reconciler.available_datasets_rx(),
+        CleanupContext::default(),
+    )
+    .await
 }
 
 async fn upsert_synthetic_disks_if_needed(
     log: &Logger,
-    storage_manager: &StorageHandle,
+    raw_disks_tx: &RawDisksSender,
     config: &Config,
 ) {
     if let Some(vdevs) = &config.vdevs {
@@ -275,7 +242,7 @@ async fn upsert_synthetic_disks_if_needed(
             let disk = RawSyntheticDisk::load(vdev, i.try_into().unwrap())
                 .expect("Failed to parse synthetic disk")
                 .into();
-            storage_manager.detected_raw_disk(disk).await.await.unwrap();
+            raw_disks_tx.add_or_update_raw_disk(disk, log);
         }
     }
 }
