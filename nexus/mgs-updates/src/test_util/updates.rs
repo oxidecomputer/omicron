@@ -75,9 +75,8 @@ pub struct UpdateDescription<'a> {
     // If `None`, the correct value is determined automatically.  These are
     // overridable in order to induce specific kinds of failures.
     pub override_baseboard_id: Option<BaseboardId>,
-    // TODO-K: change description "Overrides" above
-    pub expected_sp_component: ExpectedSpComponent,
     pub override_progress_timeout: Option<Duration>,
+    pub override_expected_sp_component: ExpectedSpComponent,
 }
 
 impl UpdateDescription<'_> {
@@ -100,7 +99,7 @@ impl UpdateDescription<'_> {
                 .unwrap_or_else(|| sp1.baseboard_id()),
         );
 
-        let details = match &self.expected_sp_component {
+        let details = match &self.override_expected_sp_component {
             ExpectedSpComponent::Sp {
                 override_expected_active,
                 override_expected_inactive,
