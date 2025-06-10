@@ -6,6 +6,7 @@
 //! associated inventory collections and blueprints
 
 use anyhow::{Context, anyhow, bail, ensure};
+use chrono::Utc;
 use gateway_client::types::RotState;
 use gateway_client::types::SpState;
 use indexmap::IndexMap;
@@ -13,6 +14,7 @@ use ipnet::Ipv6Net;
 use ipnet::Ipv6Subnets;
 use nexus_inventory::CollectionBuilder;
 use nexus_sled_agent_shared::inventory::Baseboard;
+use nexus_sled_agent_shared::inventory::ConfigReconcilerInventory;
 use nexus_sled_agent_shared::inventory::ConfigReconcilerInventoryStatus;
 use nexus_sled_agent_shared::inventory::Inventory;
 use nexus_sled_agent_shared::inventory::InventoryDataset;
@@ -59,6 +61,7 @@ use std::fmt::Debug;
 use std::net::Ipv4Addr;
 use std::net::Ipv6Addr;
 use std::sync::Arc;
+use std::time::Duration;
 
 /// Describes an actual or synthetic Oxide rack for planning and testing
 ///
@@ -395,10 +398,17 @@ impl SystemDescription {
         })?;
         let sled = Arc::make_mut(sled);
 
-        sled.inventory_sled_agent.ledgered_sled_config = Some(sled_config);
+        sled.inventory_sled_agent.ledgered_sled_config =
+            Some(sled_config.clone());
+
+        // Present results as though the reconciler has successfully completed.
         sled.inventory_sled_agent.reconciler_status =
-            ConfigReconcilerInventoryStatus::NotYetRun;
-        sled.inventory_sled_agent.last_reconciliation = None;
+            ConfigReconcilerInventoryStatus::Idle {
+                completed_at: Utc::now(),
+                ran_for: Duration::from_secs(5),
+            };
+        sled.inventory_sled_agent.last_reconciliation =
+            Some(ConfigReconcilerInventory::debug_assume_success(sled_config));
 
         Ok(self)
     }
@@ -724,9 +734,16 @@ impl Sled {
                     })
                     .collect(),
                 datasets: vec![],
-                ledgered_sled_config: Some(sled_config),
-                reconciler_status: ConfigReconcilerInventoryStatus::NotYetRun,
-                last_reconciliation: None,
+                ledgered_sled_config: Some(sled_config.clone()),
+                reconciler_status: ConfigReconcilerInventoryStatus::Idle {
+                    completed_at: Utc::now(),
+                    ran_for: Duration::from_secs(5),
+                },
+                last_reconciliation: Some(
+                    ConfigReconcilerInventory::debug_assume_success(
+                        sled_config,
+                    ),
+                ),
                 zone_image_resolver: ZoneImageResolverStatus::new_fake(),
             }
         };
@@ -746,159 +763,159 @@ impl Sled {
     /// Create a `Sled` based on real information from another `Policy` and
     /// inventory `Collection`
     fn new_full(
-        sled_id: SledUuid,
-        sled_policy: SledPolicy,
-        sled_state: SledState,
-        sled_resources: SledResources,
-        inventory_sp: Option<SledHwInventory<'_>>,
-        inv_sled_agent: &nexus_types::inventory::SledAgent,
-    ) -> Sled {
-        // Elsewhere, the user gives us some rough parameters (like a unique
-        // string) that we use to construct fake `sled_agent_client` types that
-        // we can provide to the inventory builder so that _it_ can construct
-        // the corresponding inventory types.  Here, we're working backwards,
-        // which is a little weird: we're given inventory types and we construct
-        // the fake `sled_agent_client` types, again so that we can later pass
-        // them to the inventory builder so that it can construct the same
-        // inventory types again.  This is a little goofy.
-        let baseboard = inventory_sp
-            .as_ref()
-            .map(|sledhw| Baseboard::Gimlet {
-                identifier: sledhw.baseboard_id.serial_number.clone(),
+    sled_id: SledUuid,
+    sled_policy: SledPolicy,
+    sled_state: SledState,
+    sled_resources: SledResources,
+    inventory_sp: Option<SledHwInventory<'_>>,
+    inv_sled_agent: &nexus_types::inventory::SledAgent,
+) -> Sled {
+    // Elsewhere, the user gives us some rough parameters (like a unique
+    // string) that we use to construct fake `sled_agent_client` types that
+    // we can provide to the inventory builder so that _it_ can construct
+    // the corresponding inventory types.  Here, we're working backwards,
+    // which is a little weird: we're given inventory types and we construct
+    // the fake `sled_agent_client` types, again so that we can later pass
+    // them to the inventory builder so that it can construct the same
+    // inventory types again.  This is a little goofy.
+    let baseboard = inventory_sp
+        .as_ref()
+        .map(|sledhw| Baseboard::Gimlet {
+            identifier: sledhw.baseboard_id.serial_number.clone(),
+            model: sledhw.baseboard_id.part_number.clone(),
+            revision: sledhw.sp.baseboard_revision,
+        })
+        .unwrap_or(Baseboard::Unknown);
+
+    let inventory_sp = inventory_sp.map(|sledhw| {
+        // RotStateV3 unconditionally sets all of these
+        let sp_state = if sledhw.rot.slot_a_sha3_256_digest.is_some()
+            && sledhw.rot.slot_b_sha3_256_digest.is_some()
+            && sledhw.rot.stage0_digest.is_some()
+            && sledhw.rot.stage0next_digest.is_some()
+        {
+            SpState {
+                base_mac_address: [0; 6],
+                hubris_archive_id: sledhw.sp.hubris_archive.clone(),
                 model: sledhw.baseboard_id.part_number.clone(),
+                power_state: sledhw.sp.power_state,
                 revision: sledhw.sp.baseboard_revision,
-            })
-            .unwrap_or(Baseboard::Unknown);
-
-        let inventory_sp = inventory_sp.map(|sledhw| {
-            // RotStateV3 unconditionally sets all of these
-            let sp_state = if sledhw.rot.slot_a_sha3_256_digest.is_some()
-                && sledhw.rot.slot_b_sha3_256_digest.is_some()
-                && sledhw.rot.stage0_digest.is_some()
-                && sledhw.rot.stage0next_digest.is_some()
-            {
-                SpState {
-                    base_mac_address: [0; 6],
-                    hubris_archive_id: sledhw.sp.hubris_archive.clone(),
-                    model: sledhw.baseboard_id.part_number.clone(),
-                    power_state: sledhw.sp.power_state,
-                    revision: sledhw.sp.baseboard_revision,
-                    rot: RotState::V3 {
-                        active: sledhw.rot.active_slot,
-                        pending_persistent_boot_preference: sledhw
-                            .rot
-                            .pending_persistent_boot_preference,
-                        persistent_boot_preference: sledhw
-                            .rot
-                            .persistent_boot_preference,
-                        slot_a_fwid: sledhw
-                            .rot
-                            .slot_a_sha3_256_digest
-                            .clone()
-                            .expect("slot_a_fwid should be set"),
-                        slot_b_fwid: sledhw
-                            .rot
-                            .slot_b_sha3_256_digest
-                            .clone()
-                            .expect("slot_b_fwid should be set"),
-                        stage0_fwid: sledhw
-                            .rot
-                            .stage0_digest
-                            .clone()
-                            .expect("stage0 fwid should be set"),
-                        stage0next_fwid: sledhw
-                            .rot
-                            .stage0next_digest
-                            .clone()
-                            .expect("stage0 fwid should be set"),
-                        transient_boot_preference: sledhw
-                            .rot
-                            .transient_boot_preference,
-                        slot_a_error: sledhw.rot.slot_a_error,
-                        slot_b_error: sledhw.rot.slot_b_error,
-                        stage0_error: sledhw.rot.stage0_error,
-                        stage0next_error: sledhw.rot.stage0next_error,
-                    },
-                    serial_number: sledhw.baseboard_id.serial_number.clone(),
-                }
-            } else {
-                SpState {
-                    base_mac_address: [0; 6],
-                    hubris_archive_id: sledhw.sp.hubris_archive.clone(),
-                    model: sledhw.baseboard_id.part_number.clone(),
-                    power_state: sledhw.sp.power_state,
-                    revision: sledhw.sp.baseboard_revision,
-                    rot: RotState::V2 {
-                        active: sledhw.rot.active_slot,
-                        pending_persistent_boot_preference: sledhw
-                            .rot
-                            .pending_persistent_boot_preference,
-                        persistent_boot_preference: sledhw
-                            .rot
-                            .persistent_boot_preference,
-                        slot_a_sha3_256_digest: sledhw
-                            .rot
-                            .slot_a_sha3_256_digest
-                            .clone(),
-                        slot_b_sha3_256_digest: sledhw
-                            .rot
-                            .slot_b_sha3_256_digest
-                            .clone(),
-                        transient_boot_preference: sledhw
-                            .rot
-                            .transient_boot_preference,
-                    },
-                    serial_number: sledhw.baseboard_id.serial_number.clone(),
-                }
-            };
-            (sledhw.sp.sp_slot, sp_state)
-        });
-
-        let inventory_sled_agent = Inventory {
-            baseboard,
-            reservoir_size: inv_sled_agent.reservoir_size,
-            sled_role: inv_sled_agent.sled_role,
-            sled_agent_address: inv_sled_agent.sled_agent_address,
-            sled_id,
-            usable_hardware_threads: inv_sled_agent.usable_hardware_threads,
-            usable_physical_ram: inv_sled_agent.usable_physical_ram,
-            disks: vec![],
-            zpools: vec![],
-            datasets: vec![],
-            ledgered_sled_config: inv_sled_agent.ledgered_sled_config.clone(),
-            reconciler_status: inv_sled_agent.reconciler_status.clone(),
-            last_reconciliation: inv_sled_agent.last_reconciliation.clone(),
-            zone_image_resolver: ZoneImageResolverStatus::new_fake(),
+                rot: RotState::V3 {
+                    active: sledhw.rot.active_slot,
+                    pending_persistent_boot_preference: sledhw
+                        .rot
+                        .pending_persistent_boot_preference,
+                    persistent_boot_preference: sledhw
+                        .rot
+                        .persistent_boot_preference,
+                    slot_a_fwid: sledhw
+                        .rot
+                        .slot_a_sha3_256_digest
+                        .clone()
+                        .expect("slot_a_fwid should be set"),
+                    slot_b_fwid: sledhw
+                        .rot
+                        .slot_b_sha3_256_digest
+                        .clone()
+                        .expect("slot_b_fwid should be set"),
+                    stage0_fwid: sledhw
+                        .rot
+                        .stage0_digest
+                        .clone()
+                        .expect("stage0 fwid should be set"),
+                    stage0next_fwid: sledhw
+                        .rot
+                        .stage0next_digest
+                        .clone()
+                        .expect("stage0 fwid should be set"),
+                    transient_boot_preference: sledhw
+                        .rot
+                        .transient_boot_preference,
+                    slot_a_error: sledhw.rot.slot_a_error,
+                    slot_b_error: sledhw.rot.slot_b_error,
+                    stage0_error: sledhw.rot.stage0_error,
+                    stage0next_error: sledhw.rot.stage0next_error,
+                },
+                serial_number: sledhw.baseboard_id.serial_number.clone(),
+            }
+        } else {
+            SpState {
+                base_mac_address: [0; 6],
+                hubris_archive_id: sledhw.sp.hubris_archive.clone(),
+                model: sledhw.baseboard_id.part_number.clone(),
+                power_state: sledhw.sp.power_state,
+                revision: sledhw.sp.baseboard_revision,
+                rot: RotState::V2 {
+                    active: sledhw.rot.active_slot,
+                    pending_persistent_boot_preference: sledhw
+                        .rot
+                        .pending_persistent_boot_preference,
+                    persistent_boot_preference: sledhw
+                        .rot
+                        .persistent_boot_preference,
+                    slot_a_sha3_256_digest: sledhw
+                        .rot
+                        .slot_a_sha3_256_digest
+                        .clone(),
+                    slot_b_sha3_256_digest: sledhw
+                        .rot
+                        .slot_b_sha3_256_digest
+                        .clone(),
+                    transient_boot_preference: sledhw
+                        .rot
+                        .transient_boot_preference,
+                },
+                serial_number: sledhw.baseboard_id.serial_number.clone(),
+            }
         };
+        (sledhw.sp.sp_slot, sp_state)
+    });
 
-        Sled {
-            sled_id,
-            inventory_sp,
-            inventory_sled_agent,
-            policy: sled_policy,
-            state: sled_state,
-            resources: sled_resources,
-        }
+    let inventory_sled_agent = Inventory {
+        baseboard,
+        reservoir_size: inv_sled_agent.reservoir_size,
+        sled_role: inv_sled_agent.sled_role,
+        sled_agent_address: inv_sled_agent.sled_agent_address,
+        sled_id,
+        usable_hardware_threads: inv_sled_agent.usable_hardware_threads,
+        usable_physical_ram: inv_sled_agent.usable_physical_ram,
+        disks: vec![],
+        zpools: vec![],
+        datasets: vec![],
+        ledgered_sled_config: inv_sled_agent.ledgered_sled_config.clone(),
+        reconciler_status: inv_sled_agent.reconciler_status.clone(),
+        last_reconciliation: inv_sled_agent.last_reconciliation.clone(),
+        zone_image_resolver: ZoneImageResolverStatus::new_fake(),
+    };
+
+    Sled {
+        sled_id,
+        inventory_sp,
+        inventory_sled_agent,
+        policy: sled_policy,
+        state: sled_state,
+        resources: sled_resources,
     }
+}
 
     /// Adds a dataset to the system description.
     ///
     /// The inventory values for "available space" and "used space" are
     /// made up, since this is a synthetic dataset.
     pub fn add_synthetic_dataset(
-        &mut self,
-        config: omicron_common::disk::DatasetConfig,
-    ) {
-        self.inventory_sled_agent.datasets.push(InventoryDataset {
-            id: Some(config.id),
-            name: config.name.full_name(),
-            available: ByteCount::from_gibibytes_u32(1),
-            used: ByteCount::from_gibibytes_u32(0),
-            quota: config.inner.quota,
-            reservation: config.inner.reservation,
-            compression: config.inner.compression.to_string(),
-        });
-    }
+    &mut self,
+    config: omicron_common::disk::DatasetConfig,
+) {
+    self.inventory_sled_agent.datasets.push(InventoryDataset {
+        id: Some(config.id),
+        name: config.name.full_name(),
+        available: ByteCount::from_gibibytes_u32(1),
+        used: ByteCount::from_gibibytes_u32(0),
+        quota: config.inner.quota,
+        reservation: config.inner.reservation,
+        compression: config.inner.compression.to_string(),
+    });
+}
 
     fn sp_state(&self) -> Option<&(u16, SpState)> {
         self.inventory_sp.as_ref()

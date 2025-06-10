@@ -13,6 +13,7 @@ use nexus_sled_agent_shared::zone_images::{
 use omicron_common::update::{OmicronZoneFileMetadata, OmicronZoneManifest};
 use rayon::iter::{ParallelBridge, ParallelIterator};
 use sha2::{Digest, Sha256};
+use sled_agent_config_reconciler::InternalDisksWithBootDisk;
 use slog::{error, info, o, warn};
 use slog_error_chain::InlineErrorChain;
 use std::{
@@ -22,7 +23,6 @@ use std::{
 use tufaceous_artifact::ArtifactHash;
 
 use crate::{
-    ZoneImageZpools,
     errors::zone_manifest_not_found,
     install_dataset_metadata::{
         AllInstallMetadataFiles, InstallMetadataNonBootMismatch,
@@ -42,15 +42,13 @@ impl AllZoneManifests {
     /// Attempt to find zone manifests.
     pub(crate) fn read_all(
         log: &slog::Logger,
-        zpools: &ZoneImageZpools<'_>,
-        boot_zpool: &ZpoolName,
+        internal_disks: &InternalDisksWithBootDisk,
     ) -> Self {
         // First read all the files.
         let files = AllInstallMetadataFiles::read_all(
             log,
             OmicronZoneManifest::FILE_NAME,
-            zpools,
-            boot_zpool,
+            internal_disks,
         );
 
         // Validate files on the boot disk.
@@ -315,7 +313,7 @@ mod tests {
     use crate::test_utils::{
         BOOT_PATHS, BOOT_ZPOOL, NON_BOOT_2_PATHS, NON_BOOT_2_ZPOOL,
         NON_BOOT_3_PATHS, NON_BOOT_3_ZPOOL, NON_BOOT_PATHS, NON_BOOT_ZPOOL,
-        WriteInstallDatasetContext, deserialize_error,
+        WriteInstallDatasetContext, deserialize_error, make_internal_disks_rx,
     };
 
     use camino_tempfile_ext::prelude::*;
@@ -341,13 +339,11 @@ mod tests {
         cx.write_to(&dir.child(&BOOT_PATHS.install_dataset)).unwrap();
         cx.write_to(&dir.child(&NON_BOOT_PATHS.install_dataset)).unwrap();
 
-        let zpools = ZoneImageZpools {
-            root: dir.path(),
-            all_m2_zpools: vec![BOOT_ZPOOL, NON_BOOT_ZPOOL],
-        };
-
+        let internal_disks =
+            make_internal_disks_rx(dir.path(), BOOT_ZPOOL, &[NON_BOOT_ZPOOL])
+                .current_with_boot_disk();
         let manifests =
-            AllZoneManifests::read_all(&logctx.log, &zpools, &BOOT_ZPOOL);
+            AllZoneManifests::read_all(&logctx.log, &internal_disks);
 
         // Boot disk should be valid.
         assert_eq!(
@@ -391,13 +387,11 @@ mod tests {
         // boot disk.
         dir.child(&BOOT_PATHS.install_dataset).create_dir_all().unwrap();
 
-        let zpools = ZoneImageZpools {
-            root: dir.path(),
-            all_m2_zpools: vec![BOOT_ZPOOL, NON_BOOT_ZPOOL],
-        };
-
+        let internal_disks =
+            make_internal_disks_rx(dir.path(), BOOT_ZPOOL, &[NON_BOOT_ZPOOL])
+                .current_with_boot_disk();
         let manifests =
-            AllZoneManifests::read_all(&logctx.log, &zpools, &BOOT_ZPOOL);
+            AllZoneManifests::read_all(&logctx.log, &internal_disks);
         assert_eq!(
             manifests.boot_disk_result.as_ref().unwrap_err(),
             &zone_manifest_not_found(&dir.path().join(&BOOT_PATHS.zones_json)),
@@ -437,13 +431,11 @@ mod tests {
         // Create an empty file on the boot disk (will cause a read error).
         dir.child(&BOOT_PATHS.zones_json).touch().unwrap();
 
-        let zpools = ZoneImageZpools {
-            root: dir.path(),
-            all_m2_zpools: vec![BOOT_ZPOOL, NON_BOOT_ZPOOL],
-        };
-
+        let internal_disks =
+            make_internal_disks_rx(dir.path(), BOOT_ZPOOL, &[NON_BOOT_ZPOOL])
+                .current_with_boot_disk();
         let manifests =
-            AllZoneManifests::read_all(&logctx.log, &zpools, &BOOT_ZPOOL);
+            AllZoneManifests::read_all(&logctx.log, &internal_disks);
         assert_eq!(
             manifests.boot_disk_result.as_ref().unwrap_err(),
             &InlineErrorChain::new(&deserialize_error(
@@ -492,13 +484,11 @@ mod tests {
         // Write the invalid manifest to the boot disk.
         invalid_cx.write_to(&dir.child(&BOOT_PATHS.install_dataset)).unwrap();
 
-        let zpools = ZoneImageZpools {
-            root: dir.path(),
-            all_m2_zpools: vec![BOOT_ZPOOL, NON_BOOT_ZPOOL],
-        };
-
+        let internal_disks =
+            make_internal_disks_rx(dir.path(), BOOT_ZPOOL, &[NON_BOOT_ZPOOL])
+                .current_with_boot_disk();
         let manifests =
-            AllZoneManifests::read_all(&logctx.log, &zpools, &BOOT_ZPOOL);
+            AllZoneManifests::read_all(&logctx.log, &internal_disks);
         assert_eq!(
             manifests.boot_disk_result.as_ref().unwrap(),
             &invalid_cx
@@ -553,18 +543,14 @@ mod tests {
         // Read error (empty file).
         dir.child(&NON_BOOT_3_PATHS.zones_json).touch().unwrap();
 
-        let zpools = ZoneImageZpools {
-            root: dir.path(),
-            all_m2_zpools: vec![
-                BOOT_ZPOOL,
-                NON_BOOT_ZPOOL,
-                NON_BOOT_2_ZPOOL,
-                NON_BOOT_3_ZPOOL,
-            ],
-        };
-
+        let internal_disks = make_internal_disks_rx(
+            dir.path(),
+            BOOT_ZPOOL,
+            &[NON_BOOT_ZPOOL, NON_BOOT_2_ZPOOL, NON_BOOT_3_ZPOOL],
+        )
+        .current_with_boot_disk();
         let manifests =
-            AllZoneManifests::read_all(&logctx.log, &zpools, &BOOT_ZPOOL);
+            AllZoneManifests::read_all(&logctx.log, &internal_disks);
         // The boot disk is valid.
         let boot_disk_result = manifests.boot_disk_result.as_ref().unwrap();
         assert_eq!(

@@ -6,7 +6,6 @@
 //!
 //! For more about commingling MUPdate and update, see RFD 556.
 
-use crate::ZoneImageZpools;
 use crate::install_dataset_metadata::AllInstallMetadataFiles;
 use crate::install_dataset_metadata::InstallMetadataNonBootInfo;
 use crate::install_dataset_metadata::InstallMetadataNonBootMismatch;
@@ -19,6 +18,7 @@ use nexus_sled_agent_shared::zone_images::MupdateOverrideNonBootMismatch;
 use nexus_sled_agent_shared::zone_images::MupdateOverrideNonBootResult;
 use nexus_sled_agent_shared::zone_images::MupdateOverrideStatus;
 use omicron_common::update::MupdateOverrideInfo;
+use sled_agent_config_reconciler::InternalDisksWithBootDisk;
 use slog::error;
 use slog::info;
 use slog::o;
@@ -40,14 +40,12 @@ impl AllMupdateOverrides {
     /// For more about commingling MUPdate and update, see RFD 556.
     pub(crate) fn read_all(
         log: &slog::Logger,
-        zpools: &ZoneImageZpools<'_>,
-        boot_zpool: &ZpoolName,
+        internal_disks: &InternalDisksWithBootDisk,
     ) -> Self {
         let files = AllInstallMetadataFiles::<MupdateOverrideInfo>::read_all(
             log,
             MupdateOverrideInfo::FILE_NAME,
-            zpools,
-            boot_zpool,
+            internal_disks,
         );
 
         let boot_disk_override = files
@@ -186,6 +184,7 @@ mod tests {
     use crate::test_utils::dataset_missing_error;
     use crate::test_utils::dataset_not_dir_error;
     use crate::test_utils::deserialize_error;
+    use crate::test_utils::make_internal_disks_rx;
 
     use camino_tempfile_ext::prelude::*;
     use dropshot::ConfigLogging;
@@ -207,12 +206,11 @@ mod tests {
         let info = cx.override_info();
         cx.write_to(&dir.child(&BOOT_PATHS.install_dataset)).unwrap();
 
-        let zpools = ZoneImageZpools {
-            root: dir.path(),
-            all_m2_zpools: vec![BOOT_ZPOOL],
-        };
+        let internal_disks =
+            make_internal_disks_rx(dir.path(), BOOT_ZPOOL, &[])
+                .current_with_boot_disk();
         let overrides =
-            AllMupdateOverrides::read_all(&logctx.log, &zpools, &BOOT_ZPOOL);
+            AllMupdateOverrides::read_all(&logctx.log, &internal_disks);
         assert_eq!(
             overrides.boot_disk_override.as_ref().unwrap().as_ref(),
             Some(&info)
@@ -235,13 +233,12 @@ mod tests {
         cx.write_to(&dir.child(&BOOT_PATHS.install_dataset)).unwrap();
         cx.write_to(&dir.child(&NON_BOOT_PATHS.install_dataset)).unwrap();
 
-        let zpools = ZoneImageZpools {
-            root: dir.path(),
-            all_m2_zpools: vec![BOOT_ZPOOL, NON_BOOT_ZPOOL],
-        };
+        let internal_disks =
+            make_internal_disks_rx(dir.path(), BOOT_ZPOOL, &[NON_BOOT_ZPOOL])
+                .current_with_boot_disk();
 
         let overrides =
-            AllMupdateOverrides::read_all(&logctx.log, &zpools, &BOOT_ZPOOL);
+            AllMupdateOverrides::read_all(&logctx.log, &internal_disks);
         assert_eq!(
             overrides.boot_disk_override.as_ref().unwrap().as_ref(),
             Some(&info)
@@ -274,13 +271,12 @@ mod tests {
         dir.child(&BOOT_PATHS.install_dataset).create_dir_all().unwrap();
         dir.child(&NON_BOOT_PATHS.install_dataset).create_dir_all().unwrap();
 
-        let zpools = ZoneImageZpools {
-            root: dir.path(),
-            all_m2_zpools: vec![BOOT_ZPOOL, NON_BOOT_ZPOOL],
-        };
+        let internal_disks =
+            make_internal_disks_rx(dir.path(), BOOT_ZPOOL, &[NON_BOOT_ZPOOL])
+                .current_with_boot_disk();
 
         let overrides =
-            AllMupdateOverrides::read_all(&logctx.log, &zpools, &BOOT_ZPOOL);
+            AllMupdateOverrides::read_all(&logctx.log, &internal_disks);
         assert_eq!(
             overrides.boot_disk_override.as_ref().unwrap().as_ref(),
             None,
@@ -314,13 +310,12 @@ mod tests {
         // Create the directory, but not the override JSON within it.
         dir.child(&NON_BOOT_PATHS.install_dataset).create_dir_all().unwrap();
 
-        let zpools = ZoneImageZpools {
-            root: dir.path(),
-            all_m2_zpools: vec![BOOT_ZPOOL, NON_BOOT_ZPOOL],
-        };
+        let internal_disks =
+            make_internal_disks_rx(dir.path(), BOOT_ZPOOL, &[NON_BOOT_ZPOOL])
+                .current_with_boot_disk();
 
         let overrides =
-            AllMupdateOverrides::read_all(&logctx.log, &zpools, &BOOT_ZPOOL);
+            AllMupdateOverrides::read_all(&logctx.log, &internal_disks);
         assert_eq!(
             overrides.boot_disk_override.as_ref().unwrap().as_ref(),
             Some(&info)
@@ -357,12 +352,11 @@ mod tests {
 
         cx.write_to(&dir.child(&NON_BOOT_PATHS.install_dataset)).unwrap();
 
-        let zpools = ZoneImageZpools {
-            root: dir.path(),
-            all_m2_zpools: vec![BOOT_ZPOOL, NON_BOOT_ZPOOL],
-        };
+        let internal_disks =
+            make_internal_disks_rx(dir.path(), BOOT_ZPOOL, &[NON_BOOT_ZPOOL])
+                .current_with_boot_disk();
         let overrides =
-            AllMupdateOverrides::read_all(&logctx.log, &zpools, &BOOT_ZPOOL);
+            AllMupdateOverrides::read_all(&logctx.log, &internal_disks);
         assert_eq!(
             overrides.boot_disk_override.as_ref().unwrap().as_ref(),
             None,
@@ -404,12 +398,11 @@ mod tests {
         let info2 = cx2.override_info();
         cx2.write_to(&dir.child(&NON_BOOT_PATHS.install_dataset)).unwrap();
 
-        let zpools = ZoneImageZpools {
-            root: dir.path(),
-            all_m2_zpools: vec![BOOT_ZPOOL, NON_BOOT_ZPOOL],
-        };
+        let internal_disks =
+            make_internal_disks_rx(dir.path(), BOOT_ZPOOL, &[NON_BOOT_ZPOOL])
+                .current_with_boot_disk();
         let overrides =
-            AllMupdateOverrides::read_all(&logctx.log, &zpools, &BOOT_ZPOOL);
+            AllMupdateOverrides::read_all(&logctx.log, &internal_disks);
         assert_eq!(
             overrides.boot_disk_override.as_ref().unwrap().as_ref(),
             Some(&info),
@@ -450,12 +443,11 @@ mod tests {
             .create_dir_all()
             .unwrap();
 
-        let zpools = ZoneImageZpools {
-            root: dir.path(),
-            all_m2_zpools: vec![BOOT_ZPOOL, NON_BOOT_ZPOOL],
-        };
+        let internal_disks =
+            make_internal_disks_rx(dir.path(), BOOT_ZPOOL, &[NON_BOOT_ZPOOL])
+                .current_with_boot_disk();
         let overrides =
-            AllMupdateOverrides::read_all(&logctx.log, &zpools, &BOOT_ZPOOL);
+            AllMupdateOverrides::read_all(&logctx.log, &internal_disks);
         assert_eq!(
             overrides.boot_disk_override.as_ref().unwrap_err(),
             &InlineErrorChain::new(&dataset_missing_error(
@@ -495,12 +487,11 @@ mod tests {
         dir.child(&BOOT_PATHS.install_dataset).touch().unwrap();
         dir.child(&NON_BOOT_PATHS.install_dataset).touch().unwrap();
 
-        let zpools = ZoneImageZpools {
-            root: dir.path(),
-            all_m2_zpools: vec![BOOT_ZPOOL, NON_BOOT_ZPOOL],
-        };
+        let internal_disks =
+            make_internal_disks_rx(dir.path(), BOOT_ZPOOL, &[NON_BOOT_ZPOOL])
+                .current_with_boot_disk();
         let overrides =
-            AllMupdateOverrides::read_all(&logctx.log, &zpools, &BOOT_ZPOOL);
+            AllMupdateOverrides::read_all(&logctx.log, &internal_disks);
         assert_eq!(
             overrides.boot_disk_override.as_ref().unwrap_err(),
             &InlineErrorChain::new(&dataset_not_dir_error(
@@ -547,17 +538,14 @@ mod tests {
         // Read error (empty file).
         dir.child(&NON_BOOT_3_PATHS.mupdate_override_json).touch().unwrap();
 
-        let zpools = ZoneImageZpools {
-            root: dir.path(),
-            all_m2_zpools: vec![
-                BOOT_ZPOOL,
-                NON_BOOT_ZPOOL,
-                NON_BOOT_2_ZPOOL,
-                NON_BOOT_3_ZPOOL,
-            ],
-        };
+        let internal_disks = make_internal_disks_rx(
+            dir.path(),
+            BOOT_ZPOOL,
+            &[NON_BOOT_ZPOOL, NON_BOOT_2_ZPOOL, NON_BOOT_3_ZPOOL],
+        )
+        .current_with_boot_disk();
         let overrides =
-            AllMupdateOverrides::read_all(&logctx.log, &zpools, &BOOT_ZPOOL);
+            AllMupdateOverrides::read_all(&logctx.log, &internal_disks);
         assert_eq!(
             overrides.boot_disk_override.as_ref().unwrap_err(),
             &InlineErrorChain::new(&deserialize_error(

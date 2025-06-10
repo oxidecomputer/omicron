@@ -4,16 +4,13 @@
 
 //! Generic code to read a metadata file from an install dataset.
 
-use crate::{
-    ZoneImageZpools,
-    errors::{ArcIoError, ArcSerdeJsonError},
-};
+use crate::errors::{ArcIoError, ArcSerdeJsonError};
 
 use camino::{Utf8Path, Utf8PathBuf};
 use iddqd::{IdOrdItem, IdOrdMap, id_upcast};
 use illumos_utils::zpool::ZpoolName;
 use serde::de::DeserializeOwned;
-use sled_storage::dataset::INSTALL_DATASET;
+use sled_agent_config_reconciler::InternalDisksWithBootDisk;
 use std::fs::{self, FileType};
 use thiserror::Error;
 
@@ -44,11 +41,9 @@ where
     pub(crate) fn read_all(
         _log: &slog::Logger,
         metadata_file_name: &str,
-        zpools: &ZoneImageZpools<'_>,
-        boot_zpool: &ZpoolName,
+        internal_disks: &InternalDisksWithBootDisk,
     ) -> Self {
-        let boot_dataset_dir =
-            boot_zpool.dataset_mountpoint(zpools.root, INSTALL_DATASET);
+        let boot_dataset_dir = internal_disks.boot_disk_install_dataset();
 
         // Read the file from the boot disk.
         let boot_disk_path = boot_dataset_dir.join(metadata_file_name);
@@ -58,22 +53,16 @@ where
         // Read the file from all other disks. We attempt to make sure they match up
         // and will log a warning if they don't, though (until we have a better
         // story on transient failures) it's not fatal.
-        let non_boot_zpools = zpools
-            .all_m2_zpools
-            .iter()
-            .filter(|&zpool_name| zpool_name != boot_zpool);
-        let non_boot_disk_overrides = non_boot_zpools
-            .map(|zpool_name| {
-                let dataset_dir =
-                    zpool_name.dataset_mountpoint(zpools.root, INSTALL_DATASET);
-
+        let non_boot_datasets = internal_disks.non_boot_disk_install_datasets();
+        let non_boot_disk_overrides = non_boot_datasets
+            .map(|(zpool_name, dataset_dir)| {
                 let path = dataset_dir.join(metadata_file_name);
                 let res = read_install_metadata_file(&dataset_dir, &path);
                 let result =
                     InstallMetadataNonBootResult::new(res, &boot_disk_metadata);
 
                 InstallMetadataNonBootInfo {
-                    zpool_name: *zpool_name,
+                    zpool_name,
                     dataset_dir,
                     path,
                     result,
@@ -82,7 +71,7 @@ where
             .collect();
 
         Self {
-            boot_zpool: *boot_zpool,
+            boot_zpool: internal_disks.boot_disk_zpool(),
             boot_dataset_dir,
             boot_disk_path,
             boot_disk_metadata,

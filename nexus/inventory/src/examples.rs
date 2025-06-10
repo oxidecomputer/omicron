@@ -16,7 +16,6 @@ use gateway_client::types::SpType;
 use gateway_types::rot::RotSlot;
 use nexus_sled_agent_shared::inventory::Baseboard;
 use nexus_sled_agent_shared::inventory::ConfigReconcilerInventory;
-use nexus_sled_agent_shared::inventory::ConfigReconcilerInventoryResult;
 use nexus_sled_agent_shared::inventory::ConfigReconcilerInventoryStatus;
 use nexus_sled_agent_shared::inventory::Inventory;
 use nexus_sled_agent_shared::inventory::InventoryDataset;
@@ -644,29 +643,9 @@ pub fn sled_agent(
     ledgered_sled_config: Option<OmicronSledConfig>,
 ) -> Inventory {
     // Assume the `ledgered_sled_config` was reconciled successfully.
-    let last_reconciliation = ledgered_sled_config.clone().map(|config| {
-        let external_disks = config
-            .disks
-            .iter()
-            .map(|d| (d.id, ConfigReconcilerInventoryResult::Ok))
-            .collect();
-        let datasets = config
-            .datasets
-            .iter()
-            .map(|d| (d.id, ConfigReconcilerInventoryResult::Ok))
-            .collect();
-        let zones = config
-            .zones
-            .iter()
-            .map(|z| (z.id, ConfigReconcilerInventoryResult::Ok))
-            .collect();
-        ConfigReconcilerInventory {
-            last_reconciled_config: config,
-            external_disks,
-            datasets,
-            zones,
-        }
-    });
+    let last_reconciliation = ledgered_sled_config
+        .clone()
+        .map(ConfigReconcilerInventory::debug_assume_success);
 
     let reconciler_status = if last_reconciliation.is_some() {
         ConfigReconcilerInventoryStatus::Idle {

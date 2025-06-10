@@ -10,8 +10,8 @@ use nexus_client::types::{
     BackgroundTasksActivateRequest, ProbeExternalIp, ProbeInfo,
 };
 use omicron_common::api::external::{
-    Generation, VpcFirewallRuleAction, VpcFirewallRuleDirection,
-    VpcFirewallRulePriority, VpcFirewallRuleStatus,
+    VpcFirewallRuleAction, VpcFirewallRuleDirection, VpcFirewallRulePriority,
+    VpcFirewallRuleStatus,
 };
 use omicron_common::api::internal::shared::{
     NetworkInterface, ResolvedVpcFirewallRule,
@@ -19,10 +19,11 @@ use omicron_common::api::internal::shared::{
 use omicron_uuid_kinds::{GenericUuid, OmicronZoneUuid};
 use rand::SeedableRng;
 use rand::prelude::IteratorRandom;
+use sled_agent_config_reconciler::{
+    AvailableDatasetsReceiver, CurrentlyManagedZpools,
+    CurrentlyManagedZpoolsReceiver,
+};
 use sled_agent_zone_images::ramdisk_file_source;
-use sled_storage::dataset::ZONE_DATASET;
-use sled_storage::manager::StorageHandle;
-use sled_storage::resources::AllDisks;
 use slog::{Logger, error, warn};
 use std::collections::{HashMap, HashSet};
 use std::hash::{Hash, Hasher};
@@ -51,7 +52,6 @@ pub(crate) struct ProbeManager {
 }
 
 struct RunningProbes {
-    storage_generation: Option<Generation>,
     zones: HashMap<Uuid, RunningZone>,
 }
 
@@ -61,10 +61,10 @@ pub(crate) struct ProbeManagerInner {
     log: Logger,
     sled_id: Uuid,
     vnic_allocator: VnicAllocator<Etherstub>,
-    storage: StorageHandle,
     port_manager: PortManager,
     metrics_queue: MetricsRequestQueue,
     running_probes: Mutex<RunningProbes>,
+    available_datasets_rx: AvailableDatasetsReceiver,
 
     zones_api: Arc<dyn illumos_utils::zone::Api>,
 }
@@ -74,9 +74,9 @@ impl ProbeManager {
         sled_id: Uuid,
         nexus_client: NexusClient,
         etherstub: Etherstub,
-        storage: StorageHandle,
         port_manager: PortManager,
         metrics_queue: MetricsRequestQueue,
+        available_datasets_rx: AvailableDatasetsReceiver,
         log: Logger,
     ) -> Self {
         Self {
@@ -88,69 +88,24 @@ impl ProbeManager {
                     Arc::new(illumos_utils::dladm::Dladm::real_api()),
                 ),
                 running_probes: Mutex::new(RunningProbes {
-                    storage_generation: None,
                     zones: HashMap::new(),
                 }),
                 nexus_client,
                 log,
                 sled_id,
-                storage,
                 port_manager,
                 metrics_queue,
+                available_datasets_rx,
                 zones_api: Arc::new(illumos_utils::zone::Zones::real_api()),
             }),
         }
     }
 
-    pub(crate) async fn run(&self) {
-        self.inner.run().await;
-    }
-
-    /// Removes any probes using filesystem roots on zpools that are not
-    /// contained in the set of "disks".
-    pub(crate) async fn use_only_these_disks(&self, disks: &AllDisks) {
-        let u2_set: HashSet<_> = disks.all_u2_zpools().into_iter().collect();
-        let mut probes = self.inner.running_probes.lock().await;
-
-        // Consider the generation number on the incoming request to avoid
-        // applying old requests.
-        let requested_generation = *disks.generation();
-        if let Some(last_gen) = probes.storage_generation {
-            if last_gen >= requested_generation {
-                // This request looks old, ignore it.
-                info!(self.inner.log, "use_only_these_disks: Ignoring request";
-                    "last_gen" => ?last_gen, "requested_gen" => ?requested_generation);
-                return;
-            }
-        }
-        probes.storage_generation = Some(requested_generation);
-        info!(self.inner.log, "use_only_these_disks: Processing new request";
-            "gen" => ?requested_generation);
-
-        let to_remove = probes
-            .zones
-            .iter()
-            .filter_map(|(id, probe)| {
-                let probe_pool = match probe.root_zpool() {
-                    ZpoolOrRamdisk::Zpool(zpool_name) => zpool_name,
-                    ZpoolOrRamdisk::Ramdisk => {
-                        info!(
-                            self.inner.log,
-                            "use_only_these_disks: removing probe on ramdisk";
-                            "id" => ?id,
-                        );
-                        return None;
-                    }
-                };
-
-                if !u2_set.contains(probe_pool) { Some(*id) } else { None }
-            })
-            .collect::<Vec<_>>();
-
-        for probe_id in to_remove {
-            info!(self.inner.log, "use_only_these_disks: Removing probe"; "probe_id" => ?probe_id);
-            self.inner.remove_probe_locked(&mut probes, probe_id).await;
-        }
+    pub(crate) async fn run(
+        &self,
+        currently_managed_zpools_rx: CurrentlyManagedZpoolsReceiver,
+    ) {
+        self.inner.run(currently_managed_zpools_rx).await;
     }
 }
 
@@ -215,18 +170,55 @@ impl TryFrom<Zone> for ProbeState {
 
 impl ProbeManagerInner {
     /// Run the probe manager. If it's already running this is a no-op.
-    async fn run(self: &Arc<Self>) {
+    async fn run(
+        self: &Arc<Self>,
+        currently_managed_zpools_rx: CurrentlyManagedZpoolsReceiver,
+    ) {
         let mut join_handle = self.join_handle.lock().await;
         if join_handle.is_none() {
-            *join_handle = Some(self.clone().reconciler())
+            *join_handle =
+                Some(self.clone().reconciler(currently_managed_zpools_rx))
         }
     }
 
     /// Run the reconciler loop on a background thread.
-    fn reconciler(self: Arc<Self>) -> JoinHandle<()> {
+    fn reconciler(
+        self: Arc<Self>,
+        mut currently_managed_zpools_rx: CurrentlyManagedZpoolsReceiver,
+    ) -> JoinHandle<()> {
         tokio::spawn(async move {
             loop {
-                sleep(RECONCILIATION_INTERVAL).await;
+                let sleep_fut = sleep(RECONCILIATION_INTERVAL);
+                tokio::pin!(sleep_fut);
+
+                // Wait until the next reconciliation tick, but handle any
+                // changes to the set of disks in the meantime.
+                loop {
+                    tokio::select! {
+                        _ = &mut sleep_fut => break,
+
+                        // Cancel-safe per docs on `changed()`
+                        result = currently_managed_zpools_rx.changed() => {
+                            match result {
+                                Ok(()) => {
+                                    self.use_only_these_disks(
+                                        &currently_managed_zpools_rx
+                                            .current_and_update()
+                                    ).await;
+                                    continue;
+                                }
+                                Err(_) => {
+                                    warn!(
+                                        self.log,
+                                        "ProbeManager's 'current zpools' \
+                                         channel closed; shutting down",
+                                    );
+                                    return;
+                                }
+                            }
+                        }
+                    }
+                }
 
                 // Collect the target and current state. Use set operations
                 // to determine what probes need to be added, removed and/or
@@ -269,6 +261,37 @@ impl ProbeManagerInner {
         })
     }
 
+    /// Removes any probes using filesystem roots on zpools that are not
+    /// contained in the set of "disks".
+    async fn use_only_these_disks(&self, disks: &CurrentlyManagedZpools) {
+        let mut probes = self.running_probes.lock().await;
+
+        let to_remove = probes
+            .zones
+            .iter()
+            .filter_map(|(id, probe)| {
+                let probe_pool = match probe.root_zpool() {
+                    ZpoolOrRamdisk::Zpool(zpool_name) => zpool_name,
+                    ZpoolOrRamdisk::Ramdisk => {
+                        info!(
+                            self.log,
+                            "use_only_these_disks: removing probe on ramdisk";
+                            "id" => ?id,
+                        );
+                        return None;
+                    }
+                };
+
+                if !disks.contains(probe_pool) { Some(*id) } else { None }
+            })
+            .collect::<Vec<_>>();
+
+        for probe_id in to_remove {
+            info!(self.log, "use_only_these_disks: Removing probe"; "probe_id" => ?probe_id);
+            self.remove_probe_locked(&mut probes, probe_id).await;
+        }
+    }
+
     /// Add a set of probes to this sled.
     ///
     /// Returns the number of inserted probes.
@@ -292,12 +315,9 @@ impl ProbeManagerInner {
     /// boots the probe zone.
     async fn add_probe(self: &Arc<Self>, probe: &ProbeState) -> Result<()> {
         let mut rng = rand::rngs::StdRng::from_entropy();
-        let current_disks = self
-            .storage
-            .get_latest_disks()
-            .await
-            .all_u2_mountpoints(ZONE_DATASET);
-        let zone_root_path = current_disks
+        let zone_root_path = self
+            .available_datasets_rx
+            .all_mounted_zone_root_datasets()
             .into_iter()
             .choose(&mut rng)
             .ok_or_else(|| anyhow!("u2 not found"))?;

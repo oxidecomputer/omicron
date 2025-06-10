@@ -3560,6 +3560,19 @@
             "$ref": "#/components/schemas/PendingMgsUpdate"
           },
           "result": {
+            "x-rust-type": {
+              "crate": "std",
+              "parameters": [
+                {
+                  "$ref": "#/components/schemas/UpdateCompletedHow"
+                },
+                {
+                  "type": "string"
+                }
+              ],
+              "path": "::std::result::Result",
+              "version": "*"
+            },
             "oneOf": [
               {
                 "type": "object",
@@ -3570,8 +3583,7 @@
                 },
                 "required": [
                   "ok"
-                ],
-                "additionalProperties": false
+                ]
               },
               {
                 "type": "object",
@@ -3582,8 +3594,7 @@
                 },
                 "required": [
                   "err"
-                ],
-                "additionalProperties": false
+                ]
               }
             ]
           },
