@@ -34,9 +34,9 @@ use std::time::Duration;
 use std::time::Instant;
 use tokio::sync::watch;
 
-use crate::dataset_serialization_task::OrphanedDataset;
 use crate::TimeSyncConfig;
 use crate::dataset_serialization_task::DatasetTaskHandle;
+use crate::dataset_serialization_task::OrphanedDataset;
 use crate::ledger::CurrentSledConfig;
 use crate::raw_disks::RawDisksReceiver;
 use crate::sled_agent_facilities::SledAgentFacilities;
