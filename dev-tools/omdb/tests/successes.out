@@ -28,8 +28,10 @@ DNS zone:                   oxide-dev.test (External)
 requested version:          2 (created at <REDACTED_TIMESTAMP>)
 version created by Nexus:   ..........<REDACTED_UUID>...........
 version created because:    create silo: "test-suite-silo"
-changes:                    names added: 1, names removed: 0
+changes:                    names added: 3, names removed: 0
 
++  @                                                  NS   ns1.oxide-dev.test
++  ns1                                                AAAA ::1
 +  test-suite-silo.sys                                A    127.0.0.1
 ---------------------------------------------
 stderr:
@@ -42,6 +44,8 @@ termination: Exited(0)
 stdout:
 External zone: oxide-dev.test
   NAME                                               RECORDS
+  @                                                  NS   ns1.oxide-dev.test
+  ns1                                                AAAA ::1
   test-suite-silo.sys                                A    127.0.0.1
 ---------------------------------------------
 stderr:
@@ -1469,11 +1473,12 @@ parent:    <none>
     read from::   SingleNode
 
  METADATA:
-    created by:::::::::::   nexus-test-utils
-    created at:::::::::::   <REDACTED_TIMESTAMP>
-    comment::::::::::::::   initial test blueprint
-    internal DNS version:   1
-    external DNS version:   2
+    created by:::::::::::::   nexus-test-utils
+    created at:::::::::::::   <REDACTED_TIMESTAMP>
+    comment::::::::::::::::   initial test blueprint
+    internal DNS version:::   1
+    external DNS version:::   2
+    target release min gen:   1
 
  PENDING MGS-MANAGED UPDATES: 0
 
@@ -1570,11 +1575,12 @@ parent:    <none>
     read from::   SingleNode
 
  METADATA:
-    created by:::::::::::   nexus-test-utils
-    created at:::::::::::   <REDACTED_TIMESTAMP>
-    comment::::::::::::::   initial test blueprint
-    internal DNS version:   1
-    external DNS version:   2
+    created by:::::::::::::   nexus-test-utils
+    created at:::::::::::::   <REDACTED_TIMESTAMP>
+    comment::::::::::::::::   initial test blueprint
+    internal DNS version:::   1
+    external DNS version:::   2
+    target release min gen:   1
 
  PENDING MGS-MANAGED UPDATES: 0
 
@@ -1656,8 +1662,9 @@ to:   blueprint ......<REDACTED_BLUEPRINT_ID>.......
     cluster.preserve_downgrade_option:   <COCKROACHDB_VERSION_REDACTED> (unchanged)
 
  METADATA:
-    internal DNS version:   1 (unchanged)
-    external DNS version:   2 (unchanged)
+    internal DNS version:::   1 (unchanged)
+    external DNS version:::   2 (unchanged)
+    target release min gen:   1 (unchanged)
 
  OXIMETER SETTINGS:
     generation:   1 (unchanged)

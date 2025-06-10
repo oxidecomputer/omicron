@@ -229,6 +229,62 @@ impl NexusExternalApi for NexusExternalApiImpl {
             .await
     }
 
+    async fn auth_settings_view(
+        rqctx: RequestContext<ApiContext>,
+    ) -> Result<HttpResponseOk<views::SiloAuthSettings>, HttpError> {
+        let apictx = rqctx.context();
+        let handler = async {
+            let nexus = &apictx.context.nexus;
+            let opctx =
+                crate::context::op_context_for_external_api(&rqctx).await?;
+            let silo: NameOrId = opctx
+                .authn
+                .silo_required()
+                .internal_context("loading current silo")?
+                .id()
+                .into();
+
+            let silo_lookup = nexus.silo_lookup(&opctx, silo)?;
+            let settings =
+                nexus.silo_fetch_auth_settings(&opctx, &silo_lookup).await?;
+            Ok(HttpResponseOk(settings.into()))
+        };
+        apictx
+            .context
+            .external_latencies
+            .instrument_dropshot_handler(&rqctx, handler)
+            .await
+    }
+
+    async fn auth_settings_update(
+        rqctx: RequestContext<Self::Context>,
+        new_settings: TypedBody<params::SiloAuthSettingsUpdate>,
+    ) -> Result<HttpResponseOk<views::SiloAuthSettings>, HttpError> {
+        let apictx = rqctx.context();
+        let handler = async {
+            let nexus = &apictx.context.nexus;
+            let new_settings = new_settings.into_inner();
+            let opctx =
+                crate::context::op_context_for_external_api(&rqctx).await?;
+            let silo: NameOrId = opctx
+                .authn
+                .silo_required()
+                .internal_context("loading current silo")?
+                .id()
+                .into();
+            let silo_lookup = nexus.silo_lookup(&opctx, silo)?;
+            let settings = nexus
+                .silo_update_auth_settings(&opctx, &silo_lookup, &new_settings)
+                .await?;
+            Ok(HttpResponseOk(settings.into()))
+        };
+        apictx
+            .context
+            .external_latencies
+            .instrument_dropshot_handler(&rqctx, handler)
+            .await
+    }
+
     async fn utilization_view(
         rqctx: RequestContext<ApiContext>,
     ) -> Result<HttpResponseOk<Utilization>, HttpError> {
@@ -6579,7 +6635,7 @@ impl NexusExternalApi for NexusExternalApiImpl {
             // Fetch the TUF repo metadata and update the target release.
             let tuf_repo_id = nexus
                 .datastore()
-                .update_tuf_repo_get(&opctx, system_version.into())
+                .tuf_repo_get_by_version(&opctx, system_version.into())
                 .await?
                 .repo
                 .id;
@@ -7003,6 +7059,57 @@ impl NexusExternalApi for NexusExternalApiImpl {
             nexus
                 .ssh_key_delete(&opctx, actor.actor_id(), &ssh_key_lookup)
                 .await?;
+            Ok(HttpResponseDeleted())
+        };
+        apictx
+            .context
+            .external_latencies
+            .instrument_dropshot_handler(&rqctx, handler)
+            .await
+    }
+
+    async fn current_user_access_token_list(
+        rqctx: RequestContext<Self::Context>,
+        query_params: Query<PaginatedById>,
+    ) -> Result<HttpResponseOk<ResultsPage<views::DeviceAccessToken>>, HttpError>
+    {
+        let apictx = rqctx.context();
+        let handler = async {
+            let opctx =
+                crate::context::op_context_for_external_api(&rqctx).await?;
+            let nexus = &apictx.context.nexus;
+            let query = query_params.into_inner();
+            let pag_params = data_page_params_for(&rqctx, &query)?;
+            let tokens = nexus
+                .current_user_token_list(&opctx, &pag_params)
+                .await?
+                .into_iter()
+                .map(views::DeviceAccessToken::from)
+                .collect();
+            Ok(HttpResponseOk(ScanById::results_page(
+                &query,
+                tokens,
+                &marker_for_id,
+            )?))
+        };
+        apictx
+            .context
+            .external_latencies
+            .instrument_dropshot_handler(&rqctx, handler)
+            .await
+    }
+
+    async fn current_user_access_token_delete(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<params::TokenPath>,
+    ) -> Result<HttpResponseDeleted, HttpError> {
+        let apictx = rqctx.context();
+        let handler = async {
+            let opctx =
+                crate::context::op_context_for_external_api(&rqctx).await?;
+            let nexus = &apictx.context.nexus;
+            let path = path_params.into_inner();
+            nexus.current_user_token_delete(&opctx, path.token_id).await?;
             Ok(HttpResponseDeleted())
         };
         apictx
@@ -7583,20 +7690,25 @@ impl NexusExternalApi for NexusExternalApiImpl {
         let apictx = rqctx.context();
         let handler = async {
             let nexus = &apictx.context.nexus;
-            let opctx =
-                crate::context::op_context_for_external_api(&rqctx).await;
-            let token = cookies.get(session_cookie::SESSION_COOKIE_COOKIE_NAME);
+            // this is kind of a weird one, but we're only doing things here
+            // that are authorized directly by the possession of the token,
+            // which makes it somewhat like a login
+            let opctx = nexus.opctx_external_authn();
+            let session_cookie =
+                cookies.get(session_cookie::SESSION_COOKIE_COOKIE_NAME);
 
-            if let Ok(opctx) = opctx {
-                if let Some(token) = token {
-                    nexus.session_hard_delete(&opctx, token.value()).await?;
-                }
+            // Look up session and delete it if present
+            if let Some(cookie) = session_cookie {
+                let token = cookie.value().to_string();
+                nexus.session_hard_delete_by_token(&opctx, token).await?;
             }
 
-            // If user's session was already expired, they failed auth and their
-            // session was automatically deleted by the auth scheme. If they have no
-            // session (e.g., they cleared their cookies while sitting on the page)
-            // they will also fail auth.
+            // If user's session was already expired, they fail auth and their
+            // session is automatically deleted by the auth scheme. If they
+            // have no session at all (because, e.g., they cleared their cookies
+            // while sitting on the page) they will also fail auth, but nothing
+            // is deleted and the above lookup by token fails (but doesn't early
+            // return).
 
             // Even if the user failed auth, we don't want to send them back a 401
             // like we would for a normal request. They are in fact logged out like
@@ -7744,9 +7856,8 @@ impl NexusExternalApi for NexusExternalApiImpl {
                 }
             };
 
-            let model = nexus
-                .device_auth_request_create(&opctx, params.client_id)
-                .await?;
+            let model =
+                nexus.device_auth_request_create(&opctx, params).await?;
             nexus.build_oauth_response(
                 StatusCode::OK,
                 &model.into_response(rqctx.server.using_tls(), host),

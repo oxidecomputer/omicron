@@ -5,6 +5,7 @@
 use std::time::Duration;
 
 use gateway_messages::UpdateStatus;
+use omicron_uuid_kinds::MupdateUuid;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use tufaceous_artifact::ArtifactHash;
@@ -95,7 +96,7 @@ impl From<gateway_messages::UpdatePreparationProgress>
 )]
 #[serde(rename_all = "snake_case")]
 pub struct InstallinatorImageId {
-    pub update_id: Uuid,
+    pub update_id: MupdateUuid,
     pub host_phase_2: ArtifactHash,
     pub control_plane: ArtifactHash,
 }

@@ -8,10 +8,10 @@
 
 use crate::services::ServiceManager;
 use crate::sled_agent::SledAgent;
+use sled_agent_config_reconciler::RawDisksSender;
 use sled_hardware::{HardwareManager, HardwareUpdate};
 use sled_hardware_types::Baseboard;
 use sled_storage::disk::RawDisk;
-use sled_storage::manager::StorageHandle;
 use slog::Logger;
 use tokio::sync::broadcast::error::RecvError;
 use tokio::sync::{broadcast, oneshot};
@@ -68,8 +68,8 @@ pub struct HardwareMonitor {
     // A reference to the hardware manager
     hardware_manager: HardwareManager,
 
-    // A handle to [`sled_hardware::manager::StorageManger`]
-    storage_manager: StorageHandle,
+    // A handle to send raw disk updates to the config-reconciler system.
+    raw_disks_tx: RawDisksSender,
 
     // A handle to the sled-agent
     //
@@ -91,7 +91,7 @@ impl HardwareMonitor {
     pub fn new(
         log: &Logger,
         hardware_manager: &HardwareManager,
-        storage_manager: &StorageHandle,
+        raw_disks_tx: RawDisksSender,
     ) -> (
         HardwareMonitor,
         oneshot::Sender<SledAgent>,
@@ -112,7 +112,7 @@ impl HardwareMonitor {
                 service_manager_ready_rx,
                 hardware_rx,
                 hardware_manager: hardware_manager.clone(),
-                storage_manager: storage_manager.clone(),
+                raw_disks_tx,
                 sled_agent: None,
                 tofino_manager,
             },
@@ -177,36 +177,16 @@ impl HardwareMonitor {
                     }
                 }
                 HardwareUpdate::DiskAdded(disk) => {
-                    // We notify the storage manager of the hardware, but do not need to
-                    // wait for the result to be fully processed.
-                    //
-                    // Here and below, we're "dropping a future" rather than
-                    // awaiting it. That's intentional - the hardware monitor
-                    // doesn't care when this work is finished, just when it's
-                    // enqueued.
-                    #[allow(clippy::let_underscore_future)]
-                    let _ = self
-                        .storage_manager
-                        .detected_raw_disk(disk.into())
-                        .await;
+                    self.raw_disks_tx
+                        .add_or_update_raw_disk(disk.into(), &self.log);
                 }
                 HardwareUpdate::DiskRemoved(disk) => {
-                    // We notify the storage manager of the hardware, but do not need to
-                    // wait for the result to be fully processed.
-                    #[allow(clippy::let_underscore_future)]
-                    let _ = self
-                        .storage_manager
-                        .detected_raw_disk_removal(disk.into())
-                        .await;
+                    self.raw_disks_tx
+                        .remove_raw_disk(disk.identity(), &self.log);
                 }
                 HardwareUpdate::DiskUpdated(disk) => {
-                    // We notify the storage manager of the hardware, but do not need to
-                    // wait for the result to be fully processed.
-                    #[allow(clippy::let_underscore_future)]
-                    let _ = self
-                        .storage_manager
-                        .detected_raw_disk_update(disk.into())
-                        .await;
+                    self.raw_disks_tx
+                        .add_or_update_raw_disk(disk.into(), &self.log);
                 }
             },
             Err(broadcast::error::RecvError::Lagged(count)) => {
@@ -280,14 +260,9 @@ impl HardwareMonitor {
             self.deactivate_switch().await;
         }
 
-        // We notify the storage manager of the hardware, but do not need to
-        // wait for the result to be fully processed.
-        #[allow(clippy::let_underscore_future)]
-        let _ = self
-            .storage_manager
-            .ensure_using_exactly_these_disks(
-                self.hardware_manager.disks().into_values().map(RawDisk::from),
-            )
-            .await;
+        self.raw_disks_tx.set_raw_disks(
+            self.hardware_manager.disks().into_values().map(RawDisk::from),
+            &self.log,
+        );
     }
 }

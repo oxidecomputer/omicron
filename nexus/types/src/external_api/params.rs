@@ -13,8 +13,8 @@ use omicron_common::api::external::{
     AddressLotKind, AffinityPolicy, AllowedSourceIps, BfdMode, BgpPeer,
     ByteCount, FailureDomain, Hostname, IdentityMetadataCreateParams,
     IdentityMetadataUpdateParams, InstanceAutoRestartPolicy, InstanceCpuCount,
-    LinkFec, LinkSpeed, Name, NameOrId, PaginationOrder, RouteDestination,
-    RouteTarget, UserId,
+    LinkFec, LinkSpeed, Name, NameOrId, Nullable, PaginationOrder,
+    RouteDestination, RouteTarget, UserId,
 };
 use omicron_common::disk::DiskVariant;
 use oxnet::{IpNet, Ipv4Net, Ipv6Net};
@@ -27,6 +27,7 @@ use serde::{
 };
 use std::collections::BTreeMap;
 use std::collections::BTreeSet;
+use std::num::NonZeroU32;
 use std::{net::IpAddr, str::FromStr};
 use url::Url;
 use uuid::Uuid;
@@ -95,6 +96,7 @@ path_param!(CertificatePath, certificate, "certificate");
 
 id_path_param!(SupportBundlePath, bundle_id, "support bundle");
 id_path_param!(GroupPath, group_id, "group");
+id_path_param!(TokenPath, token_id, "token");
 
 // TODO: The hardware resources should be represented by its UUID or a hardware
 // ID that can be used to deterministically generate the UUID.
@@ -479,6 +481,21 @@ pub struct SiloQuotasUpdate {
     pub memory: Option<ByteCount>,
     /// The amount of storage (in bytes) available for disks or snapshots
     pub storage: Option<ByteCount>,
+}
+
+// TODO: Unlike quota values, silo settings are nullable, so we need passing
+// null to be meaningful here. But it's confusing for it to work that way here
+// and differently for quotas. Maybe the best thing would be to make them all
+// non-nullable on SiloQuotasUpdate. I vaguely remember the latter being the
+// direction we wanted to go in general anyway. Can't find the issue where it
+// was discussed.
+
+/// Updateable properties of a silo's settings.
+#[derive(Clone, Debug, Serialize, Deserialize, JsonSchema)]
+pub struct SiloAuthSettingsUpdate {
+    /// Maximum lifetime of a device token in seconds. If set to null, users
+    /// will be able to create tokens that do not expire.
+    pub device_token_max_ttl_seconds: Nullable<NonZeroU32>,
 }
 
 /// Create-time parameters for a `User`
@@ -1176,8 +1193,9 @@ pub struct InstanceCreate {
     /// Disk attachments of type "create" will be created, while those of type
     /// "attach" must already exist.
     ///
-    /// The order of this list does not guarantee a boot order for the
-    /// instance. Use the boot_disk attribute to specify a boot disk.
+    /// The order of this list does not guarantee a boot order for the instance.
+    /// Use the boot_disk attribute to specify a boot disk. When boot_disk is
+    /// specified it will count against the disk attachment limit.
     #[serde(default)]
     pub disks: Vec<InstanceDiskAttachment>,
 
@@ -1188,7 +1206,8 @@ pub struct InstanceCreate {
     ///
     /// Specifying a boot disk is optional but recommended to ensure predictable
     /// boot behavior. The boot disk can be set during instance creation or
-    /// later if the instance is stopped.
+    /// later if the instance is stopped. The boot disk counts against the disk
+    /// attachment limit.
     ///
     /// An instance that does not have a boot disk set will use the boot
     /// options specified in its UEFI settings, which are controlled by both the
@@ -1742,24 +1761,22 @@ pub struct SwitchPortSettingsCreate {
     #[serde(default)]
     pub groups: Vec<NameOrId>,
 
-    /// Links indexed by phy name. On ports that are not broken out, this is
-    /// always phy0. On a 2x breakout the options are phy0 and phy1, on 4x
-    /// phy0-phy3, etc.
+    /// Link configurations.
     pub links: Vec<LinkConfigCreate>,
 
-    /// Interfaces indexed by link name.
+    /// Interface configurations.
     #[serde(default)]
     pub interfaces: Vec<SwitchInterfaceConfigCreate>,
 
-    /// Routes indexed by interface name.
+    /// Route configurations.
     #[serde(default)]
     pub routes: Vec<RouteConfig>,
 
-    /// BGP peers indexed by interface name.
+    /// BGP peer configurations.
     #[serde(default)]
     pub bgp_peers: Vec<BgpPeerConfig>,
 
-    /// Addresses indexed by interface name.
+    /// Address configurations.
     pub addresses: Vec<AddressConfig>,
 }
 
@@ -1805,7 +1822,9 @@ pub enum SwitchPortGeometry {
 /// Switch link configuration.
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
 pub struct LinkConfigCreate {
-    /// Link name
+    /// Link name. On ports that are not broken out, this is always phy0.
+    /// On a 2x breakout the options are phy0 and phy1, on 4x
+    /// phy0-phy3, etc.
     pub link_name: Name,
 
     /// Maximum transmission unit for the link.
@@ -1822,10 +1841,10 @@ pub struct LinkConfigCreate {
     /// The speed of the link.
     pub speed: LinkSpeed,
 
-    /// Whether or not to set autonegotiation
+    /// Whether or not to set autonegotiation.
     pub autoneg: bool,
 
-    /// Optional tx_eq settings
+    /// Optional tx_eq settings.
     pub tx_eq: Option<TxEqConfig>,
 }
 
@@ -1919,7 +1938,9 @@ impl PartialEq<omicron_common::api::external::LldpLinkConfig>
 /// address will be created for the interface.
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
 pub struct SwitchInterfaceConfigCreate {
-    /// Link the interface will be assigned to
+    /// Link name. On ports that are not broken out, this is always phy0.
+    /// On a 2x breakout the options are phy0 and phy1, on 4x
+    /// phy0-phy3, etc.
     pub link_name: Name,
 
     /// Whether or not IPv6 is enabled.
@@ -1960,7 +1981,9 @@ pub struct SwitchVlanInterface {
 /// Route configuration data associated with a switch port configuration.
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
 pub struct RouteConfig {
-    /// Link the route should be active on
+    /// Link name. On ports that are not broken out, this is always phy0.
+    /// On a 2x breakout the options are phy0 and phy1, on 4x
+    /// phy0-phy3, etc.
     pub link_name: Name,
 
     /// The set of routes assigned to a switch port.
@@ -1993,7 +2016,10 @@ pub struct BgpConfigSelector {
 
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
 pub struct BgpPeerConfig {
-    /// Link that the peer is reachable on
+    /// Link that the peer is reachable on.
+    /// On ports that are not broken out, this is always phy0.
+    /// On a 2x breakout the options are phy0 and phy1, on 4x
+    /// phy0-phy3, etc.
     pub link_name: Name,
 
     pub peers: Vec<BgpPeer>,
@@ -2111,7 +2137,10 @@ pub struct BfdSessionDisable {
 /// A set of addresses associated with a port configuration.
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
 pub struct AddressConfig {
-    /// Link to assign the address to
+    /// Link to assign the addresses to.
+    /// On ports that are not broken out, this is always phy0.
+    /// On a 2x breakout the options are phy0 and phy1, on 4x
+    /// phy0-phy3, etc.
     pub link_name: Name,
 
     /// The set of addresses assigned to the port configuration.
@@ -2450,6 +2479,9 @@ impl TryFrom<String> for RelativeUri {
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
 pub struct DeviceAuthRequest {
     pub client_id: Uuid,
+    /// Optional lifetime for the access token in seconds. If not specified, the
+    /// silo's max TTL will be used (if set).
+    pub ttl_seconds: Option<NonZeroU32>,
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]

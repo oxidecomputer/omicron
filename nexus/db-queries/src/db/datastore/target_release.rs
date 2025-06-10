@@ -7,7 +7,9 @@
 use super::DataStore;
 use crate::authz;
 use crate::context::OpContext;
-use crate::db::model::{SemverVersion, TargetRelease, TargetReleaseSource};
+use crate::db::model::{
+    Generation, SemverVersion, TargetRelease, TargetReleaseSource,
+};
 use async_bb8_diesel::AsyncRunQueryDsl as _;
 use diesel::insert_into;
 use diesel::prelude::*;
@@ -42,6 +44,25 @@ impl DataStore {
             .ok_or_else(|| Error::internal_error("no target release"))?;
 
         Ok(current)
+    }
+
+    /// Fetch a target release by generation number.
+    pub async fn target_release_get_generation(
+        &self,
+        opctx: &OpContext,
+        generation: Generation,
+    ) -> LookupResult<Option<TargetRelease>> {
+        opctx
+            .authorize(authz::Action::Read, &authz::TARGET_RELEASE_CONFIG)
+            .await?;
+        let conn = self.pool_connection_authorized(opctx).await?;
+        dsl::target_release
+            .select(TargetRelease::as_select())
+            .filter(dsl::generation.eq(generation))
+            .first_async(&*conn)
+            .await
+            .optional()
+            .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))
     }
 
     /// Insert a new target release row and return it. It will only become
@@ -189,7 +210,7 @@ mod test {
                 .parse()
                 .expect("SHA256('')");
         let repo = datastore
-            .update_tuf_repo_insert(
+            .tuf_repo_insert(
                 opctx,
                 &TufRepoDescription {
                     repo: TufRepoMeta {

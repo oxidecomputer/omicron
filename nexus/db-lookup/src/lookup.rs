@@ -26,8 +26,10 @@ use nexus_types::identity::Resource;
 use omicron_common::api::external::Error;
 use omicron_common::api::external::InternalContext;
 use omicron_common::api::external::{LookupResult, LookupType, ResourceType};
+use omicron_uuid_kinds::AccessTokenKind;
 use omicron_uuid_kinds::AlertReceiverUuid;
 use omicron_uuid_kinds::AlertUuid;
+use omicron_uuid_kinds::ConsoleSessionUuid;
 use omicron_uuid_kinds::PhysicalDiskUuid;
 use omicron_uuid_kinds::SupportBundleUuid;
 use omicron_uuid_kinds::TufArtifactKind;
@@ -199,19 +201,12 @@ impl<'a> LookupPath<'a> {
 
     // Fleet-level resources
 
-    /// Select a resource of type ConsoleSession, identified by its `token`
-    pub fn console_session_token<'b, 'c>(
+    /// Select a resource of type ConsoleSession, identified by its `id`
+    pub fn console_session_id(
         self,
-        token: &'b str,
-    ) -> ConsoleSession<'c>
-    where
-        'a: 'c,
-        'b: 'c,
-    {
-        ConsoleSession::PrimaryKey(
-            Root { lookup_root: self },
-            token.to_string(),
-        )
+        id: ConsoleSessionUuid,
+    ) -> ConsoleSession<'a> {
+        ConsoleSession::PrimaryKey(Root { lookup_root: self }, id)
     }
 
     /// Select a resource of type DeviceAuthRequest, identified by its `user_code`
@@ -229,19 +224,12 @@ impl<'a> LookupPath<'a> {
         )
     }
 
-    /// Select a resource of type DeviceAccessToken, identified by its `token`
-    pub fn device_access_token<'b, 'c>(
+    /// Select a resource of type DeviceAccessToken, identified by its `id`
+    pub fn device_access_token_id(
         self,
-        token: &'b str,
-    ) -> DeviceAccessToken<'c>
-    where
-        'a: 'c,
-        'b: 'c,
-    {
-        DeviceAccessToken::PrimaryKey(
-            Root { lookup_root: self },
-            token.to_string(),
-        )
+        id: TypedUuid<AccessTokenKind>,
+    ) -> DeviceAccessToken<'a> {
+        DeviceAccessToken::PrimaryKey(Root { lookup_root: self }, id)
     }
 
     /// Select a resource of type RoleBuiltin, identified by its `name`
@@ -761,9 +749,7 @@ lookup_resource! {
     ancestors = [],
     lookup_by_name = false,
     soft_deletes = false,
-    primary_key_columns = [
-        { column_name = "token", rust_type = String },
-    ]
+    primary_key_columns = [ { column_name = "id", uuid_kind = ConsoleSessionKind } ]
 }
 
 lookup_resource! {
@@ -781,9 +767,7 @@ lookup_resource! {
     ancestors = [],
     lookup_by_name = false,
     soft_deletes = false,
-    primary_key_columns = [
-        { column_name = "token", rust_type = String },
-    ]
+    primary_key_columns = [ { column_name = "id", uuid_kind = AccessTokenKind } ]
 }
 
 lookup_resource! {

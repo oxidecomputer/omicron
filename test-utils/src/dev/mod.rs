@@ -128,6 +128,8 @@ async fn setup_database(
     let db_url = database.pg_config();
     info!(&log, "cockroach listen URL: {}", db_url);
 
+    database.disable_synchronization().await.expect("Failed to disable fsync");
+
     // If we populate the storage directory by importing the '.sql'
     // file, we must do so after the DB has started.
     match &storage_source {

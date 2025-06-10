@@ -6645,7 +6645,7 @@ fn print_name(
     if records.len() == 1 {
         match &records[0] {
             DnsRecord::Srv(_) => (),
-            DnsRecord::Aaaa(_) | DnsRecord::A(_) => {
+            DnsRecord::Aaaa(_) | DnsRecord::A(_) | DnsRecord::Ns(_) => {
                 println!(
                     "{}  {:50} {}",
                     prefix,
@@ -6670,6 +6670,7 @@ fn format_record(record: &DnsRecord) -> impl Display {
         DnsRecord::Srv(Srv { port, target, .. }) => {
             format!("SRV  port {:5} {}", port, target)
         }
+        DnsRecord::Ns(ns) => format!("NS   {}", ns),
     }
 }
 
@@ -7350,30 +7351,28 @@ fn inv_collection_print_sleds(collection: &Collection) {
                     "LAST RECONCILED CONFIG",
                     &last_reconciliation.last_reconciled_config,
                 );
-                let disk_errs = collect_config_reconciler_errors(
-                    &last_reconciliation.external_disks,
-                );
-                let dataset_errs = collect_config_reconciler_errors(
-                    &last_reconciliation.datasets,
-                );
-                let zone_errs = collect_config_reconciler_errors(
-                    &last_reconciliation.zones,
-                );
-                for (label, errs) in [
-                    ("disk", disk_errs),
-                    ("dataset", dataset_errs),
-                    ("zone", zone_errs),
-                ] {
-                    if errs.is_empty() {
-                        println!("    all {label}s reconciled successfully");
-                    } else {
-                        println!(
-                            "    {} {label} reconciliation errors:",
-                            errs.len()
-                        );
-                        for err in errs {
-                            println!("      {err}");
-                        }
+            }
+            let disk_errs = collect_config_reconciler_errors(
+                &last_reconciliation.external_disks,
+            );
+            let dataset_errs =
+                collect_config_reconciler_errors(&last_reconciliation.datasets);
+            let zone_errs =
+                collect_config_reconciler_errors(&last_reconciliation.zones);
+            for (label, errs) in [
+                ("disk", disk_errs),
+                ("dataset", dataset_errs),
+                ("zone", zone_errs),
+            ] {
+                if errs.is_empty() {
+                    println!("        all {label}s reconciled successfully");
+                } else {
+                    println!(
+                        "        {} {label} reconciliation errors:",
+                        errs.len()
+                    );
+                    for err in errs {
+                        println!("          {err}");
                     }
                 }
             }
