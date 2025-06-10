@@ -32,9 +32,10 @@ type InMemoryRepoDepotServerContext = Arc<ArtifactData>;
 /// Together, this makes it easy to write SP update tests that use these
 /// artifacts.
 pub struct TestArtifacts {
-    // TODO-K: Add rot artifacts
     pub sp_gimlet_artifact_hash: ArtifactHash,
     pub sp_sidecar_artifact_hash: ArtifactHash,
+    pub rot_gimlet_artifact_hash: ArtifactHash,
+    pub rot_sidecar_artifact_hash: ArtifactHash,
     pub artifact_cache: Arc<ArtifactCache>,
     deployed_cabooses: BTreeMap<ArtifactHash, hubtools::Caboose>,
     resolver: FixedResolver,
@@ -75,10 +76,44 @@ impl TestArtifacts {
             ArtifactHash(digest.finalize().into())
         };
 
+        // Make an RoT update artifact for SimGimlet.
+        let rot_gimlet_artifact_caboose = CabooseBuilder::default()
+            .git_commit("fake-git-commit")
+            .board(SIM_GIMLET_BOARD)
+            .version("0.0.0")
+            .name("fake-name")
+            .build();
+        let mut builder = HubrisArchiveBuilder::with_fake_image();
+        builder.write_caboose(rot_gimlet_artifact_caboose.as_slice()).unwrap();
+        let rot_gimlet_artifact = builder.build_to_vec().unwrap();
+        let rot_gimlet_artifact_hash = {
+            let mut digest = sha2::Sha256::default();
+            digest.update(&rot_gimlet_artifact);
+            ArtifactHash(digest.finalize().into())
+        };
+
+        // Make an RoT update artifact for SimSidecar
+        let rot_sidecar_artifact_caboose = CabooseBuilder::default()
+            .git_commit("fake-git-commit")
+            .board(SIM_SIDECAR_BOARD)
+            .version("0.0.0")
+            .name("fake-name")
+            .build();
+        let mut builder = HubrisArchiveBuilder::with_fake_image();
+        builder.write_caboose(rot_sidecar_artifact_caboose.as_slice()).unwrap();
+        let rot_sidecar_artifact = builder.build_to_vec().unwrap();
+        let rot_sidecar_artifact_hash = {
+            let mut digest = sha2::Sha256::default();
+            digest.update(&rot_sidecar_artifact);
+            ArtifactHash(digest.finalize().into())
+        };
+
         // Assemble a map of artifact hash to artifact contents.
         let artifact_data = [
             (sp_gimlet_artifact_hash, sp_gimlet_artifact),
             (sp_sidecar_artifact_hash, sp_sidecar_artifact),
+            (rot_gimlet_artifact_hash, rot_gimlet_artifact),
+            (rot_sidecar_artifact_hash, rot_sidecar_artifact),
         ]
         .into_iter()
         .collect();
@@ -87,6 +122,8 @@ impl TestArtifacts {
         let deployed_cabooses = [
             (sp_gimlet_artifact_hash, sp_gimlet_artifact_caboose),
             (sp_sidecar_artifact_hash, sp_sidecar_artifact_caboose),
+            (rot_gimlet_artifact_hash, rot_gimlet_artifact_caboose),
+            (rot_sidecar_artifact_hash, rot_sidecar_artifact_caboose),
         ]
         .into_iter()
         .collect();
@@ -116,6 +153,8 @@ impl TestArtifacts {
         Ok(TestArtifacts {
             sp_gimlet_artifact_hash,
             sp_sidecar_artifact_hash,
+            rot_gimlet_artifact_hash,
+            rot_sidecar_artifact_hash,
             deployed_cabooses,
             artifact_cache,
             resolver,
