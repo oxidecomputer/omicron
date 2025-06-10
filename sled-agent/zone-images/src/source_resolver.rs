@@ -8,12 +8,10 @@ use crate::AllMupdateOverrides;
 use crate::AllZoneManifests;
 use crate::MupdateOverrideStatus;
 use crate::ZoneManifestStatus;
-use camino::Utf8Path;
 use camino::Utf8PathBuf;
-use illumos_utils::zpool::ZpoolName;
 use nexus_sled_agent_shared::inventory::OmicronZoneImageSource;
-use sled_storage::dataset::INSTALL_DATASET;
-use sled_storage::dataset::M2_ARTIFACT_DATASET;
+use sled_agent_config_reconciler::InternalDisks;
+use sled_agent_config_reconciler::InternalDisksWithBootDisk;
 use slog::o;
 use std::sync::Arc;
 use std::sync::Mutex;
@@ -32,16 +30,6 @@ pub struct ZoneImageFileSource {
     pub search_paths: Vec<Utf8PathBuf>,
 }
 
-/// A description of zpools to examine for zone images.
-pub struct ZoneImageZpools<'a> {
-    /// The root directory, typically `/`.
-    pub root: &'a Utf8Path,
-
-    /// The full set of M.2 zpools that are currently known. Must be non-empty,
-    /// but it can include the boot zpool.
-    pub all_m2_zpools: Vec<ZpoolName>,
-}
-
 /// Resolves [`OmicronZoneImageSource`] instances into file names and search
 /// paths.
 ///
@@ -56,21 +44,14 @@ impl ZoneImageSourceResolver {
     /// Creates a new `ZoneImageSourceResolver`.
     pub fn new(
         log: &slog::Logger,
-        zpools: &ZoneImageZpools<'_>,
-        boot_zpool: &ZpoolName,
+        internal_disks: InternalDisksWithBootDisk,
     ) -> Self {
         Self {
             inner: Arc::new(Mutex::new(ResolverInner::new(
-                log, zpools, boot_zpool,
+                log,
+                internal_disks,
             ))),
         }
-    }
-
-    /// Overrides the image directory with another one.
-    ///
-    /// Intended for testing.
-    pub fn override_image_directory(&self, path: Utf8PathBuf) {
-        self.inner.lock().unwrap().override_image_directory(path);
     }
 
     /// Returns current information about resolver status and health.
@@ -87,11 +68,10 @@ impl ZoneImageSourceResolver {
     pub fn file_source_for(
         &self,
         image_source: &OmicronZoneImageSource,
-        zpools: &ZoneImageZpools<'_>,
-        boot_zpool: Option<&ZpoolName>,
+        internal_disks: InternalDisks,
     ) -> ZoneImageFileSource {
         let inner = self.inner.lock().unwrap();
-        inner.file_source_for(image_source, zpools, boot_zpool)
+        inner.file_source_for(image_source, internal_disks)
     }
 }
 
@@ -121,15 +101,13 @@ struct ResolverInner {
 impl ResolverInner {
     fn new(
         log: &slog::Logger,
-        zpools: &ZoneImageZpools<'_>,
-        boot_zpool: &ZpoolName,
+        internal_disks: InternalDisksWithBootDisk,
     ) -> Self {
         let log = log.new(o!("component" => "ZoneImageSourceResolver"));
 
-        let zone_manifests =
-            AllZoneManifests::read_all(&log, zpools, boot_zpool);
+        let zone_manifests = AllZoneManifests::read_all(&log, &internal_disks);
         let mupdate_overrides =
-            AllMupdateOverrides::read_all(&log, zpools, boot_zpool);
+            AllMupdateOverrides::read_all(&log, &internal_disks);
 
         Self {
             log,
@@ -139,28 +117,10 @@ impl ResolverInner {
         }
     }
 
-    fn override_image_directory(
-        &mut self,
-        image_directory_override: Utf8PathBuf,
-    ) {
-        if let Some(dir) = &self.image_directory_override {
-            // Allow idempotent sets to the same directory -- some tests do
-            // this.
-            if image_directory_override != *dir {
-                panic!(
-                    "image_directory_override already set to `{dir}`, \
-                     attempting to set it to `{image_directory_override}`"
-                );
-            }
-        }
-        self.image_directory_override = Some(image_directory_override);
-    }
-
     fn file_source_for(
         &self,
         image_source: &OmicronZoneImageSource,
-        zpools: &ZoneImageZpools<'_>,
-        boot_zpool: Option<&ZpoolName>,
+        internal_disks: InternalDisks,
     ) -> ZoneImageFileSource {
         let file_name = match image_source {
             OmicronZoneImageSource::InstallDataset => {
@@ -182,33 +142,17 @@ impl ResolverInner {
 
                 // If the boot disk exists, look for the image in the "install"
                 // dataset on the boot zpool.
-                if let Some(boot_zpool) = boot_zpool {
-                    zone_image_paths.push(
-                        boot_zpool
-                            .dataset_mountpoint(zpools.root, INSTALL_DATASET),
-                    );
+                if let Some(path) = internal_disks.boot_disk_install_dataset() {
+                    zone_image_paths.push(path);
                 }
 
                 zone_image_paths
             }
             OmicronZoneImageSource::Artifact { .. } => {
-                // Search both artifact datasets, but look on the boot disk first.
-                // This iterator starts with the zpool for the boot disk (if it
-                // exists), and then is followed by all other zpools.
-                let zpool_iter = boot_zpool.into_iter().chain(
-                    zpools
-                        .all_m2_zpools
-                        .iter()
-                        .filter(|zpool| Some(zpool) != boot_zpool.as_ref()),
-                );
-                zpool_iter
-                    .map(|zpool| {
-                        zpool.dataset_mountpoint(
-                            zpools.root,
-                            M2_ARTIFACT_DATASET,
-                        )
-                    })
-                    .collect()
+                // Search both artifact datasets. This iterator starts with the
+                // dataset for the boot disk (if it exists), and then is followed
+                // by all other disks.
+                internal_disks.all_artifact_datasets().collect()
             }
         };
 
