@@ -414,8 +414,8 @@ impl<'a> Planner<'a> {
             .blueprint
             .current_sled_zones(sled_id, BlueprintZoneDisposition::is_expunged)
         {
-            // If this is a zone still waiting for cleanup, what generation of
-            // sled config was it expunged?
+            // If this is a zone still waiting for cleanup, grab the generation
+            // in which it was expunged. Otherwise, move on.
             let as_of_generation = match zone.disposition {
                 BlueprintZoneDisposition::Expunged {
                     as_of_generation,
