@@ -2,14 +2,13 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-use diesel::backend::Backend;
-use diesel::deserialize::{self, FromSql};
-use diesel::pg::Pg;
-use diesel::serialize::{self, ToSql};
+use super::{DatabaseString, impl_from_sql_text};
 use diesel::sql_types;
 use omicron_common::api::external;
 use serde::Deserialize;
 use serde::Serialize;
+use std::borrow::Cow;
+use std::str::FromStr;
 
 /// Newtype wrapper around [`external::L4PortRange`] so we can derive
 /// diesel traits for it
@@ -22,25 +21,16 @@ pub struct L4PortRange(pub external::L4PortRange);
 NewtypeFrom! { () pub struct L4PortRange(external::L4PortRange); }
 NewtypeDeref! { () pub struct L4PortRange(external::L4PortRange); }
 
-impl ToSql<sql_types::Text, Pg> for L4PortRange {
-    fn to_sql<'a>(
-        &'a self,
-        out: &mut serialize::Output<'a, '_, Pg>,
-    ) -> serialize::Result {
-        <String as ToSql<sql_types::Text, Pg>>::to_sql(
-            &self.0.to_string(),
-            &mut out.reborrow(),
-        )
+impl DatabaseString for L4PortRange {
+    type Error = <external::L4PortRange as FromStr>::Err;
+
+    fn to_database_string(&self) -> Cow<str> {
+        self.0.to_string().into()
+    }
+
+    fn from_database_string(s: &str) -> Result<Self, Self::Error> {
+        s.parse::<external::L4PortRange>().map(Self)
     }
 }
 
-// Deserialize the "L4PortRange" object from SQL INT4.
-impl<DB> FromSql<sql_types::Text, DB> for L4PortRange
-where
-    DB: Backend,
-    String: FromSql<sql_types::Text, DB>,
-{
-    fn from_sql(bytes: DB::RawValue<'_>) -> deserialize::Result<Self> {
-        String::from_sql(bytes)?.parse().map(L4PortRange).map_err(|e| e.into())
-    }
-}
+impl_from_sql_text!(L4PortRange);
