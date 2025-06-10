@@ -10,6 +10,8 @@ pub use gateway_client::types::{
 };
 pub use gateway_types::rot::RotSlot;
 use omicron_common::api::external::SwitchLocation;
+use omicron_common::snake_case_result;
+use omicron_common::snake_case_result::SnakeCaseResult;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use std::{collections::HashMap, time::Duration};
@@ -99,13 +101,33 @@ pub struct Transceiver {
     /// The port in which the transceiver sits.
     pub port: String,
     /// The general status of the transceiver, such as presence and faults.
-    pub status: Option<ExtendedStatus>,
+    #[serde(with = "snake_case_result")]
+    #[schemars(
+        schema_with = "SnakeCaseResult::<ExtendedStatus, String>::json_schema"
+    )]
+    pub status: Result<ExtendedStatus, String>,
     /// Information about the power state of the transceiver.
-    pub power: Option<PowerMode>,
+    #[serde(with = "snake_case_result")]
+    #[schemars(
+        schema_with = "SnakeCaseResult::<PowerMode, String>::json_schema"
+    )]
+    pub power: Result<PowerMode, String>,
     /// Details about the vendor, part number, and serial number.
-    pub vendor: Option<VendorInfo>,
+    #[serde(with = "snake_case_result")]
+    #[schemars(
+        schema_with = "SnakeCaseResult::<VendorInfo, String>::json_schema"
+    )]
+    pub vendor: Result<VendorInfo, String>,
     /// Status of the transceiver's machinery for carrying data, the "datapath".
-    pub datapath: Option<Datapath>,
+    #[serde(with = "snake_case_result")]
+    #[schemars(
+        schema_with = "SnakeCaseResult::<Datapath, String>::json_schema"
+    )]
+    pub datapath: Result<Datapath, String>,
     /// Environmental monitoring data, such as temperature or optical power.
-    pub monitors: Option<Monitors>,
+    #[serde(with = "snake_case_result")]
+    #[schemars(
+        schema_with = "SnakeCaseResult::<Monitors, String>::json_schema"
+    )]
+    pub monitors: Result<Monitors, String>,
 }
