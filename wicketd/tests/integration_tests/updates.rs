@@ -4,9 +4,10 @@
 
 //! Tests for wicketd updates.
 
-use std::{collections::BTreeSet, time::Duration};
+use std::{collections::BTreeSet, sync::Arc, time::Duration};
 
 use super::setup::WicketdTestContext;
+use camino::Utf8Path;
 use camino_tempfile::Utf8TempDir;
 use clap::Parser;
 use gateway_messages::SpPort;
@@ -14,11 +15,18 @@ use gateway_test_utils::setup as gateway_setup;
 use illumos_utils::zpool::ZpoolName;
 use installinator::HOST_PHASE_2_FILE_NAME;
 use maplit::btreeset;
-use omicron_common::update::{MupdateOverrideInfo, OmicronZoneManifest};
-use omicron_uuid_kinds::{MupdateUuid, ZpoolUuid};
-use sled_agent_zone_images::{
-    MupdateOverrideNonBootResult, ZoneImageSourceResolver, ZoneImageZpools,
+use omicron_common::{
+    disk::DiskIdentity,
+    update::{MupdateOverrideInfo, OmicronZoneManifest},
 };
+use omicron_uuid_kinds::{MupdateUuid, ZpoolUuid};
+use sled_agent_config_reconciler::{
+    InternalDisksReceiver, InternalDisksWithBootDisk,
+};
+use sled_agent_zone_images::{
+    MupdateOverrideNonBootResult, ZoneImageSourceResolver,
+};
+use sled_storage::config::MountConfig;
 use tokio::sync::oneshot;
 use tufaceous_artifact::{ArtifactHashId, ArtifactKind, KnownArtifactKind};
 use update_engine::NestedError;
@@ -496,15 +504,13 @@ async fn test_installinator_fetch() {
     );
 
     // Run sled-agent-zone-images against these paths, and ensure that the
-    // mupdate override is correctly picked up. Pick zpool1 arbitrarily as the boot zpool.
+    // mupdate override is correctly picked up. Pick zpool1 arbitrarily as the
+    // boot zpool.
     let boot_zpool = ZpoolName::new_internal(zpool1_uuid);
     let non_boot_zpool = ZpoolName::new_internal(zpool2_uuid);
-    let zpools = ZoneImageZpools {
-        root: temp_dir.path(),
-        all_m2_zpools: vec![boot_zpool, non_boot_zpool],
-    };
-    let image_resolver =
-        ZoneImageSourceResolver::new(&log, &zpools, &boot_zpool);
+    let internal_disks =
+        make_internal_disks(temp_dir.path(), boot_zpool, &[non_boot_zpool]);
+    let image_resolver = ZoneImageSourceResolver::new(&log, internal_disks);
 
     // Ensure that the resolver picks up the zone manifest and mupdate override.
     let status = image_resolver.status();
@@ -666,4 +672,30 @@ async fn test_update_races() {
     );
 
     wicketd_testctx.teardown().await;
+}
+
+fn make_internal_disks(
+    root: &Utf8Path,
+    boot_zpool: ZpoolName,
+    other_zpools: &[ZpoolName],
+) -> InternalDisksWithBootDisk {
+    let identity_from_zpool = |zpool: ZpoolName| DiskIdentity {
+        vendor: "sled-agent-zone-images-tests".to_string(),
+        model: "fake-disk".to_string(),
+        serial: zpool.id().to_string(),
+    };
+    let mount_config = MountConfig {
+        root: root.to_path_buf(),
+        synthetic_disk_root: root.to_path_buf(),
+    };
+    InternalDisksReceiver::fake_static(
+        Arc::new(mount_config),
+        std::iter::once((identity_from_zpool(boot_zpool), boot_zpool)).chain(
+            other_zpools
+                .iter()
+                .copied()
+                .map(|pool| (identity_from_zpool(pool), pool)),
+        ),
+    )
+    .current_with_boot_disk()
 }
