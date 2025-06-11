@@ -7,6 +7,10 @@
 use internal_dns_resolver::Resolver;
 use internal_dns_types::names::ServiceName;
 use nexus_test_utils_macros::nexus_test;
+use omicron_nexus::app::cockroach_http::CockroachHttpClient;
+use omicron_nexus::app::cockroach_http::CockroachMetric;
+use omicron_nexus::app::cockroach_http::MetricValue;
+use omicron_nexus::app::cockroach_http::NodeLiveness;
 
 // Creates an internal DNS resolver pointing to the given DNS server address
 fn create_test_resolver(cptestctx: &ControlPlaneTestContext) -> Resolver {
@@ -67,8 +71,6 @@ async fn test_cockroach_dns(cptestctx: &ControlPlaneTestContext) {
 async fn test_cockroach_http_prometheus_metrics(
     cptestctx: &ControlPlaneTestContext,
 ) {
-    use omicron_nexus::app::cockroach_http::CockroachHttpClient;
-
     // First, find the HTTP service address
     let resolver = create_test_resolver(cptestctx);
     let http_addr = resolver
@@ -88,25 +90,7 @@ async fn test_cockroach_http_prometheus_metrics(
     // Verify we got some expected CockroachDB metrics
     assert!(!metrics.metrics.is_empty(), "Should have received some metrics");
 
-    // Look for histogram metrics (metrics ending with "_bucket")
-    println!("Looking for histogram metrics:");
-    let histogram_metrics: Vec<_> = metrics
-        .metrics
-        .keys()
-        .filter(|name| name.contains("_bucket") || name.contains("histogram"))
-        .collect();
-
-    if !histogram_metrics.is_empty() {
-        println!("Found potential histogram metrics:");
-        for metric_name in &histogram_metrics {
-            println!("  {}", metric_name);
-        }
-    } else {
-        println!("No histogram metrics found (metrics ending with '_bucket')");
-    }
-
     // Test strongly-typed metric access using the CockroachMetric enum
-    use omicron_nexus::app::cockroach_http::CockroachMetric;
     use strum::IntoEnumIterator;
 
     println!("\nTesting strongly-typed CockroachDB metrics:");
@@ -116,9 +100,26 @@ async fn test_cockroach_http_prometheus_metrics(
 
     // Check each strongly-typed metric
     for metric in CockroachMetric::iter() {
-        if let Some(value) = metrics.get_cockroach_metric_number(metric) {
-            println!("✓ {} = {}", metric.metric_name(), value);
-            found_metrics += 1;
+        // Use new typed API that enforces expected types
+        if let Some(value) = metrics.get_metric(metric) {
+            match value {
+                MetricValue::Number(val) => {
+                    println!(" {} = {} (number)", metric.metric_name(), val);
+                    found_metrics += 1;
+                }
+                MetricValue::Histogram(buckets) => {
+                    println!(
+                        " {} = {} buckets (histogram)",
+                        metric.metric_name(),
+                        buckets.len()
+                    );
+                    found_metrics += 1;
+                }
+                MetricValue::String(s) => {
+                    println!(" {} = {} (string)", metric.metric_name(), s);
+                    found_metrics += 1;
+                }
+            }
         } else {
             missing_metrics.push(metric);
         }
@@ -138,32 +139,26 @@ async fn test_cockroach_http_prometheus_metrics(
 
     // Print any missing metrics for debugging (but don't fail the test)
     if !missing_metrics.is_empty() {
-        println!(
-            "Missing metrics (may be normal if they haven't occurred yet):"
-        );
+        println!("Missing metrics:");
         for metric in missing_metrics {
             println!("  {} - {}", metric.metric_name(), metric.description());
         }
+        panic!("Missing metrics; failing test");
     }
 
     // Test SQL execution latency histogram specifically
     println!("\nTesting SQL execution latency histogram:");
     if let Some(histogram) =
-        metrics.get_cockroach_metric_histogram(CockroachMetric::SqlExecLatency)
+        metrics.get_metric_histogram(CockroachMetric::SqlExecLatency)
     {
         println!(
-            "✓ Found SQL execution latency histogram with {} buckets",
+            "Found SQL execution latency histogram with {} buckets",
             histogram.len()
         );
 
-        // Sort buckets by le value for proper display
-        let mut sorted_buckets = histogram.clone();
-        sorted_buckets.sort_by(|a, b| {
-            a.le.partial_cmp(&b.le).unwrap_or(std::cmp::Ordering::Equal)
-        });
-
+        // Buckets are automatically sorted by le value
         println!("  Histogram buckets:");
-        for bucket in &sorted_buckets {
+        for bucket in histogram {
             if bucket.le == f64::INFINITY {
                 println!("    le=+Inf: {}", bucket.count);
             } else {
@@ -174,29 +169,34 @@ async fn test_cockroach_http_prometheus_metrics(
         // Verify histogram properties
         assert!(!histogram.is_empty(), "Histogram should have buckets");
 
-        // Check that buckets are cumulative (each bucket count >= previous bucket count)
-        for i in 1..sorted_buckets.len() {
+        // Check that buckets are cumulative and sorted (each bucket count >= previous bucket count)
+        for i in 1..histogram.len() {
             assert!(
-                sorted_buckets[i].count >= sorted_buckets[i - 1].count,
+                histogram[i].count >= histogram[i - 1].count,
                 "Histogram buckets should be cumulative: bucket {} (le={}) has count {} < previous bucket count {}",
                 i,
-                sorted_buckets[i].le,
-                sorted_buckets[i].count,
-                sorted_buckets[i - 1].count
+                histogram[i].le,
+                histogram[i].count,
+                histogram[i - 1].count
+            );
+            assert!(
+                histogram[i].le >= histogram[i - 1].le,
+                "Histogram buckets should be sorted: bucket {} (le={}) < previous bucket (le={})",
+                i,
+                histogram[i].le,
+                histogram[i - 1].le
             );
         }
 
-        println!("✓ Histogram structure is valid (cumulative buckets)");
+        println!("Histogram structure is valid (cumulative buckets)");
     } else {
-        println!("⚠ SQL execution latency histogram not found");
+        panic!(" SQL execution latency histogram not found");
     }
 }
 
 // Test fetching CockroachDB node status information
 #[nexus_test]
 async fn test_cockroach_http_node_status(cptestctx: &ControlPlaneTestContext) {
-    use omicron_nexus::app::cockroach_http::CockroachHttpClient;
-
     // Create DNS resolver to find the CockroachDB HTTP service
     let resolver = create_test_resolver(cptestctx);
 
@@ -216,25 +216,23 @@ async fn test_cockroach_http_node_status(cptestctx: &ControlPlaneTestContext) {
         .await
         .expect("Should be able to fetch nodes status from CockroachDB");
 
-    // Verify we got at least one node
-    assert!(!nodes_response.nodes.is_empty(), "Should have at least one node");
-
     println!("Response: {nodes_response:#?}");
 
-    // Verify basic node status structure for the first node
+    // Verify we saw one node, and that it's alive.
+    assert_eq!(nodes_response.nodes.len(), 1, "Should have one node");
     let first_node = &nodes_response.nodes[0];
+
+    assert_eq!(
+        nodes_response
+            .liveness_by_node_id
+            .get(&first_node.desc.node_id)
+            .unwrap(),
+        &NodeLiveness::Live
+    );
+
     assert_eq!(first_node.desc.node_id.as_u32(), 1);
     assert!(
         !first_node.build_info.tag.is_empty(),
         "Build tag should not be empty"
     );
-
-    println!("✓ CockroachDB nodes status test completed successfully!");
-    println!("  Number of nodes: {}", nodes_response.nodes.len());
-    for node in &nodes_response.nodes {
-        println!(
-            "  Node ID: {}, Build tag: {}",
-            node.desc.node_id, node.build_info.tag
-        );
-    }
 }

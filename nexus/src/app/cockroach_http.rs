@@ -9,12 +9,16 @@
 
 use anyhow::{Context, Result};
 use chrono::{DateTime, Utc};
+use futures::stream::{FuturesUnordered, StreamExt};
 use reqwest::Client;
 use serde::{Deserialize, Serialize};
+use slog::{Logger, debug, warn};
 use std::collections::HashMap;
 use std::net::SocketAddr;
+use std::sync::Arc;
 use std::time::Duration;
 use strum::{Display, EnumIter, EnumString, IntoStaticStr};
+use tokio::sync::RwLock;
 
 /// A simple CockroachDB HTTP client for accessing metrics and status
 pub struct CockroachHttpClient {
@@ -27,6 +31,9 @@ impl CockroachHttpClient {
     pub fn new(address: SocketAddr) -> Self {
         let client = Client::builder()
             .timeout(Duration::from_secs(30))
+            .pool_max_idle_per_host(1) // Single connection per host
+            .pool_idle_timeout(Duration::from_secs(90)) // Keep connections alive longer
+            .tcp_keepalive(Duration::from_secs(60)) // Enable TCP keepalive
             .build()
             .expect("Failed to build HTTP client");
 
@@ -36,6 +43,8 @@ impl CockroachHttpClient {
     }
 
     /// Fetch Prometheus metrics from the /_status/vars endpoint
+    ///
+    /// This API is and must be cancel-safe
     pub async fn fetch_prometheus_metrics(&self) -> Result<PrometheusMetrics> {
         let url = format!("{}/_status/vars", self.base_url);
 
@@ -64,6 +73,8 @@ impl CockroachHttpClient {
     }
 
     /// Fetch node status information for all nodes
+    ///
+    /// This API is and must be cancel-safe
     pub async fn fetch_node_status(&self) -> Result<NodesResponse> {
         let url = format!("{}/_status/nodes", self.base_url);
 
@@ -91,6 +102,182 @@ impl CockroachHttpClient {
     }
 }
 
+/// A cluster client for CockroachDB HTTP endpoints that can contact multiple backends concurrently
+/// and cache clients for efficiency.
+///
+/// ## Usage Pattern
+///
+/// ```rust,no_run
+/// # use omicron_nexus::app::cockroach_http::CockroachClusterHttpClient;
+/// # use std::net::SocketAddr;
+/// # use slog::Logger;
+/// # async fn example(log: Logger) -> anyhow::Result<()> {
+/// let cluster = CockroachClusterHttpClient::new(log);
+///
+/// // Update backends when addresses change (e.g., from DNS resolution)
+/// let backends: Vec<SocketAddr> = vec!["192.168.1.1:8080".parse()?, "192.168.1.2:8080".parse()?];
+/// cluster.update_backends(&backends).await;
+///
+/// // Fetch metrics - will try all backends concurrently, return first success
+/// let metrics = cluster.fetch_prometheus_metrics().await?;
+///
+/// // Later, if backends change, just update the cluster
+/// let new_backends: Vec<SocketAddr> = vec!["192.168.1.2:8080".parse()?, "192.168.1.3:8080".parse()?];
+/// cluster.update_backends(&new_backends).await; // Keeps 192.168.1.2, drops 192.168.1.1, adds 192.168.1.3
+///
+/// let status = cluster.fetch_node_status().await?;
+/// # Ok(())
+/// # }
+/// ```
+pub struct CockroachClusterHttpClient {
+    /// Cached clients for each backend address
+    clients: Arc<RwLock<HashMap<SocketAddr, CockroachHttpClient>>>,
+    /// Logger for recording connection attempts and failures
+    log: Logger,
+}
+
+impl CockroachClusterHttpClient {
+    /// Create a new cluster client
+    pub fn new(log: Logger) -> Self {
+        Self {
+            clients: Arc::new(RwLock::new(HashMap::new())),
+            log: log.new(slog::o!("component" => "CockroachClusterHttpClient")),
+        }
+    }
+
+    /// Update the set of backend addresses, adding new clients and removing old ones
+    pub async fn update_backends(&self, addresses: &[SocketAddr]) {
+        let mut clients = self.clients.write().await;
+
+        // Keep only clients whose addresses are still in the new set
+        let before_count = clients.len();
+        clients.retain(|addr, _| addresses.contains(addr));
+        let removed_count = before_count - clients.len();
+
+        // Add new clients for addresses we don't have yet
+        let mut added_count = 0;
+        for &addr in addresses {
+            if let std::collections::hash_map::Entry::Vacant(e) =
+                clients.entry(addr)
+            {
+                e.insert(CockroachHttpClient::new(addr));
+                added_count += 1;
+            }
+        }
+
+        if added_count > 0 || removed_count > 0 {
+            debug!(
+                self.log,
+                "Updated CockroachDB cluster backends";
+                "added" => added_count,
+                "removed" => removed_count,
+                "total" => clients.len(),
+                "addresses" => ?addresses
+            );
+        }
+    }
+
+    /// Fetch Prometheus metrics from all backends concurrently, returning the first successful result
+    pub async fn fetch_prometheus_metrics(&self) -> Result<PrometheusMetrics> {
+        let clients = self.clients.read().await;
+
+        if clients.is_empty() {
+            anyhow::bail!("No CockroachDB backends configured");
+        }
+
+        // Create futures for all requests
+        let mut futures = FuturesUnordered::new();
+        for (&addr, client) in clients.iter() {
+            let future =
+                async move { (addr, client.fetch_prometheus_metrics().await) };
+            futures.push(future);
+        }
+
+        // Wait for the first successful result
+        while let Some((addr, result)) = futures.next().await {
+            match result {
+                Ok(metrics) => {
+                    debug!(
+                        self.log,
+                        "Successfully fetched metrics from CockroachDB cluster backend";
+                        "address" => %addr
+                    );
+                    return Ok(metrics);
+                }
+                Err(e) => {
+                    // Log the error but continue trying other backends
+                    warn!(
+                        self.log,
+                        "Failed to fetch metrics from CockroachDB cluster backend";
+                        "address" => %addr,
+                        "error" => %e
+                    );
+                }
+            }
+        }
+
+        anyhow::bail!(
+            "All CockroachDB cluster backends failed to return metrics"
+        )
+    }
+
+    /// Fetch node status from all backends concurrently, returning the first successful result
+    pub async fn fetch_node_status(&self) -> Result<NodesResponse> {
+        let clients = self.clients.read().await;
+
+        if clients.is_empty() {
+            anyhow::bail!("No CockroachDB backends configured");
+        }
+
+        // Create futures for all requests
+        let mut futures = FuturesUnordered::new();
+        for (&addr, client) in clients.iter() {
+            let future =
+                async move { (addr, client.fetch_node_status().await) };
+            futures.push(future);
+        }
+
+        // Wait for the first successful result
+        while let Some((addr, result)) = futures.next().await {
+            match result {
+                Ok(status) => {
+                    debug!(
+                        self.log,
+                        "Successfully fetched node status from CockroachDB cluster backend";
+                        "address" => %addr
+                    );
+                    return Ok(status);
+                }
+                Err(e) => {
+                    // Log the error but continue trying other backends
+                    warn!(
+                        self.log,
+                        "Failed to fetch node status from CockroachDB cluster backend";
+                        "address" => %addr,
+                        "error" => %e
+                    );
+                }
+            }
+        }
+
+        anyhow::bail!(
+            "All CockroachDB cluster backends failed to return node status"
+        )
+    }
+
+    /// Get the current set of cached client addresses
+    pub async fn get_cached_addresses(&self) -> Vec<SocketAddr> {
+        let clients = self.clients.read().await;
+        clients.keys().copied().collect()
+    }
+}
+
+impl Default for CockroachClusterHttpClient {
+    fn default() -> Self {
+        Self::new(slog::Logger::root(slog::Discard, slog::o!()))
+    }
+}
+
 /// A single metric value, which can be a counter, gauge, etc.
 #[derive(Debug, Clone, PartialEq)]
 pub enum MetricValue {
@@ -107,6 +294,17 @@ pub enum MetricValue {
 pub struct HistogramBucket {
     pub le: f64, // "less than or equal to" upper bound
     pub count: u64,
+}
+
+/// The expected type of a CockroachDB metric value
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum CockroachMetricType {
+    /// A numeric counter or gauge value
+    Number,
+    /// A histogram with buckets and counts
+    Histogram,
+    /// A string value
+    String,
 }
 
 /// Well-known CockroachDB metrics that are important for monitoring
@@ -170,6 +368,29 @@ impl CockroachMetric {
     /// Get the exact metric name as it appears in CockroachDB's Prometheus output
     pub fn metric_name(&self) -> &'static str {
         self.into()
+    }
+
+    /// Get the expected type of this metric value
+    pub fn expected_type(&self) -> CockroachMetricType {
+        match self {
+            // All counter/gauge metrics are numbers
+            CockroachMetric::LeasesError
+            | CockroachMetric::LeasesTransfersError
+            | CockroachMetric::RangeSplits
+            | CockroachMetric::RangeRemoves
+            | CockroachMetric::RangesUnderreplicated
+            | CockroachMetric::RangesOverreplicated
+            | CockroachMetric::ReplicasUninitialized
+            | CockroachMetric::ReplicasLeadersNotLeaseholders
+            | CockroachMetric::TxnRestartsUnknown
+            | CockroachMetric::TxnRestartsAsyncWriteFailure
+            | CockroachMetric::TxnRestartsCommitDeadlineExceeded => {
+                CockroachMetricType::Number
+            }
+
+            // Histogram metrics
+            CockroachMetric::SqlExecLatency => CockroachMetricType::Histogram,
+        }
     }
 
     /// Get a human-readable description of what this metric represents
@@ -239,11 +460,7 @@ impl PrometheusMetrics {
                     };
 
                 // Check if this is a histogram bucket metric
-                if metric_name.ends_with("_bucket") {
-                    // Extract the base histogram name
-                    let base_name =
-                        &metric_name[..metric_name.len() - "_bucket".len()];
-
+                if let Some(base_name) = metric_name.strip_suffix("_bucket") {
                     // Parse the 'le' (less than or equal) value from labels
                     if let Some(le_value) =
                         Self::extract_le_label(name_and_labels)
@@ -289,6 +506,15 @@ impl PrometheusMetrics {
             }
         }
 
+        // Sort histogram buckets by their upper bound for consistent ordering
+        for (_, metric_value) in metrics.iter_mut() {
+            if let MetricValue::Histogram(ref mut buckets) = metric_value {
+                buckets.sort_by(|a, b| {
+                    a.le.partial_cmp(&b.le).unwrap_or(std::cmp::Ordering::Equal)
+                });
+            }
+        }
+
         Ok(PrometheusMetrics { metrics })
     }
 
@@ -304,67 +530,40 @@ impl PrometheusMetrics {
         None
     }
 
-    /// Get a numeric metric value by name
-    pub fn get_number(&self, name: &str) -> Option<f64> {
-        match self.metrics.get(name) {
+    /// Get a specific metric by its strongly-typed enum value
+    pub fn get_metric(&self, metric: CockroachMetric) -> Option<&MetricValue> {
+        let Some(value) = self.metrics.get(metric.metric_name()) else {
+            return None;
+        };
+
+        match (metric.expected_type(), &value) {
+            (CockroachMetricType::Number, &MetricValue::Number(_)) => {
+                return Some(value);
+            }
+            (CockroachMetricType::String, &MetricValue::String(_)) => {
+                return Some(value);
+            }
+            (CockroachMetricType::Histogram, &MetricValue::Histogram(_)) => {
+                return Some(value);
+            }
+            _ => return None,
+        }
+    }
+
+    /// Get a specific metric as a number, if it exists and is numeric
+    pub fn get_metric_number(&self, metric: CockroachMetric) -> Option<f64> {
+        match self.get_metric(metric) {
             Some(MetricValue::Number(val)) => Some(*val),
-            _ => None,
-        }
-    }
-
-    /// Get a string metric value by name
-    pub fn get_string(&self, name: &str) -> Option<&String> {
-        match self.metrics.get(name) {
-            Some(MetricValue::String(val)) => Some(val),
-            _ => None,
-        }
-    }
-
-    /// Get all metrics matching a prefix
-    pub fn get_metrics_with_prefix(
-        &self,
-        prefix: &str,
-    ) -> HashMap<String, &MetricValue> {
-        self.metrics
-            .iter()
-            .filter(|(name, _)| name.starts_with(prefix))
-            .map(|(name, value)| (name.clone(), value))
-            .collect()
-    }
-
-    /// Get a specific CockroachDB metric by its strongly-typed enum value
-    pub fn get_cockroach_metric(
-        &self,
-        metric: CockroachMetric,
-    ) -> Option<&MetricValue> {
-        self.metrics.get(metric.metric_name())
-    }
-
-    /// Get a specific CockroachDB metric as a number, if it exists and is numeric
-    pub fn get_cockroach_metric_number(
-        &self,
-        metric: CockroachMetric,
-    ) -> Option<f64> {
-        match self.get_cockroach_metric(metric) {
-            Some(MetricValue::Number(val)) => Some(*val),
-            _ => None,
-        }
-    }
-
-    /// Get a histogram metric value by name
-    pub fn get_histogram(&self, name: &str) -> Option<&Vec<HistogramBucket>> {
-        match self.metrics.get(name) {
-            Some(MetricValue::Histogram(buckets)) => Some(buckets),
             _ => None,
         }
     }
 
     /// Get a specific CockroachDB metric as a histogram, if it exists and is a histogram
-    pub fn get_cockroach_metric_histogram(
+    pub fn get_metric_histogram(
         &self,
         metric: CockroachMetric,
     ) -> Option<&Vec<HistogramBucket>> {
-        match self.get_cockroach_metric(metric) {
+        match self.get_metric(metric) {
             Some(MetricValue::Histogram(buckets)) => Some(buckets),
             _ => None,
         }
@@ -578,18 +777,30 @@ cockroach_build_timestamp 1234567890
 
         let metrics = PrometheusMetrics::parse(sample_metrics).unwrap();
 
+        // Test raw metric access by name
         assert_eq!(
-            metrics.get_number("go_memstats_alloc_bytes"),
-            Some(12345670.0)
+            metrics.metrics.get("go_memstats_alloc_bytes"),
+            Some(&MetricValue::Number(12345670.0))
         );
-        assert_eq!(metrics.get_number("cockroach_sql_query_count"), Some(42.0));
-        assert_eq!(metrics.get_number("cockroach_node_id"), Some(1.0));
         assert_eq!(
-            metrics.get_number("cockroach_build_timestamp"),
-            Some(1234567890.0)
+            metrics.metrics.get("cockroach_sql_query_count"),
+            Some(&MetricValue::Number(42.0))
+        );
+        assert_eq!(
+            metrics.metrics.get("cockroach_node_id"),
+            Some(&MetricValue::Number(1.0))
+        );
+        assert_eq!(
+            metrics.metrics.get("cockroach_build_timestamp"),
+            Some(&MetricValue::Number(1234567890.0))
         );
 
-        let cockroach_metrics = metrics.get_metrics_with_prefix("cockroach_");
+        // Check that we can access cockroach metrics by raw name
+        let cockroach_metrics: Vec<_> = metrics
+            .metrics
+            .keys()
+            .filter(|name| name.starts_with("cockroach_"))
+            .collect();
         assert_eq!(cockroach_metrics.len(), 3);
     }
 
@@ -626,28 +837,28 @@ sql_exec_latency_sum 45.2
         let metrics = PrometheusMetrics::parse(sample_metrics).unwrap();
 
         // Check that histogram buckets are properly grouped under the base metric name
-        if let Some(histogram) = metrics.get_histogram("sql_exec_latency") {
+        if let Some(MetricValue::Histogram(histogram)) =
+            metrics.metrics.get("sql_exec_latency")
+        {
             assert_eq!(histogram.len(), 5, "Should have 5 histogram buckets");
 
-            // Sort buckets by le value for verification
-            let mut sorted_buckets = histogram.clone();
-            sorted_buckets.sort_by(|a, b| {
-                a.le.partial_cmp(&b.le).unwrap_or(std::cmp::Ordering::Equal)
-            });
+            // Buckets should already be sorted by le value
+            assert_eq!(histogram[0].le, 0.001);
+            assert_eq!(histogram[0].count, 10);
+            assert_eq!(histogram[1].le, 0.01);
+            assert_eq!(histogram[1].count, 25);
+            assert_eq!(histogram[4].le, f64::INFINITY);
+            assert_eq!(histogram[4].count, 205);
 
-            // Verify specific bucket values
-            assert_eq!(sorted_buckets[0].le, 0.001);
-            assert_eq!(sorted_buckets[0].count, 10);
-            assert_eq!(sorted_buckets[1].le, 0.01);
-            assert_eq!(sorted_buckets[1].count, 25);
-            assert_eq!(sorted_buckets[4].le, f64::INFINITY);
-            assert_eq!(sorted_buckets[4].count, 205);
-
-            // Verify buckets are cumulative
-            for i in 1..sorted_buckets.len() {
+            // Verify buckets are cumulative (and sorted)
+            for i in 1..histogram.len() {
                 assert!(
-                    sorted_buckets[i].count >= sorted_buckets[i - 1].count,
+                    histogram[i].count >= histogram[i - 1].count,
                     "Histogram buckets should be cumulative"
+                );
+                assert!(
+                    histogram[i].le >= histogram[i - 1].le,
+                    "Histogram buckets should be sorted by le value"
                 );
             }
         } else {
@@ -655,12 +866,19 @@ sql_exec_latency_sum 45.2
         }
 
         // Verify count and sum are stored as separate regular metrics
-        assert_eq!(metrics.get_number("sql_exec_latency_count"), Some(205.0));
-        assert_eq!(metrics.get_number("sql_exec_latency_sum"), Some(45.2));
+        // (These are accessed by name since they're not in our CockroachMetric enum)
+        assert_eq!(
+            metrics.metrics.get("sql_exec_latency_count"),
+            Some(&MetricValue::Number(205.0))
+        );
+        assert_eq!(
+            metrics.metrics.get("sql_exec_latency_sum"),
+            Some(&MetricValue::Number(45.2))
+        );
 
         // Test strongly-typed histogram access
-        if let Some(histogram) = metrics
-            .get_cockroach_metric_histogram(CockroachMetric::SqlExecLatency)
+        if let Some(histogram) =
+            metrics.get_metric_histogram(CockroachMetric::SqlExecLatency)
         {
             assert_eq!(histogram.len(), 5);
         } else {
@@ -668,6 +886,142 @@ sql_exec_latency_sum 45.2
                 "sql_exec_latency histogram not accessible via CockroachMetric enum"
             );
         }
+    }
+
+    #[test]
+    fn test_typed_cockroach_metrics() {
+        let sample_metrics = r#"
+leases_error 5
+sql_exec_latency_bucket{le="0.001"} 10
+sql_exec_latency_bucket{le="0.01"} 25
+sql_exec_latency_bucket{le="+Inf"} 30
+sql_exec_latency_count 30
+sql_exec_latency_sum 2.5
+"#;
+
+        let metrics = PrometheusMetrics::parse(sample_metrics).unwrap();
+
+        // Test strongly-typed access for number metrics
+        if let Some(MetricValue::Number(val)) =
+            metrics.get_metric(CockroachMetric::LeasesError)
+        {
+            assert_eq!(*val, 5.0);
+        } else {
+            panic!("Expected Number variant for leases_error");
+        }
+
+        // Test strongly-typed access for histogram metrics
+        if let Some(MetricValue::Histogram(buckets)) =
+            metrics.get_metric(CockroachMetric::SqlExecLatency)
+        {
+            assert_eq!(buckets.len(), 3);
+        } else {
+            panic!("Expected Histogram variant for sql_exec_latency");
+        }
+
+        // Test convenience methods
+        assert_eq!(
+            metrics.get_metric_number(CockroachMetric::LeasesError),
+            Some(5.0)
+        );
+        assert_eq!(
+            metrics
+                .get_metric_histogram(CockroachMetric::SqlExecLatency)
+                .unwrap()
+                .len(),
+            3
+        );
+
+        // Test type safety - metric that doesn't exist
+        let missing = metrics.get_metric(CockroachMetric::RangeSplits);
+        assert!(missing.is_none());
+    }
+
+    #[test]
+    fn test_histogram_bucket_sorting() {
+        // Test metrics with buckets in random order to verify sorting
+        let sample_metrics = r#"
+# Buckets deliberately out of order to test sorting
+sql_exec_latency_bucket{le="1.0"} 200
+sql_exec_latency_bucket{le="0.001"} 10
+sql_exec_latency_bucket{le="+Inf"} 205
+sql_exec_latency_bucket{le="0.1"} 100
+sql_exec_latency_bucket{le="0.01"} 25
+"#;
+
+        let metrics = PrometheusMetrics::parse(sample_metrics).unwrap();
+
+        if let Some(MetricValue::Histogram(buckets)) =
+            metrics.metrics.get("sql_exec_latency")
+        {
+            assert_eq!(buckets.len(), 5);
+
+            // Verify buckets are sorted by le value
+            assert_eq!(buckets[0].le, 0.001);
+            assert_eq!(buckets[0].count, 10);
+            assert_eq!(buckets[1].le, 0.01);
+            assert_eq!(buckets[1].count, 25);
+            assert_eq!(buckets[2].le, 0.1);
+            assert_eq!(buckets[2].count, 100);
+            assert_eq!(buckets[3].le, 1.0);
+            assert_eq!(buckets[3].count, 200);
+            assert_eq!(buckets[4].le, f64::INFINITY);
+            assert_eq!(buckets[4].count, 205);
+
+            // Verify they are indeed sorted
+            for i in 1..buckets.len() {
+                assert!(
+                    buckets[i - 1].le <= buckets[i].le,
+                    "Bucket {} (le={}) should be <= bucket {} (le={})",
+                    i - 1,
+                    buckets[i - 1].le,
+                    i,
+                    buckets[i].le
+                );
+            }
+        } else {
+            panic!("Expected histogram for sql_exec_latency");
+        }
+    }
+
+    #[tokio::test]
+    async fn test_cluster_client_caching() {
+        let log = slog::Logger::root(slog::Discard, slog::o!());
+        let cluster = CockroachClusterHttpClient::new(log);
+
+        // Initially no cached clients
+        assert_eq!(cluster.get_cached_addresses().await.len(), 0);
+
+        // Fetch should fail with no backends configured
+        assert!(cluster.fetch_prometheus_metrics().await.is_err());
+        assert!(cluster.fetch_node_status().await.is_err());
+
+        // Add some backends
+        let addr1: SocketAddr = "127.0.0.1:8080".parse().unwrap();
+        let addr2: SocketAddr = "127.0.0.1:8081".parse().unwrap();
+        let addr3: SocketAddr = "127.0.0.1:8082".parse().unwrap();
+
+        cluster.update_backends(&[addr1, addr2]).await;
+        let cached = cluster.get_cached_addresses().await;
+        assert_eq!(cached.len(), 2);
+        assert!(cached.contains(&addr1));
+        assert!(cached.contains(&addr2));
+
+        // Update with different set - should keep addr2, drop addr1, add addr3
+        cluster.update_backends(&[addr2, addr3]).await;
+        let cached = cluster.get_cached_addresses().await;
+        assert_eq!(cached.len(), 2);
+        assert!(!cached.contains(&addr1));
+        assert!(cached.contains(&addr2));
+        assert!(cached.contains(&addr3));
+
+        // Clear all backends
+        cluster.update_backends(&[]).await;
+        assert_eq!(cluster.get_cached_addresses().await.len(), 0);
+
+        // Fetch should fail again with no backends configured
+        assert!(cluster.fetch_prometheus_metrics().await.is_err());
+        assert!(cluster.fetch_node_status().await.is_err());
     }
 
     mod proptest_tests {
