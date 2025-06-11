@@ -477,7 +477,8 @@ task: "dns_propagation_external"
 
 task: "nat_v4_garbage_collector"
   configured period: every <REDACTED_DURATION>s
-  currently executing: no
+  currently executing: <REDACTED ITERATIONS>, triggered by a periodic timer firing
+    started at <REDACTED_TIMESTAMP>, running for <REDACTED DURATION>ms
   last completed activation: <REDACTED ITERATIONS>, triggered by a periodic timer firing
     started at <REDACTED_TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
     last completion reported error: failed to resolve addresses for Dendrite services: no record found for Query { name: Name("_dendrite._tcp.control-plane.oxide.internal."), query_type: SRV, query_class: IN }
@@ -516,7 +517,8 @@ task: "alert_dispatcher"
 
 task: "bfd_manager"
   configured period: every <REDACTED_DURATION>s
-  currently executing: no
+  currently executing: <REDACTED ITERATIONS>, triggered by a periodic timer firing
+    started at <REDACTED_TIMESTAMP>, running for <REDACTED DURATION>ms
   last completed activation: <REDACTED ITERATIONS>, triggered by a periodic timer firing
     started at <REDACTED_TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
     last completion reported error: failed to resolve addresses for Dendrite services: no record found for Query { name: Name("_dendrite._tcp.control-plane.oxide.internal."), query_type: SRV, query_class: IN }
@@ -633,7 +635,7 @@ task: "phantom_disks"
 task: "physical_disk_adoption"
   configured period: every <REDACTED_DURATION>s
   currently executing: no
-  last completed activation: <REDACTED ITERATIONS>, triggered by a dependent task completing
+  last completed activation: <REDACTED ITERATIONS>, triggered by a periodic timer firing
     started at <REDACTED_TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
     last completion reported error: task disabled
 
@@ -733,7 +735,7 @@ task: "service_zone_nat_tracker"
   currently executing: no
   last completed activation: <REDACTED ITERATIONS>, triggered by a periodic timer firing
     started at <REDACTED_TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
-    last completion reported error: inventory collection is None
+    last completion reported error: nexus is running but no service zone nat values could be generated from inventory
 
 task: "support_bundle_collector"
   configured period: every <REDACTED_DURATION>days <REDACTED_DURATION>h <REDACTED_DURATION>m <REDACTED_DURATION>s
@@ -749,7 +751,8 @@ task: "support_bundle_collector"
 
 task: "switch_port_config_manager"
   configured period: every <REDACTED_DURATION>s
-  currently executing: no
+  currently executing: <REDACTED ITERATIONS>, triggered by a periodic timer firing
+    started at <REDACTED_TIMESTAMP>, running for <REDACTED DURATION>ms
   last completed activation: <REDACTED ITERATIONS>, triggered by a periodic timer firing
     started at <REDACTED_TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
 warning: unknown background task: "switch_port_config_manager" (don't know how to interpret details: Object {})
@@ -996,7 +999,8 @@ task: "dns_propagation_external"
 
 task: "nat_v4_garbage_collector"
   configured period: every <REDACTED_DURATION>s
-  currently executing: no
+  currently executing: <REDACTED ITERATIONS>, triggered by a periodic timer firing
+    started at <REDACTED_TIMESTAMP>, running for <REDACTED DURATION>ms
   last completed activation: <REDACTED ITERATIONS>, triggered by a periodic timer firing
     started at <REDACTED_TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
     last completion reported error: failed to resolve addresses for Dendrite services: no record found for Query { name: Name("_dendrite._tcp.control-plane.oxide.internal."), query_type: SRV, query_class: IN }
@@ -1035,7 +1039,8 @@ task: "alert_dispatcher"
 
 task: "bfd_manager"
   configured period: every <REDACTED_DURATION>s
-  currently executing: no
+  currently executing: <REDACTED ITERATIONS>, triggered by a periodic timer firing
+    started at <REDACTED_TIMESTAMP>, running for <REDACTED DURATION>ms
   last completed activation: <REDACTED ITERATIONS>, triggered by a periodic timer firing
     started at <REDACTED_TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
     last completion reported error: failed to resolve addresses for Dendrite services: no record found for Query { name: Name("_dendrite._tcp.control-plane.oxide.internal."), query_type: SRV, query_class: IN }
@@ -1152,7 +1157,7 @@ task: "phantom_disks"
 task: "physical_disk_adoption"
   configured period: every <REDACTED_DURATION>s
   currently executing: no
-  last completed activation: <REDACTED ITERATIONS>, triggered by a dependent task completing
+  last completed activation: <REDACTED ITERATIONS>, triggered by a periodic timer firing
     started at <REDACTED_TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
     last completion reported error: task disabled
 
@@ -1252,7 +1257,7 @@ task: "service_zone_nat_tracker"
   currently executing: no
   last completed activation: <REDACTED ITERATIONS>, triggered by a periodic timer firing
     started at <REDACTED_TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
-    last completion reported error: inventory collection is None
+    last completion reported error: nexus is running but no service zone nat values could be generated from inventory
 
 task: "support_bundle_collector"
   configured period: every <REDACTED_DURATION>days <REDACTED_DURATION>h <REDACTED_DURATION>m <REDACTED_DURATION>s
@@ -1268,7 +1273,8 @@ task: "support_bundle_collector"
 
 task: "switch_port_config_manager"
   configured period: every <REDACTED_DURATION>s
-  currently executing: no
+  currently executing: <REDACTED ITERATIONS>, triggered by a periodic timer firing
+    started at <REDACTED_TIMESTAMP>, running for <REDACTED DURATION>ms
   last completed activation: <REDACTED ITERATIONS>, triggered by a periodic timer firing
     started at <REDACTED_TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
 warning: unknown background task: "switch_port_config_manager" (don't know how to interpret details: Object {})
@@ -1594,68 +1600,6 @@ termination: Exited(0)
 stdout:
 from: blueprint ......<REDACTED_BLUEPRINT_ID>.......
 to:   blueprint ......<REDACTED_BLUEPRINT_ID>.......
-
- UNCHANGED SLEDS:
-
-  sled ..........<REDACTED_UUID>........... (active, config generation 2):
-
-    physical disks:
-    -----------------------------------------------------------------
-    vendor        model              serial               disposition
-    -----------------------------------------------------------------
-    nexus-tests   nexus-test-model   nexus-test-disk-10   in service 
-    nexus-tests   nexus-test-model   nexus-test-disk-11   in service 
-    nexus-tests   nexus-test-model   nexus-test-disk-12   in service 
-    nexus-tests   nexus-test-model   nexus-test-disk-13   in service 
-    nexus-tests   nexus-test-model   nexus-test-disk-14   in service 
-    nexus-tests   nexus-test-model   nexus-test-disk-15   in service 
-    nexus-tests   nexus-test-model   nexus-test-disk-16   in service 
-    nexus-tests   nexus-test-model   nexus-test-disk-17   in service 
-    nexus-tests   nexus-test-model   nexus-test-disk-18   in service 
-    nexus-tests   nexus-test-model   nexus-test-disk-19   in service 
-
-
-  sled ..........<REDACTED_UUID>........... (active, config generation 2):
-
-    physical disks:
-    ----------------------------------------------------------------
-    vendor        model              serial              disposition
-    ----------------------------------------------------------------
-    nexus-tests   nexus-test-model   nexus-test-disk-0   in service 
-    nexus-tests   nexus-test-model   nexus-test-disk-1   in service 
-    nexus-tests   nexus-test-model   nexus-test-disk-2   in service 
-    nexus-tests   nexus-test-model   nexus-test-disk-3   in service 
-    nexus-tests   nexus-test-model   nexus-test-disk-4   in service 
-    nexus-tests   nexus-test-model   nexus-test-disk-5   in service 
-    nexus-tests   nexus-test-model   nexus-test-disk-6   in service 
-    nexus-tests   nexus-test-model   nexus-test-disk-7   in service 
-    nexus-tests   nexus-test-model   nexus-test-disk-8   in service 
-    nexus-tests   nexus-test-model   nexus-test-disk-9   in service 
-
-
-    datasets:
-    -----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
-    dataset name                                                                                                   dataset id                             disposition   quota   reservation   compression
-    -----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
-    oxp_..........<REDACTED_UUID>.........../crypt/zone/oxz_clickhouse_..........<REDACTED_UUID>...........        ..........<REDACTED_UUID>...........   in service    none    none          off        
-    oxp_..........<REDACTED_UUID>.........../crypt/zone/oxz_cockroachdb_..........<REDACTED_UUID>...........       ..........<REDACTED_UUID>...........   in service    none    none          off        
-    oxp_..........<REDACTED_UUID>.........../crypt/zone/oxz_crucible_pantry_..........<REDACTED_UUID>...........   ..........<REDACTED_UUID>...........   in service    none    none          off        
-    oxp_..........<REDACTED_UUID>.........../crypt/zone/oxz_external_dns_..........<REDACTED_UUID>...........      ..........<REDACTED_UUID>...........   in service    none    none          off        
-    oxp_..........<REDACTED_UUID>.........../crypt/zone/oxz_internal_dns_..........<REDACTED_UUID>...........      ..........<REDACTED_UUID>...........   in service    none    none          off        
-    oxp_..........<REDACTED_UUID>.........../crypt/zone/oxz_nexus_..........<REDACTED_UUID>...........             ..........<REDACTED_UUID>...........   in service    none    none          off        
-
-
-    omicron zones:
-    ---------------------------------------------------------------------------------------------------------
-    zone type         zone id                                image source      disposition   underlay IP     
-    ---------------------------------------------------------------------------------------------------------
-    clickhouse        ..........<REDACTED_UUID>...........   install dataset   in service    ::1             
-    cockroach_db      ..........<REDACTED_UUID>...........   install dataset   in service    ::1             
-    crucible_pantry   ..........<REDACTED_UUID>...........   install dataset   in service    ::1             
-    external_dns      ..........<REDACTED_UUID>...........   install dataset   in service    ::1             
-    internal_dns      ..........<REDACTED_UUID>...........   install dataset   in service    ::1             
-    nexus             ..........<REDACTED_UUID>...........   install dataset   in service    ::ffff:127.0.0.1
-
 
  COCKROACHDB SETTINGS:
     state fingerprint:::::::::::::::::   <COCKROACHDB_FINGERPRINT_REDACTED> (unchanged)
