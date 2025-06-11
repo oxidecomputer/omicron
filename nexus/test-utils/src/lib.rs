@@ -58,6 +58,7 @@ use nexus_types::internal_api::params::DnsConfigParams;
 use omicron_common::address::DNS_OPTE_IPV4_SUBNET;
 use omicron_common::address::NEXUS_OPTE_IPV4_SUBNET;
 use omicron_common::address::NTP_OPTE_IPV4_SUBNET;
+use omicron_common::address::NTP_PORT;
 use omicron_common::api::external::Generation;
 use omicron_common::api::external::MacAddr;
 use omicron_common::api::external::UserId;
@@ -1213,16 +1214,22 @@ impl<'a, N: NexusServer> ControlPlaneTestContextBuilder<'a, N> {
             .nth(NUM_INITIAL_RESERVED_IP_ADDRESSES + 1)
             .unwrap();
         let external_ip = IpAddr::V4(Ipv4Addr::new(1, 2, 3, 4));
+        let address = format!("[::1]:{NTP_PORT}").parse().unwrap(); // localhost
         let zone_id = OmicronZoneUuid::new_v4();
         let zpool_id = ZpoolUuid::new_v4();
 
+        self.rack_init_builder.add_service_to_dns(
+            zone_id,
+            address,
+            ServiceName::BoundaryNtp,
+        );
         self.blueprint_zones.push(BlueprintZoneConfig {
             disposition: BlueprintZoneDisposition::InService,
             id: zone_id,
             filesystem_pool: ZpoolName::new_external(zpool_id),
             zone_type: BlueprintZoneType::BoundaryNtp(
                 blueprint_zone_type::BoundaryNtp {
-                    address: "[::1]:80".parse().unwrap(),
+                    address,
                     ntp_servers: vec![],
                     dns_servers: vec![],
                     domain: None,
