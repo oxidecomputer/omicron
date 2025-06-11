@@ -294,7 +294,7 @@ parent:    516e80a3-b362-4fac-bd3c-4559717120dd
  METADATA:
     created by:::::::::::::   test_blueprint2
     created at:::::::::::::   1970-01-01T00:00:00.000Z
-    comment::::::::::::::::   add Clickhouse zone a5813480-2b89-4e18-a09b-c9e5b6b317cc, add CruciblePantry zone 6b6843d6-062c-4400-8fd9-d11b5d138fe6, add InternalDns zone d74f14f1-0a19-4d92-b76f-1b3a6e630b2c, add Nexus zone 75fb916b-4793-4cd0-873b-573768b1efe5, sled a1b477db-b629-48eb-911d-1ccdafca75b9 expunged (expunged 10 disks, 47 datasets, 15 zones)
+    comment::::::::::::::::   sled a1b477db-b629-48eb-911d-1ccdafca75b9 expunged (expunged 10 disks, 47 datasets, 15 zones)
     internal DNS version:::   1
     external DNS version:::   1
     target release min gen:   1

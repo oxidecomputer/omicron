@@ -177,7 +177,7 @@ parent:    6ccc786b-17f1-4562-958f-5a7d9a5a15fd
  METADATA:
     created by:::::::::::::   test suite
     created at:::::::::::::   <REDACTED_TIMESTAMP>
-    comment::::::::::::::::   add InternalNtp zone 4ad9c209-bd1b-44c9-863d-1a6b84b34d53, add Nexus zone 6df9649e-48f8-4754-94f3-55e8f9b039be, add Clickhouse zone c138c88c-a83d-4e2d-a8f8-e8e715d8e5f7, add InternalDns zone ae5b529a-2ada-490c-bea9-04c71cf8e72c, add ExternalDns zone 86c0837a-73ca-4d08-971d-8491401c2fe2, add CruciblePantry zone c4c56b5a-8c18-4eac-964a-62f94cac07b1, add Crucible zone 575bd77e-6cd9-4bb6-9c1f-2ac6f149278a, add Crucible zone 9b8c5aff-3892-4645-8c66-c540456f05af, add Crucible zone 719199e7-eacf-4add-b532-ddfaf867b478, add InternalNtp zone 345fbd68-cb55-4faa-b6ea-801789018bc6, add Nexus zone 543b3bb6-358d-4876-9774-53a53187aaa8, add InternalDns zone 159e1f8f-6f32-413d-a48b-e40fb2efaf15, add ExternalDns zone b067565e-df5a-441f-85b9-69acc38bbf35, add CruciblePantry zone 5c67f8ed-9f38-4be1-b64c-a2d9898d3263, add Crucible zone a5a25771-1025-4c08-9362-c5ee4cecafc9, add Crucible zone 7bb9667d-da70-4592-a579-31295f919aed, add Crucible zone 70b7e8a1-cc3f-4cdd-a577-4c8be9885f8b, add InternalNtp zone f282c429-5f5e-4430-8f71-600cf61ded56, add Nexus zone 1dee8f37-8286-48dc-b4b4-e59979c030ec, add InternalDns zone f14b0fff-c0f0-420f-ab51-df1a605f43c3, add ExternalDns zone 8a651785-3936-4cf6-b301-4fa7fa003c9f, add CruciblePantry zone a76d9883-b4fe-464f-acbb-e75b2bbb508d, add Crucible zone 5ea7f627-d51e-4e2d-8648-112ddc635e53, add Crucible zone ad81aafc-e74d-4b0a-b4e6-2e58ef52b7a2, add Crucible zone 327db2a9-fc45-4c3f-a6db-4ee58459e5cf
+    comment::::::::::::::::   (none)
     internal DNS version:::   1
     external DNS version:::   1
     target release min gen:   1

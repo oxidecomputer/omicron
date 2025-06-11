@@ -303,7 +303,7 @@ parent:    06c88262-f435-410e-ba98-101bed41ec27
  METADATA:
     created by:::::::::::::   test suite
     created at:::::::::::::   <REDACTED_TIMESTAMP>
-    comment::::::::::::::::   add InternalNtp zone 8c368ed6-6c91-4437-b8ff-0d789193db38, add Nexus zone ed2d3be3-fcee-4f6b-bb99-a1a9130c4eeb, add Clickhouse zone e9d3a6d6-6e95-4ec8-a857-a3ab1ce6e62d, add InternalDns zone 7a1bd482-74f8-4562-b1db-c8bad16afb44, add ExternalDns zone 1b37911d-c427-4bf1-90d3-b2d0c2e98825, add CruciblePantry zone 07738018-1b2a-4efc-8c5c-bd6b7a5d7b40, add Crucible zone efdbf061-321c-47d6-bf0f-4530ec4c287e, add Crucible zone af3e8274-151f-4cb1-990c-b0a7680ff210, add Crucible zone 8ec567c1-6776-4573-bfe5-f3041165fdca, add Crucible zone c3114d7e-07cd-4d80-b82b-49ccbe856af2, add Crucible zone 78a45052-138b-47ee-877d-e73143467c8a, add Crucible zone 53491964-307a-45f6-b277-79a5e90f20b7, add Crucible zone f31ab1c5-0f23-44dc-8504-c67c65afc11e, add Crucible zone d23b5191-04de-4b48-8599-cf866ffc06e8, add Crucible zone 8ef7ff46-81f7-4f16-aa8f-0c1957589a5f, add Crucible zone 777087c0-4fb9-43ed-846b-16aa6431a272, add InternalNtp zone 6e1cdf48-6846-4bb3-8a72-8bc1e8d5b21d, add Nexus zone 2cea0275-1fbc-410c-819e-2ec54ffeeffe, add InternalDns zone edb6573c-3621-4d95-ad3b-93a088caeea5, add ExternalDns zone 47387358-e16d-4c34-b8f7-1f3f12c662eb, add CruciblePantry zone eb4f0a57-7386-4216-bcb2-874d39aae836, add Crucible zone 55a2094a-9590-442f-8203-dffe5a76ae66, add Crucible zone 51e403e5-a703-4cfb-b044-c72c52885e82, add Crucible zone 426cd521-e6ad-4a67-ad8d-a1acef5eab5e, add Crucible zone fddd2bd6-a535-4e2c-9a36-cb90d048c0b7, add Crucible zone 758d9a91-7070-43e3-8c60-ea1d0f818a12, add Crucible zone 8e4d80f8-80ea-48ac-ad47-95501c0c3fbe, add Crucible zone f24b63e6-2382-4862-90bf-c39e42aad988, add Crucible zone d60cc034-46c4-4233-8066-4008e947d904, add Crucible zone 4a392139-7423-459b-b1c9-5903421be40c, add Crucible zone cbf109e0-cdd5-48f9-8998-e9f55c9be980, add InternalNtp zone 7b4bccad-9869-48da-8320-2dc82752deea, add Nexus zone 5b01b0e0-5cdf-4b34-b0a6-c947cbbdb8be, add InternalDns zone 171cabf0-8635-42e7-8ea1-2a1d2a2daf55, add ExternalDns zone 9995de32-dd52-4eb1-b0eb-141eb84bc739, add CruciblePantry zone 100e20aa-1816-4195-8d76-08beace10332, add Crucible zone 0903299a-6296-44f0-8ab9-7c70b5766a05, add Crucible zone 8ae67b12-ca74-40d3-a55e-90456cd623ea, add Crucible zone 2b6b3cfd-4524-465b-ac6e-10be9ab6d4d4, add Crucible zone be422e7a-16d0-426e-8567-da0aed7200d4, add Crucible zone f055a042-9d1b-4931-8268-d94cac801d7e, add Crucible zone 512758d0-335f-4c94-9afe-c82f6f127421, add Crucible zone ea50f438-1b5e-4d61-bd65-46d360f590ee, add Crucible zone f33e09d1-e3d7-4341-baf2-5f079f3679e5, add Crucible zone 3e0ff677-2ca8-4124-9fef-7c23ac2da6fa, add Crucible zone 918c8cbc-1c62-4de5-9cf2-c4153a3d1a7e
+    comment::::::::::::::::   (none)
     internal DNS version:::   1
     external DNS version:::   1
     target release min gen:   1
@@ -1619,7 +1619,7 @@ parent:    366b0b68-d80e-4bc1-abd3-dc69837847e0
  METADATA:
     created by:::::::::::::   reconfigurator-sim
     created at:::::::::::::   <REDACTED_TIMESTAMP>
-    comment::::::::::::::::   add ExternalDns zone d786ef4a-5acb-4f5d-a732-a00addf986b5
+    comment::::::::::::::::   (none)
     internal DNS version:::   1
     external DNS version:::   1
     target release min gen:   1
