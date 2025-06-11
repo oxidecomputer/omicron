@@ -47,6 +47,7 @@ use nexus_types::deployment::ClickhousePolicy;
 use nexus_types::deployment::OximeterReadMode;
 use nexus_types::deployment::OximeterReadPolicy;
 use nexus_types::internal_api::background::AbandonedVmmReaperStatus;
+use nexus_types::internal_api::background::BlueprintPlannerStatus;
 use nexus_types::internal_api::background::BlueprintRendezvousStatus;
 use nexus_types::internal_api::background::InstanceReincarnationStatus;
 use nexus_types::internal_api::background::InstanceUpdaterStatus;
@@ -1062,6 +1063,9 @@ fn print_task_details(bgtask: &BackgroundTask, details: &serde_json::Value) {
         "abandoned_vmm_reaper" => {
             print_task_abandoned_vmm_reaper(details);
         }
+        "blueprint_planner" => {
+            print_task_blueprint_planner(details);
+        }
         "blueprint_executor" => {
             print_task_blueprint_executor(details);
         }
@@ -1208,6 +1212,44 @@ fn print_task_abandoned_vmm_reaper(details: &serde_json::Value) {
             );
         }
     };
+}
+
+fn print_task_blueprint_planner(details: &serde_json::Value) {
+    let status =
+        match serde_json::from_value::<BlueprintPlannerStatus>(details.clone())
+        {
+            Ok(status) => status,
+            Err(error) => {
+                eprintln!(
+                    "warning: failed to interpret task details: {:?}: {:?}",
+                    error, details
+                );
+                return;
+            }
+        };
+    match status {
+        BlueprintPlannerStatus::Disabled => {
+            println!("    blueprint planning explicitly disabled by config!");
+        }
+        BlueprintPlannerStatus::Error(error) => {
+            println!("    task did not complete successfully: {error}");
+        }
+        BlueprintPlannerStatus::Unchanged { parent_blueprint_id } => {
+            println!("    plan unchanged from parent {parent_blueprint_id}");
+        }
+        BlueprintPlannerStatus::Planned { parent_blueprint_id, error } => {
+            println!(
+                "    planned new blueprint from parent {parent_blueprint_id}, \
+                     but could not make it the target: {error}"
+            );
+        }
+        BlueprintPlannerStatus::Targeted { blueprint_id, .. } => {
+            println!(
+                "    planned new blueprint {blueprint_id}, \
+                     and made it the current target"
+            );
+        }
+    }
 }
 
 fn print_task_blueprint_executor(details: &serde_json::Value) {
