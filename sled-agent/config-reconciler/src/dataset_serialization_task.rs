@@ -235,11 +235,13 @@ impl DatasetTaskHandle {
         &self,
         datasets: IdMap<DatasetConfig>,
         currently_managed_zpools: Arc<CurrentlyManagedZpools>,
+        destroy_orphans: bool,
     ) -> Result<anyhow::Result<IdOrdMap<OrphanedDataset>>, DatasetTaskError>
     {
         self.try_send_request(|tx| DatasetTaskRequest::DatasetsReportOrphans {
             datasets,
             currently_managed_zpools,
+            destroy_orphans,
             tx,
         })
         .await
@@ -360,12 +362,14 @@ impl DatasetTask {
             DatasetTaskRequest::DatasetsReportOrphans {
                 datasets,
                 currently_managed_zpools,
+                destroy_orphans,
                 tx,
             } => {
                 _ = tx.0.send(
                     self.datasets_report_orphans(
                         datasets,
                         currently_managed_zpools,
+                        destroy_orphans,
                         zfs,
                     )
                     .await,
@@ -438,6 +442,7 @@ impl DatasetTask {
         &mut self,
         datasets: IdMap<DatasetConfig>,
         currently_managed_zpools: Arc<CurrentlyManagedZpools>,
+        destroy_orphans: bool,
         zfs: &T,
     ) -> anyhow::Result<IdOrdMap<OrphanedDataset>> {
         let mut orphaned_datasets = IdOrdMap::new();
@@ -481,6 +486,7 @@ impl DatasetTask {
             let Ok(dataset) = DatasetName::from_str(&properties.name) else {
                 continue;
             };
+            let dataset_full_name = dataset.full_name();
 
             // Does this dataset have an ID set? If we created it, we expect it
             // does, and we can easily check whether it still exists in our
@@ -495,7 +501,7 @@ impl DatasetTask {
                             self.log,
                             "found on-disk dataset without an ID \
                              that matches a config dataset by name";
-                            "dataset" => dataset.full_name(),
+                            "dataset" => &dataset_full_name,
                         );
                         true
                     } else {
@@ -504,7 +510,7 @@ impl DatasetTask {
                             "found on-disk dataset without an ID \
                              that doesn't match any config datasets; assuming \
                              it should be marked as an orphan";
-                            "dataset" => dataset.full_name(),
+                            "dataset" => &dataset_full_name,
                         );
                         false
                     }
@@ -514,51 +520,62 @@ impl DatasetTask {
                 continue;
             }
 
-            // Explicitly match all variants here, so if we expand this list
-            // we're forced to consider whether they should be removeable.
-            let reason = match dataset.kind() {
-                // Zone durable datasets: these are the kinds we expect to
-                // remove (e.g., when the corresponding zone is expunged).
-                DatasetKind::Cockroach
-                | DatasetKind::Crucible
-                | DatasetKind::Clickhouse
-                | DatasetKind::ClickhouseKeeper
-                | DatasetKind::ClickhouseServer
-                | DatasetKind::ExternalDns
-                | DatasetKind::InternalDns => {
-                    // We should attempt to delete this; for now, just report it
-                    // as orphaned because we don't.
-                    "dataset deletion not yet implemented (omicron#6177)"
-                        .to_string()
-                }
+            // Should we skip destroying this dataset based on its `kind`?
+            if let Some(reason) =
+                reason_to_skip_orphaned_dataset_destruction(dataset.kind())
+            {
+                orphaned_datasets.insert_overwrite(OrphanedDataset {
+                    name: dataset,
+                    reason,
+                    id: properties.id,
+                    mounted: properties.mounted,
+                    available: properties.avail,
+                    used: properties.used,
+                });
+                continue;
+            }
 
-                // These kinds are part of our config, but it would be
-                // surprising to have them disappear: they should always be
-                // present for any managed disk. Refuse to remove them.
-                DatasetKind::TransientZoneRoot | DatasetKind::Debug => {
-                    format!(
-                        "refusing to delete dataset of kind {:?} \
-                         (expected to exist for all managed disks)",
-                        dataset.kind(),
-                    )
+            // Try to destroy this dataset, if destruction was requested. If
+            // destruction is disabled or enabled but we fail, record the reason
+            // this dataset is left orphaned.
+            let maybe_reason = if destroy_orphans {
+                match zfs.destroy_dataset(&dataset_full_name).await {
+                    Ok(()) => {
+                        info!(
+                            self.log,
+                            "destroyed orphaned dataset";
+                            "dataset" => &dataset_full_name,
+                        );
+                        None
+                    }
+                    Err(err) => {
+                        warn!(
+                            self.log,
+                            "failed to destroy orphaned dataset";
+                            "dataset" => &dataset_full_name,
+                            InlineErrorChain::new(&err),
+                        );
+                        Some(InlineErrorChain::new(&err).to_string())
+                    }
                 }
-
-                // These should be grandchildren of the datasets we asked for;
-                // we shouldn't see them as direct children. Refuse to remove
-                // them. (They should also be recreated on demand anyway.)
-                DatasetKind::TransientZone { .. } => {
-                    "unexpectedly found transient zone root".to_string()
-                }
+            } else {
+                Some(
+                    "`destroy_orphans` chicken switch is off \
+                    (full dataset destruction is tracked by omicron#6177)"
+                        .to_string(),
+                )
             };
 
-            orphaned_datasets.insert_overwrite(OrphanedDataset {
-                name: dataset,
-                reason,
-                id: properties.id,
-                mounted: properties.mounted,
-                available: properties.avail,
-                used: properties.used,
-            });
+            if let Some(reason) = maybe_reason {
+                orphaned_datasets.insert_overwrite(OrphanedDataset {
+                    name: dataset,
+                    reason,
+                    id: properties.id,
+                    mounted: properties.mounted,
+                    available: properties.avail,
+                    used: properties.used,
+                });
+            }
         }
 
         Ok(orphaned_datasets)
@@ -1088,6 +1105,7 @@ enum DatasetTaskRequest {
     DatasetsReportOrphans {
         datasets: IdMap<DatasetConfig>,
         currently_managed_zpools: Arc<CurrentlyManagedZpools>,
+        destroy_orphans: bool,
         tx: DebugIgnore<
             oneshot::Sender<anyhow::Result<IdOrdMap<OrphanedDataset>>>,
         >,
@@ -1126,6 +1144,47 @@ enum DatasetTaskRequest {
 enum DatasetCreationDetails<'a> {
     Nested(&'a NestedDatasetConfig),
     Config(&'a DatasetConfig, Option<&'a DatasetProperties>),
+}
+
+// This function is tightly coupled to `datasets_report_orphans()` above, but
+// it's handy for it to be separated out for tests to call explicitly. Based on
+// the kind:
+//
+// * Return `None` if we're willing to destroy it, if it's an orphan
+// * Return `Some(reason)` if we're unwilling to destroy it even if we think
+//   it's an orphan
+fn reason_to_skip_orphaned_dataset_destruction(
+    kind: &DatasetKind,
+) -> Option<String> {
+    // Explicitly match all variants here, so if we expand this list we're
+    // forced to consider whether they should be removeable.
+    match kind {
+        // Zone durable datasets: these are the kinds we expect to remove (e.g.,
+        // when the corresponding zone is expunged).
+        DatasetKind::Cockroach
+        | DatasetKind::Crucible
+        | DatasetKind::Clickhouse
+        | DatasetKind::ClickhouseKeeper
+        | DatasetKind::ClickhouseServer
+        | DatasetKind::ExternalDns
+        | DatasetKind::InternalDns => None,
+
+        // These kinds are part of our config, but it would be surprising to
+        // have them disappear: they should always be present for any managed
+        // disk. Refuse to remove them.
+        DatasetKind::TransientZoneRoot | DatasetKind::Debug => Some(format!(
+            "refusing to delete dataset of kind {kind:?} \
+             (expected to exist for all managed disks)",
+        )),
+
+        // These should be grandchildren of the datasets we ask for when
+        // checking for orphans; we shouldn't see them as direct children.
+        // Refuse to remove them. (They should also be recreated on demand
+        // anyway.)
+        DatasetKind::TransientZone { .. } => {
+            Some(format!("unexpectedly found transient zone root: {kind:?}"))
+        }
+    }
 }
 
 // Trait allowing us to test `DatasetTask` without real ZFS interactions (and on
@@ -1357,11 +1416,17 @@ mod tests {
                         }
                     }
                     WhichDatasets::SelfAndChildren => {
+                        let prefix = format!("{dataset}/");
                         for (name, props) in state.datasets.iter() {
-                            if name == dataset
-                                || name.starts_with(&format!("{}/", dataset))
-                            {
+                            let name = name.trim_end_matches('/');
+                            if name == dataset {
                                 result.push(props.clone());
+                            } else if let Some(rest) =
+                                name.strip_prefix(&prefix)
+                            {
+                                if !rest.contains('/') {
+                                    result.push(props.clone());
+                                }
                             }
                         }
                     }
@@ -1965,9 +2030,13 @@ mod tests {
             zfs.clone(),
         );
 
-        // Check for orphans.
+        // Check for orphans without destroying them.
         let orphans = task_handle
-            .datasets_report_orphans(dataset_configs, currently_managed_zpools)
+            .datasets_report_orphans(
+                dataset_configs.clone(),
+                currently_managed_zpools.clone(),
+                false, // destroy_orphans
+            )
             .await
             .expect("no task error")
             .expect("no zfs error");
@@ -1981,13 +2050,95 @@ mod tests {
             );
         }
 
-        // All the datasets in `datasets_not_in_config` should be orphans.
-        for dataset in datasets_not_in_config {
+        // All the datasets in `datasets_not_in_config` should be orphans, but
+        // they should all still exist (we passed destroy_orphans=false).
+        {
+            let zfs = zfs.inner.lock().unwrap();
+            for dataset in &datasets_not_in_config {
+                let name = dataset.full_name();
+                assert!(
+                    zfs.datasets.contains_key(&name),
+                    "dataset should not have been destroyed (destruction \
+                    not requested): {name}"
+                );
+
+                // We shouldn't find transient zone roots at all (they're
+                // grandchildren of the datasets we search for).
+                if matches!(dataset.kind(), DatasetKind::TransientZone { .. }) {
+                    let orphan = orphans.get(dataset);
+                    assert!(
+                        orphan.is_none(),
+                        "found unexpected orphan {orphan:?}"
+                    );
+                } else {
+                    assert!(
+                        orphans.contains_key(dataset),
+                        "didn't find expected orphan {name}",
+                    );
+                }
+            }
+        }
+
+        // Check for orphans and destroy them.
+        let orphans = task_handle
+            .datasets_report_orphans(
+                dataset_configs,
+                currently_managed_zpools,
+                true, // destroy_orphans
+            )
+            .await
+            .expect("no task error")
+            .expect("no zfs error");
+
+        // As above, we should report no orphans that were present in the
+        // config.
+        for dataset in &datasets_in_config {
             assert!(
-                orphans.contains_key(&dataset),
-                "didn't find expected orphan {}",
+                !orphans.contains_key(&dataset),
+                "found unexpected orphan {}",
                 dataset.full_name()
             );
+        }
+
+        // All the datasets in `datasets_not_in_config` should be orphans, and
+        // the ones with kinds we're willing to remove should have been removed.
+        {
+            let zfs = zfs.inner.lock().unwrap();
+            for dataset in &datasets_not_in_config {
+                let name = dataset.full_name();
+                if let Some(reason) =
+                    reason_to_skip_orphaned_dataset_destruction(dataset.kind())
+                {
+                    let expected_reason = if matches!(
+                        dataset.kind(),
+                        DatasetKind::TransientZone { .. }
+                    ) {
+                        None
+                    } else {
+                        Some(&reason)
+                    };
+
+                    assert_eq!(
+                        orphans.get(dataset).map(|orphan| &orphan.reason),
+                        expected_reason,
+                    );
+                    assert!(
+                        zfs.datasets.contains_key(&name),
+                        "dataset should not have been destroyed \
+                        (due to its kind): {name}"
+                    );
+                } else {
+                    let orphan = orphans.get(dataset);
+                    assert!(
+                        orphan.is_none(),
+                        "found unexpected orphan: {orphan:?}",
+                    );
+                    assert!(
+                        !zfs.datasets.contains_key(&name),
+                        "dataset should have been destroyed: {name}"
+                    );
+                }
+            }
         }
 
         logctx.cleanup_successful();
