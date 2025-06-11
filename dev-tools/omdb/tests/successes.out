@@ -1613,6 +1613,15 @@ to:   blueprint ......<REDACTED_BLUEPRINT_ID>.......
 stderr:
 note: using Nexus URL http://127.0.0.1:REDACTED_PORT/
 =============================================
+EXECUTING COMMAND: omdb ["nexus", "blueprints", "diff", "......<REDACTED_BLUEPRINT_ID>......."]
+termination: Exited(1)
+---------------------------------------------
+stdout:
+---------------------------------------------
+stderr:
+note: using Nexus URL http://127.0.0.1:REDACTED_PORT/
+Error: `blueprint2_id` was not specified and blueprint1 has no parent
+=============================================
 EXECUTING COMMAND: omdb ["reconfigurator", "export", "<TMP_PATH_REDACTED>"]
 termination: Exited(0)
 ---------------------------------------------

@@ -697,8 +697,9 @@ struct BlueprintSaveArgs {
 struct BlueprintDiffArgs {
     /// id of the first blueprint, "latest", or "target"
     blueprint1_id: BlueprintIdOpt,
-    /// id of the second blueprint, "latest", or "target"
-    blueprint2_id: BlueprintIdOpt,
+    /// id of the second blueprint, "latest", or "target", or None to mean "the
+    /// parent of blueprint1"
+    blueprint2_id: Option<BlueprintIdOpt>,
 }
 
 #[derive(Debug, Subcommand)]
@@ -1316,13 +1317,32 @@ fn cmd_blueprint_diff(
 ) -> anyhow::Result<Option<String>> {
     let mut rv = String::new();
     let blueprint1_id = args.blueprint1_id;
-    let blueprint2_id = args.blueprint2_id;
 
     let state = sim.current_state();
-    let blueprint1 =
+    let blueprint =
         state.system().resolve_and_get_blueprint(blueprint1_id.into())?;
-    let blueprint2 =
-        state.system().resolve_and_get_blueprint(blueprint2_id.into())?;
+    let (blueprint1, blueprint2) = if let Some(blueprint2_arg) =
+        args.blueprint2_id
+    {
+        // Two blueprint ids were provided.  Diff from the first to the second.
+        let blueprint1 = blueprint;
+        let blueprint2 =
+            state.system().resolve_and_get_blueprint(blueprint2_arg.into())?;
+        (blueprint1, blueprint2)
+    } else if let Some(parent_id) = blueprint.parent_blueprint_id {
+        // Only one blueprint id was provided.  Diff from that blueprint's
+        // parent to the blueprint.
+        let blueprint1 = state
+            .system()
+            .resolve_and_get_blueprint(BlueprintId::Id(parent_id))?;
+        let blueprint2 = blueprint;
+        (blueprint1, blueprint2)
+    } else {
+        bail!(
+            "`blueprint2_id` was not specified and blueprint1 has no \
+             parent blueprint"
+        );
+    };
 
     let sled_diff = blueprint2.diff_since_blueprint(&blueprint1);
     swriteln!(rv, "{}", sled_diff.display());
