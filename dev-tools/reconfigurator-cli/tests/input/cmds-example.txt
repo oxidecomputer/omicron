@@ -24,17 +24,18 @@ blueprint-list
 sled-show 89d02b1b-478c-401a-8e28-7a26f74fa41b
 blueprint-show ade5749d-bdf3-4fab-a8ae-00bea01b3a5a
 
+# Exercise `blueprint-diff` arguments.
+# We don't care about the actual content of these diffs here.
+# The "from"/"to" that's printed at the top is enough to know that the command
+# picked the right pair of blueprints.  So we also use a small system to keep
+# the rest of the diff output small.
+
 wipe all
-load-example --seed test-basic
+load-example --seed test-basic --nsleds 1 --ndisks-per-sled 4 --no-zones
 
 blueprint-list
 blueprint-plan ade5749d-bdf3-4fab-a8ae-00bea01b3a5a
 blueprint-list
-
-# Exercise `blueprint-diff` arguments.
-# We don't care about the actual content of these diffs here.
-# The "from"/"to" that's printed at the top is enough to know that the command
-# picked the right pair of blueprints.
 
 # It's not okay to specify just one blueprint if it's the first one.
 blueprint-diff 02697f74-b14a-4418-90f0-c28b2a3a6aa9
