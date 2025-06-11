@@ -466,7 +466,7 @@ parent:    4d4e6c38-cd95-4c4e-8f45-6af4d686964b
  METADATA:
     created by:::::::::::::   test_blueprint2
     created at:::::::::::::   1970-01-01T00:00:00.000Z
-    comment::::::::::::::::   sled 48d95fef-bc9f-4f50-9a53-1e075836291d expunged (expunged 10 disks, 45 datasets, 14 zones)
+    comment::::::::::::::::   add Nexus zone cab211e1-3ab1-475f-81fa-984748044d8c, add Nexus zone 33365de5-8a83-46c0-9d34-eddd68e54c6f, add Nexus zone b539cea9-c37c-49ef-874f-170d898187b2, add Nexus zone 80e4964b-a8c8-41ef-ae23-f86cfe5f3a7b, add Nexus zone c5a0c592-319e-44df-9d00-1ddb1d5ad6aa, add Nexus zone 2ed23118-6137-45ca-824c-04df3bc3d085, sled 48d95fef-bc9f-4f50-9a53-1e075836291d expunged (expunged 10 disks, 45 datasets, 14 zones)
     internal DNS version:::   1
     external DNS version:::   1
     target release min gen:   1

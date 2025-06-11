@@ -95,7 +95,7 @@ parent:    1b013011-2062-4b48-b544-a32b23bce83a
  METADATA:
     created by:::::::::::::   test suite
     created at:::::::::::::   <REDACTED_TIMESTAMP>
-    comment::::::::::::::::   (none)
+    comment::::::::::::::::   add InternalNtp zone 4211daae-e09f-4742-a62a-32080f429cb3, add Nexus zone 50dcee18-a857-4596-8cb7-fc9cf90b698d, add Nexus zone 805cba8f-a039-44e1-8cb0-1ff2c6b89997, add Nexus zone 296ab8b3-3fd4-4c2b-9e0a-1f909e4993e5, add Clickhouse zone 4fc6cb68-8ce9-4171-91b3-0106b8fed386, add InternalDns zone 0bb572bc-f5b5-48da-9004-ba336e97bf60, add InternalDns zone bc221177-0711-4bde-9f3d-32d6a6873c51, add InternalDns zone fe8bca28-44ac-4968-ba32-292dede5953f, add ExternalDns zone 77de9dbd-c3d4-4445-ae59-e2f3d4c388e0, add ExternalDns zone f9b07b90-25a8-42ad-a9e9-e497947f4f30, add ExternalDns zone ac0f0ca6-02dd-43c7-b029-f34b247f7392, add CruciblePantry zone 72d12821-646d-4296-a081-ef5fb3a0ca24, add CruciblePantry zone 026f8db9-b966-45ec-bf89-fb7b41a04cc9, add CruciblePantry zone ae74917b-2c6a-477d-9b90-fe2c2a4247f7, add Crucible zone b0d184c8-0b73-4b29-8add-3a51b4fd60a6, add Crucible zone 6cf2a0d4-d9da-4a0c-9103-f1cddb6663a8, add Crucible zone f401784a-83cb-4e93-a3a3-6914b920d884
     internal DNS version:::   1
     external DNS version:::   1
     target release min gen:   1
