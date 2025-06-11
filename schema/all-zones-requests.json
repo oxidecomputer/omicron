@@ -1,7 +1,7 @@
 {
   "$schema": "http://json-schema.org/draft-07/schema#",
   "title": "OmicronZonesConfigLocal",
-  "description": "Combines the Nexus-provided `OmicronZonesConfig` (which describes what Nexus wants for all of its zones) with the locally-determined configuration for these zones.",
+  "description": "Legacy type of the ledgered zone config.",
   "type": "object",
   "required": [
     "ledger_generation",
@@ -10,20 +10,10 @@
   ],
   "properties": {
     "ledger_generation": {
-      "description": "ledger-managed generation number\n\nThis generation is managed by the ledger facility itself.  It's bumped whenever we write a new ledger.  In practice, we don't currently have any reason to bump this _for a given Omicron generation_ so it's somewhat redundant.  In principle, if we needed to modify the ledgered configuration due to some event that doesn't change the Omicron config (e.g., if we wanted to move the root filesystem to a different path), we could do that by bumping this generation.",
-      "allOf": [
-        {
-          "$ref": "#/definitions/Generation"
-        }
-      ]
+      "$ref": "#/definitions/Generation"
     },
     "omicron_generation": {
-      "description": "generation of the Omicron-provided part of the configuration\n\nThis generation number is outside of Sled Agent's control.  We store exactly what we were given and use this number to decide when to fail requests to establish an outdated configuration.\n\nYou can think of this as a major version number, with `ledger_generation` being a minor version number.  See `is_newer_than()`.",
-      "allOf": [
-        {
-          "$ref": "#/definitions/Generation"
-        }
-      ]
+      "$ref": "#/definitions/Generation"
     },
     "zones": {
       "type": "array",
@@ -269,7 +259,6 @@
       }
     },
     "OmicronZoneConfigLocal": {
-      "description": "Combines the Nexus-provided `OmicronZoneConfig` (which describes what Nexus wants for this zone) with any locally-determined configuration (like the path to the root filesystem)",
       "type": "object",
       "required": [
         "root",

@@ -890,7 +890,7 @@
         ]
       },
       "ArtifactId": {
-        "description": "An identifier for an artifact.\n\nThe kind is [`ArtifactKind`], indicating that it might represent an artifact whose kind is unknown.",
+        "description": "An identifier for an artifact.",
         "type": "object",
         "properties": {
           "kind": {
@@ -903,11 +903,7 @@
           },
           "version": {
             "description": "The artifact's version.",
-            "allOf": [
-              {
-                "$ref": "#/components/schemas/ArtifactVersion"
-              }
-            ]
+            "type": "string"
           }
         },
         "required": [
@@ -915,11 +911,6 @@
           "name",
           "version"
         ]
-      },
-      "ArtifactVersion": {
-        "description": "An artifact version.\n\nThis is a freeform identifier with some basic validation. It may be the serialized form of a semver version, or a custom identifier that uses the same character set as a semver, plus `_`.\n\nThe exact pattern accepted is `^[a-zA-Z0-9._+-]{1,63}$`.\n\n# Ord implementation\n\n`ArtifactVersion`s are not intended to be sorted, just compared for equality. `ArtifactVersion` implements `Ord` only for storage within sorted collections.",
-        "type": "string",
-        "pattern": "^[a-zA-Z0-9._+-]{1,63}$"
       },
       "Aux1Monitor": {
         "description": "The first auxlliary CMIS monitor.",
@@ -6780,20 +6771,82 @@
         "type": "object",
         "properties": {
           "datapath": {
-            "nullable": true,
             "description": "Status of the transceiver's machinery for carrying data, the \"datapath\".",
-            "allOf": [
+            "x-rust-type": {
+              "crate": "std",
+              "parameters": [
+                {
+                  "$ref": "#/components/schemas/Datapath"
+                },
+                {
+                  "type": "string"
+                }
+              ],
+              "path": "::std::result::Result",
+              "version": "*"
+            },
+            "oneOf": [
               {
-                "$ref": "#/components/schemas/Datapath"
+                "type": "object",
+                "properties": {
+                  "ok": {
+                    "$ref": "#/components/schemas/Datapath"
+                  }
+                },
+                "required": [
+                  "ok"
+                ]
+              },
+              {
+                "type": "object",
+                "properties": {
+                  "err": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "err"
+                ]
               }
             ]
           },
           "monitors": {
-            "nullable": true,
             "description": "Environmental monitoring data, such as temperature or optical power.",
-            "allOf": [
+            "x-rust-type": {
+              "crate": "std",
+              "parameters": [
+                {
+                  "$ref": "#/components/schemas/Monitors"
+                },
+                {
+                  "type": "string"
+                }
+              ],
+              "path": "::std::result::Result",
+              "version": "*"
+            },
+            "oneOf": [
               {
-                "$ref": "#/components/schemas/Monitors"
+                "type": "object",
+                "properties": {
+                  "ok": {
+                    "$ref": "#/components/schemas/Monitors"
+                  }
+                },
+                "required": [
+                  "ok"
+                ]
+              },
+              {
+                "type": "object",
+                "properties": {
+                  "err": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "err"
+                ]
               }
             ]
           },
@@ -6802,35 +6855,133 @@
             "type": "string"
           },
           "power": {
-            "nullable": true,
             "description": "Information about the power state of the transceiver.",
-            "allOf": [
+            "x-rust-type": {
+              "crate": "std",
+              "parameters": [
+                {
+                  "$ref": "#/components/schemas/PowerMode"
+                },
+                {
+                  "type": "string"
+                }
+              ],
+              "path": "::std::result::Result",
+              "version": "*"
+            },
+            "oneOf": [
               {
-                "$ref": "#/components/schemas/PowerMode"
+                "type": "object",
+                "properties": {
+                  "ok": {
+                    "$ref": "#/components/schemas/PowerMode"
+                  }
+                },
+                "required": [
+                  "ok"
+                ]
+              },
+              {
+                "type": "object",
+                "properties": {
+                  "err": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "err"
+                ]
               }
             ]
           },
           "status": {
-            "nullable": true,
             "description": "The general status of the transceiver, such as presence and faults.",
-            "allOf": [
+            "x-rust-type": {
+              "crate": "std",
+              "parameters": [
+                {
+                  "$ref": "#/components/schemas/ExtendedStatus"
+                },
+                {
+                  "type": "string"
+                }
+              ],
+              "path": "::std::result::Result",
+              "version": "*"
+            },
+            "oneOf": [
               {
-                "$ref": "#/components/schemas/ExtendedStatus"
+                "type": "object",
+                "properties": {
+                  "ok": {
+                    "$ref": "#/components/schemas/ExtendedStatus"
+                  }
+                },
+                "required": [
+                  "ok"
+                ]
+              },
+              {
+                "type": "object",
+                "properties": {
+                  "err": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "err"
+                ]
               }
             ]
           },
           "vendor": {
-            "nullable": true,
             "description": "Details about the vendor, part number, and serial number.",
-            "allOf": [
+            "x-rust-type": {
+              "crate": "std",
+              "parameters": [
+                {
+                  "$ref": "#/components/schemas/VendorInfo"
+                },
+                {
+                  "type": "string"
+                }
+              ],
+              "path": "::std::result::Result",
+              "version": "*"
+            },
+            "oneOf": [
               {
-                "$ref": "#/components/schemas/VendorInfo"
+                "type": "object",
+                "properties": {
+                  "ok": {
+                    "$ref": "#/components/schemas/VendorInfo"
+                  }
+                },
+                "required": [
+                  "ok"
+                ]
+              },
+              {
+                "type": "object",
+                "properties": {
+                  "err": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "err"
+                ]
               }
             ]
           }
         },
         "required": [
-          "port"
+          "datapath",
+          "monitors",
+          "port",
+          "power",
+          "status",
+          "vendor"
         ]
       },
       "TransceiverInventorySnapshot": {
