@@ -21,6 +21,7 @@ display-error-chain.workspace = true
 futures.workspace = true
 hex.workspace = true
 http.workspace = true
+iddqd.workspace = true
 illumos-utils.workspace = true
 installinator-client.workspace = true
 installinator-common.workspace = true
@@ -47,7 +48,6 @@ tokio = { workspace = true, features = ["full"] }
 tufaceous-artifact.workspace = true
 tufaceous-lib.workspace = true
 update-engine.workspace = true
-uuid.workspace = true
 omicron-workspace-hack.workspace = true
 
 [dev-dependencies]

@@ -24,7 +24,6 @@ use clap::Subcommand;
 use clap::ValueEnum;
 use futures::StreamExt;
 use futures::TryStreamExt;
-use futures::future::try_join;
 use http::StatusCode;
 use internal_dns_types::names::ServiceName;
 use itertools::Itertools;
@@ -270,17 +269,12 @@ struct BlueprintIdArgs {
 }
 
 #[derive(Debug, Args)]
-struct BlueprintIdsArgs {
+struct BlueprintDiffArgs {
     /// id of first blueprint (or `target` for the current target)
     blueprint1_id: BlueprintIdOrCurrentTarget,
-    /// id of second blueprint (or `target` for the current target)
-    blueprint2_id: BlueprintIdOrCurrentTarget,
-}
-
-#[derive(Debug, Args)]
-struct BlueprintDiffArgs {
-    #[clap(flatten)]
-    ids: BlueprintIdsArgs,
+    /// id of second blueprint (or `target` for the current target, or omitted
+    /// to use the parent of the first blueprint)
+    blueprint2_id: Option<BlueprintIdOrCurrentTarget>,
     /// Exit with 1 if there were differences, 0 if no differences.
     #[arg(long, default_value_t = false)]
     exit_code: bool,
@@ -3110,11 +3104,21 @@ async fn cmd_nexus_blueprints_diff(
     client: &nexus_client::Client,
     args: &BlueprintDiffArgs,
 ) -> Result<(), anyhow::Error> {
-    let (b1, b2) = try_join(
-        args.ids.blueprint1_id.resolve_to_blueprint(client),
-        args.ids.blueprint2_id.resolve_to_blueprint(client),
-    )
-    .await?;
+    let blueprint = args.blueprint1_id.resolve_to_blueprint(client).await?;
+    let (b1, b2) = if let Some(blueprint2_arg) = &args.blueprint2_id {
+        (blueprint, blueprint2_arg.resolve_to_blueprint(client).await?)
+    } else if let Some(parent_id) = blueprint.parent_blueprint_id {
+        (
+            client
+                .blueprint_view(parent_id.as_untyped_uuid())
+                .await?
+                .into_inner(),
+            blueprint,
+        )
+    } else {
+        bail!("`blueprint2_id` was not specified and blueprint1 has no parent");
+    };
+
     let diff = b2.diff_since_blueprint(&b1);
     println!("{}", diff.display());
     if args.exit_code && diff.has_changes() {

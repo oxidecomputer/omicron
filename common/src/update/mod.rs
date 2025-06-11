@@ -4,6 +4,8 @@
 
 mod artifact_id;
 mod mupdate_override;
+mod zone_manifest;
 
 pub use artifact_id::*;
 pub use mupdate_override::*;
+pub use zone_manifest::*;

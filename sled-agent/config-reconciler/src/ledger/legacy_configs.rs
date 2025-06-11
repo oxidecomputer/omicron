@@ -218,6 +218,7 @@ fn merge_old_configs(
 
 /// Legacy type of the ledgered zone config.
 #[derive(Debug, Clone, Deserialize, Serialize)]
+#[cfg_attr(test, derive(schemars::JsonSchema))]
 struct OmicronZonesConfigLocal {
     omicron_generation: Generation,
     ledger_generation: Generation,
@@ -237,9 +238,11 @@ impl Ledgerable for OmicronZonesConfigLocal {
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
+#[cfg_attr(test, derive(schemars::JsonSchema))]
 struct OmicronZoneConfigLocal {
     zone: OmicronZoneConfig,
     #[serde(rename = "root")]
+    #[cfg_attr(test, schemars(with = "String"))]
     _root: Utf8PathBuf,
 }
 
@@ -263,6 +266,15 @@ pub(super) mod tests {
     // test_merge_old_configs below.
     const MERGED_CONFIG_PATH: &str =
         "test-data/expectorate/merged-sled-config.json";
+
+    #[test]
+    fn test_old_config_schema() {
+        let schema = schemars::schema_for!(OmicronZonesConfigLocal);
+        expectorate::assert_contents(
+            "../../schema/all-zones-requests.json",
+            &serde_json::to_string_pretty(&schema).unwrap(),
+        );
+    }
 
     #[test]
     fn test_merge_old_configs() {

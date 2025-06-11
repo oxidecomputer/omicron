@@ -76,9 +76,9 @@ dependencies = [
 
 [[package]]
 name = "allocator-api2"
-version = "0.2.18"
+version = "0.2.21"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "5c6cb57a04249c6480766f7f7cef5467412af1490f8d1e243141daddada3264f"
+checksum = "683d7910e743518b0e34f1186f92494becacb047c7b6bf616c96772180fef923"
 
 [[package]]
 name = "android-tzdata"
@@ -1105,13 +1105,38 @@ dependencies = [
 ]
 
 [[package]]
+name = "cargo-platform"
+version = "0.2.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "84982c6c0ae343635a3a4ee6dedef965513735c8b183caa7289fa6e27399ebd4"
+dependencies = [
+ "serde",
+]
+
+[[package]]
+name = "cargo-util-schemas"
+version = "0.2.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "e63d2780ac94487eb9f1fea7b0d56300abc9eb488800854ca217f102f5caccca"
+dependencies = [
+ "semver 1.0.26",
+ "serde",
+ "serde-untagged",
+ "serde-value",
+ "thiserror 1.0.69",
+ "toml 0.8.22",
+ "unicode-xid",
+ "url",
+]
+
+[[package]]
 name = "cargo_metadata"
 version = "0.18.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "2d886547e41f740c616ae73108f6eb70afe6d940c7bc697cb30f13daec073037"
 dependencies = [
  "camino",
- "cargo-platform",
+ "cargo-platform 0.1.8",
  "semver 1.0.26",
  "serde",
  "serde_json",
@@ -1125,7 +1150,22 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "dd5eb614ed4c27c5d706420e4320fbe3216ab31fa1c33cd8246ac36dae4479ba"
 dependencies = [
  "camino",
- "cargo-platform",
+ "cargo-platform 0.1.8",
+ "semver 1.0.26",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.12",
+]
+
+[[package]]
+name = "cargo_metadata"
+version = "0.20.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "4f7835cfc6135093070e95eb2b53e5d9b5c403dc3a6be6040ee026270aa82502"
+dependencies = [
+ "camino",
+ "cargo-platform 0.2.0",
+ "cargo-util-schemas",
  "semver 1.0.26",
  "serde",
  "serde_json",
@@ -1215,7 +1255,7 @@ version = "0.18.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "1a2b34126159980f92da2a08bdec0694fd80fb5eb9e48aff25d20a0d8dfa710d"
 dependencies = [
- "smallvec 1.14.0",
+ "smallvec 1.15.0",
  "target-lexicon",
 ]
 
@@ -3037,6 +3077,16 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "877a4ace8713b0bcf2a4e7eec82529c029f1d0619886d18145fea96c3ffe5c0f"
 
 [[package]]
+name = "erased-serde"
+version = "0.4.6"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "e004d887f51fcb9fef17317a2f3525c887d8aa3f4f50fed920816a688284a5b7"
+dependencies = [
+ "serde",
+ "typeid",
+]
+
+[[package]]
 name = "ereport-types"
 version = "0.1.0"
 dependencies = [
@@ -3246,9 +3296,9 @@ checksum = "3f9eec918d3f24069decb9af1554cad7c880e2da24a9afd88aca000531ab82c1"
 
 [[package]]
 name = "foldhash"
-version = "0.1.3"
+version = "0.1.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f81ec6369c545a7d40e4589b5597581fa1c441fe1cce96dd1de43159910a36a2"
+checksum = "d9c4f5dac5e15c24eb999c26181a6ca40b39fe946cbe4c263c7209467bc83af2"
 
 [[package]]
 name = "foreign-types"
@@ -3484,6 +3534,7 @@ dependencies = [
  "gateway-client",
  "gateway-messages",
  "omicron-common",
+ "omicron-uuid-kinds",
  "omicron-workspace-hack",
  "reqwest",
  "serde",
@@ -3507,6 +3558,7 @@ dependencies = [
  "daft",
  "gateway-messages",
  "gateway-types",
+ "omicron-uuid-kinds",
  "omicron-workspace-hack",
  "progenitor 0.10.0",
  "rand 0.8.5",
@@ -3610,6 +3662,7 @@ dependencies = [
  "hex",
  "ipcc",
  "omicron-common",
+ "omicron-uuid-kinds",
  "omicron-workspace-hack",
  "schemars",
  "serde",
@@ -3774,13 +3827,14 @@ dependencies = [
 
 [[package]]
 name = "guppy"
-version = "0.17.18"
+version = "0.17.19"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "b59852737bb6ccfe90e37408dfefd968b23bfd14daf30406d49ee46b4763e64a"
+checksum = "81dfbb4e91461d20334e04ea276ec826d62f4509ccd641db47d4ae15277dbb03"
 dependencies = [
  "ahash",
  "camino",
- "cargo_metadata 0.19.2",
+ "cargo-util-schemas",
+ "cargo_metadata 0.20.0",
  "cfg-if",
  "debug-ignore",
  "fixedbitset 0.5.7",
@@ -3794,7 +3848,7 @@ dependencies = [
  "semver 1.0.26",
  "serde",
  "serde_json",
- "smallvec 1.14.0",
+ "smallvec 1.15.0",
  "static_assertions",
  "target-spec",
 ]
@@ -4046,7 +4100,7 @@ dependencies = [
  "parking_lot 0.12.3",
  "rand 0.8.5",
  "resolv-conf",
- "smallvec 1.14.0",
+ "smallvec 1.15.0",
  "thiserror 1.0.69",
  "tokio",
  "tracing",
@@ -4303,7 +4357,7 @@ dependencies = [
  "httpdate",
  "itoa",
  "pin-project-lite",
- "smallvec 1.14.0",
+ "smallvec 1.15.0",
  "tokio",
  "want",
 ]
@@ -4480,7 +4534,7 @@ dependencies = [
  "icu_normalizer_data",
  "icu_properties",
  "icu_provider",
- "smallvec 1.14.0",
+ "smallvec 1.15.0",
  "utf16_iter",
  "utf8_iter",
  "write16",
@@ -4558,14 +4612,14 @@ dependencies = [
 
 [[package]]
 name = "iddqd"
-version = "0.3.0"
+version = "0.3.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "8129594fa2dd41828ac3a1f3080037c24b7588fff5422b0dba0ace331b95a7b2"
+checksum = "9f6ebdbf573a5215d3b9bf3388deedb9501d619a43184f926b376909e11ed3ed"
 dependencies = [
+ "allocator-api2",
  "daft",
- "debug-ignore",
- "derive-where",
  "equivalent",
+ "foldhash",
  "hashbrown 0.15.3",
  "ref-cast",
  "rustc-hash 2.1.1",
@@ -4585,7 +4639,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "686f825264d630750a544639377bae737628043f20d38bbc029e8f29ea968a7e"
 dependencies = [
  "idna_adapter",
- "smallvec 1.14.0",
+ "smallvec 1.15.0",
  "utf8_iter",
 ]
 
@@ -4818,6 +4872,7 @@ dependencies = [
  "hex",
  "hex-literal",
  "http",
+ "iddqd",
  "illumos-utils",
  "installinator-client",
  "installinator-common",
@@ -4850,7 +4905,6 @@ dependencies = [
  "tufaceous-artifact",
  "tufaceous-lib",
  "update-engine",
- "uuid",
 ]
 
 [[package]]
@@ -4862,6 +4916,7 @@ dependencies = [
  "hyper",
  "installinator-common",
  "omicron-common",
+ "omicron-uuid-kinds",
  "omicron-workspace-hack",
  "schemars",
  "serde",
@@ -4876,6 +4931,7 @@ version = "0.1.0"
 dependencies = [
  "installinator-common",
  "omicron-common",
+ "omicron-uuid-kinds",
  "omicron-workspace-hack",
  "progenitor 0.10.0",
  "regress",
@@ -4885,7 +4941,6 @@ dependencies = [
  "serde_json",
  "slog",
  "update-engine",
- "uuid",
 ]
 
 [[package]]
@@ -5003,13 +5058,13 @@ dependencies = [
  "ciborium",
  "libipcc",
  "omicron-common",
+ "omicron-uuid-kinds",
  "omicron-workspace-hack",
  "proptest",
  "serde",
  "test-strategy",
  "thiserror 1.0.69",
  "tufaceous-artifact",
- "uuid",
 ]
 
 [[package]]
@@ -5115,9 +5170,9 @@ checksum = "49f1f14873335454500d59611f1cf4a4b0f786f9ac11f4312a78e4cf2566695b"
 
 [[package]]
 name = "jiff"
-version = "0.2.13"
+version = "0.2.14"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f02000660d30638906021176af16b17498bd0d12813dbfe7b276d8bc7f3c0806"
+checksum = "a194df1107f33c79f4f93d02c80798520551949d59dfad22b6157048a88cca93"
 dependencies = [
  "jiff-static",
  "jiff-tzdb-platform",
@@ -5130,9 +5185,9 @@ dependencies = [
 
 [[package]]
 name = "jiff-static"
-version = "0.2.13"
+version = "0.2.14"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f3c30758ddd7188629c6713fc45d1188af4f44c90582311d0c8d8c9907f60c48"
+checksum = "6c6e1db7ed32c6c71b759497fae34bf7933636f75a251b9e736555da426f6442"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -6759,7 +6814,7 @@ version = "0.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "77a5d83df9f36fe23f0c3648c6bbb8b0298bb5f1939c8f2704431371f4b84d43"
 dependencies = [
- "smallvec 1.14.0",
+ "smallvec 1.15.0",
 ]
 
 [[package]]
@@ -6868,7 +6923,7 @@ dependencies = [
  "num-traits",
  "rand 0.8.5",
  "serde",
- "smallvec 1.14.0",
+ "smallvec 1.15.0",
  "zeroize",
 ]
 
@@ -7153,6 +7208,7 @@ dependencies = [
  "hex",
  "http",
  "id-map",
+ "iddqd",
  "ipnetwork",
  "libc",
  "macaddr",
@@ -7966,6 +8022,7 @@ dependencies = [
  "elliptic-curve",
  "ff",
  "flate2",
+ "foldhash",
  "fs-err 3.1.0",
  "futures",
  "futures-channel",
@@ -8039,7 +8096,7 @@ dependencies = [
  "sha2",
  "similar",
  "slog",
- "smallvec 1.14.0",
+ "smallvec 1.15.0",
  "spin",
  "string_cache",
  "strum",
@@ -8233,9 +8290,9 @@ checksum = "ff011a302c396a5197692431fc1948019154afc178baf7d8e37367442a4601cf"
 
 [[package]]
 name = "openssl-sys"
-version = "0.9.107"
+version = "0.9.109"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "8288979acd84749c744a9014b4382d42b8f7b2592847b5afb2ed29e5d16ede07"
+checksum = "90096e2e47630d78b7d1c20952dc621f957103f8bc2c8359ec81290d75238571"
 dependencies = [
  "cc",
  "libc",
@@ -8285,6 +8342,15 @@ dependencies = [
  "postcard",
  "serde",
  "thiserror 2.0.12",
+]
+
+[[package]]
+name = "ordered-float"
+version = "2.10.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "68f19d67e5a2795c94e73e0bb1cc1a7edeb2e28efd39e2e1c9b7a40c1108b11c"
+dependencies = [
+ "num-traits",
 ]
 
 [[package]]
@@ -8905,7 +8971,7 @@ dependencies = [
  "instant",
  "libc",
  "redox_syscall 0.2.16",
- "smallvec 1.14.0",
+ "smallvec 1.15.0",
  "winapi",
 ]
 
@@ -8918,7 +8984,7 @@ dependencies = [
  "cfg-if",
  "libc",
  "redox_syscall 0.5.7",
- "smallvec 1.14.0",
+ "smallvec 1.15.0",
  "windows-targets 0.52.6",
 ]
 
@@ -9014,7 +9080,7 @@ version = "0.8.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "6c7fabb0b56aba5d2eb3fa9b1547c187f21f8c051295a7b97a50be6a9332f4cb"
 dependencies = [
- "smallvec 1.14.0",
+ "smallvec 1.15.0",
 ]
 
 [[package]]
@@ -11266,6 +11332,27 @@ dependencies = [
 ]
 
 [[package]]
+name = "serde-untagged"
+version = "0.1.7"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "299d9c19d7d466db4ab10addd5703e4c615dec2a5a16dbbafe191045e87ee66e"
+dependencies = [
+ "erased-serde",
+ "serde",
+ "typeid",
+]
+
+[[package]]
+name = "serde-value"
+version = "0.7.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "f3a1a3341211875ef120e117ea7fd5228530ae7e7036a779fdc9117be6b3282c"
+dependencies = [
+ "ordered-float",
+ "serde",
+]
+
+[[package]]
 name = "serde_bytes"
 version = "0.11.17"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -11675,6 +11762,7 @@ dependencies = [
  "omicron-uuid-kinds",
  "omicron-workspace-hack",
  "proptest",
+ "schemars",
  "scopeguard",
  "serde",
  "serde_json",
@@ -11731,7 +11819,7 @@ dependencies = [
  "camino",
  "camino-tempfile-ext",
  "dropshot",
- "id-map",
+ "iddqd",
  "illumos-utils",
  "nexus-sled-agent-shared",
  "omicron-common",
@@ -11739,6 +11827,7 @@ dependencies = [
  "omicron-workspace-hack",
  "pretty_assertions",
  "serde_json",
+ "sled-agent-config-reconciler",
  "sled-storage",
  "slog",
  "slog-error-chain",
@@ -11986,9 +12075,9 @@ dependencies = [
 
 [[package]]
 name = "smallvec"
-version = "1.14.0"
+version = "1.15.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "7fcf8323ef1faaee30a44a340193b1ac6814fd9b7b4e88e9d4519a3e4abe1cfd"
+checksum = "8917285742e9f3e1683f0a9c4e6b57960b7314d0b08d30d1ecd426713ee2eee9"
 
 [[package]]
 name = "smawk"
@@ -13544,6 +13633,12 @@ dependencies = [
  "rand_seeder",
  "uuid",
 ]
+
+[[package]]
+name = "typeid"
+version = "1.0.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "bc7d623258602320d5c55d1bc22793b57daff0ec7efc270ea7d55ce1d5f5471c"
 
 [[package]]
 name = "typenum"
