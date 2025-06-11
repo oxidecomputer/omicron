@@ -175,6 +175,21 @@ pub struct Blueprint {
     // See blueprint execution for more on this.
     pub external_dns_version: Generation,
 
+    /// The minimum release generation to accept for target release
+    /// configuration. Target release configuration with a generation less than
+    /// this number will be ignored.
+    ///
+    /// For example, let's say that the current target release generation is 5.
+    /// Then, when reconfigurator detects a MUPdate:
+    ///
+    /// * the target release is ignored in favor of the install dataset
+    /// * this field is set to 6
+    ///
+    /// Once an operator sets a new target release, its generation will be 6 or
+    /// higher. Reconfigurator will then know that it is back in charge of
+    /// driving the system to the target release.
+    pub target_release_minimum_generation: Generation,
+
     /// CockroachDB state fingerprint when this blueprint was created
     // See `nexus/db-queries/src/db/datastore/cockroachdb_settings.rs` for more
     // on this.
@@ -216,6 +231,8 @@ impl Blueprint {
             parent_blueprint_id: self.parent_blueprint_id,
             internal_dns_version: self.internal_dns_version,
             external_dns_version: self.external_dns_version,
+            target_release_minimum_generation: self
+                .target_release_minimum_generation,
             cockroachdb_fingerprint: self.cockroachdb_fingerprint.clone(),
             cockroachdb_setting_preserve_downgrade: Some(
                 self.cockroachdb_setting_preserve_downgrade,
@@ -493,6 +510,12 @@ impl BlueprintDisplay<'_> {
                     EXTERNAL_DNS_VERSION,
                     self.blueprint.external_dns_version.to_string(),
                 ),
+                (
+                    TARGET_RELEASE_MIN_GEN,
+                    self.blueprint
+                        .target_release_minimum_generation
+                        .to_string(),
+                ),
             ],
         )
     }
@@ -532,8 +555,9 @@ impl fmt::Display for BlueprintDisplay<'_> {
             // Handled by `make_oximeter_table`, called below.
             oximeter_read_version: _,
             oximeter_read_mode: _,
-            // These five fields are handled by `make_metadata_table()`, called
+            // These six fields are handled by `make_metadata_table()`, called
             // below.
+            target_release_minimum_generation: _,
             internal_dns_version: _,
             external_dns_version: _,
             time_created: _,
@@ -1707,6 +1731,10 @@ pub struct BlueprintMetadata {
     pub internal_dns_version: Generation,
     /// external DNS version when this blueprint was created
     pub external_dns_version: Generation,
+    /// The minimum generation for the target release.
+    ///
+    /// See [`Blueprint::target_release_minimum_generation`].
+    pub target_release_minimum_generation: Generation,
     /// CockroachDB state fingerprint when this blueprint was created
     pub cockroachdb_fingerprint: String,
     /// Whether to set `cluster.preserve_downgrade_option` and what to set it to
