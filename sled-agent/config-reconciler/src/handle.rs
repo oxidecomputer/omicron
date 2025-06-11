@@ -250,6 +250,11 @@ impl ConfigReconcilerHandle {
         );
     }
 
+    /// Read whether or not we try to destroy orphaned datasets.
+    pub fn will_destroy_orphans(&self) -> bool {
+        self.destroy_orphans.load(Ordering::Relaxed)
+    }
+
     /// Control whether or not we try to destroy orphaned datasets.
     pub fn set_destroy_orphans(&self, destroy_orphans: bool) {
         self.destroy_orphans.store(destroy_orphans, Ordering::Relaxed);
