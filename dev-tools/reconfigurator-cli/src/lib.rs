@@ -53,6 +53,7 @@ use std::borrow::Cow;
 use std::collections::BTreeMap;
 use std::fmt::{self, Write};
 use std::io::IsTerminal;
+use std::num::ParseIntError;
 use std::str::FromStr;
 use swrite::{SWrite, swriteln};
 use tabled::Tabled;
@@ -457,6 +458,16 @@ enum BlueprintEditCommands {
         /// the UUID to set the field to, or "unset"
         value: MupdateOverrideUuidOpt,
     },
+    /// set the minimum generation for which target releases are accepted
+    ///
+    /// At the moment, this just sets the field to the given value. In the
+    /// future, we'll likely want to set this based on the current target
+    /// release generation.
+    #[clap(visible_alias = "set-target-release-min-gen")]
+    SetTargetReleaseMinimumGeneration {
+        /// the minimum target release generation
+        generation: Generation,
+    },
     /// expunge a zone
     ExpungeZone { zone_id: OmicronZoneUuid },
     /// mark an expunged zone ready for cleanup
@@ -579,6 +590,42 @@ impl From<MupdateOverrideUuidOpt> for Option<MupdateOverrideUuid> {
     }
 }
 
+/// Clap field for an optional generation.
+///
+/// This structure is similar to `Option`, but is specified separately to:
+///
+/// 1. Disable clap's magic around `Option`.
+/// 2. Provide a custom parser.
+///
+/// There are other ways to do both 1 and 2 (e.g. specify the type as
+/// `std::option::Option`), but when combined they're uglier than this.
+#[derive(Clone, Copy, Debug)]
+enum GenerationOpt {
+    Unset,
+    Set(Generation),
+}
+
+impl FromStr for GenerationOpt {
+    type Err = ParseIntError;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        if s == "unset" || s == "none" {
+            Ok(Self::Unset)
+        } else {
+            Ok(Self::Set(s.parse::<Generation>()?))
+        }
+    }
+}
+
+impl From<GenerationOpt> for Option<Generation> {
+    fn from(value: GenerationOpt) -> Self {
+        match value {
+            GenerationOpt::Unset => None,
+            GenerationOpt::Set(generation) => Some(generation),
+        }
+    }
+}
+
 #[derive(Clone, Debug, Subcommand)]
 enum SpUpdateComponent {
     /// update the SP itself
@@ -668,8 +715,9 @@ struct BlueprintSaveArgs {
 struct BlueprintDiffArgs {
     /// id of the first blueprint, "latest", or "target"
     blueprint1_id: BlueprintIdOpt,
-    /// id of the second blueprint, "latest", or "target"
-    blueprint2_id: BlueprintIdOpt,
+    /// id of the second blueprint, "latest", or "target", or None to mean "the
+    /// parent of blueprint1"
+    blueprint2_id: Option<BlueprintIdOpt>,
 }
 
 #[derive(Debug, Subcommand)]
@@ -1175,6 +1223,17 @@ fn cmd_blueprint_edit(
                 }
             }
         }
+        BlueprintEditCommands::SetTargetReleaseMinimumGeneration {
+            generation,
+        } => {
+            builder
+                .set_target_release_minimum_generation(
+                    blueprint.target_release_minimum_generation,
+                    generation,
+                )
+                .context("failed to set target release minimum generation")?;
+            format!("set target release minimum generation to {generation}")
+        }
         BlueprintEditCommands::SetZoneImage { zone_id, image_source } => {
             let sled_id = sled_with_zone(&builder, &zone_id)?;
             let source = BlueprintZoneImageSource::from(image_source);
@@ -1327,13 +1386,32 @@ fn cmd_blueprint_diff(
 ) -> anyhow::Result<Option<String>> {
     let mut rv = String::new();
     let blueprint1_id = args.blueprint1_id;
-    let blueprint2_id = args.blueprint2_id;
 
     let state = sim.current_state();
-    let blueprint1 =
+    let blueprint =
         state.system().resolve_and_get_blueprint(blueprint1_id.into())?;
-    let blueprint2 =
-        state.system().resolve_and_get_blueprint(blueprint2_id.into())?;
+    let (blueprint1, blueprint2) = if let Some(blueprint2_arg) =
+        args.blueprint2_id
+    {
+        // Two blueprint ids were provided.  Diff from the first to the second.
+        let blueprint1 = blueprint;
+        let blueprint2 =
+            state.system().resolve_and_get_blueprint(blueprint2_arg.into())?;
+        (blueprint1, blueprint2)
+    } else if let Some(parent_id) = blueprint.parent_blueprint_id {
+        // Only one blueprint id was provided.  Diff from that blueprint's
+        // parent to the blueprint.
+        let blueprint1 = state
+            .system()
+            .resolve_and_get_blueprint(BlueprintId::Id(parent_id))?;
+        let blueprint2 = blueprint;
+        (blueprint1, blueprint2)
+    } else {
+        bail!(
+            "`blueprint2_id` was not specified and blueprint1 has no \
+             parent blueprint"
+        );
+    };
 
     let sled_diff = blueprint2.diff_since_blueprint(&blueprint1);
     swriteln!(rv, "{}", sled_diff.display());

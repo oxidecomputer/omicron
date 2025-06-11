@@ -7,12 +7,11 @@
 
 use illumos_utils::dladm::EtherstubVnic;
 use illumos_utils::running_zone::RunningZone;
-use illumos_utils::zpool::ZpoolName;
+use illumos_utils::zpool::PathInPool;
 use nexus_sled_agent_shared::inventory::OmicronZoneConfig;
 use omicron_common::address::Ipv6Subnet;
 use omicron_common::address::SLED_PREFIX;
 use sled_agent_types::zone_bundle::ZoneBundleCause;
-use sled_storage::config::MountConfig;
 use std::future::Future;
 use tufaceous_artifact::ArtifactHash;
 
@@ -38,9 +37,7 @@ pub trait SledAgentFacilities: Send + Sync + 'static {
     fn start_omicron_zone(
         &self,
         zone_config: &OmicronZoneConfig,
-        mount_config: &MountConfig,
-        is_time_synchronized: bool,
-        all_u2_pools: &[ZpoolName],
+        zone_root_path: PathInPool,
     ) -> impl Future<Output = anyhow::Result<RunningZone>> + Send;
 
     /// Stop tracking metrics for a zone's datalinks.

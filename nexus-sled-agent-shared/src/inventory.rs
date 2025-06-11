@@ -12,16 +12,14 @@ use chrono::{DateTime, Utc};
 use daft::Diffable;
 use id_map::IdMap;
 use id_map::IdMappable;
+use omicron_common::disk::{DatasetKind, DatasetName};
 use omicron_common::ledger::Ledgerable;
 use omicron_common::{
     api::{
         external::{ByteCount, Generation},
         internal::shared::{NetworkInterface, SourceNatConfig},
     },
-    disk::{
-        DatasetConfig, DatasetManagementStatus, DiskManagementStatus,
-        DiskVariant, OmicronPhysicalDiskConfig,
-    },
+    disk::{DatasetConfig, DiskVariant, OmicronPhysicalDiskConfig},
     update::ArtifactId,
     zpool_name::ZpoolName,
 };
@@ -132,6 +130,49 @@ pub struct ConfigReconcilerInventory {
     pub zones: BTreeMap<OmicronZoneUuid, ConfigReconcilerInventoryResult>,
 }
 
+impl ConfigReconcilerInventory {
+    /// Iterate over all running zones as reported by the last reconciliation
+    /// result.
+    ///
+    /// This includes zones that are both present in `last_reconciled_config`
+    /// and whose status in `zones` indicates "successfully running".
+    pub fn running_omicron_zones(
+        &self,
+    ) -> impl Iterator<Item = &OmicronZoneConfig> {
+        self.zones.iter().filter_map(|(zone_id, result)| match result {
+            ConfigReconcilerInventoryResult::Ok => {
+                self.last_reconciled_config.zones.get(zone_id)
+            }
+            ConfigReconcilerInventoryResult::Err { .. } => None,
+        })
+    }
+
+    /// Given a sled config, produce a reconciler result that sled-agent could
+    /// have emitted if reconciliation succeeded.
+    ///
+    /// This method should only be used by tests and dev tools; real code should
+    /// look at the actual `last_reconciliation` value from the parent
+    /// [`Inventory`].
+    pub fn debug_assume_success(config: OmicronSledConfig) -> Self {
+        let external_disks = config
+            .disks
+            .iter()
+            .map(|d| (d.id, ConfigReconcilerInventoryResult::Ok))
+            .collect();
+        let datasets = config
+            .datasets
+            .iter()
+            .map(|d| (d.id, ConfigReconcilerInventoryResult::Ok))
+            .collect();
+        let zones = config
+            .zones
+            .iter()
+            .map(|z| (z.id, ConfigReconcilerInventoryResult::Ok))
+            .collect();
+        Self { last_reconciled_config: config, external_disks, datasets, zones }
+    }
+}
+
 #[derive(Clone, Debug, PartialEq, Eq, Deserialize, JsonSchema, Serialize)]
 #[serde(tag = "result", rename_all = "snake_case")]
 pub enum ConfigReconcilerInventoryResult {
@@ -187,8 +228,6 @@ pub enum SledRole {
 }
 
 /// Describes the set of Reconfigurator-managed configuration elements of a sled
-// TODO this struct should have a generation number; at the moment, each of
-// the fields has a separete one internally.
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema, PartialEq, Eq)]
 pub struct OmicronSledConfig {
     pub generation: Generation,
@@ -221,14 +260,6 @@ impl Ledgerable for OmicronSledConfig {
         // Generation bumps must only ever come from nexus and will be encoded
         // in the struct itself
     }
-}
-
-/// Result of the currently-synchronous `omicron_config_put` endpoint.
-#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
-#[must_use = "this `DatasetManagementResult` may contain errors, which should be handled"]
-pub struct OmicronSledConfigResult {
-    pub disks: Vec<DiskManagementStatus>,
-    pub datasets: Vec<DatasetManagementStatus>,
 }
 
 /// Describes the set of Omicron-managed zones running on a sled
@@ -296,6 +327,10 @@ impl OmicronZoneConfig {
             self.zone_type.kind().zone_prefix(),
             Some(self.id),
         )
+    }
+
+    pub fn dataset_name(&self) -> Option<DatasetName> {
+        self.zone_type.dataset_name()
     }
 }
 
@@ -582,6 +617,41 @@ impl OmicronZoneType {
             | OmicronZoneType::InternalDns { .. }
             | OmicronZoneType::Oximeter { .. } => None,
         }
+    }
+
+    /// If this kind of zone has an associated dataset, return the dataset's
+    /// name. Otherwise, return `None`.
+    pub fn dataset_name(&self) -> Option<DatasetName> {
+        let (dataset, dataset_kind) = match self {
+            OmicronZoneType::BoundaryNtp { .. }
+            | OmicronZoneType::InternalNtp { .. }
+            | OmicronZoneType::Nexus { .. }
+            | OmicronZoneType::Oximeter { .. }
+            | OmicronZoneType::CruciblePantry { .. } => None,
+            OmicronZoneType::Clickhouse { dataset, .. } => {
+                Some((dataset, DatasetKind::Clickhouse))
+            }
+            OmicronZoneType::ClickhouseKeeper { dataset, .. } => {
+                Some((dataset, DatasetKind::ClickhouseKeeper))
+            }
+            OmicronZoneType::ClickhouseServer { dataset, .. } => {
+                Some((dataset, DatasetKind::ClickhouseServer))
+            }
+            OmicronZoneType::CockroachDb { dataset, .. } => {
+                Some((dataset, DatasetKind::Cockroach))
+            }
+            OmicronZoneType::Crucible { dataset, .. } => {
+                Some((dataset, DatasetKind::Crucible))
+            }
+            OmicronZoneType::ExternalDns { dataset, .. } => {
+                Some((dataset, DatasetKind::ExternalDns))
+            }
+            OmicronZoneType::InternalDns { dataset, .. } => {
+                Some((dataset, DatasetKind::InternalDns))
+            }
+        }?;
+
+        Some(DatasetName::new(dataset.pool_name, dataset_kind))
     }
 }
 
