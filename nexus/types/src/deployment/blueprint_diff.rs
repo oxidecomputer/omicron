@@ -1893,46 +1893,13 @@ impl fmt::Display for BlueprintDiffDisplay<'_> {
         //
         // The order is:
         //
-        // 1. Unchanged
-        // 2. Removed
-        // 3. Modified
-        // 4. Added
-        // 5. Errors
+        // 1. Removed
+        // 2. Modified
+        // 3. Added
+        // 4. Errors
         //
-        // The idea behind the order is to (a) group all changes together
-        // and (b) put changes towards the bottom, so people have to scroll
-        // back less.
-        //
+        // The idea behind the order is to group all changes together.
         // We put errors at the bottom to ensure they are seen immediately.
-
-        // Write out tables for unchanged sleds
-        let mut unchanged_iter = summary.diff.sleds.unchanged().peekable();
-        if unchanged_iter.peek().is_some() {
-            writeln!(f, " UNCHANGED SLEDS:\n")?;
-            for (sled_id, sled) in unchanged_iter {
-                writeln!(
-                    f,
-                    "  sled {sled_id} ({}, config generation {}):",
-                    sled.state, sled.sled_agent_generation
-                )?;
-
-                let mut rows = Vec::new();
-                if let Some(id) = sled.remove_mupdate_override {
-                    // For unchanged sleds, the tense of "will remove mupdate
-                    // override" can be a bit confusing because it doesn't
-                    // indicate that the value of this field has not changed.
-                    // Add an "(unchanged)" at the end.
-                    rows.push((
-                        WILL_REMOVE_MUPDATE_OVERRIDE,
-                        format!("{id} {UNCHANGED_PARENS}"),
-                    ));
-                }
-                let list = KvList::new_unchanged(None, rows);
-                writeln!(f, "{list}")?;
-
-                self.write_tables(f, sled_id)?;
-            }
-        }
 
         // Write out tables for removed sleds
         if !summary.diff.sleds.removed.is_empty() {
@@ -1988,7 +1955,8 @@ impl fmt::Display for BlueprintDiffDisplay<'_> {
                 )?;
 
                 let mut rows = Vec::new();
-                // If either before or after is set for remove_mupdate_override, display it.
+                // If either before or after is set for remove_mupdate_override,
+                // display it.
                 if sled.before.remove_mupdate_override.is_some()
                     || sled.after.remove_mupdate_override.is_some()
                 {
