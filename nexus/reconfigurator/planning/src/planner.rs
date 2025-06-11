@@ -996,7 +996,7 @@ impl<'a> Planner<'a> {
                         "image_source" => %image_source,
                     );
                     self.blueprint.comment(format!(
-                        "upgrade {:?} zone {} in-place",
+                        "updating {:?} zone {} in-place",
                         zone.zone_type.kind(),
                         zone.id
                     ));
@@ -1020,7 +1020,7 @@ impl<'a> Planner<'a> {
                         "kind" => ?zone.zone_type.kind(),
                     );
                     self.blueprint.comment(format!(
-                        "expunge {:?} zone {} for upgrade",
+                        "expunge {:?} zone {} for update",
                         zone.zone_type.kind(),
                         zone.id
                     ));
