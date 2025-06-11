@@ -1815,6 +1815,11 @@ impl<'a> BlueprintBuilder<'a> {
         sled_id: SledUuid,
         zone: BlueprintZoneConfig,
     ) -> Result<(), Error> {
+        self.comment(format!(
+            "add {:?} zone {}",
+            zone.zone_type.kind(),
+            zone.id
+        ));
         let editor = self.sled_editors.get_mut(&sled_id).ok_or_else(|| {
             Error::Planner(anyhow!(
                 "tried to add zone on unknown sled {sled_id}"
