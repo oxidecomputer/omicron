@@ -1405,35 +1405,44 @@ mod tests {
             datasets: &[String],
             which: WhichDatasets,
         ) -> anyhow::Result<Vec<DatasetProperties>> {
-            let state = self.inner.lock().unwrap();
-            let mut result = Vec::new();
-
-            for dataset in datasets {
-                match which {
-                    WhichDatasets::SelfOnly => {
-                        if let Some(props) = state.datasets.get(dataset) {
-                            result.push(props.clone());
-                        }
-                    }
-                    WhichDatasets::SelfAndChildren => {
-                        let prefix = format!("{dataset}/");
-                        for (name, props) in state.datasets.iter() {
-                            let name = name.trim_end_matches('/');
-                            if name == dataset {
-                                result.push(props.clone());
-                            } else if let Some(rest) =
-                                name.strip_prefix(&prefix)
-                            {
-                                if !rest.contains('/') {
-                                    result.push(props.clone());
-                                }
-                            }
-                        }
-                    }
-                }
+            // Helper to break a dataset name into its /-delimited parts.
+            fn split_fn(name: &String) -> Vec<&str> {
+                name.split('/').collect()
             }
 
-            Ok(result)
+            // Helper to check whether a list of dataset name parts is a direct
+            // child of a given parent.
+            fn is_direct_child(parent: &[&str], child: &[&str]) -> bool {
+                child.len() == parent.len() + 1
+                    && &child[..child.len() - 1] == parent
+            }
+
+            // Filter function: given the name of a dataset we have "on disk"
+            // (i.e., in our in-memory ZFS state), should we include its
+            // properties in the returned set?
+            let filter_fn: &dyn Fn(&String) -> bool = match which {
+                WhichDatasets::SelfOnly => &|name| datasets.contains(name),
+                WhichDatasets::SelfAndChildren => {
+                    let datasets =
+                        datasets.iter().map(split_fn).collect::<Vec<_>>();
+                    &move |name| {
+                        let name = split_fn(name);
+                        datasets.iter().any(|dataset| {
+                            name == *dataset || is_direct_child(dataset, &name)
+                        })
+                    }
+                }
+            };
+
+            Ok(self
+                .inner
+                .lock()
+                .unwrap()
+                .datasets
+                .iter()
+                .filter(|(name, _)| filter_fn(name))
+                .map(|(_, props)| props.clone())
+                .collect())
         }
     }
 
