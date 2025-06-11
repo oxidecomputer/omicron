@@ -75,6 +75,7 @@ progenitor::generate_api!(
         PortFec = omicron_common::api::internal::shared::PortFec,
         PortSpeed = omicron_common::api::internal::shared::PortSpeed,
         RouterId = omicron_common::api::internal::shared::RouterId,
+        ResolvedVpcFirewallRule = omicron_common::api::internal::shared::ResolvedVpcFirewallRule,
         ResolvedVpcRoute = omicron_common::api::internal::shared::ResolvedVpcRoute,
         ResolvedVpcRouteSet = omicron_common::api::internal::shared::ResolvedVpcRouteSet,
         RouterTarget = omicron_common::api::internal::shared::RouterTarget,
