@@ -3,7 +3,7 @@ use clap::{Parser, Subcommand};
 use end_to_end_tests::helpers::cli::oxide_cli_style;
 use end_to_end_tests::helpers::icmp::ping4_test_run;
 use oxide_client::{
-    ClientHiddenExt, ClientLoginExt, ClientProjectsExt,
+    ClientExperimentalExt, ClientLoginExt, ClientProjectsExt,
     ClientSystemHardwareExt, ClientSystemIpPoolsExt, ClientSystemStatusExt,
     ClientVpcsExt,
     types::{

@@ -133,7 +133,7 @@ fn test_unauthorized_coverage() {
     // Even if you're just adding a stub, see [`Nexus::unimplemented_todo()`].
     // If you _added_ a test that covered an endpoint from the allowlist --
     // hooray!  Just delete the corresponding line from this file.  (Why is this
-    // not `expectorage::assert_contents`?  Because we only expect this file to
+    // not `expectorate::assert_contents`?  Because we only expect this file to
     // ever shrink, which is easy enough to fix by hand, and we don't want to
     // make it easy to accidentally add things to the allowlist.)
     // let expected_uncovered_endpoints =
