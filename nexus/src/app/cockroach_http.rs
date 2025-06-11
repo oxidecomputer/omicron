@@ -1,0 +1,726 @@
+// This Source Code Form is subject to the terms of the Mozilla Public
+// License, v. 2.0. If a copy of the MPL was not distributed with this
+// file, You can obtain one at https://mozilla.org/MPL/2.0/.
+
+//! Client for CockroachDB's built-in HTTP interface
+//!
+//! This accesses CockroachDB's native HTTP API, which provides Prometheus metrics
+//! at /_status/vars and other status endpoints.
+
+use anyhow::{Context, Result};
+use chrono::{DateTime, Utc};
+use reqwest::Client;
+use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
+use std::net::SocketAddr;
+use std::time::Duration;
+use strum::{Display, EnumIter, EnumString, IntoStaticStr};
+
+/// A simple CockroachDB HTTP client for accessing metrics and status
+pub struct CockroachHttpClient {
+    client: Client,
+    base_url: String,
+}
+
+impl CockroachHttpClient {
+    /// Create a new CockroachDB HTTP client
+    pub fn new(address: SocketAddr) -> Self {
+        let client = Client::builder()
+            .timeout(Duration::from_secs(30))
+            .build()
+            .expect("Failed to build HTTP client");
+
+        let base_url = format!("http://{}", address);
+
+        Self { client, base_url }
+    }
+
+    /// Fetch Prometheus metrics from the /_status/vars endpoint
+    pub async fn fetch_prometheus_metrics(&self) -> Result<PrometheusMetrics> {
+        let url = format!("{}/_status/vars", self.base_url);
+
+        let response = self
+            .client
+            .get(&url)
+            .send()
+            .await
+            .with_context(|| format!("Failed to GET {}", url))?;
+
+        if !response.status().is_success() {
+            anyhow::bail!(
+                "HTTP request failed with status {}: {}",
+                response.status(),
+                response.text().await.unwrap_or_default()
+            );
+        }
+
+        let text = response
+            .text()
+            .await
+            .with_context(|| "Failed to read response body")?;
+
+        PrometheusMetrics::parse(&text)
+            .with_context(|| "Failed to parse Prometheus metrics")
+    }
+
+    /// Fetch node status information for all nodes
+    pub async fn fetch_node_status(&self) -> Result<NodesResponse> {
+        let url = format!("{}/_status/nodes", self.base_url);
+
+        let response = self
+            .client
+            .get(&url)
+            .send()
+            .await
+            .with_context(|| format!("Failed to GET {}", url))?;
+
+        if !response.status().is_success() {
+            anyhow::bail!(
+                "HTTP request failed with status {}: {}",
+                response.status(),
+                response.text().await.unwrap_or_default()
+            );
+        }
+
+        let nodes_response = response
+            .json::<NodesResponse>()
+            .await
+            .with_context(|| "Failed to parse nodes response JSON")?;
+
+        Ok(nodes_response)
+    }
+}
+
+/// A single metric value, which can be a counter, gauge, etc.
+#[derive(Debug, Clone, PartialEq)]
+pub enum MetricValue {
+    /// A simple numeric value
+    Number(f64),
+    /// A histogram with buckets
+    Histogram(Vec<HistogramBucket>),
+    /// A string value
+    String(String),
+}
+
+/// A histogram bucket with upper bound and count
+#[derive(Debug, Clone, PartialEq)]
+pub struct HistogramBucket {
+    pub le: f64, // "less than or equal to" upper bound
+    pub count: u64,
+}
+
+/// Well-known CockroachDB metrics that are important for monitoring
+#[derive(
+    Debug,
+    Clone,
+    Copy,
+    PartialEq,
+    Eq,
+    Hash,
+    Display,
+    EnumIter,
+    EnumString,
+    IntoStaticStr,
+)]
+#[strum(serialize_all = "snake_case")]
+pub enum CockroachMetric {
+    // Lease metrics - important for understanding lease transfers and leadership
+    #[strum(serialize = "leases_error")]
+    LeasesError,
+    #[strum(serialize = "leases_transfers_error")]
+    LeasesTransfersError,
+
+    // Range metrics - critical for understanding data distribution and splits
+    #[strum(serialize = "range_splits")]
+    RangeSplits,
+    #[strum(serialize = "range_removes")]
+    RangeRemoves,
+    #[strum(serialize = "ranges_underreplicated")]
+    RangesUnderreplicated,
+    #[strum(serialize = "ranges_overreplicated")]
+    RangesOverreplicated,
+
+    // Replica metrics - important for replication health monitoring
+    #[strum(serialize = "replicas_uninitialized")]
+    ReplicasUninitialized,
+    #[strum(serialize = "replicas_leaders_not_leaseholders")]
+    ReplicasLeadersNotLeaseholders,
+
+    // Transaction restart metrics - crucial for detecting contention issues
+    #[strum(serialize = "txn_restarts_unknown")]
+    TxnRestartsUnknown,
+    #[strum(serialize = "txn_restarts_asyncwritefailure")]
+    TxnRestartsAsyncWriteFailure,
+    #[strum(serialize = "txn_restarts_commitdeadlineexceeded")]
+    TxnRestartsCommitDeadlineExceeded,
+
+    // SQL execution latency histogram - critical for performance monitoring
+    #[strum(serialize = "sql_exec_latency")]
+    SqlExecLatency,
+}
+
+/// Represents a collection of Prometheus metrics
+#[derive(Debug, Clone)]
+pub struct PrometheusMetrics {
+    /// Raw metrics as key-value pairs
+    pub metrics: HashMap<String, MetricValue>,
+}
+
+impl CockroachMetric {
+    /// Get the exact metric name as it appears in CockroachDB's Prometheus output
+    pub fn metric_name(&self) -> &'static str {
+        self.into()
+    }
+
+    /// Get a human-readable description of what this metric represents
+    pub fn description(&self) -> &'static str {
+        match self {
+            CockroachMetric::LeasesError => {
+                "Number of lease operations that resulted in errors"
+            }
+            CockroachMetric::LeasesTransfersError => {
+                "Number of lease transfer operations that failed"
+            }
+            CockroachMetric::RangeSplits => {
+                "Number of range split operations performed"
+            }
+            CockroachMetric::RangeRemoves => {
+                "Number of range removal operations performed"
+            }
+            CockroachMetric::RangesUnderreplicated => {
+                "Number of ranges with fewer replicas than desired"
+            }
+            CockroachMetric::RangesOverreplicated => {
+                "Number of ranges with more replicas than desired"
+            }
+            CockroachMetric::ReplicasUninitialized => {
+                "Number of replicas that are uninitialized"
+            }
+            CockroachMetric::ReplicasLeadersNotLeaseholders => {
+                "Number of replicas that are leaders but not leaseholders"
+            }
+            CockroachMetric::TxnRestartsUnknown => {
+                "Number of transaction restarts due to unknown reasons"
+            }
+            CockroachMetric::TxnRestartsAsyncWriteFailure => {
+                "Number of transaction restarts due to async write failures"
+            }
+            CockroachMetric::TxnRestartsCommitDeadlineExceeded => {
+                "Number of transaction restarts due to commit deadline exceeded"
+            }
+            CockroachMetric::SqlExecLatency => {
+                "Histogram of SQL execution latencies"
+            }
+        }
+    }
+}
+
+impl PrometheusMetrics {
+    /// Parse Prometheus text format into structured metrics
+    pub fn parse(text: &str) -> Result<Self> {
+        let mut metrics = HashMap::new();
+
+        for line in text.lines() {
+            let line = line.trim();
+
+            // Skip comments and empty lines
+            if line.is_empty() || line.starts_with('#') {
+                continue;
+            }
+
+            // Parse metric line: metric_name{labels} value
+            if let Some((name_and_labels, value_str)) = line.rsplit_once(' ') {
+                // Extract metric name (before any labels)
+                let metric_name =
+                    if let Some(brace_pos) = name_and_labels.find('{') {
+                        &name_and_labels[..brace_pos]
+                    } else {
+                        name_and_labels
+                    };
+
+                // Check if this is a histogram bucket metric
+                if metric_name.ends_with("_bucket") {
+                    // Extract the base histogram name
+                    let base_name =
+                        &metric_name[..metric_name.len() - "_bucket".len()];
+
+                    // Parse the 'le' (less than or equal) value from labels
+                    if let Some(le_value) =
+                        Self::extract_le_label(name_and_labels)
+                    {
+                        if let (Ok(count), Ok(le)) =
+                            (value_str.parse::<u64>(), le_value.parse::<f64>())
+                        {
+                            let bucket = HistogramBucket { le, count };
+
+                            // Add to existing histogram or create new one
+                            match metrics.entry(base_name.to_string()) {
+                                std::collections::hash_map::Entry::Occupied(
+                                    mut entry,
+                                ) => {
+                                    if let MetricValue::Histogram(
+                                        ref mut buckets,
+                                    ) = entry.get_mut()
+                                    {
+                                        buckets.push(bucket);
+                                    }
+                                }
+                                std::collections::hash_map::Entry::Vacant(
+                                    entry,
+                                ) => {
+                                    entry.insert(MetricValue::Histogram(vec![
+                                        bucket,
+                                    ]));
+                                }
+                            }
+                            continue;
+                        }
+                    }
+                }
+
+                // Parse regular metrics
+                let value = if let Ok(num) = value_str.parse::<f64>() {
+                    MetricValue::Number(num)
+                } else {
+                    MetricValue::String(value_str.to_string())
+                };
+
+                metrics.insert(metric_name.to_string(), value);
+            }
+        }
+
+        Ok(PrometheusMetrics { metrics })
+    }
+
+    /// Extract the 'le' (less than or equal) label value from a Prometheus metric line
+    fn extract_le_label(metric_line: &str) -> Option<&str> {
+        // Look for le="value" in the labels
+        if let Some(start) = metric_line.find("le=\"") {
+            let start = start + 4; // Skip 'le="'
+            if let Some(end) = metric_line[start..].find('"') {
+                return Some(&metric_line[start..start + end]);
+            }
+        }
+        None
+    }
+
+    /// Get a numeric metric value by name
+    pub fn get_number(&self, name: &str) -> Option<f64> {
+        match self.metrics.get(name) {
+            Some(MetricValue::Number(val)) => Some(*val),
+            _ => None,
+        }
+    }
+
+    /// Get a string metric value by name
+    pub fn get_string(&self, name: &str) -> Option<&String> {
+        match self.metrics.get(name) {
+            Some(MetricValue::String(val)) => Some(val),
+            _ => None,
+        }
+    }
+
+    /// Get all metrics matching a prefix
+    pub fn get_metrics_with_prefix(
+        &self,
+        prefix: &str,
+    ) -> HashMap<String, &MetricValue> {
+        self.metrics
+            .iter()
+            .filter(|(name, _)| name.starts_with(prefix))
+            .map(|(name, value)| (name.clone(), value))
+            .collect()
+    }
+
+    /// Get a specific CockroachDB metric by its strongly-typed enum value
+    pub fn get_cockroach_metric(
+        &self,
+        metric: CockroachMetric,
+    ) -> Option<&MetricValue> {
+        self.metrics.get(metric.metric_name())
+    }
+
+    /// Get a specific CockroachDB metric as a number, if it exists and is numeric
+    pub fn get_cockroach_metric_number(
+        &self,
+        metric: CockroachMetric,
+    ) -> Option<f64> {
+        match self.get_cockroach_metric(metric) {
+            Some(MetricValue::Number(val)) => Some(*val),
+            _ => None,
+        }
+    }
+
+    /// Get a histogram metric value by name
+    pub fn get_histogram(&self, name: &str) -> Option<&Vec<HistogramBucket>> {
+        match self.metrics.get(name) {
+            Some(MetricValue::Histogram(buckets)) => Some(buckets),
+            _ => None,
+        }
+    }
+
+    /// Get a specific CockroachDB metric as a histogram, if it exists and is a histogram
+    pub fn get_cockroach_metric_histogram(
+        &self,
+        metric: CockroachMetric,
+    ) -> Option<&Vec<HistogramBucket>> {
+        match self.get_cockroach_metric(metric) {
+            Some(MetricValue::Histogram(buckets)) => Some(buckets),
+            _ => None,
+        }
+    }
+}
+
+/// CockroachDB Node ID
+#[derive(
+    Debug,
+    Clone,
+    Copy,
+    PartialEq,
+    Eq,
+    Hash,
+    PartialOrd,
+    Ord,
+    Serialize,
+    Deserialize,
+)]
+#[serde(transparent)]
+pub struct NodeId(pub u32);
+
+impl NodeId {
+    pub fn new(id: u32) -> Self {
+        Self(id)
+    }
+
+    pub fn as_u32(&self) -> u32 {
+        self.0
+    }
+}
+
+impl std::fmt::Display for NodeId {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.0)
+    }
+}
+
+impl std::str::FromStr for NodeId {
+    type Err = std::num::ParseIntError;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        Ok(Self(s.parse()?))
+    }
+}
+
+/// CockroachDB node liveness status
+///
+/// From CockroachDB's [NodeLivenessStatus protobuf enum](https://github.com/cockroachdb/cockroach/blob/release-21.1/pkg/kv/kvserver/liveness/livenesspb/liveness.proto#L107-L138)
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[repr(u32)]
+#[serde(try_from = "u32", into = "u32")]
+pub enum NodeLiveness {
+    Unknown = 0,
+    Dead = 1,
+    Unavailable = 2,
+    Live = 3,
+    Decommissioning = 4,
+    Decommissioned = 5,
+    Draining = 6,
+}
+
+impl TryFrom<u32> for NodeLiveness {
+    type Error = String;
+
+    fn try_from(value: u32) -> Result<Self, Self::Error> {
+        match value {
+            0 => Ok(NodeLiveness::Unknown),
+            1 => Ok(NodeLiveness::Dead),
+            2 => Ok(NodeLiveness::Unavailable),
+            3 => Ok(NodeLiveness::Live),
+            4 => Ok(NodeLiveness::Decommissioning),
+            5 => Ok(NodeLiveness::Decommissioned),
+            6 => Ok(NodeLiveness::Draining),
+            _ => Err(format!("Unknown liveness value: {}", value)),
+        }
+    }
+}
+
+impl From<NodeLiveness> for u32 {
+    fn from(liveness: NodeLiveness) -> Self {
+        liveness as u32
+    }
+}
+
+mod cockroach_timestamp {
+    use chrono::{DateTime, Utc};
+    use serde::{Deserialize, Deserializer, Serialize, Serializer};
+
+    pub fn serialize<S>(
+        dt: &DateTime<Utc>,
+        serializer: S,
+    ) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        let nanos = dt.timestamp_nanos_opt().ok_or_else(|| {
+            serde::ser::Error::custom("Timestamp out of range")
+        })?;
+        nanos.to_string().serialize(serializer)
+    }
+
+    pub fn deserialize<'de, D>(
+        deserializer: D,
+    ) -> Result<DateTime<Utc>, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        let s: String = String::deserialize(deserializer)?;
+        let nanos: i64 = s.parse().map_err(serde::de::Error::custom)?;
+        Ok(DateTime::from_timestamp_nanos(nanos))
+    }
+}
+
+fn deserialize_string_to_u64<'de, D>(deserializer: D) -> Result<u64, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    use serde::Deserialize;
+    let s: String = String::deserialize(deserializer)?;
+    s.parse::<u64>().map_err(serde::de::Error::custom)
+}
+
+/// Response from the /_status/nodes endpoint containing all cluster nodes
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct NodesResponse {
+    pub nodes: Vec<NodeStatus>,
+    /// Maps node ID to liveness status
+    #[serde(rename = "livenessByNodeId")]
+    pub liveness_by_node_id: std::collections::HashMap<NodeId, NodeLiveness>,
+}
+
+/// Node status information from CockroachDB /_status/nodes endpoint
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct NodeStatus {
+    pub desc: NodeDescriptor,
+    #[serde(rename = "buildInfo")]
+    pub build_info: BuildInfo,
+    #[serde(rename = "startedAt", with = "cockroach_timestamp")]
+    pub started_at: DateTime<Utc>,
+    #[serde(rename = "updatedAt", with = "cockroach_timestamp")]
+    pub updated_at: DateTime<Utc>,
+    #[serde(
+        rename = "totalSystemMemory",
+        deserialize_with = "deserialize_string_to_u64"
+    )]
+    pub total_system_memory: u64,
+    #[serde(rename = "numCpus")]
+    pub num_cpus: u32,
+}
+
+/// Node descriptor containing basic node information
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct NodeDescriptor {
+    #[serde(rename = "nodeId")]
+    pub node_id: NodeId,
+
+    #[serde(rename = "address")]
+    pub address: AddressInfo,
+
+    #[serde(rename = "sqlAddress")]
+    pub sql_address: AddressInfo,
+
+    #[serde(rename = "httpAddress")]
+    pub http_address: AddressInfo,
+
+    #[serde(rename = "buildTag")]
+    pub build_tag: String,
+
+    #[serde(rename = "startedAt", with = "cockroach_timestamp")]
+    pub started_at: DateTime<Utc>,
+
+    #[serde(rename = "clusterName")]
+    pub cluster_name: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AddressInfo {
+    #[serde(rename = "networkField")]
+    pub network_field: String,
+
+    #[serde(rename = "addressField")]
+    pub address_field: std::net::SocketAddr,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct BuildInfo {
+    #[serde(rename = "goVersion")]
+    pub go_version: String,
+
+    #[serde(rename = "tag")]
+    pub tag: String,
+    // There's plenty more BuildInfo accessible here, but this is a
+    // reduced version of the contents.
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_prometheus_metrics_parsing() {
+        let sample_metrics = r#"
+# TYPE go_memstats_alloc_bytes gauge
+go_memstats_alloc_bytes 1.234567e+07
+# TYPE cockroach_sql_query_count counter  
+cockroach_sql_query_count 42
+cockroach_node_id 1
+cockroach_build_timestamp 1234567890
+"#;
+
+        let metrics = PrometheusMetrics::parse(sample_metrics).unwrap();
+
+        assert_eq!(
+            metrics.get_number("go_memstats_alloc_bytes"),
+            Some(12345670.0)
+        );
+        assert_eq!(metrics.get_number("cockroach_sql_query_count"), Some(42.0));
+        assert_eq!(metrics.get_number("cockroach_node_id"), Some(1.0));
+        assert_eq!(
+            metrics.get_number("cockroach_build_timestamp"),
+            Some(1234567890.0)
+        );
+
+        let cockroach_metrics = metrics.get_metrics_with_prefix("cockroach_");
+        assert_eq!(cockroach_metrics.len(), 3);
+    }
+
+    #[test]
+    fn test_prometheus_metrics_empty() {
+        let metrics = PrometheusMetrics::parse("").unwrap();
+        assert!(metrics.metrics.is_empty());
+    }
+
+    #[test]
+    fn test_prometheus_metrics_comments_only() {
+        let sample_metrics = r#"
+# This is a comment
+# TYPE some_metric counter
+# Another comment
+"#;
+        let metrics = PrometheusMetrics::parse(sample_metrics).unwrap();
+        assert!(metrics.metrics.is_empty());
+    }
+
+    #[test]
+    fn test_prometheus_histogram_parsing() {
+        let sample_metrics = r#"
+# TYPE sql_exec_latency histogram
+sql_exec_latency_bucket{le="0.001"} 10
+sql_exec_latency_bucket{le="0.01"} 25
+sql_exec_latency_bucket{le="0.1"} 100
+sql_exec_latency_bucket{le="1.0"} 200
+sql_exec_latency_bucket{le="+Inf"} 205
+sql_exec_latency_count 205
+sql_exec_latency_sum 45.2
+"#;
+
+        let metrics = PrometheusMetrics::parse(sample_metrics).unwrap();
+
+        // Check that histogram buckets are properly grouped under the base metric name
+        if let Some(histogram) = metrics.get_histogram("sql_exec_latency") {
+            assert_eq!(histogram.len(), 5, "Should have 5 histogram buckets");
+
+            // Sort buckets by le value for verification
+            let mut sorted_buckets = histogram.clone();
+            sorted_buckets.sort_by(|a, b| {
+                a.le.partial_cmp(&b.le).unwrap_or(std::cmp::Ordering::Equal)
+            });
+
+            // Verify specific bucket values
+            assert_eq!(sorted_buckets[0].le, 0.001);
+            assert_eq!(sorted_buckets[0].count, 10);
+            assert_eq!(sorted_buckets[1].le, 0.01);
+            assert_eq!(sorted_buckets[1].count, 25);
+            assert_eq!(sorted_buckets[4].le, f64::INFINITY);
+            assert_eq!(sorted_buckets[4].count, 205);
+
+            // Verify buckets are cumulative
+            for i in 1..sorted_buckets.len() {
+                assert!(
+                    sorted_buckets[i].count >= sorted_buckets[i - 1].count,
+                    "Histogram buckets should be cumulative"
+                );
+            }
+        } else {
+            panic!("sql_exec_latency histogram not found");
+        }
+
+        // Verify count and sum are stored as separate regular metrics
+        assert_eq!(metrics.get_number("sql_exec_latency_count"), Some(205.0));
+        assert_eq!(metrics.get_number("sql_exec_latency_sum"), Some(45.2));
+
+        // Test strongly-typed histogram access
+        if let Some(histogram) = metrics
+            .get_cockroach_metric_histogram(CockroachMetric::SqlExecLatency)
+        {
+            assert_eq!(histogram.len(), 5);
+        } else {
+            panic!(
+                "sql_exec_latency histogram not accessible via CockroachMetric enum"
+            );
+        }
+    }
+
+    mod proptest_tests {
+        use super::*;
+        use proptest::prelude::*;
+
+        proptest! {
+            /// Test that PrometheusMetrics::parse never panics on arbitrary input
+            #[test]
+            fn prometheus_parse_never_panics(input in ".*") {
+                // This should never panic, even on completely malformed input
+                let _result = PrometheusMetrics::parse(&input);
+            }
+
+            /// Test PrometheusMetrics::parse with more structured but still arbitrary input
+            #[test]
+            fn prometheus_parse_structured_input(
+                lines in prop::collection::vec(".*", 0..20)
+            ) {
+                let input = lines.join("\n");
+                let _result = PrometheusMetrics::parse(&input);
+            }
+        }
+
+        #[test]
+        fn test_prometheus_metrics_parse_resilience() {
+            // Test various edge cases that could cause issues
+
+            // Empty input
+            let result = PrometheusMetrics::parse("");
+            assert!(result.is_ok());
+            assert!(result.unwrap().metrics.is_empty());
+
+            // Only comments
+            let result =
+                PrometheusMetrics::parse("# comment\n# another comment");
+            assert!(result.is_ok());
+            assert!(result.unwrap().metrics.is_empty());
+
+            // Malformed lines (missing values, extra spaces, etc.)
+            let malformed_input = r#"
+            metric_name_no_value
+            metric_name_with_space 
+            metric_name_multiple spaces here
+            = value_no_name
+             leading_space_metric 123
+            trailing_space_metric 456 
+            metric{label=value} 789
+            metric{malformed=label value} 999
+            "#;
+            let result = PrometheusMetrics::parse(malformed_input);
+            assert!(result.is_ok());
+            // Should ignore malformed lines gracefully
+        }
+    }
+}

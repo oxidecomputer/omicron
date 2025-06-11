@@ -100,6 +100,7 @@ slog-error-chain.workspace = true
 display-error-chain.workspace = true
 slog-term.workspace = true
 steno.workspace = true
+strum.workspace = true
 tempfile.workspace = true
 thiserror.workspace = true
 tokio = { workspace = true, features = ["full"] }
@@ -174,6 +175,7 @@ httptest.workspace = true
 httpmock.workspace = true
 strum.workspace = true
 tufaceous-artifact.workspace = true
+proptest.workspace = true
 
 [[bench]]
 name = "setup_benchmark"

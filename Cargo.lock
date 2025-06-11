@@ -7513,6 +7513,7 @@ dependencies = [
  "pretty_assertions",
  "progenitor-client 0.10.0",
  "propolis-client 0.1.0 (git+https://github.com/oxidecomputer/propolis?rev=e3988414bd68ecf806078fb898120e1194451ee9)",
+ "proptest",
  "qorb",
  "rand 0.8.5",
  "range-requests",
