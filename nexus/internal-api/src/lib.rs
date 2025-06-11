@@ -19,9 +19,7 @@ use nexus_types::{
         headers::RangeRequest,
         params::{self, PhysicalDiskPath, SledSelector, UninitializedSledId},
         shared::{self, ProbeInfo, UninitializedSled},
-        views::Ping,
-        views::PingStatus,
-        views::SledPolicy,
+        views::{Ping, PingStatus, SledPolicy},
     },
     internal_api::{
         params::{
@@ -30,7 +28,7 @@ use nexus_types::{
         },
         views::{
             BackgroundTask, DemoSaga, Ipv4NatEntryView, MgsUpdateDriverStatus,
-            Saga,
+            Saga, UpgradeStatus,
         },
     },
 };
@@ -486,6 +484,15 @@ pub trait NexusInternalApi {
         rqctx: RequestContext<Self::Context>,
         blueprint: TypedBody<Blueprint>,
     ) -> Result<HttpResponseUpdatedNoContent, HttpError>;
+
+    /// Show deployed versions of artifacts
+    #[endpoint {
+        method = GET,
+        path = "/deployment/upgrade-status"
+    }]
+    async fn upgrade_status(
+        rqctx: RequestContext<Self::Context>,
+    ) -> Result<HttpResponseOk<UpgradeStatus>, HttpError>;
 
     /// List uninitialized sleds
     #[endpoint {

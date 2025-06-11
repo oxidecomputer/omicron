@@ -47,6 +47,7 @@ use nexus_types::internal_api::views::DemoSaga;
 use nexus_types::internal_api::views::Ipv4NatEntryView;
 use nexus_types::internal_api::views::MgsUpdateDriverStatus;
 use nexus_types::internal_api::views::Saga;
+use nexus_types::internal_api::views::UpgradeStatus;
 use nexus_types::internal_api::views::to_list;
 use omicron_common::api::external::Instance;
 use omicron_common::api::external::http_pagination::PaginatedById;
@@ -850,6 +851,23 @@ impl NexusInternalApi for NexusInternalApiImpl {
             let blueprint = blueprint.into_inner();
             nexus.blueprint_import(&opctx, blueprint).await?;
             Ok(HttpResponseUpdatedNoContent())
+        };
+        apictx
+            .internal_latencies
+            .instrument_dropshot_handler(&rqctx, handler)
+            .await
+    }
+
+    async fn upgrade_status(
+        rqctx: RequestContext<Self::Context>,
+    ) -> Result<HttpResponseOk<UpgradeStatus>, HttpError> {
+        let apictx = &rqctx.context().context;
+        let handler = async {
+            let opctx =
+                crate::context::op_context_for_internal_api(&rqctx).await;
+            let nexus = &apictx.nexus;
+            let result = nexus.upgrade_status(&opctx).await?;
+            Ok(HttpResponseOk(result))
         };
         apictx
             .internal_latencies
