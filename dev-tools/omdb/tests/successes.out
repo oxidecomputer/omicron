@@ -477,8 +477,7 @@ task: "dns_propagation_external"
 
 task: "nat_v4_garbage_collector"
   configured period: every <REDACTED_DURATION>s
-  currently executing: <REDACTED ITERATIONS>, triggered by a periodic timer firing
-    started at <REDACTED_TIMESTAMP>, running for <REDACTED DURATION>ms
+  currently executing: no
   last completed activation: <REDACTED ITERATIONS>, triggered by a periodic timer firing
     started at <REDACTED_TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
     last completion reported error: failed to resolve addresses for Dendrite services: no record found for Query { name: Name("_dendrite._tcp.control-plane.oxide.internal."), query_type: SRV, query_class: IN }
@@ -517,8 +516,7 @@ task: "alert_dispatcher"
 
 task: "bfd_manager"
   configured period: every <REDACTED_DURATION>s
-  currently executing: <REDACTED ITERATIONS>, triggered by a periodic timer firing
-    started at <REDACTED_TIMESTAMP>, running for <REDACTED DURATION>ms
+  currently executing: no
   last completed activation: <REDACTED ITERATIONS>, triggered by a periodic timer firing
     started at <REDACTED_TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
     last completion reported error: failed to resolve addresses for Dendrite services: no record found for Query { name: Name("_dendrite._tcp.control-plane.oxide.internal."), query_type: SRV, query_class: IN }
@@ -635,7 +633,7 @@ task: "phantom_disks"
 task: "physical_disk_adoption"
   configured period: every <REDACTED_DURATION>s
   currently executing: no
-  last completed activation: <REDACTED ITERATIONS>, triggered by a periodic timer firing
+  last completed activation: <REDACTED ITERATIONS>, triggered by a dependent task completing
     started at <REDACTED_TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
     last completion reported error: task disabled
 
@@ -735,7 +733,7 @@ task: "service_zone_nat_tracker"
   currently executing: no
   last completed activation: <REDACTED ITERATIONS>, triggered by a periodic timer firing
     started at <REDACTED_TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
-    last completion reported error: nexus is running but no service zone nat values could be generated from inventory
+    last completion reported error: inventory collection is None
 
 task: "support_bundle_collector"
   configured period: every <REDACTED_DURATION>days <REDACTED_DURATION>h <REDACTED_DURATION>m <REDACTED_DURATION>s
@@ -751,8 +749,7 @@ task: "support_bundle_collector"
 
 task: "switch_port_config_manager"
   configured period: every <REDACTED_DURATION>s
-  currently executing: <REDACTED ITERATIONS>, triggered by a periodic timer firing
-    started at <REDACTED_TIMESTAMP>, running for <REDACTED DURATION>ms
+  currently executing: no
   last completed activation: <REDACTED ITERATIONS>, triggered by a periodic timer firing
     started at <REDACTED_TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
 warning: unknown background task: "switch_port_config_manager" (don't know how to interpret details: Object {})
@@ -999,8 +996,7 @@ task: "dns_propagation_external"
 
 task: "nat_v4_garbage_collector"
   configured period: every <REDACTED_DURATION>s
-  currently executing: <REDACTED ITERATIONS>, triggered by a periodic timer firing
-    started at <REDACTED_TIMESTAMP>, running for <REDACTED DURATION>ms
+  currently executing: no
   last completed activation: <REDACTED ITERATIONS>, triggered by a periodic timer firing
     started at <REDACTED_TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
     last completion reported error: failed to resolve addresses for Dendrite services: no record found for Query { name: Name("_dendrite._tcp.control-plane.oxide.internal."), query_type: SRV, query_class: IN }
@@ -1039,8 +1035,7 @@ task: "alert_dispatcher"
 
 task: "bfd_manager"
   configured period: every <REDACTED_DURATION>s
-  currently executing: <REDACTED ITERATIONS>, triggered by a periodic timer firing
-    started at <REDACTED_TIMESTAMP>, running for <REDACTED DURATION>ms
+  currently executing: no
   last completed activation: <REDACTED ITERATIONS>, triggered by a periodic timer firing
     started at <REDACTED_TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
     last completion reported error: failed to resolve addresses for Dendrite services: no record found for Query { name: Name("_dendrite._tcp.control-plane.oxide.internal."), query_type: SRV, query_class: IN }
@@ -1157,7 +1152,7 @@ task: "phantom_disks"
 task: "physical_disk_adoption"
   configured period: every <REDACTED_DURATION>s
   currently executing: no
-  last completed activation: <REDACTED ITERATIONS>, triggered by a periodic timer firing
+  last completed activation: <REDACTED ITERATIONS>, triggered by a dependent task completing
     started at <REDACTED_TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
     last completion reported error: task disabled
 
@@ -1257,7 +1252,7 @@ task: "service_zone_nat_tracker"
   currently executing: no
   last completed activation: <REDACTED ITERATIONS>, triggered by a periodic timer firing
     started at <REDACTED_TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
-    last completion reported error: nexus is running but no service zone nat values could be generated from inventory
+    last completion reported error: inventory collection is None
 
 task: "support_bundle_collector"
   configured period: every <REDACTED_DURATION>days <REDACTED_DURATION>h <REDACTED_DURATION>m <REDACTED_DURATION>s
@@ -1273,8 +1268,7 @@ task: "support_bundle_collector"
 
 task: "switch_port_config_manager"
   configured period: every <REDACTED_DURATION>s
-  currently executing: <REDACTED ITERATIONS>, triggered by a periodic timer firing
-    started at <REDACTED_TIMESTAMP>, running for <REDACTED DURATION>ms
+  currently executing: no
   last completed activation: <REDACTED ITERATIONS>, triggered by a periodic timer firing
     started at <REDACTED_TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
 warning: unknown background task: "switch_port_config_manager" (don't know how to interpret details: Object {})
