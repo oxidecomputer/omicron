@@ -134,6 +134,8 @@ enum NexusCommands {
     /// interact with support bundles
     #[command(visible_alias = "sb")]
     SupportBundles(SupportBundleArgs),
+    /// show running artifact versions
+    UpgradeStatus,
 }
 
 #[derive(Debug, Args)]
@@ -778,6 +780,9 @@ impl NexusArgs {
             NexusCommands::SupportBundles(SupportBundleArgs {
                 command: SupportBundleCommands::Inspect(args),
             }) => cmd_nexus_support_bundles_inspect(&client, args).await,
+            NexusCommands::UpgradeStatus => {
+                cmd_nexus_upgrade_status(&client).await
+            }
         }
     }
 }
@@ -4043,4 +4048,47 @@ async fn cmd_nexus_support_bundles_inspect(
     };
 
     support_bundle_viewer::run_dashboard(accessor).await
+}
+
+/// Runs `omdb nexus upgrade-status`
+async fn cmd_nexus_upgrade_status(
+    client: &nexus_client::Client,
+) -> Result<(), anyhow::Error> {
+    let status = client
+        .upgrade_status()
+        .await
+        .context("retrieving upgrade status")?
+        .into_inner();
+
+    #[derive(Tabled)]
+    #[tabled(rename_all = "SCREAMING_SNAKE_CASE")]
+    struct ZoneRow {
+        sled_id: String,
+        zone_type: String,
+        zone_id: String,
+        version: String,
+    }
+
+    let mut rows = Vec::new();
+    for (sled_id, mut statuses) in status.zones.into_iter() {
+        statuses.sort_unstable_by_key(|s| {
+            (s.zone_type.kind(), s.zone_id, s.version.clone())
+        });
+        for status in statuses {
+            rows.push(ZoneRow {
+                sled_id: sled_id.to_string(),
+                zone_type: status.zone_type.kind().name_prefix().into(),
+                zone_id: status.zone_id.to_string(),
+                version: status.version.to_string(),
+            });
+        }
+    }
+
+    let table = tabled::Table::new(rows)
+        .with(tabled::settings::Style::empty())
+        .with(tabled::settings::Padding::new(0, 1, 0, 0))
+        .to_string();
+
+    println!("{}", table);
+    Ok(())
 }

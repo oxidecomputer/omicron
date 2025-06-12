@@ -476,7 +476,17 @@ pub struct WaitingStatus {
     pub nattempts_done: u32,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+#[derive(
+    Debug,
+    Clone,
+    PartialEq,
+    Eq,
+    PartialOrd,
+    Ord,
+    Serialize,
+    Deserialize,
+    JsonSchema,
+)]
 #[serde(
     rename_all = "snake_case",
     tag = "zone_status_version",
@@ -488,16 +498,28 @@ pub enum ZoneStatusVersion {
     Version(Version),
 }
 
+impl Display for ZoneStatusVersion {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            ZoneStatusVersion::Unknown => write!(f, "unknown"),
+            ZoneStatusVersion::InstallDataset => write!(f, "install dataset"),
+            ZoneStatusVersion::Version(version) => {
+                write!(f, "{}", version)
+            }
+        }
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 pub struct ZoneStatus {
-    zone_id: OmicronZoneUuid,
-    zone_type: OmicronZoneType,
-    version: ZoneStatusVersion,
+    pub zone_id: OmicronZoneUuid,
+    pub zone_type: OmicronZoneType,
+    pub version: ZoneStatusVersion,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 pub struct UpgradeStatus {
-    zones: BTreeMap<SledUuid, Vec<ZoneStatus>>,
+    pub zones: BTreeMap<SledUuid, Vec<ZoneStatus>>,
 }
 
 impl UpgradeStatus {
