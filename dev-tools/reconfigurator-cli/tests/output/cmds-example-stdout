@@ -504,6 +504,7 @@ WARN failed to place all new desired InternalDns zones, placed: 0, wanted_to_pla
 INFO sufficient ExternalDns zones exist in plan, desired_count: 0, current_count: 0
 WARN failed to place all new desired Nexus zones, placed: 0, wanted_to_place: 3
 INFO sufficient Oximeter zones exist in plan, desired_count: 0, current_count: 0
+WARN cannot issue more SP updates (no current artifacts)
 INFO some zones not yet up-to-date, sled_id: 89d02b1b-478c-401a-8e28-7a26f74fa41b
 INFO will ensure cockroachdb setting, setting: cluster.preserve_downgrade_option, value: DoNotModify
 generated blueprint 86db3308-f817-4626-8838-4085949a6a41 based on parent blueprint ade5749d-bdf3-4fab-a8ae-00bea01b3a5a
