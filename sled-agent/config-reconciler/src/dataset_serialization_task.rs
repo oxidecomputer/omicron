@@ -17,9 +17,7 @@ use debug_ignore::DebugIgnore;
 use futures::StreamExt;
 use id_map::IdMap;
 use id_map::IdMappable;
-use iddqd::IdOrdItem;
 use iddqd::IdOrdMap;
-use iddqd::id_upcast;
 use illumos_utils::zfs;
 use illumos_utils::zfs::CanMount;
 use illumos_utils::zfs::DatasetEnsureArgs;
@@ -29,7 +27,7 @@ use illumos_utils::zfs::Mountpoint;
 use illumos_utils::zfs::WhichDatasets;
 use illumos_utils::zfs::Zfs;
 use nexus_sled_agent_shared::inventory::InventoryDataset;
-use omicron_common::api::external::ByteCount;
+use nexus_sled_agent_shared::inventory::OrphanedDataset;
 use omicron_common::disk::DatasetConfig;
 use omicron_common::disk::DatasetKind;
 use omicron_common::disk::DatasetName;
@@ -89,26 +87,6 @@ pub enum DatasetEnsureError {
     #[cfg(test)]
     #[error("test error: {0}")]
     TestError(&'static str),
-}
-
-#[derive(Debug, Clone)]
-pub struct OrphanedDataset {
-    pub name: DatasetName,
-    pub reason: String,
-    pub id: Option<DatasetUuid>,
-    pub mounted: bool,
-    pub avail: ByteCount,
-    pub used: ByteCount,
-}
-
-impl IdOrdItem for OrphanedDataset {
-    type Key<'a> = &'a DatasetName;
-
-    fn key(&self) -> Self::Key<'_> {
-        &self.name
-    }
-
-    id_upcast!();
 }
 
 impl DatasetEnsureError {
@@ -578,7 +556,7 @@ impl DatasetTask {
                 reason,
                 id: properties.id,
                 mounted: properties.mounted,
-                avail: properties.avail,
+                available: properties.avail,
                 used: properties.used,
             });
         }

@@ -3762,7 +3762,7 @@ CREATE TABLE IF NOT EXISTS omicron.public.inv_dataset (
     inv_collection_id UUID NOT NULL,
     sled_id UUID NOT NULL,
 
-    -- The control plane ID of the zpool.
+    -- The control plane ID of the dataset.
     -- This is nullable because datasets have been historically
     -- self-managed by the Sled Agent, and some don't have explicit UUIDs.
     id UUID,
@@ -3834,6 +3834,44 @@ CREATE TABLE IF NOT EXISTS omicron.public.inv_last_reconciliation_dataset_result
     error_message TEXT,
 
     PRIMARY KEY (inv_collection_id, sled_id, dataset_id)
+);
+
+CREATE TABLE IF NOT EXISTS omicron.public.inv_last_reconciliation_orphaned_dataset (
+    -- where this observation came from
+    -- (foreign key into `inv_collection` table)
+    inv_collection_id UUID NOT NULL,
+
+    -- unique id for this sled (should be foreign keys into `sled` table, though
+    -- it's conceivable a sled will report an id that we don't know about)
+    sled_id UUID NOT NULL,
+
+    -- These three columns compose a `DatasetName`. Other tables that store a
+    -- `DatasetName` use a nullable `zone_name` (since it's only supposed to be
+    -- set for datasets with `kind = 'zone'`). This table instead uses the empty
+    -- string for non-'zone' kinds, which allows the column to be NOT NULL and
+    -- hence be a member of our primary key. (We have no other unique ID to
+    -- distinguish different `DatasetName`s.)
+    pool_id UUID NOT NULL,
+    kind omicron.public.dataset_kind NOT NULL,
+    zone_name TEXT NOT NULL,
+    CONSTRAINT zone_name_for_zone_kind CHECK (
+      (kind != 'zone' AND zone_name = '') OR
+      (kind = 'zone' AND zone_name != '')
+    ),
+
+    reason TEXT NOT NULL,
+
+    -- The control plane ID of the dataset.
+    -- This is nullable because this is attached as the `oxide:uuid` property in
+    -- ZFS, and we can't guarantee it exists for any given dataset.
+    id UUID,
+
+    -- Properties of the dataset at the time we detected it was an orphan.
+    mounted BOOL NOT NULL,
+    available INT8 NOT NULL,
+    used INT8 NOT NULL,
+
+    PRIMARY KEY (inv_collection_id, sled_id, pool_id, kind, zone_name)
 );
 
 CREATE TABLE IF NOT EXISTS omicron.public.inv_last_reconciliation_zone_result (
@@ -5722,7 +5760,7 @@ INSERT INTO omicron.public.db_metadata (
     version,
     target_version
 ) VALUES
-    (TRUE, NOW(), NOW(), '149.0.0', NULL)
+    (TRUE, NOW(), NOW(), '150.0.0', NULL)
 ON CONFLICT DO NOTHING;
 
 COMMIT;

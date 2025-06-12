@@ -16,6 +16,7 @@ use nexus_sled_agent_shared::inventory::ConfigReconcilerInventory;
 use nexus_sled_agent_shared::inventory::ConfigReconcilerInventoryResult;
 use nexus_sled_agent_shared::inventory::ConfigReconcilerInventoryStatus;
 use nexus_sled_agent_shared::inventory::OmicronSledConfig;
+use nexus_sled_agent_shared::inventory::OrphanedDataset;
 use omicron_common::disk::DatasetKind;
 use omicron_uuid_kinds::DatasetUuid;
 use omicron_uuid_kinds::OmicronZoneUuid;
@@ -36,7 +37,6 @@ use tokio::sync::watch;
 
 use crate::TimeSyncConfig;
 use crate::dataset_serialization_task::DatasetTaskHandle;
-use crate::dataset_serialization_task::OrphanedDataset;
 use crate::ledger::CurrentSledConfig;
 use crate::raw_disks::RawDisksReceiver;
 use crate::sled_agent_facilities::SledAgentFacilities;
@@ -210,6 +210,7 @@ impl LatestReconciliationResult {
             last_reconciled_config: self.sled_config.clone(),
             external_disks: self.external_disks_inventory.clone(),
             datasets: self.datasets.clone(),
+            orphaned_datasets: self.orphaned_datasets.clone(),
             zones: self.zones_inventory.clone(),
         }
     }

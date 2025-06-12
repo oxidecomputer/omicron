@@ -1157,6 +1157,4 @@ mod tests {
 
         logctx.cleanup_successful();
     }
-    // TODO-john more tests
-    // * change disk properties
 }
