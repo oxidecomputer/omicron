@@ -4089,6 +4089,7 @@ async fn cmd_nexus_upgrade_status(
         .with(tabled::settings::Padding::new(0, 1, 0, 0))
         .to_string();
 
+    println!("Running Zones");
     println!("{}", table);
     Ok(())
 }
