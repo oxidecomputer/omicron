@@ -355,6 +355,22 @@ pub(crate) async fn apply_update(
         while let Err(error) =
             update_helper.post_update(log, &mut mgs_clients, update).await
         {
+            // TODO-K: Can I get this to happen?
+            //        match error {
+            //            PostUpdateError::GatewayClientError(error) => {
+            //                if !matches!(error, gateway_client::Error::CommunicationError(_)) {
+            //                    let error = InlineErrorChain::new(&error);
+            //                    error!(log, "post_update failed"; &error);
+            //                    return Err(ApplyUpdateError::SpResetFailed(error.to_string()));
+            //                }
+            //            },
+            //            PostUpdateError::RotBootloaderImageError { error } => {
+            //                let error = InlineErrorChain::new(&error);
+            //                    error!(log, "post_update failed"; &error);
+            //                    return Err(ApplyUpdateError::SpResetFailed(error.to_string()));
+            //            },
+            //            PostUpdateError::RotCommunicationFailed { message: _ } => {},
+            //        }
             if !matches!(error, gateway_client::Error::CommunicationError(_)) {
                 let error = InlineErrorChain::new(&error);
                 error!(log, "post_update failed"; &error);

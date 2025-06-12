@@ -7,7 +7,6 @@
 use super::MgsClients;
 use crate::SpComponentUpdateHelper;
 use crate::common_sp_update::FoundVersion;
-use crate::common_sp_update::PostUpdateError;
 use crate::common_sp_update::PrecheckError;
 use crate::common_sp_update::PrecheckStatus;
 use crate::common_sp_update::error_means_caboose_is_invalid;
@@ -24,7 +23,7 @@ use nexus_types::deployment::ExpectedVersion;
 use nexus_types::deployment::PendingMgsUpdate;
 use nexus_types::deployment::PendingMgsUpdateDetails;
 use slog::Logger;
-use slog::{debug, info};
+use slog::{debug, error, info};
 use std::sync::Arc;
 use std::time::Duration;
 use std::time::Instant;
@@ -200,7 +199,6 @@ impl SpComponentUpdateHelper for ReconfiguratorRotBootloaderUpdater {
         mgs_clients: &'a mut MgsClients,
         update: &'a PendingMgsUpdate,
     ) -> BoxFuture<'a, Result<(), GatewayClientError>> {
-        //    ) -> BoxFuture<'a, Result<(), PostUpdateError>> {
         const WAIT_FOR_BOOT_TIMEOUT: Duration = Duration::from_secs(30);
 
         // TODO-K: Again, we're resetting the ROT twice here, what happens
@@ -227,11 +225,11 @@ impl SpComponentUpdateHelper for ReconfiguratorRotBootloaderUpdater {
                     update.sp_type,
                     update.slot_id,
                     WAIT_FOR_BOOT_TIMEOUT
-                ).await;
+                ).await?;
 
                 // If the image is not valid we bail
                 debug!(log, "attempting to retrieve boot info to verify image validity");
-                // TODO-K: uncomment when we return PostUpdateError instead of GatewayClientError
+                // TODO-K: uncomment if I can get PostUpdateError to work instead of GatewayClientError
                 //if let Some(error) = stage0next_error {
                 //    return Err(PostUpdateError::RotBootloaderImageError {
                 //        error: error,
@@ -272,7 +270,7 @@ async fn wait_for_rot_boot_info(
     sp_type: SpType,
     sp_slot: u32,
     timeout: Duration,
-) -> Result<Option<RotImageError>, PostUpdateError> {
+) -> Result<Option<RotImageError>, GatewayClientError> {
     let mut ticker = tokio::time::interval(Duration::from_secs(1));
 
     let start = Instant::now();
@@ -306,9 +304,12 @@ async fn wait_for_rot_boot_info(
                             "error" => %message,
                         );
                     } else {
-                        return Err(PostUpdateError::RotCommunicationFailed {
-                            message,
-                        });
+                        error!(
+                            log,
+                            "failed to get RoT boot info";
+                            "error" => %message,
+                        );
+                        return Ok(Some(RotImageError::Unchecked));
                     }
                 }
             },
@@ -320,7 +321,7 @@ async fn wait_for_rot_boot_info(
                         "error" => %error,
                     );
                 } else {
-                    return Err(PostUpdateError::GatewayClientError(error));
+                    return Err(error);
                 }
             }
         }
