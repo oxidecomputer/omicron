@@ -5,11 +5,13 @@
 //! omdb commands that query or update specific Sleds
 
 use crate::Omdb;
+use crate::check_allow_destructive::DestructiveOperationToken;
 use crate::helpers::CONNECTION_OPTIONS_HEADING;
 use anyhow::Context;
 use anyhow::bail;
 use clap::Args;
 use clap::Subcommand;
+use sled_agent_client::types::ChickenSwitchDestroyOrphanedDatasets;
 
 /// Arguments to the "omdb sled-agent" subcommand
 #[derive(Debug, Args)]
@@ -37,6 +39,11 @@ enum SledAgentCommands {
     /// print information about the local bootstore node
     #[clap(subcommand)]
     Bootstore(BootstoreCommands),
+
+    /// control "chicken switches" (potentially-destructive sled-agent behavior
+    /// that can be toggled on or off via `omdb`)
+    #[clap(subcommand)]
+    ChickenSwitch(ChickenSwitchCommands),
 }
 
 #[derive(Debug, Subcommand)]
@@ -46,32 +53,38 @@ enum ZoneCommands {
 }
 
 #[derive(Debug, Subcommand)]
-enum ZpoolCommands {
-    /// Print list of all zpools managed by the sled agent
-    List,
-}
-
-#[derive(Debug, Subcommand)]
-enum DatasetCommands {
-    /// Print list of all datasets the sled agent is configured to manage
-    ///
-    /// Note that the set of actual datasets on the sled may be distinct,
-    /// use the `omdb db inventory collections show` command to see the latest
-    /// set of datasets collected from sleds.
-    List,
-}
-
-#[derive(Debug, Subcommand)]
 enum BootstoreCommands {
     /// Show the internal state of the local bootstore node
     Status,
+}
+
+#[derive(Debug, Subcommand)]
+enum ChickenSwitchCommands {
+    /// interact with the "destroy orphaned datasets" chicken switch
+    DestroyOrphans(DestroyOrphansArgs),
+}
+
+#[derive(Debug, Args)]
+struct DestroyOrphansArgs {
+    #[command(subcommand)]
+    command: DestroyOrphansCommands,
+}
+
+#[derive(Debug, Subcommand)]
+enum DestroyOrphansCommands {
+    /// Get the current chicken switch setting
+    Get,
+    /// Enable the current chicken switch setting
+    Enable,
+    /// Disable the current chicken switch setting
+    Disable,
 }
 
 impl SledAgentArgs {
     /// Run a `omdb sled-agent` subcommand.
     pub(crate) async fn run_cmd(
         &self,
-        _omdb: &Omdb,
+        omdb: &Omdb,
         log: &slog::Logger,
     ) -> Result<(), anyhow::Error> {
         // This is a little goofy. The sled URL is required, but can come
@@ -91,6 +104,29 @@ impl SledAgentArgs {
             }
             SledAgentCommands::Bootstore(BootstoreCommands::Status) => {
                 cmd_bootstore_status(&client).await
+            }
+            SledAgentCommands::ChickenSwitch(
+                ChickenSwitchCommands::DestroyOrphans(DestroyOrphansArgs {
+                    command: DestroyOrphansCommands::Get,
+                }),
+            ) => cmd_chicken_switch_destroy_orphans_get(&client).await,
+            SledAgentCommands::ChickenSwitch(
+                ChickenSwitchCommands::DestroyOrphans(DestroyOrphansArgs {
+                    command: DestroyOrphansCommands::Enable,
+                }),
+            ) => {
+                let token = omdb.check_allow_destructive()?;
+                cmd_chicken_switch_destroy_orphans_set(&client, true, token)
+                    .await
+            }
+            SledAgentCommands::ChickenSwitch(
+                ChickenSwitchCommands::DestroyOrphans(DestroyOrphansArgs {
+                    command: DestroyOrphansCommands::Disable,
+                }),
+            ) => {
+                let token = omdb.check_allow_destructive()?;
+                cmd_chicken_switch_destroy_orphans_set(&client, false, token)
+                    .await
             }
         }
     }
@@ -155,5 +191,35 @@ async fn cmd_bootstore_status(
         println!("    {addr}");
     }
 
+    Ok(())
+}
+
+/// Runs `omdb sled-agent chicken-switch destroy-orphans get`
+async fn cmd_chicken_switch_destroy_orphans_get(
+    client: &sled_agent_client::Client,
+) -> Result<(), anyhow::Error> {
+    let ChickenSwitchDestroyOrphanedDatasets { destroy_orphans } = client
+        .chicken_switch_destroy_orphaned_datasets_get()
+        .await
+        .context("get chicken switch value")?
+        .into_inner();
+    let status = if destroy_orphans { "enabled" } else { "disabled" };
+    println!("destroy orphaned datasets {status}");
+    Ok(())
+}
+
+/// Runs `omdb sled-agent chicken-switch destroy-orphans {enable,disable}`
+async fn cmd_chicken_switch_destroy_orphans_set(
+    client: &sled_agent_client::Client,
+    destroy_orphans: bool,
+    _token: DestructiveOperationToken,
+) -> Result<(), anyhow::Error> {
+    let options = ChickenSwitchDestroyOrphanedDatasets { destroy_orphans };
+    client
+        .chicken_switch_destroy_orphaned_datasets_put(&options)
+        .await
+        .context("put chicken switch value")?;
+    let status = if destroy_orphans { "enabled" } else { "disabled" };
+    println!("destroy orphaned datasets {status}");
     Ok(())
 }
