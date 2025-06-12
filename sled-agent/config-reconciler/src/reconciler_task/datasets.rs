@@ -11,11 +11,14 @@
 //! operations" consumers (e.g., inventory requests perform operations to check
 //! the live state of datasets directly from ZFS).
 
+use super::CurrentlyManagedZpools;
 use crate::dataset_serialization_task::DatasetEnsureError;
 use crate::dataset_serialization_task::DatasetEnsureResult;
 use crate::dataset_serialization_task::DatasetTaskHandle;
+use crate::dataset_serialization_task::OrphanedDataset;
 use id_map::IdMap;
 use id_map::IdMappable;
+use iddqd::IdOrdMap;
 use illumos_utils::zpool::PathInPool;
 use illumos_utils::zpool::ZpoolOrRamdisk;
 use nexus_sled_agent_shared::inventory::ConfigReconcilerInventoryResult;
@@ -27,6 +30,7 @@ use omicron_uuid_kinds::DatasetUuid;
 use sled_storage::config::MountConfig;
 use sled_storage::dataset::ZONE_DATASET;
 use slog::Logger;
+use slog::info;
 use slog::warn;
 use slog_error_chain::InlineErrorChain;
 use std::collections::BTreeMap;
@@ -47,6 +51,7 @@ pub(super) enum ZoneDatasetDependencyError {
 #[derive(Debug)]
 pub(super) struct OmicronDatasets {
     datasets: IdMap<OmicronDataset>,
+    orphaned_datasets: IdOrdMap<OrphanedDataset>,
     dataset_task: DatasetTaskHandle,
 }
 
@@ -66,11 +71,15 @@ impl OmicronDatasets {
                 },
             })
             .collect();
-        Self { datasets, dataset_task }
+        Self { datasets, orphaned_datasets: IdOrdMap::new(), dataset_task }
     }
 
     pub(super) fn new(dataset_task: DatasetTaskHandle) -> Self {
-        Self { datasets: IdMap::default(), dataset_task }
+        Self {
+            datasets: IdMap::default(),
+            orphaned_datasets: IdOrdMap::new(),
+            dataset_task,
+        }
     }
 
     /// Confirm that any dataset dependencies of `zone` have been ensured
@@ -139,41 +148,100 @@ impl OmicronDatasets {
         Ok(zone_root_path)
     }
 
-    pub(super) fn remove_datasets_if_needed(
+    pub(super) async fn remove_datasets_if_needed(
         &mut self,
         datasets: &IdMap<DatasetConfig>,
+        currently_managed_zpools: Arc<CurrentlyManagedZpools>,
         log: &Logger,
     ) {
         let mut datasets_to_remove = Vec::new();
 
-        for dataset in &self.datasets {
+        // Make a pass through our in-memory dataset states:
+        //
+        // * Remember any that are no longer present in `datasets`
+        // * Mark any whose parent zpool has disappeared as failed, unless
+        //   they're already in a failed state.
+        for mut dataset in &mut self.datasets {
             if !datasets.contains_key(&dataset.config.id) {
                 datasets_to_remove.push(dataset.config.id);
+                continue;
+            }
+
+            match &dataset.state {
+                DatasetState::Ensured => {
+                    if !currently_managed_zpools
+                        .contains(dataset.config.name.pool())
+                    {
+                        dataset.state = DatasetState::FailedToEnsure(Arc::new(
+                            DatasetEnsureError::ZpoolNotFound(
+                                *dataset.config.name.pool(),
+                            ),
+                        ));
+                    }
+                }
+                DatasetState::FailedToEnsure(_) => (),
             }
         }
 
+        // Actually remove the gone-from-config datasets
         for dataset_id in datasets_to_remove {
-            // TODO We should delete these datasets! (We should also delete any
-            // on-disk Omicron datasets that aren't present in `config`).
-            //
-            // https://github.com/oxidecomputer/omicron/issues/6177
-            let dataset = self.datasets.remove(&dataset_id).expect(
-                "datasets_to_remove only has existing datasets by construction",
-            );
-            warn!(
-                log, "leaking ZFS dataset (should be deleted: omicron#6177)";
-                "id" => %dataset_id,
-                "name" => dataset.config.name.full_name(),
-            )
+            self.datasets.remove(&dataset_id);
+        }
+
+        // Check against the filesystem for any orphaned datasets; this should
+        // eventually _remove_ orphaned datasets instead of reporting them.
+        match self
+            .dataset_task
+            .datasets_report_orphans(datasets.clone(), currently_managed_zpools)
+            .await
+        {
+            Ok(Ok(orphaned)) => {
+                // Accumulate into our set of orphaned datasets. We never remove
+                // entries from this set for monitoring omicron#6177: we want to
+                // report any datasets we _might have deleted_ at any point.
+                // Once we start actually deleting, we should remove this
+                // accumulation and only report the currently-orphaned datasets.
+                let mut newly_orphaned = 0_usize;
+                for orphan in orphaned {
+                    if self.orphaned_datasets.insert_overwrite(orphan).is_none()
+                    {
+                        newly_orphaned += 1;
+                    }
+                }
+                if newly_orphaned > 0 {
+                    info!(
+                        log,
+                        "found {newly_orphaned} newly-orphaned datasets"
+                    );
+                }
+            }
+            Ok(Err(err)) => {
+                warn!(
+                    log,
+                    "failed to check for orphaned datasets";
+                    InlineErrorChain::new(err.as_ref()),
+                );
+            }
+            Err(err) => {
+                warn!(
+                    log, "failed to contact dataset task";
+                    InlineErrorChain::new(&err),
+                );
+            }
         }
     }
 
     pub(super) async fn ensure_datasets_if_needed(
         &mut self,
         datasets: IdMap<DatasetConfig>,
+        currently_managed_zpools: Arc<CurrentlyManagedZpools>,
         log: &Logger,
     ) {
-        let results = match self.dataset_task.datasets_ensure(datasets).await {
+        let results = match self
+            .dataset_task
+            .datasets_ensure(datasets, currently_managed_zpools)
+            .await
+        {
             Ok(results) => results,
             Err(err) => {
                 // If we can't contact the dataset task, we leave
@@ -223,6 +291,10 @@ impl OmicronDatasets {
                 (dataset.config.id, result)
             })
             .collect()
+    }
+
+    pub(crate) fn orphaned_datasets(&self) -> &IdOrdMap<OrphanedDataset> {
+        &self.orphaned_datasets
     }
 }
 

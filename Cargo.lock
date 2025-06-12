@@ -11754,6 +11754,7 @@ dependencies = [
  "futures",
  "glob",
  "id-map",
+ "iddqd",
  "illumos-utils",
  "key-manager",
  "nexus-sled-agent-shared",

@@ -8,6 +8,7 @@ use chrono::DateTime;
 use chrono::Utc;
 use either::Either;
 use futures::future;
+use iddqd::IdOrdMap;
 use illumos_utils::zpool::PathInPool;
 use illumos_utils::zpool::ZpoolOrRamdisk;
 use key_manager::StorageKeyRequester;
@@ -35,6 +36,7 @@ use tokio::sync::watch;
 
 use crate::TimeSyncConfig;
 use crate::dataset_serialization_task::DatasetTaskHandle;
+use crate::dataset_serialization_task::OrphanedDataset;
 use crate::ledger::CurrentSledConfig;
 use crate::raw_disks::RawDisksReceiver;
 use crate::sled_agent_facilities::SledAgentFacilities;
@@ -197,6 +199,7 @@ struct LatestReconciliationResult {
     external_disks_inventory:
         BTreeMap<PhysicalDiskUuid, ConfigReconcilerInventoryResult>,
     datasets: BTreeMap<DatasetUuid, ConfigReconcilerInventoryResult>,
+    orphaned_datasets: IdOrdMap<OrphanedDataset>,
     zones_inventory: BTreeMap<OmicronZoneUuid, ConfigReconcilerInventoryResult>,
     timesync_status: TimeSyncStatus,
 }
@@ -394,8 +397,8 @@ impl ReconcilerTask {
         };
 
         // ---
-        // We go through the removal process first: shut down zones, then remove
-        // datasets, then remove disks.
+        // We go through the removal process first: shut down zones, then stop
+        // managing disks, then remove any orphaned datasets.
         // ---
 
         // First, shut down zones if needed.
@@ -408,20 +411,29 @@ impl ReconcilerTask {
             )
             .await;
 
-        // Next, remove datasets we have but that aren't present in the config.
-        //
-        // Note: this doesn't actually delete them yet!
-        // https://github.com/oxidecomputer/omicron/issues/6177
-        self.datasets
-            .remove_datasets_if_needed(&sled_config.datasets, &self.log);
-
-        // Finally, remove any external disks we're no longer supposed to use
+        // Next, remove any external disks we're no longer supposed to use
         // (either due to config changes or the raw disk being gone).
         self.external_disks.stop_managing_if_needed(
             &current_raw_disks,
             &sled_config.disks,
             &self.log,
         );
+
+        // Finally, remove any "orphaned" datasets (i.e., datasets of a kind
+        // that we ought to be managing that exist on disks we're managing but
+        // don't have entries in our current config).
+        //
+        // Note: this doesn't actually delete them yet! We only report the
+        // orphans; after some bake time where we build confidence this won't
+        // remove datasets it shouldn't, we'll change this to actually remove
+        // them. https://github.com/oxidecomputer/omicron/issues/6177
+        self.datasets
+            .remove_datasets_if_needed(
+                &sled_config.datasets,
+                self.external_disks.currently_managed_zpools(),
+                &self.log,
+            )
+            .await;
 
         // ---
         // Now go through the add process: start managing disks, create
@@ -440,7 +452,11 @@ impl ReconcilerTask {
 
         // Ensure all the datasets we want exist.
         self.datasets
-            .ensure_datasets_if_needed(sled_config.datasets.clone(), &self.log)
+            .ensure_datasets_if_needed(
+                sled_config.datasets.clone(),
+                self.external_disks.currently_managed_zpools(),
+                &self.log,
+            )
             .await;
 
         // Collect the current timesync status (needed to start any new zones,
@@ -494,6 +510,7 @@ impl ReconcilerTask {
             sled_config,
             external_disks_inventory: self.external_disks.to_inventory(),
             datasets: self.datasets.to_inventory(),
+            orphaned_datasets: self.datasets.orphaned_datasets().clone(),
             zones_inventory: self.zones.to_inventory(),
             timesync_status,
         };
