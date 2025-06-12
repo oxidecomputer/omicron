@@ -904,7 +904,7 @@ pub async fn wipe(
 
 /// Parses the HTTP address from CockroachDB's stdout file.
 ///
-/// Looks for a line like "webui: http://[::1]:39953"
+/// Looks for a line like `webui: http://[::1]:39953`
 /// and extracts the socket address.
 async fn parse_http_addr_from_stdout(
     stdout_path: &std::path::Path,
