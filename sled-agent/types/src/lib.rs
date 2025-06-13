@@ -16,3 +16,4 @@ pub mod sled;
 pub mod support_bundle;
 pub mod time_sync;
 pub mod zone_bundle;
+pub mod zone_images;

@@ -1,0 +1,21 @@
+[package]
+name = "sled-agent-zone-images-examples"
+description = "Example values for sled-agent-zone-images types"
+version = "0.1.0"
+edition = "2021"
+
+[lints]
+workspace = true
+
+[dependencies]
+camino.workspace = true
+camino-tempfile-ext.workspace = true
+iddqd.workspace = true
+omicron-common.workspace = true
+omicron-uuid-kinds.workspace = true
+omicron-workspace-hack.workspace = true
+serde_json.workspace = true
+sha2.workspace = true
+sled-agent-types.workspace = true
+sled-storage.workspace = true
+tufaceous-artifact.workspace = true
