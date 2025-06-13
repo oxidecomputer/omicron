@@ -6,20 +6,18 @@
 //!
 //! For more about commingling MUPdate and update, see RFD 556.
 
-use std::fs;
-use std::fs::FileType;
-use std::io;
-use std::sync::Arc;
-
-use camino::Utf8Path;
+use crate::AllInstallMetadataFiles;
+use crate::InstallMetadataNonBootInfo;
+use crate::InstallMetadataNonBootMismatch;
+use crate::InstallMetadataNonBootResult;
+use crate::InstallMetadataReadError;
 use camino::Utf8PathBuf;
 use iddqd::IdOrdItem;
 use iddqd::IdOrdMap;
 use iddqd::id_upcast;
-use illumos_utils::zpool::ZpoolName;
 use omicron_common::update::MupdateOverrideInfo;
+use omicron_uuid_kinds::ZpoolUuid;
 use sled_agent_config_reconciler::InternalDisksWithBootDisk;
-use slog::debug;
 use slog::error;
 use slog::info;
 use slog::o;
@@ -27,9 +25,24 @@ use slog::warn;
 use slog_error_chain::InlineErrorChain;
 use thiserror::Error;
 
+/// Describes the current state of mupdate overrides.
+#[derive(Clone, Debug)]
+pub struct MupdateOverrideStatus {
+    /// The path to the mupdate override JSON on the boot disk.
+    pub boot_disk_path: Utf8PathBuf,
+
+    /// Status of the boot disk.
+    pub boot_disk_override:
+        Result<Option<MupdateOverrideInfo>, MupdateOverrideReadError>,
+
+    /// Status of the non-boot disks. This results in warnings in case of a
+    /// mismatch.
+    pub non_boot_disk_overrides: IdOrdMap<MupdateOverrideNonBootInfo>,
+}
+
 #[derive(Debug)]
 pub(crate) struct AllMupdateOverrides {
-    boot_zpool: ZpoolName,
+    boot_zpool: ZpoolUuid,
     boot_disk_path: Utf8PathBuf,
     boot_disk_override:
         Result<Option<MupdateOverrideInfo>, MupdateOverrideReadError>,
@@ -40,62 +53,48 @@ impl AllMupdateOverrides {
     /// Attempt to find MUPdate override files. If present, this file will cause
     /// install-dataset artifacts to be used even if the image source is Artifact.
     ///
-    /// For now we treat the boot disk as authoritative, since install-dataset
-    /// artifacts are always served from the boot disk. There is a class of issues
-    /// here related to transient failures on one of the M.2s that we're
-    /// acknowledging but not tackling for now.
-    ///
-    /// In general, this API follows an interpreter pattern: first read all the
-    /// results and put them in a map, then make decisions based on them in a
-    /// separate step. This enables better testing and ensures that changes to
-    /// behavior are described in the type system.
-    ///
     /// For more about commingling MUPdate and update, see RFD 556.
-    ///
-    /// TODO: This is somewhat complex error handling logic that's similar to,
-    /// but different from, `Ledgerable` (for example, it only does an equality
-    /// check, not an ordering check, and it always considers the boot disk to
-    /// be authoritative). Consider extracting this out into something generic.
     pub(crate) fn read_all(
         log: &slog::Logger,
-        internal_disks: InternalDisksWithBootDisk,
+        internal_disks: &InternalDisksWithBootDisk,
     ) -> Self {
-        let dataset = internal_disks.boot_disk_install_dataset();
+        let files = AllInstallMetadataFiles::<MupdateOverrideInfo>::read_all(
+            log,
+            MupdateOverrideInfo::FILE_NAME,
+            internal_disks,
+        );
 
-        let (boot_disk_path, boot_disk_res) =
-            read_mupdate_override(log, &dataset);
-
-        // Now read the file from all other disks. We attempt to make sure they
-        // match up and will log a warning if they don't, though (until we have
-        // a better story on transient failures) it's not fatal.
-        let non_boot_datasets = internal_disks.non_boot_disk_install_datasets();
-        let non_boot_disks_overrides = non_boot_datasets
-            .map(|(zpool_name, dataset)| {
-                let (path, res) = read_mupdate_override(log, &dataset);
-                MupdateOverrideNonBootInfo {
-                    zpool_name,
-                    path,
-                    result: MupdateOverrideNonBootResult::new(
-                        res,
-                        &boot_disk_res,
-                    ),
-                }
-            })
+        let boot_disk_override = files
+            .boot_disk_metadata
+            .map_err(MupdateOverrideReadError::InstallMetadata);
+        let non_boot_disk_overrides = files
+            .non_boot_disk_metadata
+            .into_iter()
+            .map(MupdateOverrideNonBootInfo::new)
             .collect();
 
         let ret = Self {
-            boot_zpool: internal_disks.boot_disk_zpool(),
-            boot_disk_path,
-            boot_disk_override: boot_disk_res,
-            non_boot_disk_overrides: non_boot_disks_overrides,
+            boot_zpool: files.boot_zpool,
+            boot_disk_path: files.boot_disk_path,
+            boot_disk_override,
+            non_boot_disk_overrides,
         };
 
         ret.log_results(&log);
         ret
     }
 
+    pub(crate) fn status(&self) -> MupdateOverrideStatus {
+        MupdateOverrideStatus {
+            boot_disk_path: self.boot_disk_path.clone(),
+            boot_disk_override: self.boot_disk_override.clone(),
+            non_boot_disk_overrides: self.non_boot_disk_overrides.clone(),
+        }
+    }
+
     fn log_results(&self, log: &slog::Logger) {
         let log = log.new(o!(
+            "component" => "mupdate_override",
             "boot_zpool" => self.boot_zpool.to_string(),
             "boot_disk_path" => self.boot_disk_path.to_string(),
         ));
@@ -138,427 +137,164 @@ impl AllMupdateOverrides {
     }
 }
 
-fn read_mupdate_override(
-    log: &slog::Logger,
-    dataset_dir: &Utf8Path,
-) -> (Utf8PathBuf, Result<Option<MupdateOverrideInfo>, MupdateOverrideReadError>)
-{
-    let override_path = dataset_dir.join(MupdateOverrideInfo::FILE_NAME);
-
-    fn inner(
-        log: &slog::Logger,
-        dataset_dir: &Utf8Path,
-        override_path: &Utf8Path,
-    ) -> Result<Option<MupdateOverrideInfo>, MupdateOverrideReadError> {
-        // First check that the dataset directory exists. This distinguishes the
-        // two cases:
-        //
-        // 1. The install dataset is missing (an error).
-        // 2. The install dataset is present, but the override file is missing
-        //    (expected).
-        //
-        // It would be nice if we could use openat-style APIs to read the file
-        // from the opened directory, but:
-        //
-        // * those don't exist in rust std
-        // * it's not crucial -- we don't expect TOCTTOU races much in this code
-        //   path, and we're not generally resilient to them anyway.
-        //
-        // We use symlink_metadata (lstat) rather than metadata (stat) because
-        // there really shouldn't be any symlinks involved.
-        let dir_metadata =
-            fs::symlink_metadata(dataset_dir).map_err(|error| {
-                MupdateOverrideReadError::DatasetDirMetadata {
-                    dataset_dir: dataset_dir.to_owned(),
-                    error: ArcIoError::new(error),
-                }
-            })?;
-        if !dir_metadata.is_dir() {
-            return Err(MupdateOverrideReadError::DatasetNotDirectory {
-                dataset_dir: dataset_dir.to_owned(),
-                file_type: dir_metadata.file_type(),
-            });
-        }
-
-        let mupdate_override = match std::fs::read_to_string(&override_path) {
-            Ok(data) => {
-                let data = serde_json::from_str::<MupdateOverrideInfo>(&data)
-                    .map_err(|error| {
-                    MupdateOverrideReadError::Deserialize {
-                        path: override_path.to_owned(),
-                        error: ArcSerdeJsonError::new(error),
-                        contents: data,
-                    }
-                })?;
-                Some(data)
-            }
-            Err(error) => {
-                if error.kind() == std::io::ErrorKind::NotFound {
-                    debug!(
-                        log,
-                        "mupdate override file not found, treating as absent";
-                        "path" => %override_path
-                    );
-                    None
-                } else {
-                    return Err(MupdateOverrideReadError::Read {
-                        path: override_path.to_owned(),
-                        error: ArcIoError::new(error),
-                    });
-                }
-            }
-        };
-
-        Ok(mupdate_override)
-    }
-
-    let res = inner(log, dataset_dir, &override_path);
-    (override_path, res)
-}
-
+/// Describes the result of reading a mupdate override file from a non-boot disk.
 #[derive(Clone, Debug, PartialEq)]
-struct MupdateOverrideNonBootInfo {
-    /// The name of the zpool.
-    zpool_name: ZpoolName,
+pub struct MupdateOverrideNonBootInfo {
+    /// The ID of the zpool.
+    pub zpool_id: ZpoolUuid,
 
-    /// The path that was read from.
-    path: Utf8PathBuf,
+    /// The path to the mupdate override file.
+    pub path: Utf8PathBuf,
 
-    /// The result of performing the read operation.
-    result: MupdateOverrideNonBootResult,
+    /// The result of reading the mupdate override file.
+    pub result: MupdateOverrideNonBootResult,
 }
 
 impl MupdateOverrideNonBootInfo {
+    pub fn new(info: InstallMetadataNonBootInfo<MupdateOverrideInfo>) -> Self {
+        let result = match info.result {
+            InstallMetadataNonBootResult::MatchesPresent(_) => {
+                MupdateOverrideNonBootResult::MatchesPresent
+            }
+            InstallMetadataNonBootResult::MatchesAbsent => {
+                MupdateOverrideNonBootResult::MatchesAbsent
+            }
+            InstallMetadataNonBootResult::Mismatch(mismatch) => {
+                let mupdate_mismatch = match mismatch {
+                    InstallMetadataNonBootMismatch::BootPresentOtherAbsent => {
+                        MupdateOverrideNonBootMismatch::BootPresentOtherAbsent
+                    }
+                    InstallMetadataNonBootMismatch::BootAbsentOtherPresent { non_boot_disk_info } => {
+                        MupdateOverrideNonBootMismatch::BootAbsentOtherPresent { non_boot_disk_info }
+                    }
+                    InstallMetadataNonBootMismatch::ValueMismatch { non_boot_disk_info } => {
+                        MupdateOverrideNonBootMismatch::ValueMismatch { non_boot_disk_info }
+                    }
+                    InstallMetadataNonBootMismatch::BootDiskReadError { non_boot_disk_info } => {
+                        MupdateOverrideNonBootMismatch::BootDiskReadError { non_boot_disk_info }
+                    }
+                };
+                MupdateOverrideNonBootResult::Mismatch(mupdate_mismatch)
+            }
+            InstallMetadataNonBootResult::ReadError(error) => {
+                MupdateOverrideNonBootResult::ReadError(
+                    MupdateOverrideReadError::InstallMetadata(error),
+                )
+            }
+        };
+
+        Self { zpool_id: info.zpool_id, path: info.path, result }
+    }
+
     fn log_result(&self, log: &slog::Logger) {
         let log = log.new(o!(
-            "non_boot_zpool_name" => self.zpool_name.to_string(),
+            "non_boot_zpool_id" => self.zpool_id.to_string(),
             "non_boot_path" => self.path.to_string(),
         ));
 
         match &self.result {
-            MupdateOverrideNonBootResult::MatchesAbsent => {
-                info!(
-                    log,
-                    "mupdate override absent on this non-boot \
-                     disk, matches absence on boot disk",
-                );
-            }
             MupdateOverrideNonBootResult::MatchesPresent => {
                 info!(
                     log,
-                    "mupdate override present on this non-boot \
-                     disk, matches presence on boot disk",
+                    "mupdate override for non-boot disk matches boot disk (present)"
+                );
+            }
+            MupdateOverrideNonBootResult::MatchesAbsent => {
+                info!(
+                    log,
+                    "mupdate override for non-boot disk matches boot disk (absent)"
+                );
+            }
+            MupdateOverrideNonBootResult::Mismatch(mismatch) => {
+                warn!(
+                    log,
+                    "mupdate override for non-boot disk does not match boot disk";
+                    "mismatch" => ?mismatch,
                 );
             }
             MupdateOverrideNonBootResult::ReadError(error) => {
                 warn!(
                     log,
-                    "failed to read mupdate override from other disk";
+                    "error reading mupdate override for non-boot disk";
                     "error" => InlineErrorChain::new(error),
                 );
-            }
-            MupdateOverrideNonBootResult::Mismatch(mismatch) => {
-                mismatch.log_to(&log)
             }
         }
     }
 }
 
 impl IdOrdItem for MupdateOverrideNonBootInfo {
-    type Key<'a> = ZpoolName;
+    type Key<'a> = ZpoolUuid;
 
     fn key(&self) -> Self::Key<'_> {
-        self.zpool_name
+        self.zpool_id
     }
 
     id_upcast!();
 }
 
+/// The result of reading a mupdate override file from a non-boot disk.
 #[derive(Clone, Debug, PartialEq)]
-enum MupdateOverrideNonBootResult {
-    /// The override is present and matches the value on the boot disk.
+pub enum MupdateOverrideNonBootResult {
+    /// The non-boot disk matches the boot disk (both present).
     MatchesPresent,
 
-    /// The override is absent and is also absent on the boot disk.
+    /// The non-boot disk matches the boot disk (both absent).
     MatchesAbsent,
 
-    /// A mismatch between the boot disk and the other disk was detected.
+    /// The non-boot disk does not match the boot disk.
     Mismatch(MupdateOverrideNonBootMismatch),
 
-    /// An error occurred while reading the mupdate override info on this disk.
+    /// There was an error reading the mupdate override file from the non-boot disk.
     ReadError(MupdateOverrideReadError),
 }
 
-impl MupdateOverrideNonBootResult {
-    fn new(
-        res: Result<Option<MupdateOverrideInfo>, MupdateOverrideReadError>,
-        boot_disk_res: &Result<
-            Option<MupdateOverrideInfo>,
-            MupdateOverrideReadError,
-        >,
-    ) -> Self {
-        match (res, boot_disk_res) {
-            (Ok(Some(non_boot_disk_info)), Ok(Some(boot_disk_info))) => {
-                if boot_disk_info == &non_boot_disk_info {
-                    Self::MatchesPresent
-                } else {
-                    Self::Mismatch(
-                        MupdateOverrideNonBootMismatch::ValueMismatch {
-                            non_boot_disk_info,
-                        },
-                    )
-                }
-            }
-            (Ok(Some(non_boot_disk_info)), Ok(None)) => Self::Mismatch(
-                MupdateOverrideNonBootMismatch::BootAbsentOtherPresent {
-                    non_boot_disk_info,
-                },
-            ),
-            (Ok(None), Ok(Some(_))) => Self::Mismatch(
-                MupdateOverrideNonBootMismatch::BootPresentOtherAbsent,
-            ),
-            (Ok(None), Ok(None)) => Self::MatchesAbsent,
-            (Ok(non_boot_disk_info), Err(_)) => Self::Mismatch(
-                MupdateOverrideNonBootMismatch::BootDiskReadError {
-                    non_boot_disk_info,
-                },
-            ),
-            (Err(error), _) => Self::ReadError(error),
-        }
-    }
-}
-
-#[derive(Clone, Debug, PartialEq, Eq)]
-enum MupdateOverrideNonBootMismatch {
-    /// The override is present on the boot disk but absent on the other disk.
+/// Describes a mismatch between the boot disk and a non-boot disk.
+#[derive(Clone, Debug, PartialEq)]
+pub enum MupdateOverrideNonBootMismatch {
+    /// The boot disk is present but the non-boot disk is absent.
     BootPresentOtherAbsent,
 
-    /// The override is absent on the boot disk but present on the other disk.
-    BootAbsentOtherPresent {
-        /// The information found on the other disk.
-        non_boot_disk_info: MupdateOverrideInfo,
-    },
+    /// The boot disk is absent but the non-boot disk is present.
+    BootAbsentOtherPresent { non_boot_disk_info: MupdateOverrideInfo },
 
-    /// The override value differs between the boot disk and the other disk.
+    /// Both disks are present but have different values.
     ValueMismatch { non_boot_disk_info: MupdateOverrideInfo },
 
-    /// There was a read error on the boot disk, so we were unable to verify
-    /// consistency.
-    BootDiskReadError {
-        /// The value as found on this disk. This value is logged but not used.
-        non_boot_disk_info: Option<MupdateOverrideInfo>,
-    },
-}
-
-impl MupdateOverrideNonBootMismatch {
-    // This function assumes that `log` has already been provided context about
-    // the zpool name and path.
-    fn log_to(&self, log: &slog::Logger) {
-        match self {
-            Self::BootPresentOtherAbsent => {
-                warn!(
-                    log,
-                    "mupdate override absent on this non-boot disk but \
-                     present on boot disk, treating file on boot disk as \
-                     authoritative"
-                )
-            }
-            Self::BootAbsentOtherPresent { non_boot_disk_info } => {
-                warn!(
-                    log,
-                    "mupdate override present on this non-boot disk but \
-                     absent on boot disk, treating the absence on boot disk \
-                     as authoritative";
-                    "non_boot_disk_info" => ?non_boot_disk_info,
-                )
-            }
-            Self::ValueMismatch { non_boot_disk_info } => {
-                warn!(
-                    log,
-                    "mupdate override value present on both this non-boot \
-                     disk and the boot disk, but different across disks, \
-                     treating boot disk as authoritative";
-                    "non_boot_disk_info" => ?non_boot_disk_info,
-                )
-            }
-            Self::BootDiskReadError { non_boot_disk_info } => {
-                warn!(
-                    log,
-                    "mupdate override read error on boot disk, unable \
-                     to verify consistency across disks";
-                    "non_boot_disk_info" => ?non_boot_disk_info,
-                )
-            }
-        }
-    }
+    /// There was an error reading the boot disk.
+    BootDiskReadError { non_boot_disk_info: Option<MupdateOverrideInfo> },
 }
 
 #[derive(Clone, Debug, Error, PartialEq)]
-enum MupdateOverrideReadError {
-    #[error(
-        "error retrieving metadata for install dataset directory \
-         `{dataset_dir}`"
-    )]
-    DatasetDirMetadata {
-        dataset_dir: Utf8PathBuf,
-        #[source]
-        error: ArcIoError,
-    },
-
-    #[error(
-        "expected install dataset `{dataset_dir}` to be a directory, \
-         found {file_type:?}"
-    )]
-    DatasetNotDirectory { dataset_dir: Utf8PathBuf, file_type: FileType },
-
-    #[error("error reading mupdate override from `{path}`")]
-    Read {
-        path: Utf8PathBuf,
-        #[source]
-        error: ArcIoError,
-    },
-
-    #[error(
-        "error deserializing `{path}` into MupdateOverrideInfo, \
-         contents: {contents:?}"
-    )]
-    Deserialize {
-        path: Utf8PathBuf,
-        contents: String,
-        #[source]
-        error: ArcSerdeJsonError,
-    },
-}
-
-/// An `io::Error` wrapper that implements `Clone` and `PartialEq`.
-#[derive(Clone, Debug, Error)]
-#[error(transparent)]
-struct ArcIoError(Arc<io::Error>);
-
-impl ArcIoError {
-    fn new(error: io::Error) -> Self {
-        Self(Arc::new(error))
-    }
-}
-
-/// Testing aid.
-impl PartialEq for ArcIoError {
-    fn eq(&self, other: &Self) -> bool {
-        // Simply comparing io::ErrorKind is good enough for tests.
-        self.0.kind() == other.0.kind()
-    }
-}
-
-/// A `serde_json::Error` that implements `Clone` and `PartialEq`.
-#[derive(Clone, Debug, Error)]
-#[error(transparent)]
-struct ArcSerdeJsonError(Arc<serde_json::Error>);
-
-impl ArcSerdeJsonError {
-    fn new(error: serde_json::Error) -> Self {
-        Self(Arc::new(error))
-    }
-}
-
-/// Testing aid.
-impl PartialEq for ArcSerdeJsonError {
-    fn eq(&self, other: &Self) -> bool {
-        // Simply comparing line/column/category is good enough for tests.
-        self.0.line() == other.0.line()
-            && self.0.column() == other.0.column()
-            && self.0.classify() == other.0.classify()
-    }
+pub enum MupdateOverrideReadError {
+    #[error("install metadata read error")]
+    InstallMetadata(#[from] InstallMetadataReadError),
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    use crate::test_utils::BOOT_PATHS;
+    use crate::test_utils::BOOT_UUID;
+    use crate::test_utils::NON_BOOT_2_PATHS;
+    use crate::test_utils::NON_BOOT_2_UUID;
+    use crate::test_utils::NON_BOOT_3_PATHS;
+    use crate::test_utils::NON_BOOT_3_UUID;
+    use crate::test_utils::NON_BOOT_PATHS;
+    use crate::test_utils::NON_BOOT_UUID;
+    use crate::test_utils::WriteInstallDatasetContext;
+    use crate::test_utils::dataset_missing_error;
+    use crate::test_utils::dataset_not_dir_error;
+    use crate::test_utils::deserialize_error;
+    use crate::test_utils::make_internal_disks_rx;
+
     use camino_tempfile_ext::prelude::*;
     use dropshot::ConfigLogging;
     use dropshot::ConfigLoggingLevel;
     use dropshot::test_util::LogContext;
-    use omicron_common::disk::DiskIdentity;
-    use omicron_uuid_kinds::MupdateOverrideUuid;
-    use omicron_uuid_kinds::ZpoolUuid;
+    use iddqd::id_ord_map;
     use pretty_assertions::assert_eq;
-    use sled_agent_config_reconciler::InternalDisksReceiver;
-    use sled_storage::config::MountConfig;
-    use std::collections::BTreeSet;
-    use std::io;
-    use std::sync::LazyLock;
-
-    struct OverridePaths {
-        install_dataset: Utf8PathBuf,
-        override_json: Utf8PathBuf,
-    }
-
-    impl OverridePaths {
-        fn for_uuid(uuid: ZpoolUuid) -> Self {
-            let install_dataset =
-                Utf8PathBuf::from(format!("pool/int/{uuid}/install"));
-            let mupdate_override_json =
-                install_dataset.join("mupdate-override.json");
-            Self { install_dataset, override_json: mupdate_override_json }
-        }
-    }
-
-    const BOOT_UUID: ZpoolUuid =
-        ZpoolUuid::from_u128(0xd3e7205d_4efe_493b_ac5e_9175584907cd);
-    const BOOT_ZPOOL: ZpoolName = ZpoolName::new_internal(BOOT_UUID);
-    static BOOT_PATHS: LazyLock<OverridePaths> =
-        LazyLock::new(|| OverridePaths::for_uuid(BOOT_UUID));
-
-    const NON_BOOT_UUID: ZpoolUuid =
-        ZpoolUuid::from_u128(0x4854189f_b290_47cd_b076_374d0e1748ec);
-    const NON_BOOT_ZPOOL: ZpoolName = ZpoolName::new_internal(NON_BOOT_UUID);
-    static NON_BOOT_PATHS: LazyLock<OverridePaths> =
-        LazyLock::new(|| OverridePaths::for_uuid(NON_BOOT_UUID));
-
-    const NON_BOOT_2_UUID: ZpoolUuid =
-        ZpoolUuid::from_u128(0x72201e1e_9fee_4231_81cd_4e2d514cb632);
-    const NON_BOOT_2_ZPOOL: ZpoolName =
-        ZpoolName::new_internal(NON_BOOT_2_UUID);
-    static NON_BOOT_2_PATHS: LazyLock<OverridePaths> =
-        LazyLock::new(|| OverridePaths::for_uuid(NON_BOOT_2_UUID));
-
-    const NON_BOOT_3_UUID: ZpoolUuid =
-        ZpoolUuid::from_u128(0xd0d04947_93c5_40fd_97ab_4648b8cc28d6);
-    const NON_BOOT_3_ZPOOL: ZpoolName =
-        ZpoolName::new_internal(NON_BOOT_3_UUID);
-    static NON_BOOT_3_PATHS: LazyLock<OverridePaths> =
-        LazyLock::new(|| OverridePaths::for_uuid(NON_BOOT_3_UUID));
-
-    static OVERRIDE_UUID: MupdateOverrideUuid =
-        MupdateOverrideUuid::from_u128(0x70b965c2_fc95_4843_a34d_a2c7246788a8);
-    static OVERRIDE_2_UUID: MupdateOverrideUuid =
-        MupdateOverrideUuid::from_u128(0x20588f8f_c680_4101_afc7_820226d03ada);
-
-    fn make_internal_disks(
-        root: &Utf8Path,
-        boot_zpool: ZpoolName,
-        other_zpools: &[ZpoolName],
-    ) -> InternalDisksWithBootDisk {
-        let identity_from_zpool = |zpool: ZpoolName| DiskIdentity {
-            vendor: "mupdate-override-tests".to_string(),
-            model: "fake-disk".to_string(),
-            serial: zpool.id().to_string(),
-        };
-        let mount_config = MountConfig {
-            root: root.to_path_buf(),
-            synthetic_disk_root: root.to_path_buf(),
-        };
-        InternalDisksReceiver::fake_static(
-            Arc::new(mount_config),
-            std::iter::once((identity_from_zpool(boot_zpool), boot_zpool))
-                .chain(
-                    other_zpools
-                        .iter()
-                        .copied()
-                        .map(|pool| (identity_from_zpool(pool), pool)),
-                ),
-        )
-        .current_with_boot_disk()
-    }
 
     /// Boot disk present / no other disks. (This produces a warning, but is
     /// otherwise okay.)
@@ -568,19 +304,18 @@ mod tests {
             "mupdate_override_read_other_absent",
             &ConfigLogging::StderrTerminal { level: ConfigLoggingLevel::Debug },
         );
-        let override_info = override_info();
         let dir = Utf8TempDir::new().unwrap();
+        let cx = WriteInstallDatasetContext::new_basic();
+        let info = cx.override_info();
+        cx.write_to(&dir.child(&BOOT_PATHS.install_dataset)).unwrap();
 
-        dir.child(&BOOT_PATHS.override_json)
-            .write_str(&serde_json::to_string(&override_info).unwrap())
-            .unwrap();
-
-        let internal_disks = make_internal_disks(dir.path(), BOOT_ZPOOL, &[]);
+        let internal_disks = make_internal_disks_rx(dir.path(), BOOT_UUID, &[])
+            .current_with_boot_disk();
         let overrides =
-            AllMupdateOverrides::read_all(&logctx.log, internal_disks);
+            AllMupdateOverrides::read_all(&logctx.log, &internal_disks);
         assert_eq!(
             overrides.boot_disk_override.as_ref().unwrap().as_ref(),
-            Some(&override_info)
+            Some(&info)
         );
         assert_eq!(overrides.non_boot_disk_overrides, IdOrdMap::new());
 
@@ -594,34 +329,31 @@ mod tests {
             "mupdate_override_read_both_present",
             &ConfigLogging::StderrTerminal { level: ConfigLoggingLevel::Debug },
         );
-        let override_info = override_info();
         let dir = Utf8TempDir::new().unwrap();
-
-        dir.child(&BOOT_PATHS.override_json)
-            .write_str(&serde_json::to_string(&override_info).unwrap())
-            .unwrap();
-        dir.child(&NON_BOOT_PATHS.override_json)
-            .write_str(&serde_json::to_string(&override_info).unwrap())
-            .unwrap();
+        let cx = WriteInstallDatasetContext::new_basic();
+        let info = cx.override_info();
+        cx.write_to(&dir.child(&BOOT_PATHS.install_dataset)).unwrap();
+        cx.write_to(&dir.child(&NON_BOOT_PATHS.install_dataset)).unwrap();
 
         let internal_disks =
-            make_internal_disks(dir.path(), BOOT_ZPOOL, &[NON_BOOT_ZPOOL]);
+            make_internal_disks_rx(dir.path(), BOOT_UUID, &[NON_BOOT_UUID])
+                .current_with_boot_disk();
 
         let overrides =
-            AllMupdateOverrides::read_all(&logctx.log, internal_disks);
+            AllMupdateOverrides::read_all(&logctx.log, &internal_disks);
         assert_eq!(
             overrides.boot_disk_override.as_ref().unwrap().as_ref(),
-            Some(&override_info)
+            Some(&info)
         );
         assert_eq!(
             overrides.non_boot_disk_overrides,
-            [MupdateOverrideNonBootInfo {
-                zpool_name: NON_BOOT_ZPOOL,
-                path: dir.path().join(&NON_BOOT_PATHS.override_json),
-                result: MupdateOverrideNonBootResult::MatchesPresent,
-            }]
-            .into_iter()
-            .collect(),
+            id_ord_map! {
+                MupdateOverrideNonBootInfo {
+                    zpool_id: NON_BOOT_UUID,
+                    path: dir.path().join(&NON_BOOT_PATHS.mupdate_override_json),
+                    result: MupdateOverrideNonBootResult::MatchesPresent,
+                }
+            },
         );
 
         logctx.cleanup_successful();
@@ -634,6 +366,7 @@ mod tests {
             "mupdate_override_read_both_absent",
             &ConfigLogging::StderrTerminal { level: ConfigLoggingLevel::Debug },
         );
+
         let dir = Utf8TempDir::new().unwrap();
 
         // Create the directories but not the override JSONs within them.
@@ -641,23 +374,24 @@ mod tests {
         dir.child(&NON_BOOT_PATHS.install_dataset).create_dir_all().unwrap();
 
         let internal_disks =
-            make_internal_disks(dir.path(), BOOT_ZPOOL, &[NON_BOOT_ZPOOL]);
+            make_internal_disks_rx(dir.path(), BOOT_UUID, &[NON_BOOT_UUID])
+                .current_with_boot_disk();
 
         let overrides =
-            AllMupdateOverrides::read_all(&logctx.log, internal_disks);
+            AllMupdateOverrides::read_all(&logctx.log, &internal_disks);
         assert_eq!(
             overrides.boot_disk_override.as_ref().unwrap().as_ref(),
             None,
         );
         assert_eq!(
             overrides.non_boot_disk_overrides,
-            [MupdateOverrideNonBootInfo {
-                zpool_name: NON_BOOT_ZPOOL,
-                path: dir.path().join(&NON_BOOT_PATHS.override_json),
-                result: MupdateOverrideNonBootResult::MatchesAbsent,
-            }]
-            .into_iter()
-            .collect(),
+            id_ord_map! {
+                MupdateOverrideNonBootInfo {
+                    zpool_id: NON_BOOT_UUID,
+                    path: dir.path().join(&NON_BOOT_PATHS.mupdate_override_json),
+                    result: MupdateOverrideNonBootResult::MatchesAbsent,
+                }
+            },
         );
 
         logctx.cleanup_successful();
@@ -670,35 +404,35 @@ mod tests {
             "mupdate_override_read_boot_present_other_absent",
             &ConfigLogging::StderrTerminal { level: ConfigLoggingLevel::Debug },
         );
-        let override_info = override_info();
         let dir = Utf8TempDir::new().unwrap();
+        let cx = WriteInstallDatasetContext::new_basic();
+        let info = cx.override_info();
+        cx.write_to(&dir.child(&BOOT_PATHS.install_dataset)).unwrap();
 
-        dir.child(&BOOT_PATHS.override_json)
-            .write_str(&serde_json::to_string(&override_info).unwrap())
-            .unwrap();
         // Create the directory, but not the override JSON within it.
         dir.child(&NON_BOOT_PATHS.install_dataset).create_dir_all().unwrap();
 
         let internal_disks =
-            make_internal_disks(dir.path(), BOOT_ZPOOL, &[NON_BOOT_ZPOOL]);
+            make_internal_disks_rx(dir.path(), BOOT_UUID, &[NON_BOOT_UUID])
+                .current_with_boot_disk();
 
         let overrides =
-            AllMupdateOverrides::read_all(&logctx.log, internal_disks);
+            AllMupdateOverrides::read_all(&logctx.log, &internal_disks);
         assert_eq!(
             overrides.boot_disk_override.as_ref().unwrap().as_ref(),
-            Some(&override_info)
+            Some(&info)
         );
         assert_eq!(
             overrides.non_boot_disk_overrides,
-            [MupdateOverrideNonBootInfo {
-                zpool_name: NON_BOOT_ZPOOL,
-                path: dir.path().join(&NON_BOOT_PATHS.override_json),
-                result: MupdateOverrideNonBootResult::Mismatch(
-                    MupdateOverrideNonBootMismatch::BootPresentOtherAbsent,
-                ),
-            }]
-            .into_iter()
-            .collect(),
+            id_ord_map! {
+                MupdateOverrideNonBootInfo {
+                    zpool_id: NON_BOOT_UUID,
+                    path: dir.path().join(&NON_BOOT_PATHS.mupdate_override_json),
+                    result: MupdateOverrideNonBootResult::Mismatch(
+                        MupdateOverrideNonBootMismatch::BootPresentOtherAbsent,
+                    ),
+                }
+            },
         );
 
         logctx.cleanup_successful();
@@ -711,37 +445,37 @@ mod tests {
             "mupdate_override_read_boot_absent_other_present",
             &ConfigLogging::StderrTerminal { level: ConfigLoggingLevel::Debug },
         );
-        let override_info = override_info();
         let dir = Utf8TempDir::new().unwrap();
+        let cx = WriteInstallDatasetContext::new_basic();
+        let info = cx.override_info();
 
         // Create the directory, but not the override JSON within it.
         dir.child(&BOOT_PATHS.install_dataset).create_dir_all().unwrap();
 
-        dir.child(&NON_BOOT_PATHS.override_json)
-            .write_str(&serde_json::to_string(&override_info).unwrap())
-            .unwrap();
+        cx.write_to(&dir.child(&NON_BOOT_PATHS.install_dataset)).unwrap();
 
         let internal_disks =
-            make_internal_disks(dir.path(), BOOT_ZPOOL, &[NON_BOOT_ZPOOL]);
+            make_internal_disks_rx(dir.path(), BOOT_UUID, &[NON_BOOT_UUID])
+                .current_with_boot_disk();
         let overrides =
-            AllMupdateOverrides::read_all(&logctx.log, internal_disks);
+            AllMupdateOverrides::read_all(&logctx.log, &internal_disks);
         assert_eq!(
             overrides.boot_disk_override.as_ref().unwrap().as_ref(),
             None,
         );
         assert_eq!(
             overrides.non_boot_disk_overrides,
-            [MupdateOverrideNonBootInfo {
-                zpool_name: NON_BOOT_ZPOOL,
-                path: dir.path().join(&NON_BOOT_PATHS.override_json),
-                result: MupdateOverrideNonBootResult::Mismatch(
-                    MupdateOverrideNonBootMismatch::BootAbsentOtherPresent {
-                        non_boot_disk_info: override_info.clone()
-                    },
-                ),
-            }]
-            .into_iter()
-            .collect(),
+            id_ord_map! {
+                MupdateOverrideNonBootInfo {
+                    zpool_id: NON_BOOT_UUID,
+                    path: dir.path().join(&NON_BOOT_PATHS.mupdate_override_json),
+                    result: MupdateOverrideNonBootResult::Mismatch(
+                        MupdateOverrideNonBootMismatch::BootAbsentOtherPresent {
+                            non_boot_disk_info: info.clone()
+                        },
+                    ),
+                }
+            },
         );
 
         logctx.cleanup_successful();
@@ -754,38 +488,40 @@ mod tests {
             "mupdate_override_read_different_values",
             &ConfigLogging::StderrTerminal { level: ConfigLoggingLevel::Debug },
         );
-        let override_info = override_info();
-        let override_info_2 = override_info_2();
+
         let dir = Utf8TempDir::new().unwrap();
 
-        dir.child(&BOOT_PATHS.override_json)
-            .write_str(&serde_json::to_string(&override_info).unwrap())
-            .expect("failed to write override json");
-        dir.child(&NON_BOOT_PATHS.override_json)
-            .write_str(&serde_json::to_string(&override_info_2).unwrap())
-            .expect("failed to write override json");
+        // Make two different contexts. Each will have a different mupdate_uuid
+        // so will not match.
+        let cx = WriteInstallDatasetContext::new_basic();
+        let info = cx.override_info();
+        cx.write_to(&dir.child(&BOOT_PATHS.install_dataset)).unwrap();
+        let cx2 = WriteInstallDatasetContext::new_basic();
+        let info2 = cx2.override_info();
+        cx2.write_to(&dir.child(&NON_BOOT_PATHS.install_dataset)).unwrap();
 
         let internal_disks =
-            make_internal_disks(dir.path(), BOOT_ZPOOL, &[NON_BOOT_ZPOOL]);
+            make_internal_disks_rx(dir.path(), BOOT_UUID, &[NON_BOOT_UUID])
+                .current_with_boot_disk();
         let overrides =
-            AllMupdateOverrides::read_all(&logctx.log, internal_disks);
+            AllMupdateOverrides::read_all(&logctx.log, &internal_disks);
         assert_eq!(
             overrides.boot_disk_override.as_ref().unwrap().as_ref(),
-            Some(&override_info),
+            Some(&info),
         );
         assert_eq!(
             overrides.non_boot_disk_overrides,
-            [MupdateOverrideNonBootInfo {
-                zpool_name: NON_BOOT_ZPOOL,
-                path: dir.path().join(&NON_BOOT_PATHS.override_json),
-                result: MupdateOverrideNonBootResult::Mismatch(
-                    MupdateOverrideNonBootMismatch::ValueMismatch {
-                        non_boot_disk_info: override_info_2,
-                    }
-                ),
-            }]
-            .into_iter()
-            .collect(),
+            id_ord_map! {
+                MupdateOverrideNonBootInfo {
+                    zpool_id: NON_BOOT_UUID,
+                    path: dir.path().join(&NON_BOOT_PATHS.mupdate_override_json),
+                    result: MupdateOverrideNonBootResult::Mismatch(
+                        MupdateOverrideNonBootMismatch::ValueMismatch {
+                            non_boot_disk_info: info2,
+                        }
+                    ),
+                }
+            },
         );
 
         logctx.cleanup_successful();
@@ -810,28 +546,31 @@ mod tests {
             .unwrap();
 
         let internal_disks =
-            make_internal_disks(dir.path(), BOOT_ZPOOL, &[NON_BOOT_ZPOOL]);
+            make_internal_disks_rx(dir.path(), BOOT_UUID, &[NON_BOOT_UUID])
+                .current_with_boot_disk();
         let overrides =
-            AllMupdateOverrides::read_all(&logctx.log, internal_disks);
+            AllMupdateOverrides::read_all(&logctx.log, &internal_disks);
         assert_eq!(
             overrides.boot_disk_override.as_ref().unwrap_err(),
             &dataset_missing_error(
                 &dir.path().join(&BOOT_PATHS.install_dataset)
             )
+            .into()
         );
         assert_eq!(
             overrides.non_boot_disk_overrides,
-            [MupdateOverrideNonBootInfo {
-                zpool_name: NON_BOOT_ZPOOL,
-                path: dir.path().join(&NON_BOOT_PATHS.override_json),
-                result: MupdateOverrideNonBootResult::ReadError(
-                    dataset_missing_error(
-                        &dir.path().join(&NON_BOOT_PATHS.install_dataset)
-                    ),
-                )
-            }]
-            .into_iter()
-            .collect(),
+            id_ord_map! {
+                MupdateOverrideNonBootInfo {
+                    zpool_id: NON_BOOT_UUID,
+                    path: dir.path().join(&NON_BOOT_PATHS.mupdate_override_json),
+                    result: MupdateOverrideNonBootResult::ReadError(
+                        dataset_missing_error(
+                            &dir.path().join(&NON_BOOT_PATHS.install_dataset)
+                        )
+                        .into(),
+                    )
+                }
+            },
         );
 
         logctx.cleanup_successful();
@@ -851,28 +590,31 @@ mod tests {
         dir.child(&NON_BOOT_PATHS.install_dataset).touch().unwrap();
 
         let internal_disks =
-            make_internal_disks(dir.path(), BOOT_ZPOOL, &[NON_BOOT_ZPOOL]);
+            make_internal_disks_rx(dir.path(), BOOT_UUID, &[NON_BOOT_UUID])
+                .current_with_boot_disk();
         let overrides =
-            AllMupdateOverrides::read_all(&logctx.log, internal_disks);
+            AllMupdateOverrides::read_all(&logctx.log, &internal_disks);
         assert_eq!(
             overrides.boot_disk_override.as_ref().unwrap_err(),
             &dataset_not_dir_error(
                 &dir.path().join(&BOOT_PATHS.install_dataset)
             )
+            .into()
         );
         assert_eq!(
             overrides.non_boot_disk_overrides,
-            [MupdateOverrideNonBootInfo {
-                zpool_name: NON_BOOT_ZPOOL,
-                path: dir.path().join(&NON_BOOT_PATHS.override_json),
-                result: MupdateOverrideNonBootResult::ReadError(
-                    dataset_not_dir_error(
-                        &dir.path().join(&NON_BOOT_PATHS.install_dataset),
+            id_ord_map! {
+                MupdateOverrideNonBootInfo {
+                    zpool_id: NON_BOOT_UUID,
+                    path: dir.path().join(&NON_BOOT_PATHS.mupdate_override_json),
+                    result: MupdateOverrideNonBootResult::ReadError(
+                        dataset_not_dir_error(
+                            &dir.path().join(&NON_BOOT_PATHS.install_dataset),
+                        )
+                        .into(),
                     ),
-                ),
-            }]
-            .into_iter()
-            .collect(),
+                },
+            },
         );
 
         logctx.cleanup_successful();
@@ -885,46 +627,51 @@ mod tests {
             "mupdate_override_read_boot_read_error",
             &ConfigLogging::StderrTerminal { level: ConfigLoggingLevel::Debug },
         );
-        let override_info = override_info();
         let dir = Utf8TempDir::new().unwrap();
+        let cx = WriteInstallDatasetContext::new_basic();
+        let info = cx.override_info();
 
         // Create an empty file: this won't deserialize correctly.
-        dir.child(&BOOT_PATHS.override_json).touch().unwrap();
+        dir.child(&BOOT_PATHS.mupdate_override_json).touch().unwrap();
         // File with the correct contents.
-        dir.child(&NON_BOOT_PATHS.override_json)
-            .write_str(&serde_json::to_string(&override_info).unwrap())
-            .unwrap();
+        cx.write_to(&dir.child(&NON_BOOT_PATHS.install_dataset)).unwrap();
         // File that's absent.
         dir.child(&NON_BOOT_2_PATHS.install_dataset).create_dir_all().unwrap();
         // Read error (empty file).
-        dir.child(&NON_BOOT_3_PATHS.override_json).touch().unwrap();
+        dir.child(&NON_BOOT_3_PATHS.mupdate_override_json).touch().unwrap();
 
-        let internal_disks = make_internal_disks(
+        let internal_disks = make_internal_disks_rx(
             dir.path(),
-            BOOT_ZPOOL,
-            &[NON_BOOT_ZPOOL, NON_BOOT_2_ZPOOL, NON_BOOT_3_ZPOOL],
-        );
+            BOOT_UUID,
+            &[NON_BOOT_UUID, NON_BOOT_2_UUID, NON_BOOT_3_UUID],
+        )
+        .current_with_boot_disk();
         let overrides =
-            AllMupdateOverrides::read_all(&logctx.log, internal_disks);
+            AllMupdateOverrides::read_all(&logctx.log, &internal_disks);
         assert_eq!(
             overrides.boot_disk_override.as_ref().unwrap_err(),
-            &deserialize_error(dir.path(), &BOOT_PATHS.override_json, "",),
+            &deserialize_error(
+                dir.path(),
+                &BOOT_PATHS.mupdate_override_json,
+                ""
+            )
+            .into(),
         );
         assert_eq!(
             overrides.non_boot_disk_overrides,
-            [
+            id_ord_map! {
                 MupdateOverrideNonBootInfo {
-                    zpool_name: NON_BOOT_ZPOOL,
-                    path: dir.path().join(&NON_BOOT_PATHS.override_json),
+                    zpool_id: NON_BOOT_UUID,
+                    path: dir.path().join(&NON_BOOT_PATHS.mupdate_override_json),
                     result: MupdateOverrideNonBootResult::Mismatch(
                         MupdateOverrideNonBootMismatch::BootDiskReadError {
-                            non_boot_disk_info: Some(override_info),
+                            non_boot_disk_info: Some(info),
                         },
                     ),
                 },
                 MupdateOverrideNonBootInfo {
-                    zpool_name: NON_BOOT_2_ZPOOL,
-                    path: dir.path().join(&NON_BOOT_2_PATHS.override_json),
+                    zpool_id: NON_BOOT_2_UUID,
+                    path: dir.path().join(&NON_BOOT_2_PATHS.mupdate_override_json),
                     result: MupdateOverrideNonBootResult::Mismatch(
                         MupdateOverrideNonBootMismatch::BootDiskReadError {
                             non_boot_disk_info: None,
@@ -932,71 +679,20 @@ mod tests {
                     ),
                 },
                 MupdateOverrideNonBootInfo {
-                    zpool_name: NON_BOOT_3_ZPOOL,
-                    path: dir.path().join(&NON_BOOT_3_PATHS.override_json),
+                    zpool_id: NON_BOOT_3_UUID,
+                    path: dir.path().join(&NON_BOOT_3_PATHS.mupdate_override_json),
                     result: MupdateOverrideNonBootResult::ReadError(
                         deserialize_error(
                             dir.path(),
-                            &NON_BOOT_3_PATHS.override_json,
+                            &NON_BOOT_3_PATHS.mupdate_override_json,
                             "",
-                        ),
+                        )
+                        .into(),
                     ),
                 },
-            ]
-            .into_iter()
-            .collect(),
+            },
         );
 
         logctx.cleanup_successful();
-    }
-
-    fn override_info() -> MupdateOverrideInfo {
-        MupdateOverrideInfo {
-            mupdate_uuid: OVERRIDE_UUID,
-            hash_ids: BTreeSet::new(),
-        }
-    }
-
-    fn override_info_2() -> MupdateOverrideInfo {
-        MupdateOverrideInfo {
-            mupdate_uuid: OVERRIDE_2_UUID,
-            hash_ids: BTreeSet::new(),
-        }
-    }
-
-    fn dataset_missing_error(dir_path: &Utf8Path) -> MupdateOverrideReadError {
-        MupdateOverrideReadError::DatasetDirMetadata {
-            dataset_dir: dir_path.to_owned(),
-            error: ArcIoError(Arc::new(io::Error::from(
-                io::ErrorKind::NotFound,
-            ))),
-        }
-    }
-
-    fn dataset_not_dir_error(dir_path: &Utf8Path) -> MupdateOverrideReadError {
-        // A `FileType` must unfortunately be retrieved from disk -- can't
-        // create a new one in-memory. We assume that `dir.path()` passed in
-        // actually has the described error condition.
-        MupdateOverrideReadError::DatasetNotDirectory {
-            dataset_dir: dir_path.to_owned(),
-            file_type: fs::symlink_metadata(dir_path)
-                .expect("lstat on dir.path() succeeded")
-                .file_type(),
-        }
-    }
-
-    fn deserialize_error(
-        dir_path: &Utf8Path,
-        json_path: &Utf8Path,
-        contents: &str,
-    ) -> MupdateOverrideReadError {
-        MupdateOverrideReadError::Deserialize {
-            path: dir_path.join(json_path),
-            contents: contents.to_owned(),
-            error: ArcSerdeJsonError(Arc::new(
-                serde_json::from_str::<MupdateOverrideInfo>(contents)
-                    .unwrap_err(),
-            )),
-        }
     }
 }

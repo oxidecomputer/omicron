@@ -39,6 +39,7 @@ use rand::prelude::IteratorRandom;
 use sled_agent_config_reconciler::AvailableDatasetsReceiver;
 use sled_agent_types::instance::*;
 use sled_agent_types::zone_bundle::ZoneBundleCause;
+use sled_agent_zone_images::ramdisk_file_source;
 use slog::Logger;
 use std::net::IpAddr;
 use std::net::SocketAddr;
@@ -2003,7 +2004,7 @@ impl InstanceRunner {
             .with_log(self.log.clone())
             .with_underlay_vnic_allocator(&self.vnic_allocator)
             .with_zone_root_path(root)
-            .with_zone_image_paths(&["/opt/oxide".into()])
+            .with_file_source(&ramdisk_file_source("propolis-server"))
             .with_zone_type("propolis-server")
             .with_unique_name(OmicronZoneUuid::from_untyped_uuid(
                 self.propolis_id.into_untyped_uuid(),
@@ -2535,7 +2536,7 @@ mod tests {
                         model: "test-model".to_string(),
                         serial: "test-serial".to_string(),
                     },
-                    ZpoolName::new_external(ZpoolUuid::new_v4()),
+                    ZpoolUuid::new_v4(),
                 )]
                 .into_iter(),
             ),
