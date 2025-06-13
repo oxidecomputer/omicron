@@ -246,6 +246,13 @@ impl RegionSnapshotReplacementDetector {
                 continue;
             }
 
+            // Do not check if the volume is deleted here: if the read-only
+            // target is _not_ deleted (checked above), then even if the
+            // snapshot volume is hard deleted there are still other references
+            // in other volumes to those read-only targets that need replacing.
+            // The start saga can handle if the snapshot volume is hard deleted,
+            // so proceed with invoking it here.
+
             let result = self
                 .send_start_request(
                     authn::saga::Serialized::for_opctx(opctx),
