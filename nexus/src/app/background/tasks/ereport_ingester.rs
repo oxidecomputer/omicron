@@ -322,6 +322,17 @@ impl Ingester {
                     );
                 }
                 Err(e) => {
+                    slog::warn!(
+                        &opctx.log,
+                        "ereport collection: unanticipated MGS request error: {e:#}";
+                        "sp_type" => ?sp_type,
+                        "slot" => slot,
+                        "committed_ena" => ?committed_ena,
+                        "start_ena" => ?start_ena,
+                        "restart_id" => ?restart_id,
+                        "gateway_addr" => %addr,
+                        "error" => ?e,
+                    );
                     let stats = status.get_or_insert_default();
                     stats.requests += 1;
                     stats.errors.push(format!("MGS {addr}: {e:#}"));
