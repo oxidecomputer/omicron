@@ -208,6 +208,7 @@ fn process_command(
         Commands::SledRemove(args) => cmd_sled_remove(sim, args),
         Commands::SledShow(args) => cmd_sled_show(sim, args),
         Commands::SledSetPolicy(args) => cmd_sled_set_policy(sim, args),
+        Commands::SledUpdateSp(args) => cmd_sled_update_sp(sim, args),
         Commands::SiloList => cmd_silo_list(sim),
         Commands::SiloAdd(args) => cmd_silo_add(sim, args),
         Commands::SiloRemove(args) => cmd_silo_remove(sim, args),
@@ -261,6 +262,8 @@ enum Commands {
     SledShow(SledArgs),
     /// set a sled's policy
     SledSetPolicy(SledSetPolicyArgs),
+    /// simulate updating the sled's SP versions
+    SledUpdateSp(SledUpdateSpArgs),
 
     /// list silos
     SiloList,
@@ -370,6 +373,20 @@ impl From<SledPolicyOpt> for SledPolicy {
             SledPolicyOpt::Expunged => SledPolicy::Expunged,
         }
     }
+}
+
+#[derive(Debug, Args)]
+struct SledUpdateSpArgs {
+    /// id of the sled
+    sled_id: SledUuid,
+
+    /// sets the version reported for the SP active slot
+    #[clap(long, required_unless_present_any = &["inactive"])]
+    active: Option<ArtifactVersion>,
+
+    /// sets the version reported for the SP inactive slot
+    #[clap(long, required_unless_present_any = &["active"])]
+    inactive: Option<ExpectedVersion>,
 }
 
 #[derive(Debug, Args)]
@@ -885,18 +902,22 @@ fn cmd_sled_show(
     args: SledArgs,
 ) -> anyhow::Result<Option<String>> {
     let state = sim.current_state();
-    let planning_input = state
-        .system()
-        .description()
+    let description = state.system().description();
+    let sled_id = args.sled_id;
+    let sp_active_version = description.sled_sp_active_version(sled_id)?;
+    let sp_inactive_version = description.sled_sp_inactive_version(sled_id)?;
+    let planning_input = description
         .to_planning_input_builder()
         .context("failed to generate planning_input builder")?
         .build();
-    let sled_id = args.sled_id;
-    let sled_resources =
-        &planning_input.sled_lookup(args.filter, sled_id)?.resources;
+    let sled = planning_input.sled_lookup(args.filter, sled_id)?;
+    let sled_resources = &sled.resources;
     let mut s = String::new();
     swriteln!(s, "sled {}", sled_id);
+    swriteln!(s, "serial {}", sled.baseboard_id.serial_number);
     swriteln!(s, "subnet {}", sled_resources.subnet.net());
+    swriteln!(s, "SP active version:   {:?}", sp_active_version);
+    swriteln!(s, "SP inactive version: {:?}", sp_inactive_version);
     swriteln!(s, "zpools ({}):", sled_resources.zpools.len());
     for (zpool, disk) in &sled_resources.zpools {
         swriteln!(s, "    {:?}", zpool);
@@ -922,6 +943,46 @@ fn cmd_sled_set_policy(
         state,
     );
     Ok(Some(format!("set sled {} policy to {}", args.sled_id, args.policy)))
+}
+
+fn cmd_sled_update_sp(
+    sim: &mut ReconfiguratorSim,
+    args: SledUpdateSpArgs,
+) -> anyhow::Result<Option<String>> {
+    let mut labels = Vec::new();
+    if let Some(active) = &args.active {
+        labels.push(format!("active -> {}", active));
+    }
+    if let Some(inactive) = &args.inactive {
+        labels.push(format!("inactive -> {}", inactive));
+    }
+
+    assert!(
+        !labels.is_empty(),
+        "clap configuration requires that at least one argument is specified"
+    );
+
+    let mut state = sim.current_state().to_mut();
+    state.system_mut().description_mut().sled_update_sp_versions(
+        args.sled_id,
+        args.active,
+        args.inactive,
+    )?;
+
+    sim.commit_and_bump(
+        format!(
+            "reconfigurator-cli sled-update-sp: {}: {}",
+            args.sled_id,
+            labels.join(", "),
+        ),
+        state,
+    );
+
+    Ok(Some(format!(
+        "set sled {} SP versions: {}",
+        args.sled_id,
+        labels.join(", ")
+    )))
 }
 
 fn cmd_inventory_list(

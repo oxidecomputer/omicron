@@ -1428,6 +1428,15 @@ impl FromStr for ExpectedVersion {
     }
 }
 
+impl fmt::Display for ExpectedVersion {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            ExpectedVersion::NoValidVersion => f.write_str("invalid"),
+            ExpectedVersion::Version(v) => v.fmt(f),
+        }
+    }
+}
+
 /// Describes the expected active RoT slot, and the version we expect to find for it
 #[derive(
     Clone, Debug, Eq, PartialEq, JsonSchema, Deserialize, Serialize, Diffable,

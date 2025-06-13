@@ -37,7 +37,10 @@ T ENA ID                                   PARENT                               
 
 > sled-show 2eb69596-f081-4e2d-9425-9994926e0832
 sled 2eb69596-f081-4e2d-9425-9994926e0832
+serial serial1
 subnet fd00:1122:3344:102::/64
+SP active version:   Some("0.0.1")
+SP inactive version: None
 zpools (10):
     088ed702-551e-453b-80d7-57700372a844 (zpool)
     SledDisk { disk_identity: DiskIdentity { vendor: "fake-vendor", model: "fake-model", serial: "serial-088ed702-551e-453b-80d7-57700372a844" }, disk_id: b2850ccb-4ac7-4034-aeab-b1cd582d407b (physical_disk), policy: InService, state: Active }
@@ -395,7 +398,10 @@ T ENA ID                                   PARENT                               
 
 > sled-show 89d02b1b-478c-401a-8e28-7a26f74fa41b
 sled 89d02b1b-478c-401a-8e28-7a26f74fa41b
+serial serial0
 subnet fd00:1122:3344:101::/64
+SP active version:   Some("0.0.1")
+SP inactive version: None
 zpools (4):
     44fa7024-c2bc-4d2c-b478-c4997e4aece8 (zpool)
     SledDisk { disk_identity: DiskIdentity { vendor: "fake-vendor", model: "fake-model", serial: "serial-44fa7024-c2bc-4d2c-b478-c4997e4aece8" }, disk_id: 2a15b33c-dd0e-45b7-aba9-d05f40f030ff (physical_disk), policy: InService, state: Active }

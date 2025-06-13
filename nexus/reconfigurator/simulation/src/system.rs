@@ -17,7 +17,7 @@ use nexus_types::{
         Blueprint, BlueprintTarget, SledFilter, UnstableReconfiguratorState,
     },
     internal_api::params::{DnsConfigParams, DnsConfigZone},
-    inventory::Collection,
+    inventory::{CabooseWhich, Collection},
 };
 use omicron_common::{address::IpRange, api::external::Generation};
 use omicron_uuid_kinds::{BlueprintUuid, CollectionUuid, SledUuid};
@@ -687,7 +687,7 @@ impl SimSystemBuilderInner {
             else {
                 res.warnings.push(format!(
                     "sled {}: skipped (no inventory found for sled agent in \
-                     collection {}",
+                     collection {})",
                     sled_id, primary_collection_id
                 ));
                 continue;
@@ -699,11 +699,19 @@ impl SimSystemBuilderInner {
                 .and_then(|baseboard_id| {
                     let inv_sp = primary_collection.sps.get(baseboard_id);
                     let inv_rot = primary_collection.rots.get(baseboard_id);
+                    let sp_active = primary_collection
+                        .caboose_for(CabooseWhich::SpSlot0, baseboard_id)
+                        .map(|c| c.caboose.clone());
+                    let sp_inactive = primary_collection
+                        .caboose_for(CabooseWhich::SpSlot1, baseboard_id)
+                        .map(|c| c.caboose.clone());
                     if let (Some(inv_sp), Some(inv_rot)) = (inv_sp, inv_rot) {
                         Some(SledHwInventory {
                             baseboard_id: &baseboard_id,
                             sp: inv_sp,
                             rot: inv_rot,
+                            sp_active,
+                            sp_inactive,
                         })
                     } else {
                         None
