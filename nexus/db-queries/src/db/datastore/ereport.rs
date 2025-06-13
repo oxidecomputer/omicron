@@ -17,6 +17,7 @@ use crate::db::model::SpMgsSlot;
 use crate::db::model::SpType;
 use crate::db::model::SqlU16;
 use crate::db::model::SqlU32;
+use crate::db::pagination::paginated;
 use async_bb8_diesel::AsyncRunQueryDsl;
 use chrono::DateTime;
 use chrono::Utc;
@@ -27,6 +28,7 @@ use nexus_db_lookup::DbConnection;
 use nexus_db_schema::schema::host_ereport::dsl as host_dsl;
 use nexus_db_schema::schema::sp_ereport::dsl as sp_dsl;
 use omicron_common::api::external::CreateResult;
+use omicron_common::api::external::DataPageParams;
 use omicron_common::api::external::Error;
 use omicron_common::api::external::ListResultVec;
 use omicron_common::api::external::LookupResult;
@@ -41,7 +43,7 @@ type EreportIdTuple = (Uuid, DbEna);
 pub struct EreporterRestartBySerial {
     pub id: EreporterRestartUuid,
     pub first_seen_at: DateTime<Utc>,
-    pub reporter: Reporter,
+    pub reporter_kind: Reporter,
     pub ereports: u32,
 }
 
@@ -100,6 +102,24 @@ impl DataStore {
         Err(Error::non_resourcetype_not_found(format!("ereport {id}")))
     }
 
+    /// List ereports from the SP with the given restart ID.
+    pub async fn sp_ereport_list_by_restart(
+        &self,
+        opctx: &OpContext,
+        restart_id: EreporterRestartUuid,
+        pagparams: &DataPageParams<'_, DbEna>,
+    ) -> ListResultVec<SpEreport> {
+        opctx.authorize(authz::Action::ListChildren, &authz::FLEET).await?;
+        paginated(sp_dsl::sp_ereport, sp_dsl::ena, pagparams)
+            .filter(sp_dsl::restart_id.eq(restart_id.into_untyped_uuid()))
+            .filter(sp_dsl::time_deleted.is_null())
+            .select(SpEreport::as_select())
+            .load_async(&*self.pool_connection_authorized(opctx).await?)
+            .await
+            .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))
+    }
+
+    /// List unique ereporter restarts for the given serial number.
     pub async fn ereporter_restart_list_by_serial(
         &self,
         opctx: &OpContext,
@@ -172,7 +192,7 @@ impl DataStore {
 
             Some(EreporterRestartBySerial {
                 id: EreporterRestartUuid::from_untyped_uuid(restart_id),
-                reporter: Reporter::Sp { sp_type, slot: sp_slot.into() },
+                reporter_kind: Reporter::Sp { sp_type, slot: sp_slot.into() },
                 first_seen_at,
                 ereports,
             })
@@ -198,7 +218,7 @@ impl DataStore {
 
             Some(EreporterRestartBySerial {
                 id: EreporterRestartUuid::from_untyped_uuid(restart_id),
-                reporter: Reporter::HostOs { sled: SledUuid::from_untyped_uuid(sled_id) },
+                reporter_kind: Reporter::HostOs { sled: SledUuid::from_untyped_uuid(sled_id) },
                 first_seen_at,
                 ereports,
             })
