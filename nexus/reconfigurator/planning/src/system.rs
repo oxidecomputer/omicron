@@ -491,6 +491,18 @@ impl SystemDescription {
                 policy: sled.policy,
                 state: sled.state,
                 resources: sled.resources.clone(),
+                baseboard_id: BaseboardId {
+                    part_number: sled
+                        .inventory_sled_agent
+                        .baseboard
+                        .model()
+                        .to_owned(),
+                    serial_number: sled
+                        .inventory_sled_agent
+                        .baseboard
+                        .identifier()
+                        .to_owned(),
+                },
             };
             builder.add_sled(sled.sled_id, sled_details)?;
         }
