@@ -301,17 +301,361 @@ parent:    06c88262-f435-410e-ba98-101bed41ec27
     read from::   SingleNode
 
  METADATA:
-    created by:::::::::::   test suite
-    created at:::::::::::   <REDACTED_TIMESTAMP>
-    comment::::::::::::::   (none)
-    internal DNS version:   1
-    external DNS version:   1
+    created by:::::::::::::   test suite
+    created at:::::::::::::   <REDACTED_TIMESTAMP>
+    comment::::::::::::::::   (none)
+    internal DNS version:::   1
+    external DNS version:::   1
+    target release min gen:   1
 
  PENDING MGS-MANAGED UPDATES: 0
 
 
 > blueprint-edit 3f00b694-1b16-4aaa-8f78-e6b3a527b434 expunge-zone 9995de32-dd52-4eb1-b0eb-141eb84bc739
 blueprint 366b0b68-d80e-4bc1-abd3-dc69837847e0 created from blueprint 3f00b694-1b16-4aaa-8f78-e6b3a527b434: expunged zone 9995de32-dd52-4eb1-b0eb-141eb84bc739 from sled a88790de-5962-4871-8686-61c1fd5b7094
+
+
+> # Diff DNS to see that the expunged zone is no longer has DNS records.
+> blueprint-diff 3f00b694-1b16-4aaa-8f78-e6b3a527b434 366b0b68-d80e-4bc1-abd3-dc69837847e0
+from: blueprint 3f00b694-1b16-4aaa-8f78-e6b3a527b434
+to:   blueprint 366b0b68-d80e-4bc1-abd3-dc69837847e0
+
+ MODIFIED SLEDS:
+
+  sled a88790de-5962-4871-8686-61c1fd5b7094 (active, config generation 2 -> 3):
+
+    physical disks:
+    ------------------------------------------------------------------------------------
+    vendor        model        serial                                        disposition
+    ------------------------------------------------------------------------------------
+    fake-vendor   fake-model   serial-2f26e76b-6c91-4ee9-87b3-f424b942091b   in service 
+    fake-vendor   fake-model   serial-6f8fa855-4f34-42db-a6e4-9d0090d6c828   in service 
+    fake-vendor   fake-model   serial-71450d62-791e-4068-9882-8a206a465fd9   in service 
+    fake-vendor   fake-model   serial-7b4ad242-8330-4c08-9588-c66782742678   in service 
+    fake-vendor   fake-model   serial-9bf23b52-565e-4439-9728-edb603fa6c4e   in service 
+    fake-vendor   fake-model   serial-c9476e3d-7745-4fa9-b336-b54ac5b08f56   in service 
+    fake-vendor   fake-model   serial-d2cd1e65-b63d-4748-895f-aafecc81e440   in service 
+    fake-vendor   fake-model   serial-d4ad3cc1-956a-4444-81a6-da6a025f6df2   in service 
+    fake-vendor   fake-model   serial-e1298a43-fa1a-4e6f-bcfa-b26996f69c50   in service 
+    fake-vendor   fake-model   serial-fa9ce87c-fa7c-4854-95bd-69b8f01c46f9   in service 
+
+
+    datasets:
+    --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+    dataset name                                                                                                   dataset id                             disposition    quota     reservation   compression
+    --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+    oxp_2f26e76b-6c91-4ee9-87b3-f424b942091b/crucible                                                              dd2ac836-55e7-4f13-a39f-24fbf9122dee   in service     none      none          off        
+    oxp_6f8fa855-4f34-42db-a6e4-9d0090d6c828/crucible                                                              b1d078dc-62ee-433a-b8cf-854fefb22039   in service     none      none          off        
+    oxp_71450d62-791e-4068-9882-8a206a465fd9/crucible                                                              91ea5860-a12b-458a-9b47-a3960e2d78b8   in service     none      none          off        
+    oxp_7b4ad242-8330-4c08-9588-c66782742678/crucible                                                              9316a944-5d51-475a-ad89-8df8b4dd0863   in service     none      none          off        
+    oxp_9bf23b52-565e-4439-9728-edb603fa6c4e/crucible                                                              8dabf037-8d33-47e3-95fc-ada8d20f1d44   in service     none      none          off        
+    oxp_c9476e3d-7745-4fa9-b336-b54ac5b08f56/crucible                                                              1e28e523-e77a-4270-99d1-fd3810e1aad9   in service     none      none          off        
+    oxp_d2cd1e65-b63d-4748-895f-aafecc81e440/crucible                                                              28ba9385-4ebf-49ce-9fa2-5c549ad1fded   in service     none      none          off        
+    oxp_d4ad3cc1-956a-4444-81a6-da6a025f6df2/crucible                                                              fdc03ce9-b4f2-47aa-bff8-b0b2a05fe3b0   in service     none      none          off        
+    oxp_e1298a43-fa1a-4e6f-bcfa-b26996f69c50/crucible                                                              7d9f72bd-23bc-40e6-97c5-a53ca255588d   in service     none      none          off        
+    oxp_fa9ce87c-fa7c-4854-95bd-69b8f01c46f9/crucible                                                              bf673cd5-b04e-4088-b017-c7a714ce2b63   in service     none      none          off        
+    oxp_2f26e76b-6c91-4ee9-87b3-f424b942091b/crypt/internal_dns                                                    92ff6262-7b3c-4300-bb53-936bd3edce26   in service     none      none          off        
+    oxp_2f26e76b-6c91-4ee9-87b3-f424b942091b/crypt/zone                                                            9d6ab53a-6474-4ed6-8beb-9be1758229f5   in service     none      none          off        
+    oxp_6f8fa855-4f34-42db-a6e4-9d0090d6c828/crypt/zone                                                            df385279-2886-4422-957f-88f1f382a90b   in service     none      none          off        
+    oxp_71450d62-791e-4068-9882-8a206a465fd9/crypt/zone                                                            97a12796-0555-47c5-a0d3-c136e0e919f6   in service     none      none          off        
+    oxp_7b4ad242-8330-4c08-9588-c66782742678/crypt/zone                                                            39343108-efec-4643-80c8-1c741d045dad   in service     none      none          off        
+    oxp_9bf23b52-565e-4439-9728-edb603fa6c4e/crypt/zone                                                            b58b762a-7124-4441-a334-16d552f576f3   in service     none      none          off        
+    oxp_c9476e3d-7745-4fa9-b336-b54ac5b08f56/crypt/zone                                                            92c63f1f-4ba8-4a41-93c0-e227b3320eaa   in service     none      none          off        
+    oxp_d2cd1e65-b63d-4748-895f-aafecc81e440/crypt/zone                                                            434bf6e8-b885-441d-b944-9508b0c64311   in service     none      none          off        
+    oxp_d4ad3cc1-956a-4444-81a6-da6a025f6df2/crypt/zone                                                            58e91146-8da0-449a-adab-6e93504c9bf0   in service     none      none          off        
+    oxp_e1298a43-fa1a-4e6f-bcfa-b26996f69c50/crypt/zone                                                            e56258ab-55c4-42ca-95e5-ea8bbeff84e1   in service     none      none          off        
+    oxp_fa9ce87c-fa7c-4854-95bd-69b8f01c46f9/crypt/zone                                                            e070deb1-5298-46fb-983f-b6e153e98cd7   in service     none      none          off        
+    oxp_2f26e76b-6c91-4ee9-87b3-f424b942091b/crypt/zone/oxz_crucible_0903299a-6296-44f0-8ab9-7c70b5766a05          277b0d6a-bb61-4eb2-bd11-d750586b5fbc   in service     none      none          off        
+    oxp_71450d62-791e-4068-9882-8a206a465fd9/crypt/zone/oxz_crucible_2b6b3cfd-4524-465b-ac6e-10be9ab6d4d4          5073cf86-7d36-4c98-9e34-559172a0bc84   in service     none      none          off        
+    oxp_e1298a43-fa1a-4e6f-bcfa-b26996f69c50/crypt/zone/oxz_crucible_3e0ff677-2ca8-4124-9fef-7c23ac2da6fa          028fc58f-16ea-4536-9f50-b4eeb1aa57c9   in service     none      none          off        
+    oxp_c9476e3d-7745-4fa9-b336-b54ac5b08f56/crypt/zone/oxz_crucible_512758d0-335f-4c94-9afe-c82f6f127421          f20e7661-c0c7-47cd-b08a-e7f5b76026d6   in service     none      none          off        
+    oxp_6f8fa855-4f34-42db-a6e4-9d0090d6c828/crypt/zone/oxz_crucible_8ae67b12-ca74-40d3-a55e-90456cd623ea          3f7802ee-87bb-48d6-a42d-657bd0f85c74   in service     none      none          off        
+    oxp_fa9ce87c-fa7c-4854-95bd-69b8f01c46f9/crypt/zone/oxz_crucible_918c8cbc-1c62-4de5-9cf2-c4153a3d1a7e          41d832ad-7b85-4214-b485-9ca2ed4f85d0   in service     none      none          off        
+    oxp_7b4ad242-8330-4c08-9588-c66782742678/crypt/zone/oxz_crucible_be422e7a-16d0-426e-8567-da0aed7200d4          e0fb453d-b22c-4d87-be9b-94f6113cb25a   in service     none      none          off        
+    oxp_d2cd1e65-b63d-4748-895f-aafecc81e440/crypt/zone/oxz_crucible_ea50f438-1b5e-4d61-bd65-46d360f590ee          26a25185-a37f-4ead-8c81-77be56a21b0a   in service     none      none          off        
+    oxp_9bf23b52-565e-4439-9728-edb603fa6c4e/crypt/zone/oxz_crucible_f055a042-9d1b-4931-8268-d94cac801d7e          998b0fb1-b562-4858-a9ae-c02296c7c6ed   in service     none      none          off        
+    oxp_d4ad3cc1-956a-4444-81a6-da6a025f6df2/crypt/zone/oxz_crucible_f33e09d1-e3d7-4341-baf2-5f079f3679e5          aa4f1267-a83a-4081-b572-28e1860ff2f2   in service     none      none          off        
+    oxp_2f26e76b-6c91-4ee9-87b3-f424b942091b/crypt/zone/oxz_crucible_pantry_100e20aa-1816-4195-8d76-08beace10332   032bf309-8046-4c96-9453-29b9346b19fc   in service     none      none          off        
+    oxp_2f26e76b-6c91-4ee9-87b3-f424b942091b/crypt/zone/oxz_internal_dns_171cabf0-8635-42e7-8ea1-2a1d2a2daf55      3531c6de-8d31-4917-bb72-884b6e168eca   in service     none      none          off        
+    oxp_2f26e76b-6c91-4ee9-87b3-f424b942091b/crypt/zone/oxz_nexus_5b01b0e0-5cdf-4b34-b0a6-c947cbbdb8be             5e3a1b9d-9475-4bd9-8112-5595a7c0da7d   in service     none      none          off        
+    oxp_2f26e76b-6c91-4ee9-87b3-f424b942091b/crypt/zone/oxz_ntp_7b4bccad-9869-48da-8320-2dc82752deea               45771e96-054c-4b05-8021-c32b23fcad8d   in service     none      none          off        
+    oxp_2f26e76b-6c91-4ee9-87b3-f424b942091b/crypt/debug                                                           29be83b4-4d0b-4787-819d-96e8e69301da   in service     100 GiB   none          gzip-9     
+    oxp_6f8fa855-4f34-42db-a6e4-9d0090d6c828/crypt/debug                                                           ce433c69-7540-4a7a-9e11-dd30b0d2dc19   in service     100 GiB   none          gzip-9     
+    oxp_71450d62-791e-4068-9882-8a206a465fd9/crypt/debug                                                           48cc9313-13c2-4ebe-8120-5b648ec26a28   in service     100 GiB   none          gzip-9     
+    oxp_7b4ad242-8330-4c08-9588-c66782742678/crypt/debug                                                           cdcfe435-881a-44dc-9dba-2a0fafdbf66d   in service     100 GiB   none          gzip-9     
+    oxp_9bf23b52-565e-4439-9728-edb603fa6c4e/crypt/debug                                                           835edc8b-9d33-45db-9bdc-ea8a956f3217   in service     100 GiB   none          gzip-9     
+    oxp_c9476e3d-7745-4fa9-b336-b54ac5b08f56/crypt/debug                                                           1754b8f0-07b8-4305-8bb2-b347ba3e0b68   in service     100 GiB   none          gzip-9     
+    oxp_d2cd1e65-b63d-4748-895f-aafecc81e440/crypt/debug                                                           7028b888-b4c0-43e5-a9d4-2e29d24f34a7   in service     100 GiB   none          gzip-9     
+    oxp_d4ad3cc1-956a-4444-81a6-da6a025f6df2/crypt/debug                                                           36ad4fe9-3897-4777-bc0e-88f142594d07   in service     100 GiB   none          gzip-9     
+    oxp_e1298a43-fa1a-4e6f-bcfa-b26996f69c50/crypt/debug                                                           d37e0b8c-6c43-4e83-b3ec-238429d1cbfb   in service     100 GiB   none          gzip-9     
+    oxp_fa9ce87c-fa7c-4854-95bd-69b8f01c46f9/crypt/debug                                                           b7569aa4-f0d6-4de0-9b9a-cd8d0a6cc01d   in service     100 GiB   none          gzip-9     
+*   oxp_2f26e76b-6c91-4ee9-87b3-f424b942091b/crypt/external_dns                                                    195da8dd-34fd-4e96-a949-b7329710133e   - in service   none      none          off        
+     └─                                                                                                                                                   + expunged                                        
+*   oxp_2f26e76b-6c91-4ee9-87b3-f424b942091b/crypt/zone/oxz_external_dns_9995de32-dd52-4eb1-b0eb-141eb84bc739      f258d941-f8b3-4d0e-bbe6-773996a002d5   - in service   none      none          off        
+     └─                                                                                                                                                   + expunged                                        
+
+
+    omicron zones:
+    ------------------------------------------------------------------------------------------------------------------
+    zone type         zone id                                image source      disposition      underlay IP           
+    ------------------------------------------------------------------------------------------------------------------
+    crucible          0903299a-6296-44f0-8ab9-7c70b5766a05   install dataset   in service       fd00:1122:3344:101::25
+    crucible          2b6b3cfd-4524-465b-ac6e-10be9ab6d4d4   install dataset   in service       fd00:1122:3344:101::27
+    crucible          3e0ff677-2ca8-4124-9fef-7c23ac2da6fa   install dataset   in service       fd00:1122:3344:101::2d
+    crucible          512758d0-335f-4c94-9afe-c82f6f127421   install dataset   in service       fd00:1122:3344:101::2a
+    crucible          8ae67b12-ca74-40d3-a55e-90456cd623ea   install dataset   in service       fd00:1122:3344:101::26
+    crucible          918c8cbc-1c62-4de5-9cf2-c4153a3d1a7e   install dataset   in service       fd00:1122:3344:101::2e
+    crucible          be422e7a-16d0-426e-8567-da0aed7200d4   install dataset   in service       fd00:1122:3344:101::28
+    crucible          ea50f438-1b5e-4d61-bd65-46d360f590ee   install dataset   in service       fd00:1122:3344:101::2b
+    crucible          f055a042-9d1b-4931-8268-d94cac801d7e   install dataset   in service       fd00:1122:3344:101::29
+    crucible          f33e09d1-e3d7-4341-baf2-5f079f3679e5   install dataset   in service       fd00:1122:3344:101::2c
+    crucible_pantry   100e20aa-1816-4195-8d76-08beace10332   install dataset   in service       fd00:1122:3344:101::24
+    internal_dns      171cabf0-8635-42e7-8ea1-2a1d2a2daf55   install dataset   in service       fd00:1122:3344:3::1   
+    internal_ntp      7b4bccad-9869-48da-8320-2dc82752deea   install dataset   in service       fd00:1122:3344:101::21
+    nexus             5b01b0e0-5cdf-4b34-b0a6-c947cbbdb8be   install dataset   in service       fd00:1122:3344:101::22
+*   external_dns      9995de32-dd52-4eb1-b0eb-141eb84bc739   install dataset   - in service     fd00:1122:3344:101::23
+     └─                                                                        + expunged ⏳                           
+
+
+ COCKROACHDB SETTINGS:
+    state fingerprint:::::::::::::::::   (none) (unchanged)
+    cluster.preserve_downgrade_option:   (do not modify) (unchanged)
+
+ METADATA:
+    internal DNS version:::   1 (unchanged)
+    external DNS version:::   1 (unchanged)
+    target release min gen:   1 (unchanged)
+
+ OXIMETER SETTINGS:
+    generation:   1 (unchanged)
+    read from::   SingleNode (unchanged)
+
+
+internal DNS:
+* DNS zone: "control-plane.oxide.internal": 
+    name: 07738018-1b2a-4efc-8c5c-bd6b7a5d7b40.host          (records: 1)
+        AAAA fd00:1122:3344:103::25
+    name: 0903299a-6296-44f0-8ab9-7c70b5766a05.host          (records: 1)
+        AAAA fd00:1122:3344:101::25
+    name: 100e20aa-1816-4195-8d76-08beace10332.host          (records: 1)
+        AAAA fd00:1122:3344:101::24
+    name: 171cabf0-8635-42e7-8ea1-2a1d2a2daf55.host          (records: 1)
+        AAAA fd00:1122:3344:3::1
+    name: 1b37911d-c427-4bf1-90d3-b2d0c2e98825.host          (records: 1)
+        AAAA fd00:1122:3344:103::24
+    name: 2b6b3cfd-4524-465b-ac6e-10be9ab6d4d4.host          (records: 1)
+        AAAA fd00:1122:3344:101::27
+    name: 2cea0275-1fbc-410c-819e-2ec54ffeeffe.host          (records: 1)
+        AAAA fd00:1122:3344:102::22
+    name: 3e0ff677-2ca8-4124-9fef-7c23ac2da6fa.host          (records: 1)
+        AAAA fd00:1122:3344:101::2d
+    name: 426cd521-e6ad-4a67-ad8d-a1acef5eab5e.host          (records: 1)
+        AAAA fd00:1122:3344:102::27
+    name: 47387358-e16d-4c34-b8f7-1f3f12c662eb.host          (records: 1)
+        AAAA fd00:1122:3344:102::23
+    name: 4a392139-7423-459b-b1c9-5903421be40c.host          (records: 1)
+        AAAA fd00:1122:3344:102::2d
+    name: 512758d0-335f-4c94-9afe-c82f6f127421.host          (records: 1)
+        AAAA fd00:1122:3344:101::2a
+    name: 51e403e5-a703-4cfb-b044-c72c52885e82.host          (records: 1)
+        AAAA fd00:1122:3344:102::26
+    name: 53491964-307a-45f6-b277-79a5e90f20b7.host          (records: 1)
+        AAAA fd00:1122:3344:103::2b
+    name: 55a2094a-9590-442f-8203-dffe5a76ae66.host          (records: 1)
+        AAAA fd00:1122:3344:102::25
+    name: 5b01b0e0-5cdf-4b34-b0a6-c947cbbdb8be.host          (records: 1)
+        AAAA fd00:1122:3344:101::22
+    name: 6e1cdf48-6846-4bb3-8a72-8bc1e8d5b21d.host          (records: 1)
+        AAAA fd00:1122:3344:102::21
+    name: 711ac7f8-d19e-4572-bdb9-e9b50f6e362a.sled          (records: 1)
+        AAAA fd00:1122:3344:103::1
+    name: 758d9a91-7070-43e3-8c60-ea1d0f818a12.host          (records: 1)
+        AAAA fd00:1122:3344:102::29
+    name: 777087c0-4fb9-43ed-846b-16aa6431a272.host          (records: 1)
+        AAAA fd00:1122:3344:103::2f
+    name: 78a45052-138b-47ee-877d-e73143467c8a.host          (records: 1)
+        AAAA fd00:1122:3344:103::2a
+    name: 7a1bd482-74f8-4562-b1db-c8bad16afb44.host          (records: 1)
+        AAAA fd00:1122:3344:1::1
+    name: 7b4bccad-9869-48da-8320-2dc82752deea.host          (records: 1)
+        AAAA fd00:1122:3344:101::21
+    name: 8ae67b12-ca74-40d3-a55e-90456cd623ea.host          (records: 1)
+        AAAA fd00:1122:3344:101::26
+    name: 8c368ed6-6c91-4437-b8ff-0d789193db38.host          (records: 1)
+        AAAA fd00:1122:3344:103::21
+    name: 8e4d80f8-80ea-48ac-ad47-95501c0c3fbe.host          (records: 1)
+        AAAA fd00:1122:3344:102::2a
+    name: 8ec567c1-6776-4573-bfe5-f3041165fdca.host          (records: 1)
+        AAAA fd00:1122:3344:103::28
+    name: 8ef7ff46-81f7-4f16-aa8f-0c1957589a5f.host          (records: 1)
+        AAAA fd00:1122:3344:103::2e
+    name: 918c8cbc-1c62-4de5-9cf2-c4153a3d1a7e.host          (records: 1)
+        AAAA fd00:1122:3344:101::2e
+-   name: 9995de32-dd52-4eb1-b0eb-141eb84bc739.host          (records: 1)
+-       AAAA fd00:1122:3344:101::23
+    name: 9dc50690-f9bf-4520-bf80-051d0f465c2c.sled          (records: 1)
+        AAAA fd00:1122:3344:102::1
+    name: @                                                  (records: 3)
+        NS   ns1.control-plane.oxide.internal
+        NS   ns2.control-plane.oxide.internal
+        NS   ns3.control-plane.oxide.internal
+    name: _clickhouse-admin-single-server._tcp               (records: 1)
+        SRV  port  8888 e9d3a6d6-6e95-4ec8-a857-a3ab1ce6e62d.host.control-plane.oxide.internal
+    name: _clickhouse-native._tcp                            (records: 1)
+        SRV  port  9000 e9d3a6d6-6e95-4ec8-a857-a3ab1ce6e62d.host.control-plane.oxide.internal
+    name: _clickhouse._tcp                                   (records: 1)
+        SRV  port  8123 e9d3a6d6-6e95-4ec8-a857-a3ab1ce6e62d.host.control-plane.oxide.internal
+    name: _crucible-pantry._tcp                              (records: 3)
+        SRV  port 17000 07738018-1b2a-4efc-8c5c-bd6b7a5d7b40.host.control-plane.oxide.internal
+        SRV  port 17000 100e20aa-1816-4195-8d76-08beace10332.host.control-plane.oxide.internal
+        SRV  port 17000 eb4f0a57-7386-4216-bcb2-874d39aae836.host.control-plane.oxide.internal
+    name: _crucible._tcp.0903299a-6296-44f0-8ab9-7c70b5766a05 (records: 1)
+        SRV  port 32345 0903299a-6296-44f0-8ab9-7c70b5766a05.host.control-plane.oxide.internal
+    name: _crucible._tcp.2b6b3cfd-4524-465b-ac6e-10be9ab6d4d4 (records: 1)
+        SRV  port 32345 2b6b3cfd-4524-465b-ac6e-10be9ab6d4d4.host.control-plane.oxide.internal
+    name: _crucible._tcp.3e0ff677-2ca8-4124-9fef-7c23ac2da6fa (records: 1)
+        SRV  port 32345 3e0ff677-2ca8-4124-9fef-7c23ac2da6fa.host.control-plane.oxide.internal
+    name: _crucible._tcp.426cd521-e6ad-4a67-ad8d-a1acef5eab5e (records: 1)
+        SRV  port 32345 426cd521-e6ad-4a67-ad8d-a1acef5eab5e.host.control-plane.oxide.internal
+    name: _crucible._tcp.4a392139-7423-459b-b1c9-5903421be40c (records: 1)
+        SRV  port 32345 4a392139-7423-459b-b1c9-5903421be40c.host.control-plane.oxide.internal
+    name: _crucible._tcp.512758d0-335f-4c94-9afe-c82f6f127421 (records: 1)
+        SRV  port 32345 512758d0-335f-4c94-9afe-c82f6f127421.host.control-plane.oxide.internal
+    name: _crucible._tcp.51e403e5-a703-4cfb-b044-c72c52885e82 (records: 1)
+        SRV  port 32345 51e403e5-a703-4cfb-b044-c72c52885e82.host.control-plane.oxide.internal
+    name: _crucible._tcp.53491964-307a-45f6-b277-79a5e90f20b7 (records: 1)
+        SRV  port 32345 53491964-307a-45f6-b277-79a5e90f20b7.host.control-plane.oxide.internal
+    name: _crucible._tcp.55a2094a-9590-442f-8203-dffe5a76ae66 (records: 1)
+        SRV  port 32345 55a2094a-9590-442f-8203-dffe5a76ae66.host.control-plane.oxide.internal
+    name: _crucible._tcp.758d9a91-7070-43e3-8c60-ea1d0f818a12 (records: 1)
+        SRV  port 32345 758d9a91-7070-43e3-8c60-ea1d0f818a12.host.control-plane.oxide.internal
+    name: _crucible._tcp.777087c0-4fb9-43ed-846b-16aa6431a272 (records: 1)
+        SRV  port 32345 777087c0-4fb9-43ed-846b-16aa6431a272.host.control-plane.oxide.internal
+    name: _crucible._tcp.78a45052-138b-47ee-877d-e73143467c8a (records: 1)
+        SRV  port 32345 78a45052-138b-47ee-877d-e73143467c8a.host.control-plane.oxide.internal
+    name: _crucible._tcp.8ae67b12-ca74-40d3-a55e-90456cd623ea (records: 1)
+        SRV  port 32345 8ae67b12-ca74-40d3-a55e-90456cd623ea.host.control-plane.oxide.internal
+    name: _crucible._tcp.8e4d80f8-80ea-48ac-ad47-95501c0c3fbe (records: 1)
+        SRV  port 32345 8e4d80f8-80ea-48ac-ad47-95501c0c3fbe.host.control-plane.oxide.internal
+    name: _crucible._tcp.8ec567c1-6776-4573-bfe5-f3041165fdca (records: 1)
+        SRV  port 32345 8ec567c1-6776-4573-bfe5-f3041165fdca.host.control-plane.oxide.internal
+    name: _crucible._tcp.8ef7ff46-81f7-4f16-aa8f-0c1957589a5f (records: 1)
+        SRV  port 32345 8ef7ff46-81f7-4f16-aa8f-0c1957589a5f.host.control-plane.oxide.internal
+    name: _crucible._tcp.918c8cbc-1c62-4de5-9cf2-c4153a3d1a7e (records: 1)
+        SRV  port 32345 918c8cbc-1c62-4de5-9cf2-c4153a3d1a7e.host.control-plane.oxide.internal
+    name: _crucible._tcp.af3e8274-151f-4cb1-990c-b0a7680ff210 (records: 1)
+        SRV  port 32345 af3e8274-151f-4cb1-990c-b0a7680ff210.host.control-plane.oxide.internal
+    name: _crucible._tcp.be422e7a-16d0-426e-8567-da0aed7200d4 (records: 1)
+        SRV  port 32345 be422e7a-16d0-426e-8567-da0aed7200d4.host.control-plane.oxide.internal
+    name: _crucible._tcp.c3114d7e-07cd-4d80-b82b-49ccbe856af2 (records: 1)
+        SRV  port 32345 c3114d7e-07cd-4d80-b82b-49ccbe856af2.host.control-plane.oxide.internal
+    name: _crucible._tcp.cbf109e0-cdd5-48f9-8998-e9f55c9be980 (records: 1)
+        SRV  port 32345 cbf109e0-cdd5-48f9-8998-e9f55c9be980.host.control-plane.oxide.internal
+    name: _crucible._tcp.d23b5191-04de-4b48-8599-cf866ffc06e8 (records: 1)
+        SRV  port 32345 d23b5191-04de-4b48-8599-cf866ffc06e8.host.control-plane.oxide.internal
+    name: _crucible._tcp.d60cc034-46c4-4233-8066-4008e947d904 (records: 1)
+        SRV  port 32345 d60cc034-46c4-4233-8066-4008e947d904.host.control-plane.oxide.internal
+    name: _crucible._tcp.ea50f438-1b5e-4d61-bd65-46d360f590ee (records: 1)
+        SRV  port 32345 ea50f438-1b5e-4d61-bd65-46d360f590ee.host.control-plane.oxide.internal
+    name: _crucible._tcp.efdbf061-321c-47d6-bf0f-4530ec4c287e (records: 1)
+        SRV  port 32345 efdbf061-321c-47d6-bf0f-4530ec4c287e.host.control-plane.oxide.internal
+    name: _crucible._tcp.f055a042-9d1b-4931-8268-d94cac801d7e (records: 1)
+        SRV  port 32345 f055a042-9d1b-4931-8268-d94cac801d7e.host.control-plane.oxide.internal
+    name: _crucible._tcp.f24b63e6-2382-4862-90bf-c39e42aad988 (records: 1)
+        SRV  port 32345 f24b63e6-2382-4862-90bf-c39e42aad988.host.control-plane.oxide.internal
+    name: _crucible._tcp.f31ab1c5-0f23-44dc-8504-c67c65afc11e (records: 1)
+        SRV  port 32345 f31ab1c5-0f23-44dc-8504-c67c65afc11e.host.control-plane.oxide.internal
+    name: _crucible._tcp.f33e09d1-e3d7-4341-baf2-5f079f3679e5 (records: 1)
+        SRV  port 32345 f33e09d1-e3d7-4341-baf2-5f079f3679e5.host.control-plane.oxide.internal
+    name: _crucible._tcp.fddd2bd6-a535-4e2c-9a36-cb90d048c0b7 (records: 1)
+        SRV  port 32345 fddd2bd6-a535-4e2c-9a36-cb90d048c0b7.host.control-plane.oxide.internal
+*   name: _external-dns._tcp                                 (records: 3 -> 2)
+-       SRV  port  5353 1b37911d-c427-4bf1-90d3-b2d0c2e98825.host.control-plane.oxide.internal
+-       SRV  port  5353 47387358-e16d-4c34-b8f7-1f3f12c662eb.host.control-plane.oxide.internal
+-       SRV  port  5353 9995de32-dd52-4eb1-b0eb-141eb84bc739.host.control-plane.oxide.internal
++       SRV  port  5353 1b37911d-c427-4bf1-90d3-b2d0c2e98825.host.control-plane.oxide.internal
++       SRV  port  5353 47387358-e16d-4c34-b8f7-1f3f12c662eb.host.control-plane.oxide.internal
+    name: _internal-ntp._tcp                                 (records: 3)
+        SRV  port   123 6e1cdf48-6846-4bb3-8a72-8bc1e8d5b21d.host.control-plane.oxide.internal
+        SRV  port   123 7b4bccad-9869-48da-8320-2dc82752deea.host.control-plane.oxide.internal
+        SRV  port   123 8c368ed6-6c91-4437-b8ff-0d789193db38.host.control-plane.oxide.internal
+    name: _nameservice._tcp                                  (records: 3)
+        SRV  port  5353 171cabf0-8635-42e7-8ea1-2a1d2a2daf55.host.control-plane.oxide.internal
+        SRV  port  5353 7a1bd482-74f8-4562-b1db-c8bad16afb44.host.control-plane.oxide.internal
+        SRV  port  5353 edb6573c-3621-4d95-ad3b-93a088caeea5.host.control-plane.oxide.internal
+    name: _nexus._tcp                                        (records: 3)
+        SRV  port 12221 2cea0275-1fbc-410c-819e-2ec54ffeeffe.host.control-plane.oxide.internal
+        SRV  port 12221 5b01b0e0-5cdf-4b34-b0a6-c947cbbdb8be.host.control-plane.oxide.internal
+        SRV  port 12221 ed2d3be3-fcee-4f6b-bb99-a1a9130c4eeb.host.control-plane.oxide.internal
+    name: _oximeter-reader._tcp                              (records: 1)
+        SRV  port  9000 e9d3a6d6-6e95-4ec8-a857-a3ab1ce6e62d.host.control-plane.oxide.internal
+    name: _repo-depot._tcp                                   (records: 3)
+        SRV  port 12348 711ac7f8-d19e-4572-bdb9-e9b50f6e362a.sled.control-plane.oxide.internal
+        SRV  port 12348 9dc50690-f9bf-4520-bf80-051d0f465c2c.sled.control-plane.oxide.internal
+        SRV  port 12348 a88790de-5962-4871-8686-61c1fd5b7094.sled.control-plane.oxide.internal
+    name: a88790de-5962-4871-8686-61c1fd5b7094.sled          (records: 1)
+        AAAA fd00:1122:3344:101::1
+    name: af3e8274-151f-4cb1-990c-b0a7680ff210.host          (records: 1)
+        AAAA fd00:1122:3344:103::27
+    name: be422e7a-16d0-426e-8567-da0aed7200d4.host          (records: 1)
+        AAAA fd00:1122:3344:101::28
+    name: c3114d7e-07cd-4d80-b82b-49ccbe856af2.host          (records: 1)
+        AAAA fd00:1122:3344:103::29
+    name: cbf109e0-cdd5-48f9-8998-e9f55c9be980.host          (records: 1)
+        AAAA fd00:1122:3344:102::2e
+    name: d23b5191-04de-4b48-8599-cf866ffc06e8.host          (records: 1)
+        AAAA fd00:1122:3344:103::2d
+    name: d60cc034-46c4-4233-8066-4008e947d904.host          (records: 1)
+        AAAA fd00:1122:3344:102::2c
+    name: e9d3a6d6-6e95-4ec8-a857-a3ab1ce6e62d.host          (records: 1)
+        AAAA fd00:1122:3344:103::23
+    name: ea50f438-1b5e-4d61-bd65-46d360f590ee.host          (records: 1)
+        AAAA fd00:1122:3344:101::2b
+    name: eb4f0a57-7386-4216-bcb2-874d39aae836.host          (records: 1)
+        AAAA fd00:1122:3344:102::24
+    name: ed2d3be3-fcee-4f6b-bb99-a1a9130c4eeb.host          (records: 1)
+        AAAA fd00:1122:3344:103::22
+    name: edb6573c-3621-4d95-ad3b-93a088caeea5.host          (records: 1)
+        AAAA fd00:1122:3344:2::1
+    name: efdbf061-321c-47d6-bf0f-4530ec4c287e.host          (records: 1)
+        AAAA fd00:1122:3344:103::26
+    name: f055a042-9d1b-4931-8268-d94cac801d7e.host          (records: 1)
+        AAAA fd00:1122:3344:101::29
+    name: f24b63e6-2382-4862-90bf-c39e42aad988.host          (records: 1)
+        AAAA fd00:1122:3344:102::2b
+    name: f31ab1c5-0f23-44dc-8504-c67c65afc11e.host          (records: 1)
+        AAAA fd00:1122:3344:103::2c
+    name: f33e09d1-e3d7-4341-baf2-5f079f3679e5.host          (records: 1)
+        AAAA fd00:1122:3344:101::2c
+    name: fddd2bd6-a535-4e2c-9a36-cb90d048c0b7.host          (records: 1)
+        AAAA fd00:1122:3344:102::28
+    name: ns1                                                (records: 1)
+        AAAA fd00:1122:3344:1::1
+    name: ns2                                                (records: 1)
+        AAAA fd00:1122:3344:2::1
+    name: ns3                                                (records: 1)
+        AAAA fd00:1122:3344:3::1
+
+external DNS:
+* DNS zone: "oxide.example": 
+*   name: @                                                  (records: 3 -> 2)
+-       NS   ns1.oxide.example
+-       NS   ns2.oxide.example
+-       NS   ns3.oxide.example
++       NS   ns1.oxide.example
++       NS   ns2.oxide.example
+    name: example-silo.sys                                   (records: 3)
+        A    192.0.2.2
+        A    192.0.2.3
+        A    192.0.2.4
+    name: ns1                                                (records: 1)
+        A    198.51.100.1
+    name: ns2                                                (records: 1)
+        A    198.51.100.2
+-   name: ns3                                                (records: 1)
+-       A    198.51.100.3
+
+
 
 
 > blueprint-show 366b0b68-d80e-4bc1-abd3-dc69837847e0
@@ -608,15 +952,17 @@ parent:    3f00b694-1b16-4aaa-8f78-e6b3a527b434
     read from::   SingleNode
 
  METADATA:
-    created by:::::::::::   reconfigurator-cli
-    created at:::::::::::   <REDACTED_TIMESTAMP>
-    comment::::::::::::::   (none)
-    internal DNS version:   1
-    external DNS version:   1
+    created by:::::::::::::   reconfigurator-cli
+    created at:::::::::::::   <REDACTED_TIMESTAMP>
+    comment::::::::::::::::   (none)
+    internal DNS version:::   1
+    external DNS version:::   1
+    target release min gen:   1
 
  PENDING MGS-MANAGED UPDATES: 0
 
 
+> # blueprint-plan will place a new external DNS zone, diff DNS to see the new zone has `ns<N>` and NS records.
 > blueprint-plan 366b0b68-d80e-4bc1-abd3-dc69837847e0
 INFO sufficient BoundaryNtp zones exist in plan, desired_count: 0, current_count: 0
 INFO sufficient Clickhouse zones exist in plan, desired_count: 1, current_count: 1
@@ -628,8 +974,350 @@ INFO sufficient InternalDns zones exist in plan, desired_count: 3, current_count
 INFO added zone to sled, sled_id: a88790de-5962-4871-8686-61c1fd5b7094, kind: ExternalDns
 INFO sufficient Nexus zones exist in plan, desired_count: 3, current_count: 3
 INFO sufficient Oximeter zones exist in plan, desired_count: 0, current_count: 0
+INFO some zones not yet up-to-date, sled_id: a88790de-5962-4871-8686-61c1fd5b7094
 INFO will ensure cockroachdb setting, setting: cluster.preserve_downgrade_option, value: DoNotModify
 generated blueprint 9c998c1d-1a7b-440a-ae0c-40f781dea6e2 based on parent blueprint 366b0b68-d80e-4bc1-abd3-dc69837847e0
+
+> blueprint-diff 366b0b68-d80e-4bc1-abd3-dc69837847e0 9c998c1d-1a7b-440a-ae0c-40f781dea6e2
+from: blueprint 366b0b68-d80e-4bc1-abd3-dc69837847e0
+to:   blueprint 9c998c1d-1a7b-440a-ae0c-40f781dea6e2
+
+ MODIFIED SLEDS:
+
+  sled a88790de-5962-4871-8686-61c1fd5b7094 (active, config generation 3 -> 4):
+
+    physical disks:
+    ------------------------------------------------------------------------------------
+    vendor        model        serial                                        disposition
+    ------------------------------------------------------------------------------------
+    fake-vendor   fake-model   serial-2f26e76b-6c91-4ee9-87b3-f424b942091b   in service 
+    fake-vendor   fake-model   serial-6f8fa855-4f34-42db-a6e4-9d0090d6c828   in service 
+    fake-vendor   fake-model   serial-71450d62-791e-4068-9882-8a206a465fd9   in service 
+    fake-vendor   fake-model   serial-7b4ad242-8330-4c08-9588-c66782742678   in service 
+    fake-vendor   fake-model   serial-9bf23b52-565e-4439-9728-edb603fa6c4e   in service 
+    fake-vendor   fake-model   serial-c9476e3d-7745-4fa9-b336-b54ac5b08f56   in service 
+    fake-vendor   fake-model   serial-d2cd1e65-b63d-4748-895f-aafecc81e440   in service 
+    fake-vendor   fake-model   serial-d4ad3cc1-956a-4444-81a6-da6a025f6df2   in service 
+    fake-vendor   fake-model   serial-e1298a43-fa1a-4e6f-bcfa-b26996f69c50   in service 
+    fake-vendor   fake-model   serial-fa9ce87c-fa7c-4854-95bd-69b8f01c46f9   in service 
+
+
+    datasets:
+    -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+    dataset name                                                                                                   dataset id                             disposition   quota     reservation   compression
+    -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+    oxp_2f26e76b-6c91-4ee9-87b3-f424b942091b/crucible                                                              dd2ac836-55e7-4f13-a39f-24fbf9122dee   in service    none      none          off        
+    oxp_6f8fa855-4f34-42db-a6e4-9d0090d6c828/crucible                                                              b1d078dc-62ee-433a-b8cf-854fefb22039   in service    none      none          off        
+    oxp_71450d62-791e-4068-9882-8a206a465fd9/crucible                                                              91ea5860-a12b-458a-9b47-a3960e2d78b8   in service    none      none          off        
+    oxp_7b4ad242-8330-4c08-9588-c66782742678/crucible                                                              9316a944-5d51-475a-ad89-8df8b4dd0863   in service    none      none          off        
+    oxp_9bf23b52-565e-4439-9728-edb603fa6c4e/crucible                                                              8dabf037-8d33-47e3-95fc-ada8d20f1d44   in service    none      none          off        
+    oxp_c9476e3d-7745-4fa9-b336-b54ac5b08f56/crucible                                                              1e28e523-e77a-4270-99d1-fd3810e1aad9   in service    none      none          off        
+    oxp_d2cd1e65-b63d-4748-895f-aafecc81e440/crucible                                                              28ba9385-4ebf-49ce-9fa2-5c549ad1fded   in service    none      none          off        
+    oxp_d4ad3cc1-956a-4444-81a6-da6a025f6df2/crucible                                                              fdc03ce9-b4f2-47aa-bff8-b0b2a05fe3b0   in service    none      none          off        
+    oxp_e1298a43-fa1a-4e6f-bcfa-b26996f69c50/crucible                                                              7d9f72bd-23bc-40e6-97c5-a53ca255588d   in service    none      none          off        
+    oxp_fa9ce87c-fa7c-4854-95bd-69b8f01c46f9/crucible                                                              bf673cd5-b04e-4088-b017-c7a714ce2b63   in service    none      none          off        
+    oxp_2f26e76b-6c91-4ee9-87b3-f424b942091b/crypt/external_dns                                                    195da8dd-34fd-4e96-a949-b7329710133e   expunged      none      none          off        
+    oxp_2f26e76b-6c91-4ee9-87b3-f424b942091b/crypt/internal_dns                                                    92ff6262-7b3c-4300-bb53-936bd3edce26   in service    none      none          off        
+    oxp_2f26e76b-6c91-4ee9-87b3-f424b942091b/crypt/zone                                                            9d6ab53a-6474-4ed6-8beb-9be1758229f5   in service    none      none          off        
+    oxp_6f8fa855-4f34-42db-a6e4-9d0090d6c828/crypt/zone                                                            df385279-2886-4422-957f-88f1f382a90b   in service    none      none          off        
+    oxp_71450d62-791e-4068-9882-8a206a465fd9/crypt/zone                                                            97a12796-0555-47c5-a0d3-c136e0e919f6   in service    none      none          off        
+    oxp_7b4ad242-8330-4c08-9588-c66782742678/crypt/zone                                                            39343108-efec-4643-80c8-1c741d045dad   in service    none      none          off        
+    oxp_9bf23b52-565e-4439-9728-edb603fa6c4e/crypt/zone                                                            b58b762a-7124-4441-a334-16d552f576f3   in service    none      none          off        
+    oxp_c9476e3d-7745-4fa9-b336-b54ac5b08f56/crypt/zone                                                            92c63f1f-4ba8-4a41-93c0-e227b3320eaa   in service    none      none          off        
+    oxp_d2cd1e65-b63d-4748-895f-aafecc81e440/crypt/zone                                                            434bf6e8-b885-441d-b944-9508b0c64311   in service    none      none          off        
+    oxp_d4ad3cc1-956a-4444-81a6-da6a025f6df2/crypt/zone                                                            58e91146-8da0-449a-adab-6e93504c9bf0   in service    none      none          off        
+    oxp_e1298a43-fa1a-4e6f-bcfa-b26996f69c50/crypt/zone                                                            e56258ab-55c4-42ca-95e5-ea8bbeff84e1   in service    none      none          off        
+    oxp_fa9ce87c-fa7c-4854-95bd-69b8f01c46f9/crypt/zone                                                            e070deb1-5298-46fb-983f-b6e153e98cd7   in service    none      none          off        
+    oxp_2f26e76b-6c91-4ee9-87b3-f424b942091b/crypt/zone/oxz_crucible_0903299a-6296-44f0-8ab9-7c70b5766a05          277b0d6a-bb61-4eb2-bd11-d750586b5fbc   in service    none      none          off        
+    oxp_71450d62-791e-4068-9882-8a206a465fd9/crypt/zone/oxz_crucible_2b6b3cfd-4524-465b-ac6e-10be9ab6d4d4          5073cf86-7d36-4c98-9e34-559172a0bc84   in service    none      none          off        
+    oxp_e1298a43-fa1a-4e6f-bcfa-b26996f69c50/crypt/zone/oxz_crucible_3e0ff677-2ca8-4124-9fef-7c23ac2da6fa          028fc58f-16ea-4536-9f50-b4eeb1aa57c9   in service    none      none          off        
+    oxp_c9476e3d-7745-4fa9-b336-b54ac5b08f56/crypt/zone/oxz_crucible_512758d0-335f-4c94-9afe-c82f6f127421          f20e7661-c0c7-47cd-b08a-e7f5b76026d6   in service    none      none          off        
+    oxp_6f8fa855-4f34-42db-a6e4-9d0090d6c828/crypt/zone/oxz_crucible_8ae67b12-ca74-40d3-a55e-90456cd623ea          3f7802ee-87bb-48d6-a42d-657bd0f85c74   in service    none      none          off        
+    oxp_fa9ce87c-fa7c-4854-95bd-69b8f01c46f9/crypt/zone/oxz_crucible_918c8cbc-1c62-4de5-9cf2-c4153a3d1a7e          41d832ad-7b85-4214-b485-9ca2ed4f85d0   in service    none      none          off        
+    oxp_7b4ad242-8330-4c08-9588-c66782742678/crypt/zone/oxz_crucible_be422e7a-16d0-426e-8567-da0aed7200d4          e0fb453d-b22c-4d87-be9b-94f6113cb25a   in service    none      none          off        
+    oxp_d2cd1e65-b63d-4748-895f-aafecc81e440/crypt/zone/oxz_crucible_ea50f438-1b5e-4d61-bd65-46d360f590ee          26a25185-a37f-4ead-8c81-77be56a21b0a   in service    none      none          off        
+    oxp_9bf23b52-565e-4439-9728-edb603fa6c4e/crypt/zone/oxz_crucible_f055a042-9d1b-4931-8268-d94cac801d7e          998b0fb1-b562-4858-a9ae-c02296c7c6ed   in service    none      none          off        
+    oxp_d4ad3cc1-956a-4444-81a6-da6a025f6df2/crypt/zone/oxz_crucible_f33e09d1-e3d7-4341-baf2-5f079f3679e5          aa4f1267-a83a-4081-b572-28e1860ff2f2   in service    none      none          off        
+    oxp_2f26e76b-6c91-4ee9-87b3-f424b942091b/crypt/zone/oxz_crucible_pantry_100e20aa-1816-4195-8d76-08beace10332   032bf309-8046-4c96-9453-29b9346b19fc   in service    none      none          off        
+    oxp_2f26e76b-6c91-4ee9-87b3-f424b942091b/crypt/zone/oxz_external_dns_9995de32-dd52-4eb1-b0eb-141eb84bc739      f258d941-f8b3-4d0e-bbe6-773996a002d5   expunged      none      none          off        
+    oxp_2f26e76b-6c91-4ee9-87b3-f424b942091b/crypt/zone/oxz_internal_dns_171cabf0-8635-42e7-8ea1-2a1d2a2daf55      3531c6de-8d31-4917-bb72-884b6e168eca   in service    none      none          off        
+    oxp_2f26e76b-6c91-4ee9-87b3-f424b942091b/crypt/zone/oxz_nexus_5b01b0e0-5cdf-4b34-b0a6-c947cbbdb8be             5e3a1b9d-9475-4bd9-8112-5595a7c0da7d   in service    none      none          off        
+    oxp_2f26e76b-6c91-4ee9-87b3-f424b942091b/crypt/zone/oxz_ntp_7b4bccad-9869-48da-8320-2dc82752deea               45771e96-054c-4b05-8021-c32b23fcad8d   in service    none      none          off        
+    oxp_2f26e76b-6c91-4ee9-87b3-f424b942091b/crypt/debug                                                           29be83b4-4d0b-4787-819d-96e8e69301da   in service    100 GiB   none          gzip-9     
+    oxp_6f8fa855-4f34-42db-a6e4-9d0090d6c828/crypt/debug                                                           ce433c69-7540-4a7a-9e11-dd30b0d2dc19   in service    100 GiB   none          gzip-9     
+    oxp_71450d62-791e-4068-9882-8a206a465fd9/crypt/debug                                                           48cc9313-13c2-4ebe-8120-5b648ec26a28   in service    100 GiB   none          gzip-9     
+    oxp_7b4ad242-8330-4c08-9588-c66782742678/crypt/debug                                                           cdcfe435-881a-44dc-9dba-2a0fafdbf66d   in service    100 GiB   none          gzip-9     
+    oxp_9bf23b52-565e-4439-9728-edb603fa6c4e/crypt/debug                                                           835edc8b-9d33-45db-9bdc-ea8a956f3217   in service    100 GiB   none          gzip-9     
+    oxp_c9476e3d-7745-4fa9-b336-b54ac5b08f56/crypt/debug                                                           1754b8f0-07b8-4305-8bb2-b347ba3e0b68   in service    100 GiB   none          gzip-9     
+    oxp_d2cd1e65-b63d-4748-895f-aafecc81e440/crypt/debug                                                           7028b888-b4c0-43e5-a9d4-2e29d24f34a7   in service    100 GiB   none          gzip-9     
+    oxp_d4ad3cc1-956a-4444-81a6-da6a025f6df2/crypt/debug                                                           36ad4fe9-3897-4777-bc0e-88f142594d07   in service    100 GiB   none          gzip-9     
+    oxp_e1298a43-fa1a-4e6f-bcfa-b26996f69c50/crypt/debug                                                           d37e0b8c-6c43-4e83-b3ec-238429d1cbfb   in service    100 GiB   none          gzip-9     
+    oxp_fa9ce87c-fa7c-4854-95bd-69b8f01c46f9/crypt/debug                                                           b7569aa4-f0d6-4de0-9b9a-cd8d0a6cc01d   in service    100 GiB   none          gzip-9     
++   oxp_2f26e76b-6c91-4ee9-87b3-f424b942091b/crypt/external_dns                                                    07153a04-4e4a-485a-8399-15bc9063cb5d   in service    none      none          off        
++   oxp_2f26e76b-6c91-4ee9-87b3-f424b942091b/crypt/zone/oxz_external_dns_d786ef4a-5acb-4f5d-a732-a00addf986b5      39f57b97-0501-4902-8f3a-902ed4d7c869   in service    none      none          off        
+
+
+    omicron zones:
+    ----------------------------------------------------------------------------------------------------------------
+    zone type         zone id                                image source      disposition    underlay IP           
+    ----------------------------------------------------------------------------------------------------------------
+    crucible          0903299a-6296-44f0-8ab9-7c70b5766a05   install dataset   in service     fd00:1122:3344:101::25
+    crucible          2b6b3cfd-4524-465b-ac6e-10be9ab6d4d4   install dataset   in service     fd00:1122:3344:101::27
+    crucible          3e0ff677-2ca8-4124-9fef-7c23ac2da6fa   install dataset   in service     fd00:1122:3344:101::2d
+    crucible          512758d0-335f-4c94-9afe-c82f6f127421   install dataset   in service     fd00:1122:3344:101::2a
+    crucible          8ae67b12-ca74-40d3-a55e-90456cd623ea   install dataset   in service     fd00:1122:3344:101::26
+    crucible          918c8cbc-1c62-4de5-9cf2-c4153a3d1a7e   install dataset   in service     fd00:1122:3344:101::2e
+    crucible          be422e7a-16d0-426e-8567-da0aed7200d4   install dataset   in service     fd00:1122:3344:101::28
+    crucible          ea50f438-1b5e-4d61-bd65-46d360f590ee   install dataset   in service     fd00:1122:3344:101::2b
+    crucible          f055a042-9d1b-4931-8268-d94cac801d7e   install dataset   in service     fd00:1122:3344:101::29
+    crucible          f33e09d1-e3d7-4341-baf2-5f079f3679e5   install dataset   in service     fd00:1122:3344:101::2c
+    crucible_pantry   100e20aa-1816-4195-8d76-08beace10332   install dataset   in service     fd00:1122:3344:101::24
+    external_dns      9995de32-dd52-4eb1-b0eb-141eb84bc739   install dataset   expunged ⏳     fd00:1122:3344:101::23
+    internal_dns      171cabf0-8635-42e7-8ea1-2a1d2a2daf55   install dataset   in service     fd00:1122:3344:3::1   
+    internal_ntp      7b4bccad-9869-48da-8320-2dc82752deea   install dataset   in service     fd00:1122:3344:101::21
+    nexus             5b01b0e0-5cdf-4b34-b0a6-c947cbbdb8be   install dataset   in service     fd00:1122:3344:101::22
++   external_dns      d786ef4a-5acb-4f5d-a732-a00addf986b5   install dataset   in service     fd00:1122:3344:101::2f
+
+
+ COCKROACHDB SETTINGS:
+    state fingerprint:::::::::::::::::   (none) (unchanged)
+    cluster.preserve_downgrade_option:   (do not modify) (unchanged)
+
+ METADATA:
+    internal DNS version:::   1 (unchanged)
+    external DNS version:::   1 (unchanged)
+    target release min gen:   1 (unchanged)
+
+ OXIMETER SETTINGS:
+    generation:   1 (unchanged)
+    read from::   SingleNode (unchanged)
+
+
+internal DNS:
+* DNS zone: "control-plane.oxide.internal": 
+    name: 07738018-1b2a-4efc-8c5c-bd6b7a5d7b40.host          (records: 1)
+        AAAA fd00:1122:3344:103::25
+    name: 0903299a-6296-44f0-8ab9-7c70b5766a05.host          (records: 1)
+        AAAA fd00:1122:3344:101::25
+    name: 100e20aa-1816-4195-8d76-08beace10332.host          (records: 1)
+        AAAA fd00:1122:3344:101::24
+    name: 171cabf0-8635-42e7-8ea1-2a1d2a2daf55.host          (records: 1)
+        AAAA fd00:1122:3344:3::1
+    name: 1b37911d-c427-4bf1-90d3-b2d0c2e98825.host          (records: 1)
+        AAAA fd00:1122:3344:103::24
+    name: 2b6b3cfd-4524-465b-ac6e-10be9ab6d4d4.host          (records: 1)
+        AAAA fd00:1122:3344:101::27
+    name: 2cea0275-1fbc-410c-819e-2ec54ffeeffe.host          (records: 1)
+        AAAA fd00:1122:3344:102::22
+    name: 3e0ff677-2ca8-4124-9fef-7c23ac2da6fa.host          (records: 1)
+        AAAA fd00:1122:3344:101::2d
+    name: 426cd521-e6ad-4a67-ad8d-a1acef5eab5e.host          (records: 1)
+        AAAA fd00:1122:3344:102::27
+    name: 47387358-e16d-4c34-b8f7-1f3f12c662eb.host          (records: 1)
+        AAAA fd00:1122:3344:102::23
+    name: 4a392139-7423-459b-b1c9-5903421be40c.host          (records: 1)
+        AAAA fd00:1122:3344:102::2d
+    name: 512758d0-335f-4c94-9afe-c82f6f127421.host          (records: 1)
+        AAAA fd00:1122:3344:101::2a
+    name: 51e403e5-a703-4cfb-b044-c72c52885e82.host          (records: 1)
+        AAAA fd00:1122:3344:102::26
+    name: 53491964-307a-45f6-b277-79a5e90f20b7.host          (records: 1)
+        AAAA fd00:1122:3344:103::2b
+    name: 55a2094a-9590-442f-8203-dffe5a76ae66.host          (records: 1)
+        AAAA fd00:1122:3344:102::25
+    name: 5b01b0e0-5cdf-4b34-b0a6-c947cbbdb8be.host          (records: 1)
+        AAAA fd00:1122:3344:101::22
+    name: 6e1cdf48-6846-4bb3-8a72-8bc1e8d5b21d.host          (records: 1)
+        AAAA fd00:1122:3344:102::21
+    name: 711ac7f8-d19e-4572-bdb9-e9b50f6e362a.sled          (records: 1)
+        AAAA fd00:1122:3344:103::1
+    name: 758d9a91-7070-43e3-8c60-ea1d0f818a12.host          (records: 1)
+        AAAA fd00:1122:3344:102::29
+    name: 777087c0-4fb9-43ed-846b-16aa6431a272.host          (records: 1)
+        AAAA fd00:1122:3344:103::2f
+    name: 78a45052-138b-47ee-877d-e73143467c8a.host          (records: 1)
+        AAAA fd00:1122:3344:103::2a
+    name: 7a1bd482-74f8-4562-b1db-c8bad16afb44.host          (records: 1)
+        AAAA fd00:1122:3344:1::1
+    name: 7b4bccad-9869-48da-8320-2dc82752deea.host          (records: 1)
+        AAAA fd00:1122:3344:101::21
+    name: 8ae67b12-ca74-40d3-a55e-90456cd623ea.host          (records: 1)
+        AAAA fd00:1122:3344:101::26
+    name: 8c368ed6-6c91-4437-b8ff-0d789193db38.host          (records: 1)
+        AAAA fd00:1122:3344:103::21
+    name: 8e4d80f8-80ea-48ac-ad47-95501c0c3fbe.host          (records: 1)
+        AAAA fd00:1122:3344:102::2a
+    name: 8ec567c1-6776-4573-bfe5-f3041165fdca.host          (records: 1)
+        AAAA fd00:1122:3344:103::28
+    name: 8ef7ff46-81f7-4f16-aa8f-0c1957589a5f.host          (records: 1)
+        AAAA fd00:1122:3344:103::2e
+    name: 918c8cbc-1c62-4de5-9cf2-c4153a3d1a7e.host          (records: 1)
+        AAAA fd00:1122:3344:101::2e
+    name: 9dc50690-f9bf-4520-bf80-051d0f465c2c.sled          (records: 1)
+        AAAA fd00:1122:3344:102::1
+    name: @                                                  (records: 3)
+        NS   ns1.control-plane.oxide.internal
+        NS   ns2.control-plane.oxide.internal
+        NS   ns3.control-plane.oxide.internal
+    name: _clickhouse-admin-single-server._tcp               (records: 1)
+        SRV  port  8888 e9d3a6d6-6e95-4ec8-a857-a3ab1ce6e62d.host.control-plane.oxide.internal
+    name: _clickhouse-native._tcp                            (records: 1)
+        SRV  port  9000 e9d3a6d6-6e95-4ec8-a857-a3ab1ce6e62d.host.control-plane.oxide.internal
+    name: _clickhouse._tcp                                   (records: 1)
+        SRV  port  8123 e9d3a6d6-6e95-4ec8-a857-a3ab1ce6e62d.host.control-plane.oxide.internal
+    name: _crucible-pantry._tcp                              (records: 3)
+        SRV  port 17000 07738018-1b2a-4efc-8c5c-bd6b7a5d7b40.host.control-plane.oxide.internal
+        SRV  port 17000 100e20aa-1816-4195-8d76-08beace10332.host.control-plane.oxide.internal
+        SRV  port 17000 eb4f0a57-7386-4216-bcb2-874d39aae836.host.control-plane.oxide.internal
+    name: _crucible._tcp.0903299a-6296-44f0-8ab9-7c70b5766a05 (records: 1)
+        SRV  port 32345 0903299a-6296-44f0-8ab9-7c70b5766a05.host.control-plane.oxide.internal
+    name: _crucible._tcp.2b6b3cfd-4524-465b-ac6e-10be9ab6d4d4 (records: 1)
+        SRV  port 32345 2b6b3cfd-4524-465b-ac6e-10be9ab6d4d4.host.control-plane.oxide.internal
+    name: _crucible._tcp.3e0ff677-2ca8-4124-9fef-7c23ac2da6fa (records: 1)
+        SRV  port 32345 3e0ff677-2ca8-4124-9fef-7c23ac2da6fa.host.control-plane.oxide.internal
+    name: _crucible._tcp.426cd521-e6ad-4a67-ad8d-a1acef5eab5e (records: 1)
+        SRV  port 32345 426cd521-e6ad-4a67-ad8d-a1acef5eab5e.host.control-plane.oxide.internal
+    name: _crucible._tcp.4a392139-7423-459b-b1c9-5903421be40c (records: 1)
+        SRV  port 32345 4a392139-7423-459b-b1c9-5903421be40c.host.control-plane.oxide.internal
+    name: _crucible._tcp.512758d0-335f-4c94-9afe-c82f6f127421 (records: 1)
+        SRV  port 32345 512758d0-335f-4c94-9afe-c82f6f127421.host.control-plane.oxide.internal
+    name: _crucible._tcp.51e403e5-a703-4cfb-b044-c72c52885e82 (records: 1)
+        SRV  port 32345 51e403e5-a703-4cfb-b044-c72c52885e82.host.control-plane.oxide.internal
+    name: _crucible._tcp.53491964-307a-45f6-b277-79a5e90f20b7 (records: 1)
+        SRV  port 32345 53491964-307a-45f6-b277-79a5e90f20b7.host.control-plane.oxide.internal
+    name: _crucible._tcp.55a2094a-9590-442f-8203-dffe5a76ae66 (records: 1)
+        SRV  port 32345 55a2094a-9590-442f-8203-dffe5a76ae66.host.control-plane.oxide.internal
+    name: _crucible._tcp.758d9a91-7070-43e3-8c60-ea1d0f818a12 (records: 1)
+        SRV  port 32345 758d9a91-7070-43e3-8c60-ea1d0f818a12.host.control-plane.oxide.internal
+    name: _crucible._tcp.777087c0-4fb9-43ed-846b-16aa6431a272 (records: 1)
+        SRV  port 32345 777087c0-4fb9-43ed-846b-16aa6431a272.host.control-plane.oxide.internal
+    name: _crucible._tcp.78a45052-138b-47ee-877d-e73143467c8a (records: 1)
+        SRV  port 32345 78a45052-138b-47ee-877d-e73143467c8a.host.control-plane.oxide.internal
+    name: _crucible._tcp.8ae67b12-ca74-40d3-a55e-90456cd623ea (records: 1)
+        SRV  port 32345 8ae67b12-ca74-40d3-a55e-90456cd623ea.host.control-plane.oxide.internal
+    name: _crucible._tcp.8e4d80f8-80ea-48ac-ad47-95501c0c3fbe (records: 1)
+        SRV  port 32345 8e4d80f8-80ea-48ac-ad47-95501c0c3fbe.host.control-plane.oxide.internal
+    name: _crucible._tcp.8ec567c1-6776-4573-bfe5-f3041165fdca (records: 1)
+        SRV  port 32345 8ec567c1-6776-4573-bfe5-f3041165fdca.host.control-plane.oxide.internal
+    name: _crucible._tcp.8ef7ff46-81f7-4f16-aa8f-0c1957589a5f (records: 1)
+        SRV  port 32345 8ef7ff46-81f7-4f16-aa8f-0c1957589a5f.host.control-plane.oxide.internal
+    name: _crucible._tcp.918c8cbc-1c62-4de5-9cf2-c4153a3d1a7e (records: 1)
+        SRV  port 32345 918c8cbc-1c62-4de5-9cf2-c4153a3d1a7e.host.control-plane.oxide.internal
+    name: _crucible._tcp.af3e8274-151f-4cb1-990c-b0a7680ff210 (records: 1)
+        SRV  port 32345 af3e8274-151f-4cb1-990c-b0a7680ff210.host.control-plane.oxide.internal
+    name: _crucible._tcp.be422e7a-16d0-426e-8567-da0aed7200d4 (records: 1)
+        SRV  port 32345 be422e7a-16d0-426e-8567-da0aed7200d4.host.control-plane.oxide.internal
+    name: _crucible._tcp.c3114d7e-07cd-4d80-b82b-49ccbe856af2 (records: 1)
+        SRV  port 32345 c3114d7e-07cd-4d80-b82b-49ccbe856af2.host.control-plane.oxide.internal
+    name: _crucible._tcp.cbf109e0-cdd5-48f9-8998-e9f55c9be980 (records: 1)
+        SRV  port 32345 cbf109e0-cdd5-48f9-8998-e9f55c9be980.host.control-plane.oxide.internal
+    name: _crucible._tcp.d23b5191-04de-4b48-8599-cf866ffc06e8 (records: 1)
+        SRV  port 32345 d23b5191-04de-4b48-8599-cf866ffc06e8.host.control-plane.oxide.internal
+    name: _crucible._tcp.d60cc034-46c4-4233-8066-4008e947d904 (records: 1)
+        SRV  port 32345 d60cc034-46c4-4233-8066-4008e947d904.host.control-plane.oxide.internal
+    name: _crucible._tcp.ea50f438-1b5e-4d61-bd65-46d360f590ee (records: 1)
+        SRV  port 32345 ea50f438-1b5e-4d61-bd65-46d360f590ee.host.control-plane.oxide.internal
+    name: _crucible._tcp.efdbf061-321c-47d6-bf0f-4530ec4c287e (records: 1)
+        SRV  port 32345 efdbf061-321c-47d6-bf0f-4530ec4c287e.host.control-plane.oxide.internal
+    name: _crucible._tcp.f055a042-9d1b-4931-8268-d94cac801d7e (records: 1)
+        SRV  port 32345 f055a042-9d1b-4931-8268-d94cac801d7e.host.control-plane.oxide.internal
+    name: _crucible._tcp.f24b63e6-2382-4862-90bf-c39e42aad988 (records: 1)
+        SRV  port 32345 f24b63e6-2382-4862-90bf-c39e42aad988.host.control-plane.oxide.internal
+    name: _crucible._tcp.f31ab1c5-0f23-44dc-8504-c67c65afc11e (records: 1)
+        SRV  port 32345 f31ab1c5-0f23-44dc-8504-c67c65afc11e.host.control-plane.oxide.internal
+    name: _crucible._tcp.f33e09d1-e3d7-4341-baf2-5f079f3679e5 (records: 1)
+        SRV  port 32345 f33e09d1-e3d7-4341-baf2-5f079f3679e5.host.control-plane.oxide.internal
+    name: _crucible._tcp.fddd2bd6-a535-4e2c-9a36-cb90d048c0b7 (records: 1)
+        SRV  port 32345 fddd2bd6-a535-4e2c-9a36-cb90d048c0b7.host.control-plane.oxide.internal
+*   name: _external-dns._tcp                                 (records: 2 -> 3)
+-       SRV  port  5353 1b37911d-c427-4bf1-90d3-b2d0c2e98825.host.control-plane.oxide.internal
+-       SRV  port  5353 47387358-e16d-4c34-b8f7-1f3f12c662eb.host.control-plane.oxide.internal
++       SRV  port  5353 1b37911d-c427-4bf1-90d3-b2d0c2e98825.host.control-plane.oxide.internal
++       SRV  port  5353 47387358-e16d-4c34-b8f7-1f3f12c662eb.host.control-plane.oxide.internal
++       SRV  port  5353 d786ef4a-5acb-4f5d-a732-a00addf986b5.host.control-plane.oxide.internal
+    name: _internal-ntp._tcp                                 (records: 3)
+        SRV  port   123 6e1cdf48-6846-4bb3-8a72-8bc1e8d5b21d.host.control-plane.oxide.internal
+        SRV  port   123 7b4bccad-9869-48da-8320-2dc82752deea.host.control-plane.oxide.internal
+        SRV  port   123 8c368ed6-6c91-4437-b8ff-0d789193db38.host.control-plane.oxide.internal
+    name: _nameservice._tcp                                  (records: 3)
+        SRV  port  5353 171cabf0-8635-42e7-8ea1-2a1d2a2daf55.host.control-plane.oxide.internal
+        SRV  port  5353 7a1bd482-74f8-4562-b1db-c8bad16afb44.host.control-plane.oxide.internal
+        SRV  port  5353 edb6573c-3621-4d95-ad3b-93a088caeea5.host.control-plane.oxide.internal
+    name: _nexus._tcp                                        (records: 3)
+        SRV  port 12221 2cea0275-1fbc-410c-819e-2ec54ffeeffe.host.control-plane.oxide.internal
+        SRV  port 12221 5b01b0e0-5cdf-4b34-b0a6-c947cbbdb8be.host.control-plane.oxide.internal
+        SRV  port 12221 ed2d3be3-fcee-4f6b-bb99-a1a9130c4eeb.host.control-plane.oxide.internal
+    name: _oximeter-reader._tcp                              (records: 1)
+        SRV  port  9000 e9d3a6d6-6e95-4ec8-a857-a3ab1ce6e62d.host.control-plane.oxide.internal
+    name: _repo-depot._tcp                                   (records: 3)
+        SRV  port 12348 711ac7f8-d19e-4572-bdb9-e9b50f6e362a.sled.control-plane.oxide.internal
+        SRV  port 12348 9dc50690-f9bf-4520-bf80-051d0f465c2c.sled.control-plane.oxide.internal
+        SRV  port 12348 a88790de-5962-4871-8686-61c1fd5b7094.sled.control-plane.oxide.internal
+    name: a88790de-5962-4871-8686-61c1fd5b7094.sled          (records: 1)
+        AAAA fd00:1122:3344:101::1
+    name: af3e8274-151f-4cb1-990c-b0a7680ff210.host          (records: 1)
+        AAAA fd00:1122:3344:103::27
+    name: be422e7a-16d0-426e-8567-da0aed7200d4.host          (records: 1)
+        AAAA fd00:1122:3344:101::28
+    name: c3114d7e-07cd-4d80-b82b-49ccbe856af2.host          (records: 1)
+        AAAA fd00:1122:3344:103::29
+    name: cbf109e0-cdd5-48f9-8998-e9f55c9be980.host          (records: 1)
+        AAAA fd00:1122:3344:102::2e
+    name: d23b5191-04de-4b48-8599-cf866ffc06e8.host          (records: 1)
+        AAAA fd00:1122:3344:103::2d
+    name: d60cc034-46c4-4233-8066-4008e947d904.host          (records: 1)
+        AAAA fd00:1122:3344:102::2c
++   name: d786ef4a-5acb-4f5d-a732-a00addf986b5.host          (records: 1)
++       AAAA fd00:1122:3344:101::2f
+    name: e9d3a6d6-6e95-4ec8-a857-a3ab1ce6e62d.host          (records: 1)
+        AAAA fd00:1122:3344:103::23
+    name: ea50f438-1b5e-4d61-bd65-46d360f590ee.host          (records: 1)
+        AAAA fd00:1122:3344:101::2b
+    name: eb4f0a57-7386-4216-bcb2-874d39aae836.host          (records: 1)
+        AAAA fd00:1122:3344:102::24
+    name: ed2d3be3-fcee-4f6b-bb99-a1a9130c4eeb.host          (records: 1)
+        AAAA fd00:1122:3344:103::22
+    name: edb6573c-3621-4d95-ad3b-93a088caeea5.host          (records: 1)
+        AAAA fd00:1122:3344:2::1
+    name: efdbf061-321c-47d6-bf0f-4530ec4c287e.host          (records: 1)
+        AAAA fd00:1122:3344:103::26
+    name: f055a042-9d1b-4931-8268-d94cac801d7e.host          (records: 1)
+        AAAA fd00:1122:3344:101::29
+    name: f24b63e6-2382-4862-90bf-c39e42aad988.host          (records: 1)
+        AAAA fd00:1122:3344:102::2b
+    name: f31ab1c5-0f23-44dc-8504-c67c65afc11e.host          (records: 1)
+        AAAA fd00:1122:3344:103::2c
+    name: f33e09d1-e3d7-4341-baf2-5f079f3679e5.host          (records: 1)
+        AAAA fd00:1122:3344:101::2c
+    name: fddd2bd6-a535-4e2c-9a36-cb90d048c0b7.host          (records: 1)
+        AAAA fd00:1122:3344:102::28
+    name: ns1                                                (records: 1)
+        AAAA fd00:1122:3344:1::1
+    name: ns2                                                (records: 1)
+        AAAA fd00:1122:3344:2::1
+    name: ns3                                                (records: 1)
+        AAAA fd00:1122:3344:3::1
+
+external DNS:
+* DNS zone: "oxide.example": 
+*   name: @                                                  (records: 2 -> 3)
+-       NS   ns1.oxide.example
+-       NS   ns2.oxide.example
++       NS   ns1.oxide.example
++       NS   ns2.oxide.example
++       NS   ns3.oxide.example
+    name: example-silo.sys                                   (records: 3)
+        A    192.0.2.2
+        A    192.0.2.3
+        A    192.0.2.4
+    name: ns1                                                (records: 1)
+        A    198.51.100.1
+    name: ns2                                                (records: 1)
+        A    198.51.100.2
++   name: ns3                                                (records: 1)
++       A    198.51.100.3
+
+
 
 
 > blueprint-show 9c998c1d-1a7b-440a-ae0c-40f781dea6e2
@@ -929,15 +1617,361 @@ parent:    366b0b68-d80e-4bc1-abd3-dc69837847e0
     read from::   SingleNode
 
  METADATA:
-    created by:::::::::::   reconfigurator-sim
-    created at:::::::::::   <REDACTED_TIMESTAMP>
-    comment::::::::::::::   (none)
-    internal DNS version:   1
-    external DNS version:   1
+    created by:::::::::::::   reconfigurator-sim
+    created at:::::::::::::   <REDACTED_TIMESTAMP>
+    comment::::::::::::::::   (none)
+    internal DNS version:::   1
+    external DNS version:::   1
+    target release min gen:   1
 
  PENDING MGS-MANAGED UPDATES: 0
 
 
+> # expunging the new zone should work, then diff again to see the new zone also have its DNS records removed.
 > blueprint-edit 9c998c1d-1a7b-440a-ae0c-40f781dea6e2 expunge-zone d786ef4a-5acb-4f5d-a732-a00addf986b5
 blueprint 2ac8c740-444d-42ff-8d66-9812a7e51288 created from blueprint 9c998c1d-1a7b-440a-ae0c-40f781dea6e2: expunged zone d786ef4a-5acb-4f5d-a732-a00addf986b5 from sled a88790de-5962-4871-8686-61c1fd5b7094
+
+> blueprint-diff 9c998c1d-1a7b-440a-ae0c-40f781dea6e2 2ac8c740-444d-42ff-8d66-9812a7e51288
+from: blueprint 9c998c1d-1a7b-440a-ae0c-40f781dea6e2
+to:   blueprint 2ac8c740-444d-42ff-8d66-9812a7e51288
+
+ MODIFIED SLEDS:
+
+  sled a88790de-5962-4871-8686-61c1fd5b7094 (active, config generation 4 -> 5):
+
+    physical disks:
+    ------------------------------------------------------------------------------------
+    vendor        model        serial                                        disposition
+    ------------------------------------------------------------------------------------
+    fake-vendor   fake-model   serial-2f26e76b-6c91-4ee9-87b3-f424b942091b   in service 
+    fake-vendor   fake-model   serial-6f8fa855-4f34-42db-a6e4-9d0090d6c828   in service 
+    fake-vendor   fake-model   serial-71450d62-791e-4068-9882-8a206a465fd9   in service 
+    fake-vendor   fake-model   serial-7b4ad242-8330-4c08-9588-c66782742678   in service 
+    fake-vendor   fake-model   serial-9bf23b52-565e-4439-9728-edb603fa6c4e   in service 
+    fake-vendor   fake-model   serial-c9476e3d-7745-4fa9-b336-b54ac5b08f56   in service 
+    fake-vendor   fake-model   serial-d2cd1e65-b63d-4748-895f-aafecc81e440   in service 
+    fake-vendor   fake-model   serial-d4ad3cc1-956a-4444-81a6-da6a025f6df2   in service 
+    fake-vendor   fake-model   serial-e1298a43-fa1a-4e6f-bcfa-b26996f69c50   in service 
+    fake-vendor   fake-model   serial-fa9ce87c-fa7c-4854-95bd-69b8f01c46f9   in service 
+
+
+    datasets:
+    --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+    dataset name                                                                                                   dataset id                             disposition    quota     reservation   compression
+    --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+    oxp_2f26e76b-6c91-4ee9-87b3-f424b942091b/crucible                                                              dd2ac836-55e7-4f13-a39f-24fbf9122dee   in service     none      none          off        
+    oxp_6f8fa855-4f34-42db-a6e4-9d0090d6c828/crucible                                                              b1d078dc-62ee-433a-b8cf-854fefb22039   in service     none      none          off        
+    oxp_71450d62-791e-4068-9882-8a206a465fd9/crucible                                                              91ea5860-a12b-458a-9b47-a3960e2d78b8   in service     none      none          off        
+    oxp_7b4ad242-8330-4c08-9588-c66782742678/crucible                                                              9316a944-5d51-475a-ad89-8df8b4dd0863   in service     none      none          off        
+    oxp_9bf23b52-565e-4439-9728-edb603fa6c4e/crucible                                                              8dabf037-8d33-47e3-95fc-ada8d20f1d44   in service     none      none          off        
+    oxp_c9476e3d-7745-4fa9-b336-b54ac5b08f56/crucible                                                              1e28e523-e77a-4270-99d1-fd3810e1aad9   in service     none      none          off        
+    oxp_d2cd1e65-b63d-4748-895f-aafecc81e440/crucible                                                              28ba9385-4ebf-49ce-9fa2-5c549ad1fded   in service     none      none          off        
+    oxp_d4ad3cc1-956a-4444-81a6-da6a025f6df2/crucible                                                              fdc03ce9-b4f2-47aa-bff8-b0b2a05fe3b0   in service     none      none          off        
+    oxp_e1298a43-fa1a-4e6f-bcfa-b26996f69c50/crucible                                                              7d9f72bd-23bc-40e6-97c5-a53ca255588d   in service     none      none          off        
+    oxp_fa9ce87c-fa7c-4854-95bd-69b8f01c46f9/crucible                                                              bf673cd5-b04e-4088-b017-c7a714ce2b63   in service     none      none          off        
+    oxp_2f26e76b-6c91-4ee9-87b3-f424b942091b/crypt/external_dns                                                    195da8dd-34fd-4e96-a949-b7329710133e   expunged       none      none          off        
+    oxp_2f26e76b-6c91-4ee9-87b3-f424b942091b/crypt/internal_dns                                                    92ff6262-7b3c-4300-bb53-936bd3edce26   in service     none      none          off        
+    oxp_2f26e76b-6c91-4ee9-87b3-f424b942091b/crypt/zone                                                            9d6ab53a-6474-4ed6-8beb-9be1758229f5   in service     none      none          off        
+    oxp_6f8fa855-4f34-42db-a6e4-9d0090d6c828/crypt/zone                                                            df385279-2886-4422-957f-88f1f382a90b   in service     none      none          off        
+    oxp_71450d62-791e-4068-9882-8a206a465fd9/crypt/zone                                                            97a12796-0555-47c5-a0d3-c136e0e919f6   in service     none      none          off        
+    oxp_7b4ad242-8330-4c08-9588-c66782742678/crypt/zone                                                            39343108-efec-4643-80c8-1c741d045dad   in service     none      none          off        
+    oxp_9bf23b52-565e-4439-9728-edb603fa6c4e/crypt/zone                                                            b58b762a-7124-4441-a334-16d552f576f3   in service     none      none          off        
+    oxp_c9476e3d-7745-4fa9-b336-b54ac5b08f56/crypt/zone                                                            92c63f1f-4ba8-4a41-93c0-e227b3320eaa   in service     none      none          off        
+    oxp_d2cd1e65-b63d-4748-895f-aafecc81e440/crypt/zone                                                            434bf6e8-b885-441d-b944-9508b0c64311   in service     none      none          off        
+    oxp_d4ad3cc1-956a-4444-81a6-da6a025f6df2/crypt/zone                                                            58e91146-8da0-449a-adab-6e93504c9bf0   in service     none      none          off        
+    oxp_e1298a43-fa1a-4e6f-bcfa-b26996f69c50/crypt/zone                                                            e56258ab-55c4-42ca-95e5-ea8bbeff84e1   in service     none      none          off        
+    oxp_fa9ce87c-fa7c-4854-95bd-69b8f01c46f9/crypt/zone                                                            e070deb1-5298-46fb-983f-b6e153e98cd7   in service     none      none          off        
+    oxp_2f26e76b-6c91-4ee9-87b3-f424b942091b/crypt/zone/oxz_crucible_0903299a-6296-44f0-8ab9-7c70b5766a05          277b0d6a-bb61-4eb2-bd11-d750586b5fbc   in service     none      none          off        
+    oxp_71450d62-791e-4068-9882-8a206a465fd9/crypt/zone/oxz_crucible_2b6b3cfd-4524-465b-ac6e-10be9ab6d4d4          5073cf86-7d36-4c98-9e34-559172a0bc84   in service     none      none          off        
+    oxp_e1298a43-fa1a-4e6f-bcfa-b26996f69c50/crypt/zone/oxz_crucible_3e0ff677-2ca8-4124-9fef-7c23ac2da6fa          028fc58f-16ea-4536-9f50-b4eeb1aa57c9   in service     none      none          off        
+    oxp_c9476e3d-7745-4fa9-b336-b54ac5b08f56/crypt/zone/oxz_crucible_512758d0-335f-4c94-9afe-c82f6f127421          f20e7661-c0c7-47cd-b08a-e7f5b76026d6   in service     none      none          off        
+    oxp_6f8fa855-4f34-42db-a6e4-9d0090d6c828/crypt/zone/oxz_crucible_8ae67b12-ca74-40d3-a55e-90456cd623ea          3f7802ee-87bb-48d6-a42d-657bd0f85c74   in service     none      none          off        
+    oxp_fa9ce87c-fa7c-4854-95bd-69b8f01c46f9/crypt/zone/oxz_crucible_918c8cbc-1c62-4de5-9cf2-c4153a3d1a7e          41d832ad-7b85-4214-b485-9ca2ed4f85d0   in service     none      none          off        
+    oxp_7b4ad242-8330-4c08-9588-c66782742678/crypt/zone/oxz_crucible_be422e7a-16d0-426e-8567-da0aed7200d4          e0fb453d-b22c-4d87-be9b-94f6113cb25a   in service     none      none          off        
+    oxp_d2cd1e65-b63d-4748-895f-aafecc81e440/crypt/zone/oxz_crucible_ea50f438-1b5e-4d61-bd65-46d360f590ee          26a25185-a37f-4ead-8c81-77be56a21b0a   in service     none      none          off        
+    oxp_9bf23b52-565e-4439-9728-edb603fa6c4e/crypt/zone/oxz_crucible_f055a042-9d1b-4931-8268-d94cac801d7e          998b0fb1-b562-4858-a9ae-c02296c7c6ed   in service     none      none          off        
+    oxp_d4ad3cc1-956a-4444-81a6-da6a025f6df2/crypt/zone/oxz_crucible_f33e09d1-e3d7-4341-baf2-5f079f3679e5          aa4f1267-a83a-4081-b572-28e1860ff2f2   in service     none      none          off        
+    oxp_2f26e76b-6c91-4ee9-87b3-f424b942091b/crypt/zone/oxz_crucible_pantry_100e20aa-1816-4195-8d76-08beace10332   032bf309-8046-4c96-9453-29b9346b19fc   in service     none      none          off        
+    oxp_2f26e76b-6c91-4ee9-87b3-f424b942091b/crypt/zone/oxz_external_dns_9995de32-dd52-4eb1-b0eb-141eb84bc739      f258d941-f8b3-4d0e-bbe6-773996a002d5   expunged       none      none          off        
+    oxp_2f26e76b-6c91-4ee9-87b3-f424b942091b/crypt/zone/oxz_internal_dns_171cabf0-8635-42e7-8ea1-2a1d2a2daf55      3531c6de-8d31-4917-bb72-884b6e168eca   in service     none      none          off        
+    oxp_2f26e76b-6c91-4ee9-87b3-f424b942091b/crypt/zone/oxz_nexus_5b01b0e0-5cdf-4b34-b0a6-c947cbbdb8be             5e3a1b9d-9475-4bd9-8112-5595a7c0da7d   in service     none      none          off        
+    oxp_2f26e76b-6c91-4ee9-87b3-f424b942091b/crypt/zone/oxz_ntp_7b4bccad-9869-48da-8320-2dc82752deea               45771e96-054c-4b05-8021-c32b23fcad8d   in service     none      none          off        
+    oxp_2f26e76b-6c91-4ee9-87b3-f424b942091b/crypt/debug                                                           29be83b4-4d0b-4787-819d-96e8e69301da   in service     100 GiB   none          gzip-9     
+    oxp_6f8fa855-4f34-42db-a6e4-9d0090d6c828/crypt/debug                                                           ce433c69-7540-4a7a-9e11-dd30b0d2dc19   in service     100 GiB   none          gzip-9     
+    oxp_71450d62-791e-4068-9882-8a206a465fd9/crypt/debug                                                           48cc9313-13c2-4ebe-8120-5b648ec26a28   in service     100 GiB   none          gzip-9     
+    oxp_7b4ad242-8330-4c08-9588-c66782742678/crypt/debug                                                           cdcfe435-881a-44dc-9dba-2a0fafdbf66d   in service     100 GiB   none          gzip-9     
+    oxp_9bf23b52-565e-4439-9728-edb603fa6c4e/crypt/debug                                                           835edc8b-9d33-45db-9bdc-ea8a956f3217   in service     100 GiB   none          gzip-9     
+    oxp_c9476e3d-7745-4fa9-b336-b54ac5b08f56/crypt/debug                                                           1754b8f0-07b8-4305-8bb2-b347ba3e0b68   in service     100 GiB   none          gzip-9     
+    oxp_d2cd1e65-b63d-4748-895f-aafecc81e440/crypt/debug                                                           7028b888-b4c0-43e5-a9d4-2e29d24f34a7   in service     100 GiB   none          gzip-9     
+    oxp_d4ad3cc1-956a-4444-81a6-da6a025f6df2/crypt/debug                                                           36ad4fe9-3897-4777-bc0e-88f142594d07   in service     100 GiB   none          gzip-9     
+    oxp_e1298a43-fa1a-4e6f-bcfa-b26996f69c50/crypt/debug                                                           d37e0b8c-6c43-4e83-b3ec-238429d1cbfb   in service     100 GiB   none          gzip-9     
+    oxp_fa9ce87c-fa7c-4854-95bd-69b8f01c46f9/crypt/debug                                                           b7569aa4-f0d6-4de0-9b9a-cd8d0a6cc01d   in service     100 GiB   none          gzip-9     
+*   oxp_2f26e76b-6c91-4ee9-87b3-f424b942091b/crypt/external_dns                                                    07153a04-4e4a-485a-8399-15bc9063cb5d   - in service   none      none          off        
+     └─                                                                                                                                                   + expunged                                        
+*   oxp_2f26e76b-6c91-4ee9-87b3-f424b942091b/crypt/zone/oxz_external_dns_d786ef4a-5acb-4f5d-a732-a00addf986b5      39f57b97-0501-4902-8f3a-902ed4d7c869   - in service   none      none          off        
+     └─                                                                                                                                                   + expunged                                        
+
+
+    omicron zones:
+    ------------------------------------------------------------------------------------------------------------------
+    zone type         zone id                                image source      disposition      underlay IP           
+    ------------------------------------------------------------------------------------------------------------------
+    crucible          0903299a-6296-44f0-8ab9-7c70b5766a05   install dataset   in service       fd00:1122:3344:101::25
+    crucible          2b6b3cfd-4524-465b-ac6e-10be9ab6d4d4   install dataset   in service       fd00:1122:3344:101::27
+    crucible          3e0ff677-2ca8-4124-9fef-7c23ac2da6fa   install dataset   in service       fd00:1122:3344:101::2d
+    crucible          512758d0-335f-4c94-9afe-c82f6f127421   install dataset   in service       fd00:1122:3344:101::2a
+    crucible          8ae67b12-ca74-40d3-a55e-90456cd623ea   install dataset   in service       fd00:1122:3344:101::26
+    crucible          918c8cbc-1c62-4de5-9cf2-c4153a3d1a7e   install dataset   in service       fd00:1122:3344:101::2e
+    crucible          be422e7a-16d0-426e-8567-da0aed7200d4   install dataset   in service       fd00:1122:3344:101::28
+    crucible          ea50f438-1b5e-4d61-bd65-46d360f590ee   install dataset   in service       fd00:1122:3344:101::2b
+    crucible          f055a042-9d1b-4931-8268-d94cac801d7e   install dataset   in service       fd00:1122:3344:101::29
+    crucible          f33e09d1-e3d7-4341-baf2-5f079f3679e5   install dataset   in service       fd00:1122:3344:101::2c
+    crucible_pantry   100e20aa-1816-4195-8d76-08beace10332   install dataset   in service       fd00:1122:3344:101::24
+    external_dns      9995de32-dd52-4eb1-b0eb-141eb84bc739   install dataset   expunged ⏳       fd00:1122:3344:101::23
+    internal_dns      171cabf0-8635-42e7-8ea1-2a1d2a2daf55   install dataset   in service       fd00:1122:3344:3::1   
+    internal_ntp      7b4bccad-9869-48da-8320-2dc82752deea   install dataset   in service       fd00:1122:3344:101::21
+    nexus             5b01b0e0-5cdf-4b34-b0a6-c947cbbdb8be   install dataset   in service       fd00:1122:3344:101::22
+*   external_dns      d786ef4a-5acb-4f5d-a732-a00addf986b5   install dataset   - in service     fd00:1122:3344:101::2f
+     └─                                                                        + expunged ⏳                           
+
+
+ COCKROACHDB SETTINGS:
+    state fingerprint:::::::::::::::::   (none) (unchanged)
+    cluster.preserve_downgrade_option:   (do not modify) (unchanged)
+
+ METADATA:
+    internal DNS version:::   1 (unchanged)
+    external DNS version:::   1 (unchanged)
+    target release min gen:   1 (unchanged)
+
+ OXIMETER SETTINGS:
+    generation:   1 (unchanged)
+    read from::   SingleNode (unchanged)
+
+
+internal DNS:
+* DNS zone: "control-plane.oxide.internal": 
+    name: 07738018-1b2a-4efc-8c5c-bd6b7a5d7b40.host          (records: 1)
+        AAAA fd00:1122:3344:103::25
+    name: 0903299a-6296-44f0-8ab9-7c70b5766a05.host          (records: 1)
+        AAAA fd00:1122:3344:101::25
+    name: 100e20aa-1816-4195-8d76-08beace10332.host          (records: 1)
+        AAAA fd00:1122:3344:101::24
+    name: 171cabf0-8635-42e7-8ea1-2a1d2a2daf55.host          (records: 1)
+        AAAA fd00:1122:3344:3::1
+    name: 1b37911d-c427-4bf1-90d3-b2d0c2e98825.host          (records: 1)
+        AAAA fd00:1122:3344:103::24
+    name: 2b6b3cfd-4524-465b-ac6e-10be9ab6d4d4.host          (records: 1)
+        AAAA fd00:1122:3344:101::27
+    name: 2cea0275-1fbc-410c-819e-2ec54ffeeffe.host          (records: 1)
+        AAAA fd00:1122:3344:102::22
+    name: 3e0ff677-2ca8-4124-9fef-7c23ac2da6fa.host          (records: 1)
+        AAAA fd00:1122:3344:101::2d
+    name: 426cd521-e6ad-4a67-ad8d-a1acef5eab5e.host          (records: 1)
+        AAAA fd00:1122:3344:102::27
+    name: 47387358-e16d-4c34-b8f7-1f3f12c662eb.host          (records: 1)
+        AAAA fd00:1122:3344:102::23
+    name: 4a392139-7423-459b-b1c9-5903421be40c.host          (records: 1)
+        AAAA fd00:1122:3344:102::2d
+    name: 512758d0-335f-4c94-9afe-c82f6f127421.host          (records: 1)
+        AAAA fd00:1122:3344:101::2a
+    name: 51e403e5-a703-4cfb-b044-c72c52885e82.host          (records: 1)
+        AAAA fd00:1122:3344:102::26
+    name: 53491964-307a-45f6-b277-79a5e90f20b7.host          (records: 1)
+        AAAA fd00:1122:3344:103::2b
+    name: 55a2094a-9590-442f-8203-dffe5a76ae66.host          (records: 1)
+        AAAA fd00:1122:3344:102::25
+    name: 5b01b0e0-5cdf-4b34-b0a6-c947cbbdb8be.host          (records: 1)
+        AAAA fd00:1122:3344:101::22
+    name: 6e1cdf48-6846-4bb3-8a72-8bc1e8d5b21d.host          (records: 1)
+        AAAA fd00:1122:3344:102::21
+    name: 711ac7f8-d19e-4572-bdb9-e9b50f6e362a.sled          (records: 1)
+        AAAA fd00:1122:3344:103::1
+    name: 758d9a91-7070-43e3-8c60-ea1d0f818a12.host          (records: 1)
+        AAAA fd00:1122:3344:102::29
+    name: 777087c0-4fb9-43ed-846b-16aa6431a272.host          (records: 1)
+        AAAA fd00:1122:3344:103::2f
+    name: 78a45052-138b-47ee-877d-e73143467c8a.host          (records: 1)
+        AAAA fd00:1122:3344:103::2a
+    name: 7a1bd482-74f8-4562-b1db-c8bad16afb44.host          (records: 1)
+        AAAA fd00:1122:3344:1::1
+    name: 7b4bccad-9869-48da-8320-2dc82752deea.host          (records: 1)
+        AAAA fd00:1122:3344:101::21
+    name: 8ae67b12-ca74-40d3-a55e-90456cd623ea.host          (records: 1)
+        AAAA fd00:1122:3344:101::26
+    name: 8c368ed6-6c91-4437-b8ff-0d789193db38.host          (records: 1)
+        AAAA fd00:1122:3344:103::21
+    name: 8e4d80f8-80ea-48ac-ad47-95501c0c3fbe.host          (records: 1)
+        AAAA fd00:1122:3344:102::2a
+    name: 8ec567c1-6776-4573-bfe5-f3041165fdca.host          (records: 1)
+        AAAA fd00:1122:3344:103::28
+    name: 8ef7ff46-81f7-4f16-aa8f-0c1957589a5f.host          (records: 1)
+        AAAA fd00:1122:3344:103::2e
+    name: 918c8cbc-1c62-4de5-9cf2-c4153a3d1a7e.host          (records: 1)
+        AAAA fd00:1122:3344:101::2e
+    name: 9dc50690-f9bf-4520-bf80-051d0f465c2c.sled          (records: 1)
+        AAAA fd00:1122:3344:102::1
+    name: @                                                  (records: 3)
+        NS   ns1.control-plane.oxide.internal
+        NS   ns2.control-plane.oxide.internal
+        NS   ns3.control-plane.oxide.internal
+    name: _clickhouse-admin-single-server._tcp               (records: 1)
+        SRV  port  8888 e9d3a6d6-6e95-4ec8-a857-a3ab1ce6e62d.host.control-plane.oxide.internal
+    name: _clickhouse-native._tcp                            (records: 1)
+        SRV  port  9000 e9d3a6d6-6e95-4ec8-a857-a3ab1ce6e62d.host.control-plane.oxide.internal
+    name: _clickhouse._tcp                                   (records: 1)
+        SRV  port  8123 e9d3a6d6-6e95-4ec8-a857-a3ab1ce6e62d.host.control-plane.oxide.internal
+    name: _crucible-pantry._tcp                              (records: 3)
+        SRV  port 17000 07738018-1b2a-4efc-8c5c-bd6b7a5d7b40.host.control-plane.oxide.internal
+        SRV  port 17000 100e20aa-1816-4195-8d76-08beace10332.host.control-plane.oxide.internal
+        SRV  port 17000 eb4f0a57-7386-4216-bcb2-874d39aae836.host.control-plane.oxide.internal
+    name: _crucible._tcp.0903299a-6296-44f0-8ab9-7c70b5766a05 (records: 1)
+        SRV  port 32345 0903299a-6296-44f0-8ab9-7c70b5766a05.host.control-plane.oxide.internal
+    name: _crucible._tcp.2b6b3cfd-4524-465b-ac6e-10be9ab6d4d4 (records: 1)
+        SRV  port 32345 2b6b3cfd-4524-465b-ac6e-10be9ab6d4d4.host.control-plane.oxide.internal
+    name: _crucible._tcp.3e0ff677-2ca8-4124-9fef-7c23ac2da6fa (records: 1)
+        SRV  port 32345 3e0ff677-2ca8-4124-9fef-7c23ac2da6fa.host.control-plane.oxide.internal
+    name: _crucible._tcp.426cd521-e6ad-4a67-ad8d-a1acef5eab5e (records: 1)
+        SRV  port 32345 426cd521-e6ad-4a67-ad8d-a1acef5eab5e.host.control-plane.oxide.internal
+    name: _crucible._tcp.4a392139-7423-459b-b1c9-5903421be40c (records: 1)
+        SRV  port 32345 4a392139-7423-459b-b1c9-5903421be40c.host.control-plane.oxide.internal
+    name: _crucible._tcp.512758d0-335f-4c94-9afe-c82f6f127421 (records: 1)
+        SRV  port 32345 512758d0-335f-4c94-9afe-c82f6f127421.host.control-plane.oxide.internal
+    name: _crucible._tcp.51e403e5-a703-4cfb-b044-c72c52885e82 (records: 1)
+        SRV  port 32345 51e403e5-a703-4cfb-b044-c72c52885e82.host.control-plane.oxide.internal
+    name: _crucible._tcp.53491964-307a-45f6-b277-79a5e90f20b7 (records: 1)
+        SRV  port 32345 53491964-307a-45f6-b277-79a5e90f20b7.host.control-plane.oxide.internal
+    name: _crucible._tcp.55a2094a-9590-442f-8203-dffe5a76ae66 (records: 1)
+        SRV  port 32345 55a2094a-9590-442f-8203-dffe5a76ae66.host.control-plane.oxide.internal
+    name: _crucible._tcp.758d9a91-7070-43e3-8c60-ea1d0f818a12 (records: 1)
+        SRV  port 32345 758d9a91-7070-43e3-8c60-ea1d0f818a12.host.control-plane.oxide.internal
+    name: _crucible._tcp.777087c0-4fb9-43ed-846b-16aa6431a272 (records: 1)
+        SRV  port 32345 777087c0-4fb9-43ed-846b-16aa6431a272.host.control-plane.oxide.internal
+    name: _crucible._tcp.78a45052-138b-47ee-877d-e73143467c8a (records: 1)
+        SRV  port 32345 78a45052-138b-47ee-877d-e73143467c8a.host.control-plane.oxide.internal
+    name: _crucible._tcp.8ae67b12-ca74-40d3-a55e-90456cd623ea (records: 1)
+        SRV  port 32345 8ae67b12-ca74-40d3-a55e-90456cd623ea.host.control-plane.oxide.internal
+    name: _crucible._tcp.8e4d80f8-80ea-48ac-ad47-95501c0c3fbe (records: 1)
+        SRV  port 32345 8e4d80f8-80ea-48ac-ad47-95501c0c3fbe.host.control-plane.oxide.internal
+    name: _crucible._tcp.8ec567c1-6776-4573-bfe5-f3041165fdca (records: 1)
+        SRV  port 32345 8ec567c1-6776-4573-bfe5-f3041165fdca.host.control-plane.oxide.internal
+    name: _crucible._tcp.8ef7ff46-81f7-4f16-aa8f-0c1957589a5f (records: 1)
+        SRV  port 32345 8ef7ff46-81f7-4f16-aa8f-0c1957589a5f.host.control-plane.oxide.internal
+    name: _crucible._tcp.918c8cbc-1c62-4de5-9cf2-c4153a3d1a7e (records: 1)
+        SRV  port 32345 918c8cbc-1c62-4de5-9cf2-c4153a3d1a7e.host.control-plane.oxide.internal
+    name: _crucible._tcp.af3e8274-151f-4cb1-990c-b0a7680ff210 (records: 1)
+        SRV  port 32345 af3e8274-151f-4cb1-990c-b0a7680ff210.host.control-plane.oxide.internal
+    name: _crucible._tcp.be422e7a-16d0-426e-8567-da0aed7200d4 (records: 1)
+        SRV  port 32345 be422e7a-16d0-426e-8567-da0aed7200d4.host.control-plane.oxide.internal
+    name: _crucible._tcp.c3114d7e-07cd-4d80-b82b-49ccbe856af2 (records: 1)
+        SRV  port 32345 c3114d7e-07cd-4d80-b82b-49ccbe856af2.host.control-plane.oxide.internal
+    name: _crucible._tcp.cbf109e0-cdd5-48f9-8998-e9f55c9be980 (records: 1)
+        SRV  port 32345 cbf109e0-cdd5-48f9-8998-e9f55c9be980.host.control-plane.oxide.internal
+    name: _crucible._tcp.d23b5191-04de-4b48-8599-cf866ffc06e8 (records: 1)
+        SRV  port 32345 d23b5191-04de-4b48-8599-cf866ffc06e8.host.control-plane.oxide.internal
+    name: _crucible._tcp.d60cc034-46c4-4233-8066-4008e947d904 (records: 1)
+        SRV  port 32345 d60cc034-46c4-4233-8066-4008e947d904.host.control-plane.oxide.internal
+    name: _crucible._tcp.ea50f438-1b5e-4d61-bd65-46d360f590ee (records: 1)
+        SRV  port 32345 ea50f438-1b5e-4d61-bd65-46d360f590ee.host.control-plane.oxide.internal
+    name: _crucible._tcp.efdbf061-321c-47d6-bf0f-4530ec4c287e (records: 1)
+        SRV  port 32345 efdbf061-321c-47d6-bf0f-4530ec4c287e.host.control-plane.oxide.internal
+    name: _crucible._tcp.f055a042-9d1b-4931-8268-d94cac801d7e (records: 1)
+        SRV  port 32345 f055a042-9d1b-4931-8268-d94cac801d7e.host.control-plane.oxide.internal
+    name: _crucible._tcp.f24b63e6-2382-4862-90bf-c39e42aad988 (records: 1)
+        SRV  port 32345 f24b63e6-2382-4862-90bf-c39e42aad988.host.control-plane.oxide.internal
+    name: _crucible._tcp.f31ab1c5-0f23-44dc-8504-c67c65afc11e (records: 1)
+        SRV  port 32345 f31ab1c5-0f23-44dc-8504-c67c65afc11e.host.control-plane.oxide.internal
+    name: _crucible._tcp.f33e09d1-e3d7-4341-baf2-5f079f3679e5 (records: 1)
+        SRV  port 32345 f33e09d1-e3d7-4341-baf2-5f079f3679e5.host.control-plane.oxide.internal
+    name: _crucible._tcp.fddd2bd6-a535-4e2c-9a36-cb90d048c0b7 (records: 1)
+        SRV  port 32345 fddd2bd6-a535-4e2c-9a36-cb90d048c0b7.host.control-plane.oxide.internal
+*   name: _external-dns._tcp                                 (records: 3 -> 2)
+-       SRV  port  5353 1b37911d-c427-4bf1-90d3-b2d0c2e98825.host.control-plane.oxide.internal
+-       SRV  port  5353 47387358-e16d-4c34-b8f7-1f3f12c662eb.host.control-plane.oxide.internal
+-       SRV  port  5353 d786ef4a-5acb-4f5d-a732-a00addf986b5.host.control-plane.oxide.internal
++       SRV  port  5353 1b37911d-c427-4bf1-90d3-b2d0c2e98825.host.control-plane.oxide.internal
++       SRV  port  5353 47387358-e16d-4c34-b8f7-1f3f12c662eb.host.control-plane.oxide.internal
+    name: _internal-ntp._tcp                                 (records: 3)
+        SRV  port   123 6e1cdf48-6846-4bb3-8a72-8bc1e8d5b21d.host.control-plane.oxide.internal
+        SRV  port   123 7b4bccad-9869-48da-8320-2dc82752deea.host.control-plane.oxide.internal
+        SRV  port   123 8c368ed6-6c91-4437-b8ff-0d789193db38.host.control-plane.oxide.internal
+    name: _nameservice._tcp                                  (records: 3)
+        SRV  port  5353 171cabf0-8635-42e7-8ea1-2a1d2a2daf55.host.control-plane.oxide.internal
+        SRV  port  5353 7a1bd482-74f8-4562-b1db-c8bad16afb44.host.control-plane.oxide.internal
+        SRV  port  5353 edb6573c-3621-4d95-ad3b-93a088caeea5.host.control-plane.oxide.internal
+    name: _nexus._tcp                                        (records: 3)
+        SRV  port 12221 2cea0275-1fbc-410c-819e-2ec54ffeeffe.host.control-plane.oxide.internal
+        SRV  port 12221 5b01b0e0-5cdf-4b34-b0a6-c947cbbdb8be.host.control-plane.oxide.internal
+        SRV  port 12221 ed2d3be3-fcee-4f6b-bb99-a1a9130c4eeb.host.control-plane.oxide.internal
+    name: _oximeter-reader._tcp                              (records: 1)
+        SRV  port  9000 e9d3a6d6-6e95-4ec8-a857-a3ab1ce6e62d.host.control-plane.oxide.internal
+    name: _repo-depot._tcp                                   (records: 3)
+        SRV  port 12348 711ac7f8-d19e-4572-bdb9-e9b50f6e362a.sled.control-plane.oxide.internal
+        SRV  port 12348 9dc50690-f9bf-4520-bf80-051d0f465c2c.sled.control-plane.oxide.internal
+        SRV  port 12348 a88790de-5962-4871-8686-61c1fd5b7094.sled.control-plane.oxide.internal
+    name: a88790de-5962-4871-8686-61c1fd5b7094.sled          (records: 1)
+        AAAA fd00:1122:3344:101::1
+    name: af3e8274-151f-4cb1-990c-b0a7680ff210.host          (records: 1)
+        AAAA fd00:1122:3344:103::27
+    name: be422e7a-16d0-426e-8567-da0aed7200d4.host          (records: 1)
+        AAAA fd00:1122:3344:101::28
+    name: c3114d7e-07cd-4d80-b82b-49ccbe856af2.host          (records: 1)
+        AAAA fd00:1122:3344:103::29
+    name: cbf109e0-cdd5-48f9-8998-e9f55c9be980.host          (records: 1)
+        AAAA fd00:1122:3344:102::2e
+    name: d23b5191-04de-4b48-8599-cf866ffc06e8.host          (records: 1)
+        AAAA fd00:1122:3344:103::2d
+    name: d60cc034-46c4-4233-8066-4008e947d904.host          (records: 1)
+        AAAA fd00:1122:3344:102::2c
+-   name: d786ef4a-5acb-4f5d-a732-a00addf986b5.host          (records: 1)
+-       AAAA fd00:1122:3344:101::2f
+    name: e9d3a6d6-6e95-4ec8-a857-a3ab1ce6e62d.host          (records: 1)
+        AAAA fd00:1122:3344:103::23
+    name: ea50f438-1b5e-4d61-bd65-46d360f590ee.host          (records: 1)
+        AAAA fd00:1122:3344:101::2b
+    name: eb4f0a57-7386-4216-bcb2-874d39aae836.host          (records: 1)
+        AAAA fd00:1122:3344:102::24
+    name: ed2d3be3-fcee-4f6b-bb99-a1a9130c4eeb.host          (records: 1)
+        AAAA fd00:1122:3344:103::22
+    name: edb6573c-3621-4d95-ad3b-93a088caeea5.host          (records: 1)
+        AAAA fd00:1122:3344:2::1
+    name: efdbf061-321c-47d6-bf0f-4530ec4c287e.host          (records: 1)
+        AAAA fd00:1122:3344:103::26
+    name: f055a042-9d1b-4931-8268-d94cac801d7e.host          (records: 1)
+        AAAA fd00:1122:3344:101::29
+    name: f24b63e6-2382-4862-90bf-c39e42aad988.host          (records: 1)
+        AAAA fd00:1122:3344:102::2b
+    name: f31ab1c5-0f23-44dc-8504-c67c65afc11e.host          (records: 1)
+        AAAA fd00:1122:3344:103::2c
+    name: f33e09d1-e3d7-4341-baf2-5f079f3679e5.host          (records: 1)
+        AAAA fd00:1122:3344:101::2c
+    name: fddd2bd6-a535-4e2c-9a36-cb90d048c0b7.host          (records: 1)
+        AAAA fd00:1122:3344:102::28
+    name: ns1                                                (records: 1)
+        AAAA fd00:1122:3344:1::1
+    name: ns2                                                (records: 1)
+        AAAA fd00:1122:3344:2::1
+    name: ns3                                                (records: 1)
+        AAAA fd00:1122:3344:3::1
+
+external DNS:
+* DNS zone: "oxide.example": 
+*   name: @                                                  (records: 3 -> 2)
+-       NS   ns1.oxide.example
+-       NS   ns2.oxide.example
+-       NS   ns3.oxide.example
++       NS   ns1.oxide.example
++       NS   ns2.oxide.example
+    name: example-silo.sys                                   (records: 3)
+        A    192.0.2.2
+        A    192.0.2.3
+        A    192.0.2.4
+    name: ns1                                                (records: 1)
+        A    198.51.100.1
+    name: ns2                                                (records: 1)
+        A    198.51.100.2
+-   name: ns3                                                (records: 1)
+-       A    198.51.100.3
+
+
 

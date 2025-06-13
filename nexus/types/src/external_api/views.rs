@@ -15,7 +15,7 @@ use daft::Diffable;
 use omicron_common::api::external::{
     AffinityPolicy, AllowedSourceIps as ExternalAllowedSourceIps, ByteCount,
     Digest, Error, FailureDomain, IdentityMetadata, InstanceState, Name,
-    ObjectIdentity, RoleName, SimpleIdentityOrName,
+    ObjectIdentity, RoleName, SimpleIdentity, SimpleIdentityOrName,
 };
 use omicron_uuid_kinds::{AlertReceiverUuid, AlertUuid};
 use oxnet::{Ipv4Net, Ipv6Net};
@@ -114,6 +114,15 @@ impl SimpleIdentityOrName for SiloUtilization {
     fn name(&self) -> &Name {
         &self.silo_name
     }
+}
+
+/// View of silo authentication settings
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
+pub struct SiloAuthSettings {
+    pub silo_id: Uuid,
+    /// Maximum lifetime of a device token in seconds. If set to null, users
+    /// will be able to create tokens that do not expire.
+    pub device_token_max_ttl_seconds: Option<u32>,
 }
 
 // AFFINITY GROUPS
@@ -580,7 +589,7 @@ pub struct Sled {
     pub rack_id: Uuid,
     /// The operator-defined policy of a sled.
     pub policy: SledPolicy,
-    /// The current state Nexus believes the sled to be in.
+    /// The current state of the sled.
     pub state: SledState,
     /// The number of hardware threads which can execute on this sled
     pub usable_hardware_threads: u32,
@@ -720,7 +729,7 @@ impl fmt::Display for SledPolicy {
     }
 }
 
-/// The current state of the sled, as determined by Nexus.
+/// The current state of the sled.
 #[derive(
     Copy,
     Clone,
@@ -980,16 +989,35 @@ pub struct SshKey {
     pub public_key: String,
 }
 
+/// View of a device access token
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema, PartialEq)]
+pub struct DeviceAccessToken {
+    /// A unique, immutable, system-controlled identifier for the token.
+    /// Note that this ID is not the bearer token itself, which starts with
+    /// "oxide-token-"
+    pub id: Uuid,
+    pub time_created: DateTime<Utc>,
+
+    /// Expiration timestamp. A null value means the token does not automatically expire.
+    pub time_expires: Option<DateTime<Utc>>,
+}
+
+impl SimpleIdentity for DeviceAccessToken {
+    fn id(&self) -> Uuid {
+        self.id
+    }
+}
+
 // OAUTH 2.0 DEVICE AUTHORIZATION REQUESTS & TOKENS
 
 /// Response to an initial device authorization request.
 /// See RFC 8628 §3.2 (Device Authorization Response).
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
 pub struct DeviceAuthResponse {
-    /// The device verification code.
+    /// The device verification code
     pub device_code: String,
 
-    /// The end-user verification code.
+    /// The end-user verification code
     pub user_code: String,
 
     /// The end-user verification URI on the authorization server.
@@ -997,18 +1025,24 @@ pub struct DeviceAuthResponse {
     /// may be asked to manually type it into their user agent.
     pub verification_uri: String,
 
-    /// The lifetime in seconds of the `device_code` and `user_code`.
+    /// The lifetime in seconds of the `device_code` and `user_code`
     pub expires_in: u16,
 }
 
 /// Successful access token grant. See RFC 6749 §5.1.
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
 pub struct DeviceAccessTokenGrant {
-    /// The access token issued to the client.
+    /// The access token issued to the client
     pub access_token: String,
 
     /// The type of the token issued, as described in RFC 6749 §7.1.
     pub token_type: DeviceAccessTokenType,
+
+    /// A unique, immutable, system-controlled identifier for the token
+    pub token_id: Uuid,
+
+    /// Expiration timestamp. A null value means the token does not automatically expire.
+    pub time_expires: Option<DateTime<Utc>>,
 }
 
 /// The kind of token granted.
@@ -1090,7 +1124,7 @@ pub struct AlertSubscriptionCreated {
 
 /// The possible alert delivery mechanisms for an alert receiver.
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema, PartialEq)]
-#[serde(rename_all = "snake_case")]
+#[serde(rename_all = "snake_case", tag = "kind")]
 pub enum AlertReceiverKind {
     Webhook(WebhookReceiverConfig),
 }

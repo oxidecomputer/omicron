@@ -427,6 +427,10 @@ CREATE TYPE IF NOT EXISTS omicron.public.physical_disk_state AS ENUM (
 );
 
 -- A physical disk which exists inside the rack.
+--
+-- This is currently limited to U.2 disks, which are managed by the
+-- control plane. A disk may exist within inventory, but not in this row:
+-- if that's the case, it is not explicitly "managed" by Nexus.
 CREATE TABLE IF NOT EXISTS omicron.public.physical_disk (
     id UUID PRIMARY KEY,
     time_created TIMESTAMPTZ NOT NULL,
@@ -444,7 +448,15 @@ CREATE TABLE IF NOT EXISTS omicron.public.physical_disk (
     sled_id UUID NOT NULL,
 
     disk_policy omicron.public.physical_disk_policy NOT NULL,
-    disk_state omicron.public.physical_disk_state NOT NULL
+    disk_state omicron.public.physical_disk_state NOT NULL,
+
+    -- This table should be limited to U.2s, and disallow inserting
+    -- other disk kinds, unless we explicitly want them to be controlled
+    -- by Nexus.
+    --
+    -- See https://github.com/oxidecomputer/omicron/issues/8258 for additional
+    -- context.
+    CONSTRAINT physical_disk_variant_u2 CHECK (variant = 'u2')
 );
 
 -- This constraint only needs to be upheld for disks that are not deleted
@@ -592,6 +604,8 @@ CREATE INDEX IF NOT EXISTS lookup_zpool_by_disk on omicron.public.zpool (
     id
 ) WHERE physical_disk_id IS NOT NULL AND time_deleted IS NULL;
 
+-- TODO-cleanup If modifying this enum, please remove 'update'; see
+-- https://github.com/oxidecomputer/omicron/issues/8268.
 CREATE TYPE IF NOT EXISTS omicron.public.dataset_kind AS ENUM (
   'crucible',
   'cockroach',
@@ -1065,6 +1079,14 @@ WHERE
 AND
     s.time_deleted IS NULL;
 
+CREATE TABLE IF NOT EXISTS omicron.public.silo_auth_settings (
+    silo_id UUID PRIMARY KEY,
+    time_created TIMESTAMPTZ NOT NULL,
+    time_modified TIMESTAMPTZ NOT NULL,
+
+    -- null means no max: users can tokens that never expire
+    device_token_max_ttl_seconds INT8 CHECK (device_token_max_ttl_seconds > 0)
+);
 /*
  * Projects
  */
@@ -2400,7 +2422,8 @@ CREATE TABLE IF NOT EXISTS omicron.public.saga_node_event (
  * Sessions for use by web console.
  */
 CREATE TABLE IF NOT EXISTS omicron.public.console_session (
-    token STRING(40) PRIMARY KEY,
+    id UUID PRIMARY KEY,
+    token STRING(40) NOT NULL,
     time_created TIMESTAMPTZ NOT NULL,
     time_last_used TIMESTAMPTZ NOT NULL,
     silo_user_id UUID NOT NULL
@@ -2409,14 +2432,20 @@ CREATE TABLE IF NOT EXISTS omicron.public.console_session (
 -- to be used for cleaning up old tokens
 -- It's okay that this index is non-unique because we don't need to page through
 -- this list.  We'll just grab the next N, delete them, then repeat.
-CREATE INDEX IF NOT EXISTS lookup_console_by_creation ON omicron.public.console_session (
-    time_created
-);
+CREATE INDEX IF NOT EXISTS lookup_console_by_creation
+    ON omicron.public.console_session (time_created);
 
 -- This index is used to remove sessions for a user that's being deleted.
-CREATE INDEX IF NOT EXISTS lookup_console_by_silo_user ON omicron.public.console_session (
-    silo_user_id
-);
+CREATE INDEX IF NOT EXISTS lookup_console_by_silo_user
+    ON omicron.public.console_session (silo_user_id);
+
+-- We added a UUID as the primary key, but we need the token to keep acting like
+-- it did before. "When you change a primary key with ALTER PRIMARY KEY, the old
+-- primary key index becomes a secondary index." We chose to use DROP CONSTRAINT
+-- and ADD CONSTRAINT instead and manually create the index.
+-- https://www.cockroachlabs.com/docs/v22.1/primary-key#changing-primary-key-columns
+CREATE UNIQUE INDEX IF NOT EXISTS console_session_token_unique
+	ON omicron.public.console_session (token);
 
 /*******************************************************************/
 
@@ -2790,12 +2819,15 @@ CREATE TABLE IF NOT EXISTS omicron.public.device_auth_request (
     client_id UUID NOT NULL,
     device_code STRING(40) NOT NULL,
     time_created TIMESTAMPTZ NOT NULL,
-    time_expires TIMESTAMPTZ NOT NULL
+    time_expires TIMESTAMPTZ NOT NULL,
+    -- requested TTL for the token in seconds (if specified by the user)
+    token_ttl_seconds INT8 CHECK (token_ttl_seconds > 0)
 );
 
 -- Access tokens granted in response to successful device authorization flows.
 CREATE TABLE IF NOT EXISTS omicron.public.device_access_token (
-    token STRING(40) PRIMARY KEY,
+    id UUID PRIMARY KEY,
+    token STRING(40) NOT NULL,
     client_id UUID NOT NULL,
     device_code STRING(40) NOT NULL,
     silo_user_id UUID NOT NULL,
@@ -2806,14 +2838,17 @@ CREATE TABLE IF NOT EXISTS omicron.public.device_access_token (
 
 -- This UNIQUE constraint is critical for ensuring that at most
 -- one token is ever created for a given device authorization flow.
-CREATE UNIQUE INDEX IF NOT EXISTS lookup_device_access_token_by_client ON omicron.public.device_access_token (
-    client_id, device_code
-);
+CREATE UNIQUE INDEX IF NOT EXISTS lookup_device_access_token_by_client
+    ON omicron.public.device_access_token (client_id, device_code);
+
+-- We added a UUID as the primary key, but we need the token to keep acting like
+-- it did before
+CREATE UNIQUE INDEX IF NOT EXISTS device_access_token_unique
+    ON omicron.public.device_access_token (token);
 
 -- This index is used to remove tokens for a user that's being deleted.
-CREATE INDEX IF NOT EXISTS lookup_device_access_token_by_silo_user ON omicron.public.device_access_token (
-    silo_user_id
-);
+CREATE INDEX IF NOT EXISTS lookup_device_access_token_by_silo_user
+    ON omicron.public.device_access_token (silo_user_id);
 
 /*
  * Roles built into the system
@@ -3721,7 +3756,7 @@ CREATE TABLE IF NOT EXISTS omicron.public.inv_dataset (
     inv_collection_id UUID NOT NULL,
     sled_id UUID NOT NULL,
 
-    -- The control plane ID of the zpool.
+    -- The control plane ID of the dataset.
     -- This is nullable because datasets have been historically
     -- self-managed by the Sled Agent, and some don't have explicit UUIDs.
     id UUID,
@@ -3793,6 +3828,44 @@ CREATE TABLE IF NOT EXISTS omicron.public.inv_last_reconciliation_dataset_result
     error_message TEXT,
 
     PRIMARY KEY (inv_collection_id, sled_id, dataset_id)
+);
+
+CREATE TABLE IF NOT EXISTS omicron.public.inv_last_reconciliation_orphaned_dataset (
+    -- where this observation came from
+    -- (foreign key into `inv_collection` table)
+    inv_collection_id UUID NOT NULL,
+
+    -- unique id for this sled (should be foreign keys into `sled` table, though
+    -- it's conceivable a sled will report an id that we don't know about)
+    sled_id UUID NOT NULL,
+
+    -- These three columns compose a `DatasetName`. Other tables that store a
+    -- `DatasetName` use a nullable `zone_name` (since it's only supposed to be
+    -- set for datasets with `kind = 'zone'`). This table instead uses the empty
+    -- string for non-'zone' kinds, which allows the column to be NOT NULL and
+    -- hence be a member of our primary key. (We have no other unique ID to
+    -- distinguish different `DatasetName`s.)
+    pool_id UUID NOT NULL,
+    kind omicron.public.dataset_kind NOT NULL,
+    zone_name TEXT NOT NULL,
+    CONSTRAINT zone_name_for_zone_kind CHECK (
+      (kind != 'zone' AND zone_name = '') OR
+      (kind = 'zone' AND zone_name != '')
+    ),
+
+    reason TEXT NOT NULL,
+
+    -- The control plane ID of the dataset.
+    -- This is nullable because this is attached as the `oxide:uuid` property in
+    -- ZFS, and we can't guarantee it exists for any given dataset.
+    id UUID,
+
+    -- Properties of the dataset at the time we detected it was an orphan.
+    mounted BOOL NOT NULL,
+    available INT8 NOT NULL,
+    used INT8 NOT NULL,
+
+    PRIMARY KEY (inv_collection_id, sled_id, pool_id, kind, zone_name)
 );
 
 CREATE TABLE IF NOT EXISTS omicron.public.inv_last_reconciliation_zone_result (
@@ -4068,7 +4141,23 @@ CREATE TABLE IF NOT EXISTS omicron.public.blueprint (
     -- represented by the presence of the default value in that field.
     --
     -- `cluster.preserve_downgrade_option`
-    cockroachdb_setting_preserve_downgrade TEXT
+    cockroachdb_setting_preserve_downgrade TEXT,
+
+    -- The smallest value of the target_release table's generation field that's
+    -- accepted by the blueprint.
+    --
+    -- For example, let's say that the current target release generation is 5.
+    -- Then, when reconfigurator detects a MUPdate:
+    --
+    -- * the target release is ignored in favor of the install dataset
+    -- * this field is set to 6
+    --
+    -- Once an operator sets a new target release, its generation will be 6 or
+    -- higher. Reconfigurator will then know that it is back in charge of
+    -- driving the system to the target release.
+    --
+    -- This is set to 1 by default in application code.
+    target_release_minimum_generation INT8 NOT NULL
 );
 
 -- table describing both the current and historical target blueprints of the
@@ -5665,7 +5754,7 @@ INSERT INTO omicron.public.db_metadata (
     version,
     target_version
 ) VALUES
-    (TRUE, NOW(), NOW(), '145.0.0', NULL)
+    (TRUE, NOW(), NOW(), '151.0.0', NULL)
 ON CONFLICT DO NOTHING;
 
 COMMIT;

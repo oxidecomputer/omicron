@@ -28,8 +28,10 @@ DNS zone:                   oxide-dev.test (External)
 requested version:          2 (created at <REDACTED_TIMESTAMP>)
 version created by Nexus:   ..........<REDACTED_UUID>...........
 version created because:    create silo: "test-suite-silo"
-changes:                    names added: 1, names removed: 0
+changes:                    names added: 3, names removed: 0
 
++  @                                                  NS   ns1.oxide-dev.test
++  ns1                                                AAAA ::1
 +  test-suite-silo.sys                                A    127.0.0.1
 ---------------------------------------------
 stderr:
@@ -42,6 +44,8 @@ termination: Exited(0)
 stdout:
 External zone: oxide-dev.test
   NAME                                               RECORDS
+  @                                                  NS   ns1.oxide-dev.test
+  ns1                                                AAAA ::1
   test-suite-silo.sys                                A    127.0.0.1
 ---------------------------------------------
 stderr:
@@ -1469,11 +1473,12 @@ parent:    <none>
     read from::   SingleNode
 
  METADATA:
-    created by:::::::::::   nexus-test-utils
-    created at:::::::::::   <REDACTED_TIMESTAMP>
-    comment::::::::::::::   initial test blueprint
-    internal DNS version:   1
-    external DNS version:   2
+    created by:::::::::::::   nexus-test-utils
+    created at:::::::::::::   <REDACTED_TIMESTAMP>
+    comment::::::::::::::::   initial test blueprint
+    internal DNS version:::   1
+    external DNS version:::   2
+    target release min gen:   1
 
  PENDING MGS-MANAGED UPDATES: 0
 
@@ -1570,11 +1575,12 @@ parent:    <none>
     read from::   SingleNode
 
  METADATA:
-    created by:::::::::::   nexus-test-utils
-    created at:::::::::::   <REDACTED_TIMESTAMP>
-    comment::::::::::::::   initial test blueprint
-    internal DNS version:   1
-    external DNS version:   2
+    created by:::::::::::::   nexus-test-utils
+    created at:::::::::::::   <REDACTED_TIMESTAMP>
+    comment::::::::::::::::   initial test blueprint
+    internal DNS version:::   1
+    external DNS version:::   2
+    target release min gen:   1
 
  PENDING MGS-MANAGED UPDATES: 0
 
@@ -1589,75 +1595,14 @@ stdout:
 from: blueprint ......<REDACTED_BLUEPRINT_ID>.......
 to:   blueprint ......<REDACTED_BLUEPRINT_ID>.......
 
- UNCHANGED SLEDS:
-
-  sled ..........<REDACTED_UUID>........... (active, config generation 2):
-
-    physical disks:
-    -----------------------------------------------------------------
-    vendor        model              serial               disposition
-    -----------------------------------------------------------------
-    nexus-tests   nexus-test-model   nexus-test-disk-10   in service 
-    nexus-tests   nexus-test-model   nexus-test-disk-11   in service 
-    nexus-tests   nexus-test-model   nexus-test-disk-12   in service 
-    nexus-tests   nexus-test-model   nexus-test-disk-13   in service 
-    nexus-tests   nexus-test-model   nexus-test-disk-14   in service 
-    nexus-tests   nexus-test-model   nexus-test-disk-15   in service 
-    nexus-tests   nexus-test-model   nexus-test-disk-16   in service 
-    nexus-tests   nexus-test-model   nexus-test-disk-17   in service 
-    nexus-tests   nexus-test-model   nexus-test-disk-18   in service 
-    nexus-tests   nexus-test-model   nexus-test-disk-19   in service 
-
-
-  sled ..........<REDACTED_UUID>........... (active, config generation 2):
-
-    physical disks:
-    ----------------------------------------------------------------
-    vendor        model              serial              disposition
-    ----------------------------------------------------------------
-    nexus-tests   nexus-test-model   nexus-test-disk-0   in service 
-    nexus-tests   nexus-test-model   nexus-test-disk-1   in service 
-    nexus-tests   nexus-test-model   nexus-test-disk-2   in service 
-    nexus-tests   nexus-test-model   nexus-test-disk-3   in service 
-    nexus-tests   nexus-test-model   nexus-test-disk-4   in service 
-    nexus-tests   nexus-test-model   nexus-test-disk-5   in service 
-    nexus-tests   nexus-test-model   nexus-test-disk-6   in service 
-    nexus-tests   nexus-test-model   nexus-test-disk-7   in service 
-    nexus-tests   nexus-test-model   nexus-test-disk-8   in service 
-    nexus-tests   nexus-test-model   nexus-test-disk-9   in service 
-
-
-    datasets:
-    -----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
-    dataset name                                                                                                   dataset id                             disposition   quota   reservation   compression
-    -----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
-    oxp_..........<REDACTED_UUID>.........../crypt/zone/oxz_clickhouse_..........<REDACTED_UUID>...........        ..........<REDACTED_UUID>...........   in service    none    none          off        
-    oxp_..........<REDACTED_UUID>.........../crypt/zone/oxz_cockroachdb_..........<REDACTED_UUID>...........       ..........<REDACTED_UUID>...........   in service    none    none          off        
-    oxp_..........<REDACTED_UUID>.........../crypt/zone/oxz_crucible_pantry_..........<REDACTED_UUID>...........   ..........<REDACTED_UUID>...........   in service    none    none          off        
-    oxp_..........<REDACTED_UUID>.........../crypt/zone/oxz_external_dns_..........<REDACTED_UUID>...........      ..........<REDACTED_UUID>...........   in service    none    none          off        
-    oxp_..........<REDACTED_UUID>.........../crypt/zone/oxz_internal_dns_..........<REDACTED_UUID>...........      ..........<REDACTED_UUID>...........   in service    none    none          off        
-    oxp_..........<REDACTED_UUID>.........../crypt/zone/oxz_nexus_..........<REDACTED_UUID>...........             ..........<REDACTED_UUID>...........   in service    none    none          off        
-
-
-    omicron zones:
-    ---------------------------------------------------------------------------------------------------------
-    zone type         zone id                                image source      disposition   underlay IP     
-    ---------------------------------------------------------------------------------------------------------
-    clickhouse        ..........<REDACTED_UUID>...........   install dataset   in service    ::1             
-    cockroach_db      ..........<REDACTED_UUID>...........   install dataset   in service    ::1             
-    crucible_pantry   ..........<REDACTED_UUID>...........   install dataset   in service    ::1             
-    external_dns      ..........<REDACTED_UUID>...........   install dataset   in service    ::1             
-    internal_dns      ..........<REDACTED_UUID>...........   install dataset   in service    ::1             
-    nexus             ..........<REDACTED_UUID>...........   install dataset   in service    ::ffff:127.0.0.1
-
-
  COCKROACHDB SETTINGS:
     state fingerprint:::::::::::::::::   <COCKROACHDB_FINGERPRINT_REDACTED> (unchanged)
     cluster.preserve_downgrade_option:   <COCKROACHDB_VERSION_REDACTED> (unchanged)
 
  METADATA:
-    internal DNS version:   1 (unchanged)
-    external DNS version:   2 (unchanged)
+    internal DNS version:::   1 (unchanged)
+    external DNS version:::   2 (unchanged)
+    target release min gen:   1 (unchanged)
 
  OXIMETER SETTINGS:
     generation:   1 (unchanged)
@@ -1667,6 +1612,15 @@ to:   blueprint ......<REDACTED_BLUEPRINT_ID>.......
 ---------------------------------------------
 stderr:
 note: using Nexus URL http://127.0.0.1:REDACTED_PORT/
+=============================================
+EXECUTING COMMAND: omdb ["nexus", "blueprints", "diff", "......<REDACTED_BLUEPRINT_ID>......."]
+termination: Exited(1)
+---------------------------------------------
+stdout:
+---------------------------------------------
+stderr:
+note: using Nexus URL http://127.0.0.1:REDACTED_PORT/
+Error: `blueprint2_id` was not specified and blueprint1 has no parent
 =============================================
 EXECUTING COMMAND: omdb ["reconfigurator", "export", "<TMP_PATH_REDACTED>"]
 termination: Exited(0)

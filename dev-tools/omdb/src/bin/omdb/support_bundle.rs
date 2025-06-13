@@ -52,13 +52,13 @@ impl<'a> StreamedFile<'a> {
     //
     // This means that we would potentially want to restart the stream with a different position.
     async fn start_stream(&mut self) -> anyhow::Result<()> {
-        // TODO: Add range headers, for range requests? Though this
-        // will require adding support to Progenitor + Nexus too.
+        // TODO: Add range headers, for range requests?
         let stream = self
             .client
             .support_bundle_download_file(
                 self.id.as_untyped_uuid(),
                 self.path.as_str(),
+                None,
             )
             .await
             .with_context(|| {
@@ -142,7 +142,7 @@ impl<'c> SupportBundleAccessor for InternalApiAccess<'c> {
     async fn get_index(&self) -> anyhow::Result<SupportBundleIndex> {
         let stream = self
             .client
-            .support_bundle_index(self.id.as_untyped_uuid())
+            .support_bundle_index(self.id.as_untyped_uuid(), None)
             .await
             .with_context(|| {
                 format!("downloading support bundle index {}", self.id)

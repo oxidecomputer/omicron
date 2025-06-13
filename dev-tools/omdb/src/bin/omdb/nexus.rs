@@ -24,7 +24,6 @@ use clap::Subcommand;
 use clap::ValueEnum;
 use futures::StreamExt;
 use futures::TryStreamExt;
-use futures::future::try_join;
 use http::StatusCode;
 use internal_dns_types::names::ServiceName;
 use itertools::Itertools;
@@ -76,6 +75,7 @@ use serde::Deserialize;
 use slog_error_chain::InlineErrorChain;
 use std::collections::BTreeMap;
 use std::collections::BTreeSet;
+use std::fs::OpenOptions;
 use std::str::FromStr;
 use std::sync::Arc;
 use support_bundle_viewer::LocalFileAccess;
@@ -268,17 +268,12 @@ struct BlueprintIdArgs {
 }
 
 #[derive(Debug, Args)]
-struct BlueprintIdsArgs {
+struct BlueprintDiffArgs {
     /// id of first blueprint (or `target` for the current target)
     blueprint1_id: BlueprintIdOrCurrentTarget,
-    /// id of second blueprint (or `target` for the current target)
-    blueprint2_id: BlueprintIdOrCurrentTarget,
-}
-
-#[derive(Debug, Args)]
-struct BlueprintDiffArgs {
-    #[clap(flatten)]
-    ids: BlueprintIdsArgs,
+    /// id of second blueprint (or `target` for the current target, or omitted
+    /// to use the parent of the first blueprint)
+    blueprint2_id: Option<BlueprintIdOrCurrentTarget>,
     /// Exit with 1 if there were differences, 0 if no differences.
     #[arg(long, default_value_t = false)]
     exit_code: bool,
@@ -522,6 +517,13 @@ struct SupportBundleDownloadArgs {
     /// instead of stdout.
     #[arg(short, long)]
     output: Option<Utf8PathBuf>,
+
+    /// If "true" and using an output path, resumes downloading.
+    ///
+    /// This assumes the contents of "output" are already valid, and resumes
+    /// downloading at the end of the file.
+    #[arg(short, long, default_value_t = false)]
+    resume: bool,
 }
 
 #[derive(Debug, Args)]
@@ -2347,6 +2349,7 @@ fn print_task_support_bundle_collector(details: &serde_json::Value) {
             if let Some(SupportBundleCollectionReport {
                 bundle,
                 listed_in_service_sleds,
+                listed_sps,
                 activated_in_db_ok,
             }) = collection_report
             {
@@ -2354,6 +2357,9 @@ fn print_task_support_bundle_collector(details: &serde_json::Value) {
                 println!("      Bundle ID: {bundle}");
                 println!(
                     "      Bundle was able to list in-service sleds: {listed_in_service_sleds}"
+                );
+                println!(
+                    "      Bundle was able to list service processors: {listed_sps}"
                 );
                 println!(
                     "      Bundle was activated in the database: {activated_in_db_ok}"
@@ -3056,11 +3062,21 @@ async fn cmd_nexus_blueprints_diff(
     client: &nexus_client::Client,
     args: &BlueprintDiffArgs,
 ) -> Result<(), anyhow::Error> {
-    let (b1, b2) = try_join(
-        args.ids.blueprint1_id.resolve_to_blueprint(client),
-        args.ids.blueprint2_id.resolve_to_blueprint(client),
-    )
-    .await?;
+    let blueprint = args.blueprint1_id.resolve_to_blueprint(client).await?;
+    let (b1, b2) = if let Some(blueprint2_arg) = &args.blueprint2_id {
+        (blueprint, blueprint2_arg.resolve_to_blueprint(client).await?)
+    } else if let Some(parent_id) = blueprint.parent_blueprint_id {
+        (
+            client
+                .blueprint_view(parent_id.as_untyped_uuid())
+                .await?
+                .into_inner(),
+            blueprint,
+        )
+    } else {
+        bail!("`blueprint2_id` was not specified and blueprint1 has no parent");
+    };
+
     let diff = b2.diff_since_blueprint(&b1);
     println!("{}", diff.display());
     if args.exit_code && diff.has_changes() {
@@ -3857,10 +3873,10 @@ async fn cmd_nexus_support_bundles_delete(
 }
 
 async fn write_stream_to_sink(
-    mut stream: impl futures::Stream<Item = reqwest::Result<bytes::Bytes>>
-    + std::marker::Unpin,
+    mut stream: impl futures::Stream<Item = anyhow::Result<bytes::Bytes>>,
     mut sink: impl std::io::Write,
 ) -> Result<(), anyhow::Error> {
+    let mut stream = std::pin::pin!(stream);
     while let Some(data) = stream.next().await {
         match data {
             Err(err) => return Err(anyhow::anyhow!(err)),
@@ -3870,19 +3886,85 @@ async fn write_stream_to_sink(
     Ok(())
 }
 
+// Downloads a portion of a support bundle using range requests.
+//
+// "range" is in bytes, and is inclusive on both sides.
+async fn support_bundle_download_range(
+    client: &nexus_client::Client,
+    id: SupportBundleUuid,
+    range: (u64, u64),
+) -> anyhow::Result<impl futures::Stream<Item = anyhow::Result<bytes::Bytes>>> {
+    let range = format!("bytes={}-{}", range.0, range.1);
+    Ok(client
+        .support_bundle_download(id.as_untyped_uuid(), Some(&range))
+        .await
+        .with_context(|| format!("downloading support bundle {}", id))?
+        .into_inner_stream()
+        .map(|r| r.map_err(|err| anyhow::anyhow!(err))))
+}
+
+// Downloads all ranges of a support bundle, and combines them into a single
+// stream.
+//
+// Starts the download at "start" bytes (inclusive) and continues up to "end"
+// bytes (exclusive).
+fn support_bundle_download_ranges(
+    client: &nexus_client::Client,
+    id: SupportBundleUuid,
+    start: u64,
+    end: u64,
+) -> impl futures::Stream<Item = anyhow::Result<bytes::Bytes>> + use<'_> {
+    // Arbitrary chunk size of 100 MiB.
+    //
+    // Note that we'll still stream data in packets which are smaller than this,
+    // but we won't keep a single connection to Nexus open for longer than a 100
+    // MiB download.
+    const CHUNK_SIZE: u64 = 100 * (1 << 20);
+    futures::stream::try_unfold(
+        (start, start + CHUNK_SIZE - 1),
+        move |range| async move {
+            if end <= range.0 {
+                return Ok(None);
+            }
+
+            let stream =
+                support_bundle_download_range(client, id, range).await?;
+            let next_range = (range.0 + CHUNK_SIZE, range.1 + CHUNK_SIZE);
+            Ok::<_, anyhow::Error>(Some((stream, next_range)))
+        },
+    )
+    .try_flatten()
+}
+
 /// Runs `omdb nexus support-bundles download`
 async fn cmd_nexus_support_bundles_download(
     client: &nexus_client::Client,
     args: &SupportBundleDownloadArgs,
 ) -> Result<(), anyhow::Error> {
-    let stream = client
-        .support_bundle_download(args.id.as_untyped_uuid())
-        .await
-        .with_context(|| format!("downloading support bundle {}", args.id))?
-        .into_inner_stream();
+    let total_length = client
+        .support_bundle_head(args.id.as_untyped_uuid(), None)
+        .await?
+        .content_length()
+        .ok_or_else(|| anyhow::anyhow!("No content length"))?;
+
+    let start = match &args.output {
+        Some(output) if output.exists() && args.resume => {
+            output.metadata()?.len()
+        }
+        _ => 0,
+    };
+
+    let stream =
+        support_bundle_download_ranges(client, args.id, start, total_length);
 
     let sink: Box<dyn std::io::Write> = match &args.output {
-        Some(path) => Box::new(std::fs::File::create(path)?),
+        Some(path) => Box::new(
+            OpenOptions::new()
+                .create(true)
+                .append(true)
+                .truncate(!args.resume)
+                .open(path)?,
+        ),
         None => Box::new(std::io::stdout()),
     };
 
@@ -3898,12 +3980,13 @@ async fn cmd_nexus_support_bundles_get_index(
     args: &SupportBundleIndexArgs,
 ) -> Result<(), anyhow::Error> {
     let stream = client
-        .support_bundle_index(args.id.as_untyped_uuid())
+        .support_bundle_index(args.id.as_untyped_uuid(), None)
         .await
         .with_context(|| {
             format!("downloading support bundle index {}", args.id)
         })?
-        .into_inner_stream();
+        .into_inner_stream()
+        .map(|r| r.map_err(|err| anyhow::anyhow!(err)));
 
     write_stream_to_sink(stream, std::io::stdout()).await.with_context(
         || format!("streaming support bundle index {}", args.id),
@@ -3920,6 +4003,7 @@ async fn cmd_nexus_support_bundles_get_file(
         .support_bundle_download_file(
             args.id.as_untyped_uuid(),
             args.path.as_str(),
+            None,
         )
         .await
         .with_context(|| {
@@ -3928,7 +4012,8 @@ async fn cmd_nexus_support_bundles_get_file(
                 args.id, args.path
             )
         })?
-        .into_inner_stream();
+        .into_inner_stream()
+        .map(|r| r.map_err(|err| anyhow::anyhow!(err)));
 
     let sink: Box<dyn std::io::Write> = match &args.output {
         Some(path) => Box::new(std::fs::File::create(path)?),

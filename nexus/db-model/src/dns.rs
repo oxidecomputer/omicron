@@ -124,6 +124,7 @@ pub enum DnsRecord {
     A(Ipv4Addr),
     AAAA(Ipv6Addr),
     SRV(SRV),
+    NS(String),
 }
 
 impl From<params::DnsRecord> for DnsRecord {
@@ -132,6 +133,7 @@ impl From<params::DnsRecord> for DnsRecord {
             params::DnsRecord::A(addr) => DnsRecord::A(addr),
             params::DnsRecord::Aaaa(addr) => DnsRecord::AAAA(addr),
             params::DnsRecord::Srv(srv) => DnsRecord::SRV(SRV::from(srv)),
+            params::DnsRecord::Ns(ns) => DnsRecord::NS(ns),
         }
     }
 }
@@ -144,6 +146,7 @@ impl From<DnsRecord> for params::DnsRecord {
             DnsRecord::SRV(srv) => {
                 params::DnsRecord::Srv(params::Srv::from(srv))
             }
+            DnsRecord::NS(ns) => params::DnsRecord::Ns(ns),
         }
     }
 }

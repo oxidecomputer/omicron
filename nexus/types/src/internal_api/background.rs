@@ -231,6 +231,9 @@ pub struct SupportBundleCollectionReport {
     /// True iff we could list in-service sleds
     pub listed_in_service_sleds: bool,
 
+    /// True iff we could list the service processors.
+    pub listed_sps: bool,
+
     /// True iff the bundle was successfully made 'active' in the database.
     pub activated_in_db_ok: bool,
 }
@@ -240,6 +243,7 @@ impl SupportBundleCollectionReport {
         Self {
             bundle,
             listed_in_service_sleds: false,
+            listed_sps: false,
             activated_in_db_ok: false,
         }
     }

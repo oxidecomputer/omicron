@@ -6,6 +6,7 @@
 //! associated inventory collections and blueprints
 
 use anyhow::{Context, anyhow, bail, ensure};
+use chrono::Utc;
 use gateway_client::types::RotState;
 use gateway_client::types::SpState;
 use indexmap::IndexMap;
@@ -13,6 +14,7 @@ use ipnet::Ipv6Net;
 use ipnet::Ipv6Subnets;
 use nexus_inventory::CollectionBuilder;
 use nexus_sled_agent_shared::inventory::Baseboard;
+use nexus_sled_agent_shared::inventory::ConfigReconcilerInventory;
 use nexus_sled_agent_shared::inventory::ConfigReconcilerInventoryStatus;
 use nexus_sled_agent_shared::inventory::Inventory;
 use nexus_sled_agent_shared::inventory::InventoryDataset;
@@ -45,6 +47,7 @@ use omicron_common::address::SLED_PREFIX;
 use omicron_common::address::get_sled_address;
 use omicron_common::api::external::ByteCount;
 use omicron_common::api::external::Generation;
+use omicron_common::api::external::TufRepoDescription;
 use omicron_common::disk::DiskIdentity;
 use omicron_common::disk::DiskVariant;
 use omicron_common::policy::INTERNAL_DNS_REDUNDANCY;
@@ -57,6 +60,7 @@ use std::fmt::Debug;
 use std::net::Ipv4Addr;
 use std::net::Ipv6Addr;
 use std::sync::Arc;
+use std::time::Duration;
 
 /// Describes an actual or synthetic Oxide rack for planning and testing
 ///
@@ -97,6 +101,8 @@ pub struct SystemDescription {
     external_dns_version: Generation,
     clickhouse_policy: Option<ClickhousePolicy>,
     oximeter_read_policy: OximeterReadPolicy,
+    tuf_repo: Option<TufRepoDescription>,
+    old_repo: Option<TufRepoDescription>,
 }
 
 impl SystemDescription {
@@ -176,6 +182,8 @@ impl SystemDescription {
             external_dns_version: Generation::new(),
             clickhouse_policy: None,
             oximeter_read_policy: OximeterReadPolicy::new(1),
+            tuf_repo: None,
+            old_repo: None,
         }
     }
 
@@ -389,10 +397,17 @@ impl SystemDescription {
         })?;
         let sled = Arc::make_mut(sled);
 
-        sled.inventory_sled_agent.ledgered_sled_config = Some(sled_config);
+        sled.inventory_sled_agent.ledgered_sled_config =
+            Some(sled_config.clone());
+
+        // Present results as though the reconciler has successfully completed.
         sled.inventory_sled_agent.reconciler_status =
-            ConfigReconcilerInventoryStatus::NotYetRun;
-        sled.inventory_sled_agent.last_reconciliation = None;
+            ConfigReconcilerInventoryStatus::Idle {
+                completed_at: Utc::now(),
+                ran_for: Duration::from_secs(5),
+            };
+        sled.inventory_sled_agent.last_reconciliation =
+            Some(ConfigReconcilerInventory::debug_assume_success(sled_config));
 
         Ok(self)
     }
@@ -461,6 +476,8 @@ impl SystemDescription {
                 .target_crucible_pantry_zone_count,
             clickhouse_policy: self.clickhouse_policy.clone(),
             oximeter_read_policy: self.oximeter_read_policy.clone(),
+            tuf_repo: self.tuf_repo.clone(),
+            old_repo: self.old_repo.clone(),
         };
         let mut builder = PlanningInputBuilder::new(
             policy,
@@ -716,9 +733,16 @@ impl Sled {
                     })
                     .collect(),
                 datasets: vec![],
-                ledgered_sled_config: Some(sled_config),
-                reconciler_status: ConfigReconcilerInventoryStatus::NotYetRun,
-                last_reconciliation: None,
+                ledgered_sled_config: Some(sled_config.clone()),
+                reconciler_status: ConfigReconcilerInventoryStatus::Idle {
+                    completed_at: Utc::now(),
+                    ran_for: Duration::from_secs(5),
+                },
+                last_reconciliation: Some(
+                    ConfigReconcilerInventory::debug_assume_success(
+                        sled_config,
+                    ),
+                ),
             }
         };
 

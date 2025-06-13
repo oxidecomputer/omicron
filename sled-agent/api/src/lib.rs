@@ -7,13 +7,13 @@ use std::time::Duration;
 
 use camino::Utf8PathBuf;
 use dropshot::{
-    Body, FreeformBody, HttpError, HttpResponseAccepted, HttpResponseCreated,
-    HttpResponseDeleted, HttpResponseHeaders, HttpResponseOk,
-    HttpResponseUpdatedNoContent, Path, Query, RequestContext, StreamingBody,
-    TypedBody,
+    Body, FreeformBody, Header, HttpError, HttpResponseAccepted,
+    HttpResponseCreated, HttpResponseDeleted, HttpResponseHeaders,
+    HttpResponseOk, HttpResponseUpdatedNoContent, Path, Query, RequestContext,
+    StreamingBody, TypedBody,
 };
 use nexus_sled_agent_shared::inventory::{
-    Inventory, OmicronSledConfig, OmicronSledConfigResult, SledRole,
+    Inventory, OmicronSledConfig, SledRole,
 };
 use omicron_common::{
     api::external::Generation,
@@ -24,7 +24,7 @@ use omicron_common::{
             SledIdentifiers, SwitchPorts, VirtualNetworkInterfaceHost,
         },
     },
-    disk::{DatasetsConfig, DiskVariant, OmicronPhysicalDisksConfig},
+    disk::DiskVariant,
     ledger::Ledgerable,
 };
 use omicron_uuid_kinds::{
@@ -190,6 +190,7 @@ pub trait SledAgentApi {
     }]
     async fn support_bundle_download(
         rqctx: RequestContext<Self::Context>,
+        headers: Header<RangeRequestHeaders>,
         path_params: Path<SupportBundlePathParam>,
     ) -> Result<http::Response<Body>, HttpError>;
 
@@ -200,6 +201,7 @@ pub trait SledAgentApi {
     }]
     async fn support_bundle_download_file(
         rqctx: RequestContext<Self::Context>,
+        headers: Header<RangeRequestHeaders>,
         path_params: Path<SupportBundleFilePathParam>,
     ) -> Result<http::Response<Body>, HttpError>;
 
@@ -210,6 +212,7 @@ pub trait SledAgentApi {
     }]
     async fn support_bundle_index(
         rqctx: RequestContext<Self::Context>,
+        headers: Header<RangeRequestHeaders>,
         path_params: Path<SupportBundlePathParam>,
     ) -> Result<http::Response<Body>, HttpError>;
 
@@ -220,6 +223,7 @@ pub trait SledAgentApi {
     }]
     async fn support_bundle_head(
         rqctx: RequestContext<Self::Context>,
+        headers: Header<RangeRequestHeaders>,
         path_params: Path<SupportBundlePathParam>,
     ) -> Result<http::Response<Body>, HttpError>;
 
@@ -230,6 +234,7 @@ pub trait SledAgentApi {
     }]
     async fn support_bundle_head_file(
         rqctx: RequestContext<Self::Context>,
+        headers: Header<RangeRequestHeaders>,
         path_params: Path<SupportBundleFilePathParam>,
     ) -> Result<http::Response<Body>, HttpError>;
 
@@ -240,6 +245,7 @@ pub trait SledAgentApi {
     }]
     async fn support_bundle_head_index(
         rqctx: RequestContext<Self::Context>,
+        headers: Header<RangeRequestHeaders>,
         path_params: Path<SupportBundlePathParam>,
     ) -> Result<http::Response<Body>, HttpError>;
 
@@ -260,32 +266,7 @@ pub trait SledAgentApi {
     async fn omicron_config_put(
         rqctx: RequestContext<Self::Context>,
         body: TypedBody<OmicronSledConfig>,
-    ) -> Result<HttpResponseOk<OmicronSledConfigResult>, HttpError>;
-
-    /// Lists the datasets that this sled is configured to use
-    #[endpoint {
-        method = GET,
-        path = "/datasets",
-    }]
-    async fn datasets_get(
-        rqctx: RequestContext<Self::Context>,
-    ) -> Result<HttpResponseOk<DatasetsConfig>, HttpError>;
-
-    #[endpoint {
-        method = GET,
-        path = "/omicron-physical-disks",
-    }]
-    async fn omicron_physical_disks_get(
-        rqctx: RequestContext<Self::Context>,
-    ) -> Result<HttpResponseOk<OmicronPhysicalDisksConfig>, HttpError>;
-
-    #[endpoint {
-        method = GET,
-        path = "/zpools",
-    }]
-    async fn zpools_get(
-        rqctx: RequestContext<Self::Context>,
-    ) -> Result<HttpResponseOk<Vec<Zpool>>, HttpError>;
+    ) -> Result<HttpResponseUpdatedNoContent, HttpError>;
 
     #[endpoint {
         method = GET,
@@ -809,6 +790,15 @@ pub enum SupportBundleState {
 pub struct SupportBundleMetadata {
     pub support_bundle_id: SupportBundleUuid,
     pub state: SupportBundleState,
+}
+
+/// Range request headers
+#[derive(Debug, Deserialize, Serialize, JsonSchema)]
+pub struct RangeRequestHeaders {
+    /// A request to access a portion of the resource, such as `bytes=0-499`
+    ///
+    /// See: <https://developer.mozilla.org/en-US/docs/Web/HTTP/Reference/Headers/Range>
+    pub range: Option<String>,
 }
 
 /// Path parameters for sled-diagnostics log requests used by support bundles

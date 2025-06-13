@@ -355,11 +355,12 @@ parent:    02697f74-b14a-4418-90f0-c28b2a3a6aa9
     read from::   SingleNode
 
  METADATA:
-    created by:::::::::::   test suite
-    created at:::::::::::   <REDACTED_TIMESTAMP>
-    comment::::::::::::::   (none)
-    internal DNS version:   1
-    external DNS version:   1
+    created by:::::::::::::   test suite
+    created at:::::::::::::   <REDACTED_TIMESTAMP>
+    comment::::::::::::::::   (none)
+    internal DNS version:::   1
+    external DNS version:::   1
+    target release min gen:   1
 
  PENDING MGS-MANAGED UPDATES: 0
 
@@ -451,12 +452,279 @@ parent:    02697f74-b14a-4418-90f0-c28b2a3a6aa9
     read from::   SingleNode
 
  METADATA:
-    created by:::::::::::   test suite
-    created at:::::::::::   <REDACTED_TIMESTAMP>
-    comment::::::::::::::   (none)
-    internal DNS version:   1
-    external DNS version:   1
+    created by:::::::::::::   test suite
+    created at:::::::::::::   <REDACTED_TIMESTAMP>
+    comment::::::::::::::::   (none)
+    internal DNS version:::   1
+    external DNS version:::   1
+    target release min gen:   1
 
  PENDING MGS-MANAGED UPDATES: 0
+
+
+
+> # Exercise `blueprint-diff` arguments.
+> # We don't care about the actual content of these diffs here.
+> # The "from"/"to" that's printed at the top is enough to know that the command
+> # picked the right pair of blueprints.  So we also use a small system to keep
+> # the rest of the diff output small.
+
+> wipe all
+- wiped system, reconfigurator-sim config, and RNG state
+
+                 - reset seed to test-basic
+
+> load-example --seed test-basic --nsleds 1 --ndisks-per-sled 4 --no-zones
+loaded example system with:
+- collection: 9e187896-7809-46d0-9210-d75be1b3c4d4
+- blueprint: ade5749d-bdf3-4fab-a8ae-00bea01b3a5a
+
+
+> blueprint-list
+T ENA ID                                   PARENT                               TIME_CREATED             
+      02697f74-b14a-4418-90f0-c28b2a3a6aa9 <none>                               <REDACTED_TIMESTAMP> 
+* yes ade5749d-bdf3-4fab-a8ae-00bea01b3a5a 02697f74-b14a-4418-90f0-c28b2a3a6aa9 <REDACTED_TIMESTAMP> 
+
+> blueprint-plan ade5749d-bdf3-4fab-a8ae-00bea01b3a5a
+INFO found sled missing NTP zone (will add one), sled_id: 89d02b1b-478c-401a-8e28-7a26f74fa41b
+INFO sufficient BoundaryNtp zones exist in plan, desired_count: 0, current_count: 0
+WARN failed to place all new desired Clickhouse zones, placed: 0, wanted_to_place: 1
+INFO sufficient ClickhouseKeeper zones exist in plan, desired_count: 0, current_count: 0
+INFO sufficient ClickhouseServer zones exist in plan, desired_count: 0, current_count: 0
+INFO sufficient CockroachDb zones exist in plan, desired_count: 0, current_count: 0
+WARN failed to place all new desired CruciblePantry zones, placed: 0, wanted_to_place: 3
+WARN failed to place all new desired InternalDns zones, placed: 0, wanted_to_place: 3
+INFO sufficient ExternalDns zones exist in plan, desired_count: 0, current_count: 0
+WARN failed to place all new desired Nexus zones, placed: 0, wanted_to_place: 3
+INFO sufficient Oximeter zones exist in plan, desired_count: 0, current_count: 0
+INFO some zones not yet up-to-date, sled_id: 89d02b1b-478c-401a-8e28-7a26f74fa41b
+INFO will ensure cockroachdb setting, setting: cluster.preserve_downgrade_option, value: DoNotModify
+generated blueprint 86db3308-f817-4626-8838-4085949a6a41 based on parent blueprint ade5749d-bdf3-4fab-a8ae-00bea01b3a5a
+
+> blueprint-list
+T ENA ID                                   PARENT                               TIME_CREATED             
+      02697f74-b14a-4418-90f0-c28b2a3a6aa9 <none>                               <REDACTED_TIMESTAMP> 
+* yes ade5749d-bdf3-4fab-a8ae-00bea01b3a5a 02697f74-b14a-4418-90f0-c28b2a3a6aa9 <REDACTED_TIMESTAMP> 
+      86db3308-f817-4626-8838-4085949a6a41 ade5749d-bdf3-4fab-a8ae-00bea01b3a5a <REDACTED_TIMESTAMP> 
+
+
+> # It's not okay to specify just one blueprint if it's the first one.
+> blueprint-diff 02697f74-b14a-4418-90f0-c28b2a3a6aa9
+error: `blueprint2_id` was not specified and blueprint1 has no parent blueprint
+
+> # It does work to specify just one blueprint if it's a later one.
+> blueprint-diff 86db3308-f817-4626-8838-4085949a6a41
+from: blueprint ade5749d-bdf3-4fab-a8ae-00bea01b3a5a
+to:   blueprint 86db3308-f817-4626-8838-4085949a6a41
+
+ MODIFIED SLEDS:
+
+  sled 89d02b1b-478c-401a-8e28-7a26f74fa41b (active, config generation 2 -> 3):
+
+    physical disks:
+    ------------------------------------------------------------------------------------
+    vendor        model        serial                                        disposition
+    ------------------------------------------------------------------------------------
+    fake-vendor   fake-model   serial-44fa7024-c2bc-4d2c-b478-c4997e4aece8   in service 
+    fake-vendor   fake-model   serial-8562317c-4736-4cfc-9292-7dcab96a6fee   in service 
+    fake-vendor   fake-model   serial-ce1c13f3-bef2-4306-b0f2-4e39bd4a18b6   in service 
+    fake-vendor   fake-model   serial-f931ec80-a3e3-4adb-a8ba-fa5adbd2294c   in service 
+
+
+    datasets:
+    -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+    dataset name                                                                                       dataset id                             disposition   quota     reservation   compression
+    -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+    oxp_44fa7024-c2bc-4d2c-b478-c4997e4aece8/crypt/zone                                                819bb07a-b7be-4741-899a-62a2d7899032   in service    none      none          off        
+    oxp_8562317c-4736-4cfc-9292-7dcab96a6fee/crypt/zone                                                a63be222-b12b-40ec-9dd4-3a0068c6a578   in service    none      none          off        
+    oxp_ce1c13f3-bef2-4306-b0f2-4e39bd4a18b6/crypt/zone                                                750d6910-096b-4f39-a8b5-d8f09c80d3db   in service    none      none          off        
+    oxp_f931ec80-a3e3-4adb-a8ba-fa5adbd2294c/crypt/zone                                                a16b5eaa-346d-4516-8af2-5154697c5d72   in service    none      none          off        
+    oxp_44fa7024-c2bc-4d2c-b478-c4997e4aece8/crypt/debug                                               137ee88a-d89a-41a7-95d0-53e59f03a8e6   in service    100 GiB   none          gzip-9     
+    oxp_8562317c-4736-4cfc-9292-7dcab96a6fee/crypt/debug                                               67ebc7eb-f34d-4c8c-bd5c-6c69caf142af   in service    100 GiB   none          gzip-9     
+    oxp_ce1c13f3-bef2-4306-b0f2-4e39bd4a18b6/crypt/debug                                               673a9c1d-d762-4328-adbe-1fe1a158cc32   in service    100 GiB   none          gzip-9     
+    oxp_f931ec80-a3e3-4adb-a8ba-fa5adbd2294c/crypt/debug                                               d2c79018-e2df-4258-893b-fb7b6cacce44   in service    100 GiB   none          gzip-9     
++   oxp_44fa7024-c2bc-4d2c-b478-c4997e4aece8/crypt/zone/oxz_ntp_d9757590-e283-49cc-b453-5c1331fa68c1   ef755aeb-9b12-484c-9631-b18524920878   in service    none      none          off        
+
+
+    omicron zones:
+    ------------------------------------------------------------------------------------------------------------
+    zone type      zone id                                image source      disposition   underlay IP           
+    ------------------------------------------------------------------------------------------------------------
++   internal_ntp   d9757590-e283-49cc-b453-5c1331fa68c1   install dataset   in service    fd00:1122:3344:101::21
+
+
+ COCKROACHDB SETTINGS:
+    state fingerprint:::::::::::::::::   (none) (unchanged)
+    cluster.preserve_downgrade_option:   (do not modify) (unchanged)
+
+ METADATA:
+    internal DNS version:::   1 (unchanged)
+    external DNS version:::   1 (unchanged)
+    target release min gen:   1 (unchanged)
+
+ OXIMETER SETTINGS:
+    generation:   1 (unchanged)
+    read from::   SingleNode (unchanged)
+
+
+internal DNS:
+* DNS zone: "control-plane.oxide.internal": 
+    name: 89d02b1b-478c-401a-8e28-7a26f74fa41b.sled          (records: 1)
+        AAAA fd00:1122:3344:101::1
++   name: _internal-ntp._tcp                                 (records: 1)
++       SRV  port   123 d9757590-e283-49cc-b453-5c1331fa68c1.host.control-plane.oxide.internal
+    name: _repo-depot._tcp                                   (records: 1)
+        SRV  port 12348 89d02b1b-478c-401a-8e28-7a26f74fa41b.sled.control-plane.oxide.internal
++   name: d9757590-e283-49cc-b453-5c1331fa68c1.host          (records: 1)
++       AAAA fd00:1122:3344:101::21
+
+external DNS:
+  DNS zone: "oxide.example" (unchanged)
+    name: example-silo.sys                                   (records: 0)
+
+
+
+> # It also works to specify two blueprints.
+> blueprint-diff 02697f74-b14a-4418-90f0-c28b2a3a6aa9 86db3308-f817-4626-8838-4085949a6a41
+from: blueprint 02697f74-b14a-4418-90f0-c28b2a3a6aa9
+to:   blueprint 86db3308-f817-4626-8838-4085949a6a41
+
+ MODIFIED SLEDS:
+
+  sled 89d02b1b-478c-401a-8e28-7a26f74fa41b (active, config generation 1 -> 3):
+
+    physical disks:
+    ------------------------------------------------------------------------------------
+    vendor        model        serial                                        disposition
+    ------------------------------------------------------------------------------------
++   fake-vendor   fake-model   serial-44fa7024-c2bc-4d2c-b478-c4997e4aece8   in service 
++   fake-vendor   fake-model   serial-8562317c-4736-4cfc-9292-7dcab96a6fee   in service 
++   fake-vendor   fake-model   serial-ce1c13f3-bef2-4306-b0f2-4e39bd4a18b6   in service 
++   fake-vendor   fake-model   serial-f931ec80-a3e3-4adb-a8ba-fa5adbd2294c   in service 
+
+
+    datasets:
+    -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+    dataset name                                                                                       dataset id                             disposition   quota     reservation   compression
+    -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
++   oxp_44fa7024-c2bc-4d2c-b478-c4997e4aece8/crypt/zone                                                819bb07a-b7be-4741-899a-62a2d7899032   in service    none      none          off        
++   oxp_8562317c-4736-4cfc-9292-7dcab96a6fee/crypt/zone                                                a63be222-b12b-40ec-9dd4-3a0068c6a578   in service    none      none          off        
++   oxp_ce1c13f3-bef2-4306-b0f2-4e39bd4a18b6/crypt/zone                                                750d6910-096b-4f39-a8b5-d8f09c80d3db   in service    none      none          off        
++   oxp_f931ec80-a3e3-4adb-a8ba-fa5adbd2294c/crypt/zone                                                a16b5eaa-346d-4516-8af2-5154697c5d72   in service    none      none          off        
++   oxp_44fa7024-c2bc-4d2c-b478-c4997e4aece8/crypt/zone/oxz_ntp_d9757590-e283-49cc-b453-5c1331fa68c1   ef755aeb-9b12-484c-9631-b18524920878   in service    none      none          off        
++   oxp_44fa7024-c2bc-4d2c-b478-c4997e4aece8/crypt/debug                                               137ee88a-d89a-41a7-95d0-53e59f03a8e6   in service    100 GiB   none          gzip-9     
++   oxp_8562317c-4736-4cfc-9292-7dcab96a6fee/crypt/debug                                               67ebc7eb-f34d-4c8c-bd5c-6c69caf142af   in service    100 GiB   none          gzip-9     
++   oxp_ce1c13f3-bef2-4306-b0f2-4e39bd4a18b6/crypt/debug                                               673a9c1d-d762-4328-adbe-1fe1a158cc32   in service    100 GiB   none          gzip-9     
++   oxp_f931ec80-a3e3-4adb-a8ba-fa5adbd2294c/crypt/debug                                               d2c79018-e2df-4258-893b-fb7b6cacce44   in service    100 GiB   none          gzip-9     
+
+
+    omicron zones:
+    ------------------------------------------------------------------------------------------------------------
+    zone type      zone id                                image source      disposition   underlay IP           
+    ------------------------------------------------------------------------------------------------------------
++   internal_ntp   d9757590-e283-49cc-b453-5c1331fa68c1   install dataset   in service    fd00:1122:3344:101::21
+
+
+ COCKROACHDB SETTINGS:
+    state fingerprint:::::::::::::::::   (none) (unchanged)
+    cluster.preserve_downgrade_option:   (do not modify) (unchanged)
+
+ METADATA:
+    internal DNS version:::   1 (unchanged)
+    external DNS version:::   1 (unchanged)
+    target release min gen:   1 (unchanged)
+
+ OXIMETER SETTINGS:
+    generation:   1 (unchanged)
+    read from::   SingleNode (unchanged)
+
+
+internal DNS:
+* DNS zone: "control-plane.oxide.internal": 
+    name: 89d02b1b-478c-401a-8e28-7a26f74fa41b.sled          (records: 1)
+        AAAA fd00:1122:3344:101::1
++   name: _internal-ntp._tcp                                 (records: 1)
++       SRV  port   123 d9757590-e283-49cc-b453-5c1331fa68c1.host.control-plane.oxide.internal
+    name: _repo-depot._tcp                                   (records: 1)
+        SRV  port 12348 89d02b1b-478c-401a-8e28-7a26f74fa41b.sled.control-plane.oxide.internal
++   name: d9757590-e283-49cc-b453-5c1331fa68c1.host          (records: 1)
++       AAAA fd00:1122:3344:101::21
+
+external DNS:
+  DNS zone: "oxide.example" (unchanged)
+    name: example-silo.sys                                   (records: 0)
+
+
+
+> # You can specify them in the reverse order and see the opposite changes.
+> blueprint-diff 86db3308-f817-4626-8838-4085949a6a41 02697f74-b14a-4418-90f0-c28b2a3a6aa9
+from: blueprint 86db3308-f817-4626-8838-4085949a6a41
+to:   blueprint 02697f74-b14a-4418-90f0-c28b2a3a6aa9
+
+ MODIFIED SLEDS:
+
+  sled 89d02b1b-478c-401a-8e28-7a26f74fa41b (active, config generation 3 -> 1):
+
+    physical disks:
+    ------------------------------------------------------------------------------------
+    vendor        model        serial                                        disposition
+    ------------------------------------------------------------------------------------
+-   fake-vendor   fake-model   serial-44fa7024-c2bc-4d2c-b478-c4997e4aece8   in service 
+-   fake-vendor   fake-model   serial-8562317c-4736-4cfc-9292-7dcab96a6fee   in service 
+-   fake-vendor   fake-model   serial-ce1c13f3-bef2-4306-b0f2-4e39bd4a18b6   in service 
+-   fake-vendor   fake-model   serial-f931ec80-a3e3-4adb-a8ba-fa5adbd2294c   in service 
+
+
+    datasets:
+    -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+    dataset name                                                                                       dataset id                             disposition   quota     reservation   compression
+    -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+-   oxp_44fa7024-c2bc-4d2c-b478-c4997e4aece8/crypt/zone                                                819bb07a-b7be-4741-899a-62a2d7899032   in service    none      none          off        
+-   oxp_8562317c-4736-4cfc-9292-7dcab96a6fee/crypt/zone                                                a63be222-b12b-40ec-9dd4-3a0068c6a578   in service    none      none          off        
+-   oxp_ce1c13f3-bef2-4306-b0f2-4e39bd4a18b6/crypt/zone                                                750d6910-096b-4f39-a8b5-d8f09c80d3db   in service    none      none          off        
+-   oxp_f931ec80-a3e3-4adb-a8ba-fa5adbd2294c/crypt/zone                                                a16b5eaa-346d-4516-8af2-5154697c5d72   in service    none      none          off        
+-   oxp_44fa7024-c2bc-4d2c-b478-c4997e4aece8/crypt/zone/oxz_ntp_d9757590-e283-49cc-b453-5c1331fa68c1   ef755aeb-9b12-484c-9631-b18524920878   in service    none      none          off        
+-   oxp_44fa7024-c2bc-4d2c-b478-c4997e4aece8/crypt/debug                                               137ee88a-d89a-41a7-95d0-53e59f03a8e6   in service    100 GiB   none          gzip-9     
+-   oxp_8562317c-4736-4cfc-9292-7dcab96a6fee/crypt/debug                                               67ebc7eb-f34d-4c8c-bd5c-6c69caf142af   in service    100 GiB   none          gzip-9     
+-   oxp_ce1c13f3-bef2-4306-b0f2-4e39bd4a18b6/crypt/debug                                               673a9c1d-d762-4328-adbe-1fe1a158cc32   in service    100 GiB   none          gzip-9     
+-   oxp_f931ec80-a3e3-4adb-a8ba-fa5adbd2294c/crypt/debug                                               d2c79018-e2df-4258-893b-fb7b6cacce44   in service    100 GiB   none          gzip-9     
+
+
+    omicron zones:
+    ------------------------------------------------------------------------------------------------------------
+    zone type      zone id                                image source      disposition   underlay IP           
+    ------------------------------------------------------------------------------------------------------------
+-   internal_ntp   d9757590-e283-49cc-b453-5c1331fa68c1   install dataset   in service    fd00:1122:3344:101::21
+
+
+ COCKROACHDB SETTINGS:
+    state fingerprint:::::::::::::::::   (none) (unchanged)
+    cluster.preserve_downgrade_option:   (do not modify) (unchanged)
+
+ METADATA:
+    internal DNS version:::   1 (unchanged)
+    external DNS version:::   1 (unchanged)
+    target release min gen:   1 (unchanged)
+
+ OXIMETER SETTINGS:
+    generation:   1 (unchanged)
+    read from::   SingleNode (unchanged)
+
+
+internal DNS:
+* DNS zone: "control-plane.oxide.internal": 
+    name: 89d02b1b-478c-401a-8e28-7a26f74fa41b.sled          (records: 1)
+        AAAA fd00:1122:3344:101::1
+-   name: _internal-ntp._tcp                                 (records: 1)
+-       SRV  port   123 d9757590-e283-49cc-b453-5c1331fa68c1.host.control-plane.oxide.internal
+    name: _repo-depot._tcp                                   (records: 1)
+        SRV  port 12348 89d02b1b-478c-401a-8e28-7a26f74fa41b.sled.control-plane.oxide.internal
+-   name: d9757590-e283-49cc-b453-5c1331fa68c1.host          (records: 1)
+-       AAAA fd00:1122:3344:101::21
+
+external DNS:
+  DNS zone: "oxide.example" (unchanged)
+    name: example-silo.sys                                   (records: 0)
+
 
 

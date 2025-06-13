@@ -56,6 +56,7 @@ use omicron_common::address::DNS_PORT;
 use omicron_common::address::NTP_PORT;
 use omicron_common::address::ReservedRackSubnet;
 use omicron_common::api::external::Generation;
+use omicron_common::api::external::TufRepoDescription;
 use omicron_common::api::external::Vni;
 use omicron_common::api::internal::shared::NetworkInterface;
 use omicron_common::api::internal::shared::NetworkInterfaceKind;
@@ -124,6 +125,16 @@ pub enum Error {
     AllocateExternalNetworking(#[from] ExternalNetworkingError),
     #[error("can only have {INTERNAL_DNS_REDUNDANCY} internal DNS servers")]
     PolicySpecifiesTooManyInternalDnsServers,
+    #[error("zone is already up-to-date and should not be updated")]
+    ZoneAlreadyUpToDate,
+    #[error(
+        "mismatch while setting target_release_minimum_generation, \
+         expected current value is {expected} but actual value is {actual}"
+    )]
+    TargetReleaseMinimumGenerationMismatch {
+        expected: Generation,
+        actual: Generation,
+    },
 }
 
 /// Describes the result of an idempotent "ensure" operation
@@ -404,6 +415,7 @@ pub struct BlueprintBuilder<'a> {
     // corresponding fields in `Blueprint`.
     sled_editors: BTreeMap<SledUuid, SledEditor>,
     cockroachdb_setting_preserve_downgrade: CockroachDbPreserveDowngrade,
+    target_release_minimum_generation: Generation,
 
     creator: String,
     operations: Vec<Operation>,
@@ -465,6 +477,7 @@ impl<'a> BlueprintBuilder<'a> {
             parent_blueprint_id: None,
             internal_dns_version: Generation::new(),
             external_dns_version: Generation::new(),
+            target_release_minimum_generation: Generation::new(),
             cockroachdb_fingerprint: String::new(),
             cockroachdb_setting_preserve_downgrade:
                 CockroachDbPreserveDowngrade::DoNotModify,
@@ -541,6 +554,8 @@ impl<'a> BlueprintBuilder<'a> {
             cockroachdb_setting_preserve_downgrade: parent_blueprint
                 .cockroachdb_setting_preserve_downgrade,
             pending_mgs_updates: parent_blueprint.pending_mgs_updates.clone(),
+            target_release_minimum_generation: parent_blueprint
+                .target_release_minimum_generation,
             creator: creator.to_owned(),
             operations: Vec::new(),
             comments: Vec::new(),
@@ -709,6 +724,8 @@ impl<'a> BlueprintBuilder<'a> {
             parent_blueprint_id: Some(self.parent_blueprint.id),
             internal_dns_version: self.input.internal_dns_version(),
             external_dns_version: self.input.external_dns_version(),
+            target_release_minimum_generation: self
+                .target_release_minimum_generation,
             cockroachdb_fingerprint: self
                 .input
                 .cockroachdb_settings()
@@ -716,6 +733,7 @@ impl<'a> BlueprintBuilder<'a> {
                 .clone(),
             cockroachdb_setting_preserve_downgrade: self
                 .cockroachdb_setting_preserve_downgrade,
+
             clickhouse_cluster_config,
             oximeter_read_version: oximeter_read_version.into(),
             oximeter_read_mode,
@@ -1161,13 +1179,14 @@ impl<'a> BlueprintBuilder<'a> {
                 gz_address: dns_subnet.gz_address(),
                 gz_address_index,
             });
+        let image_source = self.zone_image_source(zone_type.kind());
 
         let zone = BlueprintZoneConfig {
             disposition: BlueprintZoneDisposition::InService,
             id: self.rng.sled_rng(sled_id).next_zone(),
             filesystem_pool: zpool,
             zone_type,
-            image_source: BlueprintZoneImageSource::InstallDataset,
+            image_source,
         };
 
         self.sled_add_zone(sled_id, zone)
@@ -1213,13 +1232,14 @@ impl<'a> BlueprintBuilder<'a> {
                 dns_address,
                 nic,
             });
+        let image_source = self.zone_image_source(zone_type.kind());
 
         let zone = BlueprintZoneConfig {
             disposition: BlueprintZoneDisposition::InService,
             id,
             filesystem_pool: pool_name,
             zone_type,
-            image_source: BlueprintZoneImageSource::InstallDataset,
+            image_source,
         };
         self.sled_add_zone(sled_id, zone)
     }
@@ -1252,13 +1272,14 @@ impl<'a> BlueprintBuilder<'a> {
             });
         let filesystem_pool =
             self.sled_select_zpool(sled_id, zone_type.kind())?;
+        let image_source = self.zone_image_source(zone_type.kind());
 
         let zone = BlueprintZoneConfig {
             disposition: BlueprintZoneDisposition::InService,
             id: self.rng.sled_rng(sled_id).next_zone(),
             filesystem_pool,
             zone_type,
-            image_source: BlueprintZoneImageSource::InstallDataset,
+            image_source,
         };
 
         self.sled_add_zone(sled_id, zone)?;
@@ -1404,13 +1425,14 @@ impl<'a> BlueprintBuilder<'a> {
         });
         let filesystem_pool =
             self.sled_select_zpool(sled_id, zone_type.kind())?;
+        let image_source = self.zone_image_source(zone_type.kind());
 
         let zone = BlueprintZoneConfig {
             disposition: BlueprintZoneDisposition::InService,
             id: nexus_id,
             filesystem_pool,
             zone_type,
-            image_source: BlueprintZoneImageSource::InstallDataset,
+            image_source,
         };
         self.sled_add_zone(sled_id, zone)
     }
@@ -1429,13 +1451,14 @@ impl<'a> BlueprintBuilder<'a> {
             });
         let filesystem_pool =
             self.sled_select_zpool(sled_id, zone_type.kind())?;
+        let image_source = self.zone_image_source(zone_type.kind());
 
         let zone = BlueprintZoneConfig {
             disposition: BlueprintZoneDisposition::InService,
             id: oximeter_id,
             filesystem_pool,
             zone_type,
-            image_source: BlueprintZoneImageSource::InstallDataset,
+            image_source,
         };
         self.sled_add_zone(sled_id, zone)
     }
@@ -1453,13 +1476,14 @@ impl<'a> BlueprintBuilder<'a> {
         );
         let filesystem_pool =
             self.sled_select_zpool(sled_id, zone_type.kind())?;
+        let image_source = self.zone_image_source(zone_type.kind());
 
         let zone = BlueprintZoneConfig {
             disposition: BlueprintZoneDisposition::InService,
             id: pantry_id,
             filesystem_pool,
             zone_type,
-            image_source: BlueprintZoneImageSource::InstallDataset,
+            image_source,
         };
         self.sled_add_zone(sled_id, zone)
     }
@@ -1487,13 +1511,14 @@ impl<'a> BlueprintBuilder<'a> {
                 dataset: OmicronZoneDataset { pool_name },
             });
         let filesystem_pool = pool_name;
+        let image_source = self.zone_image_source(zone_type.kind());
 
         let zone = BlueprintZoneConfig {
             disposition: BlueprintZoneDisposition::InService,
             id: zone_id,
             filesystem_pool,
             zone_type,
-            image_source: BlueprintZoneImageSource::InstallDataset,
+            image_source,
         };
         self.sled_add_zone(sled_id, zone)
     }
@@ -1513,13 +1538,14 @@ impl<'a> BlueprintBuilder<'a> {
                 address,
                 dataset: OmicronZoneDataset { pool_name },
             });
+        let image_source = self.zone_image_source(zone_type.kind());
 
         let zone = BlueprintZoneConfig {
             disposition: BlueprintZoneDisposition::InService,
             id,
             filesystem_pool: pool_name,
             zone_type,
-            image_source: BlueprintZoneImageSource::InstallDataset,
+            image_source,
         };
         self.sled_add_zone(sled_id, zone)
     }
@@ -1541,13 +1567,14 @@ impl<'a> BlueprintBuilder<'a> {
             },
         );
         let filesystem_pool = pool_name;
+        let image_source = self.zone_image_source(zone_type.kind());
 
         let zone = BlueprintZoneConfig {
             disposition: BlueprintZoneDisposition::InService,
             id: zone_id,
             filesystem_pool,
             zone_type,
-            image_source: BlueprintZoneImageSource::InstallDataset,
+            image_source,
         };
         self.sled_add_zone(sled_id, zone)
     }
@@ -1569,13 +1596,14 @@ impl<'a> BlueprintBuilder<'a> {
             },
         );
         let filesystem_pool = pool_name;
+        let image_source = self.zone_image_source(zone_type.kind());
 
         let zone = BlueprintZoneConfig {
             disposition: BlueprintZoneDisposition::InService,
             id: zone_id,
             filesystem_pool,
             zone_type,
-            image_source: BlueprintZoneImageSource::InstallDataset,
+            image_source,
         };
         self.sled_add_zone(sled_id, zone)
     }
@@ -1695,6 +1723,7 @@ impl<'a> BlueprintBuilder<'a> {
             });
         let filesystem_pool =
             self.sled_select_zpool(sled_id, zone_type.kind())?;
+        let image_source = self.zone_image_source(zone_type.kind());
 
         self.sled_add_zone(
             sled_id,
@@ -1703,7 +1732,7 @@ impl<'a> BlueprintBuilder<'a> {
                 id: new_zone_id,
                 filesystem_pool,
                 zone_type,
-                image_source: BlueprintZoneImageSource::InstallDataset,
+                image_source,
             },
         )
     }
@@ -1721,6 +1750,25 @@ impl<'a> BlueprintBuilder<'a> {
         let initial_counts = editor.edit_counts();
         editor
             .expunge_zone(&zone_id)
+            .map_err(|err| Error::SledEditError { sled_id, err })?;
+        let final_counts = editor.edit_counts();
+
+        Ok(final_counts.difference_since(initial_counts))
+    }
+
+    pub fn sled_mark_expunged_zone_ready_for_cleanup(
+        &mut self,
+        sled_id: SledUuid,
+        zone_id: OmicronZoneUuid,
+    ) -> Result<SledEditCounts, Error> {
+        let editor = self.sled_editors.get_mut(&sled_id).ok_or_else(|| {
+            Error::Planner(anyhow!(
+                "tried to mark expunged zone ready for cleanup on unknown sled {sled_id}"
+            ))
+        })?;
+        let initial_counts = editor.edit_counts();
+        editor
+            .mark_expunged_zone_ready_for_cleanup(&zone_id)
             .map_err(|err| Error::SledEditError { sled_id, err })?;
         let final_counts = editor.edit_counts();
 
@@ -1880,6 +1928,24 @@ impl<'a> BlueprintBuilder<'a> {
             .len()
     }
 
+    /// Given the current value of `target_release_minimum_generation`, set the
+    /// new value for this blueprint.
+    pub fn set_target_release_minimum_generation(
+        &mut self,
+        current: Generation,
+        target_release_minimum_generation: Generation,
+    ) -> Result<(), Error> {
+        if self.target_release_minimum_generation != current {
+            return Err(Error::TargetReleaseMinimumGenerationMismatch {
+                expected: current,
+                actual: self.target_release_minimum_generation,
+            });
+        }
+        self.target_release_minimum_generation =
+            target_release_minimum_generation;
+        Ok(())
+    }
+
     /// Allow a test to manually add an external DNS address, which could
     /// ordinarily only come from RSS.
     ///
@@ -1906,6 +1972,70 @@ impl<'a> BlueprintBuilder<'a> {
         baseboard_id: &Arc<BaseboardId>,
     ) {
         self.pending_mgs_updates.remove(baseboard_id);
+    }
+
+    fn zone_image_artifact(
+        repo: Option<&TufRepoDescription>,
+        zone_kind: ZoneKind,
+    ) -> BlueprintZoneImageSource {
+        repo.and_then(|repo| {
+            repo.artifacts
+                .iter()
+                .find(|artifact| {
+                    zone_kind.is_control_plane_zone_artifact(&artifact.id)
+                })
+                .map(BlueprintZoneImageSource::from_available_artifact)
+        })
+        .unwrap_or(BlueprintZoneImageSource::InstallDataset)
+    }
+
+    /// Try to find an artifact in either the current or previous release repo
+    /// that contains an image for a zone of the given kind; see RFD 565 §9.
+    /// Defaults to the install dataset.
+    pub(crate) fn zone_image_source(
+        &self,
+        zone_kind: ZoneKind,
+    ) -> BlueprintZoneImageSource {
+        let new_repo = self.input.tuf_repo();
+        let old_repo = self.input.old_repo();
+        Self::zone_image_artifact(
+            if self.zone_is_ready_for_update(zone_kind, new_repo) {
+                new_repo
+            } else {
+                old_repo
+            },
+            zone_kind,
+        )
+    }
+
+    /// Return `true` iff a zone of the given kind is ready to be updated;
+    /// i.e., its dependencies have been updated, or its data sufficiently
+    /// replicated, etc.
+    fn zone_is_ready_for_update(
+        &self,
+        zone_kind: ZoneKind,
+        new_repo: Option<&TufRepoDescription>,
+    ) -> bool {
+        match zone_kind {
+            ZoneKind::Nexus => {
+                // Nexus can only be updated if all non-Nexus zones have been updated,
+                // i.e., their image source is an artifact from the new repo.
+                self.sled_ids_with_zones().all(|sled_id| {
+                    self.current_sled_zones(
+                        sled_id,
+                        BlueprintZoneDisposition::is_in_service,
+                    )
+                    .filter(|z| z.zone_type.kind() != ZoneKind::Nexus)
+                    .all(|z| {
+                        z.image_source
+                            == Self::zone_image_artifact(new_repo, z.kind())
+                    })
+                })
+            }
+            // <https://github.com/oxidecomputer/omicron/issues/6404>
+            // ZoneKind::CockroachDb => todo!("check cluster status in inventory"),
+            _ => true, // other zone kinds have no special dependencies
+        }
     }
 
     /// Debug method to remove a sled from a blueprint entirely.
