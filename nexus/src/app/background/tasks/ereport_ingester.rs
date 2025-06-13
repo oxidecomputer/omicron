@@ -388,3 +388,54 @@ impl EreportQueryParams {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use nexus_test_utils_macros::nexus_test;
+
+    type ControlPlaneTestContext =
+        nexus_test_utils::ControlPlaneTestContext<crate::Server>;
+
+    #[nexus_test(server = crate::Server)]
+    async fn test_sp_ereport_ingestion(cptestctx: &ControlPlaneTestContext) {
+        let nexus = &cptestctx.server.server_context().nexus;
+        let datastore = nexus.datastore();
+        let opctx = OpContext::for_tests(
+            cptestctx.logctx.log.clone(),
+            datastore.clone(),
+        );
+        let mut ingester = SpEreportIngester::new(
+            datastore.clone(),
+            nexus.internal_resolver.clone(),
+            nexus.id(),
+        );
+
+        let activation1 = ingester
+            .actually_activate(&opctx)
+            .await
+            .expect("activation should succeed");
+        dbg!(&activation1);
+        assert_eq!(
+            activation1.error.as_ref(),
+            None,
+            "there should be no top-level activation error"
+        );
+        assert_eq!(
+            activation1.sps.len(),
+            4,
+            "ereports from 4 SPs should be observed: {:?}",
+            activation1.sps,
+        );
+
+        for SpEreporterStatus { sp_type, slot, status } in &activation1.sps {
+            assert_eq!(
+                &status.errors,
+                &Vec::<String>::new(),
+                "there should be no errors from SP {sp_type:?} {slot}",
+            );
+        }
+        
+        
+    }
+}
