@@ -124,18 +124,16 @@ The Planner
                +----------+  |  +----------/
                           |  |  |
                           v  v  v
-
-                         "planner"
-              (eventually a background task)
+                    planner background task
                              |
-                             v                      no
-                    is a new blueprint necessary? ------> done
-                             |
-                             | yes
                              v
                     generate a new blueprint
                              |
                              |
+                             v                                                no
+                    is the new blueprint different from the current target? ------> done
+                             |
+                             | yes
                              v
                     commit blueprint to database
                              |

@@ -459,6 +459,29 @@ impl slog::KV for DebugDatasetsRendezvousStats {
     }
 }
 
+/// The status of a `blueprint_planner` background task activation.
+#[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
+pub enum BlueprintPlannerStatus {
+    /// Automatic blueprint planning has been explicitly disabled
+    /// by the config file.
+    Disabled,
+
+    /// An error occurred during planning or blueprint insertion.
+    Error(String),
+
+    /// Planning produced a blueprint identital to the current target,
+    /// so we threw it away and did nothing.
+    Unchanged { parent_blueprint_id: BlueprintUuid },
+
+    /// Planning produced a new blueprint, but we failed to make it
+    /// the current target and so deleted it.
+    Planned { parent_blueprint_id: BlueprintUuid, error: String },
+
+    /// Planing succeeded, and we saved and made the new blueprint the
+    /// current target.
+    Targeted { parent_blueprint_id: BlueprintUuid, blueprint_id: BlueprintUuid },
+}
+
 /// The status of a `alert_dispatcher` background task activation.
 #[derive(Debug, Clone, Eq, PartialEq, Serialize, Deserialize)]
 pub struct AlertDispatcherStatus {
