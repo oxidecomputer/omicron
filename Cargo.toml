@@ -424,7 +424,7 @@ ereport-types = { path = "ereport/types" }
 expectorate = "1.2.0"
 fatfs = "0.3.6"
 filetime = "0.2.25"
-flate2 = "1.1.1"
+flate2 = "1.1.2"
 float-ord = "0.3.2"
 flume = "0.11.1"
 foreign-types = "0.3.2"
