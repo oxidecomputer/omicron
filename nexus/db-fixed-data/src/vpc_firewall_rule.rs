@@ -77,13 +77,12 @@ pub const NEXUS_ICMP_FW_RULE_NAME: &str = "nexus-icmp";
 /// Built-in VPC firewall rule for Nexus.
 ///
 /// This rule allows *arbitrary forwarding nodes* on the network to inform the
-/// Nexus zone that packets have been explicitly dropped. This is a key part in
-/// enabling path MTU discovery, such as when customers are accessing Necus
+/// Nexus/DNS zones that packets have been explicitly dropped. This is a key part
+/// in enabling path MTU discovery, such as when customers are accessing Nexus
 /// over a VPN.
 ///
-/// Note that we currently rely on this being exactly one rule to implement the
-/// system-level enable/disable endpoint. See `nexus/networking/src/firewall_rules.rs`
-/// for more details.
+/// We currently rely on this being exactly one rule to implement the system-level
+/// enable/disable endpoint. See `nexus/networking/src/firewall_rules.rs`.
 pub static NEXUS_ICMP_FW_RULE: LazyLock<VpcFirewallRuleUpdate> =
     LazyLock::new(|| VpcFirewallRuleUpdate {
         name: NEXUS_ICMP_FW_RULE_NAME.parse().unwrap(),
@@ -92,9 +91,14 @@ pub static NEXUS_ICMP_FW_RULE: LazyLock<VpcFirewallRuleUpdate> =
                 .to_string(),
         status: VpcFirewallRuleStatus::Enabled,
         direction: VpcFirewallRuleDirection::Inbound,
-        targets: vec![VpcFirewallRuleTarget::Subnet(
-            super::vpc_subnet::NEXUS_VPC_SUBNET.name().clone(),
-        )],
+        targets: vec![
+            VpcFirewallRuleTarget::Subnet(
+                super::vpc_subnet::NEXUS_VPC_SUBNET.name().clone(),
+            ),
+            VpcFirewallRuleTarget::Subnet(
+                super::vpc_subnet::DNS_VPC_SUBNET.name().clone(),
+            ),
+        ],
         filters: VpcFirewallRuleFilter {
             hosts: None,
             protocols: Some(vec![
