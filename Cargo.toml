@@ -127,6 +127,7 @@ members = [
     "sled-agent/repo-depot-api",
     "sled-agent/types",
     "sled-agent/zone-images",
+    "sled-agent/zone-images-examples",
     "sled-diagnostics",
     "sled-hardware",
     "sled-hardware/types",
@@ -279,6 +280,7 @@ default-members = [
     "sled-agent/repo-depot-api",
     "sled-agent/types",
     "sled-agent/zone-images",
+    "sled-agent/zone-images-examples",
     "sled-diagnostics",
     "sled-hardware",
     "sled-hardware/types",
@@ -675,6 +677,7 @@ sled-agent-client = { path = "clients/sled-agent-client" }
 sled-agent-config-reconciler = { path = "sled-agent/config-reconciler" }
 sled-agent-types = { path = "sled-agent/types" }
 sled-agent-zone-images = { path = "sled-agent/zone-images" }
+sled-agent-zone-images-examples = { path = "sled-agent/zone-images-examples" }
 sled-diagnostics = { path = "sled-diagnostics" }
 sled-hardware = { path = "sled-hardware" }
 sled-hardware-types = { path = "sled-hardware/types" }
