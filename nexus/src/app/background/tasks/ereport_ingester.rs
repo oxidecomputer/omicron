@@ -307,7 +307,9 @@ impl Ingester {
                     status.get_or_insert_default().requests += 1;
                     return Some(ereports.into_inner());
                 }
-                Err(e) if e.status() == Some(http::StatusCode::NOT_FOUND) => {
+                Err(gateway_client::Error::ErrorResponse(rsp))
+                    if rsp.error_code.as_deref() == Some("InvalidSp") =>
+                {
                     slog::debug!(
                         &opctx.log,
                         "ereport collection: MGS claims there is no SP in this slot";
