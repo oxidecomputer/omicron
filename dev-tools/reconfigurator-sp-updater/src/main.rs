@@ -421,6 +421,14 @@ enum Component {
         #[arg(long, short = 't')]
         expected_transient_boot_preference: Option<RotSlot>,
     },
+    RotBootloader {
+        /// expected version of the active slot
+        #[arg(long, short = 'a')]
+        expected_stage0_version: ArtifactVersion,
+        /// expected version of the inactive slot
+        #[arg(long, short = 'i')]
+        expected_stage0_next_version: ExpectedVersion,
+    },
 }
 
 fn cmd_set(
@@ -481,6 +489,13 @@ fn cmd_set(
                     expected_transient_boot_preference,
                 }
             }
+            Component::RotBootloader {
+                expected_stage0_version,
+                expected_stage0_next_version,
+            } => PendingMgsUpdateDetails::RotBootloader {
+                expected_stage0_version,
+                expected_stage0_next_version,
+            },
         },
         artifact_hash: args.artifact_hash,
         artifact_version: ArtifactVersion::new(args.version)
