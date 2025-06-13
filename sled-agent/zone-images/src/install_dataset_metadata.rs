@@ -6,7 +6,7 @@
 
 use camino::{Utf8Path, Utf8PathBuf};
 use iddqd::{IdOrdItem, IdOrdMap, id_upcast};
-use illumos_utils::zpool::ZpoolName;
+use omicron_uuid_kinds::ZpoolUuid;
 use serde::de::DeserializeOwned;
 use sled_agent_config_reconciler::InternalDisksWithBootDisk;
 use std::fs::{self, FileType};
@@ -16,7 +16,7 @@ use crate::{ArcIoError, ArcSerdeJsonError};
 
 #[derive(Debug)]
 pub(crate) struct AllInstallMetadataFiles<T: 'static> {
-    pub(crate) boot_zpool: ZpoolName,
+    pub(crate) boot_zpool: ZpoolUuid,
     pub(crate) boot_dataset_dir: Utf8PathBuf,
     pub(crate) boot_disk_path: Utf8PathBuf,
     pub(crate) boot_disk_metadata: Result<Option<T>, InstallMetadataReadError>,
@@ -55,14 +55,14 @@ where
         // story on transient failures) it's not fatal.
         let non_boot_datasets = internal_disks.non_boot_disk_install_datasets();
         let non_boot_disk_overrides = non_boot_datasets
-            .map(|(zpool_name, dataset_dir)| {
+            .map(|(zpool_id, dataset_dir)| {
                 let path = dataset_dir.join(metadata_file_name);
                 let res = read_install_metadata_file(&dataset_dir, &path);
                 let result =
                     InstallMetadataNonBootResult::new(res, &boot_disk_metadata);
 
                 InstallMetadataNonBootInfo {
-                    zpool_name,
+                    zpool_id,
                     dataset_dir,
                     path,
                     result,
@@ -71,7 +71,7 @@ where
             .collect();
 
         Self {
-            boot_zpool: internal_disks.boot_disk_zpool(),
+            boot_zpool: internal_disks.boot_disk_zpool_id(),
             boot_dataset_dir,
             boot_disk_path,
             boot_disk_metadata,
@@ -145,8 +145,8 @@ where
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct InstallMetadataNonBootInfo<T> {
-    /// The name of the zpool.
-    pub zpool_name: ZpoolName,
+    /// The ID of the zpool.
+    pub zpool_id: ZpoolUuid,
 
     /// The dataset directory.
     pub dataset_dir: Utf8PathBuf,
@@ -160,12 +160,12 @@ pub struct InstallMetadataNonBootInfo<T> {
 
 impl<T> IdOrdItem for InstallMetadataNonBootInfo<T> {
     type Key<'a>
-        = ZpoolName
+        = ZpoolUuid
     where
         T: 'a;
 
     fn key(&self) -> Self::Key<'_> {
-        self.zpool_name
+        self.zpool_id
     }
 
     id_upcast!();

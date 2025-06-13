@@ -2536,7 +2536,7 @@ mod tests {
                         model: "test-model".to_string(),
                         serial: "test-serial".to_string(),
                     },
-                    ZpoolName::new_external(ZpoolUuid::new_v4()),
+                    ZpoolUuid::new_v4(),
                 )]
                 .into_iter(),
             ),

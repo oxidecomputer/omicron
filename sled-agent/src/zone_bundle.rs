@@ -1770,6 +1770,7 @@ mod illumos_tests {
     use chrono::Timelike;
     use chrono::Utc;
     use omicron_common::disk::DiskIdentity;
+    use omicron_common::zpool_name::ZpoolKind;
     use rand::RngCore;
     use sled_agent_config_reconciler::AvailableDatasetsReceiver;
     use sled_agent_config_reconciler::InternalDisksReceiver;
@@ -1907,13 +1908,18 @@ mod illumos_tests {
             Arc::new(all_disks.mount_config().clone()),
             all_disks.all_m2_zpools().into_iter().enumerate().map(
                 |(i, zpool)| {
+                    assert_eq!(
+                        zpool.kind(),
+                        ZpoolKind::Internal,
+                        "internal disk zpools are ZpoolKind::Internal"
+                    );
                     (
                         DiskIdentity {
                             vendor: format!("test-vendor-{i}"),
                             model: format!("test-model-{i}"),
                             serial: format!("test-serial-{i}"),
                         },
-                        zpool,
+                        zpool.id(),
                     )
                 },
             ),
