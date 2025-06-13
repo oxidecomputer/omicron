@@ -424,7 +424,7 @@ ereport-types = { path = "ereport/types" }
 expectorate = "1.2.0"
 fatfs = "0.3.6"
 filetime = "0.2.25"
-flate2 = "1.1.1"
+flate2 = "1.1.2"
 float-ord = "0.3.2"
 flume = "0.11.1"
 foreign-types = "0.3.2"
@@ -473,7 +473,7 @@ hyper = "1.6.0"
 hyper-util = "0.1.11"
 hyper-rustls = "0.26.0"
 hyper-staticfile = "0.10.1"
-iddqd = { version = "0.3.6", features = ["daft", "serde"] }
+iddqd = { version = "0.3.6", features = ["daft", "serde", "schemars08"] }
 id-map = { path = "id-map" }
 illumos-utils = { path = "illumos-utils" }
 iana-time-zone = "0.1.63"

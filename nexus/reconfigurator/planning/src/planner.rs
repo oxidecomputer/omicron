@@ -52,6 +52,32 @@ pub use self::rng::SledPlannerRng;
 mod omicron_zone_placement;
 pub(crate) mod rng;
 
+/// Maximum number of MGS-managed updates (updates to SP, RoT, RoT bootloader,
+/// or host OS) that we allow to be pending across the whole system at one time
+///
+/// For now, we limit this to 1 for safety.  That's for a few reasons:
+///
+/// - SP updates reboot the corresponding host.  Thus, if we have one of these
+///   updates outstanding, we should assume that host may be offline.  Most
+///   control plane services are designed to survive multiple failures (e.g.,
+///   the Cockroach cluster can sustain two failures and stay online), but
+///   having one sled offline eats into that margin.  And some services like
+///   Crucible volumes can only sustain one failure.  Taking down two sleds
+///   would render unavailable any Crucible volumes with regions on those two
+///   sleds.
+///
+/// - There is unfortunately some risk in updating the RoT bootloader, in that
+///   there's a window where a failure could render the device unbootable.  See
+///   oxidecomputer/omicron#7819 for more on this.  Updating only one at a time
+///   helps mitigate this risk.
+///
+/// More sophisticated schemes are certainly possible (e.g., allocate Crucible
+/// regions in such a way that there are at least pairs of sleds we could update
+/// concurrently without taking volumes down; and/or be willing to update
+/// multiple sleds as long as they don't have overlapping control plane
+/// services, etc.).
+const NUM_CONCURRENT_MGS_UPDATES: usize = 1;
+
 enum UpdateStepResult {
     ContinueToNextStep,
     Waiting,
@@ -122,8 +148,7 @@ impl<'a> Planner<'a> {
         self.do_plan_expunge()?;
         self.do_plan_add()?;
         self.do_plan_decommission()?;
-        if let UpdateStepResult::ContinueToNextStep =
-            self.do_plan_mgs_updates()?
+        if let UpdateStepResult::ContinueToNextStep = self.do_plan_mgs_updates()
         {
             self.do_plan_zone_updates()?;
         }
@@ -914,7 +939,7 @@ impl<'a> Planner<'a> {
 
     /// Update at most one MGS-managed device (SP, RoT, etc.), if any are out of
     /// date.
-    fn do_plan_mgs_updates(&mut self) -> Result<UpdateStepResult, Error> {
+    fn do_plan_mgs_updates(&mut self) -> UpdateStepResult {
         // Determine which baseboards we will consider updating.
         //
         // Sleds may be present but not adopted as part of the control plane.
@@ -956,7 +981,7 @@ impl<'a> Planner<'a> {
             &included_baseboards,
             &current_updates,
             current_artifacts,
-            1,
+            NUM_CONCURRENT_MGS_UPDATES,
         );
 
         // TODO This is not quite right.  See oxidecomputer/omicron#8285.
@@ -966,7 +991,7 @@ impl<'a> Planner<'a> {
             UpdateStepResult::Waiting
         };
         self.blueprint.pending_mgs_updates_replace_all(next);
-        Ok(rv)
+        rv
     }
 
     /// Update at most one existing zone to use a new image source.
@@ -1063,6 +1088,11 @@ impl<'a> Planner<'a> {
                         "kind" => ?zone.zone_type.kind(),
                         "image_source" => %image_source,
                     );
+                    self.blueprint.comment(format!(
+                        "updating {:?} zone {} in-place",
+                        zone.zone_type.kind(),
+                        zone.id
+                    ));
                     self.blueprint.sled_set_zone_source(
                         sled_id,
                         zone.id,
@@ -1082,6 +1112,11 @@ impl<'a> Planner<'a> {
                         "zone_id" => %zone.id,
                         "kind" => ?zone.zone_type.kind(),
                     );
+                    self.blueprint.comment(format!(
+                        "expunge {:?} zone {} for update",
+                        zone.zone_type.kind(),
+                        zone.id
+                    ));
                     self.blueprint.sled_expunge_zone(sled_id, zone.id)?;
                 }
             }

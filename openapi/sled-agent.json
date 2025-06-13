@@ -3499,6 +3499,24 @@
           "last_reconciled_config": {
             "$ref": "#/components/schemas/OmicronSledConfig"
           },
+          "orphaned_datasets": {
+            "title": "IdOrdMap",
+            "x-rust-type": {
+              "crate": "iddqd",
+              "parameters": [
+                {
+                  "$ref": "#/components/schemas/OrphanedDataset"
+                }
+              ],
+              "path": "iddqd::IdOrdMap",
+              "version": "*"
+            },
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/OrphanedDataset"
+            },
+            "uniqueItems": true
+          },
           "zones": {
             "type": "object",
             "additionalProperties": {
@@ -3510,6 +3528,7 @@
           "datasets",
           "external_disks",
           "last_reconciled_config",
+          "orphaned_datasets",
           "zones"
         ]
       },
@@ -5896,6 +5915,41 @@
               "type"
             ]
           }
+        ]
+      },
+      "OrphanedDataset": {
+        "type": "object",
+        "properties": {
+          "available": {
+            "$ref": "#/components/schemas/ByteCount"
+          },
+          "id": {
+            "nullable": true,
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/TypedUuidForDatasetKind"
+              }
+            ]
+          },
+          "mounted": {
+            "type": "boolean"
+          },
+          "name": {
+            "$ref": "#/components/schemas/DatasetName"
+          },
+          "reason": {
+            "type": "string"
+          },
+          "used": {
+            "$ref": "#/components/schemas/ByteCount"
+          }
+        },
+        "required": [
+          "available",
+          "mounted",
+          "name",
+          "reason",
+          "used"
         ]
       },
       "P9fs": {
