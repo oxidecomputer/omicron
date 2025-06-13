@@ -11,6 +11,7 @@ use super::common_sp_update::SpComponentUpdater;
 use super::common_sp_update::deliver_update;
 use crate::SpComponentUpdateHelper;
 use crate::common_sp_update::FoundVersion;
+use crate::common_sp_update::PostUpdateError;
 use crate::common_sp_update::PrecheckError;
 use crate::common_sp_update::PrecheckStatus;
 use crate::common_sp_update::error_means_caboose_is_invalid;
@@ -396,11 +397,12 @@ impl SpComponentUpdateHelper for ReconfiguratorRotUpdater {
         log: &'a slog::Logger,
         mgs_clients: &'a mut MgsClients,
         update: &'a PendingMgsUpdate,
-    ) -> BoxFuture<'a, Result<(), GatewayClientError>> {
+    ) -> BoxFuture<'a, Result<(), PostUpdateError>> {
+        async move {
+        // We want to set the slot we've just updated as the active one
+        debug!(log, "attempting to set active slot");
         mgs_clients
             .try_all_serially(log, move |mgs_client| async move {
-                // We want to set the slot we've just updated as the active one
-                debug!(log, "attempting to set active slot");
                 let inactive_slot = match &update.details {
                     PendingMgsUpdateDetails::Rot { expected_active_slot, .. } => {
                         expected_active_slot.slot().toggled().to_u16()
@@ -421,8 +423,13 @@ impl SpComponentUpdateHelper for ReconfiguratorRotUpdater {
                         &SpComponentFirmwareSlot { slot: inactive_slot }
                     )
                     .await?;
+                Ok(())
+            })
+            .await?;
 
-                debug!(log, "attempting to reset device");
+            debug!(log, "attempting to reset device");
+            mgs_clients
+            .try_all_serially(log, move |mgs_client| async move {
                 mgs_client
                     .sp_component_reset(
                         update.sp_type,
@@ -431,7 +438,8 @@ impl SpComponentUpdateHelper for ReconfiguratorRotUpdater {
                     )
                     .await?;
                 Ok(())
-            })
-            .boxed()
+            }).await?;
+            Ok(())
+        }.boxed()
     }
 }

@@ -8,6 +8,7 @@
 use super::MgsClients;
 use super::UpdateProgress;
 use futures::future::BoxFuture;
+use gateway_client::types::RotImageError;
 use gateway_client::types::SpType;
 use gateway_client::types::SpUpdateStatus;
 use gateway_types::rot::RotSlot;
@@ -270,7 +271,8 @@ pub trait SpComponentUpdateHelper {
         update: &'a PendingMgsUpdate,
         // TODO-K: Return a PostUpdateError here? Is it even possible
         // due to try_serially
-    ) -> BoxFuture<'a, Result<(), GatewayClientError>>;
+        //) -> BoxFuture<'a, Result<(), GatewayClientError>>;
+    ) -> BoxFuture<'a, Result<(), PostUpdateError>>;
 }
 
 /// Describes the live state of the component before the update begins
@@ -322,17 +324,18 @@ pub enum PrecheckError {
     WrongInactiveVersion { expected: ExpectedVersion, found: FoundVersion },
 }
 
-//#[derive(Debug, Error)]
-//pub enum PostUpdateError {
-//    #[error("communicating with MGS")]
-//    GatewayClientError(#[from] GatewayClientError),
-//
-//    #[error("communicating with RoT: {message:?}")]
-//    RotCommunicationFailed { message: String },
-//
-//    #[error("invalid RoT image: {error:?}")]
-//    RotBootloaderImageError { error: RotImageError },
-//}
+#[derive(Debug, thiserror::Error)]
+pub enum PostUpdateError {
+    #[error("communicating with MGS")]
+    GatewayClientError(#[from] GatewayClientError),
+
+    // TODO-K: This one may not be necessary
+    #[error("communicating with RoT: {message:?}")]
+    RotCommunicationFailed { message: String },
+
+    #[error("invalid RoT image: {error:?}")]
+    RotBootloaderImageError { error: RotImageError },
+}
 
 #[derive(Debug)]
 pub enum FoundVersion {

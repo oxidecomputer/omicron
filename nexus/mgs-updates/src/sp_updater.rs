@@ -9,6 +9,7 @@ use crate::SpComponentUpdateError;
 use crate::SpComponentUpdateHelper;
 use crate::UpdateProgress;
 use crate::common_sp_update::FoundVersion;
+use crate::common_sp_update::PostUpdateError;
 use crate::common_sp_update::PrecheckError;
 use crate::common_sp_update::PrecheckStatus;
 use crate::common_sp_update::SpComponentUpdater;
@@ -293,19 +294,23 @@ impl SpComponentUpdateHelper for ReconfiguratorSpUpdater {
         log: &'a slog::Logger,
         mgs_clients: &'a mut MgsClients,
         update: &'a PendingMgsUpdate,
-    ) -> BoxFuture<'a, Result<(), GatewayClientError>> {
-        mgs_clients
-            .try_all_serially(log, move |mgs_client| async move {
-                debug!(log, "attempting to reset device");
-                mgs_client
-                    .sp_component_reset(
-                        update.sp_type,
-                        update.slot_id,
-                        &SpComponent::SP_ITSELF.to_string(),
-                    )
-                    .await?;
-                Ok(())
-            })
-            .boxed()
+    ) -> BoxFuture<'a, Result<(), PostUpdateError>> {
+        async move {
+            mgs_clients
+                .try_all_serially(log, move |mgs_client| async move {
+                    debug!(log, "attempting to reset device");
+                    mgs_client
+                        .sp_component_reset(
+                            update.sp_type,
+                            update.slot_id,
+                            &SpComponent::SP_ITSELF.to_string(),
+                        )
+                        .await?;
+                    Ok(())
+                })
+                .await?;
+            Ok(())
+        }
+        .boxed()
     }
 }

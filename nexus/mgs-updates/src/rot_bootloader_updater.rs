@@ -7,6 +7,7 @@
 use super::MgsClients;
 use crate::SpComponentUpdateHelper;
 use crate::common_sp_update::FoundVersion;
+use crate::common_sp_update::PostUpdateError;
 use crate::common_sp_update::PrecheckError;
 use crate::common_sp_update::PrecheckStatus;
 use crate::common_sp_update::error_means_caboose_is_invalid;
@@ -24,7 +25,6 @@ use nexus_types::deployment::PendingMgsUpdate;
 use nexus_types::deployment::PendingMgsUpdateDetails;
 use slog::Logger;
 use slog::{debug, error, info};
-use std::sync::Arc;
 use std::time::Duration;
 use std::time::Instant;
 
@@ -198,57 +198,73 @@ impl SpComponentUpdateHelper for ReconfiguratorRotBootloaderUpdater {
         log: &'a slog::Logger,
         mgs_clients: &'a mut MgsClients,
         update: &'a PendingMgsUpdate,
-    ) -> BoxFuture<'a, Result<(), GatewayClientError>> {
+    ) -> BoxFuture<'a, Result<(), PostUpdateError>> {
         const WAIT_FOR_BOOT_TIMEOUT: Duration = Duration::from_secs(30);
 
         // TODO-K: Again, we're resetting the ROT twice here, what happens
         // if an RoT update is happening at the same time?
-        mgs_clients
-            .try_all_serially(log, move |mgs_client| async move {
-                // Before setting stage0 to the new version we want to ensure
-                // the image is good and we're not going to brick the device.
-                // The RoT will do a signature check when reset.
-                debug!(log, "attempting to reset device to do bootloader signature check");
-                mgs_client
-                    .sp_component_reset(
-                        update.sp_type,
-                        update.slot_id,
-                        &SpComponent::ROT.to_string(),
-                    )
-                    .await?;
 
-                // We now retrieve boot info from the RoT to verify the reset
-                // has completed and signature checks done.
-                let _stage0next_error = wait_for_rot_boot_info(
-                    log,
-                    mgs_client.clone(),
-                    update.sp_type,
-                    update.slot_id,
-                    WAIT_FOR_BOOT_TIMEOUT
-                ).await?;
+        async move {
+            // Before setting stage0 to the new version we want to ensure
+            // the image is good and we're not going to brick the device.
+            // The RoT will do a signature check when reset.
+            debug!(
+                log,
+                "attempting to reset device to do bootloader signature check"
+            );
+            mgs_clients
+                .try_all_serially(log, move |mgs_client| async move {
+                    mgs_client
+                        .sp_component_reset(
+                            update.sp_type,
+                            update.slot_id,
+                            &SpComponent::ROT.to_string(),
+                        )
+                        .await
+                })
+                .await?;
 
-                // If the image is not valid we bail
-                debug!(log, "attempting to retrieve boot info to verify image validity");
-                // TODO-K: uncomment if I can get PostUpdateError to work instead of GatewayClientError
-                //if let Some(error) = stage0next_error {
-                //    return Err(PostUpdateError::RotBootloaderImageError {
-                //        error: error,
-                //    });
-                //}
+            // We now retrieve boot info from the RoT to verify the reset
+            // has completed and signature checks done.
+            debug!(
+                log,
+                "attempting to retrieve boot info to verify image validity"
+            );
+            let stage0next_error = wait_for_stage0_next_image_check(
+                log,
+                mgs_clients,
+                update.sp_type,
+                update.slot_id,
+                WAIT_FOR_BOOT_TIMEOUT,
+            )
+            .await?;
+            // If the image is not valid we bail
+            if let Some(error) = stage0next_error {
+                return Err(PostUpdateError::RotBootloaderImageError {
+                    error,
+                });
+            }
 
-                debug!(log, "attempting to set RoT bootloader active slot");
-                let persist = true;
-                mgs_client
-                    .sp_component_active_slot_set(
-                        update.sp_type,
-                        update.slot_id,
-                        &SpComponent::STAGE0.to_string(),
-                        persist,
-                        &SpComponentFirmwareSlot { slot: 0 }
-                    )
-                    .await?;
+            debug!(log, "attempting to set RoT bootloader active slot");
+            mgs_clients
+                .try_all_serially(log, move |mgs_client| async move {
+                    let persist = true;
+                    mgs_client
+                        .sp_component_active_slot_set(
+                            update.sp_type,
+                            update.slot_id,
+                            &SpComponent::STAGE0.to_string(),
+                            persist,
+                            &SpComponentFirmwareSlot { slot: 0 },
+                        )
+                        .await?;
+                    Ok(())
+                })
+                .await?;
 
-                debug!(log, "attempting to reset device to set to new RoT bootloader version");
+            debug!(log, "attempting to reset device to set to new RoT bootloader version");
+            mgs_clients
+                .try_all_serially(log, move |mgs_client| async move {
                     mgs_client
                         .sp_component_reset(
                             update.sp_type,
@@ -257,34 +273,44 @@ impl SpComponentUpdateHelper for ReconfiguratorRotBootloaderUpdater {
                         )
                         .await?;
                     Ok(())
-                }
-            ).boxed()
+                })
+                .await?;
+
+            Ok(())
+        }
+        .boxed()
     }
 }
 
 /// Poll the RoT asking for its boot information. This is used to check
 /// state after RoT bootloader updates
-async fn wait_for_rot_boot_info(
+async fn wait_for_stage0_next_image_check(
     log: &Logger,
-    mgs_client: Arc<gateway_client::Client>,
+    mgs_clients: &mut MgsClients,
     sp_type: SpType,
     sp_slot: u32,
     timeout: Duration,
+    // TODO-K: Change to PostUpdateError?
 ) -> Result<Option<RotImageError>, GatewayClientError> {
     let mut ticker = tokio::time::interval(Duration::from_secs(1));
 
     let start = Instant::now();
     loop {
         ticker.tick().await;
-        match mgs_client
-            .sp_rot_boot_info(
-                sp_type,
-                sp_slot,
-                SpComponent::ROT.const_as_str(),
-                &GetRotBootInfoParams {
-                    version: RotBootInfo::HIGHEST_KNOWN_VERSION,
-                },
-            )
+
+        match mgs_clients
+            .try_all_serially(log, |mgs_client| async move {
+                mgs_client
+                    .sp_rot_boot_info(
+                        sp_type,
+                        sp_slot,
+                        SpComponent::ROT.const_as_str(),
+                        &GetRotBootInfoParams {
+                            version: RotBootInfo::HIGHEST_KNOWN_VERSION,
+                        },
+                    )
+                    .await
+            })
             .await
         {
             Ok(state) => match state.into_inner() {
@@ -309,6 +335,7 @@ async fn wait_for_rot_boot_info(
                             "failed to get RoT boot info";
                             "error" => %message,
                         );
+                        // TODO-K: change this one to RotCommunicationFailed?
                         return Ok(Some(RotImageError::Unchecked));
                     }
                 }
@@ -327,3 +354,14 @@ async fn wait_for_rot_boot_info(
         }
     }
 }
+
+//        match mgs_client
+//            .sp_rot_boot_info(
+//                sp_type,
+//                sp_slot,
+//                SpComponent::ROT.const_as_str(),
+//                &GetRotBootInfoParams {
+//                    version: RotBootInfo::HIGHEST_KNOWN_VERSION,
+//                },
+//            )
+//            .await
