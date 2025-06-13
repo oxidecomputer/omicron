@@ -426,7 +426,7 @@ impl SledAgent {
         let boot_disk_zpool = config_reconciler
             .internal_disks_rx()
             .current()
-            .boot_disk_zpool()
+            .boot_disk_zpool_name()
             .ok_or_else(|| Error::BootDiskNotFound)?;
 
         // Configure a swap device of the configured size before other system setup.
@@ -1122,6 +1122,8 @@ impl SledAgent {
         let reservoir_size = self.inner.instances.reservoir_size();
         let sled_role =
             if is_scrimlet { SledRole::Scrimlet } else { SledRole::Gimlet };
+        let zone_image_resolver =
+            self.inner.services.zone_image_resolver().status().to_inventory();
 
         let ReconcilerInventory {
             disks,
@@ -1131,8 +1133,6 @@ impl SledAgent {
             reconciler_status,
             last_reconciliation,
         } = self.inner.config_reconciler.inventory(&self.log).await?;
-        let zone_image_resolver =
-            self.inner.services.zone_image_resolver().status();
 
         Ok(Inventory {
             sled_id,

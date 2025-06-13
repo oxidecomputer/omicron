@@ -93,8 +93,8 @@ use omicron_ddm_admin_client::DdmError;
 use omicron_uuid_kinds::OmicronZoneUuid;
 use sled_agent_config_reconciler::InternalDisksReceiver;
 use sled_agent_types::sled::SWITCH_ZONE_BASEBOARD_FILE;
-use sled_agent_zone_images::ZoneImageSource;
-use sled_agent_zone_images::ZoneImageSourceResolver;
+use sled_agent_types::zone_images::MupdateOverrideReadError;
+use sled_agent_zone_images::{ZoneImageSource, ZoneImageSourceResolver};
 use sled_hardware::DendriteAsic;
 use sled_hardware::SledMode;
 use sled_hardware::is_gimlet;
@@ -263,8 +263,8 @@ pub enum Error {
     #[error("Unexpected zone config: zone {zone_id} is running on ramdisk ?!")]
     ZoneIsRunningOnRamdisk { zone_id: OmicronZoneUuid },
 
-    #[error("failed to read mupdate override info, not starting zones: {0}")]
-    MupdateOverrideRead(String),
+    #[error("failed to read mupdate override info, not starting zones")]
+    MupdateOverrideRead(#[source] MupdateOverrideReadError),
 
     #[error(
         "Couldn't find requested zone image ({hash}) for \
@@ -772,10 +772,6 @@ impl ServiceManager {
 
     pub fn switch_zone_bootstrap_address(&self) -> Ipv6Addr {
         self.inner.switch_zone_bootstrap_address
-    }
-
-    pub fn zone_image_resolver(&self) -> &ZoneImageSourceResolver {
-        &self.inner.zone_image_resolver
     }
 
     /// Sets up "Sled Agent" information, including underlay info.
@@ -3414,6 +3410,11 @@ impl ServiceManager {
             vec![],
         )
         .await
+    }
+
+    /// Returns a reference to the zone image resolver.
+    pub(crate) fn zone_image_resolver(&self) -> &ZoneImageSourceResolver {
+        &self.inner.zone_image_resolver
     }
 
     // Forcefully initialize a sled-local switch zone.

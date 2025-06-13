@@ -10,9 +10,9 @@ use serde::{Deserialize, Serialize};
 use tufaceous_artifact::{Artifact, ArtifactKind, ArtifactVersion};
 
 /// An identifier for an artifact.
-///
-/// The kind is [`ArtifactKind`], indicating that it might represent an artifact
-/// whose kind is unknown.
+//
+// The kind is [`ArtifactKind`], indicating that it might represent an artifact
+// whose kind is unknown.
 // TODO: move this to tufaceous-artifact in the future
 #[derive(
     Debug,
@@ -32,6 +32,7 @@ pub struct ArtifactId {
     pub name: String,
 
     /// The artifact's version.
+    #[schemars(with = "String")]
     pub version: ArtifactVersion,
 
     /// The kind of artifact this is.

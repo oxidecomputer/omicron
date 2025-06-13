@@ -17,4 +17,3 @@
 
 pub mod inventory;
 pub mod recovery_silo;
-pub mod zone_images;

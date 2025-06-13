@@ -2229,25 +2229,6 @@
       "ArtifactCopyFromDepotResponse": {
         "type": "object"
       },
-      "ArtifactHashId": {
-        "description": "A hash-based identifier for an artifact or deployment unit: the kind and hash.",
-        "type": "object",
-        "properties": {
-          "hash": {
-            "description": "The hash of the artifact.",
-            "type": "string",
-            "format": "hex string (32 bytes)"
-          },
-          "kind": {
-            "description": "The kind of artifact this is.",
-            "type": "string"
-          }
-        },
-        "required": [
-          "hash",
-          "kind"
-        ]
-      },
       "ArtifactListResponse": {
         "type": "object",
         "properties": {
@@ -3518,6 +3499,24 @@
           "last_reconciled_config": {
             "$ref": "#/components/schemas/OmicronSledConfig"
           },
+          "orphaned_datasets": {
+            "title": "IdOrdMap",
+            "x-rust-type": {
+              "crate": "iddqd",
+              "parameters": [
+                {
+                  "$ref": "#/components/schemas/OrphanedDataset"
+                }
+              ],
+              "path": "iddqd::IdOrdMap",
+              "version": "*"
+            },
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/OrphanedDataset"
+            },
+            "uniqueItems": true
+          },
           "zones": {
             "type": "object",
             "additionalProperties": {
@@ -3529,6 +3528,7 @@
           "datasets",
           "external_disks",
           "last_reconciled_config",
+          "orphaned_datasets",
           "zones"
         ]
       },
@@ -4888,7 +4888,7 @@
             "$ref": "#/components/schemas/ByteCount"
           },
           "zone_image_resolver": {
-            "$ref": "#/components/schemas/ZoneImageResolverStatus"
+            "$ref": "#/components/schemas/ZoneImageResolverInventory"
           },
           "zpools": {
             "type": "array",
@@ -5265,230 +5265,16 @@
           }
         ]
       },
-      "MupdateOverrideInfo": {
-        "description": "MUPdate override information, typically serialized as JSON (RFD 556).\n\nWhen a MUPdate occurs, a file containing this information is created on the install dataset of the system.",
-        "type": "object",
-        "properties": {
-          "hash_ids": {
-            "description": "Artifact hashes written out to the install dataset.\n\nCurrently includes the host phase 2 and composite control plane artifacts.",
-            "type": "array",
-            "items": {
-              "$ref": "#/components/schemas/ArtifactHashId"
-            },
-            "uniqueItems": true
-          },
-          "mupdate_uuid": {
-            "description": "A UUID that identifies a MUPdate that occurred.",
-            "allOf": [
-              {
-                "$ref": "#/components/schemas/TypedUuidForMupdateOverrideKind"
-              }
-            ]
-          }
-        },
-        "required": [
-          "hash_ids",
-          "mupdate_uuid"
-        ]
-      },
-      "MupdateOverrideNonBootInfo": {
-        "description": "Describes the result of reading a mupdate override file from a non-boot disk.",
-        "type": "object",
-        "properties": {
-          "path": {
-            "description": "The path to the mupdate override file.",
-            "type": "string",
-            "format": "Utf8PathBuf"
-          },
-          "result": {
-            "description": "The result of reading the mupdate override file.",
-            "allOf": [
-              {
-                "$ref": "#/components/schemas/MupdateOverrideNonBootResult"
-              }
-            ]
-          },
-          "zpool_name": {
-            "description": "The zpool name.",
-            "allOf": [
-              {
-                "$ref": "#/components/schemas/ZpoolName"
-              }
-            ]
-          }
-        },
-        "required": [
-          "path",
-          "result",
-          "zpool_name"
-        ]
-      },
-      "MupdateOverrideNonBootMismatch": {
-        "description": "Describes a mismatch between the boot disk and a non-boot disk.",
-        "oneOf": [
-          {
-            "description": "The boot disk is present but the non-boot disk is absent.",
-            "type": "object",
-            "properties": {
-              "reason": {
-                "type": "string",
-                "enum": [
-                  "boot_present_other_absent"
-                ]
-              }
-            },
-            "required": [
-              "reason"
-            ]
-          },
-          {
-            "description": "The boot disk is absent but the non-boot disk is present.",
-            "type": "object",
-            "properties": {
-              "non_boot_disk_info": {
-                "$ref": "#/components/schemas/MupdateOverrideInfo"
-              },
-              "reason": {
-                "type": "string",
-                "enum": [
-                  "boot_absent_other_present"
-                ]
-              }
-            },
-            "required": [
-              "non_boot_disk_info",
-              "reason"
-            ]
-          },
-          {
-            "description": "Both disks are present but have different values.",
-            "type": "object",
-            "properties": {
-              "non_boot_disk_info": {
-                "$ref": "#/components/schemas/MupdateOverrideInfo"
-              },
-              "reason": {
-                "type": "string",
-                "enum": [
-                  "value_mismatch"
-                ]
-              }
-            },
-            "required": [
-              "non_boot_disk_info",
-              "reason"
-            ]
-          },
-          {
-            "description": "There was an error reading the boot disk.",
-            "type": "object",
-            "properties": {
-              "non_boot_disk_info": {
-                "nullable": true,
-                "allOf": [
-                  {
-                    "$ref": "#/components/schemas/MupdateOverrideInfo"
-                  }
-                ]
-              },
-              "reason": {
-                "type": "string",
-                "enum": [
-                  "boot_disk_read_error"
-                ]
-              }
-            },
-            "required": [
-              "reason"
-            ]
-          }
-        ]
-      },
-      "MupdateOverrideNonBootResult": {
-        "description": "The result of reading a mupdate override file from a non-boot disk.",
-        "oneOf": [
-          {
-            "description": "The non-boot disk matches the boot disk (both present).",
-            "type": "object",
-            "properties": {
-              "result": {
-                "type": "string",
-                "enum": [
-                  "matches_present"
-                ]
-              }
-            },
-            "required": [
-              "result"
-            ]
-          },
-          {
-            "description": "The non-boot disk matches the boot disk (both absent).",
-            "type": "object",
-            "properties": {
-              "result": {
-                "type": "string",
-                "enum": [
-                  "matches_absent"
-                ]
-              }
-            },
-            "required": [
-              "result"
-            ]
-          },
-          {
-            "description": "The non-boot disk does not match the boot disk.",
-            "type": "object",
-            "properties": {
-              "reason": {
-                "$ref": "#/components/schemas/MupdateOverrideNonBootMismatch"
-              },
-              "result": {
-                "type": "string",
-                "enum": [
-                  "mismatch"
-                ]
-              }
-            },
-            "required": [
-              "reason",
-              "result"
-            ]
-          },
-          {
-            "description": "There was an error reading the mupdate override file from the non-boot disk.",
-            "type": "object",
-            "properties": {
-              "message": {
-                "type": "string"
-              },
-              "result": {
-                "type": "string",
-                "enum": [
-                  "read_error"
-                ]
-              }
-            },
-            "required": [
-              "message",
-              "result"
-            ]
-          }
-        ]
-      },
-      "MupdateOverrideStatus": {
-        "description": "Describes the current state of mupdate overrides.",
+      "MupdateOverrideInventory": {
         "type": "object",
         "properties": {
           "boot_disk_override": {
-            "description": "Status of the boot disk.",
+            "description": "The boot disk override, or an error if it could not be parsed.",
             "x-rust-type": {
               "crate": "std",
               "parameters": [
                 {
-                  "$ref": "#/components/schemas/MupdateOverrideInfo",
-                  "nullable": true
+                  "type": "null"
                 },
                 {
                   "type": "string"
@@ -5502,11 +5288,9 @@
                 "type": "object",
                 "properties": {
                   "ok": {
-                    "nullable": true,
-                    "allOf": [
-                      {
-                        "$ref": "#/components/schemas/MupdateOverrideInfo"
-                      }
+                    "type": "string",
+                    "enum": [
+                      null
                     ]
                   }
                 },
@@ -5532,14 +5316,14 @@
             "type": "string",
             "format": "Utf8PathBuf"
           },
-          "non_boot_disk_overrides": {
+          "non_boot_status": {
             "title": "IdOrdMap",
-            "description": "Status of the non-boot disks. This results in warnings in case of a mismatch.",
+            "description": "Warnings about non-boot disks, if any.",
             "x-rust-type": {
               "crate": "iddqd",
               "parameters": [
                 {
-                  "$ref": "#/components/schemas/MupdateOverrideNonBootInfo"
+                  "$ref": "#/components/schemas/MupdateOverrideNonBootInventory"
                 }
               ],
               "path": "iddqd::IdOrdMap",
@@ -5547,7 +5331,7 @@
             },
             "type": "array",
             "items": {
-              "$ref": "#/components/schemas/MupdateOverrideNonBootInfo"
+              "$ref": "#/components/schemas/MupdateOverrideNonBootInventory"
             },
             "uniqueItems": true
           }
@@ -5555,7 +5339,39 @@
         "required": [
           "boot_disk_override",
           "boot_disk_path",
-          "non_boot_disk_overrides"
+          "non_boot_status"
+        ]
+      },
+      "MupdateOverrideNonBootInventory": {
+        "type": "object",
+        "properties": {
+          "is_valid": {
+            "description": "Whether the status is valid.",
+            "type": "boolean"
+          },
+          "message": {
+            "description": "A message describing the status. If `is_valid` is false, then this message describes the reason for the invalid status.",
+            "type": "string"
+          },
+          "path": {
+            "description": "The path to the mupdate override JSON on the non-boot disk.",
+            "type": "string",
+            "format": "Utf8PathBuf"
+          },
+          "zpool_id": {
+            "description": "The non-boot zpool ID.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/TypedUuidForZpoolKind"
+              }
+            ]
+          }
+        },
+        "required": [
+          "is_valid",
+          "message",
+          "path",
+          "zpool_id"
         ]
       },
       "Name": {
@@ -5823,32 +5639,6 @@
           "pool_name"
         ]
       },
-      "OmicronZoneFileMetadata": {
-        "description": "Information about an Omicron zone file written out to the install dataset.\n\nPart of [`OmicronZoneManifest`].",
-        "type": "object",
-        "properties": {
-          "file_name": {
-            "description": "The file name.",
-            "type": "string"
-          },
-          "file_size": {
-            "description": "The file size.",
-            "type": "integer",
-            "format": "uint64",
-            "minimum": 0
-          },
-          "hash": {
-            "description": "The hash of the file.",
-            "type": "string",
-            "format": "hex string (32 bytes)"
-          }
-        },
-        "required": [
-          "file_name",
-          "file_size",
-          "hash"
-        ]
-      },
       "OmicronZoneImageSource": {
         "description": "Where Sled Agent should get the image for a zone.",
         "oneOf": [
@@ -5887,43 +5677,6 @@
               "type"
             ]
           }
-        ]
-      },
-      "OmicronZoneManifest": {
-        "description": "Describes the set of Omicron zones written out into an install dataset.",
-        "type": "object",
-        "properties": {
-          "mupdate_id": {
-            "description": "The UUID of the mupdate which created this manifest. Intended primarily for checking equality.",
-            "allOf": [
-              {
-                "$ref": "#/components/schemas/TypedUuidForMupdateKind"
-              }
-            ]
-          },
-          "zones": {
-            "title": "IdOrdMap",
-            "description": "Omicron zone file names and hashes.",
-            "x-rust-type": {
-              "crate": "iddqd",
-              "parameters": [
-                {
-                  "$ref": "#/components/schemas/OmicronZoneFileMetadata"
-                }
-              ],
-              "path": "iddqd::IdOrdMap",
-              "version": "*"
-            },
-            "type": "array",
-            "items": {
-              "$ref": "#/components/schemas/OmicronZoneFileMetadata"
-            },
-            "uniqueItems": true
-          }
-        },
-        "required": [
-          "mupdate_id",
-          "zones"
         ]
       },
       "OmicronZoneType": {
@@ -6275,6 +6028,41 @@
               "type"
             ]
           }
+        ]
+      },
+      "OrphanedDataset": {
+        "type": "object",
+        "properties": {
+          "available": {
+            "$ref": "#/components/schemas/ByteCount"
+          },
+          "id": {
+            "nullable": true,
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/TypedUuidForDatasetKind"
+              }
+            ]
+          },
+          "mounted": {
+            "type": "boolean"
+          },
+          "name": {
+            "$ref": "#/components/schemas/DatasetName"
+          },
+          "reason": {
+            "type": "string"
+          },
+          "used": {
+            "$ref": "#/components/schemas/ByteCount"
+          }
+        },
+        "required": [
+          "available",
+          "mounted",
+          "name",
+          "reason",
+          "used"
         ]
       },
       "P9fs": {
@@ -7815,6 +7603,117 @@
           "vni"
         ]
       },
+      "ZoneArtifactInventory": {
+        "type": "object",
+        "properties": {
+          "expected_hash": {
+            "description": "The expected hash of the file.",
+            "type": "string",
+            "format": "hex string (32 bytes)"
+          },
+          "expected_size": {
+            "description": "The expected size of the file.",
+            "type": "integer",
+            "format": "uint64",
+            "minimum": 0
+          },
+          "file_name": {
+            "description": "The filename.",
+            "type": "string"
+          },
+          "path": {
+            "description": "The full path to the file.",
+            "type": "string",
+            "format": "Utf8PathBuf"
+          },
+          "status": {
+            "description": "The status.",
+            "x-rust-type": {
+              "crate": "std",
+              "parameters": [
+                {
+                  "type": "null"
+                },
+                {
+                  "type": "string"
+                }
+              ],
+              "path": "::std::result::Result",
+              "version": "*"
+            },
+            "oneOf": [
+              {
+                "type": "object",
+                "properties": {
+                  "ok": {
+                    "type": "string",
+                    "enum": [
+                      null
+                    ]
+                  }
+                },
+                "required": [
+                  "ok"
+                ]
+              },
+              {
+                "type": "object",
+                "properties": {
+                  "err": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "err"
+                ]
+              }
+            ]
+          }
+        },
+        "required": [
+          "expected_hash",
+          "expected_size",
+          "file_name",
+          "path",
+          "status"
+        ]
+      },
+      "ZoneArtifactsInventory": {
+        "type": "object",
+        "properties": {
+          "artifacts": {
+            "title": "IdOrdMap",
+            "description": "The artifacts on disk.",
+            "x-rust-type": {
+              "crate": "iddqd",
+              "parameters": [
+                {
+                  "$ref": "#/components/schemas/ZoneArtifactInventory"
+                }
+              ],
+              "path": "iddqd::IdOrdMap",
+              "version": "*"
+            },
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ZoneArtifactInventory"
+            },
+            "uniqueItems": true
+          },
+          "mupdate_id": {
+            "description": "The mupdate UUID that created this inventory.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/TypedUuidForMupdateKind"
+              }
+            ]
+          }
+        },
+        "required": [
+          "artifacts",
+          "mupdate_id"
+        ]
+      },
       "ZoneBundleCause": {
         "description": "The reason or cause for a zone bundle, i.e., why it was created.",
         "oneOf": [
@@ -7899,15 +7798,15 @@
           "version"
         ]
       },
-      "ZoneImageResolverStatus": {
-        "description": "Current status of the zone image resolver.\n\nThe zone resolver is the component responsible for looking up zone images from the install dataset and artifact store.",
+      "ZoneImageResolverInventory": {
+        "description": "A simplified form of zone image resolver status.",
         "type": "object",
         "properties": {
           "mupdate_override": {
             "description": "The mupdate override status.",
             "allOf": [
               {
-                "$ref": "#/components/schemas/MupdateOverrideStatus"
+                "$ref": "#/components/schemas/MupdateOverrideInventory"
               }
             ]
           },
@@ -7915,7 +7814,7 @@
             "description": "The zone manifest status.",
             "allOf": [
               {
-                "$ref": "#/components/schemas/ZoneManifestStatus"
+                "$ref": "#/components/schemas/ZoneManifestInventory"
               }
             ]
           }
@@ -7925,328 +7824,21 @@
           "zone_manifest"
         ]
       },
-      "ZoneManifestArtifactResult": {
-        "type": "object",
-        "properties": {
-          "expected_hash": {
-            "description": "The expected hash.",
-            "type": "string",
-            "format": "hex string (32 bytes)"
-          },
-          "expected_size": {
-            "description": "The expected size.",
-            "type": "integer",
-            "format": "uint64",
-            "minimum": 0
-          },
-          "file_name": {
-            "description": "The filename.",
-            "type": "string"
-          },
-          "path": {
-            "description": "The full path to the file.",
-            "type": "string",
-            "format": "Utf8PathBuf"
-          },
-          "status": {
-            "description": "The status on disk.",
-            "allOf": [
-              {
-                "$ref": "#/components/schemas/ZoneManifestArtifactStatus"
-              }
-            ]
-          }
-        },
-        "required": [
-          "expected_hash",
-          "expected_size",
-          "file_name",
-          "path",
-          "status"
-        ]
-      },
-      "ZoneManifestArtifactStatus": {
-        "oneOf": [
-          {
-            "description": "The artifact was read successfully and matches.",
-            "type": "object",
-            "properties": {
-              "status": {
-                "type": "string",
-                "enum": [
-                  "valid"
-                ]
-              }
-            },
-            "required": [
-              "status"
-            ]
-          },
-          {
-            "description": "The artifact was read successfully but does not match.",
-            "type": "object",
-            "properties": {
-              "actual_hash": {
-                "description": "The actual hash.",
-                "type": "string",
-                "format": "hex string (32 bytes)"
-              },
-              "actual_size": {
-                "description": "The actual file size.",
-                "type": "integer",
-                "format": "uint64",
-                "minimum": 0
-              },
-              "status": {
-                "type": "string",
-                "enum": [
-                  "mismatch"
-                ]
-              }
-            },
-            "required": [
-              "actual_hash",
-              "actual_size",
-              "status"
-            ]
-          },
-          {
-            "description": "An error occurred while reading the artifact.",
-            "type": "object",
-            "properties": {
-              "message": {
-                "type": "string"
-              },
-              "status": {
-                "type": "string",
-                "enum": [
-                  "error"
-                ]
-              }
-            },
-            "required": [
-              "message",
-              "status"
-            ]
-          }
-        ]
-      },
-      "ZoneManifestArtifactsResult": {
-        "description": "The result of reading artifacts from an install dataset.\n\nThis may or may not be valid, depending on the status of the artifacts. See [`Self::is_valid`].",
-        "type": "object",
-        "properties": {
-          "data": {
-            "title": "IdOrdMap",
-            "x-rust-type": {
-              "crate": "iddqd",
-              "parameters": [
-                {
-                  "$ref": "#/components/schemas/ZoneManifestArtifactResult"
-                }
-              ],
-              "path": "iddqd::IdOrdMap",
-              "version": "*"
-            },
-            "type": "array",
-            "items": {
-              "$ref": "#/components/schemas/ZoneManifestArtifactResult"
-            },
-            "uniqueItems": true
-          },
-          "manifest": {
-            "$ref": "#/components/schemas/OmicronZoneManifest"
-          }
-        },
-        "required": [
-          "data",
-          "manifest"
-        ]
-      },
-      "ZoneManifestNonBootInfo": {
-        "type": "object",
-        "properties": {
-          "dataset_dir": {
-            "description": "The dataset directory.",
-            "type": "string",
-            "format": "Utf8PathBuf"
-          },
-          "path": {
-            "description": "The zone manifest path.",
-            "type": "string",
-            "format": "Utf8PathBuf"
-          },
-          "result": {
-            "description": "The result of performing the read operation.",
-            "allOf": [
-              {
-                "$ref": "#/components/schemas/ZoneManifestNonBootResult"
-              }
-            ]
-          },
-          "zpool_name": {
-            "description": "The name of the zpool.",
-            "allOf": [
-              {
-                "$ref": "#/components/schemas/ZpoolName"
-              }
-            ]
-          }
-        },
-        "required": [
-          "dataset_dir",
-          "path",
-          "result",
-          "zpool_name"
-        ]
-      },
-      "ZoneManifestNonBootMismatch": {
-        "oneOf": [
-          {
-            "description": "The file is absent on the boot disk but present on the other disk.",
-            "type": "object",
-            "properties": {
-              "non_boot_disk_result": {
-                "description": "The result of reading the file on the other disk.",
-                "allOf": [
-                  {
-                    "$ref": "#/components/schemas/ZoneManifestArtifactsResult"
-                  }
-                ]
-              },
-              "reason": {
-                "type": "string",
-                "enum": [
-                  "boot_absent_other_present"
-                ]
-              }
-            },
-            "required": [
-              "non_boot_disk_result",
-              "reason"
-            ]
-          },
-          {
-            "description": "The file's contents differ between the boot disk and the other disk.",
-            "type": "object",
-            "properties": {
-              "non_boot_disk_result": {
-                "$ref": "#/components/schemas/ZoneManifestArtifactsResult"
-              },
-              "reason": {
-                "type": "string",
-                "enum": [
-                  "value_mismatch"
-                ]
-              }
-            },
-            "required": [
-              "non_boot_disk_result",
-              "reason"
-            ]
-          },
-          {
-            "description": "There was a read error on the boot disk, so we were unable to verify consistency.",
-            "type": "object",
-            "properties": {
-              "non_boot_disk_result": {
-                "description": "The value as found on this disk. This value is logged but not used.",
-                "allOf": [
-                  {
-                    "$ref": "#/components/schemas/ZoneManifestArtifactsResult"
-                  }
-                ]
-              },
-              "reason": {
-                "type": "string",
-                "enum": [
-                  "boot_disk_read_error"
-                ]
-              }
-            },
-            "required": [
-              "non_boot_disk_result",
-              "reason"
-            ]
-          }
-        ]
-      },
-      "ZoneManifestNonBootResult": {
-        "oneOf": [
-          {
-            "description": "The manifest is present and matches the value on the boot disk.\n\nThis does not necessarily mean that the zone tarballs on the non-boot disk match the manifest. Information about that is stored in the `ZoneManifestArtifactsResult`.",
-            "type": "object",
-            "properties": {
-              "artifacts_result": {
-                "$ref": "#/components/schemas/ZoneManifestArtifactsResult"
-              },
-              "result": {
-                "type": "string",
-                "enum": [
-                  "matches"
-                ]
-              }
-            },
-            "required": [
-              "artifacts_result",
-              "result"
-            ]
-          },
-          {
-            "description": "A mismatch between the boot disk and the other disk was detected.",
-            "type": "object",
-            "properties": {
-              "reason": {
-                "$ref": "#/components/schemas/ZoneManifestNonBootMismatch"
-              },
-              "result": {
-                "type": "string",
-                "enum": [
-                  "mismatch"
-                ]
-              }
-            },
-            "required": [
-              "reason",
-              "result"
-            ]
-          },
-          {
-            "description": "An error occurred while reading the zone manifest on this disk.",
-            "type": "object",
-            "properties": {
-              "message": {
-                "type": "string"
-              },
-              "result": {
-                "type": "string",
-                "enum": [
-                  "read_error"
-                ]
-              }
-            },
-            "required": [
-              "message",
-              "result"
-            ]
-          }
-        ]
-      },
-      "ZoneManifestStatus": {
-        "description": "Describes the current state of zone manifests.",
+      "ZoneManifestInventory": {
         "type": "object",
         "properties": {
           "boot_disk_path": {
-            "description": "The path to the zone manifest JSON on the boot disk.",
+            "description": "The path to the zone manifest file on the boot disk.",
             "type": "string",
             "format": "Utf8PathBuf"
           },
-          "boot_disk_result": {
-            "description": "Status of the boot disk.",
+          "manifest": {
+            "description": "The manifest read from disk.",
             "x-rust-type": {
               "crate": "std",
               "parameters": [
                 {
-                  "$ref": "#/components/schemas/ZoneManifestArtifactsResult"
+                  "$ref": "#/components/schemas/ZoneArtifactsInventory"
                 },
                 {
                   "type": "string"
@@ -8260,7 +7852,7 @@
                 "type": "object",
                 "properties": {
                   "ok": {
-                    "$ref": "#/components/schemas/ZoneManifestArtifactsResult"
+                    "$ref": "#/components/schemas/ZoneArtifactsInventory"
                   }
                 },
                 "required": [
@@ -8280,14 +7872,14 @@
               }
             ]
           },
-          "non_boot_disk_metadata": {
+          "non_boot_status": {
             "title": "IdOrdMap",
-            "description": "Status of the non-boot disks. This results in warnings in case of a mismatch.",
+            "description": "Warnings about non-boot disks, if any.",
             "x-rust-type": {
               "crate": "iddqd",
               "parameters": [
                 {
-                  "$ref": "#/components/schemas/ZoneManifestNonBootInfo"
+                  "$ref": "#/components/schemas/ZoneManifestNonBootInventory"
                 }
               ],
               "path": "iddqd::IdOrdMap",
@@ -8295,15 +7887,47 @@
             },
             "type": "array",
             "items": {
-              "$ref": "#/components/schemas/ZoneManifestNonBootInfo"
+              "$ref": "#/components/schemas/ZoneManifestNonBootInventory"
             },
             "uniqueItems": true
           }
         },
         "required": [
           "boot_disk_path",
-          "boot_disk_result",
-          "non_boot_disk_metadata"
+          "manifest",
+          "non_boot_status"
+        ]
+      },
+      "ZoneManifestNonBootInventory": {
+        "type": "object",
+        "properties": {
+          "is_valid": {
+            "description": "Whether the status is valid.",
+            "type": "boolean"
+          },
+          "message": {
+            "description": "A message describing the status. If `is_valid` is false, then this message describes the reason for the invalid status.",
+            "type": "string"
+          },
+          "path": {
+            "description": "The path to the zone manifest JSON on the non-boot disk.",
+            "type": "string",
+            "format": "Utf8PathBuf"
+          },
+          "zpool_id": {
+            "description": "The non-boot zpool ID.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/TypedUuidForZpoolKind"
+              }
+            ]
+          }
+        },
+        "required": [
+          "is_valid",
+          "message",
+          "path",
+          "zpool_id"
         ]
       },
       "ZpoolName": {

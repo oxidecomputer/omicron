@@ -1711,12 +1711,9 @@ mod test {
     use super::*;
     use crate::rack_setup::plan::service::{Plan as ServicePlan, SledInfo};
     use nexus_reconfigurator_blippy::{Blippy, BlippyReportSortKey};
-    use nexus_sled_agent_shared::{
-        inventory::{
-            Baseboard, ConfigReconcilerInventoryStatus, Inventory,
-            InventoryDisk, OmicronZoneType, SledRole,
-        },
-        zone_images::ZoneImageResolverStatus,
+    use nexus_sled_agent_shared::inventory::{
+        Baseboard, ConfigReconcilerInventoryStatus, Inventory, InventoryDisk,
+        OmicronZoneType, SledRole, ZoneImageResolverInventory,
     };
     use omicron_common::{
         address::{Ipv6Subnet, SLED_PREFIX, get_sled_address},
@@ -1764,7 +1761,7 @@ mod test {
                 ledgered_sled_config: None,
                 reconciler_status: ConfigReconcilerInventoryStatus::NotYetRun,
                 last_reconciliation: None,
-                zone_image_resolver: ZoneImageResolverStatus::new_fake(),
+                zone_image_resolver: ZoneImageResolverInventory::new_fake(),
             },
             true,
         )

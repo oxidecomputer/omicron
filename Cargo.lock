@@ -1049,9 +1049,9 @@ dependencies = [
 
 [[package]]
 name = "camino"
-version = "1.1.9"
+version = "1.1.10"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "8b96ec4966b5813e2c0507c1f86115c8c5abaadc3980879c3424042a02fd1ad3"
+checksum = "0da45bc31171d8d6960122e222a67740df867c1dd53b4d51caa297084c185cab"
 dependencies = [
  "serde",
 ]
@@ -1261,9 +1261,9 @@ dependencies = [
 
 [[package]]
 name = "cfg-if"
-version = "1.0.0"
+version = "1.0.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "baf1de4339761588bc0619e3cbc0120ee582ebb74b53b4efbf79117bd2da40fd"
+checksum = "9555578bc9e57714c812a1f84e4fc5b4d21fcb063490c624de019f7464c91268"
 
 [[package]]
 name = "cfg_aliases"
@@ -3253,9 +3253,9 @@ checksum = "b3ea1ec5f8307826a5b71094dd91fc04d4ae75d5709b20ad351c7fb4815c86ec"
 
 [[package]]
 name = "flate2"
-version = "1.1.1"
+version = "1.1.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "7ced92e76e966ca2fd84c8f7aa01a4aea65b0eb6648d72f7c8f3e2764a67fece"
+checksum = "4a3d7db9596fecd151c5f638c0ee5d5bd487b6e0ea232e5dc96d5250f6f94b1d"
 dependencies = [
  "crc32fast",
  "miniz_oxide",
@@ -3362,9 +3362,9 @@ dependencies = [
 
 [[package]]
 name = "fs-err"
-version = "3.1.0"
+version = "3.1.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "1f89bda4c2a21204059a977ed3bfe746677dfd137b83c339e702b0ac91d482aa"
+checksum = "88d7be93788013f265201256d58f04936a8079ad5dc898743aa20525f503b683"
 dependencies = [
  "autocfg",
  "tokio",
@@ -4436,12 +4436,13 @@ dependencies = [
 
 [[package]]
 name = "hyper-util"
-version = "0.1.11"
+version = "0.1.14"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "497bbc33a26fdd4af9ed9c70d63f61cf56a938375fbb32df34db9b1cd6d643f2"
+checksum = "dc2fdfdbff08affe55bb779f33b053aa1fe5dd5b54c257343c17edfa55711bdb"
 dependencies = [
  "bytes",
  "futures-channel",
+ "futures-core",
  "futures-util",
  "http",
  "http-body",
@@ -4612,9 +4613,9 @@ dependencies = [
 
 [[package]]
 name = "iddqd"
-version = "0.3.6"
+version = "0.3.7"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "9f6ebdbf573a5215d3b9bf3388deedb9501d619a43184f926b376909e11ed3ed"
+checksum = "fcce2c6f521794eaabde7b11887b92ca033cc09bf9d5c36d78fd14936a6d053b"
 dependencies = [
  "allocator-api2",
  "daft",
@@ -5419,7 +5420,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "4979f22fdb869068da03c9f7528f8297c6fd2606bc3a4affe42e6a823fdb8da4"
 dependencies = [
  "cfg-if",
- "windows-targets 0.52.6",
+ "windows-targets 0.48.5",
 ]
 
 [[package]]
@@ -6123,6 +6124,7 @@ dependencies = [
  "diesel",
  "expectorate",
  "hex",
+ "iddqd",
  "ipnetwork",
  "macaddr",
  "newtype_derive",
@@ -6181,6 +6183,7 @@ dependencies = [
  "gateway-client",
  "hyper-rustls 0.26.0",
  "id-map",
+ "iddqd",
  "illumos-utils",
  "internal-dns-resolver",
  "internal-dns-types",
@@ -6303,6 +6306,7 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "base64 0.22.1",
+ "camino",
  "chrono",
  "clickhouse-admin-keeper-client",
  "clickhouse-admin-server-client",
@@ -6314,6 +6318,7 @@ dependencies = [
  "gateway-test-utils",
  "gateway-types",
  "id-map",
+ "iddqd",
  "nexus-sled-agent-shared",
  "nexus-types",
  "omicron-common",
@@ -6324,10 +6329,13 @@ dependencies = [
  "reqwest",
  "serde_json",
  "sled-agent-client",
+ "sled-agent-types",
+ "sled-agent-zone-images-examples",
  "slog",
  "strum",
  "thiserror 1.0.69",
  "tokio",
+ "tufaceous-artifact",
  "typed-rng",
  "uuid",
 ]
@@ -6673,7 +6681,6 @@ dependencies = [
  "serde",
  "serde_json",
  "sled-hardware-types",
- "slog",
  "strum",
  "thiserror 1.0.69",
  "tufaceous-artifact",
@@ -7590,6 +7597,7 @@ dependencies = [
  "gateway-types",
  "http",
  "humantime",
+ "iddqd",
  "indicatif",
  "internal-dns-resolver",
  "internal-dns-types",
@@ -7707,7 +7715,7 @@ dependencies = [
  "anyhow",
  "camino",
  "cargo_metadata 0.19.2",
- "fs-err 3.1.0",
+ "fs-err 3.1.1",
  "omicron-workspace-hack",
  "serde",
  "toml_edit 0.22.26",
@@ -7753,7 +7761,7 @@ dependencies = [
  "cargo_metadata 0.19.2",
  "chrono",
  "clap",
- "fs-err 3.1.0",
+ "fs-err 3.1.1",
  "futures",
  "hex",
  "omicron-pins",
@@ -7858,7 +7866,6 @@ dependencies = [
  "hyper",
  "hyper-staticfile",
  "id-map",
- "iddqd",
  "illumos-utils",
  "installinator-common",
  "internal-dns-resolver",
@@ -8029,7 +8036,7 @@ dependencies = [
  "ff",
  "flate2",
  "foldhash",
- "fs-err 3.1.0",
+ "fs-err 3.1.1",
  "futures",
  "futures-channel",
  "futures-core",
@@ -8082,7 +8089,6 @@ dependencies = [
  "postgres-types",
  "predicates",
  "proc-macro2",
- "quote",
  "rand 0.8.5",
  "regex",
  "regex-automata",
@@ -8212,7 +8218,7 @@ dependencies = [
  "debug-ignore",
  "dns-server-api",
  "dropshot",
- "fs-err 3.1.0",
+ "fs-err 3.1.1",
  "gateway-api",
  "hex",
  "indent_write",
@@ -11760,6 +11766,7 @@ dependencies = [
  "futures",
  "glob",
  "id-map",
+ "iddqd",
  "illumos-utils",
  "key-manager",
  "nexus-sled-agent-shared",
@@ -11796,6 +11803,7 @@ dependencies = [
  "camino",
  "camino-tempfile",
  "chrono",
+ "iddqd",
  "nexus-sled-agent-shared",
  "omicron-common",
  "omicron-test-utils",
@@ -11811,9 +11819,11 @@ dependencies = [
  "sha3",
  "sled-hardware-types",
  "slog",
+ "slog-error-chain",
  "strum",
  "thiserror 1.0.69",
  "toml 0.8.22",
+ "tufaceous-artifact",
  "uuid",
 ]
 
@@ -11837,10 +11847,28 @@ dependencies = [
  "serde_json",
  "sha2",
  "sled-agent-config-reconciler",
+ "sled-agent-types",
+ "sled-agent-zone-images-examples",
  "sled-storage",
  "slog",
  "slog-error-chain",
- "thiserror 1.0.69",
+ "tufaceous-artifact",
+]
+
+[[package]]
+name = "sled-agent-zone-images-examples"
+version = "0.1.0"
+dependencies = [
+ "camino",
+ "camino-tempfile-ext",
+ "iddqd",
+ "omicron-common",
+ "omicron-uuid-kinds",
+ "omicron-workspace-hack",
+ "serde_json",
+ "sha2",
+ "sled-agent-types",
+ "sled-storage",
  "tufaceous-artifact",
 ]
 
@@ -11851,7 +11879,7 @@ dependencies = [
  "anyhow",
  "camino",
  "cfg-if",
- "fs-err 3.1.0",
+ "fs-err 3.1.1",
  "futures",
  "illumos-utils",
  "libc",
@@ -13934,7 +13962,7 @@ dependencies = [
  "display-error-chain",
  "dropshot",
  "flate2",
- "fs-err 3.1.0",
+ "fs-err 3.1.1",
  "futures",
  "hex",
  "hubtools",
@@ -14509,7 +14537,7 @@ dependencies = [
  "expectorate",
  "flate2",
  "flume",
- "fs-err 3.1.0",
+ "fs-err 3.1.1",
  "futures",
  "gateway-client",
  "gateway-messages",
@@ -14529,7 +14557,6 @@ dependencies = [
  "internal-dns-types",
  "itertools 0.14.0",
  "maplit",
- "nexus-sled-agent-shared",
  "omicron-certificates",
  "omicron-common",
  "omicron-ddm-admin-client",
@@ -14548,7 +14575,9 @@ dependencies = [
  "serde_json",
  "sha2",
  "sled-agent-config-reconciler",
+ "sled-agent-types",
  "sled-agent-zone-images",
+ "sled-agent-zone-images-examples",
  "sled-hardware-types",
  "sled-storage",
  "slog",
@@ -15072,7 +15101,7 @@ dependencies = [
  "cargo_toml",
  "clap",
  "dev-tools-common",
- "fs-err 3.1.0",
+ "fs-err 3.1.1",
  "macaddr",
  "serde",
  "swrite",

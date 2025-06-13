@@ -26,12 +26,10 @@ use diesel::sql_types::Nullable;
 use futures::FutureExt;
 use futures::future::BoxFuture;
 use id_map::{IdMap, IdMappable};
+use iddqd::IdOrdMap;
 use nexus_db_errors::ErrorHandler;
 use nexus_db_errors::public_error_from_diesel;
 use nexus_db_errors::public_error_from_diesel_lookup;
-use nexus_db_model::HwBaseboardId;
-use nexus_db_model::HwPowerState;
-use nexus_db_model::HwRotSlot;
 use nexus_db_model::InvCaboose;
 use nexus_db_model::InvClickhouseKeeperMembership;
 use nexus_db_model::InvCollection;
@@ -41,6 +39,7 @@ use nexus_db_model::InvConfigReconcilerStatusKind;
 use nexus_db_model::InvDataset;
 use nexus_db_model::InvLastReconciliationDatasetResult;
 use nexus_db_model::InvLastReconciliationDiskResult;
+use nexus_db_model::InvLastReconciliationOrphanedDataset;
 use nexus_db_model::InvLastReconciliationZoneResult;
 use nexus_db_model::InvNvmeDiskFirmware;
 use nexus_db_model::InvOmicronSledConfig;
@@ -62,6 +61,11 @@ use nexus_db_model::SqlU32;
 use nexus_db_model::SwCaboose;
 use nexus_db_model::SwRotPage;
 use nexus_db_model::to_db_typed_uuid;
+use nexus_db_model::{
+    HwBaseboardId, InvZoneImageResolver, InvZoneManifestZone,
+};
+use nexus_db_model::{HwPowerState, InvZoneManifestNonBoot};
+use nexus_db_model::{HwRotSlot, InvMupdateOverrideNonBoot};
 use nexus_db_schema::enums::HwPowerStateEnum;
 use nexus_db_schema::enums::HwRotSlotEnum;
 use nexus_db_schema::enums::RotImageErrorEnum;
@@ -74,7 +78,11 @@ use nexus_db_schema::enums::{
 use nexus_sled_agent_shared::inventory::ConfigReconcilerInventory;
 use nexus_sled_agent_shared::inventory::ConfigReconcilerInventoryResult;
 use nexus_sled_agent_shared::inventory::ConfigReconcilerInventoryStatus;
+use nexus_sled_agent_shared::inventory::MupdateOverrideNonBootInventory;
 use nexus_sled_agent_shared::inventory::OmicronSledConfig;
+use nexus_sled_agent_shared::inventory::OrphanedDataset;
+use nexus_sled_agent_shared::inventory::ZoneArtifactInventory;
+use nexus_sled_agent_shared::inventory::ZoneManifestNonBootInventory;
 use nexus_types::inventory::BaseboardId;
 use nexus_types::inventory::Collection;
 use nexus_types::inventory::PhysicalDiskFirmware;
@@ -91,6 +99,7 @@ use omicron_uuid_kinds::OmicronSledConfigUuid;
 use omicron_uuid_kinds::OmicronZoneUuid;
 use omicron_uuid_kinds::PhysicalDiskUuid;
 use omicron_uuid_kinds::SledUuid;
+use slog_error_chain::InlineErrorChain;
 use std::collections::BTreeMap;
 use std::collections::BTreeSet;
 use std::num::NonZeroU32;
@@ -214,12 +223,76 @@ impl DataStore {
             })
             .collect();
 
+        // Pull zone manifest zones out of all sled agents.
+        let zone_manifest_zones: Vec<_> = collection
+            .sled_agents
+            .iter()
+            .filter_map(|(sled_id, sled_agent)| {
+                sled_agent
+                    .zone_image_resolver
+                    .zone_manifest
+                    .manifest
+                    .as_ref()
+                    .ok()
+                    .map(|artifacts| {
+                        artifacts.artifacts.iter().map(|artifact| {
+                            InvZoneManifestZone::new(
+                                collection_id,
+                                *sled_id,
+                                artifact,
+                            )
+                        })
+                    })
+            })
+            .flatten()
+            .collect();
+
+        // Pull zone manifest non-boot info out of all sled agents.
+        let zone_manifest_non_boot: Vec<_> = collection
+            .sled_agents
+            .iter()
+            .flat_map(|(sled_id, sled_agent)| {
+                sled_agent
+                    .zone_image_resolver
+                    .zone_manifest
+                    .non_boot_status
+                    .iter()
+                    .map(|non_boot| {
+                        InvZoneManifestNonBoot::new(
+                            collection_id,
+                            *sled_id,
+                            non_boot,
+                        )
+                    })
+            })
+            .collect();
+
+        // Pull mupdate override non-boot info out of all sled agents.
+        let mupdate_override_non_boot: Vec<_> = collection
+            .sled_agents
+            .iter()
+            .flat_map(|(sled_id, sled_agent)| {
+                sled_agent
+                    .zone_image_resolver
+                    .mupdate_override
+                    .non_boot_status
+                    .iter()
+                    .map(|non_boot| {
+                        InvMupdateOverrideNonBoot::new(
+                            collection_id,
+                            *sled_id,
+                            non_boot,
+                        )
+                    })
+            })
+            .collect();
+
         // Build up a list of `OmicronSledConfig`s we need to insert. Each sled
         // has 0-3:
         //
         // * The ledgered sled config (if the sled has gotten a config from RSS
         //   or Nexus)
-        // * The most-recently-reconciled config (if the sled-agent's config
+        // * The most-recently-reconciled config (if the sled-agen's config
         //   reconciler has run since the last time it started)
         // * The currently-being-reconciled config (if the sled-agent's config
         //   reconciler was actively running when inventory was collected)
@@ -241,6 +314,7 @@ impl DataStore {
             zone_nics: omicron_sled_config_zone_nics,
             disk_results: reconciler_disk_results,
             dataset_results: reconciler_dataset_results,
+            orphaned_datasets: reconciler_orphaned_datasets,
             zone_results: reconciler_zone_results,
             mut config_reconciler_fields_by_sled,
         } = ConfigReconcilerRows::new(collection_id, collection)
@@ -266,12 +340,15 @@ impl DataStore {
                 } = config_reconciler_fields_by_sled
                     .remove(&sled_agent.sled_id)
                     .expect("all sled IDs should exist");
+                let zone_image_resolver =
+                    InvZoneImageResolver::new(&sled_agent.zone_image_resolver);
                 InvSledAgent::new_without_baseboard(
                     collection_id,
                     sled_agent,
                     ledgered_sled_config,
                     last_reconciliation_sled_config,
                     reconciler_status,
+                    zone_image_resolver,
                 )
                 .map_err(|e| Error::internal_error(&e.to_string()))
             })
@@ -1008,6 +1085,25 @@ impl DataStore {
                 }
             }
 
+            // Insert rows for all the sled config reconciler orphaned datasets
+            {
+                use nexus_db_schema::schema::inv_last_reconciliation_orphaned_dataset::dsl;
+
+                let batch_size = SQL_BATCH_SIZE.get().try_into().unwrap();
+                let mut orphaned_datasets = reconciler_orphaned_datasets.into_iter();
+                loop {
+                    let some_orphaned_datasets =
+                        orphaned_datasets.by_ref().take(batch_size).collect::<Vec<_>>();
+                    if some_orphaned_datasets.is_empty() {
+                        break;
+                    }
+                    let _ = diesel::insert_into(dsl::inv_last_reconciliation_orphaned_dataset)
+                        .values(some_orphaned_datasets)
+                        .execute_async(&conn)
+                        .await?;
+                }
+            }
+
             // Insert rows for all the sled config reconciler zone results
             {
                 use nexus_db_schema::schema::inv_last_reconciliation_zone_result::dsl;
@@ -1022,6 +1118,64 @@ impl DataStore {
                     }
                     let _ = diesel::insert_into(dsl::inv_last_reconciliation_zone_result)
                         .values(some_zone_results)
+                        .execute_async(&conn)
+                        .await?;
+                }
+            }
+
+            // Insert rows for all the zones found in the zone manifest on the
+            // boot disk.
+            {
+                use nexus_db_schema::schema::inv_zone_manifest_zone::dsl;
+
+                let batch_size = SQL_BATCH_SIZE.get().try_into().unwrap();
+                let mut zones = zone_manifest_zones.into_iter();
+                loop {
+                    let some_zones =
+                        zones.by_ref().take(batch_size).collect::<Vec<_>>();
+                    if some_zones.is_empty() {
+                        break;
+                    }
+                    let _ = diesel::insert_into(dsl::inv_zone_manifest_zone)
+                        .values(some_zones)
+                        .execute_async(&conn)
+                        .await?;
+                }
+            }
+
+            // Insert rows for non-boot zone manifests.
+            {
+                use nexus_db_schema::schema::inv_zone_manifest_non_boot::dsl;
+
+                let batch_size = SQL_BATCH_SIZE.get().try_into().unwrap();
+                let mut non_boot = zone_manifest_non_boot.into_iter();
+                loop {
+                    let some_non_boot =
+                        non_boot.by_ref().take(batch_size).collect::<Vec<_>>();
+                    if some_non_boot.is_empty() {
+                        break;
+                    }
+                    let _ = diesel::insert_into(dsl::inv_zone_manifest_non_boot)
+                        .values(some_non_boot)
+                        .execute_async(&conn)
+                        .await?;
+                }
+            }
+
+            // Insert rows for non-boot mupdate overrides.
+            {
+                use nexus_db_schema::schema::inv_mupdate_override_non_boot::dsl;
+
+                let batch_size = SQL_BATCH_SIZE.get().try_into().unwrap();
+                let mut non_boot = mupdate_override_non_boot.into_iter();
+                loop {
+                    let some_non_boot =
+                        non_boot.by_ref().take(batch_size).collect::<Vec<_>>();
+                    if some_non_boot.is_empty() {
+                        break;
+                    }
+                    let _ = diesel::insert_into(dsl::inv_mupdate_override_non_boot)
+                        .values(some_non_boot)
                         .execute_async(&conn)
                         .await?;
                 }
@@ -1048,6 +1202,7 @@ impl DataStore {
                     } = config_reconciler_fields_by_sled
                         .remove(&sled_agent.sled_id)
                         .expect("all sled IDs should exist");
+                    let zone_image_resolver = InvZoneImageResolver::new(&sled_agent.zone_image_resolver);
                     let selection = nexus_db_schema::schema::hw_baseboard_id::table
                         .select((
                             db_collection_id
@@ -1095,6 +1250,18 @@ impl DataStore {
                                 .into_sql::<Nullable<diesel::sql_types::Timestamptz>>(),
                             reconciler_status.reconciler_status_duration_secs
                                 .into_sql::<Nullable<diesel::sql_types::Double>>(),
+                            zone_image_resolver.zone_manifest_boot_disk_path
+                                .into_sql::<diesel::sql_types::Text>(),
+                            zone_image_resolver.zone_manifest_mupdate_id
+                                .into_sql::<Nullable<diesel::sql_types::Uuid>>(),
+                            zone_image_resolver.zone_manifest_boot_disk_error
+                                .into_sql::<Nullable<diesel::sql_types::Text>>(),
+                            zone_image_resolver.mupdate_override_boot_disk_path
+                                .into_sql::<diesel::sql_types::Text>(),
+                            zone_image_resolver.mupdate_override_id
+                                .into_sql::<Nullable<diesel::sql_types::Uuid>>(),
+                            zone_image_resolver.mupdate_override_boot_disk_error
+                                .into_sql::<Nullable<diesel::sql_types::Text>>(),
                         ))
                         .filter(
                             baseboard_dsl::part_number
@@ -1126,7 +1293,12 @@ impl DataStore {
                                 sa_dsl::reconciler_status_sled_config,
                                 sa_dsl::reconciler_status_timestamp,
                                 sa_dsl::reconciler_status_duration_secs,
-                            ))
+                                sa_dsl::zone_manifest_boot_disk_path,
+                                sa_dsl::zone_manifest_mupdate_id,
+                                sa_dsl::zone_manifest_boot_disk_error,
+                                sa_dsl::mupdate_override_boot_disk_path,
+                                sa_dsl::mupdate_override_id,
+                                sa_dsl::mupdate_override_boot_disk_error,                            ))
                             .execute_async(&conn)
                             .await?;
 
@@ -1151,6 +1323,12 @@ impl DataStore {
                         _reconciler_status_sled_config,
                         _reconciler_status_timestamp,
                         _reconciler_status_duration_secs,
+                        _zone_manifest_boot_disk_path,
+                        _zone_manifest_mupdate_id,
+                        _zone_manifest_boot_disk_error,
+                        _mupdate_override_boot_disk_path,
+                        _mupdate_override_boot_disk_id,
+                        _mupdate_override_boot_disk_error,
                     ) = sa_dsl::inv_sled_agent::all_columns();
                 }
 
@@ -1448,7 +1626,11 @@ impl DataStore {
             nnvme_disk_firmware: usize,
             nlast_reconciliation_disk_results: usize,
             nlast_reconciliation_dataset_results: usize,
+            nlast_reconciliation_orphaned_datasets: usize,
             nlast_reconciliation_zone_results: usize,
+            nzone_manifest_zones: usize,
+            nzone_manifest_non_boot: usize,
+            nmupdate_override_non_boot: usize,
             nomicron_sled_configs: usize,
             nomicron_sled_config_disks: usize,
             nomicron_sled_config_datasets: usize,
@@ -1471,7 +1653,11 @@ impl DataStore {
             nnvme_disk_firmware,
             nlast_reconciliation_disk_results,
             nlast_reconciliation_dataset_results,
+            nlast_reconciliation_orphaned_datasets,
             nlast_reconciliation_zone_results,
+            nzone_manifest_zones,
+            nzone_manifest_non_boot,
+            nmupdate_override_non_boot,
             nomicron_sled_configs,
             nomicron_sled_config_disks,
             nomicron_sled_config_datasets,
@@ -1592,9 +1778,43 @@ impl DataStore {
                         .execute_async(&conn)
                         .await?
                     };
+                    let nlast_reconciliation_orphaned_datasets = {
+                        use nexus_db_schema::schema::inv_last_reconciliation_orphaned_dataset::dsl;
+                        diesel::delete(dsl::inv_last_reconciliation_orphaned_dataset.filter(
+                            dsl::inv_collection_id.eq(db_collection_id),
+                        ))
+                        .execute_async(&conn)
+                        .await?
+                    };
                     let nlast_reconciliation_zone_results = {
                         use nexus_db_schema::schema::inv_last_reconciliation_zone_result::dsl;
                         diesel::delete(dsl::inv_last_reconciliation_zone_result.filter(
+                            dsl::inv_collection_id.eq(db_collection_id),
+                        ))
+                        .execute_async(&conn)
+                        .await?
+                    };
+
+                    // Remove rows associated with zone resolver inventory.
+                    let nzone_manifest_zones = {
+                        use nexus_db_schema::schema::inv_zone_manifest_zone::dsl;
+                        diesel::delete(dsl::inv_zone_manifest_zone.filter(
+                            dsl::inv_collection_id.eq(db_collection_id),
+                        ))
+                        .execute_async(&conn)
+                        .await?
+                    };
+                    let nzone_manifest_non_boot = {
+                        use nexus_db_schema::schema::inv_zone_manifest_non_boot::dsl;
+                        diesel::delete(dsl::inv_zone_manifest_non_boot.filter(
+                            dsl::inv_collection_id.eq(db_collection_id),
+                        ))
+                        .execute_async(&conn)
+                        .await?
+                    };
+                    let nmupdate_override_non_boot = {
+                        use nexus_db_schema::schema::inv_mupdate_override_non_boot::dsl;
+                        diesel::delete(dsl::inv_mupdate_override_non_boot.filter(
                             dsl::inv_collection_id.eq(db_collection_id),
                         ))
                         .execute_async(&conn)
@@ -1686,7 +1906,11 @@ impl DataStore {
                         nnvme_disk_firmware,
                         nlast_reconciliation_disk_results,
                         nlast_reconciliation_dataset_results,
+                        nlast_reconciliation_orphaned_datasets,
                         nlast_reconciliation_zone_results,
+                        nzone_manifest_zones,
+                        nzone_manifest_non_boot,
+                        nmupdate_override_non_boot,
                         nomicron_sled_configs,
                         nomicron_sled_config_disks,
                         nomicron_sled_config_datasets,
@@ -1717,8 +1941,13 @@ impl DataStore {
                 nlast_reconciliation_disk_results,
             "nlast_reconciliation_dataset_results" =>
                 nlast_reconciliation_dataset_results,
+            "nlast_reconciliation_orphaned_datasets" =>
+                nlast_reconciliation_orphaned_datasets,
             "nlast_reconciliation_zone_results" =>
                 nlast_reconciliation_zone_results,
+            "nzone_manifest_zones" => nzone_manifest_zones,
+            "nzone_manifest_non_boot" => nzone_manifest_non_boot,
+            "nmupdate_override_non_boot" => nmupdate_override_non_boot,
             "nomicron_sled_configs" => nomicron_sled_configs,
             "nomicron_sled_config_disks" => nomicron_sled_config_disks,
             "nomicron_sled_config_datasets" => nomicron_sled_config_datasets,
@@ -2688,6 +2917,49 @@ impl DataStore {
             results
         };
 
+        // Load all the config reconciler orphaned dataset rows; built a map
+        // of sets keyed by sled ID.
+        let mut last_reconciliation_orphaned_datasets = {
+            use nexus_db_schema::schema::inv_last_reconciliation_orphaned_dataset::dsl;
+
+            let mut orphaned: BTreeMap<SledUuid, IdOrdMap<OrphanedDataset>> =
+                BTreeMap::new();
+
+            // TODO-performance This ought to be paginated like the other
+            // queries in this method, but
+            //
+            // (a) this table's primary key is 5 columns, and we don't have
+            //     `paginated` support that wide
+            // (b) we expect a very small number of orphaned datasets, generally
+            //
+            // so we just do the lazy thing and load all the rows at once.
+            let rows = dsl::inv_last_reconciliation_orphaned_dataset
+                .filter(dsl::inv_collection_id.eq(db_id))
+                .select(InvLastReconciliationOrphanedDataset::as_select())
+                .load_async(&*conn)
+                .await
+                .map_err(|e| {
+                    public_error_from_diesel(e, ErrorHandler::Server)
+                })?;
+
+            for row in rows {
+                orphaned
+                    .entry(row.sled_id.into())
+                    .or_default()
+                    .insert_unique(row.try_into()?)
+                    .map_err(|err| {
+                        // We should never get duplicates: the table's primary
+                        // key is the dataset name (same as the IdOrdMap)
+                        Error::internal_error(&format!(
+                            "unexpected duplicate orphaned dataset: {}",
+                            InlineErrorChain::new(&err)
+                        ))
+                    })?;
+            }
+
+            orphaned
+        };
+
         // Load all the config reconciler zone results; build a map of maps
         // keyed by sled ID.
         let mut last_reconciliation_zone_results = {
@@ -2722,6 +2994,127 @@ impl DataStore {
             }
 
             results
+        };
+
+        // Load zone_manifest_zone rows.
+        let mut zone_manifest_artifacts_by_sled_id = {
+            use nexus_db_schema::schema::inv_zone_manifest_zone::dsl;
+
+            let mut by_sled_id: BTreeMap<
+                SledUuid,
+                IdOrdMap<ZoneArtifactInventory>,
+            > = BTreeMap::new();
+
+            let mut paginator = Paginator::new(batch_size);
+            while let Some(p) = paginator.next() {
+                let batch = paginated_multicolumn(
+                    dsl::inv_zone_manifest_zone,
+                    (dsl::sled_id, dsl::zone_file_name),
+                    &p.current_pagparams(),
+                )
+                .filter(dsl::inv_collection_id.eq(db_id))
+                .select(InvZoneManifestZone::as_select())
+                .load_async(&*conn)
+                .await
+                .map_err(|e| {
+                    public_error_from_diesel(e, ErrorHandler::Server)
+                })?;
+                paginator = p.found_batch(&batch, &|row| {
+                    (row.sled_id, row.zone_file_name.clone())
+                });
+
+                for row in batch {
+                    by_sled_id
+                        .entry(row.sled_id.into())
+                        .or_default()
+                        .insert_unique(row.into())
+                        .expect("database ensures the row is unique");
+                }
+
+                println!(
+                    "batch size {batch_size}, by_sled_id: {:#?}",
+                    by_sled_id
+                );
+            }
+
+            by_sled_id
+        };
+
+        // Load zone-manifest non-boot rows.
+        let mut zone_manifest_non_boot_by_sled_id = {
+            use nexus_db_schema::schema::inv_zone_manifest_non_boot::dsl;
+
+            let mut by_sled_id: BTreeMap<
+                SledUuid,
+                IdOrdMap<ZoneManifestNonBootInventory>,
+            > = BTreeMap::new();
+
+            let mut paginator = Paginator::new(batch_size);
+            while let Some(p) = paginator.next() {
+                let batch = paginated_multicolumn(
+                    dsl::inv_zone_manifest_non_boot,
+                    (dsl::sled_id, dsl::non_boot_zpool_id),
+                    &p.current_pagparams(),
+                )
+                .filter(dsl::inv_collection_id.eq(db_id))
+                .select(InvZoneManifestNonBoot::as_select())
+                .load_async(&*conn)
+                .await
+                .map_err(|e| {
+                    public_error_from_diesel(e, ErrorHandler::Server)
+                })?;
+                paginator = p.found_batch(&batch, &|row| {
+                    (row.sled_id, row.non_boot_zpool_id)
+                });
+
+                for row in batch {
+                    by_sled_id
+                        .entry(row.sled_id.into())
+                        .or_default()
+                        .insert_unique(row.into())
+                        .expect("database ensures the row is unique");
+                }
+            }
+
+            by_sled_id
+        };
+
+        // Load mupdate-override non-boot rows.
+        let mut mupdate_override_non_boot_by_sled_id = {
+            use nexus_db_schema::schema::inv_mupdate_override_non_boot::dsl;
+
+            let mut by_sled_id: BTreeMap<
+                SledUuid,
+                IdOrdMap<MupdateOverrideNonBootInventory>,
+            > = BTreeMap::new();
+
+            let mut paginator = Paginator::new(batch_size);
+            while let Some(p) = paginator.next() {
+                let batch = paginated_multicolumn(
+                    dsl::inv_mupdate_override_non_boot,
+                    (dsl::sled_id, dsl::non_boot_zpool_id),
+                    &p.current_pagparams(),
+                )
+                .filter(dsl::inv_collection_id.eq(db_id))
+                .select(InvMupdateOverrideNonBoot::as_select())
+                .load_async(&*conn)
+                .await
+                .map_err(|e| {
+                    public_error_from_diesel(e, ErrorHandler::Server)
+                })?;
+                paginator = p.found_batch(&batch, &|row| {
+                    (row.sled_id, row.non_boot_zpool_id)
+                });
+                for row in batch {
+                    by_sled_id
+                        .entry(row.sled_id.into())
+                        .or_default()
+                        .insert_unique(row.into())
+                        .expect("database ensures the row is unique");
+                }
+            }
+
+            by_sled_id
         };
 
         // Now load the clickhouse keeper cluster memberships
@@ -2819,12 +3212,22 @@ impl DataStore {
                         datasets: last_reconciliation_dataset_results
                             .remove(&sled_id)
                             .unwrap_or_default(),
+                        orphaned_datasets:
+                            last_reconciliation_orphaned_datasets
+                                .remove(&sled_id)
+                                .unwrap_or_default(),
                         zones: last_reconciliation_zone_results
                             .remove(&sled_id)
                             .unwrap_or_default(),
                     })
                 })
                 .transpose()?;
+
+            let zone_image_resolver = s.zone_image_resolver.into_inventory(
+                zone_manifest_artifacts_by_sled_id.remove(&sled_id),
+                zone_manifest_non_boot_by_sled_id.remove(&sled_id),
+                mupdate_override_non_boot_by_sled_id.remove(&sled_id),
+            );
 
             let sled_agent = nexus_types::inventory::SledAgent {
                 time_collected: s.time_collected,
@@ -2860,6 +3263,7 @@ impl DataStore {
                 ledgered_sled_config,
                 reconciler_status,
                 last_reconciliation,
+                zone_image_resolver,
             };
             sled_agents.insert(sled_id, sled_agent);
         }
@@ -2933,6 +3337,7 @@ struct ConfigReconcilerRows {
     zone_nics: Vec<InvOmicronSledConfigZoneNic>,
     disk_results: Vec<InvLastReconciliationDiskResult>,
     dataset_results: Vec<InvLastReconciliationDatasetResult>,
+    orphaned_datasets: Vec<InvLastReconciliationOrphanedDataset>,
     zone_results: Vec<InvLastReconciliationZoneResult>,
     config_reconciler_fields_by_sled:
         BTreeMap<SledUuid, ConfigReconcilerFields>,
@@ -3001,6 +3406,15 @@ impl ConfigReconcilerRows {
                         )
                     },
                 ),
+            );
+            self.orphaned_datasets.extend(
+                last_reconciliation.orphaned_datasets.iter().map(|dataset| {
+                    InvLastReconciliationOrphanedDataset::new(
+                        collection_id,
+                        sled_id,
+                        dataset.clone(),
+                    )
+                }),
             );
             self.zone_results.extend(last_reconciliation.zones.iter().map(
                 |(zone_id, result)| {
@@ -3188,6 +3602,7 @@ mod test {
     use nexus_inventory::examples::Representative;
     use nexus_inventory::examples::representative;
     use nexus_inventory::now_db_precision;
+    use nexus_sled_agent_shared::inventory::OrphanedDataset;
     use nexus_sled_agent_shared::inventory::{
         ConfigReconcilerInventory, ConfigReconcilerInventoryResult,
         ConfigReconcilerInventoryStatus, OmicronZoneImageSource,
@@ -3197,9 +3612,13 @@ mod test {
     use nexus_types::inventory::CabooseWhich;
     use nexus_types::inventory::RotPageWhich;
     use omicron_common::api::external::Error;
+    use omicron_common::disk::DatasetKind;
+    use omicron_common::disk::DatasetName;
+    use omicron_common::zpool_name::ZpoolName;
     use omicron_test_utils::dev;
     use omicron_uuid_kinds::{
         CollectionUuid, DatasetUuid, OmicronZoneUuid, PhysicalDiskUuid,
+        ZpoolUuid,
     };
     use pretty_assertions::assert_eq;
     use std::num::NonZeroU32;
@@ -4002,6 +4421,23 @@ mod test {
                     .collect(),
                 datasets: (0..10)
                     .map(|i| (DatasetUuid::new_v4(), make_result("dataset", i)))
+                    .collect(),
+                orphaned_datasets: (0..5)
+                    .map(|i| OrphanedDataset {
+                        name: DatasetName::new(
+                            ZpoolName::new_external(ZpoolUuid::new_v4()),
+                            DatasetKind::Cockroach,
+                        ),
+                        reason: format!("test orphan {i}"),
+                        id: if i % 2 == 0 {
+                            Some(DatasetUuid::new_v4())
+                        } else {
+                            None
+                        },
+                        mounted: i % 2 == 1,
+                        available: (10 * i).into(),
+                        used: i.into(),
+                    })
                     .collect(),
                 zones: (0..10)
                     .map(|i| {

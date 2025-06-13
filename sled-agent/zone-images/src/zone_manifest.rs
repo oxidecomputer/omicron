@@ -4,16 +4,17 @@
 
 use camino::{Utf8Path, Utf8PathBuf};
 use iddqd::IdOrdMap;
-use illumos_utils::zpool::ZpoolName;
-use nexus_sled_agent_shared::zone_images::{
-    ZoneManifestArtifactResult, ZoneManifestArtifactStatus,
-    ZoneManifestArtifactsResult, ZoneManifestNonBootInfo,
-    ZoneManifestNonBootMismatch, ZoneManifestNonBootResult, ZoneManifestStatus,
-};
 use omicron_common::update::{OmicronZoneFileMetadata, OmicronZoneManifest};
+use omicron_uuid_kinds::ZpoolUuid;
 use rayon::iter::{ParallelBridge, ParallelIterator};
 use sha2::{Digest, Sha256};
 use sled_agent_config_reconciler::InternalDisksWithBootDisk;
+use sled_agent_types::zone_images::{
+    ArcIoError, ArtifactReadResult, ZoneManifestArtifactResult,
+    ZoneManifestArtifactsResult, ZoneManifestNonBootInfo,
+    ZoneManifestNonBootMismatch, ZoneManifestNonBootResult,
+    ZoneManifestReadError, ZoneManifestStatus,
+};
 use slog::{error, info, o, warn};
 use slog_error_chain::InlineErrorChain;
 use std::{
@@ -23,18 +24,16 @@ use std::{
 use tufaceous_artifact::ArtifactHash;
 
 use crate::{
-    errors::zone_manifest_not_found,
-    install_dataset_metadata::{
-        AllInstallMetadataFiles, InstallMetadataNonBootMismatch,
-        InstallMetadataNonBootResult,
-    },
+    AllInstallMetadataFiles, InstallMetadataNonBootInfo,
+    InstallMetadataNonBootMismatch, InstallMetadataNonBootResult,
 };
 
 #[derive(Debug)]
 pub(crate) struct AllZoneManifests {
-    boot_zpool: ZpoolName,
+    boot_zpool: ZpoolUuid,
     boot_disk_path: Utf8PathBuf,
-    boot_disk_result: Result<ZoneManifestArtifactsResult, String>,
+    boot_disk_result:
+        Result<ZoneManifestArtifactsResult, ZoneManifestReadError>,
     non_boot_disk_metadata: IdOrdMap<ZoneManifestNonBootInfo>,
 }
 
@@ -54,13 +53,15 @@ impl AllZoneManifests {
         // Validate files on the boot disk.
         let boot_disk_result = match files.boot_disk_metadata {
             Ok(Some(manifest)) => {
-                Ok(validate_artifacts(&files.boot_dataset_dir, manifest))
+                Ok(make_artifacts_result(&files.boot_dataset_dir, manifest))
             }
             Ok(None) => {
                 // The file is missing -- this is an error.
-                Err(zone_manifest_not_found(&files.boot_disk_path))
+                Err(ZoneManifestReadError::NotFound(
+                    files.boot_disk_path.clone(),
+                ))
             }
-            Err(error) => Err(InlineErrorChain::new(&error).to_string()),
+            Err(error) => Err(ZoneManifestReadError::InstallMetadata(error)),
         };
 
         // Validate files on non-boot disks (non-fatal, will produce warnings if
@@ -68,19 +69,7 @@ impl AllZoneManifests {
         let non_boot_disk_metadata = files
             .non_boot_disk_metadata
             .into_iter()
-            .map(|info| {
-                let result = validate_non_boot_result(
-                    &info.dataset_dir,
-                    &info.path,
-                    info.result,
-                );
-                ZoneManifestNonBootInfo {
-                    zpool_name: info.zpool_name,
-                    dataset_dir: info.dataset_dir,
-                    path: info.path,
-                    result,
-                }
-            })
+            .map(make_non_boot_info)
             .collect::<IdOrdMap<_>>();
 
         let ret = Self {
@@ -104,7 +93,7 @@ impl AllZoneManifests {
 
     pub(crate) fn boot_disk_result(
         &self,
-    ) -> &Result<ZoneManifestArtifactsResult, String> {
+    ) -> &Result<ZoneManifestArtifactsResult, ZoneManifestReadError> {
         &self.boot_disk_result
     }
 
@@ -140,7 +129,7 @@ impl AllZoneManifests {
                     log,
                     "error reading zone manifest for boot disk, \
                      will not bring up Omicron zones";
-                    "error" => error,
+                    "error" => InlineErrorChain::new(error),
                 );
             }
         }
@@ -159,7 +148,20 @@ impl AllZoneManifests {
     }
 }
 
-fn validate_non_boot_result(
+fn make_non_boot_info(
+    info: InstallMetadataNonBootInfo<OmicronZoneManifest>,
+) -> ZoneManifestNonBootInfo {
+    let result =
+        make_non_boot_result(&info.dataset_dir, &info.path, info.result);
+    ZoneManifestNonBootInfo {
+        zpool_id: info.zpool_id,
+        dataset_dir: info.dataset_dir,
+        path: info.path,
+        result,
+    }
+}
+
+fn make_non_boot_result(
     dataset_dir: &Utf8Path,
     path: &Utf8Path,
     result: InstallMetadataNonBootResult<OmicronZoneManifest>,
@@ -167,69 +169,66 @@ fn validate_non_boot_result(
     match result {
         InstallMetadataNonBootResult::MatchesPresent(
             non_boot_disk_metadata,
-        ) => ZoneManifestNonBootResult::Matches {
-            artifacts_result: validate_artifacts(
-                dataset_dir,
-                non_boot_disk_metadata,
-            ),
-        },
+        ) => ZoneManifestNonBootResult::Matches(make_artifacts_result(
+            dataset_dir,
+            non_boot_disk_metadata,
+        )),
         InstallMetadataNonBootResult::MatchesAbsent => {
             // Error case.
-            ZoneManifestNonBootResult::ReadError {
-                message: zone_manifest_not_found(path),
-            }
+            ZoneManifestNonBootResult::ReadError(
+                ZoneManifestReadError::NotFound(path.to_owned()),
+            )
         }
         InstallMetadataNonBootResult::Mismatch(mismatch) => match mismatch {
             InstallMetadataNonBootMismatch::BootPresentOtherAbsent => {
                 // Error case.
-                ZoneManifestNonBootResult::ReadError {
-                    message: zone_manifest_not_found(path),
-                }
+                ZoneManifestNonBootResult::ReadError(
+                    ZoneManifestReadError::NotFound(path.to_owned()),
+                )
             }
             InstallMetadataNonBootMismatch::BootAbsentOtherPresent {
                 non_boot_disk_info,
-            } => ZoneManifestNonBootResult::Mismatch {
-                reason: ZoneManifestNonBootMismatch::BootAbsentOtherPresent {
-                    non_boot_disk_result: validate_artifacts(
+            } => ZoneManifestNonBootResult::Mismatch(
+                ZoneManifestNonBootMismatch::BootAbsentOtherPresent {
+                    non_boot_disk_result: make_artifacts_result(
                         dataset_dir,
                         non_boot_disk_info,
                     ),
                 },
-            },
+            ),
             InstallMetadataNonBootMismatch::ValueMismatch {
                 non_boot_disk_info,
-            } => ZoneManifestNonBootResult::Mismatch {
-                reason: ZoneManifestNonBootMismatch::ValueMismatch {
-                    non_boot_disk_result: validate_artifacts(
+            } => ZoneManifestNonBootResult::Mismatch(
+                ZoneManifestNonBootMismatch::ValueMismatch {
+                    non_boot_disk_result: make_artifacts_result(
                         dataset_dir,
                         non_boot_disk_info,
                     ),
                 },
-            },
+            ),
             InstallMetadataNonBootMismatch::BootDiskReadError {
                 non_boot_disk_info: Some(info),
-            } => ZoneManifestNonBootResult::Mismatch {
-                reason: ZoneManifestNonBootMismatch::BootDiskReadError {
-                    non_boot_disk_result: validate_artifacts(dataset_dir, info),
+            } => ZoneManifestNonBootResult::Mismatch(
+                ZoneManifestNonBootMismatch::BootDiskReadError {
+                    non_boot_disk_result: make_artifacts_result(
+                        dataset_dir,
+                        info,
+                    ),
                 },
-            },
+            ),
             InstallMetadataNonBootMismatch::BootDiskReadError {
                 non_boot_disk_info: None,
-            } => ZoneManifestNonBootResult::ReadError {
-                message: zone_manifest_not_found(path),
-            },
+            } => ZoneManifestNonBootResult::ReadError(
+                ZoneManifestReadError::NotFound(path.to_owned()),
+            ),
         },
         InstallMetadataNonBootResult::ReadError(error) => {
-            ZoneManifestNonBootResult::ReadError {
-                message: InlineErrorChain::new(&error).to_string(),
-            }
+            ZoneManifestNonBootResult::ReadError(error.into())
         }
     }
 }
 
-/// Makes a new `ZoneManifestArtifactsResult` by reading artifacts from the
-/// given directory.
-fn validate_artifacts(
+fn make_artifacts_result(
     dir: &Utf8Path,
     manifest: OmicronZoneManifest,
 ) -> ZoneManifestArtifactsResult {
@@ -261,30 +260,23 @@ fn validate_artifacts(
 fn validate_one(
     artifact_path: &Utf8Path,
     zone: &OmicronZoneFileMetadata,
-) -> ZoneManifestArtifactStatus {
+) -> ArtifactReadResult {
     let mut f = match File::open(artifact_path) {
         Ok(f) => f,
         Err(error) => {
-            return ZoneManifestArtifactStatus::Error {
-                message: InlineErrorChain::new(&error).to_string(),
-            };
+            return ArtifactReadResult::Error(ArcIoError::new(error));
         }
     };
 
     match compute_size_and_hash(&mut f) {
         Ok((actual_size, actual_hash)) => {
             if zone.file_size == actual_size && zone.hash == actual_hash {
-                ZoneManifestArtifactStatus::Valid
+                ArtifactReadResult::Valid
             } else {
-                ZoneManifestArtifactStatus::Mismatch {
-                    actual_size,
-                    actual_hash,
-                }
+                ArtifactReadResult::Mismatch { actual_size, actual_hash }
             }
         }
-        Err(error) => ZoneManifestArtifactStatus::Error {
-            message: InlineErrorChain::new(&error).to_string(),
-        },
+        Err(error) => ArtifactReadResult::Error(ArcIoError::new(error)),
     }
 }
 
@@ -310,17 +302,19 @@ fn compute_size_and_hash(
 mod tests {
     use super::*;
 
-    use crate::test_utils::{
-        BOOT_PATHS, BOOT_ZPOOL, NON_BOOT_2_PATHS, NON_BOOT_2_ZPOOL,
-        NON_BOOT_3_PATHS, NON_BOOT_3_ZPOOL, NON_BOOT_PATHS, NON_BOOT_ZPOOL,
-        WriteInstallDatasetContext, deserialize_error, make_internal_disks_rx,
-    };
+    use crate::test_utils::make_internal_disks_rx;
 
     use camino_tempfile_ext::prelude::*;
     use dropshot::{ConfigLogging, ConfigLoggingLevel, test_util::LogContext};
     use expectorate::assert_contents;
     use iddqd::id_ord_map;
     use pretty_assertions::assert_eq;
+    use sled_agent_types::zone_images::ZoneManifestNonBootInfo;
+    use sled_agent_zone_images_examples::{
+        BOOT_PATHS, BOOT_UUID, NON_BOOT_2_PATHS, NON_BOOT_2_UUID,
+        NON_BOOT_3_PATHS, NON_BOOT_3_UUID, NON_BOOT_PATHS, NON_BOOT_UUID,
+        WriteInstallDatasetContext, deserialize_error,
+    };
 
     // Much of the logic in this module is shared with mupdate_override.rs, and
     // tested there.
@@ -340,7 +334,7 @@ mod tests {
         cx.write_to(&dir.child(&NON_BOOT_PATHS.install_dataset)).unwrap();
 
         let internal_disks =
-            make_internal_disks_rx(dir.path(), BOOT_ZPOOL, &[NON_BOOT_ZPOOL])
+            make_internal_disks_rx(dir.path(), BOOT_UUID, &[NON_BOOT_UUID])
                 .current_with_boot_disk();
         let manifests =
             AllZoneManifests::read_all(&logctx.log, &internal_disks);
@@ -356,14 +350,14 @@ mod tests {
             manifests.non_boot_disk_metadata,
             id_ord_map! {
                 ZoneManifestNonBootInfo {
-                    zpool_name: NON_BOOT_ZPOOL,
+                    zpool_id: NON_BOOT_UUID,
                     dataset_dir: dir.path().join(&NON_BOOT_PATHS.install_dataset),
                     path: dir.path().join(&NON_BOOT_PATHS.zones_json),
-                    result: ZoneManifestNonBootResult::Matches {
-                        artifacts_result: cx.expected_result(
+                    result: ZoneManifestNonBootResult::Matches(
+                        cx.expected_result(
                             &dir.path().join(&NON_BOOT_PATHS.install_dataset)
                         )
-                    }
+                    )
                 }
             }
         );
@@ -388,29 +382,31 @@ mod tests {
         dir.child(&BOOT_PATHS.install_dataset).create_dir_all().unwrap();
 
         let internal_disks =
-            make_internal_disks_rx(dir.path(), BOOT_ZPOOL, &[NON_BOOT_ZPOOL])
+            make_internal_disks_rx(dir.path(), BOOT_UUID, &[NON_BOOT_UUID])
                 .current_with_boot_disk();
         let manifests =
             AllZoneManifests::read_all(&logctx.log, &internal_disks);
         assert_eq!(
             manifests.boot_disk_result.as_ref().unwrap_err(),
-            &zone_manifest_not_found(&dir.path().join(&BOOT_PATHS.zones_json)),
+            &ZoneManifestReadError::NotFound(
+                dir.path().join(&BOOT_PATHS.zones_json)
+            ),
         );
 
         assert_eq!(
             manifests.non_boot_disk_metadata,
             id_ord_map! {
                 ZoneManifestNonBootInfo {
-                    zpool_name: NON_BOOT_ZPOOL,
+                    zpool_id: NON_BOOT_UUID,
                     dataset_dir: dir.path().join(&NON_BOOT_PATHS.install_dataset),
                     path: dir.path().join(&NON_BOOT_PATHS.zones_json),
-                    result: ZoneManifestNonBootResult::Mismatch {
-                        reason: ZoneManifestNonBootMismatch::BootAbsentOtherPresent {
+                    result: ZoneManifestNonBootResult::Mismatch(
+                        ZoneManifestNonBootMismatch::BootAbsentOtherPresent {
                             non_boot_disk_result: cx.expected_result(
                                 &dir.path().join(&NON_BOOT_PATHS.install_dataset)
                             ),
                         }
-                    }
+                    )
                 }
             }
         );
@@ -432,34 +428,29 @@ mod tests {
         dir.child(&BOOT_PATHS.zones_json).touch().unwrap();
 
         let internal_disks =
-            make_internal_disks_rx(dir.path(), BOOT_ZPOOL, &[NON_BOOT_ZPOOL])
+            make_internal_disks_rx(dir.path(), BOOT_UUID, &[NON_BOOT_UUID])
                 .current_with_boot_disk();
         let manifests =
             AllZoneManifests::read_all(&logctx.log, &internal_disks);
         assert_eq!(
             manifests.boot_disk_result.as_ref().unwrap_err(),
-            &InlineErrorChain::new(&deserialize_error(
-                dir.path(),
-                &BOOT_PATHS.zones_json,
-                ""
-            ))
-            .to_string(),
+            &deserialize_error(dir.path(), &BOOT_PATHS.zones_json, "").into(),
         );
 
         assert_eq!(
             manifests.non_boot_disk_metadata,
             id_ord_map! {
                 ZoneManifestNonBootInfo {
-                    zpool_name: NON_BOOT_ZPOOL,
+                    zpool_id: NON_BOOT_UUID,
                     dataset_dir: dir.path().join(&NON_BOOT_PATHS.install_dataset),
                     path: dir.path().join(&NON_BOOT_PATHS.zones_json),
-                    result: ZoneManifestNonBootResult::Mismatch {
-                        reason: ZoneManifestNonBootMismatch::BootDiskReadError {
+                    result: ZoneManifestNonBootResult::Mismatch(
+                        ZoneManifestNonBootMismatch::BootDiskReadError {
                             non_boot_disk_result: cx.expected_result(
                                 &dir.path().join(&NON_BOOT_PATHS.install_dataset)
                             ),
                         }
-                    }
+                    )
                 }
             }
         );
@@ -485,7 +476,7 @@ mod tests {
         invalid_cx.write_to(&dir.child(&BOOT_PATHS.install_dataset)).unwrap();
 
         let internal_disks =
-            make_internal_disks_rx(dir.path(), BOOT_ZPOOL, &[NON_BOOT_ZPOOL])
+            make_internal_disks_rx(dir.path(), BOOT_UUID, &[NON_BOOT_UUID])
                 .current_with_boot_disk();
         let manifests =
             AllZoneManifests::read_all(&logctx.log, &internal_disks);
@@ -499,21 +490,21 @@ mod tests {
             manifests.non_boot_disk_metadata,
             id_ord_map! {
                 ZoneManifestNonBootInfo {
-                    zpool_name: NON_BOOT_ZPOOL,
+                    zpool_id: NON_BOOT_UUID,
                     dataset_dir: dir.path().join(&NON_BOOT_PATHS.install_dataset),
                     path: dir.path().join(&NON_BOOT_PATHS.zones_json),
-                    result: ZoneManifestNonBootResult::Mismatch {
+                    result: ZoneManifestNonBootResult::Mismatch(
                         // The boot disk was read successfully but the zones on
                         // the boot disk didn't match what was on disk. We could
                         // treat this as either a ValueMismatch or a
                         // BootDiskReadError -- currently, we treat it as a
                         // ValueMismatch for convenience.
-                        reason: ZoneManifestNonBootMismatch::ValueMismatch {
+                        ZoneManifestNonBootMismatch::ValueMismatch {
                             non_boot_disk_result: cx.expected_result(
                                 &dir.path().join(&NON_BOOT_PATHS.install_dataset)
                             ),
                         }
-                    },
+                    )
                 }
             },
         );
@@ -545,8 +536,8 @@ mod tests {
 
         let internal_disks = make_internal_disks_rx(
             dir.path(),
-            BOOT_ZPOOL,
-            &[NON_BOOT_ZPOOL, NON_BOOT_2_ZPOOL, NON_BOOT_3_ZPOOL],
+            BOOT_UUID,
+            &[NON_BOOT_UUID, NON_BOOT_2_UUID, NON_BOOT_3_UUID],
         )
         .current_with_boot_disk();
         let manifests =
@@ -566,37 +557,37 @@ mod tests {
             manifests.non_boot_disk_metadata,
             id_ord_map! {
                 ZoneManifestNonBootInfo {
-                    zpool_name: NON_BOOT_ZPOOL,
+                    zpool_id: NON_BOOT_UUID,
                     dataset_dir: dir.path().join(&NON_BOOT_PATHS.install_dataset),
                     path: dir.path().join(&NON_BOOT_PATHS.zones_json),
-                    result: ZoneManifestNonBootResult::Mismatch {
-                        reason: ZoneManifestNonBootMismatch::ValueMismatch {
+                    result: ZoneManifestNonBootResult::Mismatch(
+                        ZoneManifestNonBootMismatch::ValueMismatch {
                             non_boot_disk_result: non_boot_disk_result.clone(),
                         }
-                    },
+                    )
                 },
                 ZoneManifestNonBootInfo {
-                    zpool_name: NON_BOOT_2_ZPOOL,
+                    zpool_id: NON_BOOT_2_UUID,
                     dataset_dir: dir.path().join(&NON_BOOT_2_PATHS.install_dataset),
                     path: dir.path().join(&NON_BOOT_2_PATHS.zones_json),
-                    result: ZoneManifestNonBootResult::ReadError {
-                        message: zone_manifest_not_found(
-                            &dir.path().join(&NON_BOOT_2_PATHS.zones_json),
+                    result: ZoneManifestNonBootResult::ReadError(
+                        ZoneManifestReadError::NotFound(
+                            dir.path().join(&NON_BOOT_2_PATHS.zones_json)
                         ),
-                    },
+                    )
                 },
                 ZoneManifestNonBootInfo {
-                    zpool_name: NON_BOOT_3_ZPOOL,
+                    zpool_id: NON_BOOT_3_UUID,
                     dataset_dir: dir.path().join(&NON_BOOT_3_PATHS.install_dataset),
                     path: dir.path().join(&NON_BOOT_3_PATHS.zones_json),
-                    result: ZoneManifestNonBootResult::ReadError {
-                        message: InlineErrorChain::new(&deserialize_error(
+                    result: ZoneManifestNonBootResult::ReadError(
+                        deserialize_error(
                             dir.path(),
                             &NON_BOOT_3_PATHS.zones_json,
                             "",
-                        ))
-                        .to_string(),
-                    },
+                        )
+                        .into()
+                    )
                 }
             },
         );

@@ -1601,6 +1601,14 @@ table! {
         reconciler_status_sled_config -> Nullable<Uuid>,
         reconciler_status_timestamp -> Nullable<Timestamptz>,
         reconciler_status_duration_secs -> Nullable<Float8>,
+
+        zone_manifest_boot_disk_path -> Text,
+        zone_manifest_mupdate_id -> Nullable<Uuid>,
+        zone_manifest_boot_disk_error -> Nullable<Text>,
+
+        mupdate_override_boot_disk_path -> Text,
+        mupdate_override_id -> Nullable<Uuid>,
+        mupdate_override_boot_disk_error -> Nullable<Text>,
     }
 }
 
@@ -1627,12 +1635,63 @@ table! {
 }
 
 table! {
+    inv_last_reconciliation_orphaned_dataset
+        (inv_collection_id, sled_id, pool_id, kind, zone_name)
+    {
+        inv_collection_id -> Uuid,
+        sled_id -> Uuid,
+        pool_id -> Uuid,
+        kind -> crate::enums::DatasetKindEnum,
+        zone_name -> Text,
+        reason -> Text,
+        id -> Nullable<Uuid>,
+        mounted -> Bool,
+        available -> Int8,
+        used -> Int8,
+    }
+}
+
+table! {
     inv_last_reconciliation_zone_result (inv_collection_id, sled_id, zone_id) {
         inv_collection_id -> Uuid,
         sled_id -> Uuid,
         zone_id -> Uuid,
 
         error_message -> Nullable<Text>,
+    }
+}
+
+table! {
+    inv_zone_manifest_zone (inv_collection_id, sled_id, zone_file_name) {
+        inv_collection_id -> Uuid,
+        sled_id -> Uuid,
+        zone_file_name -> Text,
+        path -> Text,
+        expected_size -> Int8,
+        expected_sha256 -> Text,
+        error -> Nullable<Text>,
+    }
+}
+
+table! {
+    inv_zone_manifest_non_boot (inv_collection_id, sled_id, non_boot_zpool_id) {
+        inv_collection_id -> Uuid,
+        sled_id -> Uuid,
+        non_boot_zpool_id -> Uuid,
+        path -> Text,
+        is_valid -> Bool,
+        message -> Text,
+    }
+}
+
+table! {
+    inv_mupdate_override_non_boot (inv_collection_id, sled_id, non_boot_zpool_id) {
+        inv_collection_id -> Uuid,
+        sled_id -> Uuid,
+        non_boot_zpool_id -> Uuid,
+        path -> Text,
+        is_valid -> Bool,
+        message -> Text,
     }
 }
 
