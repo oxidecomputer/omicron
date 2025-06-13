@@ -7,8 +7,16 @@
 //! This contains a subset of zone image code at the moment: you're encouraged
 //! to move more code into this crate as appropriate.
 
+mod errors;
+mod install_dataset_metadata;
 mod mupdate_override;
 mod source_resolver;
+#[cfg(test)]
+mod test_utils;
+mod zone_manifest;
 
-pub(crate) use mupdate_override::*;
+pub use errors::*;
+pub use install_dataset_metadata::*;
+pub use mupdate_override::*;
 pub use source_resolver::*;
+pub use zone_manifest::*;

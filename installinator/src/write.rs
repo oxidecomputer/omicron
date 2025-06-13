@@ -63,7 +63,8 @@ struct ArtifactDestination {
 
 impl ArtifactDestination {
     fn from_directory(dir: &Utf8Path) -> Result<Self> {
-        let control_plane_dir = dir.join("zones");
+        // The install dataset goes into a directory called "install".
+        let control_plane_dir = dir.join("install");
         std::fs::create_dir_all(&control_plane_dir)
             .with_context(|| format!("error creating directories at {dir}"))?;
 
