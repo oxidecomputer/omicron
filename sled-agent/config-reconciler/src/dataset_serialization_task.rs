@@ -10,13 +10,14 @@
 //! It uses the common pattern of "a task with a mpsc channel to send requests,
 //! using oneshot channels to send responses".
 
-use crate::CurrentlyManagedZpoolsReceiver;
+use crate::CurrentlyManagedZpools;
 use crate::InventoryError;
 use camino::Utf8PathBuf;
 use debug_ignore::DebugIgnore;
 use futures::StreamExt;
 use id_map::IdMap;
 use id_map::IdMappable;
+use iddqd::IdOrdMap;
 use illumos_utils::zfs;
 use illumos_utils::zfs::CanMount;
 use illumos_utils::zfs::DatasetEnsureArgs;
@@ -26,6 +27,7 @@ use illumos_utils::zfs::Mountpoint;
 use illumos_utils::zfs::WhichDatasets;
 use illumos_utils::zfs::Zfs;
 use nexus_sled_agent_shared::inventory::InventoryDataset;
+use nexus_sled_agent_shared::inventory::OrphanedDataset;
 use omicron_common::disk::DatasetConfig;
 use omicron_common::disk::DatasetKind;
 use omicron_common::disk::DatasetName;
@@ -45,6 +47,7 @@ use slog_error_chain::InlineErrorChain;
 use std::collections::BTreeMap;
 use std::collections::BTreeSet;
 use std::future::Future;
+use std::str::FromStr;
 use std::sync::Arc;
 use tokio::sync::mpsc;
 use tokio::sync::mpsc::error::TrySendError;
@@ -185,20 +188,13 @@ impl DatasetTaskHandle {
 
     pub fn spawn_dataset_task(
         mount_config: Arc<MountConfig>,
-        currently_managed_zpools_rx: CurrentlyManagedZpoolsReceiver,
         base_log: &Logger,
     ) -> Self {
-        Self::spawn_with_zfs_impl(
-            mount_config,
-            currently_managed_zpools_rx,
-            base_log,
-            RealZfs,
-        )
+        Self::spawn_with_zfs_impl(mount_config, base_log, RealZfs)
     }
 
     fn spawn_with_zfs_impl<T: ZfsImpl>(
         mount_config: Arc<MountConfig>,
-        currently_managed_zpools_rx: CurrentlyManagedZpoolsReceiver,
         base_log: &Logger,
         zfs: T,
     ) -> Self {
@@ -216,7 +212,6 @@ impl DatasetTaskHandle {
         tokio::spawn(
             DatasetTask {
                 mount_config,
-                currently_managed_zpools_rx,
                 request_rx,
                 ensured_datasets: BTreeSet::new(),
                 log: base_log.new(slog::o!("component" => "DatasetTask")),
@@ -236,12 +231,28 @@ impl DatasetTaskHandle {
             .await
     }
 
+    pub async fn datasets_report_orphans(
+        &self,
+        datasets: IdMap<DatasetConfig>,
+        currently_managed_zpools: Arc<CurrentlyManagedZpools>,
+    ) -> Result<anyhow::Result<IdOrdMap<OrphanedDataset>>, DatasetTaskError>
+    {
+        self.try_send_request(|tx| DatasetTaskRequest::DatasetsReportOrphans {
+            datasets,
+            currently_managed_zpools,
+            tx,
+        })
+        .await
+    }
+
     pub async fn datasets_ensure(
         &self,
         datasets: IdMap<DatasetConfig>,
+        currently_managed_zpools: Arc<CurrentlyManagedZpools>,
     ) -> Result<IdMap<DatasetEnsureResult>, DatasetTaskError> {
         self.try_send_request(|tx| DatasetTaskRequest::DatasetsEnsure {
             datasets,
+            currently_managed_zpools,
             tx,
         })
         .await
@@ -324,7 +335,6 @@ impl DatasetTaskHandle {
 struct DatasetTask {
     mount_config: Arc<MountConfig>,
     request_rx: mpsc::Receiver<DatasetTaskRequest>,
-    currently_managed_zpools_rx: CurrentlyManagedZpoolsReceiver,
     ensured_datasets: BTreeSet<DatasetName>,
     log: Logger,
 }
@@ -347,8 +357,33 @@ impl DatasetTask {
             DatasetTaskRequest::Inventory { zpools, tx } => {
                 _ = tx.0.send(self.inventory(zpools, zfs).await);
             }
-            DatasetTaskRequest::DatasetsEnsure { datasets, tx } => {
-                _ = tx.0.send(self.datasets_ensure(datasets, zfs).await);
+            DatasetTaskRequest::DatasetsReportOrphans {
+                datasets,
+                currently_managed_zpools,
+                tx,
+            } => {
+                _ = tx.0.send(
+                    self.datasets_report_orphans(
+                        datasets,
+                        currently_managed_zpools,
+                        zfs,
+                    )
+                    .await,
+                );
+            }
+            DatasetTaskRequest::DatasetsEnsure {
+                datasets,
+                currently_managed_zpools,
+                tx,
+            } => {
+                _ = tx.0.send(
+                    self.datasets_ensure(
+                        datasets,
+                        currently_managed_zpools,
+                        zfs,
+                    )
+                    .await,
+                );
             }
             DatasetTaskRequest::NestedDatasetMount { name, tx } => {
                 _ = tx.0.send(self.nested_dataset_mount(name, zfs).await);
@@ -399,9 +434,140 @@ impl DatasetTask {
         Ok(props.into_iter().map(From::from).collect())
     }
 
+    async fn datasets_report_orphans<T: ZfsImpl>(
+        &mut self,
+        datasets: IdMap<DatasetConfig>,
+        currently_managed_zpools: Arc<CurrentlyManagedZpools>,
+        zfs: &T,
+    ) -> anyhow::Result<IdOrdMap<OrphanedDataset>> {
+        let mut orphaned_datasets = IdOrdMap::new();
+
+        let datasets_of_interest = currently_managed_zpools
+            .iter()
+            .flat_map(|zpool| {
+                [
+                    // We care about the direct children of the zpool itself.
+                    // (This will include any unencrypted datasets, such as
+                    // `crucible`.)
+                    zpool.to_string(),
+                    // We also care about the direct children of the encrypted
+                    // dataset. (This includes non-crucible Omicron zone durable
+                    // datasets.)
+                    format!("{zpool}/{CRYPT_DATASET}"),
+                    // We _don't_ need to check children of
+                    // `{zpool}/{ZONE_DATASET}`: these are all transient, and
+                    // should be destroyed/created on demand.
+                ]
+            })
+            .collect::<Vec<_>>();
+
+        for properties in zfs
+            .get_dataset_properties(
+                &datasets_of_interest,
+                WhichDatasets::SelfAndChildren,
+            )
+            .await?
+        {
+            // Skip any errors parsing dataset names: we expect to get some
+            // errors! We won't be able to parse any dataset names that can't be
+            // represented by `DatasetKind`, which will always include at least
+            // the two parent datasets we asked for above (`zpool` and
+            // `zpool/crypt`).
+            //
+            // Our goal here is to prune datasets that _we_ created; we only
+            // create datasets that have representable `DatasetName`s, so this
+            // also acts as a safeguard that we should never delete datasets we
+            // don't fully understand.
+            let Ok(dataset) = DatasetName::from_str(&properties.name) else {
+                continue;
+            };
+
+            // Does this dataset have an ID set? If we created it, we expect it
+            // does, and we can easily check whether it still exists in our
+            // config. A dataset with a known `DatasetKind` without an ID set is
+            // pretty unexpected: we'll search through our config datasets to
+            // find a matching name; if we do, we'll assume it's that one.
+            let present_in_config = match properties.id {
+                Some(id) => datasets.contains_key(&id),
+                None => {
+                    if datasets.iter().any(|d| d.name == dataset) {
+                        warn!(
+                            self.log,
+                            "found on-disk dataset without an ID \
+                             that matches a config dataset by name";
+                            "dataset" => dataset.full_name(),
+                        );
+                        true
+                    } else {
+                        warn!(
+                            self.log,
+                            "found on-disk dataset without an ID \
+                             that doesn't match any config datasets; assuming \
+                             it should be marked as an orphan";
+                            "dataset" => dataset.full_name(),
+                        );
+                        false
+                    }
+                }
+            };
+            if present_in_config {
+                continue;
+            }
+
+            // Explicitly match all variants here, so if we expand this list
+            // we're forced to consider whether they should be removeable.
+            let reason = match dataset.kind() {
+                // Zone durable datasets: these are the kinds we expect to
+                // remove (e.g., when the corresponding zone is expunged).
+                DatasetKind::Cockroach
+                | DatasetKind::Crucible
+                | DatasetKind::Clickhouse
+                | DatasetKind::ClickhouseKeeper
+                | DatasetKind::ClickhouseServer
+                | DatasetKind::ExternalDns
+                | DatasetKind::InternalDns => {
+                    // We should attempt to delete this; for now, just report it
+                    // as orphaned because we don't.
+                    "dataset deletion not yet implemented (omicron#6177)"
+                        .to_string()
+                }
+
+                // These kinds are part of our config, but it would be
+                // surprising to have them disappear: they should always be
+                // present for any managed disk. Refuse to remove them.
+                DatasetKind::TransientZoneRoot | DatasetKind::Debug => {
+                    format!(
+                        "refusing to delete dataset of kind {:?} \
+                         (expected to exist for all managed disks)",
+                        dataset.kind(),
+                    )
+                }
+
+                // These should be grandchildren of the datasets we asked for;
+                // we shouldn't see them as direct children. Refuse to remove
+                // them. (They should also be recreated on demand anyway.)
+                DatasetKind::TransientZone { .. } => {
+                    "unexpectedly found transient zone root".to_string()
+                }
+            };
+
+            orphaned_datasets.insert_overwrite(OrphanedDataset {
+                name: dataset,
+                reason,
+                id: properties.id,
+                mounted: properties.mounted,
+                available: properties.avail,
+                used: properties.used,
+            });
+        }
+
+        Ok(orphaned_datasets)
+    }
+
     async fn datasets_ensure<T: ZfsImpl>(
         &mut self,
         config: IdMap<DatasetConfig>,
+        currently_managed_zpools: Arc<CurrentlyManagedZpools>,
         zfs: &T,
     ) -> IdMap<DatasetEnsureResult> {
         let mut ensure_results = IdMap::new();
@@ -435,18 +601,6 @@ impl DatasetTask {
         // check whether they already exist, are mounted, and have the expected
         // properties to avoid doing unnecessary work.
         let mut dataset_names = Vec::new();
-
-        // Grab a snapshot of the currently-managed zpools. We'll refuse to
-        // create any datasets on zpools that aren't in this set.
-        //
-        // This looks like a TOCTOU problem: what if the set of managed zpools
-        // changed in between this snapshot and when we actually create datasets
-        // below? In practice it isn't, although this feels a little fragile:
-        // only the reconciler task calls this method, and only the reconciler
-        // task changes the set of managed disks. It will not change the set of
-        // managed disks while waiting for us to ensure datasets on its behalf.
-        let currently_managed_zpools =
-            self.currently_managed_zpools_rx.current();
 
         for dataset in config {
             let zpool = dataset.name.pool();
@@ -498,8 +652,7 @@ impl DatasetTask {
                 | DatasetKind::ClickhouseServer
                 | DatasetKind::ExternalDns
                 | DatasetKind::InternalDns
-                | DatasetKind::Debug
-                | DatasetKind::Update => {
+                | DatasetKind::Debug => {
                     non_transient_zone_configs.push(dataset);
                 }
             }
@@ -786,8 +939,8 @@ impl DatasetTask {
         let mountpoint = name.mountpoint(&self.mount_config.root);
 
         zfs.ensure_nested_dataset_mounted(
-            name.full_name(),
-            Mountpoint(mountpoint.clone()),
+            &name.full_name(),
+            &Mountpoint(mountpoint.clone()),
         )
         .await?;
 
@@ -855,7 +1008,7 @@ impl DatasetTask {
             return Err(err);
         }
 
-        zfs.destroy_dataset(full_name).await.map_err(From::from)
+        zfs.destroy_dataset(&full_name).await.map_err(From::from)
     }
 
     async fn nested_dataset_list<T: ZfsImpl>(
@@ -932,8 +1085,16 @@ enum DatasetTaskRequest {
             oneshot::Sender<Result<Vec<InventoryDataset>, InventoryError>>,
         >,
     },
+    DatasetsReportOrphans {
+        datasets: IdMap<DatasetConfig>,
+        currently_managed_zpools: Arc<CurrentlyManagedZpools>,
+        tx: DebugIgnore<
+            oneshot::Sender<anyhow::Result<IdOrdMap<OrphanedDataset>>>,
+        >,
+    },
     DatasetsEnsure {
         datasets: IdMap<DatasetConfig>,
+        currently_managed_zpools: Arc<CurrentlyManagedZpools>,
         tx: DebugIgnore<oneshot::Sender<IdMap<DatasetEnsureResult>>>,
     },
     NestedDatasetMount {
@@ -978,13 +1139,13 @@ trait ZfsImpl: Send + Sync + 'static {
 
     fn ensure_nested_dataset_mounted(
         &self,
-        name: String,
-        mountpoint: Mountpoint,
+        name: &str,
+        mountpoint: &Mountpoint,
     ) -> impl Future<Output = Result<(), NestedDatasetMountError>> + Send;
 
     fn destroy_dataset(
         &self,
-        name: String,
+        name: &str,
     ) -> impl Future<Output = Result<(), DestroyDatasetError>> + Send;
 
     fn get_dataset_properties(
@@ -1012,20 +1173,22 @@ impl ZfsImpl for RealZfs {
 
     async fn ensure_nested_dataset_mounted(
         &self,
-        name: String,
-        mountpoint: Mountpoint,
+        name: &str,
+        mountpoint: &Mountpoint,
     ) -> Result<(), NestedDatasetMountError> {
-        let name_cloned = name.clone();
-        Zfs::ensure_dataset_mounted_and_exists(&name_cloned, &mountpoint)
-            .await
-            .map_err(|err| NestedDatasetMountError::MountFailed { name, err })
+        Zfs::ensure_dataset_mounted_and_exists(name, mountpoint).await.map_err(
+            |err| NestedDatasetMountError::MountFailed {
+                name: name.to_string(),
+                err,
+            },
+        )
     }
 
     async fn destroy_dataset(
         &self,
-        name: String,
+        name: &str,
     ) -> Result<(), DestroyDatasetError> {
-        Zfs::destroy_dataset(&name).await
+        Zfs::destroy_dataset(name).await
     }
 
     async fn get_dataset_properties(
@@ -1033,14 +1196,14 @@ impl ZfsImpl for RealZfs {
         datasets: &[String],
         which: WhichDatasets,
     ) -> anyhow::Result<Vec<DatasetProperties>> {
-        let datasets = datasets.to_vec();
-        Zfs::get_dataset_properties(&datasets, which).await
+        Zfs::get_dataset_properties(datasets, which).await
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::CurrentlyManagedZpoolsReceiver;
     use assert_matches::assert_matches;
     use illumos_utils::zfs::DestroyDatasetErrorVariant;
     use omicron_common::api::external::ByteCount;
@@ -1129,8 +1292,8 @@ mod tests {
 
         async fn ensure_nested_dataset_mounted(
             &self,
-            name: String,
-            _mountpoint: Mountpoint,
+            name: &str,
+            _mountpoint: &Mountpoint,
         ) -> Result<(), NestedDatasetMountError> {
             let mut state = self.inner.lock().unwrap();
 
@@ -1144,7 +1307,7 @@ mod tests {
             }
 
             // Dataset must exist
-            let dataset = match state.datasets.get_mut(&name) {
+            let dataset = match state.datasets.get_mut(name) {
                 Some(ds) => ds,
                 None => {
                     return Err(NestedDatasetMountError::TestError(
@@ -1159,14 +1322,14 @@ mod tests {
 
         async fn destroy_dataset(
             &self,
-            name: String,
+            name: &str,
         ) -> Result<(), DestroyDatasetError> {
             let mut state = self.inner.lock().unwrap();
 
             // Remove the dataset...
-            if state.datasets.remove(&name).is_none() {
+            if state.datasets.remove(name).is_none() {
                 return Err(DestroyDatasetError {
-                    name,
+                    name: name.to_string(),
                     err: DestroyDatasetErrorVariant::NotFound,
                 });
             }
@@ -1298,19 +1461,19 @@ mod tests {
             .collect::<IdMap<_>>();
 
         // Send this pile of datasets to the task as a set to ensure.
-        let currently_managed_zpools_rx =
+        let currently_managed_zpools =
             CurrentlyManagedZpoolsReceiver::fake_static(
                 managed_pools.clone().into_iter(),
-            );
+            )
+            .current();
         let zfs = InMemoryZfs::default();
         let task_handle = DatasetTaskHandle::spawn_with_zfs_impl(
             nonexistent_mount_config(),
-            currently_managed_zpools_rx,
             &logctx.log,
             zfs.clone(),
         );
         let result = task_handle
-            .datasets_ensure(datasets.clone())
+            .datasets_ensure(datasets.clone(), currently_managed_zpools)
             .await
             .expect("no task error");
 
@@ -1431,16 +1594,16 @@ mod tests {
         }
 
         // Send this pile of datasets to the task as a set to ensure.
-        let currently_managed_zpools_rx =
-            CurrentlyManagedZpoolsReceiver::fake_static(pools.keys().cloned());
+        let currently_managed_zpools =
+            CurrentlyManagedZpoolsReceiver::fake_static(pools.keys().cloned())
+                .current();
         let task_handle = DatasetTaskHandle::spawn_with_zfs_impl(
             nonexistent_mount_config(),
-            currently_managed_zpools_rx,
             &logctx.log,
             zfs.clone(),
         );
         let result = task_handle
-            .datasets_ensure(datasets.clone())
+            .datasets_ensure(datasets.clone(), currently_managed_zpools)
             .await
             .expect("no task error");
 
@@ -1548,17 +1711,17 @@ mod tests {
             .collect::<IdMap<_>>();
 
         // Send this pile of datasets to the task as a set to ensure.
-        let currently_managed_zpools_rx =
-            CurrentlyManagedZpoolsReceiver::fake_static(pools.iter().cloned());
+        let currently_managed_zpools =
+            CurrentlyManagedZpoolsReceiver::fake_static(pools.iter().cloned())
+                .current();
         let zfs = InMemoryZfs::default();
         let task_handle = DatasetTaskHandle::spawn_with_zfs_impl(
             nonexistent_mount_config(),
-            currently_managed_zpools_rx,
             &logctx.log,
             zfs.clone(),
         );
         let result = task_handle
-            .datasets_ensure(datasets.clone())
+            .datasets_ensure(datasets.clone(), currently_managed_zpools)
             .await
             .expect("no task error");
 
@@ -1613,17 +1776,17 @@ mod tests {
             .collect::<IdMap<_>>();
 
         // Send this pile of datasets to the task as a set to ensure.
-        let currently_managed_zpools_rx =
-            CurrentlyManagedZpoolsReceiver::fake_static(pools.iter().cloned());
+        let currently_managed_zpools =
+            CurrentlyManagedZpoolsReceiver::fake_static(pools.iter().cloned())
+                .current();
         let zfs = InMemoryZfs::default();
         let task_handle = DatasetTaskHandle::spawn_with_zfs_impl(
             nonexistent_mount_config(),
-            currently_managed_zpools_rx,
             &logctx.log,
             zfs.clone(),
         );
         let result = task_handle
-            .datasets_ensure(datasets.clone())
+            .datasets_ensure(datasets.clone(), currently_managed_zpools.clone())
             .await
             .expect("no task error");
 
@@ -1646,7 +1809,7 @@ mod tests {
         // Ensuring the exact same set of datasets should not cause any more
         // calls to ZFS, because they all have the properties they need already.
         let result = task_handle
-            .datasets_ensure(datasets.clone())
+            .datasets_ensure(datasets.clone(), currently_managed_zpools.clone())
             .await
             .expect("no task error");
         assert_eq!(result.len(), datasets.len());
@@ -1696,7 +1859,7 @@ mod tests {
         // Ensure the same set of datasets again; the ones we mutated should get
         // re-ensured.
         let result = task_handle
-            .datasets_ensure(datasets.clone())
+            .datasets_ensure(datasets.clone(), currently_managed_zpools)
             .await
             .expect("no task error");
         assert_eq!(result.len(), datasets.len());
@@ -1715,6 +1878,116 @@ mod tests {
                     "unexpected count for dataset {dataset:?}"
                 );
             }
+        }
+
+        logctx.cleanup_successful();
+    }
+
+    #[derive(Debug, Arbitrary, PartialEq, PartialOrd, Eq, Ord)]
+    struct ZpoolWithDatasets {
+        name: ArbitraryZpoolName,
+        datasets: BTreeMap<DatasetKind, bool>,
+    }
+
+    #[proptest]
+    fn find_orphaned_datasets(
+        #[any(size_range(1..20).lift())] pools: BTreeSet<ZpoolWithDatasets>,
+    ) {
+        with_test_runtime(async move {
+            find_orphaned_datasets_impl(pools).await;
+        })
+    }
+
+    async fn find_orphaned_datasets_impl(inputs: BTreeSet<ZpoolWithDatasets>) {
+        let logctx = dev::test_setup_log("find_orphaned_datasets");
+
+        // Convert our test input into:
+        //
+        // 1. The set of pools
+        // 2. The set of `DatasetConfig`s
+        // 3. The set of datasets that don't have `DatasetConfig`s
+        let mut pools: BTreeSet<ZpoolName> = BTreeSet::new();
+        let mut dataset_configs = IdMap::new();
+        let mut datasets_in_config = BTreeSet::new();
+        let mut datasets_not_in_config = BTreeSet::new();
+        for input in inputs {
+            let ZpoolWithDatasets { name, datasets } = input;
+            let name = name.into();
+            pools.insert(name);
+            for (kind, in_config) in datasets {
+                let name = DatasetName::new(name, kind);
+                if in_config {
+                    assert!(!datasets_not_in_config.contains(&name));
+                    assert!(datasets_in_config.insert(name.clone()));
+                    dataset_configs.insert(DatasetConfig {
+                        id: DatasetUuid::new_v4(),
+                        name,
+                        inner: SharedDatasetConfig::default(),
+                    });
+                } else {
+                    assert!(!datasets_in_config.contains(&name));
+                    assert!(datasets_not_in_config.insert(name));
+                }
+            }
+        }
+
+        // Build up our in-memory ZFS: insert _all_ the datasets.
+        let zfs = InMemoryZfs::default();
+        {
+            let mut zfs = zfs.inner.lock().unwrap();
+            for dataset in
+                datasets_in_config.iter().chain(datasets_not_in_config.iter())
+            {
+                let name = dataset.full_name();
+                zfs.datasets.insert(
+                    name.clone(),
+                    DatasetProperties {
+                        id: None,
+                        name,
+                        mounted: false,
+                        avail: ByteCount::from_gibibytes_u32(1),
+                        used: ByteCount::from_gibibytes_u32(0),
+                        quota: None,
+                        reservation: None,
+                        compression: CompressionAlgorithm::On.to_string(),
+                    },
+                );
+            }
+        }
+
+        // Spawn our task.
+        let currently_managed_zpools =
+            CurrentlyManagedZpoolsReceiver::fake_static(pools.iter().copied())
+                .current();
+        let task_handle = DatasetTaskHandle::spawn_with_zfs_impl(
+            nonexistent_mount_config(),
+            &logctx.log,
+            zfs.clone(),
+        );
+
+        // Check for orphans.
+        let orphans = task_handle
+            .datasets_report_orphans(dataset_configs, currently_managed_zpools)
+            .await
+            .expect("no task error")
+            .expect("no zfs error");
+
+        // We should report no orphans that were present in the config.
+        for dataset in &datasets_in_config {
+            assert!(
+                !orphans.contains_key(&dataset),
+                "found unexpected orphan {}",
+                dataset.full_name()
+            );
+        }
+
+        // All the datasets in `datasets_not_in_config` should be orphans.
+        for dataset in datasets_not_in_config {
+            assert!(
+                orphans.contains_key(&dataset),
+                "didn't find expected orphan {}",
+                dataset.full_name()
+            );
         }
 
         logctx.cleanup_successful();
@@ -1786,10 +2059,11 @@ mod tests {
 
         // Setup: Create our pile of zpools, and a pile of debug datasets for a
         // subset of them.
-        let currently_managed_zpools_rx =
+        let currently_managed_zpools =
             CurrentlyManagedZpoolsReceiver::fake_static(
                 inputs.iter().map(|input| input.pool),
-            );
+            )
+            .current();
         let datasets = inputs
             .iter()
             .filter(|input| input.is_debug_datset_mounted)
@@ -1801,12 +2075,11 @@ mod tests {
         let zfs = InMemoryZfs::default();
         let task_handle = DatasetTaskHandle::spawn_with_zfs_impl(
             nonexistent_mount_config(),
-            currently_managed_zpools_rx,
             &logctx.log,
             zfs.clone(),
         );
         let result = task_handle
-            .datasets_ensure(datasets.clone())
+            .datasets_ensure(datasets.clone(), currently_managed_zpools)
             .await
             .expect("no task error");
         assert_eq!(result.len(), datasets.len());
@@ -1924,6 +2197,7 @@ mod tests {
 mod illumos_tests {
     use super::tests::make_dataset_config;
     use super::*;
+    use crate::CurrentlyManagedZpoolsReceiver;
     use assert_matches::assert_matches;
     use camino_tempfile::Utf8TempDir;
     use illumos_utils::zpool::Zpool;
@@ -2048,6 +2322,10 @@ mod illumos_tests {
             }
         }
 
+        fn current_zpools(&self) -> Arc<CurrentlyManagedZpools> {
+            self.currently_managed_zpools_rx.current()
+        }
+
         async fn add_zpool(&mut self, kind: ZpoolKind) -> ZpoolName {
             self.add_zpool_with_size(kind, Self::DEFAULT_VDEV_SIZE).await
         }
@@ -2164,14 +2442,16 @@ mod illumos_tests {
         let zpool = harness.add_zpool(ZpoolKind::External).await;
         let task_handle = DatasetTaskHandle::spawn_dataset_task(
             Arc::new(harness.mount_config.clone()),
-            harness.currently_managed_zpools_rx.clone(),
             &logctx.log,
         );
 
         // Create a dataset on the newly formatted U.2
         let dataset = make_dataset_config(zpool, DatasetKind::Crucible);
         let result = task_handle
-            .datasets_ensure([dataset.clone()].into_iter().collect())
+            .datasets_ensure(
+                [dataset.clone()].into_iter().collect(),
+                harness.current_zpools(),
+            )
             .await
             .expect("task should not fail");
         assert_eq!(result.len(), 1);
@@ -2185,7 +2465,10 @@ mod illumos_tests {
 
         // Calling "datasets_ensure" with the same input should succeed.
         let result = task_handle
-            .datasets_ensure([dataset.clone()].into_iter().collect())
+            .datasets_ensure(
+                [dataset.clone()].into_iter().collect(),
+                harness.current_zpools(),
+            )
             .await
             .expect("task should not fail");
         assert_eq!(result.len(), 1);
@@ -2234,7 +2517,6 @@ mod illumos_tests {
         let zpool = harness.add_zpool(ZpoolKind::External).await;
         let task_handle = DatasetTaskHandle::spawn_dataset_task(
             Arc::new(harness.mount_config.clone()),
-            harness.currently_managed_zpools_rx.clone(),
             &logctx.log,
         );
 
@@ -2243,7 +2525,10 @@ mod illumos_tests {
         let name = &dataset.name;
 
         let result = task_handle
-            .datasets_ensure([dataset.clone()].into_iter().collect())
+            .datasets_ensure(
+                [dataset.clone()].into_iter().collect(),
+                harness.current_zpools(),
+            )
             .await
             .expect("task should not fail");
         assert_eq!(result.len(), 1);
@@ -2264,7 +2549,10 @@ mod illumos_tests {
 
         // We can re-apply the same config...
         let result = task_handle
-            .datasets_ensure([dataset.clone()].into_iter().collect())
+            .datasets_ensure(
+                [dataset.clone()].into_iter().collect(),
+                harness.current_zpools(),
+            )
             .await
             .expect("task should not fail");
         assert_eq!(result.len(), 1);
@@ -2293,7 +2581,6 @@ mod illumos_tests {
         let zpool = harness.add_zpool(ZpoolKind::External).await;
         let task_handle = DatasetTaskHandle::spawn_dataset_task(
             Arc::new(harness.mount_config.clone()),
-            harness.currently_managed_zpools_rx.clone(),
             &logctx.log,
         );
 
@@ -2325,7 +2612,7 @@ mod illumos_tests {
 
         // Create the datasets.
         let result = task_handle
-            .datasets_ensure(dataset_configs.clone())
+            .datasets_ensure(dataset_configs.clone(), harness.current_zpools())
             .await
             .expect("task should not fail");
         assert_eq!(result.len(), dataset_configs.len());
@@ -2386,7 +2673,6 @@ mod illumos_tests {
         };
         let task_handle = DatasetTaskHandle::spawn_dataset_task(
             Arc::new(harness.mount_config.clone()),
-            harness.currently_managed_zpools_rx.clone(),
             &logctx.log,
         );
 
@@ -2403,7 +2689,7 @@ mod illumos_tests {
 
         // Create the datasets.
         let result = task_handle
-            .datasets_ensure(datasets.clone())
+            .datasets_ensure(datasets.clone(), harness.current_zpools())
             .await
             .expect("task should not fail");
         assert_eq!(result.len(), datasets.len());
@@ -2413,7 +2699,7 @@ mod illumos_tests {
 
         // Calling "datasets_ensure" with the same input should succeed.
         let result = task_handle
-            .datasets_ensure(datasets.clone())
+            .datasets_ensure(datasets.clone(), harness.current_zpools())
             .await
             .expect("task should not fail");
         assert_eq!(result.len(), datasets.len());
@@ -2435,14 +2721,16 @@ mod illumos_tests {
         let zpool = harness.add_zpool(ZpoolKind::External).await;
         let task_handle = DatasetTaskHandle::spawn_dataset_task(
             Arc::new(harness.mount_config.clone()),
-            harness.currently_managed_zpools_rx.clone(),
             &logctx.log,
         );
 
         // Add a `Debug` dataset to our zpool.
         let debug_dataset = make_dataset_config(zpool, DatasetKind::Debug);
         let result = task_handle
-            .datasets_ensure([debug_dataset.clone()].into_iter().collect())
+            .datasets_ensure(
+                [debug_dataset.clone()].into_iter().collect(),
+                harness.current_zpools(),
+            )
             .await
             .expect("task should not fail");
         assert_eq!(result.len(), 1);
