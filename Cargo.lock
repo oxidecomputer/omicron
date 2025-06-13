@@ -1261,9 +1261,9 @@ dependencies = [
 
 [[package]]
 name = "cfg-if"
-version = "1.0.0"
+version = "1.0.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "baf1de4339761588bc0619e3cbc0120ee582ebb74b53b4efbf79117bd2da40fd"
+checksum = "9555578bc9e57714c812a1f84e4fc5b4d21fcb063490c624de019f7464c91268"
 
 [[package]]
 name = "cfg_aliases"
@@ -3253,9 +3253,9 @@ checksum = "b3ea1ec5f8307826a5b71094dd91fc04d4ae75d5709b20ad351c7fb4815c86ec"
 
 [[package]]
 name = "flate2"
-version = "1.1.1"
+version = "1.1.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "7ced92e76e966ca2fd84c8f7aa01a4aea65b0eb6648d72f7c8f3e2764a67fece"
+checksum = "4a3d7db9596fecd151c5f638c0ee5d5bd487b6e0ea232e5dc96d5250f6f94b1d"
 dependencies = [
  "crc32fast",
  "miniz_oxide",
@@ -4623,7 +4623,9 @@ dependencies = [
  "hashbrown 0.15.3",
  "ref-cast",
  "rustc-hash 2.1.1",
+ "schemars",
  "serde",
+ "serde_json",
 ]
 
 [[package]]
@@ -6179,6 +6181,7 @@ dependencies = [
  "gateway-client",
  "hyper-rustls 0.26.0",
  "id-map",
+ "iddqd",
  "illumos-utils",
  "internal-dns-resolver",
  "internal-dns-types",
@@ -6660,6 +6663,7 @@ dependencies = [
  "chrono",
  "daft",
  "id-map",
+ "iddqd",
  "illumos-utils",
  "omicron-common",
  "omicron-passwords",
@@ -7585,6 +7589,7 @@ dependencies = [
  "gateway-types",
  "http",
  "humantime",
+ "iddqd",
  "indicatif",
  "internal-dns-resolver",
  "internal-dns-types",
@@ -11754,6 +11759,7 @@ dependencies = [
  "futures",
  "glob",
  "id-map",
+ "iddqd",
  "illumos-utils",
  "key-manager",
  "nexus-sled-agent-shared",

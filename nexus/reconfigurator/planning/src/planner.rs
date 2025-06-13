@@ -1063,6 +1063,11 @@ impl<'a> Planner<'a> {
                         "kind" => ?zone.zone_type.kind(),
                         "image_source" => %image_source,
                     );
+                    self.blueprint.comment(format!(
+                        "updating {:?} zone {} in-place",
+                        zone.zone_type.kind(),
+                        zone.id
+                    ));
                     self.blueprint.sled_set_zone_source(
                         sled_id,
                         zone.id,
@@ -1082,6 +1087,11 @@ impl<'a> Planner<'a> {
                         "zone_id" => %zone.id,
                         "kind" => ?zone.zone_type.kind(),
                     );
+                    self.blueprint.comment(format!(
+                        "expunge {:?} zone {} for update",
+                        zone.zone_type.kind(),
+                        zone.id
+                    ));
                     self.blueprint.sled_expunge_zone(sled_id, zone.id)?;
                 }
             }
