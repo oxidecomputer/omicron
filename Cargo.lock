@@ -3362,9 +3362,9 @@ dependencies = [
 
 [[package]]
 name = "fs-err"
-version = "3.1.0"
+version = "3.1.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "1f89bda4c2a21204059a977ed3bfe746677dfd137b83c339e702b0ac91d482aa"
+checksum = "88d7be93788013f265201256d58f04936a8079ad5dc898743aa20525f503b683"
 dependencies = [
  "autocfg",
  "tokio",
@@ -7707,7 +7707,7 @@ dependencies = [
  "anyhow",
  "camino",
  "cargo_metadata 0.19.2",
- "fs-err 3.1.0",
+ "fs-err 3.1.1",
  "omicron-workspace-hack",
  "serde",
  "toml_edit 0.22.26",
@@ -7753,7 +7753,7 @@ dependencies = [
  "cargo_metadata 0.19.2",
  "chrono",
  "clap",
- "fs-err 3.1.0",
+ "fs-err 3.1.1",
  "futures",
  "hex",
  "omicron-pins",
@@ -8028,7 +8028,7 @@ dependencies = [
  "ff",
  "flate2",
  "foldhash",
- "fs-err 3.1.0",
+ "fs-err 3.1.1",
  "futures",
  "futures-channel",
  "futures-core",
@@ -8211,7 +8211,7 @@ dependencies = [
  "debug-ignore",
  "dns-server-api",
  "dropshot",
- "fs-err 3.1.0",
+ "fs-err 3.1.1",
  "gateway-api",
  "hex",
  "indent_write",
@@ -11847,7 +11847,7 @@ dependencies = [
  "anyhow",
  "camino",
  "cfg-if",
- "fs-err 3.1.0",
+ "fs-err 3.1.1",
  "futures",
  "illumos-utils",
  "libc",
@@ -13930,7 +13930,7 @@ dependencies = [
  "display-error-chain",
  "dropshot",
  "flate2",
- "fs-err 3.1.0",
+ "fs-err 3.1.1",
  "futures",
  "hex",
  "hubtools",
@@ -14505,7 +14505,7 @@ dependencies = [
  "expectorate",
  "flate2",
  "flume",
- "fs-err 3.1.0",
+ "fs-err 3.1.1",
  "futures",
  "gateway-client",
  "gateway-messages",
@@ -15064,7 +15064,7 @@ dependencies = [
  "cargo_toml",
  "clap",
  "dev-tools-common",
- "fs-err 3.1.0",
+ "fs-err 3.1.1",
  "macaddr",
  "serde",
  "swrite",
