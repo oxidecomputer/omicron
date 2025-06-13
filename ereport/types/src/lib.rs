@@ -34,6 +34,7 @@ pub struct Ereport {
     JsonSchema,
 )]
 #[repr(transparent)]
+#[serde(from = "u64", into = "u64")]
 pub struct Ena(pub u64);
 
 impl fmt::Display for Ena {
@@ -73,6 +74,18 @@ impl FromStr for Ena {
             s.parse::<u64>()?
         };
         Ok(Self(value))
+    }
+}
+
+impl From<u64> for Ena {
+    fn from(value: u64) -> Self {
+        Self(value)
+    }
+}
+
+impl From<Ena> for u64 {
+    fn from(Ena(value): Ena) -> Self {
+        value
     }
 }
 
