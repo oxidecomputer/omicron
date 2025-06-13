@@ -7,9 +7,9 @@
 use super::DbFetchOptions;
 use super::check_limit;
 use crate::helpers::const_max_len;
+use crate::helpers::datetime_opt_rfc3339_concise;
 use crate::helpers::datetime_rfc3339_concise;
 use crate::helpers::display_option_blank;
-use crate::helpers::display_option_error;
 
 use anyhow::Context;
 use async_bb8_diesel::AsyncConnection;
@@ -19,6 +19,7 @@ use chrono::DateTime;
 use chrono::Utc;
 use clap::Args;
 use clap::Subcommand;
+use diesel::dsl::{count_distinct, min};
 use diesel::prelude::*;
 use ereport_types::Ena;
 use ereport_types::EreporterRestartUuid;
@@ -373,12 +374,21 @@ async fn cmd_db_ereporters(
             // on filters.
             conn.batch_execute_async(ALLOW_FULL_TABLE_SCAN_SQL).await?;
             let mut sp_query = sp_dsl::sp_ereport
+                .group_by((
+                    sp_dsl::restart_id,
+                    sp_dsl::sp_slot,
+                    sp_dsl::sp_type,
+                    sp_dsl::serial_number,
+                    sp_dsl::part_number
+                ))
                 .select((
                     sp_dsl::restart_id,
                     sp_dsl::sp_slot,
                     sp_dsl::sp_type,
                     sp_dsl::serial_number,
                     sp_dsl::part_number,
+                    min(sp_dsl::time_collected),
+                    count_distinct(sp_dsl::ena),
                 ))
                 .order_by((
                     sp_dsl::sp_type,
@@ -386,7 +396,6 @@ async fn cmd_db_ereporters(
                     sp_dsl::serial_number,
                     sp_dsl::restart_id,
                 ))
-                .distinct()
                 .into_boxed();
 
             if let Some(slot) = slot {
@@ -410,7 +419,7 @@ async fn cmd_db_ereporters(
             }
 
             sp_query
-                .load_async::<(Uuid, db::model::SqlU16, SpType, Option<String>, Option<String>)>(
+                .load_async::<(Uuid, db::model::SqlU16, SpType, Option<String>, Option<String>, Option<DateTime<Utc>>, i64)>(
                     &conn,
                 )
                 .await.context("listing SP reporter entries")
@@ -420,6 +429,9 @@ async fn cmd_db_ereporters(
     #[derive(Tabled)]
     #[tabled(rename_all = "SCREAMING_SNAKE_CASE")]
     struct ReporterRow {
+        #[tabled(display_with = "datetime_opt_rfc3339_concise")]
+        first_seen: Option<DateTime<Utc>>,
+        id: Uuid,
         #[tabled(rename = "TYPE")]
         ty: SrcType,
         #[tabled(rename = "#")]
@@ -428,38 +440,30 @@ async fn cmd_db_ereporters(
         serial: Option<String>,
         #[tabled(display_with = "display_option_blank", rename = "P/N")]
         part_number: Option<String>,
-        id: Uuid,
-        #[tabled(display_with = "display_option_error", rename = "P/N")]
-        ereports: Option<i64>,
+        ereports: i64,
     }
 
-    let mut rows = Vec::with_capacity(sp_ereporters.len());
-
-    for (restart_id, slot, sp_type, serial, part_number) in sp_ereporters {
-        let count_result = sp_dsl::sp_ereport
-            .filter(sp_dsl::restart_id.eq(restart_id))
-            .count()
-            .get_result_async(&*conn)
-            .await;
-        let ereports = match count_result {
-            Ok(count) => Some(count),
-            Err(err) => {
-                eprintln!(
-                    "WARN: could not count ereports for {restart_id} \
-                     ({sp_type} {slot}): {err}",
-                );
-                None
-            }
-        };
-        rows.push(ReporterRow {
-            ty: sp_type.into(),
-            slot: slot.into(),
+    let rows = sp_ereporters.into_iter().map(
+        |(
+            restart_id,
+            slot,
+            sp_type,
             serial,
             part_number,
-            id: restart_id,
+            first_seen,
             ereports,
-        });
-    }
+        )| {
+            ReporterRow {
+                first_seen,
+                ty: sp_type.into(),
+                slot: slot.into(),
+                serial,
+                part_number,
+                id: restart_id,
+                ereports,
+            }
+        },
+    );
     let mut table = tabled::Table::new(rows.into_iter());
 
     table

@@ -15,7 +15,8 @@ use diesel::sql_types;
 use ereport_types::{Ena, EreportId};
 use nexus_db_schema::schema::{host_ereport, sp_ereport};
 use omicron_uuid_kinds::{
-    EreporterRestartKind, OmicronZoneKind, OmicronZoneUuid, SledKind, SledUuid,
+    EreporterRestartKind, EreporterRestartUuid, OmicronZoneKind,
+    OmicronZoneUuid, SledKind, SledUuid,
 };
 use serde::{Deserialize, Serialize};
 use std::convert::TryFrom;

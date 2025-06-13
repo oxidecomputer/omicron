@@ -11,11 +11,15 @@ use crate::db::datastore::RunnableQuery;
 use crate::db::model::DbEna;
 use crate::db::model::Ereport;
 use crate::db::model::HostEreport;
+use crate::db::model::Reporter;
 use crate::db::model::SpEreport;
 use crate::db::model::SpMgsSlot;
 use crate::db::model::SpType;
 use crate::db::model::SqlU16;
+use crate::db::model::SqlU32;
 use async_bb8_diesel::AsyncRunQueryDsl;
+use chrono::DateTime;
+use chrono::Utc;
 use diesel::prelude::*;
 use nexus_db_errors::ErrorHandler;
 use nexus_db_errors::public_error_from_diesel;
@@ -24,6 +28,7 @@ use nexus_db_schema::schema::host_ereport::dsl as host_dsl;
 use nexus_db_schema::schema::sp_ereport::dsl as sp_dsl;
 use omicron_common::api::external::CreateResult;
 use omicron_common::api::external::Error;
+use omicron_common::api::external::ListResultVec;
 use omicron_common::api::external::LookupResult;
 use omicron_uuid_kinds::EreporterRestartUuid;
 use omicron_uuid_kinds::GenericUuid;
@@ -31,6 +36,14 @@ use omicron_uuid_kinds::SledUuid;
 use uuid::Uuid;
 
 type EreportIdTuple = (Uuid, DbEna);
+
+#[derive(Clone, Debug)]
+pub struct EreporterRestartBySerial {
+    pub id: EreporterRestartUuid,
+    pub first_seen_at: DateTime<Utc>,
+    pub reporter: Reporter,
+    pub ereports: u32,
+}
 
 impl DataStore {
     // pub async fn sp_ereport_list_by_serial(
@@ -85,6 +98,112 @@ impl DataStore {
         }
 
         Err(Error::non_resourcetype_not_found(format!("ereport {id}")))
+    }
+
+    pub async fn ereporter_restart_list_by_serial(
+        &self,
+        opctx: &OpContext,
+        serial: String,
+    ) -> ListResultVec<EreporterRestartBySerial> {
+        use diesel::dsl::{count_distinct, min};
+        opctx.authorize(authz::Action::ListChildren, &authz::FLEET).await?;
+
+        let conn = &*self.pool_connection_authorized(opctx).await?;
+        let sp_rows = sp_dsl::sp_ereport
+            .filter(
+                sp_dsl::serial_number
+                    .eq(serial.clone())
+                    .and(sp_dsl::time_deleted.is_null()),
+            )
+            .group_by((sp_dsl::restart_id, sp_dsl::sp_slot, sp_dsl::sp_type))
+            .select((
+                sp_dsl::restart_id,
+                sp_dsl::sp_type,
+                sp_dsl::sp_slot,
+                min(sp_dsl::time_collected),
+                count_distinct(sp_dsl::ena),
+            ))
+            .order_by(sp_dsl::restart_id)
+            .load_async::<(Uuid, SpType, SqlU16, Option<DateTime<Utc>>, SqlU32)>(
+                &*conn,
+            )
+            .await
+            .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))?;
+        let host_os_rows = host_dsl::host_ereport
+            .filter(
+                host_dsl::sled_serial
+                    .eq(serial)
+                    .and(host_dsl::time_deleted.is_null()),
+            )
+            .group_by((host_dsl::restart_id, host_dsl::sled_id))
+            .select((
+                host_dsl::restart_id,
+                host_dsl::sled_id,
+                min(host_dsl::time_collected),
+                count_distinct(host_dsl::ena),
+            ))
+            .order_by(host_dsl::restart_id)
+            .load_async::<(Uuid, Uuid, Option<DateTime<Utc>>, SqlU32)>(&*conn)
+            .await
+            .map_err(|e| {
+                public_error_from_diesel(e, ErrorHandler::Server)
+                    .internal_context("listing SP ereports")
+            })?;
+
+        let sp_reporters = sp_rows.into_iter().filter_map(|(restart_id, sp_type, sp_slot, first_seen, ereports)| {
+            let ereports = ereports.into();
+            let first_seen_at = match first_seen {
+                Some(t) => t,
+                None => {
+                    debug_assert!(false, "ELIZA: why would min(time_collected) be none?");
+                    slog::warn!(
+                        opctx.log,
+                        "SP row returned by `ereporter_restart_list_by_serial` \
+                         had a `None` value for `min(time_collected)`";
+                        "restart_id" => ?restart_id,
+                        "sp_type" => ?sp_type,
+                        "sp_slot" => ?sp_slot,
+                        "first_seen" => ?first_seen,
+                        "count" => ?ereports,
+                    );
+                    return None;
+                }
+            };
+
+            Some(EreporterRestartBySerial {
+                id: EreporterRestartUuid::from_untyped_uuid(restart_id),
+                reporter: Reporter::Sp { sp_type, slot: sp_slot.into() },
+                first_seen_at,
+                ereports,
+            })
+        });
+        let host_reporters =  host_os_rows.into_iter().filter_map(|(restart_id, sled_id, first_seen, ereports)| {
+            let ereports = ereports.into();
+            let first_seen_at = match first_seen {
+                Some(t) => t,
+                None => {
+                    debug_assert!(false, "ELIZA: why would min(time_collected) be none?");
+                    slog::warn!(
+                        opctx.log,
+                        "SP row returned by `ereporter_restart_list_by_serial` \
+                         had a `None` value for `min(time_collected)`";
+                        "restart_id" => ?restart_id,
+                        "sled_id" => ?sled_id,
+                        "first_seen" => ?first_seen,
+                        "ereports" => ?ereports,
+                    );
+                    return None;
+                }
+            };
+
+            Some(EreporterRestartBySerial {
+                id: EreporterRestartUuid::from_untyped_uuid(restart_id),
+                reporter: Reporter::HostOs { sled: SledUuid::from_untyped_uuid(sled_id) },
+                first_seen_at,
+                ereports,
+            })
+        });
+        Ok(sp_reporters.chain(host_reporters).collect::<Vec<_>>())
     }
 
     pub async fn sp_latest_ereport_id(
