@@ -37,6 +37,7 @@ use omicron_common::api::external::NameOrId;
 use omicron_common::api::external::Nullable;
 use omicron_common::api::external::RouteDestination;
 use omicron_common::api::external::RouteTarget;
+use omicron_common::api::external::ServiceIcmpConfig;
 use omicron_common::api::external::UserId;
 use omicron_common::api::external::VpcFirewallRuleUpdateParams;
 use omicron_test_utils::certificates::CertificateChain;
@@ -1243,6 +1244,12 @@ pub static DEMO_WEBHOOK_SECRET_CREATE: LazyLock<params::WebhookSecretCreate> =
     LazyLock::new(|| params::WebhookSecretCreate {
         secret: "TRUSTNO1".to_string(),
     });
+
+pub static DEMO_INBOUND_ICMP_URL: &'static str =
+    "/v1/system/networking/inbound-icmp";
+
+pub static DEMO_INBOUND_ICMP_UPDATE: LazyLock<ServiceIcmpConfig> =
+    LazyLock::new(|| ServiceIcmpConfig { enabled: true });
 
 /// Describes an API endpoint to be verified by the "unauthorized" test
 ///
@@ -2859,6 +2866,19 @@ pub static VERIFY_ENDPOINTS: LazyLock<Vec<VerifyEndpoint>> =
                     AllowedMethod::Get,
                     AllowedMethod::Put(
                         serde_json::to_value(&*ALLOW_LIST_UPDATE).unwrap(),
+                    ),
+                ],
+            },
+            // User-facing services inbound ICMP allow/block
+            VerifyEndpoint {
+                url: DEMO_INBOUND_ICMP_URL,
+                visibility: Visibility::Public,
+                unprivileged_access: UnprivilegedAccess::None,
+                allowed_methods: vec![
+                    AllowedMethod::Get,
+                    AllowedMethod::Put(
+                        serde_json::to_value(&*DEMO_INBOUND_ICMP_UPDATE)
+                            .unwrap(),
                     ),
                 ],
             },

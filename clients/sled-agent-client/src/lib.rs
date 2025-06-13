@@ -90,6 +90,7 @@ progenitor::generate_api!(
         TypedUuidForSupportBundleKind = omicron_uuid_kinds::SupportBundleUuid,
         TypedUuidForZpoolKind = omicron_uuid_kinds::ZpoolUuid,
         Vni = omicron_common::api::external::Vni,
+        VpcFirewallIcmpFilter = omicron_common::api::external::VpcFirewallIcmpFilter,
         ZpoolKind = omicron_common::zpool_name::ZpoolKind,
         ZpoolName = omicron_common::zpool_name::ZpoolName,
     }
@@ -308,7 +309,7 @@ impl From<omicron_common::api::external::VpcFirewallRuleProtocol>
         match s {
             Tcp => Self::Tcp,
             Udp => Self::Udp,
-            Icmp => Self::Icmp,
+            Icmp(v) => Self::Icmp(v),
         }
     }
 }
