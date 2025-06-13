@@ -21,5 +21,6 @@ serde.workspace = true
 serde_json.workspace = true
 schemars.workspace = true
 slog.workspace = true
+thiserror.workspace = true
 uuid.workspace = true
 omicron-workspace-hack.workspace = true
