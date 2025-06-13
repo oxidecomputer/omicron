@@ -24,6 +24,7 @@ csv.workspace = true
 diesel.workspace = true
 dropshot.workspace = true
 dyn-clone.workspace = true
+ereport-types.workspace = true
 futures.workspace = true
 gateway-client.workspace = true
 gateway-messages.workspace = true

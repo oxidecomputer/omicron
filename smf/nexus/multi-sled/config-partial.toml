@@ -80,6 +80,7 @@ read_only_region_replacement_start.period_secs = 30
 # so we don't need to periodically activate it *that* frequently.
 alert_dispatcher.period_secs = 60
 webhook_deliverator.period_secs = 60
+sp_ereport_ingester.period_secs = 30
 
 [default_region_allocation_strategy]
 # by default, allocate across 3 distinct sleds

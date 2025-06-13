@@ -10,6 +10,7 @@ use schemars::JsonSchema;
 use serde::Deserialize;
 use serde::Serialize;
 use std::num::NonZeroU32;
+use std::str::FromStr;
 
 /// An ereport message.
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, JsonSchema)]
@@ -37,7 +38,7 @@ pub struct Ena(pub u64);
 
 impl fmt::Display for Ena {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "{:#x}", self.0)
+        write!(f, "{:x}", self.0)
     }
 }
 
@@ -56,6 +57,47 @@ impl fmt::UpperHex for Ena {
 impl fmt::LowerHex for Ena {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         fmt::LowerHex::fmt(&self.0, f)
+    }
+}
+
+impl FromStr for Ena {
+    type Err = std::num::ParseIntError;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        let s = s.trim();
+        let value = if let Some(hex_str) =
+            s.strip_prefix("0x").or_else(|| s.strip_prefix("0X"))
+        {
+            u64::from_str_radix(hex_str, 16)?
+        } else {
+            s.parse::<u64>()?
+        };
+        Ok(Self(value))
+    }
+}
+
+#[derive(Clone, Debug, thiserror::Error)]
+#[error("ENA value ({0}) is negative")]
+pub struct EnaNegativeError(i64);
+
+impl TryFrom<i64> for Ena {
+    type Error = EnaNegativeError;
+
+    fn try_from(value: i64) -> Result<Self, Self::Error> {
+        u64::try_from(value).map(Ena).map_err(|_| EnaNegativeError(value))
+    }
+}
+
+/// Unique identifier for an ereport.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub struct EreportId {
+    pub restart_id: EreporterRestartUuid,
+    pub ena: Ena,
+}
+
+impl fmt::Display for EreportId {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{:?}:{:x}", self.restart_id, self.ena)
     }
 }
 

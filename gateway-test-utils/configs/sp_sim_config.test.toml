@@ -48,6 +48,17 @@ sensors = [
     { name = "South", kind = "Temperature", last_error.value = "DeviceError", last_error.timestamp = 1234 },
 ]
 
+[simulated_sps.sidecar.ereport_config]
+restart_id = "0d3e464a-666e-4687-976f-90e31238be8b"
+
+[[simulated_sps.sidecar.ereport_config.ereports]]
+task_name = "task_thermal_server"
+task_gen = 1
+uptime = 1235
+class = "oxide.sidecar.thermal.sensor_read_error"
+sensor = { id = "dev-1", device = "fake-tmp-sensor", location = "South", presence = "Failed" }
+error = "DeviceError"
+
 [[simulated_sps.sidecar]]
 serial_number = "SimSidecar1"
 manufacturing_root_cert_seed = "01de01de01de01de01de01de01de01de01de01de01de01de01de01de01de01de"

@@ -56,6 +56,7 @@ url.workspace = true
 usdt.workspace = true
 uuid.workspace = true
 
+ereport-types.workspace = true
 db-macros.workspace = true
 nexus-auth.workspace = true
 nexus-config.workspace = true

@@ -302,11 +302,11 @@ impl Gimlet {
             if cfg.restart.metadata.is_empty() {
                 let map = &mut cfg.restart.metadata;
                 map.insert(
-                    "chassis_model".to_string(),
+                    "baseboard_part_number".to_string(),
                     SIM_GIMLET_BOARD.into(),
                 );
                 map.insert(
-                    "chassis_serial".to_string(),
+                    "baseboard_serial_number".to_string(),
                     gimlet.common.serial_number.clone().into(),
                 );
                 map.insert("hubris_archive_id".to_string(), hubris_gitc.into());
