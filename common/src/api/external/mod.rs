@@ -3389,9 +3389,10 @@ pub enum BfdMode {
 )]
 pub struct ServiceIcmpConfig {
     /// When enabled, Nexus is able to receive ICMP Destination Unreachable
-    /// (type 4, fragmentation needed) and Time Exceeded messages. These
-    /// enable Nexus to perform Path MTU discovery and better cope with
-    /// fragmentation issues. Otherwise all ICMP traffic will be dropped.
+    /// type 3 (port unreachable) and type 4 (fragmentation needed),
+    /// Redirect, and Time Exceeded messages. These enable Nexus to perform Path
+    /// MTU discovery and better cope with fragmentation issues. Otherwise all
+    /// inbound ICMP traffic will be dropped.
     pub enabled: bool,
 }
 

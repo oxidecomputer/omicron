@@ -16,8 +16,13 @@ SELECT
   NOW(), NOW(), vpc.id, 'enabled',
   -- Apply to the Nexus and External DNS zones...
   ARRAY['subnet:nexus','subnet:external-dns'],
-  -- Allow inbound ICMP Destination Unreachable (Too Large) and Time Exceeded
-  ARRAY['icmp:3,4','icmp:11'],
+  -- Allow inbound ICMP:
+  --  * Destination Unreachable
+  --    * Port Unreachable
+  --    * Fragmentation Needed
+  --  * Redirect
+  --  * Time Exceeded
+  ARRAY['icmp:3,3-4','icmp:5','icmp:11'],
   'inbound', 'allow', 65534
 FROM omicron.public.vpc
   WHERE vpc.id = '001de000-074c-4000-8000-000000000000'
