@@ -10349,6 +10349,7 @@ dependencies = [
  "clap",
  "colored",
  "datatest-stable",
+ "dropshot",
  "expectorate",
  "humantime",
  "indent_write",
@@ -10378,7 +10379,9 @@ dependencies = [
  "swrite",
  "tabled 0.15.0",
  "tokio",
+ "tufaceous",
  "tufaceous-artifact",
+ "update-common",
  "uuid",
 ]
 

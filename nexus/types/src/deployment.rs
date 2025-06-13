@@ -1242,6 +1242,10 @@ impl slog::KV for PendingMgsUpdate {
         serializer.emit_str(
             Key::from("artifact_hash"),
             &self.artifact_hash.to_string(),
+        )?;
+        serializer.emit_str(
+            Key::from("artifact_version"),
+            &self.artifact_version.to_string(),
         )
     }
 }

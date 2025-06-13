@@ -60,6 +60,7 @@ use tabled::Tabled;
 use tufaceous_artifact::ArtifactHash;
 use tufaceous_artifact::ArtifactVersion;
 use tufaceous_artifact::ArtifactVersionError;
+use update_common::artifacts::{ArtifactsWithPlan, ControlPlaneZonesMode};
 
 mod log_capture;
 
@@ -727,6 +728,11 @@ enum SetArgs {
     NumNexus { num_nexus: u16 },
     /// system's external DNS zone name (suffix)
     ExternalDnsZoneName { zone_name: String },
+    /// system target release
+    TargetRelease {
+        /// TUF repo containing release artifacts
+        filename: Utf8PathBuf,
+    },
 }
 
 #[derive(Debug, Args)]
@@ -838,6 +844,7 @@ fn cmd_sled_list(
     #[tabled(rename_all = "SCREAMING_SNAKE_CASE")]
     struct Sled {
         id: SledUuid,
+        serial: String,
         nzpools: usize,
         subnet: String,
     }
@@ -849,11 +856,12 @@ fn cmd_sled_list(
         .to_planning_input_builder()
         .context("failed to generate planning input")?
         .build();
-    let rows = planning_input.all_sled_resources(SledFilter::Commissioned).map(
-        |(sled_id, sled_resources)| Sled {
+    let rows = planning_input.all_sleds(SledFilter::Commissioned).map(
+        |(sled_id, sled_details)| Sled {
             id: sled_id,
-            subnet: sled_resources.subnet.net().to_string(),
-            nzpools: sled_resources.zpools.len(),
+            serial: sled_details.baseboard_id.serial_number.clone(),
+            subnet: sled_details.resources.subnet.net().to_string(),
+            nzpools: sled_details.resources.zpools.len(),
         },
     );
     let table = tabled::Table::new(rows)
@@ -1618,20 +1626,7 @@ fn cmd_wipe(
 fn cmd_show(sim: &mut ReconfiguratorSim) -> anyhow::Result<Option<String>> {
     let mut s = String::new();
     let state = sim.current_state();
-    do_print_properties(&mut s, state);
-    swriteln!(
-        s,
-        "target number of Nexus instances: {}",
-        state
-            .config()
-            .num_nexus()
-            .map_or_else(|| "default".to_owned(), |n| n.to_string())
-    );
-    Ok(Some(s))
-}
 
-// TODO: consider moving this to a method on `SimState`.
-fn do_print_properties(s: &mut String, state: &SimState) {
     swriteln!(
         s,
         "configured external DNS zone name: {}",
@@ -1667,6 +1662,41 @@ fn do_print_properties(s: &mut String, state: &SimState) {
             .collect::<Vec<_>>()
             .join(", "),
     );
+    swriteln!(
+        s,
+        "target number of Nexus instances: {}",
+        state
+            .config()
+            .num_nexus()
+            .map_or_else(|| "default".to_owned(), |n| n.to_string())
+    );
+
+    let target_release = state.system().description().target_release();
+    match target_release {
+        Some(tuf_desc) => {
+            swriteln!(
+                s,
+                "target release: {} ({})",
+                tuf_desc.repo.system_version,
+                tuf_desc.repo.file_name
+            );
+            for artifact in &tuf_desc.artifacts {
+                swriteln!(
+                    s,
+                    "    artifact: {} {} ({} version {})",
+                    artifact.hash,
+                    artifact.id.kind,
+                    artifact.id.name,
+                    artifact.id.version
+                );
+            }
+        }
+        None => {
+            swriteln!(s, "target release: unset");
+        }
+    }
+
+    Ok(Some(s))
 }
 
 fn cmd_set(
@@ -1702,6 +1732,33 @@ fn cmd_set(
             );
             state.config_mut().set_external_dns_zone_name(zone_name);
             rv
+        }
+        SetArgs::TargetRelease { filename } => {
+            let file = std::fs::File::open(&filename)
+                .with_context(|| format!("open {:?}", filename))?;
+            let buf = std::io::BufReader::new(file);
+            let rt = tokio::runtime::Runtime::new()
+                .context("creating tokio runtime")?;
+            // We're not using the repo hash here.  Make one up.
+            let repo_hash = ArtifactHash([0; 32]);
+            let artifacts_with_plan = rt.block_on(async {
+                ArtifactsWithPlan::from_zip(
+                    buf,
+                    None,
+                    repo_hash,
+                    ControlPlaneZonesMode::Split,
+                    &sim.log,
+                )
+                .await
+                .with_context(|| format!("unpacking {:?}", filename))
+            })?;
+            let description = artifacts_with_plan.description().clone();
+            drop(artifacts_with_plan);
+            state
+                .system_mut()
+                .description_mut()
+                .set_target_release(Some(description));
+            format!("set target release based on {}", filename)
         }
     };
 
