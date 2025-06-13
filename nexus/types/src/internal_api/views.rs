@@ -9,13 +9,19 @@ use chrono::SecondsFormat;
 use chrono::Utc;
 use futures::future::ready;
 use futures::stream::StreamExt;
+use nexus_sled_agent_shared::inventory::ConfigReconcilerInventory;
+use nexus_sled_agent_shared::inventory::OmicronZoneImageSource;
+use nexus_sled_agent_shared::inventory::OmicronZoneType;
 use omicron_common::api::external::MacAddr;
 use omicron_common::api::external::ObjectStream;
+use omicron_common::api::external::TufRepoDescription;
 use omicron_common::api::external::Vni;
 use omicron_common::snake_case_result;
 use omicron_common::snake_case_result::SnakeCaseResult;
 use omicron_uuid_kinds::DemoSagaUuid;
+use omicron_uuid_kinds::{OmicronZoneUuid, SledUuid};
 use schemars::JsonSchema;
+use semver::Version;
 use serde::Deserialize;
 use serde::Serialize;
 use std::collections::BTreeMap;
@@ -468,4 +474,112 @@ pub enum UpdateAttemptStatus {
 pub struct WaitingStatus {
     pub next_attempt_time: DateTime<Utc>,
     pub nattempts_done: u32,
+}
+
+#[derive(
+    Debug,
+    Clone,
+    PartialEq,
+    Eq,
+    PartialOrd,
+    Ord,
+    Serialize,
+    Deserialize,
+    JsonSchema,
+)]
+#[serde(
+    rename_all = "snake_case",
+    tag = "zone_status_version",
+    content = "details"
+)]
+pub enum ZoneStatusVersion {
+    Unknown,
+    InstallDataset,
+    Version(Version),
+}
+
+impl Display for ZoneStatusVersion {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            ZoneStatusVersion::Unknown => write!(f, "unknown"),
+            ZoneStatusVersion::InstallDataset => write!(f, "install dataset"),
+            ZoneStatusVersion::Version(version) => {
+                write!(f, "{}", version)
+            }
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+pub struct ZoneStatus {
+    pub zone_id: OmicronZoneUuid,
+    pub zone_type: OmicronZoneType,
+    pub version: ZoneStatusVersion,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+pub struct UpgradeStatus {
+    pub zones: BTreeMap<SledUuid, Vec<ZoneStatus>>,
+}
+
+impl UpgradeStatus {
+    pub fn new<'a>(
+        old: Option<&TufRepoDescription>,
+        new: Option<&TufRepoDescription>,
+        sleds: impl Iterator<
+            Item = (&'a SledUuid, &'a Option<ConfigReconcilerInventory>),
+        >,
+    ) -> UpgradeStatus {
+        let zones = sleds
+            .map(|(sled_id, inv)| {
+                (
+                    *sled_id,
+                    inv.as_ref().map_or(vec![], |inv| {
+                        inv.running_omicron_zones()
+                            .map(|conf| ZoneStatus {
+                                zone_id: conf.id,
+                                zone_type: conf.zone_type.clone(),
+                                version: Self::zone_image_source_to_version(
+                                    old,
+                                    new,
+                                    &conf.image_source,
+                                ),
+                            })
+                            .collect()
+                    }),
+                )
+            })
+            .collect();
+        UpgradeStatus { zones }
+    }
+
+    pub fn zone_image_source_to_version(
+        old: Option<&TufRepoDescription>,
+        new: Option<&TufRepoDescription>,
+        source: &OmicronZoneImageSource,
+    ) -> ZoneStatusVersion {
+        let &OmicronZoneImageSource::Artifact { hash } = source else {
+            return ZoneStatusVersion::InstallDataset;
+        };
+
+        if let Some(old) = old {
+            if let Some(_) = old.artifacts.iter().find(|meta| meta.hash == hash)
+            {
+                return ZoneStatusVersion::Version(
+                    old.repo.system_version.clone(),
+                );
+            }
+        }
+
+        if let Some(new) = new {
+            if let Some(_) = new.artifacts.iter().find(|meta| meta.hash == hash)
+            {
+                return ZoneStatusVersion::Version(
+                    new.repo.system_version.clone(),
+                );
+            }
+        }
+
+        ZoneStatusVersion::Unknown
+    }
 }
