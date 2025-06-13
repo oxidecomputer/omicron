@@ -174,6 +174,8 @@ fn make_non_boot_info(
 mod tests {
     use super::*;
 
+    use crate::test_utils::make_internal_disks_rx;
+
     use camino_tempfile_ext::prelude::*;
     use dropshot::ConfigLogging;
     use dropshot::ConfigLoggingLevel;
@@ -192,7 +194,6 @@ mod tests {
     use sled_agent_zone_images_examples::dataset_missing_error;
     use sled_agent_zone_images_examples::dataset_not_dir_error;
     use sled_agent_zone_images_examples::deserialize_error;
-    use sled_agent_zone_images_examples::make_internal_disks_rx;
 
     /// Boot disk present / no other disks. (This produces a warning, but is
     /// otherwise okay.)

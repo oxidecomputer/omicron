@@ -11,6 +11,8 @@ mod file_source;
 mod install_dataset_metadata;
 mod mupdate_override;
 mod source_resolver;
+#[cfg(test)]
+mod test_utils;
 mod zone_manifest;
 
 pub use file_source::*;

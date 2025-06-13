@@ -302,6 +302,8 @@ fn compute_size_and_hash(
 mod tests {
     use super::*;
 
+    use crate::test_utils::make_internal_disks_rx;
+
     use camino_tempfile_ext::prelude::*;
     use dropshot::{ConfigLogging, ConfigLoggingLevel, test_util::LogContext};
     use expectorate::assert_contents;
@@ -311,7 +313,7 @@ mod tests {
     use sled_agent_zone_images_examples::{
         BOOT_PATHS, BOOT_UUID, NON_BOOT_2_PATHS, NON_BOOT_2_UUID,
         NON_BOOT_3_PATHS, NON_BOOT_3_UUID, NON_BOOT_PATHS, NON_BOOT_UUID,
-        WriteInstallDatasetContext, deserialize_error, make_internal_disks_rx,
+        WriteInstallDatasetContext, deserialize_error,
     };
 
     // Much of the logic in this module is shared with mupdate_override.rs, and

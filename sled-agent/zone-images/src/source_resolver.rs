@@ -209,11 +209,12 @@ impl ResolverInner {
 mod tests {
     use super::*;
 
+    use crate::test_utils::make_internal_disks_rx;
+
     use camino_tempfile_ext::prelude::*;
     use dropshot::{ConfigLogging, ConfigLoggingLevel, test_util::LogContext};
     use sled_agent_zone_images_examples::{
         BOOT_PATHS, BOOT_UUID, WriteInstallDatasetContext,
-        make_internal_disks_rx,
     };
 
     /// Test source resolver behavior when the zone manifest is invalid.

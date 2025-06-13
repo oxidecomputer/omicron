@@ -430,7 +430,7 @@ flate2 = "1.1.2"
 float-ord = "0.3.2"
 flume = "0.11.1"
 foreign-types = "0.3.2"
-fs-err = "3.1.0"
+fs-err = "3.1.1"
 futures = "0.3.31"
 gateway-api = { path = "gateway-api" }
 gateway-client = { path = "clients/gateway-client" }
@@ -472,10 +472,10 @@ httptest = "0.16.3"
 hubtools = { git = "https://github.com/oxidecomputer/hubtools.git", branch = "main" }
 humantime = "2.1.0"
 hyper = "1.6.0"
-hyper-util = "0.1.11"
+hyper-util = "0.1.14"
 hyper-rustls = "0.26.0"
 hyper-staticfile = "0.10.1"
-iddqd = { version = "0.3.6", features = ["daft", "serde", "schemars08"] }
+iddqd = { version = "0.3.7", features = ["daft", "serde", "schemars08"] }
 id-map = { path = "id-map" }
 illumos-utils = { path = "illumos-utils" }
 iana-time-zone = "0.1.63"

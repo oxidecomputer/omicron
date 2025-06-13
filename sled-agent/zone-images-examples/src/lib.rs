@@ -7,11 +7,7 @@
 //! This crate provides helpers for generating example values for zone image
 //! resolver types.
 
-use std::{
-    collections::BTreeSet,
-    fs, io,
-    sync::{Arc, LazyLock},
-};
+use std::{collections::BTreeSet, fs, io, sync::LazyLock};
 
 use camino::{Utf8Path, Utf8PathBuf};
 use camino_tempfile_ext::{
@@ -19,21 +15,16 @@ use camino_tempfile_ext::{
     prelude::*,
 };
 use iddqd::{IdOrdItem, IdOrdMap, id_upcast};
-use omicron_common::{
-    disk::DiskIdentity,
-    update::{
-        MupdateOverrideInfo, OmicronZoneFileMetadata, OmicronZoneManifest,
-    },
+use omicron_common::update::{
+    MupdateOverrideInfo, OmicronZoneFileMetadata, OmicronZoneManifest,
 };
 use omicron_uuid_kinds::{MupdateOverrideUuid, MupdateUuid, ZpoolUuid};
 use sha2::{Digest, Sha256};
-use sled_agent_config_reconciler::InternalDisksReceiver;
 use sled_agent_types::zone_images::{
     ArcIoError, ArcSerdeJsonError, ArtifactReadResult,
     InstallMetadataReadError, ZoneManifestArtifactResult,
     ZoneManifestArtifactsResult,
 };
-use sled_storage::config::MountConfig;
 use tufaceous_artifact::ArtifactHash;
 
 pub struct OverridePaths {
@@ -72,31 +63,6 @@ pub const NON_BOOT_3_UUID: ZpoolUuid =
     ZpoolUuid::from_u128(0xd0d04947_93c5_40fd_97ab_4648b8cc28d6);
 pub static NON_BOOT_3_PATHS: LazyLock<OverridePaths> =
     LazyLock::new(|| OverridePaths::for_uuid(NON_BOOT_3_UUID));
-
-pub fn make_internal_disks_rx(
-    root: &Utf8Path,
-    boot_zpool: ZpoolUuid,
-    other_zpools: &[ZpoolUuid],
-) -> InternalDisksReceiver {
-    let identity_from_zpool = |zpool: ZpoolUuid| DiskIdentity {
-        vendor: "sled-agent-zone-images-tests".to_string(),
-        model: "fake-disk".to_string(),
-        serial: zpool.to_string(),
-    };
-    let mount_config = MountConfig {
-        root: root.to_path_buf(),
-        synthetic_disk_root: root.to_path_buf(),
-    };
-    InternalDisksReceiver::fake_static(
-        Arc::new(mount_config),
-        std::iter::once((identity_from_zpool(boot_zpool), boot_zpool)).chain(
-            other_zpools
-                .iter()
-                .copied()
-                .map(|pool| (identity_from_zpool(pool), pool)),
-        ),
-    )
-}
 
 /// Context for writing out fake zones to install dataset directories.
 ///
