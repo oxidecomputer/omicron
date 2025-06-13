@@ -233,6 +233,7 @@ pub use switch_interface::*;
 pub use switch_port::*;
 pub use target_release::*;
 pub use tuf_repo::*;
+pub use typed_uuid::DbTypedUuid;
 pub use typed_uuid::to_db_typed_uuid;
 pub use upstairs_repair::*;
 pub use user_builtin::*;
