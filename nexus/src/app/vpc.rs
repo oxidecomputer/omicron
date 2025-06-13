@@ -26,6 +26,7 @@ use omicron_common::api::external::NameOrId;
 use omicron_common::api::external::UpdateResult;
 use omicron_common::api::external::VpcFirewallRuleUpdateParams;
 use omicron_common::api::external::http_pagination::PaginatedBy;
+use omicron_common::api::internal::shared::ResolvedVpcFirewallRule;
 use std::sync::Arc;
 use uuid::Uuid;
 
@@ -261,8 +262,7 @@ impl super::Nexus {
         opctx: &OpContext,
         vpc: &db::model::Vpc,
         rules: &[db::model::VpcFirewallRule],
-    ) -> Result<Vec<sled_agent_client::types::ResolvedVpcFirewallRule>, Error>
-    {
+    ) -> Result<Vec<ResolvedVpcFirewallRule>, Error> {
         nexus_networking::resolve_firewall_rules_for_sled_agent(
             &self.db_datastore,
             opctx,
