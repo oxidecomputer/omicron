@@ -59,8 +59,10 @@ tufaceous-artifact.workspace = true
 camino-tempfile.workspace = true
 expectorate.workspace = true
 libc.workspace = true
+proptest.workspace = true
 regress.workspace = true
 serde_urlencoded.workspace = true
+test-strategy.workspace = true
 tokio = { workspace = true, features = ["test-util"] }
 toml.workspace = true
 

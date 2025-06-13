@@ -12,6 +12,9 @@ use chrono::{DateTime, Utc};
 use daft::Diffable;
 use id_map::IdMap;
 use id_map::IdMappable;
+use iddqd::IdOrdItem;
+use iddqd::IdOrdMap;
+use iddqd::id_upcast;
 use omicron_common::disk::{DatasetKind, DatasetName};
 use omicron_common::ledger::Ledgerable;
 use omicron_common::{
@@ -127,6 +130,7 @@ pub struct ConfigReconcilerInventory {
     pub external_disks:
         BTreeMap<PhysicalDiskUuid, ConfigReconcilerInventoryResult>,
     pub datasets: BTreeMap<DatasetUuid, ConfigReconcilerInventoryResult>,
+    pub orphaned_datasets: IdOrdMap<OrphanedDataset>,
     pub zones: BTreeMap<OmicronZoneUuid, ConfigReconcilerInventoryResult>,
 }
 
@@ -169,8 +173,34 @@ impl ConfigReconcilerInventory {
             .iter()
             .map(|z| (z.id, ConfigReconcilerInventoryResult::Ok))
             .collect();
-        Self { last_reconciled_config: config, external_disks, datasets, zones }
+        Self {
+            last_reconciled_config: config,
+            external_disks,
+            datasets,
+            orphaned_datasets: IdOrdMap::new(),
+            zones,
+        }
     }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Deserialize, JsonSchema, Serialize)]
+pub struct OrphanedDataset {
+    pub name: DatasetName,
+    pub reason: String,
+    pub id: Option<DatasetUuid>,
+    pub mounted: bool,
+    pub available: ByteCount,
+    pub used: ByteCount,
+}
+
+impl IdOrdItem for OrphanedDataset {
+    type Key<'a> = &'a DatasetName;
+
+    fn key(&self) -> Self::Key<'_> {
+        &self.name
+    }
+
+    id_upcast!();
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Deserialize, JsonSchema, Serialize)]

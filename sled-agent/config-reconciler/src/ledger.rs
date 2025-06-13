@@ -684,14 +684,14 @@ mod tests {
         }
     }
 
-    fn make_fake_disk() -> (DiskIdentity, ZpoolName) {
+    fn make_fake_disk() -> (DiskIdentity, ZpoolUuid) {
         (
             DiskIdentity {
                 vendor: "ledger-test".into(),
                 model: "ledger-test".into(),
                 serial: "ledger-test-disk".into(),
             },
-            ZpoolName::new_internal(ZpoolUuid::new_v4()),
+            ZpoolUuid::new_v4(),
         )
     }
 

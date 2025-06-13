@@ -127,6 +127,7 @@ members = [
     "sled-agent/repo-depot-api",
     "sled-agent/types",
     "sled-agent/zone-images",
+    "sled-agent/zone-images-examples",
     "sled-diagnostics",
     "sled-hardware",
     "sled-hardware/types",
@@ -279,6 +280,7 @@ default-members = [
     "sled-agent/repo-depot-api",
     "sled-agent/types",
     "sled-agent/zone-images",
+    "sled-agent/zone-images-examples",
     "sled-diagnostics",
     "sled-hardware",
     "sled-hardware/types",
@@ -424,11 +426,11 @@ ereport-types = { path = "ereport/types" }
 expectorate = "1.2.0"
 fatfs = "0.3.6"
 filetime = "0.2.25"
-flate2 = "1.1.1"
+flate2 = "1.1.2"
 float-ord = "0.3.2"
 flume = "0.11.1"
 foreign-types = "0.3.2"
-fs-err = "3.1.0"
+fs-err = "3.1.1"
 futures = "0.3.31"
 gateway-api = { path = "gateway-api" }
 gateway-client = { path = "clients/gateway-client" }
@@ -470,10 +472,10 @@ httptest = "0.16.3"
 hubtools = { git = "https://github.com/oxidecomputer/hubtools.git", branch = "main" }
 humantime = "2.1.0"
 hyper = "1.6.0"
-hyper-util = "0.1.11"
+hyper-util = "0.1.14"
 hyper-rustls = "0.26.0"
 hyper-staticfile = "0.10.1"
-iddqd = { version = "0.3.6", features = ["daft", "serde"] }
+iddqd = { version = "0.3.7", features = ["daft", "serde", "schemars08"] }
 id-map = { path = "id-map" }
 illumos-utils = { path = "illumos-utils" }
 iana-time-zone = "0.1.63"
@@ -675,6 +677,7 @@ sled-agent-client = { path = "clients/sled-agent-client" }
 sled-agent-config-reconciler = { path = "sled-agent/config-reconciler" }
 sled-agent-types = { path = "sled-agent/types" }
 sled-agent-zone-images = { path = "sled-agent/zone-images" }
+sled-agent-zone-images-examples = { path = "sled-agent/zone-images-examples" }
 sled-diagnostics = { path = "sled-diagnostics" }
 sled-hardware = { path = "sled-hardware" }
 sled-hardware-types = { path = "sled-hardware/types" }
