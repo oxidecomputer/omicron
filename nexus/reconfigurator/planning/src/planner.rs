@@ -554,7 +554,7 @@ impl<'a> Planner<'a> {
                 );
                 self.blueprint.record_operation(Operation::AddZone {
                     sled_id,
-                    kind: ZoneKind::BoundaryNtp,
+                    kind: ZoneKind::InternalNtp,
                 });
 
                 // If we're setting up a new sled (the typical reason to add a
