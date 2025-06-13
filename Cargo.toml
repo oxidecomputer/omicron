@@ -473,7 +473,7 @@ hyper = "1.6.0"
 hyper-util = "0.1.11"
 hyper-rustls = "0.26.0"
 hyper-staticfile = "0.10.1"
-iddqd = { version = "0.3.6", features = ["daft", "serde", "schemars08"] }
+iddqd = { version = "0.3.7", features = ["daft", "serde", "schemars08"] }
 id-map = { path = "id-map" }
 illumos-utils = { path = "illumos-utils" }
 iana-time-zone = "0.1.63"
