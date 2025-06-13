@@ -4999,6 +4999,7 @@ dependencies = [
  "anyhow",
  "assert_matches",
  "dns-server",
+ "dns-server-api",
  "dns-service-client",
  "dropshot",
  "expectorate",
