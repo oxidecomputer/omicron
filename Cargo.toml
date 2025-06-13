@@ -507,8 +507,8 @@ lldp_protocol = { git = "https://github.com/oxidecomputer/lldp", package = "prot
 macaddr = { version = "1.0.1", features = ["serde_std"] }
 maplit = "1.0.2"
 newtype_derive = "0.1.6"
-mg-admin-client = { git = "https://github.com/oxidecomputer/maghemite", rev = "65046498359ad2fdcb344eb6a80931a0dc19924e" }
-ddm-admin-client = { git = "https://github.com/oxidecomputer/maghemite", rev = "65046498359ad2fdcb344eb6a80931a0dc19924e" }
+mg-admin-client = { git = "https://github.com/oxidecomputer/maghemite", rev = "fac1310f118f3d2e361c399a6383fddcbab681ca" }
+ddm-admin-client = { git = "https://github.com/oxidecomputer/maghemite", rev = "fac1310f118f3d2e361c399a6383fddcbab681ca" }
 multimap = "0.10.1"
 nexus-auth = { path = "nexus/auth" }
 nexus-background-task-interface = { path = "nexus/background-task-interface" }
