@@ -937,6 +937,7 @@ pub enum DatasetKind {
     // Zone filesystems
     TransientZoneRoot,
     TransientZone {
+        #[cfg_attr(any(test, feature = "testing"), strategy("[^/]+"))]
         name: String,
     },
 

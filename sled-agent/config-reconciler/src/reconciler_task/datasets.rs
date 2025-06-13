@@ -35,6 +35,8 @@ use slog::warn;
 use slog_error_chain::InlineErrorChain;
 use std::collections::BTreeMap;
 use std::sync::Arc;
+use std::sync::atomic::AtomicBool;
+use std::sync::atomic::Ordering;
 
 #[derive(Debug, thiserror::Error)]
 pub(super) enum ZoneDatasetDependencyError {
@@ -53,6 +55,7 @@ pub(super) struct OmicronDatasets {
     datasets: IdMap<OmicronDataset>,
     orphaned_datasets: IdOrdMap<OrphanedDataset>,
     dataset_task: DatasetTaskHandle,
+    destroy_orphans: Arc<AtomicBool>,
 }
 
 impl OmicronDatasets {
@@ -71,14 +74,23 @@ impl OmicronDatasets {
                 },
             })
             .collect();
-        Self { datasets, orphaned_datasets: IdOrdMap::new(), dataset_task }
+        Self {
+            datasets,
+            orphaned_datasets: IdOrdMap::new(),
+            dataset_task,
+            destroy_orphans: Arc::new(AtomicBool::new(false)),
+        }
     }
 
-    pub(super) fn new(dataset_task: DatasetTaskHandle) -> Self {
+    pub(super) fn new(
+        dataset_task: DatasetTaskHandle,
+        destroy_orphans: Arc<AtomicBool>,
+    ) -> Self {
         Self {
             datasets: IdMap::default(),
             orphaned_datasets: IdOrdMap::new(),
             dataset_task,
+            destroy_orphans,
         }
     }
 
@@ -188,11 +200,17 @@ impl OmicronDatasets {
             self.datasets.remove(&dataset_id);
         }
 
-        // Check against the filesystem for any orphaned datasets; this should
-        // eventually _remove_ orphaned datasets instead of reporting them.
+        // Check against the filesystem for any orphaned datasets; this will
+        // attempt to destroy orphaned datasets if `self.destroy_orphans` is
+        // true. (It's false by default and must be enabled by an operator via
+        // `omdb`; making it true by default is tracked by omicron#6177.)
         match self
             .dataset_task
-            .datasets_report_orphans(datasets.clone(), currently_managed_zpools)
+            .datasets_report_orphans(
+                datasets.clone(),
+                currently_managed_zpools,
+                self.destroy_orphans.load(Ordering::Relaxed),
+            )
             .await
         {
             Ok(Ok(orphaned)) => {

@@ -334,6 +334,57 @@
         }
       }
     },
+    "/chicken-switch/destroy-orphaned-datasets": {
+      "get": {
+        "summary": "This endpoint reports the status of the `destroy_orphaned_datasets`",
+        "description": "chicken switch. It will be removed with omicron#6177.",
+        "operationId": "chicken_switch_destroy_orphaned_datasets_get",
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ChickenSwitchDestroyOrphanedDatasets"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      },
+      "put": {
+        "summary": "This endpoint sets the `destroy_orphaned_datasets` chicken switch",
+        "description": "(allowing sled-agent to delete datasets it believes are orphaned). It will be removed with omicron#6177.",
+        "operationId": "chicken_switch_destroy_orphaned_datasets_put",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ChickenSwitchDestroyOrphanedDatasets"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "204": {
+            "description": "resource updated"
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
     "/disks/{disk_id}": {
       "put": {
         "operationId": "disk_put",
@@ -2925,6 +2976,18 @@
         "type": "integer",
         "format": "uint64",
         "minimum": 0
+      },
+      "ChickenSwitchDestroyOrphanedDatasets": {
+        "type": "object",
+        "properties": {
+          "destroy_orphans": {
+            "description": "If true, sled-agent will attempt to destroy durable ZFS datasets that it believes were associated with now-expunged Omicron zones.",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "destroy_orphans"
+        ]
       },
       "Chipset": {
         "description": "A kind of virtual chipset.",

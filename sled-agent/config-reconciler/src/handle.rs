@@ -22,6 +22,8 @@ use slog::Logger;
 use std::collections::HashSet;
 use std::sync::Arc;
 use std::sync::OnceLock;
+use std::sync::atomic::AtomicBool;
+use std::sync::atomic::Ordering;
 use tokio::sync::watch;
 
 #[cfg(feature = "testing")]
@@ -97,6 +99,7 @@ pub struct ConfigReconcilerHandle {
     dataset_task: DatasetTaskHandle,
     reconciler_result_rx: watch::Receiver<ReconcilerResult>,
     currently_managed_zpools_rx: CurrentlyManagedZpoolsReceiver,
+    destroy_orphans: Arc<AtomicBool>,
 
     // Empty until `spawn_reconciliation_task()` is called.
     ledger_task: OnceLock<LedgerTaskHandle>,
@@ -160,6 +163,10 @@ impl ConfigReconcilerHandle {
                 ledger_task: OnceLock::new(),
                 reconciler_result_rx,
                 currently_managed_zpools_rx,
+                // By default, we only report (and don't destroy) orphans.
+                // Destruction can be turned on by sled-agent. This will go away
+                // with omicron#6177.
+                destroy_orphans: Arc::new(AtomicBool::new(false)),
             },
             // Stash the dependencies the reconciler task will need in
             // `spawn_reconciliation_task()` inside this token that the caller
@@ -237,9 +244,20 @@ impl ConfigReconcilerHandle {
             currently_managed_zpools_tx,
             external_disks_tx,
             raw_disks_rx,
+            Arc::clone(&self.destroy_orphans),
             sled_agent_facilities,
             reconciler_task_log,
         );
+    }
+
+    /// Read whether or not we try to destroy orphaned datasets.
+    pub fn will_destroy_orphans(&self) -> bool {
+        self.destroy_orphans.load(Ordering::Relaxed)
+    }
+
+    /// Control whether or not we try to destroy orphaned datasets.
+    pub fn set_destroy_orphans(&self, destroy_orphans: bool) {
+        self.destroy_orphans.store(destroy_orphans, Ordering::Relaxed);
     }
 
     /// Get the current timesync status.
