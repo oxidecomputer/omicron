@@ -3661,6 +3661,31 @@ CREATE TABLE IF NOT EXISTS omicron.public.inv_sled_agent (
     -- only present if `reconciler_status_kind != 'not-yet-run'`
     reconciler_status_duration_secs FLOAT,
 
+    -- Columns making up the zone image resolver's zone manifest description:
+    --
+    -- The path to the boot disk image file.
+    zone_manifest_boot_disk_path TEXT NOT NULL,
+    -- The mupdate ID that created the zone manifest. If this is NULL, then there
+    -- was an error reading the zone manifest.
+    zone_manifest_mupdate_id UUID,
+    -- Message describing the status of the zone manifest on the boot disk. If
+    -- this is NULL, then the zone manifest was successfully read, and the
+    -- inv_zone_manifest_zone table has entries corresponding to the zone
+    -- manifest.
+    zone_manifest_boot_disk_error TEXT,
+
+    -- Columns making up the zone image resolver's mupdate override description.
+    mupdate_override_boot_disk_path TEXT NOT NULL,
+    -- The ID of the mupdate override. NULL means either that the mupdate
+    -- override was not found or that we failed to read it -- the two cases are
+    -- differentiated by the presence of a non-NULL value in the
+    -- mupdate_override_boot_disk_error column.
+    mupdate_override_id UUID,
+    -- Error reading the mupdate override, if any. If this is NULL then
+    -- the mupdate override was either successfully read or is not
+    -- present.
+    mupdate_override_boot_disk_error TEXT,
+
     CONSTRAINT reconciler_status_sled_config_present_if_running CHECK (
         (reconciler_status_kind = 'running'
             AND reconciler_status_sled_config IS NOT NULL)
@@ -3676,6 +3701,30 @@ CREATE TABLE IF NOT EXISTS omicron.public.inv_sled_agent (
         (reconciler_status_kind != 'not-yet-run'
             AND reconciler_status_timestamp IS NOT NULL
             AND reconciler_status_duration_secs IS NOT NULL)
+    ),
+
+    -- For the zone manifest, exactly one of mupdate_id and
+    -- boot_disk_error must be set.
+    --
+    -- This is equivalent to Result<T, String>.
+    CONSTRAINT zone_manifest_consistency CHECK (
+        (zone_manifest_mupdate_id IS NULL
+            AND zone_manifest_boot_disk_error IS NOT NULL)
+        OR
+        (zone_manifest_mupdate_id IS NOT NULL
+            AND zone_manifest_boot_disk_error IS NULL)
+    ),
+
+    -- For the mupdate override, three states are valid:
+    -- 1. No override, no error
+    -- 2. Override, no error
+    -- 3. No override, error
+    --
+    -- This is equivalent to Result<Option<T>, String>.
+    CONSTRAINT mupdate_override_consistency CHECK (
+        (mupdate_override_id IS NULL
+            AND mupdate_override_boot_disk_error IS NOT NULL)
+        OR mupdate_override_boot_disk_error IS NULL
     ),
 
     PRIMARY KEY (inv_collection_id, sled_id)
@@ -3890,6 +3939,87 @@ CREATE TABLE IF NOT EXISTS omicron.public.inv_last_reconciliation_zone_result (
     error_message TEXT,
 
     PRIMARY KEY (inv_collection_id, sled_id, zone_id)
+);
+
+-- A table describing a single zone within a zone manifest collected by inventory.
+CREATE TABLE IF NOT EXISTS omicron.public.inv_zone_manifest_zone (
+    -- where this observation came from
+    -- (foreign key into `inv_collection` table)
+    inv_collection_id UUID NOT NULL,
+
+    -- unique id for this sled (should be foreign keys into `sled` table, though
+    -- it's conceivable a sled will report an id that we don't know about)
+    sled_id UUID NOT NULL,
+
+    -- Zone file name, part of the primary key within this table.
+    zone_file_name TEXT NOT NULL,
+
+    -- The full path to the file.
+    path TEXT NOT NULL,
+
+    -- The expected file size.
+    expected_size INT8 NOT NULL,
+
+    -- The expected hash.
+    expected_sha256 STRING(64) NOT NULL,
+
+    -- The error while reading the zone or matching it to the manifest, if any.
+    -- NULL indicates success.
+    error TEXT,
+
+    PRIMARY KEY (inv_collection_id, sled_id, zone_file_name)
+);
+
+-- A table describing status for a single zone manifest on a non-boot disk
+-- collected by inventory.
+CREATE TABLE IF NOT EXISTS omicron.public.inv_zone_manifest_non_boot (
+    -- where this observation came from
+    -- (foreign key into `inv_collection` table)
+    inv_collection_id UUID NOT NULL,
+
+    -- unique id for this sled (should be foreign keys into `sled` table, though
+    -- it's conceivable a sled will report an id that we don't know about)
+    sled_id UUID NOT NULL,
+
+    -- unique ID for this non-boot disk
+    non_boot_zpool_id UUID NOT NULL,
+
+    -- The full path to the zone manifest.
+    path TEXT NOT NULL,
+
+    -- Whether the non-boot disk is in a valid state.
+    is_valid BOOLEAN NOT NULL,
+
+    -- A message attached to this disk.
+    message TEXT NOT NULL,
+
+    PRIMARY KEY (inv_collection_id, sled_id, non_boot_zpool_id)
+);
+
+-- A table describing status for a single mupdate override on a non-boot disk
+-- collected by inventory.
+CREATE TABLE IF NOT EXISTS omicron.public.inv_mupdate_override_non_boot (
+    -- where this observation came from
+    -- (foreign key into `inv_collection` table)
+    inv_collection_id UUID NOT NULL,
+
+    -- unique id for this sled (should be foreign keys into `sled` table, though
+    -- it's conceivable a sled will report an id that we don't know about)
+    sled_id UUID NOT NULL,
+
+    -- unique id for this non-boot disk
+    non_boot_zpool_id UUID NOT NULL,
+
+    -- The full path to the mupdate override file.
+    path TEXT NOT NULL,
+
+    -- Whether the non-boot disk is in a valid state.
+    is_valid BOOLEAN NOT NULL,
+
+    -- A message attached to this disk.
+    message TEXT NOT NULL,
+
+    PRIMARY KEY (inv_collection_id, sled_id, non_boot_zpool_id)
 );
 
 CREATE TYPE IF NOT EXISTS omicron.public.zone_type AS ENUM (
@@ -5760,7 +5890,7 @@ INSERT INTO omicron.public.db_metadata (
     version,
     target_version
 ) VALUES
-    (TRUE, NOW(), NOW(), '150.0.0', NULL)
+    (TRUE, NOW(), NOW(), '151.0.0', NULL)
 ON CONFLICT DO NOTHING;
 
 COMMIT;

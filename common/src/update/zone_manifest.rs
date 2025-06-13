@@ -4,11 +4,12 @@
 
 use iddqd::{IdOrdItem, IdOrdMap, id_upcast};
 use omicron_uuid_kinds::MupdateUuid;
+use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use tufaceous_artifact::ArtifactHash;
 
 /// Describes the set of Omicron zones written out into an install dataset.
-#[derive(Clone, Debug, Eq, PartialEq, Deserialize, Serialize)]
+#[derive(Clone, Debug, Eq, PartialEq, Deserialize, Serialize, JsonSchema)]
 pub struct OmicronZoneManifest {
     /// The UUID of the mupdate which created this manifest. Intended primarily
     /// for checking equality.
@@ -27,7 +28,15 @@ impl OmicronZoneManifest {
 ///
 /// Part of [`OmicronZoneManifest`].
 #[derive(
-    Clone, Debug, Eq, Ord, PartialEq, PartialOrd, Deserialize, Serialize,
+    Clone,
+    Debug,
+    Eq,
+    Ord,
+    PartialEq,
+    PartialOrd,
+    Deserialize,
+    Serialize,
+    JsonSchema,
 )]
 pub struct OmicronZoneFileMetadata {
     /// The file name.

@@ -1122,6 +1122,8 @@ impl SledAgent {
         let reservoir_size = self.inner.instances.reservoir_size();
         let sled_role =
             if is_scrimlet { SledRole::Scrimlet } else { SledRole::Gimlet };
+        let zone_image_resolver =
+            self.inner.services.zone_image_resolver().status().to_inventory();
 
         let ReconcilerInventory {
             disks,
@@ -1146,6 +1148,7 @@ impl SledAgent {
             ledgered_sled_config,
             reconciler_status,
             last_reconciliation,
+            zone_image_resolver,
         })
     }
 
