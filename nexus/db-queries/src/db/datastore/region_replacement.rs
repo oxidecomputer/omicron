@@ -220,10 +220,11 @@ impl DataStore {
                         Ok(())
                     } else {
                         Err(Error::conflict(format!(
-                            "region replacement {} set to {:?} (operating saga id {:?})",
+                            "region replacement {} set to {:?} (operating saga id {:?}) (expected operating saga id {:?})",
                             region_replacement_id,
                             record.replacement_state,
                             record.operating_saga_id,
+                            operating_saga_id,
                         )))
                     }
                 }
@@ -415,10 +416,11 @@ impl DataStore {
                         Ok(())
                     } else {
                         Err(Error::conflict(format!(
-                            "region replacement {} set to {:?} (operating saga id {:?})",
+                            "region replacement {} set to {:?} (operating saga id {:?}) (expected operating saga id {:?})",
                             region_replacement_id,
                             record.replacement_state,
                             record.operating_saga_id,
+                            operating_saga_id,
                         )))
                     }
                 }
@@ -618,10 +620,11 @@ impl DataStore {
                         Ok(())
                     } else {
                         Err(Error::conflict(format!(
-                            "region replacement {} set to {:?} (operating saga id {:?})",
+                            "region replacement {} set to {:?} (operating saga id {:?}) (expected operating saga id {:?})",
                             region_replacement_id,
                             record.replacement_state,
                             record.operating_saga_id,
+                            operating_saga_id,
                         )))
                     }
                 }
