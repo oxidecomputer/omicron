@@ -493,7 +493,7 @@ itertools = "0.14.0"
 internet-checksum = "0.2"
 ipnetwork = { version = "0.21", features = ["schemars", "serde"] }
 ispf = { git = "https://github.com/oxidecomputer/ispf" }
-jiff = "0.2.14"
+jiff = "0.2.15"
 key-manager = { path = "key-manager" }
 kstat-rs = "0.2.4"
 libc = "0.2.172"
