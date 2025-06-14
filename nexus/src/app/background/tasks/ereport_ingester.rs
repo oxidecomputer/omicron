@@ -179,6 +179,9 @@ impl Ingester {
             .await
         {
             if items.is_empty() {
+                if let Some(ref mut status) = status {
+                    status.requests += 1;
+                }
                 slog::trace!(
                     &opctx.log,
                     "no ereports returned by SP";
@@ -193,6 +196,8 @@ impl Ingester {
                         .map(|s| s.new_ereports),
                 );
                 break;
+            } else {
+                status.get_or_insert_default().requests += 1;
             }
             let db_ereports = items
                 .into_iter()
@@ -304,7 +309,6 @@ impl Ingester {
                 .await;
             match res {
                 Ok(ereports) => {
-                    status.get_or_insert_default().requests += 1;
                     return Some(ereports.into_inner());
                 }
                 Err(gateway_client::Error::ErrorResponse(rsp))
@@ -439,8 +443,8 @@ mod tests {
         );
         assert_eq!(
             activation1.sps.len(),
-            4,
-            "ereports from 4 SPs should be observed: {:?}",
+            3,
+            "ereports from 3 SPs should be observed: {:?}",
             activation1.sps,
         );
 
@@ -449,6 +453,10 @@ mod tests {
                 &status.errors,
                 &Vec::<String>::new(),
                 "there should be no errors from SP {sp_type:?} {slot}",
+            );
+            assert_eq!(
+                status.requests, 2,
+                "two HTTP requests should have been sent for SP {sp_type:?} {slot}",
             );
         }
 
