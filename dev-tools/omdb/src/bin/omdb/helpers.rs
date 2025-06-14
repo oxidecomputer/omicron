@@ -45,13 +45,6 @@ pub(crate) fn display_option_blank<T: std::fmt::Display>(
     opt.as_ref().map(|x| x.to_string()).unwrap_or_else(|| "".to_string())
 }
 
-// Display the string "<error>" for an Option<T> if it's None.
-pub(crate) fn display_option_error<T: std::fmt::Display>(
-    opt: &Option<T>,
-) -> String {
-    opt.as_ref().map(|x| x.to_string()).unwrap_or_else(|| "<error>".to_string())
-}
-
 // Format a `chrono::DateTime` in RFC3339 with milliseconds precision and using
 // `Z` rather than the UTC offset for UTC timestamps, to save a few characters
 // of line width in tabular output.
