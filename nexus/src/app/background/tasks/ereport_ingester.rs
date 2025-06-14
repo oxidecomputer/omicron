@@ -405,7 +405,10 @@ impl EreportQueryParams {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use nexus_db_queries::db::pagination::Paginator;
     use nexus_test_utils_macros::nexus_test;
+    use omicron_uuid_kinds::GenericUuid;
+    use uuid::uuid;
 
     type ControlPlaneTestContext =
         nexus_test_utils::ControlPlaneTestContext<crate::Server>;
@@ -448,7 +451,222 @@ mod tests {
                 "there should be no errors from SP {sp_type:?} {slot}",
             );
         }
-        
-        
+
+        // Now, let's check that the ereports exist in the database.
+
+        let sled0_restart_id = EreporterRestartUuid::from_untyped_uuid(uuid!(
+            "af1ebf85-36ba-4c31-bbec-b9825d6d9d8b"
+        ));
+        let sled1_restart_id = EreporterRestartUuid::from_untyped_uuid(uuid!(
+            "55e30cc7-a109-492f-aca9-735ed725df3c"
+        ));
+
+        let sled0_ereports = [
+            (
+                Ena::from(1),
+                serde_json::json!({
+                    "baseboard_part_number": "SimGimletSp",
+                    "baseboard_serial_number": "SimGimlet00",
+                    "hubris_archive_id": "ffffffff",
+                    "hubris_version": "0.0.2",
+                    "hubris_task_name": "task_apollo_server",
+                    "hubris_task_gen": 13,
+                    "hubris_uptime_ms": 1233,
+                    "ereport_message_version": 0,
+                    "class": "gov.nasa.apollo.o2_tanks.stir.begin",
+                    "message": "stirring the tanks",
+                }),
+            ),
+            (
+                Ena::from(2),
+                serde_json::json!({
+                    "baseboard_part_number": "SimGimletSp",
+                    "baseboard_serial_number": "SimGimlet00",
+                    "hubris_archive_id": "ffffffff",
+                    "hubris_version": "0.0.2",
+                    "hubris_task_name": "drv_ae35_server",
+                    "hubris_task_gen": 1,
+                    "hubris_uptime_ms": 1234,
+                    "ereport_message_version": 0,
+                    "class": "io.discovery.ae35.fault",
+                    "message": "i've just picked up a fault in the AE-35 unit",
+                    "de": {
+                        "scheme": "fmd",
+                        "mod-name": "ae35-diagnosis",
+                        "authority": {
+                            "product-id": "HAL-9000-series computer",
+                            "server-id": "HAL 9000",
+                        },
+                    },
+                    "hours_to_failure": 72,
+                }),
+            ),
+            (
+                Ena::from(3),
+                serde_json::json!({
+                    "baseboard_part_number": "SimGimletSp",
+                    "baseboard_serial_number": "SimGimlet00",
+                    "hubris_archive_id": "ffffffff",
+                    "hubris_version": "0.0.2",
+                    "hubris_task_name": "task_apollo_server",
+                    "hubris_task_gen": 13,
+                    "hubris_uptime_ms": 1237,
+                    "ereport_message_version": 0,
+                    "class": "gov.nasa.apollo.fault",
+                    "message": "houston, we have a problem",
+                    "crew": [
+                        "Lovell",
+                        "Swigert",
+                        "Haise",
+                    ],
+                }),
+            ),
+            (
+                Ena::from(4),
+                serde_json::json!({
+                    "baseboard_part_number": "SimGimletSp",
+                    "baseboard_serial_number": "SimGimlet00",
+                    "hubris_archive_id": "ffffffff",
+                    "hubris_version": "0.0.2",
+                    "hubris_task_name": "drv_thingy_server",
+                    "hubris_task_gen": 2,
+                    "hubris_uptime_ms": 1240,
+                    "ereport_message_version": 0,
+                    "class": "flagrant_error",
+                    "computer": false,
+                }),
+            ),
+            (
+                Ena::from(5),
+                serde_json::json!({
+                    "baseboard_part_number": "SimGimletSp",
+                    "baseboard_serial_number": "SimGimlet00",
+                    "hubris_archive_id": "ffffffff",
+                    "hubris_version": "0.0.2",
+                    "hubris_task_name": "task_latex_server",
+                    "hubris_task_gen": 1,
+                    "hubris_uptime_ms": 1245,
+                    "ereport_message_version": 0,
+                    "class": "overfull_hbox",
+                    "badness": 10000,
+                }),
+            ),
+        ];
+
+        let sled1_ereports = [(
+            Ena::from(1),
+            serde_json::json!({
+                "baseboard_part_number": "SimGimletSp",
+                "baseboard_serial_number": "SimGimlet01",
+                "hubris_archive_id": "ffffffff",
+                "hubris_version": "0.0.2",
+                "hubris_task_name": "task_thermal_server",
+                "hubris_task_gen": 1,
+                "hubris_uptime_ms": 1233,
+                "ereport_message_version": 0,
+                "class": "computer.oxide.gimlet.chassis_integrity.fault",
+                "nosub_class": "chassis_integrity.cat_hair_detected",
+                "message": "cat hair detected inside gimlet",
+                "de": {
+                    "scheme": "fmd",
+                    "mod-name": "hubris-thermal-diagnosis",
+                    "mod-version": "1.0",
+                    "authority": {
+                        "product-id": "oxide",
+                        "server-id": "SimGimlet1",
+                    }
+                },
+                "certainty": 0x64,
+                "cat_hair_amount": 10000,
+            }),
+        )];
+
+        check_sp_ereports_exist(
+            datastore,
+            &opctx,
+            sled0_restart_id,
+            &sled0_ereports,
+        )
+        .await;
+        check_sp_ereports_exist(
+            datastore,
+            &opctx,
+            sled1_restart_id,
+            &sled1_ereports,
+        )
+        .await;
+
+        // Activate the task again and assert that no new ereports were
+        // ingested.
+        let activation2 = ingester
+            .actually_activate(&opctx)
+            .await
+            .expect("activation 2 should succeed");
+        dbg!(&activation1);
+        assert_eq!(
+            activation2.error.as_ref(),
+            None,
+            "there should be no top-level activation error for the second \
+             activation"
+        );
+        assert_eq!(activation2.sps, &[], "no new ereports should be observed");
+
+        check_sp_ereports_exist(
+            datastore,
+            &opctx,
+            sled0_restart_id,
+            &sled0_ereports,
+        )
+        .await;
+        check_sp_ereports_exist(
+            datastore,
+            &opctx,
+            sled1_restart_id,
+            &sled1_ereports,
+        )
+        .await;
+    }
+
+    async fn check_sp_ereports_exist(
+        datastore: &DataStore,
+        opctx: &OpContext,
+        restart_id: EreporterRestartUuid,
+        expected_ereports: &[(Ena, serde_json::Value)],
+    ) {
+        let mut paginator =
+            Paginator::new(std::num::NonZeroU32::new(100).unwrap());
+        let mut found_ereports = BTreeMap::new();
+        while let Some(p) = paginator.next() {
+            let batch = datastore
+                .sp_ereport_list_by_restart(
+                    &opctx,
+                    restart_id,
+                    &p.current_pagparams(),
+                )
+                .await
+                .expect("should be able to query for ereports");
+            paginator = p.found_batch(&batch, &|ereport| ereport.ena);
+            found_ereports.extend(
+                batch.into_iter().map(|ereport| (ereport.ena.0, ereport)),
+            );
+        }
+        assert_eq!(
+            expected_ereports.len(),
+            found_ereports.len(),
+            "expected {} ereports for {restart_id:?}",
+            expected_ereports.len()
+        );
+
+        for (ena, report) in expected_ereports {
+            let Some(found_report) = found_ereports.get(ena) else {
+                panic!(
+                    "expected ereport {restart_id:?}:{ena} not found in database"
+                )
+            };
+            assert_eq!(
+                report, &found_report.report,
+                "ereport data for {restart_id:?}:{ena} doesn't match expected"
+            );
+        }
     }
 }
