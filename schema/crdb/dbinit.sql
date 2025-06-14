@@ -5750,6 +5750,92 @@ ON omicron.public.webhook_delivery_attempt (
 );
 
 /*
+ * Ereports
+ */
+
+-- Ereports from service processors
+CREATE TABLE IF NOT EXISTS omicron.public.sp_ereport (
+    restart_id UUID NOT NULL,
+    ena INT8 NOT NULL,
+    time_deleted TIMESTAMPTZ,
+
+    -- time at which the ereport was collected
+    time_collected TIMESTAMPTZ NOT NULL,
+    -- UUID of the Nexus instance that collected the ereport
+    collector_id UUID NOT NULL,
+
+    -- physical lcoation of the reporting SP
+    --
+    -- these fields are always present, as they are how requests to collect
+    -- ereports are indexed by MGS.
+    sp_type omicron.public.sp_type NOT NULL,
+    sp_slot INT4 NOT NULL,
+
+    -- VPD identity of the reporting SP.
+    --
+    -- unlike the physical location, these fields are nullable, as an ereport
+    -- may be generated in a state where the SP doesn't know who or what it is.
+    -- consider that "i don't know my own identity" is a reasonable condition to
+    -- might want to generate an ereport about!
+    serial_number STRING,
+    part_number STRING,
+
+    -- JSON representation of the ereport
+    report JSONB NOT NULL,
+
+    PRIMARY KEY (restart_id, ena)
+);
+
+CREATE INDEX IF NOT EXISTS lookup_sp_ereports_by_slot
+ON omicron.public.sp_ereport (
+    sp_type,
+    sp_slot,
+    time_collected
+);
+
+CREATE INDEX IF NOT EXISTS order_sp_ereports_by_timestamp
+ON omicron.public.sp_ereport
+USING BTREE (
+    time_collected
+)
+WHERE
+    time_deleted IS NULL;
+
+-- Ereports from the host operating system
+CREATE TABLE IF NOT EXISTS omicron.public.host_ereport (
+    restart_id UUID NOT NULL,
+    ena INT8 NOT NULL,
+    time_deleted TIMESTAMPTZ,
+
+    -- time at which the ereport was collected
+    time_collected TIMESTAMPTZ NOT NULL,
+    -- UUID of the Nexus instance that collected the ereport
+    collector_id UUID NOT NULL,
+
+    -- identity of the reporting sled
+    sled_id UUID NOT NULL,
+    sled_serial TEXT NOT NULL,
+
+    -- JSON representation of the ereport
+    report JSONB NOT NULL,
+
+    PRIMARY KEY (restart_id, ena)
+);
+
+CREATE INDEX IF NOT EXISTS lookup_host_ereports_by_sled ON omicron.public.host_ereport (
+    sled_id,
+    time_collected
+);
+
+CREATE INDEX IF NOT EXISTS order_host_ereports_by_timestamp
+ON omicron.public.host_ereport
+USING BTREE (
+    time_collected
+)
+WHERE
+    time_deleted IS NULL;
+
+/*
  * Keep this at the end of file so that the database does not contain a version
  * until it is fully populated.
  */
@@ -5760,7 +5846,7 @@ INSERT INTO omicron.public.db_metadata (
     version,
     target_version
 ) VALUES
-    (TRUE, NOW(), NOW(), '150.0.0', NULL)
+    (TRUE, NOW(), NOW(), '151.0.0', NULL)
 ON CONFLICT DO NOTHING;
 
 COMMIT;
