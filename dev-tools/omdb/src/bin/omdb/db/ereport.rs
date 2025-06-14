@@ -322,7 +322,6 @@ async fn ereport_fetch(
     let sp_query = sp_dsl::sp_ereport
         .filter(sp_dsl::restart_id.eq(restart_id.clone()))
         .filter(sp_dsl::ena.eq(ena.clone()))
-        .filter(sp_dsl::time_deleted.is_null())
         .select(db::model::SpEreport::as_select());
     let sp_result = if !fetch_opts.include_deleted {
         sp_query
@@ -341,7 +340,6 @@ async fn ereport_fetch(
     let host_query = host_dsl::host_ereport
         .filter(host_dsl::restart_id.eq(restart_id))
         .filter(host_dsl::ena.eq(ena))
-        .filter(host_dsl::time_deleted.is_null())
         .select(db::model::HostEreport::as_select());
     let host_result = if !fetch_opts.include_deleted {
         host_query
