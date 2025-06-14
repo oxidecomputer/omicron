@@ -148,7 +148,7 @@ async fn cmd_db_ereport_list(
                 restart_id: restart_id.into_untyped_uuid(),
                 ena: ena.into(),
                 src: sp_type.into(),
-                slot: sp_slot.0.into(),
+                slot: sp_slot.0,
             }
         }
     }
@@ -252,7 +252,7 @@ async fn cmd_db_ereport_info(
     let ereport_id = ereport_types::EreportId { restart_id, ena };
     let conn = datastore.pool_connection_for_tests().await?;
     let db::model::Ereport { id, metadata, reporter, report } =
-        ereport_fetch(&*conn, fetch_opts, ereport_id).await?;
+        ereport_fetch(&conn, fetch_opts, ereport_id).await?;
 
     let db::model::EreportMetadata {
         time_collected,
@@ -320,16 +320,13 @@ async fn ereport_fetch(
     let ena = db::model::DbEna::from(id.ena);
 
     let sp_query = sp_dsl::sp_ereport
-        .filter(sp_dsl::restart_id.eq(restart_id.clone()))
-        .filter(sp_dsl::ena.eq(ena.clone()))
+        .filter(sp_dsl::restart_id.eq(restart_id))
+        .filter(sp_dsl::ena.eq(ena))
         .select(db::model::SpEreport::as_select());
     let sp_result = if !fetch_opts.include_deleted {
-        sp_query
-            .filter(sp_dsl::time_deleted.is_null())
-            .first_async(&*conn)
-            .await
+        sp_query.filter(sp_dsl::time_deleted.is_null()).first_async(conn).await
     } else {
-        sp_query.first_async(&*conn).await
+        sp_query.first_async(conn).await
     };
     if let Some(report) = sp_result.optional().with_context(|| {
         format!("failed to query for SP ereport matching {id}")
@@ -344,10 +341,10 @@ async fn ereport_fetch(
     let host_result = if !fetch_opts.include_deleted {
         host_query
             .filter(host_dsl::time_deleted.is_null())
-            .first_async(&*conn)
+            .first_async(conn)
             .await
     } else {
-        host_query.first_async(&*conn).await
+        host_query.first_async(conn).await
     };
     if let Some(report) = host_result.optional().with_context(|| {
         format!("failed to query for host OS ereport matching {id}")
@@ -409,7 +406,7 @@ async fn cmd_db_ereporters(
 
             if let Some(slot_type) = slot_type {
                 sp_query = sp_query
-                    .filter(sp_dsl::sp_type.eq(SpType::from(slot_type.clone())));
+                    .filter(sp_dsl::sp_type.eq(SpType::from(slot_type)));
             }
 
             if let Some(serial) = serial {

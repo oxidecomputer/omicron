@@ -300,7 +300,7 @@ impl Ingester {
             let res = client
                 .sp_ereports_ingest(
                     sp_type,
-                    slot as u32,
+                    u32::from(slot),
                     committed_ena.as_ref(),
                     LIMIT,
                     &restart_id,
