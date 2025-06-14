@@ -145,7 +145,7 @@ impl DataStore {
             ))
             .order_by(sp_dsl::restart_id)
             .load_async::<(Uuid, SpType, SqlU16, Option<DateTime<Utc>>, SqlU32)>(
-                &conn,
+                &*conn,
             )
             .await
             .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))?;
@@ -163,7 +163,7 @@ impl DataStore {
                 count_distinct(host_dsl::ena),
             ))
             .order_by(host_dsl::restart_id)
-            .load_async::<(Uuid, Uuid, Option<DateTime<Utc>>, SqlU32)>(&conn)
+            .load_async::<(Uuid, Uuid, Option<DateTime<Utc>>, SqlU32)>(&*conn)
             .await
             .map_err(|e| {
                 public_error_from_diesel(e, ErrorHandler::Server)
