@@ -450,7 +450,7 @@ gethostname = "0.5.0"
 gfss = { path = "trust-quorum/gfss" }
 glob = "0.3.2"
 guppy = "0.17.19"
-headers = "0.4.0"
+headers = "0.4.1"
 heck = "0.5"
 hex = "0.4.3"
 hex-literal = "0.4.1"
@@ -493,10 +493,10 @@ itertools = "0.14.0"
 internet-checksum = "0.2"
 ipnetwork = { version = "0.21", features = ["schemars", "serde"] }
 ispf = { git = "https://github.com/oxidecomputer/ispf" }
-jiff = "0.2.14"
+jiff = "0.2.15"
 key-manager = { path = "key-manager" }
 kstat-rs = "0.2.4"
-libc = "0.2.172"
+libc = "0.2.173"
 libipcc = { git = "https://github.com/oxidecomputer/ipcc-rs", rev = "524eb8f125003dff50b9703900c6b323f00f9e1b" }
 libfalcon = { git = "https://github.com/oxidecomputer/falcon", branch = "main" }
 libnvme = { git = "https://github.com/oxidecomputer/libnvme", rev = "dd5bb221d327a1bc9287961718c3c10d6bd37da0" }
@@ -574,7 +574,7 @@ openssl = "0.10"
 openssl-sys = "0.9"
 opte-ioctl = { git = "https://github.com/oxidecomputer/opte", rev = "f5560fae02ad3fc349fabc6454c321143199ca9e" }
 oso = "0.27"
-owo-colors = "4.2.0"
+owo-colors = "4.2.1"
 oximeter = { path = "oximeter/oximeter" }
 oximeter-api = { path = "oximeter/api" }
 oximeter-client = { path = "clients/oximeter-client" }
@@ -757,7 +757,7 @@ zone = { version = "0.3.1", default-features = false, features = ["async"] }
 # the kinds). However, uses of omicron-uuid-kinds _within omicron_ will have
 # std and the other features enabled because they'll refer to it via
 # omicron-uuid-kinds.workspace = true.
-newtype-uuid = { version = "1.2.1", default-features = false }
+newtype-uuid = { version = "1.2.2", default-features = false }
 omicron-uuid-kinds = { path = "uuid-kinds", features = ["serde", "schemars08", "uuid-v4"] }
 
 # NOTE: The test profile inherits from the dev profile, so settings under

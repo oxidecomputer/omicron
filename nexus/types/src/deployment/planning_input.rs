@@ -14,6 +14,7 @@ use crate::external_api::views::PhysicalDiskState;
 use crate::external_api::views::SledPolicy;
 use crate::external_api::views::SledProvisionPolicy;
 use crate::external_api::views::SledState;
+use crate::inventory::BaseboardId;
 use chrono::DateTime;
 use chrono::Utc;
 use clap::ValueEnum;
@@ -724,6 +725,9 @@ pub enum SledFilter {
 
     /// Sleds which should have TUF repo artifacts replicated onto them.
     TufArtifactReplication,
+
+    /// Sleds whose SPs should be updated by Reconfigurator
+    SpsUpdatedByReconfigurator,
 }
 
 impl SledFilter {
@@ -780,6 +784,7 @@ impl SledPolicy {
                 SledFilter::VpcRouting => true,
                 SledFilter::VpcFirewall => true,
                 SledFilter::TufArtifactReplication => true,
+                SledFilter::SpsUpdatedByReconfigurator => true,
             },
             SledPolicy::InService {
                 provision_policy: SledProvisionPolicy::NonProvisionable,
@@ -794,6 +799,7 @@ impl SledPolicy {
                 SledFilter::VpcRouting => true,
                 SledFilter::VpcFirewall => true,
                 SledFilter::TufArtifactReplication => true,
+                SledFilter::SpsUpdatedByReconfigurator => true,
             },
             SledPolicy::Expunged => match filter {
                 SledFilter::All => true,
@@ -806,6 +812,7 @@ impl SledPolicy {
                 SledFilter::VpcRouting => false,
                 SledFilter::VpcFirewall => false,
                 SledFilter::TufArtifactReplication => false,
+                SledFilter::SpsUpdatedByReconfigurator => false,
             },
         }
     }
@@ -840,6 +847,7 @@ impl SledState {
                 SledFilter::VpcRouting => true,
                 SledFilter::VpcFirewall => true,
                 SledFilter::TufArtifactReplication => true,
+                SledFilter::SpsUpdatedByReconfigurator => true,
             },
             SledState::Decommissioned => match filter {
                 SledFilter::All => true,
@@ -852,6 +860,7 @@ impl SledState {
                 SledFilter::VpcRouting => false,
                 SledFilter::VpcFirewall => false,
                 SledFilter::TufArtifactReplication => false,
+                SledFilter::SpsUpdatedByReconfigurator => false,
             },
         }
     }
@@ -1058,6 +1067,8 @@ pub struct SledDetails {
     pub state: SledState,
     /// current resources allocated to this sled
     pub resources: SledResources,
+    /// baseboard id for this sled
+    pub baseboard_id: BaseboardId,
 }
 
 #[derive(Debug, thiserror::Error)]

@@ -510,19 +510,22 @@ Options:
           Show sleds that match the given filter
 
           Possible values:
-          - all:                      All sleds in the system, regardless of policy or state
-          - commissioned:             All sleds that are currently part of the control plane cluster
-          - decommissioned:           All sleds that were previously part of the control plane
+          - all:                           All sleds in the system, regardless of policy or state
+          - commissioned:                  All sleds that are currently part of the control plane
+            cluster
+          - decommissioned:                All sleds that were previously part of the control plane
             cluster but have been decommissioned
-          - discretionary:            Sleds that are eligible for discretionary services
-          - in-service:               Sleds that are in service (even if they might not be eligible
-            for discretionary services)
-          - query-during-inventory:   Sleds whose sled agents should be queried for inventory
-          - reservation-create:       Sleds on which reservations can be created
-          - vpc-routing:              Sleds which should be sent OPTE V2P mappings and Routing rules
-          - vpc-firewall:             Sleds which should be sent VPC firewall rules
-          - tuf-artifact-replication: Sleds which should have TUF repo artifacts replicated onto
-            them
+          - discretionary:                 Sleds that are eligible for discretionary services
+          - in-service:                    Sleds that are in service (even if they might not be
+            eligible for discretionary services)
+          - query-during-inventory:        Sleds whose sled agents should be queried for inventory
+          - reservation-create:            Sleds on which reservations can be created
+          - vpc-routing:                   Sleds which should be sent OPTE V2P mappings and Routing
+            rules
+          - vpc-firewall:                  Sleds which should be sent VPC firewall rules
+          - tuf-artifact-replication:      Sleds which should have TUF repo artifacts replicated
+            onto them
+          - sps-updated-by-reconfigurator: Sleds whose SPs should be updated by Reconfigurator
 
       --log-level <LOG_LEVEL>
           log level filter
