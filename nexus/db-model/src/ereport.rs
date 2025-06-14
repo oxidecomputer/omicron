@@ -93,7 +93,7 @@ impl From<SpEreport> for Ereport {
                 part_number,
                 serial_number,
             },
-            reporter: Reporter::Sp { sp_type, slot: sp_slot.0.into() },
+            reporter: Reporter::Sp { sp_type, slot: sp_slot.0 },
             report,
         }
     }
