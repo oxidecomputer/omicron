@@ -648,7 +648,7 @@ samael = { version = "0.0.18", features = ["xmlsec"] }
 schemars = "0.8.22"
 scopeguard = "1.2.0"
 secrecy = "0.10.0"
-semver = { version = "1.0.25", features = ["std", "serde"] }
+semver = { version = "1.0.26", features = ["std", "serde"] }
 serde = { version = "1.0", default-features = false, features = [ "derive", "rc" ] }
 serde_cbor = "0.11.2"
 serde_human_bytes = { git = "https://github.com/oxidecomputer/serde_human_bytes", branch = "main" }
