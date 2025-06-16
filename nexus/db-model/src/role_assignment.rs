@@ -118,6 +118,7 @@ where
 mod tests {
     use super::*;
     use omicron_common::api::external::ResourceType;
+    use std::borrow::Cow;
 
     #[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq)]
     #[serde(rename_all = "kebab-case")]
@@ -128,7 +129,7 @@ mod tests {
     impl crate::DatabaseString for DummyRoles {
         type Error = anyhow::Error;
 
-        fn to_database_string(&self) -> &str {
+        fn to_database_string(&self) -> Cow<str> {
             unimplemented!()
         }
 

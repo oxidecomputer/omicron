@@ -13,7 +13,9 @@ use crate::blueprint_builder::Error;
 use crate::blueprint_builder::Operation;
 use crate::blueprint_editor::DisksEditError;
 use crate::blueprint_editor::SledEditError;
+use crate::mgs_updates::plan_mgs_updates;
 use crate::planner::omicron_zone_placement::PlacementError;
+use gateway_client::types::SpType;
 use nexus_sled_agent_shared::inventory::OmicronZoneType;
 use nexus_sled_agent_shared::inventory::ZoneKind;
 use nexus_types::deployment::Blueprint;
@@ -49,6 +51,37 @@ pub use self::rng::SledPlannerRng;
 
 mod omicron_zone_placement;
 pub(crate) mod rng;
+
+/// Maximum number of MGS-managed updates (updates to SP, RoT, RoT bootloader,
+/// or host OS) that we allow to be pending across the whole system at one time
+///
+/// For now, we limit this to 1 for safety.  That's for a few reasons:
+///
+/// - SP updates reboot the corresponding host.  Thus, if we have one of these
+///   updates outstanding, we should assume that host may be offline.  Most
+///   control plane services are designed to survive multiple failures (e.g.,
+///   the Cockroach cluster can sustain two failures and stay online), but
+///   having one sled offline eats into that margin.  And some services like
+///   Crucible volumes can only sustain one failure.  Taking down two sleds
+///   would render unavailable any Crucible volumes with regions on those two
+///   sleds.
+///
+/// - There is unfortunately some risk in updating the RoT bootloader, in that
+///   there's a window where a failure could render the device unbootable.  See
+///   oxidecomputer/omicron#7819 for more on this.  Updating only one at a time
+///   helps mitigate this risk.
+///
+/// More sophisticated schemes are certainly possible (e.g., allocate Crucible
+/// regions in such a way that there are at least pairs of sleds we could update
+/// concurrently without taking volumes down; and/or be willing to update
+/// multiple sleds as long as they don't have overlapping control plane
+/// services, etc.).
+const NUM_CONCURRENT_MGS_UPDATES: usize = 1;
+
+enum UpdateStepResult {
+    ContinueToNextStep,
+    Waiting,
+}
 
 pub struct Planner<'a> {
     log: Logger,
@@ -115,7 +148,10 @@ impl<'a> Planner<'a> {
         self.do_plan_expunge()?;
         self.do_plan_add()?;
         self.do_plan_decommission()?;
-        self.do_plan_zone_updates()?;
+        if let UpdateStepResult::ContinueToNextStep = self.do_plan_mgs_updates()
+        {
+            self.do_plan_zone_updates()?;
+        }
         self.do_plan_cockroachdb_settings();
         Ok(())
     }
@@ -518,7 +554,7 @@ impl<'a> Planner<'a> {
                 );
                 self.blueprint.record_operation(Operation::AddZone {
                     sled_id,
-                    kind: ZoneKind::BoundaryNtp,
+                    kind: ZoneKind::InternalNtp,
                 });
 
                 // If we're setting up a new sled (the typical reason to add a
@@ -899,6 +935,63 @@ impl<'a> Planner<'a> {
         }
 
         Ok(())
+    }
+
+    /// Update at most one MGS-managed device (SP, RoT, etc.), if any are out of
+    /// date.
+    fn do_plan_mgs_updates(&mut self) -> UpdateStepResult {
+        // Determine which baseboards we will consider updating.
+        //
+        // Sleds may be present but not adopted as part of the control plane.
+        // In deployed systems, this would probably only happen if a sled was
+        // about to be added.  In dev/test environments, it's common to leave
+        // some number of sleds out of the control plane for various reasons.
+        // Inventory will still report them, but we don't want to touch them.
+        //
+        // For better or worse, switches and PSCs do not have the same idea of
+        // being adopted into the control plane.  If they're present, they're
+        // part of the system, and we will update them.
+        let included_sled_baseboards: BTreeSet<_> = self
+            .input
+            .all_sleds(SledFilter::SpsUpdatedByReconfigurator)
+            .map(|(_sled_id, details)| &details.baseboard_id)
+            .collect();
+        let included_baseboards =
+            self.inventory
+                .sps
+                .iter()
+                .filter_map(|(baseboard_id, sp_state)| {
+                    let do_include = match sp_state.sp_type {
+                        SpType::Sled => included_sled_baseboards
+                            .contains(baseboard_id.as_ref()),
+                        SpType::Power => true,
+                        SpType::Switch => true,
+                    };
+                    do_include.then_some(baseboard_id.clone())
+                })
+                .collect();
+
+        // Compute the new set of PendingMgsUpdates.
+        let current_updates =
+            &self.blueprint.parent_blueprint().pending_mgs_updates;
+        let current_artifacts = self.input.tuf_repo();
+        let next = plan_mgs_updates(
+            &self.log,
+            &self.inventory,
+            &included_baseboards,
+            &current_updates,
+            current_artifacts,
+            NUM_CONCURRENT_MGS_UPDATES,
+        );
+
+        // TODO This is not quite right.  See oxidecomputer/omicron#8285.
+        let rv = if next.is_empty() {
+            UpdateStepResult::ContinueToNextStep
+        } else {
+            UpdateStepResult::Waiting
+        };
+        self.blueprint.pending_mgs_updates_replace_all(next);
+        rv
     }
 
     /// Update at most one existing zone to use a new image source.
