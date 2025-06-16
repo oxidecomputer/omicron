@@ -709,7 +709,7 @@ Commands:
   sagas                 view sagas, create and complete demo sagas
   sleds                 interact with sleds
   support-bundles       interact with support bundles [aliases: sb]
-  upgrade-status        show running artifact versions
+  update-status         show running artifact versions
   help                  Print this message or the help of the given subcommand(s)
 
 Options:
