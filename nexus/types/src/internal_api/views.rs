@@ -510,7 +510,7 @@ impl Display for ZoneStatusVersion {
     }
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct ZoneStatus {
     pub zone_id: OmicronZoneUuid,
     pub zone_type: OmicronZoneType,
@@ -518,18 +518,18 @@ pub struct ZoneStatus {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
-pub struct UpgradeStatus {
+pub struct UpdateStatus {
     pub zones: BTreeMap<SledUuid, Vec<ZoneStatus>>,
 }
 
-impl UpgradeStatus {
+impl UpdateStatus {
     pub fn new<'a>(
         old: Option<&TufRepoDescription>,
         new: Option<&TufRepoDescription>,
         sleds: impl Iterator<
             Item = (&'a SledUuid, &'a Option<ConfigReconcilerInventory>),
         >,
-    ) -> UpgradeStatus {
+    ) -> UpdateStatus {
         let zones = sleds
             .map(|(sled_id, inv)| {
                 (
@@ -550,7 +550,7 @@ impl UpgradeStatus {
                 )
             })
             .collect();
-        UpgradeStatus { zones }
+        UpdateStatus { zones }
     }
 
     pub fn zone_image_source_to_version(

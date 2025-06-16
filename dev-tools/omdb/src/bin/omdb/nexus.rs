@@ -135,7 +135,7 @@ enum NexusCommands {
     #[command(visible_alias = "sb")]
     SupportBundles(SupportBundleArgs),
     /// show running artifact versions
-    UpgradeStatus,
+    UpdateStatus,
 }
 
 #[derive(Debug, Args)]
@@ -780,8 +780,8 @@ impl NexusArgs {
             NexusCommands::SupportBundles(SupportBundleArgs {
                 command: SupportBundleCommands::Inspect(args),
             }) => cmd_nexus_support_bundles_inspect(&client, args).await,
-            NexusCommands::UpgradeStatus => {
-                cmd_nexus_upgrade_status(&client).await
+            NexusCommands::UpdateStatus => {
+                cmd_nexus_update_status(&client).await
             }
         }
     }
@@ -4051,13 +4051,13 @@ async fn cmd_nexus_support_bundles_inspect(
 }
 
 /// Runs `omdb nexus upgrade-status`
-async fn cmd_nexus_upgrade_status(
+async fn cmd_nexus_update_status(
     client: &nexus_client::Client,
 ) -> Result<(), anyhow::Error> {
     let status = client
-        .upgrade_status()
+        .update_status()
         .await
-        .context("retrieving upgrade status")?
+        .context("retrieving update status")?
         .into_inner();
 
     #[derive(Tabled)]

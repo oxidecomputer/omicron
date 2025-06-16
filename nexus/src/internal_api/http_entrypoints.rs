@@ -47,7 +47,7 @@ use nexus_types::internal_api::views::DemoSaga;
 use nexus_types::internal_api::views::Ipv4NatEntryView;
 use nexus_types::internal_api::views::MgsUpdateDriverStatus;
 use nexus_types::internal_api::views::Saga;
-use nexus_types::internal_api::views::UpgradeStatus;
+use nexus_types::internal_api::views::UpdateStatus;
 use nexus_types::internal_api::views::to_list;
 use omicron_common::api::external::Instance;
 use omicron_common::api::external::http_pagination::PaginatedById;
@@ -858,15 +858,15 @@ impl NexusInternalApi for NexusInternalApiImpl {
             .await
     }
 
-    async fn upgrade_status(
+    async fn update_status(
         rqctx: RequestContext<Self::Context>,
-    ) -> Result<HttpResponseOk<UpgradeStatus>, HttpError> {
+    ) -> Result<HttpResponseOk<UpdateStatus>, HttpError> {
         let apictx = &rqctx.context().context;
         let handler = async {
             let opctx =
                 crate::context::op_context_for_internal_api(&rqctx).await;
             let nexus = &apictx.nexus;
-            let result = nexus.upgrade_status(&opctx).await?;
+            let result = nexus.update_status(&opctx).await?;
             Ok(HttpResponseOk(result))
         };
         apictx

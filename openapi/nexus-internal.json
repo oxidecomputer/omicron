@@ -677,17 +677,17 @@
         }
       }
     },
-    "/deployment/upgrade-status": {
+    "/deployment/update-status": {
       "get": {
         "summary": "Show deployed versions of artifacts",
-        "operationId": "upgrade_status",
+        "operationId": "update_status",
         "responses": {
           "200": {
             "description": "successful operation",
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/UpgradeStatus"
+                  "$ref": "#/components/schemas/UpdateStatus"
                 }
               }
             }
@@ -7470,7 +7470,7 @@
           "took_over_concurrent_update"
         ]
       },
-      "UpgradeStatus": {
+      "UpdateStatus": {
         "type": "object",
         "properties": {
           "zones": {

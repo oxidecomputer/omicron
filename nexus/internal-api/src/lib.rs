@@ -28,7 +28,7 @@ use nexus_types::{
         },
         views::{
             BackgroundTask, DemoSaga, Ipv4NatEntryView, MgsUpdateDriverStatus,
-            Saga, UpgradeStatus,
+            Saga, UpdateStatus,
         },
     },
 };
@@ -488,11 +488,11 @@ pub trait NexusInternalApi {
     /// Show deployed versions of artifacts
     #[endpoint {
         method = GET,
-        path = "/deployment/upgrade-status"
+        path = "/deployment/update-status"
     }]
-    async fn upgrade_status(
+    async fn update_status(
         rqctx: RequestContext<Self::Context>,
-    ) -> Result<HttpResponseOk<UpgradeStatus>, HttpError>;
+    ) -> Result<HttpResponseOk<UpdateStatus>, HttpError>;
 
     /// List uninitialized sleds
     #[endpoint {
