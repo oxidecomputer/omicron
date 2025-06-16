@@ -121,9 +121,7 @@ async fn cmd_db_ereport_list(
         time_collected: DateTime<Utc>,
         restart_id: Uuid,
         ena: Ena,
-        src: SrcType,
-        #[tabled(rename = "#")]
-        slot: u16,
+        source: db::model::Reporter,
     }
 
     #[derive(Tabled)]
@@ -151,8 +149,7 @@ async fn cmd_db_ereport_list(
                 time_collected,
                 restart_id: restart_id.into_untyped_uuid(),
                 ena: ena.into(),
-                src: sp_type.into(),
-                slot: sp_slot.0,
+                source: db::model::Reporter::Sp { sp_type, slot: sp_slot.0 },
             }
         }
     }
@@ -168,6 +165,40 @@ async fn cmd_db_ereport_list(
                 inner,
                 serial: ereport.serial_number.as_deref(),
                 part_number: ereport.part_number.as_deref(),
+            }
+        }
+    }
+
+    impl From<&'_ db::model::HostEreport> for EreportRow {
+        fn from(ereport: &db::model::HostEreport) -> Self {
+            let &db::model::HostEreport {
+                time_collected,
+                restart_id,
+                ena,
+                sled_id,
+                ..
+            } = ereport;
+            EreportRow {
+                time_collected,
+                restart_id: restart_id.into_untyped_uuid(),
+                ena: ena.into(),
+                source: db::model::Reporter::HostOs { sled: sled_id.into() },
+            }
+        }
+    }
+
+    impl<'report, T> From<&'report db::model::HostEreport>
+        for WithSerial<'report, T>
+    where
+        T: Tabled,
+        T: From<&'report db::model::HostEreport>,
+    {
+        fn from(ereport: &'report db::model::HostEreport) -> Self {
+            let inner = T::from(ereport);
+            WithSerial {
+                inner,
+                serial: Some(&ereport.sled_serial),
+                part_number: None, // TODO(eliza): go get this from inventory?
             }
         }
     }
@@ -212,13 +243,52 @@ async fn cmd_db_ereport_list(
     let sp_ereports = query.load_async(&*conn).await.with_context(ctx)?;
     check_limit(&sp_ereports, fetch_opts.fetch_limit, ctx);
 
-    // let host_ereports: Vec<HostEreport> = Vec::new(); // TODO
+    let ctx = || "loading host OS ereports";
+    let mut query = host_dsl::host_ereport
+        .select(db::model::HostEreport::as_select())
+        .limit(fetch_opts.fetch_limit.get().into())
+        .order_by((
+            host_dsl::time_collected,
+            host_dsl::restart_id,
+            host_dsl::ena,
+        ))
+        .into_boxed();
+
+    if let Some(ref serial) = args.serial {
+        query = query.filter(host_dsl::sled_serial.eq(serial.clone()));
+    }
+
+    if let Some(id) = args.id {
+        query = query.filter(host_dsl::restart_id.eq(id.into_untyped_uuid()));
+    }
+
+    if let Some(before) = args.before {
+        query = query.filter(host_dsl::time_collected.lt(before));
+    }
+
+    if let Some(after) = args.after {
+        query = query.filter(host_dsl::time_collected.gt(after));
+    }
+
+    if !fetch_opts.include_deleted {
+        query = query.filter(host_dsl::time_deleted.is_null());
+    }
+
+    let host_ereports = query.load_async(&*conn).await.with_context(ctx)?;
+    check_limit(&host_ereports, fetch_opts.fetch_limit, ctx);
 
     let mut table = if args.serial.is_some() {
-        tabled::Table::new(sp_ereports.iter().map(EreportRow::from))
+        tabled::Table::new(
+            sp_ereports
+                .iter()
+                .map(EreportRow::from)
+                .chain(host_ereports.iter().map(EreportRow::from)),
+        )
     } else {
         tabled::Table::new(
-            sp_ereports.iter().map(WithSerial::<'_, EreportRow>::from),
+            sp_ereports.iter().map(WithSerial::<'_, EreportRow>::from).chain(
+                host_ereports.iter().map(WithSerial::<'_, EreportRow>::from),
+            ),
         )
     };
 

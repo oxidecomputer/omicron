@@ -19,6 +19,7 @@ use omicron_uuid_kinds::{
 };
 use serde::{Deserialize, Serialize};
 use std::convert::TryFrom;
+use std::fmt;
 
 #[derive(
     Copy,
@@ -139,6 +140,25 @@ pub struct EreportMetadata {
 pub enum Reporter {
     Sp { sp_type: SpType, slot: u16 },
     HostOs { sled: SledUuid },
+}
+
+impl std::fmt::Display for Reporter {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Sp { sp_type: SpType::Sled, slot } => {
+                write!(f, "Sled (SP) {slot:02}")
+            }
+            Self::Sp { sp_type: SpType::Switch, slot } => {
+                write!(f, "Switch {slot}")
+            }
+            Self::Sp { sp_type: SpType::Power, slot } => {
+                write!(f, "PSC {slot}")
+            }
+            Self::HostOs { sled } => {
+                write!(f, "Sled (OS) {sled:?}")
+            }
+        }
+    }
 }
 
 #[derive(Clone, Debug, Insertable, Queryable, Selectable)]
