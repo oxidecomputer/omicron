@@ -67,31 +67,19 @@ pub struct VpcFirewallRuleProtocol(pub external::VpcFirewallRuleProtocol);
 NewtypeFrom! { () pub struct VpcFirewallRuleProtocol(external::VpcFirewallRuleProtocol); }
 NewtypeDeref! { () pub struct VpcFirewallRuleProtocol(external::VpcFirewallRuleProtocol); }
 
-impl ToSql<sql_types::Text, Pg> for VpcFirewallRuleProtocol {
-    fn to_sql<'a>(
-        &'a self,
-        out: &mut serialize::Output<'a, '_, Pg>,
-    ) -> serialize::Result {
-        <String as ToSql<sql_types::Text, Pg>>::to_sql(
-            &self.0.to_string(),
-            &mut out.reborrow(),
-        )
+impl DatabaseString for VpcFirewallRuleProtocol {
+    type Error = <external::VpcFirewallRuleProtocol as FromStr>::Err;
+
+    fn to_database_string(&self) -> Cow<str> {
+        self.0.to_string().into()
+    }
+
+    fn from_database_string(s: &str) -> Result<Self, Self::Error> {
+        s.parse::<external::VpcFirewallRuleProtocol>().map(Self)
     }
 }
 
-// Deserialize the "VpcFirewallRuleProtocol" object from SQL TEXT.
-impl<DB> FromSql<sql_types::Text, DB> for VpcFirewallRuleProtocol
-where
-    DB: Backend,
-    String: FromSql<sql_types::Text, DB>,
-{
-    fn from_sql(bytes: DB::RawValue<'_>) -> deserialize::Result<Self> {
-        Ok(VpcFirewallRuleProtocol(
-            String::from_sql(bytes)?
-                .parse::<external::VpcFirewallRuleProtocol>()?,
-        ))
-    }
-}
+impl_from_sql_text!(VpcFirewallRuleProtocol);
 
 /// Newtype wrapper around [`external::VpcFirewallRuleTarget`] so we can derive
 /// diesel traits for it
