@@ -56,19 +56,21 @@ enum Commands {
 
 #[derive(Debug, Args, Clone)]
 struct InfoArgs {
+    /// The reporter restart UUID of the ereport to show
     restart_id: EreporterRestartUuid,
+    /// The ENA of the ereport within the reporter restart
     ena: Ena,
 }
 
 #[derive(Debug, Args, Clone)]
 struct ListArgs {
-    /// Include only ereports from the system with the provided serial number.
-    #[clap(long, short)]
-    serial: Option<String>,
+    /// Include only ereports from systems with the provided serial numbers.
+    #[clap(long = "serial", short)]
+    serials: Vec<String>,
 
-    /// Include only ereports from the provided reporter restart ID.
-    #[clap(long, short)]
-    id: Option<EreporterRestartUuid>,
+    /// Include only ereports from the provided reporter restart IDs.
+    #[clap(long = "id", short)]
+    ids: Vec<Uuid>,
 
     /// Include only ereports collected before this timestamp
     #[clap(long, short)]
@@ -116,33 +118,28 @@ async fn cmd_db_ereport_list(
 ) -> anyhow::Result<()> {
     #[derive(Tabled)]
     #[tabled(rename_all = "SCREAMING_SNAKE_CASE")]
-    struct EreportRow {
+    struct EreportRow<'report> {
         #[tabled(display_with = "datetime_rfc3339_concise")]
         time_collected: DateTime<Utc>,
         restart_id: Uuid,
         ena: Ena,
         source: db::model::Reporter,
-    }
-
-    #[derive(Tabled)]
-    #[tabled(rename_all = "SCREAMING_SNAKE_CASE")]
-    struct WithSerial<'a, T: Tabled> {
-        #[tabled(inline)]
-        inner: T,
         #[tabled(display_with = "display_option_blank", rename = "S/N")]
-        serial: Option<&'a str>,
+        serial: Option<&'report str>,
         #[tabled(display_with = "display_option_blank", rename = "P/N")]
-        part_number: Option<&'a str>,
+        part_number: Option<&'report str>,
     }
 
-    impl From<&'_ db::model::SpEreport> for EreportRow {
-        fn from(ereport: &db::model::SpEreport) -> Self {
+    impl<'report> From<&'report db::model::SpEreport> for EreportRow<'report> {
+        fn from(ereport: &'report db::model::SpEreport) -> Self {
             let &db::model::SpEreport {
                 time_collected,
                 restart_id,
                 ena,
                 sp_type,
                 sp_slot,
+                ref serial_number,
+                ref part_number,
                 ..
             } = ereport;
             EreportRow {
@@ -150,32 +147,20 @@ async fn cmd_db_ereport_list(
                 restart_id: restart_id.into_untyped_uuid(),
                 ena: ena.into(),
                 source: db::model::Reporter::Sp { sp_type, slot: sp_slot.0 },
+                serial: serial_number.as_deref(),
+                part_number: part_number.as_deref(),
             }
         }
     }
 
-    impl<'report, T> From<&'report db::model::SpEreport> for WithSerial<'report, T>
-    where
-        T: Tabled,
-        T: From<&'report db::model::SpEreport>,
-    {
-        fn from(ereport: &'report db::model::SpEreport) -> Self {
-            let inner = T::from(ereport);
-            WithSerial {
-                inner,
-                serial: ereport.serial_number.as_deref(),
-                part_number: ereport.part_number.as_deref(),
-            }
-        }
-    }
-
-    impl From<&'_ db::model::HostEreport> for EreportRow {
-        fn from(ereport: &db::model::HostEreport) -> Self {
+    impl<'report> From<&'report db::model::HostEreport> for EreportRow<'report> {
+        fn from(ereport: &'report db::model::HostEreport) -> Self {
             let &db::model::HostEreport {
                 time_collected,
                 restart_id,
                 ena,
                 sled_id,
+                ref sled_serial,
                 ..
             } = ereport;
             EreportRow {
@@ -183,21 +168,7 @@ async fn cmd_db_ereport_list(
                 restart_id: restart_id.into_untyped_uuid(),
                 ena: ena.into(),
                 source: db::model::Reporter::HostOs { sled: sled_id.into() },
-            }
-        }
-    }
-
-    impl<'report, T> From<&'report db::model::HostEreport>
-        for WithSerial<'report, T>
-    where
-        T: Tabled,
-        T: From<&'report db::model::HostEreport>,
-    {
-        fn from(ereport: &'report db::model::HostEreport) -> Self {
-            let inner = T::from(ereport);
-            WithSerial {
-                inner,
-                serial: Some(&ereport.sled_serial),
+                serial: Some(&sled_serial),
                 part_number: None, // TODO(eliza): go get this from inventory?
             }
         }
@@ -220,14 +191,14 @@ async fn cmd_db_ereport_list(
         .order_by((sp_dsl::time_collected, sp_dsl::restart_id, sp_dsl::ena))
         .into_boxed();
 
-    if let Some(ref serial) = args.serial {
-        query = query.filter(sp_dsl::serial_number.eq(serial.clone()));
+    if !args.serials.is_empty() {
+        query =
+            query.filter(sp_dsl::serial_number.eq_any(args.serials.clone()));
     }
 
-    if let Some(id) = args.id {
-        query = query.filter(sp_dsl::restart_id.eq(id.into_untyped_uuid()));
+    if !args.ids.is_empty() {
+        query = query.filter(sp_dsl::restart_id.eq_any(args.ids.clone()));
     }
-
     if let Some(before) = args.before {
         query = query.filter(sp_dsl::time_collected.lt(before));
     }
@@ -254,12 +225,13 @@ async fn cmd_db_ereport_list(
         ))
         .into_boxed();
 
-    if let Some(ref serial) = args.serial {
-        query = query.filter(host_dsl::sled_serial.eq(serial.clone()));
+    if !args.serials.is_empty() {
+        query =
+            query.filter(host_dsl::sled_serial.eq_any(args.serials.clone()));
     }
 
-    if let Some(id) = args.id {
-        query = query.filter(host_dsl::restart_id.eq(id.into_untyped_uuid()));
+    if !args.ids.is_empty() {
+        query = query.filter(host_dsl::restart_id.eq_any(args.ids.clone()));
     }
 
     if let Some(before) = args.before {
@@ -277,21 +249,24 @@ async fn cmd_db_ereport_list(
     let host_ereports = query.load_async(&*conn).await.with_context(ctx)?;
     check_limit(&host_ereports, fetch_opts.fetch_limit, ctx);
 
-    let mut table = if args.serial.is_some() {
-        tabled::Table::new(
-            sp_ereports
-                .iter()
-                .map(EreportRow::from)
-                .chain(host_ereports.iter().map(EreportRow::from)),
-        )
-    } else {
-        tabled::Table::new(
-            sp_ereports.iter().map(WithSerial::<'_, EreportRow>::from).chain(
-                host_ereports.iter().map(WithSerial::<'_, EreportRow>::from),
-            ),
-        )
-    };
+    let mut rows = sp_ereports
+        .iter()
+        .map(EreportRow::from)
+        .chain(host_ereports.iter().map(EreportRow::from))
+        .collect::<Vec<_>>();
 
+    // Sort everything by time collected so that the host-OS and SP ereports are
+    // interspersed by time collected, reporter, and ENA. Use
+    // `std::cmp::Reverse` so that more recent ereports are displayed first.
+    rows.sort_by_key(|row| {
+        (
+            std::cmp::Reverse(row.time_collected),
+            row.restart_id,
+            std::cmp::Reverse(row.ena),
+        )
+    });
+
+    let mut table = tabled::Table::new(rows);
     table
         .with(tabled::settings::Style::empty())
         .with(tabled::settings::Padding::new(0, 1, 0, 0));
