@@ -63,8 +63,12 @@ struct InfoArgs {
 #[derive(Debug, Args, Clone)]
 struct ListArgs {
     /// Include only ereports from the system with the provided serial number.
-    #[clap(long)]
+    #[clap(long, short)]
     serial: Option<String>,
+
+    /// Include only ereports from the provided reporter restart ID.
+    #[clap(long, short)]
+    id: Option<EreporterRestartUuid>,
 
     /// Include only ereports collected before this timestamp
     #[clap(long, short)]
@@ -187,6 +191,10 @@ async fn cmd_db_ereport_list(
 
     if let Some(ref serial) = args.serial {
         query = query.filter(sp_dsl::serial_number.eq(serial.clone()));
+    }
+
+    if let Some(id) = args.id {
+        query = query.filter(sp_dsl::restart_id.eq(id.into_untyped_uuid()));
     }
 
     if let Some(before) = args.before {
