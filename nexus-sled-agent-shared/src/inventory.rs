@@ -147,6 +147,22 @@ impl ConfigReconcilerInventory {
         })
     }
 
+    /// Iterate over all zones contained in the most-recently-reconciled sled
+    /// config and report their status as of that reconciliation.
+    pub fn reconciled_omicron_zones(
+        &self,
+    ) -> impl Iterator<Item = (&OmicronZoneConfig, &ConfigReconcilerInventoryResult)>
+    {
+        // `self.zones` may contain zone IDs that aren't present in
+        // `last_reconciled_config` at all, if we failed to _shut down_ zones
+        // that are no longer present in the config. We use `filter_map` to
+        // strip those out, and only report on the configured zones.
+        self.zones.iter().filter_map(|(zone_id, result)| {
+            let config = self.last_reconciled_config.zones.get(zone_id)?;
+            Some((config, result))
+        })
+    }
+
     /// Given a sled config, produce a reconciler result that sled-agent could
     /// have emitted if reconciliation succeeded.
     ///

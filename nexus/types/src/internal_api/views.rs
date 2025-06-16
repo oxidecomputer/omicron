@@ -10,6 +10,7 @@ use chrono::Utc;
 use futures::future::ready;
 use futures::stream::StreamExt;
 use nexus_sled_agent_shared::inventory::ConfigReconcilerInventory;
+use nexus_sled_agent_shared::inventory::ConfigReconcilerInventoryResult;
 use nexus_sled_agent_shared::inventory::OmicronZoneImageSource;
 use nexus_sled_agent_shared::inventory::OmicronZoneType;
 use omicron_common::api::external::MacAddr;
@@ -496,6 +497,7 @@ pub enum ZoneStatusVersion {
     Unknown,
     InstallDataset,
     Version(Version),
+    Error(String),
 }
 
 impl Display for ZoneStatusVersion {
@@ -505,6 +507,9 @@ impl Display for ZoneStatusVersion {
             ZoneStatusVersion::InstallDataset => write!(f, "install dataset"),
             ZoneStatusVersion::Version(version) => {
                 write!(f, "{}", version)
+            }
+            ZoneStatusVersion::Error(s) => {
+                write!(f, "{}", s)
             }
         }
     }
@@ -535,14 +540,15 @@ impl UpdateStatus {
                 (
                     *sled_id,
                     inv.as_ref().map_or(vec![], |inv| {
-                        inv.running_omicron_zones()
-                            .map(|conf| ZoneStatus {
+                        inv.reconciled_omicron_zones()
+                            .map(|(conf, res)| ZoneStatus {
                                 zone_id: conf.id,
                                 zone_type: conf.zone_type.clone(),
                                 version: Self::zone_image_source_to_version(
                                     old,
                                     new,
                                     &conf.image_source,
+                                    res,
                                 ),
                             })
                             .collect()
@@ -557,7 +563,12 @@ impl UpdateStatus {
         old: Option<&TufRepoDescription>,
         new: Option<&TufRepoDescription>,
         source: &OmicronZoneImageSource,
+        res: &ConfigReconcilerInventoryResult,
     ) -> ZoneStatusVersion {
+        if let ConfigReconcilerInventoryResult::Err { message } = res {
+            return ZoneStatusVersion::Error(message.clone());
+        }
+
         let &OmicronZoneImageSource::Artifact { hash } = source else {
             return ZoneStatusVersion::InstallDataset;
         };
