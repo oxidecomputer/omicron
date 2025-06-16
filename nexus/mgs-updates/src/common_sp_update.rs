@@ -269,9 +269,6 @@ pub trait SpComponentUpdateHelper {
         log: &'a slog::Logger,
         mgs_clients: &'a mut MgsClients,
         update: &'a PendingMgsUpdate,
-        // TODO-K: Return a PostUpdateError here? Is it even possible
-        // due to try_serially
-        //) -> BoxFuture<'a, Result<(), GatewayClientError>>;
     ) -> BoxFuture<'a, Result<(), PostUpdateError>>;
 }
 
@@ -280,6 +277,8 @@ pub trait SpComponentUpdateHelper {
 pub enum PrecheckStatus {
     UpdateComplete,
     ReadyForUpdate,
+    // TODO-K: Add more detailed comment here
+    WaitingForOngoingUpdate,
 }
 
 #[derive(Debug, Error)]

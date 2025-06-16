@@ -47,6 +47,11 @@ pub const DEFAULT_RETRY_TIMEOUT: Duration = Duration::from_secs(60);
 /// How long to wait after resetting the device before expecting it to come up
 const RESET_TIMEOUT: Duration = Duration::from_secs(60);
 
+/// TODO-K: Write a better comment here
+// Is 3 munutes enough? we're giving 1 minute per reset, and we're resetting
+// twice, so it makes sense to add one more minute?
+const WAIT_FOR_ONGOING_UPDATE_TIMEOUT: Duration = Duration::from_secs(180);
+
 /// Parameters describing a request to update one SP-managed component
 ///
 /// This is similar in spirit to the `SpComponentUpdater` trait but uses a
@@ -217,7 +222,9 @@ pub(crate) async fn apply_update(
     // - if not, then if our required preconditions are met
     status.update(UpdateAttemptStatus::Precheck);
     match update_helper.precheck(log, &mut mgs_clients, update).await {
-        Ok(PrecheckStatus::ReadyForUpdate) => (),
+        // TODO-K: Add more detailed comment here
+        Ok(PrecheckStatus::ReadyForUpdate) |
+        Ok(PrecheckStatus::WaitingForOngoingUpdate) => (),
         Ok(PrecheckStatus::UpdateComplete) => {
             return Ok(UpdateCompletedHow::FoundNoChangesNeeded);
         }
@@ -615,6 +622,17 @@ async fn wait_for_update_done(
         match updater.precheck(log, mgs_clients, update).await {
             // Check if we're done.
             Ok(PrecheckStatus::UpdateComplete) => return Ok(()),
+
+            // TODO-K: Add more detailed comment here
+            // Loop for 3 minutes to wait for any ongoing update (maybe more minutes?)
+            Ok(PrecheckStatus::WaitingForOngoingUpdate) => {
+                if before.elapsed() >= WAIT_FOR_ONGOING_UPDATE_TIMEOUT {
+                    return Err(UpdateWaitError::Timeout(WAIT_FOR_ONGOING_UPDATE_TIMEOUT));
+                }
+
+                tokio::time::sleep(PROGRESS_POLL_INTERVAL).await;
+                continue;
+            },
 
             // An incorrect version in the "inactive" slot, incorrect active slot,
             // or non-empty pending_persistent_boot_preference/transient_boot_preference
