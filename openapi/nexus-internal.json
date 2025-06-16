@@ -7706,6 +7706,24 @@
               "details",
               "zone_status_version"
             ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "details": {
+                "type": "string"
+              },
+              "zone_status_version": {
+                "type": "string",
+                "enum": [
+                  "error"
+                ]
+              }
+            },
+            "required": [
+              "details",
+              "zone_status_version"
+            ]
           }
         ]
       },
