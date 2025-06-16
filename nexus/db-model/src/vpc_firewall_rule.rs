@@ -2,7 +2,9 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-use super::{L4PortRange, SqlU16, impl_enum_wrapper};
+use super::{
+    DatabaseString, L4PortRange, SqlU16, impl_enum_wrapper, impl_from_sql_text,
+};
 use db_macros::Resource;
 use diesel::backend::Backend;
 use diesel::deserialize::{self, FromSql};
@@ -14,8 +16,10 @@ use nexus_types::identity::Resource;
 use omicron_common::api::external;
 use serde::Deserialize;
 use serde::Serialize;
+use std::borrow::Cow;
 use std::collections::HashSet;
 use std::io::Write;
+use std::str::FromStr;
 use uuid::Uuid;
 
 impl_enum_wrapper!(
@@ -98,31 +102,19 @@ pub struct VpcFirewallRuleTarget(pub external::VpcFirewallRuleTarget);
 NewtypeFrom! { () pub struct VpcFirewallRuleTarget(external::VpcFirewallRuleTarget); }
 NewtypeDeref! { () pub struct VpcFirewallRuleTarget(external::VpcFirewallRuleTarget); }
 
-impl ToSql<sql_types::Text, Pg> for VpcFirewallRuleTarget {
-    fn to_sql<'a>(
-        &'a self,
-        out: &mut serialize::Output<'a, '_, Pg>,
-    ) -> serialize::Result {
-        <String as ToSql<sql_types::Text, Pg>>::to_sql(
-            &self.0.to_string(),
-            &mut out.reborrow(),
-        )
+impl DatabaseString for VpcFirewallRuleTarget {
+    type Error = <external::VpcFirewallRuleTarget as FromStr>::Err;
+
+    fn to_database_string(&self) -> Cow<str> {
+        self.0.to_string().into()
+    }
+
+    fn from_database_string(s: &str) -> Result<Self, Self::Error> {
+        s.parse::<external::VpcFirewallRuleTarget>().map(Self)
     }
 }
 
-// Deserialize the "VpcFirewallRuleTarget" object from SQL TEXT.
-impl<DB> FromSql<sql_types::Text, DB> for VpcFirewallRuleTarget
-where
-    DB: Backend,
-    String: FromSql<sql_types::Text, DB>,
-{
-    fn from_sql(bytes: DB::RawValue<'_>) -> deserialize::Result<Self> {
-        Ok(VpcFirewallRuleTarget(
-            String::from_sql(bytes)?
-                .parse::<external::VpcFirewallRuleTarget>()?,
-        ))
-    }
-}
+impl_from_sql_text!(VpcFirewallRuleTarget);
 
 /// Newtype wrapper around [`external::VpcFirewallRuleHostFilter`] so we can derive
 /// diesel traits for it
@@ -133,31 +125,19 @@ pub struct VpcFirewallRuleHostFilter(pub external::VpcFirewallRuleHostFilter);
 NewtypeFrom! { () pub struct VpcFirewallRuleHostFilter(external::VpcFirewallRuleHostFilter); }
 NewtypeDeref! { () pub struct VpcFirewallRuleHostFilter(external::VpcFirewallRuleHostFilter); }
 
-impl ToSql<sql_types::Text, Pg> for VpcFirewallRuleHostFilter {
-    fn to_sql<'a>(
-        &'a self,
-        out: &mut serialize::Output<'a, '_, Pg>,
-    ) -> serialize::Result {
-        <String as ToSql<sql_types::Text, Pg>>::to_sql(
-            &self.0.to_string(),
-            &mut out.reborrow(),
-        )
+impl DatabaseString for VpcFirewallRuleHostFilter {
+    type Error = <external::VpcFirewallRuleHostFilter as FromStr>::Err;
+
+    fn to_database_string(&self) -> Cow<str> {
+        self.0.to_string().into()
+    }
+
+    fn from_database_string(s: &str) -> Result<Self, Self::Error> {
+        s.parse::<external::VpcFirewallRuleHostFilter>().map(Self)
     }
 }
 
-// Deserialize the "VpcFirewallRuleHostFilter" object from SQL TEXT.
-impl<DB> FromSql<sql_types::Text, DB> for VpcFirewallRuleHostFilter
-where
-    DB: Backend,
-    String: FromSql<sql_types::Text, DB>,
-{
-    fn from_sql(bytes: DB::RawValue<'_>) -> deserialize::Result<Self> {
-        Ok(VpcFirewallRuleHostFilter(
-            String::from_sql(bytes)?
-                .parse::<external::VpcFirewallRuleHostFilter>()?,
-        ))
-    }
-}
+impl_from_sql_text!(VpcFirewallRuleHostFilter);
 
 /// Newtype wrapper around [`external::VpcFirewallRulePriority`] so we can derive
 /// diesel traits for it
