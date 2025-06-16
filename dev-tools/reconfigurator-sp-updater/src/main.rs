@@ -422,10 +422,10 @@ enum Component {
         expected_transient_boot_preference: Option<RotSlot>,
     },
     RotBootloader {
-        /// expected version of the active slot
+        /// expected version of stage0 (active slot)
         #[arg(long, short = 'a')]
         expected_stage0_version: ArtifactVersion,
-        /// expected version of the inactive slot
+        /// expected version of stage0 next (inactive slot)
         #[arg(long, short = 'i')]
         expected_stage0_next_version: ExpectedVersion,
     },
