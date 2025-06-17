@@ -329,7 +329,7 @@ pub enum PostUpdateError {
     #[error("communicating with RoT: {message:?}")]
     RotCommunicationFailed { message: String },
 
-    #[error("invalid RoT image: {error:?}")]
+    #[error("invalid RoT bootloader image: {error:?}")]
     RotBootloaderImageError { error: RotImageError },
 }
 

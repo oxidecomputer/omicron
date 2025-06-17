@@ -7,7 +7,6 @@ edition = "2021"
 workspace = true
 
 [dependencies]
-anyhow.workspace = true
 chrono.workspace = true
 futures.workspace = true
 gateway-client.workspace = true
