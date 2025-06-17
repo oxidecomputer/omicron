@@ -600,8 +600,7 @@ fn synthesize_manifest(
                 return Err(InstallMetadataReadError::ReadFile {
                     path: entry.path().to_owned(),
                     error: ArcIoError::new(error),
-                }
-                .into());
+                });
             }
         }
     }
