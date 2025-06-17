@@ -98,8 +98,12 @@ export RUSTDOCFLAGS="--document-private-items -D warnings"
 # usually configured via ".cargo/config" but the `RUSTFLAGS` env variable
 # takes precedence. This path contains oxide specific libraries such as
 # libipcc.
+#
+# Additionally, we enable the "tokio_unstable" cfg in order to use
+# Tokio's unstable features for `tokio-dtrace`'s probes.
 if [[ $target_os == "illumos" ]]; then
-    RUSTFLAGS="$RUSTFLAGS -C link-arg=-R/usr/platform/oxide/lib/amd64"
+    RUSTFLAGS+=" -C link-arg=-R/usr/platform/oxide/lib/amd64"
+    RUSTFLAGS+=" --cfg tokio_unstable"
 fi
 export TMPDIR="$TEST_TMPDIR"
 export RUST_BACKTRACE=1
