@@ -536,10 +536,35 @@ impl<'a> Planner<'a> {
                     updated,
                     removed,
                 });
+            }
 
-                // Note that this doesn't actually need to short-circuit the
-                // rest of the blueprint planning, as long as during execution
-                // we send this request first.
+            // The first thing we want to do with any sled is ensure it has an
+            // NTP zone. However, this requires the sled to have at least one
+            // available zpool on which we could place a zone. There are at
+            // least two expected cases where we'll see a sled here with no
+            // in-service zpools:
+            //
+            // 1. A sled was just added and its disks have not yet been adopted
+            //    by the control plane.
+            // 2. A sled has had all of its disks expunged.
+            //
+            // In either case, we can't do anything with the sled, but we don't
+            // wait to fail planning entirely. Just skip sleds in this state.
+            if sled_resources
+                .all_zpools(ZpoolFilter::InService)
+                .next()
+                .is_none()
+            {
+                info!(
+                    self.log,
+                    "skipping sled (no zpools in service)";
+                    "sled_id" => %sled_id,
+                );
+                self.blueprint.comment(format!(
+                    "skipping sled {sled_id}: no zpools in service"
+                ));
+                sleds_waiting_for_ntp_zone.insert(sled_id);
+                continue;
             }
 
             // Check for an NTP zone.  Every sled should have one.  If it's not
