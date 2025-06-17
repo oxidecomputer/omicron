@@ -1,0 +1,7 @@
+error: the following required arguments were not provided:
+  --active <ACTIVE>
+  --inactive <INACTIVE>
+
+Usage: sled-update-sp --active <ACTIVE> --inactive <INACTIVE> <SLED_ID>
+
+For more information, try '--help'.

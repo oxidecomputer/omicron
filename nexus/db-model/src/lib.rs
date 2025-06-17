@@ -373,6 +373,39 @@ macro_rules! impl_enum_type {
 
 pub(crate) use impl_enum_type;
 
+/// Automatically implement `FromSql<Text, _>` and `ToSql<Text, _>` on a provided
+/// type which implements the [`DatabaseString`] trait.
+///
+/// This is necessary because we cannot blanket impl these (foreign) traits on
+/// all implementors.
+macro_rules! impl_from_sql_text {
+    (
+        $model_type:ident
+    ) => {
+        impl ::diesel::serialize::ToSql<::diesel::sql_types::Text, ::diesel::pg::Pg> for $model_type {
+            fn to_sql<'a>(
+                &'a self,
+                out: &mut ::diesel::serialize::Output<'a, '_, ::diesel::pg::Pg>,
+            ) -> ::diesel::serialize::Result {
+                <str as ::diesel::serialize::ToSql<::diesel::sql_types::Text, ::diesel::pg::Pg>>::to_sql(
+                    &self.to_database_string(),
+                    &mut out.reborrow(),
+                )
+            }
+        }
+
+        impl ::diesel::deserialize::FromSql<::diesel::sql_types::Text, ::diesel::pg::Pg> for $model_type {
+            fn from_sql(bytes: <::diesel::pg::Pg as ::diesel::backend::Backend>::RawValue<'_>)
+                -> ::diesel::deserialize::Result<Self>
+            {
+                Ok($model_type::from_database_string(::std::str::from_utf8(bytes.as_bytes())?)?)
+            }
+        }
+    }
+}
+
+pub(crate) use impl_from_sql_text;
+
 /// Describes a type that's represented in the database using a String
 ///
 /// If you're reaching for this type, consider whether it'd be better to use an
@@ -390,7 +423,7 @@ pub(crate) use impl_enum_type;
 pub trait DatabaseString: Sized {
     type Error: std::fmt::Display;
 
-    fn to_database_string(&self) -> &str;
+    fn to_database_string(&self) -> Cow<str>;
     fn from_database_string(s: &str) -> Result<Self, Self::Error>;
 }
 
@@ -398,16 +431,18 @@ use anyhow::anyhow;
 use nexus_types::external_api::shared::FleetRole;
 use nexus_types::external_api::shared::ProjectRole;
 use nexus_types::external_api::shared::SiloRole;
+use std::borrow::Cow;
 
 impl DatabaseString for FleetRole {
     type Error = anyhow::Error;
 
-    fn to_database_string(&self) -> &str {
+    fn to_database_string(&self) -> Cow<str> {
         match self {
             FleetRole::Admin => "admin",
             FleetRole::Collaborator => "collaborator",
             FleetRole::Viewer => "viewer",
         }
+        .into()
     }
 
     // WARNING: if you're considering changing this (including removing
@@ -426,12 +461,13 @@ impl DatabaseString for FleetRole {
 impl DatabaseString for SiloRole {
     type Error = anyhow::Error;
 
-    fn to_database_string(&self) -> &str {
+    fn to_database_string(&self) -> Cow<str> {
         match self {
             SiloRole::Admin => "admin",
             SiloRole::Collaborator => "collaborator",
             SiloRole::Viewer => "viewer",
         }
+        .into()
     }
 
     // WARNING: if you're considering changing this (including removing
@@ -450,12 +486,13 @@ impl DatabaseString for SiloRole {
 impl DatabaseString for ProjectRole {
     type Error = anyhow::Error;
 
-    fn to_database_string(&self) -> &str {
+    fn to_database_string(&self) -> Cow<str> {
         match self {
             ProjectRole::Admin => "admin",
             ProjectRole::Collaborator => "collaborator",
             ProjectRole::Viewer => "viewer",
         }
+        .into()
     }
 
     // WARNING: if you're considering changing this (including removing
@@ -667,7 +704,7 @@ mod tests {
             // Serialize the variant.  Verify that we can deserialize the thing
             // we just got back.
             let serialized = variant.to_database_string();
-            let deserialized = T::from_database_string(serialized)
+            let deserialized = T::from_database_string(&serialized)
                 .unwrap_or_else(|_| {
                     panic!(
                         "failed to deserialize the string {:?}, which we \
