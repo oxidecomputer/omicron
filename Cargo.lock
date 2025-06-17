@@ -5947,9 +5947,9 @@ dependencies = [
 
 [[package]]
 name = "newtype-uuid"
-version = "1.2.3"
+version = "1.2.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d5825f69cf354438a53f85b959f0baa6a7ada1f4bd923f63e42c34090bf288fb"
+checksum = "a17d82edb1c8a6c20c238747ae7aae9181133e766bc92cd2556fdd764407d0d1"
 dependencies = [
  "proptest",
  "schemars",
