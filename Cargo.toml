@@ -717,6 +717,7 @@ test-strategy = "0.4.0"
 thiserror = "1.0"
 tofino = { git = "https://github.com/oxidecomputer/tofino", branch = "main" }
 tokio = "1.43.0"
+tokio-dtrace = { git = "https://github.com/oxidecomputer/tokio-dtrace", branch = "main" }
 tokio-postgres = { version = "0.7", features = [ "with-chrono-0_4", "with-uuid-1" ] }
 tokio-stream = "0.1.17"
 tokio-tungstenite = "0.23.1"
