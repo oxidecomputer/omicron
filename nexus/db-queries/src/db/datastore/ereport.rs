@@ -21,6 +21,7 @@ use crate::db::pagination::paginated;
 use async_bb8_diesel::AsyncRunQueryDsl;
 use chrono::DateTime;
 use chrono::Utc;
+use diesel::dsl::{count_distinct, min};
 use diesel::prelude::*;
 use nexus_db_errors::ErrorHandler;
 use nexus_db_errors::public_error_from_diesel;
@@ -125,50 +126,23 @@ impl DataStore {
         opctx: &OpContext,
         serial: String,
     ) -> ListResultVec<EreporterRestartBySerial> {
-        use diesel::dsl::{count_distinct, min};
         opctx.authorize(authz::Action::ListChildren, &authz::FLEET).await?;
 
         let conn = &*self.pool_connection_authorized(opctx).await?;
-        let sp_rows = sp_dsl::sp_ereport
-            .filter(
-                sp_dsl::serial_number
-                    .eq(serial.clone())
-                    .and(sp_dsl::time_deleted.is_null()),
-            )
-            .group_by((sp_dsl::restart_id, sp_dsl::sp_slot, sp_dsl::sp_type))
-            .select((
-                sp_dsl::restart_id,
-                sp_dsl::sp_type,
-                sp_dsl::sp_slot,
-                min(sp_dsl::time_collected),
-                count_distinct(sp_dsl::ena),
-            ))
-            .order_by(sp_dsl::restart_id)
+        let sp_rows = Self::sp_restart_list_by_serial_query(serial.clone())
             .load_async::<(Uuid, SpType, SqlU16, Option<DateTime<Utc>>, SqlU32)>(
                 conn,
             )
             .await
             .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))?;
-        let host_os_rows = host_dsl::host_ereport
-            .filter(
-                host_dsl::sled_serial
-                    .eq(serial)
-                    .and(host_dsl::time_deleted.is_null()),
-            )
-            .group_by((host_dsl::restart_id, host_dsl::sled_id))
-            .select((
-                host_dsl::restart_id,
-                host_dsl::sled_id,
-                min(host_dsl::time_collected),
-                count_distinct(host_dsl::ena),
-            ))
-            .order_by(host_dsl::restart_id)
-            .load_async::<(Uuid, Uuid, Option<DateTime<Utc>>, SqlU32)>(conn)
-            .await
-            .map_err(|e| {
-                public_error_from_diesel(e, ErrorHandler::Server)
-                    .internal_context("listing SP ereports")
-            })?;
+        let host_os_rows =
+            Self::host_restart_list_by_serial_query(serial.clone())
+                .load_async::<(Uuid, Uuid, Option<DateTime<Utc>>, SqlU32)>(conn)
+                .await
+                .map_err(|e| {
+                    public_error_from_diesel(e, ErrorHandler::Server)
+                        .internal_context("listing SP ereports")
+                })?;
 
         let sp_reporters = sp_rows.into_iter().filter_map(|(restart_id, sp_type, sp_slot, first_seen, ereports)| {
             let ereports = ereports.into();
@@ -224,6 +198,46 @@ impl DataStore {
             })
         });
         Ok(sp_reporters.chain(host_reporters).collect::<Vec<_>>())
+    }
+
+    fn sp_restart_list_by_serial_query(
+        serial: String,
+    ) -> impl RunnableQuery<(Uuid, SpType, SqlU16, Option<DateTime<Utc>>, SqlU32)>
+    {
+        sp_dsl::sp_ereport
+            .filter(
+                sp_dsl::serial_number
+                    .eq(serial.clone())
+                    .and(sp_dsl::time_deleted.is_null()),
+            )
+            .group_by((sp_dsl::restart_id, sp_dsl::sp_slot, sp_dsl::sp_type))
+            .select((
+                sp_dsl::restart_id,
+                sp_dsl::sp_type,
+                sp_dsl::sp_slot,
+                min(sp_dsl::time_collected),
+                count_distinct(sp_dsl::ena),
+            ))
+            .order_by(sp_dsl::restart_id)
+    }
+
+    fn host_restart_list_by_serial_query(
+        serial: String,
+    ) -> impl RunnableQuery<(Uuid, Uuid, Option<DateTime<Utc>>, SqlU32)> {
+        host_dsl::host_ereport
+            .filter(
+                host_dsl::sled_serial
+                    .eq(serial)
+                    .and(host_dsl::time_deleted.is_null()),
+            )
+            .group_by((host_dsl::restart_id, host_dsl::sled_id))
+            .select((
+                host_dsl::restart_id,
+                host_dsl::sled_id,
+                min(host_dsl::time_collected),
+                count_distinct(host_dsl::ena),
+            ))
+            .order_by(host_dsl::restart_id)
     }
 
     pub async fn sp_latest_ereport_id(
@@ -378,6 +392,56 @@ mod tests {
         let conn = pool.claim().await.unwrap();
 
         let query = DataStore::host_latest_ereport_id_query(SledUuid::nil());
+        let explanation = query
+            .explain_async(&conn)
+            .await
+            .expect("Failed to explain query - is it valid SQL?");
+
+        eprintln!("{explanation}");
+
+        assert!(
+            !explanation.contains("FULL SCAN"),
+            "Found an unexpected FULL SCAN: {}",
+            explanation
+        );
+
+        db.terminate().await;
+        logctx.cleanup_successful();
+    }
+
+    #[tokio::test]
+    async fn explain_host_restart_list_by_serial() {
+        let logctx = dev::test_setup_log("explain_host_restart_list_by_serial");
+        let db = TestDatabase::new_with_pool(&logctx.log).await;
+        let pool = db.pool();
+        let conn = pool.claim().await.unwrap();
+
+        let query = DataStore::host_restart_list_by_serial_query(String::new());
+        let explanation = query
+            .explain_async(&conn)
+            .await
+            .expect("Failed to explain query - is it valid SQL?");
+
+        eprintln!("{explanation}");
+
+        assert!(
+            !explanation.contains("FULL SCAN"),
+            "Found an unexpected FULL SCAN: {}",
+            explanation
+        );
+
+        db.terminate().await;
+        logctx.cleanup_successful();
+    }
+
+    #[tokio::test]
+    async fn explain_sp_restart_list_by_serial() {
+        let logctx = dev::test_setup_log("explain_sp_restart_list_by_serial");
+        let db = TestDatabase::new_with_pool(&logctx.log).await;
+        let pool = db.pool();
+        let conn = pool.claim().await.unwrap();
+
+        let query = DataStore::sp_restart_list_by_serial_query(String::new());
         let explanation = query
             .explain_async(&conn)
             .await
