@@ -255,7 +255,7 @@ impl SpComponentUpdateHelper for ReconfiguratorRotBootloaderUpdater {
                             update.slot_id,
                             &SpComponent::STAGE0.to_string(),
                             persist,
-                            &SpComponentFirmwareSlot { slot: 0 },
+                            &SpComponentFirmwareSlot { slot: 1 },
                         )
                         .await?;
                     Ok(())
@@ -355,13 +355,3 @@ async fn wait_for_stage0_next_image_check(
     }
 }
 
-//        match mgs_client
-//            .sp_rot_boot_info(
-//                sp_type,
-//                sp_slot,
-//                SpComponent::ROT.const_as_str(),
-//                &GetRotBootInfoParams {
-//                    version: RotBootInfo::HIGHEST_KNOWN_VERSION,
-//                },
-//            )
-//            .await

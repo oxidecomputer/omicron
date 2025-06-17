@@ -259,7 +259,6 @@ pub trait SpComponentUpdateHelper {
         log: &'a slog::Logger,
         mgs_clients: &'a mut MgsClients,
         update: &'a PendingMgsUpdate,
-        // TODO-K: Add WaitingForOngoingUpdate?
     ) -> BoxFuture<'a, Result<PrecheckStatus, PrecheckError>>;
 
     /// Attempts once to perform any post-update actions (e.g., reset the
@@ -277,8 +276,7 @@ pub trait SpComponentUpdateHelper {
 pub enum PrecheckStatus {
     UpdateComplete,
     ReadyForUpdate,
-    // TODO-K: Add more detailed comment here
-    WaitingForOngoingUpdate,
+    WaitingForOngoingRotBootloaderUpdate,
 }
 
 #[derive(Debug, Error)]

@@ -2816,7 +2816,6 @@ impl<'a> SpComponentUpdateContext<'a> {
             UpdateComponent::RotBootloader => {
                 const WAIT_FOR_BOOT_TIMEOUT: Duration = Duration::from_secs(30);
 
-                // TODO-K: Check steps here
                 // We need to reset the RoT in order to check the signature on what we just
                 // updated
                 registrar

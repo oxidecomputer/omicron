@@ -33,7 +33,7 @@ use uuid::Uuid;
 
 /// How long may the status remain unchanged without us treating this as a
 /// problem?
-pub const PROGRESS_TIMEOUT: Duration = Duration::from_secs(120);
+pub const PROGRESS_TIMEOUT: Duration = Duration::from_secs(180);
 
 /// How long to wait between failed attempts to reset the device
 const RESET_DELAY_INTERVAL: Duration = Duration::from_secs(10);
@@ -47,10 +47,11 @@ pub const DEFAULT_RETRY_TIMEOUT: Duration = Duration::from_secs(60);
 /// How long to wait after resetting the device before expecting it to come up
 const RESET_TIMEOUT: Duration = Duration::from_secs(60);
 
-/// TODO-K: Write a better comment here
-// Is 3 munutes enough? we're giving 1 minute per reset, and we're resetting
-// twice, so it makes sense to add one more minute?
-const WAIT_FOR_ONGOING_UPDATE_TIMEOUT: Duration = Duration::from_secs(180);
+/// How long to wait for an ongoing RoT bootloader update
+const WAIT_FOR_ONGOING_ROT_BOOTLOADER_UPDATE_TIMEOUT: Duration = Duration::from_secs(180);
+
+/// How long to wait between poll attempts on RoT bootloader update status
+const ROT_BOOLOADER_UPDATE_PROGRESS_INTERVAL: Duration = Duration::from_secs(10);
 
 /// Parameters describing a request to update one SP-managed component
 ///
@@ -222,9 +223,11 @@ pub(crate) async fn apply_update(
     // - if not, then if our required preconditions are met
     status.update(UpdateAttemptStatus::Precheck);
     match update_helper.precheck(log, &mut mgs_clients, update).await {
-        // TODO-K: Add more detailed comment here
         Ok(PrecheckStatus::ReadyForUpdate) |
-        Ok(PrecheckStatus::WaitingForOngoingUpdate) => (),
+        // This is the first time a Nexus instance is attempting to
+        // update the RoT bootloader, we don't need to wait for an
+        // ongoing update.
+        Ok(PrecheckStatus::WaitingForOngoingRotBootloaderUpdate) => (),
         Ok(PrecheckStatus::UpdateComplete) => {
             return Ok(UpdateCompletedHow::FoundNoChangesNeeded);
         }
@@ -623,14 +626,16 @@ async fn wait_for_update_done(
             // Check if we're done.
             Ok(PrecheckStatus::UpdateComplete) => return Ok(()),
 
-            // TODO-K: Add more detailed comment here
-            // Loop for 3 minutes to wait for any ongoing update (maybe more minutes?)
-            Ok(PrecheckStatus::WaitingForOngoingUpdate) => {
-                if before.elapsed() >= WAIT_FOR_ONGOING_UPDATE_TIMEOUT {
-                    return Err(UpdateWaitError::Timeout(WAIT_FOR_ONGOING_UPDATE_TIMEOUT));
+            // We'll loop for 3 minutes to wait for any ongoing RoT bootloader update.
+            // We need to wait for 2 resets which have a timeout of 60 seconds each,
+            // and an attempt to retrieve boot info, which has a time out of 30 seconds.
+            // We give an additional 30 seconds to as a buffer for the other actions.
+            Ok(PrecheckStatus::WaitingForOngoingRotBootloaderUpdate) => {
+                if before.elapsed() >= WAIT_FOR_ONGOING_ROT_BOOTLOADER_UPDATE_TIMEOUT {
+                    return Err(UpdateWaitError::Timeout(WAIT_FOR_ONGOING_ROT_BOOTLOADER_UPDATE_TIMEOUT));
                 }
 
-                tokio::time::sleep(PROGRESS_POLL_INTERVAL).await;
+                tokio::time::sleep(ROT_BOOLOADER_UPDATE_PROGRESS_INTERVAL).await;
                 continue;
             },
 
