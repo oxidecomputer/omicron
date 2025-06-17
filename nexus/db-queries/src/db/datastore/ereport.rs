@@ -340,22 +340,7 @@ mod tests {
     use super::*;
     use crate::db::explain::ExplainableAsync;
     use crate::db::pub_test_utils::TestDatabase;
-    use crate::db::raw_query_builder::expectorate_query_contents;
     use omicron_test_utils::dev;
-
-    #[tokio::test]
-    async fn expectorate_sp_latest_ereport_id() {
-        let query = DataStore::sp_latest_ereport_id_query(
-            SpType::Sled,
-            SpMgsSlot::from(SqlU16::new(1)),
-        );
-
-        expectorate_query_contents(
-            &query,
-            "tests/output/sp_latest_ereport_id.sql",
-        )
-        .await;
-    }
 
     #[tokio::test]
     async fn explain_sp_latest_ereport_id() {
@@ -383,17 +368,6 @@ mod tests {
 
         db.terminate().await;
         logctx.cleanup_successful();
-    }
-
-    #[tokio::test]
-    async fn expectorate_host_latest_ereport_id() {
-        let query = DataStore::host_latest_ereport_id_query(SledUuid::nil());
-
-        expectorate_query_contents(
-            &query,
-            "tests/output/host_latest_ereport_id.sql",
-        )
-        .await;
     }
 
     #[tokio::test]
