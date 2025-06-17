@@ -1049,9 +1049,9 @@ dependencies = [
 
 [[package]]
 name = "camino"
-version = "1.1.9"
+version = "1.1.10"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "8b96ec4966b5813e2c0507c1f86115c8c5abaadc3980879c3424042a02fd1ad3"
+checksum = "0da45bc31171d8d6960122e222a67740df867c1dd53b4d51caa297084c185cab"
 dependencies = [
  "serde",
 ]
@@ -1261,9 +1261,9 @@ dependencies = [
 
 [[package]]
 name = "cfg-if"
-version = "1.0.0"
+version = "1.0.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "baf1de4339761588bc0619e3cbc0120ee582ebb74b53b4efbf79117bd2da40fd"
+checksum = "9555578bc9e57714c812a1f84e4fc5b4d21fcb063490c624de019f7464c91268"
 
 [[package]]
 name = "cfg_aliases"
@@ -3253,9 +3253,9 @@ checksum = "b3ea1ec5f8307826a5b71094dd91fc04d4ae75d5709b20ad351c7fb4815c86ec"
 
 [[package]]
 name = "flate2"
-version = "1.1.1"
+version = "1.1.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "7ced92e76e966ca2fd84c8f7aa01a4aea65b0eb6648d72f7c8f3e2764a67fece"
+checksum = "4a3d7db9596fecd151c5f638c0ee5d5bd487b6e0ea232e5dc96d5250f6f94b1d"
 dependencies = [
  "crc32fast",
  "miniz_oxide",
@@ -3362,9 +3362,9 @@ dependencies = [
 
 [[package]]
 name = "fs-err"
-version = "3.1.0"
+version = "3.1.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "1f89bda4c2a21204059a977ed3bfe746677dfd137b83c339e702b0ac91d482aa"
+checksum = "88d7be93788013f265201256d58f04936a8079ad5dc898743aa20525f503b683"
 dependencies = [
  "autocfg",
  "tokio",
@@ -3940,11 +3940,11 @@ dependencies = [
 
 [[package]]
 name = "headers"
-version = "0.4.0"
+version = "0.4.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "322106e6bd0cba2d5ead589ddb8150a13d7c4217cf80d7c4f682ca994ccc6aa9"
+checksum = "b3314d5adb5d94bcdf56771f2e50dbbc80bb4bdf88967526706205ac9eff24eb"
 dependencies = [
- "base64 0.21.7",
+ "base64 0.22.1",
  "bytes",
  "headers-core",
  "http",
@@ -4436,12 +4436,13 @@ dependencies = [
 
 [[package]]
 name = "hyper-util"
-version = "0.1.11"
+version = "0.1.14"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "497bbc33a26fdd4af9ed9c70d63f61cf56a938375fbb32df34db9b1cd6d643f2"
+checksum = "dc2fdfdbff08affe55bb779f33b053aa1fe5dd5b54c257343c17edfa55711bdb"
 dependencies = [
  "bytes",
  "futures-channel",
+ "futures-core",
  "futures-util",
  "http",
  "http-body",
@@ -4612,9 +4613,9 @@ dependencies = [
 
 [[package]]
 name = "iddqd"
-version = "0.3.6"
+version = "0.3.7"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "9f6ebdbf573a5215d3b9bf3388deedb9501d619a43184f926b376909e11ed3ed"
+checksum = "fcce2c6f521794eaabde7b11887b92ca033cc09bf9d5c36d78fd14936a6d053b"
 dependencies = [
  "allocator-api2",
  "daft",
@@ -4623,7 +4624,9 @@ dependencies = [
  "hashbrown 0.15.3",
  "ref-cast",
  "rustc-hash 2.1.1",
+ "schemars",
  "serde",
+ "serde_json",
 ]
 
 [[package]]
@@ -5170,9 +5173,9 @@ checksum = "49f1f14873335454500d59611f1cf4a4b0f786f9ac11f4312a78e4cf2566695b"
 
 [[package]]
 name = "jiff"
-version = "0.2.14"
+version = "0.2.15"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a194df1107f33c79f4f93d02c80798520551949d59dfad22b6157048a88cca93"
+checksum = "be1f93b8b1eb69c77f24bbb0afdf66f54b632ee39af40ca21c4365a1d7347e49"
 dependencies = [
  "jiff-static",
  "jiff-tzdb-platform",
@@ -5185,9 +5188,9 @@ dependencies = [
 
 [[package]]
 name = "jiff-static"
-version = "0.2.14"
+version = "0.2.15"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "6c6e1db7ed32c6c71b759497fae34bf7933636f75a251b9e736555da426f6442"
+checksum = "03343451ff899767262ec32146f6d559dd759fdadf42ff0e227c7c48f72594b4"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -5326,9 +5329,9 @@ checksum = "830d08ce1d1d941e6b30645f1a0eb5643013d835ce3779a5fc208261dbe10f55"
 
 [[package]]
 name = "libc"
-version = "0.2.172"
+version = "0.2.173"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d750af042f7ef4f724306de029d18836c26c1765a54a6a3f094cbd23a7267ffa"
+checksum = "d8cfeafaffdbc32176b64fb251369d52ea9f0a8fbc6f8759edffef7b525d64bb"
 
 [[package]]
 name = "libdlpi-sys"
@@ -5944,9 +5947,9 @@ dependencies = [
 
 [[package]]
 name = "newtype-uuid"
-version = "1.2.1"
+version = "1.2.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "ee3224f0e8be7c2a1ebc77ef9c3eecb90f55c6594399ee825de964526b3c9056"
+checksum = "a8ba303c7a8f8fdee1fe1513cfd918f50f1c69bf65c91b39217bfc2b2af5c081"
 dependencies = [
  "proptest",
  "schemars",
@@ -6179,6 +6182,7 @@ dependencies = [
  "gateway-client",
  "hyper-rustls 0.26.0",
  "id-map",
+ "iddqd",
  "illumos-utils",
  "internal-dns-resolver",
  "internal-dns-types",
@@ -6554,6 +6558,7 @@ dependencies = [
  "sled-agent-client",
  "slog",
  "slog-error-chain",
+ "sp-sim",
  "static_assertions",
  "strum",
  "test-strategy",
@@ -6660,6 +6665,7 @@ dependencies = [
  "chrono",
  "daft",
  "id-map",
+ "iddqd",
  "illumos-utils",
  "omicron-common",
  "omicron-passwords",
@@ -7585,6 +7591,7 @@ dependencies = [
  "gateway-types",
  "http",
  "humantime",
+ "iddqd",
  "indicatif",
  "internal-dns-resolver",
  "internal-dns-types",
@@ -7702,7 +7709,7 @@ dependencies = [
  "anyhow",
  "camino",
  "cargo_metadata 0.19.2",
- "fs-err 3.1.0",
+ "fs-err 3.1.1",
  "omicron-workspace-hack",
  "serde",
  "toml_edit 0.22.26",
@@ -7748,7 +7755,7 @@ dependencies = [
  "cargo_metadata 0.19.2",
  "chrono",
  "clap",
- "fs-err 3.1.0",
+ "fs-err 3.1.1",
  "futures",
  "hex",
  "omicron-pins",
@@ -8023,7 +8030,7 @@ dependencies = [
  "ff",
  "flate2",
  "foldhash",
- "fs-err 3.1.0",
+ "fs-err 3.1.1",
  "futures",
  "futures-channel",
  "futures-core",
@@ -8076,7 +8083,6 @@ dependencies = [
  "postgres-types",
  "predicates",
  "proc-macro2",
- "quote",
  "rand 0.8.5",
  "regex",
  "regex-automata",
@@ -8206,7 +8212,7 @@ dependencies = [
  "debug-ignore",
  "dns-server-api",
  "dropshot",
- "fs-err 3.1.0",
+ "fs-err 3.1.1",
  "gateway-api",
  "hex",
  "indent_write",
@@ -8258,9 +8264,9 @@ dependencies = [
 
 [[package]]
 name = "openssl"
-version = "0.10.72"
+version = "0.10.73"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "fedfea7d58a1f73118430a55da6a286e7b044961736ce96a16a17068ea25e5da"
+checksum = "8505734d46c8ab1e19a1dce3aef597ad87dcb4c37e7188231769bd6bd51cebf8"
 dependencies = [
  "bitflags 2.9.0",
  "cfg-if",
@@ -8380,9 +8386,9 @@ dependencies = [
 
 [[package]]
 name = "owo-colors"
-version = "4.2.0"
+version = "4.2.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "1036865bb9422d3300cf723f657c2851d0e9ab12567854b1f4eba3d77decf564"
+checksum = "26995317201fa17f3656c36716aed4a7c81743a9634ac4c99c0eeda495db0cec"
 
 [[package]]
 name = "oxide-client"
@@ -10343,6 +10349,7 @@ dependencies = [
  "clap",
  "colored",
  "datatest-stable",
+ "dropshot",
  "expectorate",
  "humantime",
  "indent_write",
@@ -10372,7 +10379,9 @@ dependencies = [
  "swrite",
  "tabled 0.15.0",
  "tokio",
+ "tufaceous",
  "tufaceous-artifact",
+ "update-common",
  "uuid",
 ]
 
@@ -11754,6 +11763,7 @@ dependencies = [
  "futures",
  "glob",
  "id-map",
+ "iddqd",
  "illumos-utils",
  "key-manager",
  "nexus-sled-agent-shared",
@@ -11846,7 +11856,7 @@ dependencies = [
  "anyhow",
  "camino",
  "cfg-if",
- "fs-err 3.1.0",
+ "fs-err 3.1.1",
  "futures",
  "illumos-utils",
  "libc",
@@ -13929,7 +13939,7 @@ dependencies = [
  "display-error-chain",
  "dropshot",
  "flate2",
- "fs-err 3.1.0",
+ "fs-err 3.1.1",
  "futures",
  "hex",
  "hubtools",
@@ -14504,7 +14514,7 @@ dependencies = [
  "expectorate",
  "flate2",
  "flume",
- "fs-err 3.1.0",
+ "fs-err 3.1.1",
  "futures",
  "gateway-client",
  "gateway-messages",
@@ -15066,7 +15076,7 @@ dependencies = [
  "cargo_toml",
  "clap",
  "dev-tools-common",
- "fs-err 3.1.0",
+ "fs-err 3.1.1",
  "macaddr",
  "serde",
  "swrite",
