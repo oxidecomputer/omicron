@@ -326,7 +326,6 @@ pub enum PostUpdateError {
     #[error("communicating with MGS")]
     GatewayClientError(#[from] GatewayClientError),
 
-    // TODO-K: This one may not be necessary
     #[error("communicating with RoT: {message:?}")]
     RotCommunicationFailed { message: String },
 

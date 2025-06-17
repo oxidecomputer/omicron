@@ -28,7 +28,7 @@ use slog::{debug, error, info};
 use std::time::Duration;
 use std::time::Instant;
 
-type GatewayClientError = gateway_client::Error<gateway_client::types::Error>;
+const WAIT_FOR_BOOT_INFO_TIMEOUT: Duration = Duration::from_secs(30);
 
 pub struct ReconfiguratorRotBootloaderUpdater;
 impl SpComponentUpdateHelper for ReconfiguratorRotBootloaderUpdater {
@@ -186,7 +186,7 @@ impl SpComponentUpdateHelper for ReconfiguratorRotBootloaderUpdater {
             // itself is being updated (during the reset stage)? Should we check for that
             // here before setting the RoT bootloader as ready to update?
 
-            Ok(PrecheckStatus::ReadyForUpdate)
+            Ok(PrecheckStatus::WaitingForOngoingRotBootloaderUpdate)
         }
         .boxed()
     }
@@ -199,8 +199,6 @@ impl SpComponentUpdateHelper for ReconfiguratorRotBootloaderUpdater {
         mgs_clients: &'a mut MgsClients,
         update: &'a PendingMgsUpdate,
     ) -> BoxFuture<'a, Result<(), PostUpdateError>> {
-        const WAIT_FOR_BOOT_TIMEOUT: Duration = Duration::from_secs(30);
-
         // TODO-K: Again, we're resetting the ROT twice here, what happens
         // if an RoT update is happening at the same time?
 
@@ -235,7 +233,7 @@ impl SpComponentUpdateHelper for ReconfiguratorRotBootloaderUpdater {
                 mgs_clients,
                 update.sp_type,
                 update.slot_id,
-                WAIT_FOR_BOOT_TIMEOUT,
+                WAIT_FOR_BOOT_INFO_TIMEOUT,
             )
             .await?;
             // If the image is not valid we bail
@@ -290,8 +288,7 @@ async fn wait_for_stage0_next_image_check(
     sp_type: SpType,
     sp_slot: u32,
     timeout: Duration,
-    // TODO-K: Change to PostUpdateError?
-) -> Result<Option<RotImageError>, GatewayClientError> {
+) -> Result<Option<RotImageError>, PostUpdateError> {
     let mut ticker = tokio::time::interval(Duration::from_secs(1));
 
     let start = Instant::now();
@@ -335,8 +332,9 @@ async fn wait_for_stage0_next_image_check(
                             "failed to get RoT boot info";
                             "error" => %message,
                         );
-                        // TODO-K: change this one to RotCommunicationFailed?
-                        return Ok(Some(RotImageError::Unchecked));
+                        return Err(PostUpdateError::RotCommunicationFailed {
+                            message,
+                        });
                     }
                 }
             },
@@ -348,7 +346,7 @@ async fn wait_for_stage0_next_image_check(
                         "error" => %error,
                     );
                 } else {
-                    return Err(error);
+                    return Err(PostUpdateError::GatewayClientError(error));
                 }
             }
         }

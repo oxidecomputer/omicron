@@ -362,9 +362,9 @@ pub(crate) async fn apply_update(
 
     if try_reset {
         // We retry this until we get some error *other* than a communication
-        // error.  There is intentionally no timeout here.  If we've staged an
-        // update but not managed to reset the device, there's no point where
-        // we'd want to stop trying to do so.
+        // error or an RoT bootloader image error.  There is intentionally no
+        // timeout here.  If we've staged an update but not managed to reset
+        // the device, there's no point where we'd want to stop trying to do so.
         while let Err(error) =
             update_helper.post_update(log, &mut mgs_clients, update).await
         {
