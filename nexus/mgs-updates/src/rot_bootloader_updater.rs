@@ -354,4 +354,3 @@ async fn wait_for_stage0_next_image_check(
         }
     }
 }
-

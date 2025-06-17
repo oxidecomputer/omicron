@@ -48,10 +48,12 @@ pub const DEFAULT_RETRY_TIMEOUT: Duration = Duration::from_secs(60);
 const RESET_TIMEOUT: Duration = Duration::from_secs(60);
 
 /// How long to wait for an ongoing RoT bootloader update
-const WAIT_FOR_ONGOING_ROT_BOOTLOADER_UPDATE_TIMEOUT: Duration = Duration::from_secs(180);
+const WAIT_FOR_ONGOING_ROT_BOOTLOADER_UPDATE_TIMEOUT: Duration =
+    Duration::from_secs(180);
 
 /// How long to wait between poll attempts on RoT bootloader update status
-const ROT_BOOLOADER_UPDATE_PROGRESS_INTERVAL: Duration = Duration::from_secs(10);
+const ROT_BOOLOADER_UPDATE_PROGRESS_INTERVAL: Duration =
+    Duration::from_secs(10);
 
 /// Parameters describing a request to update one SP-managed component
 ///
@@ -631,13 +633,18 @@ async fn wait_for_update_done(
             // and an attempt to retrieve boot info, which has a time out of 30 seconds.
             // We give an additional 30 seconds to as a buffer for the other actions.
             Ok(PrecheckStatus::WaitingForOngoingRotBootloaderUpdate) => {
-                if before.elapsed() >= WAIT_FOR_ONGOING_ROT_BOOTLOADER_UPDATE_TIMEOUT {
-                    return Err(UpdateWaitError::Timeout(WAIT_FOR_ONGOING_ROT_BOOTLOADER_UPDATE_TIMEOUT));
+                if before.elapsed()
+                    >= WAIT_FOR_ONGOING_ROT_BOOTLOADER_UPDATE_TIMEOUT
+                {
+                    return Err(UpdateWaitError::Timeout(
+                        WAIT_FOR_ONGOING_ROT_BOOTLOADER_UPDATE_TIMEOUT,
+                    ));
                 }
 
-                tokio::time::sleep(ROT_BOOLOADER_UPDATE_PROGRESS_INTERVAL).await;
+                tokio::time::sleep(ROT_BOOLOADER_UPDATE_PROGRESS_INTERVAL)
+                    .await;
                 continue;
-            },
+            }
 
             // An incorrect version in the "inactive" slot, incorrect active slot,
             // or non-empty pending_persistent_boot_preference/transient_boot_preference
