@@ -407,9 +407,10 @@ show what was found in a particular collection
 Usage: omdb db inventory collections show [OPTIONS] <ID_OR_LATEST> [COMMAND]
 
 Commands:
-  all   show all information from the collection
-  sp    show information about service processors (baseboard)
-  help  Print this message or the help of the given subcommand(s)
+  all                show all information from the collection
+  sp                 show information about service processors (baseboard)
+  orphaned-datasets  show orphaned datasets
+  help               Print this message or the help of the given subcommand(s)
 
 Arguments:
   <ID_OR_LATEST>  id of the collection (or `latest`)
@@ -507,19 +508,22 @@ Options:
           Show sleds that match the given filter
 
           Possible values:
-          - all:                      All sleds in the system, regardless of policy or state
-          - commissioned:             All sleds that are currently part of the control plane cluster
-          - decommissioned:           All sleds that were previously part of the control plane
+          - all:                           All sleds in the system, regardless of policy or state
+          - commissioned:                  All sleds that are currently part of the control plane
+            cluster
+          - decommissioned:                All sleds that were previously part of the control plane
             cluster but have been decommissioned
-          - discretionary:            Sleds that are eligible for discretionary services
-          - in-service:               Sleds that are in service (even if they might not be eligible
-            for discretionary services)
-          - query-during-inventory:   Sleds whose sled agents should be queried for inventory
-          - reservation-create:       Sleds on which reservations can be created
-          - vpc-routing:              Sleds which should be sent OPTE V2P mappings and Routing rules
-          - vpc-firewall:             Sleds which should be sent VPC firewall rules
-          - tuf-artifact-replication: Sleds which should have TUF repo artifacts replicated onto
-            them
+          - discretionary:                 Sleds that are eligible for discretionary services
+          - in-service:                    Sleds that are in service (even if they might not be
+            eligible for discretionary services)
+          - query-during-inventory:        Sleds whose sled agents should be queried for inventory
+          - reservation-create:            Sleds on which reservations can be created
+          - vpc-routing:                   Sleds which should be sent OPTE V2P mappings and Routing
+            rules
+          - vpc-firewall:                  Sleds which should be sent VPC firewall rules
+          - tuf-artifact-replication:      Sleds which should have TUF repo artifacts replicated
+            onto them
+          - sps-updated-by-reconfigurator: Sleds whose SPs should be updated by Reconfigurator
 
       --log-level <LOG_LEVEL>
           log level filter
@@ -908,9 +912,11 @@ Debug a specific Sled
 Usage: omdb sled-agent [OPTIONS] <COMMAND>
 
 Commands:
-  zones      print information about zones
-  bootstore  print information about the local bootstore node
-  help       Print this message or the help of the given subcommand(s)
+  zones           print information about zones
+  bootstore       print information about the local bootstore node
+  chicken-switch  control "chicken switches" (potentially-destructive sled-agent behavior that can
+                  be toggled on or off via `omdb`)
+  help            Print this message or the help of the given subcommand(s)
 
 Options:
       --log-level <LOG_LEVEL>  log level filter [env: LOG_LEVEL=] [default: warn]
