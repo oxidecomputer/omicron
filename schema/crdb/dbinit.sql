@@ -5764,7 +5764,7 @@ CREATE TABLE IF NOT EXISTS omicron.public.sp_ereport (
     -- UUID of the Nexus instance that collected the ereport
     collector_id UUID NOT NULL,
 
-    -- physical lcoation of the reporting SP
+    -- physical location of the reporting SP
     --
     -- these fields are always present, as they are how requests to collect
     -- ereports are indexed by MGS.
