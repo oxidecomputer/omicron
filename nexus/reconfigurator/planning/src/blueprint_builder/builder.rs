@@ -1960,6 +1960,13 @@ impl<'a> BlueprintBuilder<'a> {
         Ok(self.resource_allocator()?.inject_untracked_external_dns_ip(addr)?)
     }
 
+    pub fn pending_mgs_updates_replace_all(
+        &mut self,
+        updates: nexus_types::deployment::PendingMgsUpdates,
+    ) {
+        self.pending_mgs_updates = updates;
+    }
+
     pub fn pending_mgs_update_insert(
         &mut self,
         update: nexus_types::deployment::PendingMgsUpdate,

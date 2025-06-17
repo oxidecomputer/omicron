@@ -16,14 +16,15 @@ configured silo names: example-silo
 internal DNS generations: 1
 external DNS generations: 1
 target number of Nexus instances: default
+target release: unset
 
 
 
 > sled-list
-ID                                   NZPOOLS SUBNET                  
-2eb69596-f081-4e2d-9425-9994926e0832 10      fd00:1122:3344:102::/64 
-32d8d836-4d8a-4e54-8fa9-f31d79c42646 10      fd00:1122:3344:103::/64 
-89d02b1b-478c-401a-8e28-7a26f74fa41b 10      fd00:1122:3344:101::/64 
+ID                                   SERIAL  NZPOOLS SUBNET                  
+2eb69596-f081-4e2d-9425-9994926e0832 serial1 10      fd00:1122:3344:102::/64 
+32d8d836-4d8a-4e54-8fa9-f31d79c42646 serial2 10      fd00:1122:3344:103::/64 
+89d02b1b-478c-401a-8e28-7a26f74fa41b serial0 10      fd00:1122:3344:101::/64 
 
 > inventory-list
 ID                                   NERRORS TIME_DONE                
@@ -37,7 +38,10 @@ T ENA ID                                   PARENT                               
 
 > sled-show 2eb69596-f081-4e2d-9425-9994926e0832
 sled 2eb69596-f081-4e2d-9425-9994926e0832
+serial serial1
 subnet fd00:1122:3344:102::/64
+SP active version:   Some("0.0.1")
+SP inactive version: None
 zpools (10):
     088ed702-551e-453b-80d7-57700372a844 (zpool)
     SledDisk { disk_identity: DiskIdentity { vendor: "fake-vendor", model: "fake-model", serial: "serial-088ed702-551e-453b-80d7-57700372a844" }, disk_id: b2850ccb-4ac7-4034-aeab-b1cd582d407b (physical_disk), policy: InService, state: Active }
@@ -380,8 +384,8 @@ loaded example system with:
 
 
 > sled-list
-ID                                   NZPOOLS SUBNET                  
-89d02b1b-478c-401a-8e28-7a26f74fa41b 4       fd00:1122:3344:101::/64 
+ID                                   SERIAL  NZPOOLS SUBNET                  
+89d02b1b-478c-401a-8e28-7a26f74fa41b serial0 4       fd00:1122:3344:101::/64 
 
 > inventory-list
 ID                                   NERRORS TIME_DONE                
@@ -395,7 +399,10 @@ T ENA ID                                   PARENT                               
 
 > sled-show 89d02b1b-478c-401a-8e28-7a26f74fa41b
 sled 89d02b1b-478c-401a-8e28-7a26f74fa41b
+serial serial0
 subnet fd00:1122:3344:101::/64
+SP active version:   Some("0.0.1")
+SP inactive version: None
 zpools (4):
     44fa7024-c2bc-4d2c-b478-c4997e4aece8 (zpool)
     SledDisk { disk_identity: DiskIdentity { vendor: "fake-vendor", model: "fake-model", serial: "serial-44fa7024-c2bc-4d2c-b478-c4997e4aece8" }, disk_id: 2a15b33c-dd0e-45b7-aba9-d05f40f030ff (physical_disk), policy: InService, state: Active }
@@ -497,6 +504,7 @@ WARN failed to place all new desired InternalDns zones, placed: 0, wanted_to_pla
 INFO sufficient ExternalDns zones exist in plan, desired_count: 0, current_count: 0
 WARN failed to place all new desired Nexus zones, placed: 0, wanted_to_place: 3
 INFO sufficient Oximeter zones exist in plan, desired_count: 0, current_count: 0
+WARN cannot issue more SP updates (no current artifacts)
 INFO some zones not yet up-to-date, sled_id: 89d02b1b-478c-401a-8e28-7a26f74fa41b
 INFO will ensure cockroachdb setting, setting: cluster.preserve_downgrade_option, value: DoNotModify
 generated blueprint 86db3308-f817-4626-8838-4085949a6a41 based on parent blueprint ade5749d-bdf3-4fab-a8ae-00bea01b3a5a
