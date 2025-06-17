@@ -49,16 +49,6 @@ pub struct EreporterRestartBySerial {
 }
 
 impl DataStore {
-    // pub async fn sp_ereport_list_by_serial(
-    //     &self,
-    //     opctx: &OpContext,
-    //     serial: String,
-    //     time_range: impl RangeBounds<DateTime<Utc>>,
-    //     pagparams:
-    // ) -> ListResultVec<SpEreport> {
-    //     todo!()
-    // }
-
     /// Fetch an ereport by its restart ID and ENA.
     ///
     /// This function queries both the service-processor and host OS ereport
