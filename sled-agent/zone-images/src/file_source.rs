@@ -10,6 +10,9 @@ use illumos_utils::running_zone::ZoneImageFileSource;
 pub const RAMDISK_IMAGE_PATH: &str = "/opt/oxide";
 
 /// Constructs a file source for the RAM disk.
+///
+/// This accepts a `zone_type` string rather than a `ZoneType` or `ZoneKind`
+/// enum because it is used to manage non-Omicron zones like propolis-server.
 pub fn ramdisk_file_source(zone_type: &str) -> ZoneImageFileSource {
     ZoneImageFileSource {
         file_name: install_dataset_file_name(zone_type),
