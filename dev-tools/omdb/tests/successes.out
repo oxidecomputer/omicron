@@ -1409,7 +1409,7 @@ stdout:
 blueprint  ......<REDACTED_BLUEPRINT_ID>.......
 parent:    <none>
 
-  sled: ..........<REDACTED_UUID>........... (active, config generation 2)
+  sled: ..........<REDACTED_UUID>........... (active, config generation 4)
 
     physical disks:
     -----------------------------------------------------------------
@@ -1440,7 +1440,7 @@ parent:    <none>
 
 
 
-  sled: ..........<REDACTED_UUID>........... (active, config generation 2)
+  sled: ..........<REDACTED_UUID>........... (active, config generation 4)
 
     physical disks:
     ----------------------------------------------------------------
@@ -1513,7 +1513,7 @@ stdout:
 blueprint  ......<REDACTED_BLUEPRINT_ID>.......
 parent:    <none>
 
-  sled: ..........<REDACTED_UUID>........... (active, config generation 2)
+  sled: ..........<REDACTED_UUID>........... (active, config generation 4)
 
     physical disks:
     -----------------------------------------------------------------
@@ -1544,7 +1544,7 @@ parent:    <none>
 
 
 
-  sled: ..........<REDACTED_UUID>........... (active, config generation 2)
+  sled: ..........<REDACTED_UUID>........... (active, config generation 4)
 
     physical disks:
     ----------------------------------------------------------------
