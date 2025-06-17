@@ -149,6 +149,13 @@ packages = [ "oximeter-collector" ]
 #              tooling supports this value so that during development you can
 #              relax these constraints.
 #
+# "server" and "client" versioning is elaborated on more in RFD 532.  Note that
+# "lockstep" collapses into "server" here, as it's trivially the case that if
+# the server and client(s) are updated atomically the server does not have to
+# support older clients.  Additionally, the "updated before" relationship is
+# discussed some in RFD 565, [Update
+# sequence](https://rfd.shared.oxide.computer/rfd/0565#_update_sequence).
+#
 # [`versioned_how_reason`]: free text string explaining why `versioned_how` must
 # be "client" for this API.  This is printed in documentation and command output
 # and serves as documentation for developers to understand why we made this
