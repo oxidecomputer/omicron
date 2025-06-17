@@ -5801,6 +5801,13 @@ USING BTREE (
 WHERE
     time_deleted IS NULL;
 
+
+CREATE INDEX IF NOT EXISTS lookup_sp_ereports_by_serial
+ON omicron.public.sp_ereport (
+    serial_number
+) WHERE
+    time_deleted IS NULL;
+
 -- Ereports from the host operating system
 CREATE TABLE IF NOT EXISTS omicron.public.host_ereport (
     restart_id UUID NOT NULL,
@@ -5822,7 +5829,8 @@ CREATE TABLE IF NOT EXISTS omicron.public.host_ereport (
     PRIMARY KEY (restart_id, ena)
 );
 
-CREATE INDEX IF NOT EXISTS lookup_host_ereports_by_sled ON omicron.public.host_ereport (
+CREATE INDEX IF NOT EXISTS lookup_host_ereports_by_sled
+ON omicron.public.host_ereport (
     sled_id,
     time_collected
 );
@@ -5833,6 +5841,12 @@ USING BTREE (
     time_collected
 )
 WHERE
+    time_deleted IS NULL;
+
+CREATE INDEX IF NOT EXISTS lookup_host_ereports_by_serial
+ON omicron.public.host_ereport (
+    sled_serial
+) WHERE
     time_deleted IS NULL;
 
 /*
