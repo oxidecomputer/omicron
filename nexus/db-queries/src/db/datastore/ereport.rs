@@ -134,59 +134,36 @@ impl DataStore {
                         .internal_context("listing SP ereports")
                 })?;
 
-        let sp_reporters = sp_rows.into_iter().filter_map(|(restart_id, sp_type, sp_slot, first_seen, ereports)| {
-            let ereports = ereports.into();
-            let first_seen_at = match first_seen {
-                Some(t) => t,
-                None => {
-                    debug_assert!(false, "ELIZA: why would min(time_collected) be none?");
-                    slog::warn!(
-                        opctx.log,
-                        "SP row returned by `ereporter_restart_list_by_serial` \
-                         had a `None` value for `min(time_collected)`";
-                        "restart_id" => ?restart_id,
-                        "sp_type" => ?sp_type,
-                        "sp_slot" => ?sp_slot,
-                        "first_seen" => ?first_seen,
-                        "count" => ?ereports,
-                    );
-                    return None;
-                }
-            };
+        const FIRST_SEEN_NOT_NULL: &str = "`min(time_collected)` should never \
+            return `NULL`, since the `time_collected` column is not nullable, \
+            and the `SELECT` clause should return nothing if the result set \
+            is empty";
 
-            Some(EreporterRestartBySerial {
-                id: EreporterRestartUuid::from_untyped_uuid(restart_id),
-                reporter_kind: Reporter::Sp { sp_type, slot: sp_slot.into() },
-                first_seen_at,
-                ereports,
-            })
-        });
-        let host_reporters =  host_os_rows.into_iter().filter_map(|(restart_id, sled_id, first_seen, ereports)| {
-            let ereports = ereports.into();
-            let first_seen_at = match first_seen {
-                Some(t) => t,
-                None => {
-                    debug_assert!(false, "ELIZA: why would min(time_collected) be none?");
-                    slog::warn!(
-                        opctx.log,
-                        "SP row returned by `ereporter_restart_list_by_serial` \
-                         had a `None` value for `min(time_collected)`";
-                        "restart_id" => ?restart_id,
-                        "sled_id" => ?sled_id,
-                        "first_seen" => ?first_seen,
-                        "ereports" => ?ereports,
-                    );
-                    return None;
+        let sp_reporters = sp_rows.into_iter().map(
+            |(restart_id, sp_type, sp_slot, first_seen, ereports)| {
+                EreporterRestartBySerial {
+                    id: EreporterRestartUuid::from_untyped_uuid(restart_id),
+                    reporter_kind: Reporter::Sp {
+                        sp_type,
+                        slot: sp_slot.into(),
+                    },
+                    first_seen_at: first_seen.expect(FIRST_SEEN_NOT_NULL),
+                    ereports: ereports.into(),
                 }
-            };
-
-            Some(EreporterRestartBySerial {
-                id: EreporterRestartUuid::from_untyped_uuid(restart_id),
-                reporter_kind: Reporter::HostOs { sled: SledUuid::from_untyped_uuid(sled_id) },
-                first_seen_at,
-                ereports,
-            })
-        });
+            },
+        );
+        let host_reporters = host_os_rows.into_iter().map(
+            |(restart_id, sled_id, first_seen, ereports)| {
+                EreporterRestartBySerial {
+                    id: EreporterRestartUuid::from_untyped_uuid(restart_id),
+                    reporter_kind: Reporter::HostOs {
+                        sled: SledUuid::from_untyped_uuid(sled_id),
+                    },
+                    first_seen_at: first_seen.expect(FIRST_SEEN_NOT_NULL),
+                    ereports: ereports.into(),
+                }
+            },
+        );
         Ok(sp_reporters.chain(host_reporters).collect::<Vec<_>>())
     }
 
