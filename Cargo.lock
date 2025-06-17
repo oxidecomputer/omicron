@@ -2258,9 +2258,9 @@ dependencies = [
 
 [[package]]
 name = "data-encoding"
-version = "2.6.0"
+version = "2.9.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e8566979429cf69b49a5c740c60791108e86440e8be149bbea4fe54d2c32d6e2"
+checksum = "2a2330da5de22e8a3cb63252ce2abb30116bf5265e89c0e01bc17015ce30a476"
 
 [[package]]
 name = "datatest-stable"
@@ -9608,9 +9608,9 @@ dependencies = [
 
 [[package]]
 name = "prettyplease"
-version = "0.2.32"
+version = "0.2.34"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "664ec5419c51e34154eec046ebcba56312d5a2fc3b09a06da188e1ad21afadf6"
+checksum = "6837b9e10d61f45f987d50808f83d1ee3d206c66acf650c3e4ae2e1f6ddedf55"
 dependencies = [
  "proc-macro2",
  "syn 2.0.101",
@@ -11113,9 +11113,9 @@ dependencies = [
 
 [[package]]
 name = "samael"
-version = "0.0.18"
+version = "0.0.19"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "bcefa9336e783352848ad9a1cb86bec02030624c0ce8205f79a19d4a7b6f148d"
+checksum = "f20498fc95ccfe0f015d003aa86084b042cc672a9a41fa2bea4ab7d7e3239348"
 dependencies = [
  "base64 0.22.1",
  "bindgen 0.71.1",
@@ -11131,7 +11131,7 @@ dependencies = [
  "openssl-sys",
  "pkg-config",
  "quick-xml",
- "rand 0.8.5",
+ "rand 0.9.0",
  "serde",
  "thiserror 2.0.12",
  "url",
