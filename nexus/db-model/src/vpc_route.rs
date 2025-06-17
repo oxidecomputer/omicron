@@ -2,19 +2,17 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-use super::{Name, impl_enum_wrapper};
+use super::{DatabaseString, Name, impl_enum_wrapper, impl_from_sql_text};
 use chrono::{DateTime, Utc};
 use db_macros::Resource;
-use diesel::backend::Backend;
-use diesel::deserialize::{self, FromSql};
-use diesel::pg::Pg;
-use diesel::serialize::{self, ToSql};
 use diesel::sql_types;
 use nexus_db_schema::schema::router_route;
 use nexus_types::external_api::params;
 use nexus_types::identity::Resource;
 use omicron_common::api::external;
+use std::borrow::Cow;
 use std::io::Write;
+use std::str::FromStr;
 use uuid::Uuid;
 
 impl_enum_wrapper!(
@@ -34,29 +32,19 @@ impl_enum_wrapper!(
 #[diesel(sql_type = sql_types::Text)]
 pub struct RouteTarget(pub external::RouteTarget);
 
-impl ToSql<sql_types::Text, Pg> for RouteTarget {
-    fn to_sql<'a>(
-        &'a self,
-        out: &mut serialize::Output<'a, '_, Pg>,
-    ) -> serialize::Result {
-        <String as ToSql<sql_types::Text, Pg>>::to_sql(
-            &self.0.to_string(),
-            &mut out.reborrow(),
-        )
+impl DatabaseString for RouteTarget {
+    type Error = <external::RouteTarget as FromStr>::Err;
+
+    fn to_database_string(&self) -> Cow<str> {
+        self.0.to_string().into()
+    }
+
+    fn from_database_string(s: &str) -> Result<Self, Self::Error> {
+        s.parse::<external::RouteTarget>().map(Self)
     }
 }
 
-impl<DB> FromSql<sql_types::Text, DB> for RouteTarget
-where
-    DB: Backend,
-    String: FromSql<sql_types::Text, DB>,
-{
-    fn from_sql(bytes: DB::RawValue<'_>) -> deserialize::Result<Self> {
-        Ok(RouteTarget(
-            String::from_sql(bytes)?.parse::<external::RouteTarget>()?,
-        ))
-    }
-}
+impl_from_sql_text!(RouteTarget);
 
 #[derive(Clone, Debug, AsExpression, FromSqlRow)]
 #[diesel(sql_type = sql_types::Text)]
@@ -72,29 +60,19 @@ impl RouteDestination {
     }
 }
 
-impl ToSql<sql_types::Text, Pg> for RouteDestination {
-    fn to_sql<'a>(
-        &'a self,
-        out: &mut serialize::Output<'a, '_, Pg>,
-    ) -> serialize::Result {
-        <String as ToSql<sql_types::Text, Pg>>::to_sql(
-            &self.0.to_string(),
-            &mut out.reborrow(),
-        )
+impl DatabaseString for RouteDestination {
+    type Error = <external::RouteDestination as FromStr>::Err;
+
+    fn to_database_string(&self) -> Cow<str> {
+        self.0.to_string().into()
+    }
+
+    fn from_database_string(s: &str) -> Result<Self, Self::Error> {
+        s.parse::<external::RouteDestination>().map(Self)
     }
 }
 
-impl<DB> FromSql<sql_types::Text, DB> for RouteDestination
-where
-    DB: Backend,
-    String: FromSql<sql_types::Text, DB>,
-{
-    fn from_sql(bytes: DB::RawValue<'_>) -> deserialize::Result<Self> {
-        Ok(RouteDestination::new(
-            String::from_sql(bytes)?.parse::<external::RouteDestination>()?,
-        ))
-    }
-}
+impl_from_sql_text!(RouteDestination);
 
 #[derive(Queryable, Insertable, Clone, Debug, Selectable, Resource)]
 #[diesel(table_name = router_route)]

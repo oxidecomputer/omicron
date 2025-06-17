@@ -19,7 +19,8 @@ pub(crate) struct AllInstallMetadataFiles<T: 'static> {
     pub(crate) boot_zpool: ZpoolName,
     pub(crate) boot_dataset_dir: Utf8PathBuf,
     pub(crate) boot_disk_path: Utf8PathBuf,
-    pub(crate) boot_disk_metadata: Result<Option<T>, InstallMetadataReadError>,
+    pub(crate) boot_disk_metadata:
+        Result<Option<InstallMetadata<T>>, InstallMetadataReadError>,
     pub(crate) non_boot_disk_metadata: IdOrdMap<InstallMetadataNonBootInfo<T>>,
 }
 
@@ -38,17 +39,28 @@ where
     /// results and put them in a map, then make decisions based on them in a
     /// separate step. This enables better testing and ensures that changes to
     /// behavior are described in the type system.
-    pub(crate) fn read_all(
+    ///
+    /// `with_default` is used to provide a default value if the metadata file
+    /// is not found.
+    pub(crate) fn read_all<F>(
         _log: &slog::Logger,
         metadata_file_name: &str,
         internal_disks: &InternalDisksWithBootDisk,
-    ) -> Self {
+        with_default: F,
+    ) -> Self
+    where
+        F: Fn(&Utf8Path) -> Result<Option<T>, InstallMetadataReadError>,
+    {
         let boot_dataset_dir = internal_disks.boot_disk_install_dataset();
 
         // Read the file from the boot disk.
         let boot_disk_path = boot_dataset_dir.join(metadata_file_name);
         let boot_disk_metadata =
             read_install_metadata_file::<T>(&boot_dataset_dir, &boot_disk_path);
+        let boot_disk_metadata =
+            InstallMetadata::new(boot_disk_metadata, || {
+                with_default(&boot_dataset_dir)
+            });
 
         // Read the file from all other disks. We attempt to make sure they match up
         // and will log a warning if they don't, though (until we have a better
@@ -57,7 +69,10 @@ where
         let non_boot_disk_overrides = non_boot_datasets
             .map(|(zpool_name, dataset_dir)| {
                 let path = dataset_dir.join(metadata_file_name);
-                let res = read_install_metadata_file(&dataset_dir, &path);
+                let res = read_install_metadata_file::<T>(&dataset_dir, &path);
+                let res =
+                    InstallMetadata::new(res, || with_default(&dataset_dir));
+
                 let result =
                     InstallMetadataNonBootResult::new(res, &boot_disk_metadata);
 
@@ -143,6 +158,39 @@ where
     Ok(metadata)
 }
 
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct InstallMetadata<T> {
+    /// The value deserialized from disk or returned by the default function.
+    pub value: T,
+
+    /// True if the value was deserialized from disk.
+    pub deserialized: bool,
+}
+
+impl<T> InstallMetadata<T> {
+    fn new<F>(
+        deserialized_metadata: Result<Option<T>, InstallMetadataReadError>,
+        default_fn: F,
+    ) -> Result<Option<Self>, InstallMetadataReadError>
+    where
+        F: FnOnce() -> Result<Option<T>, InstallMetadataReadError>,
+    {
+        match deserialized_metadata {
+            Ok(Some(metadata)) => {
+                Ok(Some(Self { value: metadata, deserialized: true }))
+            }
+            Ok(None) => match default_fn() {
+                Ok(Some(metadata)) => {
+                    Ok(Some(Self { value: metadata, deserialized: false }))
+                }
+                Ok(None) => Ok(None),
+                Err(error) => Err(error),
+            },
+            Err(error) => Err(error),
+        }
+    }
+}
+
 #[derive(Clone, Debug, PartialEq)]
 pub struct InstallMetadataNonBootInfo<T> {
     /// The name of the zpool.
@@ -173,8 +221,9 @@ impl<T> IdOrdItem for InstallMetadataNonBootInfo<T> {
 
 #[derive(Clone, Debug, PartialEq)]
 pub enum InstallMetadataNonBootResult<T> {
-    /// The file is present and matches the value on the boot disk.
-    MatchesPresent(T),
+    /// The metadata is present and matches the value on the boot disk (or the
+    /// default value).
+    MatchesPresent(InstallMetadata<T>),
 
     /// The file is absent and is also absent on the boot disk.
     MatchesAbsent,
@@ -188,8 +237,11 @@ pub enum InstallMetadataNonBootResult<T> {
 
 impl<T: PartialEq> InstallMetadataNonBootResult<T> {
     pub(crate) fn new(
-        res: Result<Option<T>, InstallMetadataReadError>,
-        boot_disk_res: &Result<Option<T>, InstallMetadataReadError>,
+        res: Result<Option<InstallMetadata<T>>, InstallMetadataReadError>,
+        boot_disk_res: &Result<
+            Option<InstallMetadata<T>>,
+            InstallMetadataReadError,
+        >,
     ) -> Self {
         match (res, boot_disk_res) {
             (Ok(Some(non_boot_disk_info)), Ok(Some(boot_disk_info))) => {
@@ -230,17 +282,17 @@ pub enum InstallMetadataNonBootMismatch<T> {
     /// The file is absent on the boot disk but present on the other disk.
     BootAbsentOtherPresent {
         /// The information found on the other disk.
-        non_boot_disk_info: T,
+        non_boot_disk_info: InstallMetadata<T>,
     },
 
     /// The file's contents differ between the boot disk and the other disk.
-    ValueMismatch { non_boot_disk_info: T },
+    ValueMismatch { non_boot_disk_info: InstallMetadata<T> },
 
     /// There was a read error on the boot disk, so we were unable to verify
     /// consistency.
     BootDiskReadError {
         /// The value as found on this disk. This value is logged but not used.
-        non_boot_disk_info: Option<T>,
+        non_boot_disk_info: Option<InstallMetadata<T>>,
     },
 }
 
@@ -275,5 +327,23 @@ pub enum InstallMetadataReadError {
         contents: String,
         #[source]
         error: ArcSerdeJsonError,
+    },
+    #[error("error reading entries from install dataset dir {dataset_dir}")]
+    ReadDir {
+        dataset_dir: Utf8PathBuf,
+        #[source]
+        error: ArcIoError,
+    },
+    #[error("error reading file type for {path}")]
+    ReadFileType {
+        path: Utf8PathBuf,
+        #[source]
+        error: ArcIoError,
+    },
+    #[error("error reading file {path}")]
+    ReadFile {
+        path: Utf8PathBuf,
+        #[source]
+        error: ArcIoError,
     },
 }

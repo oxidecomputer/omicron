@@ -17,9 +17,11 @@ use installinator::HOST_PHASE_2_FILE_NAME;
 use maplit::btreeset;
 use omicron_common::{
     disk::DiskIdentity,
-    update::{MupdateOverrideInfo, OmicronZoneManifest},
+    update::{
+        MupdateOverrideInfo, OmicronZoneManifest, OmicronZoneManifestSource,
+    },
 };
-use omicron_uuid_kinds::{MupdateUuid, ZpoolUuid};
+use omicron_uuid_kinds::{InternalZpoolUuid, MupdateUuid};
 use sled_agent_config_reconciler::{
     InternalDisksReceiver, InternalDisksWithBootDisk,
 };
@@ -357,9 +359,9 @@ async fn test_installinator_fetch() {
 
     // Create a new update ID and register it. This is required to ensure the
     // installinator reaches completion.
-    let update_id = MupdateUuid::new_v4();
+    let mupdate_id = MupdateUuid::new_v4();
     let start_receiver =
-        wicketd_testctx.server.ipr_update_tracker.register(update_id);
+        wicketd_testctx.server.ipr_update_tracker.register(mupdate_id);
 
     // Process the receiver rather than dropping it, since dropping it causes
     // 410 Gone errors.
@@ -372,12 +374,12 @@ async fn test_installinator_fetch() {
     });
 
     // Simulate a couple of zpools.
-    let zpool1_uuid = ZpoolUuid::new_v4();
-    let zpool2_uuid = ZpoolUuid::new_v4();
+    let zpool1_uuid = InternalZpoolUuid::new_v4();
+    let zpool2_uuid = InternalZpoolUuid::new_v4();
     let a_path = temp_dir.path().join("pool/int").join(zpool1_uuid.to_string());
     let b_path = temp_dir.path().join("pool/int").join(zpool2_uuid.to_string());
 
-    let update_id_str = update_id.to_string();
+    let update_id_str = mupdate_id.to_string();
     let args = installinator::InstallinatorApp::try_parse_from([
         "installinator",
         "install",
@@ -404,7 +406,7 @@ async fn test_installinator_fetch() {
 
     // Check that the update status is marked as closed.
     assert_eq!(
-        wicketd_testctx.server.ipr_update_tracker.update_state(update_id),
+        wicketd_testctx.server.ipr_update_tracker.update_state(mupdate_id),
         Some(RunningUpdateState::Closed),
         "update should be marked as closed at the end of the run"
     );
@@ -472,8 +474,13 @@ async fn test_installinator_fetch() {
         serde_json::from_slice::<OmicronZoneManifest>(&a_manifest_bytes)
             .expect("zone manifest file successfully deserialized");
 
-    // Check that the mupdate ID matches.
-    assert_eq!(a_manifest.mupdate_id, update_id, "mupdate ID matches");
+    // Check that the source was correctly specified and that the mupdate ID
+    // matches.
+    assert_eq!(
+        a_manifest.source,
+        OmicronZoneManifestSource::Installinator { mupdate_id },
+        "mupdate ID matches",
+    );
 
     // Check that the zone1 and zone2 images are present in the zone set. (The
     // names come from fake-non-semver.toml, under
@@ -506,8 +513,8 @@ async fn test_installinator_fetch() {
     // Run sled-agent-zone-images against these paths, and ensure that the
     // mupdate override is correctly picked up. Pick zpool1 arbitrarily as the
     // boot zpool.
-    let boot_zpool = ZpoolName::new_internal(zpool1_uuid);
-    let non_boot_zpool = ZpoolName::new_internal(zpool2_uuid);
+    let boot_zpool = ZpoolName::Internal(zpool1_uuid);
+    let non_boot_zpool = ZpoolName::Internal(zpool2_uuid);
     let internal_disks =
         make_internal_disks(temp_dir.path(), boot_zpool, &[non_boot_zpool]);
     let image_resolver = ZoneImageSourceResolver::new(&log, internal_disks);

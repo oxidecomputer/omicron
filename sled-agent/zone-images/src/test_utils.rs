@@ -19,9 +19,10 @@ use omicron_common::{
     disk::DiskIdentity,
     update::{
         MupdateOverrideInfo, OmicronZoneFileMetadata, OmicronZoneManifest,
+        OmicronZoneManifestSource,
     },
 };
-use omicron_uuid_kinds::{MupdateOverrideUuid, MupdateUuid, ZpoolUuid};
+use omicron_uuid_kinds::{InternalZpoolUuid, MupdateOverrideUuid, MupdateUuid};
 use sha2::{Digest, Sha256};
 use sled_agent_config_reconciler::InternalDisksReceiver;
 use sled_storage::config::MountConfig;
@@ -40,7 +41,7 @@ pub(crate) struct OverridePaths {
 }
 
 impl OverridePaths {
-    fn for_uuid(uuid: ZpoolUuid) -> Self {
+    fn for_uuid(uuid: InternalZpoolUuid) -> Self {
         let install_dataset =
             Utf8PathBuf::from(format!("pool/int/{uuid}/install"));
         let zones_json = install_dataset.join(OmicronZoneManifest::FILE_NAME);
@@ -50,30 +51,29 @@ impl OverridePaths {
     }
 }
 
-pub(crate) const BOOT_UUID: ZpoolUuid =
-    ZpoolUuid::from_u128(0xd3e7205d_4efe_493b_ac5e_9175584907cd);
-pub(crate) const BOOT_ZPOOL: ZpoolName = ZpoolName::new_internal(BOOT_UUID);
+pub(crate) const BOOT_UUID: InternalZpoolUuid =
+    InternalZpoolUuid::from_u128(0xd3e7205d_4efe_493b_ac5e_9175584907cd);
+pub(crate) const BOOT_ZPOOL: ZpoolName = ZpoolName::Internal(BOOT_UUID);
 pub(crate) static BOOT_PATHS: LazyLock<OverridePaths> =
     LazyLock::new(|| OverridePaths::for_uuid(BOOT_UUID));
 
-pub(crate) const NON_BOOT_UUID: ZpoolUuid =
-    ZpoolUuid::from_u128(0x4854189f_b290_47cd_b076_374d0e1748ec);
-pub(crate) const NON_BOOT_ZPOOL: ZpoolName =
-    ZpoolName::new_internal(NON_BOOT_UUID);
+pub(crate) const NON_BOOT_UUID: InternalZpoolUuid =
+    InternalZpoolUuid::from_u128(0x4854189f_b290_47cd_b076_374d0e1748ec);
+pub(crate) const NON_BOOT_ZPOOL: ZpoolName = ZpoolName::Internal(NON_BOOT_UUID);
 pub(crate) static NON_BOOT_PATHS: LazyLock<OverridePaths> =
     LazyLock::new(|| OverridePaths::for_uuid(NON_BOOT_UUID));
 
-pub(crate) const NON_BOOT_2_UUID: ZpoolUuid =
-    ZpoolUuid::from_u128(0x72201e1e_9fee_4231_81cd_4e2d514cb632);
+pub(crate) const NON_BOOT_2_UUID: InternalZpoolUuid =
+    InternalZpoolUuid::from_u128(0x72201e1e_9fee_4231_81cd_4e2d514cb632);
 pub(crate) const NON_BOOT_2_ZPOOL: ZpoolName =
-    ZpoolName::new_internal(NON_BOOT_2_UUID);
+    ZpoolName::Internal(NON_BOOT_2_UUID);
 pub(crate) static NON_BOOT_2_PATHS: LazyLock<OverridePaths> =
     LazyLock::new(|| OverridePaths::for_uuid(NON_BOOT_2_UUID));
 
-pub(crate) const NON_BOOT_3_UUID: ZpoolUuid =
-    ZpoolUuid::from_u128(0xd0d04947_93c5_40fd_97ab_4648b8cc28d6);
+pub(crate) const NON_BOOT_3_UUID: InternalZpoolUuid =
+    InternalZpoolUuid::from_u128(0xd0d04947_93c5_40fd_97ab_4648b8cc28d6);
 pub(crate) const NON_BOOT_3_ZPOOL: ZpoolName =
-    ZpoolName::new_internal(NON_BOOT_3_UUID);
+    ZpoolName::Internal(NON_BOOT_3_UUID);
 pub(crate) static NON_BOOT_3_PATHS: LazyLock<OverridePaths> =
     LazyLock::new(|| OverridePaths::for_uuid(NON_BOOT_3_UUID));
 
@@ -111,6 +111,7 @@ pub(crate) struct WriteInstallDatasetContext {
     pub(crate) zones: IdOrdMap<ZoneContents>,
     pub(crate) mupdate_id: MupdateUuid,
     pub(crate) mupdate_override_uuid: MupdateOverrideUuid,
+    write_zone_manifest_to_disk: bool,
 }
 
 impl WriteInstallDatasetContext {
@@ -129,6 +130,7 @@ impl WriteInstallDatasetContext {
             .collect(),
             mupdate_id: MupdateUuid::new_v4(),
             mupdate_override_uuid: MupdateOverrideUuid::new_v4(),
+            write_zone_manifest_to_disk: true,
         }
     }
 
@@ -146,6 +148,11 @@ impl WriteInstallDatasetContext {
         self.zones.get_mut("zone5.tar.gz").unwrap().include_in_json = false;
     }
 
+    /// Set to false to not write out the zone manifest to disk.
+    pub(crate) fn write_zone_manifest_to_disk(&mut self, write: bool) {
+        self.write_zone_manifest_to_disk = write;
+    }
+
     pub(crate) fn override_info(&self) -> MupdateOverrideInfo {
         MupdateOverrideInfo {
             mupdate_uuid: self.mupdate_override_uuid,
@@ -156,8 +163,15 @@ impl WriteInstallDatasetContext {
     }
 
     pub(crate) fn zone_manifest(&self) -> OmicronZoneManifest {
+        let source = if self.write_zone_manifest_to_disk {
+            OmicronZoneManifestSource::Installinator {
+                mupdate_id: self.mupdate_id,
+            }
+        } else {
+            OmicronZoneManifestSource::SledAgent
+        };
         OmicronZoneManifest {
-            mupdate_id: self.mupdate_id,
+            source,
             zones: self
                 .zones
                 .iter()
@@ -202,13 +216,15 @@ impl WriteInstallDatasetContext {
             }
         }
 
-        let manifest = self.zone_manifest();
-        let json = serde_json::to_string(&manifest).map_err(|e| {
-            FixtureError::new(FixtureKind::WriteFile).with_source(e)
-        })?;
-        // No need to create intermediate directories with
-        // camino-tempfile-ext.
-        dir.child(OmicronZoneManifest::FILE_NAME).write_str(&json)?;
+        if self.write_zone_manifest_to_disk {
+            let manifest = self.zone_manifest();
+            let json = serde_json::to_string(&manifest).map_err(|e| {
+                FixtureError::new(FixtureKind::WriteFile).with_source(e)
+            })?;
+            // No need to create intermediate directories with
+            // camino-tempfile-ext.
+            dir.child(OmicronZoneManifest::FILE_NAME).write_str(&json)?;
+        }
 
         let info = self.override_info();
         let json = serde_json::to_string(&info).map_err(|e| {
