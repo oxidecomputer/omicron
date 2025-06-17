@@ -7,7 +7,7 @@
 use internal_dns_resolver::Resolver;
 use internal_dns_types::names::ServiceName;
 use nexus_test_utils_macros::nexus_test;
-use omicron_nexus::app::cockroach_http::CockroachHttpClient;
+use omicron_nexus::app::cockroach_http::CockroachClusterHttpClient;
 use omicron_nexus::app::cockroach_http::CockroachMetric;
 use omicron_nexus::app::cockroach_http::MetricValue;
 use omicron_nexus::app::cockroach_http::NodeLiveness;
@@ -80,7 +80,8 @@ async fn test_cockroach_http_prometheus_metrics(
     let http_addr = std::net::SocketAddr::V6(http_addr);
 
     // Create HTTP client and fetch Prometheus metrics
-    let client = CockroachHttpClient::new(http_addr);
+    let client = CockroachClusterHttpClient::new(cptestctx.logctx.log.clone());
+    client.update_backends(&[http_addr]).await;
 
     let metrics = client
         .fetch_prometheus_metrics()
@@ -209,7 +210,8 @@ async fn test_cockroach_http_node_status(cptestctx: &ControlPlaneTestContext) {
     let http_addr = std::net::SocketAddr::V6(http_addr);
 
     // Create HTTP client and fetch node status
-    let client = CockroachHttpClient::new(http_addr);
+    let client = CockroachClusterHttpClient::new(cptestctx.logctx.log.clone());
+    client.update_backends(&[http_addr]).await;
 
     let nodes_response = client
         .fetch_node_status()

@@ -5,7 +5,7 @@
 //! Client for CockroachDB's built-in HTTP interface
 //!
 //! This accesses CockroachDB's native HTTP API, which provides Prometheus metrics
-//! at /_status/vars and other status endpoints.
+//! at /_status/vars and other endpoints.
 
 use anyhow::{Context, Result};
 use chrono::{DateTime, Utc};
@@ -20,20 +20,23 @@ use std::time::Duration;
 use strum::{Display, EnumIter, EnumString, IntoStaticStr};
 use tokio::sync::RwLock;
 
-/// A simple CockroachDB HTTP client for accessing metrics and status
-pub struct CockroachHttpClient {
+// A simple CockroachDB HTTP client for accessing metrics and node status
+//
+// Only accesses a single client at a time. To query from multiple nodes
+// in a cluster concurrently, use [CockroachClusterHttpClient].
+struct CockroachHttpClient {
     client: Client,
     base_url: String,
 }
 
 impl CockroachHttpClient {
-    /// Create a new CockroachDB HTTP client
-    pub fn new(address: SocketAddr) -> Self {
+    // Create a new CockroachDB HTTP client
+    fn new(address: SocketAddr) -> Self {
         let client = Client::builder()
-            .timeout(Duration::from_secs(30))
-            .pool_max_idle_per_host(1) // Single connection per host
-            .pool_idle_timeout(Duration::from_secs(90)) // Keep connections alive longer
-            .tcp_keepalive(Duration::from_secs(60)) // Enable TCP keepalive
+            .pool_max_idle_per_host(1)
+            .timeout(Duration::from_secs(60))
+            .connect_timeout(Duration::from_secs(15))
+            .tcp_keepalive(Duration::from_secs(60))
             .build()
             .expect("Failed to build HTTP client");
 
@@ -42,10 +45,10 @@ impl CockroachHttpClient {
         Self { client, base_url }
     }
 
-    /// Fetch Prometheus metrics from the /_status/vars endpoint
-    ///
-    /// This API is and must be cancel-safe
-    pub async fn fetch_prometheus_metrics(&self) -> Result<PrometheusMetrics> {
+    // Fetch Prometheus metrics from the /_status/vars endpoint
+    //
+    // This API is (and must remain) cancel-safe
+    async fn fetch_prometheus_metrics(&self) -> Result<PrometheusMetrics> {
         let url = format!("{}/_status/vars", self.base_url);
 
         let response = self
@@ -72,10 +75,10 @@ impl CockroachHttpClient {
             .with_context(|| "Failed to parse Prometheus metrics")
     }
 
-    /// Fetch node status information for all nodes
-    ///
-    /// This API is and must be cancel-safe
-    pub async fn fetch_node_status(&self) -> Result<NodesResponse> {
+    // Fetch node status information for all nodes
+    //
+    // This API is (and must remain) cancel-safe
+    async fn fetch_node_status(&self) -> Result<NodesResponse> {
         let url = format!("{}/_status/nodes", self.base_url);
 
         let response = self
@@ -132,7 +135,6 @@ impl CockroachHttpClient {
 pub struct CockroachClusterHttpClient {
     /// Cached clients for each backend address
     clients: Arc<RwLock<HashMap<SocketAddr, CockroachHttpClient>>>,
-    /// Logger for recording connection attempts and failures
     log: Logger,
 }
 
@@ -269,12 +271,6 @@ impl CockroachClusterHttpClient {
     pub async fn get_cached_addresses(&self) -> Vec<SocketAddr> {
         let clients = self.clients.read().await;
         clients.keys().copied().collect()
-    }
-}
-
-impl Default for CockroachClusterHttpClient {
-    fn default() -> Self {
-        Self::new(slog::Logger::root(slog::Discard, slog::o!()))
     }
 }
 
