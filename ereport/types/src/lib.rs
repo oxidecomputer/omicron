@@ -39,7 +39,7 @@ pub struct Ena(pub u64);
 
 impl fmt::Display for Ena {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "{:x}", self.0)
+        write!(f, "{:#x}", self.0)
     }
 }
 
@@ -51,13 +51,13 @@ impl fmt::Debug for Ena {
 
 impl fmt::UpperHex for Ena {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        fmt::UpperHex::fmt(&self.0, f)
+        write!(f, "{:#X}", self.0)
     }
 }
 
 impl fmt::LowerHex for Ena {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        fmt::LowerHex::fmt(&self.0, f)
+        write!(f, "{:#x}", self.0)
     }
 }
 
@@ -199,5 +199,41 @@ mod tests {
             dbg!(serde_json::from_str::<Ereport>(&ereport_string))
                 .expect("ereport should deserialize");
         eprintln!("EREPORT: {deserialized:#?}");
+    }
+
+    #[test]
+    fn test_ena_from_str() {
+        let expected = [
+            ("1", Ena(1)),
+            ("0x1", Ena(1)),
+            // Should parse in base 10
+            ("16", Ena(16)),
+            // Should parse hexadecimally
+            ("0x16", Ena(0x16)),
+            ("0X16", Ena(0x16)),
+            // ENA spotted "in the wild", taken from:
+            // https://rfd.shared.oxide.computer/rfd/0520#_ereports_in_the_fma
+            ("0x3cae76440c100001", Ena(0x3cae76440c100001)),
+        ];
+
+        for (input, expected) in expected {
+            let actual = Ena::from_str(dbg!(input)).expect("should parse");
+            assert_eq!(dbg!(expected), dbg!(actual));
+        }
+    }
+
+    #[test]
+    fn test_ena_from_str_roundtrip() {
+        let enas = [Ena(1), Ena(16), Ena(4200), Ena(0x3cae76440c100001)];
+
+        for ena in enas {
+            let ena = dbg!(ena);
+            let display = format!("{ena}");
+            assert_eq!(dbg!(display).parse::<Ena>(), Ok(ena));
+            let upperhex = format!("{ena:X}");
+            assert_eq!(dbg!(upperhex).parse::<Ena>(), Ok(ena));
+            let lowerhex = format!("{ena:x}");
+            assert_eq!(dbg!(lowerhex).parse::<Ena>(), Ok(ena));
+        }
     }
 }
