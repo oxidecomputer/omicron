@@ -60,6 +60,7 @@ use tabled::Tabled;
 use tufaceous_artifact::ArtifactHash;
 use tufaceous_artifact::ArtifactVersion;
 use tufaceous_artifact::ArtifactVersionError;
+use update_common::artifacts::{ArtifactsWithPlan, ControlPlaneZonesMode};
 
 mod log_capture;
 
@@ -208,6 +209,7 @@ fn process_command(
         Commands::SledRemove(args) => cmd_sled_remove(sim, args),
         Commands::SledShow(args) => cmd_sled_show(sim, args),
         Commands::SledSetPolicy(args) => cmd_sled_set_policy(sim, args),
+        Commands::SledUpdateSp(args) => cmd_sled_update_sp(sim, args),
         Commands::SiloList => cmd_silo_list(sim),
         Commands::SiloAdd(args) => cmd_silo_add(sim, args),
         Commands::SiloRemove(args) => cmd_silo_remove(sim, args),
@@ -261,6 +263,8 @@ enum Commands {
     SledShow(SledArgs),
     /// set a sled's policy
     SledSetPolicy(SledSetPolicyArgs),
+    /// simulate updating the sled's SP versions
+    SledUpdateSp(SledUpdateSpArgs),
 
     /// list silos
     SiloList,
@@ -370,6 +374,20 @@ impl From<SledPolicyOpt> for SledPolicy {
             SledPolicyOpt::Expunged => SledPolicy::Expunged,
         }
     }
+}
+
+#[derive(Debug, Args)]
+struct SledUpdateSpArgs {
+    /// id of the sled
+    sled_id: SledUuid,
+
+    /// sets the version reported for the SP active slot
+    #[clap(long, required_unless_present_any = &["inactive"])]
+    active: Option<ArtifactVersion>,
+
+    /// sets the version reported for the SP inactive slot
+    #[clap(long, required_unless_present_any = &["active"])]
+    inactive: Option<ExpectedVersion>,
 }
 
 #[derive(Debug, Args)]
@@ -697,8 +715,9 @@ struct BlueprintSaveArgs {
 struct BlueprintDiffArgs {
     /// id of the first blueprint, "latest", or "target"
     blueprint1_id: BlueprintIdOpt,
-    /// id of the second blueprint, "latest", or "target"
-    blueprint2_id: BlueprintIdOpt,
+    /// id of the second blueprint, "latest", or "target", or None to mean "the
+    /// parent of blueprint1"
+    blueprint2_id: Option<BlueprintIdOpt>,
 }
 
 #[derive(Debug, Subcommand)]
@@ -709,6 +728,11 @@ enum SetArgs {
     NumNexus { num_nexus: u16 },
     /// system's external DNS zone name (suffix)
     ExternalDnsZoneName { zone_name: String },
+    /// system target release
+    TargetRelease {
+        /// TUF repo containing release artifacts
+        filename: Utf8PathBuf,
+    },
 }
 
 #[derive(Debug, Args)]
@@ -820,6 +844,7 @@ fn cmd_sled_list(
     #[tabled(rename_all = "SCREAMING_SNAKE_CASE")]
     struct Sled {
         id: SledUuid,
+        serial: String,
         nzpools: usize,
         subnet: String,
     }
@@ -831,11 +856,12 @@ fn cmd_sled_list(
         .to_planning_input_builder()
         .context("failed to generate planning input")?
         .build();
-    let rows = planning_input.all_sled_resources(SledFilter::Commissioned).map(
-        |(sled_id, sled_resources)| Sled {
+    let rows = planning_input.all_sleds(SledFilter::Commissioned).map(
+        |(sled_id, sled_details)| Sled {
             id: sled_id,
-            subnet: sled_resources.subnet.net().to_string(),
-            nzpools: sled_resources.zpools.len(),
+            serial: sled_details.baseboard_id.serial_number.clone(),
+            subnet: sled_details.resources.subnet.net().to_string(),
+            nzpools: sled_details.resources.zpools.len(),
         },
     );
     let table = tabled::Table::new(rows)
@@ -884,18 +910,22 @@ fn cmd_sled_show(
     args: SledArgs,
 ) -> anyhow::Result<Option<String>> {
     let state = sim.current_state();
-    let planning_input = state
-        .system()
-        .description()
+    let description = state.system().description();
+    let sled_id = args.sled_id;
+    let sp_active_version = description.sled_sp_active_version(sled_id)?;
+    let sp_inactive_version = description.sled_sp_inactive_version(sled_id)?;
+    let planning_input = description
         .to_planning_input_builder()
         .context("failed to generate planning_input builder")?
         .build();
-    let sled_id = args.sled_id;
-    let sled_resources =
-        &planning_input.sled_lookup(args.filter, sled_id)?.resources;
+    let sled = planning_input.sled_lookup(args.filter, sled_id)?;
+    let sled_resources = &sled.resources;
     let mut s = String::new();
     swriteln!(s, "sled {}", sled_id);
+    swriteln!(s, "serial {}", sled.baseboard_id.serial_number);
     swriteln!(s, "subnet {}", sled_resources.subnet.net());
+    swriteln!(s, "SP active version:   {:?}", sp_active_version);
+    swriteln!(s, "SP inactive version: {:?}", sp_inactive_version);
     swriteln!(s, "zpools ({}):", sled_resources.zpools.len());
     for (zpool, disk) in &sled_resources.zpools {
         swriteln!(s, "    {:?}", zpool);
@@ -921,6 +951,46 @@ fn cmd_sled_set_policy(
         state,
     );
     Ok(Some(format!("set sled {} policy to {}", args.sled_id, args.policy)))
+}
+
+fn cmd_sled_update_sp(
+    sim: &mut ReconfiguratorSim,
+    args: SledUpdateSpArgs,
+) -> anyhow::Result<Option<String>> {
+    let mut labels = Vec::new();
+    if let Some(active) = &args.active {
+        labels.push(format!("active -> {}", active));
+    }
+    if let Some(inactive) = &args.inactive {
+        labels.push(format!("inactive -> {}", inactive));
+    }
+
+    assert!(
+        !labels.is_empty(),
+        "clap configuration requires that at least one argument is specified"
+    );
+
+    let mut state = sim.current_state().to_mut();
+    state.system_mut().description_mut().sled_update_sp_versions(
+        args.sled_id,
+        args.active,
+        args.inactive,
+    )?;
+
+    sim.commit_and_bump(
+        format!(
+            "reconfigurator-cli sled-update-sp: {}: {}",
+            args.sled_id,
+            labels.join(", "),
+        ),
+        state,
+    );
+
+    Ok(Some(format!(
+        "set sled {} SP versions: {}",
+        args.sled_id,
+        labels.join(", ")
+    )))
 }
 
 fn cmd_inventory_list(
@@ -1316,13 +1386,32 @@ fn cmd_blueprint_diff(
 ) -> anyhow::Result<Option<String>> {
     let mut rv = String::new();
     let blueprint1_id = args.blueprint1_id;
-    let blueprint2_id = args.blueprint2_id;
 
     let state = sim.current_state();
-    let blueprint1 =
+    let blueprint =
         state.system().resolve_and_get_blueprint(blueprint1_id.into())?;
-    let blueprint2 =
-        state.system().resolve_and_get_blueprint(blueprint2_id.into())?;
+    let (blueprint1, blueprint2) = if let Some(blueprint2_arg) =
+        args.blueprint2_id
+    {
+        // Two blueprint ids were provided.  Diff from the first to the second.
+        let blueprint1 = blueprint;
+        let blueprint2 =
+            state.system().resolve_and_get_blueprint(blueprint2_arg.into())?;
+        (blueprint1, blueprint2)
+    } else if let Some(parent_id) = blueprint.parent_blueprint_id {
+        // Only one blueprint id was provided.  Diff from that blueprint's
+        // parent to the blueprint.
+        let blueprint1 = state
+            .system()
+            .resolve_and_get_blueprint(BlueprintId::Id(parent_id))?;
+        let blueprint2 = blueprint;
+        (blueprint1, blueprint2)
+    } else {
+        bail!(
+            "`blueprint2_id` was not specified and blueprint1 has no \
+             parent blueprint"
+        );
+    };
 
     let sled_diff = blueprint2.diff_since_blueprint(&blueprint1);
     swriteln!(rv, "{}", sled_diff.display());
@@ -1537,20 +1626,7 @@ fn cmd_wipe(
 fn cmd_show(sim: &mut ReconfiguratorSim) -> anyhow::Result<Option<String>> {
     let mut s = String::new();
     let state = sim.current_state();
-    do_print_properties(&mut s, state);
-    swriteln!(
-        s,
-        "target number of Nexus instances: {}",
-        state
-            .config()
-            .num_nexus()
-            .map_or_else(|| "default".to_owned(), |n| n.to_string())
-    );
-    Ok(Some(s))
-}
 
-// TODO: consider moving this to a method on `SimState`.
-fn do_print_properties(s: &mut String, state: &SimState) {
     swriteln!(
         s,
         "configured external DNS zone name: {}",
@@ -1586,6 +1662,41 @@ fn do_print_properties(s: &mut String, state: &SimState) {
             .collect::<Vec<_>>()
             .join(", "),
     );
+    swriteln!(
+        s,
+        "target number of Nexus instances: {}",
+        state
+            .config()
+            .num_nexus()
+            .map_or_else(|| "default".to_owned(), |n| n.to_string())
+    );
+
+    let target_release = state.system().description().target_release();
+    match target_release {
+        Some(tuf_desc) => {
+            swriteln!(
+                s,
+                "target release: {} ({})",
+                tuf_desc.repo.system_version,
+                tuf_desc.repo.file_name
+            );
+            for artifact in &tuf_desc.artifacts {
+                swriteln!(
+                    s,
+                    "    artifact: {} {} ({} version {})",
+                    artifact.hash,
+                    artifact.id.kind,
+                    artifact.id.name,
+                    artifact.id.version
+                );
+            }
+        }
+        None => {
+            swriteln!(s, "target release: unset");
+        }
+    }
+
+    Ok(Some(s))
 }
 
 fn cmd_set(
@@ -1621,6 +1732,33 @@ fn cmd_set(
             );
             state.config_mut().set_external_dns_zone_name(zone_name);
             rv
+        }
+        SetArgs::TargetRelease { filename } => {
+            let file = std::fs::File::open(&filename)
+                .with_context(|| format!("open {:?}", filename))?;
+            let buf = std::io::BufReader::new(file);
+            let rt = tokio::runtime::Runtime::new()
+                .context("creating tokio runtime")?;
+            // We're not using the repo hash here.  Make one up.
+            let repo_hash = ArtifactHash([0; 32]);
+            let artifacts_with_plan = rt.block_on(async {
+                ArtifactsWithPlan::from_zip(
+                    buf,
+                    None,
+                    repo_hash,
+                    ControlPlaneZonesMode::Split,
+                    &sim.log,
+                )
+                .await
+                .with_context(|| format!("unpacking {:?}", filename))
+            })?;
+            let description = artifacts_with_plan.description().clone();
+            drop(artifacts_with_plan);
+            state
+                .system_mut()
+                .description_mut()
+                .set_target_release(Some(description));
+            format!("set target release based on {}", filename)
         }
     };
 

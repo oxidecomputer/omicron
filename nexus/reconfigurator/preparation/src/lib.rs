@@ -33,6 +33,7 @@ use nexus_types::deployment::SledResources;
 use nexus_types::deployment::UnstableReconfiguratorState;
 use nexus_types::identity::Asset;
 use nexus_types::identity::Resource;
+use nexus_types::inventory::BaseboardId;
 use nexus_types::inventory::Collection;
 use omicron_common::address::IpRange;
 use omicron_common::address::Ipv6Subnet;
@@ -274,6 +275,10 @@ impl PlanningInputFromDb<'_> {
                 policy: sled_row.policy(),
                 state: sled_row.state().into(),
                 resources: SledResources { subnet, zpools },
+                baseboard_id: BaseboardId {
+                    part_number: sled_row.part_number().to_owned(),
+                    serial_number: sled_row.serial_number().to_owned(),
+                },
             };
             // TODO-cleanup use `TypedUuid` everywhere
             let sled_id = SledUuid::from_untyped_uuid(sled_id);

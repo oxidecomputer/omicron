@@ -86,5 +86,5 @@ command = 'pfexec'
 [[profile.default.scripts]]
 filter = 'package(sled-hardware) and test(compare_nvme_to_blkdev_nodes)'
 run-wrapper = 'pfexec'
-# platform = { host = 'cfg(target_os = "illumos")' }
+platform = { host = 'cfg(target_os = "illumos")' }
 

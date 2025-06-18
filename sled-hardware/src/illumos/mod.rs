@@ -2,10 +2,11 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-use crate::DiskFirmware;
 use crate::{DendriteAsic, HardwareUpdate, SledMode, UnparsedDisk};
+use crate::{DiskFirmware, DiskPaths};
+use camino::Utf8PathBuf;
 use gethostname::gethostname;
-use illumos_devinfo::{DevInfo, Node, Property};
+use illumos_devinfo::{DevInfo, DevLinkType, DevLinks, Node, Property};
 use libnvme::{Nvme, controller::Controller};
 use omicron_common::disk::{DiskIdentity, DiskVariant};
 use sled_hardware_types::Baseboard;
@@ -35,9 +36,6 @@ enum Error {
 
     #[error("Device does not appear to be an Oxide Gimlet: {0}")]
     NotAGimlet(String),
-
-    #[error("Invalid Utf8 path: {0}")]
-    FromPathBuf(#[from] camino::FromPathBufError),
 
     #[error("Node {node} missing device property {name}")]
     MissingDeviceProperty { node: String, name: String },
@@ -79,6 +77,18 @@ enum Error {
         "NVMe instance {instance} with serial {serial} contains invalid Utf8"
     )]
     NvmeInvalidModelString { instance: i32, serial: String },
+}
+
+#[derive(thiserror::Error, Debug)]
+pub enum DiskPathsError {
+    #[error("Invalid Utf8 path: {0}")]
+    FromPathBuf(#[from] camino::FromPathBufError),
+
+    #[error("Failed to access devinfo: {0}")]
+    DevInfo(anyhow::Error),
+
+    #[error("Could not translate {0} to '/dev' path: no links")]
+    NoDevLinks(Utf8PathBuf),
 }
 
 const GIMLET_ROOT_NODE_NAME: &str = "Oxide,Gimlet";
@@ -658,6 +668,90 @@ fn poll_device_tree(
     }
 
     Ok(())
+}
+
+pub(crate) fn find_disk_paths(
+    unparsed_disk: &UnparsedDisk,
+) -> Result<DiskPaths, DiskPathsError> {
+    // XXX Check `nvme_ns_disc_level_t` ?
+    // This will miss potential namespaces otherwise
+    let mut devinfo = DevInfo::new().map_err(DiskPathsError::DevInfo)?;
+    let blkdev = devinfo.walk_driver("blkdev");
+    let found: Vec<_> = blkdev
+        .filter_map(|res| {
+            let node = res.ok()?;
+            let parent = node.parent().ok()??;
+            if parent.instance() == Some(unparsed_disk.nvme_instance()) {
+                Some(node)
+            } else {
+                None
+            }
+        })
+        .collect();
+    let node = found
+        .first()
+        // XXX we can attempt to reset the state of the world by
+        // looking at namespaces and attempting to attach blkdev to a
+        // nvme namespace, we also want to verify that only a single
+        // namespace is present.
+        .expect("blkdev not attached");
+    let devfs_path = node.devfs_path().map_err(DiskPathsError::DevInfo)?;
+    let dev_path = get_dev_path_of_whole_disk(&node)?;
+    assert!(devfs_path.starts_with('/'));
+    let devfs_path = format!("/devices{devfs_path}");
+
+    Ok(DiskPaths { devfs_path: Utf8PathBuf::from(&devfs_path), dev_path })
+}
+
+fn get_dev_path_of_whole_disk(
+    node: &Node<'_>,
+) -> Result<Option<Utf8PathBuf>, DiskPathsError> {
+    let mut wm = node.minors();
+    while let Some(m) =
+        wm.next().transpose().map_err(DiskPathsError::DevInfo)?
+    {
+        // "wd" stands for "whole disk"
+        if m.name() != "wd" {
+            continue;
+        }
+        let links = {
+            match DevLinks::new(true) {
+                Ok(links) => links,
+                Err(_) => {
+                    DevLinks::new(false).map_err(DiskPathsError::DevInfo)?
+                }
+            }
+        };
+        let devfs_path = m.devfs_path().map_err(DiskPathsError::DevInfo)?;
+
+        let paths = links
+            .links_for_path(&devfs_path)
+            .map_err(DiskPathsError::DevInfo)?
+            .into_iter()
+            .filter(|l| {
+                // Devices in "/dev/dsk" have names that denote their purpose,
+                // of the form "controller, disk, slice" or "controller, disk,
+                // partition".
+                //
+                // The suffix of "d0" is typical of an individual disk, and is
+                // the expected device to correspond with the "wd" device in
+                // the "/devices" hierarchy.
+                l.linktype() == DevLinkType::Primary
+                    && l.path()
+                        .file_name()
+                        .map(|f| f.to_string_lossy().ends_with("d0"))
+                        .unwrap_or(false)
+            })
+            .collect::<Vec<_>>();
+
+        if paths.is_empty() {
+            return Err(DiskPathsError::NoDevLinks(Utf8PathBuf::from(
+                devfs_path,
+            )));
+        }
+        return Ok(Some(paths[0].path().to_path_buf().try_into()?));
+    }
+    Ok(None)
 }
 
 async fn hardware_tracking_task(

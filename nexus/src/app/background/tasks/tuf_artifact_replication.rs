@@ -405,7 +405,8 @@ impl Request<'_> {
                     }
                 }
             },
-            error: err.map(|err| err.to_string()),
+            error: err
+                .map(|err| InlineErrorChain::new(err.as_ref()).to_string()),
         }
     }
 }
@@ -639,7 +640,7 @@ impl ArtifactReplication {
                         "sled" => sled.client.baseurl(),
                         "generation" => &config.generation,
                     );
-                    err.to_string()
+                    InlineErrorChain::new(err).to_string()
                 }),
             })
             .await
@@ -723,7 +724,10 @@ impl ArtifactReplication {
                     "error" => InlineErrorChain::new(&err),
                     "sled" => sled.client.baseurl(),
                 );
-                (ControlFlow::Continue(BTreeMap::new()), Some(err.to_string()))
+                (
+                    ControlFlow::Continue(BTreeMap::new()),
+                    Some(InlineErrorChain::new(&err).to_string()),
+                )
             }
         };
         ringbuf_tx

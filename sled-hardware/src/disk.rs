@@ -3,10 +3,6 @@
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 use camino::{Utf8Path, Utf8PathBuf};
-use illumos_devinfo::DevInfo;
-use illumos_devinfo::DevLinkType;
-use illumos_devinfo::DevLinks;
-use illumos_devinfo::Node;
 use illumos_utils::fstyp::Fstyp;
 use illumos_utils::zpool::Api;
 use illumos_utils::zpool::Zpool;
@@ -57,10 +53,8 @@ pub enum PooledDiskError {
     NvmeFormatAndResize(#[from] NvmeFormattingError),
     #[error("Invalid Utf8 path: {0}")]
     FromPathBuf(#[from] camino::FromPathBufError),
-    #[error("Failed to access devinfo: {0}")]
-    DevInfo(anyhow::Error),
-    #[error("Could not translate {0} to '/dev' path: no links")]
-    NoDevLinks(Utf8PathBuf),
+    #[error("Cannot find disk paths for {identity:?}: {error}")]
+    DiskPath { identity: DiskIdentity, error: DiskPathsError },
 }
 
 /// A partition (or 'slice') of a disk.
@@ -245,6 +239,10 @@ impl UnparsedDisk {
         self.slot
     }
 
+    pub fn nvme_instance(&self) -> i32 {
+        self.nvme_instance
+    }
+
     pub fn firmware(&self) -> &DiskFirmware {
         &self.firmware
     }
@@ -286,7 +284,12 @@ impl PooledDisk {
         unparsed_disk: UnparsedDisk,
         zpool_id: Option<ZpoolUuid>,
     ) -> Result<Self, PooledDiskError> {
-        let paths = find_disk_paths(&unparsed_disk)?;
+        let paths = find_disk_paths(&unparsed_disk).map_err(|error| {
+            PooledDiskError::DiskPath {
+                identity: unparsed_disk.identity().clone(),
+                error,
+            }
+        })?;
         let variant = unparsed_disk.variant;
         let identity = &unparsed_disk.identity;
         // Ensure the GPT has the right format. This does not necessarily
@@ -322,88 +325,6 @@ impl PooledDisk {
             firmware: unparsed_disk.firmware,
         })
     }
-}
-
-fn find_disk_paths(
-    unparsed_disk: &UnparsedDisk,
-) -> Result<DiskPaths, PooledDiskError> {
-    let mut devinfo = DevInfo::new().map_err(PooledDiskError::DevInfo)?;
-    let blkdev = devinfo.walk_driver("blkdev");
-    let found: Vec<_> = blkdev
-        .filter_map(|res| {
-            let node = res.ok()?;
-            let parent = node.parent().ok()??;
-            if parent.instance() == Some(unparsed_disk.nvme_instance) {
-                Some(node)
-            } else {
-                None
-            }
-        })
-        .collect();
-    let node = found
-        .first()
-        // XXX we can attempt to reset the state of the world by
-        // looking at namespaces and attempting to attach blkdev to a
-        // nvme namespace, we also want to verify that only a single
-        // namespace is present.
-        .expect("blkdev not attached");
-    let devfs_path = node.devfs_path().map_err(PooledDiskError::DevInfo)?;
-    let dev_path = get_dev_path_of_whole_disk(&node)?;
-    assert!(devfs_path.starts_with('/'));
-    let devfs_path = format!("/devices{devfs_path}");
-
-    Ok(DiskPaths { devfs_path: Utf8PathBuf::from(&devfs_path), dev_path })
-}
-
-fn get_dev_path_of_whole_disk(
-    node: &Node<'_>,
-) -> Result<Option<Utf8PathBuf>, PooledDiskError> {
-    let mut wm = node.minors();
-    while let Some(m) =
-        wm.next().transpose().map_err(PooledDiskError::DevInfo)?
-    {
-        // "wd" stands for "whole disk"
-        if m.name() != "wd" {
-            continue;
-        }
-        let links = {
-            match DevLinks::new(true) {
-                Ok(links) => links,
-                Err(_) => {
-                    DevLinks::new(false).map_err(PooledDiskError::DevInfo)?
-                }
-            }
-        };
-        let devfs_path = m.devfs_path().map_err(PooledDiskError::DevInfo)?;
-
-        let paths = links
-            .links_for_path(&devfs_path)
-            .map_err(PooledDiskError::DevInfo)?
-            .into_iter()
-            .filter(|l| {
-                // Devices in "/dev/dsk" have names that denote their purpose,
-                // of the form "controller, disk, slice" or "controller, disk,
-                // partition".
-                //
-                // The suffix of "d0" is typical of an individual disk, and is
-                // the expected device to correspond with the "wd" device in
-                // the "/devices" hierarchy.
-                l.linktype() == DevLinkType::Primary
-                    && l.path()
-                        .file_name()
-                        .map(|f| f.to_string_lossy().ends_with("d0"))
-                        .unwrap_or(false)
-            })
-            .collect::<Vec<_>>();
-
-        if paths.is_empty() {
-            return Err(PooledDiskError::NoDevLinks(Utf8PathBuf::from(
-                devfs_path,
-            )));
-        }
-        return Ok(Some(paths[0].path().to_path_buf().try_into()?));
-    }
-    Ok(None)
 }
 
 /// Checks if the zpool exists, but makes no modifications,
