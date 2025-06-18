@@ -114,7 +114,7 @@ semver = { version = "1.0.26", features = ["serde"] }
 serde = { version = "1.0.219", features = ["alloc", "derive", "rc"] }
 serde_json = { version = "1.0.140", features = ["raw_value", "unbounded_depth"] }
 sha1 = { version = "0.10.6", features = ["oid"] }
-sha2 = { version = "0.10.8", features = ["oid"] }
+sha2 = { version = "0.10.9", features = ["oid"] }
 similar = { version = "2.7.0", features = ["bytes", "inline", "unicode"] }
 slog = { version = "2.7.0", features = ["dynamic-keys", "max_level_trace", "release_max_level_debug", "release_max_level_trace"] }
 smallvec = { version = "1.15.0", default-features = false, features = ["const_new"] }
@@ -242,7 +242,7 @@ semver = { version = "1.0.26", features = ["serde"] }
 serde = { version = "1.0.219", features = ["alloc", "derive", "rc"] }
 serde_json = { version = "1.0.140", features = ["raw_value", "unbounded_depth"] }
 sha1 = { version = "0.10.6", features = ["oid"] }
-sha2 = { version = "0.10.8", features = ["oid"] }
+sha2 = { version = "0.10.9", features = ["oid"] }
 similar = { version = "2.7.0", features = ["bytes", "inline", "unicode"] }
 slog = { version = "2.7.0", features = ["dynamic-keys", "max_level_trace", "release_max_level_debug", "release_max_level_trace"] }
 smallvec = { version = "1.15.0", default-features = false, features = ["const_new"] }
