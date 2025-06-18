@@ -89,7 +89,7 @@ openapi-lint.workspace = true
 openapiv3.workspace = true
 rand.workspace = true
 serde_json.workspace = true
-sled-agent-config-reconciler.workspace = true
+sled-agent-config-reconciler = { workspace = true, features = ["testing"] }
 sled-agent-types.workspace = true
 sled-agent-zone-images.workspace = true
 sled-agent-zone-images-examples.workspace = true
