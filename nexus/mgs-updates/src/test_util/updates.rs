@@ -54,9 +54,10 @@ pub enum ExpectedSpComponent {
         override_expected_pending_persistent_boot_preference: Option<RotSlot>,
         override_expected_transient_boot_preference: Option<RotSlot>,
     },
-    // TODO-K: Remove once fully implemented
-    #[allow(dead_code)]
-    RotBootloader {},
+    RotBootloader {
+        override_expected_stage0: Option<ArtifactVersion>,
+        override_expected_stage0_next: Option<ExpectedVersion>,
+    },
 }
 
 /// Describes an update operation that can later be executed any number of times
@@ -152,7 +153,23 @@ impl UpdateDescription<'_> {
                     expected_transient_boot_preference,
                 }
             }
-            ExpectedSpComponent::RotBootloader {} => unimplemented!(),
+            ExpectedSpComponent::RotBootloader {
+                override_expected_stage0,
+                override_expected_stage0_next,
+            } => {
+                let expected_stage0_version = override_expected_stage0
+                    .clone()
+                    .unwrap_or_else(|| sp1.expect_stage0_version());
+                let expected_stage0_next_version =
+                    override_expected_stage0_next
+                        .clone()
+                        .unwrap_or_else(|| sp1.expect_stage0_next_version());
+
+                PendingMgsUpdateDetails::RotBootloader {
+                    expected_stage0_version,
+                    expected_stage0_next_version,
+                }
+            }
         };
 
         let deployed_caboose = self
@@ -489,6 +506,64 @@ impl FinishedUpdateAttempt {
                 sp1.expect_caboose_rot_active(),
                 sp2.expect_caboose_rot_inactive()
             );
+        }
+    }
+
+    /// Asserts various conditions associated with successful RoT bootloader updates.
+    pub fn expect_rot_bootloader_success(
+        &self,
+        expected_result: UpdateCompletedHow,
+    ) {
+        let how = match self.result {
+            Ok(how) if how == expected_result => how,
+            _ => {
+                panic!(
+                    "unexpected result from apply_update(): {:?}",
+                    self.result,
+                );
+            }
+        };
+
+        eprintln!("apply_update() -> {:?}", how);
+        let sp2 = &self.sp2;
+
+        // The active slot should contain what we just updated to.
+        let deployed_caboose = &self.deployed_caboose;
+        assert!(cabooses_equal(&sp2.caboose_stage0, &deployed_caboose));
+
+        // RoT information should not have changed.
+        let sp1 = &self.sp1;
+        assert_eq!(sp1.expect_caboose_rot_a(), sp2.expect_caboose_rot_a());
+        assert_eq!(sp1.expect_caboose_rot_b(), sp2.expect_caboose_rot_b());
+
+        // SP information should not have changed
+        let sp1 = &self.sp1;
+        assert_eq!(
+            sp1.expect_caboose_sp_inactive(),
+            sp2.expect_caboose_sp_inactive(),
+        );
+        assert_eq!(
+            sp1.expect_caboose_sp_active(),
+            sp2.expect_caboose_sp_active(),
+        );
+
+        if how == UpdateCompletedHow::FoundNoChangesNeeded {
+            assert_eq!(sp1.caboose_stage0, sp2.caboose_stage0);
+            assert_eq!(
+                sp1.expect_caboose_stage0_next(),
+                sp2.expect_caboose_stage0_next()
+            );
+            assert_eq!(sp1.sp_state, sp2.sp_state);
+            assert_eq!(sp1.sp_boot_info, sp2.sp_boot_info);
+        } else {
+            // One way or another, an update was completed. Stage 0
+            // and Stage 0 next should contain the same contents
+            assert_eq!(
+                sp2.expect_caboose_stage0(),
+                sp2.expect_caboose_stage0_next()
+            );
+            // RoT boot info should have changed
+            assert_ne!(sp1.sp_boot_info, sp2.sp_boot_info);
         }
     }
 
