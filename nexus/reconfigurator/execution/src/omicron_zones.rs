@@ -323,6 +323,7 @@ mod test {
             zone_type: BlueprintZoneType::CockroachDb(
                 blueprint_zone_type::CockroachDb {
                     address: "[::1]:0".parse().unwrap(),
+                    http_address: "[::1]:0".parse().unwrap(),
                     dataset: OmicronZoneDataset {
                         pool_name: format!("oxp_{}", Uuid::new_v4())
                             .parse()

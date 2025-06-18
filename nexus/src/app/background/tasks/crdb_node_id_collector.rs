@@ -128,6 +128,9 @@ impl CockroachNodeIdCollector {
 // This trait exists so we can inject addresses in our unit tests below that
 // aren't required to have admin servers listening on the fixed
 // `COCKROACH_ADMIN_PORT`.
+//
+// TODO: Is this as necessary, now that the blueprint can identify information
+// about the CockroachDB HTTP address? Seems like it might be removable now.
 trait CockroachAdminFromBlueprint {
     fn cockroach_admin_addrs<'a>(
         &'a self,
@@ -277,6 +280,12 @@ mod tests {
                 zone_type: BlueprintZoneType::CockroachDb(
                     blueprint_zone_type::CockroachDb {
                         address: addr,
+                        http_address: SocketAddrV6::new(
+                            *addr.ip(),
+                            COCKROACH_ADMIN_PORT,
+                            0,
+                            0,
+                        ),
                         dataset: OmicronZoneDataset {
                             pool_name: format!("oxp_{}", zpool_id)
                                 .parse()

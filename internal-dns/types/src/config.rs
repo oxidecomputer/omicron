@@ -544,6 +544,38 @@ impl DnsConfigBuilder {
         )
     }
 
+    /// Higher-level shorthand for adding a Cockroach zone with several
+    /// services.
+    ///
+    /// # Errors
+    ///
+    /// This fails if the provided `addresses` aren't using the same IP address.
+    /// It also fails if the services have already been added to the
+    /// configuration.
+    pub fn host_zone_cockroach(
+        &mut self,
+        zone_id: OmicronZoneUuid,
+        listen_address: SocketAddrV6,
+        http_address: SocketAddrV6,
+    ) -> anyhow::Result<()> {
+        anyhow::ensure!(
+            listen_address.ip() == http_address.ip(),
+            "The IP address of the listen and HTTP address must match",
+        );
+        let zone = self.host_zone(zone_id, *listen_address.ip())?;
+        self.service_backend_zone(
+            ServiceName::Cockroach,
+            &zone,
+            listen_address.port(),
+        )?;
+        self.service_backend_zone(
+            ServiceName::CockroachHttp,
+            &zone,
+            http_address.port(),
+        )?;
+        Ok(())
+    }
+
     /// Higher-level shorthand for adding an internal DNS zone, including
     /// records for both its HTTP and DNS interfaces.
     ///
@@ -741,6 +773,10 @@ mod test {
             "_clickhouse-server._tcp",
         );
         assert_eq!(ServiceName::Cockroach.dns_name(), "_cockroach._tcp",);
+        assert_eq!(
+            ServiceName::CockroachHttp.dns_name(),
+            "_cockroach-http._tcp",
+        );
         assert_eq!(ServiceName::InternalDns.dns_name(), "_nameservice._tcp",);
         assert_eq!(ServiceName::Nexus.dns_name(), "_nexus._tcp",);
         assert_eq!(ServiceName::Oximeter.dns_name(), "_oximeter._tcp",);

@@ -96,8 +96,19 @@ pub fn blueprint_internal_dns_config(
                 continue 'all_zones;
             }
             BlueprintZoneType::CockroachDb(
-                blueprint_zone_type::CockroachDb { address, .. },
-            ) => (ServiceName::Cockroach, address),
+                blueprint_zone_type::CockroachDb {
+                    address, http_address, ..
+                },
+            ) => {
+                let listen_addr = *address;
+                let http_addr = *http_address;
+                dns_builder.host_zone_cockroach(
+                    zone.id,
+                    listen_addr,
+                    http_addr,
+                )?;
+                continue 'all_zones;
+            }
             BlueprintZoneType::Nexus(blueprint_zone_type::Nexus {
                 internal_address,
                 ..

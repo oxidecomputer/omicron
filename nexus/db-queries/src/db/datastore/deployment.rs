@@ -649,10 +649,7 @@ impl DataStore {
                             format!("zone {zone_id}: parse from database")
                         })
                         .map_err(|e| {
-                            Error::internal_error(&format!(
-                                "{:#}",
-                                e.to_string()
-                            ))
+                            Error::internal_error(&format!("{:?}", e))
                         })?;
                     sled_config.zones.insert(zone);
                 }

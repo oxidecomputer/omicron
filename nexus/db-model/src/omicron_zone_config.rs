@@ -90,8 +90,8 @@ pub fn dataset_zpool_name_to_omicron_zone_dataset(
         .ok_or_else(|| anyhow!("expected dataset zpool name, found none"))
 }
 
-/// Convert the secondary ip and port to a dns address
-pub fn secondary_ip_and_port_to_dns_address(
+/// Convert the secondary ip and port to an address
+pub fn secondary_ip_and_port_to_address(
     second_service_ip: Option<IpNetwork>,
     second_service_port: Option<SqlU16>,
 ) -> anyhow::Result<SocketAddr> {

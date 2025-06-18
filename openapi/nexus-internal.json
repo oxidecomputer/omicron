@@ -3087,6 +3087,9 @@
               "dataset": {
                 "$ref": "#/components/schemas/OmicronZoneDataset"
               },
+              "http_address": {
+                "type": "string"
+              },
               "type": {
                 "type": "string",
                 "enum": [
@@ -3097,6 +3100,7 @@
             "required": [
               "address",
               "dataset",
+              "http_address",
               "type"
             ]
           },
