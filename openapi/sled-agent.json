@@ -334,20 +334,47 @@
         }
       }
     },
-    "/datasets": {
+    "/chicken-switch/destroy-orphaned-datasets": {
       "get": {
-        "summary": "Lists the datasets that this sled is configured to use",
-        "operationId": "datasets_get",
+        "summary": "This endpoint reports the status of the `destroy_orphaned_datasets`",
+        "description": "chicken switch. It will be removed with omicron#6177.",
+        "operationId": "chicken_switch_destroy_orphaned_datasets_get",
         "responses": {
           "200": {
             "description": "successful operation",
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/DatasetsConfig"
+                  "$ref": "#/components/schemas/ChickenSwitchDestroyOrphanedDatasets"
                 }
               }
             }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      },
+      "put": {
+        "summary": "This endpoint sets the `destroy_orphaned_datasets` chicken switch",
+        "description": "(allowing sled-agent to delete datasets it believes are orphaned). It will be removed with omicron#6177.",
+        "operationId": "chicken_switch_destroy_orphaned_datasets_put",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ChickenSwitchDestroyOrphanedDatasets"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "204": {
+            "description": "resource updated"
           },
           "4XX": {
             "$ref": "#/components/responses/Error"
@@ -516,38 +543,8 @@
           "required": true
         },
         "responses": {
-          "200": {
-            "description": "successful operation",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/OmicronSledConfigResult"
-                }
-              }
-            }
-          },
-          "4XX": {
-            "$ref": "#/components/responses/Error"
-          },
-          "5XX": {
-            "$ref": "#/components/responses/Error"
-          }
-        }
-      }
-    },
-    "/omicron-physical-disks": {
-      "get": {
-        "operationId": "omicron_physical_disks_get",
-        "responses": {
-          "200": {
-            "description": "successful operation",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/OmicronPhysicalDisksConfig"
-                }
-              }
-            }
+          "204": {
+            "description": "resource updated"
           },
           "4XX": {
             "$ref": "#/components/responses/Error"
@@ -2229,33 +2226,6 @@
           }
         }
       }
-    },
-    "/zpools": {
-      "get": {
-        "operationId": "zpools_get",
-        "responses": {
-          "200": {
-            "description": "successful operation",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "title": "Array_of_Zpool",
-                  "type": "array",
-                  "items": {
-                    "$ref": "#/components/schemas/Zpool"
-                  }
-                }
-              }
-            }
-          },
-          "4XX": {
-            "$ref": "#/components/responses/Error"
-          },
-          "5XX": {
-            "$ref": "#/components/responses/Error"
-          }
-        }
-      }
     }
   },
   "components": {
@@ -3007,6 +2977,18 @@
         "format": "uint64",
         "minimum": 0
       },
+      "ChickenSwitchDestroyOrphanedDatasets": {
+        "type": "object",
+        "properties": {
+          "destroy_orphans": {
+            "description": "If true, sled-agent will attempt to destroy durable ZFS datasets that it believes were associated with now-expunged Omicron zones.",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "destroy_orphans"
+        ]
+      },
       "Chipset": {
         "description": "A kind of virtual chipset.",
         "oneOf": [
@@ -3580,6 +3562,24 @@
           "last_reconciled_config": {
             "$ref": "#/components/schemas/OmicronSledConfig"
           },
+          "orphaned_datasets": {
+            "title": "IdOrdMap",
+            "x-rust-type": {
+              "crate": "iddqd",
+              "parameters": [
+                {
+                  "$ref": "#/components/schemas/OrphanedDataset"
+                }
+              ],
+              "path": "iddqd::IdOrdMap",
+              "version": "*"
+            },
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/OrphanedDataset"
+            },
+            "uniqueItems": true
+          },
           "zones": {
             "type": "object",
             "additionalProperties": {
@@ -3591,6 +3591,7 @@
           "datasets",
           "external_disks",
           "last_reconciled_config",
+          "orphaned_datasets",
           "zones"
         ]
       },
@@ -3863,22 +3864,6 @@
         "description": "The kind of dataset. See the `DatasetKind` enum in omicron-common for possible values.",
         "type": "string"
       },
-      "DatasetManagementStatus": {
-        "description": "Identifies how a single dataset management operation may have succeeded or failed.",
-        "type": "object",
-        "properties": {
-          "dataset_name": {
-            "$ref": "#/components/schemas/DatasetName"
-          },
-          "err": {
-            "nullable": true,
-            "type": "string"
-          }
-        },
-        "required": [
-          "dataset_name"
-        ]
-      },
       "DatasetName": {
         "type": "object",
         "properties": {
@@ -3892,29 +3877,6 @@
         "required": [
           "kind",
           "pool_name"
-        ]
-      },
-      "DatasetsConfig": {
-        "type": "object",
-        "properties": {
-          "datasets": {
-            "type": "object",
-            "additionalProperties": {
-              "$ref": "#/components/schemas/DatasetConfig"
-            }
-          },
-          "generation": {
-            "description": "generation number of this configuration\n\nThis generation number is owned by the control plane (i.e., RSS or Nexus, depending on whether RSS-to-Nexus handoff has happened).  It should not be bumped within Sled Agent.\n\nSled Agent rejects attempts to set the configuration to a generation older than the one it's currently running.\n\nNote that \"Generation::new()\", AKA, the first generation number, is reserved for \"no datasets\". This is the default configuration for a sled before any requests have been made.",
-            "allOf": [
-              {
-                "$ref": "#/components/schemas/Generation"
-              }
-            ]
-          }
-        },
-        "required": [
-          "datasets",
-          "generation"
         ]
       },
       "DhcpConfig": {
@@ -3991,128 +3953,6 @@
           "model",
           "serial",
           "vendor"
-        ]
-      },
-      "DiskManagementError": {
-        "oneOf": [
-          {
-            "type": "object",
-            "properties": {
-              "type": {
-                "type": "string",
-                "enum": [
-                  "not_found"
-                ]
-              }
-            },
-            "required": [
-              "type"
-            ]
-          },
-          {
-            "type": "object",
-            "properties": {
-              "type": {
-                "type": "string",
-                "enum": [
-                  "internal_disk_control_plane_request"
-                ]
-              },
-              "value": {
-                "$ref": "#/components/schemas/TypedUuidForPhysicalDiskKind"
-              }
-            },
-            "required": [
-              "type",
-              "value"
-            ]
-          },
-          {
-            "type": "object",
-            "properties": {
-              "type": {
-                "type": "string",
-                "enum": [
-                  "zpool_uuid_mismatch"
-                ]
-              },
-              "value": {
-                "type": "object",
-                "properties": {
-                  "expected": {
-                    "$ref": "#/components/schemas/TypedUuidForZpoolKind"
-                  },
-                  "observed": {
-                    "$ref": "#/components/schemas/TypedUuidForZpoolKind"
-                  }
-                },
-                "required": [
-                  "expected",
-                  "observed"
-                ]
-              }
-            },
-            "required": [
-              "type",
-              "value"
-            ]
-          },
-          {
-            "type": "object",
-            "properties": {
-              "type": {
-                "type": "string",
-                "enum": [
-                  "key_manager"
-                ]
-              },
-              "value": {
-                "type": "string"
-              }
-            },
-            "required": [
-              "type",
-              "value"
-            ]
-          },
-          {
-            "type": "object",
-            "properties": {
-              "type": {
-                "type": "string",
-                "enum": [
-                  "other"
-                ]
-              },
-              "value": {
-                "type": "string"
-              }
-            },
-            "required": [
-              "type",
-              "value"
-            ]
-          }
-        ]
-      },
-      "DiskManagementStatus": {
-        "description": "Identifies how a single disk management operation may have succeeded or failed.",
-        "type": "object",
-        "properties": {
-          "err": {
-            "nullable": true,
-            "allOf": [
-              {
-                "$ref": "#/components/schemas/DiskManagementError"
-              }
-            ]
-          },
-          "identity": {
-            "$ref": "#/components/schemas/DiskIdentity"
-          }
-        },
-        "required": [
-          "identity"
         ]
       },
       "DiskRuntimeState": {
@@ -4411,13 +4251,6 @@
               "state"
             ]
           }
-        ]
-      },
-      "DiskType": {
-        "type": "string",
-        "enum": [
-          "U2",
-          "M2"
         ]
       },
       "DiskVariant": {
@@ -5677,29 +5510,6 @@
           "pool_id"
         ]
       },
-      "OmicronPhysicalDisksConfig": {
-        "type": "object",
-        "properties": {
-          "disks": {
-            "type": "array",
-            "items": {
-              "$ref": "#/components/schemas/OmicronPhysicalDiskConfig"
-            }
-          },
-          "generation": {
-            "description": "generation number of this configuration\n\nThis generation number is owned by the control plane (i.e., RSS or Nexus, depending on whether RSS-to-Nexus handoff has happened).  It should not be bumped within Sled Agent.\n\nSled Agent rejects attempts to set the configuration to a generation older than the one it's currently running.",
-            "allOf": [
-              {
-                "$ref": "#/components/schemas/Generation"
-              }
-            ]
-          }
-        },
-        "required": [
-          "disks",
-          "generation"
-        ]
-      },
       "OmicronSledConfig": {
         "description": "Describes the set of Reconfigurator-managed configuration elements of a sled",
         "type": "object",
@@ -5730,28 +5540,6 @@
           "disks",
           "generation",
           "zones"
-        ]
-      },
-      "OmicronSledConfigResult": {
-        "description": "Result of the currently-synchronous `omicron_config_put` endpoint.",
-        "type": "object",
-        "properties": {
-          "datasets": {
-            "type": "array",
-            "items": {
-              "$ref": "#/components/schemas/DatasetManagementStatus"
-            }
-          },
-          "disks": {
-            "type": "array",
-            "items": {
-              "$ref": "#/components/schemas/DiskManagementStatus"
-            }
-          }
-        },
-        "required": [
-          "datasets",
-          "disks"
         ]
       },
       "OmicronZoneConfig": {
@@ -6190,6 +5978,41 @@
               "type"
             ]
           }
+        ]
+      },
+      "OrphanedDataset": {
+        "type": "object",
+        "properties": {
+          "available": {
+            "$ref": "#/components/schemas/ByteCount"
+          },
+          "id": {
+            "nullable": true,
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/TypedUuidForDatasetKind"
+              }
+            ]
+          },
+          "mounted": {
+            "type": "boolean"
+          },
+          "name": {
+            "$ref": "#/components/schemas/DatasetName"
+          },
+          "reason": {
+            "type": "string"
+          },
+          "used": {
+            "$ref": "#/components/schemas/ByteCount"
+          }
+        },
+        "required": [
+          "available",
+          "mounted",
+          "name",
+          "reason",
+          "used"
         ]
       },
       "P9fs": {
@@ -7808,21 +7631,6 @@
           "id",
           "time_created",
           "version"
-        ]
-      },
-      "Zpool": {
-        "type": "object",
-        "properties": {
-          "disk_type": {
-            "$ref": "#/components/schemas/DiskType"
-          },
-          "id": {
-            "$ref": "#/components/schemas/TypedUuidForZpoolKind"
-          }
-        },
-        "required": [
-          "disk_type",
-          "id"
         ]
       },
       "ZpoolName": {

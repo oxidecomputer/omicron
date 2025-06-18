@@ -16,7 +16,6 @@ use gateway_client::types::SpType;
 use gateway_types::rot::RotSlot;
 use nexus_sled_agent_shared::inventory::Baseboard;
 use nexus_sled_agent_shared::inventory::ConfigReconcilerInventory;
-use nexus_sled_agent_shared::inventory::ConfigReconcilerInventoryResult;
 use nexus_sled_agent_shared::inventory::ConfigReconcilerInventoryStatus;
 use nexus_sled_agent_shared::inventory::Inventory;
 use nexus_sled_agent_shared::inventory::InventoryDataset;
@@ -24,6 +23,7 @@ use nexus_sled_agent_shared::inventory::InventoryDisk;
 use nexus_sled_agent_shared::inventory::InventoryZpool;
 use nexus_sled_agent_shared::inventory::OmicronSledConfig;
 use nexus_sled_agent_shared::inventory::OmicronZonesConfig;
+use nexus_sled_agent_shared::inventory::OrphanedDataset;
 use nexus_sled_agent_shared::inventory::SledRole;
 use nexus_types::inventory::BaseboardId;
 use nexus_types::inventory::CabooseWhich;
@@ -37,6 +37,7 @@ use omicron_common::disk::DatasetName;
 use omicron_common::disk::DiskVariant;
 use omicron_common::disk::OmicronPhysicalDiskConfig;
 use omicron_common::disk::SharedDatasetConfig;
+use omicron_uuid_kinds::DatasetUuid;
 use omicron_uuid_kinds::PhysicalDiskUuid;
 use omicron_uuid_kinds::SledUuid;
 use omicron_uuid_kinds::ZpoolUuid;
@@ -644,27 +645,20 @@ pub fn sled_agent(
 ) -> Inventory {
     // Assume the `ledgered_sled_config` was reconciled successfully.
     let last_reconciliation = ledgered_sled_config.clone().map(|config| {
-        let external_disks = config
-            .disks
-            .iter()
-            .map(|d| (d.id, ConfigReconcilerInventoryResult::Ok))
-            .collect();
-        let datasets = config
-            .datasets
-            .iter()
-            .map(|d| (d.id, ConfigReconcilerInventoryResult::Ok))
-            .collect();
-        let zones = config
-            .zones
-            .iter()
-            .map(|z| (z.id, ConfigReconcilerInventoryResult::Ok))
-            .collect();
-        ConfigReconcilerInventory {
-            last_reconciled_config: config,
-            external_disks,
-            datasets,
-            zones,
-        }
+        let mut inv = ConfigReconcilerInventory::debug_assume_success(config);
+        // Add an orphaned dataset with no tie to other pools/datasets.
+        inv.orphaned_datasets.insert_overwrite(OrphanedDataset {
+            name: DatasetName::new(
+                ZpoolName::new_external(ZpoolUuid::new_v4()),
+                DatasetKind::ExternalDns,
+            ),
+            reason: "example orphaned dataset".to_string(),
+            id: Some(DatasetUuid::new_v4()),
+            mounted: false,
+            available: 0.into(),
+            used: 0.into(),
+        });
+        inv
     });
 
     let reconciler_status = if last_reconciliation.is_some() {

@@ -12,16 +12,18 @@ use chrono::{DateTime, Utc};
 use daft::Diffable;
 use id_map::IdMap;
 use id_map::IdMappable;
+use iddqd::IdOrdItem;
+use iddqd::IdOrdMap;
+use iddqd::id_upcast;
+use omicron_common::disk::{DatasetKind, DatasetName};
 use omicron_common::ledger::Ledgerable;
 use omicron_common::{
     api::{
         external::{ByteCount, Generation},
         internal::shared::{NetworkInterface, SourceNatConfig},
     },
-    disk::{
-        DatasetConfig, DatasetManagementStatus, DiskManagementStatus,
-        DiskVariant, OmicronPhysicalDiskConfig,
-    },
+    disk::{DatasetConfig, DiskVariant, OmicronPhysicalDiskConfig},
+    update::ArtifactId,
     zpool_name::ZpoolName,
 };
 use omicron_uuid_kinds::{DatasetUuid, OmicronZoneUuid};
@@ -33,7 +35,7 @@ use serde::{Deserialize, Serialize};
 // depend on sled-hardware-types.
 pub use sled_hardware_types::Baseboard;
 use strum::EnumIter;
-use tufaceous_artifact::ArtifactHash;
+use tufaceous_artifact::{ArtifactHash, KnownArtifactKind};
 
 /// Identifies information about disks which may be attached to Sleds.
 #[derive(Clone, Debug, Deserialize, JsonSchema, Serialize)]
@@ -128,7 +130,93 @@ pub struct ConfigReconcilerInventory {
     pub external_disks:
         BTreeMap<PhysicalDiskUuid, ConfigReconcilerInventoryResult>,
     pub datasets: BTreeMap<DatasetUuid, ConfigReconcilerInventoryResult>,
+    pub orphaned_datasets: IdOrdMap<OrphanedDataset>,
     pub zones: BTreeMap<OmicronZoneUuid, ConfigReconcilerInventoryResult>,
+}
+
+impl ConfigReconcilerInventory {
+    /// Iterate over all running zones as reported by the last reconciliation
+    /// result.
+    ///
+    /// This includes zones that are both present in `last_reconciled_config`
+    /// and whose status in `zones` indicates "successfully running".
+    pub fn running_omicron_zones(
+        &self,
+    ) -> impl Iterator<Item = &OmicronZoneConfig> {
+        self.zones.iter().filter_map(|(zone_id, result)| match result {
+            ConfigReconcilerInventoryResult::Ok => {
+                self.last_reconciled_config.zones.get(zone_id)
+            }
+            ConfigReconcilerInventoryResult::Err { .. } => None,
+        })
+    }
+
+    /// Iterate over all zones contained in the most-recently-reconciled sled
+    /// config and report their status as of that reconciliation.
+    pub fn reconciled_omicron_zones(
+        &self,
+    ) -> impl Iterator<Item = (&OmicronZoneConfig, &ConfigReconcilerInventoryResult)>
+    {
+        // `self.zones` may contain zone IDs that aren't present in
+        // `last_reconciled_config` at all, if we failed to _shut down_ zones
+        // that are no longer present in the config. We use `filter_map` to
+        // strip those out, and only report on the configured zones.
+        self.zones.iter().filter_map(|(zone_id, result)| {
+            let config = self.last_reconciled_config.zones.get(zone_id)?;
+            Some((config, result))
+        })
+    }
+
+    /// Given a sled config, produce a reconciler result that sled-agent could
+    /// have emitted if reconciliation succeeded.
+    ///
+    /// This method should only be used by tests and dev tools; real code should
+    /// look at the actual `last_reconciliation` value from the parent
+    /// [`Inventory`].
+    pub fn debug_assume_success(config: OmicronSledConfig) -> Self {
+        let external_disks = config
+            .disks
+            .iter()
+            .map(|d| (d.id, ConfigReconcilerInventoryResult::Ok))
+            .collect();
+        let datasets = config
+            .datasets
+            .iter()
+            .map(|d| (d.id, ConfigReconcilerInventoryResult::Ok))
+            .collect();
+        let zones = config
+            .zones
+            .iter()
+            .map(|z| (z.id, ConfigReconcilerInventoryResult::Ok))
+            .collect();
+        Self {
+            last_reconciled_config: config,
+            external_disks,
+            datasets,
+            orphaned_datasets: IdOrdMap::new(),
+            zones,
+        }
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Deserialize, JsonSchema, Serialize)]
+pub struct OrphanedDataset {
+    pub name: DatasetName,
+    pub reason: String,
+    pub id: Option<DatasetUuid>,
+    pub mounted: bool,
+    pub available: ByteCount,
+    pub used: ByteCount,
+}
+
+impl IdOrdItem for OrphanedDataset {
+    type Key<'a> = &'a DatasetName;
+
+    fn key(&self) -> Self::Key<'_> {
+        &self.name
+    }
+
+    id_upcast!();
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Deserialize, JsonSchema, Serialize)]
@@ -186,8 +274,6 @@ pub enum SledRole {
 }
 
 /// Describes the set of Reconfigurator-managed configuration elements of a sled
-// TODO this struct should have a generation number; at the moment, each of
-// the fields has a separete one internally.
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema, PartialEq, Eq)]
 pub struct OmicronSledConfig {
     pub generation: Generation,
@@ -220,14 +306,6 @@ impl Ledgerable for OmicronSledConfig {
         // Generation bumps must only ever come from nexus and will be encoded
         // in the struct itself
     }
-}
-
-/// Result of the currently-synchronous `omicron_config_put` endpoint.
-#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
-#[must_use = "this `DatasetManagementResult` may contain errors, which should be handled"]
-pub struct OmicronSledConfigResult {
-    pub disks: Vec<DiskManagementStatus>,
-    pub datasets: Vec<DatasetManagementStatus>,
 }
 
 /// Describes the set of Omicron-managed zones running on a sled
@@ -295,6 +373,10 @@ impl OmicronZoneConfig {
             self.zone_type.kind().zone_prefix(),
             Some(self.id),
         )
+    }
+
+    pub fn dataset_name(&self) -> Option<DatasetName> {
+        self.zone_type.dataset_name()
     }
 }
 
@@ -582,6 +664,41 @@ impl OmicronZoneType {
             | OmicronZoneType::Oximeter { .. } => None,
         }
     }
+
+    /// If this kind of zone has an associated dataset, return the dataset's
+    /// name. Otherwise, return `None`.
+    pub fn dataset_name(&self) -> Option<DatasetName> {
+        let (dataset, dataset_kind) = match self {
+            OmicronZoneType::BoundaryNtp { .. }
+            | OmicronZoneType::InternalNtp { .. }
+            | OmicronZoneType::Nexus { .. }
+            | OmicronZoneType::Oximeter { .. }
+            | OmicronZoneType::CruciblePantry { .. } => None,
+            OmicronZoneType::Clickhouse { dataset, .. } => {
+                Some((dataset, DatasetKind::Clickhouse))
+            }
+            OmicronZoneType::ClickhouseKeeper { dataset, .. } => {
+                Some((dataset, DatasetKind::ClickhouseKeeper))
+            }
+            OmicronZoneType::ClickhouseServer { dataset, .. } => {
+                Some((dataset, DatasetKind::ClickhouseServer))
+            }
+            OmicronZoneType::CockroachDb { dataset, .. } => {
+                Some((dataset, DatasetKind::Cockroach))
+            }
+            OmicronZoneType::Crucible { dataset, .. } => {
+                Some((dataset, DatasetKind::Crucible))
+            }
+            OmicronZoneType::ExternalDns { dataset, .. } => {
+                Some((dataset, DatasetKind::ExternalDns))
+            }
+            OmicronZoneType::InternalDns { dataset, .. } => {
+                Some((dataset, DatasetKind::InternalDns))
+            }
+        }?;
+
+        Some(DatasetName::new(dataset.pool_name, dataset_kind))
+    }
 }
 
 /// Like [`OmicronZoneType`], but without any associated data.
@@ -590,13 +707,14 @@ impl OmicronZoneType {
 ///
 /// # String representations of this type
 ///
-/// There are no fewer than four string representations for this type, all
+/// There are no fewer than five string representations for this type, all
 /// slightly different from each other.
 ///
 /// 1. [`Self::zone_prefix`]: Used to construct zone names.
 /// 2. [`Self::service_prefix`]: Used to construct SMF service names.
 /// 3. [`Self::name_prefix`]: Used to construct `Name` instances.
 /// 4. [`Self::report_str`]: Used for reporting and testing.
+/// 5. [`Self::artifact_name`]: Used to match TUF artifact names.
 ///
 /// There is no `Display` impl to ensure that users explicitly choose the
 /// representation they want. (Please play close attention to this! The
@@ -714,6 +832,39 @@ impl ZoneKind {
             ZoneKind::Nexus => "nexus",
             ZoneKind::Oximeter => "oximeter",
         }
+    }
+
+    /// Return a string used as an artifact name for control-plane zones.
+    /// This is **not guaranteed** to be stable.
+    pub fn artifact_name(self) -> &'static str {
+        match self {
+            ZoneKind::BoundaryNtp => "ntp",
+            ZoneKind::Clickhouse => "clickhouse",
+            ZoneKind::ClickhouseKeeper => "clickhouse_keeper",
+            ZoneKind::ClickhouseServer => "clickhouse",
+            ZoneKind::CockroachDb => "cockroachdb",
+            ZoneKind::Crucible => "crucible-zone",
+            ZoneKind::CruciblePantry => "crucible-pantry-zone",
+            ZoneKind::ExternalDns => "external-dns",
+            ZoneKind::InternalDns => "internal-dns",
+            ZoneKind::InternalNtp => "ntp",
+            ZoneKind::Nexus => "nexus",
+            ZoneKind::Oximeter => "oximeter",
+        }
+    }
+
+    /// Return true if an artifact represents a control plane zone image
+    /// of this kind.
+    pub fn is_control_plane_zone_artifact(
+        self,
+        artifact_id: &ArtifactId,
+    ) -> bool {
+        artifact_id
+            .kind
+            .to_known()
+            .map(|kind| matches!(kind, KnownArtifactKind::Zone))
+            .unwrap_or(false)
+            && artifact_id.name == self.artifact_name()
     }
 }
 

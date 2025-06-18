@@ -343,7 +343,7 @@ cast_lossless = "warn"
 
 [workspace.dependencies]
 anyhow = "1.0"
-anstyle = "1.0.10"
+anstyle = "1.0.11"
 api_identity = { path = "api_identity" }
 approx = "0.5.1"
 assert_matches = "1.5.0"
@@ -363,8 +363,8 @@ buf-list = { version = "1.0.3", features = ["tokio1"] }
 byteorder = "1.5.0"
 bytes = "1.10.1"
 camino = { version = "1.1", features = ["serde1"] }
-camino-tempfile = "1.3.0"
-camino-tempfile-ext = { version = "0.3.0", features = ["assert-color"] }
+camino-tempfile = "1.4.1"
+camino-tempfile-ext = { version = "0.3.1", features = ["assert-color"] }
 cancel-safe-futures = "0.1.5"
 cargo_metadata = "0.19.2"
 chacha20poly1305 = "0.10.1"
@@ -424,11 +424,11 @@ ereport-types = { path = "ereport/types" }
 expectorate = "1.2.0"
 fatfs = "0.3.6"
 filetime = "0.2.25"
-flate2 = "1.1.1"
+flate2 = "1.1.2"
 float-ord = "0.3.2"
 flume = "0.11.1"
 foreign-types = "0.3.2"
-fs-err = "3.1.0"
+fs-err = "3.1.1"
 futures = "0.3.31"
 gateway-api = { path = "gateway-api" }
 gateway-client = { path = "clients/gateway-client" }
@@ -449,8 +449,8 @@ gateway-types = { path = "gateway-types" }
 gethostname = "0.5.0"
 gfss = { path = "trust-quorum/gfss" }
 glob = "0.3.2"
-guppy = "0.17.18"
-headers = "0.4.0"
+guppy = "0.17.19"
+headers = "0.4.1"
 heck = "0.5"
 hex = "0.4.3"
 hex-literal = "0.4.1"
@@ -470,10 +470,10 @@ httptest = "0.16.3"
 hubtools = { git = "https://github.com/oxidecomputer/hubtools.git", branch = "main" }
 humantime = "2.1.0"
 hyper = "1.6.0"
-hyper-util = "0.1.11"
+hyper-util = "0.1.14"
 hyper-rustls = "0.26.0"
 hyper-staticfile = "0.10.1"
-iddqd = { version = "0.3.0", features = ["daft", "serde"] }
+iddqd = { version = "0.3.7", features = ["daft", "serde", "schemars08"] }
 id-map = { path = "id-map" }
 illumos-utils = { path = "illumos-utils" }
 iana-time-zone = "0.1.63"
@@ -493,10 +493,10 @@ itertools = "0.14.0"
 internet-checksum = "0.2"
 ipnetwork = { version = "0.21", features = ["schemars", "serde"] }
 ispf = { git = "https://github.com/oxidecomputer/ispf" }
-jiff = "0.2.13"
+jiff = "0.2.15"
 key-manager = { path = "key-manager" }
 kstat-rs = "0.2.4"
-libc = "0.2.172"
+libc = "0.2.174"
 libipcc = { git = "https://github.com/oxidecomputer/ipcc-rs", rev = "524eb8f125003dff50b9703900c6b323f00f9e1b" }
 libfalcon = { git = "https://github.com/oxidecomputer/falcon", branch = "main" }
 libnvme = { git = "https://github.com/oxidecomputer/libnvme", rev = "dd5bb221d327a1bc9287961718c3c10d6bd37da0" }
@@ -574,7 +574,7 @@ openssl = "0.10"
 openssl-sys = "0.9"
 opte-ioctl = { git = "https://github.com/oxidecomputer/opte", rev = "f5560fae02ad3fc349fabc6454c321143199ca9e" }
 oso = "0.27"
-owo-colors = "4.2.0"
+owo-colors = "4.2.1"
 oximeter = { path = "oximeter/oximeter" }
 oximeter-api = { path = "oximeter/api" }
 oximeter-client = { path = "clients/oximeter-client" }
@@ -606,7 +606,7 @@ postgres-protocol = "0.6.8"
 predicates = "3.1.3"
 pretty_assertions = "1.4.1"
 pretty-hex = "0.4.1"
-prettyplease = { version = "0.2.32", features = ["verbatim"] }
+prettyplease = { version = "0.2.34", features = ["verbatim"] }
 proc-macro2 = "1.0"
 progenitor = "0.10.0"
 progenitor-client = "0.10.0"
@@ -618,10 +618,12 @@ propolis_api_types = { git = "https://github.com/oxidecomputer/propolis", rev = 
 propolis-client = { git = "https://github.com/oxidecomputer/propolis", rev = "e3988414bd68ecf806078fb898120e1194451ee9" }
 propolis-mock-server = { git = "https://github.com/oxidecomputer/propolis", rev = "e3988414bd68ecf806078fb898120e1194451ee9" }
 # NOTE: see above!
-proptest = "1.6.0"
+proptest = "1.7.0"
 qorb = "0.3.1"
 quote = "1.0"
 rand = "0.8.5"
+# We're still in the middle of migrating to rand 0.9.
+rand09 = { package = "rand", version = "0.9.1" }
 rand_core = "0.6.4"
 rand_distr = "0.4.3"
 rand_seeder = "0.3.0"
@@ -636,7 +638,7 @@ regex = "1.11.1"
 regress = "0.10.3"
 repo-depot-api = { path = "sled-agent/repo-depot-api" }
 repo-depot-client = { path = "clients/repo-depot-client" }
-reqwest = { version = "0.12.15", default-features = false }
+reqwest = { version = "0.12.20", default-features = false }
 ring = "0.17.14"
 rpassword = "7.3.1"
 rstest = "0.24.0"
@@ -644,19 +646,19 @@ rustfmt-wrapper = "0.2"
 rustls = "0.22.2"
 rustls-pemfile = "2.2.0"
 rustyline = "14.0.0"
-samael = { version = "0.0.18", features = ["xmlsec"] }
+samael = { version = "0.0.19", features = ["xmlsec"] }
 schemars = "0.8.22"
 scopeguard = "1.2.0"
-secrecy = "0.10.0"
-semver = { version = "1.0.25", features = ["std", "serde"] }
+secrecy = "0.10.3"
+semver = { version = "1.0.26", features = ["std", "serde"] }
 serde = { version = "1.0", default-features = false, features = [ "derive", "rc" ] }
 serde_cbor = "0.11.2"
 serde_human_bytes = { git = "https://github.com/oxidecomputer/serde_human_bytes", branch = "main" }
-serde_json = "1.0.139"
+serde_json = "1.0.140"
 serde_tokenstream = "0.2"
 serde_urlencoded = "0.7.1"
 serde_with = "3.12.0"
-sha2 = "0.10.8"
+sha2 = "0.10.9"
 sha3 = "0.10.8"
 shell-words = "1.1.0"
 signal-hook = "0.3"
@@ -708,12 +710,12 @@ libsw = { version = "3.4.0", features = ["tokio"] }
 syn = { version = "2.0" }
 tabled = "0.15.0"
 tar = "0.4"
-tempfile = "3.10"
+tempfile = "3.20"
 term = "0.7"
 termios = "0.3"
 termtree = "0.5.1"
-textwrap = { version = "0.16.1", features = [ "terminal_size" ] }
-test-strategy = "0.4.0"
+textwrap = { version = "0.16.2", features = [ "terminal_size" ] }
+test-strategy = "0.4.1"
 thiserror = "1.0"
 tofino = { git = "https://github.com/oxidecomputer/tofino", branch = "main" }
 tokio = "1.43.0"
@@ -738,7 +740,7 @@ update-common = { path = "update-common" }
 update-engine = { path = "update-engine" }
 url = "2.5.3"
 usdt = "0.5.0"
-uuid = { version = "1.15.1", features = ["serde", "v4"] }
+uuid = { version = "1.17.0", features = ["serde", "v4"] }
 uzers = "0.12"
 walkdir = "2.5"
 whoami = "1.5"
@@ -757,7 +759,7 @@ zone = { version = "0.3.1", default-features = false, features = ["async"] }
 # the kinds). However, uses of omicron-uuid-kinds _within omicron_ will have
 # std and the other features enabled because they'll refer to it via
 # omicron-uuid-kinds.workspace = true.
-newtype-uuid = { version = "1.2.1", default-features = false }
+newtype-uuid = { version = "1.2.4", default-features = false }
 omicron-uuid-kinds = { path = "uuid-kinds", features = ["serde", "schemars08", "uuid-v4"] }
 
 # NOTE: The test profile inherits from the dev profile, so settings under
@@ -981,8 +983,3 @@ path = "workspace-hack"
 [patch."https://github.com/oxidecomputer/omicron"]
 omicron-uuid-kinds = { path = "uuid-kinds" }
 omicron-common = { path = "common" }
-
-# Waiting for https://github.com/seanmonstar/reqwest/pull/2623 to be released...
-[patch.crates-io.reqwest]
-git = 'https://github.com/seanmonstar/reqwest'
-rev = '114d97c1a862567b465cb57f14d584626e1cf30c'

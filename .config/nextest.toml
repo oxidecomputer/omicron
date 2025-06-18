@@ -3,7 +3,7 @@
 #
 # The required version should be bumped up if we need new features, performance
 # improvements or bugfixes that are present in newer versions of nextest.
-nextest-version = { required = "0.9.91", recommended = "0.9.96" }
+nextest-version = { required = "0.9.98", recommended = "0.9.98" }
 
 experimental = ["setup-scripts"]
 
@@ -21,7 +21,7 @@ fail-fast = false
 [profile.ci.junit]
 path = "junit.xml"
 
-[script.crdb-seed]
+[scripts.setup.crdb-seed]
 # Use the test profile for this executable since that's how almost all
 # invocations of nextest happen.
 command = 'cargo run -p crdb-seed --profile test'
@@ -30,7 +30,7 @@ command = 'cargo run -p crdb-seed --profile test'
 filter = 'package(omicron-clickhouse-admin)'
 setup = 'clickhouse-cluster'
 
-[script.clickhouse-cluster]
+[scripts.setup.clickhouse-cluster]
 command = 'cargo run -p clickhouse-cluster-dev'
 
 [test-groups]

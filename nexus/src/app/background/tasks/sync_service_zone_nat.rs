@@ -126,21 +126,17 @@ impl BackgroundTask for ServiceZoneNatTracker {
                 let sled_address = oxnet::Ipv6Net::host_net(*sled.ip);
 
                 // TODO-correctness Looking at inventory here is a little
-                // sketchy. We currently check the most-recently-ledgered zones
-                // which tells us what services sled-agent things it's supposed
-                // to be running. It might be better to check either:
-                //
-                // * `sa.last_reconciliation` (to know what zones are actually
-                //   running; this requires
-                //   https://github.com/oxidecomputer/omicron/pull/8064 landing)
-                //   if the goal is to sync what's actually on the sled
-                // * a rendezvous table populated by reconfigurator if the goal
-                //   is to sync with what's Nexus thinks is supposed to be
-                //   running on the sled
+                // sketchy. We check the last reconciliation result, which
+                // should be a view of what zones are actually running on the
+                // sled. But maybe it would be better to act on a rendezvous
+                // table populated by reconfigurator if the goal is to sync with
+                // what's Nexus thinks is supposed to be running on the sled?
                 let zones = sa
-                    .ledgered_sled_config
-                    .map(|config| config.zones)
-                    .unwrap_or_default();
+                    .last_reconciliation
+                    .iter()
+                    .flat_map(|reconciliation| {
+                        reconciliation.running_omicron_zones().cloned()
+                    });
 
                 for zone in zones {
                     let zone_type: OmicronZoneType = zone.zone_type;
