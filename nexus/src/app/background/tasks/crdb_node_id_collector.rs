@@ -285,8 +285,7 @@ mod tests {
                             COCKROACH_ADMIN_PORT,
                             0,
                             0,
-                        )
-                        .into(),
+                        ),
                         dataset: OmicronZoneDataset {
                             pool_name: format!("oxp_{}", zpool_id)
                                 .parse()
