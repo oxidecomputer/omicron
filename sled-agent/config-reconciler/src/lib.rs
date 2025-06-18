@@ -62,6 +62,7 @@ mod sled_agent_facilities;
 // TODO-cleanup Make this private once the reconciler uses it instead of
 // sled-agent proper.
 pub mod dump_setup;
+mod host_phase_2;
 
 pub use dataset_serialization_task::DatasetTaskError;
 pub use dataset_serialization_task::NestedDatasetDestroyError;
