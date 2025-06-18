@@ -500,6 +500,7 @@ pub fn representative() -> Representative {
                 datasets,
                 Some(sled14),
                 zone_image_resolver(ZoneImageResolverExampleKind::Success {
+                    deserialized_zone_manifest: true,
                     has_mupdate_override: true,
                 }),
             ),
@@ -531,6 +532,7 @@ pub fn representative() -> Representative {
                 vec![],
                 Some(sled16),
                 zone_image_resolver(ZoneImageResolverExampleKind::Success {
+                    deserialized_zone_manifest: false,
                     has_mupdate_override: false,
                 }),
             ),
@@ -674,8 +676,9 @@ pub fn rot_page(unique: &str) -> RotPage {
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum ZoneImageResolverExampleKind {
-    /// Success, with or without the mupdate override being present.
-    Success { has_mupdate_override: bool },
+    /// Success, with or without treating the manifest as deserialized and the
+    /// mupdate override being present.
+    Success { deserialized_zone_manifest: bool, has_mupdate_override: bool },
 
     /// The zone manifest is successfully read but doesn't match entries on
     /// disk.
@@ -692,7 +695,7 @@ pub fn zone_image_resolver(
     let dir_path = Utf8Path::new("/some/path");
 
     // Create a bunch of contexts.
-    let cx = WriteInstallDatasetContext::new_basic();
+    let mut cx = WriteInstallDatasetContext::new_basic();
 
     let mut invalid_cx = WriteInstallDatasetContext::new_basic();
     invalid_cx.make_error_cases();
@@ -700,7 +703,13 @@ pub fn zone_image_resolver(
     // Determine the zone manifest and mupdate override results for the boot
     // disk.
     let (boot_zm_result, boot_override_result) = match kind {
-        ZoneImageResolverExampleKind::Success { has_mupdate_override } => {
+        ZoneImageResolverExampleKind::Success {
+            deserialized_zone_manifest,
+            has_mupdate_override,
+        } => {
+            if !deserialized_zone_manifest {
+                cx.write_zone_manifest_to_disk(false);
+            }
             let zm_result = Ok(
                 cx.expected_result(&dir_path.join(&BOOT_PATHS.install_dataset))
             );
