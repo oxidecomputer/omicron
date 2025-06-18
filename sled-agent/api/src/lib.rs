@@ -13,7 +13,7 @@ use dropshot::{
     StreamingBody, TypedBody,
 };
 use nexus_sled_agent_shared::inventory::{
-    Inventory, OmicronSledConfig, OmicronSledConfigResult, SledRole,
+    Inventory, OmicronSledConfig, SledRole,
 };
 use omicron_common::{
     api::external::Generation,
@@ -24,7 +24,7 @@ use omicron_common::{
             SledIdentifiers, SwitchPorts, VirtualNetworkInterfaceHost,
         },
     },
-    disk::{DatasetsConfig, DiskVariant, OmicronPhysicalDisksConfig},
+    disk::DiskVariant,
     ledger::Ledgerable,
 };
 use omicron_uuid_kinds::{
@@ -266,32 +266,7 @@ pub trait SledAgentApi {
     async fn omicron_config_put(
         rqctx: RequestContext<Self::Context>,
         body: TypedBody<OmicronSledConfig>,
-    ) -> Result<HttpResponseOk<OmicronSledConfigResult>, HttpError>;
-
-    /// Lists the datasets that this sled is configured to use
-    #[endpoint {
-        method = GET,
-        path = "/datasets",
-    }]
-    async fn datasets_get(
-        rqctx: RequestContext<Self::Context>,
-    ) -> Result<HttpResponseOk<DatasetsConfig>, HttpError>;
-
-    #[endpoint {
-        method = GET,
-        path = "/omicron-physical-disks",
-    }]
-    async fn omicron_physical_disks_get(
-        rqctx: RequestContext<Self::Context>,
-    ) -> Result<HttpResponseOk<OmicronPhysicalDisksConfig>, HttpError>;
-
-    #[endpoint {
-        method = GET,
-        path = "/zpools",
-    }]
-    async fn zpools_get(
-        rqctx: RequestContext<Self::Context>,
-    ) -> Result<HttpResponseOk<Vec<Zpool>>, HttpError>;
+    ) -> Result<HttpResponseUpdatedNoContent, HttpError>;
 
     #[endpoint {
         method = GET,
@@ -707,6 +682,35 @@ pub trait SledAgentApi {
         path_params: Path<SledDiagnosticsLogsDownloadPathParm>,
         query_params: Query<SledDiagnosticsLogsDownloadQueryParam>,
     ) -> Result<http::Response<Body>, HttpError>;
+
+    /// This endpoint reports the status of the `destroy_orphaned_datasets`
+    /// chicken switch. It will be removed with omicron#6177.
+    #[endpoint {
+        method = GET,
+        path = "/chicken-switch/destroy-orphaned-datasets",
+    }]
+    async fn chicken_switch_destroy_orphaned_datasets_get(
+        request_context: RequestContext<Self::Context>,
+    ) -> Result<HttpResponseOk<ChickenSwitchDestroyOrphanedDatasets>, HttpError>;
+
+    /// This endpoint sets the `destroy_orphaned_datasets` chicken switch
+    /// (allowing sled-agent to delete datasets it believes are orphaned). It
+    /// will be removed with omicron#6177.
+    #[endpoint {
+        method = PUT,
+        path = "/chicken-switch/destroy-orphaned-datasets",
+    }]
+    async fn chicken_switch_destroy_orphaned_datasets_put(
+        request_context: RequestContext<Self::Context>,
+        body: TypedBody<ChickenSwitchDestroyOrphanedDatasets>,
+    ) -> Result<HttpResponseUpdatedNoContent, HttpError>;
+}
+
+#[derive(Clone, Debug, Deserialize, JsonSchema, Serialize)]
+pub struct ChickenSwitchDestroyOrphanedDatasets {
+    /// If true, sled-agent will attempt to destroy durable ZFS datasets that it
+    /// believes were associated with now-expunged Omicron zones.
+    pub destroy_orphans: bool,
 }
 
 #[derive(Clone, Debug, Deserialize, JsonSchema, Serialize)]

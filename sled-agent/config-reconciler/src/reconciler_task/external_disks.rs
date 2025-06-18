@@ -63,10 +63,12 @@ impl CurrentlyManagedZpools {
 
     /// Within this crate, directly expose the set of zpools.
     ///
-    /// We should remove this once we clean up zone starting; starting a zone
-    /// should already know where to place datasets.
-    pub(crate) fn into_vec(self) -> Vec<ZpoolName> {
-        self.0.into_iter().collect()
+    /// We never use this to "pick a zpool to use" (any choosing should be
+    /// picking _datasets_, not zpools). We use it when we need to know all the
+    /// zpools we have to scan for something (e.g., orphaned datasets to
+    /// delete).
+    pub(crate) fn iter(&self) -> impl Iterator<Item = ZpoolName> + '_ {
+        self.0.iter().copied()
     }
 }
 
@@ -1155,6 +1157,4 @@ mod tests {
 
         logctx.cleanup_successful();
     }
-    // TODO-john more tests
-    // * change disk properties
 }

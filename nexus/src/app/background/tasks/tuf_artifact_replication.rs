@@ -405,7 +405,8 @@ impl Request<'_> {
                     }
                 }
             },
-            error: err.map(|err| err.to_string()),
+            error: err
+                .map(|err| InlineErrorChain::new(err.as_ref()).to_string()),
         }
     }
 }
@@ -590,18 +591,13 @@ impl ArtifactReplication {
         &self,
         opctx: &OpContext,
     ) -> Result<(ArtifactConfig, Inventory)> {
-        let generation =
-            self.datastore.update_tuf_generation_get(opctx).await?;
+        let generation = self.datastore.tuf_get_generation(opctx).await?;
         let mut inventory = Inventory::default();
         let mut paginator = Paginator::new(SQL_BATCH_SIZE);
         while let Some(p) = paginator.next() {
             let batch = self
                 .datastore
-                .update_tuf_artifact_list(
-                    opctx,
-                    generation,
-                    &p.current_pagparams(),
-                )
+                .tuf_list_repos(opctx, generation, &p.current_pagparams())
                 .await?;
             paginator = p.found_batch(&batch, &|a| a.id.into_untyped_uuid());
             for artifact in batch {
@@ -644,7 +640,7 @@ impl ArtifactReplication {
                         "sled" => sled.client.baseurl(),
                         "generation" => &config.generation,
                     );
-                    err.to_string()
+                    InlineErrorChain::new(err).to_string()
                 }),
             })
             .await
@@ -728,7 +724,10 @@ impl ArtifactReplication {
                     "error" => InlineErrorChain::new(&err),
                     "sled" => sled.client.baseurl(),
                 );
-                (ControlFlow::Continue(BTreeMap::new()), Some(err.to_string()))
+                (
+                    ControlFlow::Continue(BTreeMap::new()),
+                    Some(InlineErrorChain::new(&err).to_string()),
+                )
             }
         };
         ringbuf_tx

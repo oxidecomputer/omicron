@@ -18,13 +18,13 @@ use display_error_chain::DisplayErrorChain;
 use http::StatusCode;
 use installinator_client::ClientError;
 use installinator_common::{Event, EventBuffer, EventReport};
+use omicron_uuid_kinds::MupdateUuid;
 use tokio::{
     sync::{mpsc, watch},
     task::JoinHandle,
     time,
 };
 use update_engine::AsError;
-use uuid::Uuid;
 
 use crate::{
     artifact::ArtifactClient,
@@ -56,7 +56,7 @@ const DISCOVER_INTERVAL: Duration = Duration::from_secs(5);
 #[derive(Debug)]
 pub(crate) struct ProgressReporter {
     log: slog::Logger,
-    update_id: Uuid,
+    update_id: MupdateUuid,
     report_backend: ReportProgressBackend,
     // Receives updates about progress and completion.
     event_receiver: mpsc::Receiver<Event>,
@@ -69,7 +69,7 @@ pub(crate) struct ProgressReporter {
 impl ProgressReporter {
     pub(crate) fn new(
         log: &slog::Logger,
-        update_id: Uuid,
+        update_id: MupdateUuid,
         report_backend: ReportProgressBackend,
     ) -> (Self, mpsc::Sender<Event>) {
         let (event_sender, event_receiver) = update_engine::channel();
@@ -377,7 +377,7 @@ struct ReportTask {
 impl ReportTask {
     fn new(
         peer: PeerAddress,
-        update_id: Uuid,
+        update_id: MupdateUuid,
         report_rx: watch::Receiver<Option<ReportMessage>>,
         backend: ReportProgressBackend,
     ) -> ReportTask {
@@ -416,7 +416,7 @@ impl ReportTask {
 async fn report_task_loop(
     log: &slog::Logger,
     peer: PeerAddress,
-    update_id: Uuid,
+    update_id: MupdateUuid,
     mut report_rx: watch::Receiver<Option<ReportMessage>>,
     backend: ReportProgressBackend,
 ) {
@@ -523,7 +523,7 @@ impl ReportProgressBackend {
     pub(crate) async fn send_report_to_peer(
         &self,
         peer: PeerAddress,
-        update_id: Uuid,
+        update_id: MupdateUuid,
         report: EventReport,
     ) -> Result<SendReportStatus, ClientError> {
         let log = self.log.new(slog::o!("peer" => peer.to_string()));
@@ -586,7 +586,7 @@ pub(crate) trait ReportProgressImpl: fmt::Debug + Send + Sync {
     async fn report_progress_impl(
         &self,
         peer: PeerAddress,
-        update_id: Uuid,
+        update_id: MupdateUuid,
         report: EventReport,
     ) -> Result<(), ClientError>;
 }
@@ -618,7 +618,7 @@ impl ReportProgressImpl for HttpProgressBackend {
     async fn report_progress_impl(
         &self,
         peer: PeerAddress,
-        update_id: Uuid,
+        update_id: MupdateUuid,
         report: EventReport,
     ) -> Result<(), ClientError> {
         let artifact_client = ArtifactClient::new(peer.address(), &self.log);

@@ -10,11 +10,11 @@
 //! (through MGS) or set from userland via libipcc.
 
 use libipcc::{IpccError, IpccHandle};
+use omicron_uuid_kinds::MupdateUuid;
 use serde::Deserialize;
 use serde::Serialize;
 use thiserror::Error;
 use tufaceous_artifact::ArtifactHash;
-use uuid::Uuid;
 
 #[cfg(test)]
 use proptest::arbitrary::any;
@@ -46,8 +46,8 @@ pub struct InstallinatorImageId {
     /// Installinator can send progress and completion messages to all peers it
     /// finds, and any peer that cares about progress can use this ID to match
     /// the progress message with a running recovery.
-    #[cfg_attr(test, strategy(any::<[u8; 16]>().prop_map(Uuid::from_bytes)))]
-    pub update_id: Uuid,
+    #[cfg_attr(test, strategy(any::<[u8; 16]>().prop_map(MupdateUuid::from_bytes)))]
+    pub update_id: MupdateUuid,
     /// SHA-256 hash of the host phase 2 image to fetch.
     pub host_phase_2: ArtifactHash,
     /// SHA-256 hash of the control plane image to fetch.
@@ -178,6 +178,7 @@ impl Ipcc {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use omicron_uuid_kinds::MupdateUuid;
     use test_strategy::proptest;
 
     #[proptest]
@@ -297,7 +298,7 @@ mod tests {
         ];
 
         let expected = InstallinatorImageId {
-            update_id: Uuid::from_bytes([
+            update_id: MupdateUuid::from_bytes([
                 65, 66, 67, 68, 69, 70, 71, 72, 73, 74, 75, 76, 77, 78, 79, 80,
             ]),
             host_phase_2: ArtifactHash([

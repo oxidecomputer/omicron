@@ -7,6 +7,7 @@
 use anyhow::Context;
 use futures::StreamExt;
 use nexus_db_model::DnsGroup;
+use nexus_db_model::Generation;
 use nexus_db_queries::context::OpContext;
 use nexus_db_queries::db::DataStore;
 use nexus_db_queries::db::datastore::DataStoreDnsTest;
@@ -32,6 +33,7 @@ use nexus_types::deployment::SledResources;
 use nexus_types::deployment::UnstableReconfiguratorState;
 use nexus_types::identity::Asset;
 use nexus_types::identity::Resource;
+use nexus_types::inventory::BaseboardId;
 use nexus_types::inventory::Collection;
 use omicron_common::address::IpRange;
 use omicron_common::address::Ipv6Subnet;
@@ -39,6 +41,7 @@ use omicron_common::address::SLED_PREFIX;
 use omicron_common::api::external::Error;
 use omicron_common::api::external::InternalContext;
 use omicron_common::api::external::LookupType;
+use omicron_common::api::external::TufRepoDescription;
 use omicron_common::disk::DiskIdentity;
 use omicron_common::policy::BOUNDARY_NTP_REDUNDANCY;
 use omicron_common::policy::COCKROACHDB_REDUNDANCY;
@@ -78,6 +81,8 @@ pub struct PlanningInputFromDb<'a> {
     pub cockroachdb_settings: &'a CockroachDbSettings,
     pub clickhouse_policy: Option<ClickhousePolicy>,
     pub oximeter_read_policy: OximeterReadPolicy,
+    pub tuf_repo: Option<TufRepoDescription>,
+    pub old_repo: Option<TufRepoDescription>,
     pub log: &'a Logger,
 }
 
@@ -140,11 +145,43 @@ impl PlanningInputFromDb<'_> {
             .cockroachdb_settings(opctx)
             .await
             .internal_context("fetching cockroachdb settings")?;
-
         let clickhouse_policy = datastore
             .clickhouse_policy_get_latest(opctx)
             .await
             .internal_context("fetching clickhouse policy")?;
+        let target_release = datastore
+            .target_release_get_current(opctx)
+            .await
+            .internal_context("fetching current target release")?;
+        let tuf_repo = match target_release.tuf_repo_id {
+            None => None,
+            Some(repo_id) => Some(
+                datastore
+                    .tuf_repo_get_by_id(opctx, repo_id.into())
+                    .await
+                    .internal_context("fetching target release repo")?
+                    .into_external(),
+            ),
+        };
+        let prev_release = if let Some(prev) = target_release.generation.prev()
+        {
+            datastore
+                .target_release_get_generation(opctx, Generation(prev))
+                .await
+                .internal_context("fetching current target release")?
+        } else {
+            None
+        };
+        let old_repo = match prev_release.and_then(|r| r.tuf_repo_id) {
+            None => None,
+            Some(repo_id) => Some(
+                datastore
+                    .tuf_repo_get_by_id(opctx, repo_id.into())
+                    .await
+                    .internal_context("fetching target release repo")?
+                    .into_external(),
+            ),
+        };
 
         let oximeter_read_policy = datastore
             .oximeter_read_policy_get_latest(opctx)
@@ -171,6 +208,8 @@ impl PlanningInputFromDb<'_> {
             cockroachdb_settings: &cockroachdb_settings,
             clickhouse_policy,
             oximeter_read_policy,
+            tuf_repo,
+            old_repo,
         }
         .build()
         .internal_context("assembling planning_input")?;
@@ -194,6 +233,8 @@ impl PlanningInputFromDb<'_> {
                 .target_crucible_pantry_zone_count,
             clickhouse_policy: self.clickhouse_policy.clone(),
             oximeter_read_policy: self.oximeter_read_policy.clone(),
+            tuf_repo: self.tuf_repo.clone(),
+            old_repo: self.old_repo.clone(),
         };
         let mut builder = PlanningInputBuilder::new(
             policy,
@@ -234,6 +275,10 @@ impl PlanningInputFromDb<'_> {
                 policy: sled_row.policy(),
                 state: sled_row.state().into(),
                 resources: SledResources { subnet, zpools },
+                baseboard_id: BaseboardId {
+                    part_number: sled_row.part_number().to_owned(),
+                    serial_number: sled_row.serial_number().to_owned(),
+                },
             };
             // TODO-cleanup use `TypedUuid` everywhere
             let sled_id = SledUuid::from_untyped_uuid(sled_id);

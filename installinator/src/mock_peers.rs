@@ -19,13 +19,13 @@ use async_trait::async_trait;
 use bytes::Bytes;
 use installinator_client::{ClientError, ResponseValue};
 use installinator_common::EventReport;
+use omicron_uuid_kinds::MupdateUuid;
 use proptest::{collection::vec_deque, prelude::*};
 use reqwest::StatusCode;
 use test_strategy::Arbitrary;
 use tokio::sync::mpsc;
 use tufaceous_artifact::ArtifactHashId;
 use update_engine::events::StepEventIsTerminal;
-use uuid::Uuid;
 
 use crate::{
     errors::{DiscoverPeersError, HttpError},
@@ -458,7 +458,7 @@ impl ResponseAction_ {
 /// In the future, this will be combined with `MockPeers` so we can model.
 #[derive(Debug)]
 struct MockProgressBackend {
-    update_id: Uuid,
+    update_id: MupdateUuid,
     // Use an unbounded sender to avoid async code in handle_valid_peer_event.
     report_sender: mpsc::UnboundedSender<EventReport>,
     behaviors: Mutex<ReportBehaviors>,
@@ -481,7 +481,7 @@ impl MockProgressBackend {
     ));
 
     fn new(
-        update_id: Uuid,
+        update_id: MupdateUuid,
         report_sender: mpsc::UnboundedSender<EventReport>,
         behaviors: ReportBehaviors,
     ) -> Self {
@@ -574,7 +574,7 @@ impl ReportProgressImpl for MockProgressBackend {
     async fn report_progress_impl(
         &self,
         peer: PeerAddress,
-        update_id: Uuid,
+        update_id: MupdateUuid,
         report: EventReport,
     ) -> Result<(), ClientError> {
         assert_eq!(update_id, self.update_id, "update ID matches");
@@ -712,8 +712,8 @@ mod tests {
         universe: MockPeersUniverse,
         #[strategy((0..2000u64).prop_map(Duration::from_millis))]
         timeout: Duration,
-        #[strategy(any::<[u8; 16]>().prop_map(Uuid::from_bytes))]
-        update_id: Uuid,
+        #[strategy(any::<[u8; 16]>().prop_map(MupdateUuid::from_bytes))]
+        update_id: MupdateUuid,
         valid_peer_behaviors: ReportBehaviors,
     ) {
         with_test_runtime(async move {

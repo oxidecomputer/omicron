@@ -9,7 +9,7 @@ use oxide_client::types::{
     InstanceCpuCount, InstanceCreate, InstanceDiskAttachment,
     InstanceNetworkInterfaceAttachment, InstanceState, SshKeyCreate,
 };
-use oxide_client::{ClientDisksExt, ClientInstancesExt, ClientSessionExt};
+use oxide_client::{ClientCurrentUserExt, ClientDisksExt, ClientInstancesExt};
 use russh::{ChannelMsg, Disconnect};
 use russh_keys::PublicKeyBase64;
 use russh_keys::key::{KeyPair, PublicKey};

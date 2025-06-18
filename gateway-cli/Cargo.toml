@@ -12,6 +12,7 @@ anyhow.workspace = true
 clap.workspace = true
 futures.workspace = true
 omicron-common.workspace = true
+omicron-uuid-kinds.workspace = true
 reqwest.workspace = true
 serde.workspace = true
 serde_json.workspace = true

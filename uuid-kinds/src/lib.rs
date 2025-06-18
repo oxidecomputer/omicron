@@ -67,6 +67,7 @@ impl_typed_uuid_kind! {
     ExternalIp => "external_ip",
     Instance => "instance",
     LoopbackAddress => "loopback_address",
+    Mupdate => "mupdate",
     MupdateOverride => "mupdate_override",
     // `OmicronSledConfig`s do not themselves contain IDs, but we generate IDs
     // for them when they're serialized to the database during inventory

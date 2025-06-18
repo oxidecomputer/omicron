@@ -14,7 +14,7 @@ use omicron_test_utils::dev::test_cmds::EXIT_USAGE;
 use omicron_test_utils::dev::test_cmds::assert_exit_code;
 use omicron_test_utils::dev::test_cmds::path_to_executable;
 use omicron_test_utils::dev::test_cmds::run_command;
-use oxide_client::ClientHiddenExt;
+use oxide_client::ClientConsoleAuthExt;
 use std::io::BufRead;
 use std::path::PathBuf;
 use subprocess::Exec;

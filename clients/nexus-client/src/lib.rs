@@ -67,6 +67,9 @@ progenitor::generate_api!(
         TypedUuidForUpstairsSessionKind = omicron_uuid_kinds::TypedUuid<omicron_uuid_kinds::UpstairsSessionKind>,
         TypedUuidForVolumeKind = omicron_uuid_kinds::TypedUuid<omicron_uuid_kinds::VolumeKind>,
         TypedUuidForZpoolKind = omicron_uuid_kinds::TypedUuid<omicron_uuid_kinds::ZpoolKind>,
+        UpdateStatus = nexus_types::internal_api::views::UpdateStatus,
+        ZoneStatus = nexus_types::internal_api::views::ZoneStatus,
+        ZoneStatusVersion = nexus_types::internal_api::views::ZoneStatusVersion
     },
     patch = {
         SledAgentInfo = { derives = [PartialEq, Eq] },

@@ -439,7 +439,7 @@ impl CockroachStarter {
                 // the user can debug if they want.  We'll skip cleanup of the
                 // temporary directory for the same reason and also so that
                 // CockroachDB doesn't trip over its files being gone.
-                let _preserve_directory = self.temp_dir.into_path();
+                let _preserve_directory = self.temp_dir.keep();
 
                 Err(match poll_error {
                     poll::Error::PermanentError(e) => e,
@@ -586,6 +586,21 @@ impl CockroachInstance {
         client.cleanup().await.context("cleaning up after wipe")
     }
 
+    /// Disables fsync synchronization for the underlying storage layer.
+    ///
+    /// This is not a recommended operation in production, but it can
+    /// drastically improve the performance of test databases.
+    pub async fn disable_synchronization(&self) -> Result<(), anyhow::Error> {
+        let client = self.connect().await.context("connect")?;
+        client.batch_execute(
+            "SET CLUSTER SETTING kv.raft_log.disable_synchronization_unsafe = true"
+        ).await.context("disabling database synchronization")?;
+        client
+            .cleanup()
+            .await
+            .context("cleaning up after changing cluster settings")
+    }
+
     /// Wrapper around [`populate()`] using a connection to this database.
     pub async fn populate(&self) -> Result<(), anyhow::Error> {
         let client = self.connect().await.context("connect")?;
@@ -683,7 +698,7 @@ impl Drop for CockroachInstance {
             #[allow(unused_must_use)]
             if let Some(temp_dir) = self.temp_dir.take() {
                 // Do NOT clean up the temporary directory in this case.
-                let path = temp_dir.into_path();
+                let path = temp_dir.keep();
                 eprintln!(
                     "WARN: temporary directory leaked: {path:?}\n\
                      \tIf you would like to access the database for debugging, run the following:\n\n\

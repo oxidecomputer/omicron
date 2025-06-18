@@ -825,7 +825,7 @@ impl ClickHouseDataDir {
         ];
         // Persist this temporary directory since we're going to be doing the
         // cleanup ourselves.
-        let dir = self.dir.into_path();
+        let dir = self.dir.keep();
 
         let mut error_paths = BTreeMap::new();
         // contents_first = true ensures that we delete inner files before

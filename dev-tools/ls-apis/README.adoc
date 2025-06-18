@@ -95,7 +95,7 @@ Crucible Pantry
 The `servers` and `deployment-units` commands accept a `--dot` argument to print output in a format that `dot(1)` can process:
 
 ```
-$ cargo xtask ls-apis deployment-units --dot > deployment-units.dot
+$ cargo xtask ls-apis deployment-units --output-format dot > deployment-units.dot
 ```
 
 You can generate a PNG image of the graph like this:

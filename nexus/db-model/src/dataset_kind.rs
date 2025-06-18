@@ -46,12 +46,20 @@ impl DatasetKind {
                 ApiKind::TransientZone { name }
             }
             (Self::Debug, None) => ApiKind::Debug,
-            (Self::Update, None) => ApiKind::Update,
             (Self::TransientZone, None) => {
                 return Err(Error::internal_error("Zone kind needs name"));
             }
             (_, Some(_)) => {
                 return Err(Error::internal_error("Only zone kind needs name"));
+            }
+            // TODO-cleanup We should remove `Self::Update` entirely, but that's
+            // a lot of work for not a lot of gain, so we filed that away for
+            // our future selves as
+            // https://github.com/oxidecomputer/omicron/issues/8268.
+            (Self::Update, None) => {
+                return Err(Error::internal_error(
+                    "Unexpected `update` dataset kind",
+                ));
             }
         };
 
@@ -90,7 +98,6 @@ impl From<&internal::shared::DatasetKind> for DatasetKind {
                 DatasetKind::TransientZone
             }
             internal::shared::DatasetKind::Debug => DatasetKind::Debug,
-            internal::shared::DatasetKind::Update => DatasetKind::Update,
         }
     }
 }

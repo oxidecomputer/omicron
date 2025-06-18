@@ -5,7 +5,8 @@
 //! Shamir secret sharing over GF(2^8)
 
 use digest::Digest;
-use rand::{Rng, rngs::OsRng};
+use rand09::TryRngCore;
+use rand09::{Rng, rngs::OsRng};
 use secrecy::SecretBox;
 use serde::{Deserialize, Serialize};
 use subtle::ConstantTimeEq;
@@ -144,7 +145,7 @@ pub fn split_secret(
     k: u8,
 ) -> Result<SecretShares, SplitError> {
     // We hardcode this for security.
-    let mut rng = OsRng;
+    let mut rng = OsRng.unwrap_err();
     split_secret_impl(secret, n, k, &mut rng)
 }
 

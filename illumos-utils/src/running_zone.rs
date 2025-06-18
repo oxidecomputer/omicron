@@ -361,6 +361,11 @@ impl RunningZone {
         &self.inner.zonepath.pool
     }
 
+    /// Returns the zone's image path.
+    pub fn image_path(&self) -> &Utf8Path {
+        &self.inner.image_path
+    }
+
     /// Return the name of a bootstrap VNIC in the zone, if any.
     pub fn bootstrap_vnic_name(&self) -> Option<&str> {
         self.inner.get_bootstrap_vnic_name()
@@ -900,6 +905,9 @@ pub struct InstalledZone {
     // Filesystem path of the zone
     zonepath: PathInPool,
 
+    // The path to the zone's image source.
+    image_path: Utf8PathBuf,
+
     // Name of the Zone.
     name: String,
 
@@ -1016,7 +1024,7 @@ impl ZoneBuilderFactory {
     ) -> Self {
         let temp_dir = match temp_dir {
             Some(dir) => Utf8PathBuf::from(dir),
-            None => Utf8TempDir::new().unwrap().into_path(),
+            None => Utf8TempDir::new().unwrap().keep(),
         };
         Self {
             fake_cfg: Some(FakeZoneBuilderConfig {
@@ -1210,8 +1218,9 @@ impl<'a> ZoneBuilder<'a> {
         let fake_cfg = self.fake_cfg.unwrap();
         let temp_dir = fake_cfg.temp_dir;
         (|| {
+            let zone_type = self.zone_type?;
             let full_zone_name = InstalledZone::get_zone_name(
-                self.zone_type?,
+                zone_type,
                 self.unique_name,
             );
             let mut zonepath = self.zone_root_path?;
@@ -1223,6 +1232,7 @@ impl<'a> ZoneBuilder<'a> {
             let iz = InstalledZone {
                 log: self.log?,
                 zonepath,
+                image_path: Utf8PathBuf::from(format!("/fake/image/path/{zone_type}.tar.gz")),
                 name: full_zone_name,
                 control_vnic,
                 bootstrap_vnic: self.bootstrap_vnic,
@@ -1338,6 +1348,7 @@ impl<'a> ZoneBuilder<'a> {
         Ok(InstalledZone {
             log: log.new(o!("zone" => full_zone_name.clone())),
             zonepath: zone_root_path,
+            image_path: zone_image_path,
             name: full_zone_name,
             control_vnic,
             bootstrap_vnic,

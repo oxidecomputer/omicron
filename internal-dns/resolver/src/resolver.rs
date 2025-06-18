@@ -528,7 +528,7 @@ mod test {
             if !self.successful {
                 // If we didn't explicitly succeed, then we want to keep the
                 // temporary directory around.
-                let _ = self.storage_path.take().unwrap().into_path();
+                let _ = self.storage_path.take().unwrap().keep();
             }
         }
     }

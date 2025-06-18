@@ -6635,7 +6635,7 @@ impl NexusExternalApi for NexusExternalApiImpl {
             // Fetch the TUF repo metadata and update the target release.
             let tuf_repo_id = nexus
                 .datastore()
-                .update_tuf_repo_get(&opctx, system_version.into())
+                .tuf_repo_get_by_version(&opctx, system_version.into())
                 .await?
                 .repo
                 .id;

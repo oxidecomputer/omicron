@@ -5,15 +5,15 @@ load-example --nsleds 1 --ndisks-per-sled 3 --seed test_set_zone_images
 blueprint-show 971eeb12-1830-4fa0-a699-98ea0164505c
 
 # Set a couple zones' image sources to specific artifacts.
-blueprint-edit latest set-zone-image 026f8db9-b966-45ec-bf89-fb7b41a04cc9 artifact 1.2.3 e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855
-blueprint-edit latest set-zone-image 72d12821-646d-4296-a081-ef5fb3a0ca24 artifact valid-non-semver 7b4281a6bd5946bb96b332c62afe289bef275e58b9ba031085f8827655f434b3
+blueprint-edit latest set-zone-image 7cbd5731-4f6a-4d13-9248-2ec7483d3c37 artifact 1.2.3 e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855
+blueprint-edit latest set-zone-image 87505ee8-022c-45fd-8a38-55ffd685bca6 artifact valid-non-semver 7b4281a6bd5946bb96b332c62afe289bef275e58b9ba031085f8827655f434b3
 
 blueprint-show f714e6ea-e85a-4d7d-93c2-a018744fe176
 blueprint-diff 971eeb12-1830-4fa0-a699-98ea0164505c f714e6ea-e85a-4d7d-93c2-a018744fe176
 
 # Set these zones' image sources back to the install dataset.
-blueprint-edit latest set-zone-image 026f8db9-b966-45ec-bf89-fb7b41a04cc9 install-dataset
-blueprint-edit latest set-zone-image 72d12821-646d-4296-a081-ef5fb3a0ca24 install-dataset
+blueprint-edit latest set-zone-image 7cbd5731-4f6a-4d13-9248-2ec7483d3c37 install-dataset
+blueprint-edit latest set-zone-image 87505ee8-022c-45fd-8a38-55ffd685bca6 install-dataset
 blueprint-show d9c572a1-a68c-4945-b1ec-5389bd588fe9
 blueprint-diff f714e6ea-e85a-4d7d-93c2-a018744fe176 d9c572a1-a68c-4945-b1ec-5389bd588fe9
 
@@ -24,6 +24,6 @@ blueprint-edit latest set-zone-image help
 # test error case: no such zone id
 blueprint-edit latest set-zone-image 126f8db9-b966-45ec-bf89-fb7b41a04cc9 install-dataset
 # test error case: invalid version identifier
-blueprint-edit latest set-zone-image 026f8db9-b966-45ec-bf89-fb7b41a04cc9 artifact 🫡 5d835e8666bd5cf65be66efbca6847b24e41fd85993448a211ad7be5fea559ab
+blueprint-edit latest set-zone-image 7cbd5731-4f6a-4d13-9248-2ec7483d3c37 artifact 🫡 5d835e8666bd5cf65be66efbca6847b24e41fd85993448a211ad7be5fea559ab
 # test error case: bad hash
-blueprint-edit latest set-zone-image 026f8db9-b966-45ec-bf89-fb7b41a04cc9 artifact 1.2.3 aaaa
+blueprint-edit latest set-zone-image 7cbd5731-4f6a-4d13-9248-2ec7483d3c37 artifact 1.2.3 aaaa

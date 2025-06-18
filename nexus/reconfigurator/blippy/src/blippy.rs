@@ -337,9 +337,9 @@ impl fmt::Display for SledKind {
                     | DatasetKind::ExternalDns
                     | DatasetKind::InternalDns
                     | DatasetKind::TransientZone { .. } => "zone",
-                    DatasetKind::TransientZoneRoot
-                    | DatasetKind::Debug
-                    | DatasetKind::Update => "disk",
+                    DatasetKind::TransientZoneRoot | DatasetKind::Debug => {
+                        "disk"
+                    }
                 };
                 write!(
                     f,

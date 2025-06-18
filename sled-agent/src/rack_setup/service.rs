@@ -89,7 +89,8 @@ use nexus_client::{
     Client as NexusClient, Error as NexusError, types as NexusTypes,
 };
 use nexus_sled_agent_shared::inventory::{
-    OmicronSledConfig, OmicronZoneConfig, OmicronZoneType, OmicronZonesConfig,
+    ConfigReconcilerInventoryResult, OmicronSledConfig, OmicronZoneConfig,
+    OmicronZoneType, OmicronZonesConfig,
 };
 use nexus_types::deployment::{
     Blueprint, BlueprintDatasetConfig, BlueprintDatasetDisposition,
@@ -117,6 +118,7 @@ use serde::{Deserialize, Serialize};
 use sled_agent_client::{
     Client as SledAgentClient, Error as SledAgentError, types as SledAgentTypes,
 };
+use sled_agent_config_reconciler::InternalDisksReceiver;
 use sled_agent_types::early_networking::{
     EarlyNetworkConfig, EarlyNetworkConfigBody,
 };
@@ -127,8 +129,6 @@ use sled_agent_types::rack_ops::RssStep;
 use sled_agent_types::sled::StartSledAgentRequest;
 use sled_agent_types::time_sync::TimeSync;
 use sled_hardware_types::underlay::BootstrapInterface;
-use sled_storage::dataset::CONFIG_DATASET;
-use sled_storage::manager::StorageHandle;
 use slog::Logger;
 use slog_error_chain::InlineErrorChain;
 use std::collections::{BTreeMap, BTreeSet, btree_map};
@@ -201,6 +201,9 @@ pub enum SetupServiceError {
     #[error("Error making HTTP request to Sled Agent: {0}")]
     SledApi(#[from] SledAgentError<SledAgentTypes::Error>),
 
+    #[error("Sled config not yet reconciled: {0}")]
+    ConfigNotYetReconciled(String),
+
     #[error("Error making HTTP request to Nexus: {0}")]
     NexusApi(#[from] NexusError<NexusTypes::Error>),
 
@@ -257,15 +260,14 @@ impl RackSetupService {
     /// Arguments:
     /// - `log`: The logger.
     /// - `config`: The config file, which is used to setup the rack.
-    /// - `storage_manager`: A handle for interacting with the storage manager
-    ///   task
+    /// - `internal_disks_rx`: Tells us about available internal disks
     /// - `local_bootstrap_agent`: Communication channel by which we can send
     ///   commands to our local bootstrap-agent (e.g., to start sled-agents)
     /// - `bootstore` - A handle to call bootstore APIs
     pub(crate) fn new(
         log: Logger,
         config: Config,
-        storage_manager: StorageHandle,
+        internal_disks_rx: InternalDisksReceiver,
         local_bootstrap_agent: BootstrapAgentHandle,
         bootstore: bootstore::NodeHandle,
         step_tx: watch::Sender<RssStep>,
@@ -275,7 +277,7 @@ impl RackSetupService {
             if let Err(e) = svc
                 .run(
                     &config,
-                    &storage_manager,
+                    &internal_disks_rx,
                     local_bootstrap_agent,
                     bootstore,
                     step_tx,
@@ -375,86 +377,9 @@ impl ServiceInner {
                 "datasets" => ?sled_config.datasets,
                 "zones" => ?sled_config.zones,
             );
-            let result = client.omicron_config_put(&sled_config).await;
-            let error = match result {
-                Ok(response) => {
-                    let response = response.into_inner();
-
-                    // An HTTP OK may contain _partial_ success: check whether
-                    // we got any individual disk failures, and split those out
-                    // into transient/permanent cases based on whether they
-                    // indicate we should retry.
-                    let disk_errors =
-                        response.disks.into_iter().filter_map(|status| {
-                            status.err.map(|err| (status.identity, err))
-                        });
-                    let mut transient_errors = Vec::new();
-                    let mut permanent_errors = Vec::new();
-                    for (identity, error) in disk_errors {
-                        if error.retryable() {
-                            transient_errors.push(format!(
-                                "Retryable error initializing disk \
-                                 {} / {} / {}: {}",
-                                identity.vendor,
-                                identity.model,
-                                identity.serial,
-                                InlineErrorChain::new(&error)
-                            ));
-                        } else {
-                            permanent_errors.push(format!(
-                                "Non-retryable error initializing disk \
-                                 {} / {} / {}: {}",
-                                identity.vendor,
-                                identity.model,
-                                identity.serial,
-                                InlineErrorChain::new(&error)
-                            ));
-                        }
-                    }
-                    if !permanent_errors.is_empty() {
-                        return Err(BackoffError::permanent(
-                            SetupServiceError::DiskInitializationPermanent {
-                                permanent_errors,
-                            },
-                        ));
-                    }
-                    if !transient_errors.is_empty() {
-                        return Err(BackoffError::transient(
-                            SetupServiceError::DiskInitializationTransient {
-                                transient_errors,
-                            },
-                        ));
-                    }
-
-                    // No individual disk errors reported; all disks were
-                    // initialized. Check for any dataset errors; these are not
-                    // retryable.
-                    let dataset_errors = response
-                        .datasets
-                        .into_iter()
-                        .filter_map(|status| {
-                            status.err.map(|err| {
-                                format!(
-                                    "Error initializing dataset {}: {err}",
-                                    status.dataset_name.full_name()
-                                )
-                            })
-                        })
-                        .collect::<Vec<_>>();
-                    if !dataset_errors.is_empty() {
-                        return Err(BackoffError::permanent(
-                            SetupServiceError::DatasetInitialization {
-                                errors: dataset_errors,
-                            },
-                        ));
-                    }
-
-                    // No individual dataset errors reported. We don't get
-                    // status for individual zones (any failure there results in
-                    // an HTTP-level error), so everything is good.
-                    return Ok(());
-                }
-                Err(error) => error,
+            let Err(error) = client.omicron_config_put(&sled_config).await
+            else {
+                return Ok(());
             };
 
             if let sled_agent_client::Error::ErrorResponse(response) = &error {
@@ -502,6 +427,130 @@ impl ServiceInner {
         Ok(())
     }
 
+    // Wait until the config reconciler on the target sled has successfully
+    // reconciled the config at `generation`.
+    async fn wait_for_config_reconciliation_on_sled(
+        &self,
+        sled_address: SocketAddrV6,
+        generation: Generation,
+    ) -> Result<(), SetupServiceError> {
+        let dur = std::time::Duration::from_secs(60);
+        let client = reqwest::ClientBuilder::new()
+            .connect_timeout(dur)
+            .build()
+            .map_err(SetupServiceError::HttpClient)?;
+        let log = self.log.new(o!("sled_address" => sled_address.to_string()));
+        let client = SledAgentClient::new_with_client(
+            &format!("http://{}", sled_address),
+            client,
+            log.clone(),
+        );
+
+        let inv_check = || async {
+            info!(log, "attempting to read sled's inventory");
+            let inventory = match client.inventory().await {
+                Ok(response) => response.into_inner(),
+                Err(error) => {
+                    // TODO Many other codes here should not be retried.  See
+                    // omicron#4578.
+                    return Err(BackoffError::transient(
+                        SetupServiceError::SledApi(error),
+                    ));
+                }
+            };
+
+            // Has this sled's reconciler run at all?
+            let Some(last_reconciliation) = inventory.last_reconciliation
+            else {
+                return Err(BackoffError::transient(
+                    SetupServiceError::ConfigNotYetReconciled(
+                        "no reconcilation state available".to_string(),
+                    ),
+                ));
+            };
+
+            // Has it attempted to reconcile our target generation?
+            let reconciled_gen =
+                last_reconciliation.last_reconciled_config.generation;
+
+            if reconciled_gen < generation {
+                return Err(BackoffError::transient(
+                    SetupServiceError::ConfigNotYetReconciled(format!(
+                        "reconciled generation {reconciled_gen} lower than \
+                         desired generation {generation}",
+                    )),
+                ));
+            }
+
+            // Were there any errors during reconciliation? Check for disk,
+            // dataset, and zone errors.
+            let mut errors = Vec::new();
+
+            for (disk_id, result) in &last_reconciliation.external_disks {
+                match result {
+                    ConfigReconcilerInventoryResult::Ok => (),
+                    ConfigReconcilerInventoryResult::Err { message } => {
+                        errors.push(format!(
+                            "reconcilation for disk {disk_id} failed: {message}"
+                        ));
+                    }
+                }
+            }
+            for (dataset_id, result) in &last_reconciliation.datasets {
+                match result {
+                    ConfigReconcilerInventoryResult::Ok => (),
+                    ConfigReconcilerInventoryResult::Err { message } => {
+                        errors.push(format!(
+                            "reconcilation for dataset {dataset_id} failed: \
+                             {message}"
+                        ));
+                    }
+                }
+            }
+            for (zone_id, result) in &last_reconciliation.zones {
+                match result {
+                    ConfigReconcilerInventoryResult::Ok => (),
+                    ConfigReconcilerInventoryResult::Err { message } => {
+                        errors.push(format!(
+                            "reconcilation for zone {zone_id} failed: {message}"
+                        ));
+                    }
+                }
+            }
+
+            if errors.is_empty() {
+                Ok(())
+            } else {
+                // We treat all of these as transient (although it's possible
+                // some are permanent - we have no means for recovering from
+                // permanent errors during RSS other than clean-slating and
+                // starting over, so it's safer to treat these as transient and
+                // let operators investigate if things are stuck).
+                Err(BackoffError::transient(
+                    SetupServiceError::ConfigNotYetReconciled(
+                        errors.join(", "),
+                    ),
+                ))
+            }
+        };
+        let log_failure = |error, delay| {
+            warn!(
+                log,
+                "sled config not yet reconciled";
+                "error" => #%error,
+                "retry_after" => ?delay,
+            );
+        };
+        retry_notify(
+            retry_policy_internal_service_aggressive(),
+            inv_check,
+            log_failure,
+        )
+        .await?;
+
+        Ok(())
+    }
+
     // Ensure that the desired sled configuration for a particular zone version
     // is deployed.
     //
@@ -530,21 +579,27 @@ impl ServiceInner {
                     })?
                     .clone();
 
+                // We bump the zone generation as we step through phases of
+                // RSS; use that as the overall sled config generation.
+                let generation = zones_config.generation;
                 let sled_config = OmicronSledConfig {
-                    // We bump the zone generation as we step through phases of
-                    // RSS; use that as the overall sled config generation.
-                    generation: zones_config.generation,
+                    generation,
                     disks: config
                         .disks
                         .iter()
                         .map(|c| c.clone().into())
                         .collect(),
                     datasets: config.datasets.values().cloned().collect(),
-                    zones: zones_config.zones.iter().cloned().collect(),
+                    zones: zones_config.zones.into_iter().collect(),
                     remove_mupdate_override: None,
                 };
 
                 self.set_config_on_sled(*sled_address, sled_config).await?;
+                self.wait_for_config_reconciliation_on_sled(
+                    *sled_address,
+                    generation,
+                )
+                .await?;
 
                 Ok::<(), SetupServiceError>(())
             }),
@@ -1121,7 +1176,7 @@ impl ServiceInner {
     async fn run(
         &self,
         config: &Config,
-        storage_manager: &StorageHandle,
+        internal_disks_rx: &InternalDisksReceiver,
         local_bootstrap_agent: BootstrapAgentHandle,
         bootstore: bootstore::NodeHandle,
         step_tx: watch::Sender<RssStep>,
@@ -1134,19 +1189,18 @@ impl ServiceInner {
             config.az_subnet(),
         )?;
 
-        let started_marker_paths: Vec<Utf8PathBuf> = storage_manager
-            .get_latest_disks()
-            .await
-            .all_m2_mountpoints(CONFIG_DATASET)
-            .into_iter()
+        let config_dataset_paths = internal_disks_rx
+            .current()
+            .all_config_datasets()
+            .collect::<Vec<_>>();
+
+        let started_marker_paths: Vec<Utf8PathBuf> = config_dataset_paths
+            .iter()
             .map(|p| p.join(RSS_STARTED_FILENAME))
             .collect();
 
-        let completed_marker_paths: Vec<Utf8PathBuf> = storage_manager
-            .get_latest_disks()
-            .await
-            .all_m2_mountpoints(CONFIG_DATASET)
-            .into_iter()
+        let completed_marker_paths: Vec<Utf8PathBuf> = config_dataset_paths
+            .iter()
             .map(|p| p.join(RSS_COMPLETED_FILENAME))
             .collect();
 
@@ -1541,6 +1595,7 @@ pub(crate) fn build_initial_blueprint_from_sled_configs(
         // generation of 1. Nexus will bump this up when it updates external DNS
         // (including creating the recovery silo).
         external_dns_version: Generation::new(),
+        target_release_minimum_generation: Generation::new(),
         // Nexus will fill in the CockroachDB values during initialization.
         cockroachdb_fingerprint: String::new(),
         cockroachdb_setting_preserve_downgrade:
