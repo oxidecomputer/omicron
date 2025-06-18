@@ -649,7 +649,7 @@ rustyline = "14.0.0"
 samael = { version = "0.0.19", features = ["xmlsec"] }
 schemars = "0.8.22"
 scopeguard = "1.2.0"
-secrecy = "0.10.0"
+secrecy = "0.10.3"
 semver = { version = "1.0.26", features = ["std", "serde"] }
 serde = { version = "1.0", default-features = false, features = [ "derive", "rc" ] }
 serde_cbor = "0.11.2"
