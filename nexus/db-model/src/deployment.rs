@@ -16,12 +16,14 @@ use anyhow::{Context, Result, anyhow, bail};
 use chrono::{DateTime, Utc};
 use clickhouse_admin_types::{KeeperId, ServerId};
 use ipnetwork::IpNetwork;
+use nexus_db_schema::schema::reconfigurator_chicken_switches::planner_enabled;
 use nexus_db_schema::schema::{
     blueprint, bp_clickhouse_cluster_config,
     bp_clickhouse_keeper_zone_id_to_node_id,
     bp_clickhouse_server_zone_id_to_node_id, bp_omicron_dataset,
     bp_omicron_physical_disk, bp_omicron_zone, bp_omicron_zone_nic,
     bp_oximeter_read_policy, bp_sled_metadata, bp_target,
+    reconfigurator_chicken_switches,
 };
 use nexus_sled_agent_shared::inventory::OmicronZoneDataset;
 use nexus_types::deployment::BlueprintDatasetDisposition;
@@ -1242,6 +1244,24 @@ impl BpOximeterReadPolicy {
             blueprint_id: blueprint_id.into(),
             version,
             oximeter_read_mode: DbOximeterReadMode::from(read_mode),
+        }
+    }
+}
+
+#[derive(Queryable, Clone, Debug, Selectable, Insertable)]
+#[diesel(table_name = reconfigurator_chicken_switches)]
+pub struct ReconfiguratorChickenSwitches {
+    pub version: SqlU32,
+    pub planner_enabled: bool,
+    pub time_modified: DateTime<Utc>,
+}
+
+impl ReconfiguratorChickenSwitches {
+    pub fn new(version: u32, planner_enabled: bool) -> Self {
+        Self {
+            version: version.into(),
+            planner_enabled,
+            time_modified: Utc::now(),
         }
     }
 }
