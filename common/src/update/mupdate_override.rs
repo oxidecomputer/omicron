@@ -20,6 +20,9 @@ pub struct MupdateOverrideInfo {
     pub mupdate_uuid: MupdateOverrideUuid,
 
     /// Artifact hashes written out to the install dataset.
+    ///
+    /// Currently includes the host phase 2 and composite control plane
+    /// artifacts.
     pub hash_ids: BTreeSet<ArtifactHashId>,
 }
 

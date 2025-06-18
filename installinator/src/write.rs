@@ -12,21 +12,28 @@ use std::{
 use anyhow::{Context, Result, anyhow, ensure};
 use async_trait::async_trait;
 use buf_list::BufList;
-use bytes::Buf;
+use bytes::{Buf, Bytes};
 use camino::{Utf8Path, Utf8PathBuf};
+use iddqd::IdOrdMap;
 use illumos_utils::zpool::{Zpool, ZpoolName};
 use installinator_common::{
     ControlPlaneZonesSpec, ControlPlaneZonesStepId, RawDiskWriter, StepContext,
     StepProgress, StepResult, StepSuccess, UpdateEngine, WriteComponent,
     WriteError, WriteOutput, WriteSpec, WriteStepId,
 };
-use omicron_common::{disk::M2Slot, update::MupdateOverrideInfo};
-use omicron_uuid_kinds::MupdateOverrideUuid;
+use omicron_common::{
+    disk::M2Slot,
+    update::{
+        MupdateOverrideInfo, OmicronZoneFileMetadata, OmicronZoneManifest,
+    },
+};
+use omicron_uuid_kinds::{MupdateOverrideUuid, MupdateUuid};
 use sha2::{Digest, Sha256};
 use slog::{Logger, info, warn};
 use tokio::{
     fs::File,
     io::{AsyncWrite, AsyncWriteExt},
+    task::JoinSet,
 };
 use tufaceous_artifact::{ArtifactHash, ArtifactHashId};
 use tufaceous_lib::ControlPlaneZoneImages;
@@ -200,6 +207,7 @@ pub(crate) struct ArtifactWriter<'a> {
 
 impl<'a> ArtifactWriter<'a> {
     pub(crate) fn new(
+        mupdate_id: MupdateUuid,
         host_phase_2_id: &'a ArtifactHashId,
         host_phase_2_data: &'a BufList,
         control_plane_id: &'a ArtifactHashId,
@@ -216,7 +224,7 @@ impl<'a> ArtifactWriter<'a> {
         // At the moment, there's no reason to have it be passed in via Wicket
         // or some other means, though there are conceivably reasons to do so in
         // the future.
-        let mupdate_uuid = MupdateOverrideUuid::new_v4();
+        let mupdate_override_uuid = MupdateOverrideUuid::new_v4();
 
         Self {
             drives,
@@ -227,7 +235,8 @@ impl<'a> ArtifactWriter<'a> {
                 host_phase_2_data,
                 control_plane_id,
                 control_plane_zones,
-                mupdate_uuid,
+                mupdate_id,
+                mupdate_override_uuid,
             },
         }
     }
@@ -533,7 +542,8 @@ struct ArtifactsToWrite<'a> {
     host_phase_2_data: &'a BufList,
     control_plane_id: &'a ArtifactHashId,
     control_plane_zones: &'a ControlPlaneZoneImages,
-    mupdate_uuid: MupdateOverrideUuid,
+    mupdate_id: MupdateUuid,
+    mupdate_override_uuid: MupdateOverrideUuid,
 }
 
 impl ArtifactsToWrite<'_> {
@@ -581,7 +591,8 @@ impl ArtifactsToWrite<'_> {
             zones: self.control_plane_zones,
             host_phase_2_id: self.host_phase_2_id,
             control_plane_id: self.control_plane_id,
-            mupdate_uuid: self.mupdate_uuid,
+            mupdate_id: self.mupdate_id,
+            mupdate_override_uuid: self.mupdate_override_uuid,
         };
         cx.with_nested_engine(|engine| {
             inner_cx.register_steps(
@@ -617,7 +628,8 @@ struct ControlPlaneZoneWriteContext<'a> {
     zones: &'a ControlPlaneZoneImages,
     host_phase_2_id: &'a ArtifactHashId,
     control_plane_id: &'a ArtifactHashId,
-    mupdate_uuid: MupdateOverrideUuid,
+    mupdate_id: MupdateUuid,
+    mupdate_override_uuid: MupdateOverrideUuid,
 }
 
 impl ControlPlaneZoneWriteContext<'_> {
@@ -630,7 +642,7 @@ impl ControlPlaneZoneWriteContext<'_> {
         use update_engine::StepHandle;
 
         let slot = self.slot;
-        let mupdate_uuid = self.mupdate_uuid;
+        let mupdate_override_uuid = self.mupdate_override_uuid;
 
         // If we're on a gimlet, remove any files in the control plane
         // destination directory.
@@ -678,7 +690,7 @@ impl ControlPlaneZoneWriteContext<'_> {
                 async move |cx| {
                     let transport = transport.into_value(cx.token()).await;
                     let mupdate_json =
-                        self.mupdate_override_artifact(mupdate_uuid);
+                        self.mupdate_override_artifact(mupdate_override_uuid);
 
                     let out_path = self
                         .output_directory
@@ -696,7 +708,42 @@ impl ControlPlaneZoneWriteContext<'_> {
 
                     StepSuccess::new(transport)
                         .with_message(format!(
-                            "{out_path} written with UUID: {mupdate_uuid}",
+                            "{out_path} written with mupdate override UUID: \
+                             {mupdate_override_uuid}",
+                        ))
+                        .into()
+                },
+            )
+            .register();
+
+        transport = engine
+            .new_step(
+                WriteComponent::ControlPlane,
+                ControlPlaneZonesStepId::ZoneManifest,
+                "Writing zone manifest",
+                async move |cx| {
+                    let transport = transport.into_value(cx.token()).await;
+                    let zone_manifest_json =
+                        self.omicron_zone_manifest_artifact().await;
+
+                    let out_path = self
+                        .output_directory
+                        .join(OmicronZoneManifest::FILE_NAME);
+
+                    write_artifact_impl(
+                        WriteComponent::ControlPlane,
+                        slot,
+                        zone_manifest_json,
+                        &out_path,
+                        transport,
+                        &cx,
+                    )
+                    .await?;
+
+                    StepSuccess::new(transport)
+                        .with_message(format!(
+                            "{out_path} written with mupdate UUID: {}",
+                            self.mupdate_id,
                         ))
                         .into()
                 },
@@ -761,19 +808,70 @@ impl ControlPlaneZoneWriteContext<'_> {
 
     fn mupdate_override_artifact(
         &self,
-        mupdate_uuid: MupdateOverrideUuid,
+        mupdate_override_uuid: MupdateOverrideUuid,
     ) -> BufList {
-        // Might be worth writing out individual hash IDs for each zone in the
-        // future.
         let hash_ids =
             [self.host_phase_2_id.clone(), self.control_plane_id.clone()]
                 .into_iter()
                 .collect();
-        let mupdate_override = MupdateOverrideInfo { mupdate_uuid, hash_ids };
+
+        let mupdate_override = MupdateOverrideInfo {
+            mupdate_uuid: mupdate_override_uuid,
+            hash_ids,
+        };
         let json_bytes = serde_json::to_vec(&mupdate_override)
             .expect("this serialization is infallible");
         BufList::from(json_bytes)
     }
+
+    async fn omicron_zone_manifest_artifact(&self) -> BufList {
+        let zones = compute_zone_hashes(&self.zones).await;
+
+        let omicron_zone_manifest =
+            OmicronZoneManifest { mupdate_id: self.mupdate_id, zones };
+        let json_bytes = serde_json::to_vec(&omicron_zone_manifest)
+            .expect("this serialization is infallible");
+        BufList::from(json_bytes)
+    }
+}
+
+/// Computes the zone hash IDs.
+///
+/// Hash computation is done in parallel on blocking tasks.
+///
+/// # Panics
+///
+/// Panics if the runtime shuts down causing a task abort, or a task panics.
+async fn compute_zone_hashes(
+    images: &ControlPlaneZoneImages,
+) -> IdOrdMap<OmicronZoneFileMetadata> {
+    let mut tasks = JoinSet::new();
+    for (file_name, data) in &images.zones {
+        let file_name = file_name.clone();
+        // data is a Bytes so is cheap to clone.
+        let data: Bytes = data.clone();
+        // Compute hashes in parallel.
+        tasks.spawn_blocking(move || {
+            let mut hasher = Sha256::new();
+            hasher.update(&data);
+            let hash = hasher.finalize();
+            OmicronZoneFileMetadata {
+                file_name,
+                file_size: u64::try_from(data.len()).unwrap(),
+                hash: ArtifactHash(hash.into()),
+            }
+        });
+    }
+
+    let mut output = IdOrdMap::new();
+    while let Some(res) = tasks.join_next().await {
+        // Propagate panics across tasks—this is the standard pattern we follow
+        // in installinator.
+        output
+            .insert_unique(res.expect("task panicked"))
+            .expect("filenames are unique");
+    }
+    output
 }
 
 fn remove_contents_of(path: &Utf8Path) -> io::Result<()> {
@@ -1186,6 +1284,7 @@ mod tests {
         };
 
         let mut writer = ArtifactWriter::new(
+            MupdateUuid::new_v4(),
             &host_id,
             &artifact_host,
             &control_plane_id,

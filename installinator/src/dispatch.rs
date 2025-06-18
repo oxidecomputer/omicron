@@ -351,6 +351,7 @@ impl InstallOpts {
                         control_plane_zones.into_value(cx.token()).await;
 
                     let mut writer = ArtifactWriter::new(
+                        image_id.update_id,
                         &host_2_phase_id_2,
                         &host_phase_2_artifact.artifact,
                         &control_plane_id_2,

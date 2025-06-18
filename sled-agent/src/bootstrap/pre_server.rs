@@ -20,7 +20,6 @@ use crate::long_running_tasks::{
     LongRunningTaskHandles, spawn_all_longrunning_tasks,
 };
 use crate::services::ServiceManager;
-use crate::services::TimeSyncConfig;
 use crate::sled_agent::SledAgent;
 use camino::Utf8PathBuf;
 use cancel_safe_futures::TryStreamExt;
@@ -36,6 +35,7 @@ use illumos_utils::zone::Api;
 use illumos_utils::zone::Zones;
 use omicron_common::FileKv;
 use omicron_common::address::Ipv6Subnet;
+use sled_agent_config_reconciler::ConfigReconcilerSpawnToken;
 use sled_hardware::DendriteAsic;
 use sled_hardware::SledMode;
 use sled_hardware::underlay;
@@ -54,6 +54,7 @@ pub(super) struct BootstrapAgentStartup {
     pub(super) service_manager: ServiceManager,
     pub(super) long_running_task_handles: LongRunningTaskHandles,
     pub(super) sled_agent_started_tx: oneshot::Sender<SledAgent>,
+    pub(super) config_reconciler_spawn_token: ConfigReconcilerSpawnToken,
 }
 
 impl BootstrapAgentStartup {
@@ -121,6 +122,7 @@ impl BootstrapAgentStartup {
         // the process and are used by both the bootstrap agent and sled agent
         let (
             long_running_task_handles,
+            config_reconciler_spawn_token,
             sled_agent_started_tx,
             service_manager_ready_tx,
         ) = spawn_all_longrunning_tasks(
@@ -134,23 +136,18 @@ impl BootstrapAgentStartup {
         let global_zone_bootstrap_ip =
             startup_networking.global_zone_bootstrap_ip;
 
-        let time_sync = if let Some(true) = config.skip_timesync {
-            TimeSyncConfig::Skip
-        } else {
-            TimeSyncConfig::Normal
-        };
-
         let service_manager = ServiceManager::new(
             &base_log,
             ddm_reconciler,
             startup_networking,
             sled_mode,
-            time_sync,
             config.sidecar_revision.clone(),
             config.switch_zone_maghemite_links.clone(),
-            long_running_task_handles.storage_manager.clone(),
-            long_running_task_handles.zone_bundler.clone(),
             long_running_task_handles.zone_image_resolver.clone(),
+            long_running_task_handles
+                .config_reconciler
+                .internal_disks_rx()
+                .clone(),
         );
 
         // Inform the hardware monitor that the service manager is ready
@@ -168,6 +165,7 @@ impl BootstrapAgentStartup {
             service_manager,
             long_running_task_handles,
             sled_agent_started_tx,
+            config_reconciler_spawn_token,
         })
     }
 }

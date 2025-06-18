@@ -14,6 +14,7 @@ use crate::external_api::views::PhysicalDiskState;
 use crate::external_api::views::SledPolicy;
 use crate::external_api::views::SledProvisionPolicy;
 use crate::external_api::views::SledState;
+use crate::inventory::BaseboardId;
 use chrono::DateTime;
 use chrono::Utc;
 use clap::ValueEnum;
@@ -23,6 +24,7 @@ use omicron_common::address::IpRange;
 use omicron_common::address::Ipv6Subnet;
 use omicron_common::address::SLED_PREFIX;
 use omicron_common::api::external::Generation;
+use omicron_common::api::external::TufRepoDescription;
 use omicron_common::api::internal::shared::SourceNatConfigError;
 use omicron_common::disk::DiskIdentity;
 use omicron_common::policy::SINGLE_NODE_CLICKHOUSE_REDUNDANCY;
@@ -150,6 +152,14 @@ impl PlanningInput {
             .as_ref()
             .map(|policy| usize::from(policy.mode.target_keepers()))
             .unwrap_or(0)
+    }
+
+    pub fn tuf_repo(&self) -> Option<&TufRepoDescription> {
+        self.policy.tuf_repo.as_ref()
+    }
+
+    pub fn old_repo(&self) -> Option<&TufRepoDescription> {
+        self.policy.old_repo.as_ref()
     }
 
     pub fn service_ip_pool_ranges(&self) -> &[IpRange] {
@@ -715,6 +725,9 @@ pub enum SledFilter {
 
     /// Sleds which should have TUF repo artifacts replicated onto them.
     TufArtifactReplication,
+
+    /// Sleds whose SPs should be updated by Reconfigurator
+    SpsUpdatedByReconfigurator,
 }
 
 impl SledFilter {
@@ -771,6 +784,7 @@ impl SledPolicy {
                 SledFilter::VpcRouting => true,
                 SledFilter::VpcFirewall => true,
                 SledFilter::TufArtifactReplication => true,
+                SledFilter::SpsUpdatedByReconfigurator => true,
             },
             SledPolicy::InService {
                 provision_policy: SledProvisionPolicy::NonProvisionable,
@@ -785,6 +799,7 @@ impl SledPolicy {
                 SledFilter::VpcRouting => true,
                 SledFilter::VpcFirewall => true,
                 SledFilter::TufArtifactReplication => true,
+                SledFilter::SpsUpdatedByReconfigurator => true,
             },
             SledPolicy::Expunged => match filter {
                 SledFilter::All => true,
@@ -797,6 +812,7 @@ impl SledPolicy {
                 SledFilter::VpcRouting => false,
                 SledFilter::VpcFirewall => false,
                 SledFilter::TufArtifactReplication => false,
+                SledFilter::SpsUpdatedByReconfigurator => false,
             },
         }
     }
@@ -831,6 +847,7 @@ impl SledState {
                 SledFilter::VpcRouting => true,
                 SledFilter::VpcFirewall => true,
                 SledFilter::TufArtifactReplication => true,
+                SledFilter::SpsUpdatedByReconfigurator => true,
             },
             SledState::Decommissioned => match filter {
                 SledFilter::All => true,
@@ -843,6 +860,7 @@ impl SledState {
                 SledFilter::VpcRouting => false,
                 SledFilter::VpcFirewall => false,
                 SledFilter::TufArtifactReplication => false,
+                SledFilter::SpsUpdatedByReconfigurator => false,
             },
         }
     }
@@ -918,6 +936,19 @@ pub struct Policy {
     /// Eventually we will only allow reads from a cluster and this policy will
     /// no longer exist.
     pub oximeter_read_policy: OximeterReadPolicy,
+
+    /// Desired system software release repository.
+    ///
+    /// New zones may use artifacts in this repo as their image sources,
+    /// and at most one extant zone may be modified to use it or replaced
+    /// with one that does.
+    pub tuf_repo: Option<TufRepoDescription>,
+
+    /// Previous system software release repository.
+    ///
+    /// New zones deployed mid-update may use artifacts in this repo as
+    /// their image sources. See RFD 565 §9.
+    pub old_repo: Option<TufRepoDescription>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
@@ -1036,6 +1067,8 @@ pub struct SledDetails {
     pub state: SledState,
     /// current resources allocated to this sled
     pub resources: SledResources,
+    /// baseboard id for this sled
+    pub baseboard_id: BaseboardId,
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -1087,6 +1120,8 @@ impl PlanningInputBuilder {
                 target_crucible_pantry_zone_count: 0,
                 clickhouse_policy: None,
                 oximeter_read_policy: OximeterReadPolicy::new(1),
+                tuf_repo: None,
+                old_repo: None,
             },
             internal_dns_version: Generation::new(),
             external_dns_version: Generation::new(),
