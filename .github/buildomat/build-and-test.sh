@@ -92,18 +92,14 @@ banner ls-apis
 # from end-to-end-tests.
 #
 banner build
-export RUSTFLAGS="-D warnings"
+export RUSTFLAGS="$RUSTFLAGS -D warnings"
 export RUSTDOCFLAGS="--document-private-items -D warnings"
 # When running on illumos we need to pass an additional runpath that is
 # usually configured via ".cargo/config" but the `RUSTFLAGS` env variable
 # takes precedence. This path contains oxide specific libraries such as
 # libipcc.
-#
-# Additionally, we enable the "tokio_unstable" cfg in order to use
-# Tokio's unstable features for `tokio-dtrace`'s probes.
 if [[ $target_os == "illumos" ]]; then
-    RUSTFLAGS+=" -C link-arg=-R/usr/platform/oxide/lib/amd64"
-    RUSTFLAGS+=" --cfg tokio_unstable"
+    export RUSTFLAGS="$RUSTFLAGS -C link-arg=-R/usr/platform/oxide/lib/amd64"
 fi
 export TMPDIR="$TEST_TMPDIR"
 export RUST_BACKTRACE=1
