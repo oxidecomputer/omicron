@@ -11174,7 +11174,7 @@ dependencies = [
  "anyhow",
  "camino",
  "clap",
- "fs-err 3.1.0",
+ "fs-err 3.1.1",
  "nexus-db-model",
  "omicron-rpaths",
  "omicron-workspace-hack",

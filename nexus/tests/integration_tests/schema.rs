@@ -280,14 +280,6 @@ fn read_all_schema_versions() -> AllSchemaVersions {
     AllSchemaVersions::load(camino::Utf8Path::new(SCHEMA_DIR)).unwrap()
 }
 
-async fn disable_fsync(client: &Client) {
-    let setting =
-        "SET CLUSTER SETTING kv.raft_log.disable_synchronization_unsafe = true";
-    if let Err(e) = client.batch_execute(setting).await {
-        panic!("Failed to apply setting '{}': {}", setting, e);
-    }
-}
-
 async fn apply_database_version(crdb: &CockroachInstance, version: &Version) {
     let old_dbinit = match get_old_dbinit_for_version(version).await {
         Ok(sql) => {
@@ -305,7 +297,6 @@ async fn apply_database_version(crdb: &CockroachInstance, version: &Version) {
     let client = crdb.connect().await.expect("failed to connect");
 
     // Apply dbinit.sql
-    disable_fsync(&client).await;
     client
         .batch_execute(&old_dbinit)
         .await
@@ -2340,7 +2331,6 @@ async fn validate_data_migration_from_version_to_target(
         .expect("Failed to load starting schema");
 
     let client = crdb.connect().await.expect("Failed to access CRDB client");
-    disable_fsync(&client).await;
     client
         .batch_execute(&starting_sql)
         .await
