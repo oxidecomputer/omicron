@@ -983,8 +983,3 @@ path = "workspace-hack"
 [patch."https://github.com/oxidecomputer/omicron"]
 omicron-uuid-kinds = { path = "uuid-kinds" }
 omicron-common = { path = "common" }
-
-# Waiting for https://github.com/seanmonstar/reqwest/pull/2623 to be released...
-[patch.crates-io.reqwest]
-git = 'https://github.com/seanmonstar/reqwest'
-rev = '114d97c1a862567b465cb57f14d584626e1cf30c'
