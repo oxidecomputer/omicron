@@ -1624,6 +1624,7 @@ version = "0.1.0"
 dependencies = [
  "cockroach-admin-types",
  "dropshot",
+ "http",
  "omicron-common",
  "omicron-uuid-kinds",
  "omicron-workspace-hack",
@@ -6727,6 +6728,7 @@ dependencies = [
  "nexus-sled-agent-shared",
  "nexus-test-interface",
  "nexus-types",
+ "omicron-cockroach-admin",
  "omicron-common",
  "omicron-passwords",
  "omicron-sled-agent",
@@ -7180,6 +7182,7 @@ dependencies = [
  "openapiv3",
  "pq-sys",
  "proptest",
+ "reqwest",
  "schemars",
  "serde",
  "serde_json",

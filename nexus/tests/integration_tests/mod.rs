@@ -14,6 +14,7 @@ mod authn_http;
 mod authz;
 mod basic;
 mod certificates;
+mod cockroach;
 mod commands;
 mod console_api;
 mod crucible_replacements;

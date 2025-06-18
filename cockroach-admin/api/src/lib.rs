@@ -61,6 +61,29 @@ pub trait CockroachAdminApi {
         rqctx: RequestContext<Self::Context>,
         body: TypedBody<NodeId>,
     ) -> Result<HttpResponseOk<NodeDecommission>, HttpError>;
+
+    /// Proxy to CockroachDB's /_status/vars endpoint
+    //
+    // Dropshot isn't happy about the "_status" portion of the path; it fails
+    // the linter. Instead, I'm adding the prefix "proxy" to make it clear these
+    // are "intended-to-be-proxied" endpoints, rather than exact matches for the
+    // CRDB HTTP interface paths.
+    #[endpoint {
+        method = GET,
+        path = "/proxy/status/vars",
+    }]
+    async fn status_vars(
+        rqctx: RequestContext<Self::Context>,
+    ) -> Result<HttpResponseOk<String>, HttpError>;
+
+    /// Proxy to CockroachDB's /_status/nodes endpoint
+    #[endpoint {
+        method = GET,
+        path = "/proxy/status/nodes",
+    }]
+    async fn status_nodes(
+        rqctx: RequestContext<Self::Context>,
+    ) -> Result<HttpResponseOk<String>, HttpError>;
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize, JsonSchema)]

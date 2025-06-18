@@ -1687,6 +1687,10 @@ impl ServiceManager {
                     addr.set_port(COCKROACH_ADMIN_PORT);
                     addr.to_string()
                 };
+                let cockroach_http_address = std::net::SocketAddrV4::new(
+                    std::net::Ipv4Addr::LOCALHOST,
+                    8080,
+                );
 
                 let nw_setup_service = Self::zone_network_setup_install(
                     Some(&info.underlay_address),
@@ -1714,6 +1718,11 @@ impl ServiceManager {
                             "cockroach_address",
                             "astring",
                             address.to_string(),
+                        )
+                        .add_property(
+                            "cockroach_http_address",
+                            "astring",
+                            cockroach_http_address.to_string(),
                         )
                         .add_property("http_address", "astring", admin_address);
                 let cockroach_admin_service =

@@ -47,7 +47,9 @@ const COCKROACHDB_DATABASE: &'static str = "omicron";
 const COCKROACHDB_USER: &'static str = "root";
 
 /// Path to the CockroachDB binary
-const COCKROACHDB_BIN: &str = "cockroach";
+///
+/// Needs to be public for access by the Cockroach Admin server
+pub const COCKROACHDB_BIN: &str = "cockroach";
 
 // Filename of Cockroachdb's stdout
 const COCKROACHDB_STDOUT: &str = "cockroach_stdout";

@@ -12,7 +12,7 @@ use illumos_utils::output_to_exec_error;
 use slog_error_chain::InlineErrorChain;
 use slog_error_chain::SlogInlineError;
 use std::io;
-use std::net::SocketAddrV6;
+use std::net::{SocketAddr, SocketAddrV6};
 use std::process::Output;
 use tokio::process::Command;
 
@@ -93,18 +93,28 @@ impl From<CockroachCliError> for HttpError {
 pub struct CockroachCli {
     path_to_cockroach_binary: Utf8PathBuf,
     cockroach_address: SocketAddrV6,
+    cockroach_http_address: SocketAddr,
 }
 
 impl CockroachCli {
     pub fn new(
         path_to_cockroach_binary: Utf8PathBuf,
         cockroach_address: SocketAddrV6,
+        cockroach_http_address: SocketAddr,
     ) -> Self {
-        Self { path_to_cockroach_binary, cockroach_address }
+        Self {
+            path_to_cockroach_binary,
+            cockroach_address,
+            cockroach_http_address,
+        }
     }
 
     pub fn cockroach_address(&self) -> SocketAddrV6 {
         self.cockroach_address
+    }
+
+    pub fn cockroach_http_address(&self) -> SocketAddr {
+        self.cockroach_http_address
     }
 
     pub async fn cluster_init(&self) -> Result<(), CockroachCliError> {
@@ -443,7 +453,11 @@ mod tests {
         )
         .parse()
         .expect("valid SocketAddrV6");
-        let cli = CockroachCli::new("cockroach".into(), cockroach_address);
+        let cli = CockroachCli::new(
+            "cockroach".into(),
+            cockroach_address,
+            SocketAddr::V6(cockroach_address),
+        );
         let status = cli.node_status().await.expect("got node status");
 
         // We can't check all the fields exactly, but some we know based on the
@@ -505,7 +519,11 @@ mod tests {
         )
         .parse()
         .expect("valid SocketAddrV6");
-        let cli = CockroachCli::new("cockroach".into(), cockroach_address);
+        let cli = CockroachCli::new(
+            "cockroach".into(),
+            cockroach_address,
+            SocketAddr::V6(cockroach_address),
+        );
         let result = cli
             .invoke_node_decommission("1")
             .await
@@ -652,7 +670,11 @@ mod tests {
         // Repeat the above test but using our wrapper.
         {
             let db = UninitializedCockroach::start().await;
-            let cli = CockroachCli::new("cockroach".into(), db.listen_addr);
+            let cli = CockroachCli::new(
+                "cockroach".into(),
+                db.listen_addr,
+                SocketAddr::V6(db.listen_addr),
+            );
 
             cli.cluster_init().await.expect("cluster initialized");
             cli.cluster_init().await.expect("cluster still initialized");
@@ -675,7 +697,11 @@ mod tests {
         .parse()
         .expect("valid SocketAddrV6");
 
-        let cli = CockroachCli::new("cockroach".into(), cockroach_address);
+        let cli = CockroachCli::new(
+            "cockroach".into(),
+            cockroach_address,
+            SocketAddr::V6(cockroach_address),
+        );
         cli.schema_init_impl(DBINIT_RELATIVE_PATH)
             .await
             .expect("initialized schema");
@@ -692,7 +718,11 @@ mod tests {
         let logctx =
             dev::test_setup_log("test_cluster_schema_init_interleaved");
         let db = UninitializedCockroach::start().await;
-        let cli = CockroachCli::new("cockroach".into(), db.listen_addr);
+        let cli = CockroachCli::new(
+            "cockroach".into(),
+            db.listen_addr,
+            SocketAddr::V6(db.listen_addr),
+        );
 
         // We should be able to initialize the cluster, then install the schema,
         // then do both of those things again.
@@ -778,6 +808,7 @@ mod tests {
         let cli = CockroachCli::new(
             "never-called".into(),
             "[::1]:0".parse().unwrap(),
+            SocketAddr::V6("[::1]:0".parse().unwrap()),
         );
 
         match cli.validate_node_decommissionable(

@@ -109,6 +109,56 @@
           }
         }
       }
+    },
+    "/proxy/status/nodes": {
+      "get": {
+        "summary": "Proxy to CockroachDB's /_status/nodes endpoint",
+        "operationId": "status_nodes",
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "title": "String",
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/proxy/status/vars": {
+      "get": {
+        "summary": "Proxy to CockroachDB's /_status/vars endpoint",
+        "operationId": "status_vars",
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "title": "String",
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
     }
   },
   "components": {
