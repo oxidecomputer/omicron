@@ -1049,9 +1049,9 @@ dependencies = [
 
 [[package]]
 name = "camino"
-version = "1.1.10"
+version = "1.1.9"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "0da45bc31171d8d6960122e222a67740df867c1dd53b4d51caa297084c185cab"
+checksum = "8b96ec4966b5813e2c0507c1f86115c8c5abaadc3980879c3424042a02fd1ad3"
 dependencies = [
  "serde",
 ]
@@ -1255,15 +1255,15 @@ version = "0.18.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "1a2b34126159980f92da2a08bdec0694fd80fb5eb9e48aff25d20a0d8dfa710d"
 dependencies = [
- "smallvec 1.15.0",
+ "smallvec 1.15.1",
  "target-lexicon",
 ]
 
 [[package]]
 name = "cfg-if"
-version = "1.0.1"
+version = "1.0.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "9555578bc9e57714c812a1f84e4fc5b4d21fcb063490c624de019f7464c91268"
+checksum = "baf1de4339761588bc0619e3cbc0120ee582ebb74b53b4efbf79117bd2da40fd"
 
 [[package]]
 name = "cfg_aliases"
@@ -3848,7 +3848,7 @@ dependencies = [
  "semver 1.0.26",
  "serde",
  "serde_json",
- "smallvec 1.15.0",
+ "smallvec 1.15.1",
  "static_assertions",
  "target-spec",
 ]
@@ -4100,7 +4100,7 @@ dependencies = [
  "parking_lot 0.12.3",
  "rand 0.8.5",
  "resolv-conf",
- "smallvec 1.15.0",
+ "smallvec 1.15.1",
  "thiserror 1.0.69",
  "tokio",
  "tracing",
@@ -4357,7 +4357,7 @@ dependencies = [
  "httpdate",
  "itoa",
  "pin-project-lite",
- "smallvec 1.15.0",
+ "smallvec 1.15.1",
  "tokio",
  "want",
 ]
@@ -4436,13 +4436,12 @@ dependencies = [
 
 [[package]]
 name = "hyper-util"
-version = "0.1.14"
+version = "0.1.11"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "dc2fdfdbff08affe55bb779f33b053aa1fe5dd5b54c257343c17edfa55711bdb"
+checksum = "497bbc33a26fdd4af9ed9c70d63f61cf56a938375fbb32df34db9b1cd6d643f2"
 dependencies = [
  "bytes",
  "futures-channel",
- "futures-core",
  "futures-util",
  "http",
  "http-body",
@@ -4535,7 +4534,7 @@ dependencies = [
  "icu_normalizer_data",
  "icu_properties",
  "icu_provider",
- "smallvec 1.15.0",
+ "smallvec 1.15.1",
  "utf16_iter",
  "utf8_iter",
  "write16",
@@ -4642,7 +4641,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "686f825264d630750a544639377bae737628043f20d38bbc029e8f29ea968a7e"
 dependencies = [
  "idna_adapter",
- "smallvec 1.15.0",
+ "smallvec 1.15.1",
  "utf8_iter",
 ]
 
@@ -6820,7 +6819,7 @@ version = "0.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "77a5d83df9f36fe23f0c3648c6bbb8b0298bb5f1939c8f2704431371f4b84d43"
 dependencies = [
- "smallvec 1.15.0",
+ "smallvec 1.15.1",
 ]
 
 [[package]]
@@ -6929,7 +6928,7 @@ dependencies = [
  "num-traits",
  "rand 0.8.5",
  "serde",
- "smallvec 1.15.0",
+ "smallvec 1.15.1",
  "zeroize",
 ]
 
@@ -7351,6 +7350,23 @@ dependencies = [
  "tufaceous-artifact",
  "uuid",
  "zip 2.6.1",
+]
+
+[[package]]
+name = "omicron-hist"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "clap",
+ "crossterm",
+ "futures",
+ "omicron-workspace-hack",
+ "quick-xml",
+ "ratatui",
+ "reqwest",
+ "serde_json",
+ "sigpipe",
+ "tokio",
 ]
 
 [[package]]
@@ -8084,6 +8100,8 @@ dependencies = [
  "ppv-lite86",
  "predicates",
  "proc-macro2",
+ "quick-xml",
+ "quote",
  "rand 0.8.5",
  "rand 0.9.1",
  "rand_chacha 0.9.0",
@@ -8105,7 +8123,7 @@ dependencies = [
  "sha2",
  "similar",
  "slog",
- "smallvec 1.15.0",
+ "smallvec 1.15.1",
  "spin",
  "string_cache",
  "strum",
@@ -8267,9 +8285,9 @@ dependencies = [
 
 [[package]]
 name = "openssl"
-version = "0.10.73"
+version = "0.10.72"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "8505734d46c8ab1e19a1dce3aef597ad87dcb4c37e7188231769bd6bd51cebf8"
+checksum = "fedfea7d58a1f73118430a55da6a286e7b044961736ce96a16a17068ea25e5da"
 dependencies = [
  "bitflags 2.9.0",
  "cfg-if",
@@ -8299,9 +8317,9 @@ checksum = "ff011a302c396a5197692431fc1948019154afc178baf7d8e37367442a4601cf"
 
 [[package]]
 name = "openssl-sys"
-version = "0.9.109"
+version = "0.9.107"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "90096e2e47630d78b7d1c20952dc621f957103f8bc2c8359ec81290d75238571"
+checksum = "8288979acd84749c744a9014b4382d42b8f7b2592847b5afb2ed29e5d16ede07"
 dependencies = [
  "cc",
  "libc",
@@ -8980,7 +8998,7 @@ dependencies = [
  "instant",
  "libc",
  "redox_syscall 0.2.16",
- "smallvec 1.15.0",
+ "smallvec 1.15.1",
  "winapi",
 ]
 
@@ -8993,7 +9011,7 @@ dependencies = [
  "cfg-if",
  "libc",
  "redox_syscall 0.5.7",
- "smallvec 1.15.0",
+ "smallvec 1.15.1",
  "windows-targets 0.52.6",
 ]
 
@@ -9089,7 +9107,7 @@ version = "0.8.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "6c7fabb0b56aba5d2eb3fa9b1547c187f21f8c051295a7b97a50be6a9332f4cb"
 dependencies = [
- "smallvec 1.15.0",
+ "smallvec 1.15.1",
 ]
 
 [[package]]
@@ -12087,9 +12105,9 @@ dependencies = [
 
 [[package]]
 name = "smallvec"
-version = "1.15.0"
+version = "1.15.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "8917285742e9f3e1683f0a9c4e6b57960b7314d0b08d30d1ecd426713ee2eee9"
+checksum = "67b1b7a3b5fe4f1376887184045fcf45c69e92af734b7aaddc05fb777b6fbd03"
 
 [[package]]
 name = "smawk"
