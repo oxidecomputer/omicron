@@ -216,9 +216,9 @@ impl BlueprintPlanner {
                 {
                     Ok(()) => (),
                     Err(error) => {
-                        warn!(
+                        error!(
                             &opctx.log,
-                            "can't delete blueprint";
+                            "can't delete blueprint, leaking it";
                             "error" => %error,
                             "blueprint_id" => %blueprint_id,
                         );
