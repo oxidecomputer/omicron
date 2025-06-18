@@ -1355,6 +1355,13 @@ impl ServiceManager {
             .map(|d| zone::Device { name: d.to_string() })
             .collect();
 
+        let zone_type_str = match &request {
+            ZoneArgs::Omicron(zone_config) => {
+                zone_config.zone_type.kind().zone_prefix()
+            }
+            ZoneArgs::Switch(_) => "switch",
+        };
+
         // TODO: `InstallDataset` should be renamed to something more accurate
         // when all the major changes here have landed. Some zones are
         // distributed from the host OS image and are never placed in the
@@ -1366,16 +1373,10 @@ impl ServiceManager {
             ZoneArgs::Switch(_) => &OmicronZoneImageSource::InstallDataset,
         };
         let file_source = self.inner.zone_image_resolver.file_source_for(
+            zone_type_str,
             image_source,
             self.inner.internal_disks_rx.current(),
         );
-
-        let zone_type_str = match &request {
-            ZoneArgs::Omicron(zone_config) => {
-                zone_config.zone_type.kind().zone_prefix()
-            }
-            ZoneArgs::Switch(_) => "switch",
-        };
 
         // We use the fake initialiser for testing
         let mut zone_builder = match self.inner.system_api.fake_install_dir() {
@@ -1392,15 +1393,12 @@ impl ServiceManager {
         if let Some(vnic) = bootstrap_vnic {
             zone_builder = zone_builder.with_bootstrap_vnic(vnic);
         }
-        if let Some(file_name) = &file_source.file_name {
-            zone_builder = zone_builder.with_zone_image_file_name(file_name);
-        }
         let installed_zone = zone_builder
             .with_log(self.inner.log.clone())
             .with_underlay_vnic_allocator(&self.inner.underlay_vnic_allocator)
             .with_zone_root_path(zone_root_path)
-            .with_zone_image_paths(file_source.search_paths.as_slice())
             .with_zone_type(zone_type_str)
+            .with_file_source(&file_source)
             .with_datasets(datasets.as_slice())
             .with_filesystems(&filesystems)
             .with_data_links(&data_links)

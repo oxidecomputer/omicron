@@ -8,6 +8,7 @@
 //! to move more code into this crate as appropriate.
 
 mod errors;
+mod file_source;
 mod install_dataset_metadata;
 mod mupdate_override;
 mod source_resolver;
@@ -16,6 +17,7 @@ mod test_utils;
 mod zone_manifest;
 
 pub use errors::*;
+pub use file_source::*;
 pub use install_dataset_metadata::*;
 pub use mupdate_override::*;
 pub use source_resolver::*;
