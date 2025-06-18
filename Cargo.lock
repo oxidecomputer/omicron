@@ -12558,9 +12558,9 @@ dependencies = [
 
 [[package]]
 name = "sync-ptr"
-version = "0.1.1"
+version = "0.1.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "df0928969361c40d9ca9d3f12828adf628107fdbe31e8e17324923a90837249b"
+checksum = "2b115b4cc742d11625f50e0e48ab15baf6fa548c2ec33a8d4113711886316a4f"
 
 [[package]]
 name = "sync_wrapper"
