@@ -4218,6 +4218,26 @@ CREATE TABLE IF NOT EXISTS omicron.public.inv_clickhouse_keeper_membership (
 );
 
 /*
+ * Various runtime configuration switches for reconfigurator
+ *
+ * Each configuration option is a single column in a row, and the whole row
+ * of configurations is updated atomically. The latest `version` is the active
+ * configuration.
+ *
+ * See https://github.com/oxidecomputer/omicron/issues/8253 for more details.
+ */
+CREATE TABLE IF NOT EXISTS omicron.public.reconfigurator_chicken_switches (
+    -- Monotonically increasing version for all bp_targets
+    version INT8 PRIMARY KEY,
+
+    -- Enable the planner background task
+    planner_enabled BOOL NOT NULL DEFAULT FALSE,
+
+    -- The time at which the configuration for a version was set
+    time_modified TIMESTAMPTZ NOT NULL
+);
+
+/*
  * System-level blueprints
  *
  * See RFD 457 and 459 for context.
@@ -5907,7 +5927,7 @@ INSERT INTO omicron.public.db_metadata (
     version,
     target_version
 ) VALUES
-    (TRUE, NOW(), NOW(), '151.0.0', NULL)
+    (TRUE, NOW(), NOW(), '152.0.0', NULL)
 ON CONFLICT DO NOTHING;
 
 COMMIT;

@@ -58,6 +58,7 @@ use tufaceous_artifact::ArtifactVersionError;
 
 mod blueprint_diff;
 mod blueprint_display;
+mod chicken_switches;
 mod clickhouse;
 pub mod execution;
 mod network_resources;
@@ -67,6 +68,7 @@ mod zone_type;
 use crate::inventory::BaseboardId;
 pub use blueprint_diff::BlueprintDiffSummary;
 use blueprint_display::BpPendingMgsUpdates;
+pub use chicken_switches::ReconfiguratorChickenSwitches;
 pub use clickhouse::ClickhouseClusterConfig;
 use gateway_client::types::SpType;
 use gateway_types::rot::RotSlot;

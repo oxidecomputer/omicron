@@ -33,6 +33,7 @@ use nexus_client::types::BackgroundTasksActivateRequest;
 use nexus_client::types::CurrentStatus;
 use nexus_client::types::LastResult;
 use nexus_client::types::PhysicalDiskPath;
+use nexus_client::types::ReconfiguratorChickenSwitches;
 use nexus_client::types::SagaState;
 use nexus_client::types::SledSelector;
 use nexus_client::types::UninitializedSledId;
@@ -77,6 +78,7 @@ use slog_error_chain::InlineErrorChain;
 use std::collections::BTreeMap;
 use std::collections::BTreeSet;
 use std::fs::OpenOptions;
+use std::num::ParseIntError;
 use std::str::FromStr;
 use std::sync::Arc;
 use support_bundle_viewer::LocalFileAccess;
@@ -122,6 +124,8 @@ enum NexusCommands {
     BackgroundTasks(BackgroundTasksArgs),
     /// interact with blueprints
     Blueprints(BlueprintsArgs),
+    /// interact with reconfigurator chicken switches
+    ChickenSwitches(ChickenSwitchesArgs),
     /// interact with clickhouse policy
     ClickhousePolicy(ClickhousePolicyArgs),
     /// print information about pending MGS updates
@@ -372,6 +376,51 @@ enum ClickhousePolicyMode {
     ClusterOnly,
     // Run both single-node and clustered clickhouse deployments
     Both,
+}
+
+#[derive(Debug, Args)]
+struct ChickenSwitchesArgs {
+    #[command(subcommand)]
+    command: ChickenSwitchesCommands,
+}
+
+#[derive(Debug, Subcommand)]
+enum ChickenSwitchesCommands {
+    /// Show a chicken switch at a given version
+    Show(ChickenSwitchesShowArgs),
+
+    /// Set the value of all chicken switches for the latest version
+    /// Values carry over from the latest version if unset on the CLI.
+    Set(ChickenSwitchesSetArgs),
+}
+
+#[derive(Debug, Clone, Args)]
+struct ChickenSwitchesSetArgs {
+    planner_enabled: bool,
+}
+
+#[derive(Debug, Clone, Copy, Args)]
+struct ChickenSwitchesShowArgs {
+    version: ChickenSwitchesVersionOrCurrent,
+}
+
+#[derive(Debug, Clone, Copy)]
+enum ChickenSwitchesVersionOrCurrent {
+    Current,
+    Version(u32),
+}
+
+impl FromStr for ChickenSwitchesVersionOrCurrent {
+    type Err = ParseIntError;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        if matches!(s, "current" | "latest") {
+            Ok(Self::Current)
+        } else {
+            let version = s.parse()?;
+            Ok(Self::Version(version))
+        }
+    }
 }
 
 #[derive(Debug, Args)]
@@ -675,6 +724,19 @@ impl NexusArgs {
             }) => {
                 let token = omdb.check_allow_destructive()?;
                 cmd_nexus_blueprints_import(&client, token, args).await
+            }
+
+            NexusCommands::ChickenSwitches(ChickenSwitchesArgs { command }) => {
+                match command {
+                    ChickenSwitchesCommands::Show(version) => {
+                        cmd_nexus_chicken_switches_show(&client, version).await
+                    }
+                    ChickenSwitchesCommands::Set(args) => {
+                        let token = omdb.check_allow_destructive()?;
+                        cmd_nexus_chicken_switches_set(&client, args, token)
+                            .await
+                    }
+                }
             }
 
             NexusCommands::ClickhousePolicy(ClickhousePolicyArgs {
@@ -3276,6 +3338,90 @@ async fn cmd_nexus_blueprints_import(
         .await
         .with_context(|| format!("upload {:?}", input_path))?;
     eprintln!("uploaded new blueprint {}", blueprint.id);
+    Ok(())
+}
+
+async fn cmd_nexus_chicken_switches_show(
+    client: &nexus_client::Client,
+    args: &ChickenSwitchesShowArgs,
+) -> Result<(), anyhow::Error> {
+    let res = match args.version {
+        ChickenSwitchesVersionOrCurrent::Current => {
+            client.reconfigurator_chicken_switches_show_current().await
+        }
+        ChickenSwitchesVersionOrCurrent::Version(version) => {
+            client.reconfigurator_chicken_switches_show(version).await
+        }
+    };
+
+    match res {
+        Ok(switches) => {
+            println!("Reconfigurator Chicken Switches: ");
+            println!("    version: {}", switches.version);
+            println!("    modified time: {}", switches.time_modified);
+            println!("    planner enabled: {}", switches.planner_enabled);
+        }
+        Err(err) => eprintln!("error: {:#}", err),
+    }
+
+    Ok(())
+}
+
+async fn cmd_nexus_chicken_switches_set(
+    client: &nexus_client::Client,
+    args: &ChickenSwitchesSetArgs,
+    _destruction_token: DestructiveOperationToken,
+) -> Result<(), anyhow::Error> {
+    let switches = match client
+        .reconfigurator_chicken_switches_show_current()
+        .await
+    {
+        Ok(switches) => {
+            let Some(version) = switches.version.checked_add(1) else {
+                eprintln!(
+                    "ERROR: Failed to update chicken switches. Max version reached."
+                );
+                return Ok(());
+            };
+            let mut switches = switches.into_inner();
+            // Future switches should use the following pattern, and only update
+            // the current switch values if a setting changed.
+            //
+            // We may want to use `Options` in `args` to allow defaulting to
+            // the current setting rather than forcing the user to update all
+            // settings if the number of switches grows significantly. However,
+            // this will not play nice with the `NOT_FOUND` case below.
+            let mut modified = false;
+            if args.planner_enabled != switches.planner_enabled {
+                switches.planner_enabled = args.planner_enabled;
+                modified = true;
+            }
+            if modified {
+                switches.version = version;
+                switches.time_modified = now_db_precision();
+                switches
+            } else {
+                println!("No modifications made to current switch values");
+                return Ok(());
+            }
+        }
+        Err(err) => {
+            if err.status() == Some(StatusCode::NOT_FOUND) {
+                ReconfiguratorChickenSwitches {
+                    version: 1,
+                    planner_enabled: args.planner_enabled,
+                    time_modified: now_db_precision(),
+                }
+            } else {
+                eprintln!("error: {:#}", err);
+                return Ok(());
+            }
+        }
+    };
+
+    client.reconfigurator_chicken_switches_set(&switches).await?;
+    println!("Chicken switches updated at version {}", switches.version);
+
     Ok(())
 }
 
