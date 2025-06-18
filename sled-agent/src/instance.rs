@@ -2273,7 +2273,7 @@ mod tests {
     use omicron_common::api::internal::nexus::VmmState;
     use omicron_common::api::internal::shared::{DhcpConfig, SledIdentifiers};
     use omicron_common::disk::DiskIdentity;
-    use omicron_uuid_kinds::ZpoolUuid;
+    use omicron_uuid_kinds::InternalZpoolUuid;
     use propolis_client::types::{
         InstanceMigrateStatusResponse, InstanceStateMonitorResponse,
     };
@@ -2536,7 +2536,7 @@ mod tests {
                         model: "test-model".to_string(),
                         serial: "test-serial".to_string(),
                     },
-                    ZpoolUuid::new_v4(),
+                    InternalZpoolUuid::new_v4(),
                 )]
                 .into_iter(),
             ),
