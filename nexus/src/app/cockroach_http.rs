@@ -43,7 +43,7 @@ impl CockroachAdminClient {
             .client
             .status_vars()
             .await
-            .with_context(|| format!("Failed to get status/vars"))?;
+            .with_context(|| "Failed to get status/vars")?;
 
         if !response.status().is_success() {
             anyhow::bail!(
@@ -65,7 +65,7 @@ impl CockroachAdminClient {
             .client
             .status_nodes()
             .await
-            .with_context(|| format!("Failed to GET node status"))?;
+            .with_context(|| "Failed to get node status")?;
 
         if !response.status().is_success() {
             anyhow::bail!(
