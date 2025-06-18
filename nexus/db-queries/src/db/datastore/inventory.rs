@@ -2569,9 +2569,7 @@ impl DataStore {
                 .with_context(|| {
                     format!("zone {:?}: parse from database", zone_id)
                 })
-                .map_err(|e| {
-                    Error::internal_error(&format!("{:#}", e.to_string()))
-                })?;
+                .map_err(|e| Error::internal_error(&format!("{:?}", e)))?;
             config_with_id.config.zones.insert(zone);
         }
 

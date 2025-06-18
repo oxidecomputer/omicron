@@ -749,11 +749,7 @@ impl BpOmicronZone {
             omicron_zone_config::secondary_ip_and_port_to_address(
                 self.second_service_ip,
                 self.second_service_port,
-            )
-            .and_then(|addr| match addr {
-                SocketAddr::V6(addr) => Ok(addr),
-                _ => Err(anyhow!("Unexpected IPv4 address for second service")),
-            });
+            );
 
         let ntp_dns_servers =
             omicron_zone_config::ntp_dns_servers_to_omicron_internal(
@@ -817,13 +813,23 @@ impl BpOmicronZone {
                 },
             ),
 
-            ZoneType::CockroachDb => BlueprintZoneType::CockroachDb(
-                blueprint_zone_type::CockroachDb {
-                    address: primary_address,
-                    http_address: second_service_address?,
-                    dataset: dataset?,
-                },
-            ),
+            ZoneType::CockroachDb => {
+                let second_service_address =
+                    second_service_address.and_then(|addr| match addr {
+                        SocketAddr::V6(addr) => Ok(addr),
+                        _ => Err(anyhow!(
+                            "Unexpected IPv4 address for CRDB HTTP service"
+                        )),
+                    });
+
+                BlueprintZoneType::CockroachDb(
+                    blueprint_zone_type::CockroachDb {
+                        address: primary_address,
+                        http_address: second_service_address?,
+                        dataset: dataset?,
+                    },
+                )
+            }
             ZoneType::Crucible => {
                 BlueprintZoneType::Crucible(blueprint_zone_type::Crucible {
                     address: primary_address,
@@ -841,7 +847,7 @@ impl BpOmicronZone {
                     http_address: primary_address,
                     dns_address: OmicronZoneExternalFloatingAddr {
                         id: external_ip_id?,
-                        addr: SocketAddr::V6(second_service_address?),
+                        addr: second_service_address?,
                     },
                     nic: nic?,
                 },
@@ -851,7 +857,7 @@ impl BpOmicronZone {
                     dataset: dataset?,
                     http_address: primary_address,
                     dns_address: omicron_zone_config::to_internal_dns_address(
-                        SocketAddr::V6(second_service_address?),
+                        second_service_address?,
                     )?,
                     gz_address: self
                         .dns_gz_address
