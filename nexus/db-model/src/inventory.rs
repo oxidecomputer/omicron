@@ -1955,11 +1955,10 @@ impl InvOmicronSledConfigZone {
             nic_row.map(Into::into),
         )?;
 
-        let dns_address =
-            omicron_zone_config::secondary_ip_and_port_to_dns_address(
-                self.second_service_ip,
-                self.second_service_port,
-            );
+        let dns_address = omicron_zone_config::secondary_ip_and_port_to_address(
+            self.second_service_ip,
+            self.second_service_port,
+        );
 
         let ntp_dns_servers =
             omicron_zone_config::ntp_dns_servers_to_omicron_internal(

@@ -677,6 +677,30 @@
         }
       }
     },
+    "/deployment/update-status": {
+      "get": {
+        "summary": "Show deployed versions of artifacts",
+        "operationId": "update_status",
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UpdateStatus"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
     "/disk/{disk_id}/remove-read-only-parent": {
       "post": {
         "summary": "Request removal of a read_only_parent from a disk.",
@@ -3063,6 +3087,9 @@
               "dataset": {
                 "$ref": "#/components/schemas/OmicronZoneDataset"
               },
+              "http_address": {
+                "type": "string"
+              },
               "type": {
                 "type": "string",
                 "enum": [
@@ -3073,6 +3100,7 @@
             "required": [
               "address",
               "dataset",
+              "http_address",
               "type"
             ]
           },
@@ -5336,6 +5364,357 @@
           "snat_cfg"
         ]
       },
+      "OmicronZoneType": {
+        "description": "Describes what kind of zone this is (i.e., what component is running in it) as well as any type-specific configuration",
+        "oneOf": [
+          {
+            "type": "object",
+            "properties": {
+              "address": {
+                "type": "string"
+              },
+              "dns_servers": {
+                "type": "array",
+                "items": {
+                  "type": "string",
+                  "format": "ip"
+                }
+              },
+              "domain": {
+                "nullable": true,
+                "type": "string"
+              },
+              "nic": {
+                "description": "The service vNIC providing outbound connectivity using OPTE.",
+                "allOf": [
+                  {
+                    "$ref": "#/components/schemas/NetworkInterface"
+                  }
+                ]
+              },
+              "ntp_servers": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "snat_cfg": {
+                "description": "The SNAT configuration for outbound connections.",
+                "allOf": [
+                  {
+                    "$ref": "#/components/schemas/SourceNatConfig"
+                  }
+                ]
+              },
+              "type": {
+                "type": "string",
+                "enum": [
+                  "boundary_ntp"
+                ]
+              }
+            },
+            "required": [
+              "address",
+              "dns_servers",
+              "nic",
+              "ntp_servers",
+              "snat_cfg",
+              "type"
+            ]
+          },
+          {
+            "description": "Type of clickhouse zone used for a single node clickhouse deployment",
+            "type": "object",
+            "properties": {
+              "address": {
+                "type": "string"
+              },
+              "dataset": {
+                "$ref": "#/components/schemas/OmicronZoneDataset"
+              },
+              "type": {
+                "type": "string",
+                "enum": [
+                  "clickhouse"
+                ]
+              }
+            },
+            "required": [
+              "address",
+              "dataset",
+              "type"
+            ]
+          },
+          {
+            "description": "A zone used to run a Clickhouse Keeper node\n\nKeepers are only used in replicated clickhouse setups",
+            "type": "object",
+            "properties": {
+              "address": {
+                "type": "string"
+              },
+              "dataset": {
+                "$ref": "#/components/schemas/OmicronZoneDataset"
+              },
+              "type": {
+                "type": "string",
+                "enum": [
+                  "clickhouse_keeper"
+                ]
+              }
+            },
+            "required": [
+              "address",
+              "dataset",
+              "type"
+            ]
+          },
+          {
+            "description": "A zone used to run a Clickhouse Server in a replicated deployment",
+            "type": "object",
+            "properties": {
+              "address": {
+                "type": "string"
+              },
+              "dataset": {
+                "$ref": "#/components/schemas/OmicronZoneDataset"
+              },
+              "type": {
+                "type": "string",
+                "enum": [
+                  "clickhouse_server"
+                ]
+              }
+            },
+            "required": [
+              "address",
+              "dataset",
+              "type"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "address": {
+                "type": "string"
+              },
+              "dataset": {
+                "$ref": "#/components/schemas/OmicronZoneDataset"
+              },
+              "type": {
+                "type": "string",
+                "enum": [
+                  "cockroach_db"
+                ]
+              }
+            },
+            "required": [
+              "address",
+              "dataset",
+              "type"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "address": {
+                "type": "string"
+              },
+              "dataset": {
+                "$ref": "#/components/schemas/OmicronZoneDataset"
+              },
+              "type": {
+                "type": "string",
+                "enum": [
+                  "crucible"
+                ]
+              }
+            },
+            "required": [
+              "address",
+              "dataset",
+              "type"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "address": {
+                "type": "string"
+              },
+              "type": {
+                "type": "string",
+                "enum": [
+                  "crucible_pantry"
+                ]
+              }
+            },
+            "required": [
+              "address",
+              "type"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "dataset": {
+                "$ref": "#/components/schemas/OmicronZoneDataset"
+              },
+              "dns_address": {
+                "description": "The address at which the external DNS server is reachable.",
+                "type": "string"
+              },
+              "http_address": {
+                "description": "The address at which the external DNS server API is reachable.",
+                "type": "string"
+              },
+              "nic": {
+                "description": "The service vNIC providing external connectivity using OPTE.",
+                "allOf": [
+                  {
+                    "$ref": "#/components/schemas/NetworkInterface"
+                  }
+                ]
+              },
+              "type": {
+                "type": "string",
+                "enum": [
+                  "external_dns"
+                ]
+              }
+            },
+            "required": [
+              "dataset",
+              "dns_address",
+              "http_address",
+              "nic",
+              "type"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "dataset": {
+                "$ref": "#/components/schemas/OmicronZoneDataset"
+              },
+              "dns_address": {
+                "type": "string"
+              },
+              "gz_address": {
+                "description": "The addresses in the global zone which should be created\n\nFor the DNS service, which exists outside the sleds's typical subnet - adding an address in the GZ is necessary to allow inter-zone traffic routing.",
+                "type": "string",
+                "format": "ipv6"
+              },
+              "gz_address_index": {
+                "description": "The address is also identified with an auxiliary bit of information to ensure that the created global zone address can have a unique name.",
+                "type": "integer",
+                "format": "uint32",
+                "minimum": 0
+              },
+              "http_address": {
+                "type": "string"
+              },
+              "type": {
+                "type": "string",
+                "enum": [
+                  "internal_dns"
+                ]
+              }
+            },
+            "required": [
+              "dataset",
+              "dns_address",
+              "gz_address",
+              "gz_address_index",
+              "http_address",
+              "type"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "address": {
+                "type": "string"
+              },
+              "type": {
+                "type": "string",
+                "enum": [
+                  "internal_ntp"
+                ]
+              }
+            },
+            "required": [
+              "address",
+              "type"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "external_dns_servers": {
+                "description": "External DNS servers Nexus can use to resolve external hosts.",
+                "type": "array",
+                "items": {
+                  "type": "string",
+                  "format": "ip"
+                }
+              },
+              "external_ip": {
+                "description": "The address at which the external nexus server is reachable.",
+                "type": "string",
+                "format": "ip"
+              },
+              "external_tls": {
+                "description": "Whether Nexus's external endpoint should use TLS",
+                "type": "boolean"
+              },
+              "internal_address": {
+                "description": "The address at which the internal nexus server is reachable.",
+                "type": "string"
+              },
+              "nic": {
+                "description": "The service vNIC providing external connectivity using OPTE.",
+                "allOf": [
+                  {
+                    "$ref": "#/components/schemas/NetworkInterface"
+                  }
+                ]
+              },
+              "type": {
+                "type": "string",
+                "enum": [
+                  "nexus"
+                ]
+              }
+            },
+            "required": [
+              "external_dns_servers",
+              "external_ip",
+              "external_tls",
+              "internal_address",
+              "nic",
+              "type"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "address": {
+                "type": "string"
+              },
+              "type": {
+                "type": "string",
+                "enum": [
+                  "oximeter"
+                ]
+              }
+            },
+            "required": [
+              "address",
+              "type"
+            ]
+          }
+        ]
+      },
       "OximeterInfo": {
         "description": "Message used to notify Nexus that this oximeter instance is up and running.",
         "type": "object",
@@ -7095,6 +7474,23 @@
           "took_over_concurrent_update"
         ]
       },
+      "UpdateStatus": {
+        "type": "object",
+        "properties": {
+          "zones": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "array",
+              "items": {
+                "$ref": "#/components/schemas/ZoneStatus"
+              }
+            }
+          }
+        },
+        "required": [
+          "zones"
+        ]
+      },
       "UplinkAddressConfig": {
         "type": "object",
         "properties": {
@@ -7245,6 +7641,94 @@
         "required": [
           "nattempts_done",
           "next_attempt_time"
+        ]
+      },
+      "ZoneStatus": {
+        "type": "object",
+        "properties": {
+          "version": {
+            "$ref": "#/components/schemas/ZoneStatusVersion"
+          },
+          "zone_id": {
+            "$ref": "#/components/schemas/TypedUuidForOmicronZoneKind"
+          },
+          "zone_type": {
+            "$ref": "#/components/schemas/OmicronZoneType"
+          }
+        },
+        "required": [
+          "version",
+          "zone_id",
+          "zone_type"
+        ]
+      },
+      "ZoneStatusVersion": {
+        "oneOf": [
+          {
+            "type": "object",
+            "properties": {
+              "zone_status_version": {
+                "type": "string",
+                "enum": [
+                  "unknown"
+                ]
+              }
+            },
+            "required": [
+              "zone_status_version"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "zone_status_version": {
+                "type": "string",
+                "enum": [
+                  "install_dataset"
+                ]
+              }
+            },
+            "required": [
+              "zone_status_version"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "details": {
+                "type": "string",
+                "pattern": "^(0|[1-9]\\d*)\\.(0|[1-9]\\d*)\\.(0|[1-9]\\d*)(?:-((?:0|[1-9]\\d*|\\d*[a-zA-Z-][0-9a-zA-Z-]*)(?:\\.(?:0|[1-9]\\d*|\\d*[a-zA-Z-][0-9a-zA-Z-]*))*))?(?:\\+([0-9a-zA-Z-]+(?:\\.[0-9a-zA-Z-]+)*))?$"
+              },
+              "zone_status_version": {
+                "type": "string",
+                "enum": [
+                  "version"
+                ]
+              }
+            },
+            "required": [
+              "details",
+              "zone_status_version"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "details": {
+                "type": "string"
+              },
+              "zone_status_version": {
+                "type": "string",
+                "enum": [
+                  "error"
+                ]
+              }
+            },
+            "required": [
+              "details",
+              "zone_status_version"
+            ]
+          }
         ]
       },
       "ZpoolName": {

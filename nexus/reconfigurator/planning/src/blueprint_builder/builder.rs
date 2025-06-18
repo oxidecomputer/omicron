@@ -1505,9 +1505,12 @@ impl<'a> BlueprintBuilder<'a> {
             self.sled_select_zpool(sled_id, ZoneKind::CockroachDb)?;
         let port = omicron_common::address::COCKROACH_PORT;
         let address = SocketAddrV6::new(underlay_ip, port, 0, 0);
+        let port = omicron_common::address::COCKROACH_HTTP_PORT;
+        let http_address = SocketAddrV6::new(underlay_ip, port, 0, 0);
         let zone_type =
             BlueprintZoneType::CockroachDb(blueprint_zone_type::CockroachDb {
                 address,
+                http_address,
                 dataset: OmicronZoneDataset { pool_name },
             });
         let filesystem_pool = pool_name;

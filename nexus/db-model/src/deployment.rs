@@ -49,7 +49,7 @@ use omicron_uuid_kinds::{
     GenericUuid, MupdateOverrideKind, OmicronZoneKind, OmicronZoneUuid,
     PhysicalDiskKind, SledKind, SledUuid, ZpoolKind, ZpoolUuid,
 };
-use std::net::{IpAddr, SocketAddrV6};
+use std::net::{IpAddr, SocketAddr, SocketAddrV6};
 use uuid::Uuid;
 
 /// See [`nexus_types::deployment::Blueprint`].
@@ -578,11 +578,22 @@ impl BpOmicronZone {
                 bp_omicron_zone.set_zpool_name(dataset);
             }
             BlueprintZoneType::CockroachDb(
-                blueprint_zone_type::CockroachDb { address, dataset },
+                blueprint_zone_type::CockroachDb {
+                    address,
+                    http_address,
+                    dataset,
+                },
             ) => {
                 // Set the common fields
                 bp_omicron_zone.set_primary_service_ip_and_port(address);
                 bp_omicron_zone.set_zpool_name(dataset);
+
+                // Set the zone specific fields
+                bp_omicron_zone.second_service_ip = Some(IpNetwork::from(
+                    std::net::IpAddr::V6(*http_address.ip()),
+                ));
+                bp_omicron_zone.second_service_port =
+                    Some(SqlU16::from(http_address.port()));
             }
             BlueprintZoneType::Crucible(blueprint_zone_type::Crucible {
                 address,
@@ -734,8 +745,8 @@ impl BpOmicronZone {
         let external_ip_id =
             Self::external_ip_to_blueprint_zone_type(self.external_ip_id);
 
-        let dns_address =
-            omicron_zone_config::secondary_ip_and_port_to_dns_address(
+        let second_service_address =
+            omicron_zone_config::secondary_ip_and_port_to_address(
                 self.second_service_ip,
                 self.second_service_port,
             );
@@ -802,12 +813,23 @@ impl BpOmicronZone {
                 },
             ),
 
-            ZoneType::CockroachDb => BlueprintZoneType::CockroachDb(
-                blueprint_zone_type::CockroachDb {
-                    address: primary_address,
-                    dataset: dataset?,
-                },
-            ),
+            ZoneType::CockroachDb => {
+                let second_service_address =
+                    second_service_address.and_then(|addr| match addr {
+                        SocketAddr::V6(addr) => Ok(addr),
+                        _ => Err(anyhow!(
+                            "Unexpected IPv4 address for CRDB HTTP service"
+                        )),
+                    });
+
+                BlueprintZoneType::CockroachDb(
+                    blueprint_zone_type::CockroachDb {
+                        address: primary_address,
+                        http_address: second_service_address?,
+                        dataset: dataset?,
+                    },
+                )
+            }
             ZoneType::Crucible => {
                 BlueprintZoneType::Crucible(blueprint_zone_type::Crucible {
                     address: primary_address,
@@ -825,7 +847,7 @@ impl BpOmicronZone {
                     http_address: primary_address,
                     dns_address: OmicronZoneExternalFloatingAddr {
                         id: external_ip_id?,
-                        addr: dns_address?,
+                        addr: second_service_address?,
                     },
                     nic: nic?,
                 },
@@ -835,7 +857,7 @@ impl BpOmicronZone {
                     dataset: dataset?,
                     http_address: primary_address,
                     dns_address: omicron_zone_config::to_internal_dns_address(
-                        dns_address?,
+                        second_service_address?,
                     )?,
                     gz_address: self
                         .dns_gz_address

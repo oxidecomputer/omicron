@@ -435,6 +435,7 @@ pub mod blueprint_zone_type {
     )]
     pub struct CockroachDb {
         pub address: SocketAddrV6,
+        pub http_address: SocketAddrV6,
         pub dataset: OmicronZoneDataset,
     }
 
