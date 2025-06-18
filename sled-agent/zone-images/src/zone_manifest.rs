@@ -173,23 +173,23 @@ fn make_non_boot_result(
         )),
         InstallMetadataNonBootResult::MatchesAbsent => {
             panic!(
-                "synthetic manifest is always generated \
-                     so MatchesAbsent can never be hit"
+                "synthetic manifest is always generated, so \
+                 MatchesAbsent can never be hit"
             )
         }
         InstallMetadataNonBootResult::Mismatch(mismatch) => match mismatch {
             InstallMetadataNonBootMismatch::BootPresentOtherAbsent => {
                 panic!(
-                    "synthetic manifest is always generated \
-                         so BootPresentOtherAbsent can never be hit"
+                    "synthetic manifest is always generated, so \
+                     BootPresentOtherAbsent can never be hit"
                 )
             }
             InstallMetadataNonBootMismatch::BootAbsentOtherPresent {
                 ..
             } => {
                 panic!(
-                    "synthetic manifest is always generated \
-                         so BootAbsentOtherPresent can never be hit"
+                    "synthetic manifest is always generated, so \
+                     BootAbsentOtherPresent can never be hit"
                 )
             }
             InstallMetadataNonBootMismatch::ValueMismatch {
@@ -215,9 +215,8 @@ fn make_non_boot_result(
             InstallMetadataNonBootMismatch::BootDiskReadError {
                 non_boot_disk_info: None,
             } => panic!(
-                "synthetic manifest is always generated \
-                     so BootDiskReadError with no non-boot info can never be \
-                     hit"
+                "synthetic manifest is always generated, so BootDiskReadError \
+                 with no non-boot info can never be hit"
             ),
         },
         InstallMetadataNonBootResult::ReadError(error) => {
