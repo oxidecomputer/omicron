@@ -10,6 +10,7 @@ workspace = true
 [dependencies]
 anyhow.workspace = true
 async-trait.workspace = true
+bytes.workspace = true
 camino.workspace = true
 camino-tempfile.workspace = true
 chrono.workspace = true
@@ -27,6 +28,7 @@ nexus-sled-agent-shared.workspace = true
 omicron-common.workspace = true
 omicron-uuid-kinds.workspace = true
 serde.workspace = true
+sha2.workspace = true
 sled-agent-api.workspace = true
 sled-agent-types.workspace = true
 sled-hardware.workspace = true
