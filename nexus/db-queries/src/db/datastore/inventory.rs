@@ -66,7 +66,6 @@ use nexus_db_model::{
 };
 use nexus_db_model::{HwPowerState, InvZoneManifestNonBoot};
 use nexus_db_model::{HwRotSlot, InvMupdateOverrideNonBoot};
-use nexus_db_schema::enums::HwPowerStateEnum;
 use nexus_db_schema::enums::HwRotSlotEnum;
 use nexus_db_schema::enums::RotImageErrorEnum;
 use nexus_db_schema::enums::RotPageWhichEnum;
@@ -75,6 +74,7 @@ use nexus_db_schema::enums::SpTypeEnum;
 use nexus_db_schema::enums::{
     CabooseWhichEnum, InvConfigReconcilerStatusKindEnum,
 };
+use nexus_db_schema::enums::{HwPowerStateEnum, InvZoneManifestSourceEnum};
 use nexus_sled_agent_shared::inventory::ConfigReconcilerInventory;
 use nexus_sled_agent_shared::inventory::ConfigReconcilerInventoryResult;
 use nexus_sled_agent_shared::inventory::ConfigReconcilerInventoryStatus;
@@ -1252,6 +1252,8 @@ impl DataStore {
                                 .into_sql::<Nullable<diesel::sql_types::Double>>(),
                             zone_image_resolver.zone_manifest_boot_disk_path
                                 .into_sql::<diesel::sql_types::Text>(),
+                            zone_image_resolver.zone_manifest_source
+                                .into_sql::<Nullable<InvZoneManifestSourceEnum>>(),
                             zone_image_resolver.zone_manifest_mupdate_id
                                 .into_sql::<Nullable<diesel::sql_types::Uuid>>(),
                             zone_image_resolver.zone_manifest_boot_disk_error
@@ -1294,11 +1296,13 @@ impl DataStore {
                                 sa_dsl::reconciler_status_timestamp,
                                 sa_dsl::reconciler_status_duration_secs,
                                 sa_dsl::zone_manifest_boot_disk_path,
+                                sa_dsl::zone_manifest_source,
                                 sa_dsl::zone_manifest_mupdate_id,
                                 sa_dsl::zone_manifest_boot_disk_error,
                                 sa_dsl::mupdate_override_boot_disk_path,
                                 sa_dsl::mupdate_override_id,
-                                sa_dsl::mupdate_override_boot_disk_error,                            ))
+                                sa_dsl::mupdate_override_boot_disk_error,
+                            ))
                             .execute_async(&conn)
                             .await?;
 
@@ -1324,6 +1328,7 @@ impl DataStore {
                         _reconciler_status_timestamp,
                         _reconciler_status_duration_secs,
                         _zone_manifest_boot_disk_path,
+                        _zone_manifest_source,
                         _zone_manifest_mupdate_id,
                         _zone_manifest_boot_disk_error,
                         _mupdate_override_boot_disk_path,

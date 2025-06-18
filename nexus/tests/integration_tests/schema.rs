@@ -2352,12 +2352,13 @@ fn after_151_0_0<'a>(ctx: &'a MigrationContext<'a>) -> BoxFuture<'a, ()> {
         let rows = ctx
             .client
             .query(
-                "SELECT zone_manifest_boot_disk_path, zone_manifest_mupdate_id,
-                        zone_manifest_boot_disk_error, mupdate_override_boot_disk_path,
+                "SELECT zone_manifest_boot_disk_path, zone_manifest_source,
+                        zone_manifest_mupdate_id, zone_manifest_boot_disk_error,
+                        mupdate_override_boot_disk_path,
                         mupdate_override_id, mupdate_override_boot_disk_error
                  FROM omicron.public.inv_sled_agent
                  ORDER BY time_collected",
-                &[]
+                &[],
             )
             .await
             .expect("inserted post-migration inv_sled_agent data");
@@ -2373,7 +2374,11 @@ fn after_151_0_0<'a>(ctx: &'a MigrationContext<'a>) -> BoxFuture<'a, ()> {
         assert_eq!(zone_manifest_path, "old-collection-data-missing");
         assert_eq!(mupdate_override_path, "old-collection-data-missing");
 
-        // Check that mupdate_id fields are NULL.
+        // Check that the zone manifest and mupdate override source fields are
+        // NULL.
+        let zone_manifest_source: Option<AnySqlType> =
+            row.get("zone_manifest_source");
+        assert_eq!(zone_manifest_source, None);
         let zone_manifest_id: Option<Uuid> =
             row.get("zone_manifest_mupdate_id");
         let mupdate_override_id: Option<Uuid> = row.get("mupdate_override_id");

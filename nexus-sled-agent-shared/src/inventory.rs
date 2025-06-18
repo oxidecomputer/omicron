@@ -18,6 +18,7 @@ use iddqd::IdOrdMap;
 use iddqd::id_upcast;
 use omicron_common::disk::{DatasetKind, DatasetName};
 use omicron_common::ledger::Ledgerable;
+use omicron_common::update::OmicronZoneManifestSource;
 use omicron_common::{
     api::{
         external::{ByteCount, Generation},
@@ -28,7 +29,9 @@ use omicron_common::{
     update::ArtifactId,
     zpool_name::ZpoolName,
 };
-use omicron_uuid_kinds::{DatasetUuid, MupdateUuid, OmicronZoneUuid};
+use omicron_uuid_kinds::{
+    DatasetUuid, InternalZpoolUuid, MupdateUuid, OmicronZoneUuid,
+};
 use omicron_uuid_kinds::{MupdateOverrideUuid, PhysicalDiskUuid};
 use omicron_uuid_kinds::{SledUuid, ZpoolUuid};
 use schemars::schema::{Schema, SchemaObject};
@@ -152,6 +155,22 @@ impl ConfigReconcilerInventory {
                 self.last_reconciled_config.zones.get(zone_id)
             }
             ConfigReconcilerInventoryResult::Err { .. } => None,
+        })
+    }
+
+    /// Iterate over all zones contained in the most-recently-reconciled sled
+    /// config and report their status as of that reconciliation.
+    pub fn reconciled_omicron_zones(
+        &self,
+    ) -> impl Iterator<Item = (&OmicronZoneConfig, &ConfigReconcilerInventoryResult)>
+    {
+        // `self.zones` may contain zone IDs that aren't present in
+        // `last_reconciled_config` at all, if we failed to _shut down_ zones
+        // that are no longer present in the config. We use `filter_map` to
+        // strip those out, and only report on the configured zones.
+        self.zones.iter().filter_map(|(zone_id, result)| {
+            let config = self.last_reconciled_config.zones.get(zone_id)?;
+            Some((config, result))
         })
     }
 
@@ -295,8 +314,8 @@ impl ZoneManifestInventory {
 
 #[derive(Clone, Debug, PartialEq, Eq, Deserialize, JsonSchema, Serialize)]
 pub struct ZoneArtifactsInventory {
-    /// The mupdate UUID that created this inventory.
-    pub mupdate_id: MupdateUuid,
+    /// The manifest source.
+    pub source: OmicronZoneManifestSource,
 
     /// The artifacts on disk.
     pub artifacts: IdOrdMap<ZoneArtifactInventory>,
@@ -306,7 +325,9 @@ impl ZoneArtifactsInventory {
     /// Returns a new, fake inventory for tests.
     pub fn new_fake() -> Self {
         Self {
-            mupdate_id: MupdateUuid::nil(),
+            source: OmicronZoneManifestSource::Installinator {
+                mupdate_id: MupdateUuid::nil(),
+            },
             // TODO: fill out some fake zones here? maybe a representative
             // selection of real zones?
             artifacts: IdOrdMap::new(),
@@ -346,7 +367,7 @@ impl IdOrdItem for ZoneArtifactInventory {
 #[derive(Clone, Debug, PartialEq, Eq, Deserialize, JsonSchema, Serialize)]
 pub struct ZoneManifestNonBootInventory {
     /// The non-boot zpool ID.
-    pub zpool_id: ZpoolUuid,
+    pub zpool_id: InternalZpoolUuid,
 
     /// The path to the zone manifest JSON on the non-boot disk.
     #[schemars(schema_with = "path_schema")]
@@ -361,7 +382,7 @@ pub struct ZoneManifestNonBootInventory {
 }
 
 impl IdOrdItem for ZoneManifestNonBootInventory {
-    type Key<'a> = ZpoolUuid;
+    type Key<'a> = InternalZpoolUuid;
     fn key(&self) -> Self::Key<'_> {
         self.zpool_id
     }
@@ -406,7 +427,7 @@ pub struct MupdateOverrideInfoInventory {
 #[derive(Clone, Debug, PartialEq, Eq, Deserialize, JsonSchema, Serialize)]
 pub struct MupdateOverrideNonBootInventory {
     /// The non-boot zpool ID.
-    pub zpool_id: ZpoolUuid,
+    pub zpool_id: InternalZpoolUuid,
 
     /// The path to the mupdate override JSON on the non-boot disk.
     #[schemars(schema_with = "path_schema")]
@@ -421,7 +442,7 @@ pub struct MupdateOverrideNonBootInventory {
 }
 
 impl IdOrdItem for MupdateOverrideNonBootInventory {
-    type Key<'a> = ZpoolUuid;
+    type Key<'a> = InternalZpoolUuid;
     fn key(&self) -> Self::Key<'_> {
         self.zpool_id
     }

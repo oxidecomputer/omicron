@@ -3611,6 +3611,11 @@ AS ENUM (
     'idle'
 );
 
+CREATE TYPE IF NOT EXISTS omicron.public.inv_zone_manifest_source AS ENUM (
+    'installinator',
+    'sled-agent'
+);
+
 -- observations from and about sled agents
 CREATE TABLE IF NOT EXISTS omicron.public.inv_sled_agent (
     -- where this observation came from
@@ -3665,8 +3670,12 @@ CREATE TABLE IF NOT EXISTS omicron.public.inv_sled_agent (
     --
     -- The path to the boot disk image file.
     zone_manifest_boot_disk_path TEXT NOT NULL,
-    -- The mupdate ID that created the zone manifest. If this is NULL, then there
-    -- was an error reading the zone manifest.
+    -- The source of the zone manifest on the boot disk: from installinator or
+    -- sled-agent (synthetic). NULL means there is an error reading the zone manifest.
+    zone_manifest_source omicron.public.inv_zone_manifest_source,
+    -- The mupdate ID that created the zone manifest if this is from installinator. If
+    -- this is NULL, then either the zone manifest is synthetic or there was an
+    -- error reading the zone manifest.
     zone_manifest_mupdate_id UUID,
     -- Message describing the status of the zone manifest on the boot disk. If
     -- this is NULL, then the zone manifest was successfully read, and the
@@ -3703,16 +3712,24 @@ CREATE TABLE IF NOT EXISTS omicron.public.inv_sled_agent (
             AND reconciler_status_duration_secs IS NOT NULL)
     ),
 
-    -- For the zone manifest, exactly one of mupdate_id and
-    -- boot_disk_error must be set.
+    -- For the zone manifest, there are three valid states:
+    -- 1. Successfully read from installinator (has mupdate_id, no error)
+    -- 2. Synthetic from sled-agent (no mupdate_id, no error)
+    -- 3. Error reading (no mupdate_id, has error)
     --
-    -- This is equivalent to Result<T, String>.
+    -- This is equivalent to Result<OmicronZoneManifestSource, String>.
     CONSTRAINT zone_manifest_consistency CHECK (
-        (zone_manifest_mupdate_id IS NULL
-            AND zone_manifest_boot_disk_error IS NOT NULL)
-        OR
-        (zone_manifest_mupdate_id IS NOT NULL
+        (zone_manifest_source = 'installinator'
+            AND zone_manifest_mupdate_id IS NOT NULL
             AND zone_manifest_boot_disk_error IS NULL)
+        OR (zone_manifest_source = 'sled-agent'
+            AND zone_manifest_mupdate_id IS NULL
+            AND zone_manifest_boot_disk_error IS NULL)
+        OR (
+            zone_manifest_source IS NULL
+            AND zone_manifest_mupdate_id IS NULL
+            AND zone_manifest_boot_disk_error IS NOT NULL
+        )
     ),
 
     -- For the mupdate override, three states are valid:

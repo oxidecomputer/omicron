@@ -65,10 +65,12 @@ use omicron_common::disk::DatasetConfig;
 use omicron_common::disk::DatasetName;
 use omicron_common::disk::DiskIdentity;
 use omicron_common::disk::OmicronPhysicalDiskConfig;
+use omicron_common::update::OmicronZoneManifestSource;
 use omicron_common::zpool_name::ZpoolName;
 use omicron_uuid_kinds::DatasetKind;
 use omicron_uuid_kinds::DatasetUuid;
 use omicron_uuid_kinds::GenericUuid;
+use omicron_uuid_kinds::InternalZpoolKind;
 use omicron_uuid_kinds::MupdateKind;
 use omicron_uuid_kinds::MupdateOverrideKind;
 use omicron_uuid_kinds::MupdateOverrideUuid;
@@ -1172,11 +1174,24 @@ impl From<InvLastReconciliationZoneResult> for ConfigReconcilerInventoryResult {
     }
 }
 
+// See [`omicron_common::update::OmicronZoneManifestSource`].
+impl_enum_type!(
+    InvZoneManifestSourceEnum:
+
+    #[derive(Copy, Clone, Debug, AsExpression, FromSqlRow, PartialEq)]
+    pub enum InvZoneManifestSourceEnum;
+
+    // Enum values
+    Installinator => b"installinator"
+    SledAgent => b"sled-agent"
+);
+
 /// Rows corresponding to the zone image resolver in `inv_sled_agent`.
 #[derive(Queryable, Clone, Debug, Selectable, Insertable)]
 #[diesel(table_name = inv_sled_agent)]
 pub struct InvZoneImageResolver {
     pub zone_manifest_boot_disk_path: String,
+    pub zone_manifest_source: Option<InvZoneManifestSourceEnum>,
     pub zone_manifest_mupdate_id: Option<DbTypedUuid<MupdateKind>>,
     pub zone_manifest_boot_disk_error: Option<String>,
 
@@ -1190,14 +1205,24 @@ impl InvZoneImageResolver {
     pub fn new(inv: &ZoneImageResolverInventory) -> Self {
         let zone_manifest_boot_disk_path =
             inv.zone_manifest.boot_disk_path.clone().into();
-        let zone_manifest_mupdate_id = inv
-            .zone_manifest
-            .manifest
-            .as_ref()
-            .ok()
-            .map(|manifest| manifest.mupdate_id.into());
-        let zone_manifest_boot_disk_error =
-            inv.zone_manifest.manifest.as_ref().err().cloned();
+        let (
+            zone_manifest_source,
+            zone_manifest_mupdate_id,
+            zone_manifest_boot_disk_error,
+        ) = match &inv.zone_manifest.manifest {
+            Ok(manifest) => match manifest.source {
+                OmicronZoneManifestSource::Installinator { mupdate_id } => (
+                    Some(InvZoneManifestSourceEnum::Installinator),
+                    Some(mupdate_id.into()),
+                    None,
+                ),
+                OmicronZoneManifestSource::SledAgent => {
+                    (Some(InvZoneManifestSourceEnum::SledAgent), None, None)
+                }
+            },
+            Err(error) => (None, None, Some(error.to_string())),
+        };
+
         let mupdate_override_boot_disk_path =
             inv.mupdate_override.boot_disk_path.clone().into();
         let mupdate_override_id = inv
@@ -1213,6 +1238,7 @@ impl InvZoneImageResolver {
 
         Self {
             zone_manifest_boot_disk_path,
+            zone_manifest_source,
             zone_manifest_mupdate_id,
             zone_manifest_boot_disk_error,
             mupdate_override_boot_disk_path,
@@ -1234,18 +1260,34 @@ impl InvZoneImageResolver {
         let manifest = if let Some(error) = self.zone_manifest_boot_disk_error {
             Err(error)
         } else {
-            Ok(ZoneArtifactsInventory {
-                mupdate_id: self
-                    .zone_manifest_mupdate_id
-                    .expect(
-                        "if self.zone_manifest_boot_disk_error is None, \
-                     then the db schema guarantees that mupdate_id is Some",
+            let source = match self.zone_manifest_source {
+                Some(InvZoneManifestSourceEnum::Installinator) => {
+                    OmicronZoneManifestSource::Installinator {
+                        mupdate_id: self
+                            .zone_manifest_mupdate_id
+                            .expect(
+                                "if the source is Installinator, then the
+                                 db schema guarantees that mupdate_id is Some",
+                            )
+                            .into(),
+                    }
+                }
+                Some(InvZoneManifestSourceEnum::SledAgent) => {
+                    OmicronZoneManifestSource::SledAgent
+                }
+                None => {
+                    unreachable!(
+                        "if the source is None, then the db schema guarantees \
+                         that there was an error"
                     )
-                    .into(),
-                // Unlike the mupdate ID, artifacts might really be None in
-                // case no zones were found. (This is unusual but permitted
-                // by the data model, so any checks around this should
-                // happen at a higher level.)
+                }
+            };
+
+            Ok(ZoneArtifactsInventory {
+                source,
+                // Artifacts might really be None in case no zones were found.
+                // (This is unusual but permitted by the data model, so any
+                // checks around this should happen at a higher level.)
                 artifacts: artifacts.unwrap_or_default(),
             })
         };
@@ -1332,7 +1374,7 @@ impl From<InvZoneManifestZone> for ZoneArtifactInventory {
 pub struct InvZoneManifestNonBoot {
     pub inv_collection_id: DbTypedUuid<CollectionKind>,
     pub sled_id: DbTypedUuid<SledKind>,
-    pub non_boot_zpool_id: DbTypedUuid<ZpoolKind>,
+    pub non_boot_zpool_id: DbTypedUuid<InternalZpoolKind>,
     pub path: String,
     pub is_valid: bool,
     pub message: String,
@@ -1372,7 +1414,7 @@ impl From<InvZoneManifestNonBoot> for ZoneManifestNonBootInventory {
 pub struct InvMupdateOverrideNonBoot {
     pub inv_collection_id: DbTypedUuid<CollectionKind>,
     pub sled_id: DbTypedUuid<SledKind>,
-    pub non_boot_zpool_id: DbTypedUuid<ZpoolKind>,
+    pub non_boot_zpool_id: DbTypedUuid<InternalZpoolKind>,
     pub path: String,
     pub is_valid: bool,
     pub message: String,
@@ -1387,7 +1429,7 @@ impl InvMupdateOverrideNonBoot {
         Self {
             inv_collection_id: collection_id.into(),
             sled_id: sled_id.into(),
-            non_boot_zpool_id: non_boot.zpool_id.clone().into(),
+            non_boot_zpool_id: non_boot.zpool_id.into(),
             path: non_boot.path.clone().into(),
             is_valid: non_boot.is_valid,
             message: non_boot.message.clone(),

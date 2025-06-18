@@ -1,12 +1,20 @@
--- Create table for zone manifest zone inventory.
-CREATE TABLE IF NOT EXISTS omicron.public.inv_zone_manifest_zone (
-    inv_collection_id UUID NOT NULL,
-    sled_id UUID NOT NULL,
-    zone_file_name TEXT NOT NULL,
-    path TEXT NOT NULL,
-    expected_size INT8 NOT NULL,
-    expected_sha256 STRING(64) NOT NULL,
-    error TEXT,
-
-    PRIMARY KEY (inv_collection_id, sled_id, zone_file_name)
-);
+-- Add constraints for zone image resolver columns.
+ALTER TABLE omicron.public.inv_sled_agent
+    ADD CONSTRAINT IF NOT EXISTS zone_manifest_consistency CHECK (
+        (zone_manifest_source = 'installinator'
+            AND zone_manifest_mupdate_id IS NOT NULL
+            AND zone_manifest_boot_disk_error IS NULL)
+        OR (zone_manifest_source = 'sled-agent'
+            AND zone_manifest_mupdate_id IS NULL
+            AND zone_manifest_boot_disk_error IS NULL)
+        OR (
+            zone_manifest_source IS NULL
+            AND zone_manifest_mupdate_id IS NULL
+            AND zone_manifest_boot_disk_error IS NOT NULL
+        )
+    ),
+    ADD CONSTRAINT IF NOT EXISTS mupdate_override_consistency CHECK (
+        (mupdate_override_id IS NULL
+            AND mupdate_override_boot_disk_error IS NOT NULL)
+        OR mupdate_override_boot_disk_error IS NULL
+    );

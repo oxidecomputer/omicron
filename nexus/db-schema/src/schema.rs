@@ -1603,6 +1603,7 @@ table! {
         reconciler_status_duration_secs -> Nullable<Float8>,
 
         zone_manifest_boot_disk_path -> Text,
+        zone_manifest_source -> Nullable<crate::enums::InvZoneManifestSourceEnum>,
         zone_manifest_mupdate_id -> Nullable<Uuid>,
         zone_manifest_boot_disk_error -> Nullable<Text>,
 

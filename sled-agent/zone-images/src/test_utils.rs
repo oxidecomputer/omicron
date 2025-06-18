@@ -6,17 +6,17 @@ use std::sync::Arc;
 
 use camino::Utf8Path;
 use omicron_common::disk::DiskIdentity;
-use omicron_uuid_kinds::ZpoolUuid;
+use omicron_uuid_kinds::InternalZpoolUuid;
 use sled_agent_config_reconciler::InternalDisksReceiver;
 use sled_storage::config::MountConfig;
 
 pub(crate) fn make_internal_disks_rx(
     root: &Utf8Path,
-    boot_zpool: ZpoolUuid,
-    other_zpools: &[ZpoolUuid],
+    boot_zpool: InternalZpoolUuid,
+    other_zpools: &[InternalZpoolUuid],
 ) -> InternalDisksReceiver {
-    let identity_from_zpool = |zpool: ZpoolUuid| DiskIdentity {
-        vendor: "sled-agent-zone-images-tests".to_string(),
+    let identity_from_zpool = |zpool: InternalZpoolUuid| DiskIdentity {
+        vendor: "sled-agent-zone-images-test".to_string(),
         model: "fake-disk".to_string(),
         serial: zpool.to_string(),
     };

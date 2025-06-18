@@ -1,5 +1,5 @@
--- Create table for mupdate override non-boot disk inventory.
-CREATE TABLE IF NOT EXISTS omicron.public.inv_mupdate_override_non_boot (
+-- Create table for zone manifest non-boot disk inventory.
+CREATE TABLE IF NOT EXISTS omicron.public.inv_zone_manifest_non_boot (
     inv_collection_id UUID NOT NULL,
     sled_id UUID NOT NULL,
     non_boot_zpool_id UUID NOT NULL,

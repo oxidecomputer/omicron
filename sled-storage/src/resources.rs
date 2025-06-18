@@ -18,6 +18,7 @@ use omicron_common::disk::{
     DisksManagementResult, OmicronPhysicalDiskConfig,
     OmicronPhysicalDisksConfig,
 };
+use omicron_uuid_kinds::{ExternalZpoolUuid, InternalZpoolUuid};
 use sled_hardware::DiskFirmware;
 use slog::{Logger, error, info, o, warn};
 use std::collections::BTreeMap;
@@ -109,12 +110,40 @@ impl AllDisks {
 
     /// Returns all M.2 zpools
     pub fn all_m2_zpools(&self) -> Vec<ZpoolName> {
-        self.all_zpools(DiskVariant::M2)
+        self.all_zpools(|disk| {
+            if disk.variant() == DiskVariant::M2 {
+                Some(*disk.zpool_name())
+            } else {
+                None
+            }
+        })
+    }
+
+    /// Returns all M.2 zpool IDs.
+    pub fn all_m2_zpool_ids(&self) -> Vec<InternalZpoolUuid> {
+        self.all_zpools(|disk| match disk.zpool_name() {
+            ZpoolName::Internal(id) => Some(*id),
+            ZpoolName::External(_) => None,
+        })
     }
 
     /// Returns all U.2 zpools
     pub fn all_u2_zpools(&self) -> Vec<ZpoolName> {
-        self.all_zpools(DiskVariant::U2)
+        self.all_zpools(|disk| {
+            if disk.variant() == DiskVariant::U2 {
+                Some(*disk.zpool_name())
+            } else {
+                None
+            }
+        })
+    }
+
+    /// Returns all U.2 zpool IDs.
+    pub fn all_u2_zpool_ids(&self) -> Vec<ExternalZpoolUuid> {
+        self.all_zpools(|disk| match disk.zpool_name() {
+            ZpoolName::External(id) => Some(*id),
+            ZpoolName::Internal(_) => None,
+        })
     }
 
     /// Returns all mountpoints within all M.2s for a particular dataset.
@@ -157,18 +186,16 @@ impl AllDisks {
     // Returns all zpools of a particular variant.
     //
     // Only returns zpools from disks actively being managed.
-    fn all_zpools(&self, variant: DiskVariant) -> Vec<ZpoolName> {
+    fn all_zpools<F, R>(&self, filter_map: F) -> Vec<R>
+    where
+        F: Fn(&Disk) -> Option<R>,
+    {
         self.inner
             .values
             .values()
             .filter_map(|disk| match disk {
                 ManagedDisk::ExplicitlyManaged(disk)
-                | ManagedDisk::ImplicitlyManaged(disk) => {
-                    if disk.variant() == variant {
-                        return Some(*disk.zpool_name());
-                    }
-                    None
-                }
+                | ManagedDisk::ImplicitlyManaged(disk) => filter_map(disk),
                 ManagedDisk::Unmanaged(_) => None,
             })
             .collect()
