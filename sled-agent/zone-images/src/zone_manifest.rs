@@ -690,6 +690,7 @@ mod tests {
     use dropshot::{ConfigLogging, ConfigLoggingLevel, test_util::LogContext};
     use expectorate::assert_contents;
     use iddqd::id_ord_map;
+    use omicron_uuid_kinds::MupdateUuid;
     use pretty_assertions::assert_eq;
 
     // Much of the logic in this module is shared with mupdate_override.rs, and
@@ -904,7 +905,9 @@ mod tests {
             &ConfigLogging::StderrTerminal { level: ConfigLoggingLevel::Debug },
         );
         let dir = Utf8TempDir::new().unwrap();
-        let cx = WriteInstallDatasetContext::new_basic();
+        let mut cx = WriteInstallDatasetContext::new_basic();
+        // Set the mupdate ID to a fixed value since we use it in tests below.
+        cx.mupdate_id = MupdateUuid::nil();
         let mut invalid_cx = cx.clone();
         let mut synthesized_cx = cx.clone();
         invalid_cx.make_error_cases();
