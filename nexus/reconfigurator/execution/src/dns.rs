@@ -362,6 +362,7 @@ mod test {
     use nexus_types::internal_api::params::DnsRecord;
     use nexus_types::internal_api::params::Srv;
     use nexus_types::silo::silo_dns_name;
+    use omicron_common::address::COCKROACH_HTTP_PORT;
     use omicron_common::address::IpRange;
     use omicron_common::address::Ipv6Subnet;
     use omicron_common::address::RACK_PREFIX;
@@ -518,8 +519,14 @@ mod test {
                 )
             }
             OmicronZoneType::CockroachDb { address, dataset } => {
+                let http_address =
+                    SocketAddrV6::new(*address.ip(), COCKROACH_HTTP_PORT, 0, 0);
                 BlueprintZoneType::CockroachDb(
-                    blueprint_zone_type::CockroachDb { address, dataset },
+                    blueprint_zone_type::CockroachDb {
+                        address,
+                        http_address,
+                        dataset,
+                    },
                 )
             }
             OmicronZoneType::Crucible { address, dataset } => {

@@ -468,6 +468,7 @@ impl Plan {
                 zone_type: BlueprintZoneType::CockroachDb(
                     blueprint_zone_type::CockroachDb {
                         address: listen_address,
+                        http_address,
                         dataset: OmicronZoneDataset {
                             pool_name: *dataset_name.pool(),
                         },

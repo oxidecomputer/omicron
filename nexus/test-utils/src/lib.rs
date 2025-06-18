@@ -533,6 +533,7 @@ impl<'a, N: NexusServer> ControlPlaneTestContextBuilder<'a, N> {
             zone_type: BlueprintZoneType::CockroachDb(
                 blueprint_zone_type::CockroachDb {
                     address,
+                    http_address,
                     dataset: OmicronZoneDataset { pool_name },
                 },
             ),
