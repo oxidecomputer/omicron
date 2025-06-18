@@ -656,6 +656,7 @@ mod tests {
     use omicron_test_utils::dev;
     use omicron_test_utils::dev::poll::CondCheckError;
     use omicron_test_utils::dev::poll::wait_for_watch_channel_condition;
+    use omicron_uuid_kinds::InternalZpoolUuid;
     use omicron_uuid_kinds::OmicronZoneUuid;
     use omicron_uuid_kinds::PhysicalDiskUuid;
     use omicron_uuid_kinds::ZpoolUuid;
@@ -684,14 +685,14 @@ mod tests {
         }
     }
 
-    fn make_fake_disk() -> (DiskIdentity, ZpoolUuid) {
+    fn make_fake_disk() -> (DiskIdentity, InternalZpoolUuid) {
         (
             DiskIdentity {
                 vendor: "ledger-test".into(),
                 model: "ledger-test".into(),
                 serial: "ledger-test-disk".into(),
             },
-            ZpoolUuid::new_v4(),
+            InternalZpoolUuid::new_v4(),
         )
     }
 

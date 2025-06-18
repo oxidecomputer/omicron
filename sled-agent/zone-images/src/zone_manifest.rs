@@ -4,16 +4,18 @@
 
 use camino::{Utf8Path, Utf8PathBuf};
 use iddqd::IdOrdMap;
-use omicron_common::update::{OmicronZoneFileMetadata, OmicronZoneManifest};
-use omicron_uuid_kinds::ZpoolUuid;
+use omicron_common::update::{
+    OmicronZoneFileMetadata, OmicronZoneManifest, OmicronZoneManifestSource,
+};
+use omicron_uuid_kinds::InternalZpoolUuid;
 use rayon::iter::{ParallelBridge, ParallelIterator};
 use sha2::{Digest, Sha256};
 use sled_agent_config_reconciler::InternalDisksWithBootDisk;
 use sled_agent_types::zone_images::{
-    ArcIoError, ArtifactReadResult, ZoneManifestArtifactResult,
-    ZoneManifestArtifactsResult, ZoneManifestNonBootInfo,
-    ZoneManifestNonBootMismatch, ZoneManifestNonBootResult,
-    ZoneManifestReadError, ZoneManifestStatus,
+    ArcIoError, ArtifactReadResult, InstallMetadataReadError,
+    ZoneManifestArtifactResult, ZoneManifestArtifactsResult,
+    ZoneManifestNonBootInfo, ZoneManifestNonBootMismatch,
+    ZoneManifestNonBootResult, ZoneManifestReadError, ZoneManifestStatus,
 };
 use slog::{error, info, o, warn};
 use slog_error_chain::InlineErrorChain;
@@ -24,13 +26,13 @@ use std::{
 use tufaceous_artifact::ArtifactHash;
 
 use crate::{
-    AllInstallMetadataFiles, InstallMetadataNonBootInfo,
+    AllInstallMetadataFiles, InstallMetadata, InstallMetadataNonBootInfo,
     InstallMetadataNonBootMismatch, InstallMetadataNonBootResult,
 };
 
 #[derive(Debug)]
 pub(crate) struct AllZoneManifests {
-    boot_zpool: ZpoolUuid,
+    boot_zpool: InternalZpoolUuid,
     boot_disk_path: Utf8PathBuf,
     boot_disk_result:
         Result<ZoneManifestArtifactsResult, ZoneManifestReadError>,
@@ -48,6 +50,7 @@ impl AllZoneManifests {
             log,
             OmicronZoneManifest::FILE_NAME,
             internal_disks,
+            |dataset_dir| synthesize_manifest(log, dataset_dir),
         );
 
         // Validate files on the boot disk.
@@ -56,10 +59,7 @@ impl AllZoneManifests {
                 Ok(make_artifacts_result(&files.boot_dataset_dir, manifest))
             }
             Ok(None) => {
-                // The file is missing -- this is an error.
-                Err(ZoneManifestReadError::NotFound(
-                    files.boot_disk_path.clone(),
-                ))
+                unreachable!("we always synthesize a manifest")
             }
             Err(error) => Err(ZoneManifestReadError::InstallMetadata(error)),
         };
@@ -151,8 +151,7 @@ impl AllZoneManifests {
 fn make_non_boot_info(
     info: InstallMetadataNonBootInfo<OmicronZoneManifest>,
 ) -> ZoneManifestNonBootInfo {
-    let result =
-        make_non_boot_result(&info.dataset_dir, &info.path, info.result);
+    let result = make_non_boot_result(&info.dataset_dir, info.result);
     ZoneManifestNonBootInfo {
         zpool_id: info.zpool_id,
         dataset_dir: info.dataset_dir,
@@ -163,7 +162,6 @@ fn make_non_boot_info(
 
 fn make_non_boot_result(
     dataset_dir: &Utf8Path,
-    path: &Utf8Path,
     result: InstallMetadataNonBootResult<OmicronZoneManifest>,
 ) -> ZoneManifestNonBootResult {
     match result {
@@ -174,28 +172,26 @@ fn make_non_boot_result(
             non_boot_disk_metadata,
         )),
         InstallMetadataNonBootResult::MatchesAbsent => {
-            // Error case.
-            ZoneManifestNonBootResult::ReadError(
-                ZoneManifestReadError::NotFound(path.to_owned()),
+            panic!(
+                "synthetic manifest is always generated \
+                     so MatchesAbsent can never be hit"
             )
         }
         InstallMetadataNonBootResult::Mismatch(mismatch) => match mismatch {
             InstallMetadataNonBootMismatch::BootPresentOtherAbsent => {
-                // Error case.
-                ZoneManifestNonBootResult::ReadError(
-                    ZoneManifestReadError::NotFound(path.to_owned()),
+                panic!(
+                    "synthetic manifest is always generated \
+                         so BootPresentOtherAbsent can never be hit"
                 )
             }
             InstallMetadataNonBootMismatch::BootAbsentOtherPresent {
-                non_boot_disk_info,
-            } => ZoneManifestNonBootResult::Mismatch(
-                ZoneManifestNonBootMismatch::BootAbsentOtherPresent {
-                    non_boot_disk_result: make_artifacts_result(
-                        dataset_dir,
-                        non_boot_disk_info,
-                    ),
-                },
-            ),
+                ..
+            } => {
+                panic!(
+                    "synthetic manifest is always generated \
+                         so BootAbsentOtherPresent can never be hit"
+                )
+            }
             InstallMetadataNonBootMismatch::ValueMismatch {
                 non_boot_disk_info,
             } => ZoneManifestNonBootResult::Mismatch(
@@ -218,8 +214,10 @@ fn make_non_boot_result(
             ),
             InstallMetadataNonBootMismatch::BootDiskReadError {
                 non_boot_disk_info: None,
-            } => ZoneManifestNonBootResult::ReadError(
-                ZoneManifestReadError::NotFound(path.to_owned()),
+            } => panic!(
+                "synthetic manifest is always generated \
+                     so BootDiskReadError with no non-boot info can never be \
+                     hit"
             ),
         },
         InstallMetadataNonBootResult::ReadError(error) => {
@@ -230,16 +228,23 @@ fn make_non_boot_result(
 
 fn make_artifacts_result(
     dir: &Utf8Path,
-    manifest: OmicronZoneManifest,
+    manifest: InstallMetadata<OmicronZoneManifest>,
 ) -> ZoneManifestArtifactsResult {
     let artifacts: Vec<_> = manifest
+        .value
         .zones
         .iter()
         // Parallelize artifact reading to speed it up.
         .par_bridge()
         .map(|zone| {
             let artifact_path = dir.join(&zone.file_name);
-            let status = validate_one(&artifact_path, &zone);
+            let status = if manifest.deserialized {
+                validate_one(&artifact_path, &zone)
+            } else {
+                // If the manifest is synthetic, the artifact is assumed to
+                // be valid (we just read the hash!)
+                ArtifactReadResult::Valid
+            };
 
             ZoneManifestArtifactResult {
                 file_name: zone.file_name.clone(),
@@ -252,9 +257,85 @@ fn make_artifacts_result(
         .collect();
 
     ZoneManifestArtifactsResult {
-        manifest,
+        manifest: manifest.value,
         data: artifacts.into_iter().collect(),
     }
+}
+
+fn synthesize_manifest(
+    log: &slog::Logger,
+    dataset_dir: &Utf8Path,
+) -> Result<Option<OmicronZoneManifest>, InstallMetadataReadError> {
+    let mut zones = IdOrdMap::new();
+
+    // Read all the files in the directory.
+    let entries = dataset_dir.read_dir_utf8().map_err(|error| {
+        InstallMetadataReadError::ReadDir {
+            dataset_dir: dataset_dir.to_owned(),
+            error: ArcIoError::new(error),
+        }
+    })?;
+
+    for entry in entries {
+        let entry =
+            entry.map_err(|error| InstallMetadataReadError::ReadDir {
+                dataset_dir: dataset_dir.to_owned(),
+                error: ArcIoError::new(error),
+            })?;
+
+        let ft = entry.file_type().map_err(|error| {
+            InstallMetadataReadError::ReadFileType {
+                path: entry.path().to_owned(),
+                error: ArcIoError::new(error),
+            }
+        })?;
+        if !ft.is_file() {
+            info!(
+                log,
+                "skipping non-file entry in dataset directory";
+                "file_name" => entry.file_name().to_string(),
+            );
+            continue;
+        }
+
+        // Zone files always end with `.tar.gz`.
+        if !entry.file_name().ends_with(".tar.gz") {
+            info!(
+                log,
+                "skipping non-zone file in dataset directory";
+                "file_name" => entry.file_name().to_string(),
+            );
+            continue;
+        }
+
+        let mut f = File::open(entry.path()).map_err(|error| {
+            InstallMetadataReadError::ReadFile {
+                path: entry.path().to_owned(),
+                error: ArcIoError::new(error),
+            }
+        })?;
+
+        match compute_size_and_hash(&mut f) {
+            Ok((size, hash)) => {
+                zones.insert_overwrite(OmicronZoneFileMetadata {
+                    file_name: entry.file_name().to_string(),
+                    file_size: size,
+                    hash,
+                });
+            }
+            Err(error) => {
+                return Err(InstallMetadataReadError::ReadFile {
+                    path: entry.path().to_owned(),
+                    error: ArcIoError::new(error),
+                });
+            }
+        }
+    }
+
+    Ok(Some(OmicronZoneManifest {
+        source: OmicronZoneManifestSource::SledAgent,
+        zones,
+    }))
 }
 
 fn validate_one(
@@ -374,23 +455,27 @@ mod tests {
         );
         let dir = Utf8TempDir::new().unwrap();
         let cx = WriteInstallDatasetContext::new_basic();
+        let mut synthesized_cx = cx.clone();
+        synthesized_cx.write_zone_manifest_to_disk(false);
 
         // Write the valid manifest to the non-boot disk.
         cx.write_to(&dir.child(&NON_BOOT_PATHS.install_dataset)).unwrap();
-        // Create the install dataset directory, but not the manifest, on the
-        // boot disk.
-        dir.child(&BOOT_PATHS.install_dataset).create_dir_all().unwrap();
+        // Create the install dataset directory and zones, but not the manifest,
+        // on the boot disk.
+        synthesized_cx
+            .write_to(&dir.child(&BOOT_PATHS.install_dataset))
+            .unwrap();
 
         let internal_disks =
             make_internal_disks_rx(dir.path(), BOOT_UUID, &[NON_BOOT_UUID])
                 .current_with_boot_disk();
         let manifests =
             AllZoneManifests::read_all(&logctx.log, &internal_disks);
+        // For the boot disk, we should synthesize a manifest.
         assert_eq!(
-            manifests.boot_disk_result.as_ref().unwrap_err(),
-            &ZoneManifestReadError::NotFound(
-                dir.path().join(&BOOT_PATHS.zones_json)
-            ),
+            manifests.boot_disk_result.as_ref().unwrap(),
+            &synthesized_cx
+                .expected_result(&dir.path().join(&BOOT_PATHS.install_dataset)),
         );
 
         assert_eq!(
@@ -401,7 +486,10 @@ mod tests {
                     dataset_dir: dir.path().join(&NON_BOOT_PATHS.install_dataset),
                     path: dir.path().join(&NON_BOOT_PATHS.zones_json),
                     result: ZoneManifestNonBootResult::Mismatch(
-                        ZoneManifestNonBootMismatch::BootAbsentOtherPresent {
+                        // This is a mismatch because the boot disk manifest is
+                        // synthesized and the non-boot disk manifest is
+                        // written by installinator.
+                        ZoneManifestNonBootMismatch::ValueMismatch {
                             non_boot_disk_result: cx.expected_result(
                                 &dir.path().join(&NON_BOOT_PATHS.install_dataset)
                             ),
@@ -523,16 +611,20 @@ mod tests {
         let dir = Utf8TempDir::new().unwrap();
         let cx = WriteInstallDatasetContext::new_basic();
         let mut invalid_cx = cx.clone();
+        let mut synthesized_cx = cx.clone();
         invalid_cx.make_error_cases();
 
         cx.write_to(&dir.child(&BOOT_PATHS.install_dataset)).unwrap();
         invalid_cx
             .write_to(&dir.child(&NON_BOOT_PATHS.install_dataset))
             .unwrap();
-        // Zone manifest file that's absent.
-        dir.child(&NON_BOOT_2_PATHS.install_dataset).create_dir_all().unwrap();
         // Read error (empty file).
         dir.child(&NON_BOOT_3_PATHS.zones_json).touch().unwrap();
+        // Zone manifest file that's absent (but the zones are present).
+        synthesized_cx.write_zone_manifest_to_disk(false);
+        synthesized_cx
+            .write_to(&dir.child(&NON_BOOT_2_PATHS.install_dataset))
+            .unwrap();
 
         let internal_disks = make_internal_disks_rx(
             dir.path(),
@@ -570,10 +662,12 @@ mod tests {
                     zpool_id: NON_BOOT_2_UUID,
                     dataset_dir: dir.path().join(&NON_BOOT_2_PATHS.install_dataset),
                     path: dir.path().join(&NON_BOOT_2_PATHS.zones_json),
-                    result: ZoneManifestNonBootResult::ReadError(
-                        ZoneManifestReadError::NotFound(
-                            dir.path().join(&NON_BOOT_2_PATHS.zones_json)
-                        ),
+                    result: ZoneManifestNonBootResult::Mismatch(
+                        ZoneManifestNonBootMismatch::ValueMismatch {
+                            non_boot_disk_result: synthesized_cx.expected_result(
+                                &dir.path().join(&NON_BOOT_2_PATHS.install_dataset),
+                            ),
+                        }
                     )
                 },
                 ZoneManifestNonBootInfo {

@@ -13,7 +13,7 @@ use crate::InstallMetadataNonBootResult;
 use camino::Utf8PathBuf;
 use iddqd::IdOrdMap;
 use omicron_common::update::MupdateOverrideInfo;
-use omicron_uuid_kinds::ZpoolUuid;
+use omicron_uuid_kinds::InternalZpoolUuid;
 use sled_agent_config_reconciler::InternalDisksWithBootDisk;
 use sled_agent_types::zone_images::MupdateOverrideNonBootInfo;
 use sled_agent_types::zone_images::MupdateOverrideNonBootMismatch;
@@ -28,7 +28,7 @@ use slog_error_chain::InlineErrorChain;
 
 #[derive(Debug)]
 pub(crate) struct AllMupdateOverrides {
-    boot_zpool: ZpoolUuid,
+    boot_zpool: InternalZpoolUuid,
     boot_disk_path: Utf8PathBuf,
     boot_disk_override:
         Result<Option<MupdateOverrideInfo>, MupdateOverrideReadError>,
@@ -48,11 +48,17 @@ impl AllMupdateOverrides {
             log,
             MupdateOverrideInfo::FILE_NAME,
             internal_disks,
+            // For mupdate overrides there is no default value.
+            |_| Ok(None),
         );
 
-        let boot_disk_override = files
-            .boot_disk_metadata
-            .map_err(MupdateOverrideReadError::InstallMetadata);
+        let boot_disk_override = match files.boot_disk_metadata {
+            // There is no default value provided for mupdate overrides, so we
+            // don't need to care about the InstallMetadata wrapper.
+            Ok(Some(metadata)) => Ok(Some(metadata.value)),
+            Ok(None) => Ok(None),
+            Err(error) => Err(MupdateOverrideReadError::InstallMetadata(error)),
+        };
         let non_boot_disk_overrides = files
             .non_boot_disk_metadata
             .into_iter()
@@ -140,18 +146,23 @@ fn make_non_boot_info(
                 }
                 InstallMetadataNonBootMismatch::BootAbsentOtherPresent {
                     non_boot_disk_info,
-                } => MupdateOverrideNonBootMismatch::BootAbsentOtherPresent {
-                    non_boot_disk_info,
-                },
+                } => {
+                    // Here and below, we don't return a default value while
+                    // constructing the set, so we can get rid of the
+                    // InstallMetadata wrapper.
+                    MupdateOverrideNonBootMismatch::BootAbsentOtherPresent {
+                        non_boot_disk_info: non_boot_disk_info.value,
+                    }
+                }
                 InstallMetadataNonBootMismatch::ValueMismatch {
                     non_boot_disk_info,
                 } => MupdateOverrideNonBootMismatch::ValueMismatch {
-                    non_boot_disk_info,
+                    non_boot_disk_info: non_boot_disk_info.value,
                 },
                 InstallMetadataNonBootMismatch::BootDiskReadError {
                     non_boot_disk_info,
                 } => MupdateOverrideNonBootMismatch::BootDiskReadError {
-                    non_boot_disk_info,
+                    non_boot_disk_info: non_boot_disk_info.map(|v| v.value),
                 },
             };
             MupdateOverrideNonBootResult::Mismatch(mupdate_mismatch)

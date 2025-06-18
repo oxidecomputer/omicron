@@ -7,7 +7,7 @@ use std::{fmt, fs::FileType, io, sync::Arc};
 use camino::Utf8PathBuf;
 use iddqd::{IdOrdItem, IdOrdMap, id_upcast};
 use omicron_common::update::{MupdateOverrideInfo, OmicronZoneManifest};
-use omicron_uuid_kinds::ZpoolUuid;
+use omicron_uuid_kinds::InternalZpoolUuid;
 use slog::{info, o, warn};
 use slog_error_chain::InlineErrorChain;
 use thiserror::Error;
@@ -174,7 +174,7 @@ impl fmt::Display for ZoneManifestArtifactDisplay<'_> {
 #[derive(Clone, Debug, PartialEq)]
 pub struct ZoneManifestNonBootInfo {
     /// The ID of the zpool.
-    pub zpool_id: ZpoolUuid,
+    pub zpool_id: InternalZpoolUuid,
 
     /// The dataset directory.
     pub dataset_dir: Utf8PathBuf,
@@ -197,7 +197,7 @@ impl ZoneManifestNonBootInfo {
 }
 
 impl IdOrdItem for ZoneManifestNonBootInfo {
-    type Key<'a> = ZpoolUuid;
+    type Key<'a> = InternalZpoolUuid;
 
     fn key(&self) -> Self::Key<'_> {
         self.zpool_id
@@ -254,15 +254,6 @@ impl ZoneManifestNonBootResult {
                 }
             }
             Self::Mismatch(mismatch) => match mismatch {
-                ZoneManifestNonBootMismatch::BootAbsentOtherPresent {
-                    non_boot_disk_result,
-                } => {
-                    warn!(
-                        log,
-                        "zone manifest absent on boot disk but present on non-boot disk";
-                        "non_boot_disk_result" => %non_boot_disk_result.display(),
-                    );
-                }
                 ZoneManifestNonBootMismatch::ValueMismatch {
                     non_boot_disk_result,
                 } => {
@@ -296,12 +287,6 @@ impl ZoneManifestNonBootResult {
 
 #[derive(Clone, Debug, PartialEq)]
 pub enum ZoneManifestNonBootMismatch {
-    /// The file is absent on the boot disk but present on the other disk.
-    BootAbsentOtherPresent {
-        /// The result of reading the file on the other disk.
-        non_boot_disk_result: ZoneManifestArtifactsResult,
-    },
-
     /// The file's contents differ between the boot disk and the other disk.
     ValueMismatch { non_boot_disk_result: ZoneManifestArtifactsResult },
 
@@ -332,7 +317,7 @@ pub struct MupdateOverrideStatus {
 #[derive(Clone, Debug, PartialEq)]
 pub struct MupdateOverrideNonBootInfo {
     /// The ID of the zpool.
-    pub zpool_id: ZpoolUuid,
+    pub zpool_id: InternalZpoolUuid,
 
     /// The path to the mupdate override file.
     pub path: Utf8PathBuf,
@@ -380,7 +365,7 @@ impl MupdateOverrideNonBootInfo {
 }
 
 impl IdOrdItem for MupdateOverrideNonBootInfo {
-    type Key<'a> = ZpoolUuid;
+    type Key<'a> = InternalZpoolUuid;
 
     fn key(&self) -> Self::Key<'_> {
         self.zpool_id
@@ -425,8 +410,6 @@ pub enum MupdateOverrideNonBootMismatch {
 pub enum ZoneManifestReadError {
     #[error("error reading install metadata")]
     InstallMetadata(#[from] InstallMetadataReadError),
-    #[error("zone manifest not found at `{0}`")]
-    NotFound(Utf8PathBuf),
 }
 
 #[derive(Clone, Debug, Error, PartialEq)]
@@ -484,6 +467,24 @@ pub enum InstallMetadataReadError {
         contents: String,
         #[source]
         error: ArcSerdeJsonError,
+    },
+    #[error("error reading entries from install dataset dir {dataset_dir}")]
+    ReadDir {
+        dataset_dir: Utf8PathBuf,
+        #[source]
+        error: ArcIoError,
+    },
+    #[error("error reading file type for {path}")]
+    ReadFileType {
+        path: Utf8PathBuf,
+        #[source]
+        error: ArcIoError,
+    },
+    #[error("error reading file {path}")]
+    ReadFile {
+        path: Utf8PathBuf,
+        #[source]
+        error: ArcIoError,
     },
 }
 
