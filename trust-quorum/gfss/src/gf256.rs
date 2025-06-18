@@ -24,8 +24,8 @@
 
 use core::fmt::{self, Binary, Display, Formatter, LowerHex, UpperHex};
 use core::ops::{Add, AddAssign, Div, Mul, MulAssign, Sub};
-use rand::Rng;
-use rand::distributions::{Distribution, Standard};
+use rand09::Rng;
+use rand09::distr::{Distribution, StandardUniform};
 use serde::{Deserialize, Serialize};
 use subtle::ConstantTimeEq;
 use zeroize::Zeroize;
@@ -108,9 +108,9 @@ impl Binary for Gf256 {
     }
 }
 
-impl Distribution<Gf256> for Standard {
+impl Distribution<Gf256> for StandardUniform {
     fn sample<R: Rng + ?Sized>(&self, rng: &mut R) -> Gf256 {
-        Gf256(rng.r#gen())
+        Gf256(rng.random())
     }
 }
 
@@ -207,7 +207,7 @@ impl Div for Gf256 {
 ///
 /// See the `test_docs_example` unit test at the bottom of this file to confirm
 /// this math.
-///   
+///
 /// In this algorithm, we use the value `0x1b`, which is our irreducible
 /// polynomial without the high term. We do this because of the following
 /// equality in GF(2^8), which follows from long-division of polynomials:
