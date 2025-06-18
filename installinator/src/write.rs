@@ -25,6 +25,7 @@ use omicron_common::{
     disk::M2Slot,
     update::{
         MupdateOverrideInfo, OmicronZoneFileMetadata, OmicronZoneManifest,
+        OmicronZoneManifestSource,
     },
 };
 use omicron_uuid_kinds::{MupdateOverrideUuid, MupdateUuid};
@@ -828,8 +829,12 @@ impl ControlPlaneZoneWriteContext<'_> {
     async fn omicron_zone_manifest_artifact(&self) -> BufList {
         let zones = compute_zone_hashes(&self.zones).await;
 
-        let omicron_zone_manifest =
-            OmicronZoneManifest { mupdate_id: self.mupdate_id, zones };
+        let omicron_zone_manifest = OmicronZoneManifest {
+            source: OmicronZoneManifestSource::Installinator {
+                mupdate_id: self.mupdate_id,
+            },
+            zones,
+        };
         let json_bytes = serde_json::to_vec(&omicron_zone_manifest)
             .expect("this serialization is infallible");
         BufList::from(json_bytes)
