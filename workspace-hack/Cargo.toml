@@ -73,7 +73,7 @@ ipnetwork = { version = "0.21.1", features = ["schemars", "serde"] }
 itertools-93f6ce9d446188ac = { package = "itertools", version = "0.10.5" }
 lalrpop-util = { version = "0.19.12" }
 lazy_static = { version = "1.5.0", default-features = false, features = ["spin_no_std"] }
-libc = { version = "0.2.173", features = ["extra_traits"] }
+libc = { version = "0.2.174", features = ["extra_traits"] }
 log = { version = "0.4.27", default-features = false, features = ["kv_unstable", "std"] }
 managed = { version = "0.8.0", default-features = false, features = ["alloc", "map"] }
 memchr = { version = "2.7.4" }
@@ -201,7 +201,7 @@ ipnetwork = { version = "0.21.1", features = ["schemars", "serde"] }
 itertools-93f6ce9d446188ac = { package = "itertools", version = "0.10.5" }
 lalrpop-util = { version = "0.19.12" }
 lazy_static = { version = "1.5.0", default-features = false, features = ["spin_no_std"] }
-libc = { version = "0.2.173", features = ["extra_traits"] }
+libc = { version = "0.2.174", features = ["extra_traits"] }
 log = { version = "0.4.27", default-features = false, features = ["kv_unstable", "std"] }
 managed = { version = "0.8.0", default-features = false, features = ["alloc", "map"] }
 memchr = { version = "2.7.4" }
