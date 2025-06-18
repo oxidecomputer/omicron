@@ -31,26 +31,26 @@ subnet fd00:1122:3344:101::/64
 SP active version:   Some("0.0.1")
 SP inactive version: None
 zpools (10):
-    0f3f1de0-7e5a-4032-a73a-74fbdabbd2fa (zpool)
-    SledDisk { disk_identity: DiskIdentity { vendor: "fake-vendor", model: "fake-model", serial: "serial-0f3f1de0-7e5a-4032-a73a-74fbdabbd2fa" }, disk_id: 2dbf19d4-7b7d-48d5-9d1c-64ac2922093b (physical_disk), policy: InService, state: Active }
-    104f891f-e018-4787-a346-3cfaa6cc7e9d (zpool)
-    SledDisk { disk_identity: DiskIdentity { vendor: "fake-vendor", model: "fake-model", serial: "serial-104f891f-e018-4787-a346-3cfaa6cc7e9d" }, disk_id: 301ab9e6-bdc1-4287-a37d-2604893712f8 (physical_disk), policy: InService, state: Active }
-    111f7a4e-5696-4be8-b13d-8ef314bc83e0 (zpool)
-    SledDisk { disk_identity: DiskIdentity { vendor: "fake-vendor", model: "fake-model", serial: "serial-111f7a4e-5696-4be8-b13d-8ef314bc83e0" }, disk_id: 1f77c099-8205-41b3-ac34-3807f3bbaf56 (physical_disk), policy: InService, state: Active }
-    5a1786e9-770d-4ac9-b291-4501398170b5 (zpool)
-    SledDisk { disk_identity: DiskIdentity { vendor: "fake-vendor", model: "fake-model", serial: "serial-5a1786e9-770d-4ac9-b291-4501398170b5" }, disk_id: b111a961-be34-4ede-80e2-ef92af5e0a1f (physical_disk), policy: InService, state: Active }
-    658fef3f-c3cd-4e6d-8823-79f9a0bec4c0 (zpool)
-    SledDisk { disk_identity: DiskIdentity { vendor: "fake-vendor", model: "fake-model", serial: "serial-658fef3f-c3cd-4e6d-8823-79f9a0bec4c0" }, disk_id: b3a01997-9894-4abd-83ad-e2d520d4c3a0 (physical_disk), policy: InService, state: Active }
-    73ce66f5-a39a-4dd1-ad84-5647a5038d35 (zpool)
-    SledDisk { disk_identity: DiskIdentity { vendor: "fake-vendor", model: "fake-model", serial: "serial-73ce66f5-a39a-4dd1-ad84-5647a5038d35" }, disk_id: 48568b33-8f21-4537-b330-666aa3334236 (physical_disk), policy: InService, state: Active }
-    7480aa69-3a3d-478d-bbdb-ba1fb74752ef (zpool)
-    SledDisk { disk_identity: DiskIdentity { vendor: "fake-vendor", model: "fake-model", serial: "serial-7480aa69-3a3d-478d-bbdb-ba1fb74752ef" }, disk_id: 9a968677-4da7-40b3-9579-9c54a7620b58 (physical_disk), policy: InService, state: Active }
-    9ff438c6-00bb-4daf-9013-87969c892b02 (zpool)
-    SledDisk { disk_identity: DiskIdentity { vendor: "fake-vendor", model: "fake-model", serial: "serial-9ff438c6-00bb-4daf-9013-87969c892b02" }, disk_id: cc22404e-8a30-4b98-9552-790e84a162bd (physical_disk), policy: InService, state: Active }
-    ad0602bf-f577-401a-a28b-687c3d86f6bb (zpool)
-    SledDisk { disk_identity: DiskIdentity { vendor: "fake-vendor", model: "fake-model", serial: "serial-ad0602bf-f577-401a-a28b-687c3d86f6bb" }, disk_id: 32baf388-4cd9-4435-b70b-d8b2e515d918 (physical_disk), policy: InService, state: Active }
-    da6e6a21-8d32-46f9-a2b3-635f6700c3f0 (zpool)
-    SledDisk { disk_identity: DiskIdentity { vendor: "fake-vendor", model: "fake-model", serial: "serial-da6e6a21-8d32-46f9-a2b3-635f6700c3f0" }, disk_id: 1e7ee543-fe10-4ba7-b8f3-d579e8e0803a (physical_disk), policy: InService, state: Active }
+    674c6591-11be-44f2-9df1-db3bb663ec01 (zpool)
+    SledDisk { disk_identity: DiskIdentity { vendor: "fake-vendor", model: "fake-model", serial: "serial-674c6591-11be-44f2-9df1-db3bb663ec01" }, disk_id: a52a7c57-7fd0-4139-8293-bda299523c53 (physical_disk), policy: InService, state: Active }
+    677dd944-6761-4a89-8606-4d7fe485a63c (zpool)
+    SledDisk { disk_identity: DiskIdentity { vendor: "fake-vendor", model: "fake-model", serial: "serial-677dd944-6761-4a89-8606-4d7fe485a63c" }, disk_id: fcf54220-3ff4-463e-b4a2-58447f51b68c (physical_disk), policy: InService, state: Active }
+    70e81eac-6ed4-4c2d-b16a-fabe2aec56fc (zpool)
+    SledDisk { disk_identity: DiskIdentity { vendor: "fake-vendor", model: "fake-model", serial: "serial-70e81eac-6ed4-4c2d-b16a-fabe2aec56fc" }, disk_id: 42643377-e4d1-41a0-ac32-38d6e56cb22a (physical_disk), policy: InService, state: Active }
+    7b26c659-bf8f-4c60-ab75-fd2dd8ef5866 (zpool)
+    SledDisk { disk_identity: DiskIdentity { vendor: "fake-vendor", model: "fake-model", serial: "serial-7b26c659-bf8f-4c60-ab75-fd2dd8ef5866" }, disk_id: 5b2df08c-ea6a-4771-8363-80031249c97b (physical_disk), policy: InService, state: Active }
+    8e0008d0-9313-4caf-bc20-305ccce29846 (zpool)
+    SledDisk { disk_identity: DiskIdentity { vendor: "fake-vendor", model: "fake-model", serial: "serial-8e0008d0-9313-4caf-bc20-305ccce29846" }, disk_id: 0f5e7fc1-8d87-45f8-a00e-f5127b7a3905 (physical_disk), policy: InService, state: Active }
+    929e328a-dd25-447d-9af7-6e2216adf4aa (zpool)
+    SledDisk { disk_identity: DiskIdentity { vendor: "fake-vendor", model: "fake-model", serial: "serial-929e328a-dd25-447d-9af7-6e2216adf4aa" }, disk_id: f62e3201-e89b-4667-9707-e49f86b9df07 (physical_disk), policy: InService, state: Active }
+    9a25ff89-5446-4233-bf58-20a24c80aa58 (zpool)
+    SledDisk { disk_identity: DiskIdentity { vendor: "fake-vendor", model: "fake-model", serial: "serial-9a25ff89-5446-4233-bf58-20a24c80aa58" }, disk_id: 49b87668-e08b-4939-91f7-a82612e2ebff (physical_disk), policy: InService, state: Active }
+    a9cd1fe6-f1ba-4227-bff7-978992c3d6ad (zpool)
+    SledDisk { disk_identity: DiskIdentity { vendor: "fake-vendor", model: "fake-model", serial: "serial-a9cd1fe6-f1ba-4227-bff7-978992c3d6ad" }, disk_id: dcde393a-3ac6-4e98-8833-012787e73e15 (physical_disk), policy: InService, state: Active }
+    b3ede1e1-3264-4b21-8c7d-9ea5d3715210 (zpool)
+    SledDisk { disk_identity: DiskIdentity { vendor: "fake-vendor", model: "fake-model", serial: "serial-b3ede1e1-3264-4b21-8c7d-9ea5d3715210" }, disk_id: 4863117c-b77d-4dbc-996d-d18ddf0f5ff7 (physical_disk), policy: InService, state: Active }
+    e0f5c287-3296-4a35-b597-7452283ff329 (zpool)
+    SledDisk { disk_identity: DiskIdentity { vendor: "fake-vendor", model: "fake-model", serial: "serial-e0f5c287-3296-4a35-b597-7452283ff329" }, disk_id: 0f13d3dd-1830-4a06-b664-e6f0473ba704 (physical_disk), policy: InService, state: Active }
 
 
 > sled-add 90c1102a-b9f5-4d88-92a2-60d54a2d98cc
@@ -78,26 +78,26 @@ subnet fd00:1122:3344:101::/64
 SP active version:   Some("1.0.0")
 SP inactive version: None
 zpools (10):
-    0f3f1de0-7e5a-4032-a73a-74fbdabbd2fa (zpool)
-    SledDisk { disk_identity: DiskIdentity { vendor: "fake-vendor", model: "fake-model", serial: "serial-0f3f1de0-7e5a-4032-a73a-74fbdabbd2fa" }, disk_id: 2dbf19d4-7b7d-48d5-9d1c-64ac2922093b (physical_disk), policy: InService, state: Active }
-    104f891f-e018-4787-a346-3cfaa6cc7e9d (zpool)
-    SledDisk { disk_identity: DiskIdentity { vendor: "fake-vendor", model: "fake-model", serial: "serial-104f891f-e018-4787-a346-3cfaa6cc7e9d" }, disk_id: 301ab9e6-bdc1-4287-a37d-2604893712f8 (physical_disk), policy: InService, state: Active }
-    111f7a4e-5696-4be8-b13d-8ef314bc83e0 (zpool)
-    SledDisk { disk_identity: DiskIdentity { vendor: "fake-vendor", model: "fake-model", serial: "serial-111f7a4e-5696-4be8-b13d-8ef314bc83e0" }, disk_id: 1f77c099-8205-41b3-ac34-3807f3bbaf56 (physical_disk), policy: InService, state: Active }
-    5a1786e9-770d-4ac9-b291-4501398170b5 (zpool)
-    SledDisk { disk_identity: DiskIdentity { vendor: "fake-vendor", model: "fake-model", serial: "serial-5a1786e9-770d-4ac9-b291-4501398170b5" }, disk_id: b111a961-be34-4ede-80e2-ef92af5e0a1f (physical_disk), policy: InService, state: Active }
-    658fef3f-c3cd-4e6d-8823-79f9a0bec4c0 (zpool)
-    SledDisk { disk_identity: DiskIdentity { vendor: "fake-vendor", model: "fake-model", serial: "serial-658fef3f-c3cd-4e6d-8823-79f9a0bec4c0" }, disk_id: b3a01997-9894-4abd-83ad-e2d520d4c3a0 (physical_disk), policy: InService, state: Active }
-    73ce66f5-a39a-4dd1-ad84-5647a5038d35 (zpool)
-    SledDisk { disk_identity: DiskIdentity { vendor: "fake-vendor", model: "fake-model", serial: "serial-73ce66f5-a39a-4dd1-ad84-5647a5038d35" }, disk_id: 48568b33-8f21-4537-b330-666aa3334236 (physical_disk), policy: InService, state: Active }
-    7480aa69-3a3d-478d-bbdb-ba1fb74752ef (zpool)
-    SledDisk { disk_identity: DiskIdentity { vendor: "fake-vendor", model: "fake-model", serial: "serial-7480aa69-3a3d-478d-bbdb-ba1fb74752ef" }, disk_id: 9a968677-4da7-40b3-9579-9c54a7620b58 (physical_disk), policy: InService, state: Active }
-    9ff438c6-00bb-4daf-9013-87969c892b02 (zpool)
-    SledDisk { disk_identity: DiskIdentity { vendor: "fake-vendor", model: "fake-model", serial: "serial-9ff438c6-00bb-4daf-9013-87969c892b02" }, disk_id: cc22404e-8a30-4b98-9552-790e84a162bd (physical_disk), policy: InService, state: Active }
-    ad0602bf-f577-401a-a28b-687c3d86f6bb (zpool)
-    SledDisk { disk_identity: DiskIdentity { vendor: "fake-vendor", model: "fake-model", serial: "serial-ad0602bf-f577-401a-a28b-687c3d86f6bb" }, disk_id: 32baf388-4cd9-4435-b70b-d8b2e515d918 (physical_disk), policy: InService, state: Active }
-    da6e6a21-8d32-46f9-a2b3-635f6700c3f0 (zpool)
-    SledDisk { disk_identity: DiskIdentity { vendor: "fake-vendor", model: "fake-model", serial: "serial-da6e6a21-8d32-46f9-a2b3-635f6700c3f0" }, disk_id: 1e7ee543-fe10-4ba7-b8f3-d579e8e0803a (physical_disk), policy: InService, state: Active }
+    674c6591-11be-44f2-9df1-db3bb663ec01 (zpool)
+    SledDisk { disk_identity: DiskIdentity { vendor: "fake-vendor", model: "fake-model", serial: "serial-674c6591-11be-44f2-9df1-db3bb663ec01" }, disk_id: a52a7c57-7fd0-4139-8293-bda299523c53 (physical_disk), policy: InService, state: Active }
+    677dd944-6761-4a89-8606-4d7fe485a63c (zpool)
+    SledDisk { disk_identity: DiskIdentity { vendor: "fake-vendor", model: "fake-model", serial: "serial-677dd944-6761-4a89-8606-4d7fe485a63c" }, disk_id: fcf54220-3ff4-463e-b4a2-58447f51b68c (physical_disk), policy: InService, state: Active }
+    70e81eac-6ed4-4c2d-b16a-fabe2aec56fc (zpool)
+    SledDisk { disk_identity: DiskIdentity { vendor: "fake-vendor", model: "fake-model", serial: "serial-70e81eac-6ed4-4c2d-b16a-fabe2aec56fc" }, disk_id: 42643377-e4d1-41a0-ac32-38d6e56cb22a (physical_disk), policy: InService, state: Active }
+    7b26c659-bf8f-4c60-ab75-fd2dd8ef5866 (zpool)
+    SledDisk { disk_identity: DiskIdentity { vendor: "fake-vendor", model: "fake-model", serial: "serial-7b26c659-bf8f-4c60-ab75-fd2dd8ef5866" }, disk_id: 5b2df08c-ea6a-4771-8363-80031249c97b (physical_disk), policy: InService, state: Active }
+    8e0008d0-9313-4caf-bc20-305ccce29846 (zpool)
+    SledDisk { disk_identity: DiskIdentity { vendor: "fake-vendor", model: "fake-model", serial: "serial-8e0008d0-9313-4caf-bc20-305ccce29846" }, disk_id: 0f5e7fc1-8d87-45f8-a00e-f5127b7a3905 (physical_disk), policy: InService, state: Active }
+    929e328a-dd25-447d-9af7-6e2216adf4aa (zpool)
+    SledDisk { disk_identity: DiskIdentity { vendor: "fake-vendor", model: "fake-model", serial: "serial-929e328a-dd25-447d-9af7-6e2216adf4aa" }, disk_id: f62e3201-e89b-4667-9707-e49f86b9df07 (physical_disk), policy: InService, state: Active }
+    9a25ff89-5446-4233-bf58-20a24c80aa58 (zpool)
+    SledDisk { disk_identity: DiskIdentity { vendor: "fake-vendor", model: "fake-model", serial: "serial-9a25ff89-5446-4233-bf58-20a24c80aa58" }, disk_id: 49b87668-e08b-4939-91f7-a82612e2ebff (physical_disk), policy: InService, state: Active }
+    a9cd1fe6-f1ba-4227-bff7-978992c3d6ad (zpool)
+    SledDisk { disk_identity: DiskIdentity { vendor: "fake-vendor", model: "fake-model", serial: "serial-a9cd1fe6-f1ba-4227-bff7-978992c3d6ad" }, disk_id: dcde393a-3ac6-4e98-8833-012787e73e15 (physical_disk), policy: InService, state: Active }
+    b3ede1e1-3264-4b21-8c7d-9ea5d3715210 (zpool)
+    SledDisk { disk_identity: DiskIdentity { vendor: "fake-vendor", model: "fake-model", serial: "serial-b3ede1e1-3264-4b21-8c7d-9ea5d3715210" }, disk_id: 4863117c-b77d-4dbc-996d-d18ddf0f5ff7 (physical_disk), policy: InService, state: Active }
+    e0f5c287-3296-4a35-b597-7452283ff329 (zpool)
+    SledDisk { disk_identity: DiskIdentity { vendor: "fake-vendor", model: "fake-model", serial: "serial-e0f5c287-3296-4a35-b597-7452283ff329" }, disk_id: 0f13d3dd-1830-4a06-b664-e6f0473ba704 (physical_disk), policy: InService, state: Active }
 
 
 > sled-update-sp dde1c0e2-b10d-4621-b420-f179f7a7a00a --inactive 2.0.0
@@ -110,26 +110,26 @@ subnet fd00:1122:3344:101::/64
 SP active version:   Some("1.0.0")
 SP inactive version: Some("2.0.0")
 zpools (10):
-    0f3f1de0-7e5a-4032-a73a-74fbdabbd2fa (zpool)
-    SledDisk { disk_identity: DiskIdentity { vendor: "fake-vendor", model: "fake-model", serial: "serial-0f3f1de0-7e5a-4032-a73a-74fbdabbd2fa" }, disk_id: 2dbf19d4-7b7d-48d5-9d1c-64ac2922093b (physical_disk), policy: InService, state: Active }
-    104f891f-e018-4787-a346-3cfaa6cc7e9d (zpool)
-    SledDisk { disk_identity: DiskIdentity { vendor: "fake-vendor", model: "fake-model", serial: "serial-104f891f-e018-4787-a346-3cfaa6cc7e9d" }, disk_id: 301ab9e6-bdc1-4287-a37d-2604893712f8 (physical_disk), policy: InService, state: Active }
-    111f7a4e-5696-4be8-b13d-8ef314bc83e0 (zpool)
-    SledDisk { disk_identity: DiskIdentity { vendor: "fake-vendor", model: "fake-model", serial: "serial-111f7a4e-5696-4be8-b13d-8ef314bc83e0" }, disk_id: 1f77c099-8205-41b3-ac34-3807f3bbaf56 (physical_disk), policy: InService, state: Active }
-    5a1786e9-770d-4ac9-b291-4501398170b5 (zpool)
-    SledDisk { disk_identity: DiskIdentity { vendor: "fake-vendor", model: "fake-model", serial: "serial-5a1786e9-770d-4ac9-b291-4501398170b5" }, disk_id: b111a961-be34-4ede-80e2-ef92af5e0a1f (physical_disk), policy: InService, state: Active }
-    658fef3f-c3cd-4e6d-8823-79f9a0bec4c0 (zpool)
-    SledDisk { disk_identity: DiskIdentity { vendor: "fake-vendor", model: "fake-model", serial: "serial-658fef3f-c3cd-4e6d-8823-79f9a0bec4c0" }, disk_id: b3a01997-9894-4abd-83ad-e2d520d4c3a0 (physical_disk), policy: InService, state: Active }
-    73ce66f5-a39a-4dd1-ad84-5647a5038d35 (zpool)
-    SledDisk { disk_identity: DiskIdentity { vendor: "fake-vendor", model: "fake-model", serial: "serial-73ce66f5-a39a-4dd1-ad84-5647a5038d35" }, disk_id: 48568b33-8f21-4537-b330-666aa3334236 (physical_disk), policy: InService, state: Active }
-    7480aa69-3a3d-478d-bbdb-ba1fb74752ef (zpool)
-    SledDisk { disk_identity: DiskIdentity { vendor: "fake-vendor", model: "fake-model", serial: "serial-7480aa69-3a3d-478d-bbdb-ba1fb74752ef" }, disk_id: 9a968677-4da7-40b3-9579-9c54a7620b58 (physical_disk), policy: InService, state: Active }
-    9ff438c6-00bb-4daf-9013-87969c892b02 (zpool)
-    SledDisk { disk_identity: DiskIdentity { vendor: "fake-vendor", model: "fake-model", serial: "serial-9ff438c6-00bb-4daf-9013-87969c892b02" }, disk_id: cc22404e-8a30-4b98-9552-790e84a162bd (physical_disk), policy: InService, state: Active }
-    ad0602bf-f577-401a-a28b-687c3d86f6bb (zpool)
-    SledDisk { disk_identity: DiskIdentity { vendor: "fake-vendor", model: "fake-model", serial: "serial-ad0602bf-f577-401a-a28b-687c3d86f6bb" }, disk_id: 32baf388-4cd9-4435-b70b-d8b2e515d918 (physical_disk), policy: InService, state: Active }
-    da6e6a21-8d32-46f9-a2b3-635f6700c3f0 (zpool)
-    SledDisk { disk_identity: DiskIdentity { vendor: "fake-vendor", model: "fake-model", serial: "serial-da6e6a21-8d32-46f9-a2b3-635f6700c3f0" }, disk_id: 1e7ee543-fe10-4ba7-b8f3-d579e8e0803a (physical_disk), policy: InService, state: Active }
+    674c6591-11be-44f2-9df1-db3bb663ec01 (zpool)
+    SledDisk { disk_identity: DiskIdentity { vendor: "fake-vendor", model: "fake-model", serial: "serial-674c6591-11be-44f2-9df1-db3bb663ec01" }, disk_id: a52a7c57-7fd0-4139-8293-bda299523c53 (physical_disk), policy: InService, state: Active }
+    677dd944-6761-4a89-8606-4d7fe485a63c (zpool)
+    SledDisk { disk_identity: DiskIdentity { vendor: "fake-vendor", model: "fake-model", serial: "serial-677dd944-6761-4a89-8606-4d7fe485a63c" }, disk_id: fcf54220-3ff4-463e-b4a2-58447f51b68c (physical_disk), policy: InService, state: Active }
+    70e81eac-6ed4-4c2d-b16a-fabe2aec56fc (zpool)
+    SledDisk { disk_identity: DiskIdentity { vendor: "fake-vendor", model: "fake-model", serial: "serial-70e81eac-6ed4-4c2d-b16a-fabe2aec56fc" }, disk_id: 42643377-e4d1-41a0-ac32-38d6e56cb22a (physical_disk), policy: InService, state: Active }
+    7b26c659-bf8f-4c60-ab75-fd2dd8ef5866 (zpool)
+    SledDisk { disk_identity: DiskIdentity { vendor: "fake-vendor", model: "fake-model", serial: "serial-7b26c659-bf8f-4c60-ab75-fd2dd8ef5866" }, disk_id: 5b2df08c-ea6a-4771-8363-80031249c97b (physical_disk), policy: InService, state: Active }
+    8e0008d0-9313-4caf-bc20-305ccce29846 (zpool)
+    SledDisk { disk_identity: DiskIdentity { vendor: "fake-vendor", model: "fake-model", serial: "serial-8e0008d0-9313-4caf-bc20-305ccce29846" }, disk_id: 0f5e7fc1-8d87-45f8-a00e-f5127b7a3905 (physical_disk), policy: InService, state: Active }
+    929e328a-dd25-447d-9af7-6e2216adf4aa (zpool)
+    SledDisk { disk_identity: DiskIdentity { vendor: "fake-vendor", model: "fake-model", serial: "serial-929e328a-dd25-447d-9af7-6e2216adf4aa" }, disk_id: f62e3201-e89b-4667-9707-e49f86b9df07 (physical_disk), policy: InService, state: Active }
+    9a25ff89-5446-4233-bf58-20a24c80aa58 (zpool)
+    SledDisk { disk_identity: DiskIdentity { vendor: "fake-vendor", model: "fake-model", serial: "serial-9a25ff89-5446-4233-bf58-20a24c80aa58" }, disk_id: 49b87668-e08b-4939-91f7-a82612e2ebff (physical_disk), policy: InService, state: Active }
+    a9cd1fe6-f1ba-4227-bff7-978992c3d6ad (zpool)
+    SledDisk { disk_identity: DiskIdentity { vendor: "fake-vendor", model: "fake-model", serial: "serial-a9cd1fe6-f1ba-4227-bff7-978992c3d6ad" }, disk_id: dcde393a-3ac6-4e98-8833-012787e73e15 (physical_disk), policy: InService, state: Active }
+    b3ede1e1-3264-4b21-8c7d-9ea5d3715210 (zpool)
+    SledDisk { disk_identity: DiskIdentity { vendor: "fake-vendor", model: "fake-model", serial: "serial-b3ede1e1-3264-4b21-8c7d-9ea5d3715210" }, disk_id: 4863117c-b77d-4dbc-996d-d18ddf0f5ff7 (physical_disk), policy: InService, state: Active }
+    e0f5c287-3296-4a35-b597-7452283ff329 (zpool)
+    SledDisk { disk_identity: DiskIdentity { vendor: "fake-vendor", model: "fake-model", serial: "serial-e0f5c287-3296-4a35-b597-7452283ff329" }, disk_id: 0f13d3dd-1830-4a06-b664-e6f0473ba704 (physical_disk), policy: InService, state: Active }
 
 
 > sled-update-sp dde1c0e2-b10d-4621-b420-f179f7a7a00a --active 3.0.0
@@ -142,26 +142,26 @@ subnet fd00:1122:3344:101::/64
 SP active version:   Some("3.0.0")
 SP inactive version: Some("2.0.0")
 zpools (10):
-    0f3f1de0-7e5a-4032-a73a-74fbdabbd2fa (zpool)
-    SledDisk { disk_identity: DiskIdentity { vendor: "fake-vendor", model: "fake-model", serial: "serial-0f3f1de0-7e5a-4032-a73a-74fbdabbd2fa" }, disk_id: 2dbf19d4-7b7d-48d5-9d1c-64ac2922093b (physical_disk), policy: InService, state: Active }
-    104f891f-e018-4787-a346-3cfaa6cc7e9d (zpool)
-    SledDisk { disk_identity: DiskIdentity { vendor: "fake-vendor", model: "fake-model", serial: "serial-104f891f-e018-4787-a346-3cfaa6cc7e9d" }, disk_id: 301ab9e6-bdc1-4287-a37d-2604893712f8 (physical_disk), policy: InService, state: Active }
-    111f7a4e-5696-4be8-b13d-8ef314bc83e0 (zpool)
-    SledDisk { disk_identity: DiskIdentity { vendor: "fake-vendor", model: "fake-model", serial: "serial-111f7a4e-5696-4be8-b13d-8ef314bc83e0" }, disk_id: 1f77c099-8205-41b3-ac34-3807f3bbaf56 (physical_disk), policy: InService, state: Active }
-    5a1786e9-770d-4ac9-b291-4501398170b5 (zpool)
-    SledDisk { disk_identity: DiskIdentity { vendor: "fake-vendor", model: "fake-model", serial: "serial-5a1786e9-770d-4ac9-b291-4501398170b5" }, disk_id: b111a961-be34-4ede-80e2-ef92af5e0a1f (physical_disk), policy: InService, state: Active }
-    658fef3f-c3cd-4e6d-8823-79f9a0bec4c0 (zpool)
-    SledDisk { disk_identity: DiskIdentity { vendor: "fake-vendor", model: "fake-model", serial: "serial-658fef3f-c3cd-4e6d-8823-79f9a0bec4c0" }, disk_id: b3a01997-9894-4abd-83ad-e2d520d4c3a0 (physical_disk), policy: InService, state: Active }
-    73ce66f5-a39a-4dd1-ad84-5647a5038d35 (zpool)
-    SledDisk { disk_identity: DiskIdentity { vendor: "fake-vendor", model: "fake-model", serial: "serial-73ce66f5-a39a-4dd1-ad84-5647a5038d35" }, disk_id: 48568b33-8f21-4537-b330-666aa3334236 (physical_disk), policy: InService, state: Active }
-    7480aa69-3a3d-478d-bbdb-ba1fb74752ef (zpool)
-    SledDisk { disk_identity: DiskIdentity { vendor: "fake-vendor", model: "fake-model", serial: "serial-7480aa69-3a3d-478d-bbdb-ba1fb74752ef" }, disk_id: 9a968677-4da7-40b3-9579-9c54a7620b58 (physical_disk), policy: InService, state: Active }
-    9ff438c6-00bb-4daf-9013-87969c892b02 (zpool)
-    SledDisk { disk_identity: DiskIdentity { vendor: "fake-vendor", model: "fake-model", serial: "serial-9ff438c6-00bb-4daf-9013-87969c892b02" }, disk_id: cc22404e-8a30-4b98-9552-790e84a162bd (physical_disk), policy: InService, state: Active }
-    ad0602bf-f577-401a-a28b-687c3d86f6bb (zpool)
-    SledDisk { disk_identity: DiskIdentity { vendor: "fake-vendor", model: "fake-model", serial: "serial-ad0602bf-f577-401a-a28b-687c3d86f6bb" }, disk_id: 32baf388-4cd9-4435-b70b-d8b2e515d918 (physical_disk), policy: InService, state: Active }
-    da6e6a21-8d32-46f9-a2b3-635f6700c3f0 (zpool)
-    SledDisk { disk_identity: DiskIdentity { vendor: "fake-vendor", model: "fake-model", serial: "serial-da6e6a21-8d32-46f9-a2b3-635f6700c3f0" }, disk_id: 1e7ee543-fe10-4ba7-b8f3-d579e8e0803a (physical_disk), policy: InService, state: Active }
+    674c6591-11be-44f2-9df1-db3bb663ec01 (zpool)
+    SledDisk { disk_identity: DiskIdentity { vendor: "fake-vendor", model: "fake-model", serial: "serial-674c6591-11be-44f2-9df1-db3bb663ec01" }, disk_id: a52a7c57-7fd0-4139-8293-bda299523c53 (physical_disk), policy: InService, state: Active }
+    677dd944-6761-4a89-8606-4d7fe485a63c (zpool)
+    SledDisk { disk_identity: DiskIdentity { vendor: "fake-vendor", model: "fake-model", serial: "serial-677dd944-6761-4a89-8606-4d7fe485a63c" }, disk_id: fcf54220-3ff4-463e-b4a2-58447f51b68c (physical_disk), policy: InService, state: Active }
+    70e81eac-6ed4-4c2d-b16a-fabe2aec56fc (zpool)
+    SledDisk { disk_identity: DiskIdentity { vendor: "fake-vendor", model: "fake-model", serial: "serial-70e81eac-6ed4-4c2d-b16a-fabe2aec56fc" }, disk_id: 42643377-e4d1-41a0-ac32-38d6e56cb22a (physical_disk), policy: InService, state: Active }
+    7b26c659-bf8f-4c60-ab75-fd2dd8ef5866 (zpool)
+    SledDisk { disk_identity: DiskIdentity { vendor: "fake-vendor", model: "fake-model", serial: "serial-7b26c659-bf8f-4c60-ab75-fd2dd8ef5866" }, disk_id: 5b2df08c-ea6a-4771-8363-80031249c97b (physical_disk), policy: InService, state: Active }
+    8e0008d0-9313-4caf-bc20-305ccce29846 (zpool)
+    SledDisk { disk_identity: DiskIdentity { vendor: "fake-vendor", model: "fake-model", serial: "serial-8e0008d0-9313-4caf-bc20-305ccce29846" }, disk_id: 0f5e7fc1-8d87-45f8-a00e-f5127b7a3905 (physical_disk), policy: InService, state: Active }
+    929e328a-dd25-447d-9af7-6e2216adf4aa (zpool)
+    SledDisk { disk_identity: DiskIdentity { vendor: "fake-vendor", model: "fake-model", serial: "serial-929e328a-dd25-447d-9af7-6e2216adf4aa" }, disk_id: f62e3201-e89b-4667-9707-e49f86b9df07 (physical_disk), policy: InService, state: Active }
+    9a25ff89-5446-4233-bf58-20a24c80aa58 (zpool)
+    SledDisk { disk_identity: DiskIdentity { vendor: "fake-vendor", model: "fake-model", serial: "serial-9a25ff89-5446-4233-bf58-20a24c80aa58" }, disk_id: 49b87668-e08b-4939-91f7-a82612e2ebff (physical_disk), policy: InService, state: Active }
+    a9cd1fe6-f1ba-4227-bff7-978992c3d6ad (zpool)
+    SledDisk { disk_identity: DiskIdentity { vendor: "fake-vendor", model: "fake-model", serial: "serial-a9cd1fe6-f1ba-4227-bff7-978992c3d6ad" }, disk_id: dcde393a-3ac6-4e98-8833-012787e73e15 (physical_disk), policy: InService, state: Active }
+    b3ede1e1-3264-4b21-8c7d-9ea5d3715210 (zpool)
+    SledDisk { disk_identity: DiskIdentity { vendor: "fake-vendor", model: "fake-model", serial: "serial-b3ede1e1-3264-4b21-8c7d-9ea5d3715210" }, disk_id: 4863117c-b77d-4dbc-996d-d18ddf0f5ff7 (physical_disk), policy: InService, state: Active }
+    e0f5c287-3296-4a35-b597-7452283ff329 (zpool)
+    SledDisk { disk_identity: DiskIdentity { vendor: "fake-vendor", model: "fake-model", serial: "serial-e0f5c287-3296-4a35-b597-7452283ff329" }, disk_id: 0f13d3dd-1830-4a06-b664-e6f0473ba704 (physical_disk), policy: InService, state: Active }
 
 
 > sled-update-sp dde1c0e2-b10d-4621-b420-f179f7a7a00a --active 4.0.0 --inactive invalid
@@ -174,26 +174,26 @@ subnet fd00:1122:3344:101::/64
 SP active version:   Some("4.0.0")
 SP inactive version: None
 zpools (10):
-    0f3f1de0-7e5a-4032-a73a-74fbdabbd2fa (zpool)
-    SledDisk { disk_identity: DiskIdentity { vendor: "fake-vendor", model: "fake-model", serial: "serial-0f3f1de0-7e5a-4032-a73a-74fbdabbd2fa" }, disk_id: 2dbf19d4-7b7d-48d5-9d1c-64ac2922093b (physical_disk), policy: InService, state: Active }
-    104f891f-e018-4787-a346-3cfaa6cc7e9d (zpool)
-    SledDisk { disk_identity: DiskIdentity { vendor: "fake-vendor", model: "fake-model", serial: "serial-104f891f-e018-4787-a346-3cfaa6cc7e9d" }, disk_id: 301ab9e6-bdc1-4287-a37d-2604893712f8 (physical_disk), policy: InService, state: Active }
-    111f7a4e-5696-4be8-b13d-8ef314bc83e0 (zpool)
-    SledDisk { disk_identity: DiskIdentity { vendor: "fake-vendor", model: "fake-model", serial: "serial-111f7a4e-5696-4be8-b13d-8ef314bc83e0" }, disk_id: 1f77c099-8205-41b3-ac34-3807f3bbaf56 (physical_disk), policy: InService, state: Active }
-    5a1786e9-770d-4ac9-b291-4501398170b5 (zpool)
-    SledDisk { disk_identity: DiskIdentity { vendor: "fake-vendor", model: "fake-model", serial: "serial-5a1786e9-770d-4ac9-b291-4501398170b5" }, disk_id: b111a961-be34-4ede-80e2-ef92af5e0a1f (physical_disk), policy: InService, state: Active }
-    658fef3f-c3cd-4e6d-8823-79f9a0bec4c0 (zpool)
-    SledDisk { disk_identity: DiskIdentity { vendor: "fake-vendor", model: "fake-model", serial: "serial-658fef3f-c3cd-4e6d-8823-79f9a0bec4c0" }, disk_id: b3a01997-9894-4abd-83ad-e2d520d4c3a0 (physical_disk), policy: InService, state: Active }
-    73ce66f5-a39a-4dd1-ad84-5647a5038d35 (zpool)
-    SledDisk { disk_identity: DiskIdentity { vendor: "fake-vendor", model: "fake-model", serial: "serial-73ce66f5-a39a-4dd1-ad84-5647a5038d35" }, disk_id: 48568b33-8f21-4537-b330-666aa3334236 (physical_disk), policy: InService, state: Active }
-    7480aa69-3a3d-478d-bbdb-ba1fb74752ef (zpool)
-    SledDisk { disk_identity: DiskIdentity { vendor: "fake-vendor", model: "fake-model", serial: "serial-7480aa69-3a3d-478d-bbdb-ba1fb74752ef" }, disk_id: 9a968677-4da7-40b3-9579-9c54a7620b58 (physical_disk), policy: InService, state: Active }
-    9ff438c6-00bb-4daf-9013-87969c892b02 (zpool)
-    SledDisk { disk_identity: DiskIdentity { vendor: "fake-vendor", model: "fake-model", serial: "serial-9ff438c6-00bb-4daf-9013-87969c892b02" }, disk_id: cc22404e-8a30-4b98-9552-790e84a162bd (physical_disk), policy: InService, state: Active }
-    ad0602bf-f577-401a-a28b-687c3d86f6bb (zpool)
-    SledDisk { disk_identity: DiskIdentity { vendor: "fake-vendor", model: "fake-model", serial: "serial-ad0602bf-f577-401a-a28b-687c3d86f6bb" }, disk_id: 32baf388-4cd9-4435-b70b-d8b2e515d918 (physical_disk), policy: InService, state: Active }
-    da6e6a21-8d32-46f9-a2b3-635f6700c3f0 (zpool)
-    SledDisk { disk_identity: DiskIdentity { vendor: "fake-vendor", model: "fake-model", serial: "serial-da6e6a21-8d32-46f9-a2b3-635f6700c3f0" }, disk_id: 1e7ee543-fe10-4ba7-b8f3-d579e8e0803a (physical_disk), policy: InService, state: Active }
+    674c6591-11be-44f2-9df1-db3bb663ec01 (zpool)
+    SledDisk { disk_identity: DiskIdentity { vendor: "fake-vendor", model: "fake-model", serial: "serial-674c6591-11be-44f2-9df1-db3bb663ec01" }, disk_id: a52a7c57-7fd0-4139-8293-bda299523c53 (physical_disk), policy: InService, state: Active }
+    677dd944-6761-4a89-8606-4d7fe485a63c (zpool)
+    SledDisk { disk_identity: DiskIdentity { vendor: "fake-vendor", model: "fake-model", serial: "serial-677dd944-6761-4a89-8606-4d7fe485a63c" }, disk_id: fcf54220-3ff4-463e-b4a2-58447f51b68c (physical_disk), policy: InService, state: Active }
+    70e81eac-6ed4-4c2d-b16a-fabe2aec56fc (zpool)
+    SledDisk { disk_identity: DiskIdentity { vendor: "fake-vendor", model: "fake-model", serial: "serial-70e81eac-6ed4-4c2d-b16a-fabe2aec56fc" }, disk_id: 42643377-e4d1-41a0-ac32-38d6e56cb22a (physical_disk), policy: InService, state: Active }
+    7b26c659-bf8f-4c60-ab75-fd2dd8ef5866 (zpool)
+    SledDisk { disk_identity: DiskIdentity { vendor: "fake-vendor", model: "fake-model", serial: "serial-7b26c659-bf8f-4c60-ab75-fd2dd8ef5866" }, disk_id: 5b2df08c-ea6a-4771-8363-80031249c97b (physical_disk), policy: InService, state: Active }
+    8e0008d0-9313-4caf-bc20-305ccce29846 (zpool)
+    SledDisk { disk_identity: DiskIdentity { vendor: "fake-vendor", model: "fake-model", serial: "serial-8e0008d0-9313-4caf-bc20-305ccce29846" }, disk_id: 0f5e7fc1-8d87-45f8-a00e-f5127b7a3905 (physical_disk), policy: InService, state: Active }
+    929e328a-dd25-447d-9af7-6e2216adf4aa (zpool)
+    SledDisk { disk_identity: DiskIdentity { vendor: "fake-vendor", model: "fake-model", serial: "serial-929e328a-dd25-447d-9af7-6e2216adf4aa" }, disk_id: f62e3201-e89b-4667-9707-e49f86b9df07 (physical_disk), policy: InService, state: Active }
+    9a25ff89-5446-4233-bf58-20a24c80aa58 (zpool)
+    SledDisk { disk_identity: DiskIdentity { vendor: "fake-vendor", model: "fake-model", serial: "serial-9a25ff89-5446-4233-bf58-20a24c80aa58" }, disk_id: 49b87668-e08b-4939-91f7-a82612e2ebff (physical_disk), policy: InService, state: Active }
+    a9cd1fe6-f1ba-4227-bff7-978992c3d6ad (zpool)
+    SledDisk { disk_identity: DiskIdentity { vendor: "fake-vendor", model: "fake-model", serial: "serial-a9cd1fe6-f1ba-4227-bff7-978992c3d6ad" }, disk_id: dcde393a-3ac6-4e98-8833-012787e73e15 (physical_disk), policy: InService, state: Active }
+    b3ede1e1-3264-4b21-8c7d-9ea5d3715210 (zpool)
+    SledDisk { disk_identity: DiskIdentity { vendor: "fake-vendor", model: "fake-model", serial: "serial-b3ede1e1-3264-4b21-8c7d-9ea5d3715210" }, disk_id: 4863117c-b77d-4dbc-996d-d18ddf0f5ff7 (physical_disk), policy: InService, state: Active }
+    e0f5c287-3296-4a35-b597-7452283ff329 (zpool)
+    SledDisk { disk_identity: DiskIdentity { vendor: "fake-vendor", model: "fake-model", serial: "serial-e0f5c287-3296-4a35-b597-7452283ff329" }, disk_id: 0f13d3dd-1830-4a06-b664-e6f0473ba704 (physical_disk), policy: InService, state: Active }
 
 
 > sled-update-sp dde1c0e2-b10d-4621-b420-f179f7a7a00a --active 4.0.0 --inactive 5.0.0
@@ -206,26 +206,26 @@ subnet fd00:1122:3344:101::/64
 SP active version:   Some("4.0.0")
 SP inactive version: Some("5.0.0")
 zpools (10):
-    0f3f1de0-7e5a-4032-a73a-74fbdabbd2fa (zpool)
-    SledDisk { disk_identity: DiskIdentity { vendor: "fake-vendor", model: "fake-model", serial: "serial-0f3f1de0-7e5a-4032-a73a-74fbdabbd2fa" }, disk_id: 2dbf19d4-7b7d-48d5-9d1c-64ac2922093b (physical_disk), policy: InService, state: Active }
-    104f891f-e018-4787-a346-3cfaa6cc7e9d (zpool)
-    SledDisk { disk_identity: DiskIdentity { vendor: "fake-vendor", model: "fake-model", serial: "serial-104f891f-e018-4787-a346-3cfaa6cc7e9d" }, disk_id: 301ab9e6-bdc1-4287-a37d-2604893712f8 (physical_disk), policy: InService, state: Active }
-    111f7a4e-5696-4be8-b13d-8ef314bc83e0 (zpool)
-    SledDisk { disk_identity: DiskIdentity { vendor: "fake-vendor", model: "fake-model", serial: "serial-111f7a4e-5696-4be8-b13d-8ef314bc83e0" }, disk_id: 1f77c099-8205-41b3-ac34-3807f3bbaf56 (physical_disk), policy: InService, state: Active }
-    5a1786e9-770d-4ac9-b291-4501398170b5 (zpool)
-    SledDisk { disk_identity: DiskIdentity { vendor: "fake-vendor", model: "fake-model", serial: "serial-5a1786e9-770d-4ac9-b291-4501398170b5" }, disk_id: b111a961-be34-4ede-80e2-ef92af5e0a1f (physical_disk), policy: InService, state: Active }
-    658fef3f-c3cd-4e6d-8823-79f9a0bec4c0 (zpool)
-    SledDisk { disk_identity: DiskIdentity { vendor: "fake-vendor", model: "fake-model", serial: "serial-658fef3f-c3cd-4e6d-8823-79f9a0bec4c0" }, disk_id: b3a01997-9894-4abd-83ad-e2d520d4c3a0 (physical_disk), policy: InService, state: Active }
-    73ce66f5-a39a-4dd1-ad84-5647a5038d35 (zpool)
-    SledDisk { disk_identity: DiskIdentity { vendor: "fake-vendor", model: "fake-model", serial: "serial-73ce66f5-a39a-4dd1-ad84-5647a5038d35" }, disk_id: 48568b33-8f21-4537-b330-666aa3334236 (physical_disk), policy: InService, state: Active }
-    7480aa69-3a3d-478d-bbdb-ba1fb74752ef (zpool)
-    SledDisk { disk_identity: DiskIdentity { vendor: "fake-vendor", model: "fake-model", serial: "serial-7480aa69-3a3d-478d-bbdb-ba1fb74752ef" }, disk_id: 9a968677-4da7-40b3-9579-9c54a7620b58 (physical_disk), policy: InService, state: Active }
-    9ff438c6-00bb-4daf-9013-87969c892b02 (zpool)
-    SledDisk { disk_identity: DiskIdentity { vendor: "fake-vendor", model: "fake-model", serial: "serial-9ff438c6-00bb-4daf-9013-87969c892b02" }, disk_id: cc22404e-8a30-4b98-9552-790e84a162bd (physical_disk), policy: InService, state: Active }
-    ad0602bf-f577-401a-a28b-687c3d86f6bb (zpool)
-    SledDisk { disk_identity: DiskIdentity { vendor: "fake-vendor", model: "fake-model", serial: "serial-ad0602bf-f577-401a-a28b-687c3d86f6bb" }, disk_id: 32baf388-4cd9-4435-b70b-d8b2e515d918 (physical_disk), policy: InService, state: Active }
-    da6e6a21-8d32-46f9-a2b3-635f6700c3f0 (zpool)
-    SledDisk { disk_identity: DiskIdentity { vendor: "fake-vendor", model: "fake-model", serial: "serial-da6e6a21-8d32-46f9-a2b3-635f6700c3f0" }, disk_id: 1e7ee543-fe10-4ba7-b8f3-d579e8e0803a (physical_disk), policy: InService, state: Active }
+    674c6591-11be-44f2-9df1-db3bb663ec01 (zpool)
+    SledDisk { disk_identity: DiskIdentity { vendor: "fake-vendor", model: "fake-model", serial: "serial-674c6591-11be-44f2-9df1-db3bb663ec01" }, disk_id: a52a7c57-7fd0-4139-8293-bda299523c53 (physical_disk), policy: InService, state: Active }
+    677dd944-6761-4a89-8606-4d7fe485a63c (zpool)
+    SledDisk { disk_identity: DiskIdentity { vendor: "fake-vendor", model: "fake-model", serial: "serial-677dd944-6761-4a89-8606-4d7fe485a63c" }, disk_id: fcf54220-3ff4-463e-b4a2-58447f51b68c (physical_disk), policy: InService, state: Active }
+    70e81eac-6ed4-4c2d-b16a-fabe2aec56fc (zpool)
+    SledDisk { disk_identity: DiskIdentity { vendor: "fake-vendor", model: "fake-model", serial: "serial-70e81eac-6ed4-4c2d-b16a-fabe2aec56fc" }, disk_id: 42643377-e4d1-41a0-ac32-38d6e56cb22a (physical_disk), policy: InService, state: Active }
+    7b26c659-bf8f-4c60-ab75-fd2dd8ef5866 (zpool)
+    SledDisk { disk_identity: DiskIdentity { vendor: "fake-vendor", model: "fake-model", serial: "serial-7b26c659-bf8f-4c60-ab75-fd2dd8ef5866" }, disk_id: 5b2df08c-ea6a-4771-8363-80031249c97b (physical_disk), policy: InService, state: Active }
+    8e0008d0-9313-4caf-bc20-305ccce29846 (zpool)
+    SledDisk { disk_identity: DiskIdentity { vendor: "fake-vendor", model: "fake-model", serial: "serial-8e0008d0-9313-4caf-bc20-305ccce29846" }, disk_id: 0f5e7fc1-8d87-45f8-a00e-f5127b7a3905 (physical_disk), policy: InService, state: Active }
+    929e328a-dd25-447d-9af7-6e2216adf4aa (zpool)
+    SledDisk { disk_identity: DiskIdentity { vendor: "fake-vendor", model: "fake-model", serial: "serial-929e328a-dd25-447d-9af7-6e2216adf4aa" }, disk_id: f62e3201-e89b-4667-9707-e49f86b9df07 (physical_disk), policy: InService, state: Active }
+    9a25ff89-5446-4233-bf58-20a24c80aa58 (zpool)
+    SledDisk { disk_identity: DiskIdentity { vendor: "fake-vendor", model: "fake-model", serial: "serial-9a25ff89-5446-4233-bf58-20a24c80aa58" }, disk_id: 49b87668-e08b-4939-91f7-a82612e2ebff (physical_disk), policy: InService, state: Active }
+    a9cd1fe6-f1ba-4227-bff7-978992c3d6ad (zpool)
+    SledDisk { disk_identity: DiskIdentity { vendor: "fake-vendor", model: "fake-model", serial: "serial-a9cd1fe6-f1ba-4227-bff7-978992c3d6ad" }, disk_id: dcde393a-3ac6-4e98-8833-012787e73e15 (physical_disk), policy: InService, state: Active }
+    b3ede1e1-3264-4b21-8c7d-9ea5d3715210 (zpool)
+    SledDisk { disk_identity: DiskIdentity { vendor: "fake-vendor", model: "fake-model", serial: "serial-b3ede1e1-3264-4b21-8c7d-9ea5d3715210" }, disk_id: 4863117c-b77d-4dbc-996d-d18ddf0f5ff7 (physical_disk), policy: InService, state: Active }
+    e0f5c287-3296-4a35-b597-7452283ff329 (zpool)
+    SledDisk { disk_identity: DiskIdentity { vendor: "fake-vendor", model: "fake-model", serial: "serial-e0f5c287-3296-4a35-b597-7452283ff329" }, disk_id: 0f13d3dd-1830-4a06-b664-e6f0473ba704 (physical_disk), policy: InService, state: Active }
 
 
 
@@ -270,25 +270,25 @@ subnet fd00:1122:3344:101::/64
 SP active version:   Some("4.0.0")
 SP inactive version: Some("5.0.0")
 zpools (10):
-    0f3f1de0-7e5a-4032-a73a-74fbdabbd2fa (zpool)
-    SledDisk { disk_identity: DiskIdentity { vendor: "fake-vendor", model: "fake-model", serial: "serial-0f3f1de0-7e5a-4032-a73a-74fbdabbd2fa" }, disk_id: 2dbf19d4-7b7d-48d5-9d1c-64ac2922093b (physical_disk), policy: InService, state: Active }
-    104f891f-e018-4787-a346-3cfaa6cc7e9d (zpool)
-    SledDisk { disk_identity: DiskIdentity { vendor: "fake-vendor", model: "fake-model", serial: "serial-104f891f-e018-4787-a346-3cfaa6cc7e9d" }, disk_id: 301ab9e6-bdc1-4287-a37d-2604893712f8 (physical_disk), policy: InService, state: Active }
-    111f7a4e-5696-4be8-b13d-8ef314bc83e0 (zpool)
-    SledDisk { disk_identity: DiskIdentity { vendor: "fake-vendor", model: "fake-model", serial: "serial-111f7a4e-5696-4be8-b13d-8ef314bc83e0" }, disk_id: 1f77c099-8205-41b3-ac34-3807f3bbaf56 (physical_disk), policy: InService, state: Active }
-    5a1786e9-770d-4ac9-b291-4501398170b5 (zpool)
-    SledDisk { disk_identity: DiskIdentity { vendor: "fake-vendor", model: "fake-model", serial: "serial-5a1786e9-770d-4ac9-b291-4501398170b5" }, disk_id: b111a961-be34-4ede-80e2-ef92af5e0a1f (physical_disk), policy: InService, state: Active }
-    658fef3f-c3cd-4e6d-8823-79f9a0bec4c0 (zpool)
-    SledDisk { disk_identity: DiskIdentity { vendor: "fake-vendor", model: "fake-model", serial: "serial-658fef3f-c3cd-4e6d-8823-79f9a0bec4c0" }, disk_id: b3a01997-9894-4abd-83ad-e2d520d4c3a0 (physical_disk), policy: InService, state: Active }
-    73ce66f5-a39a-4dd1-ad84-5647a5038d35 (zpool)
-    SledDisk { disk_identity: DiskIdentity { vendor: "fake-vendor", model: "fake-model", serial: "serial-73ce66f5-a39a-4dd1-ad84-5647a5038d35" }, disk_id: 48568b33-8f21-4537-b330-666aa3334236 (physical_disk), policy: InService, state: Active }
-    7480aa69-3a3d-478d-bbdb-ba1fb74752ef (zpool)
-    SledDisk { disk_identity: DiskIdentity { vendor: "fake-vendor", model: "fake-model", serial: "serial-7480aa69-3a3d-478d-bbdb-ba1fb74752ef" }, disk_id: 9a968677-4da7-40b3-9579-9c54a7620b58 (physical_disk), policy: InService, state: Active }
-    9ff438c6-00bb-4daf-9013-87969c892b02 (zpool)
-    SledDisk { disk_identity: DiskIdentity { vendor: "fake-vendor", model: "fake-model", serial: "serial-9ff438c6-00bb-4daf-9013-87969c892b02" }, disk_id: cc22404e-8a30-4b98-9552-790e84a162bd (physical_disk), policy: InService, state: Active }
-    ad0602bf-f577-401a-a28b-687c3d86f6bb (zpool)
-    SledDisk { disk_identity: DiskIdentity { vendor: "fake-vendor", model: "fake-model", serial: "serial-ad0602bf-f577-401a-a28b-687c3d86f6bb" }, disk_id: 32baf388-4cd9-4435-b70b-d8b2e515d918 (physical_disk), policy: InService, state: Active }
-    da6e6a21-8d32-46f9-a2b3-635f6700c3f0 (zpool)
-    SledDisk { disk_identity: DiskIdentity { vendor: "fake-vendor", model: "fake-model", serial: "serial-da6e6a21-8d32-46f9-a2b3-635f6700c3f0" }, disk_id: 1e7ee543-fe10-4ba7-b8f3-d579e8e0803a (physical_disk), policy: InService, state: Active }
+    674c6591-11be-44f2-9df1-db3bb663ec01 (zpool)
+    SledDisk { disk_identity: DiskIdentity { vendor: "fake-vendor", model: "fake-model", serial: "serial-674c6591-11be-44f2-9df1-db3bb663ec01" }, disk_id: a52a7c57-7fd0-4139-8293-bda299523c53 (physical_disk), policy: InService, state: Active }
+    677dd944-6761-4a89-8606-4d7fe485a63c (zpool)
+    SledDisk { disk_identity: DiskIdentity { vendor: "fake-vendor", model: "fake-model", serial: "serial-677dd944-6761-4a89-8606-4d7fe485a63c" }, disk_id: fcf54220-3ff4-463e-b4a2-58447f51b68c (physical_disk), policy: InService, state: Active }
+    70e81eac-6ed4-4c2d-b16a-fabe2aec56fc (zpool)
+    SledDisk { disk_identity: DiskIdentity { vendor: "fake-vendor", model: "fake-model", serial: "serial-70e81eac-6ed4-4c2d-b16a-fabe2aec56fc" }, disk_id: 42643377-e4d1-41a0-ac32-38d6e56cb22a (physical_disk), policy: InService, state: Active }
+    7b26c659-bf8f-4c60-ab75-fd2dd8ef5866 (zpool)
+    SledDisk { disk_identity: DiskIdentity { vendor: "fake-vendor", model: "fake-model", serial: "serial-7b26c659-bf8f-4c60-ab75-fd2dd8ef5866" }, disk_id: 5b2df08c-ea6a-4771-8363-80031249c97b (physical_disk), policy: InService, state: Active }
+    8e0008d0-9313-4caf-bc20-305ccce29846 (zpool)
+    SledDisk { disk_identity: DiskIdentity { vendor: "fake-vendor", model: "fake-model", serial: "serial-8e0008d0-9313-4caf-bc20-305ccce29846" }, disk_id: 0f5e7fc1-8d87-45f8-a00e-f5127b7a3905 (physical_disk), policy: InService, state: Active }
+    929e328a-dd25-447d-9af7-6e2216adf4aa (zpool)
+    SledDisk { disk_identity: DiskIdentity { vendor: "fake-vendor", model: "fake-model", serial: "serial-929e328a-dd25-447d-9af7-6e2216adf4aa" }, disk_id: f62e3201-e89b-4667-9707-e49f86b9df07 (physical_disk), policy: InService, state: Active }
+    9a25ff89-5446-4233-bf58-20a24c80aa58 (zpool)
+    SledDisk { disk_identity: DiskIdentity { vendor: "fake-vendor", model: "fake-model", serial: "serial-9a25ff89-5446-4233-bf58-20a24c80aa58" }, disk_id: 49b87668-e08b-4939-91f7-a82612e2ebff (physical_disk), policy: InService, state: Active }
+    a9cd1fe6-f1ba-4227-bff7-978992c3d6ad (zpool)
+    SledDisk { disk_identity: DiskIdentity { vendor: "fake-vendor", model: "fake-model", serial: "serial-a9cd1fe6-f1ba-4227-bff7-978992c3d6ad" }, disk_id: dcde393a-3ac6-4e98-8833-012787e73e15 (physical_disk), policy: InService, state: Active }
+    b3ede1e1-3264-4b21-8c7d-9ea5d3715210 (zpool)
+    SledDisk { disk_identity: DiskIdentity { vendor: "fake-vendor", model: "fake-model", serial: "serial-b3ede1e1-3264-4b21-8c7d-9ea5d3715210" }, disk_id: 4863117c-b77d-4dbc-996d-d18ddf0f5ff7 (physical_disk), policy: InService, state: Active }
+    e0f5c287-3296-4a35-b597-7452283ff329 (zpool)
+    SledDisk { disk_identity: DiskIdentity { vendor: "fake-vendor", model: "fake-model", serial: "serial-e0f5c287-3296-4a35-b597-7452283ff329" }, disk_id: 0f13d3dd-1830-4a06-b664-e6f0473ba704 (physical_disk), policy: InService, state: Active }
 
 
