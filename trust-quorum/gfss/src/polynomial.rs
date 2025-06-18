@@ -4,7 +4,7 @@
 
 //! Generated polynomials over GF(2^8) used for secret splitting
 
-use rand::{Rng, distributions};
+use rand09::{Rng, distr};
 use std::fmt::Display;
 use subtle::ConstantTimeEq;
 use zeroize::{Zeroize, ZeroizeOnDrop};
@@ -48,7 +48,7 @@ impl Polynomial {
         // We need to store the 0th term which is a constant, so we add back 1
         // to the degree.
         let mut inner: Box<[Gf256]> =
-            rng.sample_iter(distributions::Standard).take(degree + 1).collect();
+            rng.sample_iter(distr::StandardUniform).take(degree + 1).collect();
 
         // Overwrite the constant term
         inner[0] = constant_term;
@@ -62,7 +62,7 @@ impl Polynomial {
         // However, we still want our comparison to be constant time so we use
         // `ct_eq`.
         while inner[degree].ct_eq(&gf256::ZERO).into() {
-            inner[degree] = rng.r#gen();
+            inner[degree] = rng.random();
         }
 
         Polynomial(inner)
