@@ -13036,7 +13036,7 @@ dependencies = [
 [[package]]
 name = "tokio-dtrace"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/tokio-dtrace?branch=main#45cb80e6e3e9484e686917023f6640c06e1fcef8"
+source = "git+https://github.com/oxidecomputer/tokio-dtrace?branch=main#55588b30dc424a87005deffdf4063679892b1c01"
 dependencies = [
  "thiserror 2.0.12",
  "tokio",
