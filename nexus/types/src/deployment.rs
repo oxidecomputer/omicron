@@ -1242,6 +1242,10 @@ impl slog::KV for PendingMgsUpdate {
         serializer.emit_str(
             Key::from("artifact_hash"),
             &self.artifact_hash.to_string(),
+        )?;
+        serializer.emit_str(
+            Key::from("artifact_version"),
+            &self.artifact_version.to_string(),
         )
     }
 }
@@ -1424,6 +1428,15 @@ impl FromStr for ExpectedVersion {
             Ok(ExpectedVersion::NoValidVersion)
         } else {
             Ok(ExpectedVersion::Version(s.parse()?))
+        }
+    }
+}
+
+impl fmt::Display for ExpectedVersion {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            ExpectedVersion::NoValidVersion => f.write_str("invalid"),
+            ExpectedVersion::Version(v) => v.fmt(f),
         }
     }
 }

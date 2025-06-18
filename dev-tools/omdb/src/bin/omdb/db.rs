@@ -50,6 +50,7 @@ use diesel::TextExpressionMethods;
 use diesel::expression::SelectableHelper;
 use diesel::query_dsl::QueryDsl;
 use gateway_client::types::SpType;
+use iddqd::IdOrdMap;
 use indicatif::ProgressBar;
 use indicatif::ProgressDrawTarget;
 use indicatif::ProgressStyle;
@@ -127,6 +128,7 @@ use nexus_sled_agent_shared::inventory::ConfigReconcilerInventoryResult;
 use nexus_sled_agent_shared::inventory::ConfigReconcilerInventoryStatus;
 use nexus_sled_agent_shared::inventory::OmicronSledConfig;
 use nexus_sled_agent_shared::inventory::OmicronZoneImageSource;
+use nexus_sled_agent_shared::inventory::OrphanedDataset;
 use nexus_types::deployment::Blueprint;
 use nexus_types::deployment::BlueprintZoneDisposition;
 use nexus_types::deployment::BlueprintZoneType;
@@ -172,6 +174,7 @@ use std::future::Future;
 use std::num::NonZeroU32;
 use std::str::FromStr;
 use std::sync::Arc;
+use std::sync::LazyLock;
 use strum::IntoEnumIterator;
 use tabled::Tabled;
 use uuid::Uuid;
@@ -672,6 +675,8 @@ enum CollectionsShowFilter {
         /// show only information about one SP
         serial: Option<String>,
     },
+    /// show orphaned datasets
+    OrphanedDatasets,
 }
 
 impl CollectionsShowFilter {
@@ -680,6 +685,7 @@ impl CollectionsShowFilter {
             CollectionsShowFilter::All => true,
             CollectionsShowFilter::Sp { serial: None } => true,
             CollectionsShowFilter::Sp { serial: Some(_) } => false,
+            CollectionsShowFilter::OrphanedDatasets => false,
         }
     }
 
@@ -690,6 +696,7 @@ impl CollectionsShowFilter {
             CollectionsShowFilter::Sp { serial: Some(serial) } => {
                 this_serial == serial
             }
+            CollectionsShowFilter::OrphanedDatasets => false,
         }
     }
 
@@ -697,6 +704,7 @@ impl CollectionsShowFilter {
         match self {
             CollectionsShowFilter::All => true,
             CollectionsShowFilter::Sp { .. } => false,
+            CollectionsShowFilter::OrphanedDatasets => false,
         }
     }
 
@@ -704,6 +712,7 @@ impl CollectionsShowFilter {
         match self {
             CollectionsShowFilter::All => true,
             CollectionsShowFilter::Sp { .. } => false,
+            CollectionsShowFilter::OrphanedDatasets => false,
         }
     }
 }
@@ -7014,6 +7023,8 @@ async fn cmd_db_inventory_collections_show(
         .await?;
     if filter.include_sleds() {
         inv_collection_print_sleds(&collection);
+    } else if matches!(filter, CollectionsShowFilter::OrphanedDatasets) {
+        inv_collection_print_orphaned_datasets(&collection);
     }
     if filter.include_keeper_membership() {
         inv_collection_print_keeper_membership(&collection);
@@ -7352,6 +7363,17 @@ fn inv_collection_print_sleds(collection: &Collection) {
                     &last_reconciliation.last_reconciled_config,
                 );
             }
+            if last_reconciliation.orphaned_datasets.is_empty() {
+                println!("        no orphaned datasets");
+            } else {
+                println!(
+                    "        {} orphaned dataset(s):",
+                    last_reconciliation.orphaned_datasets.len()
+                );
+                for orphan in &last_reconciliation.orphaned_datasets {
+                    print_one_orphaned_dataset("            ", orphan);
+                }
+            }
             let disk_errs = collect_config_reconciler_errors(
                 &last_reconciliation.external_disks,
             );
@@ -7406,6 +7428,51 @@ fn inv_collection_print_sleds(collection: &Collection) {
             }
         }
     }
+}
+
+fn inv_collection_print_orphaned_datasets(collection: &Collection) {
+    // Helper for `unwrap_or()` passing borrow check below
+    static EMPTY_SET: LazyLock<IdOrdMap<OrphanedDataset>> =
+        LazyLock::new(IdOrdMap::new);
+
+    println!("ORPHANED DATASETS");
+    for sled in collection.sled_agents.values() {
+        println!(
+            "\nsled {} (serial {})",
+            sled.sled_id,
+            match &sled.baseboard_id {
+                Some(baseboard_id) => &baseboard_id.serial_number,
+                None => "unknown",
+            },
+        );
+        let orphaned_datasets = sled
+            .last_reconciliation
+            .as_ref()
+            .map(|r| &r.orphaned_datasets)
+            .unwrap_or(&*EMPTY_SET);
+        if orphaned_datasets.is_empty() {
+            println!("    no orphaned datasets");
+        } else {
+            println!("    {} orphaned dataset(s):", orphaned_datasets.len());
+            for orphan in orphaned_datasets {
+                print_one_orphaned_dataset("        ", orphan);
+            }
+        }
+    }
+}
+
+fn print_one_orphaned_dataset(indent: &str, orphan: &OrphanedDataset) {
+    let OrphanedDataset { name, reason, id, mounted, available, used } = orphan;
+    let id = match id {
+        Some(id) => id as &dyn Display,
+        None => &"none (this is unexpected!)",
+    };
+    println!("{indent}{}", name.full_name());
+    println!("{indent}    reason: {reason}");
+    println!("{indent}    dataset ID: {id}");
+    println!("{indent}    mounted: {mounted}");
+    println!("{indent}    available: {available}");
+    println!("{indent}    used: {used}");
 }
 
 fn collect_config_reconciler_errors<T: Ord + Display>(

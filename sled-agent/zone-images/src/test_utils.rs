@@ -19,13 +19,12 @@ use omicron_common::{
     disk::DiskIdentity,
     update::{
         MupdateOverrideInfo, OmicronZoneFileMetadata, OmicronZoneManifest,
+        OmicronZoneManifestSource,
     },
 };
 use omicron_uuid_kinds::{MupdateOverrideUuid, MupdateUuid, ZpoolUuid};
 use sha2::{Digest, Sha256};
-use sled_agent_config_reconciler::{
-    InternalDisksReceiver, InternalDisksWithBootDisk,
-};
+use sled_agent_config_reconciler::InternalDisksReceiver;
 use sled_storage::config::MountConfig;
 use tufaceous_artifact::ArtifactHash;
 
@@ -79,11 +78,11 @@ pub(crate) const NON_BOOT_3_ZPOOL: ZpoolName =
 pub(crate) static NON_BOOT_3_PATHS: LazyLock<OverridePaths> =
     LazyLock::new(|| OverridePaths::for_uuid(NON_BOOT_3_UUID));
 
-pub(crate) fn make_internal_disks(
+pub(crate) fn make_internal_disks_rx(
     root: &Utf8Path,
     boot_zpool: ZpoolName,
     other_zpools: &[ZpoolName],
-) -> InternalDisksWithBootDisk {
+) -> InternalDisksReceiver {
     let identity_from_zpool = |zpool: ZpoolName| DiskIdentity {
         vendor: "sled-agent-zone-images-tests".to_string(),
         model: "fake-disk".to_string(),
@@ -102,7 +101,6 @@ pub(crate) fn make_internal_disks(
                 .map(|pool| (identity_from_zpool(pool), pool)),
         ),
     )
-    .current_with_boot_disk()
 }
 
 /// Context for writing out fake zones to install dataset directories.
@@ -114,6 +112,7 @@ pub(crate) struct WriteInstallDatasetContext {
     pub(crate) zones: IdOrdMap<ZoneContents>,
     pub(crate) mupdate_id: MupdateUuid,
     pub(crate) mupdate_override_uuid: MupdateOverrideUuid,
+    write_zone_manifest_to_disk: bool,
 }
 
 impl WriteInstallDatasetContext {
@@ -132,6 +131,7 @@ impl WriteInstallDatasetContext {
             .collect(),
             mupdate_id: MupdateUuid::new_v4(),
             mupdate_override_uuid: MupdateOverrideUuid::new_v4(),
+            write_zone_manifest_to_disk: true,
         }
     }
 
@@ -149,6 +149,11 @@ impl WriteInstallDatasetContext {
         self.zones.get_mut("zone5.tar.gz").unwrap().include_in_json = false;
     }
 
+    /// Set to false to not write out the zone manifest to disk.
+    pub(crate) fn write_zone_manifest_to_disk(&mut self, write: bool) {
+        self.write_zone_manifest_to_disk = write;
+    }
+
     pub(crate) fn override_info(&self) -> MupdateOverrideInfo {
         MupdateOverrideInfo {
             mupdate_uuid: self.mupdate_override_uuid,
@@ -159,8 +164,15 @@ impl WriteInstallDatasetContext {
     }
 
     pub(crate) fn zone_manifest(&self) -> OmicronZoneManifest {
+        let source = if self.write_zone_manifest_to_disk {
+            OmicronZoneManifestSource::Installinator {
+                mupdate_id: self.mupdate_id,
+            }
+        } else {
+            OmicronZoneManifestSource::SledAgent
+        };
         OmicronZoneManifest {
-            mupdate_id: self.mupdate_id,
+            source,
             zones: self
                 .zones
                 .iter()
@@ -205,13 +217,15 @@ impl WriteInstallDatasetContext {
             }
         }
 
-        let manifest = self.zone_manifest();
-        let json = serde_json::to_string(&manifest).map_err(|e| {
-            FixtureError::new(FixtureKind::WriteFile).with_source(e)
-        })?;
-        // No need to create intermediate directories with
-        // camino-tempfile-ext.
-        dir.child(OmicronZoneManifest::FILE_NAME).write_str(&json)?;
+        if self.write_zone_manifest_to_disk {
+            let manifest = self.zone_manifest();
+            let json = serde_json::to_string(&manifest).map_err(|e| {
+                FixtureError::new(FixtureKind::WriteFile).with_source(e)
+            })?;
+            // No need to create intermediate directories with
+            // camino-tempfile-ext.
+            dir.child(OmicronZoneManifest::FILE_NAME).write_str(&json)?;
+        }
 
         let info = self.override_info();
         let json = serde_json::to_string(&info).map_err(|e| {

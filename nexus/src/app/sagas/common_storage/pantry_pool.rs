@@ -80,6 +80,7 @@ pub(crate) fn make_pantry_connection_pool(
     qorb_resolver: &QorbResolver,
 ) -> pool::Pool<PooledPantryClient> {
     match pool::Pool::new(
+        "crucible-pantry".to_string(),
         qorb_resolver.for_service(ServiceName::CruciblePantry),
         Arc::new(PantryConnector),
         qorb::policy::Policy::default(),
