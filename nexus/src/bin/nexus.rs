@@ -25,14 +25,13 @@ struct Args {
     config_file_path: Option<Utf8PathBuf>,
 }
 
-#[tokio::main]
-async fn main() {
-    if let Err(cmd_error) = do_run().await {
+fn main() {
+    if let Err(cmd_error) = do_run() {
         fatal(cmd_error);
     }
 }
 
-async fn do_run() -> Result<(), CmdError> {
+fn do_run() -> Result<(), CmdError> {
     let args = Args::parse();
 
     let config_path = match args.config_file_path {
@@ -49,5 +48,30 @@ async fn do_run() -> Result<(), CmdError> {
     let config = NexusConfig::from_file(config_path)
         .map_err(|e| CmdError::Failure(anyhow!(e)))?;
 
-    run_server(&config).await.map_err(|err| CmdError::Failure(anyhow!(err)))
+    let rt = {
+        let mut builder = tokio::runtime::Builder::new_multi_thread();
+        #[cfg(target_os = "illumos")]
+        tokio_dtrace::register_hooks(&mut builder)
+            .map_err(|err| CmdError::Failure(anyhow!(err)))?;
+        builder
+            .enable_all()
+            .build()
+            .map_err(|err| CmdError::Failure(anyhow!(err)))?
+    };
+    rt.block_on(async move {
+        // Spawn the `do_run` future in a task, as the future passed to
+        // `block_on` does not run on a Tokio worker thread. See:
+        // https://docs.rs/tokio/latest/tokio/runtime/struct.Runtime.html#non-worker-future
+        tokio::spawn(async move {
+            run_server(&config)
+                .await
+                .map_err(|err| CmdError::Failure(anyhow!(err)))
+        })
+        .await
+        .map_err(|err| {
+            CmdError::Failure(anyhow!(
+                "run_server task should not panic or be aborted: {err}",
+            ))
+        })?
+    })
 }

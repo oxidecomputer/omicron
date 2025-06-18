@@ -57,7 +57,9 @@ rustdocflags = "--document-private-items"
 # variety of things such as host OS.
 [target.x86_64-unknown-illumos]
 rustflags = [
-    "-C", "link-arg=-Wl,-znocompstrtab,-R/usr/platform/oxide/lib/amd64"
+    "-C", "link-arg=-Wl,-znocompstrtab,-R/usr/platform/oxide/lib/amd64",
+    # enable the `tokio-unstable` config for `tokio-dtrace` probes
+    "--cfg", "tokio_unstable"
 ]
 
 # Set up `cargo xtask`.

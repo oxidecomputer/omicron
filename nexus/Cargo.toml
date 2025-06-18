@@ -136,6 +136,9 @@ omicron-workspace-hack.workspace = true
 omicron-uuid-kinds.workspace = true
 zip.workspace = true
 
+[target.'cfg(target_os = "illumos")'.dependencies]
+tokio-dtrace.workspace = true
+
 [dev-dependencies]
 async-bb8-diesel.workspace = true
 camino-tempfile.workspace = true
