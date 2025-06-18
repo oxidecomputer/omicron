@@ -5791,7 +5791,9 @@ ON omicron.public.sp_ereport (
     sp_type,
     sp_slot,
     time_collected
-);
+)
+where
+    time_deleted IS NULL;
 
 CREATE INDEX IF NOT EXISTS order_sp_ereports_by_timestamp
 ON omicron.public.sp_ereport
@@ -5833,7 +5835,9 @@ CREATE INDEX IF NOT EXISTS lookup_host_ereports_by_sled
 ON omicron.public.host_ereport (
     sled_id,
     time_collected
-);
+)
+WHERE
+    time_deleted IS NULL;
 
 CREATE INDEX IF NOT EXISTS order_host_ereports_by_timestamp
 ON omicron.public.host_ereport
