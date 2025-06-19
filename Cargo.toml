@@ -749,7 +749,7 @@ wicket-common = { path = "wicket-common" }
 wicketd-api = { path = "wicketd-api" }
 wicketd-client = { path = "clients/wicketd-client" }
 xshell = "0.2.7"
-zerocopy = "0.8.25"
+zerocopy = "0.8.26"
 zeroize = { version = "1.8.1", features = ["zeroize_derive", "std"] }
 zip = { version = "2.6.1", default-features = false, features = ["deflate","bzip2"] }
 zone = { version = "0.3.1", default-features = false, features = ["async"] }
