@@ -2442,3 +2442,16 @@ allow_tables_to_appear_in_same_query!(
     webhook_delivery_attempt
 );
 joinable!(webhook_delivery_attempt -> webhook_delivery (delivery_id));
+
+table! {
+    user_data_export (id) {
+        id -> Uuid,
+        resource_type -> crate::enums::UserDataExportResourceTypeEnum,
+        resource_id -> Uuid,
+        resource_deleted -> Bool,
+        pantry_ip -> Inet,
+        pantry_port -> Int4,
+        volume_id -> Uuid,
+    }
+}
+allow_tables_to_appear_in_same_query!(user_data_export, snapshot, image);

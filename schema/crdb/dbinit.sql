@@ -5749,6 +5749,33 @@ ON omicron.public.webhook_delivery_attempt (
     rx_id
 );
 
+CREATE TYPE IF NOT EXISTS omicron.public.user_data_export_resource_type AS ENUM (
+  'snapshot',
+  'image'
+);
+
+/*
+ * This table contains a record when a snapshot or image is being exported.
+ */
+CREATE TABLE IF NOT EXISTS omicron.public.user_data_export (
+    id UUID PRIMARY KEY,
+    resource_id UUID NOT NULL,
+    resource_type omicron.public.user_data_export_resource_type NOT NULL,
+    pantry_ip INET NOT NULL,
+    pantry_port INT4 CHECK (pantry_port BETWEEN 0 AND 65535) NOT NULL,
+    volume_id UUID NOT NULL,
+    resource_deleted BOOL NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS lookup_export_by_resource_type
+ON omicron.public.user_data_export (resource_type);
+
+CREATE UNIQUE INDEX IF NOT EXISTS one_export_record_per_resource
+ON omicron.public.user_data_export (resource_id);
+
+CREATE INDEX IF NOT EXISTS lookup_export_by_volume
+ON omicron.public.user_data_export (volume_id);
+
 /*
  * Keep this at the end of file so that the database does not contain a version
  * until it is fully populated.
@@ -5760,7 +5787,7 @@ INSERT INTO omicron.public.db_metadata (
     version,
     target_version
 ) VALUES
-    (TRUE, NOW(), NOW(), '150.0.0', NULL)
+    (TRUE, NOW(), NOW(), '151.0.0', NULL)
 ON CONFLICT DO NOTHING;
 
 COMMIT;
