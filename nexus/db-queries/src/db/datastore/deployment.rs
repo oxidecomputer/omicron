@@ -368,6 +368,7 @@ impl DataStore {
                     #[rustfmt::skip]
                     use nexus_db_schema::schema::bp_sled_metadata::dsl
                         as sled_metadata;
+
                     let _ =
                         diesel::insert_into(sled_metadata::bp_sled_metadata)
                             .values(sled_metadatas)
@@ -418,8 +419,8 @@ impl DataStore {
                 {
                     // Skip formatting this line to prevent rustfmt bailing out.
                     #[rustfmt::skip]
-                    use nexus_db_schema::schema::bp_omicron_zone_nic::dsl as
-                        omicron_zone_nic;
+                    use nexus_db_schema::schema::bp_omicron_zone_nic::dsl
+                        as omicron_zone_nic;
                     let _ = diesel::insert_into(
                         omicron_zone_nic::bp_omicron_zone_nic,
                     )
