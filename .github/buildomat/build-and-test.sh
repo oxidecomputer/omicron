@@ -92,7 +92,7 @@ banner ls-apis
 # from end-to-end-tests.
 #
 banner build
-export RUSTFLAGS="--cfg tokio_unstable-D warnings"
+export RUSTFLAGS="--cfg tokio_unstable -D warnings"
 export RUSTDOCFLAGS="--document-private-items -D warnings"
 # When running on illumos we need to pass an additional runpath that is
 # usually configured via ".cargo/config" but the `RUSTFLAGS` env variable
