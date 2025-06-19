@@ -732,7 +732,7 @@ tufaceous = { git = "https://github.com/oxidecomputer/tufaceous", branch = "main
 tufaceous-artifact = { git = "https://github.com/oxidecomputer/tufaceous", branch = "main", features = ["proptest", "schemars"] }
 tufaceous-brand-metadata = { git = "https://github.com/oxidecomputer/tufaceous", branch = "main" }
 tufaceous-lib = { git = "https://github.com/oxidecomputer/tufaceous", branch = "main" }
-tui-tree-widget = "0.23.0"
+tui-tree-widget = "0.23.1"
 typed-rng = { path = "typed-rng" }
 typify = "0.3.0"
 unicode-width = "0.1.13"
