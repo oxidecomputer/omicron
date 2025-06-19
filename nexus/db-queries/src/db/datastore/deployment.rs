@@ -525,10 +525,9 @@ impl DataStore {
                     );
                     let db_sp_type =
                         SpType::from(update.sp_type).into_sql::<SpTypeEnum>();
-                    let db_slot_id = SpMgsSlot::from(SqlU16::from(
-                        u16::try_from(update_slot_id).unwrap(),
-                    ))
-                    .into_sql::<diesel::sql_types::Int4>();
+                    let db_slot_id =
+                        SpMgsSlot::from(SqlU16::from(update_slot_id))
+                            .into_sql::<diesel::sql_types::Int4>();
                     let db_artifact_hash =
                         ArtifactHash::from(update.artifact_hash)
                             .into_sql::<diesel::sql_types::Text>();
@@ -562,6 +561,7 @@ impl DataStore {
                             .select((
                                 db_blueprint_id,
                                 baseboard_dsl::id,
+                                db_sp_type,
                                 db_slot_id,
                                 db_artifact_hash,
                                 db_artifact_version,
