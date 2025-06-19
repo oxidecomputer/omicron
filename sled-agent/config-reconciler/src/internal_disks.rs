@@ -866,7 +866,7 @@ mod tests {
     use omicron_test_utils::dev;
     use omicron_test_utils::dev::poll::CondCheckError;
     use omicron_test_utils::dev::poll::wait_for_watch_channel_condition;
-    use omicron_uuid_kinds::ZpoolUuid;
+    use omicron_uuid_kinds::InternalZpoolUuid;
     use proptest::sample::size_range;
     use sled_hardware::DiskFirmware;
     use sled_hardware::DiskPaths;
@@ -907,7 +907,7 @@ mod tests {
             .into_iter()
             .map(|id| InternalDiskDetails {
                 id: id.into(),
-                zpool_name: ZpoolName::new_internal(ZpoolUuid::new_v4()),
+                zpool_name: ZpoolName::Internal(InternalZpoolUuid::new_v4()),
                 slot: None,
                 raw_devfs_path: None,
             })
@@ -966,7 +966,7 @@ mod tests {
                 identity: raw_disk.identity().clone(),
                 is_boot_disk: raw_disk.is_boot_disk(),
                 partitions: vec![],
-                zpool_name: ZpoolName::new_internal(ZpoolUuid::new_v4()),
+                zpool_name: ZpoolName::Internal(InternalZpoolUuid::new_v4()),
                 firmware: raw_disk.firmware().clone(),
             }))
         }

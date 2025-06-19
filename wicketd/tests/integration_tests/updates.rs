@@ -21,7 +21,7 @@ use omicron_common::{
         MupdateOverrideInfo, OmicronZoneManifest, OmicronZoneManifestSource,
     },
 };
-use omicron_uuid_kinds::{MupdateUuid, ZpoolUuid};
+use omicron_uuid_kinds::{InternalZpoolUuid, MupdateUuid};
 use sled_agent_config_reconciler::{
     InternalDisksReceiver, InternalDisksWithBootDisk,
 };
@@ -374,8 +374,8 @@ async fn test_installinator_fetch() {
     });
 
     // Simulate a couple of zpools.
-    let zpool1_uuid = ZpoolUuid::new_v4();
-    let zpool2_uuid = ZpoolUuid::new_v4();
+    let zpool1_uuid = InternalZpoolUuid::new_v4();
+    let zpool2_uuid = InternalZpoolUuid::new_v4();
     let a_path = temp_dir.path().join("pool/int").join(zpool1_uuid.to_string());
     let b_path = temp_dir.path().join("pool/int").join(zpool2_uuid.to_string());
 
@@ -513,8 +513,8 @@ async fn test_installinator_fetch() {
     // Run sled-agent-zone-images against these paths, and ensure that the
     // mupdate override is correctly picked up. Pick zpool1 arbitrarily as the
     // boot zpool.
-    let boot_zpool = ZpoolName::new_internal(zpool1_uuid);
-    let non_boot_zpool = ZpoolName::new_internal(zpool2_uuid);
+    let boot_zpool = ZpoolName::Internal(zpool1_uuid);
+    let non_boot_zpool = ZpoolName::Internal(zpool2_uuid);
     let internal_disks =
         make_internal_disks(temp_dir.path(), boot_zpool, &[non_boot_zpool]);
     let image_resolver = ZoneImageSourceResolver::new(&log, internal_disks);
