@@ -220,7 +220,7 @@ mod tests {
     use super::*;
 
     use crate::test_utils::{
-        BOOT_PATHS, BOOT_ZPOOL, WriteInstallDatasetContext,
+        BOOT_PATHS, BOOT_UUID, WriteInstallDatasetContext,
         make_internal_disks_rx,
     };
 
@@ -238,7 +238,7 @@ mod tests {
         dir.child(&BOOT_PATHS.install_dataset).create_dir_all().unwrap();
 
         let internal_disks_rx =
-            make_internal_disks_rx(dir.path(), BOOT_ZPOOL, &[]);
+            make_internal_disks_rx(dir.path(), BOOT_UUID, &[]);
         let resolver = ZoneImageSourceResolver::new(
             &logctx.log,
             internal_disks_rx.current_with_boot_disk(),
@@ -291,7 +291,7 @@ mod tests {
         cx.write_to(&dir.child(&BOOT_PATHS.install_dataset)).unwrap();
 
         let internal_disks_rx =
-            make_internal_disks_rx(dir.path(), BOOT_ZPOOL, &[]);
+            make_internal_disks_rx(dir.path(), BOOT_UUID, &[]);
         let resolver = ZoneImageSourceResolver::new(
             &logctx.log,
             internal_disks_rx.current_with_boot_disk(),

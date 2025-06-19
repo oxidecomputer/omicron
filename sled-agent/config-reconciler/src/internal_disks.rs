@@ -21,6 +21,7 @@ use omicron_common::disk::DiskIdentity;
 use omicron_common::disk::DiskVariant;
 use omicron_common::disk::M2Slot;
 use omicron_common::zpool_name::ZpoolName;
+use omicron_uuid_kinds::InternalZpoolUuid;
 use sled_hardware::PooledDiskError;
 use sled_storage::config::MountConfig;
 use sled_storage::dataset::CLUSTER_DATASET;
@@ -75,15 +76,15 @@ impl InternalDisksReceiver {
     #[cfg(any(test, feature = "testing"))]
     pub fn fake_static(
         mount_config: Arc<MountConfig>,
-        disks: impl Iterator<Item = (DiskIdentity, ZpoolName)>,
+        disks: impl Iterator<Item = (DiskIdentity, InternalZpoolUuid)>,
     ) -> Self {
         let inner = InternalDisksReceiverInner::FakeStatic(Arc::new(
             disks
                 .enumerate()
-                .map(|(i, (identity, zpool_name))| {
+                .map(|(i, (identity, zpool_id))| {
                     InternalDiskDetails::fake_details(
                         identity,
-                        zpool_name,
+                        zpool_id,
                         i == 0,
                     )
                 })
@@ -113,14 +114,14 @@ impl InternalDisksReceiver {
     #[cfg(any(test, feature = "testing"))]
     pub fn fake_dynamic(
         mount_config: Arc<MountConfig>,
-        mut disks_rx: watch::Receiver<Vec<(DiskIdentity, ZpoolName)>>,
+        mut disks_rx: watch::Receiver<Vec<(DiskIdentity, InternalZpoolUuid)>>,
     ) -> Self {
         let current = disks_rx
             .borrow_and_update()
             .clone()
             .into_iter()
-            .map(|(identity, zpool_name)| {
-                InternalDiskDetails::fake_details(identity, zpool_name, false)
+            .map(|(identity, zpool_id)| {
+                InternalDiskDetails::fake_details(identity, zpool_id, false)
             })
             .collect();
         let (mapped_tx, mapped_rx) = watch::channel(Arc::new(current));
@@ -132,9 +133,9 @@ impl InternalDisksReceiver {
                     .borrow_and_update()
                     .clone()
                     .into_iter()
-                    .map(|(identity, zpool_name)| {
+                    .map(|(identity, zpool_id)| {
                         InternalDiskDetails::fake_details(
-                            identity, zpool_name, false,
+                            identity, zpool_id, false,
                         )
                     })
                     .collect();
@@ -325,14 +326,18 @@ impl InternalDisks {
         &self.mount_config
     }
 
-    pub fn boot_disk_zpool(&self) -> Option<ZpoolName> {
+    pub fn boot_disk_zpool_id(&self) -> Option<InternalZpoolUuid> {
         self.disks.iter().find_map(|d| {
-            if d.is_boot_disk() { Some(d.zpool_name) } else { None }
+            if d.is_boot_disk() { Some(d.zpool_id) } else { None }
         })
     }
 
+    pub fn boot_disk_zpool_name(&self) -> Option<ZpoolName> {
+        self.boot_disk_zpool_id().map(ZpoolName::Internal)
+    }
+
     pub fn boot_disk_install_dataset(&self) -> Option<Utf8PathBuf> {
-        self.boot_disk_zpool().map(|zpool| {
+        self.boot_disk_zpool_name().map(|zpool| {
             zpool.dataset_mountpoint(&self.mount_config.root, INSTALL_DATASET)
         })
     }
@@ -397,7 +402,7 @@ impl InternalDisks {
         dataset_name: &'static str,
     ) -> impl ExactSizeIterator<Item = Utf8PathBuf> + '_ {
         self.disks.iter().map(|disk| {
-            disk.zpool_name
+            disk.zpool_name()
                 .dataset_mountpoint(&self.mount_config.root, dataset_name)
         })
     }
@@ -429,12 +434,16 @@ impl InternalDisksWithBootDisk {
         &self.boot_disk().id.identity
     }
 
-    pub fn boot_disk_zpool(&self) -> ZpoolName {
-        self.boot_disk().zpool_name
+    pub fn boot_disk_zpool_name(&self) -> ZpoolName {
+        ZpoolName::Internal(self.boot_disk().zpool_id)
+    }
+
+    pub fn boot_disk_zpool_id(&self) -> InternalZpoolUuid {
+        self.boot_disk().zpool_id
     }
 
     pub fn boot_disk_install_dataset(&self) -> Utf8PathBuf {
-        self.boot_disk_zpool().dataset_mountpoint(
+        self.boot_disk_zpool_name().dataset_mountpoint(
             &self.inner.mount_config().root,
             INSTALL_DATASET,
         )
@@ -442,14 +451,15 @@ impl InternalDisksWithBootDisk {
 
     pub fn non_boot_disk_install_datasets(
         &self,
-    ) -> impl Iterator<Item = (ZpoolName, Utf8PathBuf)> + '_ {
+    ) -> impl Iterator<Item = (InternalZpoolUuid, Utf8PathBuf)> + '_ {
         self.inner.disks.iter().filter(|disk| disk.id != self.boot_disk).map(
             |disk| {
-                let dataset = disk.zpool_name.dataset_mountpoint(
-                    &self.inner.mount_config.root,
-                    INSTALL_DATASET,
-                );
-                (disk.zpool_name, dataset)
+                let dataset = ZpoolName::Internal(disk.zpool_id)
+                    .dataset_mountpoint(
+                        &self.inner.mount_config.root,
+                        INSTALL_DATASET,
+                    );
+                (disk.zpool_id, dataset)
             },
         )
     }
@@ -461,7 +471,7 @@ impl InternalDisksWithBootDisk {
 #[derive(Debug, Clone)]
 struct InternalDiskDetails {
     id: InternalDiskDetailsId,
-    zpool_name: ZpoolName,
+    zpool_id: InternalZpoolUuid,
 
     // These two fields are optional because they don't exist for synthetic
     // disks.
@@ -479,6 +489,14 @@ impl IdMappable for InternalDiskDetails {
 
 impl From<&'_ Disk> for InternalDiskDetails {
     fn from(disk: &'_ Disk) -> Self {
+        let zpool_id = match disk.zpool_name() {
+            ZpoolName::Internal(id) => *id,
+            ZpoolName::External(id) => {
+                panic!(
+                    "InternalDiskDetails::from called for external disk ({id:?})"
+                );
+            }
+        };
         // Synthetic disks panic if asked for their `slot()`, so filter
         // them out first.
         let slot = if disk.is_synthetic() {
@@ -499,7 +517,7 @@ impl From<&'_ Disk> for InternalDiskDetails {
                 identity: Arc::new(disk.identity().clone()),
                 is_boot_disk: disk.is_boot_disk(),
             },
-            zpool_name: *disk.zpool_name(),
+            zpool_id,
             slot,
             raw_devfs_path,
         }
@@ -516,7 +534,7 @@ impl InternalDiskDetails {
     #[cfg(any(test, feature = "testing"))]
     fn fake_details(
         identity: DiskIdentity,
-        zpool_name: ZpoolName,
+        zpool_id: InternalZpoolUuid,
         is_boot_disk: bool,
     ) -> Self {
         Self {
@@ -524,12 +542,16 @@ impl InternalDiskDetails {
                 identity: Arc::new(identity),
                 is_boot_disk,
             },
-            zpool_name,
+            zpool_id,
             // We can expand the interface for fake disks if we need to be able
             // to specify more of these properties in future tests.
             slot: None,
             raw_devfs_path: None,
         }
+    }
+
+    fn zpool_name(&self) -> ZpoolName {
+        ZpoolName::Internal(self.zpool_id)
     }
 
     fn is_boot_disk(&self) -> bool {
@@ -907,7 +929,7 @@ mod tests {
             .into_iter()
             .map(|id| InternalDiskDetails {
                 id: id.into(),
-                zpool_name: ZpoolName::Internal(InternalZpoolUuid::new_v4()),
+                zpool_id: InternalZpoolUuid::new_v4(),
                 slot: None,
                 raw_devfs_path: None,
             })

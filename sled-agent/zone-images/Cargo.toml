@@ -13,6 +13,7 @@ iddqd.workspace = true
 illumos-utils.workspace = true
 nexus-sled-agent-shared.workspace = true
 omicron-common.workspace = true
+omicron-uuid-kinds.workspace = true
 omicron-workspace-hack.workspace = true
 rayon.workspace = true
 serde.workspace = true

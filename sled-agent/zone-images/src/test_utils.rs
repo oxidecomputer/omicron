@@ -14,7 +14,6 @@ use camino_tempfile_ext::{
     prelude::*,
 };
 use iddqd::{IdOrdItem, IdOrdMap, id_upcast};
-use illumos_utils::zpool::ZpoolName;
 use omicron_common::{
     disk::DiskIdentity,
     update::{
@@ -53,39 +52,33 @@ impl OverridePaths {
 
 pub(crate) const BOOT_UUID: InternalZpoolUuid =
     InternalZpoolUuid::from_u128(0xd3e7205d_4efe_493b_ac5e_9175584907cd);
-pub(crate) const BOOT_ZPOOL: ZpoolName = ZpoolName::Internal(BOOT_UUID);
 pub(crate) static BOOT_PATHS: LazyLock<OverridePaths> =
     LazyLock::new(|| OverridePaths::for_uuid(BOOT_UUID));
 
 pub(crate) const NON_BOOT_UUID: InternalZpoolUuid =
     InternalZpoolUuid::from_u128(0x4854189f_b290_47cd_b076_374d0e1748ec);
-pub(crate) const NON_BOOT_ZPOOL: ZpoolName = ZpoolName::Internal(NON_BOOT_UUID);
 pub(crate) static NON_BOOT_PATHS: LazyLock<OverridePaths> =
     LazyLock::new(|| OverridePaths::for_uuid(NON_BOOT_UUID));
 
 pub(crate) const NON_BOOT_2_UUID: InternalZpoolUuid =
     InternalZpoolUuid::from_u128(0x72201e1e_9fee_4231_81cd_4e2d514cb632);
-pub(crate) const NON_BOOT_2_ZPOOL: ZpoolName =
-    ZpoolName::Internal(NON_BOOT_2_UUID);
 pub(crate) static NON_BOOT_2_PATHS: LazyLock<OverridePaths> =
     LazyLock::new(|| OverridePaths::for_uuid(NON_BOOT_2_UUID));
 
 pub(crate) const NON_BOOT_3_UUID: InternalZpoolUuid =
     InternalZpoolUuid::from_u128(0xd0d04947_93c5_40fd_97ab_4648b8cc28d6);
-pub(crate) const NON_BOOT_3_ZPOOL: ZpoolName =
-    ZpoolName::Internal(NON_BOOT_3_UUID);
 pub(crate) static NON_BOOT_3_PATHS: LazyLock<OverridePaths> =
     LazyLock::new(|| OverridePaths::for_uuid(NON_BOOT_3_UUID));
 
 pub(crate) fn make_internal_disks_rx(
     root: &Utf8Path,
-    boot_zpool: ZpoolName,
-    other_zpools: &[ZpoolName],
+    boot_zpool: InternalZpoolUuid,
+    other_zpools: &[InternalZpoolUuid],
 ) -> InternalDisksReceiver {
-    let identity_from_zpool = |zpool: ZpoolName| DiskIdentity {
-        vendor: "sled-agent-zone-images-tests".to_string(),
+    let identity_from_zpool = |zpool: InternalZpoolUuid| DiskIdentity {
+        vendor: "sled-agent-zone-images-test".to_string(),
         model: "fake-disk".to_string(),
-        serial: zpool.id().to_string(),
+        serial: zpool.to_string(),
     };
     let mount_config = MountConfig {
         root: root.to_path_buf(),

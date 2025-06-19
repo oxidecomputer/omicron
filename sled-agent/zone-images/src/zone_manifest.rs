@@ -4,10 +4,10 @@
 
 use camino::{Utf8Path, Utf8PathBuf};
 use iddqd::{IdOrdItem, IdOrdMap, id_upcast};
-use illumos_utils::zpool::ZpoolName;
 use omicron_common::update::{
     OmicronZoneFileMetadata, OmicronZoneManifest, OmicronZoneManifestSource,
 };
+use omicron_uuid_kinds::InternalZpoolUuid;
 use rayon::iter::{ParallelBridge, ParallelIterator};
 use sha2::{Digest, Sha256};
 use sled_agent_config_reconciler::InternalDisksWithBootDisk;
@@ -44,7 +44,7 @@ pub struct ZoneManifestStatus {
 
 #[derive(Debug)]
 pub(crate) struct AllZoneManifests {
-    boot_zpool: ZpoolName,
+    boot_zpool: InternalZpoolUuid,
     boot_disk_path: Utf8PathBuf,
     boot_disk_result:
         Result<ZoneManifestArtifactsResult, ZoneManifestReadError>,
@@ -163,8 +163,8 @@ impl AllZoneManifests {
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct ZoneManifestNonBootInfo {
-    /// The name of the zpool.
-    pub zpool_name: ZpoolName,
+    /// The ID of the zpool.
+    pub zpool_id: InternalZpoolUuid,
 
     /// The dataset directory.
     pub dataset_dir: Utf8PathBuf,
@@ -183,7 +183,7 @@ impl ZoneManifestNonBootInfo {
         let result =
             ZoneManifestNonBootResult::new(&info.dataset_dir, info.result);
         Self {
-            zpool_name: info.zpool_name,
+            zpool_id: info.zpool_id,
             dataset_dir: info.dataset_dir,
             path: info.path,
             result,
@@ -192,7 +192,7 @@ impl ZoneManifestNonBootInfo {
 
     pub(crate) fn log_to(&self, log: &slog::Logger) {
         let log = log.new(o!(
-            "non_boot_zpool" => self.zpool_name.to_string(),
+            "non_boot_zpool" => self.zpool_id.to_string(),
             "non_boot_path" => self.path.to_string(),
         ));
         self.result.log_to(&log);
@@ -200,10 +200,10 @@ impl ZoneManifestNonBootInfo {
 }
 
 impl IdOrdItem for ZoneManifestNonBootInfo {
-    type Key<'a> = ZpoolName;
+    type Key<'a> = InternalZpoolUuid;
 
     fn key(&self) -> Self::Key<'_> {
-        self.zpool_name
+        self.zpool_id
     }
 
     id_upcast!();
@@ -687,8 +687,8 @@ mod tests {
     use super::*;
 
     use crate::test_utils::{
-        BOOT_PATHS, BOOT_ZPOOL, NON_BOOT_2_PATHS, NON_BOOT_2_ZPOOL,
-        NON_BOOT_3_PATHS, NON_BOOT_3_ZPOOL, NON_BOOT_PATHS, NON_BOOT_ZPOOL,
+        BOOT_PATHS, BOOT_UUID, NON_BOOT_2_PATHS, NON_BOOT_2_UUID,
+        NON_BOOT_3_PATHS, NON_BOOT_3_UUID, NON_BOOT_PATHS, NON_BOOT_UUID,
         WriteInstallDatasetContext, deserialize_error, make_internal_disks_rx,
     };
 
@@ -717,7 +717,7 @@ mod tests {
         cx.write_to(&dir.child(&NON_BOOT_PATHS.install_dataset)).unwrap();
 
         let internal_disks =
-            make_internal_disks_rx(dir.path(), BOOT_ZPOOL, &[NON_BOOT_ZPOOL])
+            make_internal_disks_rx(dir.path(), BOOT_UUID, &[NON_BOOT_UUID])
                 .current_with_boot_disk();
         let manifests =
             AllZoneManifests::read_all(&logctx.log, &internal_disks);
@@ -733,7 +733,7 @@ mod tests {
             manifests.non_boot_disk_metadata,
             id_ord_map! {
                 ZoneManifestNonBootInfo {
-                    zpool_name: NON_BOOT_ZPOOL,
+                    zpool_id: NON_BOOT_UUID,
                     dataset_dir: dir.path().join(&NON_BOOT_PATHS.install_dataset),
                     path: dir.path().join(&NON_BOOT_PATHS.zones_json),
                     result: ZoneManifestNonBootResult::Matches(
@@ -769,7 +769,7 @@ mod tests {
             .unwrap();
 
         let internal_disks =
-            make_internal_disks_rx(dir.path(), BOOT_ZPOOL, &[NON_BOOT_ZPOOL])
+            make_internal_disks_rx(dir.path(), BOOT_UUID, &[NON_BOOT_UUID])
                 .current_with_boot_disk();
         let manifests =
             AllZoneManifests::read_all(&logctx.log, &internal_disks);
@@ -784,7 +784,7 @@ mod tests {
             manifests.non_boot_disk_metadata,
             id_ord_map! {
                 ZoneManifestNonBootInfo {
-                    zpool_name: NON_BOOT_ZPOOL,
+                    zpool_id: NON_BOOT_UUID,
                     dataset_dir: dir.path().join(&NON_BOOT_PATHS.install_dataset),
                     path: dir.path().join(&NON_BOOT_PATHS.zones_json),
                     result: ZoneManifestNonBootResult::Mismatch(
@@ -818,7 +818,7 @@ mod tests {
         dir.child(&BOOT_PATHS.zones_json).touch().unwrap();
 
         let internal_disks =
-            make_internal_disks_rx(dir.path(), BOOT_ZPOOL, &[NON_BOOT_ZPOOL])
+            make_internal_disks_rx(dir.path(), BOOT_UUID, &[NON_BOOT_UUID])
                 .current_with_boot_disk();
         let manifests =
             AllZoneManifests::read_all(&logctx.log, &internal_disks);
@@ -831,7 +831,7 @@ mod tests {
             manifests.non_boot_disk_metadata,
             id_ord_map! {
                 ZoneManifestNonBootInfo {
-                    zpool_name: NON_BOOT_ZPOOL,
+                    zpool_id: NON_BOOT_UUID,
                     dataset_dir: dir.path().join(&NON_BOOT_PATHS.install_dataset),
                     path: dir.path().join(&NON_BOOT_PATHS.zones_json),
                     result: ZoneManifestNonBootResult::Mismatch(
@@ -866,7 +866,7 @@ mod tests {
         invalid_cx.write_to(&dir.child(&BOOT_PATHS.install_dataset)).unwrap();
 
         let internal_disks =
-            make_internal_disks_rx(dir.path(), BOOT_ZPOOL, &[NON_BOOT_ZPOOL])
+            make_internal_disks_rx(dir.path(), BOOT_UUID, &[NON_BOOT_UUID])
                 .current_with_boot_disk();
         let manifests =
             AllZoneManifests::read_all(&logctx.log, &internal_disks);
@@ -880,7 +880,7 @@ mod tests {
             manifests.non_boot_disk_metadata,
             id_ord_map! {
                 ZoneManifestNonBootInfo {
-                    zpool_name: NON_BOOT_ZPOOL,
+                    zpool_id: NON_BOOT_UUID,
                     dataset_dir: dir.path().join(&NON_BOOT_PATHS.install_dataset),
                     path: dir.path().join(&NON_BOOT_PATHS.zones_json),
                     result: ZoneManifestNonBootResult::Mismatch(
@@ -932,8 +932,8 @@ mod tests {
 
         let internal_disks = make_internal_disks_rx(
             dir.path(),
-            BOOT_ZPOOL,
-            &[NON_BOOT_ZPOOL, NON_BOOT_2_ZPOOL, NON_BOOT_3_ZPOOL],
+            BOOT_UUID,
+            &[NON_BOOT_UUID, NON_BOOT_2_UUID, NON_BOOT_3_UUID],
         )
         .current_with_boot_disk();
         let manifests =
@@ -953,7 +953,7 @@ mod tests {
             manifests.non_boot_disk_metadata,
             id_ord_map! {
                 ZoneManifestNonBootInfo {
-                    zpool_name: NON_BOOT_ZPOOL,
+                    zpool_id: NON_BOOT_UUID,
                     dataset_dir: dir.path().join(&NON_BOOT_PATHS.install_dataset),
                     path: dir.path().join(&NON_BOOT_PATHS.zones_json),
                     result: ZoneManifestNonBootResult::Mismatch(
@@ -963,7 +963,7 @@ mod tests {
                     )
                 },
                 ZoneManifestNonBootInfo {
-                    zpool_name: NON_BOOT_2_ZPOOL,
+                    zpool_id: NON_BOOT_2_UUID,
                     dataset_dir: dir.path().join(&NON_BOOT_2_PATHS.install_dataset),
                     path: dir.path().join(&NON_BOOT_2_PATHS.zones_json),
                     result: ZoneManifestNonBootResult::Mismatch(
@@ -975,7 +975,7 @@ mod tests {
                     )
                 },
                 ZoneManifestNonBootInfo {
-                    zpool_name: NON_BOOT_3_ZPOOL,
+                    zpool_id: NON_BOOT_3_UUID,
                     dataset_dir: dir.path().join(&NON_BOOT_3_PATHS.install_dataset),
                     path: dir.path().join(&NON_BOOT_3_PATHS.zones_json),
                     result: ZoneManifestNonBootResult::ReadError(

@@ -426,7 +426,7 @@ impl SledAgent {
         let boot_disk_zpool = config_reconciler
             .internal_disks_rx()
             .current()
-            .boot_disk_zpool()
+            .boot_disk_zpool_name()
             .ok_or_else(|| Error::BootDiskNotFound)?;
 
         // Configure a swap device of the configured size before other system setup.
