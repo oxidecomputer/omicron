@@ -54,7 +54,7 @@ pub(crate) struct SpComponentUpdate {
     pub log: slog::Logger,
     pub component: SpComponent,
     pub target_sp_type: SpType,
-    pub target_sp_slot: u32,
+    pub target_sp_slot: u16,
     pub firmware_slot: u16,
     pub update_id: SpUpdateUuid,
 }
@@ -240,7 +240,7 @@ pub(crate) async fn apply_update(
                 client
                     .sp_component_update(
                         sp_type,
-                        sp_slot,
+                        u32::from(sp_slot),
                         component,
                         sp_update.firmware_slot,
                         &sp_update.update_id.as_untyped_uuid(),
@@ -445,7 +445,11 @@ async fn wait_for_delivery(
         let status = mgs_clients
             .try_all_serially(log, |client| async move {
                 let update_status = client
-                    .sp_component_update_status(sp_type, sp_slot, component)
+                    .sp_component_update_status(
+                        sp_type,
+                        u32::from(sp_slot),
+                        component,
+                    )
                     .await?;
 
                 debug!(
@@ -544,7 +548,12 @@ async fn abort_update(
         .try_all_serially(log, |mgs_client| async move {
             let arg = UpdateAbortBody { id: update_id };
             mgs_client
-                .sp_component_update_abort(sp_type, sp_slot, component, &arg)
+                .sp_component_update_abort(
+                    sp_type,
+                    u32::from(sp_slot),
+                    component,
+                    &arg,
+                )
                 .await
         })
         .await
@@ -707,7 +716,7 @@ mod test {
         gwtestctx: &GatewayTestContext,
         artifacts: &TestArtifacts,
         sp_type: SpType,
-        slot_id: u32,
+        slot_id: u16,
         artifact_hash: &ArtifactHash,
         expected_result: UpdateCompletedHow,
     ) {
@@ -791,7 +800,7 @@ mod test {
         gwtestctx: &GatewayTestContext,
         artifacts: &TestArtifacts,
         sp_type: SpType,
-        slot_id: u32,
+        slot_id: u16,
         artifact_hash: &ArtifactHash,
         expected_result: UpdateCompletedHow,
     ) {
