@@ -8,7 +8,6 @@ license = "MPL-2.0"
 workspace = true
 
 [dependencies]
-anyhow.workspace = true
 camino.workspace = true
 iddqd.workspace = true
 illumos-utils.workspace = true
