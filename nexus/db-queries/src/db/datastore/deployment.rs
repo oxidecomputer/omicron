@@ -500,13 +500,20 @@ impl DataStore {
                 for update in &blueprint.pending_mgs_updates {
                     // Right now, we only implement support for storing SP
                     // updates.
-                    let PendingMgsUpdateDetails::Sp {
-                        expected_active_version,
-                        expected_inactive_version,
-                    } = &update.details
-                    else {
-                        continue;
-                    };
+                    let (expected_active_version, expected_inactive_version) =
+                        match &update.details {
+                            PendingMgsUpdateDetails::Sp {
+                                expected_active_version,
+                                expected_inactive_version,
+                            } => (
+                                expected_active_version,
+                                expected_inactive_version,
+                            ),
+                            PendingMgsUpdateDetails::Rot { .. }
+                            | PendingMgsUpdateDetails::RotBootloader {
+                                ..
+                            } => continue,
+                        };
 
                     // slot_ids fit into a u16 in practice.  This will be enforced
                     // at compile time shortly.  See oxidecomputer/omicron#8378.
