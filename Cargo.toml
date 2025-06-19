@@ -727,7 +727,7 @@ toml = "0.8.23"
 toml_edit = "0.22.24"
 tough = { version = "0.20.0", features = [ "http" ] }
 transceiver-controller = { git = "https://github.com/oxidecomputer/transceiver-control", features = [ "api-traits" ] }
-trybuild = "1.0.103"
+trybuild = "1.0.105"
 tufaceous = { git = "https://github.com/oxidecomputer/tufaceous", branch = "main" }
 tufaceous-artifact = { git = "https://github.com/oxidecomputer/tufaceous", branch = "main", features = ["proptest", "schemars"] }
 tufaceous-brand-metadata = { git = "https://github.com/oxidecomputer/tufaceous", branch = "main" }
