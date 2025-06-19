@@ -24,7 +24,6 @@ use clap::Subcommand;
 use clap::ValueEnum;
 use futures::StreamExt;
 use futures::TryStreamExt;
-use futures::future::try_join;
 use http::StatusCode;
 use internal_dns_types::names::ServiceName;
 use itertools::Itertools;
@@ -47,6 +46,7 @@ use nexus_types::deployment::ClickhousePolicy;
 use nexus_types::deployment::OximeterReadMode;
 use nexus_types::deployment::OximeterReadPolicy;
 use nexus_types::internal_api::background::AbandonedVmmReaperStatus;
+use nexus_types::internal_api::background::BlueprintPlannerStatus;
 use nexus_types::internal_api::background::BlueprintRendezvousStatus;
 use nexus_types::internal_api::background::InstanceReincarnationStatus;
 use nexus_types::internal_api::background::InstanceUpdaterStatus;
@@ -135,6 +135,8 @@ enum NexusCommands {
     /// interact with support bundles
     #[command(visible_alias = "sb")]
     SupportBundles(SupportBundleArgs),
+    /// show running artifact versions
+    UpdateStatus,
 }
 
 #[derive(Debug, Args)]
@@ -269,17 +271,12 @@ struct BlueprintIdArgs {
 }
 
 #[derive(Debug, Args)]
-struct BlueprintIdsArgs {
+struct BlueprintDiffArgs {
     /// id of first blueprint (or `target` for the current target)
     blueprint1_id: BlueprintIdOrCurrentTarget,
-    /// id of second blueprint (or `target` for the current target)
-    blueprint2_id: BlueprintIdOrCurrentTarget,
-}
-
-#[derive(Debug, Args)]
-struct BlueprintDiffArgs {
-    #[clap(flatten)]
-    ids: BlueprintIdsArgs,
+    /// id of second blueprint (or `target` for the current target, or omitted
+    /// to use the parent of the first blueprint)
+    blueprint2_id: Option<BlueprintIdOrCurrentTarget>,
     /// Exit with 1 if there were differences, 0 if no differences.
     #[arg(long, default_value_t = false)]
     exit_code: bool,
@@ -784,6 +781,9 @@ impl NexusArgs {
             NexusCommands::SupportBundles(SupportBundleArgs {
                 command: SupportBundleCommands::Inspect(args),
             }) => cmd_nexus_support_bundles_inspect(&client, args).await,
+            NexusCommands::UpdateStatus => {
+                cmd_nexus_update_status(&client).await
+            }
         }
     }
 }
@@ -1062,6 +1062,9 @@ fn print_task_details(bgtask: &BackgroundTask, details: &serde_json::Value) {
         "abandoned_vmm_reaper" => {
             print_task_abandoned_vmm_reaper(details);
         }
+        "blueprint_planner" => {
+            print_task_blueprint_planner(details);
+        }
         "blueprint_executor" => {
             print_task_blueprint_executor(details);
         }
@@ -1208,6 +1211,44 @@ fn print_task_abandoned_vmm_reaper(details: &serde_json::Value) {
             );
         }
     };
+}
+
+fn print_task_blueprint_planner(details: &serde_json::Value) {
+    let status =
+        match serde_json::from_value::<BlueprintPlannerStatus>(details.clone())
+        {
+            Ok(status) => status,
+            Err(error) => {
+                eprintln!(
+                    "warning: failed to interpret task details: {:?}: {:?}",
+                    error, details
+                );
+                return;
+            }
+        };
+    match status {
+        BlueprintPlannerStatus::Disabled => {
+            println!("    blueprint planning explicitly disabled by config!");
+        }
+        BlueprintPlannerStatus::Error(error) => {
+            println!("    task did not complete successfully: {error}");
+        }
+        BlueprintPlannerStatus::Unchanged { parent_blueprint_id } => {
+            println!("    plan unchanged from parent {parent_blueprint_id}");
+        }
+        BlueprintPlannerStatus::Planned { parent_blueprint_id, error } => {
+            println!(
+                "    planned new blueprint from parent {parent_blueprint_id}, \
+                     but could not make it the target: {error}"
+            );
+        }
+        BlueprintPlannerStatus::Targeted { blueprint_id, .. } => {
+            println!(
+                "    planned new blueprint {blueprint_id}, \
+                     and made it the current target"
+            );
+        }
+    }
 }
 
 fn print_task_blueprint_executor(details: &serde_json::Value) {
@@ -3068,11 +3109,21 @@ async fn cmd_nexus_blueprints_diff(
     client: &nexus_client::Client,
     args: &BlueprintDiffArgs,
 ) -> Result<(), anyhow::Error> {
-    let (b1, b2) = try_join(
-        args.ids.blueprint1_id.resolve_to_blueprint(client),
-        args.ids.blueprint2_id.resolve_to_blueprint(client),
-    )
-    .await?;
+    let blueprint = args.blueprint1_id.resolve_to_blueprint(client).await?;
+    let (b1, b2) = if let Some(blueprint2_arg) = &args.blueprint2_id {
+        (blueprint, blueprint2_arg.resolve_to_blueprint(client).await?)
+    } else if let Some(parent_id) = blueprint.parent_blueprint_id {
+        (
+            client
+                .blueprint_view(parent_id.as_untyped_uuid())
+                .await?
+                .into_inner(),
+            blueprint,
+        )
+    } else {
+        bail!("`blueprint2_id` was not specified and blueprint1 has no parent");
+    };
+
     let diff = b2.diff_since_blueprint(&b1);
     println!("{}", diff.display());
     if args.exit_code && diff.has_changes() {
@@ -4039,4 +4090,48 @@ async fn cmd_nexus_support_bundles_inspect(
     };
 
     support_bundle_viewer::run_dashboard(accessor).await
+}
+
+/// Runs `omdb nexus upgrade-status`
+async fn cmd_nexus_update_status(
+    client: &nexus_client::Client,
+) -> Result<(), anyhow::Error> {
+    let status = client
+        .update_status()
+        .await
+        .context("retrieving update status")?
+        .into_inner();
+
+    #[derive(Tabled)]
+    #[tabled(rename_all = "SCREAMING_SNAKE_CASE")]
+    struct ZoneRow {
+        sled_id: String,
+        zone_type: String,
+        zone_id: String,
+        version: String,
+    }
+
+    let mut rows = Vec::new();
+    for (sled_id, mut statuses) in status.zones.into_iter() {
+        statuses.sort_unstable_by_key(|s| {
+            (s.zone_type.kind(), s.zone_id, s.version.clone())
+        });
+        for status in statuses {
+            rows.push(ZoneRow {
+                sled_id: sled_id.to_string(),
+                zone_type: status.zone_type.kind().name_prefix().into(),
+                zone_id: status.zone_id.to_string(),
+                version: status.version.to_string(),
+            });
+        }
+    }
+
+    let table = tabled::Table::new(rows)
+        .with(tabled::settings::Style::empty())
+        .with(tabled::settings::Padding::new(0, 1, 0, 0))
+        .to_string();
+
+    println!("Running Zones");
+    println!("{}", table);
+    Ok(())
 }

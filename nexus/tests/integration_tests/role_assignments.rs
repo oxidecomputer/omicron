@@ -467,10 +467,10 @@ async fn run_test<T: RoleAssignmentTest>(
             .parsed_body()
             .unwrap();
     new_policy.role_assignments.sort_by_key(|r| {
-        (r.identity_id, r.role_name.to_database_string().to_owned())
+        (r.identity_id, r.role_name.to_database_string().into_owned())
     });
     updated_policy.role_assignments.sort_by_key(|r| {
-        (r.identity_id, r.role_name.to_database_string().to_owned())
+        (r.identity_id, r.role_name.to_database_string().into_owned())
     });
     assert_eq!(updated_policy, new_policy);
 

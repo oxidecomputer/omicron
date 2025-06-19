@@ -12,6 +12,9 @@ use chrono::{DateTime, Utc};
 use daft::Diffable;
 use id_map::IdMap;
 use id_map::IdMappable;
+use iddqd::IdOrdItem;
+use iddqd::IdOrdMap;
+use iddqd::id_upcast;
 use omicron_common::disk::{DatasetKind, DatasetName};
 use omicron_common::ledger::Ledgerable;
 use omicron_common::{
@@ -127,6 +130,7 @@ pub struct ConfigReconcilerInventory {
     pub external_disks:
         BTreeMap<PhysicalDiskUuid, ConfigReconcilerInventoryResult>,
     pub datasets: BTreeMap<DatasetUuid, ConfigReconcilerInventoryResult>,
+    pub orphaned_datasets: IdOrdMap<OrphanedDataset>,
     pub zones: BTreeMap<OmicronZoneUuid, ConfigReconcilerInventoryResult>,
 }
 
@@ -144,6 +148,22 @@ impl ConfigReconcilerInventory {
                 self.last_reconciled_config.zones.get(zone_id)
             }
             ConfigReconcilerInventoryResult::Err { .. } => None,
+        })
+    }
+
+    /// Iterate over all zones contained in the most-recently-reconciled sled
+    /// config and report their status as of that reconciliation.
+    pub fn reconciled_omicron_zones(
+        &self,
+    ) -> impl Iterator<Item = (&OmicronZoneConfig, &ConfigReconcilerInventoryResult)>
+    {
+        // `self.zones` may contain zone IDs that aren't present in
+        // `last_reconciled_config` at all, if we failed to _shut down_ zones
+        // that are no longer present in the config. We use `filter_map` to
+        // strip those out, and only report on the configured zones.
+        self.zones.iter().filter_map(|(zone_id, result)| {
+            let config = self.last_reconciled_config.zones.get(zone_id)?;
+            Some((config, result))
         })
     }
 
@@ -169,8 +189,34 @@ impl ConfigReconcilerInventory {
             .iter()
             .map(|z| (z.id, ConfigReconcilerInventoryResult::Ok))
             .collect();
-        Self { last_reconciled_config: config, external_disks, datasets, zones }
+        Self {
+            last_reconciled_config: config,
+            external_disks,
+            datasets,
+            orphaned_datasets: IdOrdMap::new(),
+            zones,
+        }
     }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Deserialize, JsonSchema, Serialize)]
+pub struct OrphanedDataset {
+    pub name: DatasetName,
+    pub reason: String,
+    pub id: Option<DatasetUuid>,
+    pub mounted: bool,
+    pub available: ByteCount,
+    pub used: ByteCount,
+}
+
+impl IdOrdItem for OrphanedDataset {
+    type Key<'a> = &'a DatasetName;
+
+    fn key(&self) -> Self::Key<'_> {
+        &self.name
+    }
+
+    id_upcast!();
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Deserialize, JsonSchema, Serialize)]

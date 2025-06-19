@@ -31,6 +31,7 @@ gateway-test-utils.workspace = true
 gateway-types.workspace = true
 http.workspace = true
 humantime.workspace = true
+iddqd.workspace = true
 internal-dns-resolver.workspace = true
 internal-dns-types.workspace = true
 itertools.workspace = true
