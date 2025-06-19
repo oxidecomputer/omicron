@@ -489,8 +489,6 @@ impl IdMappable for InternalDiskDetails {
 
 impl From<&'_ Disk> for InternalDiskDetails {
     fn from(disk: &'_ Disk) -> Self {
-        // Synthetic disks panic if asked for their `slot()`, so filter
-        // them out first.
         let zpool_id = match disk.zpool_name() {
             ZpoolName::Internal(id) => *id,
             ZpoolName::External(id) => {
@@ -499,6 +497,8 @@ impl From<&'_ Disk> for InternalDiskDetails {
                 );
             }
         };
+        // Synthetic disks panic if asked for their `slot()`, so filter
+        // them out first.
         let slot = if disk.is_synthetic() {
             None
         } else {

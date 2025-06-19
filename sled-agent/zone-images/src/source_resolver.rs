@@ -188,8 +188,7 @@ impl ResolverInner {
                 })
             }
             OmicronZoneImageSource::Artifact { hash } => {
-                // TODO: implement mupdate override here. This will return an
-                // error if the override isn't found.
+                // TODO: implement mupdate override here.
                 //
                 // Search both artifact datasets. This iterator starts with the
                 // dataset for the boot disk (if it exists), and then is followed
