@@ -484,9 +484,11 @@ impl DataStore {
                 }
 
                 // Insert pending MGS updates for service processors for this
-                // blueprint.  These include foreign keys into the hw_baseboard_id
-                // table that we don't have handy.  To achieve this, we use the same
-                // pattern used during inventory insertion:
+                // blueprint.  These include foreign keys into the
+                // hw_baseboard_id table that we don't have handy.  To achieve
+                // this, we use the same pattern used during inventory
+                // insertion:
+                //
                 //   INSERT INTO bp_pending_mgs_update_sp
                 //       SELECT
                 //           id
@@ -494,8 +496,8 @@ impl DataStore {
                 //         FROM hw_baseboard_id
                 //         WHERE part_number = ... AND serial_number = ...;
                 //
-                // This way, we don't need to know the id.  The database looks it up
-                // for us as it does the INSERT.
+                // This way, we don't need to know the id.  The database looks
+                // it up for us as it does the INSERT.
 
                 for update in &blueprint.pending_mgs_updates {
                     // Right now, we only implement support for storing SP
@@ -515,8 +517,9 @@ impl DataStore {
                             } => continue,
                         };
 
-                    // slot_ids fit into a u16 in practice.  This will be enforced
-                    // at compile time shortly.  See oxidecomputer/omicron#8378.
+                    // slot_ids fit into a u16 in practice.  This will be
+                    // enforced at compile time shortly.  See
+                    // oxidecomputer/omicron#8378.
                     let update_slot_id = u16::try_from(update.slot_id)
                         .expect("slot id to fit into u16");
 
@@ -1220,7 +1223,6 @@ impl DataStore {
         // Collect the unique baseboard ids referenced by pending updates.
         let baseboard_id_ids: BTreeSet<_> =
             pending_updates_sp.iter().map(|s| s.hw_baseboard_id).collect();
-        // XXX-dap could commonize with inventory
         // Fetch the corresponding baseboard records.
         let baseboards_by_id: BTreeMap<_, _> = {
             use nexus_db_schema::schema::hw_baseboard_id::dsl;
@@ -1259,7 +1261,8 @@ impl DataStore {
             else {
                 // This should be impossible.
                 return Err(Error::internal_error(&format!(
-                    "loading blueprint {}: missing baseboard that we should have fetched: {}",
+                    "loading blueprint {}: missing baseboard that we should \
+                     have fetched: {}",
                     blueprint_id, row.hw_baseboard_id
                 )));
             };
@@ -1268,7 +1271,8 @@ impl DataStore {
             if let Some(previous) = pending_mgs_updates.insert(update) {
                 // This should be impossible.
                 return Err(Error::internal_error(&format!(
-                    "blueprint {}: found multiple pending updates for baseboard {:?}",
+                    "blueprint {}: found multiple pending updates for \
+                     baseboard {:?}",
                     blueprint_id, previous.baseboard_id
                 )));
             }
