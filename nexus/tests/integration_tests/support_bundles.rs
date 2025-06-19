@@ -189,7 +189,7 @@ async fn bundle_download(
     let body = NexusRequest::new(
         RequestBuilder::new(client, Method::GET, &url)
             .expect_status(Some(StatusCode::OK))
-            .expect_range_requestable(),
+            .expect_range_requestable("application/zip"),
     )
     .authn_as(AuthnMode::PrivilegedUser)
     .execute()
@@ -208,7 +208,7 @@ async fn bundle_download_head(
     let len = NexusRequest::new(
         RequestBuilder::new(client, Method::HEAD, &url)
             .expect_status(Some(StatusCode::OK))
-            .expect_range_requestable(),
+            .expect_range_requestable("application/zip"),
     )
     .authn_as(AuthnMode::PrivilegedUser)
     .execute()
@@ -240,7 +240,7 @@ async fn bundle_download_range(
                 http::header::CONTENT_RANGE,
                 expected_content_range,
             )
-            .expect_range_requestable(),
+            .expect_range_requestable("application/zip"),
     )
     .authn_as(AuthnMode::PrivilegedUser)
     .execute()
