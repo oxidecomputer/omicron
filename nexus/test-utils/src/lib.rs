@@ -95,6 +95,7 @@ use slog::{Logger, debug, error, o};
 use std::collections::BTreeMap;
 use std::collections::HashMap;
 use std::fmt::Debug;
+use std::iter::{once, repeat, zip};
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr, SocketAddrV6};
 use std::sync::Arc;
 use std::time::Duration;
@@ -394,6 +395,8 @@ pub struct ControlPlaneTestContextBuilder<'a, N: NexusServer> {
     pub internal_dns: Option<dns_server::TransientServer>,
     dns_config: Option<DnsConfigParams>,
     initial_blueprint_id: Option<BlueprintUuid>,
+    blueprint_disks: BTreeMap<SledUuid, IdMap<BlueprintPhysicalDiskConfig>>,
+    blueprint_datasets: BTreeMap<SledUuid, IdMap<BlueprintDatasetConfig>>,
     blueprint_zones: Vec<BlueprintZoneConfig>,
 
     pub silo_name: Option<Name>,
@@ -442,6 +445,8 @@ impl<'a, N: NexusServer> ControlPlaneTestContextBuilder<'a, N> {
             internal_dns: None,
             dns_config: None,
             initial_blueprint_id: None,
+            blueprint_disks: BTreeMap::new(),
+            blueprint_datasets: BTreeMap::new(),
             blueprint_zones: Vec::new(),
             silo_name: None,
             user_name: None,
@@ -843,7 +848,7 @@ impl<'a, N: NexusServer> ControlPlaneTestContextBuilder<'a, N> {
         self.dns_config = Some(dns_config);
     }
 
-    // Perform RSS handoff
+    /// Perform RSS handoff
     pub async fn start_nexus_external(
         &mut self,
         tls_certificates: Vec<Certificate>,
@@ -881,11 +886,11 @@ impl<'a, N: NexusServer> ControlPlaneTestContextBuilder<'a, N> {
             // The first sled agent is the only one that'll have configured
             // blueprint zones, but the others all need to have disks.
 
-            let maybe_zones = std::iter::once(Some(&self.blueprint_zones))
-                .chain(std::iter::repeat(None));
+            let maybe_zones =
+                once(Some(&self.blueprint_zones)).chain(repeat(None));
 
             for (sled_agent, maybe_zones) in
-                std::iter::zip(self.sled_agents.iter(), maybe_zones)
+                zip(self.sled_agents.iter(), maybe_zones)
             {
                 let sled_id = sled_agent.sled_agent_id();
 
@@ -947,11 +952,13 @@ impl<'a, N: NexusServer> ControlPlaneTestContextBuilder<'a, N> {
                     }
                 }
 
+                self.blueprint_disks.insert(sled_id, disks.clone());
+                self.blueprint_datasets.insert(sled_id, datasets.clone());
                 blueprint_sleds.insert(
                     sled_id,
                     BlueprintSledConfig {
                         state: SledState::Active,
-                        sled_agent_generation: Generation::new().next(),
+                        sled_agent_generation: 4.into(),
                         disks,
                         datasets,
                         zones,
@@ -1099,33 +1106,6 @@ impl<'a, N: NexusServer> ControlPlaneTestContextBuilder<'a, N> {
     /// tell the other Sled Agents to report they have no zones configured, and
     /// write the early network config to all sleds.
     pub async fn configure_sled_agents(&mut self) {
-        let Some(sled_agent) = self.sled_agents.first() else {
-            panic!("expected sled agent has not been created");
-        };
-
-        let client = sled_agent_client::Client::new(
-            &format!("http://{}", sled_agent.local_addr()),
-            self.logctx.log.clone(),
-        );
-
-        client
-            .omicron_config_put(&OmicronSledConfig {
-                generation: Generation::new().next(),
-                // Sending no disks or datasets is probably wrong, but there are
-                // a lot of inconsistencies with this in nexus-test.
-                disks: IdMap::default(),
-                datasets: IdMap::default(),
-                zones: self
-                    .blueprint_zones
-                    .clone()
-                    .into_iter()
-                    .map(From::from)
-                    .collect(),
-                remove_mupdate_override: None,
-            })
-            .await
-            .expect("Failed to configure sled agent with our zones");
-
         let early_network_config = EarlyNetworkConfig {
             body: EarlyNetworkConfigBody {
                 ntp_servers: Vec::new(),
@@ -1142,12 +1122,17 @@ impl<'a, N: NexusServer> ControlPlaneTestContextBuilder<'a, N> {
             schema_version: 2,
         };
 
-        client
-            .write_network_bootstore_config(&early_network_config)
-            .await
-            .expect("Failed to write early networking config to bootstore");
+        macro_rules! from_clone {
+            ($source: expr) => {
+                $source.clone().into_iter().map(From::from).collect()
+            };
+        }
 
-        for sled_agent in self.sled_agents.iter().skip(1) {
+        let generation = Generation::from_u32(2);
+        let zones =
+            once(from_clone!(self.blueprint_zones)).chain(repeat(vec![]));
+        for (sled_agent, sled_zones) in zip(self.sled_agents.iter(), zones) {
+            let sled_id = sled_agent.sled_agent_id();
             let client = sled_agent_client::Client::new(
                 &format!("http://{}", sled_agent.local_addr()),
                 self.logctx.log.clone(),
@@ -1155,20 +1140,22 @@ impl<'a, N: NexusServer> ControlPlaneTestContextBuilder<'a, N> {
 
             client
                 .omicron_config_put(&OmicronSledConfig {
-                    generation: Generation::new().next(),
-                    // As above, sending no disks or datasets is probably wrong
-                    disks: IdMap::default(),
-                    datasets: IdMap::default(),
-                    zones: IdMap::default(),
+                    generation,
+                    disks: from_clone!(self.blueprint_disks[&sled_id]),
+                    datasets: from_clone!(self.blueprint_datasets[&sled_id]),
+                    zones: sled_zones.into_iter().collect(),
                     remove_mupdate_override: None,
                 })
                 .await
-                .expect("Failed to configure sled agent with our zones");
+                .expect("Failed to configure sled agent {sled_id} with zones");
 
             client
                 .write_network_bootstore_config(&early_network_config)
                 .await
-                .expect("Failed to write early networking config to bootstore");
+                .expect(
+                    "Failed to write early networking config \
+                     to bootstore on sled {sled_id}",
+                );
         }
     }
 
@@ -1741,7 +1728,7 @@ async fn setup_with_config_impl<N: NexusServer>(
     }
 
     // Start expected services: these will all be allocated to the first sled
-    // agent. Afterwards, configure the first sled agent, and start the rest of
+    // agent. Afterwards, configure the sled agents and start the rest of the
     // the required services.
 
     builder
@@ -1762,10 +1749,6 @@ async fn setup_with_config_impl<N: NexusServer>(
                     Box::new(|builder| builder.populate_internal_dns().boxed()),
                 ),
                 (
-                    "configure_sled_agents",
-                    Box::new(|builder| builder.configure_sled_agents().boxed()),
-                ),
-                (
                     "start_nexus_external",
                     Box::new(|builder| {
                         builder
@@ -1774,6 +1757,10 @@ async fn setup_with_config_impl<N: NexusServer>(
                             )
                             .boxed()
                     }),
+                ),
+                (
+                    "configure_sled_agents",
+                    Box::new(|builder| builder.configure_sled_agents().boxed()),
                 ),
                 (
                     "start_oximeter",
