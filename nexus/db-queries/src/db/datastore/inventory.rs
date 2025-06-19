@@ -3035,11 +3035,6 @@ impl DataStore {
                         .insert_unique(row.into())
                         .expect("database ensures the row is unique");
                 }
-
-                println!(
-                    "batch size {batch_size}, by_sled_id: {:#?}",
-                    by_sled_id
-                );
             }
 
             by_sled_id
