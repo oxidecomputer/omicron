@@ -410,7 +410,7 @@ derive_more = "0.99.20"
 derive-where = "1.2.7"
 dev-tools-common = { path = "dev-tools/common" }
 # Having the i-implement-... feature here makes diesel go away from the workspace-hack
-diesel = { version = "2.2.10", features = ["i-implement-a-third-party-backend-and-opt-into-breaking-changes", "postgres", "r2d2", "chrono", "serde_json", "network-address", "uuid"] }
+diesel = { version = "2.2.11", features = ["i-implement-a-third-party-backend-and-opt-into-breaking-changes", "postgres", "r2d2", "chrono", "serde_json", "network-address", "uuid"] }
 diesel-dtrace = "0.4.2"
 digest = "0.10.7"
 dns-server = { path = "dns-server" }
@@ -619,7 +619,7 @@ propolis-client = { git = "https://github.com/oxidecomputer/propolis", rev = "e3
 propolis-mock-server = { git = "https://github.com/oxidecomputer/propolis", rev = "e3988414bd68ecf806078fb898120e1194451ee9" }
 # NOTE: see above!
 proptest = "1.7.0"
-qorb = "0.3.1"
+qorb = "0.4.0"
 quote = "1.0"
 rand = "0.8.5"
 # We're still in the middle of migrating to rand 0.9.
@@ -705,7 +705,7 @@ subtle = "2.6.1"
 supports-color = "3.0.2"
 support-bundle-viewer = "0.1.0"
 swrite = "0.1.0"
-sync-ptr = "0.1.1"
+sync-ptr = "0.1.4"
 libsw = { version = "3.4.0", features = ["tokio"] }
 syn = { version = "2.0" }
 tabled = "0.15.0"
@@ -718,27 +718,27 @@ textwrap = { version = "0.16.2", features = [ "terminal_size" ] }
 test-strategy = "0.4.1"
 thiserror = "1.0"
 tofino = { git = "https://github.com/oxidecomputer/tofino", branch = "main" }
-tokio = "1.43.0"
+tokio = "1.45.1"
 tokio-postgres = { version = "0.7", features = [ "with-chrono-0_4", "with-uuid-1" ] }
 tokio-stream = "0.1.17"
 tokio-tungstenite = "0.23.1"
-tokio-util = { version = "0.7.13", features = ["io", "io-util", "time"] }
-toml = "0.8.20"
-toml_edit = "0.22.24"
+tokio-util = { version = "0.7.15", features = ["io", "io-util", "time"] }
+toml = "0.8.23"
+toml_edit = "0.22.27"
 tough = { version = "0.20.0", features = [ "http" ] }
 transceiver-controller = { git = "https://github.com/oxidecomputer/transceiver-control", features = [ "api-traits" ] }
-trybuild = "1.0.103"
+trybuild = "1.0.105"
 tufaceous = { git = "https://github.com/oxidecomputer/tufaceous", branch = "main" }
 tufaceous-artifact = { git = "https://github.com/oxidecomputer/tufaceous", branch = "main", features = ["proptest", "schemars"] }
 tufaceous-brand-metadata = { git = "https://github.com/oxidecomputer/tufaceous", branch = "main" }
 tufaceous-lib = { git = "https://github.com/oxidecomputer/tufaceous", branch = "main" }
-tui-tree-widget = "0.23.0"
+tui-tree-widget = "0.23.1"
 typed-rng = { path = "typed-rng" }
 typify = "0.3.0"
 unicode-width = "0.1.13"
 update-common = { path = "update-common" }
 update-engine = { path = "update-engine" }
-url = "2.5.3"
+url = "2.5.4"
 usdt = "0.5.0"
 uuid = { version = "1.17.0", features = ["serde", "v4"] }
 uzers = "0.12"
@@ -751,7 +751,7 @@ wicketd-client = { path = "clients/wicketd-client" }
 xshell = "0.2.7"
 zerocopy = "0.8.25"
 zeroize = { version = "1.8.1", features = ["zeroize_derive", "std"] }
-zip = { version = "2.6.0", default-features = false, features = ["deflate","bzip2"] }
+zip = { version = "2.6.1", default-features = false, features = ["deflate","bzip2"] }
 zone = { version = "0.3.1", default-features = false, features = ["async"] }
 
 # newtype-uuid is set to default-features = false because we don't want to
