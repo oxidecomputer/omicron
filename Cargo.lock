@@ -7289,6 +7289,7 @@ dependencies = [
  "signal-hook-tokio",
  "subprocess",
  "tokio",
+ "tokio-dtrace",
  "tokio-postgres",
  "toml 0.8.22",
 ]
