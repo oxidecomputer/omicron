@@ -297,7 +297,7 @@ pub enum PrecheckError {
     )]
     WrongDevice {
         sp_type: SpType,
-        slot_id: u32,
+        slot_id: u16,
         expected_part: String,
         expected_serial: String,
         found_part: String,

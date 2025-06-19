@@ -1273,7 +1273,7 @@ impl BpPendingMgsUpdateSp {
         PendingMgsUpdate {
             baseboard_id,
             sp_type: self.sp_type.into(),
-            slot_id: u32::from(**self.sp_slot),
+            slot_id: **self.sp_slot,
             artifact_hash: self.artifact_sha256.into(),
             artifact_version: (*self.artifact_version).clone(),
             details: PendingMgsUpdateDetails::Sp {
