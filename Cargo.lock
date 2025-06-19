@@ -11787,6 +11787,7 @@ dependencies = [
  "camino",
  "camino-tempfile",
  "chrono",
+ "iddqd",
  "nexus-sled-agent-shared",
  "omicron-common",
  "omicron-test-utils",
@@ -11802,9 +11803,11 @@ dependencies = [
  "sha3",
  "sled-hardware-types",
  "slog",
+ "slog-error-chain",
  "strum",
  "thiserror 1.0.69",
  "toml 0.8.23",
+ "tufaceous-artifact",
  "uuid",
 ]
 
@@ -11828,10 +11831,28 @@ dependencies = [
  "serde_json",
  "sha2",
  "sled-agent-config-reconciler",
+ "sled-agent-types",
+ "sled-agent-zone-images-examples",
  "sled-storage",
  "slog",
  "slog-error-chain",
- "thiserror 1.0.69",
+ "tufaceous-artifact",
+]
+
+[[package]]
+name = "sled-agent-zone-images-examples"
+version = "0.1.0"
+dependencies = [
+ "camino",
+ "camino-tempfile-ext",
+ "iddqd",
+ "omicron-common",
+ "omicron-uuid-kinds",
+ "omicron-workspace-hack",
+ "serde_json",
+ "sha2",
+ "sled-agent-types",
+ "sled-storage",
  "tufaceous-artifact",
 ]
 
@@ -14548,7 +14569,9 @@ dependencies = [
  "serde_json",
  "sha2",
  "sled-agent-config-reconciler",
+ "sled-agent-types",
  "sled-agent-zone-images",
+ "sled-agent-zone-images-examples",
  "sled-hardware-types",
  "sled-storage",
  "slog",
