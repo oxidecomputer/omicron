@@ -5,6 +5,7 @@
 //! Mechanics for interacting with the OS phase 2 images stored on M.2
 //! partitions.
 
+use crate::InternalDisks;
 use bytes::Buf as _;
 use camino::Utf8PathBuf;
 use illumos_utils::dkio::MediaInfoExtended;
@@ -13,11 +14,9 @@ use sha2::Digest as _;
 use slog_error_chain::InlineErrorChain;
 use std::cmp;
 use std::fs::File;
-use std::io::Read as _;
+use std::io;
 use std::os::fd::AsRawFd as _;
 use tufaceous_artifact::ArtifactHash;
-
-use crate::InternalDisks;
 
 pub struct BootPartitionContents {
     pub slot_a: BootPartitionDetails,
@@ -34,6 +33,7 @@ impl BootPartitionContents {
     }
 }
 
+#[derive(Debug)]
 pub enum BootPartitionDetails {
     NoDiskFound,
     ErrorDeterminingDiskPath(String),
@@ -77,7 +77,7 @@ impl BootPartitionDetails {
     }
 
     fn read_blocking(path: Utf8PathBuf) -> Self {
-        let mut f = match File::open(&path) {
+        let f = match File::open(&path) {
             Ok(f) => f,
             Err(err) => {
                 return Self::ErrorOpeningDisk {
@@ -98,10 +98,29 @@ impl BootPartitionDetails {
             }
         };
 
+        Self::read_blocking_with_block_size(f, path, block_size)
+    }
+
+    // This is separated from `read_blocking()` so we can write unit tests over
+    // this function without needing real disks that respond to the
+    // `MediaInfoExtended` ioctl.
+    fn read_blocking_with_block_size<R: io::Read>(
+        mut f: R,
+        path: Utf8PathBuf,
+        block_size: usize,
+    ) -> Self {
+        const ONE_MIB: usize = 1024 * 1024;
+
         // In practice we expect block sizes of 512 or 4096, but we can read
         // bigger chunks; we'll choose 1 MiB (and fall back to the block size if
-        // we somehow have a disk with block sizes > 1 MiB).
-        let buf_size = cmp::max(block_size, 1024 * 1024);
+        // we somehow have a disk with block sizes > 1 MiB)...
+        let buf_size = cmp::max(block_size, ONE_MIB);
+
+        // ...but guard against something really wild (e.g., `-1` being
+        // interpreted as a block size, or proptest passing us usize::MAX); cap
+        // the block size at something reasonable.
+        let buf_size = cmp::min(buf_size, 16 * ONE_MIB);
+
         let mut buf = vec![0; buf_size];
 
         if let Err(err) = f.read_exact(&mut buf) {
@@ -245,5 +264,92 @@ impl BootImageHeader {
         sha256.copy_from_slice(&buf[..32]);
 
         Ok(Self { flags, data_size, image_size, target_size, sha256 })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use bytes::BufMut as _;
+    use test_strategy::proptest;
+
+    struct NeverEndingReader<R> {
+        inner: R,
+        inner_done: bool,
+    }
+
+    impl<R: io::Read> NeverEndingReader<R> {
+        fn new(inner: R) -> Self {
+            Self { inner, inner_done: false }
+        }
+    }
+
+    impl<R: io::Read> io::Read for NeverEndingReader<R> {
+        fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
+            loop {
+                if self.inner_done {
+                    buf.fill(0);
+                    return Ok(buf.len());
+                } else {
+                    let n = self.inner.read(buf)?;
+                    if n == 0 {
+                        self.inner_done = true;
+                    } else {
+                        return Ok(n);
+                    }
+                }
+            }
+        }
+    }
+
+    fn prepend_valid_image_hader(data: &mut Vec<u8>) -> [u8; 32] {
+        let sha256 = sha2::Sha256::digest(&data);
+        let mut header = [0; BootImageHeader::SIZE];
+        let mut buf = header.as_mut_slice();
+        buf.put_u32_le(BootImageHeader::MAGIC);
+        buf.put_u32_le(BootImageHeader::VERSION);
+        buf.put_u64_le(0); // flags
+        buf.put_u64_le(data.len() as u64);
+        buf.put_u64_le(data.len() as u64);
+        buf.put_u64_le(data.len() as u64);
+        buf.put_slice(&sha256);
+        data.splice(0..0, header);
+        sha256.into()
+    }
+
+    #[proptest]
+    fn proptest_read_valid_host_phase2(mut data: Vec<u8>, block_size: usize) {
+        let expected_header_sha256 = prepend_valid_image_hader(&mut data);
+        let expected_artifact_hash =
+            ArtifactHash(sha2::Sha256::digest(&data).into());
+        let expected_artifact_size = data.len();
+        eprintln!("{} {block_size}", data.len());
+
+        match BootPartitionDetails::read_blocking_with_block_size(
+            NeverEndingReader::new(&*data),
+            "/does-not-matter".into(),
+            block_size,
+        ) {
+            BootPartitionDetails::Phase2Image {
+                artifact_hash,
+                artifact_size,
+                header,
+            } => {
+                assert_eq!(artifact_hash, expected_artifact_hash);
+                assert_eq!(artifact_size, expected_artifact_size);
+                assert_eq!(header.sha256, expected_header_sha256);
+            }
+            res @ (BootPartitionDetails::NoDiskFound
+            | BootPartitionDetails::ErrorDeterminingDiskPath(_)
+            | BootPartitionDetails::ErrorOpeningDisk { .. }
+            | BootPartitionDetails::ErrorDeterminingBlockSize {
+                ..
+            }
+            | BootPartitionDetails::ErrorReadingDisk { .. }
+            | BootPartitionDetails::ErrorParsingImageHeader(_)
+            | BootPartitionDetails::HeaderSha256Mismatch { .. }) => {
+                panic!("unexpected result: {res:?}");
+            }
+        }
     }
 }
