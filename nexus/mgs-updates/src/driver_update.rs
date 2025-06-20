@@ -4,6 +4,7 @@
 
 //! Concurrent-safe facilities for doing MGS-managed upates
 
+use crate::common_sp_update::PostUpdateError;
 use crate::common_sp_update::PrecheckError;
 use crate::common_sp_update::PrecheckStatus;
 use crate::common_sp_update::STATUS_POLL_INTERVAL;
@@ -32,7 +33,7 @@ use uuid::Uuid;
 
 /// How long may the status remain unchanged without us treating this as a
 /// problem?
-pub const PROGRESS_TIMEOUT: Duration = Duration::from_secs(120);
+pub const PROGRESS_TIMEOUT: Duration = Duration::from_secs(180);
 
 /// How long to wait between failed attempts to reset the device
 const RESET_DELAY_INTERVAL: Duration = Duration::from_secs(10);
@@ -45,6 +46,14 @@ pub const DEFAULT_RETRY_TIMEOUT: Duration = Duration::from_secs(60);
 
 /// How long to wait after resetting the device before expecting it to come up
 const RESET_TIMEOUT: Duration = Duration::from_secs(60);
+
+/// How long to wait for an ongoing RoT bootloader update
+const WAIT_FOR_ONGOING_ROT_BOOTLOADER_UPDATE_TIMEOUT: Duration =
+    Duration::from_secs(180);
+
+/// How long to wait between poll attempts on RoT bootloader update status
+const ROT_BOOLOADER_UPDATE_PROGRESS_INTERVAL: Duration =
+    Duration::from_secs(10);
 
 /// Parameters describing a request to update one SP-managed component
 ///
@@ -216,7 +225,11 @@ pub(crate) async fn apply_update(
     // - if not, then if our required preconditions are met
     status.update(UpdateAttemptStatus::Precheck);
     match update_helper.precheck(log, &mut mgs_clients, update).await {
-        Ok(PrecheckStatus::ReadyForUpdate) => (),
+        Ok(PrecheckStatus::ReadyForUpdate) |
+        // This is the first time a Nexus instance is attempting to
+        // update the RoT bootloader, we don't need to wait for an
+        // ongoing update.
+        Ok(PrecheckStatus::WaitingForOngoingRotBootloaderUpdate) => (),
         Ok(PrecheckStatus::UpdateComplete) => {
             return Ok(UpdateCompletedHow::FoundNoChangesNeeded);
         }
@@ -349,16 +362,33 @@ pub(crate) async fn apply_update(
 
     if try_reset {
         // We retry this until we get some error *other* than a communication
-        // error.  There is intentionally no timeout here.  If we've staged an
-        // update but not managed to reset the device, there's no point where
-        // we'd want to stop trying to do so.
+        // error or an RoT bootloader image error.  There is intentionally no
+        // timeout here.  If we've staged an update but not managed to reset
+        // the device, there's no point where we'd want to stop trying to do so.
         while let Err(error) =
             update_helper.post_update(log, &mut mgs_clients, update).await
         {
-            if !matches!(error, gateway_client::Error::CommunicationError(_)) {
-                let error = InlineErrorChain::new(&error);
-                error!(log, "post_update failed"; &error);
-                return Err(ApplyUpdateError::SpResetFailed(error.to_string()));
+            match error {
+                PostUpdateError::GatewayClientError(error) => {
+                    if !matches!(
+                        error,
+                        gateway_client::Error::CommunicationError(_)
+                    ) {
+                        let error = InlineErrorChain::new(&error);
+                        error!(log, "post_update failed"; &error);
+                        return Err(ApplyUpdateError::SpResetFailed(
+                            error.to_string(),
+                        ));
+                    }
+                }
+                PostUpdateError::RotBootloaderImageError { error } => {
+                    let error = InlineErrorChain::new(&error);
+                    error!(log, "post_update failed"; &error);
+                    return Err(ApplyUpdateError::SpResetFailed(
+                        error.to_string(),
+                    ));
+                }
+                PostUpdateError::RotCommunicationFailed { message: _ } => {}
             }
 
             tokio::time::sleep(RESET_DELAY_INTERVAL).await;
@@ -598,6 +628,24 @@ async fn wait_for_update_done(
             // Check if we're done.
             Ok(PrecheckStatus::UpdateComplete) => return Ok(()),
 
+            // We'll loop for 3 minutes to wait for any ongoing RoT bootloader update.
+            // We need to wait for 2 resets which have a timeout of 60 seconds each,
+            // and an attempt to retrieve boot info, which has a time out of 30 seconds.
+            // We give an additional 30 seconds to as a buffer for the other actions.
+            Ok(PrecheckStatus::WaitingForOngoingRotBootloaderUpdate) => {
+                if before.elapsed()
+                    >= WAIT_FOR_ONGOING_ROT_BOOTLOADER_UPDATE_TIMEOUT
+                {
+                    return Err(UpdateWaitError::Timeout(
+                        WAIT_FOR_ONGOING_ROT_BOOTLOADER_UPDATE_TIMEOUT,
+                    ));
+                }
+
+                tokio::time::sleep(ROT_BOOLOADER_UPDATE_PROGRESS_INTERVAL)
+                    .await;
+                continue;
+            }
+
             // An incorrect version in the "inactive" slot, incorrect active slot,
             // or non-empty pending_persistent_boot_preference/transient_boot_preference
             // are normal during the upgrade. We have no reason to think these won't
@@ -728,6 +776,91 @@ mod test {
         let in_progress = desc.setup().await;
         let finished = in_progress.finish().await;
         finished.expect_sp_success(expected_result);
+    }
+
+    /// Tests several happy-path cases of updating an RoT bootloader
+    #[tokio::test]
+    async fn test_rot_bootloader_update_basic() {
+        let gwtestctx = gateway_test_utils::setup::test_setup(
+            "test_rot_bootloader_update_basic",
+            SpPort::One,
+        )
+        .await;
+        let log = &gwtestctx.logctx.log;
+        let artifacts = TestArtifacts::new(log).await.unwrap();
+
+        // Basic case: normal update
+        run_one_successful_rot_bootloader_update(
+            &gwtestctx,
+            &artifacts,
+            SpType::Sled,
+            1,
+            &artifacts.rot_bootloader_gimlet_artifact_hash,
+            UpdateCompletedHow::CompletedUpdate,
+        )
+        .await;
+
+        // Basic case: attempted update, found no changes needed
+        run_one_successful_rot_bootloader_update(
+            &gwtestctx,
+            &artifacts,
+            SpType::Sled,
+            1,
+            &artifacts.rot_bootloader_gimlet_artifact_hash,
+            UpdateCompletedHow::FoundNoChangesNeeded,
+        )
+        .await;
+
+        // Run the same two tests for a switch RoT bootloader.
+        run_one_successful_rot_bootloader_update(
+            &gwtestctx,
+            &artifacts,
+            SpType::Switch,
+            0,
+            &artifacts.rot_bootloader_sidecar_artifact_hash,
+            UpdateCompletedHow::CompletedUpdate,
+        )
+        .await;
+        run_one_successful_rot_bootloader_update(
+            &gwtestctx,
+            &artifacts,
+            SpType::Switch,
+            0,
+            &artifacts.rot_bootloader_sidecar_artifact_hash,
+            UpdateCompletedHow::FoundNoChangesNeeded,
+        )
+        .await;
+
+        artifacts.teardown().await;
+        gwtestctx.teardown().await;
+    }
+
+    async fn run_one_successful_rot_bootloader_update(
+        gwtestctx: &GatewayTestContext,
+        artifacts: &TestArtifacts,
+        sp_type: SpType,
+        slot_id: u32,
+        artifact_hash: &ArtifactHash,
+        expected_result: UpdateCompletedHow,
+    ) {
+        let desc = UpdateDescription {
+            gwtestctx,
+            artifacts,
+            sp_type,
+            slot_id,
+            artifact_hash,
+            override_baseboard_id: None,
+            override_expected_sp_component:
+                ExpectedSpComponent::RotBootloader {
+                    override_expected_stage0: None,
+                    override_expected_stage0_next: None,
+                },
+            override_progress_timeout: None,
+        };
+
+        let in_progress = desc.setup().await;
+        let finished = in_progress.finish().await;
+        finished.expect_rot_bootloader_success(expected_result);
     }
 
     /// Tests several happy-path cases of updating an RoT
@@ -1354,6 +1487,176 @@ mod test {
                 override_expected_pending_persistent_boot_preference: None,
                 override_expected_transient_boot_preference: None,
             },
+            override_progress_timeout: None,
+        };
+        let in_progress = desc.setup().await;
+        artifacts.teardown().await;
+        in_progress.finish().await.expect_failure(&|error, sp1, sp2| {
+            assert_matches!(error, ApplyUpdateError::FetchArtifact(..));
+            // No changes should have been made in this case.
+            assert_eq!(sp1, sp2);
+        });
+
+        gwtestctx.teardown().await;
+    }
+
+    /// Tests a bunch of easy fast-failure RoT bootloader cases.
+    #[tokio::test]
+    async fn test_rot_bootloader_basic_failures() {
+        let gwtestctx = gateway_test_utils::setup::test_setup(
+            "test_rot_bootloader_basic_failures",
+            SpPort::One,
+        )
+        .await;
+        let log = &gwtestctx.logctx.log;
+        let artifacts = TestArtifacts::new(log).await.unwrap();
+
+        // Test a case of mistaken identity (reported baseboard does not match
+        // the one that we expect).
+        let desc = UpdateDescription {
+            gwtestctx: &gwtestctx,
+            artifacts: &artifacts,
+            sp_type: SpType::Sled,
+            slot_id: 1,
+            artifact_hash: &artifacts.sp_gimlet_artifact_hash,
+            override_baseboard_id: Some(BaseboardId {
+                part_number: String::from("i86pc"),
+                serial_number: String::from("SimGimlet0"),
+            }),
+            override_expected_sp_component:
+                ExpectedSpComponent::RotBootloader {
+                    override_expected_stage0: None,
+                    override_expected_stage0_next: None,
+                },
+            override_progress_timeout: None,
+        };
+
+        desc.setup().await.finish().await.expect_failure(&|error, sp1, sp2| {
+            assert_matches!(error, ApplyUpdateError::PreconditionFailed(..));
+            let message = InlineErrorChain::new(error).to_string();
+            eprintln!("{}", message);
+            assert!(message.contains(
+                "in sled slot 1, expected to find part \"i86pc\" serial \
+                         \"SimGimlet0\", but found part \"i86pc\" serial \
+                         \"SimGimlet01\"",
+            ));
+
+            // No changes should have been made in this case.
+            assert_eq!(sp1, sp2);
+        });
+
+        // Test a case where the active version doesn't match what we expect.
+        let desc = UpdateDescription {
+            gwtestctx: &gwtestctx,
+            artifacts: &artifacts,
+            sp_type: SpType::Sled,
+            slot_id: 1,
+            artifact_hash: &artifacts.sp_gimlet_artifact_hash,
+            override_baseboard_id: None,
+            override_expected_sp_component:
+                ExpectedSpComponent::RotBootloader {
+                    override_expected_stage0: Some(
+                        "not-right".parse().unwrap(),
+                    ),
+                    override_expected_stage0_next: None,
+                },
+            override_progress_timeout: None,
+        };
+
+        desc.setup().await.finish().await.expect_failure(&|error, sp1, sp2| {
+            assert_matches!(error, ApplyUpdateError::PreconditionFailed(..));
+            let message = InlineErrorChain::new(error).to_string();
+            eprintln!("{}", message);
+            assert!(message.contains(
+                "expected to find active version \"not-right\", but \
+                         found \"0.0.200\""
+            ));
+
+            // No changes should have been made in this case.
+            assert_eq!(sp1, sp2);
+        });
+
+        // Test a case where the inactive version doesn't match what it should
+        // (expected invalid, found something else).
+        let desc = UpdateDescription {
+            gwtestctx: &gwtestctx,
+            artifacts: &artifacts,
+            sp_type: SpType::Sled,
+            slot_id: 1,
+            artifact_hash: &artifacts.sp_gimlet_artifact_hash,
+            override_baseboard_id: None,
+            override_expected_sp_component:
+                ExpectedSpComponent::RotBootloader {
+                    override_expected_stage0: None,
+                    override_expected_stage0_next: Some(
+                        ExpectedVersion::NoValidVersion,
+                    ),
+                },
+            override_progress_timeout: None,
+        };
+
+        desc.setup().await.finish().await.expect_failure(&|error, sp1, sp2| {
+            assert_matches!(error, ApplyUpdateError::PreconditionFailed(..));
+            let message = InlineErrorChain::new(error).to_string();
+            eprintln!("{}", message);
+            assert!(message.contains(
+                "expected to find inactive version NoValidVersion, \
+                         but found Version(\"0.0.200\")"
+            ));
+
+            // No changes should have been made in this case.
+            assert_eq!(sp1, sp2);
+        });
+
+        // Now test a case where the inactive version doesn't match what it
+        // should (expected a different valid version).
+        let desc = UpdateDescription {
+            gwtestctx: &gwtestctx,
+            artifacts: &artifacts,
+            sp_type: SpType::Sled,
+            slot_id: 1,
+            artifact_hash: &artifacts.sp_gimlet_artifact_hash,
+            override_baseboard_id: None,
+            override_expected_sp_component:
+                ExpectedSpComponent::RotBootloader {
+                    override_expected_stage0: None,
+                    override_expected_stage0_next: Some(
+                        ExpectedVersion::Version(
+                            "something-else".parse().unwrap(),
+                        ),
+                    ),
+                },
+            override_progress_timeout: None,
+        };
+
+        desc.setup().await.finish().await.expect_failure(&|error, sp1, sp2| {
+                assert_matches!(error, ApplyUpdateError::PreconditionFailed(..));
+                let message = InlineErrorChain::new(error).to_string();
+                eprintln!("{}", message);
+                assert!(message.contains(
+                    "expected to find inactive version \
+                         Version(ArtifactVersion(\"something-else\")), but found \
+                         Version(\"0.0.200\")"
+                ));
+
+                // No changes should have been made in this case.
+                assert_eq!(sp1, sp2);
+            });
+
+        // Test a case where we fail to fetch the artifact.  We simulate this by
+        // tearing down our artifact server before the update starts.
+        let desc = UpdateDescription {
+            gwtestctx: &gwtestctx,
+            artifacts: &artifacts,
+            sp_type: SpType::Sled,
+            slot_id: 1,
+            artifact_hash: &artifacts.sp_gimlet_artifact_hash,
+            override_baseboard_id: None,
+            override_expected_sp_component:
+                ExpectedSpComponent::RotBootloader {
+                    override_expected_stage0: None,
+                    override_expected_stage0_next: None,
+                },
             override_progress_timeout: None,
         };
         let in_progress = desc.setup().await;
