@@ -218,17 +218,14 @@ Msgs ==
      the given epoch *)
   [type: {"expunged"}, epoch: Epoch, to: NODES, from: NODES] \union
 
-  (* This is an "implicit commit" in a reply message that comes from another
-     node when that node has moved on to a later configuration and the
-     requesting node is still part of the new configuration, but unaware of it.
+  (* Inform a node that it is utilizing an old committed onfiguration and give
+     it the new configuration.
 
-    As a result, a requesting node may have to retrieve a configuration and key
-    shares to recompute its share if it never received a prepare message for
-    this epoch.
+    As a result, a requesting node may have to retrieve key shares to recompute
+    its share if it never received a prepare message for this epoch.
   *)
   [type: {"commit_advance"},
-   config:
-   Configuration,
+   config: Configuration,
    to: NODES,
    from: NODES]
 

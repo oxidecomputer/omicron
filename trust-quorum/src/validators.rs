@@ -32,12 +32,12 @@ pub fn check_rack_id(
 /// Verify that the node is not decommissioned
 fn check_in_service(
     persistent_state: &PersistentStateSummary,
-) -> Result<(), SledDecommissionedError> {
-    if let Some(decommissioned) = &persistent_state.decommissioned {
-        return Err(SledDecommissionedError {
-            from: decommissioned.from.clone(),
-            epoch: decommissioned.epoch,
-            last_prepared_epoch: persistent_state.last_prepared_epoch,
+) -> Result<(), SledExpungedError> {
+    if let Some(expunged) = &persistent_state.expunged {
+        return Err(SledExpungedError {
+            from: expunged.from.clone(),
+            epoch: expunged.epoch,
+            last_prepared_epoch: persistent_state.latest_committed_config,
         });
     }
 
@@ -48,7 +48,7 @@ fn check_in_service(
 #[error(
     "sled was decommissioned on msg from {from:?} at epoch {epoch:?}: last prepared epoch = {last_prepared_epoch:?}"
 )]
-pub struct SledDecommissionedError {
+pub struct SledExpungedError {
     from: PlatformId,
     epoch: Epoch,
     last_prepared_epoch: Option<Epoch>,
@@ -108,7 +108,7 @@ pub enum ReconfigurationError {
     DecommissionedSled(
         #[from]
         #[source]
-        SledDecommissionedError,
+        SledExpungedError,
     ),
     #[error(
         "reconfiguration in progress at epoch {current_epoch:?}: cannot reconfigure for older epoch {msg_epoch:?}"
@@ -293,17 +293,17 @@ impl ValidatedReconfigureMsg {
         persistent_state: &PersistentStateSummary,
     ) -> Result<(), ReconfigurationError> {
         // Ensure we are strictly ordering committed configurations
-        if msg.last_committed_epoch != persistent_state.last_committed_epoch {
+        if msg.last_committed_epoch != persistent_state.latest_committed_config
+        {
             return Err(ReconfigurationError::LastCommittedEpochMismatch {
-                node_epoch: persistent_state.last_committed_epoch,
+                node_epoch: persistent_state.latest_committed_config,
                 msg_epoch: msg.last_committed_epoch,
             });
         }
 
         // Ensure that we haven't seen a prepare message for a newer
         // configuration.
-        if let Some(last_prepared_epoch) = persistent_state.last_prepared_epoch
-        {
+        if let Some(last_prepared_epoch) = persistent_state.latest_config {
             if msg.epoch <= last_prepared_epoch {
                 return Err(ReconfigurationError::PreparedEpochMismatch {
                     existing: last_prepared_epoch,
@@ -444,9 +444,10 @@ mod tests {
                 rack_id: None,
                 is_lrtq_only: false,
                 is_uninitialized: true,
-                last_prepared_epoch: None,
-                last_committed_epoch: None,
-                decommissioned: None,
+                latest_config: None,
+                latest_committed_config: None,
+                latest_share: None,
+                expunged: None,
             };
             (persistent_state, None)
         } else {
@@ -454,9 +455,10 @@ mod tests {
                 rack_id: Some(msg.rack_id),
                 is_lrtq_only: false,
                 is_uninitialized: false,
-                last_prepared_epoch: msg.last_committed_epoch,
-                last_committed_epoch: msg.last_committed_epoch,
-                decommissioned: None,
+                latest_config: msg.last_committed_epoch,
+                latest_committed_config: msg.last_committed_epoch,
+                latest_share: msg.last_committed_epoch,
+                expunged: None,
             };
             let mut members = input.members.clone();
             members
@@ -514,9 +516,10 @@ mod tests {
                 rack_id: None,
                 is_lrtq_only: false,
                 is_uninitialized: true,
-                last_prepared_epoch: None,
-                last_committed_epoch: None,
-                decommissioned: None,
+                latest_config: None,
+                latest_committed_config: None,
+                latest_share: None,
+                expunged: None,
             };
             (persistent_state, None)
         } else {
@@ -524,9 +527,10 @@ mod tests {
                 rack_id: Some(msg.rack_id),
                 is_lrtq_only: false,
                 is_uninitialized: false,
-                last_prepared_epoch: msg.last_committed_epoch,
-                last_committed_epoch: msg.last_committed_epoch,
-                decommissioned: None,
+                latest_config: msg.last_committed_epoch,
+                latest_committed_config: msg.last_committed_epoch,
+                latest_share: msg.last_committed_epoch,
+                expunged: None,
             };
             let mut members = input.members.clone();
             members

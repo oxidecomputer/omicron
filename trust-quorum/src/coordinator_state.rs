@@ -5,9 +5,9 @@
 //! State of a reconfiguration coordinator inside a [`crate::Node`]
 
 use crate::crypto::{LrtqShare, Sha3_256Digest, ShareDigestLrtq};
-use crate::messages::{PeerMsg, PrepareMsg};
+use crate::messages::PeerMsg;
 use crate::validators::{ReconfigurationError, ValidatedReconfigureMsg};
-use crate::{Configuration, Envelope, Epoch, PlatformId};
+use crate::{Configuration, Envelope, Epoch, PeerMsgKind, PlatformId};
 use gfss::shamir::Share;
 use slog::{Logger, o, warn};
 use std::collections::{BTreeMap, BTreeSet};
@@ -55,24 +55,26 @@ impl CoordinatorState {
         log: Logger,
         now: Instant,
         msg: ValidatedReconfigureMsg,
-    ) -> Result<(CoordinatorState, PrepareMsg), ReconfigurationError> {
+    ) -> Result<(CoordinatorState, Configuration, Share), ReconfigurationError>
+    {
         // Create a configuration for this epoch
         let (config, shares) = Configuration::new(&msg)?;
 
         let mut prepares = BTreeMap::new();
-        // `my_prepare_msg` is optional only so that we can fill it in via
-        // the loop. It will always become `Some`, as a `Configuration` always
-        // contains the coordinator as a member as validated by construction of
-        // `ValidatedReconfigureMsg`.
-        let mut my_prepare_msg: Option<PrepareMsg> = None;
+        // `my_config` and `my_share` are optional only so that we can fill them
+        // in via the loop. They will always become `Some`, as a `Configuration`
+        // always contains the coordinator as a member as validated by
+        // construction of `ValidatedReconfigureMsg`.
+        let mut my_config: Option<Configuration> = None;
+        let mut my_share: Option<Share> = None;
         for (platform_id, share) in shares.into_iter() {
-            let prepare_msg = PrepareMsg { config: config.clone(), share };
             if platform_id == *msg.coordinator_id() {
-                // The prepare message to add to our `PersistentState`
-                my_prepare_msg = Some(prepare_msg);
+                // The data to add to our `PersistentState`
+                my_config = Some(config.clone());
+                my_share = Some(share);
             } else {
                 // Create a message that requires sending
-                prepares.insert(platform_id, prepare_msg);
+                prepares.insert(platform_id, (config.clone(), share));
             }
         }
         let op = CoordinatorOperation::Prepare {
@@ -85,7 +87,7 @@ impl CoordinatorState {
         // Safety: Construction of a `ValidatedReconfigureMsg` ensures that
         // `my_platform_id` is part of the new configuration and has a share.
         // We can therefore safely unwrap here.
-        Ok((state, my_prepare_msg.unwrap()))
+        Ok((state, my_config.unwrap(), my_share.unwrap()))
     }
 
     /// A reconfiguration from one group to another
@@ -161,11 +163,17 @@ impl CoordinatorState {
             } => {}
             CoordinatorOperation::CollectLrtqShares { members, shares } => {}
             CoordinatorOperation::Prepare { prepares, prepare_acks } => {
-                for (platform_id, prepare) in prepares.clone().into_iter() {
+                let rack_id = self.reconfigure_msg.rack_id();
+                for (platform_id, (config, share)) in
+                    prepares.clone().into_iter()
+                {
                     outbox.push(Envelope {
                         to: platform_id,
                         from: self.reconfigure_msg.coordinator_id().clone(),
-                        msg: PeerMsg::Prepare(prepare),
+                        msg: PeerMsg {
+                            rack_id,
+                            kind: PeerMsgKind::Prepare { config, share },
+                        },
                     });
                 }
             }
@@ -226,7 +234,7 @@ pub enum CoordinatorOperation {
     },
     Prepare {
         /// The set of Prepares to send to each node
-        prepares: BTreeMap<PlatformId, PrepareMsg>,
+        prepares: BTreeMap<PlatformId, (Configuration, Share)>,
 
         /// Acknowledgements that the prepare has been received
         prepare_acks: BTreeSet<PlatformId>,

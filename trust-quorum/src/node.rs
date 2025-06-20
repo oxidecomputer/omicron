@@ -3,13 +3,23 @@
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 //! A trust quorum node that implements the trust quorum protocol
+//!
+//! Nodes respond to function calls synchronously. They do not queue up replies
+//! for later. If a request like a `prepare_and_commit` operation arrives from
+//! Nexus, a node may not be ready to commit immediately. It may have to reach
+//! out to other nodes to get its configuration and collect shares. None of
+//! this happens in one tick through this FSM. Instead, outgoing messages will
+//! be queued for sending and the call will return. Higher level software must
+//! keep track of incoming requests and poll this FSM for responses. This makes
+//! the logical code here simpler at the cost of implementing tracking at higher
+//! levels. Fortunately, tracking is easier with async code, which drives this
+//! Node, and so this should not be problematic.
 
 use crate::validators::{ReconfigurationError, ValidatedReconfigureMsg};
 use crate::{
     CoordinatorState, Envelope, Epoch, PersistentState, PlatformId, messages::*,
 };
-
-use slog::{Logger, o, warn};
+use slog::{Logger, error, o, warn};
 use std::time::Instant;
 
 /// An entity capable of participating in trust quorum
@@ -92,8 +102,18 @@ impl Node {
         from: PlatformId,
         msg: PeerMsg,
     ) -> Option<PersistentState> {
-        match msg {
-            PeerMsg::PrepareAck(epoch) => {
+        if let Some(rack_id) = self.persistent_state.rack_id() {
+            if rack_id != msg.rack_id {
+                error!(self.log, "Mismatched rack id";
+                       "from" => %from,
+                       "msg" => msg.kind.name(),
+                       "expected" => %rack_id,
+                       "got" => %msg.rack_id);
+                return None;
+            }
+        }
+        match msg.kind {
+            PeerMsgKind::PrepareAck(epoch) => {
                 self.handle_prepare_ack(from, epoch);
                 None
             }
@@ -160,24 +180,25 @@ impl Node {
     ) -> Result<Option<PersistentState>, ReconfigurationError> {
         // We have no committed configuration or lrtq ledger
         if self.persistent_state.is_uninitialized() {
-            let (coordinator_state, my_prepare_msg) =
+            let (coordinator_state, my_config, my_share) =
                 CoordinatorState::new_uninitialized(
                     self.log.clone(),
                     now,
                     msg,
                 )?;
             self.coordinator_state = Some(coordinator_state);
-            // Add the prepare to our `PersistentState`
+            self.persistent_state.shares.insert(my_config.epoch, my_share);
             self.persistent_state
-                .prepares
-                .insert(my_prepare_msg.config.epoch, my_prepare_msg);
+                .configs
+                .insert_unique(my_config)
+                .expect("empty state");
 
             return Ok(Some(self.persistent_state.clone()));
         }
 
         // We have a committed configuration that is not LRTQ
         let config =
-            self.persistent_state.last_committed_configuration().unwrap();
+            self.persistent_state.latest_committed_configuration().unwrap();
 
         self.coordinator_state = Some(CoordinatorState::new_reconfiguration(
             self.log.clone(),
@@ -258,16 +279,13 @@ mod tests {
         // It should include the `PrepareMsg` for this node.
         assert!(persistent_state.lrtq.is_none());
         assert!(persistent_state.commits.is_empty());
-        assert!(persistent_state.decommissioned.is_none());
-        // The only `PrepareMsg` is this one for the first epoch
-        assert_eq!(persistent_state.prepares.len(), 1);
+        assert!(persistent_state.expunged.is_none());
+        assert_eq!(persistent_state.configs.len(), 1);
+        assert_eq!(persistent_state.shares.len(), 1);
 
         // Extract the configuration for our initial prepare msg
-        let config = &persistent_state
-            .prepares
-            .get(&input.reconfigure_msg.epoch)
-            .unwrap()
-            .config;
+        let config =
+            persistent_state.configs.get(&input.reconfigure_msg.epoch).unwrap();
 
         assert_eq!(config.epoch, input.reconfigure_msg.epoch);
         assert_eq!(config.coordinator, *node.platform_id());
@@ -280,8 +298,8 @@ mod tests {
         assert_eq!(outbox.len(), config.members.len() - 1);
         for envelope in outbox {
             assert_matches!(
-            envelope.msg,
-            PeerMsg::Prepare(PrepareMsg { config: prepare_config, .. }) => {
+            envelope.msg.kind,
+            PeerMsgKind::Prepare{ config: prepare_config, .. } => {
                 assert_eq!(*config, prepare_config);
             });
             assert_eq!(envelope.from, config.coordinator);

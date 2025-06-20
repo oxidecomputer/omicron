@@ -27,21 +27,34 @@ pub struct ReconfigureMsg {
 
 /// Messages sent between trust quorum members over a sprockets channel
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub enum PeerMsg {
-    Prepare(PrepareMsg),
+pub struct PeerMsg {
+    pub rack_id: RackUuid,
+    pub kind: PeerMsgKind,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub enum PeerMsgKind {
+    /// Sent from a coordinator node to inform a peer about a new configuration
+    Prepare {
+        config: Configuration,
+        share: Share,
+    },
+
+    /// Acknowledge a successful prepare from a coordinator
     PrepareAck(Epoch),
-    Commit(CommitMsg),
 
-    /// When a node learns about a commit for a given epoch
-    /// but does not have a `PrepareMsg`, it must ask for it
-    /// from another node.
-    GetPrepare(Epoch),
+    /// Retrieve a configuration for a given epoch from a node. Nodes only
+    /// respond if this is the current configuration and the requesting node is
+    /// a member of the configuration.
+    GetConfig(Epoch),
 
-    /// Nodes reply with `PrepareAndCommit` to `GetPrepare` requests when they
-    /// are able to.
-    PrepareAndCommit,
+    /// A configuration returned in response to `GetConfig`
+    Config(Configuration),
 
+    /// Request a node's key share for the given epoch from that node
     GetShare(Epoch),
+
+    /// Return a node's key share in response to a `GetShare` message
     Share {
         epoch: Epoch,
         share: Share,
@@ -49,17 +62,35 @@ pub enum PeerMsg {
 
     // LRTQ shares are always at epoch 0
     GetLrtqShare,
+
     LrtqShare(LrtqShare),
+
+    /// Inform a node that it is no longer part of the trust quorum as of the
+    /// given epoch
+    Expunged(Epoch),
+
+    /// Inform a node that it is utilizing an old committed onfiguration and
+    /// give it the new configuration.
+    ///
+    /// As a result, a requesting node may have to retrieve key shares to
+    /// recompute its share if it never received a prepare message for this
+    /// epoch.
+    CommitAdvance(Configuration),
 }
 
-/// The start of a reconfiguration sent from a coordinator to a specific peer
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct PrepareMsg {
-    pub config: Configuration,
-    pub share: Share,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct CommitMsg {
-    epoch: Epoch,
+impl PeerMsgKind {
+    pub fn name(&self) -> &str {
+        match self {
+            Self::Prepare { .. } => "prepare",
+            Self::PrepareAck(_) => "prepare_ack",
+            Self::GetConfig(_) => "get_config",
+            Self::Config(_) => "config",
+            Self::GetShare(_) => "get_share",
+            Self::Share { .. } => "share",
+            Self::GetLrtqShare => "get_lrtq_share",
+            Self::LrtqShare(_) => "lrtq_share",
+            Self::Expunged(_) => "expunged",
+            Self::CommitAdvance(_) => "commit_advance",
+        }
+    }
 }

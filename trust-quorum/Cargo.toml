@@ -16,6 +16,7 @@ derive_more.workspace = true
 gfss.workspace = true
 hex.workspace = true
 hkdf.workspace = true
+iddqd.workspace = true
 rand = { workspace = true, features = ["getrandom"] }
 secrecy.workspace = true
 serde.workspace = true

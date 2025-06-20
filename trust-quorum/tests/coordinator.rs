@@ -16,7 +16,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::time::{Duration, Instant};
 use test_strategy::{Arbitrary, proptest};
 use trust_quorum::{
-    Envelope, Epoch, Node, PeerMsg, PersistentState, PlatformId, PrepareMsg,
+    Envelope, Epoch, Node, PeerMsg, PeerMsgKind, PersistentState, PlatformId,
     ReconfigureMsg, Threshold,
 };
 
@@ -36,8 +36,8 @@ impl Sut {
         outbox: &mut Vec<Envelope>,
         msg: ReconfigureMsg,
     ) -> Result<Option<PersistentState>, TestCaseError> {
-        // We only generate valid configurations when calling this method. Any failure of
-        // this method should be considered a test failure.
+        // We only generate valid configurations when calling this method. Any
+        // failure of this method should be considered a test failure.
         let output = self.node.coordinate_reconfiguration(now, outbox, msg)?;
         Ok(output)
     }
@@ -70,8 +70,8 @@ impl Model {
 
     /// Advance time by `time_jump`.
     ///
-    /// If the new time exceeds any deadline timers, reset those and return true.
-    /// Otherwise return false.
+    /// If the new time exceeds any deadline timers, reset those and return
+    /// true. Otherwise return false.
     ///
     /// In the future we may wish to be specific about which timers expired.
     /// However, right now, there is only one.
@@ -117,7 +117,8 @@ impl Model {
     /// Return nodes that have acked prepares for an ongoing coordination
     /// by the Model.
     ///
-    /// Return `None` if the SUT is not currently coordinating or waiting on acks.
+    /// Return `None` if the SUT is not currently coordinating or waiting on
+    /// acks.
     pub fn acked_prepares(&self) -> Option<&BTreeSet<PlatformId>> {
         self.coordinator_state.as_ref().and_then(|cs| cs.op.acked_prepares())
     }
@@ -205,8 +206,8 @@ impl TestState {
 
         // Update the SUT state
         //
-        // We only generate valid configurations when calling this method. Any failure of
-        // this method should be considered a test failure.
+        // We only generate valid configurations when calling this method. Any
+        // failure of this method should be considered a test failure.
         let output = self.sut.action_coordinate_reconfiguration(
             self.model.now,
             &mut outbox,
@@ -220,8 +221,8 @@ impl TestState {
                     &persistent_state,
                 )?;
 
-                // We validated our persistent state is correct. Save it and move
-                // on.
+                // We validated our persistent state is correct. Save it and
+                // move on.
                 self.sut.persistent_state = persistent_state;
 
                 // The correct messages were sent
@@ -229,7 +230,8 @@ impl TestState {
                     &outbox,
                 )?;
 
-                // We validated our messages. Let's put them into our test state as "in-flight".
+                // We validated our messages. Let's put them into our test state
+                // as "in-flight".
                 self.send(outbox.into_iter());
             }
             None => {
@@ -300,8 +302,15 @@ impl TestState {
             if let Some(msg) = self.delivered_msgs.get_mut(from).unwrap().pop()
             {
                 match msg {
-                    PeerMsg::Prepare(prepare_msg) => {
-                        self.reply_to_prepare_msg(from.clone(), prepare_msg)?;
+                    PeerMsg {
+                        rack_id,
+                        kind: PeerMsgKind::Prepare { config, .. },
+                    } => {
+                        self.reply_to_prepare_msg(
+                            from.clone(),
+                            rack_id,
+                            config.epoch,
+                        )?;
                     }
                     _ => todo!(),
                 }
@@ -359,7 +368,8 @@ impl TestState {
     fn reply_to_prepare_msg(
         &mut self,
         from: PlatformId,
-        msg: PrepareMsg,
+        rack_id: RackUuid,
+        epoch: Epoch,
     ) -> Result<(), TestCaseError> {
         // We always reply to a `Prepare` with a `PrepareAck`.
         //
@@ -368,7 +378,7 @@ impl TestState {
         //
         // In any case, we don't keep enough state at the fake follower replicas
         // to check this.
-        let reply = PeerMsg::PrepareAck(msg.config.epoch);
+        let reply = PeerMsg { rack_id, kind: PeerMsgKind::PrepareAck(epoch) };
         let mut outbox = Vec::new();
         let output = self.sut.node.handle(
             self.model.now,
@@ -380,7 +390,7 @@ impl TestState {
         prop_assert!(outbox.is_empty());
 
         // Also update the model state
-        self.model.ack_prepare(from.clone(), msg.config.epoch);
+        self.model.ack_prepare(from.clone(), epoch);
 
         // Ensure that if the SUT is waiting for prepares, that the ack
         // is accounted for.
@@ -414,14 +424,14 @@ impl TestState {
             &sut.persistent_state.commits,
             &persistent_state.commits
         );
-        prop_assert!(persistent_state.decommissioned.is_none());
+        prop_assert!(persistent_state.expunged.is_none());
         prop_assert_eq!(
-            sut.persistent_state.prepares.len() + 1,
-            persistent_state.prepares.len()
+            sut.persistent_state.configs.len() + 1,
+            persistent_state.configs.len()
         );
 
         prop_assert_eq!(
-            persistent_state.last_prepared_epoch().unwrap(),
+            persistent_state.latest_config().unwrap().epoch,
             msg.epoch
         );
 
@@ -469,7 +479,10 @@ impl TestState {
         for envelope in outbox {
             assert_matches!(
                 &envelope.msg,
-                PeerMsg::Prepare(PrepareMsg { config: prepare_config, .. }) => {
+                PeerMsg{
+                    kind: PeerMsgKind::Prepare{config: prepare_config, .. },
+                    ..} =>
+                {
                     assert_eq!(*config, *prepare_config);
                 }
             );
