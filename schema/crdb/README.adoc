@@ -90,6 +90,8 @@ Process:
 ** Update the SQL statements to match what the database should look like
    after your up*.sql files are applied.
 ** Update the version field of `db_metadata` at the bottom of the file.
+* Re-run `cargo xtask schema generate-previous` to check a revision of `dbinit.sql`
+  into the codebase. This is used by tests.
 * Update `schema/crdb/dbwipe.sql` if needed.  (This is rare.)
 * Update `nexus/db-model/src/schema_versions.rs`:
 ** Update the major number of `SCHEMA_VERSION` so that it matches `NEW_VERSION`.
@@ -108,11 +110,11 @@ There are automated tests to validate many of these steps:
   must be sequential major numbers with minor and micro both being `0`.  (This
   catches various mismerge errors: accidentally duplicating a version, putting
   versions in the wrong order, etc.)
-* The combination of all `up*.sql` files results in the same schema as
+* The combination of the most recent `up*.sql` files results in the same schema as
   `dbinit.sql`.  (This catches forgetting to update dbinit.sql, forgetting to
   implement a schema update altogether, or a mismatch between dbinit.sql and
   the update.)
-* All `up*.sql` files can be applied twice without error.  (This catches
+* The most recent `up*.sql` files can be applied twice without error.  (This catches
   non-idempotent update steps.)
 
 **If you've finished all this and another PR lands on "main" that chose the
@@ -125,6 +127,7 @@ same `NEW_VERSION`:**, then your `OLD_VERSION` has changed and so _your_
    `NEW_VERSION` and still appears at the top of the list (logically after the
    new version that came in from "main").
 * Update the version in `dbinit.sql` to match the new `NEW_VERSION`.
+* Re-run `cargo xtask schema generate-previous`.
 
 === Constraints on Schema Updates
 

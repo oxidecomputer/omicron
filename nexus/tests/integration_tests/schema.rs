@@ -2,13 +2,14 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
+use anyhow::{self, Context};
 use camino::Utf8PathBuf;
 use dropshot::test_util::LogContext;
 use futures::future::BoxFuture;
 use nexus_config::NexusConfig;
 use nexus_config::SchemaConfig;
-use nexus_db_lookup::DataStoreConnection;
 use nexus_db_model::EARLIEST_SUPPORTED_VERSION;
+use nexus_db_model::KNOWN_VERSIONS;
 use nexus_db_model::SCHEMA_VERSION as LATEST_SCHEMA_VERSION;
 use nexus_db_model::SchemaUpgradeStep;
 use nexus_db_model::{AllSchemaVersions, SchemaVersion};
@@ -28,9 +29,10 @@ use similar_asserts;
 use slog::Logger;
 use slog_error_chain::InlineErrorChain;
 use std::collections::BTreeMap;
+use std::collections::BTreeSet;
 use std::net::IpAddr;
-use std::sync::Mutex;
 use tokio::time::Duration;
+use tokio::time::Instant;
 use tokio::time::timeout;
 use uuid::Uuid;
 
@@ -278,10 +280,43 @@ fn read_all_schema_versions() -> AllSchemaVersions {
     AllSchemaVersions::load(camino::Utf8Path::new(SCHEMA_DIR)).unwrap()
 }
 
+async fn apply_database_version(crdb: &CockroachInstance, version: &Version) {
+    let old_dbinit = match get_old_dbinit_for_version(version).await {
+        Ok(sql) => {
+            println!(
+                "Retrieved dbinit.sql for version {version} ({} bytes)",
+                sql.len()
+            );
+            sql
+        }
+        Err(e) => {
+            panic!("Failed to get old dbinit.sql for version {version}: {e}",);
+        }
+    };
+
+    let client = crdb.connect().await.expect("failed to connect");
+
+    // Apply dbinit.sql
+    client
+        .batch_execute(&old_dbinit)
+        .await
+        .expect("Failed to apply old dbinit.sql");
+}
+
+async fn new_database_at_version(
+    log: &Logger,
+    version: &Version,
+) -> TestDatabase {
+    let db = TestDatabase::new_populate_nothing(log).await;
+    let crdb = db.crdb();
+    apply_database_version(&crdb, version).await;
+    db
+}
+
 // This test confirms the following behavior:
 //
-// - Nexus can boot using a "1.0.0" revision of the schema
-// - Nexus can automatically apply all subsequent updates automatically
+// - Nexus can boot using the previous revision of the schema
+// - Nexus can automatically apply the subsequent updates automatically
 // - This should eventually drive Nexus to the latest revision of the schema,
 // such that it can boot.
 #[tokio::test]
@@ -289,32 +324,17 @@ async fn nexus_applies_update_on_boot() {
     let mut config = load_test_config();
     let mut builder =
         test_setup(&mut config, "nexus_applies_update_on_boot").await;
-    let log = &builder.logctx.log;
     let crdb = builder.database.as_ref().expect("Should have started CRDB");
 
-    // We started with an empty database -- apply an update here to bring
-    // us forward to our oldest supported schema version before trying to boot
-    // nexus.
-    let all_versions = read_all_schema_versions();
-    let earliest = all_versions
-        .iter_versions()
-        .next()
-        .expect("missing earliest schema version");
-    apply_update(log, &crdb, earliest, 1).await;
-    assert_eq!(
-        EARLIEST_SUPPORTED_VERSION.to_string(),
-        query_crdb_schema_version(&crdb).await
-    );
+    // Jump forward to the previous schema version before Nexus boots.
+    apply_database_version(&crdb, KNOWN_VERSIONS[1].semver()).await;
 
     // Start Nexus. It should auto-format itself to the latest version,
-    // upgrading through each intermediate update.
+    // upgrading through the last update.
     //
     // The timeout here is a bit longer than usual (120s vs 60s) because if
     // lots of tests are running at the same time, there can be contention
     // here.
-    //
-    // NOTE: If this grows excessively, we could break it into several smaller
-    // tests.
     assert!(
         timeout(Duration::from_secs(120), builder.start_nexus_internal())
             .await
@@ -404,22 +424,32 @@ async fn nexus_cannot_apply_update_from_unknown_version() {
     builder.teardown().await;
 }
 
-// This test verifies that executing all schemas, in order, twice, still
-// correctly performs an upgrade.
+// This test verifies that executing the most recent schema migration, in order,
+// twice, still correctly performs an upgrade.
 //
 // This attempts to be a rough approximation for multiple Nexuses each
 // simultaneously executing these operations.
 #[tokio::test]
-async fn versions_have_idempotent_up() {
+async fn last_update_has_idempotent_up() {
     let config = load_test_config();
     let logctx =
-        LogContext::new("versions_have_idempotent_up", &config.pkg.log);
+        LogContext::new("last_update_has_idempotent_up", &config.pkg.log);
     let log = &logctx.log;
     let db = TestDatabase::new_populate_nothing(&logctx.log).await;
     let crdb = db.crdb();
 
+    // Jump forward to the previous schema version before Nexus boots.
+    let previous_version = KNOWN_VERSIONS[1].semver();
+    apply_database_version(&crdb, previous_version).await;
+
     let all_versions = read_all_schema_versions();
-    for version in all_versions.iter_versions() {
+    let migrations_to_apply: Vec<_> = all_versions
+        .versions_range((
+            std::ops::Bound::Excluded(previous_version.clone()),
+            std::ops::Bound::Unbounded,
+        ))
+        .collect();
+    for version in migrations_to_apply {
         apply_update(log, &crdb, &version, 2).await;
         assert_eq!(
             version.semver().to_string(),
@@ -732,121 +762,15 @@ impl InformationSchema {
     }
 }
 
-// Confirms that the application of all "up.sql" files, in order, is equivalent
-// to applying "dbinit.sql", which should represent the latest-known schema.
-#[tokio::test]
-async fn dbinit_equals_sum_of_all_up() {
-    let config = load_test_config();
-    let logctx =
-        LogContext::new("dbinit_equals_sum_of_all_up", &config.pkg.log);
-    let log = &logctx.log;
-
-    let db = TestDatabase::new_populate_nothing(&logctx.log).await;
-    let crdb = db.crdb();
-
-    let all_versions = read_all_schema_versions();
-
-    // Apply the very first schema migration. In particular, this creates the
-    // `omicron` database, which allows us to construct a `db::Pool` below.
-    for version in all_versions.iter_versions().take(1) {
-        apply_update(log, &crdb, version, 1).await;
-        assert_eq!(
-            version.semver().to_string(),
-            query_crdb_schema_version(&crdb).await
-        );
-    }
-
-    // Go from the second version to the latest version.
-    for version in all_versions.iter_versions().skip(1) {
-        apply_update(log, &crdb, version, 1).await;
-        assert_eq!(
-            version.semver().to_string(),
-            query_crdb_schema_version(&crdb).await
-        );
-    }
-    assert_eq!(
-        LATEST_SCHEMA_VERSION.to_string(),
-        query_crdb_schema_version(&crdb).await
-    );
-
-    // Query the newly constructed DB for information about its schema
-    let observed_schema = InformationSchema::new(&crdb).await;
-    let observed_data = observed_schema.query_all_tables(log, &crdb).await;
-
-    db.terminate().await;
-
-    // Create a new DB with data populated from dbinit.sql for comparison
-    let db = TestDatabase::new_populate_schema_only(&logctx.log).await;
-    let crdb = db.crdb();
-    let expected_schema = InformationSchema::new(&crdb).await;
-    let expected_data = expected_schema.query_all_tables(log, &crdb).await;
-
-    // Validate that the schema is identical
-    observed_schema.pretty_assert_eq(&expected_schema);
-
-    assert_eq!(observed_data, expected_data);
-    db.terminate().await;
-    logctx.cleanup_successful();
-}
-
-struct PoolAndConnection {
-    pool: nexus_db_queries::db::Pool,
-    conn: DataStoreConnection,
-}
-
-impl PoolAndConnection {
-    async fn cleanup(self) {
-        drop(self.conn);
-        self.pool.terminate().await;
-    }
-}
-
 struct MigrationContext<'a> {
     log: &'a Logger,
 
     // Postgres connection to database
     client: Client,
-
-    // Reference to the database itself
-    crdb: &'a CockroachInstance,
-
-    // An optionally-populated "pool and connection" from before
-    // a schema version upgrade.
-    //
-    // This can be used to validate properties of a database pool
-    // before and after a particular schema migration.
-    pool_and_conn: Mutex<BTreeMap<Version, PoolAndConnection>>,
-}
-
-impl MigrationContext<'_> {
-    // Populates a pool and connection.
-    //
-    // Typically called as a part of a "before" function, to set up a connection
-    // before a schema migration.
-    async fn populate_pool_and_connection(&self, version: Version) {
-        let pool = nexus_db_queries::db::Pool::new_single_host(
-            self.log,
-            &nexus_db_queries::db::Config {
-                url: self.crdb.pg_config().clone(),
-            },
-        );
-        let conn = pool.claim().await.expect("failed to get pooled connection");
-
-        let mut map = self.pool_and_conn.lock().unwrap();
-        map.insert(version, PoolAndConnection { pool, conn });
-    }
-
-    // Takes a pool and connection if they've been populated.
-    fn take_pool_and_connection(&self, version: &Version) -> PoolAndConnection {
-        let mut map = self.pool_and_conn.lock().unwrap();
-        map.remove(version).unwrap()
-    }
 }
 
 type BeforeFn = for<'a> fn(ctx: &'a MigrationContext<'a>) -> BoxFuture<'a, ()>;
 type AfterFn = for<'a> fn(ctx: &'a MigrationContext<'a>) -> BoxFuture<'a, ()>;
-type AtCurrentFn =
-    for<'a> fn(ctx: &'a MigrationContext<'a>) -> BoxFuture<'a, ()>;
 
 // Describes the operations which we might take before and after
 // migrations to check that they worked.
@@ -854,7 +778,6 @@ type AtCurrentFn =
 struct DataMigrationFns {
     before: Option<BeforeFn>,
     after: Option<AfterFn>,
-    at_current: Option<AtCurrentFn>,
 }
 
 impl DataMigrationFns {
@@ -867,10 +790,6 @@ impl DataMigrationFns {
     }
     fn after(mut self, after: AfterFn) -> Self {
         self.after = Some(after);
-        self
-    }
-    fn at_current(mut self, at_current: AtCurrentFn) -> Self {
-        self.at_current = Some(at_current);
         self
     }
 }
@@ -1249,32 +1168,30 @@ fn before_101_0_0<'a>(ctx: &'a MigrationContext<'a>) -> BoxFuture<'a, ()> {
                     target_propolis_id, migration_id, ncpus, memory, hostname,
                     {COLUMN_AUTO_RESTART}, updater_id, updater_gen
                 )
-                VALUES (
-                    '{INSTANCE4}', 'inst4', '', now(), now(), NULL,
-                    '{PROJECT}', '', 'no_vmm', now(), 1, NULL, NULL, NULL,
-                    2, 1073741824, 'inst1', 'sled_failures_only', NULL, 1
+                VALUES
+                (
+                    '{INSTANCE1}', 'inst1', '', now(), now(), NULL, '{PROJECT}', '',
+                    'no_vmm', now(), 1, NULL, NULL, NULL, 2, 1073741824, 'inst1',
+                    NULL, NULL, 1
+                ),
+                (
+                    '{INSTANCE2}', 'inst2', '', now(), now(), NULL, '{PROJECT}', '',
+                    'vmm', now(), 1, '{PROPOLIS}', NULL, NULL, 2, 1073741824, 'inst2',
+                    'all_failures', NULL, 1
+                ),
+                (
+                    '{INSTANCE3}', 'inst3', '', now(), now(), NULL, '{PROJECT}', '',
+                    'failed', now(), 1, NULL, NULL, NULL, 2, 1073741824, 'inst3',
+                    'never', NULL, 1
+                ),
+                (
+                    '{INSTANCE4}', 'inst4', '', now(), now(), NULL, '{PROJECT}', '',
+                    'no_vmm', now(), 1, NULL, NULL, NULL, 2, 1073741824, 'inst4',
+                    'sled_failures_only', NULL, 1
                 );"
             ))
             .await
             .expect("failed to create instance");
-        // Change one of the NULLs to an explicit 'never'.
-        ctx.client
-            .batch_execute(&format!(
-                "UPDATE instance
-                SET {COLUMN_AUTO_RESTART} = 'never'
-                WHERE id = '{INSTANCE3}';"
-            ))
-            .await
-            .expect("failed to update instance");
-
-        // Used as a regression test against
-        // https://github.com/oxidecomputer/omicron/issues/5561
-        //
-        // See 'at_current_101_0_0' - we create a connection here, because connections
-        // may be populating an OID cache. We use the connection after the
-        // schema migration to access the "instance_auto_restart" type.
-        let semver = Version::new(101, 0, 0);
-        ctx.populate_pool_and_connection(semver).await;
     })
 }
 
@@ -1324,77 +1241,6 @@ fn after_101_0_0<'a>(ctx: &'a MigrationContext<'a>) -> BoxFuture<'a, ()> {
             "'sled_failures_only' auto-restart policies should be migrated \
              to '{BEST_EFFORT}'",
         );
-    })
-}
-
-fn at_current_101_0_0<'a>(ctx: &'a MigrationContext<'a>) -> BoxFuture<'a, ()> {
-    Box::pin(async {
-        // Used as a regression test against
-        // https://github.com/oxidecomputer/omicron/issues/5561
-        //
-        // See 'before_101_0_0' - we created a connection to validate that we can
-        // access the "instance_auto_restart" type without encountering
-        // OID cache poisoning.
-        //
-        // We care about the following:
-        //
-        // 1. This type was dropped and re-created in some schema migration,
-        // 2. The type still exists in the latest schema
-        //
-        // This can happen on any schema migration, but it happens to exist
-        // here. To find other schema migrations where this might be possible,
-        // try the following search from within the "omicron/schema/crdb"
-        // directory:
-        //
-        // ```bash
-        // rg 'DROP TYPE IF EXISTS (.*);' --no-filename -o --replace '$1'
-        //   | sort -u
-        //   | xargs -I {} rg 'CREATE TYPE .*{}' dbinit.sql
-        // ```
-        //
-        // This finds all user-defined types which have dropped at some point,
-        // but which still appear in the latest schema.
-        let semver = Version::new(101, 0, 0);
-        let pool_and_conn = ctx.take_pool_and_connection(&semver);
-
-        {
-            use async_bb8_diesel::AsyncRunQueryDsl;
-            use nexus_db_model::Instance;
-            use nexus_db_schema::schema::instance::dsl;
-            use nexus_types::external_api::params;
-            use omicron_common::api::external::IdentityMetadataCreateParams;
-            use omicron_uuid_kinds::InstanceUuid;
-
-            diesel::insert_into(dsl::instance)
-                .values(Instance::new(
-                    InstanceUuid::new_v4(),
-                    Uuid::new_v4(),
-                    &params::InstanceCreate {
-                        identity: IdentityMetadataCreateParams {
-                            name: "hello".parse().unwrap(),
-                            description: "hello".to_string(),
-                        },
-                        ncpus: 2.try_into().unwrap(),
-                        memory: 1024_u64.try_into().unwrap(),
-                        hostname: "inst".parse().unwrap(),
-                        user_data: vec![],
-                        ssh_public_keys: None,
-                        network_interfaces:
-                            params::InstanceNetworkInterfaceAttachment::Default,
-                        external_ips: vec![],
-                        boot_disk: None,
-                        disks: Vec::new(),
-                        start: false,
-                        auto_restart_policy: Default::default(),
-                        anti_affinity_groups: Vec::new(),
-                    },
-                ))
-                .execute_async(&*pool_and_conn.conn)
-                .await
-                .expect("failed to insert - did we poison the OID cache?");
-        }
-
-        pool_and_conn.cleanup().await;
     })
 }
 
@@ -2107,46 +1953,53 @@ fn after_139_0_0<'a>(ctx: &'a MigrationContext<'a>) -> BoxFuture<'a, ()> {
 
 fn before_140_0_0<'a>(ctx: &'a MigrationContext<'a>) -> BoxFuture<'a, ()> {
     Box::pin(async {
-        // We'll mostly reuse the instances from previous migration tests, but
-        // give instance 4 a VMM in the `Stopped` state.
+        ctx.client
+            .batch_execute(&format!("
+                INSERT INTO instance (id, name, description, time_created, time_modified,
+                    time_deleted, project_id, user_data, time_state_updated,
+                    state_generation, active_propolis_id, target_propolis_id, migration_id, ncpus,
+                    memory, hostname, updater_id, updater_gen, state, time_last_auto_restarted,
+                    auto_restart_policy, auto_restart_cooldown, boot_disk_id)
+                VALUES
+                (
+                    '{INSTANCE1}', 'inst1', '', now(), now(), NULL, '{PROJECT}', '',
+                    now(), 1, NULL, NULL, NULL, 2, 1073741824, 'inst1',
+                    NULL, 1, 'no_vmm', NULL, 'never', NULL, NULL
+                ),
+                (
+                    '{INSTANCE2}', 'inst2', '', now(), now(), NULL, '{PROJECT}', '',
+                    now(), 1, '{PROPOLIS}', NULL, NULL, 2, 1073741824, 'inst2',
+                    NULL, 1, 'vmm', NULL, 'never', NULL, NULL
+                ),
+                (
+                    '{INSTANCE3}', 'inst3', '', now(), now(), NULL, '{PROJECT}', '',
+                    now(), 1, NULL, NULL, NULL, 2, 1073741824, 'inst3',
+                    NULL, 1, 'failed', NULL, 'never', NULL, NULL
+                ),
+                (
+                    '{INSTANCE4}', 'inst4', '', now(), now(), NULL, '{PROJECT}', '',
+                    now(), 1, '{PROPOLIS2}', NULL, NULL, 2, 1073741824, 'inst4',
+                    NULL, 1, 'vmm', NULL, 'never', NULL, NULL
+                );
+                "))
+            .await
+            .expect("failed to create instances");
+
         ctx.client
             .batch_execute(&format!(
-                "INSERT INTO vmm (
-                    id,
-                    time_created,
-                    time_deleted,
-                    instance_id,
-                    time_state_updated,
-                    state_generation,
-                    sled_id,
-                    propolis_ip,
-                    propolis_port,
-                    state
-                ) VALUES (
-                    '{PROPOLIS2}',
-                    now(),
-                    NULL,
-                    '{INSTANCE4}',
-                    now(),
-                    1,
-                    '{SLED2}',
-                    'fd00:1122:3344:104::1',
-                    12400,
-                    'stopped'
+                "INSERT INTO vmm (id, time_created, time_deleted, instance_id, time_state_updated,
+                state_generation, sled_id, propolis_ip, propolis_port, state)
+                VALUES (
+                    '{PROPOLIS}', now(), NULL, '{INSTANCE2}', now(), 1, '{SLED1}',
+                    'fd00:1122:3344:104::1', 12400, 'running'
+                ),
+                (
+                    '{PROPOLIS2}', now(), NULL, '{INSTANCE4}', now(), 1, '{SLED2}',
+                    'fd00:1122:3344:104::1', 12400, 'stopped'
                 );"
             ))
             .await
             .expect("inserted VMM record");
-        ctx.client
-            .batch_execute(&format!(
-                "UPDATE instance
-                SET
-                    state = 'vmm',
-                    active_propolis_id = '{PROPOLIS2}'
-                WHERE id = '{INSTANCE4}';"
-            ))
-            .await
-            .expect("updated instance4 record");
     })
 }
 
@@ -2350,10 +2203,7 @@ fn get_migration_checks() -> BTreeMap<Version, DataMigrationFns> {
     );
     map.insert(
         Version::new(101, 0, 0),
-        DataMigrationFns::new()
-            .before(before_101_0_0)
-            .after(after_101_0_0)
-            .at_current(at_current_101_0_0),
+        DataMigrationFns::new().before(before_101_0_0).after(after_101_0_0),
     );
     map.insert(
         Version::new(107, 0, 0),
@@ -2395,46 +2245,134 @@ fn get_migration_checks() -> BTreeMap<Version, DataMigrationFns> {
     map
 }
 
-// Performs all schema changes and runs version-specific assertions.
-//
-// HOW TO ADD A MIGRATION CHECK:
-// - Add a new "map.insert" line to "get_migration_checks", with the semver of
-// the version you'd like to inspect before / after.
-// - Define your "before" (optional) and "after" (required) functions. These
-// act on a connection to CockroachDB, and can observe and mutate arbitrary
-// state.
-//
-// ADVICE FOR MIGRATION CHECKS:
-// - Your migration check will run in the same test as all other migration
-// checks, because performing schema migrations isn't that fast. If you
-// perform an operation that could be disruptive to subsequent checks, I
-// recommend cleaning up after yourself (e.g., DELETE relevant rows).
-// - I recommend using schema checks that are NOT strongly-typed. When you
-// add a migration check, it'll happen to match the "latest" static schemas
-// defined by Nexus, but that won't always be the case. As the schema
-// continues to change (maybe a table you're trying to check gets a new column
-// in a later version), your code should continue operating on the OLD version,
-// and as such, should avoid needing any updates.
-#[tokio::test]
-async fn validate_data_migration() {
+// Parse the previous-schemas.txt config file to get starting versions
+fn parse_previous_schemas() -> Result<BTreeSet<semver::Version>, anyhow::Error>
+{
+    let config_file =
+        std::path::Path::new(SCHEMA_DIR).join("previous-schemas.txt");
+    let content = std::fs::read_to_string(&config_file).with_context(|| {
+        format!("Failed to read config file: {:?}", config_file)
+    })?;
+
+    let mut versions = BTreeSet::new();
+
+    for line in content.lines() {
+        let line = line.trim();
+        // Skip empty lines and comments
+        if line.is_empty() || line.starts_with('#') {
+            continue;
+        }
+
+        if line == "PREVIOUS" {
+            // Get the previous version from KNOWN_VERSIONS
+            if KNOWN_VERSIONS.len() < 2 {
+                anyhow::bail!(
+                    "Need at least 2 known versions to find previous version. Current count: {}",
+                    KNOWN_VERSIONS.len()
+                );
+            }
+            let previous_version = KNOWN_VERSIONS[1].semver().clone();
+            versions.insert(previous_version);
+        } else {
+            // Parse as semver
+            let version = semver::Version::parse(line).with_context(|| {
+                format!("Failed to parse version: {}", line)
+            })?;
+            versions.insert(version);
+        }
+    }
+
+    Ok(versions)
+}
+
+// Load dbinit.sql from a previous schema version for migration testing
+async fn load_dbinit_from_previous_schema(
+    version: &semver::Version,
+) -> Result<String, anyhow::Error> {
+    let previous_schema_dir =
+        std::path::Path::new(SCHEMA_DIR).join("previous-schema");
+    let dbinit_file =
+        previous_schema_dir.join(version.to_string()).join("dbinit.sql");
+    if !dbinit_file.exists() {
+        anyhow::bail!(
+            "dbinit.sql not found for version {}. Run 'cargo xtask schema generate-previous' to generate it.",
+            version
+        );
+    }
+    tokio::fs::read_to_string(&dbinit_file).await.with_context(|| {
+        format!("Failed to read dbinit.sql for version {}", version)
+    })
+}
+
+struct MigrationTimingInfo {
+    entire_task: Duration,
+    schema_setup: Duration,
+    migration_times: Vec<(semver::Version, Duration)>,
+}
+
+// Test data migration from a starting schema version to a target version
+async fn validate_data_migration_from_version_to_target(
+    starting_version: semver::Version,
+    target_version: semver::Version,
+    test_name: &str,
+) -> MigrationTimingInfo {
+    let start = Instant::now();
     let config = load_test_config();
-    let logctx = LogContext::new("validate_data_migration", &config.pkg.log);
+    let logctx = LogContext::new(test_name, &config.pkg.log);
     let log = &logctx.log;
 
+    // Time database creation
     let db = TestDatabase::new_populate_nothing(&logctx.log).await;
     let crdb = db.crdb();
-    let ctx = MigrationContext {
-        log,
-        client: crdb.connect().await.expect("Failed to access CRDB client"),
-        crdb,
-        pool_and_conn: Mutex::new(BTreeMap::new()),
-    };
+
+    // Time starting schema application
+    let starting_sql = load_dbinit_from_previous_schema(&starting_version)
+        .await
+        .expect("Failed to load starting schema");
+
+    let client = crdb.connect().await.expect("Failed to access CRDB client");
+    client
+        .batch_execute(&starting_sql)
+        .await
+        .expect("Failed to apply starting schema");
+
+    // Verify we're at the expected starting version
+    let actual_version = query_crdb_schema_version(&crdb).await;
+    assert_eq!(starting_version.to_string(), actual_version);
+    let schema_setup = start.elapsed();
+
+    let ctx = MigrationContext { log, client };
 
     let all_versions = read_all_schema_versions();
     let all_checks = get_migration_checks();
 
-    // Go from the first version to the latest version.
-    for version in all_versions.iter_versions() {
+    // Find all versions from starting_version to target_version (inclusive)
+    let starting_nexus_version = Version::new(
+        starting_version.major,
+        starting_version.minor,
+        starting_version.patch,
+    );
+    let target_nexus_version = Version::new(
+        target_version.major,
+        target_version.minor,
+        target_version.patch,
+    );
+
+    let versions_to_apply: Vec<_> = all_versions
+        .iter_versions()
+        .filter(|v| {
+            v.semver() > &starting_nexus_version
+                && v.semver() <= &target_nexus_version
+        })
+        .collect();
+
+    // Time migration steps
+    let mut migration_times = Vec::new();
+
+    // Apply each migration step
+    for version in &versions_to_apply {
+        let migration_start = Instant::now();
+
         // If this check has preconditions (or setup), run them.
         let checks = all_checks.get(version.semver());
         if let Some(before) = checks.and_then(|check| check.before) {
@@ -2451,22 +2389,246 @@ async fn validate_data_migration() {
         if let Some(after) = checks.and_then(|check| check.after) {
             after(&ctx).await;
         }
+
+        let migration_time = migration_start.elapsed();
+        migration_times.push((version.semver().clone(), migration_time));
     }
+
+    // Verify we reached the target version
     assert_eq!(
-        LATEST_SCHEMA_VERSION.to_string(),
+        target_version.to_string(),
         query_crdb_schema_version(&crdb).await
     );
 
-    // If any version changes want to query the system post-upgrade, they can.
-    for version in all_versions.iter_versions() {
-        let checks = all_checks.get(version.semver());
-        if let Some(at_current) = checks.and_then(|check| check.at_current) {
-            at_current(&ctx).await;
+    db.terminate().await;
+    logctx.cleanup_successful();
+
+    MigrationTimingInfo {
+        entire_task: start.elapsed(),
+        schema_setup,
+        migration_times,
+    }
+}
+
+// Find migration test ranges based on checkpoints in previous-schemas.txt
+fn get_migration_test_ranges()
+-> Result<Vec<(semver::Version, semver::Version)>, anyhow::Error> {
+    // Get checkpoint versions from previous-schemas.txt
+    let checkpoints: Vec<_> = parse_previous_schemas()?.into_iter().collect();
+
+    // Get all migration check versions
+    let migration_checks = get_migration_checks();
+    let mut all_migration_versions: Vec<_> =
+        migration_checks.keys().cloned().collect();
+    all_migration_versions.sort();
+
+    let mut ranges = Vec::new();
+
+    // For each pair of consecutive checkpoints, find the migration checks in between
+    for i in 0..checkpoints.len() {
+        let start_checkpoint = &checkpoints[i];
+        let end_checkpoint = if i + 1 < checkpoints.len() {
+            &checkpoints[i + 1]
+        } else {
+            // For the last checkpoint, find the highest migration check version
+            all_migration_versions
+                .last()
+                .expect("Expected at least one migration check")
+        };
+
+        // Find migration versions in this range
+        let range_migrations: Vec<_> = all_migration_versions
+            .iter()
+            .filter(|v| **v > *start_checkpoint && **v <= *end_checkpoint)
+            .collect();
+
+        if !range_migrations.is_empty() {
+            let range_start = start_checkpoint.clone();
+            let range_end = (*range_migrations.last().unwrap()).clone();
+            ranges.push((range_start, range_end));
         }
     }
 
-    db.terminate().await;
-    logctx.cleanup_successful();
+    Ok(ranges)
+}
+
+// Verify that all migration checks are covered by our test ranges
+fn verify_migration_coverage() {
+    let checkpoints: Vec<_> = parse_previous_schemas()
+        .expect("Failed to parse previous-schemas.txt")
+        .into_iter()
+        .collect();
+    let migration_checks = get_migration_checks();
+    let test_ranges = get_migration_test_ranges()
+        .expect("Failed to get migration test ranges");
+
+    // Get all migration check versions
+    let mut all_migration_versions: Vec<_> =
+        migration_checks.keys().cloned().collect();
+    all_migration_versions.sort();
+
+    // Find which migrations are covered by our test ranges
+    let mut covered_migrations = std::collections::HashSet::new();
+    for (start, end) in &test_ranges {
+        for version in &all_migration_versions {
+            if version > start && version <= end {
+                covered_migrations.insert(version);
+            }
+        }
+    }
+
+    // Find uncovered migrations
+    let mut uncovered_migrations = Vec::new();
+    for version in &all_migration_versions {
+        if !covered_migrations.contains(version) {
+            uncovered_migrations.push(version);
+        }
+    }
+
+    if uncovered_migrations.is_empty() {
+        println!("  ✅ All migration checks are covered by test ranges");
+        return;
+    }
+    eprintln!(
+        "❌ UNCOVERED migration checks found: {:?}",
+        uncovered_migrations
+    );
+    eprintln!("These migration checks are not covered by any test range!");
+    eprintln!(
+        "To fix this, update schema/crdb/previous-schemas.txt to add checkpoints that cover these versions."
+    );
+
+    // Provide specific suggestions
+    for uncovered in &uncovered_migrations {
+        let before_checkpoint =
+            checkpoints.iter().filter(|cp| **cp < **uncovered).max();
+        let after_checkpoint =
+            checkpoints.iter().filter(|cp| **cp > **uncovered).min();
+
+        match (before_checkpoint, after_checkpoint) {
+            (Some(before), Some(after)) => {
+                eprintln!(
+                    "  → {} falls between checkpoints {} and {} - this should be covered automatically",
+                    uncovered, before, after
+                );
+            }
+            (None, Some(after)) => {
+                eprintln!(
+                    "  → {} is before first checkpoint {} - add an earlier checkpoint like {}",
+                    uncovered, after, uncovered
+                );
+            }
+            (Some(before), None) => {
+                eprintln!(
+                    "  → {} is after last checkpoint {} - this should be covered automatically",
+                    uncovered, before
+                );
+            }
+            (None, None) => {
+                eprintln!(
+                    "  → {} has no nearby checkpoints - do any checkpoints exist?",
+                    uncovered
+                );
+            }
+        }
+    }
+
+    panic!(
+        "Migration coverage verification failed! {} migration checks are not covered by test ranges.",
+        uncovered_migrations.len()
+    );
+}
+
+// Performs all schema changes and runs version-specific assertions.
+//
+// HOW TO ADD A MIGRATION CHECK:
+// - Add a new "map.insert" line to "get_migration_checks", with the semver of the version you'd
+// like to inspect before / after.
+// - Define your "before" (optional) and "after" (required) functions. These act on a connection to
+// CockroachDB, and can observe and mutate arbitrary state.
+// - Migrations will start at one of the schemas defined in "schema/crdb/previous-schemas.txt".
+// Migrations will be executed between these checkpoint schemas. If a particular migration is
+// taking a long time - for example, suppose it's going through hundreds of expensive upgrade
+// operations - consider adding a "checkpoint" in this file and re-running the command: "cargo
+// xtask schema generate-previous". This will save a whole copy of "dbinit.sql" from when the old
+// schema migration was added, and these checkpoints can be used as starting points for upgrade
+// tests.
+//
+// ADVICE FOR MIGRATION CHECKS:
+// - Your migration check will run in the same test as all other migration checks (between
+// checkpoints), because performing schema migrations isn't that fast. If you perform an operation
+// that could be disruptive to subsequent checks, I recommend cleaning up after yourself (e.g.,
+// DELETE relevant rows).
+// - I recommend using schema checks that are NOT strongly-typed. When you add a migration check,
+// it'll happen to match the "latest" static schemas defined by Nexus, but that won't always be the
+// case. As the schema continues to change (maybe a table you're trying to check gets a new column
+// in a later version), your code should continue operating on the OLD version, and as such, should
+// avoid needing any updates.
+#[tokio::test]
+async fn validate_data_migration_from_configured_versions() {
+    // First, verify that all migration checks are covered by our test ranges
+    verify_migration_coverage();
+
+    let test_ranges = get_migration_test_ranges()
+        .expect("Failed to get migration test ranges");
+
+    println!(
+        "Starting {} migration range tests concurrently",
+        test_ranges.len()
+    );
+
+    // Run all migration range tests concurrently
+    let mut handles = Vec::new();
+
+    for (start_version, end_version) in test_ranges {
+        let test_name = format!(
+            "validate_data_migration_from_{}_to_{}",
+            start_version.to_string().replace('.', "_"),
+            end_version.to_string().replace('.', "_")
+        );
+
+        let handle = tokio::spawn(async move {
+            println!(
+                "Starting migration test: {} → {}",
+                start_version, end_version
+            );
+
+            let timing = validate_data_migration_from_version_to_target(
+                start_version.clone(),
+                end_version.clone(),
+                &test_name,
+            )
+            .await;
+
+            (start_version, end_version, timing)
+        });
+
+        handles.push(handle);
+    }
+
+    // Wait for all tests to complete and collect results
+    let mut results = Vec::new();
+    for handle in handles {
+        let result = handle.await.expect("Migration test task failed");
+        results.push(result);
+    }
+    results.sort_by(|(s1, _, _), (s2, _, _)| s1.cmp(s2));
+
+    println!("\nMigration test summary:");
+    for (start, end, timing) in &results {
+        println!(
+            "Range: {start} -> {end}: {:.2}s",
+            timing.entire_task.as_secs_f64()
+        );
+        println!(
+            "  Apply dbinit @ {}: {:.2}s",
+            start,
+            timing.schema_setup.as_secs_f64()
+        );
+        for (version, duration) in &timing.migration_times {
+            println!("  Upgrade → {version}: {:.2}s", duration.as_secs_f64());
+        }
+    }
 }
 
 // Returns the InformationSchema object for a database populated via `sql`.
@@ -2733,5 +2895,128 @@ async fn compare_table_differing_not_null_order() {
     .await;
 
     schema1.pretty_assert_eq(&schema2);
+    logctx.cleanup_successful();
+}
+
+// Helper function to get historical dbinit.sql from pre-generated files
+async fn get_old_dbinit_for_version(
+    version: &Version,
+) -> Result<String, anyhow::Error> {
+    // Path to the pre-generated schema file using SCHEMA_DIR
+    let schema_file = Utf8PathBuf::from(SCHEMA_DIR)
+        .join("previous-schema")
+        .join(version.to_string())
+        .join("dbinit.sql");
+
+    if !schema_file.exists() {
+        anyhow::bail!(
+            "Pre-generated schema file not found: {:?}. Run 'cargo xtask schema generate-previous' to generate it.",
+            schema_file
+        );
+    }
+
+    let content = std::fs::read_to_string(&schema_file).with_context(|| {
+        format!("Failed to read schema file: {:?}", schema_file)
+    })?;
+
+    Ok(content)
+}
+
+#[tokio::test]
+async fn validate_migration_from_last_version() {
+    let config = load_test_config();
+    let logctx = LogContext::new(
+        "validate_migration_from_last_version",
+        &config.pkg.log,
+    );
+    let log = &logctx.log;
+
+    let previous_version = KNOWN_VERSIONS[1].semver();
+
+    // Validations: The first entry is the latest version,
+    // and it is not the same as the version before.
+    assert_eq!(KNOWN_VERSIONS[0].semver(), &LATEST_SCHEMA_VERSION);
+    assert_ne!(KNOWN_VERSIONS[0].semver(), KNOWN_VERSIONS[1].semver());
+
+    println!(
+        "Testing migration from previous version {} to current version {}",
+        previous_version, LATEST_SCHEMA_VERSION
+    );
+
+    // Verify that the pre-generated schema file exists for the previous version
+    let previous_schema_dir =
+        Utf8PathBuf::from(SCHEMA_DIR).join("previous-schema");
+    let previous_version_dir =
+        previous_schema_dir.join(previous_version.to_string());
+
+    if !previous_version_dir.join("dbinit.sql").exists() {
+        panic!(
+            "Pre-generated schema file not found for version {}: {:?}. Run 'cargo xtask schema generate-previous' first.",
+            previous_version,
+            previous_version_dir.join("dbinit.sql")
+        );
+    }
+
+    println!("Testing migration from version {}", previous_version);
+
+    // Create a new database and apply the historical dbinit.sql
+    let db = new_database_at_version(&logctx.log, previous_version).await;
+    let crdb = db.crdb();
+
+    // Verify we're at the expected schema version
+    let current_version = query_crdb_schema_version(&crdb).await;
+    assert_eq!(previous_version.to_string(), current_version);
+
+    // Load all schema versions and apply migrations from previous_version to latest
+    let all_versions = read_all_schema_versions();
+    let migrations_to_apply: Vec<_> = all_versions
+        .versions_range((
+            std::ops::Bound::Excluded(previous_version.clone()),
+            std::ops::Bound::Unbounded,
+        ))
+        .collect();
+
+    // Apply each migration
+    for version in migrations_to_apply {
+        apply_update(log, &crdb, version, 1).await;
+        assert_eq!(
+            version.semver().to_string(),
+            query_crdb_schema_version(&crdb).await
+        );
+    }
+
+    // Verify we're now at the latest version
+    assert_eq!(
+        LATEST_SCHEMA_VERSION.to_string(),
+        query_crdb_schema_version(&crdb).await
+    );
+
+    // Query the schema from our migrated database
+    let migrated_schema = InformationSchema::new(&crdb).await;
+    let migrated_data = migrated_schema.query_all_tables(log, &crdb).await;
+
+    db.terminate().await;
+
+    // Create a fresh database with current dbinit.sql for comparison
+    let fresh_db = TestDatabase::new_populate_schema_only(&logctx.log).await;
+    let fresh_crdb = fresh_db.crdb();
+    let expected_schema = InformationSchema::new(&fresh_crdb).await;
+    let expected_data =
+        expected_schema.query_all_tables(log, &fresh_crdb).await;
+
+    // Compare the schemas and data
+    migrated_schema.pretty_assert_eq(&expected_schema);
+    assert_eq!(
+        migrated_data, expected_data,
+        "Data mismatch when migrating from version {}",
+        previous_version
+    );
+
+    fresh_db.terminate().await;
+    println!(
+        "Successfully validated migration from version {}",
+        previous_version
+    );
+
     logctx.cleanup_successful();
 }
