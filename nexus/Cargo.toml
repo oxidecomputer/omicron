@@ -31,6 +31,7 @@ crucible-pantry-client.workspace = true
 crucible-common.workspace = true
 dns-service-client.workspace = true
 dpd-client.workspace = true
+ereport-types.workspace = true
 mg-admin-client.workspace = true
 dropshot.workspace = true
 fatfs.workspace = true
