@@ -7,10 +7,11 @@
 use anyhow::Context;
 use anyhow::anyhow;
 use futures::FutureExt;
-use hickory_resolver::TokioAsyncResolver;
+use hickory_resolver::TokioResolver;
 use hickory_resolver::config::{
-    NameServerConfig, Protocol, ResolverConfig, ResolverOpts,
+    NameServerConfig, ResolverConfig, ResolverOpts,
 };
+use hickory_resolver::name_server::TokioConnectionProvider;
 use std::net::SocketAddr;
 use std::sync::Arc;
 use thiserror::Error;
@@ -29,12 +30,12 @@ progenitor::generate_api!(
 /// for Nexus.  This is often useful when trying to connect with Nexus using
 /// TLS, since you need to come in via the DNS name to do that.
 ///
-/// This is a thin wrapper around `TokioAsyncResolver`
+/// This is a thin wrapper around `TokioResolver`
 pub struct CustomDnsResolver {
     dns_addr: SocketAddr,
     // The lifetime constraints on the `Resolve` trait make it hard to avoid an
     // Arc here.
-    resolver: Arc<TokioAsyncResolver>,
+    resolver: Arc<TokioResolver>,
 }
 
 impl CustomDnsResolver {
@@ -42,19 +43,22 @@ impl CustomDnsResolver {
     /// address
     pub fn new(dns_addr: SocketAddr) -> anyhow::Result<CustomDnsResolver> {
         let mut resolver_config = ResolverConfig::new();
-        resolver_config.add_name_server(NameServerConfig {
-            socket_addr: dns_addr,
-            protocol: Protocol::Udp,
-            tls_dns_name: None,
-            trust_negative_responses: false,
-            bind_addr: None,
-        });
+        resolver_config.add_name_server(NameServerConfig::new(
+            dns_addr,
+            hickory_resolver::proto::xfer::Protocol::Udp,
+        ));
         let mut resolver_opts = ResolverOpts::default();
         // Enable edns for potentially larger records
         resolver_opts.edns0 = true;
 
-        let resolver =
-            Arc::new(TokioAsyncResolver::tokio(resolver_config, resolver_opts));
+        let resolver = Arc::new(
+            TokioResolver::builder_with_config(
+                resolver_config,
+                TokioConnectionProvider::default(),
+            )
+            .with_options(resolver_opts)
+            .build(),
+        );
         Ok(CustomDnsResolver { dns_addr, resolver })
     }
 
@@ -63,8 +67,8 @@ impl CustomDnsResolver {
         self.dns_addr
     }
 
-    /// Returns the underlying `TokioAsyncResolver
-    pub fn resolver(&self) -> &TokioAsyncResolver {
+    /// Returns the underlying `TokioResolver
+    pub fn resolver(&self) -> &TokioResolver {
         &self.resolver
     }
 }

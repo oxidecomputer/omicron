@@ -5,38 +5,44 @@
 use std::net::IpAddr;
 use std::net::SocketAddr;
 
-use hickory_resolver::TokioAsyncResolver;
+use hickory_resolver::TokioResolver;
 use hickory_resolver::config::NameServerConfig;
-use hickory_resolver::config::Protocol;
+use hickory_resolver::config::ResolveHosts;
 use hickory_resolver::config::ResolverConfig;
 use hickory_resolver::config::ResolverOpts;
+use hickory_resolver::name_server::TokioConnectionProvider;
+use hickory_resolver::proto::xfer::Protocol;
 use omicron_common::address::DNS_PORT;
 use reqwest::dns::Name;
 
 /// Wrapper around hickory-resolver to provide name resolution
 /// using a given set of DNS servers for use with reqwest.
-pub struct Resolver(TokioAsyncResolver);
+pub struct Resolver(TokioResolver);
 
 impl Resolver {
     pub fn new(dns_servers: &[IpAddr]) -> Resolver {
         assert!(!dns_servers.is_empty());
         let mut rc = ResolverConfig::new();
         for addr in dns_servers {
-            rc.add_name_server(NameServerConfig {
-                socket_addr: SocketAddr::new(*addr, DNS_PORT),
-                protocol: Protocol::Udp,
-                tls_dns_name: None,
-                trust_negative_responses: false,
-                bind_addr: None,
-            });
+            rc.add_name_server(NameServerConfig::new(
+                SocketAddr::new(*addr, DNS_PORT),
+                Protocol::Udp,
+            ));
         }
         let mut opts = ResolverOpts::default();
         // Enable edns for potentially larger records
         opts.edns0 = true;
-        opts.use_hosts_file = false;
+        opts.use_hosts_file = ResolveHosts::Never;
         // Do as many requests in parallel as we have configured servers
         opts.num_concurrent_reqs = dns_servers.len();
-        Resolver(TokioAsyncResolver::tokio(rc, opts))
+        Resolver(
+            TokioResolver::builder_with_config(
+                rc,
+                TokioConnectionProvider::default(),
+            )
+            .with_options(opts)
+            .build(),
+        )
     }
 }
 

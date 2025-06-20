@@ -5071,6 +5071,7 @@ dependencies = [
  "dropshot",
  "expectorate",
  "futures",
+ "hickory-proto 0.25.2",
  "hickory-resolver 0.25.2",
  "internal-dns-types",
  "omicron-common",

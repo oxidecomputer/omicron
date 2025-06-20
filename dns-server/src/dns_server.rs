@@ -17,6 +17,7 @@ use hickory_proto::op::ResponseCode;
 use hickory_proto::rr::RData;
 use hickory_proto::rr::Record;
 use hickory_proto::rr::RecordType;
+use hickory_proto::rr::rdata::NS;
 use hickory_proto::rr::rdata::SRV;
 use hickory_proto::serialize::binary::BinDecodable;
 use hickory_proto::serialize::binary::BinDecoder;
@@ -224,19 +225,11 @@ fn dns_record_to_record(
 ) -> Result<Record, RequestError> {
     match record {
         DnsRecord::A(addr) => {
-            let mut a = Record::new();
-            a.set_name(name.clone())
-                .set_rr_type(RecordType::A)
-                .set_data(Some(RData::A((*addr).into())));
-            Ok(a)
+            Ok(Record::from_rdata(name.clone(), 0, RData::A((*addr).into())))
         }
 
         DnsRecord::Aaaa(addr) => {
-            let mut aaaa = Record::new();
-            aaaa.set_name(name.clone())
-                .set_rr_type(RecordType::AAAA)
-                .set_data(Some(RData::AAAA((*addr).into())));
-            Ok(aaaa)
+            Ok(Record::from_rdata(name.clone(), 0, RData::AAAA((*addr).into())))
         }
 
         DnsRecord::Srv(Srv { prio, weight, port, target }) => {
@@ -247,11 +240,11 @@ fn dns_record_to_record(
                     error
                 ))
             })?;
-            let mut srv = Record::new();
-            srv.set_name(name.clone()).set_rr_type(RecordType::SRV).set_data(
-                Some(RData::SRV(SRV::new(*prio, *weight, *port, tgt))),
-            );
-            Ok(srv)
+            Ok(Record::from_rdata(
+                name.clone(),
+                0,
+                RData::SRV(SRV::new(*prio, *weight, *port, tgt)),
+            ))
         }
 
         DnsRecord::Ns(nsdname) => {
@@ -262,12 +255,7 @@ fn dns_record_to_record(
                     error
                 ))
             })?;
-            let mut ns = Record::new();
-            use hickory_proto::rr::rdata::NS;
-            ns.set_name(name.clone())
-                .set_rr_type(RecordType::NS)
-                .set_data(Some(RData::NS(NS(nsdname))));
-            Ok(ns)
+            Ok(Record::from_rdata(name.clone(), 0, RData::NS(NS(nsdname))))
         }
     }
 }
@@ -287,118 +275,126 @@ async fn handle_dns_message(
     // have to decide if the error is authoritative.
     header.set_authoritative(true);
 
-    let query = mr.query();
-    let name = query.original().name().clone();
-    let answer = store.query(mr)?;
-    let rb = MessageResponseBuilder::from_message_request(mr);
     let mut additional_records = vec![];
 
-    let mut name_records = answer
-        .records
-        .as_ref()
-        .unwrap_or(&Vec::new())
-        .iter()
-        .map(|record| dns_record_to_record(&name, record))
-        .collect::<Result<Vec<_>, _>>()?;
-
-    if answer.name.is_none() && query.query_type() == RecordType::SOA {
-        // The query was for an SOA record at the apex. There isn't an SOA
-        // record in the database, but we can build one from the answer.
-        name_records.push(store.soa_for(&answer)?);
-    }
-
-    // If there were no records for the name at all, the name simply is not
-    // known to us. Bail now to return NXDomain.
-    //
-    // If there are no records after filtering, the name is known, just not with
-    // any records.  Returning NXDomain later on would be incorrect.
-    if name_records.is_empty() {
-        return Err(RequestError::NxDomain(answer.queried_fqdn()));
-    }
-
-    let response_records = name_records
+    let response_records = mr
+        .queries()
         .into_iter()
-        .filter(|record| {
-            let ty = query.query_type();
-            if ty == RecordType::ANY {
-                return true;
+        .map(|query| {
+            let name = query.original().name().clone();
+            let answer = store.query(query)?;
+
+            let mut name_records = answer
+                .records
+                .as_ref()
+                .unwrap_or(&Vec::new())
+                .iter()
+                .map(|record| dns_record_to_record(&name, record))
+                .collect::<Result<Vec<_>, _>>()?;
+
+            if answer.name.is_none() && query.query_type() == RecordType::SOA {
+                // The query was for an SOA record at the apex. There isn't an SOA
+                // record in the database, but we can build one from the answer.
+                name_records.push(store.soa_for(&answer)?);
             }
 
-            match (ty, record.data()) {
-                (RecordType::A, Some(RData::A(_))) => true,
-                (RecordType::AAAA, Some(RData::AAAA(_))) => true,
-                (RecordType::SRV, Some(RData::SRV(_))) => true,
-                (RecordType::NS, Some(RData::NS(_))) => true,
-                (RecordType::SOA, Some(RData::SOA(_))) => true,
-                _ => false,
-            }
-        })
-        .map(|record| {
-            // DNS allows for the server to return additional records that
-            // weren't explicitly asked for by the client but that the server
-            // expects the client will want. SRV and NS records both use names
-            // for their referents (rather than IP addresses dierctly). If
-            // someone has queried for one of those kinds of records, they'll
-            // almost certainly be needing the IP addresses that go with them as
-            // well. We opportunistically attempt to resolve the target here and
-            // if successful return those additional records in the response.
+            // If there were no records for the name at all, the name simply is not
+            // known to us. Bail now to return NXDomain.
             //
-            // NOTE: we only do this one-layer deep. If the target of a SRV or
-            // NS is a CNAME instead of A/AAAA directly, it will be lost here.
-            let additionals_target = match record.data() {
-                Some(RData::SRV(srv)) => Some(srv.target()),
-                Some(RData::NS(ns)) => Some(&ns.0),
-                _ => None,
-            };
-
-            if let Some(target) = additionals_target {
-                let target_records = store.query_name(target).map(|answer| {
-                    answer
-                        .records
-                        .unwrap_or(Vec::new())
-                        .into_iter()
-                        .map(|record| dns_record_to_record(target, &record))
-                        .collect::<Result<Vec<_>, _>>()
-                });
-                match target_records {
-                    Ok(Ok(target_records)) => {
-                        additional_records.extend(target_records);
-                    }
-                    // Don't bail out if we failed to lookup or
-                    // handle the response as the original request
-                    // did succeed and we only care to do this on
-                    // a best-effort basis.
-                    Err(error) => {
-                        slog::warn!(
-                            &log,
-                            "additional records lookup failed";
-                            "original_mr" => #?mr,
-                            "target" => ?target,
-                            "error" => ?error,
-                        );
-                    }
-                    Ok(Err(error)) => {
-                        slog::warn!(
-                            &log,
-                            "additional records unexpected response";
-                            "original_mr" => #?mr,
-                            "target" => ?target,
-                            "error" => ?error,
-                        );
-                    }
-                }
+            // If there are no records after filtering, the name is known, just not with
+            // any records.  Returning NXDomain later on would be incorrect.
+            if name_records.is_empty() {
+                return Err(RequestError::NxDomain(answer.queried_fqdn()));
             }
-            Ok(record)
+            let records = name_records
+                .into_iter()
+                .filter(|record| match (query.query_type(), record.data()) {
+                    (RecordType::ANY, _) => true,
+                    (RecordType::A, RData::A(_)) => true,
+                    (RecordType::AAAA, RData::AAAA(_)) => true,
+                    (RecordType::SRV, RData::SRV(_)) => true,
+                    (RecordType::NS, RData::NS(_)) => true,
+                    (RecordType::SOA, RData::SOA(_)) => true,
+                    _ => false,
+                })
+                .map(|record| {
+                    // DNS allows for the server to return additional records that
+                    // weren't explicitly asked for by the client but that the server
+                    // expects the client will want. SRV and NS records both use names
+                    // for their referents (rather than IP addresses directly). If
+                    // someone has queried for one of those kinds of records, they'll
+                    // almost certainly be needing the IP addresses that go with them as
+                    // well. We opportunistically attempt to resolve the target here and
+                    // if successful return those additional records in the response.
+                    //
+                    // NOTE: we only do this one-layer deep. If the target of a SRV or
+                    // NS is a CNAME instead of A/AAAA directly, it will be lost here.
+                    let additionals_target = match record.data() {
+                        RData::SRV(srv) => Some(srv.target()),
+                        RData::NS(ns) => Some(&ns.0),
+                        _ => None,
+                    };
+
+                    if let Some(target) = additionals_target {
+                        let target_records =
+                            store.query_name(target).map(|answer| {
+                                answer
+                                    .records
+                                    .unwrap_or(Vec::new())
+                                    .into_iter()
+                                    .map(|record| {
+                                        dns_record_to_record(target, &record)
+                                    })
+                                    .collect::<Result<Vec<_>, _>>()
+                            });
+                        match target_records {
+                            Ok(Ok(target_records)) => {
+                                additional_records.extend(target_records);
+                            }
+                            // Don't bail out if we failed to lookup or
+                            // handle the response as the original request
+                            // did succeed and we only care to do this on
+                            // a best-effort basis.
+                            Err(error) => {
+                                slog::warn!(
+                                    &log,
+                                    "additional records lookup failed";
+                                    "original_mr" => #?mr,
+                                    "target" => ?target,
+                                    "error" => ?error,
+                                );
+                            }
+                            Ok(Err(error)) => {
+                                slog::warn!(
+                                    &log,
+                                    "additional records unexpected response";
+                                    "original_mr" => #?mr,
+                                    "target" => ?target,
+                                    "error" => ?error,
+                                );
+                            }
+                        }
+                    }
+                    Ok(record)
+                })
+                .collect::<Result<Vec<_>, RequestError>>()?;
+
+            Ok(records)
         })
-        .collect::<Result<Vec<_>, RequestError>>()?;
+        .collect::<Result<Vec<_>, RequestError>>()?
+        .into_iter()
+        .flatten()
+        .collect::<Vec<_>>();
 
     debug!(
         &log,
         "dns response";
-        "query" => ?query,
+        "queries" => ?mr.queries(),
         "records" => ?&response_records,
         "additional_records" => ?&additional_records,
     );
+
+    let rb = MessageResponseBuilder::from_message_request(mr);
     respond_records(request, rb, header, &response_records, &additional_records)
         .await
 }
