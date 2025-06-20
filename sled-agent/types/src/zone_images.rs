@@ -6,6 +6,14 @@ use std::{fmt, fs::FileType, io, sync::Arc};
 
 use camino::Utf8PathBuf;
 use iddqd::{IdOrdItem, IdOrdMap, id_upcast};
+use nexus_sled_agent_shared::inventory::MupdateOverrideInfoInventory;
+use nexus_sled_agent_shared::inventory::MupdateOverrideInventory;
+use nexus_sled_agent_shared::inventory::MupdateOverrideNonBootInventory;
+use nexus_sled_agent_shared::inventory::ZoneArtifactInventory;
+use nexus_sled_agent_shared::inventory::ZoneArtifactsInventory;
+use nexus_sled_agent_shared::inventory::ZoneImageResolverInventory;
+use nexus_sled_agent_shared::inventory::ZoneManifestInventory;
+use nexus_sled_agent_shared::inventory::ZoneManifestNonBootInventory;
 use omicron_common::update::{
     MupdateOverrideInfo, OmicronZoneManifest, OmicronZoneManifestSource,
 };
@@ -25,6 +33,16 @@ pub struct ResolverStatus {
     pub mupdate_override: MupdateOverrideStatus,
 }
 
+impl ResolverStatus {
+    /// Convert this status to the inventory format.
+    pub fn to_inventory(&self) -> ZoneImageResolverInventory {
+        ZoneImageResolverInventory {
+            zone_manifest: self.zone_manifest.to_inventory(),
+            mupdate_override: self.mupdate_override.to_inventory(),
+        }
+    }
+}
+
 /// Describes the current state of zone manifests.
 #[derive(Clone, Debug)]
 pub struct ZoneManifestStatus {
@@ -38,6 +56,33 @@ pub struct ZoneManifestStatus {
     /// Status of the non-boot disks. This results in warnings in case of a
     /// mismatch.
     pub non_boot_disk_metadata: IdOrdMap<ZoneManifestNonBootInfo>,
+}
+
+impl ZoneManifestStatus {
+    /// Convert this status to the inventory format.
+    pub fn to_inventory(&self) -> ZoneManifestInventory {
+        let manifest = match &self.boot_disk_result {
+            Ok(artifacts_result) => Ok(artifacts_result.to_inventory()),
+            Err(err) => Err(err.to_string()),
+        };
+
+        let non_boot_status = self
+            .non_boot_disk_metadata
+            .iter()
+            .map(|info| ZoneManifestNonBootInventory {
+                zpool_id: info.zpool_id,
+                path: info.path.clone(),
+                is_valid: info.result.is_valid(),
+                message: info.result.display().to_string(),
+            })
+            .collect();
+
+        ZoneManifestInventory {
+            boot_disk_path: self.boot_disk_path.clone(),
+            manifest,
+            non_boot_status,
+        }
+    }
 }
 
 /// The result of reading artifacts from an install dataset.
@@ -62,6 +107,14 @@ impl ZoneManifestArtifactsResult {
             source: &self.manifest.source,
             artifacts: &self.data,
         }
+    }
+
+    /// Convert this result to the inventory format.
+    pub fn to_inventory(&self) -> ZoneArtifactsInventory {
+        let artifacts =
+            self.data.iter().map(|artifact| artifact.to_inventory()).collect();
+
+        ZoneArtifactsInventory { source: self.manifest.source, artifacts }
     }
 }
 
@@ -126,6 +179,31 @@ impl ZoneManifestArtifactResult {
 
     pub fn display(&self) -> ZoneManifestArtifactDisplay<'_> {
         ZoneManifestArtifactDisplay { artifact: self }
+    }
+
+    /// Convert this result to inventory format.
+    pub fn to_inventory(&self) -> ZoneArtifactInventory {
+        let status = match &self.status {
+            ArtifactReadResult::Valid => Ok(()),
+            ArtifactReadResult::Mismatch { actual_size, actual_hash } => {
+                Err(format!(
+                    "size/hash mismatch: expected {} bytes/{}, got {} bytes/{}",
+                    self.expected_size,
+                    self.expected_hash,
+                    actual_size,
+                    actual_hash
+                ))
+            }
+            ArtifactReadResult::Error(err) => Err(err.to_string()),
+        };
+
+        ZoneArtifactInventory {
+            file_name: self.file_name.clone(),
+            path: self.path.clone(),
+            expected_size: self.expected_size,
+            expected_hash: self.expected_hash,
+            status,
+        }
     }
 }
 
@@ -244,6 +322,11 @@ impl ZoneManifestNonBootResult {
         }
     }
 
+    /// Returns a displayable representation of this result.
+    pub fn display(&self) -> ZoneManifestNonBootDisplay<'_> {
+        ZoneManifestNonBootDisplay { result: self }
+    }
+
     fn log_to(&self, log: &slog::Logger) {
         match self {
             Self::Matches(result) => {
@@ -293,6 +376,47 @@ impl ZoneManifestNonBootResult {
     }
 }
 
+pub struct ZoneManifestNonBootDisplay<'a> {
+    result: &'a ZoneManifestNonBootResult,
+}
+
+impl fmt::Display for ZoneManifestNonBootDisplay<'_> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self.result {
+            ZoneManifestNonBootResult::Matches(result) => {
+                if result.is_valid() {
+                    write!(f, "valid zone manifest: {}", result.display())
+                } else {
+                    write!(f, "invalid zone manifest: {}", result.display())
+                }
+            }
+            ZoneManifestNonBootResult::Mismatch(mismatch) => match mismatch {
+                ZoneManifestNonBootMismatch::ValueMismatch {
+                    non_boot_disk_result,
+                } => {
+                    write!(
+                        f,
+                        "contents differ from boot disk: {}",
+                        non_boot_disk_result.display()
+                    )
+                }
+                ZoneManifestNonBootMismatch::BootDiskReadError {
+                    non_boot_disk_result,
+                } => {
+                    write!(
+                        f,
+                        "boot disk read error, non-boot disk: {}",
+                        non_boot_disk_result.display()
+                    )
+                }
+            },
+            ZoneManifestNonBootResult::ReadError(error) => {
+                write!(f, "read error: {}", error)
+            }
+        }
+    }
+}
+
 #[derive(Clone, Debug, PartialEq)]
 pub enum ZoneManifestNonBootMismatch {
     /// The file's contents differ between the boot disk and the other disk.
@@ -319,6 +443,36 @@ pub struct MupdateOverrideStatus {
     /// Status of the non-boot disks. This results in warnings in case of a
     /// mismatch.
     pub non_boot_disk_overrides: IdOrdMap<MupdateOverrideNonBootInfo>,
+}
+
+impl MupdateOverrideStatus {
+    /// Convert this status to inventory format.
+    pub fn to_inventory(&self) -> MupdateOverrideInventory {
+        let boot_disk_override = match &self.boot_disk_override {
+            Ok(Some(override_info)) => Ok(Some(MupdateOverrideInfoInventory {
+                mupdate_override_id: override_info.mupdate_uuid,
+            })),
+            Ok(None) => Ok(None),
+            Err(err) => Err(err.to_string()),
+        };
+
+        let non_boot_status = self
+            .non_boot_disk_overrides
+            .iter()
+            .map(|info| MupdateOverrideNonBootInventory {
+                zpool_id: info.zpool_id,
+                path: info.path.clone(),
+                is_valid: info.result.is_valid(),
+                message: info.result.display().to_string(),
+            })
+            .collect();
+
+        MupdateOverrideInventory {
+            boot_disk_path: self.boot_disk_path.clone(),
+            boot_disk_override,
+            non_boot_status,
+        }
+    }
 }
 
 /// Describes the result of reading a mupdate override file from a non-boot disk.
@@ -396,6 +550,77 @@ pub enum MupdateOverrideNonBootResult {
 
     /// There was an error reading the mupdate override file from the non-boot disk.
     ReadError(MupdateOverrideReadError),
+}
+
+impl MupdateOverrideNonBootResult {
+    /// Returns true if the status is considered to be valid.
+    pub fn is_valid(&self) -> bool {
+        match self {
+            MupdateOverrideNonBootResult::MatchesPresent
+            | MupdateOverrideNonBootResult::MatchesAbsent => true,
+            MupdateOverrideNonBootResult::Mismatch(_)
+            | MupdateOverrideNonBootResult::ReadError(_) => false,
+        }
+    }
+
+    /// Returns a displayable representation of this result.
+    pub fn display(&self) -> MupdateOverrideNonBootDisplay<'_> {
+        MupdateOverrideNonBootDisplay { result: self }
+    }
+}
+
+pub struct MupdateOverrideNonBootDisplay<'a> {
+    result: &'a MupdateOverrideNonBootResult,
+}
+
+impl fmt::Display for MupdateOverrideNonBootDisplay<'_> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self.result {
+            MupdateOverrideNonBootResult::MatchesPresent
+            | MupdateOverrideNonBootResult::MatchesAbsent => {
+                // This should not be called for matching cases
+                write!(f, "matches boot disk")
+            }
+            MupdateOverrideNonBootResult::Mismatch(mismatch) => match mismatch {
+                MupdateOverrideNonBootMismatch::BootPresentOtherAbsent => {
+                    write!(
+                        f,
+                        "boot disk has override but non-boot disk does not"
+                    )
+                }
+                MupdateOverrideNonBootMismatch::BootAbsentOtherPresent {
+                    non_boot_disk_info,
+                } => {
+                    write!(
+                        f,
+                        "non-boot disk has override ({:?}) but boot disk does not",
+                        non_boot_disk_info
+                    )
+                }
+                MupdateOverrideNonBootMismatch::ValueMismatch {
+                    non_boot_disk_info,
+                } => {
+                    write!(
+                        f,
+                        "boot disk and non-boot disk have different overrides (non-boot: {:?})",
+                        non_boot_disk_info
+                    )
+                }
+                MupdateOverrideNonBootMismatch::BootDiskReadError {
+                    non_boot_disk_info,
+                } => {
+                    write!(
+                        f,
+                        "error reading boot disk, non-boot disk override: {:?}",
+                        non_boot_disk_info
+                    )
+                }
+            },
+            MupdateOverrideNonBootResult::ReadError(err) => {
+                write!(f, "read error: {}", err)
+            }
+        }
+    }
 }
 
 /// Describes a mismatch between the boot disk and a non-boot disk.

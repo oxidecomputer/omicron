@@ -6,6 +6,7 @@
 
 use crate::CollectionBuilder;
 use crate::now_db_precision;
+use camino::Utf8Path;
 use clickhouse_admin_types::ClickhouseKeeperClusterMembership;
 use clickhouse_admin_types::KeeperId;
 use gateway_client::types::PowerState;
@@ -14,6 +15,7 @@ use gateway_client::types::SpComponentCaboose;
 use gateway_client::types::SpState;
 use gateway_client::types::SpType;
 use gateway_types::rot::RotSlot;
+use iddqd::id_ord_map;
 use nexus_sled_agent_shared::inventory::Baseboard;
 use nexus_sled_agent_shared::inventory::ConfigReconcilerInventory;
 use nexus_sled_agent_shared::inventory::ConfigReconcilerInventoryStatus;
@@ -25,6 +27,7 @@ use nexus_sled_agent_shared::inventory::OmicronSledConfig;
 use nexus_sled_agent_shared::inventory::OmicronZonesConfig;
 use nexus_sled_agent_shared::inventory::OrphanedDataset;
 use nexus_sled_agent_shared::inventory::SledRole;
+use nexus_sled_agent_shared::inventory::ZoneImageResolverInventory;
 use nexus_types::inventory::BaseboardId;
 use nexus_types::inventory::CabooseWhich;
 use nexus_types::inventory::RotPage;
@@ -41,6 +44,26 @@ use omicron_uuid_kinds::DatasetUuid;
 use omicron_uuid_kinds::PhysicalDiskUuid;
 use omicron_uuid_kinds::SledUuid;
 use omicron_uuid_kinds::ZpoolUuid;
+use sled_agent_types::zone_images::MupdateOverrideNonBootInfo;
+use sled_agent_types::zone_images::MupdateOverrideNonBootMismatch;
+use sled_agent_types::zone_images::MupdateOverrideNonBootResult;
+use sled_agent_types::zone_images::MupdateOverrideReadError;
+use sled_agent_types::zone_images::MupdateOverrideStatus;
+use sled_agent_types::zone_images::ResolverStatus;
+use sled_agent_types::zone_images::ZoneManifestNonBootInfo;
+use sled_agent_types::zone_images::ZoneManifestNonBootMismatch;
+use sled_agent_types::zone_images::ZoneManifestNonBootResult;
+use sled_agent_types::zone_images::ZoneManifestReadError;
+use sled_agent_types::zone_images::ZoneManifestStatus;
+use sled_agent_zone_images_examples::BOOT_PATHS;
+use sled_agent_zone_images_examples::NON_BOOT_2_PATHS;
+use sled_agent_zone_images_examples::NON_BOOT_2_UUID;
+use sled_agent_zone_images_examples::NON_BOOT_3_PATHS;
+use sled_agent_zone_images_examples::NON_BOOT_3_UUID;
+use sled_agent_zone_images_examples::NON_BOOT_PATHS;
+use sled_agent_zone_images_examples::NON_BOOT_UUID;
+use sled_agent_zone_images_examples::WriteInstallDatasetContext;
+use sled_agent_zone_images_examples::dataset_missing_error;
 use std::sync::Arc;
 use std::time::Duration;
 use strum::IntoEnumIterator;
@@ -476,6 +499,10 @@ pub fn representative() -> Representative {
                 zpools,
                 datasets,
                 Some(sled14),
+                zone_image_resolver(ZoneImageResolverExampleKind::Success {
+                    deserialized_zone_manifest: true,
+                    has_mupdate_override: true,
+                }),
             ),
         )
         .unwrap();
@@ -504,6 +531,10 @@ pub fn representative() -> Representative {
                 vec![],
                 vec![],
                 Some(sled16),
+                zone_image_resolver(ZoneImageResolverExampleKind::Success {
+                    deserialized_zone_manifest: false,
+                    has_mupdate_override: false,
+                }),
             ),
         )
         .unwrap();
@@ -527,6 +558,13 @@ pub fn representative() -> Representative {
                 vec![],
                 vec![],
                 Some(sled17),
+                // Simulate a mismatch in this case with the mupdate override
+                // being present. There's one case that's unexplored: mismatch
+                // with no mupdate override. But to express that case we would
+                // need an additional fifth sled.
+                zone_image_resolver(ZoneImageResolverExampleKind::Mismatch {
+                    has_mupdate_override: true,
+                }),
             ),
         )
         .unwrap();
@@ -550,6 +588,8 @@ pub fn representative() -> Representative {
                 // We only have omicron zones for three sleds so report no sled
                 // config here.
                 None,
+                // Simulate an error here.
+                zone_image_resolver(ZoneImageResolverExampleKind::Error),
             ),
         )
         .unwrap();
@@ -634,6 +674,162 @@ pub fn rot_page(unique: &str) -> RotPage {
     }
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ZoneImageResolverExampleKind {
+    /// Success, with or without treating the manifest as deserialized and the
+    /// mupdate override being present.
+    Success { deserialized_zone_manifest: bool, has_mupdate_override: bool },
+
+    /// The zone manifest is successfully read but doesn't match entries on
+    /// disk.
+    Mismatch { has_mupdate_override: bool },
+
+    /// Errors while reading the zone manifest and mupdate override status.
+    Error,
+}
+
+/// Generate an example zone image resolver inventory.
+pub fn zone_image_resolver(
+    kind: ZoneImageResolverExampleKind,
+) -> ZoneImageResolverInventory {
+    let dir_path = Utf8Path::new("/some/path");
+
+    // Create a bunch of contexts.
+    let mut cx = WriteInstallDatasetContext::new_basic();
+
+    let mut invalid_cx = WriteInstallDatasetContext::new_basic();
+    invalid_cx.make_error_cases();
+
+    // Determine the zone manifest and mupdate override results for the boot
+    // disk.
+    let (boot_zm_result, boot_override_result) = match kind {
+        ZoneImageResolverExampleKind::Success {
+            deserialized_zone_manifest,
+            has_mupdate_override,
+        } => {
+            if !deserialized_zone_manifest {
+                cx.write_zone_manifest_to_disk(false);
+            }
+            let zm_result = Ok(
+                cx.expected_result(&dir_path.join(&BOOT_PATHS.install_dataset))
+            );
+            let override_result =
+                Ok(has_mupdate_override.then(|| cx.override_info()));
+            (zm_result, override_result)
+        }
+        ZoneImageResolverExampleKind::Mismatch { has_mupdate_override } => {
+            // In this case, the zone manifest result is generated using the
+            // invalid (mismatched) context.
+            let zm_result = Ok(invalid_cx
+                .expected_result(&dir_path.join(&BOOT_PATHS.install_dataset)));
+            let override_result =
+                Ok(has_mupdate_override.then(|| cx.override_info()));
+            (zm_result, override_result)
+        }
+        ZoneImageResolverExampleKind::Error => {
+            // Use the invalid context to generate an error.
+            let zm_result = Err(ZoneManifestReadError::InstallMetadata(
+                dataset_missing_error(
+                    &dir_path.join(&BOOT_PATHS.install_dataset),
+                ),
+            ));
+            let override_result =
+                Err(MupdateOverrideReadError::InstallMetadata(
+                    dataset_missing_error(
+                        &dir_path.join(&BOOT_PATHS.install_dataset),
+                    ),
+                ));
+            (zm_result, override_result)
+        }
+    };
+
+    // Generate a status struct first.
+    let status = ResolverStatus {
+        zone_manifest: ZoneManifestStatus {
+            boot_disk_path: dir_path.join(&BOOT_PATHS.zones_json),
+            boot_disk_result: boot_zm_result,
+            non_boot_disk_metadata: id_ord_map! {
+                // Non-boot disk metadata that matches.
+                ZoneManifestNonBootInfo {
+                    zpool_id: NON_BOOT_UUID,
+                    dataset_dir: dir_path.join(&NON_BOOT_PATHS.install_dataset),
+                    path: dir_path.join(&NON_BOOT_PATHS.zones_json),
+                    // XXX Technically, if the boot disk had an error, this
+                    // can't be Matches. We choose to punt on this issue because
+                    // the conversion to the inventory type squishes down
+                    // errors into a string.
+                    result: ZoneManifestNonBootResult::Matches(
+                        cx.expected_result(
+                            &dir_path.join(&NON_BOOT_PATHS.install_dataset)
+                        )
+                    ),
+                },
+                // Non-boot disk mismatch (zones different + errors).
+                ZoneManifestNonBootInfo {
+                    zpool_id: NON_BOOT_2_UUID,
+                    dataset_dir: dir_path.join(&NON_BOOT_2_PATHS.install_dataset),
+                    path: dir_path.join(&NON_BOOT_2_PATHS.zones_json),
+                    result: ZoneManifestNonBootResult::Mismatch(
+                        ZoneManifestNonBootMismatch::ValueMismatch {
+                            non_boot_disk_result: invalid_cx.expected_result(
+                                &dir_path.join(&NON_BOOT_2_PATHS.install_dataset),
+                            ),
+                        },
+                    ),
+                },
+                // Non-boot disk mismatch (error reading zone manifest).
+                ZoneManifestNonBootInfo {
+                    zpool_id: NON_BOOT_3_UUID,
+                    dataset_dir: dir_path.join(&NON_BOOT_3_PATHS.install_dataset),
+                    path: dir_path.join(&NON_BOOT_3_PATHS.zones_json),
+                    result: ZoneManifestNonBootResult::ReadError(
+                        dataset_missing_error(
+                            &dir_path.join(&NON_BOOT_3_PATHS.install_dataset),
+                        ).into(),
+                    ),
+                },
+            },
+        },
+        mupdate_override: MupdateOverrideStatus {
+            boot_disk_path: dir_path.join(&BOOT_PATHS.mupdate_override_json),
+            boot_disk_override: boot_override_result,
+            non_boot_disk_overrides: id_ord_map! {
+                // Non-boot disk mupdate overrides that match.
+                MupdateOverrideNonBootInfo {
+                    zpool_id: NON_BOOT_UUID,
+                    path: dir_path.join(&NON_BOOT_PATHS.mupdate_override_json),
+                    // XXX Technically, if the boot disk had an error, this
+                    // can't be Matches. We choose to punt on this issue because
+                    // the conversion to the inventory type squishes down errors
+                    // into a string.
+                    result: MupdateOverrideNonBootResult::MatchesPresent,
+                },
+                // Non-boot disk mupdate overrides that have a mismatch.
+                MupdateOverrideNonBootInfo {
+                    zpool_id: NON_BOOT_2_UUID,
+                    path: dir_path.join(&NON_BOOT_2_PATHS.mupdate_override_json),
+                    result: MupdateOverrideNonBootResult::Mismatch(
+                        MupdateOverrideNonBootMismatch::BootPresentOtherAbsent,
+                    ),
+                },
+                // Non-boot disk updates (error reading zone manifest).
+                MupdateOverrideNonBootInfo {
+                    zpool_id: NON_BOOT_3_UUID,
+                    path: dir_path.join(&NON_BOOT_3_PATHS.mupdate_override_json),
+                    result: MupdateOverrideNonBootResult::ReadError(
+                        dataset_missing_error(
+                            &dir_path.join(&NON_BOOT_3_PATHS.install_dataset),
+                        ).into(),
+                    ),
+                },
+            },
+        },
+    };
+
+    status.to_inventory()
+}
+
+#[expect(clippy::too_many_arguments)]
 pub fn sled_agent(
     sled_id: SledUuid,
     baseboard: Baseboard,
@@ -642,6 +838,7 @@ pub fn sled_agent(
     zpools: Vec<InventoryZpool>,
     datasets: Vec<InventoryDataset>,
     ledgered_sled_config: Option<OmicronSledConfig>,
+    zone_image_resolver: ZoneImageResolverInventory,
 ) -> Inventory {
     // Assume the `ledgered_sled_config` was reconciled successfully.
     let last_reconciliation = ledgered_sled_config.clone().map(|config| {
@@ -684,5 +881,6 @@ pub fn sled_agent(
         ledgered_sled_config,
         reconciler_status,
         last_reconciliation,
+        zone_image_resolver,
     }
 }
