@@ -14,11 +14,12 @@ use dpd_client::types::PortId;
 use dpd_client::types::PortSettings;
 use dpd_client::types::PortSpeed as DpdPortSpeed;
 use either::Either;
-use hickory_resolver::TokioAsyncResolver;
+use hickory_resolver::TokioResolver;
 use hickory_resolver::config::NameServerConfigGroup;
+use hickory_resolver::config::ResolveHosts;
 use hickory_resolver::config::ResolverConfig;
 use hickory_resolver::config::ResolverOpts;
-use hickory_resolver::error::ResolveErrorKind;
+use hickory_resolver::name_server::TokioConnectionProvider;
 use illumos_utils::PFEXEC;
 use illumos_utils::zone::SVCCFG;
 use omicron_common::OMICRON_DPD_TAG;
@@ -1018,7 +1019,7 @@ impl DnsLookupStep {
     async fn lookup_ip(
         &mut self,
         dns_ip: IpAddr,
-        resolver: &TokioAsyncResolver,
+        resolver: &TokioResolver,
         name: &str,
         options: DnsLookupOptions,
         cx: &StepContext,
@@ -1088,91 +1089,79 @@ impl DnsLookupStep {
                 Err(err) => err,
             };
 
-            match err.kind() {
-                // If `NoRecordsFound` is an acceptable end to this lookup,
-                // we're done.
-                ResolveErrorKind::NoRecordsFound { .. }
-                    if options.is_no_records_found_okay =>
-                {
-                    let message = format!(
-                        "DNS server {dns_ip} \
-                         {query_type} query attempt {attempt}: \
-                         no record found for {name}; \
-                         connectivity to DNS server appears good"
-                    );
-                    query_results.push(message.clone());
-                    cx.send_progress(StepProgress::Progress {
-                        progress: None,
-                        metadata: message,
-                    })
-                    .await;
+            if err.is_no_records_found() && options.is_no_records_found_okay {
+                let message = format!(
+                    "DNS server {dns_ip} \
+                        {query_type} query attempt {attempt}: \
+                        no record found for {name}; \
+                        connectivity to DNS server appears good"
+                );
+                query_results.push(message.clone());
+                cx.send_progress(StepProgress::Progress {
+                    progress: None,
+                    metadata: message,
+                })
+                .await;
 
-                    self.messages.append(&mut query_results);
-                    return Ok(());
-                }
-
+                self.messages.append(&mut query_results);
+                return Ok(());
+            } else if err.is_no_records_found() {
                 // Otherwise, `NoRecordsFound` means we should either switch to
                 // AAAA queries (if this was A) or we're done (and failed).
-                ResolveErrorKind::NoRecordsFound { .. } => {
-                    let message = format!(
-                        "DNS server {dns_ip} \
+                let message = format!(
+                    "DNS server {dns_ip} \
                          {query_type} query attempt {attempt}: \
                          failed to look up {name}: {}",
-                        DisplayErrorChain::new(&err)
-                    );
-                    query_results.push(message.clone());
-                    cx.send_progress(StepProgress::Progress {
-                        progress: None,
-                        metadata: message,
-                    })
-                    .await;
+                    DisplayErrorChain::new(&err)
+                );
+                query_results.push(message.clone());
+                cx.send_progress(StepProgress::Progress {
+                    progress: None,
+                    metadata: message,
+                })
+                .await;
 
-                    // If this was an A query, switch to AAAA and reset the
-                    // attempt counter; otherwise, we're done (and we failed
-                    // to resolve the name).
-                    if query_ipv4 {
-                        query_ipv4 = false;
-                        attempt = 0;
-                        continue;
-                    } else {
-                        self.warnings.append(&mut query_results);
-                        return Ok(());
-                    }
+                // If this was an A query, switch to AAAA and reset the
+                // attempt counter; otherwise, we're done (and we failed
+                // to resolve the name).
+                if query_ipv4 {
+                    query_ipv4 = false;
+                    attempt = 0;
+                    continue;
+                } else {
+                    self.warnings.append(&mut query_results);
+                    return Ok(());
                 }
-
-                // For any other error, we're done (and failed) if we've passed
-                // `RETRY_TIMEOUT`; otherwise, we sleep briefly and then retry.
-                _ => {
-                    let message = format!(
-                        "DNS server {dns_ip} \
+            } else {
+                let message = format!(
+                    "DNS server {dns_ip} \
                          {query_type} query attempt {attempt}: \
                          failed to look up {name}: {}",
-                        DisplayErrorChain::new(&err)
-                    );
-                    query_results.push(message.clone());
-                    cx.send_progress(StepProgress::Progress {
-                        progress: None,
-                        metadata: message,
-                    })
-                    .await;
+                    DisplayErrorChain::new(&err)
+                );
+                query_results.push(message.clone());
+                cx.send_progress(StepProgress::Progress {
+                    progress: None,
+                    metadata: message,
+                })
+                .await;
 
-                    if start.elapsed() < RETRY_TIMEOUT {
-                        tokio::time::sleep(Duration::from_secs(1)).await;
-                        continue;
-                    } else {
-                        self.warnings.append(&mut query_results);
-                        return Err(StopTryingServer);
-                    }
+                if start.elapsed() < RETRY_TIMEOUT {
+                    tokio::time::sleep(Duration::from_secs(1)).await;
+                    continue;
+                } else {
+                    self.warnings.append(&mut query_results);
+                    return Err(StopTryingServer);
                 }
             }
         }
     }
 
-    /// Returns a `TokioAsyncResolver` if we're able to build one.
+    /// Returns a `TokioResolver` if we're able to build one.
     ///
     /// If building it fails, we'll append to our internal `warnings` and return
     /// `None`.
-    fn build_resolver(&mut self, dns_ip: IpAddr) -> TokioAsyncResolver {
+    fn build_resolver(&mut self, dns_ip: IpAddr) -> TokioResolver {
         let mut options = ResolverOpts::default();
 
         // Enable edns for potentially larger records
@@ -1187,7 +1176,7 @@ impl DnsLookupStep {
         options.cache_size = 0;
 
         // We only want to query the DNS server, not /etc/hosts.
-        options.use_hosts_file = false;
+        options.use_hosts_file = ResolveHosts::Never;
 
         // This is currently the default for `ResolverOpts`, but it
         // doesn't hurt to specify it in case that changes.
@@ -1197,7 +1186,7 @@ impl DnsLookupStep {
         // _probably_ doesn't matter.
         options.num_concurrent_reqs = 1;
 
-        TokioAsyncResolver::tokio(
+        TokioResolver::builder_with_config(
             ResolverConfig::from_parts(
                 None,
                 vec![],
@@ -1207,8 +1196,10 @@ impl DnsLookupStep {
                     true,
                 ),
             ),
-            options,
+            TokioConnectionProvider::default(),
         )
+        .with_options(options)
+        .build()
     }
 }
 

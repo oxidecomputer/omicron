@@ -1,7 +1,8 @@
 use crate::helpers::generate_name;
 use anyhow::{Context as _, Result, anyhow};
 use chrono::Utc;
-use hickory_resolver::error::ResolveErrorKind;
+use hickory_resolver::ResolveErrorKind;
+use hickory_resolver::proto::ProtoErrorKind;
 use omicron_test_utils::dev::poll::{CondCheckError, wait_for_condition};
 use oxide_client::CustomDnsResolver;
 use oxide_client::types::{Name, ProjectCreate};
@@ -305,9 +306,9 @@ async fn wait_for_records(
                 .resolver()
                 .lookup_ip(dns_name)
                 .await
-                .map_err(|e| match e.kind() {
-                    ResolveErrorKind::NoRecordsFound { .. }
-                    | ResolveErrorKind::Timeout => CondCheckError::NotYet,
+                .map_err(|e| match resolve_error_proto_kind(&e) {
+                    Some(ProtoErrorKind::NoRecordsFound { .. })
+                    | Some(ProtoErrorKind::Timeout) => CondCheckError::NotYet,
                     _ => CondCheckError::Failed(anyhow::Error::new(e).context(
                         format!(
                             "resolving {:?} from {}",
@@ -332,4 +333,11 @@ async fn wait_for_records(
             max
         )
     })
+}
+
+fn resolve_error_proto_kind(
+    e: &hickory_resolver::ResolveError,
+) -> Option<&ProtoErrorKind> {
+    let ResolveErrorKind::Proto(proto_error) = e.kind() else { return None };
+    Some(proto_error.kind())
 }

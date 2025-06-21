@@ -6,17 +6,18 @@ use anyhow::{Context, Result};
 use camino_tempfile::Utf8TempDir;
 use dns_service_client::Client;
 use dropshot::{HandlerTaskMode, test_util::LogContext};
-use hickory_client::{
-    client::{AsyncClient, ClientHandle},
-    error::ClientError,
-    rr::RData,
-    udp::UdpClientStream,
-};
-use hickory_resolver::TokioAsyncResolver;
-use hickory_resolver::error::ResolveErrorKind;
+use hickory_client::client::Client as HickoryClient;
+use hickory_client::{ClientError, client::ClientHandle};
+use hickory_proto::rr::RData;
+use hickory_proto::runtime::TokioRuntimeProvider;
+use hickory_proto::udp::UdpClientStream;
+use hickory_proto::xfer::Protocol;
+use hickory_resolver::ResolveErrorKind;
+use hickory_resolver::TokioResolver;
+use hickory_resolver::name_server::TokioConnectionProvider;
 use hickory_resolver::{
-    config::{NameServerConfig, Protocol, ResolverConfig, ResolverOpts},
-    error::ResolveError,
+    ResolveError,
+    config::{NameServerConfig, ResolverConfig, ResolverOpts},
     proto::{
         op::ResponseCode,
         rr::{DNSClass, Name, RecordType, rdata::AAAA},
@@ -240,7 +241,7 @@ pub async fn srv_crud() -> Result<(), anyhow::Error> {
     // that the additional records really do come back in the "Additionals"
     // section of the response.
 
-    let name = hickory_client::rr::domain::Name::from_ascii(&test_fqdn)
+    let name = hickory_proto::rr::domain::Name::from_ascii(&test_fqdn)
         .expect("can construct name for query");
 
     let response = raw_dns_client_query(
@@ -299,7 +300,7 @@ pub async fn multi_record_crud() -> Result<(), anyhow::Error> {
 
 async fn lookup_ip_expect_error_code(
     server_addr: std::net::SocketAddr,
-    resolver: &TokioAsyncResolver,
+    resolver: &TokioResolver,
     name: &str,
     expected_code: ResponseCode,
 ) {
@@ -363,31 +364,30 @@ async fn raw_query_expect_err(
     raw_response
 }
 
+#[track_caller]
 fn expect_no_records_error_code(
     err: &ResolveError,
     expected_code: ResponseCode,
 ) {
-    match err.kind() {
-        ResolveErrorKind::NoRecordsFound {
+    if let ResolveErrorKind::Proto(proto_err) = err.kind() {
+        if let hickory_proto::ProtoErrorKind::NoRecordsFound {
             response_code,
-            query: _,
-            soa: _,
-            negative_ttl: _,
-            trusted: _,
-        } => {
+            ..
+        } = proto_err.kind()
+        {
             if response_code == &expected_code {
                 // Error matches on all the conditions we're checking. No
                 // issues.
-            } else {
-                panic!(
-                    "Expected {expected_code}, got response code {response_code:?}"
-                );
+                return;
             }
-        }
-        unexpected => {
-            panic!("Expected {expected_code}, got error {unexpected:?}");
+
+            panic!(
+                "Expected {expected_code}, got response code {response_code:?}"
+            );
         }
     }
+    let unexpected = err.kind();
+    panic!("Expected {expected_code}, got error {unexpected:?}");
 }
 
 // Verify that the part of a name that's under the zone name can contain the
@@ -519,7 +519,7 @@ pub async fn soa() -> Result<(), anyhow::Error> {
     let zone_ns_answer = resolver.ns_lookup(TEST_ZONE).await?;
     let has_ns_record =
         zone_ns_answer.as_lookup().records().iter().any(|record| {
-            if let Some(RData::NS(nsdname)) = record.data() {
+            if let RData::NS(nsdname) = record.data() {
                 nsdname.0.to_utf8().as_str() == &ns1_name
             } else {
                 false
@@ -530,7 +530,7 @@ pub async fn soa() -> Result<(), anyhow::Error> {
     // The nameserver's AAAA record should be in additionals.
     let has_aaaa_additional =
         zone_ns_answer.as_lookup().records().iter().any(|record| {
-            if let Some(RData::AAAA(AAAA(addr))) = record.data() {
+            if let RData::AAAA(AAAA(addr)) = record.data() {
                 addr == &ns1_addr
             } else {
                 false
@@ -639,7 +639,7 @@ pub async fn servfail() -> Result<(), anyhow::Error> {
 
 struct TestContext {
     client: Client,
-    resolver: TokioAsyncResolver,
+    resolver: TokioResolver,
     dns_server: dns_server::dns_server::ServerHandle,
     dropshot_server: dropshot::HttpServer<dns_server::http_server::Context>,
     tmp: Utf8TempDir,
@@ -684,18 +684,20 @@ async fn init_client_server(
     .await?;
 
     let mut resolver_config = ResolverConfig::new();
-    resolver_config.add_name_server(NameServerConfig {
-        socket_addr: dns_server.local_address(),
-        protocol: Protocol::Udp,
-        tls_dns_name: None,
-        trust_negative_responses: false,
-        bind_addr: None,
-    });
+    resolver_config.add_name_server(NameServerConfig::new(
+        dns_server.local_address(),
+        Protocol::Udp,
+    ));
     let mut resolver_opts = ResolverOpts::default();
     // Enable edns for potentially larger records
     resolver_opts.edns0 = true;
 
-    let resolver = TokioAsyncResolver::tokio(resolver_config, resolver_opts);
+    let resolver = TokioResolver::builder_with_config(
+        resolver_config,
+        TokioConnectionProvider::default(),
+    )
+    .with_options(resolver_opts)
+    .build();
     let client =
         Client::new(&format!("http://{}", dropshot_server.local_addr()), log);
 
@@ -805,8 +807,10 @@ async fn raw_dns_client_query(
     name: Name,
     record_ty: RecordType,
 ) -> Result<DnsResponse, ClientError> {
-    let stream = UdpClientStream::<tokio::net::UdpSocket>::new(resolver_addr);
-    let (mut trust_client, bg) = AsyncClient::connect(stream).await.unwrap();
+    let stream =
+        UdpClientStream::builder(resolver_addr, TokioRuntimeProvider::new())
+            .build();
+    let (mut trust_client, bg) = HickoryClient::connect(stream).await.unwrap();
 
     tokio::spawn(bg);
 

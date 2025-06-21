@@ -94,7 +94,7 @@
 
 use anyhow::{Context, anyhow};
 use camino::Utf8PathBuf;
-use hickory_proto::rr::LowerName;
+use hickory_proto::{op::LowerQuery, rr::LowerName};
 use hickory_resolver::Name;
 use internal_dns_types::{
     config::{DnsConfig, DnsConfigParams, DnsConfigZone, DnsRecord},
@@ -439,23 +439,23 @@ impl Store {
             })
             .map(name_from_str)??;
 
-        let mut record = hickory_proto::rr::Record::new();
         let soa_name = name_from_str(&answer.queried_fqdn())?;
         let rname = name_from_str(format!("admin.{}", answer.zone.as_str()))?;
-        record
-            .set_name(soa_name)
-            .set_rr_type(hickory_proto::rr::RecordType::SOA)
-            .set_data(Some(hickory_proto::rr::RData::SOA(
-                hickory_proto::rr::rdata::SOA::new(
-                    preferred_nameserver,
-                    rname,
-                    answer.serial,
-                    3600,
-                    600,
-                    1800,
-                    600,
-                ),
-            )));
+
+        let record = hickory_proto::rr::Record::from_rdata(
+            soa_name,
+            0,
+            hickory_proto::rr::RData::SOA(hickory_proto::rr::rdata::SOA::new(
+                preferred_nameserver,
+                rname,
+                answer.serial,
+                3600,
+                600,
+                1800,
+                600,
+            )),
+        );
+
         Ok(record)
     }
 
@@ -759,10 +759,10 @@ impl Store {
     /// If the name does not match any zone, returns `QueryError::NoZone`.
     pub(crate) fn query(
         &self,
-        mr: &hickory_server::authority::MessageRequest,
+        query: &LowerQuery,
     ) -> Result<Answer, QueryError> {
-        let name = mr.query().name();
-        let orig_name = mr.query().original().name();
+        let name = query.name();
+        let orig_name = query.original().name();
         self.query_raw(name, orig_name)
     }
 
