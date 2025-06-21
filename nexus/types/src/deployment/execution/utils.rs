@@ -4,6 +4,7 @@
 
 use std::net::{IpAddr, SocketAddrV6};
 
+use iddqd::{IdOrdItem, id_upcast};
 use nexus_sled_agent_shared::inventory::SledRole;
 use omicron_common::address::{Ipv6Subnet, SLED_PREFIX};
 use omicron_uuid_kinds::SledUuid;
@@ -70,6 +71,14 @@ impl Sled {
     pub fn is_scrimlet(&self) -> bool {
         self.role == SledRole::Scrimlet
     }
+}
+
+impl IdOrdItem for Sled {
+    type Key<'a> = SledUuid;
+    fn key(&self) -> Self::Key<'_> {
+        self.id
+    }
+    id_upcast!();
 }
 
 /// Return the Nexus external addresses according to the given blueprint

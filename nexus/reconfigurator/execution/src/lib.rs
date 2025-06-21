@@ -7,6 +7,7 @@
 //! See `nexus_reconfigurator_planning` crate-level docs for background.
 
 use anyhow::{Context, anyhow};
+use iddqd::IdOrdMap;
 use internal_dns_resolver::Resolver;
 use nexus_db_queries::context::OpContext;
 use nexus_db_queries::db::DataStore;
@@ -20,10 +21,7 @@ use nexus_types::deployment::execution::{
     Overridables, ReconfiguratorExecutionSpec, SharedStepHandle, Sled,
     StepHandle, StepResult, UpdateEngine,
 };
-use nexus_types::identity::Asset;
-use omicron_uuid_kinds::GenericUuid;
 use omicron_uuid_kinds::OmicronZoneUuid;
-use omicron_uuid_kinds::SledUuid;
 use slog::info;
 use slog_error_chain::InlineErrorChain;
 use std::collections::BTreeMap;
@@ -370,17 +368,15 @@ fn register_sled_list_step<'a>(
     registrar: &ComponentRegistrar<'_, 'a>,
     opctx: &'a OpContext,
     datastore: &'a DataStore,
-) -> StepHandle<Arc<BTreeMap<SledUuid, Sled>>> {
+) -> StepHandle<Arc<IdOrdMap<Sled>>> {
     registrar
         .new_step(ExecutionStepId::Fetch, "Fetch sled list", async move |_cx| {
-            let sleds_by_id: BTreeMap<SledUuid, _> = datastore
+            let sleds_by_id: IdOrdMap<_> = datastore
                 .sled_list_all_batched(opctx, SledFilter::InService)
                 .await
                 .context("listing all sleds")?
                 .into_iter()
-                .map(|db_sled| {
-                    (SledUuid::from_untyped_uuid(db_sled.id()), db_sled.into())
-                })
+                .map(|db_sled| db_sled.into())
                 .collect();
 
             StepSuccess::new(Arc::new(sleds_by_id)).into()
@@ -392,7 +388,7 @@ fn register_deploy_sled_configs_step<'a>(
     registrar: &ComponentRegistrar<'_, 'a>,
     opctx: &'a OpContext,
     blueprint: &'a Blueprint,
-    sleds: SharedStepHandle<Arc<BTreeMap<SledUuid, Sled>>>,
+    sleds: SharedStepHandle<Arc<IdOrdMap<Sled>>>,
 ) {
     registrar
         .new_step(
@@ -452,7 +448,7 @@ fn register_dns_records_step<'a>(
     blueprint: &'a Blueprint,
     creator: OmicronZoneUuid,
     overrides: &'a Overridables,
-    sleds: SharedStepHandle<Arc<BTreeMap<SledUuid, Sled>>>,
+    sleds: SharedStepHandle<Arc<IdOrdMap<Sled>>>,
 ) {
     registrar
         .new_step(

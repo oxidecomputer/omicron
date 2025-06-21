@@ -1641,7 +1641,7 @@ impl<'a, N: NexusServer> DiskTest<'a, N> {
                     Ok(Some(c)) => {
                         let all_zpools = c
                             .sled_agents
-                            .values()
+                            .iter()
                             .flat_map(|sled_agent| {
                                 sled_agent.zpools.iter().map(|z| z.id)
                             })

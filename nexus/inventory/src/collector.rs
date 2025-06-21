@@ -560,10 +560,13 @@ mod test {
         }
 
         write!(&mut s, "\nsled agents found:\n").unwrap();
-        for (sled_id, sled_info) in &collection.sled_agents {
-            assert_eq!(*sled_id, sled_info.sled_id);
-            write!(&mut s, "  sled {} ({:?})\n", sled_id, sled_info.sled_role)
-                .unwrap();
+        for sled_info in &collection.sled_agents {
+            write!(
+                &mut s,
+                "  sled {} ({:?})\n",
+                sled_info.sled_id, sled_info.sled_role
+            )
+            .unwrap();
             write!(&mut s, "    baseboard {:?}\n", sled_info.baseboard_id)
                 .unwrap();
 

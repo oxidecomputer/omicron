@@ -8,6 +8,7 @@
 //! from sources like MGS) from assembling a representation of what was
 //! collected.
 
+use anyhow::Context;
 use anyhow::anyhow;
 use chrono::DateTime;
 use chrono::Utc;
@@ -15,6 +16,7 @@ use clickhouse_admin_types::ClickhouseKeeperClusterMembership;
 use gateway_client::types::SpComponentCaboose;
 use gateway_client::types::SpState;
 use gateway_client::types::SpType;
+use iddqd::IdOrdMap;
 use nexus_sled_agent_shared::inventory::Baseboard;
 use nexus_sled_agent_shared::inventory::Inventory;
 use nexus_types::inventory::BaseboardId;
@@ -30,7 +32,6 @@ use nexus_types::inventory::ServiceProcessor;
 use nexus_types::inventory::SledAgent;
 use nexus_types::inventory::Zpool;
 use omicron_uuid_kinds::CollectionKind;
-use omicron_uuid_kinds::SledUuid;
 use std::collections::BTreeMap;
 use std::collections::BTreeSet;
 use std::hash::Hash;
@@ -111,7 +112,7 @@ pub struct CollectionBuilder {
         BTreeMap<CabooseWhich, BTreeMap<Arc<BaseboardId>, CabooseFound>>,
     rot_pages_found:
         BTreeMap<RotPageWhich, BTreeMap<Arc<BaseboardId>, RotPageFound>>,
-    sleds: BTreeMap<SledUuid, SledAgent>,
+    sleds: IdOrdMap<SledAgent>,
     clickhouse_keeper_cluster_membership:
         BTreeSet<ClickhouseKeeperClusterMembership>,
     // CollectionBuilderRng is taken by value, rather than passed in as a
@@ -141,7 +142,7 @@ impl CollectionBuilder {
             rots: BTreeMap::new(),
             cabooses_found: BTreeMap::new(),
             rot_pages_found: BTreeMap::new(),
-            sleds: BTreeMap::new(),
+            sleds: IdOrdMap::new(),
             clickhouse_keeper_cluster_membership: BTreeSet::new(),
             rng: CollectionBuilderRng::from_entropy(),
         }
@@ -542,15 +543,12 @@ impl CollectionBuilder {
             zone_image_resolver: inventory.zone_image_resolver,
         };
 
-        if let Some(previous) = self.sleds.get(&sled_id) {
-            Err(anyhow!(
-                "sled {sled_id}: reported sled multiple times \
-                (previously {previous:?}, now {sled:?})",
-            ))
-        } else {
-            self.sleds.insert(sled_id, sled);
-            Ok(())
-        }
+        self.sleds
+            .insert_unique(sled)
+            .map_err(|error| error.into_owned())
+            .with_context(|| {
+                anyhow!("sled {sled_id}: reported sled multiple times")
+            })
     }
 
     /// Record information about Keeper cluster membership learned from the
@@ -957,9 +955,8 @@ mod test {
 
         // Verify that we found the sled agents.
         assert_eq!(collection.sled_agents.len(), 4);
-        for (sled_id, sled_agent) in &collection.sled_agents {
-            assert_eq!(*sled_id, sled_agent.sled_id);
-            if *sled_id == sled_agent_id_extra {
+        for sled_agent in &collection.sled_agents {
+            if sled_agent.sled_id == sled_agent_id_extra {
                 assert_eq!(sled_agent.sled_role, SledRole::Scrimlet);
             } else {
                 assert_eq!(sled_agent.sled_role, SledRole::Gimlet);
@@ -977,7 +974,8 @@ mod test {
             assert_eq!(sled_agent.reservoir_size, ByteCount::from(1024));
         }
 
-        let sled1_agent = &collection.sled_agents[&sled_agent_id_basic];
+        let sled1_agent =
+            collection.sled_agents.get(&sled_agent_id_basic).unwrap();
         let sled1_bb = sled1_agent.baseboard_id.as_ref().unwrap();
         assert_eq!(sled1_bb.part_number, "model1");
         assert_eq!(sled1_bb.serial_number, "s1");
@@ -986,14 +984,23 @@ mod test {
         assert_eq!(sled1_agent.disks[0].identity.model, "box");
         assert_eq!(sled1_agent.disks[0].identity.serial, "XXIV");
 
-        let sled4_agent = &collection.sled_agents[&sled_agent_id_extra];
+        let sled4_agent =
+            collection.sled_agents.get(&sled_agent_id_extra).unwrap();
         let sled4_bb = sled4_agent.baseboard_id.as_ref().unwrap();
         assert_eq!(sled4_bb.serial_number, "s4");
         assert!(
-            collection.sled_agents[&sled_agent_id_pc].baseboard_id.is_none()
+            collection
+                .sled_agents
+                .get(&sled_agent_id_pc)
+                .unwrap()
+                .baseboard_id
+                .is_none()
         );
         assert!(
-            collection.sled_agents[&sled_agent_id_unknown]
+            collection
+                .sled_agents
+                .get(&sled_agent_id_unknown)
+                .unwrap()
                 .baseboard_id
                 .is_none()
         );

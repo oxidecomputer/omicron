@@ -8,6 +8,7 @@ use anyhow::{Context, anyhow, bail};
 use camino::Utf8PathBuf;
 use clap::ValueEnum;
 use clap::{Args, Parser, Subcommand};
+use iddqd::IdOrdMap;
 use indent_write::fmt::IndentWriter;
 use internal_dns_types::diff::DnsDiff;
 use itertools::Itertools;
@@ -50,7 +51,6 @@ use omicron_uuid_kinds::SledUuid;
 use omicron_uuid_kinds::VnicUuid;
 use omicron_uuid_kinds::{BlueprintUuid, MupdateOverrideUuid};
 use std::borrow::Cow;
-use std::collections::BTreeMap;
 use std::fmt::{self, Write};
 use std::io::IsTerminal;
 use std::num::ParseIntError;
@@ -1454,27 +1454,27 @@ fn cmd_blueprint_diff(
 
 fn make_sleds_by_id(
     system: &SystemDescription,
-) -> Result<BTreeMap<SledUuid, execution::Sled>, anyhow::Error> {
+) -> Result<IdOrdMap<execution::Sled>, anyhow::Error> {
     let collection = system
         .to_collection_builder()
         .context(
             "unexpectedly failed to create collection for current set of sleds",
         )?
         .build();
-    let sleds_by_id: BTreeMap<_, _> = collection
+    let sleds_by_id: IdOrdMap<_> = collection
         .sled_agents
         .iter()
-        .map(|(sled_id, sled_agent_info)| {
+        .map(|sa| {
             let sled = execution::Sled::new(
-                *sled_id,
+                sa.sled_id,
                 SledPolicy::InService {
                     provision_policy: SledProvisionPolicy::Provisionable,
                 },
-                sled_agent_info.sled_agent_address,
+                sa.sled_agent_address,
                 REPO_DEPOT_PORT,
-                sled_agent_info.sled_role,
+                sa.sled_role,
             );
-            (*sled_id, sled)
+            sled
         })
         .collect();
     Ok(sleds_by_id)

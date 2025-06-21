@@ -3784,10 +3784,10 @@ async fn cmd_nexus_sled_expunge_disk_with_datastore(
 
             let mut sleds_containing_disk = vec![];
 
-            for (sled_id, sled_agent) in collection.sled_agents {
+            for sled_agent in collection.sled_agents {
                 for sled_disk in sled_agent.disks {
                     if sled_disk.identity == disk_identity {
-                        sleds_containing_disk.push(sled_id);
+                        sleds_containing_disk.push(sled_agent.sled_id);
                     }
                 }
             }
