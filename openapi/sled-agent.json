@@ -6315,7 +6315,8 @@
             "type": "array",
             "items": {
               "$ref": "#/components/schemas/HostIdentifier"
-            }
+            },
+            "uniqueItems": true
           },
           "filter_ports": {
             "nullable": true,
