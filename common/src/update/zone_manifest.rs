@@ -6,11 +6,12 @@ use std::fmt;
 
 use iddqd::{IdOrdItem, IdOrdMap, id_upcast};
 use omicron_uuid_kinds::MupdateUuid;
+use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use tufaceous_artifact::ArtifactHash;
 
 /// Describes the set of Omicron zones written out into an install dataset.
-#[derive(Clone, Debug, Eq, PartialEq, Deserialize, Serialize)]
+#[derive(Clone, Debug, Eq, PartialEq, Deserialize, Serialize, JsonSchema)]
 pub struct OmicronZoneManifest {
     /// The source of the manifest.
     pub source: OmicronZoneManifestSource,
@@ -25,7 +26,10 @@ impl OmicronZoneManifest {
 }
 
 /// The source of truth for an Omicron zone manifest.
-#[derive(Clone, Debug, Eq, PartialEq, Deserialize, Serialize)]
+#[derive(
+    Clone, Copy, Debug, Eq, PartialEq, Deserialize, Serialize, JsonSchema,
+)]
+#[serde(tag = "source", rename_all = "snake_case")]
 pub enum OmicronZoneManifestSource {
     /// The manifest was written out by installinator and the mupdate process.
     Installinator {
@@ -56,7 +60,15 @@ impl fmt::Display for OmicronZoneManifestSource {
 ///
 /// Part of [`OmicronZoneManifest`].
 #[derive(
-    Clone, Debug, Eq, Ord, PartialEq, PartialOrd, Deserialize, Serialize,
+    Clone,
+    Debug,
+    Eq,
+    Ord,
+    PartialEq,
+    PartialOrd,
+    Deserialize,
+    Serialize,
+    JsonSchema,
 )]
 pub struct OmicronZoneFileMetadata {
     /// The file name.

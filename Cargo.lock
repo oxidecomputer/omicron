@@ -6114,6 +6114,7 @@ dependencies = [
  "diesel",
  "expectorate",
  "hex",
+ "iddqd",
  "ipnetwork",
  "macaddr",
  "newtype_derive",
@@ -6295,6 +6296,7 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "base64 0.22.1",
+ "camino",
  "chrono",
  "clickhouse-admin-keeper-client",
  "clickhouse-admin-server-client",
@@ -6306,6 +6308,7 @@ dependencies = [
  "gateway-test-utils",
  "gateway-types",
  "id-map",
+ "iddqd",
  "nexus-sled-agent-shared",
  "nexus-types",
  "omicron-common",
@@ -6316,10 +6319,13 @@ dependencies = [
  "reqwest",
  "serde_json",
  "sled-agent-client",
+ "sled-agent-types",
+ "sled-agent-zone-images-examples",
  "slog",
  "strum",
  "thiserror 1.0.69",
  "tokio",
+ "tufaceous-artifact",
  "typed-rng",
  "uuid",
 ]
@@ -6652,6 +6658,7 @@ dependencies = [
 name = "nexus-sled-agent-shared"
 version = "0.1.0"
 dependencies = [
+ "camino",
  "chrono",
  "daft",
  "id-map",
