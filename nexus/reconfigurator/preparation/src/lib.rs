@@ -30,6 +30,7 @@ use nexus_types::deployment::SledDetails;
 use nexus_types::deployment::SledDisk;
 use nexus_types::deployment::SledFilter;
 use nexus_types::deployment::SledResources;
+use nexus_types::deployment::TufRepoPolicy;
 use nexus_types::deployment::UnstableReconfiguratorState;
 use nexus_types::identity::Asset;
 use nexus_types::identity::Resource;
@@ -81,7 +82,7 @@ pub struct PlanningInputFromDb<'a> {
     pub cockroachdb_settings: &'a CockroachDbSettings,
     pub clickhouse_policy: Option<ClickhousePolicy>,
     pub oximeter_read_policy: OximeterReadPolicy,
-    pub tuf_repo: Option<TufRepoDescription>,
+    pub tuf_repo: TufRepoPolicy,
     pub old_repo: Option<TufRepoDescription>,
     pub log: &'a Logger,
 }
@@ -153,7 +154,7 @@ impl PlanningInputFromDb<'_> {
             .target_release_get_current(opctx)
             .await
             .internal_context("fetching current target release")?;
-        let tuf_repo = match target_release.tuf_repo_id {
+        let tuf_repo_desc = match target_release.tuf_repo_id {
             None => None,
             Some(repo_id) => Some(
                 datastore
@@ -162,6 +163,10 @@ impl PlanningInputFromDb<'_> {
                     .internal_context("fetching target release repo")?
                     .into_external(),
             ),
+        };
+        let tuf_repo = TufRepoPolicy {
+            target_release_generation: target_release.generation.0,
+            description: tuf_repo_desc,
         };
         let prev_release = if let Some(prev) = target_release.generation.prev()
         {

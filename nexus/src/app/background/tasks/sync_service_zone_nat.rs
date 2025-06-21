@@ -104,9 +104,9 @@ impl BackgroundTask for ServiceZoneNatTracker {
             let mut nexus_count = 0;
             let mut dns_count = 0;
 
-            for (sled_id, sa) in collection.sled_agents {
+            for sa in &collection.sled_agents {
                 let (_, sled) = match LookupPath::new(opctx, &*self.datastore)
-                    .sled_id(sled_id.into_untyped_uuid())
+                    .sled_id(sa.sled_id.into_untyped_uuid())
                     .fetch()
                     .await
                     .context("failed to look up sled")
@@ -116,7 +116,7 @@ impl BackgroundTask for ServiceZoneNatTracker {
                         error!(
                             &log,
                             "failed to lookup sled by id";
-                            "id" => ?sled_id,
+                            "id" => ?sa.sled_id,
                             "error" => ?e,
                         );
                         continue;
