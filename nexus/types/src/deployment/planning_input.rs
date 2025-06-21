@@ -154,8 +154,8 @@ impl PlanningInput {
             .unwrap_or(0)
     }
 
-    pub fn tuf_repo(&self) -> Option<&TufRepoDescription> {
-        self.policy.tuf_repo.as_ref()
+    pub fn tuf_repo(&self) -> &TufRepoPolicy {
+        &self.policy.tuf_repo
     }
 
     pub fn old_repo(&self) -> Option<&TufRepoDescription> {
@@ -942,9 +942,13 @@ pub struct Policy {
     /// New zones may use artifacts in this repo as their image sources,
     /// and at most one extant zone may be modified to use it or replaced
     /// with one that does.
-    pub tuf_repo: Option<TufRepoDescription>,
+    pub tuf_repo: TufRepoPolicy,
 
     /// Previous system software release repository.
+    ///
+    /// * If present, `old_repo`'s generation is always 1 less than `tuf_repo`'s
+    ///   generation.
+    /// * If not present, `tuf_repo` should always be the initial generation 1.
     ///
     /// New zones deployed mid-update may use artifacts in this repo as
     /// their image sources. See RFD 565 §9.
@@ -967,6 +971,32 @@ impl OximeterReadPolicy {
             mode: OximeterReadMode::SingleNode,
             time_created: Utc::now(),
         }
+    }
+}
+
+/// TUF repo-related policy that's part of the planning input.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct TufRepoPolicy {
+    /// The generation of the target release for the TUF repo.
+    pub target_release_generation: Generation,
+
+    /// A description of the TUF repo, or None if no TUF repo is in use.
+    pub description: Option<TufRepoDescription>,
+}
+
+impl TufRepoPolicy {
+    /// Returns the initial TUF repo policy for an Oxide deployment:
+    ///
+    /// * The target release generation is 1.
+    /// * There is no target release.
+    #[inline]
+    pub fn initial() -> Self {
+        Self { target_release_generation: Generation::new(), description: None }
+    }
+
+    #[inline]
+    pub fn description(&self) -> Option<&TufRepoDescription> {
+        self.description.as_ref()
     }
 }
 
@@ -1120,7 +1150,7 @@ impl PlanningInputBuilder {
                 target_crucible_pantry_zone_count: 0,
                 clickhouse_policy: None,
                 oximeter_read_policy: OximeterReadPolicy::new(1),
-                tuf_repo: None,
+                tuf_repo: TufRepoPolicy::initial(),
                 old_repo: None,
             },
             internal_dns_version: Generation::new(),

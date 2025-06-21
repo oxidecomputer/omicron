@@ -349,6 +349,7 @@ mod test {
     use nexus_types::deployment::OximeterReadPolicy;
     use nexus_types::deployment::PendingMgsUpdates;
     use nexus_types::deployment::SledFilter;
+    use nexus_types::deployment::TufRepoPolicy;
     use nexus_types::deployment::blueprint_zone_type;
     use nexus_types::external_api::params;
     use nexus_types::external_api::shared;
@@ -1495,7 +1496,7 @@ mod test {
                 target_crucible_pantry_zone_count: CRUCIBLE_PANTRY_REDUNDANCY,
                 clickhouse_policy: None,
                 oximeter_read_policy: OximeterReadPolicy::new(1),
-                tuf_repo: None,
+                tuf_repo: TufRepoPolicy::initial(),
                 old_repo: None,
                 log,
             }
