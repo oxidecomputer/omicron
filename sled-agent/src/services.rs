@@ -3412,6 +3412,11 @@ impl ServiceManager {
         .await
     }
 
+    /// Returns a reference to the zone image resolver.
+    pub(crate) fn zone_image_resolver(&self) -> &ZoneImageSourceResolver {
+        &self.inner.zone_image_resolver
+    }
+
     // Forcefully initialize a sled-local switch zone.
     //
     // This is a helper function for "ensure_switch_zone".
