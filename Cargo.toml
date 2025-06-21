@@ -719,7 +719,7 @@ termios = "0.3"
 termtree = "0.5.1"
 textwrap = { version = "0.16.2", features = [ "terminal_size" ] }
 test-strategy = "0.4.1"
-thiserror = "1.0"
+thiserror = "2.0"
 tofino = { git = "https://github.com/oxidecomputer/tofino", branch = "main" }
 tokio = "1.45.1"
 tokio-postgres = { version = "0.7", features = [ "with-chrono-0_4", "with-uuid-1" ] }
