@@ -12,6 +12,7 @@ use nexus_db_queries::db::DataStore;
 use omicron_common::api::external;
 use omicron_test_utils::dev;
 use omicron_uuid_kinds::InstanceUuid;
+use once_cell::sync::Lazy;
 use std::collections::HashSet;
 use std::sync::Arc;
 use std::time::Duration;
@@ -97,7 +98,7 @@ const SLED_PARAMS: [usize; 3] = [1, 4, 8];
 // You can run these with the following command:
 //
 // ```bash
-// cargo bench -p nexus-db-queries
+// cargo nextest bench -p nexus-db-queries
 // ```
 //
 // You can also set the "SHOW_CONTENTION" environment variable to display
@@ -421,7 +422,6 @@ fn sled_reservation_benchmark(c: &mut Criterion) {
     let logctx = dev::test_setup_log("sled-reservation");
 
     let rt = tokio::runtime::Runtime::new().unwrap();
-    rt.block_on(harness::setup_db(&logctx.log));
 
     let group_patterns = [
         // No Affinity Groups
@@ -490,13 +490,23 @@ fn sled_reservation_benchmark(c: &mut Criterion) {
                     // This mitigates any database-caching issues like "loading schema
                     // on boot", or "connection pooling", as the pool stays the same
                     // between calls to the benchmark function.
+                    //
+                    // We use a Lazy to only initialize the harness if the
+                    // benchmark's in run mode, not in list mode. (We can't use
+                    // std::sync::LazyLock as of Rust 1.87, because we need
+                    // into_value which isn't available yet.)
                     let log = logctx.log.clone();
-                    let harness = rt.block_on(async move {
-                        TestHarness::new(&log, sleds).await
+                    let harness = Lazy::new(|| {
+                        rt.block_on(async move {
+                            TestHarness::new(&log, sleds).await
+                        })
                     });
 
                     // Actually invoke the benchmark.
                     group.bench_function(&name, |b| {
+                        // Force evaluation of the harness outside to_async to
+                        // avoid nested block_on.
+                        let harness = &*harness;
                         b.to_async(&rt).iter_custom(|iters| {
                             let opctx = harness.opctx();
                             let db = harness.db();
@@ -517,10 +527,12 @@ fn sled_reservation_benchmark(c: &mut Criterion) {
                     // Clean-up the harness; we'll use a new database between
                     // varations in parameters.
                     rt.block_on(async move {
-                        if std::env::var("SHOW_CONTENTION").is_ok() {
-                            harness.print_contention().await;
+                        if let Ok(harness) = Lazy::into_value(harness) {
+                            if std::env::var("SHOW_CONTENTION").is_ok() {
+                                harness.print_contention().await;
+                            }
+                            harness.terminate().await;
                         }
-                        harness.terminate().await;
                     });
                 }
             }

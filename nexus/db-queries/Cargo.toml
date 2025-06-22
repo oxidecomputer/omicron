@@ -92,8 +92,9 @@ itertools.workspace = true
 nexus-inventory.workspace = true
 nexus-reconfigurator-planning.workspace = true
 nexus-test-utils.workspace = true
+once_cell.workspace = true
 omicron-sled-agent.workspace = true
-omicron-test-utils = { workspace = true, features = ["seed-gen"] }
+omicron-test-utils.workspace = true
 openapiv3.workspace = true
 oso.workspace = true
 pem.workspace = true
