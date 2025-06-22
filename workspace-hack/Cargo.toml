@@ -33,8 +33,8 @@ byteorder = { version = "1.5.0" }
 bytes = { version = "1.10.1", features = ["serde"] }
 chrono = { version = "0.4.41", features = ["serde"] }
 cipher = { version = "0.4.4", default-features = false, features = ["block-padding", "zeroize"] }
-clap = { version = "4.5.35", features = ["cargo", "derive", "env", "wrap_help"] }
-clap_builder = { version = "4.5.35", default-features = false, features = ["cargo", "color", "env", "std", "suggestions", "usage", "wrap_help"] }
+clap = { version = "4.5.40", features = ["cargo", "derive", "env", "wrap_help"] }
+clap_builder = { version = "4.5.40", default-features = false, features = ["cargo", "color", "env", "std", "suggestions", "usage", "wrap_help"] }
 console = { version = "0.15.10" }
 crossbeam-epoch = { version = "0.9.18" }
 crossbeam-utils = { version = "0.8.21" }
@@ -63,6 +63,7 @@ generic-array = { version = "0.14.7", default-features = false, features = ["mor
 getrandom-6f8ce4dd05d13bba = { package = "getrandom", version = "0.2.15", default-features = false, features = ["js", "rdrand", "std"] }
 group = { version = "0.13.0", default-features = false, features = ["alloc"] }
 hashbrown = { version = "0.15.3" }
+heck = { version = "0.4.1" }
 hickory-proto = { version = "0.24.4", features = ["text-parsing"] }
 hmac = { version = "0.12.1", default-features = false, features = ["reset"] }
 hyper = { version = "1.6.0", features = ["full"] }
@@ -162,8 +163,8 @@ bytes = { version = "1.10.1", features = ["serde"] }
 cc = { version = "1.2.15", default-features = false, features = ["parallel"] }
 chrono = { version = "0.4.41", features = ["serde"] }
 cipher = { version = "0.4.4", default-features = false, features = ["block-padding", "zeroize"] }
-clap = { version = "4.5.35", features = ["cargo", "derive", "env", "wrap_help"] }
-clap_builder = { version = "4.5.35", default-features = false, features = ["cargo", "color", "env", "std", "suggestions", "usage", "wrap_help"] }
+clap = { version = "4.5.40", features = ["cargo", "derive", "env", "wrap_help"] }
+clap_builder = { version = "4.5.40", default-features = false, features = ["cargo", "color", "env", "std", "suggestions", "usage", "wrap_help"] }
 console = { version = "0.15.10" }
 crossbeam-epoch = { version = "0.9.18" }
 crossbeam-utils = { version = "0.8.21" }
@@ -192,6 +193,7 @@ generic-array = { version = "0.14.7", default-features = false, features = ["mor
 getrandom-6f8ce4dd05d13bba = { package = "getrandom", version = "0.2.15", default-features = false, features = ["js", "rdrand", "std"] }
 group = { version = "0.13.0", default-features = false, features = ["alloc"] }
 hashbrown = { version = "0.15.3" }
+heck = { version = "0.4.1" }
 hickory-proto = { version = "0.24.4", features = ["text-parsing"] }
 hmac = { version = "0.12.1", default-features = false, features = ["reset"] }
 hyper = { version = "1.6.0", features = ["full"] }
