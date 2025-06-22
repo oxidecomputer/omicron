@@ -603,7 +603,7 @@ pem = "3.0"
 # Note that if you depend on petname, you must also set default-features =
 # false: petname = { workspace = true, default-features = false }.
 petname = { version = "2.0.2", default-features = false, features = ["default-rng", "default-words"] }
-petgraph = "0.7.1"
+petgraph = "0.8.2"
 postgres-protocol = "0.6.8"
 predicates = "3.1.3"
 pretty_assertions = "1.4.1"
