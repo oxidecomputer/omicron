@@ -409,7 +409,7 @@ datatest-stable = "0.3.2"
 db-macros = { path = "nexus/db-macros" }
 debug-ignore = "1.0.5"
 derive_more = "0.99.20"
-derive-where = "1.2.7"
+derive-where = "1.5.0"
 dev-tools-common = { path = "dev-tools/common" }
 # Having the i-implement-... feature here makes diesel go away from the workspace-hack
 diesel = { version = "2.2.11", features = ["i-implement-a-third-party-backend-and-opt-into-breaking-changes", "postgres", "r2d2", "chrono", "serde_json", "network-address", "uuid"] }
