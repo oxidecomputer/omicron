@@ -929,7 +929,7 @@ dependencies = [
  "slog",
  "slog-async",
  "slog-term",
- "thiserror 1.0.69",
+ "thiserror 2.0.12",
  "tokio",
  "uuid",
  "vsss-rs",
@@ -1406,9 +1406,9 @@ dependencies = [
 
 [[package]]
 name = "clap"
-version = "4.5.35"
+version = "4.5.40"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d8aa86934b44c19c50f87cc2790e19f54f7a67aedb64101c2e1a2e5ecfb73944"
+checksum = "40b6887a1d8685cebccf115538db5c0efe625ccac9696ad45c409d96566e910f"
 dependencies = [
  "clap_builder",
  "clap_derive",
@@ -1416,9 +1416,9 @@ dependencies = [
 
 [[package]]
 name = "clap_builder"
-version = "4.5.35"
+version = "4.5.40"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "2414dbb2dd0695280da6ea9261e327479e9d37b0630f6b53ba2a11c60c679fd9"
+checksum = "e0c66c08ce9f0c698cbce5c0279d0bb6ac936d8674174fe48f736533b964f59e"
 dependencies = [
  "anstream",
  "anstyle",
@@ -1429,9 +1429,9 @@ dependencies = [
 
 [[package]]
 name = "clap_derive"
-version = "4.5.32"
+version = "4.5.40"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "09176aae279615badda0765c0c0b3f6ed53f4709118af73cf4655d85d1530cd7"
+checksum = "d2c7947ae4cc3d851207c1adb5b5e260ff0cca11446b1d6d1423788e442257ce"
 dependencies = [
  "heck 0.5.0",
  "proc-macro2",
@@ -1657,7 +1657,7 @@ dependencies = [
  "schemars",
  "serde",
  "test-strategy",
- "thiserror 1.0.69",
+ "thiserror 2.0.12",
 ]
 
 [[package]]
@@ -1673,7 +1673,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "117725a109d387c937a1533ce01b450cbde6b88abceea8473c4d7a85853cda3c"
 dependencies = [
  "lazy_static",
- "windows-sys 0.59.0",
+ "windows-sys 0.48.0",
 ]
 
 [[package]]
@@ -2689,7 +2689,7 @@ dependencies = [
  "slog-term",
  "subprocess",
  "tempfile",
- "thiserror 1.0.69",
+ "thiserror 2.0.12",
  "tokio",
  "toml 0.8.23",
  "uuid",
@@ -3022,7 +3022,7 @@ dependencies = [
  "slog",
  "slog-error-chain",
  "socket2",
- "thiserror 1.0.69",
+ "thiserror 2.0.12",
  "tokio",
  "toml 0.8.23",
  "uuid",
@@ -3734,7 +3734,7 @@ dependencies = [
  "serde",
  "subtle",
  "test-strategy",
- "thiserror 1.0.69",
+ "thiserror 2.0.12",
  "zeroize",
 ]
 
@@ -4718,7 +4718,7 @@ dependencies = [
  "slog",
  "slog-error-chain",
  "smf 0.2.3",
- "thiserror 1.0.69",
+ "thiserror 2.0.12",
  "tokio",
  "toml 0.8.23",
  "uuid",
@@ -4895,7 +4895,7 @@ dependencies = [
  "slog-term",
  "smf 0.2.3",
  "test-strategy",
- "thiserror 1.0.69",
+ "thiserror 2.0.12",
  "tokio",
  "tokio-stream",
  "tufaceous-artifact",
@@ -4955,7 +4955,7 @@ dependencies = [
  "serde_json",
  "serde_with",
  "test-strategy",
- "thiserror 1.0.69",
+ "thiserror 2.0.12",
  "tokio",
  "update-engine",
 ]
@@ -5011,7 +5011,7 @@ dependencies = [
  "sled",
  "slog",
  "tempfile",
- "thiserror 1.0.69",
+ "thiserror 2.0.12",
  "tokio",
 ]
 
@@ -5048,7 +5048,7 @@ dependencies = [
  "proptest",
  "serde",
  "test-strategy",
- "thiserror 1.0.69",
+ "thiserror 2.0.12",
  "tufaceous-artifact",
 ]
 
@@ -5243,7 +5243,7 @@ dependencies = [
  "secrecy 0.10.3",
  "sha3",
  "slog",
- "thiserror 1.0.69",
+ "thiserror 2.0.12",
  "tokio",
  "zeroize",
 ]
@@ -5412,7 +5412,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "4979f22fdb869068da03c9f7528f8297c6fd2606bc3a4affe42e6a823fdb8da4"
 dependencies = [
  "cfg-if",
- "windows-targets 0.52.6",
+ "windows-targets 0.48.5",
 ]
 
 [[package]]
@@ -5984,7 +5984,7 @@ dependencies = [
  "serde_urlencoded",
  "slog",
  "strum",
- "thiserror 1.0.69",
+ "thiserror 2.0.12",
  "tokio",
  "uuid",
 ]
@@ -5994,7 +5994,7 @@ name = "nexus-background-task-interface"
 version = "0.1.0"
 dependencies = [
  "omicron-workspace-hack",
- "thiserror 1.0.69",
+ "thiserror 2.0.12",
  "tokio",
 ]
 
@@ -6051,7 +6051,7 @@ dependencies = [
  "nexus-auth",
  "omicron-common",
  "omicron-workspace-hack",
- "thiserror 1.0.69",
+ "thiserror 2.0.12",
 ]
 
 [[package]]
@@ -6139,7 +6139,7 @@ dependencies = [
  "slog-error-chain",
  "steno",
  "strum",
- "thiserror 1.0.69",
+ "thiserror 2.0.12",
  "tokio",
  "tufaceous-artifact",
  "uuid",
@@ -6224,7 +6224,7 @@ dependencies = [
  "subprocess",
  "swrite",
  "term",
- "thiserror 1.0.69",
+ "thiserror 2.0.12",
  "tokio",
  "tufaceous-artifact",
  "url",
@@ -6314,7 +6314,7 @@ dependencies = [
  "sled-agent-client",
  "slog",
  "strum",
- "thiserror 1.0.69",
+ "thiserror 2.0.12",
  "tokio",
  "typed-rng",
  "uuid",
@@ -6353,7 +6353,7 @@ dependencies = [
  "pq-sys",
  "slog",
  "slog-error-chain",
- "thiserror 1.0.69",
+ "thiserror 2.0.12",
  "tokio",
  "uuid",
 ]
@@ -6388,7 +6388,7 @@ dependencies = [
  "slog",
  "slog-error-chain",
  "sp-sim",
- "thiserror 1.0.69",
+ "thiserror 2.0.12",
  "tokio",
  "tokio-stream",
  "tokio-util",
@@ -6548,7 +6548,7 @@ dependencies = [
  "static_assertions",
  "strum",
  "test-strategy",
- "thiserror 1.0.69",
+ "thiserror 2.0.12",
  "tufaceous-artifact",
  "typed-rng",
  "uuid",
@@ -6612,7 +6612,7 @@ dependencies = [
  "slog",
  "swrite",
  "sync-ptr",
- "thiserror 1.0.69",
+ "thiserror 2.0.12",
  "typed-rng",
  "uuid",
 ]
@@ -6662,7 +6662,7 @@ dependencies = [
  "serde_json",
  "sled-hardware-types",
  "strum",
- "thiserror 1.0.69",
+ "thiserror 2.0.12",
  "tufaceous-artifact",
  "uuid",
 ]
@@ -6793,7 +6793,7 @@ dependencies = [
  "steno",
  "strum",
  "test-strategy",
- "thiserror 1.0.69",
+ "thiserror 2.0.12",
  "tufaceous-artifact",
  "update-engine",
  "url",
@@ -7096,7 +7096,7 @@ dependencies = [
  "openssl",
  "openssl-sys",
  "rcgen",
- "thiserror 1.0.69",
+ "thiserror 2.0.12",
 ]
 
 [[package]]
@@ -7133,7 +7133,7 @@ dependencies = [
  "slog-error-chain",
  "slog-term",
  "subprocess",
- "thiserror 1.0.69",
+ "thiserror 2.0.12",
  "tokio",
  "tokio-postgres",
  "toml 0.8.23",
@@ -7175,7 +7175,7 @@ dependencies = [
  "slog-error-chain",
  "subprocess",
  "test-strategy",
- "thiserror 1.0.69",
+ "thiserror 2.0.12",
  "tokio",
  "tokio-postgres",
  "toml 0.8.23",
@@ -7226,7 +7226,7 @@ dependencies = [
  "slog-error-chain",
  "strum",
  "test-strategy",
- "thiserror 1.0.69",
+ "thiserror 2.0.12",
  "tokio",
  "toml 0.8.23",
  "tufaceous-artifact",
@@ -7247,7 +7247,7 @@ dependencies = [
  "serde",
  "sled-hardware-types",
  "slog",
- "thiserror 1.0.69",
+ "thiserror 2.0.12",
  "tokio",
  "uuid",
 ]
@@ -7329,7 +7329,7 @@ dependencies = [
  "slog-error-chain",
  "sp-sim",
  "subprocess",
- "thiserror 1.0.69",
+ "thiserror 2.0.12",
  "tokio",
  "tokio-stream",
  "tokio-tungstenite 0.23.1",
@@ -7537,7 +7537,7 @@ dependencies = [
  "subprocess",
  "tempfile",
  "term",
- "thiserror 1.0.69",
+ "thiserror 2.0.12",
  "tokio",
  "tokio-postgres",
  "tokio-util",
@@ -7664,7 +7664,7 @@ dependencies = [
  "smf 0.2.3",
  "strum",
  "tar",
- "thiserror 1.0.69",
+ "thiserror 2.0.12",
  "tokio",
  "toml 0.8.23",
  "walkdir",
@@ -7685,7 +7685,7 @@ dependencies = [
  "secrecy 0.10.3",
  "serde",
  "serde_with",
- "thiserror 1.0.69",
+ "thiserror 2.0.12",
 ]
 
 [[package]]
@@ -7908,7 +7908,7 @@ dependencies = [
  "subprocess",
  "tar",
  "tempfile",
- "thiserror 1.0.69",
+ "thiserror 2.0.12",
  "tofino",
  "tokio",
  "tokio-stream",
@@ -7957,7 +7957,7 @@ dependencies = [
  "subprocess",
  "tar",
  "tempfile",
- "thiserror 1.0.69",
+ "thiserror 2.0.12",
  "tokio",
  "tokio-postgres",
  "usdt",
@@ -8029,6 +8029,7 @@ dependencies = [
  "getrandom 0.3.1",
  "group",
  "hashbrown 0.15.3",
+ "heck 0.4.1",
  "hickory-proto",
  "hmac",
  "hyper",
@@ -8224,7 +8225,7 @@ dependencies = [
  "slog-error-chain",
  "supports-color",
  "textwrap",
- "thiserror 1.0.69",
+ "thiserror 2.0.12",
  "wicketd-api",
 ]
 
@@ -8397,7 +8398,7 @@ dependencies = [
  "reqwest",
  "serde",
  "serde_json",
- "thiserror 1.0.69",
+ "thiserror 2.0.12",
  "tokio",
  "uuid",
 ]
@@ -8521,7 +8522,7 @@ dependencies = [
  "slog-term",
  "strum",
  "subprocess",
- "thiserror 1.0.69",
+ "thiserror 2.0.12",
  "tokio",
  "toml 0.8.23",
  "uuid",
@@ -8587,7 +8588,7 @@ dependencies = [
  "tabled 0.15.0",
  "tempfile",
  "termtree",
- "thiserror 1.0.69",
+ "thiserror 2.0.12",
  "tokio",
  "tokio-util",
  "usdt",
@@ -8614,7 +8615,7 @@ dependencies = [
  "slog",
  "slog-async",
  "slog-term",
- "thiserror 1.0.69",
+ "thiserror 2.0.12",
  "tokio",
  "uuid",
 ]
@@ -8661,7 +8662,7 @@ dependencies = [
  "slog",
  "slog-dtrace",
  "slog-term",
- "thiserror 1.0.69",
+ "thiserror 2.0.12",
  "tokio",
  "uuid",
 ]
@@ -8770,7 +8771,7 @@ dependencies = [
  "serde",
  "serde_json",
  "strum",
- "thiserror 1.0.69",
+ "thiserror 2.0.12",
  "trybuild",
  "uuid",
 ]
@@ -10266,7 +10267,7 @@ dependencies = [
  "hyper",
  "omicron-workspace-hack",
  "proptest",
- "thiserror 1.0.69",
+ "thiserror 2.0.12",
  "tokio",
  "tokio-util",
 ]
@@ -11765,7 +11766,7 @@ dependencies = [
  "slog",
  "slog-error-chain",
  "test-strategy",
- "thiserror 1.0.69",
+ "thiserror 2.0.12",
  "tokio",
  "tufaceous-artifact",
  "xshell",
@@ -11800,7 +11801,7 @@ dependencies = [
  "slog",
  "slog-error-chain",
  "strum",
- "thiserror 1.0.69",
+ "thiserror 2.0.12",
  "toml 0.8.23",
  "tufaceous-artifact",
  "uuid",
@@ -11874,7 +11875,7 @@ dependencies = [
  "serde",
  "sled-storage",
  "slog",
- "thiserror 1.0.69",
+ "thiserror 2.0.12",
  "tokio",
  "zip 2.6.1",
 ]
@@ -11904,7 +11905,7 @@ dependencies = [
  "sled-hardware-types",
  "slog",
  "slog-error-chain",
- "thiserror 1.0.69",
+ "thiserror 2.0.12",
  "tofino",
  "tokio",
  "uuid",
@@ -11949,7 +11950,7 @@ dependencies = [
  "sled-hardware",
  "slog",
  "slog-error-chain",
- "thiserror 1.0.69",
+ "thiserror 2.0.12",
  "tokio",
  "tokio-stream",
  "uuid",
@@ -12166,7 +12167,7 @@ version = "0.8.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "03c3c6b7927ffe7ecaa769ee0e3994da3b8cafc8f444578982c83ecb161af917"
 dependencies = [
- "heck 0.5.0",
+ "heck 0.4.1",
  "proc-macro2",
  "quote",
  "syn 2.0.104",
@@ -12204,7 +12205,7 @@ dependencies = [
  "sha3",
  "slog",
  "slog-dtrace",
- "thiserror 1.0.69",
+ "thiserror 2.0.12",
  "tokio",
  "toml 0.8.23",
  "uuid",
@@ -13466,7 +13467,7 @@ dependencies = [
  "slog-error-chain",
  "subtle",
  "test-strategy",
- "thiserror 1.0.69",
+ "thiserror 2.0.12",
  "tokio",
  "uuid",
  "zeroize",
@@ -13961,7 +13962,7 @@ dependencies = [
  "sha2",
  "slog",
  "tar",
- "thiserror 1.0.69",
+ "thiserror 2.0.12",
  "tokio",
  "tokio-util",
  "tough",
@@ -14476,7 +14477,7 @@ dependencies = [
  "sha2",
  "sled-hardware-types",
  "slog",
- "thiserror 1.0.69",
+ "thiserror 2.0.12",
  "tokio",
  "toml 0.8.23",
  "transceiver-controller 0.1.1 (git+https://github.com/oxidecomputer/transceiver-control)",
@@ -14573,7 +14574,7 @@ dependencies = [
  "slog-dtrace",
  "subprocess",
  "tar",
- "thiserror 1.0.69",
+ "thiserror 2.0.12",
  "tokio",
  "tokio-stream",
  "tokio-util",
@@ -14664,7 +14665,7 @@ version = "0.1.9"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "cf221c93e13a30d793f7645a0e7762c55d169dbb0a49671918a2319d289b10bb"
 dependencies = [
- "windows-sys 0.59.0",
+ "windows-sys 0.48.0",
 ]
 
 [[package]]
