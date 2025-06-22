@@ -389,7 +389,7 @@ cockroach-admin-types = { path = "cockroach-admin/types" }
 colored = "2.1"
 const_format = "0.2.34"
 cookie = "0.18"
-criterion = { version = "0.5.1", features = [ "async_tokio" ] }
+criterion = { version = "0.6.0", features = [ "async_tokio" ] }
 crossbeam = "0.8"
 crossterm = { version = "0.28.1", features = ["event-stream"] }
 # NOTE: if you change the pinned revision of the `crucible` dependencies, you
