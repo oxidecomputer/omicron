@@ -20,10 +20,10 @@ serde.workspace = true
 serde_json.workspace = true
 sha2.workspace = true
 sled-agent-config-reconciler.workspace = true
+sled-agent-types.workspace = true
 sled-storage.workspace = true
 slog.workspace = true
 slog-error-chain.workspace = true
-thiserror.workspace = true
 tufaceous-artifact.workspace = true
 
 [dev-dependencies]
@@ -33,3 +33,4 @@ expectorate.workspace = true
 omicron-uuid-kinds.workspace = true
 pretty_assertions.workspace = true
 sled-agent-config-reconciler = { workspace = true, features = ["testing"] }
+sled-agent-zone-images-examples.workspace = true
