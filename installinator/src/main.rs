@@ -7,10 +7,9 @@ use std::error::Error;
 use clap::Parser;
 use installinator::InstallinatorApp;
 
-#[tokio::main]
-async fn main() -> Result<(), Box<dyn Error>> {
+fn main() -> Result<(), Box<dyn Error>> {
     let app = InstallinatorApp::parse();
     let log = InstallinatorApp::setup_log("/tmp/installinator.log")?;
-    app.exec(&log).await?;
+    omicron_runtime::run(app.exec(&log))?;
     Ok(())
 }

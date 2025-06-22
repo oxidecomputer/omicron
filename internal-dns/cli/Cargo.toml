@@ -15,6 +15,7 @@ hickory-resolver.workspace = true
 internal-dns-resolver.workspace = true
 internal-dns-types.workspace = true
 omicron-common.workspace = true
+omicron-runtime.workspace = true
 slog.workspace = true
 tokio.workspace = true
 omicron-workspace-hack.workspace = true

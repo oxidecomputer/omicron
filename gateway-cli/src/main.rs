@@ -366,247 +366,263 @@ impl Dumper {
     }
 }
 
-#[tokio::main]
-async fn main() -> Result<()> {
-    let args = Args::parse();
-    let decorator = slog_term::TermDecorator::new().build();
-    let drain = slog_term::FullFormat::new(decorator)
-        .build()
-        .filter_level(args.log_level)
-        .fuse();
-    let drain = slog_async::Async::new(drain).build().fuse();
-    let log = Logger::root(drain, o!("component" => "gateway-client"));
+fn main() -> Result<()> {
+    omicron_runtime::run(async {
+        let args = Args::parse();
+        let decorator = slog_term::TermDecorator::new().build();
+        let drain = slog_term::FullFormat::new(decorator)
+            .build()
+            .filter_level(args.log_level)
+            .fuse();
+        let drain = slog_async::Async::new(drain).build().fuse();
+        let log = Logger::root(drain, o!("component" => "gateway-client"));
 
-    // Workaround lack of support for scoped IPv6 addresses
-    // in URLs by adding an override to resolve the given domain
-    // (mgs.localhorse) to the desired address, scope-id and all.
-    // Note the port must still be passed via the URL.
-    let reqwest_client = reqwest::Client::builder()
-        .resolve_to_addrs("mgs.localhorse", &[args.server.into()])
-        .build()?;
-    let client = Client::new_with_client(
-        &format!("http://mgs.localhorse:{}", args.server.port()),
-        reqwest_client,
-        log.clone(),
-    );
+        // Workaround lack of support for scoped IPv6 addresses
+        // in URLs by adding an override to resolve the given domain
+        // (mgs.localhorse) to the desired address, scope-id and all.
+        // Note the port must still be passed via the URL.
+        let reqwest_client = reqwest::Client::builder()
+            .resolve_to_addrs("mgs.localhorse", &[args.server.into()])
+            .build()?;
+        let client = Client::new_with_client(
+            &format!("http://mgs.localhorse:{}", args.server.port()),
+            reqwest_client,
+            log.clone(),
+        );
 
-    let dumper = Dumper { pretty: args.pretty };
+        let dumper = Dumper { pretty: args.pretty };
 
-    match args.command {
-        Command::State { sp } => {
-            let info = client.sp_get(sp.type_, sp.slot).await?.into_inner();
-            dumper.dump(&info)?;
-        }
-        Command::Ignition { sp } => {
-            if let Some(sp) = sp {
-                let info =
-                    client.ignition_get(sp.type_, sp.slot).await?.into_inner();
-                dumper.dump(&info)?;
-            } else {
-                let info = client.ignition_list().await?.into_inner();
+        match args.command {
+            Command::State { sp } => {
+                let info = client.sp_get(sp.type_, sp.slot).await?.into_inner();
                 dumper.dump(&info)?;
             }
-        }
-        Command::IgnitionCommand { sp, command } => {
-            client.ignition_command(sp.type_, sp.slot, command).await?;
-        }
-        Command::ComponentActiveSlot { sp, component, set_slot, persist } => {
-            if let Some(slot) = set_slot {
-                client
-                    .sp_component_active_slot_set(
-                        sp.type_,
-                        sp.slot,
-                        &component,
-                        persist,
-                        &SpComponentFirmwareSlot { slot },
-                    )
-                    .await?;
-            } else {
+            Command::Ignition { sp } => {
+                if let Some(sp) = sp {
+                    let info = client
+                        .ignition_get(sp.type_, sp.slot)
+                        .await?
+                        .into_inner();
+                    dumper.dump(&info)?;
+                } else {
+                    let info = client.ignition_list().await?.into_inner();
+                    dumper.dump(&info)?;
+                }
+            }
+            Command::IgnitionCommand { sp, command } => {
+                client.ignition_command(sp.type_, sp.slot, command).await?;
+            }
+            Command::ComponentActiveSlot {
+                sp,
+                component,
+                set_slot,
+                persist,
+            } => {
+                if let Some(slot) = set_slot {
+                    client
+                        .sp_component_active_slot_set(
+                            sp.type_,
+                            sp.slot,
+                            &component,
+                            persist,
+                            &SpComponentFirmwareSlot { slot },
+                        )
+                        .await?;
+                } else {
+                    let info = client
+                        .sp_component_active_slot_get(
+                            sp.type_, sp.slot, &component,
+                        )
+                        .await?
+                        .into_inner();
+                    dumper.dump(&info)?;
+                }
+            }
+            Command::StartupOptions {
+                sp,
+                set,
+                phase2_recovery,
+                kbm,
+                bootrd,
+                prom,
+                kmdb,
+                kmdb_boot,
+                boot_ramdisk,
+                boot_net,
+                startup_verbose,
+            } => {
+                if set {
+                    let options = HostStartupOptions {
+                        phase2_recovery_mode: phase2_recovery,
+                        kbm,
+                        bootrd,
+                        prom,
+                        kmdb,
+                        kmdb_boot,
+                        boot_ramdisk,
+                        boot_net,
+                        verbose: startup_verbose,
+                    };
+                    client
+                        .sp_startup_options_set(sp.type_, sp.slot, &options)
+                        .await?;
+                } else {
+                    let info = client
+                        .sp_startup_options_get(sp.type_, sp.slot)
+                        .await?
+                        .into_inner();
+                    dumper.dump(&info)?;
+                }
+            }
+            Command::SetInstallinatorImageId {
+                sp,
+                clear,
+                update_id,
+                host_phase_2,
+                control_plane,
+            } => {
+                if clear {
+                    client
+                        .sp_installinator_image_id_delete(sp.type_, sp.slot)
+                        .await?;
+                } else {
+                    // clap guarantees these are not `None` when `clear` is false.
+                    let update_id = update_id.unwrap();
+                    let host_phase_2 = host_phase_2.unwrap().to_string();
+                    let control_plane = control_plane.unwrap().to_string();
+                    client
+                        .sp_installinator_image_id_set(
+                            sp.type_,
+                            sp.slot,
+                            &InstallinatorImageId {
+                                update_id,
+                                host_phase_2,
+                                control_plane,
+                            },
+                        )
+                        .await?;
+                }
+            }
+            Command::Inventory { sp } => {
                 let info = client
-                    .sp_component_active_slot_get(sp.type_, sp.slot, &component)
+                    .sp_component_list(sp.type_, sp.slot)
                     .await?
                     .into_inner();
                 dumper.dump(&info)?;
             }
-        }
-        Command::StartupOptions {
-            sp,
-            set,
-            phase2_recovery,
-            kbm,
-            bootrd,
-            prom,
-            kmdb,
-            kmdb_boot,
-            boot_ramdisk,
-            boot_net,
-            startup_verbose,
-        } => {
-            if set {
-                let options = HostStartupOptions {
-                    phase2_recovery_mode: phase2_recovery,
-                    kbm,
-                    bootrd,
-                    prom,
-                    kmdb,
-                    kmdb_boot,
-                    boot_ramdisk,
-                    boot_net,
-                    verbose: startup_verbose,
-                };
-                client
-                    .sp_startup_options_set(sp.type_, sp.slot, &options)
-                    .await?;
-            } else {
+            Command::ComponentDetails { sp, component } => {
                 let info = client
-                    .sp_startup_options_get(sp.type_, sp.slot)
+                    .sp_component_get(sp.type_, sp.slot, &component)
                     .await?
                     .into_inner();
                 dumper.dump(&info)?;
             }
-        }
-        Command::SetInstallinatorImageId {
-            sp,
-            clear,
-            update_id,
-            host_phase_2,
-            control_plane,
-        } => {
-            if clear {
+            Command::ComponentClearStatus { sp, component } => {
                 client
-                    .sp_installinator_image_id_delete(sp.type_, sp.slot)
-                    .await?;
-            } else {
-                // clap guarantees these are not `None` when `clear` is false.
-                let update_id = update_id.unwrap();
-                let host_phase_2 = host_phase_2.unwrap().to_string();
-                let control_plane = control_plane.unwrap().to_string();
-                client
-                    .sp_installinator_image_id_set(
-                        sp.type_,
-                        sp.slot,
-                        &InstallinatorImageId {
-                            update_id,
-                            host_phase_2,
-                            control_plane,
-                        },
-                    )
+                    .sp_component_clear_status(sp.type_, sp.slot, &component)
                     .await?;
             }
-        }
-        Command::Inventory { sp } => {
-            let info =
-                client.sp_component_list(sp.type_, sp.slot).await?.into_inner();
-            dumper.dump(&info)?;
-        }
-        Command::ComponentDetails { sp, component } => {
-            let info = client
-                .sp_component_get(sp.type_, sp.slot, &component)
-                .await?
-                .into_inner();
-            dumper.dump(&info)?;
-        }
-        Command::ComponentClearStatus { sp, component } => {
-            client
-                .sp_component_clear_status(sp.type_, sp.slot, &component)
-                .await?;
-        }
-        Command::UsartAttach {
-            sp,
-            raw,
-            stdin_buffer_time_millis,
-            imap,
-            omap,
-            uart_logfile,
-        } => {
-            let upgraded = client
-                .sp_component_serial_console_attach(
-                    sp.type_,
-                    sp.slot,
-                    SERIAL_CONSOLE_COMPONENT,
-                )
-                .await
-                .map_err(|err| anyhow!("{err}"))?;
-
-            let ws = WebSocketStream::from_raw_socket(
-                upgraded.into_inner(),
-                Role::Client,
-                None,
-            )
-            .await;
-            usart::run(
-                ws,
+            Command::UsartAttach {
+                sp,
                 raw,
-                Duration::from_millis(stdin_buffer_time_millis),
+                stdin_buffer_time_millis,
                 imap,
                 omap,
                 uart_logfile,
-            )
-            .await?;
-        }
-        Command::UsartDetach { sp } => {
-            client
-                .sp_component_serial_console_detach(
-                    sp.type_,
-                    sp.slot,
-                    SERIAL_CONSOLE_COMPONENT,
+            } => {
+                let upgraded = client
+                    .sp_component_serial_console_attach(
+                        sp.type_,
+                        sp.slot,
+                        SERIAL_CONSOLE_COMPONENT,
+                    )
+                    .await
+                    .map_err(|err| anyhow!("{err}"))?;
+
+                let ws = WebSocketStream::from_raw_socket(
+                    upgraded.into_inner(),
+                    Role::Client,
+                    None,
+                )
+                .await;
+                usart::run(
+                    ws,
+                    raw,
+                    Duration::from_millis(stdin_buffer_time_millis),
+                    imap,
+                    omap,
+                    uart_logfile,
                 )
                 .await?;
-        }
-        Command::UploadRecoveryHostPhase2 { path } => {
-            let image_stream =
-                tokio::fs::File::open(&path).await.with_context(|| {
-                    format!("failed to open {}", path.display())
-                })?;
-            let info = client
-                .recovery_host_phase2_upload(image_stream)
-                .await?
-                .into_inner();
-            dumper.dump(&info)?;
-        }
-        Command::Update { sp, component, slot, image } => {
-            let image = fs::read(&image).with_context(|| {
-                format!("failed to read {}", image.display())
-            })?;
-            update(&client, &dumper, sp, &component, slot, image).await?;
-        }
-        Command::UpdateStatus { sp, component } => {
-            let info = client
-                .sp_component_update_status(sp.type_, sp.slot, &component)
-                .await?
-                .into_inner();
-            dumper.dump(&info)?;
-        }
-        Command::UpdateAbort { sp, component, update_id } => {
-            let body = UpdateAbortBody { id: update_id };
-            client
-                .sp_component_update_abort(sp.type_, sp.slot, &component, &body)
-                .await?;
-        }
-        Command::PowerState { sp, new_power_state } => {
-            if let Some(power_state) = new_power_state {
+            }
+            Command::UsartDetach { sp } => {
                 client
-                    .sp_power_state_set(sp.type_, sp.slot, power_state)
+                    .sp_component_serial_console_detach(
+                        sp.type_,
+                        sp.slot,
+                        SERIAL_CONSOLE_COMPONENT,
+                    )
                     .await?;
-            } else {
+            }
+            Command::UploadRecoveryHostPhase2 { path } => {
+                let image_stream =
+                    tokio::fs::File::open(&path).await.with_context(|| {
+                        format!("failed to open {}", path.display())
+                    })?;
                 let info = client
-                    .sp_power_state_get(sp.type_, sp.slot)
+                    .recovery_host_phase2_upload(image_stream)
                     .await?
                     .into_inner();
                 dumper.dump(&info)?;
             }
+            Command::Update { sp, component, slot, image } => {
+                let image = fs::read(&image).with_context(|| {
+                    format!("failed to read {}", image.display())
+                })?;
+                update(&client, &dumper, sp, &component, slot, image).await?;
+            }
+            Command::UpdateStatus { sp, component } => {
+                let info = client
+                    .sp_component_update_status(sp.type_, sp.slot, &component)
+                    .await?
+                    .into_inner();
+                dumper.dump(&info)?;
+            }
+            Command::UpdateAbort { sp, component, update_id } => {
+                let body = UpdateAbortBody { id: update_id };
+                client
+                    .sp_component_update_abort(
+                        sp.type_, sp.slot, &component, &body,
+                    )
+                    .await?;
+            }
+            Command::PowerState { sp, new_power_state } => {
+                if let Some(power_state) = new_power_state {
+                    client
+                        .sp_power_state_set(sp.type_, sp.slot, power_state)
+                        .await?;
+                } else {
+                    let info = client
+                        .sp_power_state_get(sp.type_, sp.slot)
+                        .await?
+                        .into_inner();
+                    dumper.dump(&info)?;
+                }
+            }
+            Command::Reset { sp } => {
+                let component =
+                    gateway_messages::SpComponent::SP_ITSELF.const_as_str();
+                client.sp_component_reset(sp.type_, sp.slot, component).await?;
+            }
+            Command::ResetComponent { sp, component } => {
+                client
+                    .sp_component_reset(sp.type_, sp.slot, &component)
+                    .await?;
+            }
         }
-        Command::Reset { sp } => {
-            let component =
-                gateway_messages::SpComponent::SP_ITSELF.const_as_str();
-            client.sp_component_reset(sp.type_, sp.slot, component).await?;
-        }
-        Command::ResetComponent { sp, component } => {
-            client.sp_component_reset(sp.type_, sp.slot, &component).await?;
-        }
-    }
 
-    Ok(())
+        Ok(())
+    })
 }
 
 async fn update(

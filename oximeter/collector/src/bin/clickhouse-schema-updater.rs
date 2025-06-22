@@ -84,44 +84,52 @@ fn build_logger(level: Level) -> Logger {
     Logger::root(drain, slog::o!("unit" => "clickhouse_schema_updater"))
 }
 
-#[tokio::main]
-async fn main() -> anyhow::Result<()> {
-    let args = Args::parse();
-    let log = build_logger(args.log_level);
-    let client = Client::new(args.host, &log);
-    let is_replicated = client.is_oximeter_cluster().await?;
-    match args.cmd {
-        Cmd::List => {
-            let latest = client
-                .read_latest_version()
-                .await
-                .context("Failed to read latest version")?;
-            let available_versions = Client::read_available_schema_versions(
-                &log,
-                is_replicated,
-                &args.schema_directory,
-            )
-            .await?;
-            println!("Latest version: {latest}");
-            println!("Available versions:");
-            for ver in available_versions {
-                print!(" {ver}");
-                if ver == latest {
-                    print!(" (reported by database)");
+fn main() -> anyhow::Result<()> {
+    omicron_runtime::run(async {
+        let args = Args::parse();
+        let log = build_logger(args.log_level);
+        let client = Client::new(args.host, &log);
+        let is_replicated = client.is_oximeter_cluster().await?;
+        match args.cmd {
+            Cmd::List => {
+                let latest = client
+                    .read_latest_version()
+                    .await
+                    .context("Failed to read latest version")?;
+                let available_versions =
+                    Client::read_available_schema_versions(
+                        &log,
+                        is_replicated,
+                        &args.schema_directory,
+                    )
+                    .await?;
+                println!("Latest version: {latest}");
+                println!("Available versions:");
+                for ver in available_versions {
+                    print!(" {ver}");
+                    if ver == latest {
+                        print!(" (reported by database)");
+                    }
+                    if ver == OXIMETER_VERSION {
+                        print!(" (expected by oximeter)");
+                    }
+                    println!();
                 }
-                if ver == OXIMETER_VERSION {
-                    print!(" (expected by oximeter)");
-                }
-                println!();
+            }
+            Cmd::Upgrade { version } => {
+                client
+                    .ensure_schema(
+                        is_replicated,
+                        version,
+                        args.schema_directory,
+                    )
+                    .await
+                    .context("Failed to upgrade schema")?;
+                println!(
+                    "Upgrade to oximeter database version {version} complete"
+                );
             }
         }
-        Cmd::Upgrade { version } => {
-            client
-                .ensure_schema(is_replicated, version, args.schema_directory)
-                .await
-                .context("Failed to upgrade schema")?;
-            println!("Upgrade to oximeter database version {version} complete");
-        }
-    }
-    Ok(())
+        Ok(())
+    })
 }

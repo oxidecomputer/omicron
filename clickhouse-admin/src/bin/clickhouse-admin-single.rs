@@ -38,9 +38,8 @@ enum Args {
     },
 }
 
-#[tokio::main]
-async fn main() {
-    if let Err(err) = main_impl().await {
+fn main() {
+    if let Err(err) = omicron_runtime::run(main_impl()) {
         fatal(err);
     }
 }

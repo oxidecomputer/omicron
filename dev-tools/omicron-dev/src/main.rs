@@ -12,14 +12,10 @@ use nexus_test_utils::resource_helpers::DiskTest;
 use signal_hook_tokio::Signals;
 
 fn main() -> anyhow::Result<()> {
-    let args = OmicronDevApp::parse();
-    let rt = {
-        let mut builder = tokio::runtime::Builder::new_multi_thread();
-        #[cfg(target_os = "illumos")]
-        tokio_dtrace::register_hooks(&mut builder)?;
-        builder.enable_all().build().context("failed to build tokio runtime")?
-    };
-    rt.block_on(async move { args.exec().await })
+    omicron_runtime::run(async {
+        let args = OmicronDevApp::parse();
+        args.exec().await
+    })
 }
 
 /// Tools for working with a local Omicron deployment.

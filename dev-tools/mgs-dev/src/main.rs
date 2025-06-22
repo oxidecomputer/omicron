@@ -10,10 +10,11 @@ use libc::SIGINT;
 use signal_hook_tokio::Signals;
 use std::net::SocketAddr;
 
-#[tokio::main]
-async fn main() -> anyhow::Result<()> {
-    let args = MgsDevApp::parse();
-    args.exec().await
+fn main() -> anyhow::Result<()> {
+    omicron_runtime::run(async {
+        let args = MgsDevApp::parse();
+        args.exec().await
+    })
 }
 
 #[derive(Clone, Debug, Parser)]

@@ -13,6 +13,7 @@
 #
 [build]
 rustdocflags = "--document-private-items"
+rustflags = "--cfg tokio_unstable"
 
 # On illumos, use `-znocompstrtab` to reduce link time. We also add the Oxide
 # specific platform directory to the RPATH where additional libraries can be

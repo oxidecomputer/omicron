@@ -29,16 +29,17 @@ use tough::TargetName;
 use tufaceous_artifact::ArtifactHash;
 use tufaceous_lib::OmicronRepo;
 
-#[tokio::main]
-async fn main() -> Result<(), anyhow::Error> {
-    let args = RepoDepotStandalone::parse();
+fn main() -> Result<(), anyhow::Error> {
+    omicron_runtime::run(async {
+        let args = RepoDepotStandalone::parse();
 
-    if let Err(error) = args.exec().await {
-        eprintln!("error: {:#}", error);
-        std::process::exit(1);
-    }
+        if let Err(error) = args.exec().await {
+            eprintln!("error: {:#}", error);
+            std::process::exit(1);
+        }
 
-    Ok(())
+        Ok(())
+    })
 }
 
 /// Serve the Repo Depot API from one or more extracted TUF repos

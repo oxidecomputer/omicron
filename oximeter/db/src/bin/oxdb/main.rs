@@ -302,68 +302,84 @@ async fn query(
     Ok(())
 }
 
-#[tokio::main]
-async fn main() -> anyhow::Result<()> {
-    let args = OxDb::parse();
-    let decorator = slog_term::TermDecorator::new().build();
-    let drain = slog_term::FullFormat::new(decorator)
-        .build()
-        .filter_level(args.log_level)
-        .fuse();
-    let drain = slog_async::Async::new(drain).build().fuse();
-    let drain = slog_dtrace::with_drain(drain).0.fuse();
-    let log = Logger::root(drain, o!("component" => "oxdb"));
-    match args.cmd {
-        Subcommand::Describe => describe_data(),
-        Subcommand::Populate { populate_args } => {
-            populate(args.address, args.port, log, populate_args).await?
-        }
-        Subcommand::Wipe => {
-            wipe_single_node_db(args.address, args.port, log).await?
-        }
-        Subcommand::Query {
-            timeseries_name,
-            filters,
-            start,
-            start_exclusive,
-            end,
-            end_exclusive,
-        } => {
-            let start = match (start, start_exclusive) {
-                (Some(start), _) => Some(query::Timestamp::Inclusive(start)),
-                (_, Some(start)) => Some(query::Timestamp::Exclusive(start)),
-                (None, None) => None,
-            };
-            let end = match (end, end_exclusive) {
-                (Some(end), _) => Some(query::Timestamp::Inclusive(end)),
-                (_, Some(end)) => Some(query::Timestamp::Exclusive(end)),
-                (None, None) => None,
-            };
-            query(
-                args.address,
-                args.port,
-                log,
+fn main() -> anyhow::Result<()> {
+    omicron_runtime::run(async {
+        let args = OxDb::parse();
+        let decorator = slog_term::TermDecorator::new().build();
+        let drain = slog_term::FullFormat::new(decorator)
+            .build()
+            .filter_level(args.log_level)
+            .fuse();
+        let drain = slog_async::Async::new(drain).build().fuse();
+        let drain = slog_dtrace::with_drain(drain).0.fuse();
+        let log = Logger::root(drain, o!("component" => "oxdb"));
+        match args.cmd {
+            Subcommand::Describe => describe_data(),
+            Subcommand::Populate { populate_args } => {
+                populate(args.address, args.port, log, populate_args).await?
+            }
+            Subcommand::Wipe => {
+                wipe_single_node_db(args.address, args.port, log).await?
+            }
+            Subcommand::Query {
                 timeseries_name,
                 filters,
                 start,
+                start_exclusive,
                 end,
-            )
-            .await?;
-        }
-        #[cfg(feature = "sql")]
-        Subcommand::Sql { opts } => {
-            oximeter_db::shells::sql::shell(args.address, args.port, log, opts)
+                end_exclusive,
+            } => {
+                let start = match (start, start_exclusive) {
+                    (Some(start), _) => {
+                        Some(query::Timestamp::Inclusive(start))
+                    }
+                    (_, Some(start)) => {
+                        Some(query::Timestamp::Exclusive(start))
+                    }
+                    (None, None) => None,
+                };
+                let end = match (end, end_exclusive) {
+                    (Some(end), _) => Some(query::Timestamp::Inclusive(end)),
+                    (_, Some(end)) => Some(query::Timestamp::Exclusive(end)),
+                    (None, None) => None,
+                };
+                query(
+                    args.address,
+                    args.port,
+                    log,
+                    timeseries_name,
+                    filters,
+                    start,
+                    end,
+                )
+                .await?;
+            }
+            #[cfg(feature = "sql")]
+            Subcommand::Sql { opts } => {
+                oximeter_db::shells::sql::shell(
+                    args.address,
+                    args.port,
+                    log,
+                    opts,
+                )
                 .await?
-        }
-        #[cfg(feature = "oxql")]
-        Subcommand::Oxql { opts } => {
-            oximeter_db::shells::oxql::shell(args.address, args.port, log, opts)
+            }
+            #[cfg(feature = "oxql")]
+            Subcommand::Oxql { opts } => {
+                oximeter_db::shells::oxql::shell(
+                    args.address,
+                    args.port,
+                    log,
+                    opts,
+                )
                 .await?
+            }
+            #[cfg(feature = "native-sql-shell")]
+            Subcommand::NativeSql => {
+                oximeter_db::shells::native::shell(args.address, args.port)
+                    .await?
+            }
         }
-        #[cfg(feature = "native-sql-shell")]
-        Subcommand::NativeSql => {
-            oximeter_db::shells::native::shell(args.address, args.port).await?
-        }
-    }
-    Ok(())
+        Ok(())
+    })
 }

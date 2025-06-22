@@ -10,14 +10,15 @@ mod illumos {
 }
 
 #[cfg(target_os = "illumos")]
-#[tokio::main]
-async fn main() -> Result<(), illumos::Error> {
+fn main() -> Result<(), illumos::Error> {
     use illumos::*;
-    let mut d = Runner::new("launchpad_mcduck_runner");
+    omicron_runtime::run(async {
+        let mut d = Runner::new("launchpad_mcduck_runner");
 
-    d.node("launchpad_mcduck_test_vm", "helios-2.0", 2, gb(2));
-    run(&mut d).await?;
-    Ok(())
+        d.node("launchpad_mcduck_test_vm", "helios-2.0", 2, gb(2));
+        run(&mut d).await?;
+        Ok(())
+    })
 }
 
 #[cfg(not(target_os = "illumos"))]

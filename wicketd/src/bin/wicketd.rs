@@ -70,9 +70,8 @@ enum Args {
     },
 }
 
-#[tokio::main]
-async fn main() {
-    if let Err(cmd_error) = do_run().await {
+fn main() {
+    if let Err(cmd_error) = omicron_runtime::run(do_run()) {
         fatal(cmd_error);
     }
 }

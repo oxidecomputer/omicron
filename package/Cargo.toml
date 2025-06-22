@@ -19,6 +19,7 @@ hex.workspace = true
 illumos-utils.workspace = true
 indent_write.workspace = true
 indicatif.workspace = true
+omicron-runtime.workspace = true
 omicron-workspace-hack.workspace = true
 omicron-zone-package.workspace = true
 petgraph.workspace = true

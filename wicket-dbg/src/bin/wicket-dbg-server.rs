@@ -11,26 +11,27 @@ use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::{TcpListener, TcpStream};
 use wicket_dbg::{Cmd, Runner, RunnerHandle};
 
-#[tokio::main]
-async fn main() -> Result<()> {
-    let log = setup_log()?;
-    let (mut runner, handle) = Runner::new(log.clone());
+fn main() -> Result<()> {
+    omicron_runtime::run(async {
+        let log = setup_log()?;
+        let (mut runner, handle) = Runner::new(log.clone());
 
-    tokio::spawn(async move {
-        runner.run().await;
-    });
+        tokio::spawn(async move {
+            runner.run().await;
+        });
 
-    // TODO: Allow port configuration
-    let listener = TcpListener::bind("::1:9010").await?;
+        // TODO: Allow port configuration
+        let listener = TcpListener::bind("::1:9010").await?;
 
-    // Accept connections serially. We only want one client at a time.
-    loop {
-        let (sock, _) = listener.accept().await?;
+        // Accept connections serially. We only want one client at a time.
+        loop {
+            let (sock, _) = listener.accept().await?;
 
-        if let Err(e) = process(sock, &handle).await {
-            info!(log, "Error processing request: {e:#?}");
+            if let Err(e) = process(sock, &handle).await {
+                info!(log, "Error processing request: {e:#?}");
+            }
         }
-    }
+    })
 }
 
 async fn process(mut sock: TcpStream, handle: &RunnerHandle) -> Result<()> {

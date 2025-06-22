@@ -31,6 +31,7 @@ libc.workspace = true
 omicron-common.workspace = true
 omicron-ddm-admin-client.workspace = true
 omicron-uuid-kinds.workspace = true
+omicron-runtime.workspace = true
 reqwest.workspace = true
 sha2.workspace = true
 serde_json.workspace = true

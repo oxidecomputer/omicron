@@ -56,60 +56,63 @@ impl From<ServiceName> for internal_dns_types::names::ServiceName {
     }
 }
 
-#[tokio::main]
-async fn main() -> Result<()> {
-    let opt = Opt::parse();
-    let log = dropshot::ConfigLogging::File {
-        path: "/dev/stderr".into(),
-        level: dropshot::ConfigLoggingLevel::Info,
-        if_exists: dropshot::ConfigLoggingIfExists::Append,
-    }
-    .to_logger("dnswait")
-    .context("creating log")?;
-
-    let resolver = if opt.nameserver_addresses.is_empty() {
-        info!(&log, "using system configuration");
-        Resolver::new_from_system_conf(log.clone())
-            .context("initializing resolver from system configuration")?
-    } else {
-        let addrs = opt.nameserver_addresses;
-        info!(&log, "using explicit nameservers"; "nameservers" => ?addrs);
-        Resolver::new_from_addrs(log.clone(), &addrs)
-            .context("creating resolver with explicit nameserver addresses")?
-    };
-
-    let result = omicron_common::backoff::retry_notify(
-        omicron_common::backoff::retry_policy_internal_service(),
-        || async {
-            let dns_name =
-                internal_dns_types::names::ServiceName::from(opt.srv_name);
-            resolver.lookup_srv(dns_name).await.map_err(|error| match error {
-                ResolveError::Resolve(_)
-                | ResolveError::NotFound(_)
-                | ResolveError::NotFoundByString(_) => {
-                    omicron_common::backoff::BackoffError::transient(error)
-                }
-            })
-        },
-        |error, delay| {
-            warn!(
-                &log,
-                "DNS query failed; will try again";
-                "error" => format!("{:#}", error),
-                "delay" => ?delay,
-            );
-        },
-    )
-    .await
-    .context("unexpectedly gave up")?;
-
-    for (target, port) in result {
-        if opt.hostname_only {
-            println!("{}", target)
-        } else {
-            println!("{}:{}", target, port)
+fn main() -> Result<()> {
+    omicron_runtime::run(async {
+        let opt = Opt::parse();
+        let log = dropshot::ConfigLogging::File {
+            path: "/dev/stderr".into(),
+            level: dropshot::ConfigLoggingLevel::Info,
+            if_exists: dropshot::ConfigLoggingIfExists::Append,
         }
-    }
+        .to_logger("dnswait")
+        .context("creating log")?;
 
-    Ok(())
+        let resolver = if opt.nameserver_addresses.is_empty() {
+            info!(&log, "using system configuration");
+            Resolver::new_from_system_conf(log.clone())
+                .context("initializing resolver from system configuration")?
+        } else {
+            let addrs = opt.nameserver_addresses;
+            info!(&log, "using explicit nameservers"; "nameservers" => ?addrs);
+            Resolver::new_from_addrs(log.clone(), &addrs).context(
+                "creating resolver with explicit nameserver addresses",
+            )?
+        };
+
+        let result = omicron_common::backoff::retry_notify(
+            omicron_common::backoff::retry_policy_internal_service(),
+            || async {
+                let dns_name =
+                    internal_dns_types::names::ServiceName::from(opt.srv_name);
+                resolver.lookup_srv(dns_name).await.map_err(|error| match error
+                {
+                    ResolveError::Resolve(_)
+                    | ResolveError::NotFound(_)
+                    | ResolveError::NotFoundByString(_) => {
+                        omicron_common::backoff::BackoffError::transient(error)
+                    }
+                })
+            },
+            |error, delay| {
+                warn!(
+                    &log,
+                    "DNS query failed; will try again";
+                    "error" => format!("{:#}", error),
+                    "delay" => ?delay,
+                );
+            },
+        )
+        .await
+        .context("unexpectedly gave up")?;
+
+        for (target, port) in result {
+            if opt.hostname_only {
+                println!("{}", target)
+            } else {
+                println!("{}:{}", target, port)
+            }
+        }
+
+        Ok(())
+    })
 }

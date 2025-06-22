@@ -835,111 +835,127 @@ impl Progress for PackageProgress {
     }
 }
 
-#[tokio::main]
-async fn main() -> Result<()> {
-    let args = Args::try_parse()?;
-    let base_config = BaseConfig::load(&args.manifest).with_context(|| {
-        format!("failed to load base config from {:?}", args.manifest)
-    })?;
+fn main() -> Result<()> {
+    omicron_runtime::run(async {
+        let args = Args::try_parse()?;
+        let base_config =
+            BaseConfig::load(&args.manifest).with_context(|| {
+                format!("failed to load base config from {:?}", args.manifest)
+            })?;
 
-    let mut open_options = std::fs::OpenOptions::new();
-    open_options.write(true).create(true).truncate(true);
-    tokio::fs::create_dir_all(&args.artifact_dir).await?;
-    let logpath = args.artifact_dir.join("LOG");
-    let logfile = std::io::LineWriter::new(open_options.open(&logpath)?);
-    eprintln!("Logging to: {}", std::fs::canonicalize(logpath)?.display());
+        let mut open_options = std::fs::OpenOptions::new();
+        open_options.write(true).create(true).truncate(true);
+        tokio::fs::create_dir_all(&args.artifact_dir).await?;
+        let logpath = args.artifact_dir.join("LOG");
+        let logfile = std::io::LineWriter::new(open_options.open(&logpath)?);
+        eprintln!("Logging to: {}", std::fs::canonicalize(logpath)?.display());
 
-    let drain = slog_bunyan::new(logfile).build().fuse();
-    let drain = slog_async::Async::new(drain).build().fuse();
-    let log = Logger::root(drain, o!());
+        let drain = slog_bunyan::new(logfile).build().fuse();
+        let drain = slog_async::Async::new(drain).build().fuse();
+        let log = Logger::root(drain, o!());
 
-    let get_config = || -> Result<Config> {
-        Config::load(
-            &log,
-            base_config.package_config(),
-            &args.config_args,
-            &args.artifact_dir,
-        )
-    };
-
-    // Use a CWD that is the root of the Omicron repository.
-    if let Ok(manifest) = env::var("CARGO_MANIFEST_DIR") {
-        let manifest_dir = Utf8PathBuf::from(manifest);
-        let root = manifest_dir.parent().unwrap();
-        env::set_current_dir(root).with_context(|| {
-            format!("failed to set current directory to {}", root)
-        })?;
-    }
-
-    match args.subcommand {
-        SubCommand::Build(BuildCommand::Target { subcommand }) => {
-            do_target(
-                &base_config,
+        let get_config = || -> Result<Config> {
+            Config::load(
+                &log,
+                base_config.package_config(),
+                &args.config_args,
                 &args.artifact_dir,
-                args.config_args.target.as_deref(),
-                &subcommand,
             )
-            .await?;
+        };
+
+        // Use a CWD that is the root of the Omicron repository.
+        if let Ok(manifest) = env::var("CARGO_MANIFEST_DIR") {
+            let manifest_dir = Utf8PathBuf::from(manifest);
+            let root = manifest_dir.parent().unwrap();
+            env::set_current_dir(root).with_context(|| {
+                format!("failed to set current directory to {}", root)
+            })?;
         }
-        SubCommand::Build(BuildCommand::Dot) => {
-            do_dot(&get_config()?).await?;
-        }
-        SubCommand::Build(BuildCommand::ListOutputs { intermediate }) => {
-            do_list_outputs(&get_config()?, &args.artifact_dir, intermediate)
+
+        match args.subcommand {
+            SubCommand::Build(BuildCommand::Target { subcommand }) => {
+                do_target(
+                    &base_config,
+                    &args.artifact_dir,
+                    args.config_args.target.as_deref(),
+                    &subcommand,
+                )
                 .await?;
-        }
-        SubCommand::Build(BuildCommand::Package {
-            disable_cache,
-            only,
-            no_rebuild,
-        }) => {
-            let mut config = get_config()?;
-            config.set_only(only);
-            do_package(&config, &args.artifact_dir, disable_cache, no_rebuild)
+            }
+            SubCommand::Build(BuildCommand::Dot) => {
+                do_dot(&get_config()?).await?;
+            }
+            SubCommand::Build(BuildCommand::ListOutputs { intermediate }) => {
+                do_list_outputs(
+                    &get_config()?,
+                    &args.artifact_dir,
+                    intermediate,
+                )
                 .await?;
-        }
-        SubCommand::Build(BuildCommand::Stamp { package_name, version }) => {
-            do_stamp(
-                &get_config()?,
-                &args.artifact_dir,
-                &package_name,
-                &version,
-            )
-            .await?;
-        }
-        SubCommand::Build(BuildCommand::ShowCargoCommands { presets }) => {
-            // If presets is empty, show the commands from the
-            // default configuration, otherwise show the commands
-            // for the specified presets.
-            if let Some(presets) = presets {
-                do_show_cargo_commands_for_presets(&base_config, &presets)?;
-            } else {
-                do_show_cargo_commands_for_config(&get_config()?)?;
+            }
+            SubCommand::Build(BuildCommand::Package {
+                disable_cache,
+                only,
+                no_rebuild,
+            }) => {
+                let mut config = get_config()?;
+                config.set_only(only);
+                do_package(
+                    &config,
+                    &args.artifact_dir,
+                    disable_cache,
+                    no_rebuild,
+                )
+                .await?;
+            }
+            SubCommand::Build(BuildCommand::Stamp {
+                package_name,
+                version,
+            }) => {
+                do_stamp(
+                    &get_config()?,
+                    &args.artifact_dir,
+                    &package_name,
+                    &version,
+                )
+                .await?;
+            }
+            SubCommand::Build(BuildCommand::ShowCargoCommands { presets }) => {
+                // If presets is empty, show the commands from the
+                // default configuration, otherwise show the commands
+                // for the specified presets.
+                if let Some(presets) = presets {
+                    do_show_cargo_commands_for_presets(&base_config, &presets)?;
+                } else {
+                    do_show_cargo_commands_for_config(&get_config()?)?;
+                }
+            }
+            SubCommand::Build(BuildCommand::Check) => {
+                do_check(&get_config()?).await?
+            }
+            SubCommand::Deploy(DeployCommand::Install { install_dir }) => {
+                do_install(&get_config()?, &args.artifact_dir, &install_dir)
+                    .await?;
+            }
+            SubCommand::Deploy(DeployCommand::Unpack { install_dir }) => {
+                do_unpack(&get_config()?, &args.artifact_dir, &install_dir)
+                    .await?;
+            }
+            SubCommand::Deploy(DeployCommand::Activate { install_dir }) => {
+                do_activate(&get_config()?, &install_dir)?;
+            }
+            SubCommand::Deploy(DeployCommand::Deactivate) => {
+                do_deactivate(&get_config()?).await?;
+            }
+            SubCommand::Deploy(DeployCommand::Uninstall) => {
+                do_uninstall(&get_config()?).await?;
+            }
+            SubCommand::Deploy(DeployCommand::Clean { install_dir }) => {
+                do_clean(&get_config()?, &args.artifact_dir, &install_dir)
+                    .await?;
             }
         }
-        SubCommand::Build(BuildCommand::Check) => {
-            do_check(&get_config()?).await?
-        }
-        SubCommand::Deploy(DeployCommand::Install { install_dir }) => {
-            do_install(&get_config()?, &args.artifact_dir, &install_dir)
-                .await?;
-        }
-        SubCommand::Deploy(DeployCommand::Unpack { install_dir }) => {
-            do_unpack(&get_config()?, &args.artifact_dir, &install_dir).await?;
-        }
-        SubCommand::Deploy(DeployCommand::Activate { install_dir }) => {
-            do_activate(&get_config()?, &install_dir)?;
-        }
-        SubCommand::Deploy(DeployCommand::Deactivate) => {
-            do_deactivate(&get_config()?).await?;
-        }
-        SubCommand::Deploy(DeployCommand::Uninstall) => {
-            do_uninstall(&get_config()?).await?;
-        }
-        SubCommand::Deploy(DeployCommand::Clean { install_dir }) => {
-            do_clean(&get_config()?, &args.artifact_dir, &install_dir).await?;
-        }
-    }
 
-    Ok(())
+        Ok(())
+    })
 }

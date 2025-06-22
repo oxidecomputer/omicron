@@ -120,6 +120,7 @@ members = [
     "passwords",
     "range-requests",
     "rpaths",
+    "runtime",
     "sled-agent",
     "sled-agent/api",
     "sled-agent/bootstrap-agent-api",
@@ -272,6 +273,7 @@ default-members = [
     "passwords",
     "range-requests",
     "rpaths",
+    "runtime",
     "sled-agent",
     "sled-agent/api",
     "sled-agent/bootstrap-agent-api",
@@ -557,6 +559,7 @@ omicron-passwords = { path = "passwords" }
 omicron-pins = { path = "dev-tools/pins" }
 omicron-repl-utils = { path = "dev-tools/repl-utils" }
 omicron-rpaths = { path = "rpaths" }
+omicron-runtime = { path = "runtime" }
 omicron-sled-agent = { path = "sled-agent" }
 omicron-test-utils = { path = "test-utils" }
 omicron-workspace-hack = "0.1.0"

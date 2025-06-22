@@ -60,58 +60,59 @@ enum Cmd {
     },
 }
 
-#[tokio::main]
-async fn main() -> anyhow::Result<()> {
-    let args = Cli::parse();
+fn main() -> anyhow::Result<()> {
+    omicron_runtime::run(async {
+        let args = Cli::parse();
 
-    let decorator = TermDecorator::new().build();
-    let drain = FullFormat::new(decorator).build().fuse();
-    let drain = slog_async::Async::new(drain).build().fuse();
-    let drain = LevelFilter::new(drain, args.log_level).fuse();
-    let log = Logger::root(drain, slog::o!("unit" => "schema_updater"));
+        let decorator = TermDecorator::new().build();
+        let drain = FullFormat::new(decorator).build().fuse();
+        let drain = slog_async::Async::new(drain).build().fuse();
+        let drain = LevelFilter::new(drain, args.log_level).fuse();
+        let log = Logger::root(drain, slog::o!("unit" => "schema_updater"));
 
-    let schema_config = SchemaConfig { schema_dir: args.schema_directory };
-    let all_versions = AllSchemaVersions::load(&schema_config.schema_dir)?;
+        let schema_config = SchemaConfig { schema_dir: args.schema_directory };
+        let all_versions = AllSchemaVersions::load(&schema_config.schema_dir)?;
 
-    let crdb_cfg = db::Config { url: args.url };
-    let pool = Arc::new(db::Pool::new_single_host(&log, &crdb_cfg));
+        let crdb_cfg = db::Config { url: args.url };
+        let pool = Arc::new(db::Pool::new_single_host(&log, &crdb_cfg));
 
-    // We use the unchecked constructor of the datastore because we
-    // don't want to block on someone else applying an upgrade.
-    let datastore = DataStore::new_unchecked(log.clone(), pool);
+        // We use the unchecked constructor of the datastore because we
+        // don't want to block on someone else applying an upgrade.
+        let datastore = DataStore::new_unchecked(log.clone(), pool);
 
-    match args.cmd {
-        Cmd::List => {
-            let (current_version, target_version) = datastore
-                .database_schema_version()
-                .await
-                .map(|(v, t)| (v.to_string(), t.map(|t| t.to_string())))
-                .unwrap_or_else(|_| ("Unknown".to_string(), None));
+        match args.cmd {
+            Cmd::List => {
+                let (current_version, target_version) = datastore
+                    .database_schema_version()
+                    .await
+                    .map(|(v, t)| (v.to_string(), t.map(|t| t.to_string())))
+                    .unwrap_or_else(|_| ("Unknown".to_string(), None));
 
-            println!("Current Version in database: {current_version}");
-            println!("Target Version in database: {target_version:?}");
-            println!("Known Versions:");
-            for version in all_versions.iter_versions() {
-                let mut extra = String::new();
-                if version.semver().to_string() == current_version {
-                    extra.push_str(" (reported by database)");
-                };
-                if version.is_current_software_version() {
-                    extra.push_str(" (expected by Nexus)");
-                };
+                println!("Current Version in database: {current_version}");
+                println!("Target Version in database: {target_version:?}");
+                println!("Known Versions:");
+                for version in all_versions.iter_versions() {
+                    let mut extra = String::new();
+                    if version.semver().to_string() == current_version {
+                        extra.push_str(" (reported by database)");
+                    };
+                    if version.is_current_software_version() {
+                        extra.push_str(" (expected by Nexus)");
+                    };
 
-                println!("  {}{extra}", version.semver())
+                    println!("  {}{extra}", version.semver())
+                }
+            }
+            Cmd::Upgrade { version } => {
+                println!("Upgrading to {version}");
+                datastore
+                    .ensure_schema(&log, version.clone(), Some(&all_versions))
+                    .await
+                    .map_err(|e| anyhow!(e))?;
+                println!("Upgrade to {version} complete");
             }
         }
-        Cmd::Upgrade { version } => {
-            println!("Upgrading to {version}");
-            datastore
-                .ensure_schema(&log, version.clone(), Some(&all_versions))
-                .await
-                .map_err(|e| anyhow!(e))?;
-            println!("Upgrade to {version} complete");
-        }
-    }
-    datastore.terminate().await;
-    Ok(())
+        datastore.terminate().await;
+        Ok(())
+    })
 }

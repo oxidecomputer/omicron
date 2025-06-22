@@ -21,6 +21,7 @@ nexus-test-interface.workspace = true
 nexus-test-utils = { workspace = true, features = ["omicron-dev"] }
 omicron-nexus.workspace = true
 omicron-workspace-hack.workspace = true
+omicron-runtime.workspace = true
 # See omicron-rpaths for more about the "pq-sys" dependency.
 pq-sys = "*"
 signal-hook-tokio.workspace = true

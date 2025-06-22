@@ -28,9 +28,8 @@ enum Args {
     },
 }
 
-#[tokio::main]
-async fn main() {
-    if let Err(message) = do_run().await {
+fn main() {
+    if let Err(message) = omicron_runtime::run(do_run()) {
         fatal(message);
     }
 }
@@ -93,7 +92,6 @@ async fn do_run() -> Result<(), CmdError> {
                 .wait_for_finish()
                 .await
                 .map_err(|err| CmdError::Failure(anyhow!(err)))?;
-
             Ok(())
         }
     }
