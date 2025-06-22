@@ -1145,20 +1145,6 @@ dependencies = [
 
 [[package]]
 name = "cargo_metadata"
-version = "0.19.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "dd5eb614ed4c27c5d706420e4320fbe3216ab31fa1c33cd8246ac36dae4479ba"
-dependencies = [
- "camino",
- "cargo-platform 0.1.8",
- "semver 1.0.26",
- "serde",
- "serde_json",
- "thiserror 2.0.12",
-]
-
-[[package]]
-name = "cargo_metadata"
 version = "0.20.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "4f7835cfc6135093070e95eb2b53e5d9b5c403dc3a6be6040ee026270aa82502"
@@ -7384,7 +7370,7 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "camino",
- "cargo_metadata 0.19.2",
+ "cargo_metadata 0.20.0",
  "clap",
  "expectorate",
  "newtype_derive",
@@ -7642,7 +7628,7 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "camino",
- "cargo_metadata 0.19.2",
+ "cargo_metadata 0.20.0",
  "clap",
  "dev-tools-common",
  "expectorate",
@@ -7698,7 +7684,7 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "camino",
- "cargo_metadata 0.19.2",
+ "cargo_metadata 0.20.0",
  "fs-err 3.1.1",
  "omicron-workspace-hack",
  "serde",
@@ -7742,7 +7728,7 @@ dependencies = [
  "anyhow",
  "camino",
  "camino-tempfile",
- "cargo_metadata 0.19.2",
+ "cargo_metadata 0.20.0",
  "chrono",
  "clap",
  "fs-err 3.1.1",
@@ -8020,6 +8006,7 @@ dependencies = [
  "ff",
  "flate2",
  "foldhash",
+ "form_urlencoded",
  "fs-err 3.1.1",
  "futures",
  "futures-channel",
@@ -15028,7 +15015,7 @@ dependencies = [
  "anyhow",
  "camino",
  "camino-tempfile",
- "cargo_metadata 0.19.2",
+ "cargo_metadata 0.20.0",
  "cargo_toml",
  "clap",
  "dev-tools-common",
