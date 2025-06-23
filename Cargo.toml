@@ -127,6 +127,7 @@ members = [
     "sled-agent/repo-depot-api",
     "sled-agent/types",
     "sled-agent/zone-images",
+    "sled-agent/zone-images-examples",
     "sled-diagnostics",
     "sled-hardware",
     "sled-hardware/types",
@@ -279,6 +280,7 @@ default-members = [
     "sled-agent/repo-depot-api",
     "sled-agent/types",
     "sled-agent/zone-images",
+    "sled-agent/zone-images-examples",
     "sled-diagnostics",
     "sled-hardware",
     "sled-hardware/types",
@@ -343,7 +345,7 @@ cast_lossless = "warn"
 
 [workspace.dependencies]
 anyhow = "1.0"
-anstyle = "1.0.10"
+anstyle = "1.0.11"
 api_identity = { path = "api_identity" }
 approx = "0.5.1"
 assert_matches = "1.5.0"
@@ -366,7 +368,7 @@ camino = { version = "1.1", features = ["serde1"] }
 camino-tempfile = "1.4.1"
 camino-tempfile-ext = { version = "0.3.1", features = ["assert-color"] }
 cancel-safe-futures = "0.1.5"
-cargo_metadata = "0.19.2"
+cargo_metadata = "0.20.0"
 chacha20poly1305 = "0.10.1"
 cfg-if = "1.0"
 chrono = { version = "0.4", features = [ "serde" ] }
@@ -387,7 +389,7 @@ cockroach-admin-types = { path = "cockroach-admin/types" }
 colored = "2.1"
 const_format = "0.2.34"
 cookie = "0.18"
-criterion = { version = "0.5.1", features = [ "async_tokio" ] }
+criterion = { version = "0.6.0", features = [ "async_tokio" ] }
 crossbeam = "0.8"
 crossterm = { version = "0.28.1", features = ["event-stream"] }
 # NOTE: if you change the pinned revision of the `crucible` dependencies, you
@@ -407,10 +409,10 @@ datatest-stable = "0.3.2"
 db-macros = { path = "nexus/db-macros" }
 debug-ignore = "1.0.5"
 derive_more = "0.99.20"
-derive-where = "1.2.7"
+derive-where = "1.5.0"
 dev-tools-common = { path = "dev-tools/common" }
 # Having the i-implement-... feature here makes diesel go away from the workspace-hack
-diesel = { version = "2.2.10", features = ["i-implement-a-third-party-backend-and-opt-into-breaking-changes", "postgres", "r2d2", "chrono", "serde_json", "network-address", "uuid"] }
+diesel = { version = "2.2.11", features = ["i-implement-a-third-party-backend-and-opt-into-breaking-changes", "postgres", "r2d2", "chrono", "serde_json", "network-address", "uuid"] }
 diesel-dtrace = "0.4.2"
 digest = "0.10.7"
 dns-server = { path = "dns-server" }
@@ -419,7 +421,7 @@ dns-service-client = { path = "clients/dns-service-client" }
 dpd-client = { git = "https://github.com/oxidecomputer/dendrite" }
 dropshot = { version = "0.16.2", features = [ "usdt-probes" ] }
 dyn-clone = "1.0.19"
-either = "1.14.0"
+either = "1.15.0"
 ereport-types = { path = "ereport/types" }
 expectorate = "1.2.0"
 fatfs = "0.3.6"
@@ -454,10 +456,10 @@ headers = "0.4.1"
 heck = "0.5"
 hex = "0.4.3"
 hex-literal = "0.4.1"
-hickory-client = "0.24.4"
-hickory-proto = "0.24.4"
-hickory-resolver = "0.24.4"
-hickory-server = "0.24.4"
+hickory-client = "0.25.2"
+hickory-proto = "0.25.2"
+hickory-resolver = "0.25.2"
+hickory-server = "0.25.2"
 highway = "1.3.0"
 hkdf = "0.12.4"
 hmac = "0.12.1"
@@ -468,12 +470,12 @@ http-range = "0.1.5"
 httpmock = "0.8.0-alpha.1"
 httptest = "0.16.3"
 hubtools = { git = "https://github.com/oxidecomputer/hubtools.git", branch = "main" }
-humantime = "2.1.0"
+humantime = "2.2.0"
 hyper = "1.6.0"
 hyper-util = "0.1.14"
-hyper-rustls = "0.26.0"
+hyper-rustls = "0.27.7"
 hyper-staticfile = "0.10.1"
-iddqd = { version = "0.3.7", features = ["daft", "serde", "schemars08"] }
+iddqd = { version = "0.3.8", features = ["daft", "serde", "schemars08"] }
 id-map = { path = "id-map" }
 illumos-utils = { path = "illumos-utils" }
 iana-time-zone = "0.1.63"
@@ -496,7 +498,7 @@ ispf = { git = "https://github.com/oxidecomputer/ispf" }
 jiff = "0.2.15"
 key-manager = { path = "key-manager" }
 kstat-rs = "0.2.4"
-libc = "0.2.173"
+libc = "0.2.174"
 libipcc = { git = "https://github.com/oxidecomputer/ipcc-rs", rev = "524eb8f125003dff50b9703900c6b323f00f9e1b" }
 libfalcon = { git = "https://github.com/oxidecomputer/falcon", branch = "main" }
 libnvme = { git = "https://github.com/oxidecomputer/libnvme", rev = "dd5bb221d327a1bc9287961718c3c10d6bd37da0" }
@@ -540,7 +542,7 @@ nexus-test-interface = { path = "nexus/test-interface" }
 nexus-test-utils-macros = { path = "nexus/test-utils-macros" }
 nexus-test-utils = { path = "nexus/test-utils" }
 nexus-types = { path = "nexus/types" }
-nix = { version = "0.29", features = ["net"] }
+nix = { version = "0.30", features = ["net"] }
 nom = "7.1.3"
 num-integer = "0.1.46"
 num = { version = "0.4.3", default-features = false, features = [ "libm" ] }
@@ -568,7 +570,7 @@ oxnet = "0.1.2"
 once_cell = "1.21.3"
 openapi-lint = { git = "https://github.com/oxidecomputer/openapi-lint", branch = "main" }
 openapi-manager-types = { path = "dev-tools/openapi-manager/types" }
-openapiv3 = "2.0.0"
+openapiv3 = "2.2.0"
 # must match samael's crate!
 openssl = "0.10"
 openssl-sys = "0.9"
@@ -601,12 +603,12 @@ pem = "3.0"
 # Note that if you depend on petname, you must also set default-features =
 # false: petname = { workspace = true, default-features = false }.
 petname = { version = "2.0.2", default-features = false, features = ["default-rng", "default-words"] }
-petgraph = "0.7.1"
+petgraph = "0.8.2"
 postgres-protocol = "0.6.8"
 predicates = "3.1.3"
 pretty_assertions = "1.4.1"
 pretty-hex = "0.4.1"
-prettyplease = { version = "0.2.34", features = ["verbatim"] }
+prettyplease = { version = "0.2.35", features = ["verbatim"] }
 proc-macro2 = "1.0"
 progenitor = "0.10.0"
 progenitor-client = "0.10.0"
@@ -619,7 +621,7 @@ propolis-client = { git = "https://github.com/oxidecomputer/propolis", rev = "e3
 propolis-mock-server = { git = "https://github.com/oxidecomputer/propolis", rev = "e3988414bd68ecf806078fb898120e1194451ee9" }
 # NOTE: see above!
 proptest = "1.7.0"
-qorb = "0.3.1"
+qorb = "0.4.0"
 quote = "1.0"
 rand = "0.8.5"
 # We're still in the middle of migrating to rand 0.9.
@@ -638,7 +640,7 @@ regex = "1.11.1"
 regress = "0.10.3"
 repo-depot-api = { path = "sled-agent/repo-depot-api" }
 repo-depot-client = { path = "clients/repo-depot-client" }
-reqwest = { version = "0.12.15", default-features = false }
+reqwest = { version = "0.12.20", default-features = false }
 ring = "0.17.14"
 rpassword = "7.3.1"
 rstest = "0.24.0"
@@ -649,7 +651,7 @@ rustyline = "14.0.0"
 samael = { version = "0.0.19", features = ["xmlsec"] }
 schemars = "0.8.22"
 scopeguard = "1.2.0"
-secrecy = "0.10.0"
+secrecy = "0.10.3"
 semver = { version = "1.0.26", features = ["std", "serde"] }
 serde = { version = "1.0", default-features = false, features = [ "derive", "rc" ] }
 serde_cbor = "0.11.2"
@@ -658,7 +660,7 @@ serde_json = "1.0.140"
 serde_tokenstream = "0.2"
 serde_urlencoded = "0.7.1"
 serde_with = "3.12.0"
-sha2 = "0.10.8"
+sha2 = "0.10.9"
 sha3 = "0.10.8"
 shell-words = "1.1.0"
 signal-hook = "0.3"
@@ -677,6 +679,7 @@ sled-agent-client = { path = "clients/sled-agent-client" }
 sled-agent-config-reconciler = { path = "sled-agent/config-reconciler" }
 sled-agent-types = { path = "sled-agent/types" }
 sled-agent-zone-images = { path = "sled-agent/zone-images" }
+sled-agent-zone-images-examples = { path = "sled-agent/zone-images-examples" }
 sled-diagnostics = { path = "sled-diagnostics" }
 sled-hardware = { path = "sled-hardware" }
 sled-hardware-types = { path = "sled-hardware/types" }
@@ -705,8 +708,8 @@ subtle = "2.6.1"
 supports-color = "3.0.2"
 support-bundle-viewer = "0.1.0"
 swrite = "0.1.0"
-sync-ptr = "0.1.1"
-libsw = { version = "3.4.0", features = ["tokio"] }
+sync-ptr = "0.1.4"
+libsw = { version = "3.5.0", features = ["tokio"] }
 syn = { version = "2.0" }
 tabled = "0.15.0"
 tar = "0.4"
@@ -714,31 +717,31 @@ tempfile = "3.20"
 term = "0.7"
 termios = "0.3"
 termtree = "0.5.1"
-textwrap = { version = "0.16.1", features = [ "terminal_size" ] }
-test-strategy = "0.4.0"
-thiserror = "1.0"
+textwrap = { version = "0.16.2", features = [ "terminal_size" ] }
+test-strategy = "0.4.1"
+thiserror = "2.0"
 tofino = { git = "https://github.com/oxidecomputer/tofino", branch = "main" }
-tokio = "1.43.0"
+tokio = "1.45.1"
 tokio-postgres = { version = "0.7", features = [ "with-chrono-0_4", "with-uuid-1" ] }
 tokio-stream = "0.1.17"
 tokio-tungstenite = "0.23.1"
-tokio-util = { version = "0.7.13", features = ["io", "io-util", "time"] }
-toml = "0.8.20"
-toml_edit = "0.22.24"
+tokio-util = { version = "0.7.15", features = ["io", "io-util", "time"] }
+toml = "0.8.23"
+toml_edit = "0.22.27"
 tough = { version = "0.20.0", features = [ "http" ] }
 transceiver-controller = { git = "https://github.com/oxidecomputer/transceiver-control", features = [ "api-traits" ] }
-trybuild = "1.0.103"
+trybuild = "1.0.105"
 tufaceous = { git = "https://github.com/oxidecomputer/tufaceous", branch = "main" }
 tufaceous-artifact = { git = "https://github.com/oxidecomputer/tufaceous", branch = "main", features = ["proptest", "schemars"] }
 tufaceous-brand-metadata = { git = "https://github.com/oxidecomputer/tufaceous", branch = "main" }
 tufaceous-lib = { git = "https://github.com/oxidecomputer/tufaceous", branch = "main" }
-tui-tree-widget = "0.23.0"
+tui-tree-widget = "0.23.1"
 typed-rng = { path = "typed-rng" }
 typify = "0.3.0"
 unicode-width = "0.1.13"
 update-common = { path = "update-common" }
 update-engine = { path = "update-engine" }
-url = "2.5.3"
+url = "2.5.4"
 usdt = "0.5.0"
 uuid = { version = "1.17.0", features = ["serde", "v4"] }
 uzers = "0.12"
@@ -749,9 +752,9 @@ wicket-common = { path = "wicket-common" }
 wicketd-api = { path = "wicketd-api" }
 wicketd-client = { path = "clients/wicketd-client" }
 xshell = "0.2.7"
-zerocopy = "0.8.25"
+zerocopy = "0.8.26"
 zeroize = { version = "1.8.1", features = ["zeroize_derive", "std"] }
-zip = { version = "2.6.0", default-features = false, features = ["deflate","bzip2"] }
+zip = { version = "2.6.1", default-features = false, features = ["deflate","bzip2"] }
 zone = { version = "0.3.1", default-features = false, features = ["async"] }
 
 # newtype-uuid is set to default-features = false because we don't want to
@@ -983,8 +986,3 @@ path = "workspace-hack"
 [patch."https://github.com/oxidecomputer/omicron"]
 omicron-uuid-kinds = { path = "uuid-kinds" }
 omicron-common = { path = "common" }
-
-# Waiting for https://github.com/seanmonstar/reqwest/pull/2623 to be released...
-[patch.crates-io.reqwest]
-git = 'https://github.com/seanmonstar/reqwest'
-rev = '114d97c1a862567b465cb57f14d584626e1cf30c'
