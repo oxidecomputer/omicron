@@ -470,7 +470,7 @@ http-range = "0.1.5"
 httpmock = "0.8.0-alpha.1"
 httptest = "0.16.3"
 hubtools = { git = "https://github.com/oxidecomputer/hubtools.git", branch = "main" }
-humantime = "2.1.0"
+humantime = "2.2.0"
 hyper = "1.6.0"
 hyper-util = "0.1.14"
 hyper-rustls = "0.27.7"
