@@ -709,7 +709,7 @@ supports-color = "3.0.2"
 support-bundle-viewer = "0.1.0"
 swrite = "0.1.0"
 sync-ptr = "0.1.4"
-libsw = { version = "3.4.0", features = ["tokio"] }
+libsw = { version = "3.5.0", features = ["tokio"] }
 syn = { version = "2.0" }
 tabled = "0.15.0"
 tar = "0.4"
