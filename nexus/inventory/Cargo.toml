@@ -31,11 +31,13 @@ strum.workspace = true
 thiserror.workspace = true
 typed-rng.workspace = true
 uuid.workspace = true
+omicron-cockroach-metrics.workspace = true
 omicron-workspace-hack.workspace = true
 
 [dev-dependencies]
 expectorate.workspace = true
 gateway-test-utils.workspace = true
+httpmock.workspace = true
 omicron-sled-agent.workspace = true
 regex.workspace = true
 tokio.workspace = true

@@ -30,6 +30,8 @@ use nexus_types::inventory::CabooseWhich;
 use nexus_types::inventory::RotPage;
 use nexus_types::inventory::RotPageWhich;
 use nexus_types::inventory::ZpoolName;
+use omicron_cockroach_metrics::MetricValue;
+use omicron_cockroach_metrics::PrometheusMetrics;
 use omicron_common::api::external::ByteCount;
 use omicron_common::disk::DatasetConfig;
 use omicron_common::disk::DatasetKind;
@@ -41,6 +43,7 @@ use omicron_uuid_kinds::DatasetUuid;
 use omicron_uuid_kinds::PhysicalDiskUuid;
 use omicron_uuid_kinds::SledUuid;
 use omicron_uuid_kinds::ZpoolUuid;
+use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::Duration;
 use strum::IntoEnumIterator;
@@ -561,6 +564,13 @@ pub fn representative() -> Representative {
             raft_config: [KeeperId(1)].into_iter().collect(),
         },
     );
+
+    builder.found_cockroach_metrics(PrometheusMetrics {
+        metrics: HashMap::from([(
+            "ranges_underreplicated".to_string(),
+            MetricValue::Unsigned(0),
+        )]),
+    });
 
     Representative {
         builder,

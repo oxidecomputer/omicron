@@ -4070,6 +4070,13 @@ CREATE TABLE IF NOT EXISTS omicron.public.inv_clickhouse_keeper_membership (
     PRIMARY KEY (inv_collection_id, queried_keeper_id)
 );
 
+CREATE TABLE IF NOT EXISTS omicron.public.inv_cockroachdb_status (
+    inv_collection_id UUID NOT NULL,
+    ranges_underreplicated INT8,
+
+    PRIMARY KEY (inv_collection_id)
+);
+
 /*
  * System-level blueprints
  *
@@ -5760,7 +5767,7 @@ INSERT INTO omicron.public.db_metadata (
     version,
     target_version
 ) VALUES
-    (TRUE, NOW(), NOW(), '150.0.0', NULL)
+    (TRUE, NOW(), NOW(), '151.0.0', NULL)
 ON CONFLICT DO NOTHING;
 
 COMMIT;

@@ -126,7 +126,7 @@ impl CockroachClusterAdminClient {
         }
     }
 
-    /// Update the set of backend addresses, adding new clients and removing old ones
+    /// Update the set of backend admin addresses, adding new clients and removing old ones
     pub async fn update_backends(&self, addresses: &[SocketAddr]) {
         let mut clients = self.clients.write().await;
 
@@ -256,8 +256,10 @@ impl CockroachClusterAdminClient {
 /// A single metric value, which can be a counter, gauge, etc.
 #[derive(Debug, Clone, PartialEq)]
 pub enum MetricValue {
-    /// A simple numeric value
-    Number(f64),
+    /// An unsigned value
+    Unsigned(u64),
+    /// A floating point value
+    Float(f64),
     /// A histogram with buckets
     Histogram(Vec<HistogramBucket>),
     /// A string value
@@ -274,8 +276,10 @@ pub struct HistogramBucket {
 /// The expected type of a CockroachDB metric value
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum CockroachMetricType {
-    /// A numeric counter or gauge value
-    Number,
+    /// An unsigned counter or gauge value
+    Unsigned,
+    /// A floating point gauge value
+    Float,
     /// A histogram with buckets and counts
     Histogram,
     /// A string value
@@ -360,7 +364,7 @@ impl CockroachMetric {
             | CockroachMetric::TxnRestartsUnknown
             | CockroachMetric::TxnRestartsAsyncWriteFailure
             | CockroachMetric::TxnRestartsCommitDeadlineExceeded => {
-                CockroachMetricType::Number
+                CockroachMetricType::Unsigned
             }
 
             // Histogram metrics
@@ -471,8 +475,10 @@ impl PrometheusMetrics {
                 }
 
                 // Parse regular metrics
-                let value = if let Ok(num) = value_str.parse::<f64>() {
-                    MetricValue::Number(num)
+                let value = if let Ok(num) = value_str.parse::<u64>() {
+                    MetricValue::Unsigned(num)
+                } else if let Ok(float) = value_str.parse::<f64>() {
+                    MetricValue::Float(float)
                 } else {
                     MetricValue::String(value_str.to_string())
                 };
@@ -512,7 +518,10 @@ impl PrometheusMetrics {
         };
 
         match (metric.expected_type(), &value) {
-            (CockroachMetricType::Number, &MetricValue::Number(_)) => {
+            (CockroachMetricType::Unsigned, &MetricValue::Unsigned(_)) => {
+                return Some(value);
+            }
+            (CockroachMetricType::Float, &MetricValue::Float(_)) => {
                 return Some(value);
             }
             (CockroachMetricType::String, &MetricValue::String(_)) => {
@@ -525,10 +534,10 @@ impl PrometheusMetrics {
         }
     }
 
-    /// Get a specific metric as a number, if it exists and is numeric
-    pub fn get_metric_number(&self, metric: CockroachMetric) -> Option<f64> {
+    /// Get a specific metric as a number, if it exists and is unsigned
+    pub fn get_metric_unsigned(&self, metric: CockroachMetric) -> Option<u64> {
         match self.get_metric(metric) {
-            Some(MetricValue::Number(val)) => Some(*val),
+            Some(MetricValue::Unsigned(val)) => Some(*val),
             _ => None,
         }
     }
@@ -755,19 +764,19 @@ cockroach_build_timestamp 1234567890
         // Test raw metric access by name
         assert_eq!(
             metrics.metrics.get("go_memstats_alloc_bytes"),
-            Some(&MetricValue::Number(12345670.0))
+            Some(&MetricValue::Float(12345670.0))
         );
         assert_eq!(
             metrics.metrics.get("cockroach_sql_query_count"),
-            Some(&MetricValue::Number(42.0))
+            Some(&MetricValue::Unsigned(42))
         );
         assert_eq!(
             metrics.metrics.get("cockroach_node_id"),
-            Some(&MetricValue::Number(1.0))
+            Some(&MetricValue::Unsigned(1))
         );
         assert_eq!(
             metrics.metrics.get("cockroach_build_timestamp"),
-            Some(&MetricValue::Number(1234567890.0))
+            Some(&MetricValue::Unsigned(1234567890))
         );
 
         // Check that we can access cockroach metrics by raw name
@@ -844,11 +853,11 @@ sql_exec_latency_sum 45.2
         // (These are accessed by name since they're not in our CockroachMetric enum)
         assert_eq!(
             metrics.metrics.get("sql_exec_latency_count"),
-            Some(&MetricValue::Number(205.0))
+            Some(&MetricValue::Unsigned(205))
         );
         assert_eq!(
             metrics.metrics.get("sql_exec_latency_sum"),
-            Some(&MetricValue::Number(45.2))
+            Some(&MetricValue::Float(45.2))
         );
 
         // Test strongly-typed histogram access
@@ -877,12 +886,12 @@ sql_exec_latency_sum 2.5
         let metrics = PrometheusMetrics::parse(sample_metrics).unwrap();
 
         // Test strongly-typed access for number metrics
-        if let Some(MetricValue::Number(val)) =
+        if let Some(MetricValue::Unsigned(val)) =
             metrics.get_metric(CockroachMetric::LeasesError)
         {
-            assert_eq!(*val, 5.0);
+            assert_eq!(*val, 5);
         } else {
-            panic!("Expected Number variant for leases_error");
+            panic!("Expected Unsigned variant for leases_error");
         }
 
         // Test strongly-typed access for histogram metrics
@@ -896,8 +905,8 @@ sql_exec_latency_sum 2.5
 
         // Test convenience methods
         assert_eq!(
-            metrics.get_metric_number(CockroachMetric::LeasesError),
-            Some(5.0)
+            metrics.get_metric_unsigned(CockroachMetric::LeasesError),
+            Some(5)
         );
         assert_eq!(
             metrics

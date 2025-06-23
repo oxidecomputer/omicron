@@ -6,10 +6,10 @@
 
 use cockroach_admin_client::Client as CockroachAdminClient;
 use nexus_test_utils_macros::nexus_test;
-use omicron_nexus::app::cockroach_http::CockroachClusterAdminClient;
-use omicron_nexus::app::cockroach_http::CockroachMetric;
-use omicron_nexus::app::cockroach_http::MetricValue;
-use omicron_nexus::app::cockroach_http::NodeLiveness;
+use omicron_cockroach_metrics::CockroachClusterAdminClient;
+use omicron_cockroach_metrics::CockroachMetric;
+use omicron_cockroach_metrics::MetricValue;
+use omicron_cockroach_metrics::NodeLiveness;
 
 type ControlPlaneTestContext =
     nexus_test_utils::ControlPlaneTestContext<omicron_nexus::Server>;
@@ -87,8 +87,12 @@ async fn test_cockroach_http_prometheus_metrics(
     for metric in CockroachMetric::iter() {
         if let Some(value) = metrics.get_metric(metric) {
             match value {
-                MetricValue::Number(val) => {
-                    println!(" {} = {} (number)", metric.metric_name(), val);
+                MetricValue::Float(val) => {
+                    println!(" {} = {} (float)", metric.metric_name(), val);
+                    found_metrics += 1;
+                }
+                MetricValue::Unsigned(val) => {
+                    println!(" {} = {} (unsigned)", metric.metric_name(), val);
                     found_metrics += 1;
                 }
                 MetricValue::Histogram(buckets) => {

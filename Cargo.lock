@@ -6316,9 +6316,11 @@ dependencies = [
  "gateway-messages",
  "gateway-test-utils",
  "gateway-types",
+ "httpmock",
  "id-map",
  "nexus-sled-agent-shared",
  "nexus-types",
+ "omicron-cockroach-metrics",
  "omicron-common",
  "omicron-sled-agent",
  "omicron-uuid-kinds",
@@ -7200,6 +7202,23 @@ dependencies = [
 ]
 
 [[package]]
+name = "omicron-cockroach-metrics"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "chrono",
+ "cockroach-admin-client",
+ "futures",
+ "omicron-workspace-hack",
+ "proptest",
+ "serde",
+ "serde_json",
+ "slog",
+ "strum",
+ "tokio",
+]
+
+[[package]]
 name = "omicron-common"
 version = "0.1.0"
 dependencies = [
@@ -7494,6 +7513,7 @@ dependencies = [
  "nexus-test-utils-macros",
  "nexus-types",
  "num-integer",
+ "omicron-cockroach-metrics",
  "omicron-common",
  "omicron-passwords",
  "omicron-rpaths",

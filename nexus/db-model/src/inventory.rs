@@ -26,7 +26,7 @@ use diesel::{serialize, sql_types};
 use ipnetwork::IpNetwork;
 use nexus_db_schema::schema::{
     hw_baseboard_id, inv_caboose, inv_clickhouse_keeper_membership,
-    inv_collection, inv_collection_error, inv_dataset,
+    inv_cockroachdb_status, inv_collection, inv_collection_error, inv_dataset,
     inv_last_reconciliation_dataset_result,
     inv_last_reconciliation_disk_result,
     inv_last_reconciliation_orphaned_dataset,
@@ -44,8 +44,8 @@ use nexus_sled_agent_shared::inventory::{
     OmicronZoneDataset, OmicronZoneImageSource, OmicronZoneType,
 };
 use nexus_types::inventory::{
-    BaseboardId, Caboose, Collection, NvmeFirmware, PowerState, RotPage,
-    RotSlot,
+    BaseboardId, Caboose, CockroachStatus, Collection, NvmeFirmware,
+    PowerState, RotPage, RotSlot,
 };
 use omicron_common::api::external;
 use omicron_common::api::internal::shared::NetworkInterface;
@@ -2216,6 +2216,48 @@ impl InvClickhouseKeeperMembership {
                 .try_into()
                 .context("log index > 2^63")?,
             raft_config,
+        })
+    }
+}
+
+#[derive(Queryable, Clone, Debug, Selectable, Insertable)]
+#[diesel(table_name = inv_cockroachdb_status)]
+pub struct InvCockroachStatus {
+    pub inv_collection_id: DbTypedUuid<CollectionKind>,
+    pub ranges_underreplicated: Option<i64>,
+}
+
+impl InvCockroachStatus {
+    pub fn new(
+        inv_collection_id: CollectionUuid,
+        status: &CockroachStatus,
+    ) -> Result<Self, anyhow::Error> {
+        Ok(Self {
+            inv_collection_id: inv_collection_id.into(),
+            ranges_underreplicated: status
+                .ranges_underreplicated
+                .map(|n| i64::try_from(n))
+                .transpose()
+                .with_context(
+                    || "Converting ranges_underreplicated from u64 to i64",
+                )?,
+        })
+    }
+}
+
+impl TryFrom<InvCockroachStatus> for CockroachStatus {
+    type Error = anyhow::Error;
+
+    fn try_from(value: InvCockroachStatus) -> anyhow::Result<Self> {
+        Ok(Self {
+            ranges_underreplicated: value
+                .ranges_underreplicated
+                .map(|n| {
+                    u64::try_from(n).with_context(|| {
+                        format!("Failed to convert {n} to u64")
+                    })
+                })
+                .transpose()?,
         })
     }
 }
