@@ -320,101 +320,140 @@ impl DataStore {
         #[allow(clippy::disallowed_methods)]
         self.transaction_non_retry_wrapper("blueprint_insert")
             .transaction(&conn, |conn| async move {
-            // Insert the row for the blueprint.
-            {
-                use nexus_db_schema::schema::blueprint::dsl;
-                let _: usize = diesel::insert_into(dsl::blueprint)
-                    .values(row_blueprint)
-                    .execute_async(&conn)
-                    .await?;
-            }
+                // Insert the row for the blueprint.
+                {
+                    use nexus_db_schema::schema::blueprint::dsl;
+                    let _: usize = diesel::insert_into(dsl::blueprint)
+                        .values(row_blueprint)
+                        .execute_async(&conn)
+                        .await?;
+                }
 
-            // Insert all the sled states for this blueprint.
-            {
-                use nexus_db_schema::schema::bp_sled_metadata::dsl as sled_metadata;
+                // Insert all the sled states for this blueprint.
+                {
+                    // Skip formatting this line to prevent rustfmt bailing out.
+                    #[rustfmt::skip]
+                    use nexus_db_schema::schema::bp_sled_metadata::dsl
+                        as sled_metadata;
 
-                let _ = diesel::insert_into(sled_metadata::bp_sled_metadata)
-                    .values(sled_metadatas)
-                    .execute_async(&conn)
-                    .await?;
-            }
+                    let _ =
+                        diesel::insert_into(sled_metadata::bp_sled_metadata)
+                            .values(sled_metadatas)
+                            .execute_async(&conn)
+                            .await?;
+                }
 
-            // Insert all physical disks for this blueprint.
-            {
-                use nexus_db_schema::schema::bp_omicron_physical_disk::dsl as omicron_disk;
-                let _ = diesel::insert_into(omicron_disk::bp_omicron_physical_disk)
+                // Insert all physical disks for this blueprint.
+                {
+                    // Skip formatting this line to prevent rustfmt bailing out.
+                    #[rustfmt::skip]
+                    use nexus_db_schema::schema::bp_omicron_physical_disk::dsl
+                        as omicron_disk;
+                    let _ = diesel::insert_into(
+                        omicron_disk::bp_omicron_physical_disk,
+                    )
                     .values(omicron_physical_disks)
                     .execute_async(&conn)
                     .await?;
-            }
+                }
 
-            // Insert all datasets for this blueprint.
-            {
-                use nexus_db_schema::schema::bp_omicron_dataset::dsl as omicron_dataset;
-                let _ = diesel::insert_into(omicron_dataset::bp_omicron_dataset)
+                // Insert all datasets for this blueprint.
+                {
+                    // Skip formatting this line to prevent rustfmt bailing out.
+                    #[rustfmt::skip]
+                    use nexus_db_schema::schema::bp_omicron_dataset::dsl
+                        as omicron_dataset;
+                    let _ = diesel::insert_into(
+                        omicron_dataset::bp_omicron_dataset,
+                    )
                     .values(omicron_datasets)
                     .execute_async(&conn)
                     .await?;
-            }
+                }
 
-            // Insert all the Omicron zones for this blueprint.
-            {
-                use nexus_db_schema::schema::bp_omicron_zone::dsl as omicron_zone;
-                let _ = diesel::insert_into(omicron_zone::bp_omicron_zone)
-                    .values(omicron_zones)
-                    .execute_async(&conn)
-                    .await?;
-            }
-
-            {
-                use nexus_db_schema::schema::bp_omicron_zone_nic::dsl as omicron_zone_nic;
-                let _ =
-                    diesel::insert_into(omicron_zone_nic::bp_omicron_zone_nic)
-                        .values(omicron_zone_nics)
+                // Insert all the Omicron zones for this blueprint.
+                {
+                    // Skip formatting this line to prevent rustfmt bailing out.
+                    #[rustfmt::skip]
+                    use nexus_db_schema::schema::bp_omicron_zone::dsl
+                        as omicron_zone;
+                    let _ = diesel::insert_into(omicron_zone::bp_omicron_zone)
+                        .values(omicron_zones)
                         .execute_async(&conn)
                         .await?;
-            }
+                }
 
-            // Insert all clickhouse cluster related tables if necessary
-            if let Some((clickhouse_cluster_config, keepers, servers)) = clickhouse_tables {
                 {
-                    use nexus_db_schema::schema::bp_clickhouse_cluster_config::dsl;
-                    let _ = diesel::insert_into(dsl::bp_clickhouse_cluster_config)
-                    .values(clickhouse_cluster_config)
+                    // Skip formatting this line to prevent rustfmt bailing out.
+                    #[rustfmt::skip]
+                    use nexus_db_schema::schema::bp_omicron_zone_nic::dsl
+                        as omicron_zone_nic;
+                    let _ = diesel::insert_into(
+                        omicron_zone_nic::bp_omicron_zone_nic,
+                    )
+                    .values(omicron_zone_nics)
                     .execute_async(&conn)
                     .await?;
                 }
-                {
-                    use nexus_db_schema::schema::bp_clickhouse_keeper_zone_id_to_node_id::dsl;
-                    let _ = diesel::insert_into(dsl::bp_clickhouse_keeper_zone_id_to_node_id)
-                    .values(keepers)
-                    .execute_async(&conn)
-                    .await?;
-                }
-                {
-                    use nexus_db_schema::schema::bp_clickhouse_server_zone_id_to_node_id::dsl;
-                    let _ = diesel::insert_into(dsl::bp_clickhouse_server_zone_id_to_node_id)
-                    .values(servers)
-                    .execute_async(&conn)
-                    .await?;
-                }
-            }
 
-            // Insert oximeter read policy for this blueprint
-            {
-                use nexus_db_schema::schema::bp_oximeter_read_policy::dsl;
-                let _ =
-                    diesel::insert_into(dsl::bp_oximeter_read_policy)
+                // Insert all clickhouse cluster related tables if necessary
+                if let Some((clickhouse_cluster_config, keepers, servers)) =
+                    clickhouse_tables
+                {
+                    {
+                        // Skip formatting this line to prevent rustfmt bailing
+                        // out.
+                        #[rustfmt::skip]
+                        use nexus_db_schema::schema::
+                            bp_clickhouse_cluster_config::dsl;
+                        let _ = diesel::insert_into(
+                            dsl::bp_clickhouse_cluster_config,
+                        )
+                        .values(clickhouse_cluster_config)
+                        .execute_async(&conn)
+                        .await?;
+                    }
+                    {
+                        // Skip formatting this line to prevent rustfmt bailing
+                        // out.
+                        #[rustfmt::skip]
+                        use nexus_db_schema::schema::
+                            bp_clickhouse_keeper_zone_id_to_node_id::dsl;
+                        let _ = diesel::insert_into(
+                            dsl::bp_clickhouse_keeper_zone_id_to_node_id,
+                        )
+                        .values(keepers)
+                        .execute_async(&conn)
+                        .await?;
+                    }
+                    {
+                        // Skip formatting this line to prevent rustfmt bailing
+                        // out.
+                        #[rustfmt::skip]
+                        use nexus_db_schema::schema::
+                            bp_clickhouse_server_zone_id_to_node_id::dsl;
+                        let _ = diesel::insert_into(
+                            dsl::bp_clickhouse_server_zone_id_to_node_id,
+                        )
+                        .values(servers)
+                        .execute_async(&conn)
+                        .await?;
+                    }
+                }
+
+                // Insert oximeter read policy for this blueprint
+                {
+                    use nexus_db_schema::schema::bp_oximeter_read_policy::dsl;
+                    let _ = diesel::insert_into(dsl::bp_oximeter_read_policy)
                         .values(oximeter_read_policy)
                         .execute_async(&conn)
                         .await?;
-            }
+                }
 
-            Ok(())
-
-        })
-        .await
-        .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))?;
+                Ok(())
+            })
+            .await
+            .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))?;
 
         info!(
             &opctx.log,
