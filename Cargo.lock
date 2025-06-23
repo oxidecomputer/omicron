@@ -6190,7 +6190,7 @@ dependencies = [
  "oxnet",
  "paste",
  "pem",
- "petgraph 0.7.1",
+ "petgraph 0.8.2",
  "pq-sys",
  "predicates",
  "pretty_assertions",
@@ -7377,7 +7377,7 @@ dependencies = [
  "omicron-test-utils",
  "omicron-workspace-hack",
  "parse-display",
- "petgraph 0.7.1",
+ "petgraph 0.8.2",
  "serde",
  "subprocess",
  "toml 0.8.23",
@@ -7490,7 +7490,7 @@ dependencies = [
  "parse-display",
  "paste",
  "pem",
- "petgraph 0.7.1",
+ "petgraph 0.8.2",
  "pq-sys",
  "pretty_assertions",
  "progenitor-client 0.10.0",
@@ -7598,7 +7598,7 @@ dependencies = [
  "oximeter-client",
  "oximeter-db",
  "oxnet",
- "petgraph 0.7.1",
+ "petgraph 0.8.2",
  "pq-sys",
  "ratatui",
  "reedline",
@@ -7639,7 +7639,7 @@ dependencies = [
  "indicatif",
  "omicron-workspace-hack",
  "omicron-zone-package",
- "petgraph 0.7.1",
+ "petgraph 0.8.2",
  "rayon",
  "reqwest",
  "ring",
@@ -9218,6 +9218,18 @@ checksum = "3672b37090dbd86368a4145bc067582552b29c27377cad4e0a306c97f9bd7772"
 dependencies = [
  "fixedbitset 0.5.7",
  "indexmap 2.9.0",
+]
+
+[[package]]
+name = "petgraph"
+version = "0.8.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "54acf3a685220b533e437e264e4d932cfbdc4cc7ec0cd232ed73c08d03b8a7ca"
+dependencies = [
+ "fixedbitset 0.5.7",
+ "hashbrown 0.15.3",
+ "indexmap 2.9.0",
+ "serde",
 ]
 
 [[package]]
@@ -13989,7 +14001,7 @@ dependencies = [
  "omicron-test-utils",
  "omicron-workspace-hack",
  "owo-colors",
- "petgraph 0.7.1",
+ "petgraph 0.8.2",
  "schemars",
  "serde",
  "serde_json",
