@@ -244,7 +244,12 @@ impl DataStore {
         slot: SpMgsSlot,
     ) -> impl RunnableQuery<EreportIdTuple> {
         sp_dsl::sp_ereport
-            .filter(sp_dsl::sp_type.eq(sp_type).and(sp_dsl::sp_slot.eq(slot)))
+            .filter(
+                sp_dsl::sp_type
+                    .eq(sp_type)
+                    .and(sp_dsl::sp_slot.eq(slot))
+                    .and(sp_dsl::time_deleted.is_null()),
+            )
             .order_by((sp_dsl::time_collected.desc(), sp_dsl::ena.desc()))
             .limit(1)
             .select((sp_dsl::restart_id, sp_dsl::ena))
@@ -269,7 +274,11 @@ impl DataStore {
         sled_id: SledUuid,
     ) -> impl RunnableQuery<EreportIdTuple> {
         host_dsl::host_ereport
-            .filter(host_dsl::sled_id.eq(sled_id.into_untyped_uuid()))
+            .filter(
+                host_dsl::sled_id
+                    .eq(sled_id.into_untyped_uuid())
+                    .and(host_dsl::time_deleted.is_null()),
+            )
             .order_by((host_dsl::time_collected.desc(), host_dsl::ena.desc()))
             .limit(1)
             .select((host_dsl::restart_id, host_dsl::ena))
