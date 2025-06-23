@@ -264,7 +264,7 @@ pub enum ConfigReconcilerInventoryStatus {
     Idle { completed_at: DateTime<Utc>, ran_for: Duration },
 }
 
-/// A simplified form of zone image resolver status.
+/// Inventory representation of zone image resolver status and health.
 #[derive(Clone, Debug, PartialEq, Eq, Deserialize, JsonSchema, Serialize)]
 pub struct ZoneImageResolverInventory {
     /// The zone manifest status.
@@ -284,73 +284,96 @@ impl ZoneImageResolverInventory {
     }
 }
 
+/// Inventory representation of a zone manifest.
+///
+/// Part of [`ZoneImageResolverInventory`].
+///
+/// A zone manifest is a listing of all the zones present in a system's install
+/// dataset. This struct contains information about the install dataset gathered
+/// from a system.
 #[derive(Clone, Debug, PartialEq, Eq, Deserialize, JsonSchema, Serialize)]
 pub struct ZoneManifestInventory {
-    /// The path to the zone manifest file on the boot disk.
+    /// The full path to the zone manifest file on the boot disk.
     #[schemars(schema_with = "path_schema")]
     pub boot_disk_path: Utf8PathBuf,
 
-    /// The manifest read from disk.
+    /// The manifest read from the boot disk, and whether the manifest is valid.
     #[serde(with = "snake_case_result")]
     #[schemars(
-        schema_with = "SnakeCaseResult::<ZoneArtifactsInventory, String>::json_schema"
+        schema_with = "SnakeCaseResult::<ZoneManifestBootInventory, String>::json_schema"
     )]
-    pub manifest: Result<ZoneArtifactsInventory, String>,
+    pub boot_inventory: Result<ZoneManifestBootInventory, String>,
 
-    /// Warnings about non-boot disks, if any.
+    /// Information about the install dataset on non-boot disks.
     pub non_boot_status: IdOrdMap<ZoneManifestNonBootInventory>,
 }
 
 impl ZoneManifestInventory {
-    /// Returns a new, fake inventory for tests.
+    /// Returns a new, empty inventory for tests.
     pub fn new_fake() -> Self {
         Self {
             boot_disk_path: Utf8PathBuf::from("/fake/path/install/zones.json"),
-            manifest: Ok(ZoneArtifactsInventory::new_fake()),
+            boot_inventory: Ok(ZoneManifestBootInventory::new_fake()),
             non_boot_status: IdOrdMap::new(),
         }
     }
 }
 
+/// Inventory representation of zone artifacts on the boot disk.
+///
+/// Part of [`ZoneManifestInventory`].
 #[derive(Clone, Debug, PartialEq, Eq, Deserialize, JsonSchema, Serialize)]
-pub struct ZoneArtifactsInventory {
+pub struct ZoneManifestBootInventory {
     /// The manifest source.
+    ///
+    /// In production this is [`OmicronZoneManifestSource::Installinator`], but
+    /// in some development and testing flows Sled Agent synthesizes zone
+    /// manifests. In those cases, the source is
+    /// [`OmicronZoneManifestSource::SledAgent`].
     pub source: OmicronZoneManifestSource,
 
     /// The artifacts on disk.
     pub artifacts: IdOrdMap<ZoneArtifactInventory>,
 }
 
-impl ZoneArtifactsInventory {
-    /// Returns a new, fake inventory for tests.
+impl ZoneManifestBootInventory {
+    /// Returns a new, empty inventory for tests.
+    ///
+    /// For a more representative selection of real zones, see `representative`
+    /// in `nexus-inventory`.
     pub fn new_fake() -> Self {
         Self {
             source: OmicronZoneManifestSource::Installinator {
                 mupdate_id: MupdateUuid::nil(),
             },
-            // TODO: fill out some fake zones here? maybe a representative
-            // selection of real zones?
             artifacts: IdOrdMap::new(),
         }
     }
 }
 
+/// Inventory representation of a single zone artifact on a boot disk.
+///
+/// Part of [`ZoneManifestBootInventory`].
 #[derive(Clone, Debug, PartialEq, Eq, Deserialize, JsonSchema, Serialize)]
 pub struct ZoneArtifactInventory {
-    /// The filename.
+    /// The name of the zone file on disk, for example `nexus.tar.gz`. Zone
+    /// files are always ".tar.gz".
     pub file_name: String,
 
-    /// The full path to the file.
+    /// The full path to the zone file.
     #[schemars(schema_with = "path_schema")]
     pub path: Utf8PathBuf,
 
-    /// The expected size of the file.
+    /// The expected size of the file, in bytes.
     pub expected_size: u64,
 
-    /// The expected hash of the file.
+    /// The expected digest of the file's contents.
     pub expected_hash: ArtifactHash,
 
-    /// The status.
+    /// The status of the artifact.
+    ///
+    /// This is `Ok(())` if the artifact is present and matches the expected
+    /// size and digest, or an error message if it is missing or does not match.
     #[serde(with = "snake_case_result")]
     #[schemars(schema_with = "SnakeCaseResult::<(), String>::json_schema")]
     pub status: Result<(), String>,
@@ -364,20 +387,32 @@ impl IdOrdItem for ZoneArtifactInventory {
     id_upcast!();
 }
 
+/// Inventory representation of a zone manifest on a non-boot disk.
+///
+/// Unlike [`ZoneManifestBootInventory`] which is structured since
+/// Reconfigurator makes decisions based on it, information about non-boot disks
+/// is purely advisory. For simplicity, we store information in an unstructured
+/// format.
 #[derive(Clone, Debug, PartialEq, Eq, Deserialize, JsonSchema, Serialize)]
 pub struct ZoneManifestNonBootInventory {
-    /// The non-boot zpool ID.
+    /// The ID of the non-boot zpool.
     pub zpool_id: InternalZpoolUuid,
 
-    /// The path to the zone manifest JSON on the non-boot disk.
+    /// The full path to the zone manifest JSON on the non-boot disk.
     #[schemars(schema_with = "path_schema")]
     pub path: Utf8PathBuf,
 
     /// Whether the status is valid.
     pub is_valid: bool,
 
-    /// A message describing the status. If `is_valid` is false, then this
-    /// message describes the reason for the invalid status.
+    /// A message describing the status.
+    ///
+    /// If `is_valid` is true, then the message describes the list of artifacts
+    /// found and their hashes.
+    ///
+    /// If `is_valid` is false, then this message describes the reason for the
+    /// invalid status. This could include errors reading the zone manifest, or
+    /// zone file mismatches.
     pub message: String,
 }
 
@@ -389,41 +424,61 @@ impl IdOrdItem for ZoneManifestNonBootInventory {
     id_upcast!();
 }
 
+/// Inventory representation of MUPdate override status.
+///
+/// Part of [`ZoneImageResolverInventory`].
+///
+/// This is used by Reconfigurator to determine if a MUPdate override has
+/// occurred. For more about mixing MUPdate and updates, see RFD 556.
 #[derive(Clone, Debug, PartialEq, Eq, Deserialize, JsonSchema, Serialize)]
 pub struct MupdateOverrideInventory {
-    /// The path to the mupdate override JSON on the boot disk.
+    /// The full path to the mupdate override JSON on the boot disk.
     #[schemars(schema_with = "path_schema")]
     pub boot_disk_path: Utf8PathBuf,
 
     /// The boot disk override, or an error if it could not be parsed.
+    ///
+    /// This is `None` if the override is not present.
     #[serde(with = "snake_case_result")]
-    #[schemars(schema_with = "SnakeCaseResult::<(), String>::json_schema")]
-    pub boot_disk_override:
-        Result<Option<MupdateOverrideInfoInventory>, String>,
+    #[schemars(
+        schema_with = "SnakeCaseResult::<Option<MupdateOverrideBootInventory>, String>::json_schema"
+    )]
+    pub boot_override: Result<Option<MupdateOverrideBootInventory>, String>,
 
-    /// Warnings about non-boot disks, if any.
+    /// Information about the MUPdate override on non-boot disks.
     pub non_boot_status: IdOrdMap<MupdateOverrideNonBootInventory>,
 }
 
 impl MupdateOverrideInventory {
-    /// Returns a new, fake inventory for tests.
+    /// Returns a new, empty inventory for tests.
     pub fn new_fake() -> Self {
         Self {
             boot_disk_path: Utf8PathBuf::from(
                 "/fake/path/install/mupdate_override.json",
             ),
-            boot_disk_override: Ok(None),
+            boot_override: Ok(None),
             non_boot_status: IdOrdMap::new(),
         }
     }
 }
 
+/// Inventory representation of the MUPdate override on the boot disk.
 #[derive(Clone, Debug, PartialEq, Eq, Deserialize, JsonSchema, Serialize)]
-pub struct MupdateOverrideInfoInventory {
-    /// The mupdate override UUID.
+pub struct MupdateOverrideBootInventory {
+    /// The ID of the MUPdate override.
+    ///
+    /// This is unique and generated by Installinator each time it is run.
+    /// During a MUPdate, each sled gets a MUPdate override ID. (The ID is
+    /// shared across boot disks and non-boot disks, though.)
     pub mupdate_override_id: MupdateOverrideUuid,
 }
 
+/// Inventory representation of the MUPdate override on a non-boot disk.
+///
+/// Unlike [`MupdateOverrideBootInventory`] which is structured since
+/// Reconfigurator makes decisions based on it, information about non-boot disks
+/// is purely advisory. For simplicity, we store information in an unstructured
+/// format.
 #[derive(Clone, Debug, PartialEq, Eq, Deserialize, JsonSchema, Serialize)]
 pub struct MupdateOverrideNonBootInventory {
     /// The non-boot zpool ID.
@@ -436,8 +491,15 @@ pub struct MupdateOverrideNonBootInventory {
     /// Whether the status is valid.
     pub is_valid: bool,
 
-    /// A message describing the status. If `is_valid` is false, then this
-    /// message describes the reason for the invalid status.
+    /// A message describing the status.
+    ///
+    /// If `is_valid` is true, then the message is a short description saying
+    /// that it matches the boot disk, and whether the MUPdate override is
+    /// present.
+    ///
+    /// If `is_valid` is false, then this message describes the reason for the
+    /// invalid status. This could include errors reading the MUPdate override
+    /// JSON, or a mismatch between the boot and non-boot disks.
     pub message: String,
 }
 
