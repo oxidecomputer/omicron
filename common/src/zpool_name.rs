@@ -6,7 +6,9 @@
 
 use camino::{Utf8Path, Utf8PathBuf};
 use daft::Diffable;
-use omicron_uuid_kinds::ZpoolUuid;
+use omicron_uuid_kinds::{
+    ExternalZpoolUuid, GenericUuid, InternalZpoolUuid, ZpoolUuid,
+};
 use schemars::JsonSchema;
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use std::fmt;
@@ -42,10 +44,11 @@ pub enum ZpoolKind {
 #[derive(
     Clone, Copy, Debug, Hash, PartialEq, Eq, PartialOrd, Ord, Diffable,
 )]
-#[daft(leaf)]
-pub struct ZpoolName {
-    id: ZpoolUuid,
-    kind: ZpoolKind,
+pub enum ZpoolName {
+    /// An external zpool.
+    External(ExternalZpoolUuid),
+    /// An internal zpool.
+    Internal(InternalZpoolUuid),
 }
 
 const ZPOOL_NAME_REGEX: &str = r"^ox[ip]_[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$";
@@ -82,20 +85,37 @@ impl JsonSchema for ZpoolName {
 }
 
 impl ZpoolName {
-    pub const fn new_internal(id: ZpoolUuid) -> Self {
-        Self { id, kind: ZpoolKind::Internal }
+    /// Creates a new internal `ZpoolName` from a [`ZpoolUuid`].
+    ///
+    /// Prefer [`ZpoolName::Internal`] if an `InternalZpoolUuid` is available.
+    pub fn new_internal(id: ZpoolUuid) -> Self {
+        Self::Internal(InternalZpoolUuid::from_untyped_uuid(
+            id.into_untyped_uuid(),
+        ))
     }
 
-    pub const fn new_external(id: ZpoolUuid) -> Self {
-        Self { id, kind: ZpoolKind::External }
+    /// Creates a new external `ZpoolName` from a [`ZpoolUuid`].
+    ///
+    /// Prefer [`ZpoolName::External`] if an `ExternalZpoolUuid` is available.
+    pub fn new_external(id: ZpoolUuid) -> Self {
+        Self::External(ExternalZpoolUuid::from_untyped_uuid(
+            id.into_untyped_uuid(),
+        ))
     }
 
     pub const fn id(&self) -> ZpoolUuid {
-        self.id
+        match self {
+            Self::External(id) => id.upcast(),
+            Self::Internal(id) => id.upcast(),
+        }
     }
 
+    #[inline]
     pub const fn kind(&self) -> ZpoolKind {
-        self.kind
+        match self {
+            Self::External(_) => ZpoolKind::External,
+            Self::Internal(_) => ZpoolKind::Internal,
+        }
     }
 
     /// Returns a path to a dataset's mountpoint within the zpool.
@@ -109,7 +129,7 @@ impl ZpoolName {
         let mut path = Utf8PathBuf::new();
         path.push(root);
         path.push("pool");
-        match self.kind {
+        match self.kind() {
             ZpoolKind::External => path.push("ext"),
             ZpoolKind::Internal => path.push("int"),
         };
@@ -143,11 +163,13 @@ impl FromStr for ZpoolName {
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         if let Some(s) = s.strip_prefix(ZPOOL_EXTERNAL_PREFIX) {
-            let id = ZpoolUuid::from_str(s).map_err(|e| e.to_string())?;
-            Ok(ZpoolName::new_external(id))
+            let id =
+                ExternalZpoolUuid::from_str(s).map_err(|e| e.to_string())?;
+            Ok(ZpoolName::External(id))
         } else if let Some(s) = s.strip_prefix(ZPOOL_INTERNAL_PREFIX) {
-            let id = ZpoolUuid::from_str(s).map_err(|e| e.to_string())?;
-            Ok(ZpoolName::new_internal(id))
+            let id =
+                InternalZpoolUuid::from_str(s).map_err(|e| e.to_string())?;
+            Ok(ZpoolName::Internal(id))
         } else {
             Err(format!(
                 "Bad zpool name {s}; must start with '{ZPOOL_EXTERNAL_PREFIX}' or '{ZPOOL_INTERNAL_PREFIX}'",
@@ -158,11 +180,11 @@ impl FromStr for ZpoolName {
 
 impl fmt::Display for ZpoolName {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        let prefix = match self.kind {
+        let prefix = match self.kind() {
             ZpoolKind::External => ZPOOL_EXTERNAL_PREFIX,
             ZpoolKind::Internal => ZPOOL_INTERNAL_PREFIX,
         };
-        write!(f, "{prefix}{}", self.id)
+        write!(f, "{prefix}{}", self.id())
     }
 }
 
@@ -226,7 +248,7 @@ mod test {
             r#"{"pool_name":"oxi_d462a7f7-b628-40fe-80ff-4e4189e2d62b"}"#;
         let dataset: TestDataset = serde_json::from_str(json_string)
             .expect("Could not parse ZpoolName from Json Object");
-        assert!(matches!(dataset.pool_name.kind, ZpoolKind::Internal));
+        assert!(matches!(dataset.pool_name.kind(), ZpoolKind::Internal));
 
         // Confirm we can go the other way (ZpoolName to JSON string) too.
         let j = serde_json::to_string(&dataset)
