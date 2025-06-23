@@ -7,9 +7,11 @@
 
 use crate::InternalDisks;
 use camino::Utf8PathBuf;
+use nexus_sled_agent_shared::inventory::BootPartitionContents as BootPartitionContentsInventory;
 use nexus_sled_agent_shared::inventory::BootPartitionDetails;
 use omicron_common::disk::M2Slot;
 use sled_hardware::PooledDiskError;
+use slog_error_chain::InlineErrorChain;
 use std::io;
 use std::io::BufRead as _;
 use std::io::BufReader;
@@ -88,6 +90,17 @@ impl BootPartitionContents {
             boot_disk: internal_disks.boot_disk_slot().ok_or(BootDiskNotFound),
             slot_a,
             slot_b,
+        }
+    }
+
+    pub fn into_inventory(self) -> BootPartitionContentsInventory {
+        let err_to_string = |err: &dyn std::error::Error| {
+            InlineErrorChain::new(err).to_string()
+        };
+        BootPartitionContentsInventory {
+            boot_disk: self.boot_disk.map_err(|e| err_to_string(&e)),
+            slot_a: self.slot_a.map_err(|e| err_to_string(&e)),
+            slot_b: self.slot_b.map_err(|e| err_to_string(&e)),
         }
     }
 }

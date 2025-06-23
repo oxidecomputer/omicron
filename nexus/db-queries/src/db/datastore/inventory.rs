@@ -75,6 +75,7 @@ use nexus_db_schema::enums::{
     CabooseWhichEnum, InvConfigReconcilerStatusKindEnum,
 };
 use nexus_db_schema::enums::{HwPowerStateEnum, InvZoneManifestSourceEnum};
+use nexus_sled_agent_shared::inventory::BootPartitionContents;
 use nexus_sled_agent_shared::inventory::ConfigReconcilerInventory;
 use nexus_sled_agent_shared::inventory::ConfigReconcilerInventoryResult;
 use nexus_sled_agent_shared::inventory::ConfigReconcilerInventoryStatus;
@@ -3297,6 +3298,12 @@ impl DataStore {
                         zones: last_reconciliation_zone_results
                             .remove(&sled_id)
                             .unwrap_or_default(),
+                        // TODO-john
+                        boot_partitions: BootPartitionContents {
+                            boot_disk: Err("xxx".to_string()),
+                            slot_a: Err("xxx".to_string()),
+                            slot_b: Err("xxx".to_string()),
+                        },
                     })
                 })
                 .transpose()?;
@@ -3706,6 +3713,9 @@ mod test {
     use nexus_inventory::examples::Representative;
     use nexus_inventory::examples::representative;
     use nexus_inventory::now_db_precision;
+    use nexus_sled_agent_shared::inventory::BootImageHeader;
+    use nexus_sled_agent_shared::inventory::BootPartitionContents;
+    use nexus_sled_agent_shared::inventory::BootPartitionDetails;
     use nexus_sled_agent_shared::inventory::OrphanedDataset;
     use nexus_sled_agent_shared::inventory::{
         ConfigReconcilerInventory, ConfigReconcilerInventoryResult,
@@ -3718,6 +3728,7 @@ mod test {
     use omicron_common::api::external::Error;
     use omicron_common::disk::DatasetKind;
     use omicron_common::disk::DatasetName;
+    use omicron_common::disk::M2Slot;
     use omicron_common::zpool_name::ZpoolName;
     use omicron_test_utils::dev;
     use omicron_uuid_kinds::{
@@ -4551,6 +4562,21 @@ mod test {
                             (OmicronZoneUuid::new_v4(), make_result("zone", i))
                         })
                         .collect(),
+                    boot_partitions: BootPartitionContents {
+                        boot_disk: Ok(M2Slot::B),
+                        slot_a: Err("some error".to_string()),
+                        slot_b: Ok(BootPartitionDetails {
+                            header: BootImageHeader {
+                                flags: u64::MAX,
+                                data_size: 123456,
+                                image_size: 234567,
+                                target_size: 345678,
+                                sha256: [1; 32],
+                            },
+                            artifact_hash: ArtifactHash([2; 32]),
+                            artifact_size: 456789,
+                        }),
+                    },
                 }
             });
 
