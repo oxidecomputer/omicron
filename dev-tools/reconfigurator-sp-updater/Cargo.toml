@@ -21,6 +21,7 @@ internal-dns-types.workspace = true
 nexus-mgs-updates.workspace = true
 nexus-types.workspace = true
 omicron-repl-utils.workspace = true
+omicron-runtime.workspace = true
 qorb.workspace = true
 serde_json.workspace = true
 slog.workspace = true
