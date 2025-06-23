@@ -10338,6 +10338,7 @@ dependencies = [
  "datatest-stable",
  "dropshot",
  "expectorate",
+ "gateway-types",
  "humantime",
  "indent_write",
  "internal-dns-types",

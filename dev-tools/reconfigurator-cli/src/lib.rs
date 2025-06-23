@@ -8,6 +8,7 @@ use anyhow::{Context, anyhow, bail};
 use camino::Utf8PathBuf;
 use clap::ValueEnum;
 use clap::{Args, Parser, Subcommand};
+use gateway_types::rot::RotSlot;
 use indent_write::fmt::IndentWriter;
 use internal_dns_types::diff::DnsDiff;
 use itertools::Itertools;
@@ -209,6 +210,7 @@ fn process_command(
         Commands::SledRemove(args) => cmd_sled_remove(sim, args),
         Commands::SledShow(args) => cmd_sled_show(sim, args),
         Commands::SledSetPolicy(args) => cmd_sled_set_policy(sim, args),
+        Commands::SledUpdateRot(args) => cmd_sled_update_rot(sim, args),
         Commands::SledUpdateSp(args) => cmd_sled_update_sp(sim, args),
         Commands::SiloList => cmd_silo_list(sim),
         Commands::SiloAdd(args) => cmd_silo_add(sim, args),
@@ -263,6 +265,8 @@ enum Commands {
     SledShow(SledArgs),
     /// set a sled's policy
     SledSetPolicy(SledSetPolicyArgs),
+    /// simulate updating the sled's RoT versions
+    SledUpdateRot(SledUpdateRotArgs),
     /// simulate updating the sled's SP versions
     SledUpdateSp(SledUpdateSpArgs),
 
@@ -388,6 +392,42 @@ struct SledUpdateSpArgs {
     /// sets the version reported for the SP inactive slot
     #[clap(long, required_unless_present_any = &["active"])]
     inactive: Option<ExpectedVersion>,
+}
+
+// TODO-K: Double check which of these need to be optional
+#[derive(Debug, Args)]
+struct SledUpdateRotArgs {
+    /// id of the sled
+    sled_id: SledUuid,
+
+    /// whether we expect the "A" or "B" slot to be active
+    #[clap(long)]
+    active_slot: RotSlot,
+
+    /// sets the version reported for the RoT slot a
+    #[clap(long, required_unless_present_any = &["slot_b"])]
+    slot_a: Option<ExpectedVersion>,
+
+    /// sets the version reported for the RoT slot b
+    #[clap(long, required_unless_present_any = &["slot_a"])]
+    slot_b: Option<ExpectedVersion>,
+
+    /// set the persistent boot preference written into the current
+    /// authoritative CFPA page (ping or pong).
+    /// Will default to the value of active_version when not set
+    #[clap(long)]
+    persistent_boot_preference: RotSlot,
+
+    /// set the persistent boot preference written into the CFPA scratch
+    /// page that will become the persistent boot preference in the authoritative
+    /// CFPA page upon reboot, unless CFPA update of the authoritative page fails
+    /// for some reason
+    #[clap(long)]
+    pending_persistent_boot_preference: Option<RotSlot>,
+
+    /// override persistent preference selection for a single boot
+    #[clap(long)]
+    transient_boot_preference: Option<RotSlot>,
 }
 
 #[derive(Debug, Args)]
@@ -914,6 +954,9 @@ fn cmd_sled_show(
     let sled_id = args.sled_id;
     let sp_active_version = description.sled_sp_active_version(sled_id)?;
     let sp_inactive_version = description.sled_sp_inactive_version(sled_id)?;
+    let rot_active_slot = description.sled_rot_active_slot(sled_id)?;
+    let rot_slot_a_version = description.sled_rot_slot_a_version(sled_id)?;
+    let rot_slot_b_version = description.sled_rot_slot_b_version(sled_id)?;
     let planning_input = description
         .to_planning_input_builder()
         .context("failed to generate planning_input builder")?
@@ -926,6 +969,10 @@ fn cmd_sled_show(
     swriteln!(s, "subnet {}", sled_resources.subnet.net());
     swriteln!(s, "SP active version:   {:?}", sp_active_version);
     swriteln!(s, "SP inactive version: {:?}", sp_inactive_version);
+    swriteln!(s, "RoT active slot: {}", rot_active_slot);
+    // TODO-K: Include all other RoT settings?
+    swriteln!(s, "RoT slot A version: {:?}", rot_slot_a_version);
+    swriteln!(s, "RoT slot B version: {:?}", rot_slot_b_version);
     swriteln!(s, "zpools ({}):", sled_resources.zpools.len());
     for (zpool, disk) in &sled_resources.zpools {
         swriteln!(s, "    {:?}", zpool);
@@ -988,6 +1035,72 @@ fn cmd_sled_update_sp(
 
     Ok(Some(format!(
         "set sled {} SP versions: {}",
+        args.sled_id,
+        labels.join(", ")
+    )))
+}
+
+fn cmd_sled_update_rot(
+    sim: &mut ReconfiguratorSim,
+    args: SledUpdateRotArgs,
+) -> anyhow::Result<Option<String>> {
+    let mut labels = Vec::new();
+
+    labels.push(format!("active slot -> {}", &args.active_slot));
+    if let Some(slot_a) = &args.slot_a {
+        labels.push(format!("slot a -> {}", slot_a));
+    }
+    if let Some(slot_b) = &args.slot_b {
+        labels.push(format!("slot b -> {}", slot_b));
+    }
+    // TODO-K: Do I need these settings as well?
+    labels.push(format!(
+        "persistent boot preference -> {}",
+        &args.persistent_boot_preference
+    ));
+    if let Some(pending_persistent_boot_preference) =
+        &args.pending_persistent_boot_preference
+    {
+        labels.push(format!(
+            "pending persistent boot preference -> {}",
+            pending_persistent_boot_preference
+        ));
+    }
+    labels.push(format!(
+        "pending persistent boot preference -> {}",
+        &args.persistent_boot_preference
+    ));
+    if let Some(transient_boot_preference) = &args.transient_boot_preference {
+        labels.push(format!(
+            "transient boot preference -> {}",
+            transient_boot_preference
+        ));
+    }
+
+    assert!(
+        !labels.is_empty(),
+        "clap configuration requires that at least one argument is specified"
+    );
+
+    let mut state = sim.current_state().to_mut();
+    state.system_mut().description_mut().sled_update_rot_versions(
+        args.sled_id,
+        args.slot_a,
+        args.slot_b,
+    )?;
+
+    sim.commit_and_bump(
+        format!(
+            "reconfigurator-cli sled-update-rot: {}: {}",
+            args.sled_id,
+            labels.join(", "),
+        ),
+        state,
+    );
+
+    Ok(Some(format!(
+        // TODO-K: Is "RoT settings" what I want here?
+        "set sled {} RoT settings: {}",
         args.sled_id,
         labels.join(", ")
     )))
