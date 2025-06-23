@@ -109,7 +109,7 @@ pub struct SystemDescription {
     clickhouse_policy: Option<ClickhousePolicy>,
     oximeter_read_policy: OximeterReadPolicy,
     tuf_repo: TufRepoPolicy,
-    old_repo: Option<TufRepoDescription>,
+    old_repo: Option<TufRepoPolicy>,
 }
 
 impl SystemDescription {

@@ -158,7 +158,7 @@ impl PlanningInput {
         &self.policy.tuf_repo
     }
 
-    pub fn old_repo(&self) -> Option<&TufRepoDescription> {
+    pub fn old_repo(&self) -> Option<&TufRepoPolicy> {
         self.policy.old_repo.as_ref()
     }
 
@@ -944,15 +944,12 @@ pub struct Policy {
     /// with one that does.
     pub tuf_repo: TufRepoPolicy,
 
-    /// Previous system software release repository.
-    ///
-    /// * If present, `old_repo`'s generation is always 1 less than `tuf_repo`'s
-    ///   generation.
-    /// * If not present, `tuf_repo` should always be the initial generation 1.
+    /// Previous system software release repository, if any. Once Nexus-driven
+    /// update is active on a rack, this is always `Some`.
     ///
     /// New zones deployed mid-update may use artifacts in this repo as
     /// their image sources. See RFD 565 §9.
-    pub old_repo: Option<TufRepoDescription>,
+    pub old_repo: Option<TufRepoPolicy>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
