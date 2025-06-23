@@ -21,7 +21,13 @@ use std::io::Read as _;
 use std::os::fd::AsRawFd as _;
 use tufaceous_artifact::ArtifactHash;
 
+#[derive(Debug, thiserror::Error)]
+#[error("boot disk not found")]
+pub struct BootDiskNotFound;
+
+#[derive(Debug)]
 pub struct BootPartitionContents {
+    pub boot_disk: Result<M2Slot, BootDiskNotFound>,
     pub slot_a: BootPartitionDetails,
     pub slot_b: BootPartitionDetails,
 }
@@ -32,7 +38,11 @@ impl BootPartitionContents {
             BootPartitionDetails::read(M2Slot::A, internal_disks),
             BootPartitionDetails::read(M2Slot::B, internal_disks),
         );
-        Self { slot_a, slot_b }
+        Self {
+            boot_disk: internal_disks.boot_disk_slot().ok_or(BootDiskNotFound),
+            slot_a,
+            slot_b,
+        }
     }
 }
 

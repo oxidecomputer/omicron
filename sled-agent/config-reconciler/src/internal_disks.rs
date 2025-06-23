@@ -326,10 +326,16 @@ impl InternalDisks {
         &self.mount_config
     }
 
+    fn boot_disk(&self) -> Option<&InternalDiskDetails> {
+        self.disks.iter().find(|d| d.is_boot_disk())
+    }
+
+    pub(crate) fn boot_disk_slot(&self) -> Option<M2Slot> {
+        self.boot_disk().and_then(|d| d.slot)
+    }
+
     pub fn boot_disk_zpool_id(&self) -> Option<InternalZpoolUuid> {
-        self.disks.iter().find_map(|d| {
-            if d.is_boot_disk() { Some(d.zpool_id) } else { None }
-        })
+        self.boot_disk().map(|d| d.zpool_id)
     }
 
     pub fn boot_disk_zpool_name(&self) -> Option<ZpoolName> {
