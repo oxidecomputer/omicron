@@ -77,10 +77,11 @@ pub enum BootPartitionError {
 }
 
 #[derive(Debug)]
+#[allow(unused)] // TODO remove once this is reported in inventory
 pub struct BootPartitionDetails {
-    header: BootImageHeader,
-    artifact_hash: ArtifactHash,
-    artifact_size: usize,
+    pub header: BootImageHeader,
+    pub artifact_hash: ArtifactHash,
+    pub artifact_size: usize,
 }
 
 #[derive(Debug)]
@@ -250,6 +251,7 @@ pub enum ImageHeaderParseError {
 // or ignore completely; see https://github.com/oxidecomputer/boot-image-tools
 // for more thorough support.
 #[derive(Debug)]
+#[allow(unused)] // TODO remove once this is reported in inventory
 pub struct BootImageHeader {
     pub flags: u64,
     pub data_size: u64,
@@ -321,6 +323,7 @@ impl<R: io::Read> BufReaderExactSize<R> {
         Self { inner: BufReader::with_capacity(block_size, inner), block_size }
     }
 
+    #[cfg(test)]
     fn into_inner(self) -> R {
         self.inner.into_inner()
     }

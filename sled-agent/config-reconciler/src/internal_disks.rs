@@ -311,6 +311,9 @@ impl InternalDisksReceiver {
     /// Note that this error set is not atomically collected with the
     /// `current()` set of disks. It is only useful for inventory reporting
     /// purposes.
+    // TODO-correctness We should report these errors somehow!
+    // https://github.com/oxidecomputer/omicron/issues/8422
+    #[allow(dead_code)]
     pub(crate) fn errors(&self) -> Arc<BTreeMap<DiskIdentity, DiskError>> {
         Arc::clone(&*self.errors_rx.borrow())
     }

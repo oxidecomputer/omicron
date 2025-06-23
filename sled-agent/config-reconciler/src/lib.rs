@@ -45,10 +45,6 @@
 //!   [`ConfigReconcilerHandle::timesync_status()`] and
 //!   [`ConfigReconcilerHandle::inventory()`].
 
-// TODO-cleanup Remove once we've filled in all the `unimplemented!()`s that
-// will make use of various arguments and fields.
-#![allow(dead_code)]
-
 mod dataset_serialization_task;
 mod disks_common;
 mod dump_setup;
