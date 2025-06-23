@@ -2728,7 +2728,7 @@ fn print_task_sp_ereport_ingester(details: &serde_json::Value) {
     use nexus_types::internal_api::background::SpEreportIngesterStatus;
     use nexus_types::internal_api::background::SpEreporterStatus;
 
-    let SpEreportIngesterStatus { sps, error } =
+    let SpEreportIngesterStatus { sps, errors } =
         match serde_json::from_value(details.clone()) {
             Err(error) => {
                 eprintln!(
@@ -2740,8 +2740,11 @@ fn print_task_sp_ereport_ingester(details: &serde_json::Value) {
             Ok(status) => status,
         };
 
-    if let Some(error) = error {
-        println!("{ERRICON} task activation failed: {error}");
+    if !errors.is_empty() {
+        println!("{ERRICON} errors:");
+        for error in errors {
+            println!("    > {error}");
+        }
     }
 
     print_ereporter_status_totals(sps.iter().map(|sp| &sp.status));
@@ -2754,7 +2757,7 @@ fn print_task_sp_ereport_ingester(details: &serde_json::Value) {
     const NUM_WIDTH: usize = 3;
 
     if !sps.is_empty() {
-        println!("\n    Service processors:");
+        println!("\n    service processors:");
         for SpEreporterStatus { sp_type, slot, status } in &sps {
             println!(
                 "    - {sp_type:<6} {slot:02}: {:>NUM_WIDTH$} ereports",

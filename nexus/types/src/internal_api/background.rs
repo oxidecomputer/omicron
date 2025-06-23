@@ -533,7 +533,7 @@ pub struct ReadOnlyRegionReplacementStartStatus {
 #[derive(Serialize, Deserialize, Default, Debug, PartialEq, Eq)]
 pub struct SpEreportIngesterStatus {
     pub sps: Vec<SpEreporterStatus>,
-    pub error: Option<String>,
+    pub errors: Vec<String>,
 }
 
 #[derive(Serialize, Deserialize, Debug, PartialEq, Eq)]

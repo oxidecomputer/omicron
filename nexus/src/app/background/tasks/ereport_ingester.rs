@@ -5,7 +5,6 @@
 //! Background tasks for ereport ingestion
 
 use crate::app::background::BackgroundTask;
-use anyhow::Context;
 use chrono::Utc;
 use ereport_types::Ena;
 use ereport_types::Ereport;
@@ -42,13 +41,7 @@ impl BackgroundTask for SpEreportIngester {
         opctx: &'a OpContext,
     ) -> BoxFuture<'a, serde_json::Value> {
         Box::pin(async move {
-            let status =
-                self.actually_activate(opctx).await.unwrap_or_else(|error| {
-                    SpEreportIngesterStatus {
-                        error: Some(format!("{error:#}")),
-                        ..Default::default()
-                    }
-                });
+            let status = self.actually_activate(opctx).await;
             serde_json::json!(status)
         })
     }
@@ -67,50 +60,97 @@ impl SpEreportIngester {
     async fn actually_activate(
         &mut self,
         opctx: &OpContext,
-    ) -> anyhow::Result<SpEreportIngesterStatus> {
+    ) -> SpEreportIngesterStatus {
+        let mut status = SpEreportIngesterStatus::default();
         // Find MGS clients.
         // TODO(eliza): reuse the same client across activations; qorb, etc.
-        let mgs_clients = self
-            .resolver
-            .lookup_all_socket_v6(ServiceName::ManagementGatewayService)
-            .await
-            .context("looking up MGS addresses")?
-            .into_iter()
-            .map(|addr| {
-                let url = format!("http://{addr}");
-                let log = opctx.log.new(o!("gateway_url" => url.clone()));
-                let client = gateway_client::Client::new(&url, log);
-                GatewayClient { addr, client }
-            })
-            .collect::<Arc<[_]>>();
+        let mgs_clients = {
+            let lookup = self
+                .resolver
+                .lookup_all_socket_v6(ServiceName::ManagementGatewayService)
+                .await;
+            let addrs = match lookup {
+                Err(error) => {
+                    const MSG: &str = "failed to resolve MGS addresses";
+                    error!(opctx.log, "{MSG}"; "error" => ?error);
+                    status.errors.push(format!("{MSG}: {error}"));
+                    return status;
+                }
+                Ok(addrs) => addrs,
+            };
+
+            addrs
+                .into_iter()
+                .map(|addr| {
+                    let url = format!("http://{addr}");
+                    let log = opctx.log.new(o!("gateway_url" => url.clone()));
+                    let client = gateway_client::Client::new(&url, log);
+                    GatewayClient { addr, client }
+                })
+                .collect::<Arc<[_]>>()
+        };
+
+        if mgs_clients.is_empty() {
+            const MSG: &str = "no MGS addresses resolved";
+            error!(opctx.log, "{MSG}");
+            status.errors.push(MSG.to_string());
+            return status;
+        };
+
+        // Ask MGS for the list of all SP identifiers. If a request to the first
+        // gateway fails, we'll try again for every resolved MGS before giving
+        // up.
+        let sps = {
+            let mut gateways = mgs_clients.iter();
+            loop {
+                let Some(GatewayClient { addr, client }) = gateways.next()
+                else {
+                    const MSG: &str = "no MGS successfully returned SP ID list";
+                    error!(opctx.log, "{MSG}");
+                    status.errors.push(MSG.to_string());
+                    return status;
+                };
+                match client.sp_all_ids().await {
+                    Ok(ids) => break ids.into_inner(),
+                    Err(err) => {
+                        const MSG: &str = "failed to list SP IDs from MGS";
+                        warn!(
+                            opctx.log,
+                            "{MSG}";
+                            "error" => %err,
+                            "gateway_addr" => %addr,
+                        );
+                        status.errors.push(format!("{MSG} ({addr}): {err}"));
+                    }
+                }
+            }
+        };
 
         // TODO(eliza): what seems like an appropriate parallelism? should we
         // just do 16?
         let mut tasks = ParallelTaskSet::new();
-        let mut status = SpEreportIngesterStatus::default();
 
-        let sleds =
-            (0..32u16).map(|slot| (nexus_types::inventory::SpType::Sled, slot));
-        let switches = (0..2u16)
-            .map(|slot| (nexus_types::inventory::SpType::Switch, slot));
-        let pscs =
-            (0..2u16).map(|slot| (nexus_types::inventory::SpType::Power, slot));
-
-        for (sp_type, slot) in switches.chain(pscs).chain(sleds) {
+        for gateway_client::types::SpIdentifier { type_, slot } in sps {
+            let Ok(slot) = u16::try_from(slot) else {
+                const MSG: &str = "invalid slot number received from MGS";
+                error!(opctx.log, "{MSG}"; "sp_type" => %type_, "slot" => %slot);
+                status.errors.push(format!("{MSG}: {type_} {slot}"));
+                continue;
+            };
             let sp_result = tasks
                 .spawn({
                     let opctx = opctx.child(BTreeMap::from([
                         // XXX(eliza): that's so many little strings... :(
-                        ("sp_type".to_string(), sp_type.to_string()),
+                        ("sp_type".to_string(), type_.to_string()),
                         ("slot".to_string(), slot.to_string()),
                     ]));
                     let clients = mgs_clients.clone();
                     let ingester = self.inner.clone();
                     async move {
                         let status = ingester
-                            .ingest_sp_ereports(opctx, &clients, sp_type, slot)
+                            .ingest_sp_ereports(opctx, &clients, type_, slot)
                             .await?;
-                        Some(SpEreporterStatus { sp_type, slot, status })
+                        Some(SpEreporterStatus { sp_type: type_, slot, status })
                     }
                 })
                 .await;
@@ -129,7 +169,7 @@ impl SpEreportIngester {
         // Sort statuses for consistent output in OMDB commands.
         status.sps.sort_unstable_by_key(|sp| (sp.sp_type, sp.slot));
 
-        Ok(status)
+        status
     }
 }
 
@@ -431,16 +471,13 @@ mod tests {
             nexus.id(),
         );
 
-        let activation1 = ingester
-            .actually_activate(&opctx)
-            .await
-            .expect("activation should succeed");
-        dbg!(&activation1);
-        assert_eq!(
-            activation1.error.as_ref(),
-            None,
-            "there should be no top-level activation error"
+        let activation1 = ingester.actually_activate(&opctx).await;
+        assert!(
+            activation1.errors.is_empty(),
+            "activation 1 should succeed without errors, but saw: {:#?}",
+            activation1.errors
         );
+        dbg!(&activation1);
         assert_eq!(
             activation1.sps.len(),
             3,
@@ -606,17 +643,14 @@ mod tests {
 
         // Activate the task again and assert that no new ereports were
         // ingested.
-        let activation2 = ingester
-            .actually_activate(&opctx)
-            .await
-            .expect("activation 2 should succeed");
-        dbg!(&activation1);
-        assert_eq!(
-            activation2.error.as_ref(),
-            None,
-            "there should be no top-level activation error for the second \
-             activation"
+        let activation2 = ingester.actually_activate(&opctx).await;
+        assert!(
+            activation2.errors.is_empty(),
+            "activation 2 should succeed without errors, but saw: {:#?}",
+            activation2.errors
         );
+        dbg!(&activation2);
+
         assert_eq!(activation2.sps, &[], "no new ereports should be observed");
 
         check_sp_ereports_exist(
