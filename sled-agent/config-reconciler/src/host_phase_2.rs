@@ -11,7 +11,7 @@ use camino::Utf8PathBuf;
 use illumos_utils::dkio::MediaInfoExtended;
 use omicron_common::disk::M2Slot;
 use sha2::Digest as _;
-use slog_error_chain::InlineErrorChain;
+use sled_hardware::PooledDiskError;
 use std::cmp;
 use std::fs::File;
 use std::io;
@@ -19,17 +19,75 @@ use std::io::BufRead as _;
 use std::io::BufReader;
 use std::io::Read as _;
 use std::os::fd::AsRawFd as _;
+use std::sync::Arc;
 use tufaceous_artifact::ArtifactHash;
 
 #[derive(Debug, thiserror::Error)]
 #[error("boot disk not found")]
 pub struct BootDiskNotFound;
 
+#[derive(Debug, thiserror::Error)]
+pub enum BootPartitionError {
+    #[error("no disk found in this slot")]
+    NoDiskInSlot,
+    #[error("could not determine raw devfs path")]
+    DetermineDevfsPath(#[source] Arc<PooledDiskError>),
+    #[error("failed opening disk at {path}")]
+    OpenDevfs {
+        path: Utf8PathBuf,
+        #[source]
+        err: io::Error,
+    },
+    #[error("failed fetching disk's extended media info at {path}")]
+    MediaInfoExtended {
+        path: Utf8PathBuf,
+        #[source]
+        err: io::Error,
+    },
+    #[error("failed reading image header at {path}")]
+    ReadImageHeader {
+        path: Utf8PathBuf,
+        #[source]
+        err: io::Error,
+    },
+    #[error("failed parsing image header at {path}")]
+    ParseImageHeader {
+        path: Utf8PathBuf,
+        #[source]
+        err: ImageHeaderParseError,
+    },
+    #[error("failed reading image contents at {path} offset {offset}")]
+    ReadImageContents {
+        path: Utf8PathBuf,
+        offset: usize,
+        #[source]
+        err: io::Error,
+    },
+    #[error(
+        "sha256 of image contents don't match header at {path}; \
+         expected {expected} but got {got}"
+    )]
+    Sha256Mismatch {
+        path: Utf8PathBuf,
+        // These aren't really artifact hashes, exactly, but we use that type
+        // here to get the nice Display impl
+        expected: ArtifactHash,
+        got: ArtifactHash,
+    },
+}
+
+#[derive(Debug)]
+pub struct BootPartitionDetails {
+    header: BootImageHeader,
+    artifact_hash: ArtifactHash,
+    artifact_size: usize,
+}
+
 #[derive(Debug)]
 pub struct BootPartitionContents {
     pub boot_disk: Result<M2Slot, BootDiskNotFound>,
-    pub slot_a: BootPartitionDetails,
-    pub slot_b: BootPartitionDetails,
+    pub slot_a: Result<BootPartitionDetails, BootPartitionError>,
+    pub slot_b: Result<BootPartitionDetails, BootPartitionError>,
 }
 
 impl BootPartitionContents {
@@ -46,72 +104,36 @@ impl BootPartitionContents {
     }
 }
 
-#[derive(Debug)]
-pub enum BootPartitionDetails {
-    NoDiskFound,
-    ErrorDeterminingDiskPath(String),
-    ErrorOpeningDisk {
-        path: Utf8PathBuf,
-        err: String,
-    },
-    ErrorDeterminingBlockSize {
-        path: Utf8PathBuf,
-        err: String,
-    },
-    ErrorReadingDisk {
-        path: Utf8PathBuf,
-        err: String,
-    },
-    ErrorParsingImageHeader(String),
-    HeaderSha256Mismatch {
-        header: BootImageHeader,
-        calculated_sha256: [u8; 32],
-    },
-    Phase2Image {
-        artifact_hash: ArtifactHash,
-        artifact_size: usize,
-        header: BootImageHeader,
-    },
-}
-
 impl BootPartitionDetails {
-    async fn read(slot: M2Slot, internal_disks: &InternalDisks) -> Self {
+    async fn read(
+        slot: M2Slot,
+        internal_disks: &InternalDisks,
+    ) -> Result<Self, BootPartitionError> {
         match internal_disks.image_raw_devfs_path(slot) {
             Some(Ok(path)) => {
                 tokio::task::spawn_blocking(|| Self::read_blocking(path))
                     .await
                     .expect("read_blocking() did not panic")
             }
-            Some(Err(err)) => Self::ErrorDeterminingDiskPath(
-                InlineErrorChain::new(&err).to_string(),
-            ),
-            None => Self::NoDiskFound,
+            Some(Err(err)) => Err(BootPartitionError::DetermineDevfsPath(err)),
+            None => Err(BootPartitionError::NoDiskInSlot),
         }
     }
 
-    fn read_blocking(path: Utf8PathBuf) -> Self {
+    fn read_blocking(path: Utf8PathBuf) -> Result<Self, BootPartitionError> {
         const ONE_MIB: usize = 1024 * 1024;
 
-        let f = match File::open(&path) {
-            Ok(f) => f,
-            Err(err) => {
-                return Self::ErrorOpeningDisk {
-                    path,
-                    err: InlineErrorChain::new(&err).to_string(),
-                };
-            }
-        };
+        let f = File::open(&path).map_err(|err| {
+            BootPartitionError::OpenDevfs { path: path.clone(), err }
+        })?;
 
         // Determine the disk's block size.
-        let mut block_size = match MediaInfoExtended::from_fd(f.as_raw_fd()) {
-            Ok(media_info) => media_info.logical_block_size as usize,
-            Err(err) => {
-                return Self::ErrorDeterminingBlockSize {
-                    path,
-                    err: InlineErrorChain::new(&err).to_string(),
-                };
-            }
-        };
+        let mut block_size = MediaInfoExtended::from_fd(f.as_raw_fd())
+            .map_err(|err| BootPartitionError::MediaInfoExtended {
+                path: path.clone(),
+                err,
+            })?
+            .logical_block_size as usize;
 
         // We expect a block_size of 512 or 4096 in practice, but that's a
         // pretty small amount to read at once. If we have a block size that
@@ -141,7 +163,7 @@ impl BootPartitionDetails {
     fn read_blocking_with_buf_size<R: io::Read>(
         f: &mut BufReaderExactSize<R>,
         path: Utf8PathBuf,
-    ) -> Self {
+    ) -> Result<Self, BootPartitionError> {
         // Compute two SHA256 hashes as we read the contents of this boot image.
         // The `image_header` contains a sha256 of the data _after_ the header
         // itself, but the artifact hash that lands in the TUF repo depo
@@ -154,41 +176,29 @@ impl BootPartitionDetails {
         // data_hasher.
         let image_header = {
             let mut buf = [0; BootImageHeader::SIZE];
-            if let Err(err) = f.read_exact(&mut buf) {
-                return Self::ErrorReadingDisk {
-                    path,
-                    err: InlineErrorChain::new(&err).to_string(),
-                };
-            }
-            match BootImageHeader::parse(&buf) {
-                Ok(header) => {
-                    artifact_hasher.update(&buf);
-                    header
-                }
-                Err(err) => {
-                    return Self::ErrorParsingImageHeader(
-                        InlineErrorChain::new(&err).to_string(),
-                    );
-                }
-            }
+            f.read_exact(&mut buf).map_err(|err| {
+                BootPartitionError::ReadImageHeader { path: path.clone(), err }
+            })?;
+            let header = BootImageHeader::parse(&buf).map_err(|err| {
+                BootPartitionError::ParseImageHeader { path: path.clone(), err }
+            })?;
+            artifact_hasher.update(&buf);
+            header
         };
 
-        let artifact_size =
-            image_header.data_size as usize + BootImageHeader::SIZE;
-
-        let mut nleft = artifact_size - BootImageHeader::SIZE;
+        let mut nleft = image_header.data_size as usize;
+        let mut offset = BootImageHeader::SIZE;
+        let artifact_size = nleft + offset;
         while nleft > 0 {
             // Read the rest of the image in block-sized chunks by filling the
             // underlying `BufReader`'s buffer and consuming it.
-            let buf = match f.fill_buf() {
-                Ok(buf) => buf,
-                Err(err) => {
-                    return Self::ErrorReadingDisk {
-                        path,
-                        err: InlineErrorChain::new(&err).to_string(),
-                    };
+            let buf = f.fill_buf().map_err(|err| {
+                BootPartitionError::ReadImageContents {
+                    path: path.clone(),
+                    offset,
+                    err,
                 }
-            };
+            })?;
 
             // Our last block may have too much data; only hash to the end of
             // the image.
@@ -199,6 +209,7 @@ impl BootPartitionDetails {
             data_hasher.update(&buf[..nvalid]);
 
             nleft -= nvalid;
+            offset += nvalid;
             f.consume(nread);
         }
 
@@ -206,22 +217,23 @@ impl BootPartitionDetails {
         let data_hash: [u8; 32] = data_hasher.finalize().into();
 
         if image_header.sha256 != data_hash {
-            return Self::HeaderSha256Mismatch {
-                header: image_header,
-                calculated_sha256: data_hash,
-            };
+            return Err(BootPartitionError::Sha256Mismatch {
+                path,
+                expected: ArtifactHash(image_header.sha256),
+                got: ArtifactHash(data_hash),
+            });
         }
 
-        Self::Phase2Image {
+        Ok(Self {
             artifact_hash: ArtifactHash(artifact_hash.into()),
             artifact_size,
             header: image_header,
-        }
+        })
     }
 }
 
 #[derive(Debug, thiserror::Error)]
-enum ImageHeaderParseError {
+pub enum ImageHeaderParseError {
     #[error("not enough data to parse header")]
     TooSmall,
     #[error("bad magic (expected {expected:#x}, got {got:#x})")]
@@ -345,6 +357,7 @@ mod tests {
     use proptest::collection::vec;
     use proptest::prelude::*;
     use proptest::prop_oneof;
+    use slog_error_chain::InlineErrorChain;
     use test_strategy::proptest;
 
     // We're reading a raw disk that is (presumably) much larger than any phase
@@ -437,25 +450,17 @@ mod tests {
             &mut reader,
             "/does-not-matter".into(),
         ) {
-            BootPartitionDetails::Phase2Image {
+            Ok(BootPartitionDetails {
                 artifact_hash,
                 artifact_size,
                 header,
-            } => {
+            }) => {
                 assert_eq!(artifact_hash, expected_artifact_hash);
                 assert_eq!(artifact_size, expected_artifact_size);
                 assert_eq!(header.sha256, expected_header_sha256);
             }
-            res @ (BootPartitionDetails::NoDiskFound
-            | BootPartitionDetails::ErrorDeterminingDiskPath(_)
-            | BootPartitionDetails::ErrorOpeningDisk { .. }
-            | BootPartitionDetails::ErrorDeterminingBlockSize {
-                ..
-            }
-            | BootPartitionDetails::ErrorReadingDisk { .. }
-            | BootPartitionDetails::ErrorParsingImageHeader(_)
-            | BootPartitionDetails::HeaderSha256Mismatch { .. }) => {
-                panic!("unexpected result: {res:?}");
+            Err(err) => {
+                panic!("unexpected error: {}", InlineErrorChain::new(&err));
             }
         }
 
