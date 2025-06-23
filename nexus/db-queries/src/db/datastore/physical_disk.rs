@@ -340,7 +340,7 @@ mod test {
     use nexus_db_lookup::LookupPath;
     use nexus_sled_agent_shared::inventory::{
         Baseboard, ConfigReconcilerInventoryStatus, Inventory, InventoryDisk,
-        SledRole,
+        SledRole, ZoneImageResolverInventory,
     };
     use nexus_types::identity::Asset;
     use omicron_common::api::external::ByteCount;
@@ -700,6 +700,7 @@ mod test {
                     reconciler_status:
                         ConfigReconcilerInventoryStatus::NotYetRun,
                     last_reconciliation: None,
+                    zone_image_resolver: ZoneImageResolverInventory::new_fake(),
                 },
             )
             .unwrap();
