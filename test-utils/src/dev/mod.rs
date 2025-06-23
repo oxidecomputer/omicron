@@ -70,7 +70,7 @@ async fn setup_database(
     storage_source: StorageSource,
 ) -> Result<db::CockroachInstance> {
     let builder = db::CockroachStarterBuilder::new();
-    let mut builder = match &storage_source {
+    let builder = match &storage_source {
         StorageSource::DoNotPopulate | StorageSource::CopyFromSeed { .. } => {
             builder
         }
@@ -78,7 +78,6 @@ async fn setup_database(
             builder.store_dir(output_dir)
         }
     };
-    builder.redirect_stdio_to_files();
     let starter = builder.build().context("error building CockroachStarter")?;
     info!(
         &log,
