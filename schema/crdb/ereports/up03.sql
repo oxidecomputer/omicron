@@ -1,6 +1,6 @@
 CREATE INDEX IF NOT EXISTS order_sp_ereports_by_timestamp
 ON omicron.public.sp_ereport
-USING BTREE (
+USING HASH (
     time_collected
 )
 WHERE

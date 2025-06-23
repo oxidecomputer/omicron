@@ -5826,12 +5826,11 @@ where
 
 CREATE INDEX IF NOT EXISTS order_sp_ereports_by_timestamp
 ON omicron.public.sp_ereport
-USING BTREE (
+USING HASH (
     time_collected
 )
 WHERE
     time_deleted IS NULL;
-
 
 CREATE INDEX IF NOT EXISTS lookup_sp_ereports_by_serial
 ON omicron.public.sp_ereport (
@@ -5892,7 +5891,7 @@ WHERE
 
 CREATE INDEX IF NOT EXISTS order_host_ereports_by_timestamp
 ON omicron.public.host_ereport
-USING BTREE (
+USING HASH (
     time_collected
 )
 WHERE
