@@ -2,7 +2,12 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-//! Background tasks for ereport ingestion
+//! Background tasks for ereport ingestion.
+//!
+//! The tasks in this module implement the Nexus portion of the ereport
+//! ingestion protocol [described in RFD 520][rfd520].
+//!
+//! [rfd520]: https://rfd.shared.oxide.computer/rfd/520#_determinations
 
 use crate::app::background::BackgroundTask;
 use chrono::Utc;
@@ -210,6 +215,9 @@ impl Ingester {
 
         let mut params = EreportQueryParams::from_latest(latest);
         let mut status = None;
+
+        // Continue requesting ereports from this SP in a loop until we have
+        // received all its ereports.
         while let Some(gateway_client::types::Ereports {
             restart_id,
             items,
