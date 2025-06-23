@@ -13472,6 +13472,7 @@ dependencies = [
  "gfss",
  "hex",
  "hkdf",
+ "iddqd",
  "omicron-test-utils",
  "omicron-uuid-kinds",
  "omicron-workspace-hack",
