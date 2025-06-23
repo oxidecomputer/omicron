@@ -330,8 +330,6 @@ impl Ingester {
             slog::debug!(
                 &opctx.log,
                 "attempting ereport collection from MGS";
-                "sp_type" => ?sp_type,
-                "slot" => slot,
                 "committed_ena" => ?committed_ena,
                 "start_ena" => ?start_ena,
                 "restart_id" => ?restart_id,
@@ -357,8 +355,6 @@ impl Ingester {
                     slog::debug!(
                         &opctx.log,
                         "ereport collection: MGS claims there is no SP in this slot";
-                        "sp_type" => ?sp_type,
-                        "slot" => slot,
                         "committed_ena" => ?committed_ena,
                         "start_ena" => ?start_ena,
                         "restart_id" => ?restart_id,
@@ -369,8 +365,6 @@ impl Ingester {
                     slog::warn!(
                         &opctx.log,
                         "ereport collection: unanticipated MGS request error: {e:#}";
-                        "sp_type" => ?sp_type,
-                        "slot" => slot,
                         "committed_ena" => ?committed_ena,
                         "start_ena" => ?start_ena,
                         "restart_id" => ?restart_id,
