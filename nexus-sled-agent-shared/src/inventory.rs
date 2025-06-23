@@ -141,6 +141,7 @@ pub struct ConfigReconcilerInventory {
     pub datasets: BTreeMap<DatasetUuid, ConfigReconcilerInventoryResult>,
     pub orphaned_datasets: IdOrdMap<OrphanedDataset>,
     pub zones: BTreeMap<OmicronZoneUuid, ConfigReconcilerInventoryResult>,
+    pub boot_partitions: BootPartitionContents,
 }
 
 impl ConfigReconcilerInventory {
@@ -204,11 +205,21 @@ impl ConfigReconcilerInventory {
             datasets,
             orphaned_datasets: IdOrdMap::new(),
             zones,
+            boot_partitions: {
+                // None of our callers care about this; if that changes, we
+                // could pass in boot partition contents.
+                let err = "constructed via debug_assume_success()".to_string();
+                BootPartitionContents {
+                    boot_disk: Err(err.clone()),
+                    slot_a: Err(err.clone()),
+                    slot_b: Err(err),
+                }
+            },
         }
     }
 }
 
-#[derive(Clone, Debug, Deserialize, JsonSchema, Serialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Deserialize, JsonSchema, Serialize)]
 pub struct BootPartitionContents {
     #[serde(with = "snake_case_result")]
     #[schemars(schema_with = "SnakeCaseResult::<M2Slot, String>::json_schema")]
@@ -225,7 +236,7 @@ pub struct BootPartitionContents {
     pub slot_b: Result<BootPartitionDetails, String>,
 }
 
-#[derive(Clone, Debug, Deserialize, JsonSchema, Serialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Deserialize, JsonSchema, Serialize)]
 pub struct BootPartitionDetails {
     pub header: BootImageHeader,
     pub artifact_hash: ArtifactHash,
@@ -235,7 +246,7 @@ pub struct BootPartitionDetails {
 // There are several other fields in the header that we either parse and discard
 // or ignore completely; see https://github.com/oxidecomputer/boot-image-tools
 // for more thorough support.
-#[derive(Clone, Debug, Deserialize, JsonSchema, Serialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Deserialize, JsonSchema, Serialize)]
 pub struct BootImageHeader {
     pub flags: u64,
     pub data_size: u64,
