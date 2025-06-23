@@ -61,16 +61,14 @@ impl CoordinatorState {
         let (config, shares) = Configuration::new(&msg)?;
 
         let mut prepares = BTreeMap::new();
-        // `my_config` and `my_share` are optional only so that we can fill them
-        // in via the loop. They will always become `Some`, as a `Configuration`
-        // always contains the coordinator as a member as validated by
-        // construction of `ValidatedReconfigureMsg`.
-        let mut my_config: Option<Configuration> = None;
+        // `my_share` is optional only so that we can fill it in via the
+        // loop. It will always become `Some`, as a `Configuration` always
+        // contains the coordinator as a member as validated by construction of
+        // `ValidatedReconfigureMsg`.
         let mut my_share: Option<Share> = None;
         for (platform_id, share) in shares.into_iter() {
             if platform_id == *msg.coordinator_id() {
                 // The data to add to our `PersistentState`
-                my_config = Some(config.clone());
                 my_share = Some(share);
             } else {
                 // Create a message that requires sending
@@ -82,12 +80,12 @@ impl CoordinatorState {
             prepare_acks: BTreeSet::new(),
         };
 
-        let state = CoordinatorState::new(log, now, msg, config, op);
+        let state = CoordinatorState::new(log, now, msg, config.clone(), op);
 
         // Safety: Construction of a `ValidatedReconfigureMsg` ensures that
         // `my_platform_id` is part of the new configuration and has a share.
         // We can therefore safely unwrap here.
-        Ok((state, my_config.unwrap(), my_share.unwrap()))
+        Ok((state, config, my_share.unwrap()))
     }
 
     /// A reconfiguration from one group to another
