@@ -62,7 +62,7 @@ gateway-messages = { git = "https://github.com/oxidecomputer/management-gateway-
 generic-array = { version = "0.14.7", default-features = false, features = ["more_lengths", "zeroize"] }
 getrandom-6f8ce4dd05d13bba = { package = "getrandom", version = "0.2.15", default-features = false, features = ["js", "rdrand", "std"] }
 group = { version = "0.13.0", default-features = false, features = ["alloc"] }
-hashbrown = { version = "0.15.3" }
+hashbrown = { version = "0.15.4" }
 hickory-proto = { version = "0.24.4", features = ["text-parsing"] }
 hmac = { version = "0.12.1", default-features = false, features = ["reset"] }
 hyper = { version = "1.6.0", features = ["full"] }
@@ -191,7 +191,7 @@ gateway-messages = { git = "https://github.com/oxidecomputer/management-gateway-
 generic-array = { version = "0.14.7", default-features = false, features = ["more_lengths", "zeroize"] }
 getrandom-6f8ce4dd05d13bba = { package = "getrandom", version = "0.2.15", default-features = false, features = ["js", "rdrand", "std"] }
 group = { version = "0.13.0", default-features = false, features = ["alloc"] }
-hashbrown = { version = "0.15.3" }
+hashbrown = { version = "0.15.4" }
 hickory-proto = { version = "0.24.4", features = ["text-parsing"] }
 hmac = { version = "0.12.1", default-features = false, features = ["reset"] }
 hyper = { version = "1.6.0", features = ["full"] }
