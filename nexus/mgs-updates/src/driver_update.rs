@@ -129,10 +129,10 @@ pub enum ApplyUpdateError {
     #[error("SP reports not knowing about our update attempt")]
     SpUpdateLost,
     #[error(
-        "gave up after {}ms waiting for update {0} to finish",
-        .1.as_millis())
+        "gave up after {}ms waiting for update {update_id} to finish",
+        timeout.as_millis())
     ]
-    StuckUpdating(Uuid, Duration),
+    StuckUpdating { update_id: Uuid, timeout: Duration },
     #[error("failed to abort in-progress SP update")]
     SpUpdateAbortFailed(#[from] AbortError),
     #[error("SP reports that reset failed: {0:?}")]
@@ -302,7 +302,10 @@ pub(crate) async fn apply_update(
             // error.  The caller will have to do the retry if they want it.
             DeliveryWaitStatus::StuckUpdating(id, timeout) => {
                 abort_update(&mut mgs_clients, sp_update, id, "stuck").await?;
-                return Err(ApplyUpdateError::StuckUpdating(id, timeout));
+                return Err(ApplyUpdateError::StuckUpdating {
+                    update_id: id,
+                    timeout,
+                });
             }
 
             DeliveryWaitStatus::Failed(id, message) => {

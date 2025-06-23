@@ -1905,15 +1905,15 @@ mod illumos_tests {
         // StorageManagerTestHarness?
         let internal_disks_rx = InternalDisksReceiver::fake_static(
             Arc::new(all_disks.mount_config().clone()),
-            all_disks.all_m2_zpools().into_iter().enumerate().map(
-                |(i, zpool)| {
+            all_disks.all_m2_zpool_ids().into_iter().enumerate().map(
+                |(i, zpool_id)| {
                     (
                         DiskIdentity {
                             vendor: format!("test-vendor-{i}"),
                             model: format!("test-model-{i}"),
                             serial: format!("test-serial-{i}"),
                         },
-                        zpool,
+                        zpool_id,
                     )
                 },
             ),

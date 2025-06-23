@@ -118,31 +118,25 @@ The long-term goal is to enable autonomous operation of both the **planner** and
 ----
 The Planner
 
-    fleet policy  (database state, inventory)   (latest blueprint)
+    fleet policy (database state, inventory) target blueprint
              \               |               /
               \              |              /
-               +----------+  |  +----------/
+               +----------+  |  +----------+
                           |  |  |
                           v  v  v
-
-                         "planner"
-              (eventually a background task)
+                    planner background task
                              |
-                             v                      no
-                    is a new blueprint necessary? ------> done
-                             |
-                             | yes
                              v
                     generate a new blueprint
                              |
-                             |
+                             v                                                no
+                    is the new blueprint different from the current target? ------> done
+                             | yes
                              v
                     commit blueprint to database
                              |
-                             |
                              v
                     make blueprint the target
-                             |
                              |
                              v
                            done
@@ -158,18 +152,18 @@ The Executor
                      +----+   +----+
                           |   |
                           v   v
-
-                        "executor"
-                     (background task)
+                    executor background task
                             |
                             v
                     determine actions needed
-                    take actions
+                            |
+                            v
+                       take actions
 ----
 
-This planner will evaluate whether the current (target) blueprint is consistent with the current policy.  If not, the task generates a new blueprint that _is_ consistent with the current policy and attempts to make that the new target.  (Multiple Nexus instances could try to do this concurrently.  CockroachDB's strong consistency ensures that only one can win.  The other Nexus instances must go back to evaluating the winning blueprint before trying to change it again -- otherwise two Nexus instances might fight over two equivalent blueprints.)
+The planner evaluates whether the current (target) blueprint is consistent with the current policy.  If not, the task generates a new blueprint that _is_ consistent with the current policy and attempts to make that the new target.  (Multiple Nexus instances could try to do this concurrently.  CockroachDB's strong consistency ensures that only one can win.  The other Nexus instances must go back to evaluating the winning blueprint before trying to change it again -- otherwise two Nexus instances might fight over two equivalent blueprints.)
 
-The execution task will evaluate whether the state reflected in the latest inventory collection is consistent with the current target blueprint.  If not, it executes operations to bring reality into line with the blueprint.  This means provisioning new zones, removing old zones, adding instances to DNS, removing instances from DNS, carrying out firmware updates, etc.
+The execution task evaluates whether the state reflected in the latest inventory collection is consistent with the current target blueprint.  If not, it executes operations to bring reality into line with the blueprint.  This means provisioning new zones, removing old zones, adding instances to DNS, removing instances from DNS, carrying out firmware updates, etc.
 
 === Currently: plan on-demand, execute continuously
 
@@ -181,7 +175,7 @@ We're being cautious about rolling out that kind of automation.  Instead, today,
 
 `omdb` uses the Nexus internal API to do these things.  Since this can only be done using `omdb`, Reconfigurator can really only be used by Oxide engineering and support, not customers.
 
-To get to the long term vision where the system is doing all this on its own in response to operator input, we'll need to get confidence that continually executing the planner will have no ill effects on working systems.  This might involve more operational experience with it, more safeties, and tools for pausing execution, previewing what it _would_ do, etc.
+The planner background task is currently disabled by default, but can be enabled by setting the Nexus configuration option `blueprints.disable_planner = false`.  To get to the long term vision where the system is doing all this on its own in response to operator input, we'll need to get confidence that continually executing the planner will have no ill effects on working systems.  This might involve more operational experience with it, more safeties, and tools for pausing execution, previewing what it _would_ do, etc.
 
 == Design patterns
 
