@@ -67,7 +67,7 @@ impl CustomDnsResolver {
         self.dns_addr
     }
 
-    /// Returns the underlying `TokioResolver
+    /// Returns the underlying `TokioResolver`
     pub fn resolver(&self) -> &TokioResolver {
         &self.resolver
     }

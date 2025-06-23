@@ -1092,9 +1092,9 @@ impl DnsLookupStep {
             if err.is_no_records_found() && options.is_no_records_found_okay {
                 let message = format!(
                     "DNS server {dns_ip} \
-                        {query_type} query attempt {attempt}: \
-                        no record found for {name}; \
-                        connectivity to DNS server appears good"
+                     {query_type} query attempt {attempt}: \
+                     no record found for {name}; \
+                     connectivity to DNS server appears good"
                 );
                 query_results.push(message.clone());
                 cx.send_progress(StepProgress::Progress {
@@ -1106,12 +1106,13 @@ impl DnsLookupStep {
                 self.messages.append(&mut query_results);
                 return Ok(());
             } else if err.is_no_records_found() {
-                // Otherwise, `NoRecordsFound` means we should either switch to
-                // AAAA queries (if this was A) or we're done (and failed).
+                // If we did not find records but that is not an acceptable
+                // result for the lookup. Switch to AAAA queries (if this was A)
+                // or we're done (and failed).
                 let message = format!(
                     "DNS server {dns_ip} \
-                         {query_type} query attempt {attempt}: \
-                         failed to look up {name}: {}",
+                     {query_type} query attempt {attempt}: \
+                     failed to look up {name}: {}",
                     DisplayErrorChain::new(&err)
                 );
                 query_results.push(message.clone());
@@ -1121,9 +1122,6 @@ impl DnsLookupStep {
                 })
                 .await;
 
-                // If this was an A query, switch to AAAA and reset the
-                // attempt counter; otherwise, we're done (and we failed
-                // to resolve the name).
                 if query_ipv4 {
                     query_ipv4 = false;
                     attempt = 0;
@@ -1135,8 +1133,8 @@ impl DnsLookupStep {
             } else {
                 let message = format!(
                     "DNS server {dns_ip} \
-                         {query_type} query attempt {attempt}: \
-                         failed to look up {name}: {}",
+                     {query_type} query attempt {attempt}: \
+                     failed to look up {name}: {}",
                     DisplayErrorChain::new(&err)
                 );
                 query_results.push(message.clone());

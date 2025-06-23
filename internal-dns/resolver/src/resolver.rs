@@ -115,10 +115,19 @@ impl Resolver {
         let mut rc = ResolverConfig::new();
         let dns_server_count = dns_addrs.len();
         for &socket_addr in dns_addrs.into_iter() {
-            rc.add_name_server(NameServerConfig::new(
+            let mut ns_config = NameServerConfig::new(
                 socket_addr,
                 hickory_resolver::proto::xfer::Protocol::Udp,
-            ));
+            );
+            // Intentionally continue trying other DNS servers if we get an
+            // NXDOMAIN or NOERROR with no answer.  This should be a rare
+            // circumstance.  If it occurs and the name is genuinely not
+            // present, we'll be slower to error.  If the name is unevenly
+            // distributed it is in the process of going away, or a DNS server
+            // is serving stale records and may not be getting updated anymore.
+            // In this last case, we may be avoiding service disruption.
+            ns_config.trust_negative_responses = false;
+            rc.add_name_server(ns_config);
         }
         let mut opts = ResolverOpts::default();
         // Enable edns for potentially larger records
