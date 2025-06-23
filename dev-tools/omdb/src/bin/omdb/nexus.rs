@@ -2740,21 +2740,21 @@ fn print_task_sp_ereport_ingester(details: &serde_json::Value) {
             Ok(status) => status,
         };
 
-    if !errors.is_empty() {
-        println!("{ERRICON} errors:");
-        for error in errors {
-            println!("    > {error}");
-        }
-    }
-
-    print_ereporter_status_totals(sps.iter().map(|sp| &sp.status));
-
     const NEW_EREPORTS: &str = "new ereports ingested:";
     const HTTP_REQUESTS: &str = "HTTP requests sent:";
     const ERRORS: &str = "errors:";
     const WIDTH: usize =
         const_max_len(&[NEW_EREPORTS, HTTP_REQUESTS, ERRORS]) + 1;
     const NUM_WIDTH: usize = 3;
+
+    if !errors.is_empty() {
+        println!("{ERRICON} {ERRORS:<WIDTH$}{:>NUM_WIDTH$}", errors.len());
+        for error in errors {
+            println!("      - {error}");
+        }
+    }
+
+    print_ereporter_status_totals(sps.iter().map(|sp| &sp.status));
 
     if !sps.is_empty() {
         println!("\n    service processors:");
@@ -2778,7 +2778,7 @@ fn print_task_sp_ereport_ingester(details: &serde_json::Value) {
                     status.errors.len()
                 );
                 for error in &status.errors {
-                    println!("      - {error}");
+                    println!("        - {error}");
                 }
             }
         }
