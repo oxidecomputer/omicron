@@ -699,7 +699,7 @@ mod tests {
     // Helper for constructing a LedgerTask backed by a fake internal disk that
     // points to a temporary directory.
     struct TestHarness {
-        tempdir: Utf8TempDir,
+        _tempdir: Utf8TempDir,
         task_handle: LedgerTaskHandle,
         internal_disks_rx: InternalDisksReceiver,
         current_config_rx: watch::Receiver<CurrentSledConfig>,
@@ -816,7 +816,7 @@ mod tests {
             .await
             .expect("ledger task loaded config from disk");
 
-            Self { tempdir, task_handle, internal_disks_rx, current_config_rx }
+            Self { _tempdir: tempdir, task_handle, internal_disks_rx, current_config_rx }
         }
     }
 
