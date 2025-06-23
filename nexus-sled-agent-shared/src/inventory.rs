@@ -27,7 +27,6 @@ use omicron_common::{
         internal::shared::{NetworkInterface, SourceNatConfig},
     },
     disk::{DatasetConfig, DiskVariant, OmicronPhysicalDiskConfig},
-    snake_case_result::{self, SnakeCaseResult},
     update::ArtifactId,
     zpool_name::ZpoolName,
 };
