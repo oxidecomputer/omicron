@@ -10,6 +10,7 @@ workspace = true
 [dependencies]
 futures.workspace = true
 hickory-resolver.workspace = true
+hickory-proto.workspace = true
 internal-dns-types.workspace = true
 omicron-common.workspace = true
 omicron-workspace-hack.workspace = true
