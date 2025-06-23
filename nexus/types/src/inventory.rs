@@ -27,6 +27,7 @@ use nexus_sled_agent_shared::inventory::InventoryZpool;
 use nexus_sled_agent_shared::inventory::OmicronSledConfig;
 use nexus_sled_agent_shared::inventory::OmicronZoneConfig;
 use nexus_sled_agent_shared::inventory::SledRole;
+use nexus_sled_agent_shared::inventory::ZoneImageResolverInventory;
 use omicron_common::api::external::ByteCount;
 pub use omicron_common::api::internal::shared::NetworkInterface;
 pub use omicron_common::api::internal::shared::NetworkInterfaceKind;
@@ -568,6 +569,7 @@ pub struct SledAgent {
     pub ledgered_sled_config: Option<OmicronSledConfig>,
     pub reconciler_status: ConfigReconcilerInventoryStatus,
     pub last_reconciliation: Option<ConfigReconcilerInventory>,
+    pub zone_image_resolver: ZoneImageResolverInventory,
 }
 
 #[derive(Clone, Default, Debug, PartialEq, Eq, Deserialize, Serialize)]

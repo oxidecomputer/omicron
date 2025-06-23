@@ -182,10 +182,7 @@ async fn inventory_activate(
                 vec![]
             }
             ResolveError::Resolve(hickory_err)
-                if matches!(
-                    hickory_err.kind(),
-                    hickory_resolver::error::ResolveErrorKind::NoRecordsFound { .. }
-                ) =>
+                if is_no_records_found(&hickory_err) =>
             {
                 vec![]
             }
@@ -235,6 +232,20 @@ async fn inventory_activate(
         .context("saving inventory to database")?;
 
     Ok(collection)
+}
+
+fn is_no_records_found(err: &hickory_resolver::ResolveError) -> bool {
+    match err.kind() {
+        hickory_resolver::ResolveErrorKind::Proto(proto_error) => {
+            match proto_error.kind() {
+                hickory_resolver::proto::ProtoErrorKind::NoRecordsFound {
+                    ..
+                } => true,
+                _ => false,
+            }
+        }
+        _ => false,
+    }
 }
 
 /// Determine which sleds to inventory based on what's in the database

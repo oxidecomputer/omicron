@@ -4,7 +4,6 @@
 
 //! Benchmarks creating sled reservations
 
-use criterion::black_box;
 use criterion::{Criterion, SamplingMode, criterion_group, criterion_main};
 use nexus_db_queries::authz;
 use nexus_db_queries::context::OpContext;
@@ -13,6 +12,7 @@ use omicron_common::api::external;
 use omicron_test_utils::dev;
 use omicron_uuid_kinds::InstanceUuid;
 use std::collections::HashSet;
+use std::hint::black_box;
 use std::sync::Arc;
 use std::time::Duration;
 use std::time::Instant;

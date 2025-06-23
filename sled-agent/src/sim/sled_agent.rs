@@ -26,7 +26,7 @@ use futures::Stream;
 use nexus_sled_agent_shared::inventory::{
     ConfigReconcilerInventoryStatus, Inventory, InventoryDataset,
     InventoryDisk, InventoryZpool, OmicronSledConfig, OmicronZonesConfig,
-    SledRole,
+    SledRole, ZoneImageResolverInventory,
 };
 use omicron_common::api::external::{
     ByteCount, DiskState, Error, Generation, ResourceType,
@@ -807,6 +807,8 @@ impl SledAgent {
             ledgered_sled_config: Some(sled_config),
             reconciler_status: ConfigReconcilerInventoryStatus::NotYetRun,
             last_reconciliation: None,
+            // TODO: simulate the zone image resolver with greater fidelity
+            zone_image_resolver: ZoneImageResolverInventory::new_fake(),
         })
     }
 

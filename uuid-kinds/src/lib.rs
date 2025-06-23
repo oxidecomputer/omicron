@@ -65,7 +65,9 @@ impl_typed_uuid_kind! {
     DownstairsRegion => "downstairs_region",
     EreporterRestart => "ereporter_restart",
     ExternalIp => "external_ip",
+    ExternalZpool => "external_zpool",
     Instance => "instance",
+    InternalZpool => "internal_zpool",
     LoopbackAddress => "loopback_address",
     Mupdate => "mupdate",
     MupdateOverride => "mupdate_override",
@@ -96,4 +98,16 @@ impl_typed_uuid_kind! {
     WebhookDeliveryAttempt => "webhook_delivery_attempt",
     WebhookSecret => "webhook_secret",
     Zpool => "zpool",
+}
+
+impl From<ExternalZpoolKind> for ZpoolKind {
+    fn from(kind: ExternalZpoolKind) -> Self {
+        match kind {}
+    }
+}
+
+impl From<InternalZpoolKind> for ZpoolKind {
+    fn from(kind: InternalZpoolKind) -> Self {
+        match kind {}
+    }
 }
