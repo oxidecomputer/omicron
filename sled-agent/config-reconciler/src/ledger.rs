@@ -816,7 +816,12 @@ mod tests {
             .await
             .expect("ledger task loaded config from disk");
 
-            Self { _tempdir: tempdir, task_handle, internal_disks_rx, current_config_rx }
+            Self {
+                _tempdir: tempdir,
+                task_handle,
+                internal_disks_rx,
+                current_config_rx,
+            }
         }
     }
 

@@ -16,8 +16,10 @@ use id_map::IdMappable;
 use iddqd::IdOrdItem;
 use iddqd::IdOrdMap;
 use iddqd::id_upcast;
-use omicron_common::disk::{DatasetKind, DatasetName};
+use omicron_common::disk::{DatasetKind, DatasetName, M2Slot};
 use omicron_common::ledger::Ledgerable;
+use omicron_common::snake_case_result;
+use omicron_common::snake_case_result::SnakeCaseResult;
 use omicron_common::update::OmicronZoneManifestSource;
 use omicron_common::{
     api::{
@@ -204,6 +206,42 @@ impl ConfigReconcilerInventory {
             zones,
         }
     }
+}
+
+#[derive(Clone, Debug, Deserialize, JsonSchema, Serialize)]
+pub struct BootPartitionContents {
+    #[serde(with = "snake_case_result")]
+    #[schemars(schema_with = "SnakeCaseResult::<M2Slot, String>::json_schema")]
+    pub boot_disk: Result<M2Slot, String>,
+    #[serde(with = "snake_case_result")]
+    #[schemars(
+        schema_with = "SnakeCaseResult::<BootPartitionDetails, String>::json_schema"
+    )]
+    pub slot_a: Result<BootPartitionDetails, String>,
+    #[serde(with = "snake_case_result")]
+    #[schemars(
+        schema_with = "SnakeCaseResult::<BootPartitionDetails, String>::json_schema"
+    )]
+    pub slot_b: Result<BootPartitionDetails, String>,
+}
+
+#[derive(Clone, Debug, Deserialize, JsonSchema, Serialize)]
+pub struct BootPartitionDetails {
+    pub header: BootImageHeader,
+    pub artifact_hash: ArtifactHash,
+    pub artifact_size: usize,
+}
+
+// There are several other fields in the header that we either parse and discard
+// or ignore completely; see https://github.com/oxidecomputer/boot-image-tools
+// for more thorough support.
+#[derive(Clone, Debug, Deserialize, JsonSchema, Serialize)]
+pub struct BootImageHeader {
+    pub flags: u64,
+    pub data_size: u64,
+    pub image_size: u64,
+    pub target_size: u64,
+    pub sha256: [u8; 32],
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Deserialize, JsonSchema, Serialize)]
