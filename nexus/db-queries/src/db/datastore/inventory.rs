@@ -3234,7 +3234,7 @@ impl DataStore {
                     Error::internal_error(&format!(
                         "failed to create zone image resolver inventory \
                          for sled {sled_id}: {}",
-                        InlineErrorChain::new(e.as_ref()).to_string()
+                        InlineErrorChain::new(e.as_ref()),
                     ))
                 })?;
 
