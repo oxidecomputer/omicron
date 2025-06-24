@@ -1951,6 +1951,7 @@ mod tests {
     use rand::Rng;
     use rand::thread_rng;
     use slog::Logger;
+    use std::collections::BTreeSet;
     use std::mem;
     use std::net::IpAddr;
     use std::net::Ipv4Addr;
@@ -1999,6 +2000,7 @@ mod tests {
             }};
         }
 
+        let mut tables_checked = BTreeSet::new();
         for (table_name, result) in [
             query_count!(blueprint, id),
             query_count!(bp_sled_metadata, blueprint_id),
@@ -2006,12 +2008,42 @@ mod tests {
             query_count!(bp_omicron_physical_disk, blueprint_id),
             query_count!(bp_omicron_zone, blueprint_id),
             query_count!(bp_omicron_zone_nic, blueprint_id),
+            query_count!(bp_clickhouse_cluster_config, blueprint_id),
+            query_count!(bp_clickhouse_keeper_zone_id_to_node_id, blueprint_id),
+            query_count!(bp_oximeter_read_policy, blueprint_id),
         ] {
             let count: i64 = result.unwrap();
             assert_eq!(
                 count, 0,
                 "nonzero row count for blueprint \
                  {blueprint_id} in table {table_name}"
+            );
+            tables_checked.insert(table_name);
+        }
+
+        // Look for likely blueprint-related tables that we didn't check.
+        let mut query = QueryBuilder::new();
+        query.sql(
+            "SELECT table_name \
+            FROM information_schema.tables \
+            WHERE table_name LIKE 'bp\\_%'",
+        );
+        let tables_unchecked: Vec<String> = query
+            .query::<diesel::sql_types::Text>()
+            .load_async(&*conn)
+            .await
+            .expect("Failed to query information_schema for tables")
+            .into_iter()
+            .filter(|f: &String| !tables_checked.contains(f.as_str()))
+            .collect();
+        if !tables_unchecked.is_empty() {
+            panic!(
+                "found table(s) that look related to blueprints, but \
+                 aren't covered by ensure_blueprint_fully_deleted(). \
+                 Please add them to that function!\n
+                 \n\
+                 found: {}",
+                tables_unchecked.join(", ")
             );
         }
     }
