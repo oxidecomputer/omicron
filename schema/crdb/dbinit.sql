@@ -3792,7 +3792,8 @@ CREATE TABLE IF NOT EXISTS omicron.public.inv_sled_boot_partition (
     sled_id UUID NOT NULL,
 
     -- the boot disk slot (0=M2Slot::A, 1=M2Slot::B)
-    boot_disk_slot INT2 CHECK (boot_disk_slot >= 0 AND boot_disk_slot <= 1) NOT NULL,
+    boot_disk_slot INT2
+        CHECK (boot_disk_slot >= 0 AND boot_disk_slot <= 1) NOT NULL,
 
     -- SHA256 hash of the artifact; if we have a TUF repo containing this OS
     -- image, this will match the artifact hash of the phase 2 image
@@ -5971,7 +5972,7 @@ INSERT INTO omicron.public.db_metadata (
     version,
     target_version
 ) VALUES
-    (TRUE, NOW(), NOW(), '151.0.0', NULL)
+    (TRUE, NOW(), NOW(), '152.0.0', NULL)
 ON CONFLICT DO NOTHING;
 
 COMMIT;
