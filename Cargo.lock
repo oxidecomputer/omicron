@@ -7803,6 +7803,7 @@ dependencies = [
  "tabled 0.15.0",
  "textwrap",
  "tokio",
+ "tufaceous-artifact",
  "unicode-width 0.1.14",
  "update-engine",
  "url",

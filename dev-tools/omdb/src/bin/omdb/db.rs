@@ -125,6 +125,10 @@ use nexus_db_queries::db::pagination::Paginator;
 use nexus_db_queries::db::pagination::paginated;
 use nexus_db_queries::db::queries::ALLOW_FULL_TABLE_SCAN_SQL;
 use nexus_db_queries::db::queries::region_allocation;
+use nexus_sled_agent_shared::inventory::BootImageHeader;
+use nexus_sled_agent_shared::inventory::BootPartitionContents;
+use nexus_sled_agent_shared::inventory::BootPartitionDetails;
+use nexus_sled_agent_shared::inventory::ConfigReconcilerInventory;
 use nexus_sled_agent_shared::inventory::ConfigReconcilerInventoryResult;
 use nexus_sled_agent_shared::inventory::ConfigReconcilerInventoryStatus;
 use nexus_sled_agent_shared::inventory::OmicronSledConfig;
@@ -178,6 +182,7 @@ use std::sync::Arc;
 use std::sync::LazyLock;
 use strum::IntoEnumIterator;
 use tabled::Tabled;
+use tufaceous_artifact::ArtifactHash;
 use uuid::Uuid;
 
 mod alert;
@@ -7361,34 +7366,41 @@ fn inv_collection_print_sleds(collection: &Collection) {
         }
 
         if let Some(last_reconciliation) = &sled.last_reconciliation {
-            if Some(&last_reconciliation.last_reconciled_config)
+            let ConfigReconcilerInventory {
+                last_reconciled_config,
+                external_disks,
+                datasets,
+                orphaned_datasets,
+                zones,
+                boot_partitions,
+            } = last_reconciliation;
+
+            inv_print_boot_partition_contents("    ", boot_partitions);
+
+            if Some(last_reconciled_config)
                 == sled.ledgered_sled_config.as_ref()
             {
                 println!("    last reconciled config: matches ledgered config");
             } else {
                 inv_collection_print_sled_config(
                     "LAST RECONCILED CONFIG",
-                    &last_reconciliation.last_reconciled_config,
+                    &last_reconciled_config,
                 );
             }
-            if last_reconciliation.orphaned_datasets.is_empty() {
+            if orphaned_datasets.is_empty() {
                 println!("        no orphaned datasets");
             } else {
                 println!(
                     "        {} orphaned dataset(s):",
-                    last_reconciliation.orphaned_datasets.len()
+                    orphaned_datasets.len()
                 );
-                for orphan in &last_reconciliation.orphaned_datasets {
+                for orphan in orphaned_datasets {
                     print_one_orphaned_dataset("            ", orphan);
                 }
             }
-            let disk_errs = collect_config_reconciler_errors(
-                &last_reconciliation.external_disks,
-            );
-            let dataset_errs =
-                collect_config_reconciler_errors(&last_reconciliation.datasets);
-            let zone_errs =
-                collect_config_reconciler_errors(&last_reconciliation.zones);
+            let disk_errs = collect_config_reconciler_errors(&external_disks);
+            let dataset_errs = collect_config_reconciler_errors(&datasets);
+            let zone_errs = collect_config_reconciler_errors(&zones);
             for (label, errs) in [
                 ("disk", disk_errs),
                 ("dataset", dataset_errs),
@@ -7436,6 +7448,55 @@ fn inv_collection_print_sleds(collection: &Collection) {
             }
         }
     }
+}
+
+fn inv_print_boot_partition_contents(
+    indent: &str,
+    boot_partitions: &BootPartitionContents,
+) {
+    let BootPartitionContents { boot_disk, slot_a, slot_b } = &boot_partitions;
+    print!("{indent}boot disk slot: ");
+    match boot_disk {
+        Ok(slot) => println!("{slot:?}"),
+        Err(err) => println!("FAILED TO DETERMINE: {err}"),
+    }
+    match slot_a {
+        Ok(details) => {
+            println!("{indent}slot A details:");
+            inv_print_boot_partition_details(&format!("{indent}    "), details);
+        }
+        Err(err) => {
+            println!("{indent}slot A details UNAVAILABLE: {err}");
+        }
+    }
+    match slot_b {
+        Ok(details) => {
+            println!("{indent}slot B details:");
+            inv_print_boot_partition_details(&format!("{indent}    "), details);
+        }
+        Err(err) => {
+            println!("{indent}slot B details UNAVAILABLE: {err}");
+        }
+    }
+}
+
+fn inv_print_boot_partition_details(
+    indent: &str,
+    details: &BootPartitionDetails,
+) {
+    let BootPartitionDetails { header, artifact_hash, artifact_size } = details;
+
+    // Not sure it's useful to print all the header details? We'll omit for now.
+    let BootImageHeader {
+        flags: _,
+        data_size: _,
+        image_size: _,
+        target_size: _,
+        sha256,
+    } = header;
+
+    println!("{indent}artifact: {artifact_hash} ({artifact_size} bytes)");
+    println!("{indent}phase 2 hash: {}", ArtifactHash(*sha256));
 }
 
 fn inv_collection_print_orphaned_datasets(collection: &Collection) {
