@@ -24802,6 +24802,13 @@
             "type": "integer",
             "format": "int64"
           },
+          "mupdate_overrides": {
+            "description": "MUPdate overrides currently in place, keyed by sled ID.\n\nAfter a recovery-driven update (also known as a MUPdate), this map will be non-empty until the normal update path is restored.",
+            "type": "object",
+            "additionalProperties": {
+              "$ref": "#/components/schemas/TargetReleaseMupdateOverride"
+            }
+          },
           "release_source": {
             "description": "The source of the target release.",
             "allOf": [
@@ -24818,8 +24825,23 @@
         },
         "required": [
           "generation",
+          "mupdate_overrides",
           "release_source",
           "time_requested"
+        ]
+      },
+      "TargetReleaseMupdateOverride": {
+        "description": "MUPdate override for a target release.",
+        "type": "object",
+        "properties": {
+          "mupdate_override_id": {
+            "description": "The override UUID.",
+            "type": "string",
+            "format": "uuid"
+          }
+        },
+        "required": [
+          "mupdate_override_id"
         ]
       },
       "TargetReleaseSource": {

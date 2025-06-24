@@ -49,7 +49,7 @@ ed25519-dalek = { version = "2.1.1", features = ["digest", "pkcs8", "rand_core"]
 either = { version = "1.15.0", features = ["use_std"] }
 elliptic-curve = { version = "0.13.8", features = ["ecdh", "hazmat", "pem", "std"] }
 ff = { version = "0.13.0", default-features = false, features = ["alloc"] }
-flate2 = { version = "1.1.2" }
+flate2 = { version = "1.1.2", features = ["zlib-rs"] }
 foldhash = { version = "0.1.5" }
 form_urlencoded = { version = "1.2.1" }
 fs-err = { version = "3.1.1", default-features = false, features = ["tokio"] }
@@ -64,6 +64,7 @@ generic-array = { version = "0.14.7", default-features = false, features = ["mor
 getrandom-6f8ce4dd05d13bba = { package = "getrandom", version = "0.2.15", default-features = false, features = ["js", "rdrand", "std"] }
 group = { version = "0.13.0", default-features = false, features = ["alloc"] }
 hashbrown = { version = "0.15.4" }
+heck = { version = "0.4.1" }
 hickory-proto = { version = "0.25.2", features = ["serde", "text-parsing"] }
 hmac = { version = "0.12.1", default-features = false, features = ["reset"] }
 hyper = { version = "1.6.0", features = ["full"] }
@@ -72,7 +73,7 @@ indexmap = { version = "2.9.0", features = ["serde"] }
 inout = { version = "0.1.3", default-features = false, features = ["std"] }
 ipnet = { version = "2.11.0", features = ["serde"] }
 ipnetwork = { version = "0.21.1", features = ["schemars", "serde"] }
-itertools-93f6ce9d446188ac = { package = "itertools", version = "0.10.5" }
+itertools = { version = "0.10.5" }
 lalrpop-util = { version = "0.19.12" }
 lazy_static = { version = "1.5.0", default-features = false, features = ["spin_no_std"] }
 libc = { version = "0.2.174", features = ["extra_traits"] }
@@ -146,8 +147,8 @@ x509-cert = { version = "0.2.5" }
 zerocopy-c38e5c1d305a1b54 = { package = "zerocopy", version = "0.8.26", default-features = false, features = ["derive"] }
 zerocopy-ca01ad9e24f5d932 = { package = "zerocopy", version = "0.7.35", features = ["derive", "simd"] }
 zeroize = { version = "1.8.1", features = ["std", "zeroize_derive"] }
+zip-164d15cefe24d7eb = { package = "zip", version = "4.2.0", default-features = false, features = ["bzip2", "deflate", "zstd"] }
 zip-3b31131e45eafb45 = { package = "zip", version = "0.6.6", default-features = false, features = ["bzip2", "deflate"] }
-zip-f595c2ba2a3f28df = { package = "zip", version = "2.6.1", default-features = false, features = ["bzip2", "deflate", "zstd"] }
 
 [build-dependencies]
 ahash = { version = "0.8.11" }
@@ -182,7 +183,7 @@ ed25519-dalek = { version = "2.1.1", features = ["digest", "pkcs8", "rand_core"]
 either = { version = "1.15.0", features = ["use_std"] }
 elliptic-curve = { version = "0.13.8", features = ["ecdh", "hazmat", "pem", "std"] }
 ff = { version = "0.13.0", default-features = false, features = ["alloc"] }
-flate2 = { version = "1.1.2" }
+flate2 = { version = "1.1.2", features = ["zlib-rs"] }
 foldhash = { version = "0.1.5" }
 form_urlencoded = { version = "1.2.1" }
 fs-err = { version = "3.1.1", default-features = false, features = ["tokio"] }
@@ -197,6 +198,7 @@ generic-array = { version = "0.14.7", default-features = false, features = ["mor
 getrandom-6f8ce4dd05d13bba = { package = "getrandom", version = "0.2.15", default-features = false, features = ["js", "rdrand", "std"] }
 group = { version = "0.13.0", default-features = false, features = ["alloc"] }
 hashbrown = { version = "0.15.4" }
+heck = { version = "0.4.1" }
 hickory-proto = { version = "0.25.2", features = ["serde", "text-parsing"] }
 hmac = { version = "0.12.1", default-features = false, features = ["reset"] }
 hyper = { version = "1.6.0", features = ["full"] }
@@ -205,7 +207,7 @@ indexmap = { version = "2.9.0", features = ["serde"] }
 inout = { version = "0.1.3", default-features = false, features = ["std"] }
 ipnet = { version = "2.11.0", features = ["serde"] }
 ipnetwork = { version = "0.21.1", features = ["schemars", "serde"] }
-itertools-93f6ce9d446188ac = { package = "itertools", version = "0.10.5" }
+itertools = { version = "0.10.5" }
 lalrpop-util = { version = "0.19.12" }
 lazy_static = { version = "1.5.0", default-features = false, features = ["spin_no_std"] }
 libc = { version = "0.2.174", features = ["extra_traits"] }
@@ -281,8 +283,8 @@ x509-cert = { version = "0.2.5" }
 zerocopy-c38e5c1d305a1b54 = { package = "zerocopy", version = "0.8.26", default-features = false, features = ["derive"] }
 zerocopy-ca01ad9e24f5d932 = { package = "zerocopy", version = "0.7.35", features = ["derive", "simd"] }
 zeroize = { version = "1.8.1", features = ["std", "zeroize_derive"] }
+zip-164d15cefe24d7eb = { package = "zip", version = "4.2.0", default-features = false, features = ["bzip2", "deflate", "zstd"] }
 zip-3b31131e45eafb45 = { package = "zip", version = "0.6.6", default-features = false, features = ["bzip2", "deflate"] }
-zip-f595c2ba2a3f28df = { package = "zip", version = "2.6.1", default-features = false, features = ["bzip2", "deflate", "zstd"] }
 
 [target.x86_64-unknown-linux-gnu.dependencies]
 bitflags-f595c2ba2a3f28df = { package = "bitflags", version = "2.9.0", default-features = false, features = ["std"] }
@@ -350,7 +352,6 @@ getrandom-468e82937335b1c9 = { package = "getrandom", version = "0.3.1", default
 hyper-rustls = { version = "0.27.7", features = ["http2", "ring", "webpki-tokio"] }
 hyper-util = { version = "0.1.14", features = ["client-proxy", "client-proxy-system", "full"] }
 indicatif = { version = "0.17.11", features = ["rayon"] }
-itertools-5ef9efb8ec2df382 = { package = "itertools", version = "0.12.1" }
 mio = { version = "1.0.2", features = ["net", "os-ext"] }
 rustix = { version = "0.38.37", features = ["event", "fs", "net", "pipe", "process", "stdio", "system", "termios", "time"] }
 toml_edit-cdcf2f9584511fe6 = { package = "toml_edit", version = "0.19.15", features = ["serde"] }
@@ -365,7 +366,6 @@ getrandom-468e82937335b1c9 = { package = "getrandom", version = "0.3.1", default
 hyper-rustls = { version = "0.27.7", features = ["http2", "ring", "webpki-tokio"] }
 hyper-util = { version = "0.1.14", features = ["client-proxy", "client-proxy-system", "full"] }
 indicatif = { version = "0.17.11", features = ["rayon"] }
-itertools-5ef9efb8ec2df382 = { package = "itertools", version = "0.12.1" }
 mio = { version = "1.0.2", features = ["net", "os-ext"] }
 rustix = { version = "0.38.37", features = ["event", "fs", "net", "pipe", "process", "stdio", "system", "termios", "time"] }
 toml_edit-cdcf2f9584511fe6 = { package = "toml_edit", version = "0.19.15", features = ["serde"] }

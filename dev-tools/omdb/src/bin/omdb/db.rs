@@ -1730,7 +1730,7 @@ async fn get_crucible_dataset_rows(
 
     let mut zpool_total_size: HashMap<Uuid, i64> = HashMap::new();
 
-    for (_, sled_agent) in latest_collection.sled_agents {
+    for sled_agent in latest_collection.sled_agents {
         for zpool in sled_agent.zpools {
             zpool_total_size
                 .insert(zpool.id.into_untyped_uuid(), zpool.total_size.into());
@@ -3855,7 +3855,7 @@ async fn cmd_db_dry_run_region_allocation(
 
     let mut zpool_total_size: HashMap<Uuid, i64> = HashMap::new();
 
-    for (_, sled_agent) in latest_collection.sled_agents {
+    for sled_agent in latest_collection.sled_agents {
         for zpool in sled_agent.zpools {
             zpool_total_size
                 .insert(zpool.id.into_untyped_uuid(), zpool.total_size.into());
@@ -7275,7 +7275,7 @@ async fn inv_collection_print_devices(
 
 fn inv_collection_print_sleds(collection: &Collection) {
     println!("SLED AGENTS");
-    for sled in collection.sled_agents.values() {
+    for sled in &collection.sled_agents {
         println!(
             "\nsled {} (role = {:?}, serial {})",
             sled.sled_id,
@@ -7436,7 +7436,7 @@ fn inv_collection_print_orphaned_datasets(collection: &Collection) {
         LazyLock::new(IdOrdMap::new);
 
     println!("ORPHANED DATASETS");
-    for sled in collection.sled_agents.values() {
+    for sled in &collection.sled_agents {
         println!(
             "\nsled {} (serial {})",
             sled.sled_id,
@@ -8327,7 +8327,7 @@ async fn cmd_db_zpool_list(
 
     let mut zpool_total_size: HashMap<Uuid, i64> = HashMap::new();
 
-    for (_, sled_agent) in latest_collection.sled_agents {
+    for sled_agent in latest_collection.sled_agents {
         for zpool in sled_agent.zpools {
             zpool_total_size
                 .insert(zpool.id.into_untyped_uuid(), zpool.total_size.into());

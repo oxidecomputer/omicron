@@ -31,7 +31,6 @@ use nexus_db_errors::ErrorHandler;
 use nexus_db_errors::public_error_from_diesel;
 use nexus_db_errors::public_error_from_diesel_lookup;
 use nexus_db_model::InvCaboose;
-use nexus_db_model::InvClickhouseKeeperMembership;
 use nexus_db_model::InvCollection;
 use nexus_db_model::InvCollectionError;
 use nexus_db_model::InvConfigReconcilerStatus;
@@ -66,6 +65,9 @@ use nexus_db_model::{
 };
 use nexus_db_model::{HwPowerState, InvZoneManifestNonBoot};
 use nexus_db_model::{HwRotSlot, InvMupdateOverrideNonBoot};
+use nexus_db_model::{
+    InvClickhouseKeeperMembership, InvSledAgentMupdateOverrideColumns,
+};
 use nexus_db_schema::enums::HwRotSlotEnum;
 use nexus_db_schema::enums::RotImageErrorEnum;
 use nexus_db_schema::enums::RotPageWhichEnum;
@@ -75,7 +77,6 @@ use nexus_db_schema::enums::{
     CabooseWhichEnum, InvConfigReconcilerStatusKindEnum,
 };
 use nexus_db_schema::enums::{HwPowerStateEnum, InvZoneManifestSourceEnum};
-use nexus_sled_agent_shared::inventory::ConfigReconcilerInventory;
 use nexus_sled_agent_shared::inventory::ConfigReconcilerInventoryResult;
 use nexus_sled_agent_shared::inventory::ConfigReconcilerInventoryStatus;
 use nexus_sled_agent_shared::inventory::MupdateOverrideNonBootInventory;
@@ -83,6 +84,9 @@ use nexus_sled_agent_shared::inventory::OmicronSledConfig;
 use nexus_sled_agent_shared::inventory::OrphanedDataset;
 use nexus_sled_agent_shared::inventory::ZoneArtifactInventory;
 use nexus_sled_agent_shared::inventory::ZoneManifestNonBootInventory;
+use nexus_sled_agent_shared::inventory::{
+    ConfigReconcilerInventory, MupdateOverrideBootInventory,
+};
 use nexus_types::inventory::BaseboardId;
 use nexus_types::inventory::Collection;
 use nexus_types::inventory::PhysicalDiskFirmware;
@@ -169,7 +173,7 @@ impl DataStore {
 
         // Pull disk firmware out of sled agents
         let mut nvme_disk_firmware = Vec::new();
-        for (sled_id, sled_agent) in &collection.sled_agents {
+        for sled_agent in &collection.sled_agents {
             for disk in &sled_agent.disks {
                 match &disk.firmware {
                     PhysicalDiskFirmware::Unknown => (),
@@ -177,7 +181,7 @@ impl DataStore {
                         .push(
                             InvNvmeDiskFirmware::new(
                                 collection_id,
-                                *sled_id,
+                                sled_agent.sled_id,
                                 disk.slot,
                                 firmware,
                             )
@@ -193,9 +197,13 @@ impl DataStore {
         let disks: Vec<_> = collection
             .sled_agents
             .iter()
-            .flat_map(|(sled_id, sled_agent)| {
+            .flat_map(|sled_agent| {
                 sled_agent.disks.iter().map(|disk| {
-                    InvPhysicalDisk::new(collection_id, *sled_id, disk.clone())
+                    InvPhysicalDisk::new(
+                        collection_id,
+                        sled_agent.sled_id,
+                        disk.clone(),
+                    )
                 })
             })
             .collect();
@@ -204,11 +212,10 @@ impl DataStore {
         let zpools: Vec<_> = collection
             .sled_agents
             .iter()
-            .flat_map(|(sled_id, sled_agent)| {
-                sled_agent
-                    .zpools
-                    .iter()
-                    .map(|pool| InvZpool::new(collection_id, *sled_id, pool))
+            .flat_map(|sled_agent| {
+                sled_agent.zpools.iter().map(|pool| {
+                    InvZpool::new(collection_id, sled_agent.sled_id, pool)
+                })
             })
             .collect();
 
@@ -216,9 +223,9 @@ impl DataStore {
         let datasets: Vec<_> = collection
             .sled_agents
             .iter()
-            .flat_map(|(sled_id, sled_agent)| {
+            .flat_map(|sled_agent| {
                 sled_agent.datasets.iter().map(|dataset| {
-                    InvDataset::new(collection_id, *sled_id, dataset)
+                    InvDataset::new(collection_id, sled_agent.sled_id, dataset)
                 })
             })
             .collect();
@@ -227,7 +234,7 @@ impl DataStore {
         let zone_manifest_zones: Vec<_> = collection
             .sled_agents
             .iter()
-            .filter_map(|(sled_id, sled_agent)| {
+            .filter_map(|sled_agent| {
                 sled_agent
                     .zone_image_resolver
                     .zone_manifest
@@ -238,7 +245,7 @@ impl DataStore {
                         artifacts.artifacts.iter().map(|artifact| {
                             InvZoneManifestZone::new(
                                 collection_id,
-                                *sled_id,
+                                sled_agent.sled_id,
                                 artifact,
                             )
                         })
@@ -251,7 +258,7 @@ impl DataStore {
         let zone_manifest_non_boot: Vec<_> = collection
             .sled_agents
             .iter()
-            .flat_map(|(sled_id, sled_agent)| {
+            .flat_map(|sled_agent| {
                 sled_agent
                     .zone_image_resolver
                     .zone_manifest
@@ -260,7 +267,7 @@ impl DataStore {
                     .map(|non_boot| {
                         InvZoneManifestNonBoot::new(
                             collection_id,
-                            *sled_id,
+                            sled_agent.sled_id,
                             non_boot,
                         )
                     })
@@ -271,7 +278,7 @@ impl DataStore {
         let mupdate_override_non_boot: Vec<_> = collection
             .sled_agents
             .iter()
-            .flat_map(|(sled_id, sled_agent)| {
+            .flat_map(|sled_agent| {
                 sled_agent
                     .zone_image_resolver
                     .mupdate_override
@@ -280,7 +287,7 @@ impl DataStore {
                     .map(|non_boot| {
                         InvMupdateOverrideNonBoot::new(
                             collection_id,
-                            *sled_id,
+                            sled_agent.sled_id,
                             non_boot,
                         )
                     })
@@ -327,7 +334,7 @@ impl DataStore {
             Vec<_>,
         ) = collection
             .sled_agents
-            .values()
+            .iter()
             .partition(|sled_agent| sled_agent.baseboard_id.is_some());
         let sled_agents_no_baseboards = sled_agents_no_baseboards
             .into_iter()
@@ -1998,8 +2005,53 @@ impl DataStore {
         opctx: &OpContext,
     ) -> Result<Option<Collection>, Error> {
         opctx.authorize(authz::Action::Read, &authz::INVENTORY).await?;
-        let conn = self.pool_connection_authorized(opctx).await?;
+        let collection_id =
+            self.inventory_get_latest_collection_id(opctx).await?;
+        let Some(collection_id) = collection_id else {
+            return Ok(None);
+        };
+
+        Ok(Some(self.inventory_collection_read(opctx, collection_id).await?))
+    }
+
+    /// Read just the mupdate override columns for a particular collection.
+    ///
+    /// This is an abridged version of the full inventory_collection_read, which
+    /// doesn't do any traversals across tables and just reads a few rows from
+    /// the `inv_collection` table.
+    ///
+    /// If there aren't any collections, return `Ok(None)`.
+    pub async fn inventory_get_latest_collection_mupdate_overrides(
+        &self,
+        opctx: &OpContext,
+    ) -> Result<Option<BTreeMap<SledUuid, MupdateOverrideBootInventory>>, Error>
+    {
+        opctx.authorize(authz::Action::Read, &authz::INVENTORY).await?;
+        let collection_id =
+            self.inventory_get_latest_collection_id(opctx).await?;
+
+        let Some(collection_id) = collection_id else {
+            return Ok(None);
+        };
+
+        Ok(Some(
+            self.inventory_collection_read_mupdate_overrides(
+                opctx,
+                collection_id,
+            )
+            .await?,
+        ))
+    }
+
+    /// Fetches the latest collection ID -- assumes that the caller has checked
+    /// for permission to read the inventory.
+    async fn inventory_get_latest_collection_id(
+        &self,
+        opctx: &OpContext,
+    ) -> Result<Option<CollectionUuid>, Error> {
         use nexus_db_schema::schema::inv_collection::dsl;
+
+        let conn = self.pool_connection_authorized(opctx).await?;
         let collection_id = dsl::inv_collection
             .select(dsl::id)
             .order_by(dsl::time_started.desc())
@@ -2008,17 +2060,59 @@ impl DataStore {
             .optional()
             .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))?;
 
-        let Some(collection_id) = collection_id else {
-            return Ok(None);
-        };
+        Ok(collection_id.map(CollectionUuid::from_untyped_uuid))
+    }
 
-        Ok(Some(
-            self.inventory_collection_read(
-                opctx,
-                CollectionUuid::from_untyped_uuid(collection_id),
+    /// Read just the mupdate override columns for a particular collection.
+    ///
+    /// This is an abridged version of the full inventory_collection_read, which
+    /// doesn't do any traversals across tables and just reads a few rows from
+    /// the `inv_collection` table.
+    async fn inventory_collection_read_mupdate_overrides(
+        &self,
+        opctx: &OpContext,
+        collection_id: CollectionUuid,
+    ) -> Result<BTreeMap<SledUuid, MupdateOverrideBootInventory>, Error> {
+        use nexus_db_schema::schema::inv_sled_agent::dsl;
+
+        let conn = self.pool_connection_authorized(opctx).await?;
+        let db_id = to_db_typed_uuid(collection_id);
+
+        let mut by_sled_id = BTreeMap::new();
+
+        // We don't expect that many rows to be returned, but use a paginated
+        // query just in case.
+        let mut paginator = Paginator::new(SQL_BATCH_SIZE);
+        while let Some(p) = paginator.next() {
+            let batch: Vec<InvSledAgentMupdateOverrideColumns> = paginated(
+                dsl::inv_sled_agent,
+                dsl::sled_id,
+                &p.current_pagparams(),
             )
-            .await?,
-        ))
+            .filter(dsl::inv_collection_id.eq(db_id))
+            .select(InvSledAgentMupdateOverrideColumns::as_select())
+            .load_async(&*conn)
+            .await
+            .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))?;
+            paginator = p.found_batch(
+                &batch,
+                &|row: &InvSledAgentMupdateOverrideColumns| row.sled_id,
+            );
+            for row in batch {
+                let Some(mupdate_override_id) = row.mupdate_override_id else {
+                    // Ignore any rows without a mupdate_override_id.
+                    continue;
+                };
+                by_sled_id.insert(
+                    row.sled_id.into(),
+                    MupdateOverrideBootInventory {
+                        mupdate_override_id: mupdate_override_id.into(),
+                    },
+                );
+            }
+        }
+
+        Ok(by_sled_id)
     }
 
     /// Attempt to read the current collection
@@ -3151,7 +3245,7 @@ impl DataStore {
         // Finally, build up the sled-agent map using the sled agent and
         // omicron zone rows. A for loop is easier to understand than into_iter
         // + filter_map + return Result + collect.
-        let mut sled_agents = BTreeMap::new();
+        let mut sled_agents = IdOrdMap::new();
         for s in sled_agent_rows {
             let sled_id = SledUuid::from(s.sled_id);
             let baseboard_id = s
@@ -3274,7 +3368,9 @@ impl DataStore {
                 last_reconciliation,
                 zone_image_resolver,
             };
-            sled_agents.insert(sled_id, sled_agent);
+            sled_agents
+                .insert_unique(sled_agent)
+                .expect("database ensures sled_agent_rows has unique sled_id");
         }
 
         // Check that we consumed all the reconciliation results we found in
@@ -3373,8 +3469,8 @@ impl ConfigReconcilerRows {
         collection: &Collection,
     ) -> anyhow::Result<Self> {
         let mut this = Self::default();
-        for (sled_id, sled_agent) in &collection.sled_agents {
-            this.accumulate(collection_id, *sled_id, sled_agent)?;
+        for sled_agent in &collection.sled_agents {
+            this.accumulate(collection_id, sled_agent)?;
         }
         Ok(this)
     }
@@ -3382,9 +3478,9 @@ impl ConfigReconcilerRows {
     fn accumulate(
         &mut self,
         collection_id: CollectionUuid,
-        sled_id: SledUuid,
         sled_agent: &SledAgent,
     ) -> anyhow::Result<()> {
+        let sled_id = sled_agent.sled_id;
         let mut ledgered_sled_config = None;
         if let Some(config) = &sled_agent.ledgered_sled_config {
             ledgered_sled_config =
@@ -4410,71 +4506,75 @@ mod test {
         //
         // * try all three `ConfigReconcilerInventoryStatus` variants
         // * add a `last_reconciliation` with a mix of success/error results
-        let mut sled_agents = collection.sled_agents.values_mut();
-        let sa1 = sled_agents.next().expect("at least 1 sled agent");
-        let sa2 = sled_agents.next().expect("at least 2 sled agents");
-        let sa3 = sled_agents.next().expect("at least 3 sled agents");
+        {
+            let mut sled_agents = collection.sled_agents.iter_mut();
+            let mut sa1 = sled_agents.next().expect("at least 1 sled agent");
+            let mut sa2 = sled_agents.next().expect("at least 2 sled agents");
+            let mut sa3 = sled_agents.next().expect("at least 3 sled agents");
 
-        sa1.reconciler_status = ConfigReconcilerInventoryStatus::NotYetRun;
-        sa1.last_reconciliation = None;
+            sa1.reconciler_status = ConfigReconcilerInventoryStatus::NotYetRun;
+            sa1.last_reconciliation = None;
 
-        sa2.reconciler_status = ConfigReconcilerInventoryStatus::Running {
-            config: sa2.ledgered_sled_config.clone().unwrap(),
-            started_at: now_db_precision(),
-            running_for: Duration::from_secs(1),
-        };
-        sa2.last_reconciliation = Some({
-            let make_result = |kind, i| {
-                if i % 2 == 0 {
-                    ConfigReconcilerInventoryResult::Ok
-                } else {
-                    ConfigReconcilerInventoryResult::Err {
-                        message: format!("fake {kind} error {i}"),
-                    }
-                }
+            sa2.reconciler_status = ConfigReconcilerInventoryStatus::Running {
+                config: sa2.ledgered_sled_config.clone().unwrap(),
+                started_at: now_db_precision(),
+                running_for: Duration::from_secs(1),
             };
-            ConfigReconcilerInventory {
-                last_reconciled_config: sa2
-                    .ledgered_sled_config
-                    .clone()
-                    .unwrap(),
-                external_disks: (0..10)
-                    .map(|i| {
-                        (PhysicalDiskUuid::new_v4(), make_result("disk", i))
-                    })
-                    .collect(),
-                datasets: (0..10)
-                    .map(|i| (DatasetUuid::new_v4(), make_result("dataset", i)))
-                    .collect(),
-                orphaned_datasets: (0..5)
-                    .map(|i| OrphanedDataset {
-                        name: DatasetName::new(
-                            ZpoolName::new_external(ZpoolUuid::new_v4()),
-                            DatasetKind::Cockroach,
-                        ),
-                        reason: format!("test orphan {i}"),
-                        id: if i % 2 == 0 {
-                            Some(DatasetUuid::new_v4())
-                        } else {
-                            None
-                        },
-                        mounted: i % 2 == 1,
-                        available: (10 * i).into(),
-                        used: i.into(),
-                    })
-                    .collect(),
-                zones: (0..10)
-                    .map(|i| {
-                        (OmicronZoneUuid::new_v4(), make_result("zone", i))
-                    })
-                    .collect(),
-            }
-        });
+            sa2.last_reconciliation = Some({
+                let make_result = |kind, i| {
+                    if i % 2 == 0 {
+                        ConfigReconcilerInventoryResult::Ok
+                    } else {
+                        ConfigReconcilerInventoryResult::Err {
+                            message: format!("fake {kind} error {i}"),
+                        }
+                    }
+                };
+                ConfigReconcilerInventory {
+                    last_reconciled_config: sa2
+                        .ledgered_sled_config
+                        .clone()
+                        .unwrap(),
+                    external_disks: (0..10)
+                        .map(|i| {
+                            (PhysicalDiskUuid::new_v4(), make_result("disk", i))
+                        })
+                        .collect(),
+                    datasets: (0..10)
+                        .map(|i| {
+                            (DatasetUuid::new_v4(), make_result("dataset", i))
+                        })
+                        .collect(),
+                    orphaned_datasets: (0..5)
+                        .map(|i| OrphanedDataset {
+                            name: DatasetName::new(
+                                ZpoolName::new_external(ZpoolUuid::new_v4()),
+                                DatasetKind::Cockroach,
+                            ),
+                            reason: format!("test orphan {i}"),
+                            id: if i % 2 == 0 {
+                                Some(DatasetUuid::new_v4())
+                            } else {
+                                None
+                            },
+                            mounted: i % 2 == 1,
+                            available: (10 * i).into(),
+                            used: i.into(),
+                        })
+                        .collect(),
+                    zones: (0..10)
+                        .map(|i| {
+                            (OmicronZoneUuid::new_v4(), make_result("zone", i))
+                        })
+                        .collect(),
+                }
+            });
 
-        sa3.reconciler_status = ConfigReconcilerInventoryStatus::Idle {
-            completed_at: now_db_precision(),
-            ran_for: Duration::from_secs(5),
-        };
+            sa3.reconciler_status = ConfigReconcilerInventoryStatus::Idle {
+                completed_at: now_db_precision(),
+                ran_for: Duration::from_secs(5),
+            };
+        }
 
         // Write it to the db; read it back and check it survived.
         datastore
@@ -4517,9 +4617,9 @@ mod test {
         // Mutate some zones on one of the sleds to have various image sources.
         {
             // Find a sled that has a few zones in one of its sled configs.
-            let sa = collection
+            let mut sa = collection
                 .sled_agents
-                .values_mut()
+                .iter_mut()
                 .find(|sa| {
                     sa.ledgered_sled_config
                         .as_ref()

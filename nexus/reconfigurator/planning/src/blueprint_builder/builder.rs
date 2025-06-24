@@ -2003,8 +2003,9 @@ impl<'a> BlueprintBuilder<'a> {
         &self,
         zone_kind: ZoneKind,
     ) -> BlueprintZoneImageSource {
-        let new_repo = self.input.tuf_repo();
-        let old_repo = self.input.old_repo();
+        let new_repo = self.input.tuf_repo().description();
+        let old_repo =
+            self.input.old_repo().and_then(|repo| repo.description());
         Self::zone_image_artifact(
             if self.zone_is_ready_for_update(zone_kind, new_repo) {
                 new_repo
@@ -2803,9 +2804,9 @@ pub mod test {
             .sled_add_zone_nexus(
                 collection
                     .sled_agents
-                    .keys()
+                    .iter()
                     .next()
-                    .copied()
+                    .map(|sa| sa.sled_id)
                     .expect("no sleds present"),
             )
             .unwrap_err();
@@ -2830,7 +2831,7 @@ pub mod test {
         // `sled_id`.
         let sled_id = {
             let mut selected_sled_id = None;
-            for (sled_id, sa) in &mut collection.sled_agents {
+            for mut sa in &mut collection.sled_agents {
                 let sa_zones = &mut sa
                     .ledgered_sled_config
                     .as_mut()
@@ -2839,12 +2840,12 @@ pub mod test {
                 let nzones_before_retain = sa_zones.len();
                 sa_zones.retain(|z| !z.zone_type.is_nexus());
                 if sa_zones.len() < nzones_before_retain {
-                    selected_sled_id = Some(*sled_id);
+                    selected_sled_id = Some(sa.sled_id);
                     // Also remove this zone from the blueprint.
                     let mut removed_nexus = None;
                     parent
                         .sleds
-                        .get_mut(sled_id)
+                        .get_mut(&sa.sled_id)
                         .expect("missing sled")
                         .zones
                         .retain(|z| match &z.zone_type {

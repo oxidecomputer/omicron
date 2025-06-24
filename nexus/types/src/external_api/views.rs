@@ -1488,6 +1488,19 @@ pub struct TargetRelease {
 
     /// The source of the target release.
     pub release_source: TargetReleaseSource,
+
+    /// MUPdate overrides currently in place, keyed by sled ID.
+    ///
+    /// After a recovery-driven update (also known as a MUPdate), this map will
+    /// be non-empty until the normal update path is restored.
+    pub mupdate_overrides: BTreeMap<Uuid, TargetReleaseMupdateOverride>,
+}
+
+/// MUPdate override for a target release.
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize, JsonSchema)]
+pub struct TargetReleaseMupdateOverride {
+    /// The override UUID.
+    pub mupdate_override_id: Uuid,
 }
 
 fn expected_one_of<T: strum::VariantArray + fmt::Display>() -> String {

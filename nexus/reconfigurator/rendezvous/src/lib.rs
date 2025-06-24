@@ -26,7 +26,7 @@ pub async fn reconcile_blueprint_rendezvous_tables(
 ) -> anyhow::Result<BlueprintRendezvousStats> {
     let inventory_dataset_ids = inventory
         .sled_agents
-        .values()
+        .iter()
         .flat_map(|sled| sled.datasets.iter().flat_map(|d| d.id))
         .collect();
 

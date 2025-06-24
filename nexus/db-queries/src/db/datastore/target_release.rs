@@ -17,6 +17,7 @@ use nexus_db_errors::{ErrorHandler, public_error_from_diesel};
 use nexus_db_schema::schema::target_release::dsl;
 use nexus_types::external_api::views;
 use omicron_common::api::external::{CreateResult, Error, LookupResult};
+use omicron_uuid_kinds::GenericUuid;
 
 impl DataStore {
     /// Fetch the current target release, i.e., the row with the largest
@@ -125,16 +126,36 @@ impl DataStore {
                 }
             }
         };
-        Ok(target_release.into_external(release_source))
+        let mupdate_overrides = self
+            .inventory_get_latest_collection_mupdate_overrides(opctx)
+            .await?
+            .unwrap_or_default();
+        let mupdate_overrides = mupdate_overrides
+            .into_iter()
+            .map(|(sled_id, boot_inv)| {
+                (
+                    sled_id.into_untyped_uuid(),
+                    views::TargetReleaseMupdateOverride {
+                        mupdate_override_id: boot_inv
+                            .mupdate_override_id
+                            .into_untyped_uuid(),
+                    },
+                )
+            })
+            .collect();
+        Ok(target_release.into_external(release_source, mupdate_overrides))
     }
 }
 
 #[cfg(test)]
 mod test {
+    use std::collections::BTreeMap;
+
     use super::*;
     use crate::db::model::{Generation, TargetReleaseSource};
     use crate::db::pub_test_utils::TestDatabase;
     use chrono::{TimeDelta, Utc};
+    use nexus_inventory::examples::{Representative, representative};
     use omicron_common::api::external::{
         TufArtifactMeta, TufRepoDescription, TufRepoMeta,
     };
@@ -255,6 +276,52 @@ mod test {
             TargetReleaseSource::SystemVersion
         );
         assert_eq!(target_release.tuf_repo_id, Some(tuf_repo_id));
+
+        // Insert a representative collection with some mupdate overrides.
+        let Representative { builder, .. } = representative();
+        let collection = builder.build();
+        datastore
+            .inventory_insert_collection(&opctx, &collection)
+            .await
+            .expect("inserted collection");
+
+        // Now get the target release.
+        let target_release = datastore
+            .target_release_view(&opctx, &target_release)
+            .await
+            .expect("got target release");
+
+        eprintln!("target release: {target_release:#?}");
+
+        // Ensure that the mupdate overrides that are part of the collection are
+        // present.
+        let expected = collection
+            .sled_agents
+            .iter()
+            .filter_map(|sa| {
+                if let Ok(Some(o)) =
+                    &sa.zone_image_resolver.mupdate_override.boot_override
+                {
+                    let v = views::TargetReleaseMupdateOverride {
+                        mupdate_override_id: o
+                            .mupdate_override_id
+                            .into_untyped_uuid(),
+                    };
+                    Some((sa.sled_id.into_untyped_uuid(), v))
+                } else {
+                    None
+                }
+            })
+            .collect::<BTreeMap<_, _>>();
+        assert!(
+            !expected.is_empty(),
+            "representative collection should have some overrides in it",
+        );
+
+        assert_eq!(
+            target_release.mupdate_overrides, expected,
+            "mupdate overrides matches expected",
+        );
 
         // Clean up.
         db.terminate().await;
