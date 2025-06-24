@@ -42,6 +42,9 @@ serial serial1
 subnet fd00:1122:3344:102::/64
 SP active version:   Some("0.0.1")
 SP inactive version: None
+RoT active slot: A
+RoT slot A version: Some("0.0.2")
+RoT slot B version: None
 zpools (10):
     055c4910-b641-46d9-b52d-313aae9d9cbf (zpool)
     SledDisk { disk_identity: DiskIdentity { vendor: "fake-vendor", model: "fake-model", serial: "serial-055c4910-b641-46d9-b52d-313aae9d9cbf" }, disk_id: 6a0cb52f-5cc2-48a5-9f44-ac8dea3ac45b (physical_disk), policy: InService, state: Active }
@@ -403,6 +406,9 @@ serial serial0
 subnet fd00:1122:3344:101::/64
 SP active version:   Some("0.0.1")
 SP inactive version: None
+RoT active slot: A
+RoT slot A version: Some("0.0.2")
+RoT slot B version: None
 zpools (4):
     0477165a-a72e-4814-b8d6-74aa02cb2040 (zpool)
     SledDisk { disk_identity: DiskIdentity { vendor: "fake-vendor", model: "fake-model", serial: "serial-0477165a-a72e-4814-b8d6-74aa02cb2040" }, disk_id: 6a5a31ab-4edc-44e0-a7a1-4190bfe582f7 (physical_disk), policy: InService, state: Active }
