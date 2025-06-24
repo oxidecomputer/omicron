@@ -7493,9 +7493,11 @@ fn inv_print_boot_partition_details(
         image_size: _,
         target_size: _,
         sha256,
+        image_name,
     } = header;
 
     println!("{indent}artifact: {artifact_hash} ({artifact_size} bytes)");
+    println!("{indent}image name: {image_name}");
     println!("{indent}phase 2 hash: {}", ArtifactHash(*sha256));
 }
 

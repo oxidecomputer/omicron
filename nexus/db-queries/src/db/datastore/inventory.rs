@@ -4819,6 +4819,7 @@ mod test {
                                 image_size: 234567,
                                 target_size: 345678,
                                 sha256: [1; 32],
+                                image_name: "test image".to_string(),
                             },
                             artifact_hash: ArtifactHash([2; 32]),
                             artifact_size: 456789,

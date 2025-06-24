@@ -268,6 +268,8 @@ mod boot_image_header {
     use nexus_sled_agent_shared::inventory::BootImageHeader;
 
     pub(super) const SIZE: usize = 4096;
+    pub(super) const DATASET_NAME_SIZE: usize = 128;
+    pub(super) const IMAGE_NAME_SIZE: usize = 128;
     pub(super) const MAGIC: u32 = 0x1deb0075;
     pub(super) const VERSION: u32 = 2;
 
@@ -309,7 +311,21 @@ mod boot_image_header {
         }
 
         let mut sha256 = [0; 32];
-        sha256.copy_from_slice(&buf[..32]);
+        buf.copy_to_slice(&mut sha256);
+
+        // skip the dataset name field
+        buf.advance(DATASET_NAME_SIZE);
+
+        // read the image name field (this is a 0-terminated string, so trim to
+        // the first 0)
+        let image_name = {
+            let field = &buf[..IMAGE_NAME_SIZE];
+            buf.advance(IMAGE_NAME_SIZE);
+
+            let end = field.iter().position(|&b| b == 0).unwrap_or(field.len());
+
+            String::from_utf8_lossy(&field[..end]).to_string()
+        };
 
         Ok(BootImageHeader {
             flags,
@@ -317,6 +333,7 @@ mod boot_image_header {
             image_size,
             target_size,
             sha256,
+            image_name,
         })
     }
 }

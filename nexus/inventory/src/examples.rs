@@ -870,6 +870,7 @@ pub fn sled_agent(
                 image_size: 10_000,
                 target_size: 10_000,
                 sha256: [0; 32],
+                image_name: "fake image for tests".to_string(),
             },
             artifact_hash: ArtifactHash([1; 32]),
             artifact_size: 10_000 + 4096,

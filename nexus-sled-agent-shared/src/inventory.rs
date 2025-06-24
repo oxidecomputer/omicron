@@ -252,6 +252,7 @@ pub struct BootImageHeader {
     pub image_size: u64,
     pub target_size: u64,
     pub sha256: [u8; 32],
+    pub image_name: String,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Deserialize, JsonSchema, Serialize)]

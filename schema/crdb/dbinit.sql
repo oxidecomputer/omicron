@@ -3800,6 +3800,7 @@ CREATE TABLE IF NOT EXISTS omicron.public.inv_sled_boot_partition (
     header_image_size INT8 NOT NULL,
     header_target_size INT8 NOT NULL,
     header_sha256 STRING(64) NOT NULL,
+    header_image_name TEXT NOT NULL,
 
     PRIMARY KEY (inv_collection_id, sled_id, boot_disk_slot)
 );
