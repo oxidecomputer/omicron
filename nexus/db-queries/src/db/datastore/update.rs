@@ -18,14 +18,16 @@ use nexus_db_errors::OptionalError;
 use nexus_db_errors::{ErrorHandler, public_error_from_diesel};
 use nexus_db_lookup::DbConnection;
 use nexus_db_model::{
-    ArtifactHash, TufArtifact, TufRepo, TufRepoDescription, to_db_typed_uuid,
+    ArtifactHash, TufArtifact, TufRepo, TufRepoDescription, TufTrustRoot,
+    to_db_typed_uuid,
 };
 use omicron_common::api::external::{
-    self, CreateResult, DataPageParams, Generation, ListResultVec,
-    LookupResult, LookupType, ResourceType, TufRepoInsertStatus,
+    self, CreateResult, DataPageParams, DeleteResult, Generation,
+    ListResultVec, LookupResult, LookupType, ResourceType, TufRepoInsertStatus,
 };
 use omicron_uuid_kinds::GenericUuid;
 use omicron_uuid_kinds::TufRepoKind;
+use omicron_uuid_kinds::TufTrustRootUuid;
 use omicron_uuid_kinds::TypedUuid;
 use swrite::{SWrite, swrite};
 use tufaceous_artifact::ArtifactVersion;
@@ -203,6 +205,90 @@ impl DataStore {
         get_generation(&*self.pool_connection_authorized(opctx).await?)
             .await
             .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))
+    }
+
+    /// List the trusted TUF root roles in the trust store.
+    pub async fn tuf_trust_root_list(
+        &self,
+        opctx: &OpContext,
+        pagparams: &DataPageParams<'_, TufTrustRootUuid>,
+    ) -> ListResultVec<TufTrustRoot> {
+        use nexus_db_schema::schema::tuf_trust_root::dsl;
+
+        opctx.authorize(authz::Action::Read, &authz::FLEET).await?;
+        paginated(
+            dsl::tuf_trust_root,
+            dsl::id,
+            &pagparams.map_name(|id| id.as_untyped_uuid()),
+        )
+        .select(TufTrustRoot::as_select())
+        .filter(dsl::time_deleted.is_null())
+        .load_async(&*self.pool_connection_authorized(opctx).await?)
+        .await
+        .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))
+    }
+
+    /// Returns a trusted TUF root role.
+    pub async fn tuf_trust_root_get_by_id(
+        &self,
+        opctx: &OpContext,
+        trust_root_id: TufTrustRootUuid,
+    ) -> LookupResult<TufTrustRoot> {
+        use nexus_db_schema::schema::tuf_trust_root::dsl;
+
+        opctx.authorize(authz::Action::Read, &authz::FLEET).await?;
+        dsl::tuf_trust_root
+            .filter(dsl::id.eq(to_db_typed_uuid(trust_root_id)))
+            .filter(dsl::time_deleted.is_null())
+            .select(TufTrustRoot::as_select())
+            .first_async(&*self.pool_connection_authorized(opctx).await?)
+            .await
+            .map_err(|e| {
+                public_error_from_diesel(
+                    e,
+                    ErrorHandler::NotFoundByLookup(
+                        ResourceType::TufTrustRoot,
+                        LookupType::ById(trust_root_id.into_untyped_uuid()),
+                    ),
+                )
+            })
+    }
+
+    /// Insert a trusted TUF root role into the trust store.
+    pub async fn tuf_trust_root_insert(
+        &self,
+        opctx: &OpContext,
+        trust_root: TufTrustRoot,
+    ) -> CreateResult<TufTrustRoot> {
+        use nexus_db_schema::schema::tuf_trust_root::dsl;
+
+        opctx.authorize(authz::Action::Modify, &authz::FLEET).await?;
+        diesel::insert_into(dsl::tuf_trust_root)
+            .values(trust_root)
+            .returning(TufTrustRoot::as_returning())
+            .get_result_async(&*self.pool_connection_authorized(opctx).await?)
+            .await
+            .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))
+    }
+
+    /// Remove a TUF root role from the trust store (by setting the time_deleted
+    /// field).
+    pub async fn tuf_trust_root_delete(
+        &self,
+        opctx: &OpContext,
+        trust_root_id: TufTrustRootUuid,
+    ) -> DeleteResult {
+        use nexus_db_schema::schema::tuf_trust_root::dsl;
+
+        opctx.authorize(authz::Action::Modify, &authz::FLEET).await?;
+        diesel::update(dsl::tuf_trust_root)
+            .filter(dsl::id.eq(to_db_typed_uuid(trust_root_id)))
+            .filter(dsl::time_deleted.is_null())
+            .set(dsl::time_deleted.eq(chrono::Utc::now()))
+            .execute_async(&*self.pool_connection_authorized(opctx).await?)
+            .await
+            .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))
+            .map(|_| ())
     }
 }
 

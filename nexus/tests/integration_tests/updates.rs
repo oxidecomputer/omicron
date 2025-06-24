@@ -13,7 +13,7 @@ use camino_tempfile::{Builder, Utf8TempPath};
 use clap::Parser;
 use dropshot::test_util::LogContext;
 use http::{Method, StatusCode};
-use nexus_config::UpdatesConfig;
+use nexus_db_model::TufTrustRoot;
 use nexus_db_queries::context::OpContext;
 use nexus_test_utils::background::run_tuf_artifact_replication_step;
 use nexus_test_utils::background::wait_tuf_artifact_replication_step;
@@ -30,7 +30,9 @@ use std::collections::HashSet;
 use std::fmt::Debug;
 use std::io::Write;
 use tufaceous_artifact::KnownArtifactKind;
+use tufaceous_lib::Key;
 use tufaceous_lib::assemble::{DeserializedManifest, ManifestTweak};
+use zip::ZipArchive;
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn test_repo_upload_unconfigured() -> Result<()> {
@@ -47,19 +49,16 @@ async fn test_repo_upload_unconfigured() -> Result<()> {
     let client = &cptestctx.external_client;
 
     // Build a fake TUF repo
-    let archive_path = make_archive(&logctx.log).await?;
+    let archive_path =
+        make_archive(&logctx.log, &Key::generate_ed25519().unwrap()).await?;
 
-    // Attempt to upload the repository to Nexus. This should fail with a 500
-    // error because the updates system is not configured.
+    // Attempt to upload the repository to Nexus. This should fail with a 400
+    // error because we did not upload a trusted root role.
     {
-        make_upload_request(
-            client,
-            &archive_path,
-            StatusCode::INTERNAL_SERVER_ERROR,
-        )
-        .execute()
-        .await
-        .context("repository upload should have failed with 500 error")?;
+        make_upload_request(client, &archive_path, StatusCode::BAD_REQUEST)
+            .execute()
+            .await
+            .context("repository upload should have failed with 400 error")?;
     }
 
     // The artifact replication background task should have nothing to do.
@@ -71,13 +70,13 @@ async fn test_repo_upload_unconfigured() -> Result<()> {
     );
     assert_eq!(status.local_repos, 0);
 
-    // Attempt to fetch a repository description from Nexus. This should also
-    // fail with a 500 error.
+    // Attempt to fetch a repository description from Nexus. This should fail
+    // with a 404 error.
     {
         make_get_request(
             client,
             "1.0.0".parse().unwrap(),
-            StatusCode::INTERNAL_SERVER_ERROR,
+            StatusCode::NOT_FOUND,
         )
         .execute()
         .await
@@ -93,11 +92,6 @@ async fn test_repo_upload_unconfigured() -> Result<()> {
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn test_repo_upload() -> Result<()> {
     let mut config = load_test_config();
-    config.pkg.updates = Some(UpdatesConfig {
-        // XXX: This is currently not used by the update system, but
-        // trusted_root will become meaningful in the future.
-        trusted_root: "does-not-exist.json".into(),
-    });
     let logctx = LogContext::new("test_update_end_to_end", &config.pkg.log);
     let cptestctx = test_setup_with_config::<omicron_nexus::Server>(
         "test_update_end_to_end",
@@ -119,7 +113,25 @@ async fn test_repo_upload() -> Result<()> {
     );
 
     // Build a fake TUF repo
-    let archive_path = make_archive(&logctx.log).await?;
+    let key = Key::generate_ed25519().unwrap();
+    let archive_path = make_archive(&logctx.log, &key).await?;
+
+    // Read the generated root.json and add it to the trust store.
+    let root_role = {
+        let archive = std::fs::File::open(&archive_path)
+            .expect("failed to open TUF archive");
+        let mut archive =
+            ZipArchive::new(archive).expect("failed to open TUF archive");
+        let file = archive
+            .by_name("repo/metadata/1.root.json")
+            .expect("repo/metadata/1.root.json not present");
+        serde_json::from_reader(file)
+            .expect("failed reading repo/metadata/1.root.json")
+    };
+    datastore
+        .tuf_trust_root_insert(&opctx, TufTrustRoot::new(root_role))
+        .await
+        .unwrap();
 
     // Upload the repository to Nexus.
     let mut initial_description = {
@@ -257,7 +269,8 @@ async fn test_repo_upload() -> Result<()> {
             kind: KnownArtifactKind::GimletSp,
             version: "2.0.0".parse().unwrap(),
         }];
-        let archive_path = make_tweaked_archive(&logctx.log, tweaks).await?;
+        let archive_path =
+            make_tweaked_archive(&logctx.log, &key, tweaks).await?;
 
         let response = make_upload_request(
             client,
@@ -286,7 +299,8 @@ async fn test_repo_upload() -> Result<()> {
                 size_delta: 1024,
             },
         ];
-        let archive_path = make_tweaked_archive(&logctx.log, tweaks).await?;
+        let archive_path =
+            make_tweaked_archive(&logctx.log, &key, tweaks).await?;
 
         let response =
             make_upload_request(client, &archive_path, StatusCode::CONFLICT)
@@ -323,7 +337,8 @@ async fn test_repo_upload() -> Result<()> {
             },
         ];
 
-        let archive_path = make_tweaked_archive(&logctx.log, tweaks).await?;
+        let archive_path =
+            make_tweaked_archive(&logctx.log, &key, tweaks).await?;
 
         let response =
             make_upload_request(client, &archive_path, StatusCode::CONFLICT)
@@ -352,7 +367,8 @@ async fn test_repo_upload() -> Result<()> {
     // changes. This should be accepted.
     {
         let tweaks = &[ManifestTweak::SystemVersion("2.0.0".parse().unwrap())];
-        let archive_path = make_tweaked_archive(&logctx.log, tweaks).await?;
+        let archive_path =
+            make_tweaked_archive(&logctx.log, &key, tweaks).await?;
 
         let response =
             make_upload_request(client, &archive_path, StatusCode::OK)
@@ -387,12 +403,16 @@ async fn test_repo_upload() -> Result<()> {
     Ok(())
 }
 
-async fn make_archive(log: &slog::Logger) -> anyhow::Result<Utf8TempPath> {
-    make_tweaked_archive(log, &[]).await
+async fn make_archive(
+    log: &slog::Logger,
+    key: &Key,
+) -> anyhow::Result<Utf8TempPath> {
+    make_tweaked_archive(log, key, &[]).await
 }
 
 async fn make_tweaked_archive(
     log: &slog::Logger,
+    key: &Key,
     tweaks: &[ManifestTweak],
 ) -> anyhow::Result<Utf8TempPath> {
     let manifest = DeserializedManifest::tweaked_fake(tweaks);
@@ -414,6 +434,8 @@ async fn make_tweaked_archive(
     let args = tufaceous::Args::try_parse_from([
         "tufaceous",
         "assemble",
+        "--key",
+        &key.to_string(),
         manifest_file.path().as_str(),
         archive_path.as_str(),
     ])

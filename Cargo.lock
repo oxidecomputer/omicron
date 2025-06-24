@@ -6388,6 +6388,7 @@ dependencies = [
  "openapiv3",
  "oximeter-types 0.1.0",
  "oxql-types",
+ "serde_json",
 ]
 
 [[package]]
@@ -13785,7 +13786,6 @@ dependencies = [
 [[package]]
 name = "tufaceous"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/tufaceous?branch=main#681cb87d43712ce0f00d469d538080e8368bf991"
 dependencies = [
  "anyhow",
  "camino",
@@ -13806,7 +13806,6 @@ dependencies = [
 [[package]]
 name = "tufaceous-artifact"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/tufaceous?branch=main#681cb87d43712ce0f00d469d538080e8368bf991"
 dependencies = [
  "daft",
  "hex",
@@ -13823,7 +13822,6 @@ dependencies = [
 [[package]]
 name = "tufaceous-brand-metadata"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/tufaceous?branch=main#681cb87d43712ce0f00d469d538080e8368bf991"
 dependencies = [
  "semver 1.0.26",
  "serde",
@@ -13835,7 +13833,6 @@ dependencies = [
 [[package]]
 name = "tufaceous-lib"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/tufaceous?branch=main#681cb87d43712ce0f00d469d538080e8368bf991"
 dependencies = [
  "anyhow",
  "async-trait",

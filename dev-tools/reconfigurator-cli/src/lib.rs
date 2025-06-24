@@ -60,7 +60,9 @@ use tabled::Tabled;
 use tufaceous_artifact::ArtifactHash;
 use tufaceous_artifact::ArtifactVersion;
 use tufaceous_artifact::ArtifactVersionError;
-use update_common::artifacts::{ArtifactsWithPlan, ControlPlaneZonesMode};
+use update_common::artifacts::{
+    ArtifactsWithPlan, ControlPlaneZonesMode, VerificationMode,
+};
 
 mod log_capture;
 
@@ -1752,6 +1754,7 @@ fn cmd_set(
                     None,
                     repo_hash,
                     ControlPlaneZonesMode::Split,
+                    VerificationMode::BlindlyTrustAnything,
                     &sim.log,
                 )
                 .await

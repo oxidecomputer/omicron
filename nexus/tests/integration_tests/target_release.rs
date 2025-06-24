@@ -12,7 +12,6 @@ use clap::Parser as _;
 use dropshot::test_util::{ClientTestContext, LogContext};
 use http::StatusCode;
 use http::method::Method;
-use nexus_config::UpdatesConfig;
 use nexus_test_utils::http_testing::AuthnMode;
 use nexus_test_utils::http_testing::{NexusRequest, RequestBuilder};
 use nexus_test_utils::load_test_config;
@@ -22,15 +21,11 @@ use nexus_types::external_api::views::{TargetRelease, TargetReleaseSource};
 use omicron_common::api::external::TufRepoInsertResponse;
 use omicron_sled_agent::sim;
 use semver::Version;
+use tufaceous_lib::Key;
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn get_set_target_release() -> Result<()> {
     let mut config = load_test_config();
-    config.pkg.updates = Some(UpdatesConfig {
-        // XXX: This is currently not used by the update system, but
-        // trusted_root will become meaningful in the future.
-        trusted_root: "does-not-exist.json".into(),
-    });
     let ctx = test_setup_with_config::<omicron_nexus::Server>(
         "test_update_uninitialized",
         &mut config,
@@ -68,6 +63,7 @@ async fn get_set_target_release() -> Result<()> {
     .expect_err("invalid TUF repo");
 
     let temp = Utf8TempDir::new().unwrap();
+    let key = Key::generate_ed25519().unwrap();
 
     // Adding a fake (tufaceous) repo and then setting it as the
     // target release should succeed.
@@ -78,6 +74,8 @@ async fn get_set_target_release() -> Result<()> {
         tufaceous::Args::try_parse_from([
             "tufaceous",
             "assemble",
+            "--key",
+            &key.to_string(),
             "../update-common/manifests/fake.toml",
             path.as_str(),
         ])
@@ -111,6 +109,8 @@ async fn get_set_target_release() -> Result<()> {
         tufaceous::Args::try_parse_from([
             "tufaceous",
             "assemble",
+            "--key",
+            &key.to_string(),
             "../update-common/manifests/fake-non-semver.toml",
             "--allow-non-semver",
             path.as_str(),

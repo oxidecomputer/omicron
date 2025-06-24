@@ -19,7 +19,6 @@ use nexus_background_task_interface::BackgroundTasks;
 use nexus_config::NexusConfig;
 use nexus_config::RegionAllocationStrategy;
 use nexus_config::Tunables;
-use nexus_config::UpdatesConfig;
 use nexus_db_model::AllSchemaVersions;
 use nexus_db_queries::authn;
 use nexus_db_queries::authz;
@@ -211,10 +210,6 @@ pub struct Nexus {
     /// pool for the webhook deliverator background task and the webhook probe
     /// API.
     webhook_delivery_client: reqwest::Client,
-
-    /// Contents of the trusted root role for the TUF repository.
-    #[allow(dead_code)]
-    updates_config: Option<UpdatesConfig>,
 
     /// The tunable parameters from a configuration file
     tunables: Tunables,
@@ -460,7 +455,6 @@ impl Nexus {
             reqwest_client,
             timeseries_client,
             webhook_delivery_client,
-            updates_config: config.pkg.updates.clone(),
             tunables: config.pkg.tunables.clone(),
             opctx_alloc: OpContext::for_background(
                 log.new(o!("component" => "InstanceAllocator")),

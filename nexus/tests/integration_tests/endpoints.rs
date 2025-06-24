@@ -2483,9 +2483,7 @@ pub static VERIFY_ENDPOINTS: LazyLock<Vec<VerifyEndpoint>> =
                 url: "/v1/system/update/repository/1.0.0",
                 visibility: Visibility::Public,
                 unprivileged_access: UnprivilegedAccess::None,
-                // The update system is disabled, which causes a 500 error even for
-                // privileged users. That is captured by GetUnimplemented.
-                allowed_methods: vec![AllowedMethod::GetUnimplemented],
+                allowed_methods: vec![AllowedMethod::GetNonexistent],
             },
             VerifyEndpoint {
                 url: "/v1/system/update/target-release",

@@ -238,12 +238,6 @@ pub struct ConsoleConfig {
     pub session_absolute_timeout_minutes: u32,
 }
 
-#[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
-pub struct UpdatesConfig {
-    /// Trusted root.json role for the TUF updates repository.
-    pub trusted_root: Utf8PathBuf,
-}
-
 /// Options to tweak database schema changes.
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
 pub struct SchemaConfig {
@@ -839,10 +833,6 @@ pub struct PackageConfig {
     /// Timeseries database configuration.
     #[serde(default)]
     pub timeseries_db: TimeseriesDbConfig,
-    /// Updates-related configuration. Updates APIs return 400 Bad Request when
-    /// this is unconfigured.
-    #[serde(default)]
-    pub updates: Option<UpdatesConfig>,
     /// Describes how to handle and perform schema changes.
     #[serde(default)]
     pub schema: Option<SchemaConfig>,
@@ -1034,8 +1024,6 @@ mod test {
             if_exists = "fail"
             [timeseries_db]
             address = "[::1]:9000"
-            [updates]
-            trusted_root = "/path/to/root.json"
             [tunables]
             max_vpc_ipv4_subnet_prefix = 27
             [deployment]
@@ -1177,9 +1165,6 @@ mod test {
                             0,
                         ))),
                     },
-                    updates: Some(UpdatesConfig {
-                        trusted_root: Utf8PathBuf::from("/path/to/root.json"),
-                    }),
                     schema: None,
                     tunables: Tunables {
                         max_vpc_ipv4_subnet_prefix: 27,
@@ -1507,9 +1492,6 @@ mod test {
             if_exists = "fail"
             [timeseries_db]
             address = "[::1]:9000"
-            [updates]
-            trusted_root = "/path/to/root.json"
-            default_base_url = "http://example.invalid/"
             [tunables]
             max_vpc_ipv4_subnet_prefix = 100
             [deployment]

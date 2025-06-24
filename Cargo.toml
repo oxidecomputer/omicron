@@ -949,11 +949,12 @@ opt-level = 3
 # propolis-client = { path = "../propolis/lib/propolis-client" }
 # propolis-mock-server = { path = "../propolis/bin/mock-server" }
 
-# [patch."https://github.com/oxidecomputer/tufaceous"]
-# tufaceous = { path = "../tufaceous/bin" }
-# tufaceous-artifact = { path = "../tufaceous/artifact" }
-# tufaceous-brand-metadata = { path = "../tufaceous/brand-metadata" }
-# tufaceous-lib = { path = "../tufaceous/lib" }
+# XXX https://github.com/oxidecomputer/tufaceous/pull/30
+[patch."https://github.com/oxidecomputer/tufaceous"]
+tufaceous = { path = "../tufaceous/bin" }
+tufaceous-artifact = { path = "../tufaceous/artifact" }
+tufaceous-brand-metadata = { path = "../tufaceous/brand-metadata" }
+tufaceous-lib = { path = "../tufaceous/lib" }
 
 # [patch."https://github.com/oxidecomputer/typify"]
 # typify = { path = "../typify/typify" }

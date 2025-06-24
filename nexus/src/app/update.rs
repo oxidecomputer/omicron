@@ -10,11 +10,16 @@ use futures::Stream;
 use nexus_db_model::TufRepoDescription;
 use nexus_db_queries::authz;
 use nexus_db_queries::context::OpContext;
+use nexus_db_queries::db::{datastore::SQL_BATCH_SIZE, pagination::Paginator};
+use nexus_types::identity::Asset;
 use omicron_common::api::external::{
     Error, TufRepoInsertResponse, TufRepoInsertStatus,
 };
+use omicron_uuid_kinds::TufTrustRootUuid;
 use semver::Version;
-use update_common::artifacts::{ArtifactsWithPlan, ControlPlaneZonesMode};
+use update_common::artifacts::{
+    ArtifactsWithPlan, ControlPlaneZonesMode, VerificationMode,
+};
 
 impl super::Nexus {
     pub(crate) async fn updates_put_repository(
@@ -25,16 +30,24 @@ impl super::Nexus {
     ) -> Result<TufRepoInsertResponse, HttpError> {
         opctx.authorize(authz::Action::Modify, &authz::FLEET).await?;
 
-        // XXX: this needs to validate against the trusted root!
-        let _updates_config =
-            self.updates_config.as_ref().ok_or_else(|| {
-                Error::internal_error("updates system not initialized")
-            })?;
+        let mut trusted_roots = Vec::new();
+        let mut paginator = Paginator::<TufTrustRootUuid>::new(SQL_BATCH_SIZE);
+        while let Some(p) = paginator.next() {
+            let batch = self
+                .db_datastore
+                .tuf_trust_root_list(opctx, &p.current_pagparams())
+                .await?;
+            paginator = p.found_batch(&batch, &|a| a.id());
+            for root in batch {
+                trusted_roots.push(root.root_role.to_string().into_bytes());
+            }
+        }
 
         let artifacts_with_plan = ArtifactsWithPlan::from_stream(
             body,
             Some(file_name),
             ControlPlaneZonesMode::Split,
+            VerificationMode::TrustStore(&trusted_roots),
             &self.log,
         )
         .await
@@ -80,11 +93,6 @@ impl super::Nexus {
         system_version: Version,
     ) -> Result<TufRepoDescription, HttpError> {
         opctx.authorize(authz::Action::Read, &authz::FLEET).await?;
-
-        let _updates_config =
-            self.updates_config.as_ref().ok_or_else(|| {
-                Error::internal_error("updates system not initialized")
-            })?;
 
         let tuf_repo_description = self
             .db_datastore

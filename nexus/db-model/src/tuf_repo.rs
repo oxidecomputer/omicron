@@ -6,11 +6,15 @@ use std::str::FromStr;
 
 use crate::{Generation, SemverVersion, typed_uuid::DbTypedUuid};
 use chrono::{DateTime, Utc};
+use db_macros::Asset;
 use diesel::{deserialize::FromSql, serialize::ToSql, sql_types::Text};
-use nexus_db_schema::schema::{tuf_artifact, tuf_repo, tuf_repo_artifact};
+use nexus_db_schema::schema::{
+    tuf_artifact, tuf_repo, tuf_repo_artifact, tuf_trust_root,
+};
 use omicron_common::{api::external, update::ArtifactId};
 use omicron_uuid_kinds::TufArtifactKind;
 use omicron_uuid_kinds::TufRepoKind;
+use omicron_uuid_kinds::TufTrustRootUuid;
 use omicron_uuid_kinds::TypedUuid;
 use parse_display::Display;
 use serde::{Deserialize, Serialize};
@@ -329,5 +333,35 @@ impl FromSql<diesel::sql_types::Text, diesel::pg::Pg> for ArtifactHash {
         ExternalArtifactHash::from_str(&s)
             .map(ArtifactHash)
             .map_err(|e| e.into())
+    }
+}
+
+/// A trusted TUF root roles, used to verify TUF repo signatures.
+#[derive(
+    Clone,
+    Debug,
+    Queryable,
+    Insertable,
+    Selectable,
+    Asset,
+    Serialize,
+    Deserialize,
+)]
+#[diesel(table_name = tuf_trust_root)]
+#[asset(uuid_kind = TufTrustRootKind)]
+pub struct TufTrustRoot {
+    #[diesel(embed)]
+    pub identity: TufTrustRootIdentity,
+    pub time_deleted: Option<DateTime<Utc>>,
+    pub root_role: serde_json::Value,
+}
+
+impl TufTrustRoot {
+    pub fn new(root_role: serde_json::Value) -> TufTrustRoot {
+        TufTrustRoot {
+            identity: TufTrustRootIdentity::new(TufTrustRootUuid::new_v4()),
+            time_deleted: None,
+            root_role,
+        }
     }
 }
