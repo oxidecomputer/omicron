@@ -426,7 +426,7 @@ impl SledAgent {
         let boot_disk_zpool = config_reconciler
             .internal_disks_rx()
             .current()
-            .boot_disk_zpool()
+            .boot_disk_zpool_name()
             .ok_or_else(|| Error::BootDiskNotFound)?;
 
         // Configure a swap device of the configured size before other system setup.
@@ -828,6 +828,19 @@ impl SledAgent {
         self.inner.config_reconciler.set_sled_config(config).await
     }
 
+    /// Get the status of the "destroy orphaned datasets" chicken switch.
+    pub(crate) fn chicken_switch_destroy_orphaned_datasets(&self) -> bool {
+        self.inner.config_reconciler.will_destroy_orphans()
+    }
+
+    /// Set the status of the "destroy orphaned datasets" chicken switch.
+    pub(crate) fn set_chicken_switch_destroy_orphaned_datasets(
+        &self,
+        destroy_orphans: bool,
+    ) {
+        self.inner.config_reconciler.set_destroy_orphans(destroy_orphans);
+    }
+
     /// Returns whether or not the sled believes itself to be a scrimlet
     pub fn get_role(&self) -> SledRole {
         if self.inner.hardware.is_scrimlet() {
@@ -1122,6 +1135,8 @@ impl SledAgent {
         let reservoir_size = self.inner.instances.reservoir_size();
         let sled_role =
             if is_scrimlet { SledRole::Scrimlet } else { SledRole::Gimlet };
+        let zone_image_resolver =
+            self.inner.services.zone_image_resolver().status().to_inventory();
 
         let ReconcilerInventory {
             disks,
@@ -1146,6 +1161,7 @@ impl SledAgent {
             ledgered_sled_config,
             reconciler_status,
             last_reconciliation,
+            zone_image_resolver,
         })
     }
 

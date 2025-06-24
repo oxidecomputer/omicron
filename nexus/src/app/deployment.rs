@@ -13,6 +13,7 @@ use nexus_types::deployment::BlueprintMetadata;
 use nexus_types::deployment::BlueprintTarget;
 use nexus_types::deployment::BlueprintTargetSet;
 use nexus_types::deployment::PlanningInput;
+use nexus_types::internal_api::views::UpdateStatus;
 use nexus_types::inventory::Collection;
 use omicron_common::api::external::CreateResult;
 use omicron_common::api::external::DataPageParams;
@@ -199,5 +200,27 @@ impl super::Nexus {
     ) -> Result<(), Error> {
         let _ = self.blueprint_add(&opctx, &blueprint).await?;
         Ok(())
+    }
+
+    pub async fn update_status(
+        &self,
+        opctx: &OpContext,
+    ) -> Result<UpdateStatus, Error> {
+        let planning_context = self.blueprint_planning_context(opctx).await?;
+        let inventory = planning_context.inventory.ok_or_else(|| {
+            Error::internal_error("no recent inventory collection found")
+        })?;
+        let new = planning_context.planning_input.tuf_repo();
+        let old = planning_context.planning_input.old_repo();
+        let status = UpdateStatus::new(
+            old,
+            new,
+            inventory
+                .sled_agents
+                .iter()
+                .map(|agent| (&agent.sled_id, &agent.last_reconciliation)),
+        );
+
+        Ok(status)
     }
 }

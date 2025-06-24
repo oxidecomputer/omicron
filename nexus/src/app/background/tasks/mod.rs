@@ -9,6 +9,7 @@ pub mod alert_dispatcher;
 pub mod bfd;
 pub mod blueprint_execution;
 pub mod blueprint_load;
+pub mod blueprint_planner;
 pub mod blueprint_rendezvous;
 pub mod crdb_node_id_collector;
 pub mod decommissioned_disk_cleaner;

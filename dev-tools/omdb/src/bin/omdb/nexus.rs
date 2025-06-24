@@ -46,6 +46,7 @@ use nexus_types::deployment::ClickhousePolicy;
 use nexus_types::deployment::OximeterReadMode;
 use nexus_types::deployment::OximeterReadPolicy;
 use nexus_types::internal_api::background::AbandonedVmmReaperStatus;
+use nexus_types::internal_api::background::BlueprintPlannerStatus;
 use nexus_types::internal_api::background::BlueprintRendezvousStatus;
 use nexus_types::internal_api::background::EreporterStatus;
 use nexus_types::internal_api::background::InstanceReincarnationStatus;
@@ -135,6 +136,8 @@ enum NexusCommands {
     /// interact with support bundles
     #[command(visible_alias = "sb")]
     SupportBundles(SupportBundleArgs),
+    /// show running artifact versions
+    UpdateStatus,
 }
 
 #[derive(Debug, Args)]
@@ -779,6 +782,9 @@ impl NexusArgs {
             NexusCommands::SupportBundles(SupportBundleArgs {
                 command: SupportBundleCommands::Inspect(args),
             }) => cmd_nexus_support_bundles_inspect(&client, args).await,
+            NexusCommands::UpdateStatus => {
+                cmd_nexus_update_status(&client).await
+            }
         }
     }
 }
@@ -1057,6 +1063,9 @@ fn print_task_details(bgtask: &BackgroundTask, details: &serde_json::Value) {
         "abandoned_vmm_reaper" => {
             print_task_abandoned_vmm_reaper(details);
         }
+        "blueprint_planner" => {
+            print_task_blueprint_planner(details);
+        }
         "blueprint_executor" => {
             print_task_blueprint_executor(details);
         }
@@ -1206,6 +1215,44 @@ fn print_task_abandoned_vmm_reaper(details: &serde_json::Value) {
             );
         }
     };
+}
+
+fn print_task_blueprint_planner(details: &serde_json::Value) {
+    let status =
+        match serde_json::from_value::<BlueprintPlannerStatus>(details.clone())
+        {
+            Ok(status) => status,
+            Err(error) => {
+                eprintln!(
+                    "warning: failed to interpret task details: {:?}: {:?}",
+                    error, details
+                );
+                return;
+            }
+        };
+    match status {
+        BlueprintPlannerStatus::Disabled => {
+            println!("    blueprint planning explicitly disabled by config!");
+        }
+        BlueprintPlannerStatus::Error(error) => {
+            println!("    task did not complete successfully: {error}");
+        }
+        BlueprintPlannerStatus::Unchanged { parent_blueprint_id } => {
+            println!("    plan unchanged from parent {parent_blueprint_id}");
+        }
+        BlueprintPlannerStatus::Planned { parent_blueprint_id, error } => {
+            println!(
+                "    planned new blueprint from parent {parent_blueprint_id}, \
+                     but could not make it the target: {error}"
+            );
+        }
+        BlueprintPlannerStatus::Targeted { blueprint_id, .. } => {
+            println!(
+                "    planned new blueprint {blueprint_id}, \
+                     and made it the current target"
+            );
+        }
+    }
 }
 
 fn print_task_blueprint_executor(details: &serde_json::Value) {
@@ -3862,10 +3909,10 @@ async fn cmd_nexus_sled_expunge_disk_with_datastore(
 
             let mut sleds_containing_disk = vec![];
 
-            for (sled_id, sled_agent) in collection.sled_agents {
+            for sled_agent in collection.sled_agents {
                 for sled_disk in sled_agent.disks {
                     if sled_disk.identity == disk_identity {
-                        sleds_containing_disk.push(sled_id);
+                        sleds_containing_disk.push(sled_agent.sled_id);
                     }
                 }
             }
@@ -4168,4 +4215,48 @@ async fn cmd_nexus_support_bundles_inspect(
     };
 
     support_bundle_viewer::run_dashboard(accessor).await
+}
+
+/// Runs `omdb nexus upgrade-status`
+async fn cmd_nexus_update_status(
+    client: &nexus_client::Client,
+) -> Result<(), anyhow::Error> {
+    let status = client
+        .update_status()
+        .await
+        .context("retrieving update status")?
+        .into_inner();
+
+    #[derive(Tabled)]
+    #[tabled(rename_all = "SCREAMING_SNAKE_CASE")]
+    struct ZoneRow {
+        sled_id: String,
+        zone_type: String,
+        zone_id: String,
+        version: String,
+    }
+
+    let mut rows = Vec::new();
+    for (sled_id, mut statuses) in status.zones.into_iter() {
+        statuses.sort_unstable_by_key(|s| {
+            (s.zone_type.kind(), s.zone_id, s.version.clone())
+        });
+        for status in statuses {
+            rows.push(ZoneRow {
+                sled_id: sled_id.to_string(),
+                zone_type: status.zone_type.kind().name_prefix().into(),
+                zone_id: status.zone_id.to_string(),
+                version: status.version.to_string(),
+            });
+        }
+    }
+
+    let table = tabled::Table::new(rows)
+        .with(tabled::settings::Style::empty())
+        .with(tabled::settings::Padding::new(0, 1, 0, 0))
+        .to_string();
+
+    println!("Running Zones");
+    println!("{}", table);
+    Ok(())
 }

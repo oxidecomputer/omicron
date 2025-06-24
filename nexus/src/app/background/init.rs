@@ -94,6 +94,7 @@ use super::tasks::alert_dispatcher::AlertDispatcher;
 use super::tasks::bfd;
 use super::tasks::blueprint_execution;
 use super::tasks::blueprint_load;
+use super::tasks::blueprint_planner;
 use super::tasks::blueprint_rendezvous;
 use super::tasks::crdb_node_id_collector;
 use super::tasks::decommissioned_disk_cleaner;
@@ -202,6 +203,7 @@ impl BackgroundTasksInitializer {
             task_decommissioned_disk_cleaner: Activator::new(),
             task_phantom_disks: Activator::new(),
             task_blueprint_loader: Activator::new(),
+            task_blueprint_planner: Activator::new(),
             task_blueprint_executor: Activator::new(),
             task_blueprint_rendezvous: Activator::new(),
             task_crdb_node_id_collector: Activator::new(),
@@ -278,6 +280,7 @@ impl BackgroundTasksInitializer {
             task_decommissioned_disk_cleaner,
             task_phantom_disks,
             task_blueprint_loader,
+            task_blueprint_planner,
             task_blueprint_executor,
             task_blueprint_rendezvous,
             task_crdb_node_id_collector,
@@ -418,18 +421,11 @@ impl BackgroundTasksInitializer {
         };
 
         // Background task: blueprint loader
+        //
+        // Registration is below so that it can watch the planner.
         let blueprint_loader =
             blueprint_load::TargetBlueprintLoader::new(datastore.clone());
         let rx_blueprint = blueprint_loader.watcher();
-        driver.register(TaskDefinition {
-            name: "blueprint_loader",
-            description: "Loads the current target blueprint from the DB",
-            period: config.blueprints.period_secs_load,
-            task_impl: Box::new(blueprint_loader),
-            opctx: opctx.child(BTreeMap::new()),
-            watchers: vec![],
-            activator: task_blueprint_loader,
-        });
 
         // Background task: blueprint executor
         let blueprint_executor = blueprint_execution::BlueprintExecutor::new(
@@ -449,22 +445,6 @@ impl BackgroundTasksInitializer {
             opctx: opctx.child(BTreeMap::new()),
             watchers: vec![Box::new(rx_blueprint.clone())],
             activator: task_blueprint_executor,
-        });
-
-        // Background task: CockroachDB node ID collector
-        let crdb_node_id_collector =
-            crdb_node_id_collector::CockroachNodeIdCollector::new(
-                datastore.clone(),
-                rx_blueprint.clone(),
-            );
-        driver.register(TaskDefinition {
-            name: "crdb_node_id_collector",
-            description: "Collects node IDs of running CockroachDB zones",
-            period: config.blueprints.period_secs_collect_crdb_node_ids,
-            task_impl: Box::new(crdb_node_id_collector),
-            opctx: opctx.child(BTreeMap::new()),
-            watchers: vec![Box::new(rx_blueprint.clone())],
-            activator: task_crdb_node_id_collector,
         });
 
         // Background task: inventory collector
@@ -495,6 +475,58 @@ impl BackgroundTasksInitializer {
 
             inventory_watcher
         };
+
+        // Background task: blueprint planner
+        //
+        // Replans on inventory collection and changes to the current
+        // target blueprint.
+        let blueprint_planner = blueprint_planner::BlueprintPlanner::new(
+            datastore.clone(),
+            config.blueprints.disable_planner,
+            inventory_watcher.clone(),
+            rx_blueprint.clone(),
+        );
+        let rx_planner = blueprint_planner.watcher();
+        driver.register(TaskDefinition {
+            name: "blueprint_planner",
+            description: "Updates the target blueprint",
+            period: config.blueprints.period_secs_plan,
+            task_impl: Box::new(blueprint_planner),
+            opctx: opctx.child(BTreeMap::new()),
+            watchers: vec![
+                Box::new(inventory_watcher.clone()),
+                Box::new(rx_blueprint.clone()),
+            ],
+            activator: task_blueprint_planner,
+        });
+
+        // The loader watches the planner so that it can immediately load
+        // a new target blueprint.
+        driver.register(TaskDefinition {
+            name: "blueprint_loader",
+            description: "Loads the current target blueprint from the DB",
+            period: config.blueprints.period_secs_load,
+            task_impl: Box::new(blueprint_loader),
+            opctx: opctx.child(BTreeMap::new()),
+            watchers: vec![Box::new(rx_planner.clone())],
+            activator: task_blueprint_loader,
+        });
+
+        // Background task: CockroachDB node ID collector
+        let crdb_node_id_collector =
+            crdb_node_id_collector::CockroachNodeIdCollector::new(
+                datastore.clone(),
+                rx_blueprint.clone(),
+            );
+        driver.register(TaskDefinition {
+            name: "crdb_node_id_collector",
+            description: "Collects node IDs of running CockroachDB zones",
+            period: config.blueprints.period_secs_collect_crdb_node_ids,
+            task_impl: Box::new(crdb_node_id_collector),
+            opctx: opctx.child(BTreeMap::new()),
+            watchers: vec![Box::new(rx_blueprint.clone())],
+            activator: task_crdb_node_id_collector,
+        });
 
         // Cleans up and collects support bundles.
         //

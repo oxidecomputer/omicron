@@ -8,6 +8,7 @@ use std::collections::BTreeMap;
 use std::net::{IpAddr, Ipv6Addr, SocketAddr, SocketAddrV6};
 use std::time::Duration;
 
+use camino::Utf8PathBuf;
 use chrono::{DateTime, Utc};
 use daft::Diffable;
 use id_map::IdMap;
@@ -17,19 +18,24 @@ use iddqd::IdOrdMap;
 use iddqd::id_upcast;
 use omicron_common::disk::{DatasetKind, DatasetName};
 use omicron_common::ledger::Ledgerable;
+use omicron_common::update::OmicronZoneManifestSource;
 use omicron_common::{
     api::{
         external::{ByteCount, Generation},
         internal::shared::{NetworkInterface, SourceNatConfig},
     },
     disk::{DatasetConfig, DiskVariant, OmicronPhysicalDiskConfig},
+    snake_case_result::{self, SnakeCaseResult},
     update::ArtifactId,
     zpool_name::ZpoolName,
 };
-use omicron_uuid_kinds::{DatasetUuid, OmicronZoneUuid};
+use omicron_uuid_kinds::{
+    DatasetUuid, InternalZpoolUuid, MupdateUuid, OmicronZoneUuid,
+};
 use omicron_uuid_kinds::{MupdateOverrideUuid, PhysicalDiskUuid};
 use omicron_uuid_kinds::{SledUuid, ZpoolUuid};
-use schemars::JsonSchema;
+use schemars::schema::{Schema, SchemaObject};
+use schemars::{JsonSchema, SchemaGenerator};
 use serde::{Deserialize, Serialize};
 // Export this type for convenience -- this way, dependents don't have to
 // depend on sled-hardware-types.
@@ -119,6 +125,7 @@ pub struct Inventory {
     pub ledgered_sled_config: Option<OmicronSledConfig>,
     pub reconciler_status: ConfigReconcilerInventoryStatus,
     pub last_reconciliation: Option<ConfigReconcilerInventory>,
+    pub zone_image_resolver: ZoneImageResolverInventory,
 }
 
 /// Describes the last attempt made by the sled-agent-config-reconciler to
@@ -148,6 +155,22 @@ impl ConfigReconcilerInventory {
                 self.last_reconciled_config.zones.get(zone_id)
             }
             ConfigReconcilerInventoryResult::Err { .. } => None,
+        })
+    }
+
+    /// Iterate over all zones contained in the most-recently-reconciled sled
+    /// config and report their status as of that reconciliation.
+    pub fn reconciled_omicron_zones(
+        &self,
+    ) -> impl Iterator<Item = (&OmicronZoneConfig, &ConfigReconcilerInventoryResult)>
+    {
+        // `self.zones` may contain zone IDs that aren't present in
+        // `last_reconciled_config` at all, if we failed to _shut down_ zones
+        // that are no longer present in the config. We use `filter_map` to
+        // strip those out, and only report on the configured zones.
+        self.zones.iter().filter_map(|(zone_id, result)| {
+            let config = self.last_reconciled_config.zones.get(zone_id)?;
+            Some((config, result))
         })
     }
 
@@ -239,6 +262,253 @@ pub enum ConfigReconcilerInventoryStatus {
     /// attempt, because that's always available via
     /// [`ConfigReconcilerInventory::last_reconciled_config`].
     Idle { completed_at: DateTime<Utc>, ran_for: Duration },
+}
+
+/// Inventory representation of zone image resolver status and health.
+#[derive(Clone, Debug, PartialEq, Eq, Deserialize, JsonSchema, Serialize)]
+pub struct ZoneImageResolverInventory {
+    /// The zone manifest status.
+    pub zone_manifest: ZoneManifestInventory,
+
+    /// The mupdate override status.
+    pub mupdate_override: MupdateOverrideInventory,
+}
+
+impl ZoneImageResolverInventory {
+    /// Returns a new, fake inventory for tests.
+    pub fn new_fake() -> Self {
+        Self {
+            zone_manifest: ZoneManifestInventory::new_fake(),
+            mupdate_override: MupdateOverrideInventory::new_fake(),
+        }
+    }
+}
+
+/// Inventory representation of a zone manifest.
+///
+/// Part of [`ZoneImageResolverInventory`].
+///
+/// A zone manifest is a listing of all the zones present in a system's install
+/// dataset. This struct contains information about the install dataset gathered
+/// from a system.
+#[derive(Clone, Debug, PartialEq, Eq, Deserialize, JsonSchema, Serialize)]
+pub struct ZoneManifestInventory {
+    /// The full path to the zone manifest file on the boot disk.
+    #[schemars(schema_with = "path_schema")]
+    pub boot_disk_path: Utf8PathBuf,
+
+    /// The manifest read from the boot disk, and whether the manifest is valid.
+    #[serde(with = "snake_case_result")]
+    #[schemars(
+        schema_with = "SnakeCaseResult::<ZoneManifestBootInventory, String>::json_schema"
+    )]
+    pub boot_inventory: Result<ZoneManifestBootInventory, String>,
+
+    /// Information about the install dataset on non-boot disks.
+    pub non_boot_status: IdOrdMap<ZoneManifestNonBootInventory>,
+}
+
+impl ZoneManifestInventory {
+    /// Returns a new, empty inventory for tests.
+    pub fn new_fake() -> Self {
+        Self {
+            boot_disk_path: Utf8PathBuf::from("/fake/path/install/zones.json"),
+            boot_inventory: Ok(ZoneManifestBootInventory::new_fake()),
+            non_boot_status: IdOrdMap::new(),
+        }
+    }
+}
+
+/// Inventory representation of zone artifacts on the boot disk.
+///
+/// Part of [`ZoneManifestInventory`].
+#[derive(Clone, Debug, PartialEq, Eq, Deserialize, JsonSchema, Serialize)]
+pub struct ZoneManifestBootInventory {
+    /// The manifest source.
+    ///
+    /// In production this is [`OmicronZoneManifestSource::Installinator`], but
+    /// in some development and testing flows Sled Agent synthesizes zone
+    /// manifests. In those cases, the source is
+    /// [`OmicronZoneManifestSource::SledAgent`].
+    pub source: OmicronZoneManifestSource,
+
+    /// The artifacts on disk.
+    pub artifacts: IdOrdMap<ZoneArtifactInventory>,
+}
+
+impl ZoneManifestBootInventory {
+    /// Returns a new, empty inventory for tests.
+    ///
+    /// For a more representative selection of real zones, see `representative`
+    /// in `nexus-inventory`.
+    pub fn new_fake() -> Self {
+        Self {
+            source: OmicronZoneManifestSource::Installinator {
+                mupdate_id: MupdateUuid::nil(),
+            },
+            artifacts: IdOrdMap::new(),
+        }
+    }
+}
+
+/// Inventory representation of a single zone artifact on a boot disk.
+///
+/// Part of [`ZoneManifestBootInventory`].
+#[derive(Clone, Debug, PartialEq, Eq, Deserialize, JsonSchema, Serialize)]
+pub struct ZoneArtifactInventory {
+    /// The name of the zone file on disk, for example `nexus.tar.gz`. Zone
+    /// files are always ".tar.gz".
+    pub file_name: String,
+
+    /// The full path to the zone file.
+    #[schemars(schema_with = "path_schema")]
+    pub path: Utf8PathBuf,
+
+    /// The expected size of the file, in bytes.
+    pub expected_size: u64,
+
+    /// The expected digest of the file's contents.
+    pub expected_hash: ArtifactHash,
+
+    /// The status of the artifact.
+    ///
+    /// This is `Ok(())` if the artifact is present and matches the expected
+    /// size and digest, or an error message if it is missing or does not match.
+    #[serde(with = "snake_case_result")]
+    #[schemars(schema_with = "SnakeCaseResult::<(), String>::json_schema")]
+    pub status: Result<(), String>,
+}
+
+impl IdOrdItem for ZoneArtifactInventory {
+    type Key<'a> = &'a str;
+    fn key(&self) -> Self::Key<'_> {
+        &self.file_name
+    }
+    id_upcast!();
+}
+
+/// Inventory representation of a zone manifest on a non-boot disk.
+///
+/// Unlike [`ZoneManifestBootInventory`] which is structured since
+/// Reconfigurator makes decisions based on it, information about non-boot disks
+/// is purely advisory. For simplicity, we store information in an unstructured
+/// format.
+#[derive(Clone, Debug, PartialEq, Eq, Deserialize, JsonSchema, Serialize)]
+pub struct ZoneManifestNonBootInventory {
+    /// The ID of the non-boot zpool.
+    pub zpool_id: InternalZpoolUuid,
+
+    /// The full path to the zone manifest JSON on the non-boot disk.
+    #[schemars(schema_with = "path_schema")]
+    pub path: Utf8PathBuf,
+
+    /// Whether the status is valid.
+    pub is_valid: bool,
+
+    /// A message describing the status.
+    ///
+    /// If `is_valid` is true, then the message describes the list of artifacts
+    /// found and their hashes.
+    ///
+    /// If `is_valid` is false, then this message describes the reason for the
+    /// invalid status. This could include errors reading the zone manifest, or
+    /// zone file mismatches.
+    pub message: String,
+}
+
+impl IdOrdItem for ZoneManifestNonBootInventory {
+    type Key<'a> = InternalZpoolUuid;
+    fn key(&self) -> Self::Key<'_> {
+        self.zpool_id
+    }
+    id_upcast!();
+}
+
+/// Inventory representation of MUPdate override status.
+///
+/// Part of [`ZoneImageResolverInventory`].
+///
+/// This is used by Reconfigurator to determine if a MUPdate override has
+/// occurred. For more about mixing MUPdate and updates, see RFD 556.
+#[derive(Clone, Debug, PartialEq, Eq, Deserialize, JsonSchema, Serialize)]
+pub struct MupdateOverrideInventory {
+    /// The full path to the mupdate override JSON on the boot disk.
+    #[schemars(schema_with = "path_schema")]
+    pub boot_disk_path: Utf8PathBuf,
+
+    /// The boot disk override, or an error if it could not be parsed.
+    ///
+    /// This is `None` if the override is not present.
+    #[serde(with = "snake_case_result")]
+    #[schemars(
+        schema_with = "SnakeCaseResult::<Option<MupdateOverrideBootInventory>, String>::json_schema"
+    )]
+    pub boot_override: Result<Option<MupdateOverrideBootInventory>, String>,
+
+    /// Information about the MUPdate override on non-boot disks.
+    pub non_boot_status: IdOrdMap<MupdateOverrideNonBootInventory>,
+}
+
+impl MupdateOverrideInventory {
+    /// Returns a new, empty inventory for tests.
+    pub fn new_fake() -> Self {
+        Self {
+            boot_disk_path: Utf8PathBuf::from(
+                "/fake/path/install/mupdate_override.json",
+            ),
+            boot_override: Ok(None),
+            non_boot_status: IdOrdMap::new(),
+        }
+    }
+}
+
+/// Inventory representation of the MUPdate override on the boot disk.
+#[derive(Clone, Debug, PartialEq, Eq, Deserialize, JsonSchema, Serialize)]
+pub struct MupdateOverrideBootInventory {
+    /// The ID of the MUPdate override.
+    ///
+    /// This is unique and generated by Installinator each time it is run.
+    /// During a MUPdate, each sled gets a MUPdate override ID. (The ID is
+    /// shared across boot disks and non-boot disks, though.)
+    pub mupdate_override_id: MupdateOverrideUuid,
+}
+
+/// Inventory representation of the MUPdate override on a non-boot disk.
+///
+/// Unlike [`MupdateOverrideBootInventory`] which is structured since
+/// Reconfigurator makes decisions based on it, information about non-boot disks
+/// is purely advisory. For simplicity, we store information in an unstructured
+/// format.
+#[derive(Clone, Debug, PartialEq, Eq, Deserialize, JsonSchema, Serialize)]
+pub struct MupdateOverrideNonBootInventory {
+    /// The non-boot zpool ID.
+    pub zpool_id: InternalZpoolUuid,
+
+    /// The path to the mupdate override JSON on the non-boot disk.
+    #[schemars(schema_with = "path_schema")]
+    pub path: Utf8PathBuf,
+
+    /// Whether the status is valid.
+    pub is_valid: bool,
+
+    /// A message describing the status.
+    ///
+    /// If `is_valid` is true, then the message is a short description saying
+    /// that it matches the boot disk, and whether the MUPdate override is
+    /// present.
+    ///
+    /// If `is_valid` is false, then this message describes the reason for the
+    /// invalid status. This could include errors reading the MUPdate override
+    /// JSON, or a mismatch between the boot and non-boot disks.
+    pub message: String,
+}
+
+impl IdOrdItem for MupdateOverrideNonBootInventory {
+    type Key<'a> = InternalZpoolUuid;
+    fn key(&self) -> Self::Key<'_> {
+        self.zpool_id
+    }
+    id_upcast!();
 }
 
 /// Describes the role of the sled within the rack.
@@ -924,4 +1194,12 @@ mod tests {
             });
         }
     }
+}
+
+// Used for schemars to be able to be used with camino:
+// See https://github.com/camino-rs/camino/issues/91#issuecomment-2027908513
+fn path_schema(generator: &mut SchemaGenerator) -> Schema {
+    let mut schema: SchemaObject = <String>::json_schema(generator).into();
+    schema.format = Some("Utf8PathBuf".to_owned());
+    schema.into()
 }
