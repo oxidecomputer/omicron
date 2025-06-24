@@ -1641,6 +1641,7 @@ table! {
         header_image_size -> Int8,
         header_target_size -> Int8,
         header_sha256 -> Text,
+        header_image_name -> Text,
     }
 }
 

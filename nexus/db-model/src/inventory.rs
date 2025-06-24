@@ -1028,6 +1028,7 @@ pub struct InvSledBootPartition {
     header_image_size: i64,
     header_target_size: i64,
     header_sha256: ArtifactHash,
+    header_image_name: String,
 }
 
 impl InvSledBootPartition {
@@ -1060,6 +1061,7 @@ impl InvSledBootPartition {
             header_sha256: ArtifactHash(ExternalArtifactHash(
                 details.header.sha256,
             )),
+            header_image_name: details.header.image_name,
         }
     }
 
@@ -1089,6 +1091,7 @@ impl From<InvSledBootPartition> for BootPartitionDetails {
                 image_size: value.header_image_size as u64,
                 target_size: value.header_target_size as u64,
                 sha256: value.header_sha256.0.0,
+                image_name: value.header_image_name,
             },
         }
     }
