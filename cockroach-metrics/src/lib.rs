@@ -89,7 +89,7 @@ impl CockroachAdminClient {
 /// ## Usage Pattern
 ///
 /// ```rust,no_run
-/// # use omicron_nexus::app::cockroach_http::CockroachClusterAdminClient;
+/// # use omicron_cockroach_metrics::CockroachClusterAdminClient;
 /// # use std::net::SocketAddr;
 /// # use slog::Logger;
 /// # async fn example(log: Logger) -> anyhow::Result<()> {
