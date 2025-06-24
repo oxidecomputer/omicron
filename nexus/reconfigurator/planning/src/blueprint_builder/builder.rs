@@ -387,14 +387,12 @@ impl fmt::Display for Operation {
 ///    However, the new blueprint can only be made the system's target if its
 ///    parent is the current target.
 pub struct BlueprintBuilder<'a> {
-    #[allow(dead_code)]
     log: Logger,
 
     /// previous blueprint, on which this one will be based
     parent_blueprint: &'a Blueprint,
 
     /// The latest inventory collection
-    #[allow(unused)]
     collection: &'a Collection,
 
     // These fields are used to allocate resources for sleds.
@@ -2039,8 +2037,29 @@ impl<'a> BlueprintBuilder<'a> {
                     })
                 })
             }
-            // <https://github.com/oxidecomputer/omicron/issues/6404>
-            // ZoneKind::CockroachDb => todo!("check cluster status in inventory"),
+            ZoneKind::CockroachDb => {
+                // We only update CockroachDb if the latest inventory
+                // collection has observed "no underreplicated ranges".
+                //
+                // It's always possible that a TOCTTOU issue causes this to
+                // change after we decide the zone can be updated - the
+                // control plane must have some degree of tolerance to
+                // failures, even mid-update - but this prevents our system
+                // from self-sabotage when range underreplication is already
+                // present.
+                if let Some(ranges_underreplicated) =
+                    self.collection.cockroach_status.ranges_underreplicated
+                {
+                    return ranges_underreplicated == 0;
+                }
+
+                // If we can't read stats from Cockroach, OR the number of
+                // under-replicated ranges is non-zero, refuse to update.
+                //
+                // It's possible in either of these scenarios that we have
+                // degraded redundancy, and need to recover.
+                false
+            }
             _ => true, // other zone kinds have no special dependencies
         }
     }

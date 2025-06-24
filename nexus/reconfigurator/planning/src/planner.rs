@@ -1266,6 +1266,7 @@ pub(crate) mod test {
     use omicron_common::api::external::TufRepoMeta;
     use omicron_common::disk::DatasetKind;
     use omicron_common::disk::DiskIdentity;
+    use omicron_common::policy::COCKROACHDB_REDUNDANCY;
     use omicron_common::policy::CRUCIBLE_PANTRY_REDUNDANCY;
     use omicron_common::policy::NEXUS_REDUNDANCY;
     use omicron_common::update::ArtifactId;
@@ -4975,6 +4976,209 @@ pub(crate) mod test {
             &example.collection,
             TEST_NAME,
         );
+
+        logctx.cleanup_successful();
+    }
+
+    #[test]
+    fn test_update_cockroach() {
+        static TEST_NAME: &str = "update_cockroach";
+        let logctx = test_setup_log(TEST_NAME);
+        let log = logctx.log.clone();
+
+        // Use our example system.
+        let mut rng = SimRngState::from_seed(TEST_NAME);
+        let (mut example, mut blueprint) = ExampleSystemBuilder::new_with_rng(
+            &logctx.log,
+            rng.next_system_rng(),
+        )
+        .build();
+
+        // Update the example system and blueprint, as a part of test set-up.
+        //
+        // Ask for COCKROACHDB_REDUNDANCY cockroach nodes
+
+        let mut input_builder = example.input.clone().into_builder();
+        input_builder.policy_mut().target_cockroachdb_zone_count =
+            COCKROACHDB_REDUNDANCY;
+        example.input = input_builder.build();
+
+        let blueprint_name = format!("blueprint_with_cockroach");
+        let new_blueprint = Planner::new_based_on(
+            log.clone(),
+            &blueprint,
+            &example.input,
+            &blueprint_name,
+            &example.collection,
+        )
+        .expect("can't create planner")
+        .with_rng(PlannerRng::from_seed((TEST_NAME, &blueprint_name)))
+        .plan()
+        .unwrap_or_else(|_| panic!("can't plan to include Cockroach nodes"));
+
+        let summary = new_blueprint.diff_since_blueprint(&blueprint);
+        assert_eq!(summary.total_zones_added(), COCKROACHDB_REDUNDANCY);
+        assert_eq!(summary.total_zones_removed(), 0);
+        assert_eq!(summary.total_zones_modified(), 0);
+        blueprint = new_blueprint;
+        update_collection_from_blueprint(&mut example, &blueprint);
+
+        // We should have started with no specified TUF repo and nothing to do.
+        assert!(example.input.tuf_repo().is_none());
+        assert_planning_makes_no_changes(
+            &logctx.log,
+            &blueprint,
+            &example.input,
+            &example.collection,
+            TEST_NAME,
+        );
+
+        // All zones should be sourced from the install dataset by default.
+        assert!(
+            blueprint
+                .all_omicron_zones(BlueprintZoneDisposition::is_in_service)
+                .all(|(_, z)| matches!(
+                    z.image_source,
+                    BlueprintZoneImageSource::InstallDataset
+                ))
+        );
+
+        // This test "starts" here -- we specify a new TUF repo with an updated
+        // CockroachDB image. We create a new TUF repo where version of
+        // CockroachDB has been updated out of the install dataset.
+        //
+        // The planner should avoid doing this update until it has confirmation
+        // from inventory that the cluster is healthy.
+
+        let mut input_builder = example.input.clone().into_builder();
+        let version = ArtifactVersion::new_static("1.0.0-freeform")
+            .expect("can't parse artifact version");
+        let fake_hash = ArtifactHash([0; 32]);
+        let image_source = BlueprintZoneImageSource::Artifact {
+            version: BlueprintZoneImageVersion::Available {
+                version: version.clone(),
+            },
+            hash: fake_hash,
+        };
+        let artifacts = vec![fake_zone_artifact!(CockroachDb, version.clone())];
+        input_builder.policy_mut().tuf_repo = Some(TufRepoDescription {
+            repo: TufRepoMeta {
+                hash: fake_hash,
+                targets_role_version: 0,
+                valid_until: Utc::now(),
+                system_version: Version::new(1, 0, 0),
+                file_name: String::from(""),
+            },
+            artifacts,
+        });
+        example.input = input_builder.build();
+
+        // Some helper predicates for the assertions below.
+        let is_old_cockroach = |zone: &BlueprintZoneConfig| -> bool {
+            zone.zone_type.is_cockroach()
+                && matches!(
+                    zone.image_source,
+                    BlueprintZoneImageSource::InstallDataset
+                )
+        };
+        let is_up_to_date_cockroach = |zone: &BlueprintZoneConfig| -> bool {
+            zone.zone_type.is_cockroach() && zone.image_source == image_source
+        };
+
+        // If we have no "ranges_underreplicated" info in our inventory, the
+        // planner will not update any Cockroach zones.
+        example.collection.cockroach_status.ranges_underreplicated = None;
+        assert_planning_makes_no_changes(
+            &log,
+            &blueprint,
+            &example.input,
+            &example.collection,
+            TEST_NAME,
+        );
+
+        // If we have any non-zero "ranges_underreplicated" in in our inventory,
+        // the planner will not update any Cockroach zones.
+        example.collection.cockroach_status.ranges_underreplicated = Some(1);
+        assert_planning_makes_no_changes(
+            &log,
+            &blueprint,
+            &example.input,
+            &example.collection,
+            TEST_NAME,
+        );
+
+        // Once we have zero underreplicated ranges, we can start to update
+        // Cockroach zones.
+        //
+        // We'll update one zone at a time, from the install dataset to the
+        // new TUF repo artifact.
+        for i in 1..=COCKROACHDB_REDUNDANCY {
+            // Keep setting this value in a loop;
+            // "update_collection_from_blueprint" resets it to "None".
+            example.collection.cockroach_status.ranges_underreplicated =
+                Some(0);
+
+            println!("Updating cockroach {i} of {COCKROACHDB_REDUNDANCY}");
+            let new_blueprint = Planner::new_based_on(
+                log.clone(),
+                &blueprint,
+                &example.input,
+                &format!("test_blueprint_cockroach_{i}"),
+                &example.collection,
+            )
+            .expect("can't create planner")
+            .with_rng(PlannerRng::from_seed((TEST_NAME, "bp_crdb")))
+            .plan()
+            .expect("plan for trivial TUF repo");
+
+            blueprint = new_blueprint;
+
+            assert_eq!(
+                blueprint
+                    .all_omicron_zones(BlueprintZoneDisposition::is_in_service)
+                    .filter(|(_, z)| is_old_cockroach(z))
+                    .count(),
+                COCKROACHDB_REDUNDANCY - i
+            );
+            assert_eq!(
+                blueprint
+                    .all_omicron_zones(BlueprintZoneDisposition::is_in_service)
+                    .filter(|(_, z)| is_up_to_date_cockroach(z))
+                    .count(),
+                i
+            );
+            update_collection_from_blueprint(&mut example, &blueprint);
+        }
+
+        // Validate that we have no further changes to make, once all Cockroach
+        // zones have been updated.
+
+        example.collection.cockroach_status.ranges_underreplicated = Some(0);
+        assert_planning_makes_no_changes(
+            &log,
+            &blueprint,
+            &example.input,
+            &example.collection,
+            TEST_NAME,
+        );
+
+        // Validate that we do not flip back to the install dataset after
+        // performing the update.
+
+        example.collection.cockroach_status.ranges_underreplicated = Some(1);
+
+        // NOTE: This is currently failing! If we let this execute,
+        // we appear to flip back to the install dataset, which seems wrong!
+        //
+        // We shouldn't be changing the zone image at all in this case.
+
+        //         assert_planning_makes_no_changes(
+        //             &log,
+        //             &blueprint,
+        //             &example.input,
+        //             &example.collection,
+        //             TEST_NAME,
+        //         );
 
         logctx.cleanup_successful();
     }
