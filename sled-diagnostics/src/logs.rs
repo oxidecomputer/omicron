@@ -338,6 +338,7 @@ impl LogsHandle {
                 &name,
                 &[SLED_DIAGNOSTICS_ZFS_PROPERTY_NAME],
                 Some(illumos_utils::zfs::PropertySource::Local),
+                false,
             )
             .await
             {
@@ -985,6 +986,7 @@ mod illumos_tests {
                 &name,
                 &[SLED_DIAGNOSTICS_ZFS_PROPERTY_NAME],
                 Some(illumos_utils::zfs::PropertySource::Local),
+                false,
             )
             .await
             .unwrap()

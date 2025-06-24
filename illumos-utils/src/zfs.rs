@@ -1205,6 +1205,7 @@ impl Zfs {
             filesystem_name,
             &[&property],
             Some(PropertySource::Local),
+            false,
         )
         .await?;
         Ok(value)
@@ -1214,8 +1215,10 @@ impl Zfs {
     pub async fn get_value(
         filesystem_name: &str,
         name: &str,
+        parsable: bool,
     ) -> Result<String, GetValueError> {
-        let [value] = Self::get_values(filesystem_name, &[name], None).await?;
+        let [value] =
+            Self::get_values(filesystem_name, &[name], None, parsable).await?;
         Ok(value)
     }
 
@@ -1288,11 +1291,13 @@ impl Zfs {
     ///
     /// - `names`: The properties being acquired
     /// - `source`: The optioanl property source (origin of the property)
+    /// - `parsable`: Display numbers in parsable (exact) values
     /// Defaults to "all sources" when unspecified.
     pub async fn get_values<const N: usize>(
         filesystem_name: &str,
         names: &[&str; N],
         source: Option<PropertySource>,
+        parsable: bool,
     ) -> Result<[String; N], GetValueError> {
         let mut cmd = Command::new(PFEXEC);
         let all_names = names
@@ -1308,7 +1313,8 @@ impl Zfs {
             .collect::<Result<Vec<&str>, GetValueError>>()?
             .join(",");
 
-        cmd.args(&[ZFS, "get", "-Ho", "value"]);
+        let field_fmt = if parsable { "-Hpo" } else { "-Ho" };
+        cmd.args(&[ZFS, "get", field_fmt, "value"]);
         if let Some(source) = source {
             cmd.args(&["-s", &source.to_string()]);
         }
@@ -1362,7 +1368,8 @@ impl Snapshot {
         // When a mountpoint is returned as "legacy" we could go fish around in
         // "/etc/mnttab". That would probably mean making this function return a
         // result of an option.
-        let mountpoint = Zfs::get_value(&self.filesystem, "mountpoint").await?;
+        let mountpoint =
+            Zfs::get_value(&self.filesystem, "mountpoint", false).await?;
         Ok(Utf8PathBuf::from(mountpoint)
             .join(format!(".zfs/snapshot/{}", self.snap_name)))
     }
@@ -1451,22 +1458,26 @@ mod test {
     #[tokio::test]
     async fn get_values_of_rpool() {
         // If the rpool exists, it should have a name.
-        let values = Zfs::get_values("rpool", &["name"; 1], None)
+        let values = Zfs::get_values("rpool", &["name"; 1], None, false)
             .await
             .expect("Failed to query rpool type");
         assert_eq!(values[0], "rpool");
 
         // We don't really care if any local properties are set, we just don't
         // want this to throw an error.
-        let _values =
-            Zfs::get_values("rpool", &["name"; 1], Some(PropertySource::Local))
-                .await
-                .expect("Failed to query rpool type");
+        let _values = Zfs::get_values(
+            "rpool",
+            &["name"; 1],
+            Some(PropertySource::Local),
+            false,
+        )
+        .await
+        .expect("Failed to query rpool type");
 
         // Also, the "all" property should not be queryable. It's normally fine
         // to pass this value, it just returns a variable number of properties,
         // which doesn't work with the current implementation's parsing.
-        let err = Zfs::get_values("rpool", &["all"; 1], None)
+        let err = Zfs::get_values("rpool", &["all"; 1], None, false)
             .await
             .expect_err("Should not be able to query for 'all' property");
 
