@@ -1031,6 +1031,7 @@ impl DataStore {
             nclickhouse_cluster_configs,
             nclickhouse_keepers,
             nclickhouse_servers,
+            noximeter_policy,
         ) = self.transaction_retry_wrapper("blueprint_delete")
             .transaction(&conn, |conn| {
                 let err = err.clone();
@@ -1151,6 +1152,17 @@ impl DataStore {
                     .await?
                 };
 
+                let noximeter_policy = {
+                    use nexus_db_schema::schema::
+                        bp_oximeter_read_policy::dsl;
+                    diesel::delete(dsl::bp_oximeter_read_policy
+                            .filter(dsl::blueprint_id.eq(
+                                to_db_typed_uuid(blueprint_id))),
+                    )
+                    .execute_async(&conn)
+                    .await?
+                };
+
                 Ok((
                     nblueprints,
                     nsled_metadata,
@@ -1161,6 +1173,7 @@ impl DataStore {
                     nclickhouse_cluster_configs,
                     nclickhouse_keepers,
                     nclickhouse_servers,
+                    noximeter_policy,
                 ))
                 }
             })
@@ -1180,7 +1193,8 @@ impl DataStore {
             "nnics" => nnics,
             "nclickhouse_cluster_configs" => nclickhouse_cluster_configs,
             "nclickhouse_keepers" => nclickhouse_keepers,
-            "nclickhouse_servers" => nclickhouse_servers
+            "nclickhouse_servers" => nclickhouse_servers,
+            "noximeter_policy" => noximeter_policy,
         );
 
         Ok(())
@@ -2000,6 +2014,11 @@ mod tests {
             }};
         }
 
+        // These tables start with `bp_` but do not represent the contents of a
+        // specific blueprint.  It should be uncommon to add things to this
+        // list.
+        let tables_ignored: BTreeSet<_> = ["bp_target"].into_iter().collect();
+
         let mut tables_checked = BTreeSet::new();
         for (table_name, result) in [
             query_count!(blueprint, id),
@@ -2010,6 +2029,7 @@ mod tests {
             query_count!(bp_omicron_zone_nic, blueprint_id),
             query_count!(bp_clickhouse_cluster_config, blueprint_id),
             query_count!(bp_clickhouse_keeper_zone_id_to_node_id, blueprint_id),
+            query_count!(bp_clickhouse_server_zone_id_to_node_id, blueprint_id),
             query_count!(bp_oximeter_read_policy, blueprint_id),
         ] {
             let count: i64 = result.unwrap();
@@ -2034,15 +2054,22 @@ mod tests {
             .await
             .expect("Failed to query information_schema for tables")
             .into_iter()
-            .filter(|f: &String| !tables_checked.contains(f.as_str()))
+            .filter(|f: &String| {
+                let t = f.as_str();
+                !tables_ignored.contains(t) && !tables_checked.contains(t)
+            })
             .collect();
         if !tables_unchecked.is_empty() {
+            // If you see this message, you probably added a blueprint table
+            // whose name started with `bp_*`.  Add it to the block above so
+            // that this function checks whether deleting a blueprint deletes
+            // rows from that table.  (You may also find you need to update
+            // blueprint_delete() to actually delete said rows.)
             panic!(
                 "found table(s) that look related to blueprints, but \
                  aren't covered by ensure_blueprint_fully_deleted(). \
                  Please add them to that function!\n
-                 \n\
-                 found: {}",
+                 Found: {}",
                 tables_unchecked.join(", ")
             );
         }
