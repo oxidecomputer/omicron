@@ -73,6 +73,10 @@ struct ListArgs {
     #[clap(long = "id", short)]
     ids: Vec<Uuid>,
 
+    /// Include only ereports with the provided class strings.
+    #[clap(long = "class", short)]
+    classes: Vec<String>,
+
     /// Include only ereports collected before this timestamp
     #[clap(long, short)]
     before: Option<DateTime<Utc>>,
@@ -124,6 +128,8 @@ async fn cmd_db_ereport_list(
         time_collected: DateTime<Utc>,
         restart_id: Uuid,
         ena: Ena,
+        #[tabled(display_with = "display_option_blank")]
+        class: Option<String>,
         source: db::model::Reporter,
         #[tabled(display_with = "display_option_blank", rename = "S/N")]
         serial: Option<&'report str>,
@@ -137,6 +143,7 @@ async fn cmd_db_ereport_list(
                 time_collected,
                 restart_id,
                 ena,
+                ref class,
                 sp_type,
                 sp_slot,
                 ref serial_number,
@@ -147,6 +154,7 @@ async fn cmd_db_ereport_list(
                 time_collected,
                 restart_id: restart_id.into_untyped_uuid(),
                 ena: ena.into(),
+                class: class.clone(),
                 source: db::model::Reporter::Sp { sp_type, slot: sp_slot.0 },
                 serial: serial_number.as_deref(),
                 part_number: part_number.as_deref(),
@@ -160,6 +168,7 @@ async fn cmd_db_ereport_list(
                 time_collected,
                 restart_id,
                 ena,
+                ref class,
                 sled_id,
                 ref sled_serial,
                 ..
@@ -168,6 +177,7 @@ async fn cmd_db_ereport_list(
                 time_collected,
                 restart_id: restart_id.into_untyped_uuid(),
                 ena: ena.into(),
+                class: class.clone(),
                 source: db::model::Reporter::HostOs { sled: sled_id.into() },
                 serial: Some(&sled_serial),
                 part_number: None, // TODO(eliza): go get this from inventory?
@@ -195,6 +205,10 @@ async fn cmd_db_ereport_list(
     if !args.serials.is_empty() {
         query =
             query.filter(sp_dsl::serial_number.eq_any(args.serials.clone()));
+    }
+
+    if !args.classes.is_empty() {
+        query = query.filter(sp_dsl::class.eq_any(args.classes.clone()));
     }
 
     if !args.ids.is_empty() {
@@ -229,6 +243,10 @@ async fn cmd_db_ereport_list(
     if !args.serials.is_empty() {
         query =
             query.filter(host_dsl::sled_serial.eq_any(args.serials.clone()));
+    }
+
+    if !args.classes.is_empty() {
+        query = query.filter(host_dsl::class.eq_any(args.classes.clone()));
     }
 
     if !args.ids.is_empty() {
@@ -294,16 +312,19 @@ async fn cmd_db_ereport_info(
         collector_id,
         part_number,
         serial_number,
+        class,
     } = metadata;
     const ENA: &str = "ENA";
     const TIME_COLLECTED: &str = "collected at";
     const TIME_DELETED: &str = "deleted at";
     const COLLECTOR_ID: &str = "collected by";
+    const CLASS: &str = "class";
     const REPORTER: &str = "reported by";
     const RESTART_ID: &str = "restart ID";
     const PART_NUMBER: &str = "  part number";
     const SERIAL_NUMBER: &str = "  serial number";
     const WIDTH: usize = const_max_len(&[
+        CLASS,
         TIME_COLLECTED,
         TIME_DELETED,
         COLLECTOR_ID,
@@ -313,6 +334,10 @@ async fn cmd_db_ereport_info(
     ]);
     println!("\n{:=<80}", "== EREPORT METADATA ");
     println!("    {ENA:>WIDTH$}: {}", id.ena);
+    match class {
+        Some(class) => println!("    {CLASS:>WIDTH$}: {class}"),
+        None => println!("/!\\ {CLASS:>WIDTH$}: <unknown>"),
+    }
     if let Some(time_deleted) = time_deleted {
         println!("(i) {TIME_DELETED:>WIDTH$}: {time_deleted}");
     }

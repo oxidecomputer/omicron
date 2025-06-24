@@ -22,6 +22,14 @@ CREATE TABLE IF NOT EXISTS omicron.public.host_ereport (
     sled_serial TEXT NOT NULL,
 
     /*
+     * The ereport class, which indicates the category of event reported.
+     *
+     * This is nullable, as it is extracted from the report JSON, and reports
+     * missing class information must still be ingested.
+     */
+    class STRING,
+
+    /*
      * JSON representation of the ereport as received from the sled-agent.
      *
      * the raw JSON representation of the ereport is always stored, alongside

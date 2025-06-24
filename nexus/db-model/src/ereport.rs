@@ -83,6 +83,7 @@ impl From<SpEreport> for Ereport {
             serial_number,
             sp_type,
             sp_slot,
+            class,
             report,
         } = sp_report;
         Ereport {
@@ -93,6 +94,7 @@ impl From<SpEreport> for Ereport {
                 collector_id: collector_id.into(),
                 part_number,
                 serial_number,
+                class,
             },
             reporter: Reporter::Sp { sp_type, slot: sp_slot.0 },
             report,
@@ -110,6 +112,7 @@ impl From<HostEreport> for Ereport {
             collector_id,
             sled_serial,
             sled_id,
+            class,
             report,
         } = host_report;
         Ereport {
@@ -120,6 +123,7 @@ impl From<HostEreport> for Ereport {
                 collector_id: collector_id.into(),
                 part_number: None, // TODO
                 serial_number: Some(sled_serial),
+                class,
             },
             reporter: Reporter::HostOs { sled: sled_id.into() },
             report,
@@ -134,6 +138,7 @@ pub struct EreportMetadata {
     pub collector_id: OmicronZoneUuid,
     pub part_number: Option<String>,
     pub serial_number: Option<String>,
+    pub class: Option<String>,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Ord, PartialOrd)]
@@ -199,6 +204,11 @@ pub struct SpEreport {
     /// "I don't know who I am!" is an error condition for which we might want
     /// to generate an ereport!
     pub serial_number: Option<String>,
+    /// The ereport class, which indicates the category of event reported.
+    ///
+    /// This is nullable, as it is extracted from the report JSON, and reports
+    /// missing class information must still be ingested.
+    pub class: Option<String>,
 
     pub report: serde_json::Value,
 }
@@ -215,6 +225,11 @@ pub struct HostEreport {
 
     pub sled_id: DbTypedUuid<SledKind>,
     pub sled_serial: String,
+    /// The ereport class, which indicates the category of event reported.
+    ///
+    /// This is nullable, as it is extracted from the report JSON, and reports
+    /// missing class information must still be ingested.
+    pub class: Option<String>,
 
     pub report: serde_json::Value,
 }

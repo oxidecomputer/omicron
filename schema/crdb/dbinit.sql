@@ -5796,6 +5796,14 @@ CREATE TABLE IF NOT EXISTS omicron.public.sp_ereport (
     part_number STRING,
 
     /*
+     * The ereport class, which indicates the category of event reported.
+     *
+     * This is nullable, as it is extracted from the report JSON, and reports
+     * missing class information must still be ingested.
+     */
+    class STRING,
+
+    /*
      * JSON representation of the ereport as received from the SP.
      *
      * the raw JSON representation of the ereport is always stored, alongside
@@ -5859,6 +5867,14 @@ CREATE TABLE IF NOT EXISTS omicron.public.host_ereport (
     /* identity of the reporting sled */
     sled_id UUID NOT NULL,
     sled_serial TEXT NOT NULL,
+
+    /*
+     * The ereport class, which indicates the category of event reported.
+     *
+     * This is nullable, as it is extracted from the report JSON, and reports
+     * missing class information must still be ingested.
+     */
+    class STRING,
 
     /*
      * JSON representation of the ereport as received from the sled-agent.

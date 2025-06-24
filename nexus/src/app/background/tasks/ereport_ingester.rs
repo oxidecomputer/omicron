@@ -250,18 +250,30 @@ impl Ingester {
             let db_ereports = items
                 .into_iter()
                 .map(|ereport| {
+                    const MISSING_VPD: &str =
+                        " (perhaps the SP doesn't know its own VPD?)";
                     let part_number = get_sp_metadata_string(
                         "baseboard_part_number",
                         &ereport,
                         &restart_id,
                         &opctx.log,
+                        MISSING_VPD,
                     );
                     let serial_number = get_sp_metadata_string(
                         "baseboard_serial_number",
                         &ereport,
                         &restart_id,
                         &opctx.log,
+                        MISSING_VPD,
                     );
+                    let class = get_sp_metadata_string(
+                        "class",
+                        &ereport,
+                        &restart_id,
+                        &opctx.log,
+                        "",
+                    );
+
                     db::model::SpEreport {
                         restart_id: restart_id.into(),
                         ena: ereport.ena.into(),
@@ -272,6 +284,7 @@ impl Ingester {
                         sp_slot: slot.into(),
                         part_number,
                         serial_number,
+                        class,
                         report: serde_json::Value::Object(ereport.data),
                     }
                 })
@@ -399,6 +412,7 @@ fn get_sp_metadata_string(
     ereport: &Ereport,
     restart_id: &EreporterRestartUuid,
     log: &slog::Logger,
+    extra_context: &'static str,
 ) -> Option<String> {
     match ereport.data.get(key) {
         Some(serde_json::Value::String(s)) => Some(s.clone()),
@@ -415,8 +429,7 @@ fn get_sp_metadata_string(
         None => {
             slog::warn!(
                 &log,
-                "ereport missing '{key}'; perhaps the SP doesn't know its own \
-                 VPD!";
+                "ereport missing '{key}'{extra_context}";
                 "ena" => ?ereport.ena,
                 "restart_id" => ?restart_id,
             );

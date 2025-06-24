@@ -2456,6 +2456,7 @@ table! {
 
         part_number -> Nullable<Text>,
         serial_number -> Nullable<Text>,
+        class -> Nullable<Text>,
 
         report -> Jsonb,
     }
@@ -2471,6 +2472,7 @@ table! {
 
         sled_id -> Uuid,
         sled_serial -> Text,
+        class -> Nullable<Text>,
 
         report -> Jsonb,
     }
