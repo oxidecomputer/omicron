@@ -368,7 +368,7 @@ camino = { version = "1.1", features = ["serde1"] }
 camino-tempfile = "1.4.1"
 camino-tempfile-ext = { version = "0.3.1", features = ["assert-color"] }
 cancel-safe-futures = "0.1.5"
-cargo_metadata = "0.19.2"
+cargo_metadata = "0.20.0"
 chacha20poly1305 = "0.10.1"
 cfg-if = "1.0"
 chrono = { version = "0.4", features = [ "serde" ] }
@@ -389,7 +389,7 @@ cockroach-admin-types = { path = "cockroach-admin/types" }
 colored = "2.1"
 const_format = "0.2.34"
 cookie = "0.18"
-criterion = { version = "0.5.1", features = [ "async_tokio" ] }
+criterion = { version = "0.6.0", features = [ "async_tokio" ] }
 crossbeam = "0.8"
 crossterm = { version = "0.28.1", features = ["event-stream"] }
 # NOTE: if you change the pinned revision of the `crucible` dependencies, you
@@ -409,7 +409,7 @@ datatest-stable = "0.3.2"
 db-macros = { path = "nexus/db-macros" }
 debug-ignore = "1.0.5"
 derive_more = "0.99.20"
-derive-where = "1.2.7"
+derive-where = "1.5.0"
 dev-tools-common = { path = "dev-tools/common" }
 # Having the i-implement-... feature here makes diesel go away from the workspace-hack
 diesel = { version = "2.2.11", features = ["i-implement-a-third-party-backend-and-opt-into-breaking-changes", "postgres", "r2d2", "chrono", "serde_json", "network-address", "uuid"] }
@@ -421,7 +421,7 @@ dns-service-client = { path = "clients/dns-service-client" }
 dpd-client = { git = "https://github.com/oxidecomputer/dendrite" }
 dropshot = { version = "0.16.2", features = [ "usdt-probes" ] }
 dyn-clone = "1.0.19"
-either = "1.14.0"
+either = "1.15.0"
 ereport-types = { path = "ereport/types" }
 expectorate = "1.2.0"
 fatfs = "0.3.6"
@@ -456,10 +456,10 @@ headers = "0.4.1"
 heck = "0.5"
 hex = "0.4.3"
 hex-literal = "0.4.1"
-hickory-client = "0.24.4"
-hickory-proto = "0.24.4"
-hickory-resolver = "0.24.4"
-hickory-server = "0.24.4"
+hickory-client = "0.25.2"
+hickory-proto = "0.25.2"
+hickory-resolver = "0.25.2"
+hickory-server = "0.25.2"
 highway = "1.3.0"
 hkdf = "0.12.4"
 hmac = "0.12.1"
@@ -470,12 +470,12 @@ http-range = "0.1.5"
 httpmock = "0.8.0-alpha.1"
 httptest = "0.16.3"
 hubtools = { git = "https://github.com/oxidecomputer/hubtools.git", branch = "main" }
-humantime = "2.1.0"
+humantime = "2.2.0"
 hyper = "1.6.0"
 hyper-util = "0.1.14"
 hyper-rustls = "0.27.7"
 hyper-staticfile = "0.10.1"
-iddqd = { version = "0.3.7", features = ["daft", "serde", "schemars08"] }
+iddqd = { version = "0.3.8", features = ["daft", "serde", "schemars08"] }
 id-map = { path = "id-map" }
 illumos-utils = { path = "illumos-utils" }
 iana-time-zone = "0.1.63"
@@ -542,7 +542,7 @@ nexus-test-interface = { path = "nexus/test-interface" }
 nexus-test-utils-macros = { path = "nexus/test-utils-macros" }
 nexus-test-utils = { path = "nexus/test-utils" }
 nexus-types = { path = "nexus/types" }
-nix = { version = "0.29", features = ["net"] }
+nix = { version = "0.30", features = ["net"] }
 nom = "7.1.3"
 num-integer = "0.1.46"
 num = { version = "0.4.3", default-features = false, features = [ "libm" ] }
@@ -570,7 +570,7 @@ oxnet = "0.1.2"
 once_cell = "1.21.3"
 openapi-lint = { git = "https://github.com/oxidecomputer/openapi-lint", branch = "main" }
 openapi-manager-types = { path = "dev-tools/openapi-manager/types" }
-openapiv3 = "2.0.0"
+openapiv3 = "2.2.0"
 # must match samael's crate!
 openssl = "0.10"
 openssl-sys = "0.9"
@@ -603,12 +603,12 @@ pem = "3.0"
 # Note that if you depend on petname, you must also set default-features =
 # false: petname = { workspace = true, default-features = false }.
 petname = { version = "2.0.2", default-features = false, features = ["default-rng", "default-words"] }
-petgraph = "0.7.1"
+petgraph = "0.8.2"
 postgres-protocol = "0.6.8"
 predicates = "3.1.3"
 pretty_assertions = "1.4.1"
 pretty-hex = "0.4.1"
-prettyplease = { version = "0.2.34", features = ["verbatim"] }
+prettyplease = { version = "0.2.35", features = ["verbatim"] }
 proc-macro2 = "1.0"
 progenitor = "0.10.0"
 progenitor-client = "0.10.0"
@@ -709,7 +709,7 @@ supports-color = "3.0.2"
 support-bundle-viewer = "0.1.0"
 swrite = "0.1.0"
 sync-ptr = "0.1.4"
-libsw = { version = "3.4.0", features = ["tokio"] }
+libsw = { version = "3.5.0", features = ["tokio"] }
 syn = { version = "2.0" }
 tabled = "0.15.0"
 tar = "0.4"
@@ -719,7 +719,7 @@ termios = "0.3"
 termtree = "0.5.1"
 textwrap = { version = "0.16.2", features = [ "terminal_size" ] }
 test-strategy = "0.4.1"
-thiserror = "1.0"
+thiserror = "2.0"
 tofino = { git = "https://github.com/oxidecomputer/tofino", branch = "main" }
 tokio = "1.45.1"
 tokio-postgres = { version = "0.7", features = [ "with-chrono-0_4", "with-uuid-1" ] }

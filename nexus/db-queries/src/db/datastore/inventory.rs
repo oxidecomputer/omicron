@@ -234,7 +234,7 @@ impl DataStore {
                 sled_agent
                     .zone_image_resolver
                     .zone_manifest
-                    .manifest
+                    .boot_inventory
                     .as_ref()
                     .ok()
                     .map(|artifacts| {
@@ -295,7 +295,7 @@ impl DataStore {
         //
         // * The ledgered sled config (if the sled has gotten a config from RSS
         //   or Nexus)
-        // * The most-recently-reconciled config (if the sled-agen's config
+        // * The most-recently-reconciled config (if the sled-agent's config
         //   reconciler has run since the last time it started)
         // * The currently-being-reconciled config (if the sled-agent's config
         //   reconciler was actively running when inventory was collected)
@@ -3226,11 +3226,20 @@ impl DataStore {
                 })
                 .transpose()?;
 
-            let zone_image_resolver = s.zone_image_resolver.into_inventory(
-                zone_manifest_artifacts_by_sled_id.remove(&sled_id),
-                zone_manifest_non_boot_by_sled_id.remove(&sled_id),
-                mupdate_override_non_boot_by_sled_id.remove(&sled_id),
-            );
+            let zone_image_resolver = s
+                .zone_image_resolver
+                .into_inventory(
+                    zone_manifest_artifacts_by_sled_id.remove(&sled_id),
+                    zone_manifest_non_boot_by_sled_id.remove(&sled_id),
+                    mupdate_override_non_boot_by_sled_id.remove(&sled_id),
+                )
+                .map_err(|e| {
+                    Error::internal_error(&format!(
+                        "failed to create zone image resolver inventory \
+                         for sled {sled_id}: {}",
+                        InlineErrorChain::new(e.as_ref()),
+                    ))
+                })?;
 
             let sled_agent = nexus_types::inventory::SledAgent {
                 time_collected: s.time_collected,
@@ -3289,6 +3298,21 @@ impl DataStore {
             last_reconciliation_zone_results.is_empty(),
             "found extra config reconciliation zone results: {:?}",
             last_reconciliation_zone_results.keys()
+        );
+        bail_unless!(
+            zone_manifest_artifacts_by_sled_id.is_empty(),
+            "found extra zone manifest artifacts: {:?}",
+            zone_manifest_artifacts_by_sled_id.keys()
+        );
+        bail_unless!(
+            zone_manifest_non_boot_by_sled_id.is_empty(),
+            "found extra zone manifest non-boot entries: {:?}",
+            zone_manifest_non_boot_by_sled_id.keys()
+        );
+        bail_unless!(
+            mupdate_override_non_boot_by_sled_id.is_empty(),
+            "found extra mupdate override non-boot entries: {:?}",
+            mupdate_override_non_boot_by_sled_id.keys()
         );
 
         Ok(Collection {
