@@ -5825,8 +5825,7 @@ where
     time_deleted IS NULL;
 
 CREATE INDEX IF NOT EXISTS order_sp_ereports_by_timestamp
-ON omicron.public.sp_ereport
-USING HASH (
+ON omicron.public.sp_ereport(
     time_collected
 )
 WHERE
@@ -5890,8 +5889,7 @@ WHERE
     time_deleted IS NULL;
 
 CREATE INDEX IF NOT EXISTS order_host_ereports_by_timestamp
-ON omicron.public.host_ereport
-USING HASH (
+ON omicron.public.host_ereport (
     time_collected
 )
 WHERE
