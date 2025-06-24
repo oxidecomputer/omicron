@@ -611,7 +611,7 @@ pretty-hex = "0.4.1"
 prettyplease = { version = "0.2.35", features = ["verbatim"] }
 proc-macro2 = "1.0"
 progenitor = "0.10.0"
-progenitor-client = "0.10.0"
+progenitor-client = "0.11.0"
 # NOTE: if you change the pinned revision of the `bhyve_api` and propolis
 # dependencies, you must also update the references in package-manifest.toml to
 # match the new revision.
