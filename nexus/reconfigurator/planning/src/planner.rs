@@ -1041,8 +1041,10 @@ impl<'a> Planner<'a> {
                     )
                     .filter_map(move |zone| {
                         (zone.image_source
-                            != blueprint
-                                .zone_image_source(zone.zone_type.kind()))
+                            != blueprint.zone_image_source(
+                                Some(zone.id),
+                                zone.zone_type.kind(),
+                            ))
                         .then(|| (sled_id, zone.clone()))
                     })
             })
@@ -1063,7 +1065,8 @@ impl<'a> Planner<'a> {
         zone: &BlueprintZoneConfig,
     ) -> Result<(), Error> {
         let zone_kind = zone.zone_type.kind();
-        let image_source = self.blueprint.zone_image_source(zone_kind);
+        let image_source =
+            self.blueprint.zone_image_source(Some(zone.id), zone_kind);
         if zone.image_source == image_source {
             // This should only happen in the event of a planning error above.
             error!(
@@ -5003,7 +5006,7 @@ pub(crate) mod test {
             COCKROACHDB_REDUNDANCY;
         example.input = input_builder.build();
 
-        let blueprint_name = format!("blueprint_with_cockroach");
+        let blueprint_name = "blueprint_with_cockroach";
         let new_blueprint = Planner::new_based_on(
             log.clone(),
             &blueprint,
@@ -5166,19 +5169,13 @@ pub(crate) mod test {
         // performing the update.
 
         example.collection.cockroach_status.ranges_underreplicated = Some(1);
-
-        // NOTE: This is currently failing! If we let this execute,
-        // we appear to flip back to the install dataset, which seems wrong!
-        //
-        // We shouldn't be changing the zone image at all in this case.
-
-        //         assert_planning_makes_no_changes(
-        //             &log,
-        //             &blueprint,
-        //             &example.input,
-        //             &example.collection,
-        //             TEST_NAME,
-        //         );
+        assert_planning_makes_no_changes(
+            &log,
+            &blueprint,
+            &example.input,
+            &example.collection,
+            TEST_NAME,
+        );
 
         logctx.cleanup_successful();
     }
