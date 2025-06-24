@@ -1523,7 +1523,13 @@ pub(crate) mod test {
                 .nsleds(1)
                 .nexus_count(1)
                 .build();
-        let sled_id = *example.collection.sled_agents.keys().next().unwrap();
+        let sled_id = example
+            .collection
+            .sled_agents
+            .iter()
+            .next()
+            .map(|sa| sa.sled_id)
+            .unwrap();
         let input = example.input;
         let collection = example.collection;
 
@@ -2377,7 +2383,7 @@ pub(crate) mod test {
         // has learned about the expungement.
         collection
             .sled_agents
-            .get_mut(&sled_id)
+            .get_mut(sled_id)
             .unwrap()
             .last_reconciliation
             .as_mut()
@@ -4429,7 +4435,7 @@ pub(crate) mod test {
 
         // Now make both changes to the inventory.
         {
-            let config = collection.sled_agents.get_mut(&sled_id).unwrap();
+            let mut config = collection.sled_agents.get_mut(&sled_id).unwrap();
             config.ledgered_sled_config = Some(bp2_sled_config.clone());
             config.last_reconciliation =
                 Some(ConfigReconcilerInventory::debug_assume_success(

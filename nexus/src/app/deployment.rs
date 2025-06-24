@@ -218,7 +218,7 @@ impl super::Nexus {
             inventory
                 .sled_agents
                 .iter()
-                .map(|(sled_id, agent)| (sled_id, &agent.last_reconciliation)),
+                .map(|agent| (&agent.sled_id, &agent.last_reconciliation)),
         );
 
         Ok(status)
