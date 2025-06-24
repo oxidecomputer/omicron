@@ -756,7 +756,7 @@ task: "sp_ereport_ingester"
   last completed activation: <REDACTED ITERATIONS>, triggered by a periodic timer firing
     started at <REDACTED_TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
 /!\ errors:                  1
-      - failed to resolve MGS addresses: no record found for Query { name: Name("_mgs._tcp.control-plane.oxide.internal."), query_type: SRV, query_class: IN }
+      - failed to resolve MGS addresses: proto error: no records found for Query { name: Name("_mgs._tcp.control-plane.oxide.internal."), query_type: SRV, query_class: IN }
     total ereports received:      0
       new ereports ingested:      0
     total HTTP requests sent:     0
@@ -1296,7 +1296,7 @@ task: "sp_ereport_ingester"
   last completed activation: <REDACTED ITERATIONS>, triggered by a periodic timer firing
     started at <REDACTED_TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
 /!\ errors:                  1
-      - failed to resolve MGS addresses: no record found for Query { name: Name("_mgs._tcp.control-plane.oxide.internal."), query_type: SRV, query_class: IN }
+      - failed to resolve MGS addresses: proto error: no records found for Query { name: Name("_mgs._tcp.control-plane.oxide.internal."), query_type: SRV, query_class: IN }
     total ereports received:      0
       new ereports ingested:      0
     total HTTP requests sent:     0
