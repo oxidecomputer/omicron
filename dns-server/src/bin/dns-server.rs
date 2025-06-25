@@ -34,46 +34,48 @@ pub struct Config {
 }
 
 fn main() -> Result<(), anyhow::Error> {
-    oxide_tokio_rt::run(async move {
-        let args = Args::parse();
-        let config_file = &args.config_file;
-        let config_file_contents = std::fs::read_to_string(config_file)
-            .with_context(|| format!("read config file {:?}", config_file))?;
-        let mut config: Config = toml::from_str(&config_file_contents)
-            .with_context(|| format!("parse config file {:?}", config_file))?;
+    oxide_tokio_rt::run(main_impl())
+}
 
-        config.dropshot.bind_address = SocketAddr::V6(args.http_address);
-        eprintln!("{:?}", config);
+async fn main_impl() -> Result<(), anyhow::Error> {
+    let args = Args::parse();
+    let config_file = &args.config_file;
+    let config_file_contents = std::fs::read_to_string(config_file)
+        .with_context(|| format!("read config file {:?}", config_file))?;
+    let mut config: Config = toml::from_str(&config_file_contents)
+        .with_context(|| format!("parse config file {:?}", config_file))?;
 
-        let log = config
-            .log
-            .to_logger("dns-server")
-            .context("failed to create logger")?;
+    config.dropshot.bind_address = SocketAddr::V6(args.http_address);
+    eprintln!("{:?}", config);
 
-        let dns_server_config =
-            dns_server::dns_server::Config { bind_address: args.dns_address };
+    let log = config
+        .log
+        .to_logger("dns-server")
+        .context("failed to create logger")?;
 
-        info!(&log, "config";
-            "config" => ?config,
-            "dns_config" => ?dns_server_config
-        );
+    let dns_server_config =
+        dns_server::dns_server::Config { bind_address: args.dns_address };
 
-        let store = dns_server::storage::Store::new(
-            log.new(o!("component" => "store")),
-            &config.storage,
-        )
-        .context("initializing persistent storage")?;
+    info!(&log, "config";
+        "config" => ?config,
+        "dns_config" => ?dns_server_config
+    );
 
-        let (_dns_server, dropshot_server) = dns_server::start_servers(
-            log,
-            store,
-            &dns_server_config,
-            &config.dropshot,
-        )
-        .await?;
+    let store = dns_server::storage::Store::new(
+        log.new(o!("component" => "store")),
+        &config.storage,
+    )
+    .context("initializing persistent storage")?;
 
-        dropshot_server.await.map_err(|error_message| {
-            anyhow!("server exiting: {}", error_message)
-        })
-    })
+    let (_dns_server, dropshot_server) = dns_server::start_servers(
+        log,
+        store,
+        &dns_server_config,
+        &config.dropshot,
+    )
+    .await?;
+
+    dropshot_server
+        .await
+        .map_err(|error_message| anyhow!("server exiting: {}", error_message))
 }

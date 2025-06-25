@@ -59,32 +59,30 @@ mod sled_agent;
 mod support_bundle;
 
 fn main() -> Result<(), anyhow::Error> {
-    oxide_tokio_rt::run(async {
-        let args = Omdb::parse();
+    oxide_tokio_rt::run(main_impl())
+}
 
-        let log = dropshot::ConfigLogging::StderrTerminal {
-            level: args.log_level.clone(),
-        }
-        .to_logger("omdb")
-        .context("failed to create logger")?;
+async fn main_impl() -> Result<(), anyhow::Error> {
+    let args = Omdb::parse();
 
-        match &args.command {
-            OmdbCommands::Db(db) => db.run_cmd(&args, &log).await,
-            OmdbCommands::Mgs(mgs) => mgs.run_cmd(&args, &log).await,
-            OmdbCommands::Nexus(nexus) => nexus.run_cmd(&args, &log).await,
-            OmdbCommands::Oximeter(oximeter) => {
-                oximeter.run_cmd(&args, &log).await
-            }
-            OmdbCommands::Oxql(oxql) => oxql.run_cmd(&args, &log).await,
-            OmdbCommands::Reconfigurator(reconfig) => {
-                reconfig.run_cmd(&args, &log).await
-            }
-            OmdbCommands::SledAgent(sled) => sled.run_cmd(&args, &log).await,
-            OmdbCommands::CrucibleAgent(crucible) => {
-                crucible.run_cmd(&args).await
-            }
+    let log = dropshot::ConfigLogging::StderrTerminal {
+        level: args.log_level.clone(),
+    }
+    .to_logger("omdb")
+    .context("failed to create logger")?;
+
+    match &args.command {
+        OmdbCommands::Db(db) => db.run_cmd(&args, &log).await,
+        OmdbCommands::Mgs(mgs) => mgs.run_cmd(&args, &log).await,
+        OmdbCommands::Nexus(nexus) => nexus.run_cmd(&args, &log).await,
+        OmdbCommands::Oximeter(oximeter) => oximeter.run_cmd(&args, &log).await,
+        OmdbCommands::Oxql(oxql) => oxql.run_cmd(&args, &log).await,
+        OmdbCommands::Reconfigurator(reconfig) => {
+            reconfig.run_cmd(&args, &log).await
         }
-    })
+        OmdbCommands::SledAgent(sled) => sled.run_cmd(&args, &log).await,
+        OmdbCommands::CrucibleAgent(crucible) => crucible.run_cmd(&args).await,
+    }
 }
 
 /// Omicron debugger (unstable)
