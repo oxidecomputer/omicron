@@ -320,101 +320,140 @@ impl DataStore {
         #[allow(clippy::disallowed_methods)]
         self.transaction_non_retry_wrapper("blueprint_insert")
             .transaction(&conn, |conn| async move {
-            // Insert the row for the blueprint.
-            {
-                use nexus_db_schema::schema::blueprint::dsl;
-                let _: usize = diesel::insert_into(dsl::blueprint)
-                    .values(row_blueprint)
-                    .execute_async(&conn)
-                    .await?;
-            }
+                // Insert the row for the blueprint.
+                {
+                    use nexus_db_schema::schema::blueprint::dsl;
+                    let _: usize = diesel::insert_into(dsl::blueprint)
+                        .values(row_blueprint)
+                        .execute_async(&conn)
+                        .await?;
+                }
 
-            // Insert all the sled states for this blueprint.
-            {
-                use nexus_db_schema::schema::bp_sled_metadata::dsl as sled_metadata;
+                // Insert all the sled states for this blueprint.
+                {
+                    // Skip formatting this line to prevent rustfmt bailing out.
+                    #[rustfmt::skip]
+                    use nexus_db_schema::schema::bp_sled_metadata::dsl
+                        as sled_metadata;
 
-                let _ = diesel::insert_into(sled_metadata::bp_sled_metadata)
-                    .values(sled_metadatas)
-                    .execute_async(&conn)
-                    .await?;
-            }
+                    let _ =
+                        diesel::insert_into(sled_metadata::bp_sled_metadata)
+                            .values(sled_metadatas)
+                            .execute_async(&conn)
+                            .await?;
+                }
 
-            // Insert all physical disks for this blueprint.
-            {
-                use nexus_db_schema::schema::bp_omicron_physical_disk::dsl as omicron_disk;
-                let _ = diesel::insert_into(omicron_disk::bp_omicron_physical_disk)
+                // Insert all physical disks for this blueprint.
+                {
+                    // Skip formatting this line to prevent rustfmt bailing out.
+                    #[rustfmt::skip]
+                    use nexus_db_schema::schema::bp_omicron_physical_disk::dsl
+                        as omicron_disk;
+                    let _ = diesel::insert_into(
+                        omicron_disk::bp_omicron_physical_disk,
+                    )
                     .values(omicron_physical_disks)
                     .execute_async(&conn)
                     .await?;
-            }
+                }
 
-            // Insert all datasets for this blueprint.
-            {
-                use nexus_db_schema::schema::bp_omicron_dataset::dsl as omicron_dataset;
-                let _ = diesel::insert_into(omicron_dataset::bp_omicron_dataset)
+                // Insert all datasets for this blueprint.
+                {
+                    // Skip formatting this line to prevent rustfmt bailing out.
+                    #[rustfmt::skip]
+                    use nexus_db_schema::schema::bp_omicron_dataset::dsl
+                        as omicron_dataset;
+                    let _ = diesel::insert_into(
+                        omicron_dataset::bp_omicron_dataset,
+                    )
                     .values(omicron_datasets)
                     .execute_async(&conn)
                     .await?;
-            }
+                }
 
-            // Insert all the Omicron zones for this blueprint.
-            {
-                use nexus_db_schema::schema::bp_omicron_zone::dsl as omicron_zone;
-                let _ = diesel::insert_into(omicron_zone::bp_omicron_zone)
-                    .values(omicron_zones)
-                    .execute_async(&conn)
-                    .await?;
-            }
-
-            {
-                use nexus_db_schema::schema::bp_omicron_zone_nic::dsl as omicron_zone_nic;
-                let _ =
-                    diesel::insert_into(omicron_zone_nic::bp_omicron_zone_nic)
-                        .values(omicron_zone_nics)
+                // Insert all the Omicron zones for this blueprint.
+                {
+                    // Skip formatting this line to prevent rustfmt bailing out.
+                    #[rustfmt::skip]
+                    use nexus_db_schema::schema::bp_omicron_zone::dsl
+                        as omicron_zone;
+                    let _ = diesel::insert_into(omicron_zone::bp_omicron_zone)
+                        .values(omicron_zones)
                         .execute_async(&conn)
                         .await?;
-            }
+                }
 
-            // Insert all clickhouse cluster related tables if necessary
-            if let Some((clickhouse_cluster_config, keepers, servers)) = clickhouse_tables {
                 {
-                    use nexus_db_schema::schema::bp_clickhouse_cluster_config::dsl;
-                    let _ = diesel::insert_into(dsl::bp_clickhouse_cluster_config)
-                    .values(clickhouse_cluster_config)
+                    // Skip formatting this line to prevent rustfmt bailing out.
+                    #[rustfmt::skip]
+                    use nexus_db_schema::schema::bp_omicron_zone_nic::dsl
+                        as omicron_zone_nic;
+                    let _ = diesel::insert_into(
+                        omicron_zone_nic::bp_omicron_zone_nic,
+                    )
+                    .values(omicron_zone_nics)
                     .execute_async(&conn)
                     .await?;
                 }
-                {
-                    use nexus_db_schema::schema::bp_clickhouse_keeper_zone_id_to_node_id::dsl;
-                    let _ = diesel::insert_into(dsl::bp_clickhouse_keeper_zone_id_to_node_id)
-                    .values(keepers)
-                    .execute_async(&conn)
-                    .await?;
-                }
-                {
-                    use nexus_db_schema::schema::bp_clickhouse_server_zone_id_to_node_id::dsl;
-                    let _ = diesel::insert_into(dsl::bp_clickhouse_server_zone_id_to_node_id)
-                    .values(servers)
-                    .execute_async(&conn)
-                    .await?;
-                }
-            }
 
-            // Insert oximeter read policy for this blueprint
-            {
-                use nexus_db_schema::schema::bp_oximeter_read_policy::dsl;
-                let _ =
-                    diesel::insert_into(dsl::bp_oximeter_read_policy)
+                // Insert all clickhouse cluster related tables if necessary
+                if let Some((clickhouse_cluster_config, keepers, servers)) =
+                    clickhouse_tables
+                {
+                    {
+                        // Skip formatting this line to prevent rustfmt bailing
+                        // out.
+                        #[rustfmt::skip]
+                        use nexus_db_schema::schema::
+                            bp_clickhouse_cluster_config::dsl;
+                        let _ = diesel::insert_into(
+                            dsl::bp_clickhouse_cluster_config,
+                        )
+                        .values(clickhouse_cluster_config)
+                        .execute_async(&conn)
+                        .await?;
+                    }
+                    {
+                        // Skip formatting this line to prevent rustfmt bailing
+                        // out.
+                        #[rustfmt::skip]
+                        use nexus_db_schema::schema::
+                            bp_clickhouse_keeper_zone_id_to_node_id::dsl;
+                        let _ = diesel::insert_into(
+                            dsl::bp_clickhouse_keeper_zone_id_to_node_id,
+                        )
+                        .values(keepers)
+                        .execute_async(&conn)
+                        .await?;
+                    }
+                    {
+                        // Skip formatting this line to prevent rustfmt bailing
+                        // out.
+                        #[rustfmt::skip]
+                        use nexus_db_schema::schema::
+                            bp_clickhouse_server_zone_id_to_node_id::dsl;
+                        let _ = diesel::insert_into(
+                            dsl::bp_clickhouse_server_zone_id_to_node_id,
+                        )
+                        .values(servers)
+                        .execute_async(&conn)
+                        .await?;
+                    }
+                }
+
+                // Insert oximeter read policy for this blueprint
+                {
+                    use nexus_db_schema::schema::bp_oximeter_read_policy::dsl;
+                    let _ = diesel::insert_into(dsl::bp_oximeter_read_policy)
                         .values(oximeter_read_policy)
                         .execute_async(&conn)
                         .await?;
-            }
+                }
 
-            Ok(())
-
-        })
-        .await
-        .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))?;
+                Ok(())
+            })
+            .await
+            .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))?;
 
         info!(
             &opctx.log,
@@ -992,137 +1031,201 @@ impl DataStore {
             nclickhouse_cluster_configs,
             nclickhouse_keepers,
             nclickhouse_servers,
-        ) = self.transaction_retry_wrapper("blueprint_delete")
+            noximeter_policy,
+        ) = self
+            .transaction_retry_wrapper("blueprint_delete")
             .transaction(&conn, |conn| {
                 let err = err.clone();
                 async move {
-                // Ensure that blueprint we're about to delete is not the
-                // current target.
-                let current_target = Self::blueprint_current_target_only(&conn)
-                    .await
-                    .map_err(|txn_err| txn_err.into_diesel(&err))?;
+                    // Ensure that blueprint we're about to delete is not the
+                    // current target.
+                    let current_target =
+                        Self::blueprint_current_target_only(&conn)
+                            .await
+                            .map_err(|txn_err| txn_err.into_diesel(&err))?;
 
-                if current_target.target_id == blueprint_id {
-                    return Err(err.bail(TransactionError::CustomError(
-                        Error::conflict(format!(
-                            "blueprint {blueprint_id} is the \
+                    if current_target.target_id == blueprint_id {
+                        return Err(err.bail(TransactionError::CustomError(
+                            Error::conflict(format!(
+                                "blueprint {blueprint_id} is the \
                              current target and cannot be deleted",
-                        )),
-                    )));
-                }
+                            )),
+                        )));
+                    }
 
-                // Remove the record describing the blueprint itself.
-                let nblueprints = {
-                    use nexus_db_schema::schema::blueprint::dsl;
-                    diesel::delete(
-                        dsl::blueprint.filter(dsl::id.eq(to_db_typed_uuid(blueprint_id))),
-                    )
-                    .execute_async(&conn)
-                    .await?
-                };
+                    // Remove the record describing the blueprint itself.
+                    let nblueprints =
+                        {
+                            use nexus_db_schema::schema::blueprint::dsl;
+                            diesel::delete(dsl::blueprint.filter(
+                                dsl::id.eq(to_db_typed_uuid(blueprint_id)),
+                            ))
+                            .execute_async(&conn)
+                            .await?
+                        };
 
-                // Bail out if this blueprint didn't exist; there won't be
-                // references to it in any of the remaining tables either, since
-                // deletion always goes through this transaction.
-                if nblueprints == 0 {
-                    return Err(err.bail(TransactionError::CustomError(
-                        authz_blueprint.not_found(),
-                    )));
-                }
+                    // Bail out if this blueprint didn't exist; there won't be
+                    // references to it in any of the remaining tables either,
+                    // since deletion always goes through this transaction.
+                    if nblueprints == 0 {
+                        return Err(err.bail(TransactionError::CustomError(
+                            authz_blueprint.not_found(),
+                        )));
+                    }
 
-                // Remove rows associated with sled metadata.
-                let nsled_metadata = {
-                    use nexus_db_schema::schema::bp_sled_metadata::dsl;
-                    diesel::delete(
-                        dsl::bp_sled_metadata
-                            .filter(dsl::blueprint_id.eq(to_db_typed_uuid(blueprint_id))),
-                    )
-                    .execute_async(&conn)
-                    .await?
-                };
+                    // Remove rows associated with sled metadata.
+                    let nsled_metadata = {
+                        // Skip rustfmt because it bails out on this long line.
+                        #[rustfmt::skip]
+                        use nexus_db_schema::schema::
+                            bp_sled_metadata::dsl;
+                        diesel::delete(
+                            dsl::bp_sled_metadata.filter(
+                                dsl::blueprint_id
+                                    .eq(to_db_typed_uuid(blueprint_id)),
+                            ),
+                        )
+                        .execute_async(&conn)
+                        .await?
+                    };
 
-                // Remove rows associated with Omicron physical disks
-                let nphysical_disks = {
-                    use nexus_db_schema::schema::bp_omicron_physical_disk::dsl;
-                    diesel::delete(
-                        dsl::bp_omicron_physical_disk
-                            .filter(dsl::blueprint_id.eq(to_db_typed_uuid(blueprint_id))),
-                    )
-                    .execute_async(&conn)
-                    .await?
-                };
+                    // Remove rows associated with Omicron physical disks
+                    let nphysical_disks = {
+                        // Skip rustfmt because it bails out on this long line.
+                        #[rustfmt::skip]
+                        use nexus_db_schema::schema::
+                            bp_omicron_physical_disk::dsl;
+                        diesel::delete(
+                            dsl::bp_omicron_physical_disk.filter(
+                                dsl::blueprint_id
+                                    .eq(to_db_typed_uuid(blueprint_id)),
+                            ),
+                        )
+                        .execute_async(&conn)
+                        .await?
+                    };
 
-                // Remove rows associated with Omicron datasets
-                let ndatasets = {
-                    use nexus_db_schema::schema::bp_omicron_dataset::dsl;
-                    diesel::delete(
-                        dsl::bp_omicron_dataset
-                            .filter(dsl::blueprint_id.eq(to_db_typed_uuid(blueprint_id))),
-                    )
-                    .execute_async(&conn)
-                    .await?
-                };
+                    // Remove rows associated with Omicron datasets
+                    let ndatasets = {
+                        // Skip rustfmt because it bails out on this long line.
+                        #[rustfmt::skip]
+                        use nexus_db_schema::schema::
+                            bp_omicron_dataset::dsl;
+                        diesel::delete(
+                            dsl::bp_omicron_dataset.filter(
+                                dsl::blueprint_id
+                                    .eq(to_db_typed_uuid(blueprint_id)),
+                            ),
+                        )
+                        .execute_async(&conn)
+                        .await?
+                    };
 
-                // Remove rows associated with Omicron zones
-                let nzones = {
-                    use nexus_db_schema::schema::bp_omicron_zone::dsl;
-                    diesel::delete(
-                        dsl::bp_omicron_zone
-                            .filter(dsl::blueprint_id.eq(to_db_typed_uuid(blueprint_id))),
-                    )
-                    .execute_async(&conn)
-                    .await?
-                };
+                    // Remove rows associated with Omicron zones
+                    let nzones = {
+                        // Skip rustfmt because it bails out on this long line.
+                        #[rustfmt::skip]
+                        use nexus_db_schema::schema::
+                            bp_omicron_zone::dsl;
+                        diesel::delete(
+                            dsl::bp_omicron_zone.filter(
+                                dsl::blueprint_id
+                                    .eq(to_db_typed_uuid(blueprint_id)),
+                            ),
+                        )
+                        .execute_async(&conn)
+                        .await?
+                    };
 
-                let nnics = {
-                    use nexus_db_schema::schema::bp_omicron_zone_nic::dsl;
-                    diesel::delete(
-                        dsl::bp_omicron_zone_nic
-                            .filter(dsl::blueprint_id.eq(to_db_typed_uuid(blueprint_id))),
-                    )
-                    .execute_async(&conn)
-                    .await?
-                };
+                    let nnics = {
+                        // Skip rustfmt because it bails out on this long line.
+                        #[rustfmt::skip]
+                        use nexus_db_schema::schema::
+                            bp_omicron_zone_nic::dsl;
+                        diesel::delete(
+                            dsl::bp_omicron_zone_nic.filter(
+                                dsl::blueprint_id
+                                    .eq(to_db_typed_uuid(blueprint_id)),
+                            ),
+                        )
+                        .execute_async(&conn)
+                        .await?
+                    };
 
-                let nclickhouse_cluster_configs = {
-                    use nexus_db_schema::schema::bp_clickhouse_cluster_config::dsl;
-                    diesel::delete(
-                        dsl::bp_clickhouse_cluster_config
-                            .filter(dsl::blueprint_id.eq(to_db_typed_uuid(blueprint_id))),
-                    )
-                    .execute_async(&conn)
-                    .await?
-                };
+                    let nclickhouse_cluster_configs = {
+                        // Skip rustfmt because it bails out on this long line.
+                        #[rustfmt::skip]
+                        use nexus_db_schema::schema::
+                            bp_clickhouse_cluster_config::dsl;
+                        diesel::delete(
+                            dsl::bp_clickhouse_cluster_config.filter(
+                                dsl::blueprint_id
+                                    .eq(to_db_typed_uuid(blueprint_id)),
+                            ),
+                        )
+                        .execute_async(&conn)
+                        .await?
+                    };
 
-                let nclickhouse_keepers = {
-                    use nexus_db_schema::schema::bp_clickhouse_keeper_zone_id_to_node_id::dsl;
-                    diesel::delete(dsl::bp_clickhouse_keeper_zone_id_to_node_id
-                            .filter(dsl::blueprint_id.eq(to_db_typed_uuid(blueprint_id))),
-                    )
-                    .execute_async(&conn)
-                    .await?
-                };
+                    let nclickhouse_keepers = {
+                        // Skip rustfmt because it bails out on this long line.
+                        #[rustfmt::skip]
+                        use nexus_db_schema::schema::
+                            bp_clickhouse_keeper_zone_id_to_node_id::dsl;
+                        diesel::delete(
+                            dsl::bp_clickhouse_keeper_zone_id_to_node_id
+                                .filter(
+                                    dsl::blueprint_id
+                                        .eq(to_db_typed_uuid(blueprint_id)),
+                                ),
+                        )
+                        .execute_async(&conn)
+                        .await?
+                    };
 
-                let nclickhouse_servers = {
-                    use nexus_db_schema::schema::bp_clickhouse_server_zone_id_to_node_id::dsl;
-                    diesel::delete(dsl::bp_clickhouse_server_zone_id_to_node_id
-                            .filter(dsl::blueprint_id.eq(to_db_typed_uuid(blueprint_id))),
-                    )
-                    .execute_async(&conn)
-                    .await?
-                };
+                    let nclickhouse_servers = {
+                        // Skip rustfmt because it bails out on this long line.
+                        #[rustfmt::skip]
+                        use nexus_db_schema::schema::
+                            bp_clickhouse_server_zone_id_to_node_id::dsl;
+                        diesel::delete(
+                            dsl::bp_clickhouse_server_zone_id_to_node_id
+                                .filter(
+                                    dsl::blueprint_id
+                                        .eq(to_db_typed_uuid(blueprint_id)),
+                                ),
+                        )
+                        .execute_async(&conn)
+                        .await?
+                    };
 
-                Ok((
-                    nblueprints,
-                    nsled_metadata,
-                    nphysical_disks,
-                    ndatasets,
-                    nzones,
-                    nnics,
-                    nclickhouse_cluster_configs,
-                    nclickhouse_keepers,
-                    nclickhouse_servers,
-                ))
+                    let noximeter_policy = {
+                        // Skip rustfmt because it bails out on this long line.
+                        #[rustfmt::skip]
+                        use nexus_db_schema::schema::
+                            bp_oximeter_read_policy::dsl;
+                        diesel::delete(
+                            dsl::bp_oximeter_read_policy.filter(
+                                dsl::blueprint_id
+                                    .eq(to_db_typed_uuid(blueprint_id)),
+                            ),
+                        )
+                        .execute_async(&conn)
+                        .await?
+                    };
+
+                    Ok((
+                        nblueprints,
+                        nsled_metadata,
+                        nphysical_disks,
+                        ndatasets,
+                        nzones,
+                        nnics,
+                        nclickhouse_cluster_configs,
+                        nclickhouse_keepers,
+                        nclickhouse_servers,
+                        noximeter_policy,
+                    ))
                 }
             })
             .await
@@ -1141,7 +1244,8 @@ impl DataStore {
             "nnics" => nnics,
             "nclickhouse_cluster_configs" => nclickhouse_cluster_configs,
             "nclickhouse_keepers" => nclickhouse_keepers,
-            "nclickhouse_servers" => nclickhouse_servers
+            "nclickhouse_servers" => nclickhouse_servers,
+            "noximeter_policy" => noximeter_policy,
         );
 
         Ok(())
@@ -1912,6 +2016,7 @@ mod tests {
     use rand::Rng;
     use rand::thread_rng;
     use slog::Logger;
+    use std::collections::BTreeSet;
     use std::mem;
     use std::net::IpAddr;
     use std::net::Ipv4Addr;
@@ -1960,6 +2065,12 @@ mod tests {
             }};
         }
 
+        // These tables start with `bp_` but do not represent the contents of a
+        // specific blueprint.  It should be uncommon to add things to this
+        // list.
+        let tables_ignored: BTreeSet<_> = ["bp_target"].into_iter().collect();
+
+        let mut tables_checked = BTreeSet::new();
         for (table_name, result) in [
             query_count!(blueprint, id),
             query_count!(bp_sled_metadata, blueprint_id),
@@ -1967,12 +2078,50 @@ mod tests {
             query_count!(bp_omicron_physical_disk, blueprint_id),
             query_count!(bp_omicron_zone, blueprint_id),
             query_count!(bp_omicron_zone_nic, blueprint_id),
+            query_count!(bp_clickhouse_cluster_config, blueprint_id),
+            query_count!(bp_clickhouse_keeper_zone_id_to_node_id, blueprint_id),
+            query_count!(bp_clickhouse_server_zone_id_to_node_id, blueprint_id),
+            query_count!(bp_oximeter_read_policy, blueprint_id),
         ] {
             let count: i64 = result.unwrap();
             assert_eq!(
                 count, 0,
                 "nonzero row count for blueprint \
                  {blueprint_id} in table {table_name}"
+            );
+            tables_checked.insert(table_name);
+        }
+
+        // Look for likely blueprint-related tables that we didn't check.
+        let mut query = QueryBuilder::new();
+        query.sql(
+            "SELECT table_name \
+            FROM information_schema.tables \
+            WHERE table_name LIKE 'bp\\_%'",
+        );
+        let tables_unchecked: Vec<String> = query
+            .query::<diesel::sql_types::Text>()
+            .load_async(&*conn)
+            .await
+            .expect("Failed to query information_schema for tables")
+            .into_iter()
+            .filter(|f: &String| {
+                let t = f.as_str();
+                !tables_ignored.contains(t) && !tables_checked.contains(t)
+            })
+            .collect();
+        if !tables_unchecked.is_empty() {
+            // If you see this message, you probably added a blueprint table
+            // whose name started with `bp_*`.  Add it to the block above so
+            // that this function checks whether deleting a blueprint deletes
+            // rows from that table.  (You may also find you need to update
+            // blueprint_delete() to actually delete said rows.)
+            panic!(
+                "found table(s) that look related to blueprints, but \
+                 aren't covered by ensure_blueprint_fully_deleted(). \
+                 Please add them to that function!\n
+                 Found: {}",
+                tables_unchecked.join(", ")
             );
         }
     }

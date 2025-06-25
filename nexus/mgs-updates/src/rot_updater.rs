@@ -270,14 +270,6 @@ impl SpComponentUpdateHelper for ReconfiguratorRotUpdater {
                 },
             };
 
-            // If the active slot does not match the expected active slot, there is
-            // likely another update happening. Bail out.
-            if expected_active_slot.slot() != active {
-                return Err(PrecheckError::WrongActiveSlot {
-                    expected: expected_active_slot.slot, found: *active
-                })
-            }
-
             // Fetch the caboose from the currently active slot.
             let caboose = mgs_clients
             .try_all_serially(log, move |mgs_client| async move {
@@ -286,7 +278,7 @@ impl SpComponentUpdateHelper for ReconfiguratorRotUpdater {
                         update.sp_type,
                         update.slot_id,
                         &SpComponent::ROT.to_string(),
-                        expected_active_slot.slot().to_u16(),
+                        active.to_u16(),
                     )
                     .await
             })
@@ -298,6 +290,14 @@ impl SpComponentUpdateHelper for ReconfiguratorRotUpdater {
             // trying to set, then there's nothing to do.
             if caboose.version == update.artifact_version.as_str() {
                 return Ok(PrecheckStatus::UpdateComplete);
+            }
+
+            // If the active slot does not match the expected active slot, it is possible
+            // another update is happening. Bail out.
+            if expected_active_slot.slot() != active {
+                return Err(PrecheckError::WrongActiveSlot {
+                    expected: expected_active_slot.slot, found: *active
+                })
             }
 
             // Otherwise, if the version in the currently active slot does not
