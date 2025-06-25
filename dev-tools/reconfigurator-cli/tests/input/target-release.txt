@@ -39,12 +39,21 @@ blueprint-diff 8da82a8e-bf97-4fbd-8ddd-9f6462732cf1 58d5e830-0884-47d8-a7cd-b2b3
 # Now, update the simulated RoT to reflect that the update completed.
 # Collect inventory from it and use that collection for another planning step.
 # This should report that the update completed, remove that update, and add one
-# for another sled.
-# sled-update-sp 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6 --active 1.0.0
+# for an SP on the same sled.
 sled-update-rot 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6 --slot-a 1.0.0 --active-slot a --persistent-boot-preference a
 inventory-generate
 blueprint-plan 58d5e830-0884-47d8-a7cd-b2b3751adeb4 eb0796d5-ab8a-4f7b-a884-b4aeacb8ab51
 blueprint-diff 58d5e830-0884-47d8-a7cd-b2b3751adeb4 af934083-59b5-4bf6-8966-6fb5292c29e1
+
+# After the RoT update has completed, we update the simulated SP to reflect that
+# update has completed as well.
+# Like before, collect inventory from it and use that collection for the next step.
+# This should report that the update completed, remove that update, and add one
+# for another sled.
+sled-update-sp 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6 --active 1.0.0
+inventory-generate
+blueprint-plan af934083-59b5-4bf6-8966-6fb5292c29e1 61f451b3-2121-4ed6-91c7-a550054f6c21
+blueprint-diff af934083-59b5-4bf6-8966-6fb5292c29e1 df06bb57-ad42-4431-9206-abff322896c7
 
 # This time, make it more interesting.  Change the inactive slot contents of
 # the simulated RoT.  This should make the configured update impossible and cause
@@ -52,23 +61,33 @@ blueprint-diff 58d5e830-0884-47d8-a7cd-b2b3751adeb4 af934083-59b5-4bf6-8966-6fb5
 # sled-update-sp 2b8f0cb3-0295-4b3c-bc58-4fe88b57112c --inactive 0.5.0
 sled-update-rot 2b8f0cb3-0295-4b3c-bc58-4fe88b57112c --slot-b 0.5.0 --active-slot a --persistent-boot-preference a
 inventory-generate
-blueprint-plan af934083-59b5-4bf6-8966-6fb5292c29e1 61f451b3-2121-4ed6-91c7-a550054f6c21
-blueprint-diff af934083-59b5-4bf6-8966-6fb5292c29e1 df06bb57-ad42-4431-9206-abff322896c7
-
-# Now simulate the update completing successfully.
-# Another planning step should try to update the last sled.
-# sled-update-sp 2b8f0cb3-0295-4b3c-bc58-4fe88b57112c --active 1.0.0
-sled-update-rot 2b8f0cb3-0295-4b3c-bc58-4fe88b57112c --slot-a 1.0.0 --active-slot a --persistent-boot-preference a
-inventory-generate
 blueprint-plan df06bb57-ad42-4431-9206-abff322896c7 b1bda47d-2c19-4fba-96e3-d9df28db7436
 blueprint-diff df06bb57-ad42-4431-9206-abff322896c7 7f976e0d-d2a5-4eeb-9e82-c82bc2824aba
 
-# Finish updating the last sled and do one more planning run.
-# Now we should see a pending SP update. (TODO: Instead we see there's nothing left to do :( )
-# sled-update-sp d81c6a84-79b8-4958-ae41-ea46c9b19763 --active 1.0.0
-sled-update-rot d81c6a84-79b8-4958-ae41-ea46c9b19763 --slot-a 1.0.0 --active-slot a --persistent-boot-preference a
+# Now simulate the update completing successfully.
+# Like before, we should see a pending SP update for this sled.
+sled-update-rot 2b8f0cb3-0295-4b3c-bc58-4fe88b57112c --slot-a 1.0.0 --active-slot a --persistent-boot-preference a
 inventory-generate
 blueprint-plan 7f976e0d-d2a5-4eeb-9e82-c82bc2824aba a71f7a73-35a6-45e8-acbe-f1c5925eed69
 blueprint-diff 7f976e0d-d2a5-4eeb-9e82-c82bc2824aba 9034c710-3e57-45f3-99e5-4316145e87ac
 
-# TODO-K: Do an SP update as well
+# Let's simulate the successful SP update as well.
+# Another couple of planning steps should try to update the last sled.
+sled-update-sp 2b8f0cb3-0295-4b3c-bc58-4fe88b57112c --active 1.0.0
+inventory-generate
+blueprint-plan 9034c710-3e57-45f3-99e5-4316145e87ac 0b5efbb3-0b1b-4bbf-b7d8-a2d6fca074c6
+blueprint-diff 9034c710-3e57-45f3-99e5-4316145e87ac d60afc57-f15d-476c-bd0f-b1071e2bb976
+
+# Update the RoT on the last sled.
+# There should be one last pending SP update.
+sled-update-rot d81c6a84-79b8-4958-ae41-ea46c9b19763 --slot-a 1.0.0 --active-slot a --persistent-boot-preference a
+inventory-generate
+blueprint-plan d60afc57-f15d-476c-bd0f-b1071e2bb976 78f72e8d-46a9-40a9-8618-602f54454d80
+blueprint-diff d60afc57-f15d-476c-bd0f-b1071e2bb976 a5a8f242-ffa5-473c-8efd-2acf2dc0b736
+
+# Finish updating the last sled and do one more planning run.
+# Now we should see there's nothing left to do!
+sled-update-sp d81c6a84-79b8-4958-ae41-ea46c9b19763 --active 1.0.0
+inventory-generate
+blueprint-plan a5a8f242-ffa5-473c-8efd-2acf2dc0b736 39363465-89ae-4ac2-9be1-099068da9d45
+blueprint-diff a5a8f242-ffa5-473c-8efd-2acf2dc0b736 626487fa-7139-45ec-8416-902271fc730b

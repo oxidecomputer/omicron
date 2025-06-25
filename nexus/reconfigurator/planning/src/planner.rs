@@ -952,22 +952,13 @@ impl<'a> Planner<'a> {
         // For better or worse, switches and PSCs do not have the same idea of
         // being adopted into the control plane.  If they're present, they're
         // part of the system, and we will update them.
-        let mut included_sled_baseboards: BTreeSet<_> = self
+        let included_sled_baseboards: BTreeSet<_> = self
             .input
             .all_sleds(SledFilter::SpsUpdatedByReconfigurator)
             .map(|(_sled_id, details)| &details.baseboard_id)
             .collect();
 
-        // TODO-K: I don't think I need this
-        let mut included_rot_sled_baseboards: BTreeSet<_> = self
-            .input
-            .all_sleds(SledFilter::RotsUpdatedByReconfigurator)
-            .map(|(_sled_id, details)| &details.baseboard_id)
-            .collect();
-
-        included_sled_baseboards.append(&mut included_rot_sled_baseboards);
-
-        let mut included_baseboards: BTreeSet<std::sync::Arc<BaseboardId>> =
+        let included_baseboards: BTreeSet<std::sync::Arc<BaseboardId>> =
             self.inventory
                 .sps
                 .iter()
@@ -981,16 +972,6 @@ impl<'a> Planner<'a> {
                     do_include.then_some(baseboard_id.clone())
                 })
                 .collect();
-
-        // TODO-K: I don't think I need this
-        let mut included_rot_baseboards = self
-            .inventory
-            .rots
-            .keys()
-            .map(|baseboard_id| baseboard_id.clone())
-            .collect();
-
-        included_baseboards.append(&mut included_rot_baseboards);
 
         // Compute the new set of PendingMgsUpdates.
         let current_updates =

@@ -391,9 +391,10 @@ fn try_make_update(
 
     // let cabooses = &inventory.cabooses_found;
     // info!(&log, "DEBUG: Components"; "baseboard-id" => ?baseboard_id, "cabooses" => ?cabooses, "artifacts" => ?current_artifacts);
-    try_make_update_sp(log, baseboard_id, inventory, current_artifacts);
-    // TODO-K: RoT must be before SP
     try_make_update_rot(log, baseboard_id, inventory, current_artifacts)
+        .or_else(|| {
+            try_make_update_sp(log, baseboard_id, inventory, current_artifacts)
+        })
 }
 
 /// Determine if the given baseboard needs an SP update and, if so, returns it.

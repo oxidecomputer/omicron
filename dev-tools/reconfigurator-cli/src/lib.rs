@@ -394,7 +394,7 @@ struct SledUpdateSpArgs {
     inactive: Option<ExpectedVersion>,
 }
 
-// TODO-K: Double check which of these need to be optional
+// TODO-K: Double check which of these need to exist
 #[derive(Debug, Args)]
 struct SledUpdateRotArgs {
     /// id of the sled
@@ -1095,7 +1095,8 @@ fn cmd_sled_update_rot(
     );
 
     Ok(Some(format!(
-        // TODO-K: Is "RoT settings" what I want here?
+        // TODO-K: Is "RoT settings" what I want here? or "versions"
+        // if that's the only thing we need
         "set sled {} RoT settings: {}",
         args.sled_id,
         labels.join(", ")
