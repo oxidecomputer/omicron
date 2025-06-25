@@ -101,5 +101,4 @@ fn main() -> Result<(), anyhow::Error> {
 }
 
 #[cfg(not(target_os = "illumos"))]
-#[tokio::main]
-async fn main() {}
+fn main() {}
