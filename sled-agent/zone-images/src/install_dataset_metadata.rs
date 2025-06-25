@@ -6,17 +6,17 @@
 
 use camino::{Utf8Path, Utf8PathBuf};
 use iddqd::{IdOrdItem, IdOrdMap, id_upcast};
-use illumos_utils::zpool::ZpoolName;
+use omicron_uuid_kinds::InternalZpoolUuid;
 use serde::de::DeserializeOwned;
 use sled_agent_config_reconciler::InternalDisksWithBootDisk;
-use std::fs::{self, FileType};
-use thiserror::Error;
-
-use crate::{ArcIoError, ArcSerdeJsonError};
+use sled_agent_types::zone_images::{
+    ArcIoError, ArcSerdeJsonError, InstallMetadataReadError,
+};
+use std::fs;
 
 #[derive(Debug)]
 pub(crate) struct AllInstallMetadataFiles<T: 'static> {
-    pub(crate) boot_zpool: ZpoolName,
+    pub(crate) boot_zpool: InternalZpoolUuid,
     pub(crate) boot_dataset_dir: Utf8PathBuf,
     pub(crate) boot_disk_path: Utf8PathBuf,
     pub(crate) boot_disk_metadata:
@@ -67,7 +67,7 @@ where
         // story on transient failures) it's not fatal.
         let non_boot_datasets = internal_disks.non_boot_disk_install_datasets();
         let non_boot_disk_overrides = non_boot_datasets
-            .map(|(zpool_name, dataset_dir)| {
+            .map(|(zpool_id, dataset_dir)| {
                 let path = dataset_dir.join(metadata_file_name);
                 let res = read_install_metadata_file::<T>(&dataset_dir, &path);
                 let res =
@@ -77,7 +77,7 @@ where
                     InstallMetadataNonBootResult::new(res, &boot_disk_metadata);
 
                 InstallMetadataNonBootInfo {
-                    zpool_name,
+                    zpool_id,
                     dataset_dir,
                     path,
                     result,
@@ -86,7 +86,7 @@ where
             .collect();
 
         Self {
-            boot_zpool: internal_disks.boot_disk_zpool(),
+            boot_zpool: internal_disks.boot_disk_zpool_id(),
             boot_dataset_dir,
             boot_disk_path,
             boot_disk_metadata,
@@ -193,8 +193,8 @@ impl<T> InstallMetadata<T> {
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct InstallMetadataNonBootInfo<T> {
-    /// The name of the zpool.
-    pub zpool_name: ZpoolName,
+    /// The ID of the zpool.
+    pub zpool_id: InternalZpoolUuid,
 
     /// The dataset directory.
     pub dataset_dir: Utf8PathBuf,
@@ -208,12 +208,12 @@ pub struct InstallMetadataNonBootInfo<T> {
 
 impl<T> IdOrdItem for InstallMetadataNonBootInfo<T> {
     type Key<'a>
-        = ZpoolName
+        = InternalZpoolUuid
     where
         T: 'a;
 
     fn key(&self) -> Self::Key<'_> {
-        self.zpool_name
+        self.zpool_id
     }
 
     id_upcast!();
@@ -293,57 +293,5 @@ pub enum InstallMetadataNonBootMismatch<T> {
     BootDiskReadError {
         /// The value as found on this disk. This value is logged but not used.
         non_boot_disk_info: Option<InstallMetadata<T>>,
-    },
-}
-
-#[derive(Clone, Debug, PartialEq, Error)]
-pub enum InstallMetadataReadError {
-    #[error(
-        "error retrieving metadata for install dataset directory \
-         `{dataset_dir}`"
-    )]
-    DatasetDirMetadata {
-        dataset_dir: Utf8PathBuf,
-        #[source]
-        error: ArcIoError,
-    },
-
-    #[error(
-        "expected install dataset `{dataset_dir}` to be a directory, \
-         found {file_type:?}"
-    )]
-    DatasetNotDirectory { dataset_dir: Utf8PathBuf, file_type: FileType },
-
-    #[error("error reading metadata file from `{path}`")]
-    Read {
-        path: Utf8PathBuf,
-        #[source]
-        error: ArcIoError,
-    },
-
-    #[error("error deserializing `{path}`, contents: {contents:?}")]
-    Deserialize {
-        path: Utf8PathBuf,
-        contents: String,
-        #[source]
-        error: ArcSerdeJsonError,
-    },
-    #[error("error reading entries from install dataset dir {dataset_dir}")]
-    ReadDir {
-        dataset_dir: Utf8PathBuf,
-        #[source]
-        error: ArcIoError,
-    },
-    #[error("error reading file type for {path}")]
-    ReadFileType {
-        path: Utf8PathBuf,
-        #[source]
-        error: ArcIoError,
-    },
-    #[error("error reading file {path}")]
-    ReadFile {
-        path: Utf8PathBuf,
-        #[source]
-        error: ArcIoError,
     },
 }

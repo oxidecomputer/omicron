@@ -12,7 +12,6 @@ use camino_tempfile::Utf8TempDir;
 use clap::Parser;
 use gateway_messages::SpPort;
 use gateway_test_utils::setup as gateway_setup;
-use illumos_utils::zpool::ZpoolName;
 use installinator::HOST_PHASE_2_FILE_NAME;
 use maplit::btreeset;
 use omicron_common::{
@@ -21,13 +20,12 @@ use omicron_common::{
         MupdateOverrideInfo, OmicronZoneManifest, OmicronZoneManifestSource,
     },
 };
-use omicron_uuid_kinds::{MupdateUuid, ZpoolUuid};
+use omicron_uuid_kinds::{InternalZpoolUuid, MupdateUuid};
 use sled_agent_config_reconciler::{
     InternalDisksReceiver, InternalDisksWithBootDisk,
 };
-use sled_agent_zone_images::{
-    MupdateOverrideNonBootResult, ZoneImageSourceResolver,
-};
+use sled_agent_types::zone_images::MupdateOverrideNonBootResult;
+use sled_agent_zone_images::ZoneImageSourceResolver;
 use sled_storage::config::MountConfig;
 use tokio::sync::oneshot;
 use tufaceous_artifact::{ArtifactHashId, ArtifactKind, KnownArtifactKind};
@@ -374,10 +372,11 @@ async fn test_installinator_fetch() {
     });
 
     // Simulate a couple of zpools.
-    let zpool1_uuid = ZpoolUuid::new_v4();
-    let zpool2_uuid = ZpoolUuid::new_v4();
-    let a_path = temp_dir.path().join("pool/int").join(zpool1_uuid.to_string());
-    let b_path = temp_dir.path().join("pool/int").join(zpool2_uuid.to_string());
+    let boot_zpool = InternalZpoolUuid::new_v4();
+    let non_boot_zpool = InternalZpoolUuid::new_v4();
+    let a_path = temp_dir.path().join("pool/int").join(boot_zpool.to_string());
+    let b_path =
+        temp_dir.path().join("pool/int").join(non_boot_zpool.to_string());
 
     let update_id_str = mupdate_id.to_string();
     let args = installinator::InstallinatorApp::try_parse_from([
@@ -513,8 +512,6 @@ async fn test_installinator_fetch() {
     // Run sled-agent-zone-images against these paths, and ensure that the
     // mupdate override is correctly picked up. Pick zpool1 arbitrarily as the
     // boot zpool.
-    let boot_zpool = ZpoolName::new_internal(zpool1_uuid);
-    let non_boot_zpool = ZpoolName::new_internal(zpool2_uuid);
     let internal_disks =
         make_internal_disks(temp_dir.path(), boot_zpool, &[non_boot_zpool]);
     let image_resolver = ZoneImageSourceResolver::new(&log, internal_disks);
@@ -683,13 +680,13 @@ async fn test_update_races() {
 
 fn make_internal_disks(
     root: &Utf8Path,
-    boot_zpool: ZpoolName,
-    other_zpools: &[ZpoolName],
+    boot_zpool: InternalZpoolUuid,
+    other_zpools: &[InternalZpoolUuid],
 ) -> InternalDisksWithBootDisk {
-    let identity_from_zpool = |zpool: ZpoolName| DiskIdentity {
-        vendor: "sled-agent-zone-images-tests".to_string(),
+    let identity_from_zpool = |zpool: InternalZpoolUuid| DiskIdentity {
+        vendor: "wicketd-integration-test".to_string(),
         model: "fake-disk".to_string(),
-        serial: zpool.id().to_string(),
+        serial: zpool.to_string(),
     };
     let mount_config = MountConfig {
         root: root.to_path_buf(),

@@ -19,6 +19,7 @@
 
 use crate::Omdb;
 use crate::check_allow_destructive::DestructiveOperationToken;
+use crate::db::ereport::cmd_db_ereport;
 use crate::helpers::CONNECTION_OPTIONS_HEADING;
 use crate::helpers::DATABASE_OPTIONS_HEADING;
 use crate::helpers::const_max_len;
@@ -180,6 +181,7 @@ use tabled::Tabled;
 use uuid::Uuid;
 
 mod alert;
+mod ereport;
 mod saga;
 
 const NO_ACTIVE_PROPOLIS_MSG: &str = "<no active Propolis>";
@@ -356,6 +358,8 @@ enum DbCommands {
     Disks(DiskArgs),
     /// Print information about internal and external DNS
     Dns(DnsArgs),
+    /// Query and display error reports
+    Ereport(ereport::EreportArgs),
     /// Print information about collected hardware/software inventory
     Inventory(InventoryArgs),
     /// Print information about physical disks
@@ -1494,6 +1498,9 @@ impl DbArgs {
                             &args,
                             token,
                         ).await
+                    },
+                    DbCommands::Ereport(args) => {
+                        cmd_db_ereport(&datastore, &fetch_opts, &args).await
                     }
                 }
             }
@@ -1730,7 +1737,7 @@ async fn get_crucible_dataset_rows(
 
     let mut zpool_total_size: HashMap<Uuid, i64> = HashMap::new();
 
-    for (_, sled_agent) in latest_collection.sled_agents {
+    for sled_agent in latest_collection.sled_agents {
         for zpool in sled_agent.zpools {
             zpool_total_size
                 .insert(zpool.id.into_untyped_uuid(), zpool.total_size.into());
@@ -3855,7 +3862,7 @@ async fn cmd_db_dry_run_region_allocation(
 
     let mut zpool_total_size: HashMap<Uuid, i64> = HashMap::new();
 
-    for (_, sled_agent) in latest_collection.sled_agents {
+    for sled_agent in latest_collection.sled_agents {
         for zpool in sled_agent.zpools {
             zpool_total_size
                 .insert(zpool.id.into_untyped_uuid(), zpool.total_size.into());
@@ -7275,7 +7282,7 @@ async fn inv_collection_print_devices(
 
 fn inv_collection_print_sleds(collection: &Collection) {
     println!("SLED AGENTS");
-    for sled in collection.sled_agents.values() {
+    for sled in &collection.sled_agents {
         println!(
             "\nsled {} (role = {:?}, serial {})",
             sled.sled_id,
@@ -7436,7 +7443,7 @@ fn inv_collection_print_orphaned_datasets(collection: &Collection) {
         LazyLock::new(IdOrdMap::new);
 
     println!("ORPHANED DATASETS");
-    for sled in collection.sled_agents.values() {
+    for sled in &collection.sled_agents {
         println!(
             "\nsled {} (serial {})",
             sled.sled_id,
@@ -8327,7 +8334,7 @@ async fn cmd_db_zpool_list(
 
     let mut zpool_total_size: HashMap<Uuid, i64> = HashMap::new();
 
-    for (_, sled_agent) in latest_collection.sled_agents {
+    for sled_agent in latest_collection.sled_agents {
         for zpool in sled_agent.zpools {
             zpool_total_size
                 .insert(zpool.id.into_untyped_uuid(), zpool.total_size.into());

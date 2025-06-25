@@ -90,7 +90,7 @@ impl Workspace {
         for pkg in metadata.packages {
             if pkg.source.is_none() {
                 if workspace_packages_by_name
-                    .insert(pkg.name.clone(), pkg.id.clone())
+                    .insert(pkg.name.to_string(), pkg.id.clone())
                     .is_some()
                 {
                     bail!(
@@ -135,7 +135,7 @@ impl Workspace {
             };
 
             if node.deps.iter().any(|d| {
-                d.name == "progenitor"
+                d.name.as_str() == "progenitor"
                     && d.dep_kinds.iter().any(|k| {
                         matches!(
                             k.kind,
@@ -145,7 +145,7 @@ impl Workspace {
             }) {
                 if pkg.name.ends_with("-client") {
                     progenitor_clients
-                        .insert(ClientPackageName::from(pkg.name.clone()));
+                        .insert(ClientPackageName::from(pkg.name.to_string()));
                 } else if !ignored_non_clients.contains(pkg.name.as_str()) {
                     eprintln!(
                         "workspace {:?}: ignoring apparent non-client that \
@@ -311,7 +311,7 @@ impl Workspace {
         pkgname: &'a str,
     ) -> impl Iterator<Item = &'a PackageId> + 'a {
         self.packages_by_id.iter().filter_map(move |(pkgid, pkg)| {
-            if pkg.name == pkgname { Some(pkgid) } else { None }
+            if pkg.name.as_str() == pkgname { Some(pkgid) } else { None }
         })
     }
 

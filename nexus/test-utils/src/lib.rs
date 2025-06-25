@@ -17,11 +17,12 @@ use dropshot::test_util::LogContext;
 use futures::FutureExt;
 use futures::future::BoxFuture;
 use gateway_test_utils::setup::GatewayTestContext;
-use hickory_resolver::TokioAsyncResolver;
+use hickory_resolver::TokioResolver;
 use hickory_resolver::config::NameServerConfig;
-use hickory_resolver::config::Protocol;
 use hickory_resolver::config::ResolverConfig;
 use hickory_resolver::config::ResolverOpts;
+use hickory_resolver::name_server::TokioConnectionProvider;
+use hickory_resolver::proto::xfer::Protocol;
 use id_map::IdMap;
 use internal_dns_types::config::DnsConfigBuilder;
 use internal_dns_types::names::DNS_ZONE_EXTERNAL_TESTING;
@@ -1944,7 +1945,7 @@ pub async fn start_dns_server(
     (
         dns_server::dns_server::ServerHandle,
         dropshot::HttpServer<dns_server::http_server::Context>,
-        TokioAsyncResolver,
+        TokioResolver,
     ),
     anyhow::Error,
 > {
@@ -1975,16 +1976,18 @@ pub async fn start_dns_server(
     .unwrap();
 
     let mut resolver_config = ResolverConfig::new();
-    resolver_config.add_name_server(NameServerConfig {
-        socket_addr: dns_server.local_address(),
-        protocol: Protocol::Udp,
-        tls_dns_name: None,
-        trust_negative_responses: false,
-        bind_addr: None,
-    });
+    resolver_config.add_name_server(NameServerConfig::new(
+        dns_server.local_address(),
+        Protocol::Udp,
+    ));
     let mut resolver_opts = ResolverOpts::default();
     resolver_opts.edns0 = true;
-    let resolver = TokioAsyncResolver::tokio(resolver_config, resolver_opts);
+    let resolver = TokioResolver::builder_with_config(
+        resolver_config,
+        TokioConnectionProvider::default(),
+    )
+    .with_options(resolver_opts)
+    .build();
 
     Ok((dns_server, http_server, resolver))
 }
