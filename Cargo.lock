@@ -3088,6 +3088,7 @@ dependencies = [
  "schemars",
  "serde",
  "serde_json",
+ "thiserror 2.0.12",
 ]
 
 [[package]]
@@ -3549,6 +3550,7 @@ dependencies = [
  "base64 0.22.1",
  "chrono",
  "daft",
+ "ereport-types",
  "gateway-messages",
  "gateway-types",
  "omicron-uuid-kinds",
@@ -6212,6 +6214,7 @@ dependencies = [
  "db-macros",
  "derive-where",
  "diesel",
+ "ereport-types",
  "expectorate",
  "hex",
  "iddqd",
@@ -6268,6 +6271,7 @@ dependencies = [
  "diesel",
  "diesel-dtrace",
  "dropshot",
+ "ereport-types",
  "expectorate",
  "futures",
  "gateway-client",
@@ -7558,6 +7562,7 @@ dependencies = [
  "dns-service-client",
  "dpd-client",
  "dropshot",
+ "ereport-types",
  "expectorate",
  "fatfs",
  "futures",
@@ -7704,6 +7709,7 @@ dependencies = [
  "diesel",
  "dropshot",
  "dyn-clone",
+ "ereport-types",
  "expectorate",
  "futures",
  "gateway-client",
