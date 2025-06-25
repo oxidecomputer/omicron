@@ -1031,6 +1031,7 @@ impl DataStore {
             nclickhouse_cluster_configs,
             nclickhouse_keepers,
             nclickhouse_servers,
+            noximeter_policy,
         ) = self.transaction_retry_wrapper("blueprint_delete")
             .transaction(&conn, |conn| {
                 let err = err.clone();
@@ -1151,6 +1152,17 @@ impl DataStore {
                     .await?
                 };
 
+                let noximeter_policy = {
+                    use nexus_db_schema::schema::
+                        bp_oximeter_read_policy::dsl;
+                    diesel::delete(dsl::bp_oximeter_read_policy
+                            .filter(dsl::blueprint_id.eq(
+                                to_db_typed_uuid(blueprint_id))),
+                    )
+                    .execute_async(&conn)
+                    .await?
+                };
+
                 Ok((
                     nblueprints,
                     nsled_metadata,
@@ -1161,6 +1173,7 @@ impl DataStore {
                     nclickhouse_cluster_configs,
                     nclickhouse_keepers,
                     nclickhouse_servers,
+                    noximeter_policy,
                 ))
                 }
             })
@@ -1180,7 +1193,8 @@ impl DataStore {
             "nnics" => nnics,
             "nclickhouse_cluster_configs" => nclickhouse_cluster_configs,
             "nclickhouse_keepers" => nclickhouse_keepers,
-            "nclickhouse_servers" => nclickhouse_servers
+            "nclickhouse_servers" => nclickhouse_servers,
+            "noximeter_policy" => noximeter_policy,
         );
 
         Ok(())
@@ -1951,6 +1965,7 @@ mod tests {
     use rand::Rng;
     use rand::thread_rng;
     use slog::Logger;
+    use std::collections::BTreeSet;
     use std::mem;
     use std::net::IpAddr;
     use std::net::Ipv4Addr;
@@ -1999,6 +2014,12 @@ mod tests {
             }};
         }
 
+        // These tables start with `bp_` but do not represent the contents of a
+        // specific blueprint.  It should be uncommon to add things to this
+        // list.
+        let tables_ignored: BTreeSet<_> = ["bp_target"].into_iter().collect();
+
+        let mut tables_checked = BTreeSet::new();
         for (table_name, result) in [
             query_count!(blueprint, id),
             query_count!(bp_sled_metadata, blueprint_id),
@@ -2006,12 +2027,50 @@ mod tests {
             query_count!(bp_omicron_physical_disk, blueprint_id),
             query_count!(bp_omicron_zone, blueprint_id),
             query_count!(bp_omicron_zone_nic, blueprint_id),
+            query_count!(bp_clickhouse_cluster_config, blueprint_id),
+            query_count!(bp_clickhouse_keeper_zone_id_to_node_id, blueprint_id),
+            query_count!(bp_clickhouse_server_zone_id_to_node_id, blueprint_id),
+            query_count!(bp_oximeter_read_policy, blueprint_id),
         ] {
             let count: i64 = result.unwrap();
             assert_eq!(
                 count, 0,
                 "nonzero row count for blueprint \
                  {blueprint_id} in table {table_name}"
+            );
+            tables_checked.insert(table_name);
+        }
+
+        // Look for likely blueprint-related tables that we didn't check.
+        let mut query = QueryBuilder::new();
+        query.sql(
+            "SELECT table_name \
+            FROM information_schema.tables \
+            WHERE table_name LIKE 'bp\\_%'",
+        );
+        let tables_unchecked: Vec<String> = query
+            .query::<diesel::sql_types::Text>()
+            .load_async(&*conn)
+            .await
+            .expect("Failed to query information_schema for tables")
+            .into_iter()
+            .filter(|f: &String| {
+                let t = f.as_str();
+                !tables_ignored.contains(t) && !tables_checked.contains(t)
+            })
+            .collect();
+        if !tables_unchecked.is_empty() {
+            // If you see this message, you probably added a blueprint table
+            // whose name started with `bp_*`.  Add it to the block above so
+            // that this function checks whether deleting a blueprint deletes
+            // rows from that table.  (You may also find you need to update
+            // blueprint_delete() to actually delete said rows.)
+            panic!(
+                "found table(s) that look related to blueprints, but \
+                 aren't covered by ensure_blueprint_fully_deleted(). \
+                 Please add them to that function!\n
+                 Found: {}",
+                tables_unchecked.join(", ")
             );
         }
     }

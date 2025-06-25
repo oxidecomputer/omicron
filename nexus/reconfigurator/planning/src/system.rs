@@ -487,7 +487,15 @@ impl SystemDescription {
         };
 
         self.tuf_repo = new_repo;
-        // XXX: should this set old_repo to the current tuf_repo?
+
+        // It's tempting to consider setting old_repo to the current tuf_repo,
+        // but that requires the invariant that old_repo is always the current
+        // target release and that an update isn't currently in progress. See
+        // https://github.com/oxidecomputer/omicron/issues/8056 for some
+        // discussion.
+        //
+        // We may want a more explicit operation to set the old repo, though.
+
         self
     }
 
