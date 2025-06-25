@@ -6506,6 +6506,7 @@ dependencies = [
  "dropshot",
  "expectorate",
  "gateway-client",
+ "gateway-types",
  "id-map",
  "illumos-utils",
  "indexmap 2.9.0",

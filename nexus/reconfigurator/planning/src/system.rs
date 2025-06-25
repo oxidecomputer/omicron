@@ -608,6 +608,42 @@ impl SystemDescription {
                         )
                         .context("recording SP inactive caboose")?;
                 }
+
+                if let Some(slot_a) = &s.rot_slot_a_caboose() {
+                    builder
+                        .found_caboose(
+                            &baseboard_id,
+                            CabooseWhich::RotSlotA,
+                            "fake MGS 1",
+                            SpComponentCaboose {
+                                board: slot_a.board.clone(),
+                                epoch: None,
+                                git_commit: slot_a.git_commit.clone(),
+                                name: slot_a.name.clone(),
+                                sign: slot_a.sign.clone(),
+                                version: slot_a.version.clone(),
+                            },
+                        )
+                        .context("recording RoT slot a caboose")?;
+                }
+
+                if let Some(slot_b) = &s.rot_slot_b_caboose() {
+                    builder
+                        .found_caboose(
+                            &baseboard_id,
+                            CabooseWhich::RotSlotB,
+                            "fake MGS 1",
+                            SpComponentCaboose {
+                                board: slot_b.board.clone(),
+                                epoch: None,
+                                git_commit: slot_b.git_commit.clone(),
+                                name: slot_b.name.clone(),
+                                sign: slot_b.sign.clone(),
+                                version: slot_b.version.clone(),
+                            },
+                        )
+                        .context("recording RoT slot b caboose")?;
+                }
             }
 
             builder
@@ -945,7 +981,7 @@ impl Sled {
             )),
             sp_inactive_caboose: None,
             rot_slot_a_caboose: Some(Arc::new(
-                Self::default_sp_component_caboose(String::from("0.0.2")),
+                Self::default_rot_component_caboose(String::from("0.0.2")),
             )),
             rot_slot_b_caboose: None,
         }
@@ -1209,7 +1245,7 @@ impl Sled {
                         }
                         new @ None => {
                             *new = Some(Arc::new(
-                                Self::default_sp_component_caboose(
+                                Self::default_rot_component_caboose(
                                     v.to_string(),
                                 ),
                             ));
@@ -1231,7 +1267,7 @@ impl Sled {
                         }
                         new @ None => {
                             *new = Some(Arc::new(
-                                Self::default_sp_component_caboose(
+                                Self::default_rot_component_caboose(
                                     v.to_string(),
                                 ),
                             ));
@@ -1244,6 +1280,17 @@ impl Sled {
 
     fn default_sp_component_caboose(version: String) -> Caboose {
         let board = sp_sim::SIM_GIMLET_BOARD.to_string();
+        Caboose {
+            board: board.clone(),
+            git_commit: String::from("unknown"),
+            name: board,
+            version: version.to_string(),
+            sign: None,
+        }
+    }
+
+    fn default_rot_component_caboose(version: String) -> Caboose {
+        let board = sp_sim::SIM_ROT_BOARD.to_string();
         Caboose {
             board: board.clone(),
             git_commit: String::from("unknown"),

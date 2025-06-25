@@ -728,6 +728,9 @@ pub enum SledFilter {
 
     /// Sleds whose SPs should be updated by Reconfigurator
     SpsUpdatedByReconfigurator,
+
+    /// Sleds whose RoTs should be updated by Reconfigurator
+    RotsUpdatedByReconfigurator,
 }
 
 impl SledFilter {
@@ -785,6 +788,7 @@ impl SledPolicy {
                 SledFilter::VpcFirewall => true,
                 SledFilter::TufArtifactReplication => true,
                 SledFilter::SpsUpdatedByReconfigurator => true,
+                SledFilter::RotsUpdatedByReconfigurator => true,
             },
             SledPolicy::InService {
                 provision_policy: SledProvisionPolicy::NonProvisionable,
@@ -800,6 +804,7 @@ impl SledPolicy {
                 SledFilter::VpcFirewall => true,
                 SledFilter::TufArtifactReplication => true,
                 SledFilter::SpsUpdatedByReconfigurator => true,
+                SledFilter::RotsUpdatedByReconfigurator => true,
             },
             SledPolicy::Expunged => match filter {
                 SledFilter::All => true,
@@ -813,6 +818,7 @@ impl SledPolicy {
                 SledFilter::VpcFirewall => false,
                 SledFilter::TufArtifactReplication => false,
                 SledFilter::SpsUpdatedByReconfigurator => false,
+                SledFilter::RotsUpdatedByReconfigurator => false,
             },
         }
     }
@@ -848,6 +854,7 @@ impl SledState {
                 SledFilter::VpcFirewall => true,
                 SledFilter::TufArtifactReplication => true,
                 SledFilter::SpsUpdatedByReconfigurator => true,
+                SledFilter::RotsUpdatedByReconfigurator => true,
             },
             SledState::Decommissioned => match filter {
                 SledFilter::All => true,
@@ -861,6 +868,7 @@ impl SledState {
                 SledFilter::VpcFirewall => false,
                 SledFilter::TufArtifactReplication => false,
                 SledFilter::SpsUpdatedByReconfigurator => false,
+                SledFilter::RotsUpdatedByReconfigurator => false,
             },
         }
     }

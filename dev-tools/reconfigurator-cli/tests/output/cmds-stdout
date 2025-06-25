@@ -288,7 +288,7 @@ subnet fd00:1122:3344:101::/64
 SP active version:   Some("4.0.0")
 SP inactive version: Some("5.0.0")
 RoT active slot: A
-RoT slot A version: None
+RoT slot A version: Some("0.0.2")
 RoT slot B version: None
 zpools (10):
     674c6591-11be-44f2-9df1-db3bb663ec01 (zpool)

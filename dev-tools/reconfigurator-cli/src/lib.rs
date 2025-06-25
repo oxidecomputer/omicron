@@ -1066,10 +1066,6 @@ fn cmd_sled_update_rot(
             pending_persistent_boot_preference
         ));
     }
-    labels.push(format!(
-        "pending persistent boot preference -> {}",
-        &args.persistent_boot_preference
-    ));
     if let Some(transient_boot_preference) = &args.transient_boot_preference {
         labels.push(format!(
             "transient boot preference -> {}",

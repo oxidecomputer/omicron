@@ -33,6 +33,7 @@ use nexus_types::deployment::ZpoolFilter;
 use nexus_types::external_api::views::PhysicalDiskPolicy;
 use nexus_types::external_api::views::SledPolicy;
 use nexus_types::external_api::views::SledState;
+use nexus_types::inventory::BaseboardId;
 use nexus_types::inventory::Collection;
 use omicron_common::policy::INTERNAL_DNS_REDUNDANCY;
 use omicron_uuid_kinds::PhysicalDiskUuid;
@@ -951,12 +952,22 @@ impl<'a> Planner<'a> {
         // For better or worse, switches and PSCs do not have the same idea of
         // being adopted into the control plane.  If they're present, they're
         // part of the system, and we will update them.
-        let included_sled_baseboards: BTreeSet<_> = self
+        let mut included_sled_baseboards: BTreeSet<_> = self
             .input
             .all_sleds(SledFilter::SpsUpdatedByReconfigurator)
             .map(|(_sled_id, details)| &details.baseboard_id)
             .collect();
-        let included_baseboards =
+
+        // TODO-K: I don't think I need this
+        let mut included_rot_sled_baseboards: BTreeSet<_> = self
+            .input
+            .all_sleds(SledFilter::RotsUpdatedByReconfigurator)
+            .map(|(_sled_id, details)| &details.baseboard_id)
+            .collect();
+
+        included_sled_baseboards.append(&mut included_rot_sled_baseboards);
+
+        let mut included_baseboards: BTreeSet<std::sync::Arc<BaseboardId>> =
             self.inventory
                 .sps
                 .iter()
@@ -970,6 +981,16 @@ impl<'a> Planner<'a> {
                     do_include.then_some(baseboard_id.clone())
                 })
                 .collect();
+
+        // TODO-K: I don't think I need this
+        let mut included_rot_baseboards = self
+            .inventory
+            .rots
+            .keys()
+            .map(|baseboard_id| baseboard_id.clone())
+            .collect();
+
+        included_baseboards.append(&mut included_rot_baseboards);
 
         // Compute the new set of PendingMgsUpdates.
         let current_updates =
