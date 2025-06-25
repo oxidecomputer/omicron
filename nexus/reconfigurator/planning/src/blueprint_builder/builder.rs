@@ -2003,8 +2003,9 @@ impl<'a> BlueprintBuilder<'a> {
         &self,
         zone_kind: ZoneKind,
     ) -> BlueprintZoneImageSource {
-        let new_repo = self.input.tuf_repo();
-        let old_repo = self.input.old_repo();
+        let new_repo = self.input.tuf_repo().description();
+        let old_repo =
+            self.input.old_repo().and_then(|repo| repo.description());
         Self::zone_image_artifact(
             if self.zone_is_ready_for_update(zone_kind, new_repo) {
                 new_repo
