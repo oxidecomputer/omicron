@@ -7427,7 +7427,6 @@ dependencies = [
  "signal-hook-tokio",
  "subprocess",
  "tokio",
- "tokio-dtrace 0.1.0 (git+https://github.com/oxidecomputer/tokio-dtrace?branch=main)",
  "tokio-postgres",
  "toml 0.8.23",
 ]
@@ -7695,7 +7694,6 @@ dependencies = [
  "term",
  "thiserror 2.0.12",
  "tokio",
- "tokio-dtrace 0.1.0 (git+https://github.com/oxidecomputer/tokio-dtrace?branch=main)",
  "tokio-postgres",
  "tokio-util",
  "tough",
@@ -8587,7 +8585,7 @@ version = "0.1.0"
 source = "git+https://github.com/oxidecomputer/oxide-tokio-rt?rev=bd1b595a32a026163486e09fb785dbdb5fb16081#bd1b595a32a026163486e09fb785dbdb5fb16081"
 dependencies = [
  "tokio",
- "tokio-dtrace 0.1.0 (git+https://github.com/oxidecomputer/tokio-dtrace?rev=36dc6c66cc171500b0abcbb06016beff93940ac3)",
+ "tokio-dtrace",
 ]
 
 [[package]]
@@ -13272,16 +13270,6 @@ dependencies = [
  "socket2",
  "tokio-macros",
  "windows-sys 0.52.0",
-]
-
-[[package]]
-name = "tokio-dtrace"
-version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/tokio-dtrace?branch=main#55588b30dc424a87005deffdf4063679892b1c01"
-dependencies = [
- "thiserror 2.0.12",
- "tokio",
- "usdt",
 ]
 
 [[package]]
