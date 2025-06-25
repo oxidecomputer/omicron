@@ -16,8 +16,10 @@ use id_map::IdMappable;
 use iddqd::IdOrdItem;
 use iddqd::IdOrdMap;
 use iddqd::id_upcast;
-use omicron_common::disk::{DatasetKind, DatasetName};
+use omicron_common::disk::{DatasetKind, DatasetName, M2Slot};
 use omicron_common::ledger::Ledgerable;
+use omicron_common::snake_case_result;
+use omicron_common::snake_case_result::SnakeCaseResult;
 use omicron_common::update::OmicronZoneManifestSource;
 use omicron_common::{
     api::{
@@ -25,7 +27,6 @@ use omicron_common::{
         internal::shared::{NetworkInterface, SourceNatConfig},
     },
     disk::{DatasetConfig, DiskVariant, OmicronPhysicalDiskConfig},
-    snake_case_result::{self, SnakeCaseResult},
     update::ArtifactId,
     zpool_name::ZpoolName,
 };
@@ -139,6 +140,7 @@ pub struct ConfigReconcilerInventory {
     pub datasets: BTreeMap<DatasetUuid, ConfigReconcilerInventoryResult>,
     pub orphaned_datasets: IdOrdMap<OrphanedDataset>,
     pub zones: BTreeMap<OmicronZoneUuid, ConfigReconcilerInventoryResult>,
+    pub boot_partitions: BootPartitionContents,
 }
 
 impl ConfigReconcilerInventory {
@@ -202,8 +204,55 @@ impl ConfigReconcilerInventory {
             datasets,
             orphaned_datasets: IdOrdMap::new(),
             zones,
+            boot_partitions: {
+                // None of our callers care about this; if that changes, we
+                // could pass in boot partition contents.
+                let err = "constructed via debug_assume_success()".to_string();
+                BootPartitionContents {
+                    boot_disk: Err(err.clone()),
+                    slot_a: Err(err.clone()),
+                    slot_b: Err(err),
+                }
+            },
         }
     }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Deserialize, JsonSchema, Serialize)]
+pub struct BootPartitionContents {
+    #[serde(with = "snake_case_result")]
+    #[schemars(schema_with = "SnakeCaseResult::<M2Slot, String>::json_schema")]
+    pub boot_disk: Result<M2Slot, String>,
+    #[serde(with = "snake_case_result")]
+    #[schemars(
+        schema_with = "SnakeCaseResult::<BootPartitionDetails, String>::json_schema"
+    )]
+    pub slot_a: Result<BootPartitionDetails, String>,
+    #[serde(with = "snake_case_result")]
+    #[schemars(
+        schema_with = "SnakeCaseResult::<BootPartitionDetails, String>::json_schema"
+    )]
+    pub slot_b: Result<BootPartitionDetails, String>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Deserialize, JsonSchema, Serialize)]
+pub struct BootPartitionDetails {
+    pub header: BootImageHeader,
+    pub artifact_hash: ArtifactHash,
+    pub artifact_size: usize,
+}
+
+// There are several other fields in the header that we either parse and discard
+// or ignore completely; see https://github.com/oxidecomputer/boot-image-tools
+// for more thorough support.
+#[derive(Clone, Debug, PartialEq, Eq, Deserialize, JsonSchema, Serialize)]
+pub struct BootImageHeader {
+    pub flags: u64,
+    pub data_size: u64,
+    pub image_size: u64,
+    pub target_size: u64,
+    pub sha256: [u8; 32],
+    pub image_name: String,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Deserialize, JsonSchema, Serialize)]
