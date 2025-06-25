@@ -844,17 +844,6 @@ pub struct InvSledAgent {
     pub zone_image_resolver: InvZoneImageResolver,
 }
 
-/// Abridged form of [`InvSledAgent`] for mupdate override queries.
-///
-/// See [`nexus_types::inventory::SledAgent`].
-#[derive(Queryable, Clone, Debug, Selectable)]
-#[diesel(table_name = inv_sled_agent)]
-pub struct InvSledAgentMupdateOverrideColumns {
-    pub inv_collection_id: DbTypedUuid<CollectionKind>,
-    pub sled_id: DbTypedUuid<SledKind>,
-    pub mupdate_override_id: Option<DbTypedUuid<MupdateOverrideKind>>,
-}
-
 /// See [`nexus_sled_agent_shared::inventory::ConfigReconcilerInventoryStatus`].
 #[derive(Queryable, Clone, Debug, Selectable, Insertable)]
 #[diesel(table_name = inv_sled_agent)]

@@ -31,6 +31,7 @@ use nexus_db_errors::ErrorHandler;
 use nexus_db_errors::public_error_from_diesel;
 use nexus_db_errors::public_error_from_diesel_lookup;
 use nexus_db_model::InvCaboose;
+use nexus_db_model::InvClickhouseKeeperMembership;
 use nexus_db_model::InvCollection;
 use nexus_db_model::InvCollectionError;
 use nexus_db_model::InvConfigReconcilerStatus;
@@ -65,9 +66,6 @@ use nexus_db_model::{
 };
 use nexus_db_model::{HwPowerState, InvZoneManifestNonBoot};
 use nexus_db_model::{HwRotSlot, InvMupdateOverrideNonBoot};
-use nexus_db_model::{
-    InvClickhouseKeeperMembership, InvSledAgentMupdateOverrideColumns,
-};
 use nexus_db_schema::enums::HwRotSlotEnum;
 use nexus_db_schema::enums::RotImageErrorEnum;
 use nexus_db_schema::enums::RotPageWhichEnum;
@@ -77,6 +75,7 @@ use nexus_db_schema::enums::{
     CabooseWhichEnum, InvConfigReconcilerStatusKindEnum,
 };
 use nexus_db_schema::enums::{HwPowerStateEnum, InvZoneManifestSourceEnum};
+use nexus_sled_agent_shared::inventory::ConfigReconcilerInventory;
 use nexus_sled_agent_shared::inventory::ConfigReconcilerInventoryResult;
 use nexus_sled_agent_shared::inventory::ConfigReconcilerInventoryStatus;
 use nexus_sled_agent_shared::inventory::MupdateOverrideNonBootInventory;
@@ -84,9 +83,6 @@ use nexus_sled_agent_shared::inventory::OmicronSledConfig;
 use nexus_sled_agent_shared::inventory::OrphanedDataset;
 use nexus_sled_agent_shared::inventory::ZoneArtifactInventory;
 use nexus_sled_agent_shared::inventory::ZoneManifestNonBootInventory;
-use nexus_sled_agent_shared::inventory::{
-    ConfigReconcilerInventory, MupdateOverrideBootInventory,
-};
 use nexus_types::inventory::BaseboardId;
 use nexus_types::inventory::Collection;
 use nexus_types::inventory::PhysicalDiskFirmware;
@@ -2005,53 +2001,8 @@ impl DataStore {
         opctx: &OpContext,
     ) -> Result<Option<Collection>, Error> {
         opctx.authorize(authz::Action::Read, &authz::INVENTORY).await?;
-        let collection_id =
-            self.inventory_get_latest_collection_id(opctx).await?;
-        let Some(collection_id) = collection_id else {
-            return Ok(None);
-        };
-
-        Ok(Some(self.inventory_collection_read(opctx, collection_id).await?))
-    }
-
-    /// Read just the mupdate override columns for a particular collection.
-    ///
-    /// This is an abridged version of the full inventory_collection_read, which
-    /// doesn't do any traversals across tables and just reads a few rows from
-    /// the `inv_collection` table.
-    ///
-    /// If there aren't any collections, return `Ok(None)`.
-    pub async fn inventory_get_latest_collection_mupdate_overrides(
-        &self,
-        opctx: &OpContext,
-    ) -> Result<Option<BTreeMap<SledUuid, MupdateOverrideBootInventory>>, Error>
-    {
-        opctx.authorize(authz::Action::Read, &authz::INVENTORY).await?;
-        let collection_id =
-            self.inventory_get_latest_collection_id(opctx).await?;
-
-        let Some(collection_id) = collection_id else {
-            return Ok(None);
-        };
-
-        Ok(Some(
-            self.inventory_collection_read_mupdate_overrides(
-                opctx,
-                collection_id,
-            )
-            .await?,
-        ))
-    }
-
-    /// Fetches the latest collection ID -- assumes that the caller has checked
-    /// for permission to read the inventory.
-    async fn inventory_get_latest_collection_id(
-        &self,
-        opctx: &OpContext,
-    ) -> Result<Option<CollectionUuid>, Error> {
-        use nexus_db_schema::schema::inv_collection::dsl;
-
         let conn = self.pool_connection_authorized(opctx).await?;
+        use nexus_db_schema::schema::inv_collection::dsl;
         let collection_id = dsl::inv_collection
             .select(dsl::id)
             .order_by(dsl::time_started.desc())
@@ -2060,59 +2011,17 @@ impl DataStore {
             .optional()
             .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))?;
 
-        Ok(collection_id.map(CollectionUuid::from_untyped_uuid))
-    }
+        let Some(collection_id) = collection_id else {
+            return Ok(None);
+        };
 
-    /// Read just the mupdate override columns for a particular collection.
-    ///
-    /// This is an abridged version of the full inventory_collection_read, which
-    /// doesn't do any traversals across tables and just reads a few rows from
-    /// the `inv_collection` table.
-    async fn inventory_collection_read_mupdate_overrides(
-        &self,
-        opctx: &OpContext,
-        collection_id: CollectionUuid,
-    ) -> Result<BTreeMap<SledUuid, MupdateOverrideBootInventory>, Error> {
-        use nexus_db_schema::schema::inv_sled_agent::dsl;
-
-        let conn = self.pool_connection_authorized(opctx).await?;
-        let db_id = to_db_typed_uuid(collection_id);
-
-        let mut by_sled_id = BTreeMap::new();
-
-        // We don't expect that many rows to be returned, but use a paginated
-        // query just in case.
-        let mut paginator = Paginator::new(SQL_BATCH_SIZE);
-        while let Some(p) = paginator.next() {
-            let batch: Vec<InvSledAgentMupdateOverrideColumns> = paginated(
-                dsl::inv_sled_agent,
-                dsl::sled_id,
-                &p.current_pagparams(),
+        Ok(Some(
+            self.inventory_collection_read(
+                opctx,
+                CollectionUuid::from_untyped_uuid(collection_id),
             )
-            .filter(dsl::inv_collection_id.eq(db_id))
-            .select(InvSledAgentMupdateOverrideColumns::as_select())
-            .load_async(&*conn)
-            .await
-            .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))?;
-            paginator = p.found_batch(
-                &batch,
-                &|row: &InvSledAgentMupdateOverrideColumns| row.sled_id,
-            );
-            for row in batch {
-                let Some(mupdate_override_id) = row.mupdate_override_id else {
-                    // Ignore any rows without a mupdate_override_id.
-                    continue;
-                };
-                by_sled_id.insert(
-                    row.sled_id.into(),
-                    MupdateOverrideBootInventory {
-                        mupdate_override_id: mupdate_override_id.into(),
-                    },
-                );
-            }
-        }
-
-        Ok(by_sled_id)
+            .await?,
+        ))
     }
 
     /// Attempt to read the current collection

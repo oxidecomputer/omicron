@@ -2,15 +2,12 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-use std::collections::BTreeMap;
-
 use super::{Generation, impl_enum_type};
 use crate::typed_uuid::DbTypedUuid;
 use chrono::{DateTime, Utc};
 use nexus_db_schema::schema::target_release;
 use nexus_types::external_api::views;
 use omicron_uuid_kinds::TufRepoKind;
-use uuid::Uuid;
 
 impl_enum_type!(
     TargetReleaseSourceEnum:
@@ -67,13 +64,13 @@ impl TargetRelease {
     pub fn into_external(
         &self,
         release_source: views::TargetReleaseSource,
-        mupdate_overrides: BTreeMap<Uuid, views::TargetReleaseMupdateOverride>,
+        mupdate_override: Option<views::TargetReleaseMupdateOverride>,
     ) -> views::TargetRelease {
         views::TargetRelease {
             generation: (&self.generation.0).into(),
             time_requested: self.time_requested,
             release_source,
-            mupdate_overrides,
+            mupdate_override,
         }
     }
 }

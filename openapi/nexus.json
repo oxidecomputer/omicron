@@ -24802,12 +24802,14 @@
             "type": "integer",
             "format": "int64"
           },
-          "mupdate_overrides": {
-            "description": "MUPdate overrides currently in place, keyed by sled ID.\n\nAfter a recovery-driven update (also known as a MUPdate), this map will be non-empty until the normal update path is restored.",
-            "type": "object",
-            "additionalProperties": {
-              "$ref": "#/components/schemas/TargetReleaseMupdateOverride"
-            }
+          "mupdate_override": {
+            "nullable": true,
+            "description": "Whether the system has been updated to a new release through the recovery (MUPdate) path since the target release was last set.\n\nIn this case, the target release is considered to be no longer active, and a new release must be set.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/TargetReleaseMupdateOverride"
+              }
+            ]
           },
           "release_source": {
             "description": "The source of the target release.",
@@ -24825,23 +24827,22 @@
         },
         "required": [
           "generation",
-          "mupdate_overrides",
           "release_source",
           "time_requested"
         ]
       },
       "TargetReleaseMupdateOverride": {
-        "description": "MUPdate override for a target release.",
+        "description": "View of MUPdate override information for a target release.",
         "type": "object",
         "properties": {
-          "mupdate_override_id": {
-            "description": "The override UUID.",
-            "type": "string",
-            "format": "uuid"
+          "minimum_generation": {
+            "description": "The minimum generation number required for the system to be back in charge again.",
+            "type": "integer",
+            "format": "int64"
           }
         },
         "required": [
-          "mupdate_override_id"
+          "minimum_generation"
         ]
       },
       "TargetReleaseSource": {

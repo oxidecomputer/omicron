@@ -17,7 +17,6 @@ use nexus_db_errors::{ErrorHandler, public_error_from_diesel};
 use nexus_db_schema::schema::target_release::dsl;
 use nexus_types::external_api::views;
 use omicron_common::api::external::{CreateResult, Error, LookupResult};
-use omicron_uuid_kinds::GenericUuid;
 
 impl DataStore {
     /// Fetch the current target release, i.e., the row with the largest
@@ -126,36 +125,36 @@ impl DataStore {
                 }
             }
         };
-        let mupdate_overrides = self
-            .inventory_get_latest_collection_mupdate_overrides(opctx)
-            .await?
-            .unwrap_or_default();
-        let mupdate_overrides = mupdate_overrides
-            .into_iter()
-            .map(|(sled_id, boot_inv)| {
-                (
-                    sled_id.into_untyped_uuid(),
-                    views::TargetReleaseMupdateOverride {
-                        mupdate_override_id: boot_inv
-                            .mupdate_override_id
-                            .into_untyped_uuid(),
-                    },
-                )
+        // We choose to fetch the blueprint directly from the database rather
+        // than relying on the cached blueprint in Nexus because our APIs try to
+        // be strongly consistent. This shows up/will show up as a warning in
+        // the UI, and we don't want the warning to flicker in and out of
+        // existence based on which Nexus is getting hit.
+        let min_gen = self.blueprint_target_get_current_min_gen(opctx).await?;
+        // The semantics of min_gen mean we use a > sign here, not >=.
+        let mupdate_override = if min_gen > target_release.generation.0 {
+            Some(views::TargetReleaseMupdateOverride {
+                minimum_generation: (&min_gen).into(),
             })
-            .collect();
-        Ok(target_release.into_external(release_source, mupdate_overrides))
+        } else {
+            None
+        };
+        Ok(target_release.into_external(release_source, mupdate_override))
     }
 }
 
 #[cfg(test)]
 mod test {
-    use std::collections::BTreeMap;
-
     use super::*;
     use crate::db::model::{Generation, TargetReleaseSource};
     use crate::db::pub_test_utils::TestDatabase;
     use chrono::{TimeDelta, Utc};
-    use nexus_inventory::examples::{Representative, representative};
+    use nexus_inventory::now_db_precision;
+    use nexus_reconfigurator_planning::blueprint_builder::BlueprintBuilder;
+    use nexus_reconfigurator_planning::example::{
+        ExampleSystemBuilder, SimRngState,
+    };
+    use nexus_types::deployment::BlueprintTarget;
     use omicron_common::api::external::{
         TufArtifactMeta, TufRepoDescription, TufRepoMeta,
     };
@@ -166,7 +165,8 @@ mod test {
 
     #[tokio::test]
     async fn target_release_datastore() {
-        let logctx = dev::test_setup_log("target_release_datastore");
+        const TEST_NAME: &str = "target_release_datastore";
+        let logctx = dev::test_setup_log(TEST_NAME);
         let db = TestDatabase::new_with_datastore(&logctx.log).await;
         let (opctx, datastore) = (db.opctx(), db.datastore());
 
@@ -183,6 +183,56 @@ mod test {
             TargetReleaseSource::Unspecified
         );
         assert!(initial_target_release.tuf_repo_id.is_none());
+
+        // Set up an initial blueprint and make it the target. This models real
+        // systems which always have a target blueprint.
+        let mut rng = SimRngState::from_seed(TEST_NAME);
+        let (system, mut blueprint) = ExampleSystemBuilder::new_with_rng(
+            &logctx.log,
+            rng.next_system_rng(),
+        )
+        .build();
+        assert_eq!(
+            blueprint.target_release_minimum_generation,
+            1.into(),
+            "initial blueprint should have minimum generation of 1",
+        );
+        // Treat this blueprint as the initial one for the system.
+        blueprint.parent_blueprint_id = None;
+
+        datastore
+            .blueprint_insert(&opctx, &blueprint)
+            .await
+            .expect("inserted blueprint");
+        datastore
+            .blueprint_target_set_current(
+                opctx,
+                BlueprintTarget {
+                    target_id: blueprint.id,
+                    // enabled = true or false shouldn't matter for this.
+                    enabled: true,
+                    time_made_target: now_db_precision(),
+                },
+            )
+            .await
+            .expect("set blueprint target");
+
+        // We should always be able to get a view of the target release.
+        let initial_target_release_view = datastore
+            .target_release_view(opctx, &initial_target_release)
+            .await
+            .expect("got target release");
+        eprintln!(
+            "initial target release view: {:#?}",
+            initial_target_release_view
+        );
+
+        // This target release should not have the mupdate override set, because
+        // the generation is <= the minimum generation in the target blueprint.
+        assert_eq!(
+            initial_target_release_view.mupdate_override, None,
+            "mupdate_override should be None for initial target release"
+        );
 
         // We should be able to set a new generation just like the first.
         // We allow some slack in the timestamp comparison because the
@@ -277,51 +327,82 @@ mod test {
         );
         assert_eq!(target_release.tuf_repo_id, Some(tuf_repo_id));
 
-        // Insert a representative collection with some mupdate overrides.
-        let Representative { builder, .. } = representative();
-        let collection = builder.build();
-        datastore
-            .inventory_insert_collection(&opctx, &collection)
-            .await
-            .expect("inserted collection");
+        // Generate a new blueprint with a greater target release generation.
+        let mut builder = BlueprintBuilder::new_based_on(
+            &logctx.log,
+            &blueprint,
+            &system.input,
+            &system.collection,
+            TEST_NAME,
+        )
+        .expect("created blueprint builder");
+        builder.set_rng(rng.next_planner_rng());
+        builder
+            .set_target_release_minimum_generation(
+                blueprint.target_release_minimum_generation,
+                5.into(),
+            )
+            .expect("set target release minimum generation");
+        let bp2 = builder.build();
 
-        // Now get the target release.
+        datastore
+            .blueprint_insert(&opctx, &bp2)
+            .await
+            .expect("inserted blueprint");
+        datastore
+            .blueprint_target_set_current(
+                opctx,
+                BlueprintTarget {
+                    target_id: bp2.id,
+                    // enabled = true or false shouldn't matter for this.
+                    enabled: true,
+                    time_made_target: now_db_precision(),
+                },
+            )
+            .await
+            .expect("set blueprint target");
+
+        // Fetch the target release again.
         let target_release = datastore
-            .target_release_view(&opctx, &target_release)
+            .target_release_get_current(opctx)
+            .await
+            .expect("got target release");
+        let target_release_view_2 = datastore
+            .target_release_view(opctx, &target_release)
             .await
             .expect("got target release");
 
-        eprintln!("target release: {target_release:#?}");
-
-        // Ensure that the mupdate overrides that are part of the collection are
-        // present.
-        let expected = collection
-            .sled_agents
-            .iter()
-            .filter_map(|sa| {
-                if let Ok(Some(o)) =
-                    &sa.zone_image_resolver.mupdate_override.boot_override
-                {
-                    let v = views::TargetReleaseMupdateOverride {
-                        mupdate_override_id: o
-                            .mupdate_override_id
-                            .into_untyped_uuid(),
-                    };
-                    Some((sa.sled_id.into_untyped_uuid(), v))
-                } else {
-                    None
-                }
-            })
-            .collect::<BTreeMap<_, _>>();
-        assert!(
-            !expected.is_empty(),
-            "representative collection should have some overrides in it",
-        );
+        eprintln!("target release view 2: {target_release_view_2:#?}");
 
         assert_eq!(
-            target_release.mupdate_overrides, expected,
-            "mupdate overrides matches expected",
+            target_release_view_2.mupdate_override,
+            Some(views::TargetReleaseMupdateOverride { minimum_generation: 5 })
         );
+
+        // Now set the target release again -- this should cause the mupdate
+        // override to disappear.
+        let before = Utc::now();
+        let target_release = datastore
+            .target_release_insert(
+                opctx,
+                TargetRelease::new_system_version(&target_release, tuf_repo_id),
+            )
+            .await
+            .unwrap();
+        let after = Utc::now();
+
+        assert_eq!(target_release.generation, Generation(5.into()));
+        assert!(target_release.time_requested >= before);
+        assert!(target_release.time_requested <= after);
+
+        let target_release_view_3 = datastore
+            .target_release_view(opctx, &target_release)
+            .await
+            .expect("got target release");
+
+        eprintln!("target release view 3: {target_release_view_3:#?}");
+
+        assert_eq!(target_release_view_3.mupdate_override, None);
 
         // Clean up.
         db.terminate().await;
