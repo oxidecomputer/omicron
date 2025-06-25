@@ -109,15 +109,11 @@ impl DataStore {
             .authorize(authz::Action::Modify, &authz::BLUEPRINT_CONFIG)
             .await?;
 
-        let num_inserted = if switches.version == 1 {
-            self.reconfigurator_chicken_switches_insert_first(opctx, &switches)
-                .await?
-        } else {
-            self.reconfigurator_chicken_switches_insert_next_version(
+        let num_inserted = self
+            .reconfigurator_chicken_switches_insert_next_version(
                 opctx, &switches,
             )
-            .await?
-        };
+            .await?;
 
         match num_inserted {
             0 => Err(Error::invalid_request(format!(
@@ -136,47 +132,22 @@ impl DataStore {
     /// Only succeeds if the prior version is the latest version currently
     /// in the `reconfigurator_chicken_switches` table.
     ///
-    /// Panics if `switches.version <= 1`;
+    /// Panics if `switches.version < 1`;
     async fn reconfigurator_chicken_switches_insert_next_version(
         &self,
         opctx: &OpContext,
         switches: &ReconfiguratorChickenSwitches,
     ) -> Result<usize, Error> {
-        assert!(switches.version > 1);
-        let prev_version = switches.version - 1;
+        assert!(switches.version >= 1);
 
         sql_query(
             r"INSERT INTO reconfigurator_chicken_switches
                 (version, planner_enabled, time_modified)
               SELECT $1, $2, $3
-              FROM reconfigurator_chicken_switches WHERE version = $4 AND version IN
-              (SELECT version FROM reconfigurator_chicken_switches
-               ORDER BY version DESC LIMIT 1)",
-        )
-        .bind::<sql_types::BigInt, SqlU32>(switches.version.into())
-        .bind::<sql_types::Bool, _>(switches.planner_enabled)
-        .bind::<sql_types::Timestamptz, _>(switches.time_modified)
-        .bind::<sql_types::BigInt, SqlU32>(prev_version.into())
-        .execute_async(&*self.pool_connection_authorized(opctx).await?)
-        .await
-        .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))
-    }
-
-    /// Insert the first set of chicken switches in the database at version 1.
-    ///
-    /// Only insert if no other version exists.
-    ///
-    /// Return the number of inserted rows or an error.
-    async fn reconfigurator_chicken_switches_insert_first(
-        &self,
-        opctx: &OpContext,
-        switches: &ReconfiguratorChickenSwitches,
-    ) -> Result<usize, Error> {
-        sql_query(
-            r"INSERT INTO reconfigurator_chicken_switches
-              (version, planner_enabled, time_modified)
-             SELECT $1, $2, $3
-             WHERE NOT EXISTS (SELECT * FROM reconfigurator_chicken_switches)",
+              WHERE $1 - 1 IN (
+                  SELECT COALESCE(MAX(version), 0)
+                  FROM reconfigurator_chicken_switches
+              )",
         )
         .bind::<sql_types::BigInt, SqlU32>(switches.version.into())
         .bind::<sql_types::Bool, _>(switches.planner_enabled)
