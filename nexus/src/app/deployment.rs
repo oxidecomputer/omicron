@@ -210,8 +210,11 @@ impl super::Nexus {
         let inventory = planning_context.inventory.ok_or_else(|| {
             Error::internal_error("no recent inventory collection found")
         })?;
-        let new = planning_context.planning_input.tuf_repo();
-        let old = planning_context.planning_input.old_repo();
+        let new = planning_context.planning_input.tuf_repo().description();
+        let old = planning_context
+            .planning_input
+            .old_repo()
+            .and_then(|repo| repo.description());
         let status = UpdateStatus::new(
             old,
             new,

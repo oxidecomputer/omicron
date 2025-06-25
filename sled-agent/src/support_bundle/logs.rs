@@ -93,7 +93,6 @@ impl<'a> SupportBundleLogs<'a> {
                     match illumos_utils::zfs::Zfs::get_value(
                         path.as_str(),
                         "available",
-                        true,
                     )
                     .await
                     {

@@ -87,7 +87,6 @@ async fn initialize_zfs_resources(log: &Logger) -> Result<(), BundleError> {
             &name,
             &[ZONE_BUNDLE_ZFS_PROPERTY_NAME],
             Some(illumos_utils::zfs::PropertySource::Local),
-            false,
         )
         .await
         else {

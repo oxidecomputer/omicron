@@ -634,7 +634,7 @@ ratatui = "0.29.0"
 rayon = "1.10"
 rcgen = "0.12.1"
 reconfigurator-cli = { path = "dev-tools/reconfigurator-cli" }
-reedline = "0.38.0"
+reedline = "0.40.0"
 ref-cast = "1.0"
 regex = "1.11.1"
 regress = "0.10.3"
@@ -643,7 +643,7 @@ repo-depot-client = { path = "clients/repo-depot-client" }
 reqwest = { version = "0.12.20", default-features = false }
 ring = "0.17.14"
 rpassword = "7.4.0"
-rstest = "0.24.0"
+rstest = "0.25.0"
 rustfmt-wrapper = "0.2"
 rustls = "0.22.2"
 rustls-pemfile = "2.2.0"
