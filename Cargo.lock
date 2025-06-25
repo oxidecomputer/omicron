@@ -8582,7 +8582,8 @@ dependencies = [
 [[package]]
 name = "oxide-tokio-rt"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/oxide-tokio-rt?rev=bd1b595a32a026163486e09fb785dbdb5fb16081#bd1b595a32a026163486e09fb785dbdb5fb16081"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "9fc38dd168d78d303724c512152a0a8349d18906c0914619974df96a31ae8224"
 dependencies = [
  "tokio",
  "tokio-dtrace",
@@ -13275,7 +13276,8 @@ dependencies = [
 [[package]]
 name = "tokio-dtrace"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/tokio-dtrace?rev=36dc6c66cc171500b0abcbb06016beff93940ac3#36dc6c66cc171500b0abcbb06016beff93940ac3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "db739893a356b146ee6a4535693ff90274ef305cb2b6cdd40f9576b1b34b01fe"
 dependencies = [
  "thiserror 2.0.12",
  "tokio",
