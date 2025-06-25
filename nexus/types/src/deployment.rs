@@ -1830,14 +1830,15 @@ pub struct UnstableReconfiguratorState {
 /// An event that the planner is waiting on.
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 pub enum WaitCondition {
-    MgsUpdates {
-        pending: PendingMgsUpdates,
-    },
+    /// Waiting for MGS to apply some updates to the RoT/SP.
+    MgsUpdates { pending: PendingMgsUpdates },
+    /// Waiting for a zone to be expunged.
     ZoneExpunge {
         sled_id: SledUuid,
         zone_id: OmicronZoneUuid,
         reason: ZoneExpungeReason,
     },
+    /// Waiting for a zone with the updated source to appear in inventory.
     ZoneUpdate {
         sled_id: SledUuid,
         zone_id: OmicronZoneUuid,
