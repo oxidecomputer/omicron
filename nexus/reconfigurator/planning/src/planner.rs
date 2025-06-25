@@ -549,7 +549,7 @@ impl<'a> Planner<'a> {
             // 2. A sled has had all of its disks expunged.
             //
             // In either case, we can't do anything with the sled, but we don't
-            // wait to fail planning entirely. Just skip sleds in this state.
+            // want to fail planning entirely. Just skip sleds in this state.
             if sled_resources
                 .all_zpools(ZpoolFilter::InService)
                 .next()
@@ -560,9 +560,6 @@ impl<'a> Planner<'a> {
                     "skipping sled (no zpools in service)";
                     "sled_id" => %sled_id,
                 );
-                self.blueprint.comment(format!(
-                    "skipping sled {sled_id}: no zpools in service"
-                ));
                 sleds_waiting_for_ntp_zone.insert(sled_id);
                 continue;
             }
