@@ -12,26 +12,28 @@ use tokio::net::{TcpListener, TcpStream};
 use wicket_dbg::{Cmd, Runner, RunnerHandle};
 
 fn main() -> Result<()> {
-    oxide_tokio_rt::run(async {
-        let log = setup_log()?;
-        let (mut runner, handle) = Runner::new(log.clone());
+    oxide_tokio_rt::run(main_impl())
+}
 
-        tokio::spawn(async move {
-            runner.run().await;
-        });
+async fn main_impl() -> Result<()> {
+    let log = setup_log()?;
+    let (mut runner, handle) = Runner::new(log.clone());
 
-        // TODO: Allow port configuration
-        let listener = TcpListener::bind("::1:9010").await?;
+    tokio::spawn(async move {
+        runner.run().await;
+    });
 
-        // Accept connections serially. We only want one client at a time.
-        loop {
-            let (sock, _) = listener.accept().await?;
+    // TODO: Allow port configuration
+    let listener = TcpListener::bind("::1:9010").await?;
 
-            if let Err(e) = process(sock, &handle).await {
-                info!(log, "Error processing request: {e:#?}");
-            }
+    // Accept connections serially. We only want one client at a time.
+    loop {
+        let (sock, _) = listener.accept().await?;
+
+        if let Err(e) = process(sock, &handle).await {
+            info!(log, "Error processing request: {e:#?}");
         }
-    })
+    }
 }
 
 async fn process(mut sock: TcpStream, handle: &RunnerHandle) -> Result<()> {

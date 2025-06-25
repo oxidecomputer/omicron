@@ -112,147 +112,131 @@ struct DeleteRecordCommand {
 }
 
 fn main() -> Result<()> {
-    oxide_tokio_rt::run(async {
-        let opt = Opt::parse();
-        let log = init_logger();
+    oxide_tokio_rt::run(main_impl())
+}
 
-        let addr = opt.address.unwrap_or_else(|| "localhost".to_string());
+async fn main_impl() -> Result<()> {
+    let opt = Opt::parse();
+    let log = init_logger();
 
-        let endpoint = format!("http://{}", addr);
-        let client = Client::new(&endpoint, log.clone());
+    let addr = opt.address.unwrap_or_else(|| "localhost".to_string());
 
-        match opt.subcommand {
-            SubCommand::ListRecords => {
-                let config = client.dns_config_get().await?;
-                println!("generation {}", config.generation);
-                println!("    created {}", config.time_created);
-                println!("    applied {}", config.time_applied);
-                println!("    zones:  {}", config.zones.len());
+    let endpoint = format!("http://{}", addr);
+    let client = Client::new(&endpoint, log.clone());
 
-                for zone_config in &config.zones {
-                    println!("\nzone {:?}", zone_config.zone_name);
+    match opt.subcommand {
+        SubCommand::ListRecords => {
+            let config = client.dns_config_get().await?;
+            println!("generation {}", config.generation);
+            println!("    created {}", config.time_created);
+            println!("    applied {}", config.time_applied);
+            println!("    zones:  {}", config.zones.len());
 
-                    // Sort the records so that we get consistent ordering.
-                    let records: BTreeMap<_, _> =
-                        zone_config.records.iter().collect();
-                    for (name, records) in records {
-                        println!("    key {:?}:", name);
-                        for record in records {
-                            match record {
-                                DnsRecord::A(addr) => {
-                                    println!("        A:    {:?}", addr);
-                                }
-                                DnsRecord::Aaaa(addr) => {
-                                    println!("        AAAA: {:?}", addr);
-                                }
-                                DnsRecord::Srv(srv) => {
-                                    println!("        SRV:  {}", srv.target);
-                                    println!(
-                                        "              port     {}",
-                                        srv.port
-                                    );
-                                    println!(
-                                        "              priority {}",
-                                        srv.prio
-                                    );
-                                    println!(
-                                        "              weight   {}",
-                                        srv.weight
-                                    );
-                                }
-                                DnsRecord::Ns(name) => {
-                                    println!("        NS: {:?}", name);
-                                }
+            for zone_config in &config.zones {
+                println!("\nzone {:?}", zone_config.zone_name);
+
+                // Sort the records so that we get consistent ordering.
+                let records: BTreeMap<_, _> =
+                    zone_config.records.iter().collect();
+                for (name, records) in records {
+                    println!("    key {:?}:", name);
+                    for record in records {
+                        match record {
+                            DnsRecord::A(addr) => {
+                                println!("        A:    {:?}", addr);
+                            }
+                            DnsRecord::Aaaa(addr) => {
+                                println!("        AAAA: {:?}", addr);
+                            }
+                            DnsRecord::Srv(srv) => {
+                                println!("        SRV:  {}", srv.target);
+                                println!("              port     {}", srv.port);
+                                println!("              priority {}", srv.prio);
+                                println!(
+                                    "              weight   {}",
+                                    srv.weight
+                                );
+                            }
+                            DnsRecord::Ns(name) => {
+                                println!("        NS: {:?}", name);
                             }
                         }
                     }
                 }
             }
-
-            SubCommand::AddA(cmd) => {
-                let old_config = client.dns_config_get().await?.into_inner();
-                let new_config = add_record(
-                    old_config,
-                    &cmd.zone_name,
-                    &cmd.name,
-                    DnsRecord::A(cmd.addr),
-                )?;
-                client
-                    .dns_config_put(&new_config)
-                    .await
-                    .context("updating DNS")?;
-            }
-
-            SubCommand::AddAAAA(cmd) => {
-                let old_config = client.dns_config_get().await?.into_inner();
-                let new_config = add_record(
-                    old_config,
-                    &cmd.zone_name,
-                    &cmd.name,
-                    DnsRecord::Aaaa(cmd.addr),
-                )?;
-                client
-                    .dns_config_put(&new_config)
-                    .await
-                    .context("updating DNS")?;
-            }
-
-            SubCommand::AddSRV(cmd) => {
-                let old_config = client.dns_config_get().await?.into_inner();
-                let new_config = add_record(
-                    old_config,
-                    &cmd.zone_name,
-                    &cmd.name,
-                    DnsRecord::Srv(Srv {
-                        prio: cmd.prio,
-                        weight: cmd.weight,
-                        port: cmd.port,
-                        target: cmd.target,
-                    }),
-                )?;
-                client
-                    .dns_config_put(&new_config)
-                    .await
-                    .context("updating DNS")?;
-            }
-
-            SubCommand::DeleteRecord(cmd) => {
-                let old_config = client.dns_config_get().await?.into_inner();
-                verify_zone_name(&cmd.zone_name)?;
-                let zones = old_config
-                    .zones
-                    .into_iter()
-                    .map(|dns_zone| {
-                        if dns_zone.zone_name != cmd.zone_name {
-                            dns_zone
-                        } else {
-                            DnsConfigZone {
-                                zone_name: dns_zone.zone_name,
-                                records: dns_zone
-                                    .records
-                                    .into_iter()
-                                    .filter(|(name, _)| *name != cmd.name)
-                                    .collect(),
-                            }
-                        }
-                    })
-                    .collect();
-
-                let new_config = DnsConfigParams {
-                    generation: old_config.generation.next(),
-                    serial: old_config.serial + 1,
-                    time_created: chrono::Utc::now(),
-                    zones,
-                };
-                client
-                    .dns_config_put(&new_config)
-                    .await
-                    .context("updating DNS")?;
-            }
         }
 
-        Ok(())
-    })
+        SubCommand::AddA(cmd) => {
+            let old_config = client.dns_config_get().await?.into_inner();
+            let new_config = add_record(
+                old_config,
+                &cmd.zone_name,
+                &cmd.name,
+                DnsRecord::A(cmd.addr),
+            )?;
+            client.dns_config_put(&new_config).await.context("updating DNS")?;
+        }
+
+        SubCommand::AddAAAA(cmd) => {
+            let old_config = client.dns_config_get().await?.into_inner();
+            let new_config = add_record(
+                old_config,
+                &cmd.zone_name,
+                &cmd.name,
+                DnsRecord::Aaaa(cmd.addr),
+            )?;
+            client.dns_config_put(&new_config).await.context("updating DNS")?;
+        }
+
+        SubCommand::AddSRV(cmd) => {
+            let old_config = client.dns_config_get().await?.into_inner();
+            let new_config = add_record(
+                old_config,
+                &cmd.zone_name,
+                &cmd.name,
+                DnsRecord::Srv(Srv {
+                    prio: cmd.prio,
+                    weight: cmd.weight,
+                    port: cmd.port,
+                    target: cmd.target,
+                }),
+            )?;
+            client.dns_config_put(&new_config).await.context("updating DNS")?;
+        }
+
+        SubCommand::DeleteRecord(cmd) => {
+            let old_config = client.dns_config_get().await?.into_inner();
+            verify_zone_name(&cmd.zone_name)?;
+            let zones = old_config
+                .zones
+                .into_iter()
+                .map(|dns_zone| {
+                    if dns_zone.zone_name != cmd.zone_name {
+                        dns_zone
+                    } else {
+                        DnsConfigZone {
+                            zone_name: dns_zone.zone_name,
+                            records: dns_zone
+                                .records
+                                .into_iter()
+                                .filter(|(name, _)| *name != cmd.name)
+                                .collect(),
+                        }
+                    }
+                })
+                .collect();
+
+            let new_config = DnsConfigParams {
+                generation: old_config.generation.next(),
+                serial: old_config.serial + 1,
+                time_created: chrono::Utc::now(),
+                zones,
+            };
+            client.dns_config_put(&new_config).await.context("updating DNS")?;
+        }
+    }
+
+    Ok(())
 }
 
 /// Verify that the given DNS zone name provided by the user falls under the
