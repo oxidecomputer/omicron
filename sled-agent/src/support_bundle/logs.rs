@@ -165,11 +165,11 @@ impl<'a> SupportBundleLogs<'a> {
             .collect()
             .await;
 
-        let (dataset_path, _) = storage_paths_to_size
+        storage_paths_to_size
             .into_iter()
             .flatten()
             .max_by_key(|(_, size)| *size)
-            .ok_or(Error::MissingStorage)?;
-        Ok(dataset_path)
+            .map(|(dataset_path, _)| dataset_path)
+            .ok_or(Error::MissingStorage)
     }
 }
