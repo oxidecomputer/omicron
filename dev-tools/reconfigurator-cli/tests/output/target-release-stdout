@@ -31,8 +31,8 @@ INFO added artifact, name: fake-host, kind: host_phase_1, version: 1.0.0, hash: 
 INFO added artifact, name: fake-host, kind: host_phase_2, version: 1.0.0, hash: f3dd0c7a1bd4500ea0d8bcf67581f576d47752b2f1998a4cb0f0c3155c483008, length: 1048576
 INFO added artifact, name: fake-trampoline, kind: trampoline_phase_1, version: 1.0.0, hash: 9b7575cad720f017e936fe5994fc4e21fe040acaaf83c2edd86132aa3d667c7b, length: 524288
 INFO added artifact, name: fake-trampoline, kind: trampoline_phase_2, version: 1.0.0, hash: f355fb8429a7e0f0716dad035f9a06c799168d6c0ffcde85b1a96fef21d4b53e, length: 1048576
-INFO added artifact, name: zone1, kind: zone, version: 1.0.0, hash: 584bcfabf852d22ca322ca92076836cc8c9aa0489bc4132fef345271f2a00daf, length: 6612
-INFO added artifact, name: zone2, kind: zone, version: 1.0.0, hash: 4063276e4ce47896848da87c83a9e28949c104d92581d62e50bea7ff7a8cfe1c, length: 6613
+INFO added artifact, name: zone1, kind: zone, version: 1.0.0, hash: 3a20f7bf38820060363fc61ba4437e5bbd1c2500d91321417ab49687a255a30a, length: 11907
+INFO added artifact, name: zone2, kind: zone, version: 1.0.0, hash: a283b1343cc77beffdb610979bb9cafc66e5f14c142b070481e0be7ada588b79, length: 11909
 INFO added artifact, name: fake-psc-sp, kind: psc_sp, version: 1.0.0, hash: f896cf5b19ca85864d470ad8587f980218bff3954e7f52bbd999699cd0f9635b, length: 744
 INFO added artifact, name: fake-psc-rot, kind: psc_rot_image_a, version: 1.0.0, hash: 179eb660ebc92e28b6748b6af03d9f998d6131319edd4654a1e948454c62551b, length: 750
 INFO added artifact, name: fake-psc-rot, kind: psc_rot_image_b, version: 1.0.0, hash: 179eb660ebc92e28b6748b6af03d9f998d6131319edd4654a1e948454c62551b, length: 750
@@ -60,8 +60,8 @@ target release (generation 2): 1.0.0 (system-update-v1.0.0.zip)
     artifact: f3dd0c7a1bd4500ea0d8bcf67581f576d47752b2f1998a4cb0f0c3155c483008 host_phase_2 (fake-host version 1.0.0)
     artifact: 9b7575cad720f017e936fe5994fc4e21fe040acaaf83c2edd86132aa3d667c7b trampoline_phase_1 (fake-trampoline version 1.0.0)
     artifact: f355fb8429a7e0f0716dad035f9a06c799168d6c0ffcde85b1a96fef21d4b53e trampoline_phase_2 (fake-trampoline version 1.0.0)
-    artifact: 584bcfabf852d22ca322ca92076836cc8c9aa0489bc4132fef345271f2a00daf zone (zone1 version 1.0.0)
-    artifact: 4063276e4ce47896848da87c83a9e28949c104d92581d62e50bea7ff7a8cfe1c zone (zone2 version 1.0.0)
+    artifact: 3a20f7bf38820060363fc61ba4437e5bbd1c2500d91321417ab49687a255a30a zone (zone1 version 1.0.0)
+    artifact: a283b1343cc77beffdb610979bb9cafc66e5f14c142b070481e0be7ada588b79 zone (zone2 version 1.0.0)
     artifact: f896cf5b19ca85864d470ad8587f980218bff3954e7f52bbd999699cd0f9635b psc_sp (fake-psc-sp version 1.0.0)
     artifact: 179eb660ebc92e28b6748b6af03d9f998d6131319edd4654a1e948454c62551b psc_rot_image_a (fake-psc-rot version 1.0.0)
     artifact: 179eb660ebc92e28b6748b6af03d9f998d6131319edd4654a1e948454c62551b psc_rot_image_b (fake-psc-rot version 1.0.0)
@@ -124,8 +124,8 @@ target release (generation 2): 1.0.0 (system-update-v1.0.0.zip)
     artifact: f3dd0c7a1bd4500ea0d8bcf67581f576d47752b2f1998a4cb0f0c3155c483008 host_phase_2 (fake-host version 1.0.0)
     artifact: 9b7575cad720f017e936fe5994fc4e21fe040acaaf83c2edd86132aa3d667c7b trampoline_phase_1 (fake-trampoline version 1.0.0)
     artifact: f355fb8429a7e0f0716dad035f9a06c799168d6c0ffcde85b1a96fef21d4b53e trampoline_phase_2 (fake-trampoline version 1.0.0)
-    artifact: 584bcfabf852d22ca322ca92076836cc8c9aa0489bc4132fef345271f2a00daf zone (zone1 version 1.0.0)
-    artifact: 4063276e4ce47896848da87c83a9e28949c104d92581d62e50bea7ff7a8cfe1c zone (zone2 version 1.0.0)
+    artifact: 3a20f7bf38820060363fc61ba4437e5bbd1c2500d91321417ab49687a255a30a zone (zone1 version 1.0.0)
+    artifact: a283b1343cc77beffdb610979bb9cafc66e5f14c142b070481e0be7ada588b79 zone (zone2 version 1.0.0)
     artifact: f896cf5b19ca85864d470ad8587f980218bff3954e7f52bbd999699cd0f9635b psc_sp (fake-psc-sp version 1.0.0)
     artifact: 179eb660ebc92e28b6748b6af03d9f998d6131319edd4654a1e948454c62551b psc_rot_image_a (fake-psc-rot version 1.0.0)
     artifact: 179eb660ebc92e28b6748b6af03d9f998d6131319edd4654a1e948454c62551b psc_rot_image_b (fake-psc-rot version 1.0.0)

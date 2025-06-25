@@ -4728,7 +4728,7 @@ pub(crate) mod test {
         // This generation is successively incremented for each TUF repo. We use
         // generation 2 to represent the first generation with a TUF repo
         // attached.
-        let target_release_generation = Generation::new().next();
+        let target_release_generation = Generation::from_u32(2);
 
         // Manually specify a trivial TUF repo.
         let mut input_builder = example.input.clone().into_builder();

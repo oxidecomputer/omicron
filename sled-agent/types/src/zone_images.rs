@@ -6,12 +6,12 @@ use std::{fmt, fs::FileType, io, sync::Arc};
 
 use camino::Utf8PathBuf;
 use iddqd::{IdOrdItem, IdOrdMap, id_upcast};
-use nexus_sled_agent_shared::inventory::MupdateOverrideInfoInventory;
+use nexus_sled_agent_shared::inventory::MupdateOverrideBootInventory;
 use nexus_sled_agent_shared::inventory::MupdateOverrideInventory;
 use nexus_sled_agent_shared::inventory::MupdateOverrideNonBootInventory;
 use nexus_sled_agent_shared::inventory::ZoneArtifactInventory;
-use nexus_sled_agent_shared::inventory::ZoneArtifactsInventory;
 use nexus_sled_agent_shared::inventory::ZoneImageResolverInventory;
+use nexus_sled_agent_shared::inventory::ZoneManifestBootInventory;
 use nexus_sled_agent_shared::inventory::ZoneManifestInventory;
 use nexus_sled_agent_shared::inventory::ZoneManifestNonBootInventory;
 use omicron_common::update::{
@@ -61,9 +61,9 @@ pub struct ZoneManifestStatus {
 impl ZoneManifestStatus {
     /// Convert this status to the inventory format.
     pub fn to_inventory(&self) -> ZoneManifestInventory {
-        let manifest = match &self.boot_disk_result {
-            Ok(artifacts_result) => Ok(artifacts_result.to_inventory()),
-            Err(err) => Err(err.to_string()),
+        let boot_inventory = match &self.boot_disk_result {
+            Ok(artifacts_result) => Ok(artifacts_result.to_boot_inventory()),
+            Err(error) => Err(InlineErrorChain::new(error).to_string()),
         };
 
         let non_boot_status = self
@@ -79,7 +79,7 @@ impl ZoneManifestStatus {
 
         ZoneManifestInventory {
             boot_disk_path: self.boot_disk_path.clone(),
-            manifest,
+            boot_inventory,
             non_boot_status,
         }
     }
@@ -109,12 +109,12 @@ impl ZoneManifestArtifactsResult {
         }
     }
 
-    /// Convert this result to the inventory format.
-    pub fn to_inventory(&self) -> ZoneArtifactsInventory {
+    /// Converts this result to the inventory format, used for the boot disk.
+    pub fn to_boot_inventory(&self) -> ZoneManifestBootInventory {
         let artifacts =
             self.data.iter().map(|artifact| artifact.to_inventory()).collect();
 
-        ZoneArtifactsInventory { source: self.manifest.source, artifacts }
+        ZoneManifestBootInventory { source: self.manifest.source, artifacts }
     }
 }
 
@@ -194,7 +194,9 @@ impl ZoneManifestArtifactResult {
                     actual_hash
                 ))
             }
-            ArtifactReadResult::Error(err) => Err(err.to_string()),
+            ArtifactReadResult::Error(error) => {
+                Err(InlineErrorChain::new(error).to_string())
+            }
         };
 
         ZoneArtifactInventory {
@@ -250,7 +252,7 @@ impl fmt::Display for ZoneManifestArtifactDisplay<'_> {
                     f,
                     "{}: error ({})",
                     self.artifact.file_name,
-                    InlineErrorChain::new(error)
+                    InlineErrorChain::new(error),
                 )
             }
         }
@@ -446,14 +448,14 @@ pub struct MupdateOverrideStatus {
 }
 
 impl MupdateOverrideStatus {
-    /// Convert this status to inventory format.
+    /// Converts this status to the inventory format.
     pub fn to_inventory(&self) -> MupdateOverrideInventory {
-        let boot_disk_override = match &self.boot_disk_override {
-            Ok(Some(override_info)) => Ok(Some(MupdateOverrideInfoInventory {
+        let boot_override = match &self.boot_disk_override {
+            Ok(Some(override_info)) => Ok(Some(MupdateOverrideBootInventory {
                 mupdate_override_id: override_info.mupdate_uuid,
             })),
             Ok(None) => Ok(None),
-            Err(err) => Err(err.to_string()),
+            Err(error) => Err(InlineErrorChain::new(error).to_string()),
         };
 
         let non_boot_status = self
@@ -469,7 +471,7 @@ impl MupdateOverrideStatus {
 
         MupdateOverrideInventory {
             boot_disk_path: self.boot_disk_path.clone(),
-            boot_disk_override,
+            boot_override,
             non_boot_status,
         }
     }
@@ -576,10 +578,11 @@ pub struct MupdateOverrideNonBootDisplay<'a> {
 impl fmt::Display for MupdateOverrideNonBootDisplay<'_> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self.result {
-            MupdateOverrideNonBootResult::MatchesPresent
-            | MupdateOverrideNonBootResult::MatchesAbsent => {
-                // This should not be called for matching cases
-                write!(f, "matches boot disk")
+            MupdateOverrideNonBootResult::MatchesPresent => {
+                write!(f, "matches boot disk (present)")
+            }
+            MupdateOverrideNonBootResult::MatchesAbsent => {
+                write!(f, "matches boot disk (absent)")
             }
             MupdateOverrideNonBootResult::Mismatch(mismatch) => match mismatch {
                 MupdateOverrideNonBootMismatch::BootPresentOtherAbsent => {

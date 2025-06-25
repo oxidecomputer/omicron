@@ -42,13 +42,13 @@ use nexus_db_schema::schema::{
     sw_root_of_trust_page,
 };
 use nexus_sled_agent_shared::inventory::ConfigReconcilerInventoryStatus;
-use nexus_sled_agent_shared::inventory::MupdateOverrideInfoInventory;
+use nexus_sled_agent_shared::inventory::MupdateOverrideBootInventory;
 use nexus_sled_agent_shared::inventory::MupdateOverrideInventory;
 use nexus_sled_agent_shared::inventory::MupdateOverrideNonBootInventory;
 use nexus_sled_agent_shared::inventory::OrphanedDataset;
 use nexus_sled_agent_shared::inventory::ZoneArtifactInventory;
-use nexus_sled_agent_shared::inventory::ZoneArtifactsInventory;
 use nexus_sled_agent_shared::inventory::ZoneImageResolverInventory;
+use nexus_sled_agent_shared::inventory::ZoneManifestBootInventory;
 use nexus_sled_agent_shared::inventory::ZoneManifestInventory;
 use nexus_sled_agent_shared::inventory::ZoneManifestNonBootInventory;
 use nexus_sled_agent_shared::inventory::{
@@ -1209,7 +1209,7 @@ impl InvZoneImageResolver {
             zone_manifest_source,
             zone_manifest_mupdate_id,
             zone_manifest_boot_disk_error,
-        ) = match &inv.zone_manifest.manifest {
+        ) = match &inv.zone_manifest.boot_inventory {
             Ok(manifest) => match manifest.source {
                 OmicronZoneManifestSource::Installinator { mupdate_id } => (
                     Some(InvZoneManifestSourceEnum::Installinator),
@@ -1227,14 +1227,14 @@ impl InvZoneImageResolver {
             inv.mupdate_override.boot_disk_path.clone().into();
         let mupdate_override_id = inv
             .mupdate_override
-            .boot_disk_override
+            .boot_override
             .as_ref()
             .ok()
             .cloned()
             .flatten()
             .map(|inv| inv.mupdate_override_id.into());
         let mupdate_override_boot_disk_error =
-            inv.mupdate_override.boot_disk_override.as_ref().err().cloned();
+            inv.mupdate_override.boot_override.as_ref().err().cloned();
 
         Self {
             zone_manifest_boot_disk_path,
@@ -1255,70 +1255,76 @@ impl InvZoneImageResolver {
         mupdate_override_non_boot: Option<
             IdOrdMap<MupdateOverrideNonBootInventory>,
         >,
-    ) -> ZoneImageResolverInventory {
+    ) -> anyhow::Result<ZoneImageResolverInventory> {
         // Build up the ZoneManifestInventory struct.
-        let manifest = if let Some(error) = self.zone_manifest_boot_disk_error {
-            Err(error)
-        } else {
-            let source = match self.zone_manifest_source {
-                Some(InvZoneManifestSourceEnum::Installinator) => {
-                    OmicronZoneManifestSource::Installinator {
-                        mupdate_id: self
-                            .zone_manifest_mupdate_id
-                            .expect(
-                                "if the source is Installinator, then the
-                                 db schema guarantees that mupdate_id is Some",
-                            )
-                            .into(),
+        let zone_manifest = {
+            let boot_inventory = if let Some(error) =
+                self.zone_manifest_boot_disk_error
+            {
+                Err(error)
+            } else {
+                let source = match self.zone_manifest_source {
+                    Some(InvZoneManifestSourceEnum::Installinator) => {
+                        OmicronZoneManifestSource::Installinator {
+                            mupdate_id: self
+                                .zone_manifest_mupdate_id
+                                .context(
+                                    "illegal database state (CHECK constraint broken?!): \
+                                     if the source is Installinator, then the \
+                                     db schema guarantees that mupdate_id is Some",
+                                )?
+                                .into(),
+                        }
                     }
-                }
-                Some(InvZoneManifestSourceEnum::SledAgent) => {
-                    OmicronZoneManifestSource::SledAgent
-                }
-                None => {
-                    unreachable!(
-                        "if the source is None, then the db schema guarantees \
-                         that there was an error"
-                    )
-                }
+                    Some(InvZoneManifestSourceEnum::SledAgent) => {
+                        OmicronZoneManifestSource::SledAgent
+                    }
+                    None => {
+                        bail!(
+                            "illegal database state (CHECK constraint broken?!): \
+                             if the source is None, then the db schema guarantees \
+                             that there was an error",
+                        )
+                    }
+                };
+
+                Ok(ZoneManifestBootInventory {
+                    source,
+                    // Artifacts might really be None in case no zones were found.
+                    // (This is unusual but permitted by the data model, so any
+                    // checks around this should happen at a higher level.)
+                    artifacts: artifacts.unwrap_or_default(),
+                })
             };
 
-            Ok(ZoneArtifactsInventory {
-                source,
-                // Artifacts might really be None in case no zones were found.
-                // (This is unusual but permitted by the data model, so any
-                // checks around this should happen at a higher level.)
-                artifacts: artifacts.unwrap_or_default(),
-            })
-        };
-
-        let zone_manifest = ZoneManifestInventory {
-            boot_disk_path: self.zone_manifest_boot_disk_path.into(),
-            manifest,
-            // This might be None if no non-boot disks were found.
-            non_boot_status: zone_manifest_non_boot.unwrap_or_default(),
+            ZoneManifestInventory {
+                boot_disk_path: self.zone_manifest_boot_disk_path.into(),
+                boot_inventory,
+                // This might be None if no non-boot disks were found.
+                non_boot_status: zone_manifest_non_boot.unwrap_or_default(),
+            }
         };
 
         // Build up the mupdate override struct.
-        let boot_disk_override = if let Some(error) =
+        let boot_override = if let Some(error) =
             self.mupdate_override_boot_disk_error
         {
             Err(error)
         } else {
             let info = self.mupdate_override_id.map(|id| {
-                MupdateOverrideInfoInventory { mupdate_override_id: id.into() }
+                MupdateOverrideBootInventory { mupdate_override_id: id.into() }
             });
             Ok(info)
         };
 
         let mupdate_override = MupdateOverrideInventory {
             boot_disk_path: self.mupdate_override_boot_disk_path.into(),
-            boot_disk_override,
+            boot_override,
             // This might be None if no non-boot disks were found.
             non_boot_status: mupdate_override_non_boot.unwrap_or_default(),
         };
 
-        ZoneImageResolverInventory { zone_manifest, mupdate_override }
+        Ok(ZoneImageResolverInventory { zone_manifest, mupdate_override })
     }
 }
 
