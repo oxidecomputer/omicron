@@ -13,7 +13,7 @@
 #
 # WARNING: If you're setting `RUSTFLAGS` in a global `~/.cargo/config.toml`, or
 # as an environment variable in your shell, this will CONFLICT WITH THE
-# CONFIGURATION HERE, as cargo/config.toml configuration is NOT ADDITIVE.
+# CONFIGURATION HERE, as `build.rustflags` configuration is NOT ADDITIVE.
 # This is particularly relevant for folks using the `mold` linker via
 # `RUSTFLAGS`. `mold` users should consider using `mold -run cargo` instead, as
 # described here: https://github.com/rui314/mold#how-to-use
