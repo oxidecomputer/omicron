@@ -74,4 +74,88 @@ impl CockroachAdminApi for CockroachAdminImpl {
         );
         Ok(HttpResponseOk(decommission_status))
     }
+
+    async fn status_vars(
+        rqctx: RequestContext<Self::Context>,
+    ) -> Result<HttpResponseOk<String>, HttpError> {
+        let ctx = rqctx.context();
+        let cockroach_http_address =
+            ctx.cockroach_cli().cockroach_http_address();
+        let url = format!("http://{}/_status/vars", cockroach_http_address);
+
+        let client = reqwest::Client::new();
+        let response = client.get(&url).send().await.map_err(|e| {
+            HttpError::for_internal_error(format!(
+                "Failed to proxy to CockroachDB: {}",
+                e
+            ))
+        })?;
+
+        if !response.status().is_success() {
+            let status = response.status();
+            let body = response.text().await.unwrap_or_else(|_| {
+                "Failed to read error response".to_string()
+            });
+            let status_code = dropshot::ErrorStatusCode::from_status(status)
+                .unwrap_or(dropshot::ErrorStatusCode::INTERNAL_SERVER_ERROR);
+            return Err(HttpError {
+                status_code,
+                error_code: None,
+                external_message: body.clone(),
+                internal_message: body,
+                headers: None,
+            });
+        }
+
+        let body = response.text().await.map_err(|e| {
+            HttpError::for_internal_error(format!(
+                "Failed to read response body: {}",
+                e
+            ))
+        })?;
+
+        Ok(HttpResponseOk(body))
+    }
+
+    async fn status_nodes(
+        rqctx: RequestContext<Self::Context>,
+    ) -> Result<HttpResponseOk<String>, HttpError> {
+        let ctx = rqctx.context();
+        let cockroach_http_address =
+            ctx.cockroach_cli().cockroach_http_address();
+        let url = format!("http://{}/_status/nodes", cockroach_http_address);
+
+        let client = reqwest::Client::new();
+        let response = client.get(&url).send().await.map_err(|e| {
+            HttpError::for_internal_error(format!(
+                "Failed to proxy to CockroachDB: {}",
+                e
+            ))
+        })?;
+
+        if !response.status().is_success() {
+            let status = response.status();
+            let body = response.text().await.unwrap_or_else(|_| {
+                "Failed to read error response".to_string()
+            });
+            let status_code = dropshot::ErrorStatusCode::from_status(status)
+                .unwrap_or(dropshot::ErrorStatusCode::INTERNAL_SERVER_ERROR);
+            return Err(HttpError {
+                status_code,
+                error_code: None,
+                external_message: body.clone(),
+                internal_message: body,
+                headers: None,
+            });
+        }
+
+        let body = response.text().await.map_err(|e| {
+            HttpError::for_internal_error(format!(
+                "Failed to read response body: {}",
+                e
+            ))
+        })?;
+
+        Ok(HttpResponseOk(body))
+    }
 }
