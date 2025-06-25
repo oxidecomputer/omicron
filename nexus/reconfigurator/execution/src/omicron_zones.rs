@@ -37,10 +37,19 @@ pub(crate) async fn clean_up_expunged_zones<R: CleanupResolver>(
     resolver: &R,
     blueprint: &Blueprint,
 ) -> Result<(), Vec<anyhow::Error>> {
+    // TODO-correctness Decommissioning cockroach nodes is currently disabled
+    // while we work through issues with timing; see
+    // https://github.com/oxidecomputer/omicron/issues/8445. We keep the
+    // implementation around and gate it via an argument because we already have
+    // unit tests for it and because we'd like to restore it once
+    // cockroach-admin knows how to gate decommissioning correctly.
+    let decommission_cockroach = false;
+
     clean_up_expunged_zones_impl(
         opctx,
         datastore,
         resolver,
+        decommission_cockroach,
         blueprint
             .all_omicron_zones(BlueprintZoneDisposition::is_ready_for_cleanup),
     )
@@ -51,6 +60,7 @@ async fn clean_up_expunged_zones_impl<R: CleanupResolver>(
     opctx: &OpContext,
     datastore: &DataStore,
     resolver: &R,
+    decommission_cockroach: bool,
     zones_to_clean_up: impl Iterator<Item = (SledUuid, &BlueprintZoneConfig)>,
 ) -> Result<(), Vec<anyhow::Error>> {
     let errors: Vec<anyhow::Error> = stream::iter(zones_to_clean_up)
@@ -66,12 +76,18 @@ async fn clean_up_expunged_zones_impl<R: CleanupResolver>(
                 BlueprintZoneType::Nexus(_) => None,
 
                 // Zones which need cleanup after expungement.
-                BlueprintZoneType::CockroachDb(_) => Some(
-                    decommission_cockroachdb_node(
-                        opctx, datastore, resolver, config.id, &log,
-                    )
-                    .await,
-                ),
+                BlueprintZoneType::CockroachDb(_) => {
+                    if decommission_cockroach {
+                        Some(
+                            decommission_cockroachdb_node(
+                                opctx, datastore, resolver, config.id, &log,
+                            )
+                            .await,
+                        )
+                    } else {
+                        None
+                    }
+                }
                 BlueprintZoneType::Oximeter(_) => Some(
                     oximeter_cleanup(opctx, datastore, config.id, &log).await,
                 ),
@@ -303,6 +319,11 @@ mod test {
     async fn test_clean_up_cockroach_zones(
         cptestctx: &ControlPlaneTestContext,
     ) {
+        // The whole point of this test is to check that we send decommissioning
+        // requests; enable that. (See the real `clean_up_expunged_zones()` for
+        // more context.)
+        let decommission_cockroach = true;
+
         // Test setup boilerplate.
         let nexus = &cptestctx.server.server_context().nexus;
         let datastore = nexus.datastore();
@@ -356,6 +377,7 @@ mod test {
             &opctx,
             datastore,
             &fake_resolver,
+            decommission_cockroach,
             iter::once((any_sled_id, &crdb_zone)),
         )
         .await
@@ -402,6 +424,7 @@ mod test {
             &opctx,
             datastore,
             &fake_resolver,
+            decommission_cockroach,
             iter::once((any_sled_id, &crdb_zone)),
         )
         .await
@@ -433,6 +456,7 @@ mod test {
             &opctx,
             datastore,
             &fake_resolver,
+            decommission_cockroach,
             iter::once((any_sled_id, &crdb_zone)),
         )
         .await
@@ -461,6 +485,7 @@ mod test {
             &opctx,
             datastore,
             &fake_resolver,
+            decommission_cockroach,
             iter::once((any_sled_id, &crdb_zone)),
         )
         .await
