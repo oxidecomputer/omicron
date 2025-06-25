@@ -80,9 +80,52 @@ impl<'a> SupportBundleLogs<'a> {
     where
         Z: Into<String>,
     {
-        // Attempt to find a U.2 device with the most available free space
-        // for temporary storage to assemble a zip file made up of all of the
-        // discovered zone's logs.
+        let dataset_path = self.dataset_for_temporary_storage().await?;
+        let mut tempfile = tempfile_in(dataset_path)?;
+
+        let log = self.log.clone();
+        let zone = zone.into();
+
+        let zip_file = {
+            let handle = sled_diagnostics::LogsHandle::new(log);
+            match handle.get_zone_logs(&zone, max_rotated, &mut tempfile).await
+            {
+                Ok(_) => Ok(tempfile),
+                Err(e) => Err(e),
+            }
+        }
+        .map_err(Error::Logs)?;
+
+        // Since we are using a tempfile and the file path has already been
+        // unlinked we need to convert our existing handle.
+        let mut zip_file_async = tokio::fs::File::from_std(zip_file);
+        // While we are at the end of a file seek by 0 to get its final length.
+        let len = zip_file_async.seek(std::io::SeekFrom::Current(0)).await?;
+        // After we have written to the zip file we need to seek back to the
+        // start before streaming it out.
+        zip_file_async.seek(std::io::SeekFrom::Start(0)).await?;
+
+        const CONTENT_TYPE: http::HeaderValue =
+            http::HeaderValue::from_static("application/zip");
+        let content_type = Some(CONTENT_TYPE);
+
+        // We don't actually support range requests directly because the zip
+        // file is created on demand but the range-requests crate provides us
+        // with a nice wrapper for streaming out the entire zip file.
+        Ok(make_get_response(
+            None,
+            len,
+            content_type,
+            ReaderStream::new(zip_file_async),
+        )?)
+    }
+
+    /// Attempt to find a U.2 device with the most available free space
+    /// for temporary storage to assemble a zip file made up of all of the
+    /// discovered zone's logs.
+    async fn dataset_for_temporary_storage(
+        &self,
+    ) -> Result<camino::Utf8PathBuf, Error> {
         let mounted_debug_datasets =
             self.available_datasets_rx.all_mounted_debug_datasets();
         let storage_paths_to_size: Vec<_> = mounted_debug_datasets
@@ -121,47 +164,12 @@ impl<'a> SupportBundleLogs<'a> {
             .collect::<FuturesUnordered<_>>()
             .collect()
             .await;
-        let (largest_avail_space, _) = storage_paths_to_size
+
+        let (dataset_path, _) = storage_paths_to_size
             .into_iter()
             .flatten()
             .max_by_key(|(_, size)| *size)
             .ok_or(Error::MissingStorage)?;
-        let mut tempfile = tempfile_in(largest_avail_space)?;
-
-        let log = self.log.clone();
-        let zone = zone.into();
-
-        let zip_file = {
-            let handle = sled_diagnostics::LogsHandle::new(log);
-            match handle.get_zone_logs(&zone, max_rotated, &mut tempfile).await
-            {
-                Ok(_) => Ok(tempfile),
-                Err(e) => Err(e),
-            }
-        }
-        .map_err(Error::Logs)?;
-
-        // Since we are using a tempfile and the file path has already been
-        // unlinked we need to convert our existing handle.
-        let mut zip_file_async = tokio::fs::File::from_std(zip_file);
-        // While we are at the end of a file seek by 0 to get its final length.
-        let len = zip_file_async.seek(std::io::SeekFrom::Current(0)).await?;
-        // After we have written to the zip file we need to seek back to the
-        // start before streaming it out.
-        zip_file_async.seek(std::io::SeekFrom::Start(0)).await?;
-
-        const CONTENT_TYPE: http::HeaderValue =
-            http::HeaderValue::from_static("application/zip");
-        let content_type = Some(CONTENT_TYPE);
-
-        // We don't actually support range requests directly because the zip
-        // file is created on demand but the range-requests crate provides us
-        // with a nice wrapper for streaming out the entire zip file.
-        Ok(make_get_response(
-            None,
-            len,
-            content_type,
-            ReaderStream::new(zip_file_async),
-        )?)
+        Ok(dataset_path)
     }
 }
