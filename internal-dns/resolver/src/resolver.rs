@@ -2,11 +2,13 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-use hickory_resolver::TokioAsyncResolver;
+use hickory_resolver::TokioResolver;
 use hickory_resolver::config::{
-    LookupIpStrategy, NameServerConfig, Protocol, ResolverConfig, ResolverOpts,
+    LookupIpStrategy, NameServerConfig, ResolveHosts, ResolverConfig,
+    ResolverOpts,
 };
 use hickory_resolver::lookup::SrvLookup;
+use hickory_resolver::name_server::TokioConnectionProvider;
 use internal_dns_types::names::ServiceName;
 use omicron_common::address::{
     AZ_PREFIX, DNS_PORT, Ipv6Subnet, get_internal_dns_server_addresses,
@@ -17,7 +19,7 @@ use std::net::{Ipv6Addr, SocketAddr, SocketAddrV6};
 #[derive(Debug, Clone, thiserror::Error)]
 pub enum ResolveError {
     #[error(transparent)]
-    Resolve(#[from] hickory_resolver::error::ResolveError),
+    Resolve(#[from] hickory_resolver::ResolveError),
 
     #[error("Record not found for SRV key: {}", .0.dns_name())]
     NotFound(ServiceName),
@@ -71,7 +73,7 @@ impl QorbResolver {
 #[derive(Clone)]
 pub struct Resolver {
     log: slog::Logger,
-    resolver: TokioAsyncResolver,
+    resolver: TokioResolver,
 }
 
 type BoxError = Box<dyn std::error::Error + Send + Sync>;
@@ -94,11 +96,11 @@ impl Resolver {
     pub fn new_from_system_conf(
         log: slog::Logger,
     ) -> Result<Self, ResolveError> {
-        let (rc, mut opts) = hickory_resolver::system_conf::read_system_conf()?;
+        let mut builder = TokioResolver::builder_tokio()?;
         // Enable edns for potentially larger records
-        opts.edns0 = true;
+        builder.options_mut().edns0 = true;
 
-        let resolver = TokioAsyncResolver::tokio(rc, opts);
+        let resolver = builder.build();
 
         Ok(Self { log, resolver })
     }
@@ -113,24 +115,35 @@ impl Resolver {
         let mut rc = ResolverConfig::new();
         let dns_server_count = dns_addrs.len();
         for &socket_addr in dns_addrs.into_iter() {
-            rc.add_name_server(NameServerConfig {
+            let mut ns_config = NameServerConfig::new(
                 socket_addr,
-                protocol: Protocol::Udp,
-                tls_dns_name: None,
-                trust_negative_responses: false,
-                bind_addr: None,
-            });
+                hickory_resolver::proto::xfer::Protocol::Udp,
+            );
+            // Intentionally continue trying other DNS servers if we get an
+            // NXDOMAIN or NOERROR with no answer.  This should be a rare
+            // circumstance.  If it occurs and the name is genuinely not
+            // present, we'll be slower to error.  If the name is unevenly
+            // distributed it is in the process of going away, or a DNS server
+            // is serving stale records and may not be getting updated anymore.
+            // In this last case, we may be avoiding service disruption.
+            ns_config.trust_negative_responses = false;
+            rc.add_name_server(ns_config);
         }
         let mut opts = ResolverOpts::default();
         // Enable edns for potentially larger records
         opts.edns0 = true;
-        opts.use_hosts_file = false;
+        opts.use_hosts_file = ResolveHosts::Never;
         opts.num_concurrent_reqs = dns_server_count;
         // The underlay is IPv6 only, so this helps avoid needless lookups of
         // the IPv4 variant.
         opts.ip_strategy = LookupIpStrategy::Ipv6Only;
         opts.negative_max_ttl = Some(std::time::Duration::from_secs(15));
-        let resolver = TokioAsyncResolver::tokio(rc, opts);
+        let resolver = TokioResolver::builder_with_config(
+            rc,
+            TokioConnectionProvider::default(),
+        )
+        .with_options(opts)
+        .build();
 
         Ok(Self { log, resolver })
     }
@@ -150,7 +163,7 @@ impl Resolver {
     /// /etc/resolv.conf) for the underlying nameservers.
     pub fn new_with_resolver(
         log: slog::Logger,
-        resolver: TokioAsyncResolver,
+        resolver: TokioResolver,
     ) -> Self {
         Self { log, resolver }
     }
@@ -413,11 +426,11 @@ mod test {
     use super::ResolveError;
     use super::Resolver;
     use anyhow::Context;
-    use assert_matches::assert_matches;
     use dropshot::{
         ApiDescription, HandlerTaskMode, HttpError, HttpResponseOk,
         RequestContext, endpoint,
     };
+    use hickory_resolver::ResolveErrorKind;
     use internal_dns_types::config::DnsConfigBuilder;
     use internal_dns_types::config::DnsConfigParams;
     use internal_dns_types::names::DNS_ZONE;
@@ -545,19 +558,27 @@ mod test {
             .await
             .expect_err("Looking up non-existent service should fail");
 
+        expect_no_records(&err);
+
+        dns_server.cleanup_successful();
+        logctx.cleanup_successful();
+    }
+
+    #[track_caller]
+    fn expect_no_records(err: &ResolveError) {
         let dns_error = match err {
             ResolveError::Resolve(err) => err,
             _ => panic!("Unexpected error: {err}"),
         };
-        assert!(
-            matches!(
-                dns_error.kind(),
-                hickory_resolver::error::ResolveErrorKind::NoRecordsFound { .. },
-            ),
-            "Saw error: {dns_error}",
-        );
-        dns_server.cleanup_successful();
-        logctx.cleanup_successful();
+
+        if let ResolveErrorKind::Proto(proto_err) = dns_error.kind() {
+            if let hickory_proto::ProtoErrorKind::NoRecordsFound { .. } =
+                proto_err.kind()
+            {
+                return;
+            }
+        }
+        panic!("Saw error: {dns_error}");
     }
 
     // Insert and retreive a single DNS record.
@@ -703,13 +724,8 @@ mod test {
             .lookup_socket_v6(ServiceName::Cockroach)
             .await
             .expect_err("unexpectedly found records");
-        assert_matches!(
-            error,
-            ResolveError::Resolve(error)
-                if matches!(error.kind(),
-                    hickory_resolver::error::ResolveErrorKind::NoRecordsFound { .. }
-                )
-        );
+
+        expect_no_records(&error);
 
         // If we remove the zone altogether, we'll get a different resolution
         // error because the DNS server is no longer authoritative for this

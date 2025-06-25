@@ -119,6 +119,7 @@ impl Client {
         let schema = Mutex::new(BTreeMap::new());
         let request_timeout = DEFAULT_REQUEST_TIMEOUT;
         let native_pool = match Pool::new(
+            "clickhouse".to_string(),
             native_resolver,
             Arc::new(native::connection::Connector),
             policy,
@@ -164,6 +165,7 @@ impl Client {
         ));
         let schema = Mutex::new(BTreeMap::new());
         let native_pool = match Pool::new(
+            "clickhouse".to_string(),
             Box::new(FixedResolver::new([address])),
             Arc::new(native::connection::Connector),
             Default::default(),
