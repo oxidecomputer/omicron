@@ -83,45 +83,63 @@ const NUM_CONCURRENT_MGS_UPDATES: usize = 1;
 /// The planner operates in distinct steps, and it is a compile-time error
 /// to skip or reorder them; see `Planner::do_plan`.
 trait PlannerStep {
+    type Next: PlannerStep;
     fn new() -> Self;
-    fn into_next<Next: PlannerStep>(self) -> Next;
+    fn into_next(self) -> Self::Next;
 }
 
 macro_rules! planner_step {
     ($name: ident, $next: ident) => {
-        /// Non-terminal step.
+        // Non-terminal step.
         struct $name;
         impl PlannerStep for $name {
+            type Next = $next;
+
             fn new() -> Self {
                 Self
             }
 
-            fn into_next<$next: PlannerStep>(self) -> $next {
-                $next::new()
+            fn into_next(self) -> Self::Next {
+                Self::Next::new()
+            }
+        }
+    };
+    ($name: ident) => {
+        // Terminal step.
+        struct $name;
+        impl PlannerStep for $name {
+            type Next = Self;
+
+            fn new() -> Self {
+                Self
+            }
+
+            fn into_next(self) -> Self::Next {
+                unreachable!("terminal step has no next")
             }
         }
     };
 }
 planner_step!(ExpungeStep, AddStep);
 planner_step!(AddStep, DecommissionStep);
-planner_step!(DecommissionStep, MgsUpdateStep);
+planner_step!(DecommissionStep, MgsUpdatesStep);
 planner_step!(MgsUpdatesStep, UpdateZonesStep);
 planner_step!(UpdateZonesStep, CockroachDbSettingsStep);
 planner_step!(CockroachDbSettingsStep, TerminalStep);
-planner_step!(TerminalStep, Never);
+planner_step!(TerminalStep);
 
-enum UpdateStepResult<Next> {
-    ContinueToNextStep(Next),
+enum UpdateStepResult<Prev: PlannerStep> {
+    ContinueToNextStep(Prev),
     PlanningComplete(TerminalStep),
     Waiting(Vec<WaitCondition>),
 }
 
-impl<Next: PlannerStep> UpdateStepResult<Next> {
-    fn continue_to_next_step<Prev: PlannerStep>(prev: Prev) -> Self {
-        Self::ContinueToNextStep(prev.into_next())
+impl<Prev: PlannerStep> UpdateStepResult<Prev> {
+    fn continue_to_next_step(prev: Prev) -> Self {
+        Self::ContinueToNextStep(prev)
     }
 
-    fn planning_complete(prev: UpdateZonesStep) -> Self {
+    fn planning_complete(prev: CockroachDbSettingsStep) -> Self {
         Self::PlanningComplete(prev.into_next())
     }
 
@@ -212,18 +230,18 @@ impl<'a> Planner<'a> {
                 }
             }};
         }
-        let next = step!(self.do_plan_expunge()?);
-        let next = step!(self.do_plan_add(next)?);
-        let next = step!(self.do_plan_decommission(next)?);
-        let next = step!(self.do_plan_mgs_updates(next));
-        let next = step!(self.do_plan_zone_updates(next)?);
-        step!(self.do_plan_cockroachdb_settings(next)?);
+        let ready = step!(self.do_plan_expunge()?);
+        let ready = step!(self.do_plan_add(ready.into_next())?);
+        let ready = step!(self.do_plan_decommission(ready.into_next())?);
+        let ready = step!(self.do_plan_mgs_updates(ready.into_next()));
+        let ready = step!(self.do_plan_zone_updates(ready.into_next())?);
+        step!(self.do_plan_cockroachdb_settings(ready.into_next())?);
         unreachable!("planning is complete!");
     }
 
     fn do_plan_decommission(
         &mut self,
-        prev: AddStep,
+        ready: DecommissionStep,
     ) -> Result<UpdateStepResult<DecommissionStep>, Error> {
         // Check for any sleds that are currently commissioned but can be
         // decommissioned. Our gates for decommissioning are:
@@ -307,7 +325,7 @@ impl<'a> Planner<'a> {
             }
         }
 
-        Ok(UpdateStepResult::continue_to_next_step(prev))
+        Ok(UpdateStepResult::continue_to_next_step(ready))
     }
 
     fn do_plan_decommission_expunged_disks_for_in_service_sled(
@@ -565,7 +583,7 @@ impl<'a> Planner<'a> {
 
     fn do_plan_add(
         &mut self,
-        prev: ExpungeStep,
+        ready: AddStep,
     ) -> Result<UpdateStepResult<AddStep>, Error> {
         // Internal DNS is a prerequisite for bringing up all other zones.  At
         // this point, we assume that internal DNS (as a service) is already
@@ -753,7 +771,7 @@ impl<'a> Planner<'a> {
         // ensure that all sleds have the datasets they need to have.
         self.do_plan_datasets()?;
 
-        Ok(UpdateStepResult::continue_to_next_step(prev))
+        Ok(UpdateStepResult::continue_to_next_step(ready))
     }
 
     fn do_plan_datasets(&mut self) -> Result<(), Error> {
@@ -1014,7 +1032,7 @@ impl<'a> Planner<'a> {
     /// date.
     fn do_plan_mgs_updates(
         &mut self,
-        prev: DecommissionStep,
+        ready: MgsUpdatesStep,
     ) -> UpdateStepResult<MgsUpdatesStep> {
         // Determine which baseboards we will consider updating.
         //
@@ -1063,7 +1081,7 @@ impl<'a> Planner<'a> {
         // TODO This is not quite right.  See oxidecomputer/omicron#8285.
         self.blueprint.pending_mgs_updates_replace_all(next.clone());
         if next.is_empty() {
-            UpdateStepResult::continue_to_next_step(prev)
+            UpdateStepResult::continue_to_next_step(ready)
         } else {
             UpdateStepResult::waiting(vec![WaitCondition::MgsUpdates {
                 pending: next.clone(),
@@ -1074,7 +1092,7 @@ impl<'a> Planner<'a> {
     /// Update at most one existing zone to use a new image source.
     fn do_plan_zone_updates(
         &mut self,
-        prev: MgsUpdatesStep,
+        ready: UpdateZonesStep,
     ) -> Result<UpdateStepResult<UpdateZonesStep>, Error> {
         // We are only interested in non-decommissioned sleds.
         let sleds = self
@@ -1133,7 +1151,7 @@ impl<'a> Planner<'a> {
         }
 
         info!(self.log, "all zones up-to-date");
-        Ok(UpdateStepResult::continue_to_next_step(prev))
+        Ok(UpdateStepResult::continue_to_next_step(ready))
     }
 
     /// Update a zone to use a new image source, either in-place or by
@@ -1221,7 +1239,7 @@ impl<'a> Planner<'a> {
 
     fn do_plan_cockroachdb_settings(
         &mut self,
-        prev: UpdateZonesStep,
+        ready: CockroachDbSettingsStep,
     ) -> Result<UpdateStepResult<CockroachDbSettingsStep>, Error> {
         // Figure out what we should set the CockroachDB "preserve downgrade
         // option" setting to based on the planning input.
@@ -1315,7 +1333,7 @@ impl<'a> Planner<'a> {
         //
         // https://www.cockroachlabs.com/docs/stable/cluster-settings#change-a-cluster-setting
 
-        Ok(UpdateStepResult::planning_complete(prev.into_next()))
+        Ok(UpdateStepResult::planning_complete(ready))
     }
 }
 
