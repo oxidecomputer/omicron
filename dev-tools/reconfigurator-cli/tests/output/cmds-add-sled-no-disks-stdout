@@ -243,7 +243,7 @@ parent:    dbcbd3d6-41ff-48ae-ac0b-1becc9b2fd21
  METADATA:
     created by:::::::::::::   reconfigurator-sim
     created at:::::::::::::   <REDACTED_TIMESTAMP>
-    comment::::::::::::::::   skipping sled 00320471-945d-413c-85e7-03e091a70b3c: no zpools in service
+    comment::::::::::::::::   (none)
     internal DNS version:::   1
     external DNS version:::   1
     target release min gen:   1
