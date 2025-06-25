@@ -128,7 +128,6 @@ pub fn plan_mgs_updates(
             return rv;
         }
 
-        // TODO-K: Add RoT update here
         match try_make_update(log, board, inventory, current_artifacts) {
             Some(update) => {
                 // TODO-K: should this somehow change to say RoT or bootloader or whatever?
