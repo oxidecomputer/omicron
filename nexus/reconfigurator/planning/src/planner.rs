@@ -29,6 +29,8 @@ use nexus_types::deployment::DiskFilter;
 use nexus_types::deployment::PlanningInput;
 use nexus_types::deployment::SledDetails;
 use nexus_types::deployment::SledFilter;
+use nexus_types::deployment::WaitCondition;
+use nexus_types::deployment::ZoneExpungeReason;
 use nexus_types::deployment::ZpoolFilter;
 use nexus_types::external_api::views::PhysicalDiskPolicy;
 use nexus_types::external_api::views::SledPolicy;
@@ -78,9 +80,54 @@ pub(crate) mod rng;
 /// services, etc.).
 const NUM_CONCURRENT_MGS_UPDATES: usize = 1;
 
-enum UpdateStepResult {
-    ContinueToNextStep,
-    Waiting,
+/// The planner operates in distinct steps, and it is a compile-time error
+/// to skip or reorder them; see `Planner::do_plan`.
+trait PlannerStep {
+    fn new() -> Self;
+    fn into_next<Next: PlannerStep>(self) -> Next;
+}
+
+macro_rules! planner_step {
+    ($name: ident, $next: ident) => {
+        /// Non-terminal step.
+        struct $name;
+        impl PlannerStep for $name {
+            fn new() -> Self {
+                Self
+            }
+
+            fn into_next<$next: PlannerStep>(self) -> $next {
+                $next::new()
+            }
+        }
+    };
+}
+planner_step!(ExpungeStep, AddStep);
+planner_step!(AddStep, DecommissionStep);
+planner_step!(DecommissionStep, MgsUpdateStep);
+planner_step!(MgsUpdatesStep, UpdateZonesStep);
+planner_step!(UpdateZonesStep, CockroachDbSettingsStep);
+planner_step!(CockroachDbSettingsStep, TerminalStep);
+planner_step!(TerminalStep, Never);
+
+enum UpdateStepResult<Next> {
+    ContinueToNextStep(Next),
+    PlanningComplete(TerminalStep),
+    Waiting(Vec<WaitCondition>),
+}
+
+impl<Next: PlannerStep> UpdateStepResult<Next> {
+    fn continue_to_next_step<Prev: PlannerStep>(prev: Prev) -> Self {
+        Self::ContinueToNextStep(prev.into_next())
+    }
+
+    fn planning_complete(prev: UpdateZonesStep) -> Self {
+        Self::PlanningComplete(prev.into_next())
+    }
+
+    fn waiting(wait_on: Vec<WaitCondition>) -> Self {
+        Self::Waiting(wait_on)
+    }
 }
 
 pub struct Planner<'a> {
@@ -97,6 +144,7 @@ pub struct Planner<'a> {
     // information about all sleds that we expect), we should verify that up
     // front and update callers to ensure that it's true.
     inventory: &'a Collection,
+    waiting_on: Vec<WaitCondition>,
 }
 
 impl<'a> Planner<'a> {
@@ -116,7 +164,7 @@ impl<'a> Planner<'a> {
             inventory,
             creator,
         )?;
-        Ok(Planner { log, input, blueprint, inventory })
+        Ok(Planner { log, input, blueprint, inventory, waiting_on: Vec::new() })
     }
 
     /// Within tests, set a seeded RNG for deterministic results.
@@ -145,18 +193,31 @@ impl<'a> Planner<'a> {
     }
 
     fn do_plan(&mut self) -> Result<(), Error> {
-        self.do_plan_expunge()?;
-        self.do_plan_add()?;
-        self.do_plan_decommission()?;
-        if let UpdateStepResult::ContinueToNextStep = self.do_plan_mgs_updates()
-        {
-            self.do_plan_zone_updates()?;
+        macro_rules! step {
+            ($f: expr) => {{
+                match $f {
+                    UpdateStepResult::ContinueToNextStep(step) => step,
+                    UpdateStepResult::PlanningComplete(_) => return Ok(()),
+                    UpdateStepResult::Waiting(mut waiting_on) => {
+                        self.waiting_on.extend(waiting_on.drain(..));
+                        return Ok(());
+                    }
+                }
+            }};
         }
-        self.do_plan_cockroachdb_settings();
-        Ok(())
+        let next = step!(self.do_plan_expunge()?);
+        let next = step!(self.do_plan_add(next)?);
+        let next = step!(self.do_plan_decommission(next)?);
+        let next = step!(self.do_plan_mgs_updates(next));
+        let next = step!(self.do_plan_zone_updates(next)?);
+        step!(self.do_plan_cockroachdb_settings(next)?);
+        unreachable!("planning is complete!");
     }
 
-    fn do_plan_decommission(&mut self) -> Result<(), Error> {
+    fn do_plan_decommission(
+        &mut self,
+        prev: AddStep,
+    ) -> Result<UpdateStepResult<DecommissionStep>, Error> {
         // Check for any sleds that are currently commissioned but can be
         // decommissioned. Our gates for decommissioning are:
         //
@@ -239,7 +300,7 @@ impl<'a> Planner<'a> {
             }
         }
 
-        Ok(())
+        Ok(UpdateStepResult::continue_to_next_step(prev))
     }
 
     fn do_plan_decommission_expunged_disks_for_in_service_sled(
@@ -289,7 +350,9 @@ impl<'a> Planner<'a> {
         self.blueprint.sled_decommission_disks(sled_id, disks_to_decommission)
     }
 
-    fn do_plan_expunge(&mut self) -> Result<(), Error> {
+    fn do_plan_expunge(
+        &mut self,
+    ) -> Result<UpdateStepResult<ExpungeStep>, Error> {
         let mut commissioned_sled_ids = BTreeSet::new();
 
         // Remove services from sleds marked expunged. We use
@@ -304,7 +367,7 @@ impl<'a> Planner<'a> {
 
         // Check for any decommissioned sleds (i.e., sleds for which our
         // blueprint has zones, but are not in the input sled list). Any zones
-        // for decommissioned sleds must have already be expunged for
+        // for decommissioned sleds must have already been expunged for
         // decommissioning to have happened; fail if we find non-expunged zones
         // associated with a decommissioned sled.
         for sled_id in self.blueprint.sled_ids_with_zones() {
@@ -330,7 +393,7 @@ impl<'a> Planner<'a> {
             }
         }
 
-        Ok(())
+        Ok(UpdateStepResult::continue_to_next_step(ExpungeStep))
     }
 
     fn do_plan_expunge_for_commissioned_sled(
@@ -493,7 +556,10 @@ impl<'a> Planner<'a> {
         Ok(())
     }
 
-    fn do_plan_add(&mut self) -> Result<(), Error> {
+    fn do_plan_add(
+        &mut self,
+        prev: ExpungeStep,
+    ) -> Result<UpdateStepResult<AddStep>, Error> {
         // Internal DNS is a prerequisite for bringing up all other zones.  At
         // this point, we assume that internal DNS (as a service) is already
         // functioning.
@@ -680,7 +746,7 @@ impl<'a> Planner<'a> {
         // ensure that all sleds have the datasets they need to have.
         self.do_plan_datasets()?;
 
-        Ok(())
+        Ok(UpdateStepResult::continue_to_next_step(prev))
     }
 
     fn do_plan_datasets(&mut self) -> Result<(), Error> {
@@ -939,7 +1005,10 @@ impl<'a> Planner<'a> {
 
     /// Update at most one MGS-managed device (SP, RoT, etc.), if any are out of
     /// date.
-    fn do_plan_mgs_updates(&mut self) -> UpdateStepResult {
+    fn do_plan_mgs_updates(
+        &mut self,
+        prev: DecommissionStep,
+    ) -> UpdateStepResult<MgsUpdatesStep> {
         // Determine which baseboards we will consider updating.
         //
         // Sleds may be present but not adopted as part of the control plane.
@@ -985,17 +1054,21 @@ impl<'a> Planner<'a> {
         );
 
         // TODO This is not quite right.  See oxidecomputer/omicron#8285.
-        let rv = if next.is_empty() {
-            UpdateStepResult::ContinueToNextStep
+        self.blueprint.pending_mgs_updates_replace_all(next.clone());
+        if next.is_empty() {
+            UpdateStepResult::continue_to_next_step(prev)
         } else {
-            UpdateStepResult::Waiting
-        };
-        self.blueprint.pending_mgs_updates_replace_all(next);
-        rv
+            UpdateStepResult::waiting(vec![WaitCondition::MgsUpdates {
+                pending: next.clone(),
+            }])
+        }
     }
 
     /// Update at most one existing zone to use a new image source.
-    fn do_plan_zone_updates(&mut self) -> Result<(), Error> {
+    fn do_plan_zone_updates(
+        &mut self,
+        prev: MgsUpdatesStep,
+    ) -> Result<UpdateStepResult<UpdateZonesStep>, Error> {
         // We are only interested in non-decommissioned sleds.
         let sleds = self
             .input
@@ -1009,24 +1082,25 @@ impl<'a> Planner<'a> {
             .all_running_omicron_zones()
             .map(|z| (z.id, z.image_source.clone()))
             .collect::<BTreeMap<_, _>>();
+        let mut waiting_on = Vec::new();
         for &sled_id in &sleds {
-            if !self
-                .blueprint
-                .current_sled_zones(
-                    sled_id,
-                    BlueprintZoneDisposition::is_in_service,
-                )
-                .all(|zone| {
-                    let image_source = zone.image_source.clone().into();
-                    inventory_zones.get(&zone.id) == Some(&image_source)
-                })
-            {
-                info!(
-                    self.log, "some zones not yet up-to-date";
-                    "sled_id" => %sled_id,
-                );
-                return Ok(());
+            for zone in self.blueprint.current_sled_zones(
+                sled_id,
+                BlueprintZoneDisposition::is_in_service,
+            ) {
+                let image_source = zone.image_source.clone().into();
+                if inventory_zones.get(&zone.id) != Some(&image_source) {
+                    waiting_on.push(WaitCondition::ZoneUpdate {
+                        sled_id,
+                        zone_id: zone.id,
+                        new_image_source: zone.image_source.clone(),
+                    });
+                }
             }
+        }
+        if !waiting_on.is_empty() {
+            info!(self.log, "some zones not yet up-to-date");
+            return Ok(UpdateStepResult::waiting(waiting_on));
         }
 
         // Update the first out-of-date zone.
@@ -1052,7 +1126,7 @@ impl<'a> Planner<'a> {
         }
 
         info!(self.log, "all zones up-to-date");
-        Ok(())
+        Ok(UpdateStepResult::continue_to_next_step(prev))
     }
 
     /// Update a zone to use a new image source, either in-place or by
@@ -1061,7 +1135,7 @@ impl<'a> Planner<'a> {
         &mut self,
         sled_id: SledUuid,
         zone: &BlueprintZoneConfig,
-    ) -> Result<(), Error> {
+    ) -> Result<UpdateStepResult<UpdateZonesStep>, Error> {
         let zone_kind = zone.zone_type.kind();
         let image_source = self.blueprint.zone_image_source(zone_kind);
         if zone.image_source == image_source {
@@ -1075,6 +1149,10 @@ impl<'a> Planner<'a> {
             );
             return Err(Error::ZoneAlreadyUpToDate);
         } else {
+            let reason = ZoneExpungeReason::UpdatedSource {
+                from: zone.image_source.clone(),
+                to: image_source.clone(),
+            };
             match zone_kind {
                 ZoneKind::Crucible
                 | ZoneKind::Clickhouse
@@ -1096,8 +1174,15 @@ impl<'a> Planner<'a> {
                     self.blueprint.sled_set_zone_source(
                         sled_id,
                         zone.id,
-                        image_source,
+                        image_source.clone(),
                     )?;
+                    Ok(UpdateStepResult::waiting(vec![
+                        (WaitCondition::zone_update(
+                            sled_id,
+                            zone.id,
+                            image_source,
+                        )),
+                    ]))
                 }
                 ZoneKind::BoundaryNtp
                 | ZoneKind::CruciblePantry
@@ -1117,14 +1202,20 @@ impl<'a> Planner<'a> {
                         zone.zone_type.kind(),
                         zone.id
                     ));
-                    self.blueprint.sled_expunge_zone(sled_id, zone.id)?;
+                    self.blueprint
+                        .sled_expunge_zone(sled_id, zone.id, &reason)?;
+                    Ok(UpdateStepResult::waiting(vec![
+                        WaitCondition::zone_expunge(sled_id, zone.id, reason),
+                    ]))
                 }
             }
         }
-        Ok(())
     }
 
-    fn do_plan_cockroachdb_settings(&mut self) {
+    fn do_plan_cockroachdb_settings(
+        &mut self,
+        prev: UpdateZonesStep,
+    ) -> Result<UpdateStepResult<CockroachDbSettingsStep>, Error> {
         // Figure out what we should set the CockroachDB "preserve downgrade
         // option" setting to based on the planning input.
         //
@@ -1216,17 +1307,9 @@ impl<'a> Planner<'a> {
         // cluster version -- we're likely in the middle of an upgrade!
         //
         // https://www.cockroachlabs.com/docs/stable/cluster-settings#change-a-cluster-setting
-    }
-}
 
-/// The reason a sled's zones need to be expunged.
-///
-/// This is used only for introspection and logging -- it's not part of the
-/// logical flow.
-#[derive(Copy, Clone, Debug, Eq, PartialEq, Ord, PartialOrd)]
-pub(crate) enum ZoneExpungeReason {
-    ClickhouseClusterDisabled,
-    ClickhouseSingleNodeDisabled,
+        Ok(UpdateStepResult::planning_complete(prev.into_next()))
+    }
 }
 
 #[cfg(test)]

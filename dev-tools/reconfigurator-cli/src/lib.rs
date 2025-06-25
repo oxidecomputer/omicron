@@ -26,6 +26,7 @@ use nexus_reconfigurator_simulation::{BlueprintId, SimState};
 use nexus_types::deployment::OmicronZoneNic;
 use nexus_types::deployment::PlanningInput;
 use nexus_types::deployment::SledFilter;
+use nexus_types::deployment::ZoneExpungeReason;
 use nexus_types::deployment::execution;
 use nexus_types::deployment::execution::blueprint_external_dns_config;
 use nexus_types::deployment::execution::blueprint_internal_dns_config;
@@ -1249,7 +1250,11 @@ fn cmd_blueprint_edit(
         BlueprintEditCommands::ExpungeZone { zone_id } => {
             let sled_id = sled_with_zone(&builder, &zone_id)?;
             builder
-                .sled_expunge_zone(sled_id, zone_id)
+                .sled_expunge_zone(
+                    sled_id,
+                    zone_id,
+                    &ZoneExpungeReason::ManualEdit,
+                )
                 .context("failed to expunge zone")?;
             format!("expunged zone {zone_id} from sled {sled_id}")
         }

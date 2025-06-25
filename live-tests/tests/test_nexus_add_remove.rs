@@ -19,6 +19,7 @@ use nexus_reconfigurator_planning::planner::Planner;
 use nexus_reconfigurator_preparation::PlanningInputFromDb;
 use nexus_sled_agent_shared::inventory::ZoneKind;
 use nexus_types::deployment::SledFilter;
+use nexus_types::deployment::ZoneExpungeReason;
 use omicron_common::address::NEXUS_INTERNAL_PORT;
 use omicron_test_utils::dev::poll::CondCheckError;
 use omicron_test_utils::dev::poll::wait_for_condition;
@@ -123,7 +124,11 @@ async fn test_nexus_add_remove(lc: &LiveTestContext) {
         &nexus,
         &|builder: &mut BlueprintBuilder| {
             builder
-                .sled_expunge_zone(sled_id, new_zone.id)
+                .sled_expunge_zone(
+                    sled_id,
+                    new_zone.id,
+                    &ZoneExpungeReason::Test,
+                )
                 .context("expunging zone")?;
             Ok(())
         },

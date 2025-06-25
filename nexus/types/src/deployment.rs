@@ -1827,6 +1827,55 @@ pub struct UnstableReconfiguratorState {
     pub external_dns_zone_names: Vec<String>,
 }
 
+/// An event that the planner is waiting on.
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+pub enum WaitCondition {
+    MgsUpdates {
+        pending: PendingMgsUpdates,
+    },
+    ZoneExpunge {
+        sled_id: SledUuid,
+        zone_id: OmicronZoneUuid,
+        reason: ZoneExpungeReason,
+    },
+    ZoneUpdate {
+        sled_id: SledUuid,
+        zone_id: OmicronZoneUuid,
+        new_image_source: BlueprintZoneImageSource,
+    },
+}
+
+impl WaitCondition {
+    pub fn zone_expunge(
+        sled_id: SledUuid,
+        zone_id: OmicronZoneUuid,
+        reason: ZoneExpungeReason,
+    ) -> Self {
+        Self::ZoneExpunge { sled_id, zone_id, reason }
+    }
+
+    pub fn zone_update(
+        sled_id: SledUuid,
+        zone_id: OmicronZoneUuid,
+        new_image_source: BlueprintZoneImageSource,
+    ) -> Self {
+        Self::ZoneUpdate { sled_id, zone_id, new_image_source }
+    }
+}
+
+/// The reason a zone need to be expunged.
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+pub enum ZoneExpungeReason {
+    ClickhouseClusterDisabled,
+    ClickhouseSingleNodeDisabled,
+    ManualEdit,
+    Test,
+    UpdatedSource {
+        from: BlueprintZoneImageSource,
+        to: BlueprintZoneImageSource,
+    },
+}
+
 #[cfg(test)]
 mod test {
     use super::ExpectedVersion;

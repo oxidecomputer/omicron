@@ -14,7 +14,6 @@ use crate::blueprint_editor::ExternalSnatNetworkingChoice;
 use crate::blueprint_editor::NoAvailableDnsSubnets;
 use crate::blueprint_editor::SledEditError;
 use crate::blueprint_editor::SledEditor;
-use crate::planner::ZoneExpungeReason;
 use crate::planner::rng::PlannerRng;
 use anyhow::Context as _;
 use anyhow::anyhow;
@@ -45,6 +44,7 @@ use nexus_types::deployment::PendingMgsUpdates;
 use nexus_types::deployment::PlanningInput;
 use nexus_types::deployment::SledFilter;
 use nexus_types::deployment::SledResources;
+use nexus_types::deployment::ZoneExpungeReason;
 use nexus_types::deployment::ZpoolFilter;
 use nexus_types::deployment::ZpoolName;
 use nexus_types::deployment::blueprint_zone_type;
@@ -336,6 +336,13 @@ impl fmt::Display for Operation {
                     }
                     ZoneExpungeReason::ClickhouseSingleNodeDisabled => {
                         "clickhouse single-node disabled via policy"
+                    }
+                    ZoneExpungeReason::ManualEdit => {
+                        "blueprint edited manually"
+                    }
+                    ZoneExpungeReason::Test => "for testing purposes",
+                    ZoneExpungeReason::UpdatedSource { from, to } => {
+                        &format!("updating from image source {from:?} → {to:?}")
                     }
                 };
                 write!(
@@ -1741,6 +1748,7 @@ impl<'a> BlueprintBuilder<'a> {
         &mut self,
         sled_id: SledUuid,
         zone_id: OmicronZoneUuid,
+        _reason: &ZoneExpungeReason,
     ) -> Result<SledEditCounts, Error> {
         let editor = self.sled_editors.get_mut(&sled_id).ok_or_else(|| {
             Error::Planner(anyhow!(
