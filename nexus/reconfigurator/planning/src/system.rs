@@ -23,6 +23,7 @@ use nexus_sled_agent_shared::inventory::InventoryDisk;
 use nexus_sled_agent_shared::inventory::InventoryZpool;
 use nexus_sled_agent_shared::inventory::OmicronSledConfig;
 use nexus_sled_agent_shared::inventory::SledRole;
+use nexus_sled_agent_shared::inventory::ZoneImageResolverInventory;
 use nexus_types::deployment::ClickhousePolicy;
 use nexus_types::deployment::CockroachDbClusterVersion;
 use nexus_types::deployment::CockroachDbSettings;
@@ -33,6 +34,7 @@ use nexus_types::deployment::Policy;
 use nexus_types::deployment::SledDetails;
 use nexus_types::deployment::SledDisk;
 use nexus_types::deployment::SledResources;
+use nexus_types::deployment::TufRepoPolicy;
 use nexus_types::external_api::views::PhysicalDiskPolicy;
 use nexus_types::external_api::views::PhysicalDiskState;
 use nexus_types::external_api::views::SledPolicy;
@@ -106,8 +108,8 @@ pub struct SystemDescription {
     external_dns_version: Generation,
     clickhouse_policy: Option<ClickhousePolicy>,
     oximeter_read_policy: OximeterReadPolicy,
-    tuf_repo: Option<TufRepoDescription>,
-    old_repo: Option<TufRepoDescription>,
+    tuf_repo: TufRepoPolicy,
+    old_repo: Option<TufRepoPolicy>,
 }
 
 impl SystemDescription {
@@ -187,7 +189,7 @@ impl SystemDescription {
             external_dns_version: Generation::new(),
             clickhouse_policy: None,
             oximeter_read_policy: OximeterReadPolicy::new(1),
-            tuf_repo: None,
+            tuf_repo: TufRepoPolicy::initial(),
             old_repo: None,
         }
     }
@@ -467,16 +469,38 @@ impl SystemDescription {
         Ok(sled.sp_inactive_caboose().map(|c| c.version.as_ref()))
     }
 
+    pub fn set_tuf_repo(&mut self, tuf_repo: TufRepoPolicy) {
+        self.tuf_repo = tuf_repo;
+    }
+
     pub fn set_target_release(
         &mut self,
         tuf_repo: Option<TufRepoDescription>,
     ) -> &mut Self {
-        self.tuf_repo = tuf_repo;
+        // Create a new TufRepoPolicy by bumping the generation.
+        let new_repo = TufRepoPolicy {
+            target_release_generation: self
+                .tuf_repo
+                .target_release_generation
+                .next(),
+            description: tuf_repo,
+        };
+
+        self.tuf_repo = new_repo;
+
+        // It's tempting to consider setting old_repo to the current tuf_repo,
+        // but that requires the invariant that old_repo is always the current
+        // target release and that an update isn't currently in progress. See
+        // https://github.com/oxidecomputer/omicron/issues/8056 for some
+        // discussion.
+        //
+        // We may want a more explicit operation to set the old repo, though.
+
         self
     }
 
-    pub fn target_release(&self) -> Option<&TufRepoDescription> {
-        self.tuf_repo.as_ref()
+    pub fn target_release(&self) -> &TufRepoPolicy {
+        &self.tuf_repo
     }
 
     pub fn to_collection_builder(&self) -> anyhow::Result<CollectionBuilder> {
@@ -853,6 +877,8 @@ impl Sled {
                         sled_config,
                     ),
                 ),
+                // XXX: return something more reasonable here?
+                zone_image_resolver: ZoneImageResolverInventory::new_fake(),
             }
         };
 
@@ -1001,6 +1027,7 @@ impl Sled {
             ledgered_sled_config: inv_sled_agent.ledgered_sled_config.clone(),
             reconciler_status: inv_sled_agent.reconciler_status.clone(),
             last_reconciliation: inv_sled_agent.last_reconciliation.clone(),
+            zone_image_resolver: inv_sled_agent.zone_image_resolver.clone(),
         };
 
         Sled {

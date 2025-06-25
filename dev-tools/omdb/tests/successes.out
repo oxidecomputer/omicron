@@ -259,6 +259,10 @@ task: "blueprint_loader"
     Loads the current target blueprint from the DB
 
 
+task: "blueprint_planner"
+    Updates the target blueprint
+
+
 task: "blueprint_rendezvous"
     reconciles blueprints and inventory collection, updating Reconfigurator-
     owned rendezvous tables that other subsystems consume
@@ -387,6 +391,10 @@ task: "service_zone_nat_tracker"
     ensures service zone nat records are recorded in NAT RPW table
 
 
+task: "sp_ereport_ingester"
+    collects error reports from service processors
+
+
 task: "support_bundle_collector"
     Manage support bundle collection and cleanup
 
@@ -480,7 +488,7 @@ task: "nat_v4_garbage_collector"
   currently executing: no
   last completed activation: <REDACTED ITERATIONS>, triggered by a periodic timer firing
     started at <REDACTED_TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
-    last completion reported error: failed to resolve addresses for Dendrite services: no record found for Query { name: Name("_dendrite._tcp.control-plane.oxide.internal."), query_type: SRV, query_class: IN }
+    last completion reported error: failed to resolve addresses for Dendrite services: proto error: no records found for Query { name: Name("_dendrite._tcp.control-plane.oxide.internal."), query_type: SRV, query_class: IN }
 
 task: "blueprint_loader"
   configured period: every <REDACTED_DURATION>m <REDACTED_DURATION>s
@@ -519,7 +527,14 @@ task: "bfd_manager"
   currently executing: no
   last completed activation: <REDACTED ITERATIONS>, triggered by a periodic timer firing
     started at <REDACTED_TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
-    last completion reported error: failed to resolve addresses for Dendrite services: no record found for Query { name: Name("_dendrite._tcp.control-plane.oxide.internal."), query_type: SRV, query_class: IN }
+    last completion reported error: failed to resolve addresses for Dendrite services: proto error: no records found for Query { name: Name("_dendrite._tcp.control-plane.oxide.internal."), query_type: SRV, query_class: IN }
+
+task: "blueprint_planner"
+  configured period: every <REDACTED_DURATION>m
+  currently executing: no
+  last completed activation: <REDACTED ITERATIONS>, triggered by a dependent task completing
+    started at <REDACTED_TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
+    blueprint planning explicitly disabled by config!
 
 task: "blueprint_rendezvous"
   configured period: every <REDACTED_DURATION>m
@@ -734,6 +749,20 @@ task: "service_zone_nat_tracker"
   last completed activation: <REDACTED ITERATIONS>, triggered by a periodic timer firing
     started at <REDACTED_TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
     last completion reported error: inventory collection is None
+
+task: "sp_ereport_ingester"
+  configured period: every <REDACTED_DURATION>s
+  currently executing: no
+  last completed activation: <REDACTED ITERATIONS>, triggered by a periodic timer firing
+    started at <REDACTED_TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
+/!\ errors:                  1
+      - failed to resolve MGS addresses: proto error: no records found for Query { name: Name("_mgs._tcp.control-plane.oxide.internal."), query_type: SRV, query_class: IN }
+    total ereports received:      0
+      new ereports ingested:      0
+    total HTTP requests sent:     0
+      total collection errors:    0
+    reporters with ereports:      0
+    reporters with collection errors:   0
 
 task: "support_bundle_collector"
   configured period: every <REDACTED_DURATION>days <REDACTED_DURATION>h <REDACTED_DURATION>m <REDACTED_DURATION>s
@@ -999,7 +1028,7 @@ task: "nat_v4_garbage_collector"
   currently executing: no
   last completed activation: <REDACTED ITERATIONS>, triggered by a periodic timer firing
     started at <REDACTED_TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
-    last completion reported error: failed to resolve addresses for Dendrite services: no record found for Query { name: Name("_dendrite._tcp.control-plane.oxide.internal."), query_type: SRV, query_class: IN }
+    last completion reported error: failed to resolve addresses for Dendrite services: proto error: no records found for Query { name: Name("_dendrite._tcp.control-plane.oxide.internal."), query_type: SRV, query_class: IN }
 
 task: "blueprint_loader"
   configured period: every <REDACTED_DURATION>m <REDACTED_DURATION>s
@@ -1038,7 +1067,14 @@ task: "bfd_manager"
   currently executing: no
   last completed activation: <REDACTED ITERATIONS>, triggered by a periodic timer firing
     started at <REDACTED_TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
-    last completion reported error: failed to resolve addresses for Dendrite services: no record found for Query { name: Name("_dendrite._tcp.control-plane.oxide.internal."), query_type: SRV, query_class: IN }
+    last completion reported error: failed to resolve addresses for Dendrite services: proto error: no records found for Query { name: Name("_dendrite._tcp.control-plane.oxide.internal."), query_type: SRV, query_class: IN }
+
+task: "blueprint_planner"
+  configured period: every <REDACTED_DURATION>m
+  currently executing: no
+  last completed activation: <REDACTED ITERATIONS>, triggered by a dependent task completing
+    started at <REDACTED_TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
+    blueprint planning explicitly disabled by config!
 
 task: "blueprint_rendezvous"
   configured period: every <REDACTED_DURATION>m
@@ -1254,6 +1290,20 @@ task: "service_zone_nat_tracker"
     started at <REDACTED_TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
     last completion reported error: inventory collection is None
 
+task: "sp_ereport_ingester"
+  configured period: every <REDACTED_DURATION>s
+  currently executing: no
+  last completed activation: <REDACTED ITERATIONS>, triggered by a periodic timer firing
+    started at <REDACTED_TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
+/!\ errors:                  1
+      - failed to resolve MGS addresses: proto error: no records found for Query { name: Name("_mgs._tcp.control-plane.oxide.internal."), query_type: SRV, query_class: IN }
+    total ereports received:      0
+      new ereports ingested:      0
+    total HTTP requests sent:     0
+      total collection errors:    0
+    reporters with ereports:      0
+    reporters with collection errors:   0
+
 task: "support_bundle_collector"
   configured period: every <REDACTED_DURATION>days <REDACTED_DURATION>h <REDACTED_DURATION>m <REDACTED_DURATION>s
   currently executing: no
@@ -1450,12 +1500,14 @@ parent:    <none>
     oxp_..........<REDACTED_UUID>.........../crypt/zone/oxz_external_dns_..........<REDACTED_UUID>...........      ..........<REDACTED_UUID>...........   in service    none    none          off        
     oxp_..........<REDACTED_UUID>.........../crypt/zone/oxz_internal_dns_..........<REDACTED_UUID>...........      ..........<REDACTED_UUID>...........   in service    none    none          off        
     oxp_..........<REDACTED_UUID>.........../crypt/zone/oxz_nexus_..........<REDACTED_UUID>...........             ..........<REDACTED_UUID>...........   in service    none    none          off        
+    oxp_..........<REDACTED_UUID>.........../crypt/zone/oxz_ntp_..........<REDACTED_UUID>...........               ..........<REDACTED_UUID>...........   in service    none    none          off        
 
 
     omicron zones:
     ---------------------------------------------------------------------------------------------------------
     zone type         zone id                                image source      disposition   underlay IP     
     ---------------------------------------------------------------------------------------------------------
+    boundary_ntp      ..........<REDACTED_UUID>...........   install dataset   in service    ::1             
     clickhouse        ..........<REDACTED_UUID>...........   install dataset   in service    ::1             
     cockroach_db      ..........<REDACTED_UUID>...........   install dataset   in service    ::1             
     crucible_pantry   ..........<REDACTED_UUID>...........   install dataset   in service    ::1             
@@ -1552,12 +1604,14 @@ parent:    <none>
     oxp_..........<REDACTED_UUID>.........../crypt/zone/oxz_external_dns_..........<REDACTED_UUID>...........      ..........<REDACTED_UUID>...........   in service    none    none          off        
     oxp_..........<REDACTED_UUID>.........../crypt/zone/oxz_internal_dns_..........<REDACTED_UUID>...........      ..........<REDACTED_UUID>...........   in service    none    none          off        
     oxp_..........<REDACTED_UUID>.........../crypt/zone/oxz_nexus_..........<REDACTED_UUID>...........             ..........<REDACTED_UUID>...........   in service    none    none          off        
+    oxp_..........<REDACTED_UUID>.........../crypt/zone/oxz_ntp_..........<REDACTED_UUID>...........               ..........<REDACTED_UUID>...........   in service    none    none          off        
 
 
     omicron zones:
     ---------------------------------------------------------------------------------------------------------
     zone type         zone id                                image source      disposition   underlay IP     
     ---------------------------------------------------------------------------------------------------------
+    boundary_ntp      ..........<REDACTED_UUID>...........   install dataset   in service    ::1             
     clickhouse        ..........<REDACTED_UUID>...........   install dataset   in service    ::1             
     cockroach_db      ..........<REDACTED_UUID>...........   install dataset   in service    ::1             
     crucible_pantry   ..........<REDACTED_UUID>...........   install dataset   in service    ::1             

@@ -86,7 +86,12 @@ impl Pool {
         let resolver = resolver.for_service(ServiceName::Cockroach);
         let connector = make_postgres_connector(log);
         let policy = Policy::default();
-        let inner = match qorb::pool::Pool::new(resolver, connector, policy) {
+        let inner = match qorb::pool::Pool::new(
+            "crdb".to_string(),
+            resolver,
+            connector,
+            policy,
+        ) {
             Ok(pool) => {
                 debug!(log, "registered USDT probes");
                 pool
@@ -114,7 +119,12 @@ impl Pool {
         let resolver = make_single_host_resolver(db_config);
         let connector = make_postgres_connector(log);
         let policy = Policy::default();
-        let inner = match qorb::pool::Pool::new(resolver, connector, policy) {
+        let inner = match qorb::pool::Pool::new(
+            "crdb-single-host".to_string(),
+            resolver,
+            connector,
+            policy,
+        ) {
             Ok(pool) => {
                 debug!(log, "registered USDT probes");
                 pool
@@ -148,7 +158,12 @@ impl Pool {
             claim_timeout: tokio::time::Duration::from_millis(1),
             ..Default::default()
         };
-        let inner = match qorb::pool::Pool::new(resolver, connector, policy) {
+        let inner = match qorb::pool::Pool::new(
+            "crdb-single-host-failfast".to_string(),
+            resolver,
+            connector,
+            policy,
+        ) {
             Ok(pool) => {
                 debug!(log, "registered USDT probes");
                 pool
