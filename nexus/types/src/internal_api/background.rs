@@ -2,6 +2,7 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
+use crate::deployment::WaitCondition;
 use crate::external_api::views;
 use chrono::DateTime;
 use chrono::Utc;
@@ -471,15 +472,26 @@ pub enum BlueprintPlannerStatus {
 
     /// Planning produced a blueprint identital to the current target,
     /// so we threw it away and did nothing.
-    Unchanged { parent_blueprint_id: BlueprintUuid },
+    Unchanged {
+        parent_blueprint_id: BlueprintUuid,
+        waiting_on: Vec<WaitCondition>,
+    },
 
     /// Planning produced a new blueprint, but we failed to make it
     /// the current target and so deleted it.
-    Planned { parent_blueprint_id: BlueprintUuid, error: String },
+    Planned {
+        parent_blueprint_id: BlueprintUuid,
+        error: String,
+        waiting_on: Vec<WaitCondition>,
+    },
 
     /// Planing succeeded, and we saved and made the new blueprint the
     /// current target.
-    Targeted { parent_blueprint_id: BlueprintUuid, blueprint_id: BlueprintUuid },
+    Targeted {
+        parent_blueprint_id: BlueprintUuid,
+        blueprint_id: BlueprintUuid,
+        waiting_on: Vec<WaitCondition>,
+    },
 }
 
 /// The status of a `alert_dispatcher` background task activation.

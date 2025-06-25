@@ -45,6 +45,7 @@ use nexus_types::deployment::ClickhouseMode;
 use nexus_types::deployment::ClickhousePolicy;
 use nexus_types::deployment::OximeterReadMode;
 use nexus_types::deployment::OximeterReadPolicy;
+use nexus_types::deployment::WaitCondition;
 use nexus_types::internal_api::background::AbandonedVmmReaperStatus;
 use nexus_types::internal_api::background::BlueprintPlannerStatus;
 use nexus_types::internal_api::background::BlueprintRendezvousStatus;
@@ -1218,6 +1219,13 @@ fn print_task_abandoned_vmm_reaper(details: &serde_json::Value) {
 }
 
 fn print_task_blueprint_planner(details: &serde_json::Value) {
+    fn print_waiting_on(waiting_on: &[WaitCondition]) {
+        let n = waiting_on.len();
+        if n > 0 {
+            println!("    waiting on {n} events: {waiting_on:?}");
+        }
+    }
+
     let status =
         match serde_json::from_value::<BlueprintPlannerStatus>(details.clone())
         {
@@ -1237,20 +1245,32 @@ fn print_task_blueprint_planner(details: &serde_json::Value) {
         BlueprintPlannerStatus::Error(error) => {
             println!("    task did not complete successfully: {error}");
         }
-        BlueprintPlannerStatus::Unchanged { parent_blueprint_id } => {
+        BlueprintPlannerStatus::Unchanged {
+            parent_blueprint_id,
+            waiting_on,
+        } => {
             println!("    plan unchanged from parent {parent_blueprint_id}");
+            print_waiting_on(&waiting_on);
         }
-        BlueprintPlannerStatus::Planned { parent_blueprint_id, error } => {
+        BlueprintPlannerStatus::Planned {
+            parent_blueprint_id,
+            error,
+            waiting_on,
+        } => {
             println!(
                 "    planned new blueprint from parent {parent_blueprint_id}, \
                      but could not make it the target: {error}"
             );
+            print_waiting_on(&waiting_on);
         }
-        BlueprintPlannerStatus::Targeted { blueprint_id, .. } => {
+        BlueprintPlannerStatus::Targeted {
+            blueprint_id, waiting_on, ..
+        } => {
             println!(
                 "    planned new blueprint {blueprint_id}, \
                      and made it the current target"
             );
+            print_waiting_on(&waiting_on);
         }
     }
 }

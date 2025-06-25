@@ -142,7 +142,7 @@ impl BlueprintPlanner {
                 ));
             }
         };
-        let blueprint = match planner.plan() {
+        let (blueprint, waiting_on) = match planner.plan_and_wait_conditions() {
             Ok(blueprint) => blueprint,
             Err(error) => {
                 error!(&opctx.log, "can't plan: {error}");
@@ -161,7 +161,10 @@ impl BlueprintPlanner {
                 "blueprint unchanged from current target";
                 "parent_blueprint_id" => %parent_blueprint_id,
             );
-            return BlueprintPlannerStatus::Unchanged { parent_blueprint_id };
+            return BlueprintPlannerStatus::Unchanged {
+                parent_blueprint_id,
+                waiting_on,
+            };
         }
 
         // We have a fresh blueprint; save it.
@@ -227,13 +230,18 @@ impl BlueprintPlanner {
                 return BlueprintPlannerStatus::Planned {
                     parent_blueprint_id,
                     error: format!("{error}"),
+                    waiting_on,
                 };
             }
         }
 
         // We have a new target!
         self.tx_blueprint.send_replace(Some(Arc::new((target, blueprint))));
-        BlueprintPlannerStatus::Targeted { parent_blueprint_id, blueprint_id }
+        BlueprintPlannerStatus::Targeted {
+            parent_blueprint_id,
+            blueprint_id,
+            waiting_on,
+        }
     }
 }
 
@@ -314,6 +322,7 @@ mod test {
             BlueprintPlannerStatus::Targeted {
                 parent_blueprint_id,
                 blueprint_id,
+                waiting_on: _,
             } if parent_blueprint_id == initial_blueprint.id
                 && blueprint_id != initial_blueprint.id =>
             {
@@ -343,6 +352,7 @@ mod test {
             status,
             BlueprintPlannerStatus::Unchanged {
                 parent_blueprint_id: blueprint_id,
+                waiting_on: vec![],
             }
         );
 
@@ -405,6 +415,7 @@ mod test {
             status,
             BlueprintPlannerStatus::Unchanged {
                 parent_blueprint_id: blueprint_id,
+                waiting_on: vec![],
             }
         );
     }

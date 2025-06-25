@@ -184,6 +184,13 @@ impl<'a> Planner<'a> {
         Ok(self.blueprint.build())
     }
 
+    pub fn plan_and_wait_conditions(
+        mut self,
+    ) -> Result<(Blueprint, Vec<WaitCondition>), Error> {
+        let conditions = self.waiting_on.drain(..).collect();
+        Ok((self.plan()?, conditions))
+    }
+
     fn check_input_validity(&self) -> Result<(), Error> {
         if self.input.target_internal_dns_zone_count() > INTERNAL_DNS_REDUNDANCY
         {
