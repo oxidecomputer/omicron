@@ -11,6 +11,12 @@
 # - .github/buildomat/jobs/check-features.sh
 # - .github/workflows/rust.yml
 #
+# WARNING: If you're setting `RUSTFLAGS` in a global `~/.cargo/config.toml`, or
+# as an environment variable in your shell, this will CONFLICT WITH THE
+# CONFIGURATION HERE, as cargo/config.toml configuration is NOT ADDITIVE.
+# This is particularly relevant for folks using the `mold` linker via
+# `RUSTFLAGS`. `mold` users should consider using `mold -run cargo` instead, as
+# described here: https://github.com/rui314/mold#how-to-use
 [build]
 rustdocflags = "--document-private-items"
 rustflags = "--cfg tokio_unstable"
