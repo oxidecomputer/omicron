@@ -11,7 +11,7 @@ use signal_hook_tokio::Signals;
 use std::net::SocketAddr;
 
 fn main() -> anyhow::Result<()> {
-    omicron_runtime::run(async {
+    oxide_tokio_rt::run(async {
         let args = MgsDevApp::parse();
         args.exec().await
     })

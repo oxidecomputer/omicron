@@ -58,7 +58,7 @@ struct ConfigProperties {
 }
 
 fn main() {
-    if let Err(cmd_error) = omicron_runtime::run(do_run()) {
+    if let Err(cmd_error) = oxide_tokio_rt::run(do_run()) {
         fatal(cmd_error);
     }
 }

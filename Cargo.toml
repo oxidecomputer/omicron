@@ -120,7 +120,6 @@ members = [
     "passwords",
     "range-requests",
     "rpaths",
-    "runtime",
     "sled-agent",
     "sled-agent/api",
     "sled-agent/bootstrap-agent-api",
@@ -273,7 +272,6 @@ default-members = [
     "passwords",
     "range-requests",
     "rpaths",
-    "runtime",
     "sled-agent",
     "sled-agent/api",
     "sled-agent/bootstrap-agent-api",
@@ -559,12 +557,12 @@ omicron-passwords = { path = "passwords" }
 omicron-pins = { path = "dev-tools/pins" }
 omicron-repl-utils = { path = "dev-tools/repl-utils" }
 omicron-rpaths = { path = "rpaths" }
-omicron-runtime = { path = "runtime" }
 omicron-sled-agent = { path = "sled-agent" }
 omicron-test-utils = { path = "test-utils" }
 omicron-workspace-hack = "0.1.0"
 omicron-zone-package = "0.12.2"
 oxide-client = { path = "clients/oxide-client" }
+oxide-tokio-rt = { git = "https://github.com/oxidecomputer/oxide-tokio-rt", rev = "bd1b595a32a026163486e09fb785dbdb5fb16081" }
 oxide-vpc = { git = "https://github.com/oxidecomputer/opte", rev = "f5560fae02ad3fc349fabc6454c321143199ca9e", features = [ "api", "std" ] }
 oxlog = { path = "dev-tools/oxlog" }
 oxnet = "0.1.2"

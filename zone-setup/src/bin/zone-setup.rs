@@ -161,7 +161,7 @@ const ROOT: &str = "root";
 const SYS: &str = "sys";
 
 fn main() {
-    if let Err(err) = omicron_runtime::run(do_run()) {
+    if let Err(err) = oxide_tokio_rt::run(do_run()) {
         fatal(CmdError::Failure(err));
     }
 }

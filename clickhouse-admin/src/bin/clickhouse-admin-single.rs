@@ -39,7 +39,7 @@ enum Args {
 }
 
 fn main() {
-    if let Err(err) = omicron_runtime::run(main_impl()) {
+    if let Err(err) = oxide_tokio_rt::run(main_impl()) {
         fatal(err);
     }
 }

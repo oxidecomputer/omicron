@@ -10,6 +10,6 @@ use installinator::InstallinatorApp;
 fn main() -> Result<(), Box<dyn Error>> {
     let app = InstallinatorApp::parse();
     let log = InstallinatorApp::setup_log("/tmp/installinator.log")?;
-    omicron_runtime::run(app.exec(&log))?;
+    oxide_tokio_rt::run(app.exec(&log))?;
     Ok(())
 }

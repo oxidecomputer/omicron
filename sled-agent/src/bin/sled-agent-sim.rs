@@ -86,7 +86,7 @@ struct Args {
 }
 
 fn main() {
-    if let Err(message) = omicron_runtime::run(do_run()) {
+    if let Err(message) = oxide_tokio_rt::run(do_run()) {
         fatal(message);
     }
 }

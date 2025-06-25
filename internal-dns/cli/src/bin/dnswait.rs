@@ -57,7 +57,7 @@ impl From<ServiceName> for internal_dns_types::names::ServiceName {
 }
 
 fn main() -> Result<()> {
-    omicron_runtime::run(async {
+    oxide_tokio_rt::run(async {
         let opt = Opt::parse();
         let log = dropshot::ConfigLogging::File {
             path: "/dev/stderr".into(),

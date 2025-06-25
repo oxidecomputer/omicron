@@ -61,7 +61,7 @@ enum Cmd {
 }
 
 fn main() -> anyhow::Result<()> {
-    omicron_runtime::run(async {
+    oxide_tokio_rt::run(async {
         let args = Cli::parse();
 
         let decorator = TermDecorator::new().build();

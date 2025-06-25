@@ -236,7 +236,7 @@ async fn fetch_underlay_address() -> anyhow::Result<Ipv6Addr> {
 }
 
 fn main() -> anyhow::Result<()> {
-    omicron_runtime::run(async {
+    oxide_tokio_rt::run(async {
         let args = Cli::parse();
         let host = match args.host {
             Some(host) => host,

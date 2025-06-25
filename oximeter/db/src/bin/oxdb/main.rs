@@ -303,7 +303,7 @@ async fn query(
 }
 
 fn main() -> anyhow::Result<()> {
-    omicron_runtime::run(async {
+    oxide_tokio_rt::run(async {
         let args = OxDb::parse();
         let decorator = slog_term::TermDecorator::new().build();
         let drain = slog_term::FullFormat::new(decorator)

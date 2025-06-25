@@ -34,7 +34,7 @@ pub struct Config {
 }
 
 fn main() -> Result<(), anyhow::Error> {
-    omicron_runtime::run(async move {
+    oxide_tokio_rt::run(async move {
         let args = Args::parse();
         let config_file = &args.config_file;
         let config_file_contents = std::fs::read_to_string(config_file)

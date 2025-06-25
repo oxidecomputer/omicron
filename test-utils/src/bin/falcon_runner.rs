@@ -17,7 +17,7 @@ mod illumos {
 #[cfg(target_os = "illumos")]
 fn main() -> Result<(), anyhow::Error> {
     use illumos::*;
-    omicron_runtime::run(async {
+    oxide_tokio_rt::run(async {
         let args: Vec<_> = env::args().collect();
         let logctx = test_setup_log("falcon_test_runner");
         let log = logctx.log;

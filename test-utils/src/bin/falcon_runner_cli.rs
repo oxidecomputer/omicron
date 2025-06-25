@@ -12,7 +12,7 @@ mod illumos {
 #[cfg(target_os = "illumos")]
 fn main() -> Result<(), illumos::Error> {
     use illumos::*;
-    omicron_runtime::run(async {
+    oxide_tokio_rt::run(async {
         let mut d = Runner::new("launchpad_mcduck_runner");
 
         d.node("launchpad_mcduck_test_vm", "helios-2.0", 2, gb(2));

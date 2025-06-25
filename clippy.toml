@@ -32,8 +32,8 @@ disallowed-types = [
 [[disallowed-macros]]
 path = "tokio::main"
 reason = """\
-    Binaries deployed in production should use the  `omicron_runtime::run` \
-    function, as it enables DTrace probes and runtime configuration. \
+    Binaries deployed in production should use the `oxide_tokio_rt` \
+    crate, as it enables DTrace probes and runtime configuration. \
     dev-tools, xtasks, and examples may use `#[tokio::main]` when \
     necessary to avoid an `omicron-runtime` dependency.\
 """

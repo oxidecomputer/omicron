@@ -14,7 +14,7 @@ fn main() -> Result<()> {
     let args = Cli::parse();
 
     let terminal = ratatui::init();
-    let result = omicron_runtime::run(async move {
+    let result = oxide_tokio_rt::run(async move {
         Clickana::new(
             args.clickhouse_addr,
             args.log_path,

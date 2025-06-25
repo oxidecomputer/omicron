@@ -59,7 +59,7 @@ mod sled_agent;
 mod support_bundle;
 
 fn main() -> Result<(), anyhow::Error> {
-    omicron_runtime::run(async {
+    oxide_tokio_rt::run(async {
         let args = Omdb::parse();
 
         let log = dropshot::ConfigLogging::StderrTerminal {

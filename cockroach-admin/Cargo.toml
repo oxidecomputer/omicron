@@ -20,8 +20,8 @@ dropshot.workspace = true
 http.workspace = true
 illumos-utils.workspace = true
 omicron-common.workspace = true
-omicron-runtime.workspace = true
 omicron-uuid-kinds.workspace = true
+oxide-tokio-rt.workspace = true
 # See omicron-rpaths for more about the "pq-sys" dependency.
 pq-sys = "*"
 schemars.workspace = true

@@ -85,7 +85,7 @@ fn build_logger(level: Level) -> Logger {
 }
 
 fn main() -> anyhow::Result<()> {
-    omicron_runtime::run(async {
+    oxide_tokio_rt::run(async {
         let args = Args::parse();
         let log = build_logger(args.log_level);
         let client = Client::new(args.host, &log);

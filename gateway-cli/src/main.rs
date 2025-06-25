@@ -367,7 +367,7 @@ impl Dumper {
 }
 
 fn main() -> Result<()> {
-    omicron_runtime::run(async {
+    oxide_tokio_rt::run(async {
         let args = Args::parse();
         let decorator = slog_term::TermDecorator::new().build();
         let drain = slog_term::FullFormat::new(decorator)

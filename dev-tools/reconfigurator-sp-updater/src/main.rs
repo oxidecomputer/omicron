@@ -40,7 +40,7 @@ use tufaceous_artifact::ArtifactVersion;
 fn main() -> Result<(), anyhow::Error> {
     let args = ReconfiguratorSpUpdater::parse();
 
-    if let Err(error) = omicron_runtime::run(args.exec()) {
+    if let Err(error) = oxide_tokio_rt::run(args.exec()) {
         eprintln!("error: {:#}", error);
         std::process::exit(1);
     }

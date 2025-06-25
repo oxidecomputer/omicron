@@ -49,7 +49,7 @@ nexus-sled-agent-shared.workspace = true
 nexus-types.workspace = true
 omicron-common.workspace = true
 omicron-uuid-kinds.workspace = true
-omicron-runtime.workspace = true
+oxide-tokio-rt.workspace = true
 oximeter-client.workspace = true
 oximeter-db = { workspace = true, default-features = false, features = [ "oxql" ] }
 # See omicron-rpaths for more about the "pq-sys" dependency.

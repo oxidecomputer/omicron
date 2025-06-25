@@ -30,7 +30,7 @@ use tufaceous_artifact::ArtifactHash;
 use tufaceous_lib::OmicronRepo;
 
 fn main() -> Result<(), anyhow::Error> {
-    omicron_runtime::run(async {
+    oxide_tokio_rt::run(async {
         let args = RepoDepotStandalone::parse();
 
         if let Err(error) = args.exec().await {

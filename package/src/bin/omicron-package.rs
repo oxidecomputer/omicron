@@ -836,7 +836,7 @@ impl Progress for PackageProgress {
 }
 
 fn main() -> Result<()> {
-    omicron_runtime::run(async {
+    oxide_tokio_rt::run(async {
         let args = Args::try_parse()?;
         let base_config =
             BaseConfig::load(&args.manifest).with_context(|| {

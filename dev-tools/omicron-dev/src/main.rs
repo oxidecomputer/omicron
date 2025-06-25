@@ -12,7 +12,7 @@ use nexus_test_utils::resource_helpers::DiskTest;
 use signal_hook_tokio::Signals;
 
 fn main() -> anyhow::Result<()> {
-    omicron_runtime::run(async {
+    oxide_tokio_rt::run(async {
         let args = OmicronDevApp::parse();
         args.exec().await
     })

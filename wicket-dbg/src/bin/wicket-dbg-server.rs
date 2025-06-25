@@ -12,7 +12,7 @@ use tokio::net::{TcpListener, TcpStream};
 use wicket_dbg::{Cmd, Runner, RunnerHandle};
 
 fn main() -> Result<()> {
-    omicron_runtime::run(async {
+    oxide_tokio_rt::run(async {
         let log = setup_log()?;
         let (mut runner, handle) = Runner::new(log.clone());
 
