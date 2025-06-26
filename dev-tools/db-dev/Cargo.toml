@@ -18,6 +18,7 @@ futures.workspace = true
 libc.workspace = true
 omicron-test-utils.workspace = true
 omicron-workspace-hack.workspace = true
+oxide-tokio-rt.workspace = true
 # See omicron-rpaths for more about the "pq-sys" dependency.
 pq-sys = "*"
 signal-hook-tokio.workspace = true
