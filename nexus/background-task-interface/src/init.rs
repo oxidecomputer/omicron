@@ -47,6 +47,7 @@ pub struct BackgroundTasks {
     pub task_read_only_region_replacement_start: Activator,
     pub task_alert_dispatcher: Activator,
     pub task_webhook_deliverator: Activator,
+    pub task_sp_ereport_ingester: Activator,
 
     // Handles to activate background tasks that do not get used by Nexus
     // at-large.  These background tasks are implementation details as far as

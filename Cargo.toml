@@ -564,6 +564,7 @@ omicron-test-utils = { path = "test-utils" }
 omicron-workspace-hack = "0.1.0"
 omicron-zone-package = "0.12.2"
 oxide-client = { path = "clients/oxide-client" }
+oxide-tokio-rt = "0.1.1"
 oxide-vpc = { git = "https://github.com/oxidecomputer/opte", rev = "f5560fae02ad3fc349fabc6454c321143199ca9e", features = [ "api", "std" ] }
 oxlog = { path = "dev-tools/oxlog" }
 oxnet = "0.1.2"
@@ -576,7 +577,7 @@ openssl = "0.10"
 openssl-sys = "0.9"
 opte-ioctl = { git = "https://github.com/oxidecomputer/opte", rev = "f5560fae02ad3fc349fabc6454c321143199ca9e" }
 oso = "0.27"
-owo-colors = "4.2.1"
+owo-colors = "4.2.2"
 oximeter = { path = "oximeter/oximeter" }
 oximeter-api = { path = "oximeter/api" }
 oximeter-client = { path = "clients/oximeter-client" }
@@ -634,7 +635,7 @@ ratatui = "0.29.0"
 rayon = "1.10"
 rcgen = "0.12.1"
 reconfigurator-cli = { path = "dev-tools/reconfigurator-cli" }
-reedline = "0.38.0"
+reedline = "0.40.0"
 ref-cast = "1.0"
 regex = "1.11.1"
 regress = "0.10.3"
@@ -642,8 +643,8 @@ repo-depot-api = { path = "sled-agent/repo-depot-api" }
 repo-depot-client = { path = "clients/repo-depot-client" }
 reqwest = { version = "0.12.20", default-features = false }
 ring = "0.17.14"
-rpassword = "7.3.1"
-rstest = "0.24.0"
+rpassword = "7.4.0"
+rstest = "0.25.0"
 rustfmt-wrapper = "0.2"
 rustls = "0.22.2"
 rustls-pemfile = "2.2.0"
@@ -706,7 +707,7 @@ strum = { version = "0.26", features = [ "derive" ] }
 subprocess = "0.2.9"
 subtle = "2.6.1"
 supports-color = "3.0.2"
-support-bundle-viewer = "0.1.0"
+support-bundle-viewer = "0.1.2"
 swrite = "0.1.0"
 sync-ptr = "0.1.4"
 libsw = { version = "3.5.0", features = ["tokio"] }
@@ -754,7 +755,7 @@ wicketd-client = { path = "clients/wicketd-client" }
 xshell = "0.2.7"
 zerocopy = "0.8.26"
 zeroize = { version = "1.8.1", features = ["zeroize_derive", "std"] }
-zip = { version = "2.6.1", default-features = false, features = ["deflate","bzip2"] }
+zip = { version = "4.2.0", default-features = false, features = ["deflate","bzip2"] }
 zone = { version = "0.3.1", default-features = false, features = ["async"] }
 
 # newtype-uuid is set to default-features = false because we don't want to

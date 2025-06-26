@@ -9,6 +9,7 @@ use anyhow::Context;
 use anyhow::anyhow;
 use futures::StreamExt;
 use futures::stream;
+use iddqd::IdOrdMap;
 use nexus_db_queries::context::OpContext;
 use nexus_types::deployment::BlueprintSledConfig;
 use omicron_uuid_kinds::GenericUuid;
@@ -22,7 +23,7 @@ use std::collections::BTreeMap;
 /// the corresponding sleds
 pub(crate) async fn deploy_sled_configs(
     opctx: &OpContext,
-    sleds_by_id: &BTreeMap<SledUuid, Sled>,
+    sleds_by_id: &IdOrdMap<Sled>,
     sled_configs: &BTreeMap<SledUuid, BlueprintSledConfig>,
 ) -> Result<(), Vec<anyhow::Error>> {
     let errors: Vec<_> = stream::iter(sled_configs)
@@ -32,7 +33,7 @@ pub(crate) async fn deploy_sled_configs(
                 "generation" => i64::from(&config.sled_agent_generation),
             ));
 
-            let db_sled = match sleds_by_id.get(&sled_id) {
+            let db_sled = match sleds_by_id.get(sled_id) {
                 Some(sled) => sled,
                 None => {
                     if config.are_all_items_expunged() {
@@ -81,6 +82,7 @@ pub(crate) async fn deploy_sled_configs(
 mod tests {
     use super::*;
     use id_map::IdMap;
+    use iddqd::id_ord_map;
     use nexus_sled_agent_shared::inventory::OmicronZonesConfig;
     use nexus_sled_agent_shared::inventory::SledRole;
     use nexus_test_utils_macros::nexus_test;
@@ -131,8 +133,7 @@ mod tests {
         let sim_sled_agent_config_generation =
             sim_sled_agent.omicron_zones_list().generation;
 
-        let sleds_by_id = BTreeMap::from([(
-            sim_sled_agent.id,
+        let sleds_by_id = id_ord_map! {
             Sled::new(
                 sim_sled_agent.id,
                 SledPolicy::InService {
@@ -142,7 +143,7 @@ mod tests {
                 REPO_DEPOT_PORT,
                 SledRole::Scrimlet,
             ),
-        )]);
+        };
 
         // This is a fully fabricated dataset list for a simulated sled agent.
         //

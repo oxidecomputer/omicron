@@ -49,7 +49,7 @@ ed25519-dalek = { version = "2.1.1", features = ["digest", "pkcs8", "rand_core"]
 either = { version = "1.15.0", features = ["use_std"] }
 elliptic-curve = { version = "0.13.8", features = ["ecdh", "hazmat", "pem", "std"] }
 ff = { version = "0.13.0", default-features = false, features = ["alloc"] }
-flate2 = { version = "1.1.2" }
+flate2 = { version = "1.1.2", features = ["zlib-rs"] }
 foldhash = { version = "0.1.5" }
 form_urlencoded = { version = "1.2.1" }
 fs-err = { version = "3.1.1", default-features = false, features = ["tokio"] }
@@ -146,8 +146,8 @@ x509-cert = { version = "0.2.5" }
 zerocopy-c38e5c1d305a1b54 = { package = "zerocopy", version = "0.8.26", default-features = false, features = ["derive"] }
 zerocopy-ca01ad9e24f5d932 = { package = "zerocopy", version = "0.7.35", features = ["derive", "simd"] }
 zeroize = { version = "1.8.1", features = ["std", "zeroize_derive"] }
+zip-164d15cefe24d7eb = { package = "zip", version = "4.2.0", default-features = false, features = ["bzip2", "deflate", "zstd"] }
 zip-3b31131e45eafb45 = { package = "zip", version = "0.6.6", default-features = false, features = ["bzip2", "deflate"] }
-zip-f595c2ba2a3f28df = { package = "zip", version = "2.6.1", default-features = false, features = ["bzip2", "deflate", "zstd"] }
 
 [build-dependencies]
 ahash = { version = "0.8.11" }
@@ -182,7 +182,7 @@ ed25519-dalek = { version = "2.1.1", features = ["digest", "pkcs8", "rand_core"]
 either = { version = "1.15.0", features = ["use_std"] }
 elliptic-curve = { version = "0.13.8", features = ["ecdh", "hazmat", "pem", "std"] }
 ff = { version = "0.13.0", default-features = false, features = ["alloc"] }
-flate2 = { version = "1.1.2" }
+flate2 = { version = "1.1.2", features = ["zlib-rs"] }
 foldhash = { version = "0.1.5" }
 form_urlencoded = { version = "1.2.1" }
 fs-err = { version = "3.1.1", default-features = false, features = ["tokio"] }
@@ -281,8 +281,8 @@ x509-cert = { version = "0.2.5" }
 zerocopy-c38e5c1d305a1b54 = { package = "zerocopy", version = "0.8.26", default-features = false, features = ["derive"] }
 zerocopy-ca01ad9e24f5d932 = { package = "zerocopy", version = "0.7.35", features = ["derive", "simd"] }
 zeroize = { version = "1.8.1", features = ["std", "zeroize_derive"] }
+zip-164d15cefe24d7eb = { package = "zip", version = "4.2.0", default-features = false, features = ["bzip2", "deflate", "zstd"] }
 zip-3b31131e45eafb45 = { package = "zip", version = "0.6.6", default-features = false, features = ["bzip2", "deflate"] }
-zip-f595c2ba2a3f28df = { package = "zip", version = "2.6.1", default-features = false, features = ["bzip2", "deflate", "zstd"] }
 
 [target.x86_64-unknown-linux-gnu.dependencies]
 bitflags-f595c2ba2a3f28df = { package = "bitflags", version = "2.9.0", default-features = false, features = ["std"] }

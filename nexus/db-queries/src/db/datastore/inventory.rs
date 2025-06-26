@@ -169,7 +169,7 @@ impl DataStore {
 
         // Pull disk firmware out of sled agents
         let mut nvme_disk_firmware = Vec::new();
-        for (sled_id, sled_agent) in &collection.sled_agents {
+        for sled_agent in &collection.sled_agents {
             for disk in &sled_agent.disks {
                 match &disk.firmware {
                     PhysicalDiskFirmware::Unknown => (),
@@ -177,7 +177,7 @@ impl DataStore {
                         .push(
                             InvNvmeDiskFirmware::new(
                                 collection_id,
-                                *sled_id,
+                                sled_agent.sled_id,
                                 disk.slot,
                                 firmware,
                             )
@@ -193,9 +193,13 @@ impl DataStore {
         let disks: Vec<_> = collection
             .sled_agents
             .iter()
-            .flat_map(|(sled_id, sled_agent)| {
+            .flat_map(|sled_agent| {
                 sled_agent.disks.iter().map(|disk| {
-                    InvPhysicalDisk::new(collection_id, *sled_id, disk.clone())
+                    InvPhysicalDisk::new(
+                        collection_id,
+                        sled_agent.sled_id,
+                        disk.clone(),
+                    )
                 })
             })
             .collect();
@@ -204,11 +208,10 @@ impl DataStore {
         let zpools: Vec<_> = collection
             .sled_agents
             .iter()
-            .flat_map(|(sled_id, sled_agent)| {
-                sled_agent
-                    .zpools
-                    .iter()
-                    .map(|pool| InvZpool::new(collection_id, *sled_id, pool))
+            .flat_map(|sled_agent| {
+                sled_agent.zpools.iter().map(|pool| {
+                    InvZpool::new(collection_id, sled_agent.sled_id, pool)
+                })
             })
             .collect();
 
@@ -216,9 +219,9 @@ impl DataStore {
         let datasets: Vec<_> = collection
             .sled_agents
             .iter()
-            .flat_map(|(sled_id, sled_agent)| {
+            .flat_map(|sled_agent| {
                 sled_agent.datasets.iter().map(|dataset| {
-                    InvDataset::new(collection_id, *sled_id, dataset)
+                    InvDataset::new(collection_id, sled_agent.sled_id, dataset)
                 })
             })
             .collect();
@@ -227,7 +230,7 @@ impl DataStore {
         let zone_manifest_zones: Vec<_> = collection
             .sled_agents
             .iter()
-            .filter_map(|(sled_id, sled_agent)| {
+            .filter_map(|sled_agent| {
                 sled_agent
                     .zone_image_resolver
                     .zone_manifest
@@ -238,7 +241,7 @@ impl DataStore {
                         artifacts.artifacts.iter().map(|artifact| {
                             InvZoneManifestZone::new(
                                 collection_id,
-                                *sled_id,
+                                sled_agent.sled_id,
                                 artifact,
                             )
                         })
@@ -251,7 +254,7 @@ impl DataStore {
         let zone_manifest_non_boot: Vec<_> = collection
             .sled_agents
             .iter()
-            .flat_map(|(sled_id, sled_agent)| {
+            .flat_map(|sled_agent| {
                 sled_agent
                     .zone_image_resolver
                     .zone_manifest
@@ -260,7 +263,7 @@ impl DataStore {
                     .map(|non_boot| {
                         InvZoneManifestNonBoot::new(
                             collection_id,
-                            *sled_id,
+                            sled_agent.sled_id,
                             non_boot,
                         )
                     })
@@ -271,7 +274,7 @@ impl DataStore {
         let mupdate_override_non_boot: Vec<_> = collection
             .sled_agents
             .iter()
-            .flat_map(|(sled_id, sled_agent)| {
+            .flat_map(|sled_agent| {
                 sled_agent
                     .zone_image_resolver
                     .mupdate_override
@@ -280,7 +283,7 @@ impl DataStore {
                     .map(|non_boot| {
                         InvMupdateOverrideNonBoot::new(
                             collection_id,
-                            *sled_id,
+                            sled_agent.sled_id,
                             non_boot,
                         )
                     })
@@ -327,7 +330,7 @@ impl DataStore {
             Vec<_>,
         ) = collection
             .sled_agents
-            .values()
+            .iter()
             .partition(|sled_agent| sled_agent.baseboard_id.is_some());
         let sled_agents_no_baseboards = sled_agents_no_baseboards
             .into_iter()
@@ -3151,7 +3154,7 @@ impl DataStore {
         // Finally, build up the sled-agent map using the sled agent and
         // omicron zone rows. A for loop is easier to understand than into_iter
         // + filter_map + return Result + collect.
-        let mut sled_agents = BTreeMap::new();
+        let mut sled_agents = IdOrdMap::new();
         for s in sled_agent_rows {
             let sled_id = SledUuid::from(s.sled_id);
             let baseboard_id = s
@@ -3274,7 +3277,9 @@ impl DataStore {
                 last_reconciliation,
                 zone_image_resolver,
             };
-            sled_agents.insert(sled_id, sled_agent);
+            sled_agents
+                .insert_unique(sled_agent)
+                .expect("database ensures sled_agent_rows has unique sled_id");
         }
 
         // Check that we consumed all the reconciliation results we found in
@@ -3373,8 +3378,8 @@ impl ConfigReconcilerRows {
         collection: &Collection,
     ) -> anyhow::Result<Self> {
         let mut this = Self::default();
-        for (sled_id, sled_agent) in &collection.sled_agents {
-            this.accumulate(collection_id, *sled_id, sled_agent)?;
+        for sled_agent in &collection.sled_agents {
+            this.accumulate(collection_id, sled_agent)?;
         }
         Ok(this)
     }
@@ -3382,9 +3387,9 @@ impl ConfigReconcilerRows {
     fn accumulate(
         &mut self,
         collection_id: CollectionUuid,
-        sled_id: SledUuid,
         sled_agent: &SledAgent,
     ) -> anyhow::Result<()> {
+        let sled_id = sled_agent.sled_id;
         let mut ledgered_sled_config = None;
         if let Some(config) = &sled_agent.ledgered_sled_config {
             ledgered_sled_config =
@@ -4410,71 +4415,75 @@ mod test {
         //
         // * try all three `ConfigReconcilerInventoryStatus` variants
         // * add a `last_reconciliation` with a mix of success/error results
-        let mut sled_agents = collection.sled_agents.values_mut();
-        let sa1 = sled_agents.next().expect("at least 1 sled agent");
-        let sa2 = sled_agents.next().expect("at least 2 sled agents");
-        let sa3 = sled_agents.next().expect("at least 3 sled agents");
+        {
+            let mut sled_agents = collection.sled_agents.iter_mut();
+            let mut sa1 = sled_agents.next().expect("at least 1 sled agent");
+            let mut sa2 = sled_agents.next().expect("at least 2 sled agents");
+            let mut sa3 = sled_agents.next().expect("at least 3 sled agents");
 
-        sa1.reconciler_status = ConfigReconcilerInventoryStatus::NotYetRun;
-        sa1.last_reconciliation = None;
+            sa1.reconciler_status = ConfigReconcilerInventoryStatus::NotYetRun;
+            sa1.last_reconciliation = None;
 
-        sa2.reconciler_status = ConfigReconcilerInventoryStatus::Running {
-            config: sa2.ledgered_sled_config.clone().unwrap(),
-            started_at: now_db_precision(),
-            running_for: Duration::from_secs(1),
-        };
-        sa2.last_reconciliation = Some({
-            let make_result = |kind, i| {
-                if i % 2 == 0 {
-                    ConfigReconcilerInventoryResult::Ok
-                } else {
-                    ConfigReconcilerInventoryResult::Err {
-                        message: format!("fake {kind} error {i}"),
-                    }
-                }
+            sa2.reconciler_status = ConfigReconcilerInventoryStatus::Running {
+                config: sa2.ledgered_sled_config.clone().unwrap(),
+                started_at: now_db_precision(),
+                running_for: Duration::from_secs(1),
             };
-            ConfigReconcilerInventory {
-                last_reconciled_config: sa2
-                    .ledgered_sled_config
-                    .clone()
-                    .unwrap(),
-                external_disks: (0..10)
-                    .map(|i| {
-                        (PhysicalDiskUuid::new_v4(), make_result("disk", i))
-                    })
-                    .collect(),
-                datasets: (0..10)
-                    .map(|i| (DatasetUuid::new_v4(), make_result("dataset", i)))
-                    .collect(),
-                orphaned_datasets: (0..5)
-                    .map(|i| OrphanedDataset {
-                        name: DatasetName::new(
-                            ZpoolName::new_external(ZpoolUuid::new_v4()),
-                            DatasetKind::Cockroach,
-                        ),
-                        reason: format!("test orphan {i}"),
-                        id: if i % 2 == 0 {
-                            Some(DatasetUuid::new_v4())
-                        } else {
-                            None
-                        },
-                        mounted: i % 2 == 1,
-                        available: (10 * i).into(),
-                        used: i.into(),
-                    })
-                    .collect(),
-                zones: (0..10)
-                    .map(|i| {
-                        (OmicronZoneUuid::new_v4(), make_result("zone", i))
-                    })
-                    .collect(),
-            }
-        });
+            sa2.last_reconciliation = Some({
+                let make_result = |kind, i| {
+                    if i % 2 == 0 {
+                        ConfigReconcilerInventoryResult::Ok
+                    } else {
+                        ConfigReconcilerInventoryResult::Err {
+                            message: format!("fake {kind} error {i}"),
+                        }
+                    }
+                };
+                ConfigReconcilerInventory {
+                    last_reconciled_config: sa2
+                        .ledgered_sled_config
+                        .clone()
+                        .unwrap(),
+                    external_disks: (0..10)
+                        .map(|i| {
+                            (PhysicalDiskUuid::new_v4(), make_result("disk", i))
+                        })
+                        .collect(),
+                    datasets: (0..10)
+                        .map(|i| {
+                            (DatasetUuid::new_v4(), make_result("dataset", i))
+                        })
+                        .collect(),
+                    orphaned_datasets: (0..5)
+                        .map(|i| OrphanedDataset {
+                            name: DatasetName::new(
+                                ZpoolName::new_external(ZpoolUuid::new_v4()),
+                                DatasetKind::Cockroach,
+                            ),
+                            reason: format!("test orphan {i}"),
+                            id: if i % 2 == 0 {
+                                Some(DatasetUuid::new_v4())
+                            } else {
+                                None
+                            },
+                            mounted: i % 2 == 1,
+                            available: (10 * i).into(),
+                            used: i.into(),
+                        })
+                        .collect(),
+                    zones: (0..10)
+                        .map(|i| {
+                            (OmicronZoneUuid::new_v4(), make_result("zone", i))
+                        })
+                        .collect(),
+                }
+            });
 
-        sa3.reconciler_status = ConfigReconcilerInventoryStatus::Idle {
-            completed_at: now_db_precision(),
-            ran_for: Duration::from_secs(5),
-        };
+            sa3.reconciler_status = ConfigReconcilerInventoryStatus::Idle {
+                completed_at: now_db_precision(),
+                ran_for: Duration::from_secs(5),
+            };
+        }
 
         // Write it to the db; read it back and check it survived.
         datastore
@@ -4517,9 +4526,9 @@ mod test {
         // Mutate some zones on one of the sleds to have various image sources.
         {
             // Find a sled that has a few zones in one of its sled configs.
-            let sa = collection
+            let mut sa = collection
                 .sled_agents
-                .values_mut()
+                .iter_mut()
                 .find(|sa| {
                     sa.ledgered_sled_config
                         .as_ref()

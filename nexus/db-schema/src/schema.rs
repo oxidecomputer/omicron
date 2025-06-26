@@ -1846,6 +1846,14 @@ table! {
     }
 }
 
+table! {
+    reconfigurator_chicken_switches (version) {
+        version -> Int8,
+        planner_enabled -> Bool,
+        time_modified -> Timestamptz,
+    }
+}
+
 /* blueprints */
 
 table! {
@@ -2485,3 +2493,38 @@ allow_tables_to_appear_in_same_query!(
     webhook_delivery_attempt
 );
 joinable!(webhook_delivery_attempt -> webhook_delivery (delivery_id));
+
+table! {
+    sp_ereport (restart_id, ena) {
+        restart_id -> Uuid,
+        ena -> Int8,
+        time_deleted -> Nullable<Timestamptz>,
+        time_collected -> Timestamptz,
+        collector_id -> Uuid,
+
+        sp_type -> crate::enums::SpTypeEnum,
+        sp_slot -> Int4,
+
+        part_number -> Nullable<Text>,
+        serial_number -> Nullable<Text>,
+        class -> Nullable<Text>,
+
+        report -> Jsonb,
+    }
+}
+
+table! {
+    host_ereport (restart_id, ena) {
+        restart_id -> Uuid,
+        ena -> Int8,
+        time_deleted -> Nullable<Timestamptz>,
+        time_collected -> Timestamptz,
+        collector_id -> Uuid,
+
+        sled_id -> Uuid,
+        sled_serial -> Text,
+        class -> Nullable<Text>,
+
+        report -> Jsonb,
+    }
+}

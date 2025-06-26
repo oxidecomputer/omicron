@@ -1308,7 +1308,7 @@ impl Zfs {
             .collect::<Result<Vec<&str>, GetValueError>>()?
             .join(",");
 
-        cmd.args(&[ZFS, "get", "-Ho", "value"]);
+        cmd.args(&[ZFS, "get", "-Hpo", "value"]);
         if let Some(source) = source {
             cmd.args(&["-s", &source.to_string()]);
         }

@@ -26,6 +26,7 @@ hyper.workspace = true
 illumos-utils.workspace = true
 ipcc.workspace = true
 omicron-common.workspace = true
+oxide-tokio-rt.workspace = true
 schemars.workspace = true
 serde.workspace = true
 serde_json.workspace = true
