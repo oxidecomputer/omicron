@@ -1846,6 +1846,14 @@ table! {
     }
 }
 
+table! {
+    reconfigurator_chicken_switches (version) {
+        version -> Int8,
+        planner_enabled -> Bool,
+        time_modified -> Timestamptz,
+    }
+}
+
 /* blueprints */
 
 table! {
