@@ -32,3 +32,5 @@ blueprint-plan latest 61f451b3-2121-4ed6-91c7-a550054f6c21
 # TODO: we do not yet reset the install dataset image back to
 # the desired artifact version -- we should do that in the future.
 blueprint-diff 58d5e830-0884-47d8-a7cd-b2b3751adeb4 latest
+
+# TODO: set target release

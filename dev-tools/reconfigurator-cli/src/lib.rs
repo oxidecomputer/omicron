@@ -1019,7 +1019,7 @@ fn cmd_sled_set_mupdate_override(
 
     let desc = match args.mupdate_override_id {
         MupdateOverrideUuidOpt::Set(id) => format!("set to {id}"),
-        MupdateOverrideUuidOpt::Unset => format!("unset"),
+        MupdateOverrideUuidOpt::Unset => "unset".to_owned(),
     };
 
     sim.commit_and_bump(

@@ -24,7 +24,7 @@ set sled 2b8f0cb3-0295-4b3c-bc58-4fe88b57112c mupdate override: set to 6123eac1-
 generated inventory collection eb0796d5-ab8a-4f7b-a884-b4aeacb8ab51 from configured sleds
 
 > blueprint-plan latest eb0796d5-ab8a-4f7b-a884-b4aeacb8ab51
-INFO blueprint mupdate override updated to match inventory, sled_id: 2b8f0cb3-0295-4b3c-bc58-4fe88b57112c, new_bp_override: 6123eac1-ec5b-42ba-b73f-9845105a9971, prev_bp_override: None, zones: 
+INFO blueprint mupdate override updated to match inventory, phase: do_plan_mupdate_override, sled_id: 2b8f0cb3-0295-4b3c-bc58-4fe88b57112c, new_bp_override: 6123eac1-ec5b-42ba-b73f-9845105a9971, prev_bp_override: None, zones: 
   - zone 353b3b65-20f7-48c3-88f7-495bd5d31545 (Clickhouse) left unchanged, image source: install dataset
   - zone 466a9f29-62bf-4e63-924a-b9efdb86afec (Nexus) updated from artifact: version 1.2.3 to install dataset
   - zone 62620961-fc4a-481e-968b-f5acbac0dc63 (InternalNtp) left unchanged, image source: install dataset
@@ -33,8 +33,8 @@ INFO blueprint mupdate override updated to match inventory, sled_id: 2b8f0cb3-02
   - zone ad6a3a03-8d0f-4504-99a4-cbf73d69b973 (CruciblePantry) left unchanged, image source: install dataset
   - zone bd354eef-d8a6-4165-9124-283fb5e46d77 (Crucible) left unchanged, image source: install dataset
 
-INFO updating target release minimum generation based on new set-override actions, current_generation: 1, new_generation: 2
-INFO not ready to add or update new zones yet, reasons: sleds have remove mupdate override set in blueprint: 2b8f0cb3-0295-4b3c-bc58-4fe88b57112c; current target release generation (1) is lower than minimum required by blueprint (2)
+INFO updating target release minimum generation based on new set-override actions, phase: do_plan_mupdate_override, current_generation: 1, new_generation: 2
+INFO not ready to add or update new zones yet, phase: do_plan_mupdate_override, reasons: sleds have remove mupdate override set in blueprint: 2b8f0cb3-0295-4b3c-bc58-4fe88b57112c; current target release generation (1) is lower than minimum required by blueprint (2)
 INFO will ensure cockroachdb setting, setting: cluster.preserve_downgrade_option, value: DoNotModify
 generated blueprint 58d5e830-0884-47d8-a7cd-b2b3751adeb4 based on parent blueprint 8da82a8e-bf97-4fbd-8ddd-9f6462732cf1
 
@@ -232,12 +232,16 @@ set sled 2b8f0cb3-0295-4b3c-bc58-4fe88b57112c mupdate override: unset
 generated inventory collection 61f451b3-2121-4ed6-91c7-a550054f6c21 from configured sleds
 
 > blueprint-plan latest 61f451b3-2121-4ed6-91c7-a550054f6c21
-INFO inventory override no longer exists, blueprint override cleared, sled_id: 2b8f0cb3-0295-4b3c-bc58-4fe88b57112c, prev_bp_override: 6123eac1-ec5b-42ba-b73f-9845105a9971
-INFO not ready to add or update new zones yet, reasons: current target release generation (1) is lower than minimum required by blueprint (2)
+INFO inventory override no longer exists, blueprint override cleared, phase: do_plan_mupdate_override, sled_id: 2b8f0cb3-0295-4b3c-bc58-4fe88b57112c, prev_bp_override: 6123eac1-ec5b-42ba-b73f-9845105a9971
+INFO not ready to add or update new zones yet, phase: do_plan_mupdate_override, reasons: current target release generation (1) is lower than minimum required by blueprint (2)
 INFO will ensure cockroachdb setting, setting: cluster.preserve_downgrade_option, value: DoNotModify
 generated blueprint af934083-59b5-4bf6-8966-6fb5292c29e1 based on parent blueprint 58d5e830-0884-47d8-a7cd-b2b3751adeb4
 
 
+> # Diff the blueprints. This diff should show the "remove mupdate
+> # override" line going away.
+> # TODO: we do not yet reset the install dataset image back to
+> # the desired artifact version -- we should do that in the future.
 > blueprint-diff 58d5e830-0884-47d8-a7cd-b2b3751adeb4 latest
 from: blueprint 58d5e830-0884-47d8-a7cd-b2b3751adeb4
 to:   blueprint af934083-59b5-4bf6-8966-6fb5292c29e1
@@ -414,3 +418,5 @@ external DNS:
 
 
 
+
+> # TODO: set target release

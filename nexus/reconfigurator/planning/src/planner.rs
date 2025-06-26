@@ -1138,11 +1138,12 @@ impl<'a> Planner<'a> {
         // For each sled, compare what's in the inventory to what's in the
         // blueprint.
         let mut actions_by_sled = BTreeMap::new();
+        let log = self.log.new(o!("phase" => "do_plan_mupdate_override"));
 
         // We use the list of in-service sleds here -- we don't want to alter
         // expunged or decommissioned sleds.
         for sled_id in self.input.all_sled_ids(SledFilter::InService) {
-            let log = self.log.new(o!("sled_id" => sled_id.to_string()));
+            let log = log.new(o!("sled_id" => sled_id.to_string()));
             let Some(inv_sled) = self.inventory.sled_agents.get(&sled_id)
             else {
                 warn!(log, "no inventory found for commissioned sled");
@@ -1212,7 +1213,7 @@ impl<'a> Planner<'a> {
             if current == new {
                 // No change needed.
                 info!(
-                    self.log,
+                    log,
                     "would have updated target release minimum generation, but \
                      it was already set to the desired value, so no change was \
                      needed";
@@ -1221,7 +1222,7 @@ impl<'a> Planner<'a> {
             } else {
                 if current < new {
                     info!(
-                        self.log,
+                        log,
                         "updating target release minimum generation based on \
                          new set-override actions";
                         "current_generation" => %current,
@@ -1236,7 +1237,7 @@ impl<'a> Planner<'a> {
                     //
                     // In this case we warn but set the value.
                     warn!(
-                        self.log,
+                        log,
                         "target release minimum generation was set to current, \
                          but we are trying to set it to an older generation -- \
                          this is unexpected and may indicate a problem with the \
@@ -1301,7 +1302,7 @@ impl<'a> Planner<'a> {
         {
             reasons.push(format!(
                 "current target release generation ({}) is lower than \
-            minimum required by blueprint ({})",
+                 minimum required by blueprint ({})",
                 self.input.tuf_repo().target_release_generation,
                 self.blueprint.target_release_minimum_generation(),
             ));
@@ -1310,7 +1311,7 @@ impl<'a> Planner<'a> {
         if !reasons.is_empty() {
             let reasons = reasons.join("; ");
             info!(
-                self.log,
+                log,
                 "not ready to add or update new zones yet";
                 "reasons" => reasons,
             );
