@@ -9,6 +9,7 @@ use camino::Utf8PathBuf;
 use clap::ValueEnum;
 use clap::{Args, Parser, Subcommand};
 use gateway_types::rot::RotSlot;
+use iddqd::IdOrdMap;
 use indent_write::fmt::IndentWriter;
 use internal_dns_types::diff::DnsDiff;
 use itertools::Itertools;
@@ -51,7 +52,6 @@ use omicron_uuid_kinds::SledUuid;
 use omicron_uuid_kinds::VnicUuid;
 use omicron_uuid_kinds::{BlueprintUuid, MupdateOverrideUuid};
 use std::borrow::Cow;
-use std::collections::BTreeMap;
 use std::fmt::{self, Write};
 use std::io::IsTerminal;
 use std::num::ParseIntError;
@@ -1564,27 +1564,27 @@ fn cmd_blueprint_diff(
 
 fn make_sleds_by_id(
     system: &SystemDescription,
-) -> Result<BTreeMap<SledUuid, execution::Sled>, anyhow::Error> {
+) -> Result<IdOrdMap<execution::Sled>, anyhow::Error> {
     let collection = system
         .to_collection_builder()
         .context(
             "unexpectedly failed to create collection for current set of sleds",
         )?
         .build();
-    let sleds_by_id: BTreeMap<_, _> = collection
+    let sleds_by_id: IdOrdMap<_> = collection
         .sled_agents
         .iter()
-        .map(|(sled_id, sled_agent_info)| {
+        .map(|sa| {
             let sled = execution::Sled::new(
-                *sled_id,
+                sa.sled_id,
                 SledPolicy::InService {
                     provision_policy: SledProvisionPolicy::Provisionable,
                 },
-                sled_agent_info.sled_agent_address,
+                sa.sled_agent_address,
                 REPO_DEPOT_PORT,
-                sled_agent_info.sled_role,
+                sa.sled_role,
             );
-            (*sled_id, sled)
+            sled
         })
         .collect();
     Ok(sleds_by_id)
@@ -1782,11 +1782,12 @@ fn cmd_show(sim: &mut ReconfiguratorSim) -> anyhow::Result<Option<String>> {
     );
 
     let target_release = state.system().description().target_release();
-    match target_release {
+    match target_release.description() {
         Some(tuf_desc) => {
             swriteln!(
                 s,
-                "target release: {} ({})",
+                "target release (generation {}): {} ({})",
+                target_release.target_release_generation,
                 tuf_desc.repo.system_version,
                 tuf_desc.repo.file_name
             );
@@ -1802,7 +1803,11 @@ fn cmd_show(sim: &mut ReconfiguratorSim) -> anyhow::Result<Option<String>> {
             }
         }
         None => {
-            swriteln!(s, "target release: unset");
+            swriteln!(
+                s,
+                "target release (generation {}): unset",
+                target_release.target_release_generation,
+            );
         }
     }
 

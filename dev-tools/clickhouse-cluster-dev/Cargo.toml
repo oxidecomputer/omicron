@@ -15,6 +15,7 @@ clickward.workspace = true
 slog.workspace = true
 tokio.workspace = true
 omicron-workspace-hack.workspace = true
+oxide-tokio-rt.workspace = true
 oximeter-db.workspace = true
 oximeter-test-utils.workspace = true
 scopeguard.workspace = true

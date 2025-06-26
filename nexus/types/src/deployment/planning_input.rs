@@ -154,11 +154,11 @@ impl PlanningInput {
             .unwrap_or(0)
     }
 
-    pub fn tuf_repo(&self) -> Option<&TufRepoDescription> {
-        self.policy.tuf_repo.as_ref()
+    pub fn tuf_repo(&self) -> &TufRepoPolicy {
+        &self.policy.tuf_repo
     }
 
-    pub fn old_repo(&self) -> Option<&TufRepoDescription> {
+    pub fn old_repo(&self) -> Option<&TufRepoPolicy> {
         self.policy.old_repo.as_ref()
     }
 
@@ -942,13 +942,14 @@ pub struct Policy {
     /// New zones may use artifacts in this repo as their image sources,
     /// and at most one extant zone may be modified to use it or replaced
     /// with one that does.
-    pub tuf_repo: Option<TufRepoDescription>,
+    pub tuf_repo: TufRepoPolicy,
 
-    /// Previous system software release repository.
+    /// Previous system software release repository, if any. Once Nexus-driven
+    /// update is active on a rack, this is always `Some`.
     ///
     /// New zones deployed mid-update may use artifacts in this repo as
     /// their image sources. See RFD 565 §9.
-    pub old_repo: Option<TufRepoDescription>,
+    pub old_repo: Option<TufRepoPolicy>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
@@ -967,6 +968,32 @@ impl OximeterReadPolicy {
             mode: OximeterReadMode::SingleNode,
             time_created: Utc::now(),
         }
+    }
+}
+
+/// TUF repo-related policy that's part of the planning input.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct TufRepoPolicy {
+    /// The generation of the target release for the TUF repo.
+    pub target_release_generation: Generation,
+
+    /// A description of the TUF repo, or None if no TUF repo is in use.
+    pub description: Option<TufRepoDescription>,
+}
+
+impl TufRepoPolicy {
+    /// Returns the initial TUF repo policy for an Oxide deployment:
+    ///
+    /// * The target release generation is 1.
+    /// * There is no target release.
+    #[inline]
+    pub fn initial() -> Self {
+        Self { target_release_generation: Generation::new(), description: None }
+    }
+
+    #[inline]
+    pub fn description(&self) -> Option<&TufRepoDescription> {
+        self.description.as_ref()
     }
 }
 
@@ -1120,7 +1147,7 @@ impl PlanningInputBuilder {
                 target_crucible_pantry_zone_count: 0,
                 clickhouse_policy: None,
                 oximeter_read_policy: OximeterReadPolicy::new(1),
-                tuf_repo: None,
+                tuf_repo: TufRepoPolicy::initial(),
                 old_repo: None,
             },
             internal_dns_version: Generation::new(),

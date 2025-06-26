@@ -797,7 +797,7 @@ impl SimSystemBuilderInner {
 
         self.system
             .description
-            .set_target_release(state.planning_input.tuf_repo().cloned());
+            .set_tuf_repo(state.planning_input.tuf_repo().clone());
 
         system_res
     }

@@ -340,4 +340,37 @@ mod tests {
 
         logctx.cleanup_successful();
     }
+
+    /// Test that the resolver status can be converted to inventory format.
+    #[test]
+    fn resolver_status_to_inventory() {
+        let logctx = LogContext::new(
+            "resolver_status_to_inventory",
+            &ConfigLogging::StderrTerminal { level: ConfigLoggingLevel::Debug },
+        );
+        let dir = Utf8TempDir::new().unwrap();
+        dir.child(&BOOT_PATHS.install_dataset).create_dir_all().unwrap();
+
+        let internal_disks_rx =
+            make_internal_disks_rx(dir.path(), BOOT_UUID, &[]);
+        let resolver = ZoneImageSourceResolver::new(
+            &logctx.log,
+            internal_disks_rx.current_with_boot_disk(),
+        );
+
+        let status = resolver.status();
+        let inventory = status.to_inventory();
+
+        // Verify the conversion works
+        assert_eq!(
+            inventory.zone_manifest.boot_disk_path,
+            status.zone_manifest.boot_disk_path
+        );
+        assert_eq!(
+            inventory.mupdate_override.boot_disk_path,
+            status.mupdate_override.boot_disk_path
+        );
+
+        logctx.cleanup_successful();
+    }
 }
