@@ -189,7 +189,7 @@ impl Inventory {
 struct SpInfo {
     baseboard_id: Arc<BaseboardId>,
     sp_type: SpType,
-    sp_slot_id: u32,
+    sp_slot_id: u16,
 }
 
 impl Inventory {
@@ -214,16 +214,21 @@ impl Inventory {
             }),
         )
         .then(async move |sp_id| {
+            let sp_slot = u16::try_from(sp_id.slot).with_context(|| {
+                format!("sp slot number is out of range: {sp_id:?}")
+            })?;
             c.sp_get(sp_id.type_, sp_id.slot)
                 .await
                 .with_context(|| format!("fetching info about SP {:?}", sp_id))
-                .map(|s| (sp_id, s))
+                .map(|s| (sp_id.type_, sp_slot, s))
         })
         .collect::<Vec<Result<_, _>>>()
         .await
         .into_iter()
         .filter_map(|r| match r {
-            Ok((sp_id, v)) => Some((sp_id, v.into_inner())),
+            Ok((sp_type, sp_slot, v)) => {
+                Some((sp_type, sp_slot, v.into_inner()))
+            }
             Err(error) => {
                 warn!(
                     log,
@@ -237,17 +242,14 @@ impl Inventory {
 
         let sps_by_serial = sp_infos
             .into_iter()
-            .map(|(sp_id, sp_state)| {
+            .map(|(sp_type, sp_slot, sp_state)| {
                 let baseboard_id = Arc::new(BaseboardId {
                     serial_number: sp_state.serial_number,
                     part_number: sp_state.model,
                 });
                 let serial_number = baseboard_id.serial_number.clone();
-                let sp_info = SpInfo {
-                    baseboard_id,
-                    sp_type: sp_id.type_,
-                    sp_slot_id: sp_id.slot,
-                };
+                let sp_info =
+                    SpInfo { baseboard_id, sp_type, sp_slot_id: sp_slot };
                 (serial_number, sp_info)
             })
             .collect();
