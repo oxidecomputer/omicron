@@ -1,3 +1,4 @@
+use dropshot::test_util::ClientTestContext;
 use http::Method;
 use http::StatusCode;
 use nexus_test_utils::http_testing::AuthnMode;
@@ -29,6 +30,11 @@ async fn test_utilization(cptestctx: &ControlPlaneTestContext) {
 
     create_default_ip_pool(&client).await;
 
+    // default-silo has quotas, but is explicitly filtered out by ID in the DB
+    // query to avoid user confusion. so list is empty
+    let current_util = fetch_util(client).await;
+    assert!(current_util.is_empty());
+
     // set high quota for test silo
     let _ = NexusRequest::object_put(
         client,
@@ -39,31 +45,17 @@ async fn test_utilization(cptestctx: &ControlPlaneTestContext) {
     .execute()
     .await;
 
-    let current_util = objects_list_page_authz::<SiloUtilization>(
-        client,
-        "/v1/system/utilization/silos",
-    )
-    .await
-    .items;
-
-    // `default-silo` should be the only silo that shows up because
-    // it has a default quota set
-    assert_eq!(current_util.len(), 2);
-
-    assert_eq!(current_util[0].silo_name, "default-silo");
+    // now test-suite-silo shows up
+    let current_util = fetch_util(client).await;
+    assert_eq!(current_util.len(), 1);
+    assert_eq!(current_util[0].silo_name, "test-suite-silo");
     assert_eq!(current_util[0].provisioned, SiloQuotasCreate::empty().into());
     assert_eq!(
         current_util[0].allocated,
         SiloQuotasCreate::arbitrarily_high_default().into()
     );
 
-    assert_eq!(current_util[1].silo_name, "test-suite-silo");
-    assert_eq!(current_util[1].provisioned, SiloQuotasCreate::empty().into());
-    assert_eq!(
-        current_util[1].allocated,
-        SiloQuotasCreate::arbitrarily_high_default().into()
-    );
-
+    // now we take the quota back off of test-suite-silo and end up empty again
     let _ = NexusRequest::object_put(
         client,
         "/v1/system/silos/test-suite-silo/quotas",
@@ -73,22 +65,12 @@ async fn test_utilization(cptestctx: &ControlPlaneTestContext) {
     .execute()
     .await;
 
-    let current_util = objects_list_page_authz::<SiloUtilization>(
-        client,
-        "/v1/system/utilization/silos",
-    )
-    .await
-    .items;
+    let current_util = fetch_util(client).await;
 
-    // Now that default-silo is the only one with a quota, it should be the only result
-    assert_eq!(current_util.len(), 1);
+    assert!(current_util.is_empty());
 
-    assert_eq!(current_util[0].silo_name, "default-silo");
-    assert_eq!(current_util[0].provisioned, SiloQuotasCreate::empty().into());
-    assert_eq!(
-        current_util[0].allocated,
-        SiloQuotasCreate::arbitrarily_high_default().into()
-    );
+    // you can still fetch utilization for the default silo by name if you want,
+    // so we test that below
 
     let _ = create_project(&client, &PROJECT_NAME).await;
     let _ = create_instance(client, &PROJECT_NAME, &INSTANCE_NAME).await;
@@ -113,19 +95,16 @@ async fn test_utilization(cptestctx: &ControlPlaneTestContext) {
     .expect("failed to start instance");
 
     // get utilization for just the default silo
-    let silo_util = NexusRequest::object_get(
+    let default_silo_util = NexusRequest::object_get(
         client,
         "/v1/system/utilization/silos/default-silo",
     )
     .authn_as(AuthnMode::PrivilegedUser)
-    .execute()
-    .await
-    .expect("failed to fetch silo utilization")
-    .parsed_body::<SiloUtilization>()
-    .unwrap();
+    .execute_and_parse_unwrap::<SiloUtilization>()
+    .await;
 
     assert_eq!(
-        silo_util.provisioned,
+        default_silo_util.provisioned,
         VirtualResourceCounts {
             cpus: 4,
             memory: ByteCount::from_gibibytes_u32(1),
@@ -161,7 +140,7 @@ async fn test_utilization(cptestctx: &ControlPlaneTestContext) {
     .expect("disk failed to create");
 
     // Get the silo but this time using the silo admin view
-    let silo_util = NexusRequest::object_get(client, "/v1/utilization")
+    let default_silo_util = NexusRequest::object_get(client, "/v1/utilization")
         .authn_as(AuthnMode::PrivilegedUser)
         .execute()
         .await
@@ -170,11 +149,15 @@ async fn test_utilization(cptestctx: &ControlPlaneTestContext) {
         .unwrap();
 
     assert_eq!(
-        silo_util.provisioned,
+        default_silo_util.provisioned,
         VirtualResourceCounts {
             cpus: 4,
             memory: ByteCount::from_gibibytes_u32(1),
             storage: ByteCount::from_gibibytes_u32(2)
         }
     );
+}
+
+async fn fetch_util(client: &ClientTestContext) -> Vec<SiloUtilization> {
+    objects_list_page_authz(client, "/v1/system/utilization/silos").await.items
 }
