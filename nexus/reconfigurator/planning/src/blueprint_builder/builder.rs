@@ -1177,11 +1177,12 @@ impl<'a> BlueprintBuilder<'a> {
                 gz_address: dns_subnet.gz_address(),
                 gz_address_index,
             });
-        let image_source = self.zone_image_source(None, zone_type.kind());
+        let id = self.rng.sled_rng(sled_id).next_zone();
+        let image_source = self.zone_image_source(id, zone_type.kind());
 
         let zone = BlueprintZoneConfig {
             disposition: BlueprintZoneDisposition::InService,
-            id: self.rng.sled_rng(sled_id).next_zone(),
+            id,
             filesystem_pool: zpool,
             zone_type,
             image_source,
@@ -1230,7 +1231,7 @@ impl<'a> BlueprintBuilder<'a> {
                 dns_address,
                 nic,
             });
-        let image_source = self.zone_image_source(None, zone_type.kind());
+        let image_source = self.zone_image_source(id, zone_type.kind());
 
         let zone = BlueprintZoneConfig {
             disposition: BlueprintZoneDisposition::InService,
@@ -1270,11 +1271,12 @@ impl<'a> BlueprintBuilder<'a> {
             });
         let filesystem_pool =
             self.sled_select_zpool(sled_id, zone_type.kind())?;
-        let image_source = self.zone_image_source(None, zone_type.kind());
+        let id = self.rng.sled_rng(sled_id).next_zone();
+        let image_source = self.zone_image_source(id, zone_type.kind());
 
         let zone = BlueprintZoneConfig {
             disposition: BlueprintZoneDisposition::InService,
-            id: self.rng.sled_rng(sled_id).next_zone(),
+            id,
             filesystem_pool,
             zone_type,
             image_source,
@@ -1423,7 +1425,7 @@ impl<'a> BlueprintBuilder<'a> {
         });
         let filesystem_pool =
             self.sled_select_zpool(sled_id, zone_type.kind())?;
-        let image_source = self.zone_image_source(None, zone_type.kind());
+        let image_source = self.zone_image_source(nexus_id, zone_type.kind());
 
         let zone = BlueprintZoneConfig {
             disposition: BlueprintZoneDisposition::InService,
@@ -1449,7 +1451,8 @@ impl<'a> BlueprintBuilder<'a> {
             });
         let filesystem_pool =
             self.sled_select_zpool(sled_id, zone_type.kind())?;
-        let image_source = self.zone_image_source(None, zone_type.kind());
+        let image_source =
+            self.zone_image_source(oximeter_id, zone_type.kind());
 
         let zone = BlueprintZoneConfig {
             disposition: BlueprintZoneDisposition::InService,
@@ -1474,7 +1477,7 @@ impl<'a> BlueprintBuilder<'a> {
         );
         let filesystem_pool =
             self.sled_select_zpool(sled_id, zone_type.kind())?;
-        let image_source = self.zone_image_source(None, zone_type.kind());
+        let image_source = self.zone_image_source(pantry_id, zone_type.kind());
 
         let zone = BlueprintZoneConfig {
             disposition: BlueprintZoneDisposition::InService,
@@ -1509,7 +1512,7 @@ impl<'a> BlueprintBuilder<'a> {
                 dataset: OmicronZoneDataset { pool_name },
             });
         let filesystem_pool = pool_name;
-        let image_source = self.zone_image_source(None, zone_type.kind());
+        let image_source = self.zone_image_source(zone_id, zone_type.kind());
 
         let zone = BlueprintZoneConfig {
             disposition: BlueprintZoneDisposition::InService,
@@ -1536,7 +1539,7 @@ impl<'a> BlueprintBuilder<'a> {
                 address,
                 dataset: OmicronZoneDataset { pool_name },
             });
-        let image_source = self.zone_image_source(None, zone_type.kind());
+        let image_source = self.zone_image_source(id, zone_type.kind());
 
         let zone = BlueprintZoneConfig {
             disposition: BlueprintZoneDisposition::InService,
@@ -1565,7 +1568,7 @@ impl<'a> BlueprintBuilder<'a> {
             },
         );
         let filesystem_pool = pool_name;
-        let image_source = self.zone_image_source(None, zone_type.kind());
+        let image_source = self.zone_image_source(zone_id, zone_type.kind());
 
         let zone = BlueprintZoneConfig {
             disposition: BlueprintZoneDisposition::InService,
@@ -1594,7 +1597,7 @@ impl<'a> BlueprintBuilder<'a> {
             },
         );
         let filesystem_pool = pool_name;
-        let image_source = self.zone_image_source(None, zone_type.kind());
+        let image_source = self.zone_image_source(zone_id, zone_type.kind());
 
         let zone = BlueprintZoneConfig {
             disposition: BlueprintZoneDisposition::InService,
@@ -1721,7 +1724,8 @@ impl<'a> BlueprintBuilder<'a> {
             });
         let filesystem_pool =
             self.sled_select_zpool(sled_id, zone_type.kind())?;
-        let image_source = self.zone_image_source(None, zone_type.kind());
+        let image_source =
+            self.zone_image_source(new_zone_id, zone_type.kind());
 
         self.sled_add_zone(
             sled_id,
@@ -2002,7 +2006,7 @@ impl<'a> BlueprintBuilder<'a> {
     /// have already committed to using the new repo.
     pub(crate) fn zone_image_source(
         &self,
-        zone_id: Option<OmicronZoneUuid>,
+        zone_id: OmicronZoneUuid,
         zone_kind: ZoneKind,
     ) -> BlueprintZoneImageSource {
         let new_repo = self.input.tuf_repo();
@@ -2022,29 +2026,25 @@ impl<'a> BlueprintBuilder<'a> {
     /// replicated, etc.
     fn zone_should_use_new_repo(
         &self,
-        zone_id: Option<OmicronZoneUuid>,
+        zone_id: OmicronZoneUuid,
         zone_kind: ZoneKind,
         new_repo: Option<&TufRepoDescription>,
     ) -> bool {
         // If the zone is already using the new repo, keep using it.
         //
         // Otherwise, consider whether we should upgrade.
-        if let Some(zone_id) = zone_id {
-            if new_repo.is_some()
-                && self
-                    .parent_blueprint
-                    .all_omicron_zones(BlueprintZoneDisposition::is_in_service)
-                    .any(|(_, zone)| {
-                        zone.id == zone_id
-                            && zone.image_source
-                                == Self::zone_image_artifact(
-                                    new_repo, zone_kind,
-                                )
-                    })
-            {
-                return true;
-            };
-        }
+        if new_repo.is_some()
+            && self
+                .parent_blueprint
+                .all_omicron_zones(BlueprintZoneDisposition::is_in_service)
+                .any(|(_, zone)| {
+                    zone.id == zone_id
+                        && zone.image_source
+                            == Self::zone_image_artifact(new_repo, zone_kind)
+                })
+        {
+            return true;
+        };
 
         match zone_kind {
             ZoneKind::Nexus => {

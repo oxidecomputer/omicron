@@ -1042,7 +1042,7 @@ impl<'a> Planner<'a> {
                     .filter_map(move |zone| {
                         (zone.image_source
                             != blueprint.zone_image_source(
-                                Some(zone.id),
+                                zone.id,
                                 zone.zone_type.kind(),
                             ))
                         .then(|| (sled_id, zone.clone()))
@@ -1065,8 +1065,7 @@ impl<'a> Planner<'a> {
         zone: &BlueprintZoneConfig,
     ) -> Result<(), Error> {
         let zone_kind = zone.zone_type.kind();
-        let image_source =
-            self.blueprint.zone_image_source(Some(zone.id), zone_kind);
+        let image_source = self.blueprint.zone_image_source(zone.id, zone_kind);
         if zone.image_source == image_source {
             // This should only happen in the event of a planning error above.
             error!(
