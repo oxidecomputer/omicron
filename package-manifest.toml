@@ -638,10 +638,10 @@ source.repo = "maghemite"
 # `tools/maghemite_openapi_version`. Failing to do so will cause a failure when
 # building `ddm-admin-client` (which will instruct you to update
 # `tools/maghemite_openapi_version`).
-source.commit = "49cc16a3f9f70c75f841bd867f27fa0970c6b3f6"
+source.commit = "a7a1eaf26a05e7cedd02d3f3105d608beacc90d8"
 # The SHA256 digest is automatically posted to:
 # https://buildomat.eng.oxide.computer/public/file/oxidecomputer/maghemite/image/<commit>/mg-ddm-gz.sha256.txt
-source.sha256 = "a170f755c51c0e4ec8039673359772c9db4b46ee137716ab966e76a03a790517"
+source.sha256 = "75c32d297802f8b292c0df0cb7e931c0f54c4c31f96919db12d8b67f44bafc6d"
 output.type = "tarball"
 
 [package.mg-ddm]
@@ -654,10 +654,10 @@ source.repo = "maghemite"
 # `tools/maghemite_openapi_version`. Failing to do so will cause a failure when
 # building `ddm-admin-client` (which will instruct you to update
 # `tools/maghemite_openapi_version`).
-source.commit = "49cc16a3f9f70c75f841bd867f27fa0970c6b3f6"
+source.commit = "a7a1eaf26a05e7cedd02d3f3105d608beacc90d8"
 # The SHA256 digest is automatically posted to:
 # https://buildomat.eng.oxide.computer/public/file/oxidecomputer/maghemite/image/<commit>/mg-ddm.sha256.txt
-source.sha256 = "d583fedcc70c995d834562d2b111a6be79462137a5955f73910832114292a6de"
+source.sha256 = "9fdad3a2f7690681541cc89884f07a20d781fe0042269f24137521e6e8d9a083"
 output.type = "zone"
 output.intermediate_only = true
 
@@ -669,7 +669,7 @@ source.repo = "maghemite"
 # `tools/maghemite_openapi_version`. Failing to do so will cause a failure when
 # building `ddm-admin-client` (which will instruct you to update
 # `tools/maghemite_openapi_version`).
-source.commit = "49cc16a3f9f70c75f841bd867f27fa0970c6b3f6"
+source.commit = "a7a1eaf26a05e7cedd02d3f3105d608beacc90d8"
 # The SHA256 digest is automatically posted to:
 # https://buildomat.eng.oxide.computer/public/file/oxidecomputer/maghemite/image/<commit>/mgd.sha256.txt
 source.sha256 = "65438fb9c9cf5c0b623c54e571f10870bc10fda44c1d586b4f99511421c4b648"
