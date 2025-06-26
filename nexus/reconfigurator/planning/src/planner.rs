@@ -236,7 +236,7 @@ impl<'a> Planner<'a> {
         let ready = step!(self.do_plan_mgs_updates(ready.into_next()));
         let ready = step!(self.do_plan_zone_updates(ready.into_next())?);
         step!(self.do_plan_cockroachdb_settings(ready.into_next())?);
-        unreachable!("planning is complete!");
+        unreachable!("should have reached a terminal state already!");
     }
 
     fn do_plan_decommission(
