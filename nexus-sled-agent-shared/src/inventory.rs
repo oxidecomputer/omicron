@@ -597,6 +597,16 @@ pub enum HostPhase2DesiredContents {
     Artifact { hash: ArtifactHash },
 }
 
+impl HostPhase2DesiredContents {
+    /// The artifact hash described by `self`, if it has one.
+    pub fn artifact_hash(&self) -> Option<ArtifactHash> {
+        match self {
+            Self::CurrentContents => None,
+            Self::Artifact { hash } => Some(*hash),
+        }
+    }
+}
+
 /// Describes the desired contents for both host phase 2 slots.
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
