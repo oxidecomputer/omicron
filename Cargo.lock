@@ -1221,6 +1221,7 @@ dependencies = [
  "omicron-test-utils",
  "omicron-workspace-hack",
  "openssl",
+ "oxide-tokio-rt",
  "rcgen",
  "subprocess",
  "tokio",
@@ -1445,6 +1446,7 @@ dependencies = [
  "futures",
  "omicron-common",
  "omicron-workspace-hack",
+ "oxide-tokio-rt",
  "ratatui",
  "schemars",
  "serde_json",
@@ -1557,6 +1559,7 @@ dependencies = [
  "clickhouse-admin-test-utils",
  "clickward",
  "omicron-workspace-hack",
+ "oxide-tokio-rt",
  "oximeter-db",
  "oximeter-test-utils",
  "scopeguard",
@@ -2281,6 +2284,7 @@ dependencies = [
  "omicron-rpaths",
  "omicron-test-utils",
  "omicron-workspace-hack",
+ "oxide-tokio-rt",
  "pq-sys",
  "signal-hook-tokio",
  "subprocess",
@@ -2662,6 +2666,7 @@ dependencies = [
  "omicron-workspace-hack",
  "openapi-lint",
  "openapiv3",
+ "oxide-tokio-rt",
  "pretty-hex 0.4.1",
  "progenitor 0.10.0",
  "reqwest",
@@ -2999,6 +3004,7 @@ dependencies = [
  "omicron-uuid-kinds",
  "omicron-workspace-hack",
  "oxide-client",
+ "oxide-tokio-rt",
  "rand 0.8.5",
  "reqwest",
  "russh",
@@ -3089,6 +3095,7 @@ dependencies = [
  "schemars",
  "serde",
  "serde_json",
+ "thiserror 2.0.12",
 ]
 
 [[package]]
@@ -3251,6 +3258,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "4a3d7db9596fecd151c5f638c0ee5d5bd487b6e0ea232e5dc96d5250f6f94b1d"
 dependencies = [
  "crc32fast",
+ "libz-rs-sys",
  "miniz_oxide",
 ]
 
@@ -3529,6 +3537,7 @@ dependencies = [
  "omicron-common",
  "omicron-uuid-kinds",
  "omicron-workspace-hack",
+ "oxide-tokio-rt",
  "reqwest",
  "serde",
  "serde_json",
@@ -3549,6 +3558,7 @@ dependencies = [
  "base64 0.22.1",
  "chrono",
  "daft",
+ "ereport-types",
  "gateway-messages",
  "gateway-types",
  "omicron-uuid-kinds",
@@ -4930,6 +4940,7 @@ dependencies = [
  "omicron-test-utils",
  "omicron-uuid-kinds",
  "omicron-workspace-hack",
+ "oxide-tokio-rt",
  "partial-io",
  "proptest",
  "reqwest",
@@ -5031,6 +5042,7 @@ dependencies = [
  "internal-dns-types",
  "omicron-common",
  "omicron-workspace-hack",
+ "oxide-tokio-rt",
  "slog",
  "tokio",
 ]
@@ -5580,6 +5592,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "libz-rs-sys"
+version = "0.5.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "172a788537a2221661b480fee8dc5f96c580eb34fa88764d3205dc356c7e4221"
+dependencies = [
+ "zlib-rs",
+]
+
+[[package]]
 name = "libz-sys"
 version = "1.1.20"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -5886,6 +5907,7 @@ dependencies = [
  "libc",
  "omicron-gateway",
  "omicron-workspace-hack",
+ "oxide-tokio-rt",
  "signal-hook-tokio",
  "tokio",
 ]
@@ -6203,6 +6225,7 @@ dependencies = [
  "db-macros",
  "derive-where",
  "diesel",
+ "ereport-types",
  "expectorate",
  "hex",
  "iddqd",
@@ -6259,6 +6282,7 @@ dependencies = [
  "diesel",
  "diesel-dtrace",
  "dropshot",
+ "ereport-types",
  "expectorate",
  "futures",
  "gateway-client",
@@ -6576,6 +6600,7 @@ dependencies = [
  "futures",
  "httptest",
  "id-map",
+ "iddqd",
  "internal-dns-resolver",
  "internal-dns-types",
  "ipnet",
@@ -7250,6 +7275,7 @@ dependencies = [
  "omicron-workspace-hack",
  "openapi-lint",
  "openapiv3",
+ "oxide-tokio-rt",
  "oximeter-db",
  "oximeter-test-utils",
  "schemars",
@@ -7292,6 +7318,7 @@ dependencies = [
  "omicron-workspace-hack",
  "openapi-lint",
  "openapiv3",
+ "oxide-tokio-rt",
  "pq-sys",
  "proptest",
  "reqwest",
@@ -7417,6 +7444,7 @@ dependencies = [
  "omicron-test-utils",
  "omicron-workspace-hack",
  "oxide-client",
+ "oxide-tokio-rt",
  "pq-sys",
  "signal-hook-tokio",
  "subprocess",
@@ -7462,6 +7490,7 @@ dependencies = [
  "omicron-test-utils",
  "omicron-uuid-kinds",
  "omicron-workspace-hack",
+ "oxide-tokio-rt",
  "oximeter 0.1.0",
  "oximeter-instruments",
  "oximeter-producer",
@@ -7482,7 +7511,7 @@ dependencies = [
  "toml 0.8.23",
  "tufaceous-artifact",
  "uuid",
- "zip 2.6.1",
+ "zip 4.2.0",
 ]
 
 [[package]]
@@ -7569,6 +7598,7 @@ dependencies = [
  "dns-service-client",
  "dpd-client",
  "dropshot",
+ "ereport-types",
  "expectorate",
  "fatfs",
  "futures",
@@ -7635,6 +7665,7 @@ dependencies = [
  "openapiv3",
  "openssl",
  "oxide-client",
+ "oxide-tokio-rt",
  "oximeter 0.1.0",
  "oximeter-client",
  "oximeter-collector",
@@ -7696,7 +7727,7 @@ dependencies = [
  "update-common",
  "update-engine",
  "uuid",
- "zip 2.6.1",
+ "zip 4.2.0",
 ]
 
 [[package]]
@@ -7717,6 +7748,7 @@ dependencies = [
  "diesel",
  "dropshot",
  "dyn-clone",
+ "ereport-types",
  "expectorate",
  "futures",
  "gateway-client",
@@ -7753,6 +7785,7 @@ dependencies = [
  "omicron-uuid-kinds",
  "omicron-workspace-hack",
  "owo-colors",
+ "oxide-tokio-rt",
  "oximeter-client",
  "oximeter-db",
  "oxnet",
@@ -7797,6 +7830,7 @@ dependencies = [
  "indicatif",
  "omicron-workspace-hack",
  "omicron-zone-package",
+ "oxide-tokio-rt",
  "petgraph 0.8.2",
  "rayon",
  "reqwest",
@@ -7868,6 +7902,7 @@ dependencies = [
  "omicron-rpaths",
  "omicron-uuid-kinds",
  "omicron-workspace-hack",
+ "oxide-tokio-rt",
  "pq-sys",
  "qorb",
  "repo-depot-client",
@@ -7934,6 +7969,7 @@ dependencies = [
  "dropshot",
  "futures",
  "omicron-workspace-hack",
+ "oxide-tokio-rt",
  "repo-depot-api",
  "serde_json",
  "slog",
@@ -8015,6 +8051,7 @@ dependencies = [
  "omicron-uuid-kinds",
  "omicron-workspace-hack",
  "opte-ioctl",
+ "oxide-tokio-rt",
  "oximeter 0.1.0",
  "oximeter-instruments",
  "oximeter-producer",
@@ -8068,7 +8105,7 @@ dependencies = [
  "uuid",
  "walkdir",
  "zeroize",
- "zip 2.6.1",
+ "zip 4.2.0",
  "zone 0.3.1",
 ]
 
@@ -8094,6 +8131,7 @@ dependencies = [
  "nexus-config",
  "omicron-common",
  "omicron-workspace-hack",
+ "oxide-tokio-rt",
  "pem",
  "rcgen",
  "regex",
@@ -8273,7 +8311,7 @@ dependencies = [
  "zerocopy 0.8.26",
  "zeroize",
  "zip 0.6.6",
- "zip 2.6.1",
+ "zip 4.2.0",
 ]
 
 [[package]]
@@ -8537,9 +8575,9 @@ checksum = "b15813163c1d831bf4a13c3610c05c0d03b39feb07f7e09fa234dac9b15aaf39"
 
 [[package]]
 name = "owo-colors"
-version = "4.2.1"
+version = "4.2.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "26995317201fa17f3656c36716aed4a7c81743a9634ac4c99c0eeda495db0cec"
+checksum = "48dd4f4a2c8405440fd0462561f0e5806bd0f77e86f51c761481bdd4018b545e"
 
 [[package]]
 name = "oxide-client"
@@ -8563,6 +8601,16 @@ dependencies = [
  "thiserror 2.0.12",
  "tokio",
  "uuid",
+]
+
+[[package]]
+name = "oxide-tokio-rt"
+version = "0.1.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "4b64cff9722f687d5ba4c954d9a28e18d3e26c8861d588098cfe82871b3e31d1"
+dependencies = [
+ "tokio",
+ "tokio-dtrace",
 ]
 
 [[package]]
@@ -8666,6 +8714,7 @@ dependencies = [
  "omicron-workspace-hack",
  "openapi-lint",
  "openapiv3",
+ "oxide-tokio-rt",
  "oximeter 0.1.0",
  "oximeter-api",
  "oximeter-client",
@@ -8725,6 +8774,7 @@ dependencies = [
  "omicron-common",
  "omicron-test-utils",
  "omicron-workspace-hack",
+ "oxide-tokio-rt",
  "oximeter 0.1.0",
  "oximeter-test-utils",
  "oxql-types",
@@ -10524,6 +10574,7 @@ dependencies = [
  "dropshot",
  "expectorate",
  "humantime",
+ "iddqd",
  "indent_write",
  "internal-dns-types",
  "itertools 0.14.0",
@@ -10575,6 +10626,7 @@ dependencies = [
  "nexus-types",
  "omicron-repl-utils",
  "omicron-workspace-hack",
+ "oxide-tokio-rt",
  "qorb",
  "serde_json",
  "slog",
@@ -10613,22 +10665,22 @@ dependencies = [
 
 [[package]]
 name = "reedline"
-version = "0.38.0"
+version = "0.40.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "9bfa8cb0ad84c396c936d8abb814703d7042a433d2da75a0c7060cbdc89109f3"
+checksum = "b5cdfab7494d13ebfb6ce64828648518205d3ce8541ef1f94a27887f29d2d50b"
 dependencies = [
  "chrono",
  "crossterm",
  "fd-lock",
- "itertools 0.12.1",
+ "itertools 0.13.0",
  "nu-ansi-term 0.50.1",
  "serde",
  "strip-ansi-escapes",
  "strum",
  "strum_macros 0.26.4",
- "thiserror 1.0.69",
+ "thiserror 2.0.12",
  "unicode-segmentation",
- "unicode-width 0.1.14",
+ "unicode-width 0.2.0",
 ]
 
 [[package]]
@@ -10843,13 +10895,13 @@ dependencies = [
 
 [[package]]
 name = "rpassword"
-version = "7.3.1"
+version = "7.4.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "80472be3c897911d0137b2d2b9055faf6eeac5b14e324073d83bc17b191d7e3f"
+checksum = "66d4c8b64f049c6721ec8ccec37ddfc3d641c4a7fca57e8f2a89de509c73df39"
 dependencies = [
  "libc",
  "rtoolbox",
- "windows-sys 0.48.0",
+ "windows-sys 0.59.0",
 ]
 
 [[package]]
@@ -10876,9 +10928,9 @@ dependencies = [
 
 [[package]]
 name = "rstest"
-version = "0.24.0"
+version = "0.25.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "03e905296805ab93e13c1ec3a03f4b6c4f35e9498a3d5fa96dc626d22c03cd89"
+checksum = "6fc39292f8613e913f7df8fa892b8944ceb47c247b78e1b1ae2f09e019be789d"
 dependencies = [
  "futures-timer",
  "futures-util",
@@ -10888,9 +10940,9 @@ dependencies = [
 
 [[package]]
 name = "rstest_macros"
-version = "0.24.0"
+version = "0.25.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "ef0053bbffce09062bee4bcc499b0fbe7a57b879f1efe088d6d8d4c7adcdef9b"
+checksum = "1f168d99749d307be9de54d23fd226628d99768225ef08f6ffb52e0182a27746"
 dependencies = [
  "cfg-if",
  "glob",
@@ -12085,7 +12137,7 @@ dependencies = [
  "slog",
  "thiserror 2.0.12",
  "tokio",
- "zip 2.6.1",
+ "zip 4.2.0",
 ]
 
 [[package]]
@@ -12408,6 +12460,7 @@ dependencies = [
  "nix 0.30.1",
  "omicron-common",
  "omicron-workspace-hack",
+ "oxide-tokio-rt",
  "serde",
  "serde_cbor",
  "sha3",
@@ -12719,9 +12772,9 @@ checksum = "13c2bddecc57b384dee18652358fb23172facb8a2c51ccc10d74c157bdea3292"
 
 [[package]]
 name = "support-bundle-viewer"
-version = "0.1.0"
+version = "0.1.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "960873bebab69a59f0f8506f78319b924a251bd8fbb24eeca162059cfc3a1fd6"
+checksum = "666cc8963ecbd9989684b9cfce6420e73b268c91a48faf332822c8315426da60"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -12730,7 +12783,7 @@ dependencies = [
  "crossterm",
  "ratatui",
  "tokio",
- "zip 2.6.1",
+ "zip 4.2.0",
 ]
 
 [[package]]
@@ -13245,6 +13298,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "tokio-dtrace"
+version = "0.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "db739893a356b146ee6a4535693ff90274ef305cb2b6cdd40f9576b1b34b01fe"
+dependencies = [
+ "thiserror 2.0.12",
+ "tokio",
+ "usdt",
+]
+
+[[package]]
 name = "tokio-macros"
 version = "2.5.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -13742,7 +13806,7 @@ dependencies = [
 [[package]]
 name = "tufaceous"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/tufaceous?branch=main#04681f26ba09e144e5467dd6bd22c4887692a670"
+source = "git+https://github.com/oxidecomputer/tufaceous?branch=main#681cb87d43712ce0f00d469d538080e8368bf991"
 dependencies = [
  "anyhow",
  "camino",
@@ -13763,7 +13827,7 @@ dependencies = [
 [[package]]
 name = "tufaceous-artifact"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/tufaceous?branch=main#04681f26ba09e144e5467dd6bd22c4887692a670"
+source = "git+https://github.com/oxidecomputer/tufaceous?branch=main#681cb87d43712ce0f00d469d538080e8368bf991"
 dependencies = [
  "daft",
  "hex",
@@ -13780,7 +13844,7 @@ dependencies = [
 [[package]]
 name = "tufaceous-brand-metadata"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/tufaceous?branch=main#04681f26ba09e144e5467dd6bd22c4887692a670"
+source = "git+https://github.com/oxidecomputer/tufaceous?branch=main#681cb87d43712ce0f00d469d538080e8368bf991"
 dependencies = [
  "semver 1.0.26",
  "serde",
@@ -13792,7 +13856,7 @@ dependencies = [
 [[package]]
 name = "tufaceous-lib"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/tufaceous?branch=main#04681f26ba09e144e5467dd6bd22c4887692a670"
+source = "git+https://github.com/oxidecomputer/tufaceous?branch=main#681cb87d43712ce0f00d469d538080e8368bf991"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -13828,7 +13892,7 @@ dependencies = [
  "tufaceous-artifact",
  "tufaceous-brand-metadata",
  "url",
- "zip 2.6.1",
+ "zip 4.2.0",
 ]
 
 [[package]]
@@ -14747,6 +14811,7 @@ dependencies = [
  "clap",
  "crossterm",
  "omicron-workspace-hack",
+ "oxide-tokio-rt",
  "reedline",
  "serde",
  "slog",
@@ -14807,6 +14872,7 @@ dependencies = [
  "omicron-workspace-hack",
  "openapi-lint",
  "openapiv3",
+ "oxide-tokio-rt",
  "oxnet",
  "rand 0.8.5",
  "reqwest",
@@ -15560,20 +15626,25 @@ dependencies = [
 
 [[package]]
 name = "zip"
-version = "2.6.1"
+version = "4.2.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "1dcb24d0152526ae49b9b96c1dcf71850ca1e0b882e4e28ed898a93c41334744"
+checksum = "95ab361742de920c5535880f89bbd611ee62002bf11341d16a5f057bb8ba6899"
 dependencies = [
  "arbitrary",
  "bzip2 0.5.2",
  "crc32fast",
- "crossbeam-utils",
  "flate2",
  "indexmap 2.9.0",
  "memchr",
  "zopfli",
  "zstd",
 ]
+
+[[package]]
+name = "zlib-rs"
+version = "0.5.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "626bd9fa9734751fc50d6060752170984d7053f5a39061f524cda68023d4db8a"
 
 [[package]]
 name = "zone"
@@ -15609,6 +15680,7 @@ dependencies = [
  "illumos-utils",
  "omicron-common",
  "omicron-workspace-hack",
+ "oxide-tokio-rt",
  "oxnet",
  "serde_json",
  "sled-agent-types",

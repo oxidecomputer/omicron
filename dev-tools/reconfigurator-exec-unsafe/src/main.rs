@@ -38,11 +38,10 @@ use update_engine::NestedError;
 use update_engine::display::LineDisplay;
 use update_engine::display::LineDisplayStyles;
 
-#[tokio::main]
-async fn main() -> Result<(), anyhow::Error> {
+fn main() -> Result<(), anyhow::Error> {
     let args = ReconfiguratorExec::parse();
 
-    if let Err(error) = args.exec().await {
+    if let Err(error) = oxide_tokio_rt::run(args.exec()) {
         eprintln!("error: {:#}", error);
         std::process::exit(1);
     }

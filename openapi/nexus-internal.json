@@ -677,6 +677,91 @@
         }
       }
     },
+    "/deployment/chicken-switches": {
+      "get": {
+        "summary": "Get the current set of chicken switches",
+        "operationId": "reconfigurator_chicken_switches_show_current",
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ReconfiguratorChickenSwitches"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      },
+      "post": {
+        "summary": "Update the chicken switches at the latest versions",
+        "operationId": "reconfigurator_chicken_switches_set",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ReconfiguratorChickenSwitchesParam"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "204": {
+            "description": "resource updated"
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/deployment/chicken-switches/{version}": {
+      "get": {
+        "summary": "Get the chicken switches at `version` if it exists",
+        "operationId": "reconfigurator_chicken_switches_show",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "version",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "format": "uint32",
+              "minimum": 0
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ReconfiguratorChickenSwitches"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
     "/deployment/update-status": {
       "get": {
         "summary": "Show deployed versions of artifacts",
@@ -6480,6 +6565,45 @@
           "infra_ip_last",
           "ports",
           "rack_subnet"
+        ]
+      },
+      "ReconfiguratorChickenSwitches": {
+        "type": "object",
+        "properties": {
+          "planner_enabled": {
+            "type": "boolean"
+          },
+          "time_modified": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "version": {
+            "type": "integer",
+            "format": "uint32",
+            "minimum": 0
+          }
+        },
+        "required": [
+          "planner_enabled",
+          "time_modified",
+          "version"
+        ]
+      },
+      "ReconfiguratorChickenSwitchesParam": {
+        "type": "object",
+        "properties": {
+          "planner_enabled": {
+            "type": "boolean"
+          },
+          "version": {
+            "type": "integer",
+            "format": "uint32",
+            "minimum": 0
+          }
+        },
+        "required": [
+          "planner_enabled",
+          "version"
         ]
       },
       "RecoverySiloConfig": {

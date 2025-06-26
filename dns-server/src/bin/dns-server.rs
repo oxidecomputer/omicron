@@ -33,8 +33,11 @@ pub struct Config {
     pub storage: dns_server::storage::Config,
 }
 
-#[tokio::main]
-async fn main() -> Result<(), anyhow::Error> {
+fn main() -> Result<(), anyhow::Error> {
+    oxide_tokio_rt::run(main_impl())
+}
+
+async fn main_impl() -> Result<(), anyhow::Error> {
     let args = Args::parse();
     let config_file = &args.config_file;
     let config_file_contents = std::fs::read_to_string(config_file)

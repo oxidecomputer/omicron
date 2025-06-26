@@ -19,6 +19,9 @@ pub use gateway_client::types::PowerState;
 pub use gateway_client::types::RotImageError;
 pub use gateway_client::types::SpType;
 pub use gateway_types::rot::RotSlot;
+use iddqd::IdOrdItem;
+use iddqd::IdOrdMap;
+use iddqd::id_upcast;
 use nexus_sled_agent_shared::inventory::ConfigReconcilerInventory;
 use nexus_sled_agent_shared::inventory::ConfigReconcilerInventoryStatus;
 use nexus_sled_agent_shared::inventory::InventoryDataset;
@@ -119,7 +122,7 @@ pub struct Collection {
         BTreeMap<RotPageWhich, BTreeMap<Arc<BaseboardId>, RotPageFound>>,
 
     /// Sled Agent information, by *sled* id
-    pub sled_agents: BTreeMap<SledUuid, SledAgent>,
+    pub sled_agents: IdOrdMap<SledAgent>,
 
     /// The raft configuration (cluster membership) of the clickhouse keeper
     /// cluster as returned from each available keeper via `clickhouse-admin` in
@@ -177,7 +180,7 @@ impl Collection {
         &self,
     ) -> impl Iterator<Item = &OmicronZoneConfig> {
         self.sled_agents
-            .values()
+            .iter()
             .filter_map(|sa| sa.ledgered_sled_config.as_ref())
             .flat_map(|config| config.zones.iter())
     }
@@ -188,17 +191,16 @@ impl Collection {
         &self,
     ) -> impl Iterator<Item = &OmicronZoneConfig> {
         self.sled_agents
-            .values()
+            .iter()
             .filter_map(|sa| sa.last_reconciliation.as_ref())
             .flat_map(|reconciliation| reconciliation.running_omicron_zones())
     }
 
     /// Iterate over the sled ids of sleds identified as Scrimlets
     pub fn scrimlets(&self) -> impl Iterator<Item = SledUuid> + '_ {
-        self.sled_agents
-            .iter()
-            .filter(|(_, inventory)| inventory.sled_role == SledRole::Scrimlet)
-            .map(|(sled_id, _)| *sled_id)
+        self.sled_agents.iter().filter_map(|sa| {
+            (sa.sled_role == SledRole::Scrimlet).then_some(sa.sled_id)
+        })
     }
 
     /// Return the latest clickhouse keeper configuration in this collection, if
@@ -570,6 +572,14 @@ pub struct SledAgent {
     pub reconciler_status: ConfigReconcilerInventoryStatus,
     pub last_reconciliation: Option<ConfigReconcilerInventory>,
     pub zone_image_resolver: ZoneImageResolverInventory,
+}
+
+impl IdOrdItem for SledAgent {
+    type Key<'a> = SledUuid;
+    fn key(&self) -> Self::Key<'_> {
+        self.sled_id
+    }
+    id_upcast!();
 }
 
 #[derive(Clone, Default, Debug, PartialEq, Eq, Deserialize, Serialize)]
