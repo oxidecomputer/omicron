@@ -109,8 +109,8 @@ regex-syntax = { version = "0.8.5" }
 reqwest = { version = "0.12.20", features = ["blocking", "cookies", "json", "rustls-tls", "stream"] }
 rsa = { version = "0.9.6", features = ["serde", "sha2"] }
 rustc-hash = { version = "2.1.1" }
-rustls = { version = "0.23.19", features = ["ring"] }
-rustls-webpki = { version = "0.102.8", default-features = false, features = ["aws_lc_rs", "ring", "std"] }
+rustls = { version = "0.23.28", features = ["ring"] }
+rustls-webpki = { version = "0.103.3", default-features = false, features = ["aws-lc-rs", "ring", "std"] }
 schemars = { version = "0.8.22", features = ["bytes", "chrono", "semver", "url", "uuid1"] }
 scopeguard = { version = "1.2.0" }
 semver = { version = "1.0.26", features = ["serde"] }
@@ -242,8 +242,8 @@ regex-syntax = { version = "0.8.5" }
 reqwest = { version = "0.12.20", features = ["blocking", "cookies", "json", "rustls-tls", "stream"] }
 rsa = { version = "0.9.6", features = ["serde", "sha2"] }
 rustc-hash = { version = "2.1.1" }
-rustls = { version = "0.23.19", features = ["ring"] }
-rustls-webpki = { version = "0.102.8", default-features = false, features = ["aws_lc_rs", "ring", "std"] }
+rustls = { version = "0.23.28", features = ["ring"] }
+rustls-webpki = { version = "0.103.3", default-features = false, features = ["aws-lc-rs", "ring", "std"] }
 schemars = { version = "0.8.22", features = ["bytes", "chrono", "semver", "url", "uuid1"] }
 scopeguard = { version = "1.2.0" }
 semver = { version = "1.0.26", features = ["serde"] }
