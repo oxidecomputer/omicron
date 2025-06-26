@@ -31,6 +31,7 @@ crucible-pantry-client.workspace = true
 crucible-common.workspace = true
 dns-service-client.workspace = true
 dpd-client.workspace = true
+ereport-types.workspace = true
 mg-admin-client.workspace = true
 dropshot.workspace = true
 fatfs.workspace = true
@@ -126,6 +127,7 @@ nexus-sled-agent-shared.workspace = true
 nexus-types.workspace = true
 omicron-common.workspace = true
 omicron-passwords.workspace = true
+oxide-tokio-rt.workspace = true
 oximeter.workspace = true
 oximeter-instruments = { workspace = true, features = ["http-instruments"] }
 oximeter-producer.workspace = true
