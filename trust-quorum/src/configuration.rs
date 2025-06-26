@@ -8,6 +8,7 @@ use crate::crypto::{EncryptedRackSecret, RackSecret, Salt, Sha3_256Digest};
 use crate::validators::ValidatedReconfigureMsg;
 use crate::{Epoch, PlatformId, Threshold};
 use gfss::shamir::{Share, SplitError};
+use iddqd::{IdOrdItem, id_upcast};
 use omicron_uuid_kinds::RackUuid;
 use secrecy::ExposeSecret;
 use serde::{Deserialize, Serialize};
@@ -48,6 +49,16 @@ pub struct Configuration {
 
     // There is no previous configuration for the initial configuration
     pub previous_configuration: Option<PreviousConfiguration>,
+}
+
+impl IdOrdItem for Configuration {
+    type Key<'a> = Epoch;
+
+    fn key(&self) -> Self::Key<'_> {
+        self.epoch
+    }
+
+    id_upcast!();
 }
 
 impl Configuration {

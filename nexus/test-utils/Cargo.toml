@@ -34,6 +34,7 @@ nexus-db-queries = { workspace = true, features = [ "testing" ] }
 nexus-sled-agent-shared.workspace = true
 nexus-test-interface.workspace = true
 nexus-types.workspace = true
+omicron-cockroach-admin.workspace = true
 omicron-common.workspace = true
 omicron-passwords.workspace = true
 omicron-sled-agent.workspace = true

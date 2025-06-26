@@ -60,8 +60,11 @@ enum Cmd {
     },
 }
 
-#[tokio::main]
-async fn main() -> anyhow::Result<()> {
+fn main() -> anyhow::Result<()> {
+    oxide_tokio_rt::run(main_impl())
+}
+
+async fn main_impl() -> anyhow::Result<()> {
     let args = Cli::parse();
 
     let decorator = TermDecorator::new().build();

@@ -5,6 +5,7 @@
 //! Propagates DNS changes in a given blueprint
 
 use crate::Sled;
+use iddqd::IdOrdMap;
 use internal_dns_types::diff::DnsDiff;
 use nexus_db_model::DnsGroup;
 use nexus_db_queries::context::OpContext;
@@ -21,16 +22,14 @@ use nexus_types::internal_api::params::DnsConfigZone;
 use omicron_common::api::external::Error;
 use omicron_common::api::external::InternalContext;
 use omicron_common::bail_unless;
-use omicron_uuid_kinds::SledUuid;
 use slog::{debug, info, o};
-use std::collections::BTreeMap;
 
 pub(crate) async fn deploy_dns(
     opctx: &OpContext,
     datastore: &DataStore,
     creator: String,
     blueprint: &Blueprint,
-    sleds_by_id: &BTreeMap<SledUuid, Sled>,
+    sleds_by_id: &IdOrdMap<Sled>,
     overrides: &Overridables,
 ) -> Result<(), Error> {
     // First, fetch the current DNS configs.
@@ -350,6 +349,7 @@ mod test {
     use nexus_types::deployment::OximeterReadPolicy;
     use nexus_types::deployment::PendingMgsUpdates;
     use nexus_types::deployment::SledFilter;
+    use nexus_types::deployment::TufRepoPolicy;
     use nexus_types::deployment::blueprint_zone_type;
     use nexus_types::external_api::params;
     use nexus_types::external_api::shared;
@@ -640,7 +640,7 @@ mod test {
         );
         let blueprint_dns = blueprint_internal_dns_config(
             &blueprint,
-            &BTreeMap::new(),
+            &IdOrdMap::new(),
             &Default::default(),
         )
         .unwrap();
@@ -666,7 +666,7 @@ mod test {
 
         let mut blueprint_sleds = BTreeMap::new();
 
-        for (sled_id, sa) in collection.sled_agents {
+        for sa in collection.sled_agents {
             let ledgered_sled_config =
                 sa.ledgered_sled_config.unwrap_or_default();
 
@@ -689,7 +689,7 @@ mod test {
                 })
                 .collect();
             blueprint_sleds.insert(
-                sled_id,
+                sa.sled_id,
                 BlueprintSledConfig {
                     state: SledState::Active,
                     sled_agent_generation: ledgered_sled_config.generation,
@@ -756,7 +756,7 @@ mod test {
             .zip(possible_sled_subnets)
             .enumerate()
             .map(|(i, (sled_id, subnet))| {
-                let sled_info = Sled::new(
+                Sled::new(
                     *sled_id,
                     SledPolicy::InService {
                         provision_policy: SledProvisionPolicy::Provisionable,
@@ -766,8 +766,7 @@ mod test {
                     // The first two of these (arbitrarily) will be marked
                     // Scrimlets.
                     if i < 2 { SledRole::Scrimlet } else { SledRole::Gimlet },
-                );
-                (*sled_id, sled_info)
+                )
             })
             .collect();
 
@@ -823,12 +822,12 @@ mod test {
         // zone.  In this case, the value is the Scrimlet's sled id.
         let switch_sleds_by_ip: BTreeMap<_, _> = sleds_by_id
             .iter()
-            .filter_map(|(sled_id, sled)| {
+            .filter_map(|sled| {
                 if sled.is_scrimlet() {
                     let sled_subnet =
-                        sleds_by_id.get(sled_id).unwrap().subnet();
+                        sleds_by_id.get(&sled.id()).unwrap().subnet();
                     let switch_zone_ip = get_switch_zone_address(sled_subnet);
-                    Some((switch_zone_ip, *sled_id))
+                    Some((switch_zone_ip, sled.id()))
                 } else {
                     None
                 }
@@ -838,11 +837,11 @@ mod test {
         // We also want a mapping from underlay IP to each sled global zone.
         // In this case, the value is the sled id.
         let all_sleds_by_ip: BTreeMap<_, _> = sleds_by_id
-            .keys()
-            .map(|sled_id| {
-                let sled_subnet = sleds_by_id.get(sled_id).unwrap().subnet();
+            .iter()
+            .map(|sled| {
+                let sled_subnet = sleds_by_id.get(&sled.id()).unwrap().subnet();
                 let global_zone_ip = *get_sled_address(sled_subnet).ip();
-                (global_zone_ip, *sled_id)
+                (global_zone_ip, sled.id())
             })
             .collect();
 
@@ -1497,7 +1496,7 @@ mod test {
                 target_crucible_pantry_zone_count: CRUCIBLE_PANTRY_REDUNDANCY,
                 clickhouse_policy: None,
                 oximeter_read_policy: OximeterReadPolicy::new(1),
-                tuf_repo: None,
+                tuf_repo: TufRepoPolicy::initial(),
                 old_repo: None,
                 log,
             }

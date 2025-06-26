@@ -24,6 +24,7 @@ csv.workspace = true
 diesel.workspace = true
 dropshot.workspace = true
 dyn-clone.workspace = true
+ereport-types.workspace = true
 futures.workspace = true
 gateway-client.workspace = true
 gateway-messages.workspace = true
@@ -49,6 +50,7 @@ nexus-sled-agent-shared.workspace = true
 nexus-types.workspace = true
 omicron-common.workspace = true
 omicron-uuid-kinds.workspace = true
+oxide-tokio-rt.workspace = true
 oximeter-client.workspace = true
 oximeter-db = { workspace = true, default-features = false, features = [ "oxql" ] }
 # See omicron-rpaths for more about the "pq-sys" dependency.
