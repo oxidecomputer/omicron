@@ -33,7 +33,12 @@ use uuid::Uuid;
 
 /// How long may the status remain unchanged without us treating this as a
 /// problem?
-pub const PROGRESS_TIMEOUT: Duration = Duration::from_secs(180);
+///
+/// With the RoT bootloader need to wait for 2 resets which have a timeout
+/// of 60 seconds each, and an attempt to retrieve boot info, which has a
+/// time out of 30 seconds. We then give ourselves a few more minutes to act
+/// as a buffer for other pending actions.
+pub const PROGRESS_TIMEOUT: Duration = Duration::from_secs(600);
 
 /// How long to wait between failed attempts to reset the device
 const RESET_DELAY_INTERVAL: Duration = Duration::from_secs(10);
@@ -381,14 +386,13 @@ pub(crate) async fn apply_update(
                         ));
                     }
                 }
-                PostUpdateError::RotBootloaderImageError { error } => {
-                    let error = InlineErrorChain::new(&error);
-                    error!(log, "post_update failed"; &error);
+                PostUpdateError::FatalError { error } => {
+                    error!(log, "post_update failed"; "error" => ?error);
                     return Err(ApplyUpdateError::SpResetFailed(
                         error.to_string(),
                     ));
                 }
-                PostUpdateError::RotCommunicationFailed { message: _ } => {}
+                PostUpdateError::TransientError { message: _ } => {}
             }
 
             tokio::time::sleep(RESET_DELAY_INTERVAL).await;
@@ -628,10 +632,6 @@ async fn wait_for_update_done(
             // Check if we're done.
             Ok(PrecheckStatus::UpdateComplete) => return Ok(()),
 
-            // We'll loop for 3 minutes to wait for any ongoing RoT bootloader update.
-            // We need to wait for 2 resets which have a timeout of 60 seconds each,
-            // and an attempt to retrieve boot info, which has a time out of 30 seconds.
-            // We give an additional 30 seconds to as a buffer for the other actions.
             Ok(PrecheckStatus::WaitingForOngoingRotBootloaderUpdate) => {
                 if before.elapsed()
                     >= WAIT_FOR_ONGOING_ROT_BOOTLOADER_UPDATE_TIMEOUT

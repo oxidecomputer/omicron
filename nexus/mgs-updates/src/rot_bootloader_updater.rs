@@ -61,15 +61,12 @@ impl SpComponentUpdateHelper for ReconfiguratorRotBootloaderUpdater {
                 });
             }
 
-            // TODO-K: In the RoT bootloader update code in wicket, there is a set of
-            // known bootloader FWIDs that don't have cabooses. Is this something we
-            // should care about here?
-            // https://github.com/oxidecomputer/omicron/blob/89ce370f0a96165c777e90a008257a6085897f2a/wicketd/src/update_tracker.rs#L1817-L1841
-
-            // TODO-K: There are also older versions of the SP have a bug that prevents
-            // setting the active slot for the RoT bootloader. Is this something we should
-            // care about here?
-            // https://github.com/oxidecomputer/omicron/blob/89ce370f0a96165c777e90a008257a6085897f2a/wicketd/src/update_tracker.rs#L1705-L1710
+            // TODO: In the RoT bootloader update code in wicket, there is a set of
+            // known bootloader FWIDs that don't have cabooses. There are also older
+            // versions of the SP have a bug that prevents setting the active slot for
+            // the RoT bootloader. We should reject any update request that comes from
+            // a system using those devices.
+            // https://github.com/oxidecomputer/omicron/issues/8457
 
             // Fetch the caboose from the currently active slot (stage0).
             let caboose = mgs_clients
@@ -205,7 +202,9 @@ impl SpComponentUpdateHelper for ReconfiguratorRotBootloaderUpdater {
         async move {
             // Before setting stage0 to the new version we want to ensure
             // the image is good and we're not going to brick the device.
-            // The RoT will do a signature check when reset.
+            // We'll reset the device, causing it to check the signature.
+            // Then we'll validate that signature before we activate the
+            // new stage0.
             debug!(
                 log,
                 "attempting to reset device to do bootloader signature check"
@@ -237,12 +236,32 @@ impl SpComponentUpdateHelper for ReconfiguratorRotBootloaderUpdater {
             )
             .await?;
             // If the image is not valid we bail
-            if let Some(error) = stage0next_error {
-                return Err(PostUpdateError::RotBootloaderImageError {
-                    error,
+            if let Some(e) = stage0next_error {
+                return Err(PostUpdateError::FatalError {
+                    error: e.to_string(),
                 });
             }
 
+            // This operation is very delicate.  Here, we're overwriting the device
+            // bootloader with the one that we've written to the stage0next slot.
+            // The hardware has no fallback slot for the bootloader.  So if the
+            // device resets or loses power while we're copying stage0next to the
+            // stage0 slot, it could still become bricked.
+            //
+            // We've already done everything we can to mitigate this:
+            //
+            // - The data is already on the device, minimizing the time to copy it
+            //    to where it needs to go.
+            // - The image has already been verified by the device (and the device
+            //    validates _that_ before starting this operation), so it won't fail
+            //    at boot for that reason.
+            // - The device can't be externally reset _during_ this operation because
+            //    the same code responsible for processing the reset request will be
+            //    busy doing the copy.
+            // - We only ever update one RoT stage0 at a time in a rack, so if we brick
+            //    one, only one sled would be affected (still bad).
+            //
+            // So we're ready to roll!
             debug!(log, "attempting to set RoT bootloader active slot");
             mgs_clients
                 .try_all_serially(log, move |mgs_client| async move {
@@ -332,7 +351,7 @@ async fn wait_for_stage0_next_image_check(
                             "failed to get RoT boot info";
                             "error" => %message,
                         );
-                        return Err(PostUpdateError::RotCommunicationFailed {
+                        return Err(PostUpdateError::TransientError {
                             message,
                         });
                     }

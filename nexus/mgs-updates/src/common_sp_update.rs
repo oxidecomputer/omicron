@@ -8,7 +8,6 @@
 use super::MgsClients;
 use super::UpdateProgress;
 use futures::future::BoxFuture;
-use gateway_client::types::RotImageError;
 use gateway_client::types::SpType;
 use gateway_client::types::SpUpdateStatus;
 use gateway_types::rot::RotSlot;
@@ -326,11 +325,11 @@ pub enum PostUpdateError {
     #[error("communicating with MGS")]
     GatewayClientError(#[from] GatewayClientError),
 
-    #[error("communicating with RoT: {message:?}")]
-    RotCommunicationFailed { message: String },
+    #[error("transient error: {message:?}")]
+    TransientError { message: String },
 
-    #[error("invalid RoT bootloader image: {error:?}")]
-    RotBootloaderImageError { error: RotImageError },
+    #[error("fatal error: {error:?}")]
+    FatalError { error: String },
 }
 
 #[derive(Debug)]
