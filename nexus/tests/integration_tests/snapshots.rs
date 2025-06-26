@@ -135,7 +135,7 @@ async fn test_snapshot_basic(cptestctx: &ControlPlaneTestContext) {
             },
             ncpus: InstanceCpuCount(2),
             memory: ByteCount::from_gibibytes_u32(1),
-            hostname: "base-instance".parse().unwrap(),
+            hostname: Some("base-instance".parse().unwrap()),
             user_data:
                 b"#cloud-config\nsystem_info:\n  default_user:\n    name: oxide"
                     .to_vec(),
@@ -341,7 +341,7 @@ async fn test_snapshot_stopped_instance(cptestctx: &ControlPlaneTestContext) {
             },
             ncpus: InstanceCpuCount(2),
             memory: ByteCount::from_gibibytes_u32(1),
-            hostname: "base-instance".parse().unwrap(),
+            hostname: Some("base-instance".parse().unwrap()),
             user_data:
                 b"#cloud-config\nsystem_info:\n  default_user:\n    name: oxide"
                     .to_vec(),

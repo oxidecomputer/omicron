@@ -448,7 +448,7 @@ mod test {
                         },
                         ncpus: cpus.try_into().unwrap(),
                         memory: memory.try_into().unwrap(),
-                        hostname: "myhostname".try_into().unwrap(),
+                        hostname: Some("myhostname".try_into().unwrap()),
                         user_data: Vec::new(),
                         network_interfaces:
                             params::InstanceNetworkInterfaceAttachment::None,
