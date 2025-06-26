@@ -64,6 +64,7 @@ mod deployment;
 mod device_auth;
 mod disk;
 mod dns;
+mod ereport;
 mod external_ip;
 mod identity_provider;
 mod image;

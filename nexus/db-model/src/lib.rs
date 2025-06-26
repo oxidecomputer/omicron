@@ -83,6 +83,7 @@ mod webhook_rx;
 // However, they must be defined in the same crate as our tables
 // for join-based marker trait generation.
 mod deployment;
+mod ereport;
 mod ipv4_nat_entry;
 mod omicron_zone_config;
 mod quota;
@@ -170,6 +171,7 @@ pub use disk::*;
 pub use disk_state::*;
 pub use dns::*;
 pub use downstairs::*;
+pub use ereport::*;
 pub use external_ip::*;
 pub use generation::*;
 pub use identity_provider::*;

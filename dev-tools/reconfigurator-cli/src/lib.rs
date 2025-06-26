@@ -1672,11 +1672,12 @@ fn cmd_show(sim: &mut ReconfiguratorSim) -> anyhow::Result<Option<String>> {
     );
 
     let target_release = state.system().description().target_release();
-    match target_release {
+    match target_release.description() {
         Some(tuf_desc) => {
             swriteln!(
                 s,
-                "target release: {} ({})",
+                "target release (generation {}): {} ({})",
+                target_release.target_release_generation,
                 tuf_desc.repo.system_version,
                 tuf_desc.repo.file_name
             );
@@ -1692,7 +1693,11 @@ fn cmd_show(sim: &mut ReconfiguratorSim) -> anyhow::Result<Option<String>> {
             }
         }
         None => {
-            swriteln!(s, "target release: unset");
+            swriteln!(
+                s,
+                "target release (generation {}): unset",
+                target_release.target_release_generation,
+            );
         }
     }
 

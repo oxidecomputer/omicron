@@ -13,7 +13,7 @@ configured silo names: example-silo
 internal DNS generations: 1
 external DNS generations: 1
 target number of Nexus instances: default
-target release: unset
+target release (generation 1): unset
 
 
 
@@ -51,7 +51,7 @@ configured silo names: example-silo
 internal DNS generations: 1
 external DNS generations: 1
 target number of Nexus instances: default
-target release: 1.0.0 (system-update-v1.0.0.zip)
+target release (generation 2): 1.0.0 (system-update-v1.0.0.zip)
     artifact: 7e6667e646ad001b54c8365a3d309c03f89c59102723d38d01697ee8079fe670 gimlet_sp (SimGimletSp version 1.0.0)
     artifact: 04e4a7fdb84acca92c8fd3235e26d64ea61bef8a5f98202589fd346989c5720a gimlet_rot_image_a (fake-gimlet-rot version 1.0.0)
     artifact: 04e4a7fdb84acca92c8fd3235e26d64ea61bef8a5f98202589fd346989c5720a gimlet_rot_image_b (fake-gimlet-rot version 1.0.0)
@@ -89,7 +89,7 @@ configured silo names: example-silo
 internal DNS generations: 
 external DNS generations: 
 target number of Nexus instances: default
-target release: unset
+target release (generation 1): unset
 
 
 > load saved.out
@@ -115,7 +115,7 @@ configured silo names: example-silo
 internal DNS generations: 1
 external DNS generations: 1
 target number of Nexus instances: default
-target release: 1.0.0 (system-update-v1.0.0.zip)
+target release (generation 2): 1.0.0 (system-update-v1.0.0.zip)
     artifact: 7e6667e646ad001b54c8365a3d309c03f89c59102723d38d01697ee8079fe670 gimlet_sp (SimGimletSp version 1.0.0)
     artifact: 04e4a7fdb84acca92c8fd3235e26d64ea61bef8a5f98202589fd346989c5720a gimlet_rot_image_a (fake-gimlet-rot version 1.0.0)
     artifact: 04e4a7fdb84acca92c8fd3235e26d64ea61bef8a5f98202589fd346989c5720a gimlet_rot_image_b (fake-gimlet-rot version 1.0.0)

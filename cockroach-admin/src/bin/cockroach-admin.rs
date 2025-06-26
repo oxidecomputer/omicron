@@ -29,6 +29,13 @@ enum Args {
         #[clap(long, action)]
         cockroach_address: SocketAddrV6,
 
+        /// Socket address for a running cockroach HTTP server instance
+        ///
+        /// Although this may be on an arbitrary address, it should point
+        /// to the same address as the "cockroach_address" server.
+        #[clap(long, action)]
+        cockroach_http_address: SocketAddr,
+
         /// Address on which this server should run
         #[clap(long, action)]
         http_address: SocketAddrV6,
@@ -57,12 +64,16 @@ async fn main_impl() -> Result<(), CmdError> {
         Args::Run {
             path_to_cockroach_binary,
             cockroach_address,
+            cockroach_http_address,
             http_address,
             config_file_path,
             zone_id,
         } => {
-            let cockroach_cli =
-                CockroachCli::new(path_to_cockroach_binary, cockroach_address);
+            let cockroach_cli = CockroachCli::new(
+                path_to_cockroach_binary,
+                cockroach_address,
+                cockroach_http_address,
+            );
             let mut config = Config::from_file(&config_file_path)
                 .map_err(|err| CmdError::Failure(anyhow!(err)))?;
             config.dropshot.bind_address = SocketAddr::V6(http_address);
