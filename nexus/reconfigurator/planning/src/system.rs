@@ -493,8 +493,6 @@ impl SystemDescription {
         })?;
         let sled = Arc::make_mut(sled);
         sled.set_rot_versions(slot_a_version, slot_b_version);
-        // TODO-K: Should I include all the other settings as well?
-        // Is there a point to that?
         Ok(self)
     }
 

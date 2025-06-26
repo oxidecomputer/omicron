@@ -256,16 +256,6 @@ fn mgs_update_status(
                 version: found_active_version,
             };
 
-            // TODO-K: Make an mgs_update_status_rot?
-            //Ok(mgs_update_status_sp(
-            //    log,
-            //    desired_version,
-            //    &expected_active_slot.version,
-            //    expected_inactive_version,
-            //    &active_caboose.caboose.version,
-            //    found_inactive_version,
-            //))
-
             Ok(mgs_update_status_rot(
                 desired_version,
                 &expected_active_slot,
@@ -631,7 +621,6 @@ fn try_make_update_sp(
     // If the artifact's version matches what's deployed, then no update is
     // needed.
     if artifact.id.version == expected_active_version {
-        // TODO-K: bails out here when trying to do an RoT update
         debug!(log, "no SP update needed for board"; baseboard_id);
         return None;
     }

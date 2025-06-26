@@ -1053,6 +1053,7 @@ fn cmd_sled_update_rot(
         labels.push(format!("slot b -> {}", slot_b));
     }
     // TODO-K: Do I need these settings as well?
+    // Maybe only to test failure cases.
     labels.push(format!(
         "persistent boot preference -> {}",
         &args.persistent_boot_preference
@@ -1094,8 +1095,6 @@ fn cmd_sled_update_rot(
     );
 
     Ok(Some(format!(
-        // TODO-K: Is "RoT settings" what I want here? or "versions"
-        // if that's the only thing we need
         "set sled {} RoT settings: {}",
         args.sled_id,
         labels.join(", ")
