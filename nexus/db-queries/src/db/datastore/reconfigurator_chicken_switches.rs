@@ -42,6 +42,7 @@ impl DataStore {
             reconfigurator_chicken_switches::version,
             pagparams,
         )
+        .order_by(reconfigurator_chicken_switches::dsl::version.desc())
         .select(DbReconfiguratorChickenSwitches::as_select())
         .get_results_async(&*self.pool_connection_authorized(opctx).await?)
         .await
