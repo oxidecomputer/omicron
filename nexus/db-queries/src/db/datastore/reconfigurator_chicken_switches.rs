@@ -101,12 +101,6 @@ impl DataStore {
         opctx: &OpContext,
         switches: ReconfiguratorChickenSwitchesParam,
     ) -> Result<(), Error> {
-        if switches.version < 1 {
-            return Err(Error::invalid_request(
-                "version must be greater than 0",
-            ));
-        }
-
         let ReconfiguratorChickenSwitchesParam { version, planner_enabled } =
             switches;
         let switches = ReconfiguratorChickenSwitches {
@@ -119,11 +113,8 @@ impl DataStore {
             .authorize(authz::Action::Modify, &authz::BLUEPRINT_CONFIG)
             .await?;
 
-        let num_inserted = self
-            .reconfigurator_chicken_switches_insert_next_version(
-                opctx, &switches,
-            )
-            .await?;
+        let num_inserted =
+            self.insert_latest_version_internal(opctx, &switches).await?;
 
         match num_inserted {
             0 => Err(Error::invalid_request(format!(
@@ -141,14 +132,16 @@ impl DataStore {
     ///
     /// Only succeeds if the prior version is the latest version currently
     /// in the `reconfigurator_chicken_switches` table.
-    ///
-    /// Panics if `switches.version < 1`;
-    async fn reconfigurator_chicken_switches_insert_next_version(
+    async fn insert_latest_version_internal(
         &self,
         opctx: &OpContext,
         switches: &ReconfiguratorChickenSwitches,
     ) -> Result<usize, Error> {
-        assert!(switches.version >= 1);
+        if switches.version < 1 {
+            return Err(Error::invalid_request(
+                "version must be greater than 0",
+            ));
+        }
 
         sql_query(
             r"INSERT INTO reconfigurator_chicken_switches
