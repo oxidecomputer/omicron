@@ -21,6 +21,7 @@ use std::sync::Arc;
 use thiserror::Error;
 use tufaceous_artifact::ArtifactKind;
 use tufaceous_artifact::ArtifactVersion;
+use tufaceous_artifact::ArtifactVersionError;
 use tufaceous_artifact::KnownArtifactKind;
 
 /// Generates a new set of `PendingMgsUpdates` based on:
@@ -171,8 +172,12 @@ enum MgsUpdateStatusError {
     MissingSpInfo,
     #[error("no caboose found for active slot in inventory")]
     MissingActiveCaboose,
+    #[error("no RoT state found in inventory")]
+    MissingRotState,
     #[error("not yet implemented")]
     NotYetImplemented,
+    #[error("unable to parse input into ArtifactVersion: {0:?}")]
+    FailedArtifactVersionParse(ArtifactVersionError),
 }
 
 /// Determine the status of a single MGS update based on what's in inventory for
@@ -206,7 +211,6 @@ fn mgs_update_status(
                 .map(|c| c.caboose.version.as_ref());
 
             Ok(mgs_update_status_sp(
-                log,
                 desired_version,
                 expected_active_version,
                 expected_inactive_version,
@@ -217,16 +221,13 @@ fn mgs_update_status(
         PendingMgsUpdateDetails::Rot {
             expected_active_slot,
             expected_inactive_version,
-            ..
-            // TODO-K: incorporate these
-            // expected_persistent_boot_preference,
-            // expected_pending_persistent_boot_preference,
-            // expected_transient_boot_preference,
+            expected_persistent_boot_preference,
+            expected_pending_persistent_boot_preference,
+            expected_transient_boot_preference,
         } => {
-
             let active_caboose_which = match &expected_active_slot.slot {
                 RotSlot::A => CabooseWhich::RotSlotA,
-                RotSlot::B => CabooseWhich::RotSlotB
+                RotSlot::B => CabooseWhich::RotSlotB,
             };
 
             let Some(active_caboose) =
@@ -239,14 +240,44 @@ fn mgs_update_status(
                 .caboose_for(active_caboose_which.toggled_slot(), baseboard_id)
                 .map(|c| c.caboose.version.as_ref());
 
+            let rot_state = inventory
+                .rots
+                .get(baseboard_id)
+                .ok_or(MgsUpdateStatusError::MissingRotState)?;
+
+            let found_active_version =
+                ArtifactVersion::new(active_caboose.caboose.version.clone())
+                    .map_err(|e| {
+                        MgsUpdateStatusError::FailedArtifactVersionParse(e)
+                    })?;
+
+            let found_active_slot = ExpectedActiveRotSlot {
+                slot: rot_state.active_slot,
+                version: found_active_version,
+            };
+
             // TODO-K: Make an mgs_update_status_rot?
-            Ok(mgs_update_status_sp(
-                log,
+            //Ok(mgs_update_status_sp(
+            //    log,
+            //    desired_version,
+            //    &expected_active_slot.version,
+            //    expected_inactive_version,
+            //    &active_caboose.caboose.version,
+            //    found_inactive_version,
+            //))
+
+            Ok(mgs_update_status_rot(
                 desired_version,
-                &expected_active_slot.version,
+                &expected_active_slot,
                 expected_inactive_version,
-                &active_caboose.caboose.version,
+                expected_persistent_boot_preference,
+                expected_pending_persistent_boot_preference,
+                expected_transient_boot_preference,
+                &found_active_slot,
                 found_inactive_version,
+                &rot_state.persistent_boot_preference,
+                &rot_state.pending_persistent_boot_preference,
+                &rot_state.transient_boot_preference,
             ))
         }
         PendingMgsUpdateDetails::RotBootloader { .. } => {
@@ -297,8 +328,6 @@ fn mgs_update_status(
 /// Compares a configured SP update with information from inventory and
 /// determines the current status of the update.  See `MgsUpdateStatus`.
 fn mgs_update_status_sp(
-    // TODO-K: remove logger
-    _log: &slog::Logger,
     desired_version: &ArtifactVersion,
     expected_active_version: &ArtifactVersion,
     expected_inactive_version: &ExpectedVersion,
@@ -330,12 +359,120 @@ fn mgs_update_status_sp(
     match (found_inactive_version, expected_inactive_version) {
         (Some(_), ExpectedVersion::NoValidVersion) => {
             // We expected nothing in the inactive slot, but found something.
-            // info!(
-            //     &log,
-            //     "DEBUG: found {:?} != expected {}",
-            //     found_inactive_version,
-            //     expected_inactive_version
-            // );
+            MgsUpdateStatus::Impossible
+        }
+        (Some(found), ExpectedVersion::Version(expected)) => {
+            if found == expected.as_str() {
+                // We found something in the inactive slot that matches what we
+                // expected.
+                MgsUpdateStatus::NotDone
+            } else {
+                // We found something in the inactive slot that differs from
+                // what we expected.
+                MgsUpdateStatus::Impossible
+            }
+        }
+        (None, ExpectedVersion::Version(_)) => {
+            // We expected something in the inactive slot, but found nothing.
+            // This case is tricky because we can't tell from the inventory
+            // whether we transiently failed to fetch the caboose for some
+            // reason or whether the caboose is actually garbage.  We choose to
+            // assume that it's actually garbage, which would mean that this
+            // update as-configured is impossible.  This will cause us to
+            // generate a new update that expects garbage in the inactive slot.
+            // If we're right, great.  If we're wrong, then *that* update will
+            // be impossible to complete, but we should fix this again if the
+            // transient error goes away.
+            //
+            // If we instead assumed that this was a transient error, we'd do
+            // nothing here instead.  But if the caboose was really missing,
+            // then we'd get stuck forever waiting for something that would
+            // never happen.
+            MgsUpdateStatus::Impossible
+        }
+        (None, ExpectedVersion::NoValidVersion) => {
+            // We expected nothing in the inactive slot and found nothing there.
+            // No problem!
+            MgsUpdateStatus::NotDone
+        }
+    }
+}
+
+#[allow(clippy::too_many_arguments)]
+fn mgs_update_status_rot(
+    desired_version: &ArtifactVersion,
+    expected_active_slot: &ExpectedActiveRotSlot,
+    expected_inactive_version: &ExpectedVersion,
+    expected_persistent_boot_preference: &RotSlot,
+    expected_pending_persistent_boot_preference: &Option<RotSlot>,
+    expected_transient_boot_preference: &Option<RotSlot>,
+    found_active_slot: &ExpectedActiveRotSlot,
+    found_inactive_version: Option<&str>,
+    found_persistent_boot_preference: &RotSlot,
+    found_pending_persistent_boot_preference: &Option<RotSlot>,
+    found_transient_boot_preference: &Option<RotSlot>,
+) -> MgsUpdateStatus {
+    if &found_active_slot.version() == desired_version {
+        // If we find the desired version in the active slot, we're done.
+        return MgsUpdateStatus::Done;
+    }
+
+    // The update hasn't completed.
+    //
+    // Check to make sure the contents of the active slot, persistent boot
+    // preference, pending persistent boot preference, and transient boot
+    // preference are still what they were when we configured this update.
+    // If not, then this update cannot proceed as currently configured.
+    // It will fail its precondition check.
+    if found_active_slot.version() != expected_active_slot.version() {
+        return MgsUpdateStatus::Impossible;
+    }
+
+    if found_persistent_boot_preference != expected_persistent_boot_preference {
+        return MgsUpdateStatus::Impossible;
+    }
+
+    if found_pending_persistent_boot_preference
+        != expected_pending_persistent_boot_preference
+    {
+        return MgsUpdateStatus::Impossible;
+    }
+
+    if found_transient_boot_preference != expected_transient_boot_preference {
+        return MgsUpdateStatus::Impossible;
+    }
+
+    // If either found pending persistent boot preference or found transient
+    // boot preference are not empty, then an update is not done
+    if found_pending_persistent_boot_preference.is_some()
+        || found_transient_boot_preference.is_some()
+    {
+        return MgsUpdateStatus::NotDone;
+    }
+
+    // If there is a mismatch between the found persistent boot preference
+    // and the found active slot then the update is not done.
+    //
+    // TODO: Alternatively, this could also mean a failed update. See
+    // https://github.com/oxidecomputer/omicron/issues/8414 for context
+    // about when we'll be able to know whether an it's an ongoing update
+    // or an RoT in a failed state.
+    if found_persistent_boot_preference != &found_active_slot.slot {
+        // TODO-K: I am not 100% sure on this one. It may be impossible?
+        return MgsUpdateStatus::NotDone;
+    }
+
+    // Similarly, check the contents of the inactive slot to determine if it
+    // still matches what we saw when we configured this update.  If not, then
+    // this update cannot proceed as currently configured.  It will fail its
+    // precondition check.
+    //
+    // This logic is more complex than for the active slot because unlike the
+    // active slot, it's possible for both the found contents and the expected
+    // contents to be missing and that's not necessarily an error.
+    match (found_inactive_version, expected_inactive_version) {
+        (Some(_), ExpectedVersion::NoValidVersion) => {
+            // We expected nothing in the inactive slot, but found something.
             MgsUpdateStatus::Impossible
         }
         (Some(found), ExpectedVersion::Version(expected)) => {

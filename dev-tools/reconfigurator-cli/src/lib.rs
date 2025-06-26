@@ -394,7 +394,6 @@ struct SledUpdateSpArgs {
     inactive: Option<ExpectedVersion>,
 }
 
-// TODO-K: Double check which of these need to exist
 #[derive(Debug, Args)]
 struct SledUpdateRotArgs {
     /// id of the sled
