@@ -35,7 +35,7 @@ type ControlPlaneTestContext =
     nexus_test_utils::ControlPlaneTestContext<omicron_nexus::Server>;
 
 #[nexus_test]
-async fn test_utilization(cptestctx: &ControlPlaneTestContext) {
+async fn test_utilization_list(cptestctx: &ControlPlaneTestContext) {
     let client = &cptestctx.external_client;
 
     create_default_ip_pool(&client).await;
@@ -43,11 +43,10 @@ async fn test_utilization(cptestctx: &ControlPlaneTestContext) {
     // default-silo has quotas, but is explicitly filtered out by ID in the
     // DB query to avoid user confusion. test-suite-silo also exists, but is
     // filtered out because it has no quotas, so list is empty
-    let current_util = fetch_util(client).await;
-    assert!(current_util.is_empty());
+    assert!(util_list(client).await.is_empty());
 
+    // setting quotas will make test-suite-silo show up in the list
     let quotas_url = "/v1/system/silos/test-suite-silo/quotas";
-    // set high quota for test silo
     let _: SiloQuotas = object_put(
         client,
         quotas_url,
@@ -55,16 +54,129 @@ async fn test_utilization(cptestctx: &ControlPlaneTestContext) {
     )
     .await;
 
-    // now test-suite-silo shows up
-    let current_util = fetch_util(client).await;
+    // now test-suite-silo shows up in the list
+    let current_util = util_list(client).await;
     assert_eq!(current_util.len(), 1);
     assert_eq!(current_util[0].silo_name, "test-suite-silo");
+    // it's empty because it has no resources
     assert_eq!(current_util[0].provisioned, SiloQuotasCreate::empty().into());
     assert_eq!(
         current_util[0].allocated,
         SiloQuotasCreate::arbitrarily_high_default().into()
     );
 
+    // create the resources that should change the utilization
+    create_resources_in_test_suite_silo(client).await;
+
+    // list response shows provisioned resources
+    let current_util = util_list(client).await;
+    assert_eq!(current_util.len(), 1);
+    assert_eq!(current_util[0].silo_name, "test-suite-silo");
+    assert_eq!(
+        current_util[0].provisioned,
+        VirtualResourceCounts {
+            cpus: 2,
+            memory: ByteCount::from_gibibytes_u32(4),
+            storage: ByteCount::from(0)
+        }
+    );
+    assert_eq!(
+        current_util[0].allocated,
+        SiloQuotasCreate::arbitrarily_high_default().into()
+    );
+
+    // now we take the quota back off of test-suite-silo and end up empty again
+    let _: SiloQuotas =
+        object_put(client, quotas_url, &params::SiloQuotasCreate::empty())
+            .await;
+
+    assert!(util_list(client).await.is_empty());
+}
+
+// Even though default silo is filtered out of the list view, you can still
+// fetch utilization for it individiually, so we test that here
+#[nexus_test]
+async fn test_utilization_view(cptestctx: &ControlPlaneTestContext) {
+    let client = &cptestctx.external_client;
+
+    create_default_ip_pool(&client).await;
+
+    let _ = create_project(&client, &PROJECT_NAME).await;
+    let _ = create_instance(client, &PROJECT_NAME, &INSTANCE_NAME).await;
+
+    let instance_start_url = format!(
+        "/v1/instances/{}/start?project={}",
+        &INSTANCE_NAME, &PROJECT_NAME
+    );
+
+    // Start instance
+    NexusRequest::new(
+        RequestBuilder::new(client, Method::POST, &instance_start_url)
+            .body(None as Option<&serde_json::Value>)
+            .expect_status(Some(StatusCode::ACCEPTED)),
+    )
+    .authn_as(AuthnMode::PrivilegedUser)
+    .execute()
+    .await
+    .expect("failed to start instance");
+
+    // get utilization for just the default silo
+    let default_silo_util: SiloUtilization =
+        object_get(client, "/v1/system/utilization/silos/default-silo").await;
+
+    assert_eq!(
+        default_silo_util.provisioned,
+        VirtualResourceCounts {
+            cpus: 4,
+            memory: ByteCount::from_gibibytes_u32(1),
+            storage: ByteCount::from(0)
+        }
+    );
+
+    // Simulate space for disks
+    DiskTest::new(&cptestctx).await;
+
+    let disk_url = format!("/v1/disks?project={}", &PROJECT_NAME);
+    // provision disk
+    NexusRequest::new(
+        RequestBuilder::new(client, Method::POST, &disk_url)
+            .body(Some(&params::DiskCreate {
+                identity: IdentityMetadataCreateParams {
+                    name: "test-disk".parse().unwrap(),
+                    description: "".into(),
+                },
+                size: ByteCount::from_gibibytes_u32(2),
+                disk_source: params::DiskSource::Blank {
+                    block_size: params::BlockSize::try_from(512).unwrap(),
+                },
+            }))
+            .expect_status(Some(StatusCode::CREATED)),
+    )
+    .authn_as(AuthnMode::PrivilegedUser)
+    .execute()
+    .await
+    .expect("disk failed to create");
+
+    // Get the silo but this time using the silo admin view
+    let default_silo_util: Utilization =
+        object_get(client, "/v1/utilization").await;
+
+    assert_eq!(
+        default_silo_util.provisioned,
+        VirtualResourceCounts {
+            cpus: 4,
+            memory: ByteCount::from_gibibytes_u32(1),
+            storage: ByteCount::from_gibibytes_u32(2)
+        }
+    );
+}
+
+async fn util_list(client: &ClientTestContext) -> Vec<SiloUtilization> {
+    objects_list_page_authz(client, "/v1/system/utilization/silos").await.items
+}
+
+/// Could be inlined, but pulling it out makes the test much clearer
+async fn create_resources_in_test_suite_silo(client: &ClientTestContext) {
     // in order to create resources in test-suite-silo, we have to create a user
     // with the right perms so we have a user ID on hand to use in the authn_as
     let silo_url = "/v1/system/silos/test-suite-silo";
@@ -133,111 +245,4 @@ async fn test_utilization(cptestctx: &ControlPlaneTestContext) {
     .execute()
     .await
     .expect("failed to create instance in test-suite-silo");
-
-    // Check that utilization now shows provisioned resources
-    let current_util = fetch_util(client).await;
-    assert_eq!(current_util.len(), 1);
-    assert_eq!(current_util[0].silo_name, "test-suite-silo");
-    assert_eq!(
-        current_util[0].provisioned,
-        VirtualResourceCounts {
-            cpus: 2,
-            memory: ByteCount::from_gibibytes_u32(4),
-            storage: ByteCount::from(0)
-        }
-    );
-    assert_eq!(
-        current_util[0].allocated,
-        SiloQuotasCreate::arbitrarily_high_default().into()
-    );
-
-    // now we take the quota back off of test-suite-silo and end up empty again
-    let _: SiloQuotas =
-        object_put(client, quotas_url, &params::SiloQuotasCreate::empty())
-            .await;
-
-    let current_util = fetch_util(client).await;
-    assert!(current_util.is_empty());
-
-    // you can still fetch utilization for the default silo by name if you want,
-    // so we test that below
-
-    let _ = create_project(&client, &PROJECT_NAME).await;
-    let _ = create_instance(client, &PROJECT_NAME, &INSTANCE_NAME).await;
-
-    // Start instance
-    NexusRequest::new(
-        RequestBuilder::new(
-            client,
-            Method::POST,
-            format!(
-                "/v1/instances/{}/start?project={}",
-                &INSTANCE_NAME, &PROJECT_NAME
-            )
-            .as_str(),
-        )
-        .body(None as Option<&serde_json::Value>)
-        .expect_status(Some(StatusCode::ACCEPTED)),
-    )
-    .authn_as(AuthnMode::PrivilegedUser)
-    .execute()
-    .await
-    .expect("failed to start instance");
-
-    // get utilization for just the default silo
-    let default_silo_util: SiloUtilization =
-        object_get(client, "/v1/system/utilization/silos/default-silo").await;
-
-    assert_eq!(
-        default_silo_util.provisioned,
-        VirtualResourceCounts {
-            cpus: 4,
-            memory: ByteCount::from_gibibytes_u32(1),
-            storage: ByteCount::from(0)
-        }
-    );
-
-    // Simulate space for disks
-    DiskTest::new(&cptestctx).await;
-
-    // provision disk
-    NexusRequest::new(
-        RequestBuilder::new(
-            client,
-            Method::POST,
-            format!("/v1/disks?project={}", &PROJECT_NAME).as_str(),
-        )
-        .body(Some(&params::DiskCreate {
-            identity: IdentityMetadataCreateParams {
-                name: "test-disk".parse().unwrap(),
-                description: "".into(),
-            },
-            size: ByteCount::from_gibibytes_u32(2),
-            disk_source: params::DiskSource::Blank {
-                block_size: params::BlockSize::try_from(512).unwrap(),
-            },
-        }))
-        .expect_status(Some(StatusCode::CREATED)),
-    )
-    .authn_as(AuthnMode::PrivilegedUser)
-    .execute()
-    .await
-    .expect("disk failed to create");
-
-    // Get the silo but this time using the silo admin view
-    let default_silo_util: Utilization =
-        object_get(client, "/v1/utilization").await;
-
-    assert_eq!(
-        default_silo_util.provisioned,
-        VirtualResourceCounts {
-            cpus: 4,
-            memory: ByteCount::from_gibibytes_u32(1),
-            storage: ByteCount::from_gibibytes_u32(2)
-        }
-    );
-}
-
-async fn fetch_util(client: &ClientTestContext) -> Vec<SiloUtilization> {
-    objects_list_page_authz(client, "/v1/system/utilization/silos").await.items
 }
