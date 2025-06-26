@@ -20,6 +20,7 @@ use nexus_db_errors::public_error_from_diesel;
 use nexus_db_model::ReconfiguratorChickenSwitches as DbReconfiguratorChickenSwitches;
 use nexus_db_model::SqlU32;
 use nexus_types::deployment::ReconfiguratorChickenSwitches;
+use nexus_types::deployment::ReconfiguratorChickenSwitchesParam;
 use omicron_common::api::external::DataPageParams;
 use omicron_common::api::external::Error;
 use omicron_common::api::external::ListResultVec;
@@ -98,13 +99,22 @@ impl DataStore {
     pub async fn reconfigurator_chicken_switches_insert_latest_version(
         &self,
         opctx: &OpContext,
-        switches: &ReconfiguratorChickenSwitches,
+        switches: ReconfiguratorChickenSwitchesParam,
     ) -> Result<(), Error> {
         if switches.version < 1 {
             return Err(Error::invalid_request(
                 "version must be greater than 0",
             ));
         }
+
+        let ReconfiguratorChickenSwitchesParam { version, planner_enabled } =
+            switches;
+        let switches = ReconfiguratorChickenSwitches {
+            version,
+            planner_enabled,
+            time_modified: chrono::Utc::now(),
+        };
+
         opctx
             .authorize(authz::Action::Modify, &authz::BLUEPRINT_CONFIG)
             .await?;
@@ -194,7 +204,7 @@ mod tests {
         assert!(
             datastore
                 .reconfigurator_chicken_switches_insert_latest_version(
-                    opctx, &switches
+                    opctx, switches
                 )
                 .await
                 .unwrap_err()

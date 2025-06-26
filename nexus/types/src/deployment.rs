@@ -69,6 +69,7 @@ use crate::inventory::BaseboardId;
 pub use blueprint_diff::BlueprintDiffSummary;
 use blueprint_display::BpPendingMgsUpdates;
 pub use chicken_switches::ReconfiguratorChickenSwitches;
+pub use chicken_switches::ReconfiguratorChickenSwitchesParam;
 pub use clickhouse::ClickhouseClusterConfig;
 use gateway_client::types::SpType;
 use gateway_types::rot::RotSlot;

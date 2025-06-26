@@ -14,6 +14,7 @@ use nexus_types::{
     deployment::{
         Blueprint, BlueprintMetadata, BlueprintTarget, BlueprintTargetSet,
         ClickhousePolicy, OximeterReadPolicy, ReconfiguratorChickenSwitches,
+        ReconfiguratorChickenSwitchesParam,
     },
     external_api::{
         headers::RangeRequest,
@@ -511,7 +512,7 @@ pub trait NexusInternalApi {
     }]
     async fn reconfigurator_chicken_switches_set(
         rqctx: RequestContext<Self::Context>,
-        switches: TypedBody<ReconfiguratorChickenSwitches>,
+        switches: TypedBody<ReconfiguratorChickenSwitchesParam>,
     ) -> Result<HttpResponseUpdatedNoContent, HttpError>;
 
     /// Show deployed versions of artifacts

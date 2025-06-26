@@ -707,7 +707,7 @@
           "content": {
             "application/json": {
               "schema": {
-                "$ref": "#/components/schemas/ReconfiguratorChickenSwitches"
+                "$ref": "#/components/schemas/ReconfiguratorChickenSwitchesParam"
               }
             }
           },
@@ -6586,6 +6586,23 @@
         "required": [
           "planner_enabled",
           "time_modified",
+          "version"
+        ]
+      },
+      "ReconfiguratorChickenSwitchesParam": {
+        "type": "object",
+        "properties": {
+          "planner_enabled": {
+            "type": "boolean"
+          },
+          "version": {
+            "type": "integer",
+            "format": "uint32",
+            "minimum": 0
+          }
+        },
+        "required": [
+          "planner_enabled",
           "version"
         ]
       },

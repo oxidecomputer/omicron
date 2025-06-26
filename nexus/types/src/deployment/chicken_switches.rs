@@ -9,6 +9,12 @@ use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+pub struct ReconfiguratorChickenSwitchesParam {
+    pub version: u32,
+    pub planner_enabled: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct ReconfiguratorChickenSwitches {
     pub version: u32,
     pub planner_enabled: bool,

@@ -31,6 +31,7 @@ use nexus_types::deployment::BlueprintTargetSet;
 use nexus_types::deployment::ClickhousePolicy;
 use nexus_types::deployment::OximeterReadPolicy;
 use nexus_types::deployment::ReconfiguratorChickenSwitches;
+use nexus_types::deployment::ReconfiguratorChickenSwitchesParam;
 use nexus_types::external_api::headers::RangeRequest;
 use nexus_types::external_api::params::PhysicalDiskPath;
 use nexus_types::external_api::params::SledSelector;
@@ -865,11 +866,10 @@ impl NexusInternalApi for NexusInternalApiImpl {
     ) -> Result<HttpResponseOk<ReconfiguratorChickenSwitches>, HttpError> {
         let apictx = &rqctx.context().context;
         let handler = async {
-            let nexus = &apictx.nexus;
+            let datastore = &apictx.nexus.datastore();
             let opctx =
                 crate::context::op_context_for_internal_api(&rqctx).await;
-            match nexus
-                .datastore()
+            match datastore
                 .reconfigurator_chicken_switches_get_latest(&opctx)
                 .await?
             {
@@ -892,12 +892,11 @@ impl NexusInternalApi for NexusInternalApiImpl {
     ) -> Result<HttpResponseOk<ReconfiguratorChickenSwitches>, HttpError> {
         let apictx = &rqctx.context().context;
         let handler = async {
-            let nexus = &apictx.nexus;
+            let datastore = &apictx.nexus.datastore();
             let opctx =
                 crate::context::op_context_for_internal_api(&rqctx).await;
             let version = path_params.into_inner().version;
-            match nexus
-                .datastore()
+            match datastore
                 .reconfigurator_chicken_switches_get(&opctx, version)
                 .await?
             {
@@ -918,20 +917,18 @@ impl NexusInternalApi for NexusInternalApiImpl {
 
     async fn reconfigurator_chicken_switches_set(
         rqctx: RequestContext<Self::Context>,
-        switches: TypedBody<ReconfiguratorChickenSwitches>,
+        switches: TypedBody<ReconfiguratorChickenSwitchesParam>,
     ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
         let apictx = &rqctx.context().context;
         let handler = async {
-            let nexus = &apictx.nexus;
+            let datastore = &apictx.nexus.datastore();
             let opctx =
                 crate::context::op_context_for_internal_api(&rqctx).await;
-            let mut switches = switches.into_inner();
-            // Update the timestamp with server time.
-            switches.time_modified = now_db_precision();
-            nexus
-                .datastore()
+
+            datastore
                 .reconfigurator_chicken_switches_insert_latest_version(
-                    &opctx, &switches,
+                    &opctx,
+                    &switches.into_inner(),
                 )
                 .await?;
             Ok(HttpResponseUpdatedNoContent())
