@@ -141,6 +141,7 @@ use super::tasks::sync_switch_configuration::SwitchPortSettingsManager;
 use super::tasks::trust_quorum;
 use super::tasks::tuf_artifact_replication;
 use super::tasks::tuf_repo_pruner;
+use super::tasks::user_data_export_coordinator::*;
 use super::tasks::v2p_mappings::V2PManager;
 use super::tasks::vpc_routes;
 use super::tasks::webhook_deliverator;
@@ -277,6 +278,7 @@ impl BackgroundTasksInitializer {
             task_trust_quorum_manager: Activator::new(),
             task_attached_subnet_manager: Activator::new(),
             task_session_cleanup: Activator::new(),
+            task_user_data_export_coordinator: Activator::new(),
 
             // Handles to activate background tasks that do not get used by Nexus
             // at-large.  These background tasks are implementation details as far as
@@ -372,6 +374,7 @@ impl BackgroundTasksInitializer {
             task_session_cleanup,
             task_audit_log_timeout_incomplete,
             task_audit_log_cleanup,
+            task_user_data_export_coordinator,
             // Add new background tasks here.  Be sure to use this binding in a
             // call to `Driver::register()` below.  That's what actually wires
             // up the Activator to the corresponding background task.
@@ -1221,7 +1224,7 @@ impl BackgroundTasksInitializer {
             description: "distributes attached subnets to sleds and switch",
             period: config.attached_subnet_manager.period_secs,
             task_impl: Box::new(attached_subnets::Manager::new(
-                resolver,
+                resolver.clone(),
                 datastore.clone(),
             )),
             opctx: opctx.child(BTreeMap::new()),
@@ -1269,13 +1272,25 @@ impl BackgroundTasksInitializer {
                  than the retention period",
             period: config.audit_log_cleanup.period_secs,
             task_impl: Box::new(audit_log_cleanup::AuditLogCleanup::new(
-                datastore,
+                datastore.clone(),
                 config.audit_log_cleanup.retention_days,
                 config.audit_log_cleanup.max_deleted_per_activation,
             )),
             opctx: opctx.child(BTreeMap::new()),
             watchers: vec![],
             activator: task_audit_log_cleanup,
+        });
+
+        driver.register(TaskDefinition {
+            name: "user_data_export_coordinator",
+            description: "make the user resources available for export",
+            period: config.user_data_export_coordinator.period_secs,
+            task_impl: Box::new(UserDataExportCoordinator::new(
+                datastore, sagas, resolver,
+            )),
+            opctx: opctx.child(BTreeMap::new()),
+            watchers: vec![],
+            activator: task_user_data_export_coordinator,
         });
 
         driver
