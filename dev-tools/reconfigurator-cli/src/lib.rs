@@ -210,6 +210,9 @@ fn process_command(
         Commands::SledShow(args) => cmd_sled_show(sim, args),
         Commands::SledSetPolicy(args) => cmd_sled_set_policy(sim, args),
         Commands::SledUpdateSp(args) => cmd_sled_update_sp(sim, args),
+        Commands::SledSetMupdateOverride(args) => {
+            cmd_sled_set_mupdate_override(sim, args)
+        }
         Commands::SiloList => cmd_silo_list(sim),
         Commands::SiloAdd(args) => cmd_silo_add(sim, args),
         Commands::SiloRemove(args) => cmd_silo_remove(sim, args),
@@ -265,6 +268,8 @@ enum Commands {
     SledSetPolicy(SledSetPolicyArgs),
     /// simulate updating the sled's SP versions
     SledUpdateSp(SledUpdateSpArgs),
+    /// simulate the sled's mupdate override field changing
+    SledSetMupdateOverride(SledSetMupdateOverrideArgs),
 
     /// list silos
     SiloList,
@@ -388,6 +393,15 @@ struct SledUpdateSpArgs {
     /// sets the version reported for the SP inactive slot
     #[clap(long, required_unless_present_any = &["active"])]
     inactive: Option<ExpectedVersion>,
+}
+
+#[derive(Debug, Args)]
+struct SledSetMupdateOverrideArgs {
+    /// id of the sled
+    sled_id: SledUuid,
+
+    /// the new value of the mupdate override, or "unset"
+    mupdate_override_id: MupdateOverrideUuidOpt,
 }
 
 #[derive(Debug, Args)]
@@ -991,6 +1005,32 @@ fn cmd_sled_update_sp(
         args.sled_id,
         labels.join(", ")
     )))
+}
+
+fn cmd_sled_set_mupdate_override(
+    sim: &mut ReconfiguratorSim,
+    args: SledSetMupdateOverrideArgs,
+) -> anyhow::Result<Option<String>> {
+    let mut state = sim.current_state().to_mut();
+    state.system_mut().description_mut().sled_set_mupdate_override(
+        args.sled_id,
+        args.mupdate_override_id.into(),
+    )?;
+
+    let desc = match args.mupdate_override_id {
+        MupdateOverrideUuidOpt::Set(id) => format!("set to {id}"),
+        MupdateOverrideUuidOpt::Unset => format!("unset"),
+    };
+
+    sim.commit_and_bump(
+        format!(
+            "reconfigurator-cli sled-set-mupdate-override: {}: {}",
+            args.sled_id, desc,
+        ),
+        state,
+    );
+
+    Ok(Some(format!("set sled {} mupdate override: {}", args.sled_id, desc)))
 }
 
 fn cmd_inventory_list(

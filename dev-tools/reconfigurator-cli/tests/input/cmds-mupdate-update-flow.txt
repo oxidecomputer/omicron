@@ -1,0 +1,34 @@
+# Load an example system.
+
+load-example --nsleds 3 --ndisks-per-sled 1
+
+# Set one of the sled's zone's image sources to a specific artifact.
+blueprint-edit latest set-zone-image 466a9f29-62bf-4e63-924a-b9efdb86afec artifact 1.2.3 e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855
+
+# Simulate a mupdate on sled 0 by setting the mupdate override field to a
+# new UUID (generated using uuidgen).
+sled-set-mupdate-override 2b8f0cb3-0295-4b3c-bc58-4fe88b57112c 6123eac1-ec5b-42ba-b73f-9845105a9971
+
+# Generate a new inventory and plan against that.
+inventory-generate
+blueprint-plan latest eb0796d5-ab8a-4f7b-a884-b4aeacb8ab51
+
+# Diff the blueprints. This diff should show:
+#
+# * for sled 2b8f0cb3-0295-4b3c-bc58-4fe88b57112c, "+ will remove mupdate override"
+# * for zone 466a9f29-62bf-4e63-924a-b9efdb86afec, a change from artifact to install-dataset
+blueprint-diff 8da82a8e-bf97-4fbd-8ddd-9f6462732cf1 latest
+
+# Now simulate the new config being applied to the sled, which would
+# cause the mupdate override to be removed.
+sled-set-mupdate-override 2b8f0cb3-0295-4b3c-bc58-4fe88b57112c unset
+
+# Generate a new inventory and plan against that.
+inventory-generate
+blueprint-plan latest 61f451b3-2121-4ed6-91c7-a550054f6c21
+
+# Diff the blueprints. This diff should show the "remove mupdate
+# override" line going away.
+# TODO: we do not yet reset the install dataset image back to
+# the desired artifact version -- we should do that in the future.
+blueprint-diff 58d5e830-0884-47d8-a7cd-b2b3751adeb4 latest
