@@ -33,6 +33,7 @@ pub enum ChickenSwitchesCommands {
 
 #[derive(Debug, Clone, Args)]
 pub struct ChickenSwitchesSetArgs {
+    #[clap(long)]
     planner_enabled: bool,
 }
 
@@ -100,7 +101,13 @@ async fn chicken_switches_show(
             println!("    modified time: {time_modified}");
             println!("    planner enabled: {planner_enabled}");
         }
-        Err(err) => eprintln!("error: {:#}", err),
+        Err(err) => {
+            if err.status() == Some(StatusCode::NOT_FOUND) {
+                println!("No chicken switches enabled");
+            } else {
+                eprintln!("error: {:#}", err)
+            }
+        }
     }
 
     Ok(())
