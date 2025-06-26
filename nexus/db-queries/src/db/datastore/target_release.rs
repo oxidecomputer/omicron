@@ -223,9 +223,9 @@ mod test {
 
         // This target release should not have the mupdate override set, because
         // the generation is <= the minimum generation in the target blueprint.
-        assert_eq!(
-            initial_target_release_view.mupdate_override, None,
-            "mupdate_override should be None for initial target release"
+        assert!(
+            !initial_target_release_view.mupdate_override,
+            "mupdate_override should be false for initial target release"
         );
 
         // We should be able to set a new generation just like the first.
