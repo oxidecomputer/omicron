@@ -209,15 +209,6 @@ impl AllDisks {
             .collect()
     }
 
-    /// Return the directories that can be used for temporary sled-diagnostics
-    /// file storage.
-    pub fn all_sled_diagnostics_directories(&self) -> Vec<Utf8PathBuf> {
-        // These directories are currently used for tempfile storage when
-        // zipping up zone logs before shuffling them off to a nexus collecting
-        // a support bundle.
-        self.all_m2_mountpoints(M2_DEBUG_DATASET).into_iter().collect()
-    }
-
     /// Returns an iterator over all managed disks.
     pub fn iter_managed(&self) -> impl Iterator<Item = (&DiskIdentity, &Disk)> {
         self.inner.values.iter().filter_map(|(identity, disk)| match disk {

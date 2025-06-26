@@ -222,11 +222,14 @@ Here are the most important background tasks related to Reconfigurator:
 |`inventory_collection`
 |Fetches information about the current state of all hardware and software in the system (the whole rack)
 
-|`blueprint_executor`
-|Executes the most recently loaded blueprint
-
 |`blueprint_loader`
 |Loads the latest target blueprint from the database
+
+|`blueprint_planner`
+|Runs the planner to produce a new blueprint, using the most recently loaded inventory and target blueprint as input. If that blueprint differs from the current target, it is made the new target.
+
+|`blueprint_executor`
+|Executes the most recently loaded blueprint
 
 |`blueprint_rendezvous`
 |Updates rendezvous tables based on the most recent target blueprint
@@ -241,8 +244,6 @@ Here are the most important background tasks related to Reconfigurator:
 |===
 
 Many other tasks work with Reconfigurator, too (e.g., region replacement and region snapshot replacement).
-
-Notably absent from this list is anything related to planning.  This has not been automated as a background task yet.
 
 == Manual testing and developer workflow
 

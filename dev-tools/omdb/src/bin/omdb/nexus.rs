@@ -48,6 +48,7 @@ use nexus_types::deployment::OximeterReadPolicy;
 use nexus_types::internal_api::background::AbandonedVmmReaperStatus;
 use nexus_types::internal_api::background::BlueprintPlannerStatus;
 use nexus_types::internal_api::background::BlueprintRendezvousStatus;
+use nexus_types::internal_api::background::EreporterStatus;
 use nexus_types::internal_api::background::InstanceReincarnationStatus;
 use nexus_types::internal_api::background::InstanceUpdaterStatus;
 use nexus_types::internal_api::background::LookupRegionPortStatus;
@@ -1130,6 +1131,9 @@ fn print_task_details(bgtask: &BackgroundTask, details: &serde_json::Value) {
         }
         "service_firewall_rule_propagation" => {
             print_task_service_firewall_rule_propagation(details);
+        }
+        "sp_ereport_ingester" => {
+            print_task_sp_ereport_ingester(details);
         }
         "support_bundle_collector" => {
             print_task_support_bundle_collector(details);
@@ -2740,7 +2744,7 @@ fn print_task_webhook_deliverator(details: &serde_json::Value) {
         if n_internal_errors > 0 {
             total_errors += n_internal_errors;
             println!(
-                "/!\\   {ERRORS:<WIDTH$}{:>NUM_WIDTH$}",
+                "{ERRICON}   {ERRORS:<WIDTH$}{:>NUM_WIDTH$}",
                 n_internal_errors,
             );
             if let Some(error) = error {
@@ -2767,8 +2771,129 @@ fn print_task_webhook_deliverator(details: &serde_json::Value) {
     );
 }
 
+fn print_task_sp_ereport_ingester(details: &serde_json::Value) {
+    use nexus_types::internal_api::background::SpEreportIngesterStatus;
+    use nexus_types::internal_api::background::SpEreporterStatus;
+
+    let SpEreportIngesterStatus { sps, errors } =
+        match serde_json::from_value(details.clone()) {
+            Err(error) => {
+                eprintln!(
+                    "warning: failed to interpret task details: {:?}: {:?}",
+                    error, details
+                );
+                return;
+            }
+            Ok(status) => status,
+        };
+
+    const NEW_EREPORTS: &str = "new ereports ingested:";
+    const HTTP_REQUESTS: &str = "HTTP requests sent:";
+    const ERRORS: &str = "errors:";
+    const WIDTH: usize =
+        const_max_len(&[NEW_EREPORTS, HTTP_REQUESTS, ERRORS]) + 1;
+    const NUM_WIDTH: usize = 3;
+
+    if !errors.is_empty() {
+        println!("{ERRICON} {ERRORS:<WIDTH$}{:>NUM_WIDTH$}", errors.len());
+        for error in errors {
+            println!("      - {error}");
+        }
+    }
+
+    print_ereporter_status_totals(sps.iter().map(|sp| &sp.status));
+
+    if !sps.is_empty() {
+        println!("\n    service processors:");
+        for SpEreporterStatus { sp_type, slot, status } in &sps {
+            println!(
+                "    - {sp_type:<6} {slot:02}: {:>NUM_WIDTH$} ereports",
+                status.ereports_received
+            );
+            println!(
+                "      {NEW_EREPORTS:<WIDTH$}{:>NUM_WIDTH$}",
+                status.new_ereports
+            );
+            println!(
+                "      {HTTP_REQUESTS:<WIDTH$}{:>NUM_WIDTH$}",
+                status.requests
+            );
+
+            if !status.errors.is_empty() {
+                println!(
+                    "{ERRICON}   {ERRORS:<WIDTH$}{:>NUM_WIDTH$}",
+                    status.errors.len()
+                );
+                for error in &status.errors {
+                    println!("        - {error}");
+                }
+            }
+        }
+    }
+}
+
+fn print_ereporter_status_totals<'status>(
+    statuses: impl Iterator<Item = &'status EreporterStatus>,
+) {
+    let mut total_received = 0;
+    let mut total_new = 0;
+    let mut total_reqs = 0;
+    let mut total_errors = 0;
+    let mut reporters_with_ereports = 0;
+    let mut reporters_with_errors = 0;
+
+    for &EreporterStatus {
+        ereports_received,
+        new_ereports,
+        requests,
+        ref errors,
+    } in statuses
+    {
+        total_received += ereports_received;
+        total_new += new_ereports;
+        total_reqs += requests;
+        total_errors += errors.len();
+        if total_received > 0 {
+            reporters_with_ereports += 1;
+        }
+        if total_errors > 0 {
+            reporters_with_errors += 1;
+        }
+    }
+
+    const EREPORTS_RECEIVED: &str = "total ereports received:";
+    const NEW_EREPORTS: &str = "  new ereports ingested:";
+    const HTTP_REQUESTS: &str = "total HTTP requests sent:";
+    const ERRORS: &str = "  total collection errors:";
+    const REPORTERS_WITH_EREPORTS: &str = "reporters with ereports:";
+    const REPORTERS_WITH_ERRORS: &str = "reporters with collection errors:";
+    const WIDTH: usize = const_max_len(&[
+        EREPORTS_RECEIVED,
+        NEW_EREPORTS,
+        HTTP_REQUESTS,
+        ERRORS,
+        REPORTERS_WITH_EREPORTS,
+    ]) + 1;
+    const NUM_WIDTH: usize = 4;
+
+    println!("    {EREPORTS_RECEIVED:<WIDTH$}{total_received:>NUM_WIDTH$}");
+    println!("    {NEW_EREPORTS:<WIDTH$}{total_new:>NUM_WIDTH$}");
+    println!("    {HTTP_REQUESTS:<WIDTH$}{total_reqs:>NUM_WIDTH$}");
+    println!("    {ERRORS:<WIDTH$}{total_reqs:>NUM_WIDTH$}");
+    println!(
+        "    {REPORTERS_WITH_EREPORTS:<WIDTH$}\
+         {reporters_with_ereports:>NUM_WIDTH$}"
+    );
+    println!(
+        "    {REPORTERS_WITH_ERRORS:<WIDTH$}\
+         {reporters_with_errors:>NUM_WIDTH$}"
+    );
+}
+
+const ERRICON: &str = "/!\\";
+
 fn warn_if_nonzero(n: usize) -> &'static str {
-    if n > 0 { "/!\\" } else { "   " }
+    if n > 0 { ERRICON } else { "   " }
 }
 
 /// Summarizes an `ActivationReason`
@@ -3784,10 +3909,10 @@ async fn cmd_nexus_sled_expunge_disk_with_datastore(
 
             let mut sleds_containing_disk = vec![];
 
-            for (sled_id, sled_agent) in collection.sled_agents {
+            for sled_agent in collection.sled_agents {
                 for sled_disk in sled_agent.disks {
                     if sled_disk.identity == disk_identity {
-                        sleds_containing_disk.push(sled_id);
+                        sleds_containing_disk.push(sled_agent.sled_id);
                     }
                 }
             }

@@ -173,6 +173,7 @@ webhook_deliverator.period_secs = 60
 webhook_deliverator.first_retry_backoff_secs = 10
 webhook_deliverator.second_retry_backoff_secs = 20
 read_only_region_replacement_start.period_secs = 60
+sp_ereport_ingester.period_secs = 30
 
 [default_region_allocation_strategy]
 # we only have one sled in the test environment, so we need to use the

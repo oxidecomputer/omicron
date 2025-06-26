@@ -4,19 +4,18 @@
 
 //! Zone image lookup.
 
-use crate::AllMupdateOverrides;
-use crate::AllZoneManifests;
-use crate::MupdateOverrideReadError;
-use crate::MupdateOverrideStatus;
 use crate::RAMDISK_IMAGE_PATH;
-use crate::ZoneManifestStatus;
 use crate::install_dataset_file_name;
+use crate::mupdate_override::AllMupdateOverrides;
 use crate::ramdisk_file_source;
+use crate::zone_manifest::AllZoneManifests;
 use camino::Utf8PathBuf;
 use illumos_utils::running_zone::ZoneImageFileSource;
 use nexus_sled_agent_shared::inventory::OmicronZoneImageSource;
 use sled_agent_config_reconciler::InternalDisks;
 use sled_agent_config_reconciler::InternalDisksWithBootDisk;
+use sled_agent_types::zone_images::MupdateOverrideReadError;
+use sled_agent_types::zone_images::ResolverStatus;
 use slog::error;
 use slog::o;
 use slog_error_chain::InlineErrorChain;
@@ -85,16 +84,6 @@ impl ZoneImageSourceResolver {
             }
         }
     }
-}
-
-/// Current status of the zone image resolver.
-#[derive(Clone, Debug)]
-pub struct ResolverStatus {
-    /// The zone manifest status.
-    pub zone_manifest: ZoneManifestStatus,
-
-    /// The mupdate override status.
-    pub mupdate_override: MupdateOverrideStatus,
 }
 
 #[derive(Debug)]
@@ -219,13 +208,13 @@ impl ResolverInner {
 mod tests {
     use super::*;
 
-    use crate::test_utils::{
-        BOOT_PATHS, BOOT_UUID, WriteInstallDatasetContext,
-        make_internal_disks_rx,
-    };
+    use crate::test_utils::make_internal_disks_rx;
 
     use camino_tempfile_ext::prelude::*;
     use dropshot::{ConfigLogging, ConfigLoggingLevel, test_util::LogContext};
+    use sled_agent_zone_images_examples::{
+        BOOT_PATHS, BOOT_UUID, WriteInstallDatasetContext,
+    };
 
     /// Test source resolver behavior when the zone manifest is invalid.
     #[test]
@@ -348,6 +337,39 @@ mod tests {
                 }
             );
         }
+
+        logctx.cleanup_successful();
+    }
+
+    /// Test that the resolver status can be converted to inventory format.
+    #[test]
+    fn resolver_status_to_inventory() {
+        let logctx = LogContext::new(
+            "resolver_status_to_inventory",
+            &ConfigLogging::StderrTerminal { level: ConfigLoggingLevel::Debug },
+        );
+        let dir = Utf8TempDir::new().unwrap();
+        dir.child(&BOOT_PATHS.install_dataset).create_dir_all().unwrap();
+
+        let internal_disks_rx =
+            make_internal_disks_rx(dir.path(), BOOT_UUID, &[]);
+        let resolver = ZoneImageSourceResolver::new(
+            &logctx.log,
+            internal_disks_rx.current_with_boot_disk(),
+        );
+
+        let status = resolver.status();
+        let inventory = status.to_inventory();
+
+        // Verify the conversion works
+        assert_eq!(
+            inventory.zone_manifest.boot_disk_path,
+            status.zone_manifest.boot_disk_path
+        );
+        assert_eq!(
+            inventory.mupdate_override.boot_disk_path,
+            status.mupdate_override.boot_disk_path
+        );
 
         logctx.cleanup_successful();
     }

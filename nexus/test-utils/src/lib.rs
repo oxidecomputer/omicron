@@ -17,11 +17,12 @@ use dropshot::test_util::LogContext;
 use futures::FutureExt;
 use futures::future::BoxFuture;
 use gateway_test_utils::setup::GatewayTestContext;
-use hickory_resolver::TokioAsyncResolver;
+use hickory_resolver::TokioResolver;
 use hickory_resolver::config::NameServerConfig;
-use hickory_resolver::config::Protocol;
 use hickory_resolver::config::ResolverConfig;
 use hickory_resolver::config::ResolverOpts;
+use hickory_resolver::name_server::TokioConnectionProvider;
+use hickory_resolver::proto::xfer::Protocol;
 use id_map::IdMap;
 use internal_dns_types::config::DnsConfigBuilder;
 use internal_dns_types::names::DNS_ZONE_EXTERNAL_TESTING;
@@ -165,6 +166,7 @@ pub struct ControlPlaneTestContext<N> {
     pub internal_client: ClientTestContext,
     pub server: N,
     pub database: dev::db::CockroachInstance,
+    pub database_admin: omicron_cockroach_admin::Server,
     pub clickhouse: dev::clickhouse::ClickHouseDeployment,
     pub logctx: LogContext,
     pub sled_agents: Vec<ControlPlaneTestContextSledAgent>,
@@ -376,6 +378,7 @@ pub struct ControlPlaneTestContextBuilder<'a, N: NexusServer> {
 
     pub server: Option<N>,
     pub database: Option<dev::db::CockroachInstance>,
+    pub database_admin: Option<omicron_cockroach_admin::Server>,
     pub clickhouse: Option<dev::clickhouse::ClickHouseDeployment>,
     pub sled_agents: Vec<ControlPlaneTestContextSledAgent>,
     pub oximeter: Option<Oximeter>,
@@ -428,6 +431,7 @@ impl<'a, N: NexusServer> ControlPlaneTestContextBuilder<'a, N> {
             internal_client: None,
             server: None,
             database: None,
+            database_admin: None,
             clickhouse: None,
             sled_agents: vec![],
             oximeter: None,
@@ -540,7 +544,28 @@ impl<'a, N: NexusServer> ControlPlaneTestContextBuilder<'a, N> {
             ),
             image_source: BlueprintZoneImageSource::InstallDataset,
         });
+        let http_address = database.http_addr();
         self.database = Some(database);
+
+        let cli = omicron_cockroach_admin::CockroachCli::new(
+            omicron_test_utils::dev::db::COCKROACHDB_BIN.into(),
+            address,
+            http_address,
+        );
+        let server = omicron_cockroach_admin::start_server(
+            zone_id,
+            cli,
+            omicron_cockroach_admin::Config {
+                dropshot: dropshot::ConfigDropshot::default(),
+                log: ConfigLogging::StderrTerminal {
+                    level: ConfigLoggingLevel::Error,
+                },
+            },
+        )
+        .await
+        .expect("Failed to start CRDB admin server");
+
+        self.database_admin = Some(server);
     }
 
     // Start ClickHouse database server.
@@ -1408,6 +1433,7 @@ impl<'a, N: NexusServer> ControlPlaneTestContextBuilder<'a, N> {
             techport_client: self.techport_client.unwrap(),
             internal_client: self.internal_client.unwrap(),
             database: self.database.unwrap(),
+            database_admin: self.database_admin.unwrap(),
             clickhouse: self.clickhouse.unwrap(),
             sled_agents: self.sled_agents,
             oximeter: self.oximeter.unwrap(),
@@ -1957,7 +1983,7 @@ pub async fn start_dns_server(
     (
         dns_server::dns_server::ServerHandle,
         dropshot::HttpServer<dns_server::http_server::Context>,
-        TokioAsyncResolver,
+        TokioResolver,
     ),
     anyhow::Error,
 > {
@@ -1988,16 +2014,18 @@ pub async fn start_dns_server(
     .unwrap();
 
     let mut resolver_config = ResolverConfig::new();
-    resolver_config.add_name_server(NameServerConfig {
-        socket_addr: dns_server.local_address(),
-        protocol: Protocol::Udp,
-        tls_dns_name: None,
-        trust_negative_responses: false,
-        bind_addr: None,
-    });
+    resolver_config.add_name_server(NameServerConfig::new(
+        dns_server.local_address(),
+        Protocol::Udp,
+    ));
     let mut resolver_opts = ResolverOpts::default();
     resolver_opts.edns0 = true;
-    let resolver = TokioAsyncResolver::tokio(resolver_config, resolver_opts);
+    let resolver = TokioResolver::builder_with_config(
+        resolver_config,
+        TokioConnectionProvider::default(),
+    )
+    .with_options(resolver_opts)
+    .build();
 
     Ok((dns_server, http_server, resolver))
 }

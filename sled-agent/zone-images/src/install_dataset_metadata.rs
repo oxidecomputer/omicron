@@ -9,10 +9,10 @@ use iddqd::{IdOrdItem, IdOrdMap, id_upcast};
 use omicron_uuid_kinds::InternalZpoolUuid;
 use serde::de::DeserializeOwned;
 use sled_agent_config_reconciler::InternalDisksWithBootDisk;
-use std::fs::{self, FileType};
-use thiserror::Error;
-
-use crate::{ArcIoError, ArcSerdeJsonError};
+use sled_agent_types::zone_images::{
+    ArcIoError, ArcSerdeJsonError, InstallMetadataReadError,
+};
+use std::fs;
 
 #[derive(Debug)]
 pub(crate) struct AllInstallMetadataFiles<T: 'static> {
@@ -293,57 +293,5 @@ pub enum InstallMetadataNonBootMismatch<T> {
     BootDiskReadError {
         /// The value as found on this disk. This value is logged but not used.
         non_boot_disk_info: Option<InstallMetadata<T>>,
-    },
-}
-
-#[derive(Clone, Debug, PartialEq, Error)]
-pub enum InstallMetadataReadError {
-    #[error(
-        "error retrieving metadata for install dataset directory \
-         `{dataset_dir}`"
-    )]
-    DatasetDirMetadata {
-        dataset_dir: Utf8PathBuf,
-        #[source]
-        error: ArcIoError,
-    },
-
-    #[error(
-        "expected install dataset `{dataset_dir}` to be a directory, \
-         found {file_type:?}"
-    )]
-    DatasetNotDirectory { dataset_dir: Utf8PathBuf, file_type: FileType },
-
-    #[error("error reading metadata file from `{path}`")]
-    Read {
-        path: Utf8PathBuf,
-        #[source]
-        error: ArcIoError,
-    },
-
-    #[error("error deserializing `{path}`, contents: {contents:?}")]
-    Deserialize {
-        path: Utf8PathBuf,
-        contents: String,
-        #[source]
-        error: ArcSerdeJsonError,
-    },
-    #[error("error reading entries from install dataset dir {dataset_dir}")]
-    ReadDir {
-        dataset_dir: Utf8PathBuf,
-        #[source]
-        error: ArcIoError,
-    },
-    #[error("error reading file type for {path}")]
-    ReadFileType {
-        path: Utf8PathBuf,
-        #[source]
-        error: ArcIoError,
-    },
-    #[error("error reading file {path}")]
-    ReadFile {
-        path: Utf8PathBuf,
-        #[source]
-        error: ArcIoError,
     },
 }
