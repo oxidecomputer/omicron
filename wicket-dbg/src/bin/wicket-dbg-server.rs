@@ -11,8 +11,11 @@ use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::{TcpListener, TcpStream};
 use wicket_dbg::{Cmd, Runner, RunnerHandle};
 
-#[tokio::main]
-async fn main() -> Result<()> {
+fn main() -> Result<()> {
+    oxide_tokio_rt::run(main_impl())
+}
+
+async fn main_impl() -> Result<()> {
     let log = setup_log()?;
     let (mut runner, handle) = Runner::new(log.clone());
 

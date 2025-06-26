@@ -536,10 +536,32 @@ impl<'a> Planner<'a> {
                     updated,
                     removed,
                 });
+            }
 
-                // Note that this doesn't actually need to short-circuit the
-                // rest of the blueprint planning, as long as during execution
-                // we send this request first.
+            // The first thing we want to do with any sled is ensure it has an
+            // NTP zone. However, this requires the sled to have at least one
+            // available zpool on which we could place a zone. There are at
+            // least two expected cases where we'll see a sled here with no
+            // in-service zpools:
+            //
+            // 1. A sled was just added and its disks have not yet been adopted
+            //    by the control plane.
+            // 2. A sled has had all of its disks expunged.
+            //
+            // In either case, we can't do anything with the sled, but we don't
+            // want to fail planning entirely. Just skip sleds in this state.
+            if sled_resources
+                .all_zpools(ZpoolFilter::InService)
+                .next()
+                .is_none()
+            {
+                info!(
+                    self.log,
+                    "skipping sled (no zpools in service)";
+                    "sled_id" => %sled_id,
+                );
+                sleds_waiting_for_ntp_zone.insert(sled_id);
+                continue;
             }
 
             // Check for an NTP zone.  Every sled should have one.  If it's not
@@ -974,7 +996,7 @@ impl<'a> Planner<'a> {
         // Compute the new set of PendingMgsUpdates.
         let current_updates =
             &self.blueprint.parent_blueprint().pending_mgs_updates;
-        let current_artifacts = self.input.tuf_repo();
+        let current_artifacts = self.input.tuf_repo().description();
         let next = plan_mgs_updates(
             &self.log,
             &self.inventory,
@@ -1255,6 +1277,7 @@ pub(crate) mod test {
     use nexus_types::deployment::ClickhouseMode;
     use nexus_types::deployment::ClickhousePolicy;
     use nexus_types::deployment::SledDisk;
+    use nexus_types::deployment::TufRepoPolicy;
     use nexus_types::deployment::blueprint_zone_type;
     use nexus_types::deployment::blueprint_zone_type::InternalDns;
     use nexus_types::external_api::views::PhysicalDiskState;
@@ -1523,7 +1546,13 @@ pub(crate) mod test {
                 .nsleds(1)
                 .nexus_count(1)
                 .build();
-        let sled_id = *example.collection.sled_agents.keys().next().unwrap();
+        let sled_id = example
+            .collection
+            .sled_agents
+            .iter()
+            .next()
+            .map(|sa| sa.sled_id)
+            .unwrap();
         let input = example.input;
         let collection = example.collection;
 
@@ -2377,7 +2406,7 @@ pub(crate) mod test {
         // has learned about the expungement.
         collection
             .sled_agents
-            .get_mut(&sled_id)
+            .get_mut(sled_id)
             .unwrap()
             .last_reconciliation
             .as_mut()
@@ -4429,7 +4458,7 @@ pub(crate) mod test {
 
         // Now make both changes to the inventory.
         {
-            let config = collection.sled_agents.get_mut(&sled_id).unwrap();
+            let mut config = collection.sled_agents.get_mut(&sled_id).unwrap();
             config.ledgered_sled_config = Some(bp2_sled_config.clone());
             config.last_reconciliation =
                 Some(ConfigReconcilerInventory::debug_assume_success(
@@ -4699,7 +4728,7 @@ pub(crate) mod test {
         verify_blueprint(&blueprint1);
 
         // We should start with no specified TUF repo and nothing to do.
-        assert!(example.input.tuf_repo().is_none());
+        assert!(example.input.tuf_repo().description().is_none());
         assert_planning_makes_no_changes(
             &logctx.log,
             &blueprint1,
@@ -4718,18 +4747,28 @@ pub(crate) mod test {
                 ))
         );
 
+        // This generation is successively incremented for each TUF repo. We use
+        // generation 2 to represent the first generation with a TUF repo
+        // attached.
+        let target_release_generation = Generation::from_u32(2);
+
         // Manually specify a trivial TUF repo.
         let mut input_builder = example.input.clone().into_builder();
-        input_builder.policy_mut().tuf_repo = Some(TufRepoDescription {
-            repo: TufRepoMeta {
-                hash: ArtifactHash([0; 32]),
-                targets_role_version: 0,
-                valid_until: Utc::now(),
-                system_version: Version::new(0, 0, 0),
-                file_name: String::from(""),
-            },
-            artifacts: vec![],
-        });
+        input_builder.policy_mut().tuf_repo = TufRepoPolicy {
+            // We use generation 2 to represent the first generation set to a
+            // target TUF repo.
+            target_release_generation,
+            description: Some(TufRepoDescription {
+                repo: TufRepoMeta {
+                    hash: ArtifactHash([0; 32]),
+                    targets_role_version: 0,
+                    valid_until: Utc::now(),
+                    system_version: Version::new(0, 0, 0),
+                    file_name: String::from(""),
+                },
+                artifacts: vec![],
+            }),
+        };
         let input = input_builder.build();
         let blueprint2 = Planner::new_based_on(
             log.clone(),
@@ -4770,16 +4809,20 @@ pub(crate) mod test {
             fake_zone_artifact!(CruciblePantry, version.clone()),
             fake_zone_artifact!(Nexus, version.clone()),
         ];
-        input_builder.policy_mut().tuf_repo = Some(TufRepoDescription {
-            repo: TufRepoMeta {
-                hash: fake_hash,
-                targets_role_version: 0,
-                valid_until: Utc::now(),
-                system_version: Version::new(1, 0, 0),
-                file_name: String::from(""),
-            },
-            artifacts,
-        });
+        let target_release_generation = target_release_generation.next();
+        input_builder.policy_mut().tuf_repo = TufRepoPolicy {
+            target_release_generation,
+            description: Some(TufRepoDescription {
+                repo: TufRepoMeta {
+                    hash: fake_hash,
+                    targets_role_version: 0,
+                    valid_until: Utc::now(),
+                    system_version: Version::new(1, 0, 0),
+                    file_name: String::from(""),
+                },
+                artifacts,
+            }),
+        };
 
         // Some helper predicates for the assertions below.
         let is_old_nexus = |zone: &BlueprintZoneConfig| -> bool {
@@ -5017,30 +5060,36 @@ pub(crate) mod test {
             },
             hash: fake_hash,
         };
-        let tuf_repo = TufRepoDescription {
-            repo: TufRepoMeta {
-                hash: fake_hash,
-                targets_role_version: 0,
-                valid_until: Utc::now(),
-                system_version: Version::new(1, 0, 0),
-                file_name: String::from(""),
-            },
-            artifacts: vec![
-                fake_zone_artifact!(BoundaryNtp, version.clone()),
-                fake_zone_artifact!(Clickhouse, version.clone()),
-                fake_zone_artifact!(ClickhouseKeeper, version.clone()),
-                fake_zone_artifact!(ClickhouseServer, version.clone()),
-                fake_zone_artifact!(CockroachDb, version.clone()),
-                fake_zone_artifact!(Crucible, version.clone()),
-                fake_zone_artifact!(CruciblePantry, version.clone()),
-                fake_zone_artifact!(ExternalDns, version.clone()),
-                fake_zone_artifact!(InternalDns, version.clone()),
-                fake_zone_artifact!(InternalNtp, version.clone()),
-                fake_zone_artifact!(Nexus, version.clone()),
-                fake_zone_artifact!(Oximeter, version.clone()),
-            ],
+        // We use generation 2 to represent the first generation with a TUF repo
+        // attached.
+        let target_release_generation = Generation::new().next();
+        let tuf_repo = TufRepoPolicy {
+            target_release_generation,
+            description: Some(TufRepoDescription {
+                repo: TufRepoMeta {
+                    hash: fake_hash,
+                    targets_role_version: 0,
+                    valid_until: Utc::now(),
+                    system_version: Version::new(1, 0, 0),
+                    file_name: String::from(""),
+                },
+                artifacts: vec![
+                    fake_zone_artifact!(BoundaryNtp, version.clone()),
+                    fake_zone_artifact!(Clickhouse, version.clone()),
+                    fake_zone_artifact!(ClickhouseKeeper, version.clone()),
+                    fake_zone_artifact!(ClickhouseServer, version.clone()),
+                    fake_zone_artifact!(CockroachDb, version.clone()),
+                    fake_zone_artifact!(Crucible, version.clone()),
+                    fake_zone_artifact!(CruciblePantry, version.clone()),
+                    fake_zone_artifact!(ExternalDns, version.clone()),
+                    fake_zone_artifact!(InternalDns, version.clone()),
+                    fake_zone_artifact!(InternalNtp, version.clone()),
+                    fake_zone_artifact!(Nexus, version.clone()),
+                    fake_zone_artifact!(Oximeter, version.clone()),
+                ],
+            }),
         };
-        input_builder.policy_mut().tuf_repo = Some(tuf_repo);
+        input_builder.policy_mut().tuf_repo = tuf_repo;
         let input = input_builder.build();
 
         /// Expected number of planner iterations required to converge.

@@ -119,6 +119,7 @@ Commands:
   rack                         Print information about the rack
   disks                        Print information about virtual disks
   dns                          Print information about internal and external DNS
+  ereport                      Query and display error reports
   inventory                    Print information about collected hardware/software inventory
   physical-disks               Print information about physical disks
   region                       Print information about regions
@@ -176,6 +177,7 @@ Commands:
   rack                         Print information about the rack
   disks                        Print information about virtual disks
   dns                          Print information about internal and external DNS
+  ereport                      Query and display error reports
   inventory                    Print information about collected hardware/software inventory
   physical-disks               Print information about physical disks
   region                       Print information about regions
@@ -495,6 +497,138 @@ Safety Options:
 ---------------------------------------------
 stderr:
 =============================================
+EXECUTING COMMAND: omdb ["db", "ereport"]
+termination: Exited(2)
+---------------------------------------------
+stdout:
+---------------------------------------------
+stderr:
+Query and display error reports
+
+Usage: omdb db ereport [OPTIONS] <COMMAND>
+
+Commands:
+  list       List ereports
+  info       Show an ereport
+  reporters  List ereport reporters
+  help       Print this message or the help of the given subcommand(s)
+
+Options:
+      --log-level <LOG_LEVEL>  log level filter [env: LOG_LEVEL=] [default: warn]
+      --color <COLOR>          Color output [default: auto] [possible values: auto, always, never]
+  -h, --help                   Print help
+
+Connection Options:
+      --db-url <DB_URL>          URL of the database SQL interface [env: OMDB_DB_URL=]
+      --dns-server <DNS_SERVER>  [env: OMDB_DNS_SERVER=]
+
+Database Options:
+      --fetch-limit <FETCH_LIMIT>  limit to apply to queries that fetch rows [env:
+                                   OMDB_FETCH_LIMIT=] [default: 500]
+      --include-deleted            whether to include soft-deleted records when enumerating objects
+                                   that can be soft-deleted
+
+Safety Options:
+  -w, --destructive  Allow potentially-destructive subcommands
+=============================================
+EXECUTING COMMAND: omdb ["db", "ereport", "list", "--help"]
+termination: Exited(0)
+---------------------------------------------
+stdout:
+List ereports
+
+Usage: omdb db ereport list [OPTIONS]
+
+Options:
+      --log-level <LOG_LEVEL>  log level filter [env: LOG_LEVEL=] [default: warn]
+  -s, --serial <SERIALS>       Include only ereports from systems with the provided serial numbers
+  -i, --id <IDS>               Include only ereports from the provided reporter restart IDs
+  -c, --class <CLASSES>        Include only ereports with the provided class strings
+  -b, --before <BEFORE>        Include only ereports collected before this timestamp
+      --color <COLOR>          Color output [default: auto] [possible values: auto, always, never]
+  -a, --after <AFTER>          Include only ereports collected after this timestamp
+  -h, --help                   Print help
+
+Connection Options:
+      --db-url <DB_URL>          URL of the database SQL interface [env: OMDB_DB_URL=]
+      --dns-server <DNS_SERVER>  [env: OMDB_DNS_SERVER=]
+
+Database Options:
+      --fetch-limit <FETCH_LIMIT>  limit to apply to queries that fetch rows [env:
+                                   OMDB_FETCH_LIMIT=] [default: 500]
+      --include-deleted            whether to include soft-deleted records when enumerating objects
+                                   that can be soft-deleted
+
+Safety Options:
+  -w, --destructive  Allow potentially-destructive subcommands
+---------------------------------------------
+stderr:
+=============================================
+EXECUTING COMMAND: omdb ["db", "ereport", "reporters", "--help"]
+termination: Exited(0)
+---------------------------------------------
+stdout:
+List ereport reporters
+
+Usage: omdb db ereport reporters [OPTIONS] [SERIAL]
+
+Arguments:
+  [SERIAL]  
+
+Options:
+      --log-level <LOG_LEVEL>  log level filter [env: LOG_LEVEL=] [default: warn]
+  -t, --type <SLOT_TYPE>       
+  -s, --slot <SLOT>            
+      --color <COLOR>          Color output [default: auto] [possible values: auto, always, never]
+  -h, --help                   Print help
+
+Connection Options:
+      --db-url <DB_URL>          URL of the database SQL interface [env: OMDB_DB_URL=]
+      --dns-server <DNS_SERVER>  [env: OMDB_DNS_SERVER=]
+
+Database Options:
+      --fetch-limit <FETCH_LIMIT>  limit to apply to queries that fetch rows [env:
+                                   OMDB_FETCH_LIMIT=] [default: 500]
+      --include-deleted            whether to include soft-deleted records when enumerating objects
+                                   that can be soft-deleted
+
+Safety Options:
+  -w, --destructive  Allow potentially-destructive subcommands
+---------------------------------------------
+stderr:
+=============================================
+EXECUTING COMMAND: omdb ["db", "ereport", "info", "--help"]
+termination: Exited(0)
+---------------------------------------------
+stdout:
+Show an ereport
+
+Usage: omdb db ereport info [OPTIONS] <RESTART_ID> <ENA>
+
+Arguments:
+  <RESTART_ID>  The reporter restart UUID of the ereport to show
+  <ENA>         The ENA of the ereport within the reporter restart
+
+Options:
+      --log-level <LOG_LEVEL>  log level filter [env: LOG_LEVEL=] [default: warn]
+      --color <COLOR>          Color output [default: auto] [possible values: auto, always, never]
+  -h, --help                   Print help
+
+Connection Options:
+      --db-url <DB_URL>          URL of the database SQL interface [env: OMDB_DB_URL=]
+      --dns-server <DNS_SERVER>  [env: OMDB_DNS_SERVER=]
+
+Database Options:
+      --fetch-limit <FETCH_LIMIT>  limit to apply to queries that fetch rows [env:
+                                   OMDB_FETCH_LIMIT=] [default: 500]
+      --include-deleted            whether to include soft-deleted records when enumerating objects
+                                   that can be soft-deleted
+
+Safety Options:
+  -w, --destructive  Allow potentially-destructive subcommands
+---------------------------------------------
+stderr:
+=============================================
 EXECUTING COMMAND: omdb ["db", "sleds", "--help"]
 termination: Exited(0)
 ---------------------------------------------
@@ -707,6 +841,7 @@ Usage: omdb nexus [OPTIONS] <COMMAND>
 Commands:
   background-tasks      print information about background tasks
   blueprints            interact with blueprints
+  chicken-switches      interact with reconfigurator chicken switches
   clickhouse-policy     interact with clickhouse policy
   mgs-updates           print information about pending MGS updates
   oximeter-read-policy  interact with oximeter read policy
