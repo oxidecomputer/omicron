@@ -500,7 +500,7 @@ impl<N> PaginatorHelper<N> {
                 PaginatorState::Done
             } else {
                 // self.batch_size is non-zero, so if we got at least that many
-                // items, then there's at least one.
+                // items, then there's at least one left.
                 let last = batch.iter().last().unwrap();
                 let marker = item2marker(last);
                 PaginatorState::Middle { marker }
