@@ -234,7 +234,7 @@ pub(crate) async fn apply_update(
         // This is the first time a Nexus instance is attempting to
         // update the RoT bootloader, we don't need to wait for an
         // ongoing update.
-        Ok(PrecheckStatus::WaitingForOngoingRotBootloaderUpdate) => (),
+        Ok(PrecheckStatus::WaitingForOngoingUpdate) => (),
         Ok(PrecheckStatus::UpdateComplete) => {
             return Ok(UpdateCompletedHow::FoundNoChangesNeeded);
         }
@@ -632,7 +632,7 @@ async fn wait_for_update_done(
             // Check if we're done.
             Ok(PrecheckStatus::UpdateComplete) => return Ok(()),
 
-            Ok(PrecheckStatus::WaitingForOngoingRotBootloaderUpdate) => {
+            Ok(PrecheckStatus::WaitingForOngoingUpdate) => {
                 if before.elapsed()
                     >= WAIT_FOR_ONGOING_ROT_BOOTLOADER_UPDATE_TIMEOUT
                 {

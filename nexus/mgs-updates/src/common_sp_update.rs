@@ -275,7 +275,7 @@ pub trait SpComponentUpdateHelper {
 pub enum PrecheckStatus {
     UpdateComplete,
     ReadyForUpdate,
-    WaitingForOngoingRotBootloaderUpdate,
+    WaitingForOngoingUpdate,
 }
 
 #[derive(Debug, Error)]

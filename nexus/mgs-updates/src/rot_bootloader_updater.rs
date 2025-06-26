@@ -61,13 +61,6 @@ impl SpComponentUpdateHelper for ReconfiguratorRotBootloaderUpdater {
                 });
             }
 
-            // TODO: In the RoT bootloader update code in wicket, there is a set of
-            // known bootloader FWIDs that don't have cabooses. There are also older
-            // versions of the SP have a bug that prevents setting the active slot for
-            // the RoT bootloader. We should reject any update request that comes from
-            // a system using those devices.
-            // https://github.com/oxidecomputer/omicron/issues/8457
-
             // Fetch the caboose from the currently active slot (stage0).
             let caboose = mgs_clients
                 .try_all_serially(log, move |mgs_client| async move {
@@ -127,12 +120,11 @@ impl SpComponentUpdateHelper for ReconfiguratorRotBootloaderUpdater {
                         .sp_component_caboose_get(
                             update.sp_type,
                             update.slot_id,
-                            // The name for the SP component here is STAGE0
-                            // it's a little confusing because we're really
-                            // trying to reach STAGE0NEXT, and there is no
-                            // ROT_BOOTLOADER variant. We specify that we
-                            // want STAGE0NEXT by setting the firmware slot
-                            // to 1, which is where it will always be.
+                            // The naming here is a bit confusing because "stage0"
+                            // sometimes refers to the component (RoT bootloader)
+                            // and sometimes refers to the active slot for that
+                            // component. Here, we're accessing the inactive slot
+                            // for it. The component is still "stage0".
                             &SpComponent::STAGE0.to_string(),
                             1,
                         )
@@ -183,7 +175,7 @@ impl SpComponentUpdateHelper for ReconfiguratorRotBootloaderUpdater {
             // itself is being updated (during the reset stage)? Should we check for that
             // here before setting the RoT bootloader as ready to update?
 
-            Ok(PrecheckStatus::WaitingForOngoingRotBootloaderUpdate)
+            Ok(PrecheckStatus::WaitingForOngoingUpdate)
         }
         .boxed()
     }
