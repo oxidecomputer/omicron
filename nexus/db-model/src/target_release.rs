@@ -64,7 +64,7 @@ impl TargetRelease {
     pub fn into_external(
         &self,
         release_source: views::TargetReleaseSource,
-        mupdate_override: Option<views::TargetReleaseMupdateOverride>,
+        mupdate_override: bool,
     ) -> views::TargetRelease {
         views::TargetRelease {
             generation: (&self.generation.0).into(),

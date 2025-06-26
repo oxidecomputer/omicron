@@ -132,13 +132,7 @@ impl DataStore {
         // existence based on which Nexus is getting hit.
         let min_gen = self.blueprint_target_get_current_min_gen(opctx).await?;
         // The semantics of min_gen mean we use a > sign here, not >=.
-        let mupdate_override = if min_gen > target_release.generation.0 {
-            Some(views::TargetReleaseMupdateOverride {
-                minimum_generation: (&min_gen).into(),
-            })
-        } else {
-            None
-        };
+        let mupdate_override = min_gen > target_release.generation.0;
         Ok(target_release.into_external(release_source, mupdate_override))
     }
 }
@@ -374,9 +368,9 @@ mod test {
 
         eprintln!("target release view 2: {target_release_view_2:#?}");
 
-        assert_eq!(
+        assert!(
             target_release_view_2.mupdate_override,
-            Some(views::TargetReleaseMupdateOverride { minimum_generation: 5 })
+            "mupdate override is set",
         );
 
         // Now set the target release again -- this should cause the mupdate
@@ -402,7 +396,10 @@ mod test {
 
         eprintln!("target release view 3: {target_release_view_3:#?}");
 
-        assert_eq!(target_release_view_3.mupdate_override, None);
+        assert!(
+            !target_release_view_3.mupdate_override,
+            "mupdate override is not set",
+        );
 
         // Clean up.
         db.terminate().await;

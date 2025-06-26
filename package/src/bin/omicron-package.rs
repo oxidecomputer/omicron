@@ -835,8 +835,11 @@ impl Progress for PackageProgress {
     }
 }
 
-#[tokio::main]
-async fn main() -> Result<()> {
+fn main() -> Result<()> {
+    oxide_tokio_rt::run(main_impl())
+}
+
+async fn main_impl() -> Result<()> {
     let args = Args::try_parse()?;
     let base_config = BaseConfig::load(&args.manifest).with_context(|| {
         format!("failed to load base config from {:?}", args.manifest)

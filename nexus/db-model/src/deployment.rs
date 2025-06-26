@@ -111,16 +111,6 @@ impl From<Blueprint> for nexus_types::deployment::BlueprintMetadata {
     }
 }
 
-/// Abridged form of [`Blueprint`] to get just the
-/// `target_release_minimum_generation` column.
-///
-/// See [`nexus_types::deployment::Blueprint`].
-#[derive(Queryable, Clone, Debug, Selectable)]
-#[diesel(table_name = blueprint)]
-pub struct BpTargetReleaseMinGenColumns {
-    pub target_release_minimum_generation: Generation,
-}
-
 /// See [`nexus_types::deployment::BlueprintTarget`].
 #[derive(Queryable, Clone, Debug, Selectable, Insertable)]
 #[diesel(table_name = bp_target)]
