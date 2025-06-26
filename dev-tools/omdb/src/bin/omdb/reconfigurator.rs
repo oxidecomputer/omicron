@@ -16,6 +16,7 @@ use diesel::ExpressionMethods;
 use diesel::QueryDsl;
 use diesel::SelectableHelper;
 use nexus_db_model::BpTarget;
+use nexus_db_model::SqlU32;
 use nexus_db_queries::authz;
 use nexus_db_queries::context::OpContext;
 use nexus_db_queries::db::DataStore;
@@ -23,6 +24,7 @@ use nexus_db_queries::db::datastore::SQL_BATCH_SIZE;
 use nexus_db_queries::db::pagination::Paginator;
 use nexus_types::deployment::Blueprint;
 use nexus_types::deployment::BlueprintMetadata;
+use nexus_types::deployment::ReconfiguratorChickenSwitches;
 use nexus_types::deployment::UnstableReconfiguratorState;
 use omicron_common::api::external::Error;
 use omicron_common::api::external::LookupType;
@@ -30,6 +32,8 @@ use omicron_uuid_kinds::BlueprintUuid;
 use omicron_uuid_kinds::GenericUuid;
 use slog::Logger;
 use std::collections::BTreeMap;
+use std::num::NonZeroU32;
+use tabled::Tabled;
 
 /// Arguments to the "omdb reconfigurator" subcommand
 #[derive(Debug, Args)]
@@ -53,12 +57,21 @@ enum ReconfiguratorCommands {
     Archive(ExportArgs),
     /// Show recent history of blueprints
     History(HistoryArgs),
+    /// Show the recent history of chicken switch settings
+    ChickenSwitchesHistory(ChickenSwitchesHistoryArgs),
 }
 
 #[derive(Debug, Args, Clone)]
 struct ExportArgs {
     /// where to save the output
     output_file: Utf8PathBuf,
+}
+
+#[derive(Debug, Args, Clone)]
+struct ChickenSwitchesHistoryArgs {
+    /// how far back in the history to show (number of targets)
+    #[clap(long, default_value_t = 128)]
+    limit: u32,
 }
 
 #[derive(Debug, Args, Clone)]
@@ -108,6 +121,12 @@ impl ReconfiguratorArgs {
                             &opctx,
                             &datastore,
                             history_args,
+                        )
+                        .await
+                    }
+                    ReconfiguratorCommands::ChickenSwitchesHistory(args) => {
+                        cmd_reconfigurator_chicken_switches_history(
+                            &opctx, &datastore, args,
                         )
                         .await
                     }
@@ -349,6 +368,61 @@ async fn cmd_reconfigurator_history(
 
         prev_blueprint_id = Some(target_id);
     }
+
+    Ok(())
+}
+/// Show recent history of chicken switches
+async fn cmd_reconfigurator_chicken_switches_history(
+    opctx: &OpContext,
+    datastore: &DataStore,
+    history_args: &ChickenSwitchesHistoryArgs,
+) -> anyhow::Result<()> {
+    let mut history = vec![];
+    let limit = history_args.limit;
+    let batch_size = NonZeroU32::min(limit.try_into().unwrap(), SQL_BATCH_SIZE);
+    let mut paginator = Paginator::<SqlU32>::new(batch_size);
+    while let Some(p) = paginator.next() {
+        if history.len() >= limit as usize {
+            break;
+        }
+        let batch = datastore
+            .reconfigurator_chicken_switches_list(opctx, &p.current_pagparams())
+            .await
+            .context("batch of chicken switches")?;
+        paginator = p.found_batch(&batch, &|b| SqlU32::new(b.version));
+        history.extend(batch.into_iter());
+    }
+
+    #[derive(Tabled)]
+    #[tabled(rename_all = "SCREAMING_SNAKE_CASE")]
+    struct SwitchesRow {
+        version: String,
+        planner_enabled: String,
+        time_modified: String,
+    }
+
+    let rows: Vec<_> = history
+        .into_iter()
+        .map(|s| {
+            let ReconfiguratorChickenSwitches {
+                version,
+                planner_enabled,
+                time_modified,
+            } = s;
+            SwitchesRow {
+                version: version.to_string(),
+                planner_enabled: planner_enabled.to_string(),
+                time_modified: time_modified.to_string(),
+            }
+        })
+        .collect();
+
+    let table = tabled::Table::new(rows)
+        .with(tabled::settings::Style::empty())
+        .with(tabled::settings::Padding::new(0, 1, 0, 0))
+        .to_string();
+
+    println!("{}", table);
 
     Ok(())
 }
