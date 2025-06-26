@@ -5,6 +5,7 @@ edition = "2024"
 
 [dependencies]
 dropshot.workspace = true
+thiserror.workspace = true
 schemars.workspace = true
 serde.workspace = true
 serde_json.workspace = true
