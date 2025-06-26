@@ -8,7 +8,9 @@ use chrono::{DateTime, Utc};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[derive(
+    Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema,
+)]
 pub struct ReconfiguratorChickenSwitchesParam {
     pub version: u32,
     pub planner_enabled: bool,

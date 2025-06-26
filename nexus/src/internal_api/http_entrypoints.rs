@@ -23,7 +23,6 @@ use dropshot::ResultsPage;
 use dropshot::TypedBody;
 use http::Response;
 use nexus_internal_api::*;
-use nexus_inventory::now_db_precision;
 use nexus_types::deployment::Blueprint;
 use nexus_types::deployment::BlueprintMetadata;
 use nexus_types::deployment::BlueprintTarget;
@@ -928,7 +927,7 @@ impl NexusInternalApi for NexusInternalApiImpl {
             datastore
                 .reconfigurator_chicken_switches_insert_latest_version(
                     &opctx,
-                    &switches.into_inner(),
+                    switches.into_inner(),
                 )
                 .await?;
             Ok(HttpResponseUpdatedNoContent())

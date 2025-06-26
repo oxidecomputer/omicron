@@ -171,7 +171,6 @@ impl DataStore {
 mod tests {
     use super::*;
     use crate::db::pub_test_utils::TestDatabase;
-    use nexus_inventory::now_db_precision;
     use omicron_test_utils::dev;
 
     #[tokio::test]
@@ -195,10 +194,9 @@ mod tests {
         );
 
         // Fail to insert a swtiches with version 0
-        let mut switches = ReconfiguratorChickenSwitches {
+        let mut switches = ReconfiguratorChickenSwitchesParam {
             version: 0,
             planner_enabled: false,
-            time_modified: now_db_precision(),
         };
 
         assert!(
@@ -217,7 +215,7 @@ mod tests {
         assert!(
             datastore
                 .reconfigurator_chicken_switches_insert_latest_version(
-                    opctx, &switches
+                    opctx, switches
                 )
                 .await
                 .unwrap_err()
@@ -230,7 +228,7 @@ mod tests {
         assert!(
             datastore
                 .reconfigurator_chicken_switches_insert_latest_version(
-                    opctx, &switches
+                    opctx, switches
                 )
                 .await
                 .is_ok()
@@ -241,7 +239,7 @@ mod tests {
         assert!(
             datastore
                 .reconfigurator_chicken_switches_insert_latest_version(
-                    opctx, &switches
+                    opctx, switches
                 )
                 .await
                 .is_ok()
@@ -252,7 +250,7 @@ mod tests {
         assert!(
             datastore
                 .reconfigurator_chicken_switches_insert_latest_version(
-                    opctx, &switches
+                    opctx, switches
                 )
                 .await
                 .unwrap_err()
@@ -265,7 +263,7 @@ mod tests {
         assert!(
             datastore
                 .reconfigurator_chicken_switches_insert_latest_version(
-                    opctx, &switches
+                    opctx, switches
                 )
                 .await
                 .is_ok()
@@ -277,7 +275,7 @@ mod tests {
         assert!(
             datastore
                 .reconfigurator_chicken_switches_insert_latest_version(
-                    opctx, &switches
+                    opctx, switches
                 )
                 .await
                 .is_ok()
@@ -289,7 +287,8 @@ mod tests {
             .await
             .unwrap()
             .unwrap();
-        assert_eq!(switches, read);
+        assert_eq!(switches.version, read.version);
+        assert_eq!(switches.planner_enabled, read.planner_enabled);
 
         // Getting version 4 should work
         let read = datastore
@@ -297,7 +296,8 @@ mod tests {
             .await
             .unwrap()
             .unwrap();
-        assert_eq!(switches, read);
+        assert_eq!(switches.version, read.version);
+        assert_eq!(switches.planner_enabled, read.planner_enabled);
 
         // Getting version 5 should fail, as it doesn't exist
         assert!(
