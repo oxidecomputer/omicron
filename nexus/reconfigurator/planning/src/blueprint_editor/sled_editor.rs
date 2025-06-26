@@ -4,8 +4,12 @@
 
 //! Support for editing the blueprint details of a single sled.
 
+use crate::blueprint_builder::EditedSledScalarEdits;
+use crate::blueprint_builder::EnsureMupdateOverrideAction;
+use crate::blueprint_builder::EnsureMupdateOverrideUpdatedZone;
 use crate::blueprint_builder::SledEditCounts;
 use crate::planner::SledPlannerRng;
+use iddqd::IdOrdMap;
 use illumos_utils::zpool::ZpoolName;
 use itertools::Either;
 use nexus_sled_agent_shared::inventory::ZoneKind;
@@ -153,8 +157,11 @@ impl SledEditor {
             SledState::Decommissioned,
             "for_existing_decommissioned called on non-decommissioned sled"
         );
-        let inner =
-            EditedSled { config, edit_counts: SledEditCounts::zeroes() };
+        let inner = EditedSled {
+            config,
+            edit_counts: SledEditCounts::zeroes(),
+            scalar_edits: EditedSledScalarEdits::zeroes(),
+        };
         Ok(Self(InnerSledEditor::Decommissioned(inner)))
     }
 
@@ -286,6 +293,18 @@ impl SledEditor {
         }
     }
 
+    /// Returns the remove_mupdate_override field for this sled.
+    pub fn get_remove_mupdate_override(&self) -> Option<MupdateOverrideUuid> {
+        match &self.0 {
+            InnerSledEditor::Active(editor) => {
+                *editor.remove_mupdate_override.value()
+            }
+            InnerSledEditor::Decommissioned(sled) => {
+                sled.config.remove_mupdate_override
+            }
+        }
+    }
+
     fn as_active_mut(
         &mut self,
     ) -> Result<&mut ActiveSledEditor, SledEditError> {
@@ -353,6 +372,15 @@ impl SledEditor {
         self.as_active_mut()?.set_zone_image_source(zone_id, image_source)
     }
 
+    /// Updates a sled's mupdate override field based on the mupdate override
+    /// provided by inventory.
+    pub fn ensure_mupdate_override(
+        &mut self,
+        inv_mupdate_override_id: Option<MupdateOverrideUuid>,
+    ) -> Result<EnsureMupdateOverrideAction, SledEditError> {
+        self.as_active_mut()?.ensure_mupdate_override(inv_mupdate_override_id)
+    }
+
     /// Sets remove-mupdate-override configuration for this sled.
     ///
     /// Currently only used in test code.
@@ -401,6 +429,7 @@ struct ActiveSledEditor {
 pub(crate) struct EditedSled {
     pub config: BlueprintSledConfig,
     pub edit_counts: SledEditCounts,
+    pub scalar_edits: EditedSledScalarEdits,
 }
 
 impl ActiveSledEditor {
@@ -460,6 +489,11 @@ impl ActiveSledEditor {
             self.remove_mupdate_override.is_modified();
         let mut sled_agent_generation = self.incoming_sled_agent_generation;
 
+        let scalar_edits = EditedSledScalarEdits {
+            debug_force_generation_bump: self.debug_force_generation_bump,
+            remove_mupdate_override: remove_mupdate_override_is_modified,
+        };
+
         // Bump the generation if we made any changes of concern to sled-agent.
         if self.debug_force_generation_bump
             || disks_counts.has_nonzero_counts()
@@ -486,6 +520,7 @@ impl ActiveSledEditor {
                 datasets: datasets_counts,
                 zones: zones_counts,
             },
+            scalar_edits,
         }
     }
 
@@ -684,6 +719,84 @@ impl ActiveSledEditor {
                 .ensure_in_service(&mut self.datasets, rng);
         }
         Ok(())
+    }
+
+    /// Update a sled's mupdate override field based on the mupdate override
+    /// provided by inventory.
+    pub fn ensure_mupdate_override(
+        &mut self,
+        inv_mupdate_override_id: Option<MupdateOverrideUuid>,
+    ) -> Result<EnsureMupdateOverrideAction, SledEditError> {
+        match (inv_mupdate_override_id, *self.remove_mupdate_override.value()) {
+            (Some(inv_override), Some(bp_override))
+                if inv_override == bp_override =>
+            {
+                // If the inventory and blueprint overrides are the same, the
+                // sled agent hasn't yet removed the override. Nothing to do at
+                // the moment.
+                Ok(EnsureMupdateOverrideAction::NoAction {
+                    mupdate_override: Some(inv_override),
+                })
+            }
+            (Some(inv_override), bp_override) => {
+                // Inventory says there's an override in place, but the
+                // blueprint doesn't (or has a different override in place).
+                // This means that a MUPdate happened since we last did
+                // blueprint planning.
+                //
+                // Set the blueprint's remove_mupdate_override.
+                self.set_remove_mupdate_override(Some(inv_override));
+                // Set all zone image sources to InstallDataset. This is an
+                // acknowledgement of the current state of the world.
+                let zone_ids: Vec<_> = self
+                    .zones(BlueprintZoneDisposition::is_in_service)
+                    .map(|zone| (zone.id, zone.kind()))
+                    .collect();
+
+                let mut zones = IdOrdMap::with_capacity(zone_ids.len());
+                for (zone_id, kind) in zone_ids {
+                    let old_image_source = self.zones.set_zone_image_source(
+                        &zone_id,
+                        BlueprintZoneImageSource::InstallDataset,
+                    )?;
+                    let item = EnsureMupdateOverrideUpdatedZone {
+                        zone_id,
+                        kind,
+                        old_image_source,
+                        new_image_source:
+                            BlueprintZoneImageSource::InstallDataset,
+                    };
+                    zones.insert_unique(item).expect(
+                        "self.zones is a BTreeMap so zone IDs are unique",
+                    );
+                }
+
+                // TODO: Do the same for RoT/SP/host OS.
+
+                Ok(EnsureMupdateOverrideAction::BpSetOverride {
+                    inv_override,
+                    prev_bp_override: bp_override,
+                    zones,
+                })
+            }
+            (None, Some(prev_bp_override)) => {
+                // The blueprint says there's an override in place, but the
+                // inventory doesn't. This means that the sled has removed its
+                // override that was set in the above branch. We can remove the
+                // override from the blueprint.
+                self.set_remove_mupdate_override(None);
+                // TODO: change zone sources from InstallDataset to Artifact
+                Ok(EnsureMupdateOverrideAction::BpClearOverride {
+                    prev_bp_override,
+                })
+            }
+            (None, None) => {
+                // No override in place, nothing to do.
+                Ok(EnsureMupdateOverrideAction::NoAction {
+                    mupdate_override: None,
+                })
+            }
+        }
     }
 
     /// Set remove-mupdate-override configuration for this sled.
