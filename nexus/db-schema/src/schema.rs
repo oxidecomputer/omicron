@@ -2520,3 +2520,22 @@ table! {
         report -> Jsonb,
     }
 }
+
+table! {
+    user_data_export (id) {
+        id -> Uuid,
+
+        state -> crate::enums::UserDataExportStateEnum,
+        operating_saga_id -> Nullable<Uuid>,
+        generation -> Int8,
+
+        resource_id -> Uuid,
+        resource_type -> crate::enums::UserDataExportResourceTypeEnum,
+        resource_deleted -> Bool,
+
+        pantry_ip -> Nullable<Inet>,
+        pantry_port -> Nullable<Int4>,
+        volume_id -> Nullable<Uuid>,
+    }
+}
+allow_tables_to_appear_in_same_query!(user_data_export, snapshot, image);
