@@ -1327,6 +1327,7 @@ impl DataStore {
             nclickhouse_keepers,
             nclickhouse_servers,
             noximeter_policy,
+            npending_mgs_updates_sp,
         ) = self
             .transaction_retry_wrapper("blueprint_delete")
             .transaction(&conn, |conn| {
@@ -1509,6 +1510,21 @@ impl DataStore {
                         .await?
                     };
 
+                    let npending_mgs_updates_sp = {
+                        // Skip rustfmt because it bails out on this long line.
+                        #[rustfmt::skip]
+                        use nexus_db_schema::schema::
+                            bp_pending_mgs_update_sp::dsl;
+                        diesel::delete(
+                            dsl::bp_pending_mgs_update_sp.filter(
+                                dsl::blueprint_id
+                                    .eq(to_db_typed_uuid(blueprint_id)),
+                            ),
+                        )
+                        .execute_async(&conn)
+                        .await?
+                    };
+
                     Ok((
                         nblueprints,
                         nsled_metadata,
@@ -1520,6 +1536,7 @@ impl DataStore {
                         nclickhouse_keepers,
                         nclickhouse_servers,
                         noximeter_policy,
+                        npending_mgs_updates_sp,
                     ))
                 }
             })
@@ -1541,6 +1558,7 @@ impl DataStore {
             "nclickhouse_keepers" => nclickhouse_keepers,
             "nclickhouse_servers" => nclickhouse_servers,
             "noximeter_policy" => noximeter_policy,
+            "npending_mgs_updates_sp" => npending_mgs_updates_sp,
         );
 
         Ok(())
@@ -2378,6 +2396,7 @@ mod tests {
             query_count!(bp_clickhouse_keeper_zone_id_to_node_id, blueprint_id),
             query_count!(bp_clickhouse_server_zone_id_to_node_id, blueprint_id),
             query_count!(bp_oximeter_read_policy, blueprint_id),
+            query_count!(bp_pending_mgs_update_sp, blueprint_id),
         ] {
             let count: i64 = result.unwrap();
             assert_eq!(
@@ -2880,6 +2899,34 @@ mod tests {
             blueprint_list_all_ids(&opctx, &datastore).await,
             [blueprint2.id]
         );
+
+        // blueprint2 is more interesting in terms of containing a variety of
+        // different blueprint structures.  We want to try deleting that.  To do
+        // that, we have to create a new blueprint and make that one the target.
+        let blueprint3 = BlueprintBuilder::new_based_on(
+            &logctx.log,
+            &blueprint2,
+            &planning_input,
+            &collection,
+            "dummy",
+        )
+        .expect("failed to create builder")
+        .build();
+        datastore
+            .blueprint_insert(&opctx, &blueprint3)
+            .await
+            .expect("failed to insert blueprint");
+        let bp3_target = BlueprintTarget {
+            target_id: blueprint3.id,
+            enabled: true,
+            time_made_target: now_db_precision(),
+        };
+        datastore
+            .blueprint_target_set_current(&opctx, bp3_target)
+            .await
+            .unwrap();
+        datastore.blueprint_delete(&opctx, &authz_blueprint2).await.unwrap();
+        ensure_blueprint_fully_deleted(&datastore, blueprint2.id).await;
 
         // Clean up.
         db.terminate().await;
