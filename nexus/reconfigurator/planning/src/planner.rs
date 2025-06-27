@@ -5069,7 +5069,6 @@ pub(crate) mod test {
         update_collection_from_blueprint(&mut example, &blueprint);
 
         // We should have started with no specified TUF repo and nothing to do.
-        assert!(example.input.tuf_repo().is_none());
         assert_planning_makes_no_changes(
             &logctx.log,
             &blueprint,
@@ -5106,16 +5105,20 @@ pub(crate) mod test {
             hash: fake_hash,
         };
         let artifacts = vec![fake_zone_artifact!(CockroachDb, version.clone())];
-        input_builder.policy_mut().tuf_repo = Some(TufRepoDescription {
-            repo: TufRepoMeta {
-                hash: fake_hash,
-                targets_role_version: 0,
-                valid_until: Utc::now(),
-                system_version: Version::new(1, 0, 0),
-                file_name: String::from(""),
-            },
-            artifacts,
-        });
+        let target_release_generation = Generation::from_u32(2);
+        input_builder.policy_mut().tuf_repo = TufRepoPolicy {
+            target_release_generation,
+            description: Some(TufRepoDescription {
+                repo: TufRepoMeta {
+                    hash: fake_hash,
+                    targets_role_version: 0,
+                    valid_until: Utc::now(),
+                    system_version: Version::new(1, 0, 0),
+                    file_name: String::from(""),
+                },
+                artifacts,
+            }),
+        };
         example.input = input_builder.build();
 
         // Some helper predicates for the assertions below.
