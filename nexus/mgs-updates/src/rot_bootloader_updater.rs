@@ -30,6 +30,8 @@ use std::time::Instant;
 
 const WAIT_FOR_BOOT_INFO_TIMEOUT: Duration = Duration::from_secs(30);
 
+const WAIT_FOR_BOOT_INFO_INTERVAL: Duration = Duration::from_secs(10);
+
 pub struct ReconfiguratorRotBootloaderUpdater;
 impl SpComponentUpdateHelper for ReconfiguratorRotBootloaderUpdater {
     /// Checks if the component is already updated or ready for update
@@ -312,12 +314,8 @@ async fn wait_for_stage0_next_image_check(
     sp_slot: u32,
     timeout: Duration,
 ) -> Result<Option<RotImageError>, PostUpdateError> {
-    let mut ticker = tokio::time::interval(Duration::from_secs(1));
-
-    let start = Instant::now();
+    let before = Instant::now();
     loop {
-        ticker.tick().await;
-
         match mgs_clients
             .try_all_serially(log, |mgs_client| async move {
                 mgs_client
@@ -343,34 +341,37 @@ async fn wait_for_stage0_next_image_check(
                 }
                 // The RoT is probably still booting
                 RotState::CommunicationFailed { message } => {
-                    if start.elapsed() < timeout {
-                        info!(
-                            log,
-                            "failed getting RoT boot info (will retry)";
-                            "error" => %message,
-                        );
-                    } else {
+                    if before.elapsed() >= timeout {
                         error!(
                             log,
                             "failed to get RoT boot info";
-                            "error" => %message,
+                            "error" => %message
                         );
                         return Err(PostUpdateError::TransientError {
                             message,
                         });
                     }
-                }
-            },
-            Err(error) => {
-                if start.elapsed() < timeout {
+
                     info!(
                         log,
                         "failed getting RoT boot info (will retry)";
-                        "error" => %error,
+                        "error" => %message,
                     );
-                } else {
+                    tokio::time::sleep(WAIT_FOR_BOOT_INFO_INTERVAL).await;
+                }
+            },
+            // The RoT might still be booting
+            Err(error) => {
+                if before.elapsed() >= timeout {
                     return Err(PostUpdateError::GatewayClientError(error));
                 }
+
+                info!(
+                    log,
+                    "failed getting RoT boot info (will retry)";
+                    "error" => %error,
+                );
+                tokio::time::sleep(WAIT_FOR_BOOT_INFO_INTERVAL).await;
             }
         }
     }
