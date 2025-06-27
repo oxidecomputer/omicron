@@ -77,9 +77,11 @@ impl SpComponentUpdateHelper for ReconfiguratorRotBootloaderUpdater {
                 .into_inner();
             debug!(log, "found active slot caboose"; "caboose" => ?caboose);
 
+            let found_stage0_version = caboose.version;
+
             // If the version in the currently active slot matches the one we're
             // trying to set, then there's nothing to do.
-            if caboose.version == update.artifact_version.as_str() {
+            if found_stage0_version == update.artifact_version.as_str() {
                 return Ok(PrecheckStatus::UpdateComplete);
             }
 
@@ -99,10 +101,10 @@ impl SpComponentUpdateHelper for ReconfiguratorRotBootloaderUpdater {
                     will always be for the RoT bootloader"
                 );
             };
-            if caboose.version != expected_stage0_version.to_string() {
+            if found_stage0_version != expected_stage0_version.to_string() {
                 return Err(PrecheckError::WrongActiveVersion {
                     expected: expected_stage0_version.clone(),
-                    found: caboose.version,
+                    found: found_stage0_version,
                 });
             }
 
@@ -170,12 +172,22 @@ impl SpComponentUpdateHelper for ReconfiguratorRotBootloaderUpdater {
                 }
             };
 
-            // TODO-K: In post_update we'll be restarting the RoT twice to do signature
-            // checks, and to set stage0 to the new version. What happens if the RoT
-            // itself is being updated (during the reset stage)? Should we check for that
-            // here before setting the RoT bootloader as ready to update?
-
-            Ok(PrecheckStatus::WaitingForOngoingUpdate)
+            // The status is only considered ready for update if the stage0_next
+            // version found in the caboose is valid, and it matches what we
+            // found in the stage_0 caboose. Otherwise, we are waiting for an
+            // ongoing update.
+            match found_stage0_next_version {
+                FoundVersion::Version(v) => {
+                    if v == found_stage0_version {
+                        Ok(PrecheckStatus::ReadyForUpdate)
+                    } else {
+                        Ok(PrecheckStatus::WaitingForOngoingUpdate)
+                    }
+                }
+                FoundVersion::MissingVersion => {
+                    Ok(PrecheckStatus::WaitingForOngoingUpdate)
+                }
+            }
         }
         .boxed()
     }
