@@ -1560,6 +1560,23 @@ impl DataStore {
         Self::blueprint_current_target_only(&conn).await.map_err(|e| e.into())
     }
 
+    /// Get the minimum generation for the current target blueprint, if one exists
+    pub async fn blueprint_target_get_current_min_gen(
+        &self,
+        opctx: &OpContext,
+    ) -> Result<Generation, Error> {
+        opctx.authorize(authz::Action::Read, &authz::BLUEPRINT_CONFIG).await?;
+        let conn = self.pool_connection_authorized(opctx).await?;
+        let target = Self::blueprint_current_target_only(&conn).await?;
+
+        let authz_blueprint = authz_blueprint_from_id(target.target_id);
+        Self::blueprint_get_minimum_generation_connection(
+            &authz_blueprint,
+            &conn,
+        )
+        .await
+    }
+
     // Helper to fetch the current blueprint target (without fetching the entire
     // blueprint for that target).
     //
@@ -1586,6 +1603,28 @@ impl DataStore {
             })?;
 
         Ok(current_target.into())
+    }
+
+    // Helper to fetch the minimum generation for a blueprint ID (without
+    // fetching the entire blueprint for that ID.)
+    async fn blueprint_get_minimum_generation_connection(
+        authz: &authz::Blueprint,
+        conn: &async_bb8_diesel::Connection<DbConnection>,
+    ) -> Result<Generation, Error> {
+        use nexus_db_schema::schema::blueprint::dsl;
+
+        let id = authz.id();
+        let db_blueprint = dsl::blueprint
+            .filter(dsl::id.eq(id))
+            .select(DbBlueprint::as_select())
+            .first_async::<DbBlueprint>(conn)
+            .await
+            .optional()
+            .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))?;
+        let db_blueprint = db_blueprint.ok_or_else(|| {
+            Error::not_found_by_id(ResourceType::Blueprint, &id)
+        })?;
+        Ok(db_blueprint.target_release_minimum_generation.0)
     }
 }
 
