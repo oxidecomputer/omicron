@@ -60,9 +60,18 @@ use tabled::Tabled;
 use tufaceous_artifact::ArtifactHash;
 use tufaceous_artifact::ArtifactVersion;
 use tufaceous_artifact::ArtifactVersionError;
+use tufaceous_lib::assemble::ArtifactManifest;
 use update_common::artifacts::{ArtifactsWithPlan, ControlPlaneZonesMode};
 
 mod log_capture;
+
+/// The default key for TUF repository generation.
+///
+/// This was randomly generated through a tufaceous invocation.
+pub static DEFAULT_TUFACEOUS_KEY: &str = "ed25519:\
+MFECAQEwBQYDK2VwBCIEIJ9CnAhwk8PPt1x8icu\
+z9c12PdfCRHJpoUkuqJmIZ8GbgSEAbNGMpsHK5_w32\
+qwYdZH_BeVssmKzQlFsnPuaiHx2hy0=";
 
 /// REPL state
 #[derive(Debug)]
@@ -76,12 +85,12 @@ struct ReconfiguratorSim {
 }
 
 impl ReconfiguratorSim {
-    fn new(log: slog::Logger, seed: Option<String>) -> Self {
-        Self {
+    fn new(log: slog::Logger, seed: Option<String>) -> anyhow::Result<Self> {
+        Ok(Self {
             sim: Simulator::new(&log, seed),
             current: Simulator::ROOT_ID,
             log,
-        }
+        })
     }
 
     fn current_state(&self) -> &SimState {
@@ -177,7 +186,7 @@ impl CmdReconfiguratorSim {
             LogCapture::new(std::io::stdout().is_terminal());
 
         let seed_provided = self.seed.is_some();
-        let mut sim = ReconfiguratorSim::new(log, self.seed);
+        let mut sim = ReconfiguratorSim::new(log, self.seed)?;
         if seed_provided {
             println!("using provided RNG seed: {}", sim.sim.initial_seed());
         } else {
@@ -228,6 +237,7 @@ fn process_command(
         Commands::BlueprintSave(args) => cmd_blueprint_save(sim, args),
         Commands::Show => cmd_show(sim),
         Commands::Set(args) => cmd_set(sim, args),
+        Commands::TufAssemble(args) => cmd_tuf_assemble(sim, args),
         Commands::Load(args) => cmd_load(sim, args),
         Commands::LoadExample(args) => cmd_load_example(sim, args),
         Commands::FileContents(args) => cmd_file_contents(args),
@@ -302,6 +312,9 @@ enum Commands {
     /// set system properties
     #[command(subcommand)]
     Set(SetArgs),
+
+    /// use tufaceous to generate a repo from a manifest
+    TufAssemble(TufAssembleArgs),
 
     /// save state to a file
     Save(SaveArgs),
@@ -733,6 +746,16 @@ enum SetArgs {
         /// TUF repo containing release artifacts
         filename: Utf8PathBuf,
     },
+}
+
+#[derive(Debug, Args)]
+struct TufAssembleArgs {
+    /// The tufaceous manifest path (relative to this crate's root)
+    manifest_path: Utf8PathBuf,
+
+    /// The path to the output [default: repo-<system-version>.zip]
+    #[clap(long)]
+    output: Option<Utf8PathBuf>,
 }
 
 #[derive(Debug, Args)]
@@ -1768,6 +1791,62 @@ fn cmd_set(
     };
 
     sim.commit_and_bump(format!("reconfigurator-cli set: {}", rv), state);
+    Ok(Some(rv))
+}
+
+fn cmd_tuf_assemble(
+    sim: &ReconfiguratorSim,
+    args: TufAssembleArgs,
+) -> anyhow::Result<Option<String>> {
+    let manifest_path = if args.manifest_path.is_absolute() {
+        args.manifest_path.clone()
+    } else {
+        // Use CARGO_MANIFEST_DIR to resolve relative paths.
+        let dir = std::env::var("CARGO_MANIFEST_DIR").context(
+            "CARGO_MANIFEST_DIR not set in environment \
+             (are you running with `cargo run`?)",
+        )?;
+        let mut dir = Utf8PathBuf::from(dir);
+        dir.push(&args.manifest_path);
+        dir
+    };
+
+    // Obtain the system version from the manifest.
+    //
+    // TODO: Support for this should be built into tufaceous directly.
+    let manifest =
+        ArtifactManifest::from_path(&manifest_path).with_context(|| {
+            format!("error parsing manifest from `{manifest_path}`")
+        })?;
+
+    let output_path = if let Some(output_path) = &args.output {
+        output_path.clone()
+    } else {
+        // This is relative to the current directory.
+        Utf8PathBuf::from(format!("repo-{}.zip", manifest.system_version))
+    };
+
+    // Just use a fixed key for now.
+    //
+    // In the future we may want to test changing the TUF key.
+    let args = tufaceous::Args::try_parse_from([
+        "tufaceous",
+        "--key",
+        DEFAULT_TUFACEOUS_KEY,
+        "assemble",
+        manifest_path.as_str(),
+        output_path.as_str(),
+    ])
+    .expect("args are valid so this shouldn't fail");
+    let rt =
+        tokio::runtime::Runtime::new().context("creating tokio runtime")?;
+    rt.block_on(async move { args.exec(&sim.log).await })
+        .context("error executing tufaceous assemble")?;
+
+    let rv = format!(
+        "created {} for system version {}",
+        output_path, manifest.system_version,
+    );
     Ok(Some(rv))
 }
 
