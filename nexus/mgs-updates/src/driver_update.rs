@@ -44,7 +44,9 @@ const PROGRESS_POLL_INTERVAL: Duration = Duration::from_secs(10);
 pub const DEFAULT_RETRY_TIMEOUT: Duration = Duration::from_secs(60);
 
 /// How long to wait after resetting the device before expecting it to come up
-const RESET_TIMEOUT: Duration = Duration::from_secs(60);
+// 120 seconds is chosen as a generous overestimate, based on reports that
+// Sidecar SPs have been observed to take as many as 30 seconds to reset.
+const RESET_TIMEOUT: Duration = Duration::from_secs(120);
 
 /// Parameters describing a request to update one SP-managed component
 ///
