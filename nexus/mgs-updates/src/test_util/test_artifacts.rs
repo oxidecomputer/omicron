@@ -79,7 +79,6 @@ impl TestArtifacts {
         // Make an RoT update artifact for SimGimlet.
         let rot_gimlet_artifact_caboose = CabooseBuilder::default()
             .git_commit("fake-git-commit")
-            // TODO-K: change to SIM_ROT
             .board(SIM_GIMLET_BOARD)
             .version("0.0.0")
             .name("fake-name")
