@@ -529,7 +529,7 @@ pub struct UpdateStatus {
 
 impl UpdateStatus {
     pub fn new<'a>(
-        old: Option<&TargetReleaseDescription>,
+        old: &TargetReleaseDescription,
         new: &TargetReleaseDescription,
         sleds: impl Iterator<
             Item = (&'a SledUuid, &'a Option<ConfigReconcilerInventory>),
@@ -560,7 +560,7 @@ impl UpdateStatus {
     }
 
     pub fn zone_image_source_to_version(
-        old: Option<&TargetReleaseDescription>,
+        old: &TargetReleaseDescription,
         new: &TargetReleaseDescription,
         source: &OmicronZoneImageSource,
         res: &ConfigReconcilerInventoryResult,
@@ -573,7 +573,7 @@ impl UpdateStatus {
             return ZoneStatusVersion::InstallDataset;
         };
 
-        if let Some(old) = old.and_then(|old| old.tuf_repo()) {
+        if let Some(old) = old.tuf_repo() {
             if old.artifacts.iter().any(|meta| meta.hash == hash) {
                 return ZoneStatusVersion::Version(
                     old.repo.system_version.clone(),

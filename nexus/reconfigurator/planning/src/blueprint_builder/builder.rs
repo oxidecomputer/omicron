@@ -1982,15 +1982,17 @@ impl<'a> BlueprintBuilder<'a> {
     }
 
     fn zone_image_artifact(
-        repo: Option<&TargetReleaseDescription>,
+        repo: &TargetReleaseDescription,
         zone_kind: ZoneKind,
     ) -> BlueprintZoneImageSource {
         let repo = match repo {
-            // TODO-john make this non optional
-            None | Some(TargetReleaseDescription::Initial) => {
+            TargetReleaseDescription::Initial => {
+                // If `repo` describes the initial target release, we have no
+                // TUF repo at all; all zones are sourced from their install
+                // dataset.
                 return BlueprintZoneImageSource::InstallDataset;
             }
-            Some(TargetReleaseDescription::TufRepo(repo)) => repo,
+            TargetReleaseDescription::TufRepo(repo) => repo,
         };
 
         repo.artifacts
@@ -2012,10 +2014,10 @@ impl<'a> BlueprintBuilder<'a> {
         zone_kind: ZoneKind,
     ) -> BlueprintZoneImageSource {
         let new_repo = self.input.tuf_repo().description();
-        let old_repo = self.input.old_repo().map(|repo| repo.description());
+        let old_repo = self.input.old_repo().description();
         Self::zone_image_artifact(
             if self.zone_is_ready_for_update(zone_kind, new_repo) {
-                Some(new_repo)
+                new_repo
             } else {
                 old_repo
             },
@@ -2043,10 +2045,7 @@ impl<'a> BlueprintBuilder<'a> {
                     .filter(|z| z.zone_type.kind() != ZoneKind::Nexus)
                     .all(|z| {
                         z.image_source
-                            == Self::zone_image_artifact(
-                                Some(new_repo),
-                                z.kind(),
-                            )
+                            == Self::zone_image_artifact(new_repo, z.kind())
                     })
                 })
             }

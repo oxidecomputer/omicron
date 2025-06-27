@@ -83,7 +83,7 @@ pub struct PlanningInputFromDb<'a> {
     pub clickhouse_policy: Option<ClickhousePolicy>,
     pub oximeter_read_policy: OximeterReadPolicy,
     pub tuf_repo: TufRepoPolicy,
-    pub old_repo: Option<TufRepoPolicy>,
+    pub old_repo: TufRepoPolicy,
     pub log: &'a Logger,
 }
 
@@ -197,9 +197,9 @@ impl PlanningInputFromDb<'_> {
             } else {
                 TargetReleaseDescription::Initial
             };
-            Some(TufRepoPolicy { target_release_generation: prev, description })
+            TufRepoPolicy { target_release_generation: prev, description }
         } else {
-            None
+            TufRepoPolicy::initial()
         };
 
         let oximeter_read_policy = datastore
