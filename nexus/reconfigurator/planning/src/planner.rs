@@ -29,6 +29,7 @@ use nexus_types::deployment::DiskFilter;
 use nexus_types::deployment::PlanningInput;
 use nexus_types::deployment::SledDetails;
 use nexus_types::deployment::SledFilter;
+use nexus_types::deployment::TufRepoContentsError;
 use nexus_types::deployment::ZpoolFilter;
 use nexus_types::external_api::views::PhysicalDiskPolicy;
 use nexus_types::external_api::views::SledPolicy;
@@ -1052,19 +1053,20 @@ impl<'a> Planner<'a> {
             }
         }
 
-        // Update the first out-of-date zone.
-        let out_of_date_zones = sleds
+        // Find out of date zones, as defined by zones whose image source does
+        // not match what it should be based on our current target release.
+        let target_release = self.input.tuf_repo().description();
+        let mut out_of_date_zones = sleds
             .into_iter()
             .flat_map(|sled_id| {
-                let blueprint = &self.blueprint;
                 let log = &self.log;
-                blueprint
+                self.blueprint
                     .current_sled_zones(
                         sled_id,
                         BlueprintZoneDisposition::is_in_service,
                     )
                     .filter_map(move |zone| {
-                        let desired_image_source = match blueprint
+                        let desired_image_source = match target_release
                             .zone_image_source(zone.zone_type.kind())
                         {
                             Ok(source) => source,
@@ -1082,18 +1084,66 @@ impl<'a> Planner<'a> {
                             }
                         };
                         if zone.image_source != desired_image_source {
-                            Some((sled_id, zone.clone()))
+                            Some((sled_id, zone))
                         } else {
                             None
                         }
                     })
             })
-            .collect::<Vec<(SledUuid, BlueprintZoneConfig)>>();
-        if let Some((sled_id, zone)) = out_of_date_zones.first() {
-            return self.update_or_expunge_zone(*sled_id, zone);
+            .peekable();
+
+        // Before we filter out zones that can't be updated, do we have any out
+        // of date zones at all? We need this to explain why we didn't update
+        // any zones below, if we don't.
+        let have_out_of_date_zones = out_of_date_zones.peek().is_some();
+
+        // Of the out-of-date zones, filter out zones that can't be updated yet,
+        // either because they're not ready or because it wouldn't be safe to
+        // bounce them.
+        let mut updateable_zones =
+            out_of_date_zones.filter(|(_sled_id, zone)| {
+                let kind = zone.zone_type.kind();
+                if !self.can_zone_be_shut_down_safely(kind) {
+                    return false;
+                }
+                match self.is_zone_ready_for_update(kind) {
+                    Ok(true) => true,
+                    Ok(false) => false,
+                    Err(err) => {
+                        // If we can't tell whether a zone is ready for update,
+                        // assume it can't be.
+                        warn!(
+                            self.log,
+                            "cannot determine whether zone is ready for update";
+                            "zone" => ?zone,
+                            InlineErrorChain::new(&err),
+                        );
+                        false
+                    }
+                }
+            });
+
+        // Update the first out-of-date zone.
+        if let Some((sled_id, zone)) = updateable_zones.next() {
+            // Borrow check workaround: `self.update_or_expunge_zone` needs
+            // `&mut self`, but `self` is borrowed in the `updateable_zones`
+            // iterator. Clone the one zone we want to update, then drop the
+            // iterator; now we can call `&mut self` methods.
+            let zone = zone.clone();
+            std::mem::drop(updateable_zones);
+
+            return self.update_or_expunge_zone(sled_id, &zone);
         }
 
-        info!(self.log, "all zones up-to-date");
+        if have_out_of_date_zones {
+            info!(
+                self.log,
+                "not all zones up-to-date, but no zones can be updated now"
+            );
+        } else {
+            info!(self.log, "all zones up-to-date");
+        }
+
         Ok(())
     }
 
@@ -1258,6 +1308,73 @@ impl<'a> Planner<'a> {
         // cluster version -- we're likely in the middle of an upgrade!
         //
         // https://www.cockroachlabs.com/docs/stable/cluster-settings#change-a-cluster-setting
+    }
+
+    /// Return `true` iff a zone of the given kind is ready to be updated;
+    /// i.e., its dependencies have been updated.
+    fn is_zone_ready_for_update(
+        &self,
+        zone_kind: ZoneKind,
+    ) -> Result<bool, TufRepoContentsError> {
+        // TODO-correctness: We should return false regardless of `zone_kind` if
+        // there are still pending updates for components earlier in the update
+        // ordering than zones: RoT bootloader / RoT / SP / Host OS.
+
+        match zone_kind {
+            ZoneKind::Nexus => {
+                // Nexus can only be updated if all non-Nexus zones have been
+                // updated, i.e., their image source is an artifact from the new
+                // repo.
+                let new_repo = self.input.tuf_repo().description();
+
+                // If we don't actually have a TUF repo here, we can't do
+                // updates anyway; any return value is fine.
+                if new_repo.tuf_repo().is_none() {
+                    return Ok(false);
+                }
+
+                // Check that all in-service zones (other than Nexus) on all
+                // sleds have an image source consistent with `new_repo`.
+                for sled_id in self.blueprint.sled_ids_with_zones() {
+                    for z in self.blueprint.current_sled_zones(
+                        sled_id,
+                        BlueprintZoneDisposition::is_in_service,
+                    ) {
+                        let kind = z.zone_type.kind();
+                        if kind != ZoneKind::Nexus
+                            && z.image_source
+                                != new_repo.zone_image_source(kind)?
+                        {
+                            return Ok(false);
+                        }
+                    }
+                }
+
+                Ok(true)
+            }
+            _ => Ok(true), // other zone kinds have no special dependencies
+        }
+    }
+
+    /// Return `true` iff we believe a zone can safely be shut down; e.g., any
+    /// data it's responsible for is sufficiently persisted or replicated.
+    ///
+    /// "shut down" includes both "discretionary expunge" (e.g., if we're
+    /// dealing with a zone that is updated via expunge -> replace) or "shut
+    /// down and restart" (e.g., if we're upgrading a zone in place).
+    ///
+    /// This function is not (and cannot!) be called in the "expunge a zone
+    /// because the underlying disk / sled has been expunged" case. In this
+    /// case, we have no choice but to reconcile with the fact that the zone is
+    /// now gone.
+    fn can_zone_be_shut_down_safely(&self, zone_kind: ZoneKind) -> bool {
+        // TODO-cleanup remove this `allow` once we populate a variant below
+        #[allow(clippy::match_single_binding)]
+        match zone_kind {
+            // <https://github.com/oxidecomputer/omicron/issues/6404>
+            // ZoneKind::CockroachDb => todo!("check cluster status in inventory"),
+            _ => true, // other zone kinds have no special safety checks
+        }
     }
 }
 
