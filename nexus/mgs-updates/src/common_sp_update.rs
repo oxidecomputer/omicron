@@ -267,7 +267,7 @@ pub trait SpComponentUpdateHelper {
         log: &'a slog::Logger,
         mgs_clients: &'a mut MgsClients,
         update: &'a PendingMgsUpdate,
-    ) -> BoxFuture<'a, Result<(), GatewayClientError>>;
+    ) -> BoxFuture<'a, Result<(), PostUpdateError>>;
 }
 
 /// Describes the live state of the component before the update begins
@@ -275,6 +275,7 @@ pub trait SpComponentUpdateHelper {
 pub enum PrecheckStatus {
     UpdateComplete,
     ReadyForUpdate,
+    WaitingForOngoingUpdate,
 }
 
 #[derive(Debug, Error)]
@@ -317,6 +318,30 @@ pub enum PrecheckError {
         "expected to find inactive version {expected:?}, but found {found:?}"
     )]
     WrongInactiveVersion { expected: ExpectedVersion, found: FoundVersion },
+}
+
+#[derive(Debug, thiserror::Error)]
+pub enum PostUpdateError {
+    #[error("communicating with MGS")]
+    GatewayClientError(#[from] GatewayClientError),
+
+    #[error("transient error: {message:?}")]
+    TransientError { message: String },
+
+    #[error("fatal error: {error:?}")]
+    FatalError { error: String },
+}
+
+impl PostUpdateError {
+    pub fn is_fatal(&self) -> bool {
+        match self {
+            PostUpdateError::GatewayClientError(error) => {
+                !matches!(error, gateway_client::Error::CommunicationError(_))
+            }
+            PostUpdateError::TransientError { .. } => false,
+            PostUpdateError::FatalError { .. } => true,
+        }
+    }
 }
 
 #[derive(Debug)]
