@@ -146,8 +146,8 @@ impl<'a> Planner<'a> {
 
     fn do_plan(&mut self) -> Result<(), Error> {
         self.do_plan_expunge()?;
-        self.do_plan_add()?;
         self.do_plan_decommission()?;
+        self.do_plan_add()?;
         if let UpdateStepResult::ContinueToNextStep = self.do_plan_mgs_updates()
         {
             self.do_plan_zone_updates()?;
