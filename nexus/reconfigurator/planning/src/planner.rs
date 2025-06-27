@@ -22,6 +22,7 @@ use nexus_types::deployment::Blueprint;
 use nexus_types::deployment::BlueprintPhysicalDiskDisposition;
 use nexus_types::deployment::BlueprintZoneConfig;
 use nexus_types::deployment::BlueprintZoneDisposition;
+use nexus_types::deployment::BlueprintZoneImageSource;
 use nexus_types::deployment::CockroachDbClusterVersion;
 use nexus_types::deployment::CockroachDbPreserveDowngrade;
 use nexus_types::deployment::CockroachDbSettings;
@@ -37,10 +38,12 @@ use nexus_types::inventory::Collection;
 use omicron_common::policy::INTERNAL_DNS_REDUNDANCY;
 use omicron_uuid_kinds::PhysicalDiskUuid;
 use omicron_uuid_kinds::SledUuid;
+use slog::debug;
 use slog::error;
 use slog::{Logger, info, warn};
 use std::collections::BTreeMap;
 use std::collections::BTreeSet;
+use std::collections::HashMap;
 use std::str::FromStr;
 
 pub(crate) use self::omicron_zone_placement::DiscretionaryOmicronZone;
@@ -146,8 +149,9 @@ impl<'a> Planner<'a> {
 
     fn do_plan(&mut self) -> Result<(), Error> {
         self.do_plan_expunge()?;
-        self.do_plan_add()?;
         self.do_plan_decommission()?;
+        self.do_plan_noop_image_source()?;
+        self.do_plan_add()?;
         if let UpdateStepResult::ContinueToNextStep = self.do_plan_mgs_updates()
         {
             self.do_plan_zone_updates()?;
@@ -488,6 +492,165 @@ impl<'a> Planner<'a> {
                 sled_id,
                 &zones_ready_for_cleanup,
             )?;
+        }
+
+        Ok(())
+    }
+
+    fn do_plan_noop_image_source(&mut self) -> Result<(), Error> {
+        let Some(current_artifacts) = self.input.tuf_repo().description()
+        else {
+            info!(
+                self.log,
+                "skipping noop image source check for all sleds \
+                 (no current TUF repo)",
+            );
+            return Ok(());
+        };
+        let artifacts_by_hash: HashMap<_, _> = current_artifacts
+            .artifacts
+            .iter()
+            .map(|artifact| (artifact.hash, artifact))
+            .collect();
+
+        for sled_id in self.input.all_sled_ids(SledFilter::InService) {
+            let Some(inv_sled) = self.inventory.sled_agents.get(&sled_id)
+            else {
+                info!(
+                    self.log,
+                    "skipping noop image source check \
+                     (sled not present in latest inventory collection)";
+                    "sled_id" => %sled_id,
+                );
+                continue;
+            };
+
+            let zone_manifest = match &inv_sled
+                .zone_image_resolver
+                .zone_manifest
+                .boot_inventory
+            {
+                Ok(zm) => zm,
+                Err(message) => {
+                    // This is a string so we don't use InlineErrorChain::new.
+                    let message: &str = message;
+                    warn!(
+                        self.log,
+                        "skipping noop image source check since \
+                         sled-agent encountered error retrieving zone manifest \
+                         (this is abnormal)";
+                        "sled_id" => %sled_id,
+                        "error" => %message,
+                    );
+                    continue;
+                }
+            };
+
+            // Does the blueprint have the remove_mupdate_override field set for
+            // this sled? If it does, we don't want to touch the zones on this
+            // sled (they should all be InstallDataset until the
+            // remove_mupdate_override field is cleared).
+            if let Some(id) =
+                self.blueprint.sled_get_remove_mupdate_override(sled_id)?
+            {
+                debug!(
+                    self.log,
+                    "skipping noop image source check on sled \
+                     (blueprint has get_remove_mupdate_override set for sled)";
+                    "sled_id" => %sled_id,
+                    "bp_remove_mupdate_override_id" => %id,
+                );
+                continue;
+            }
+
+            // Which zones have image sources set to InstallDataset?
+            let install_dataset_zones = self
+                .blueprint
+                .current_sled_zones(
+                    sled_id,
+                    BlueprintZoneDisposition::is_in_service,
+                )
+                .filter(|z| {
+                    z.image_source == BlueprintZoneImageSource::InstallDataset
+                });
+
+            // Out of these, which zones' hashes (as reported in the zone
+            // manifest) match the corresponding ones in the TUF repo?
+            let matching_zones: Vec<_> = install_dataset_zones
+                .filter_map(|z| {
+                    let file_name =
+                        format!("{}.tar.gz", z.kind().artifact_name());
+                    let Some(artifact) =
+                        zone_manifest.artifacts.get(file_name.as_str())
+                    else {
+                        // The blueprint indicates that a zone should be present
+                        // that isn't in the install dataset. This might be an old
+                        // install dataset with a zone kind known to this version of
+                        // Nexus that isn't present in it. Not normally a cause for
+                        // concern.
+                        debug!(
+                            self.log,
+                            "blueprint zone not found in zone manifest, \
+                             ignoring for noop checks";
+                            "sled_id" => %sled_id,
+                            "zone_id" => %z.id,
+                            "kind" => z.kind().report_str(),
+                            "file_name" => file_name,
+                        );
+                        return None;
+                    };
+                    if let Err(message) = &artifact.status {
+                        // The artifact is somehow invalid and corrupt -- definitely
+                        // something to warn about and not proceed.
+                        warn!(
+                            self.log,
+                            "zone manifest inventory indicated install dataset \
+                             artifact is invalid, not using artifact (this is \
+                             abnormal)";
+                            "sled_id" => %sled_id,
+                            "zone_id" => %z.id,
+                            "kind" => z.kind().report_str(),
+                            "file_name" => file_name,
+                            "error" => %message,
+                        );
+                        return None;
+                    }
+
+                    // Does the hash match what's in the TUF repo?
+                    let Some(tuf_artifact) =
+                        artifacts_by_hash.get(&artifact.expected_hash)
+                    else {
+                        return None;
+                    };
+
+                    info!(
+                        self.log,
+                        "install dataset artifact hash matches TUF repo, \
+                         switching out the zone image source to Artifact";
+                        "sled_id" => %sled_id,
+                        "tuf_artifact_id" => %tuf_artifact.id,
+                    );
+                    Some((z.id, tuf_artifact))
+                })
+                .collect();
+
+            // Set all these zones' image sources to the corresponding
+            // blueprint.
+            for (zone_id, tuf_artifact) in &matching_zones {
+                self.blueprint.sled_set_zone_source(
+                    sled_id,
+                    *zone_id,
+                    BlueprintZoneImageSource::from_available_artifact(
+                        tuf_artifact,
+                    ),
+                )?;
+                self.blueprint.record_operation(
+                    Operation::SledNoopZoneImageSourcesUpdated {
+                        sled_id,
+                        count: matching_zones.len(),
+                    },
+                );
+            }
         }
 
         Ok(())
