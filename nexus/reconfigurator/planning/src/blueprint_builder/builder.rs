@@ -60,6 +60,7 @@ use omicron_common::api::external::TufRepoDescription;
 use omicron_common::api::external::Vni;
 use omicron_common::api::internal::shared::NetworkInterface;
 use omicron_common::api::internal::shared::NetworkInterfaceKind;
+use omicron_common::policy::COCKROACHDB_REDUNDANCY;
 use omicron_common::policy::INTERNAL_DNS_REDUNDANCY;
 use omicron_uuid_kinds::GenericUuid;
 use omicron_uuid_kinds::MupdateOverrideUuid;
@@ -387,14 +388,12 @@ impl fmt::Display for Operation {
 ///    However, the new blueprint can only be made the system's target if its
 ///    parent is the current target.
 pub struct BlueprintBuilder<'a> {
-    #[allow(dead_code)]
     log: Logger,
 
     /// previous blueprint, on which this one will be based
     parent_blueprint: &'a Blueprint,
 
     /// The latest inventory collection
-    #[allow(unused)]
     collection: &'a Collection,
 
     // These fields are used to allocate resources for sleds.
@@ -1179,11 +1178,12 @@ impl<'a> BlueprintBuilder<'a> {
                 gz_address: dns_subnet.gz_address(),
                 gz_address_index,
             });
-        let image_source = self.zone_image_source(zone_type.kind());
+        let id = self.rng.sled_rng(sled_id).next_zone();
+        let image_source = self.zone_image_source(id, zone_type.kind());
 
         let zone = BlueprintZoneConfig {
             disposition: BlueprintZoneDisposition::InService,
-            id: self.rng.sled_rng(sled_id).next_zone(),
+            id,
             filesystem_pool: zpool,
             zone_type,
             image_source,
@@ -1232,7 +1232,7 @@ impl<'a> BlueprintBuilder<'a> {
                 dns_address,
                 nic,
             });
-        let image_source = self.zone_image_source(zone_type.kind());
+        let image_source = self.zone_image_source(id, zone_type.kind());
 
         let zone = BlueprintZoneConfig {
             disposition: BlueprintZoneDisposition::InService,
@@ -1272,11 +1272,12 @@ impl<'a> BlueprintBuilder<'a> {
             });
         let filesystem_pool =
             self.sled_select_zpool(sled_id, zone_type.kind())?;
-        let image_source = self.zone_image_source(zone_type.kind());
+        let id = self.rng.sled_rng(sled_id).next_zone();
+        let image_source = self.zone_image_source(id, zone_type.kind());
 
         let zone = BlueprintZoneConfig {
             disposition: BlueprintZoneDisposition::InService,
-            id: self.rng.sled_rng(sled_id).next_zone(),
+            id,
             filesystem_pool,
             zone_type,
             image_source,
@@ -1425,7 +1426,7 @@ impl<'a> BlueprintBuilder<'a> {
         });
         let filesystem_pool =
             self.sled_select_zpool(sled_id, zone_type.kind())?;
-        let image_source = self.zone_image_source(zone_type.kind());
+        let image_source = self.zone_image_source(nexus_id, zone_type.kind());
 
         let zone = BlueprintZoneConfig {
             disposition: BlueprintZoneDisposition::InService,
@@ -1451,7 +1452,8 @@ impl<'a> BlueprintBuilder<'a> {
             });
         let filesystem_pool =
             self.sled_select_zpool(sled_id, zone_type.kind())?;
-        let image_source = self.zone_image_source(zone_type.kind());
+        let image_source =
+            self.zone_image_source(oximeter_id, zone_type.kind());
 
         let zone = BlueprintZoneConfig {
             disposition: BlueprintZoneDisposition::InService,
@@ -1476,7 +1478,7 @@ impl<'a> BlueprintBuilder<'a> {
         );
         let filesystem_pool =
             self.sled_select_zpool(sled_id, zone_type.kind())?;
-        let image_source = self.zone_image_source(zone_type.kind());
+        let image_source = self.zone_image_source(pantry_id, zone_type.kind());
 
         let zone = BlueprintZoneConfig {
             disposition: BlueprintZoneDisposition::InService,
@@ -1511,7 +1513,7 @@ impl<'a> BlueprintBuilder<'a> {
                 dataset: OmicronZoneDataset { pool_name },
             });
         let filesystem_pool = pool_name;
-        let image_source = self.zone_image_source(zone_type.kind());
+        let image_source = self.zone_image_source(zone_id, zone_type.kind());
 
         let zone = BlueprintZoneConfig {
             disposition: BlueprintZoneDisposition::InService,
@@ -1538,7 +1540,7 @@ impl<'a> BlueprintBuilder<'a> {
                 address,
                 dataset: OmicronZoneDataset { pool_name },
             });
-        let image_source = self.zone_image_source(zone_type.kind());
+        let image_source = self.zone_image_source(id, zone_type.kind());
 
         let zone = BlueprintZoneConfig {
             disposition: BlueprintZoneDisposition::InService,
@@ -1567,7 +1569,7 @@ impl<'a> BlueprintBuilder<'a> {
             },
         );
         let filesystem_pool = pool_name;
-        let image_source = self.zone_image_source(zone_type.kind());
+        let image_source = self.zone_image_source(zone_id, zone_type.kind());
 
         let zone = BlueprintZoneConfig {
             disposition: BlueprintZoneDisposition::InService,
@@ -1596,7 +1598,7 @@ impl<'a> BlueprintBuilder<'a> {
             },
         );
         let filesystem_pool = pool_name;
-        let image_source = self.zone_image_source(zone_type.kind());
+        let image_source = self.zone_image_source(zone_id, zone_type.kind());
 
         let zone = BlueprintZoneConfig {
             disposition: BlueprintZoneDisposition::InService,
@@ -1723,7 +1725,8 @@ impl<'a> BlueprintBuilder<'a> {
             });
         let filesystem_pool =
             self.sled_select_zpool(sled_id, zone_type.kind())?;
-        let image_source = self.zone_image_source(zone_type.kind());
+        let image_source =
+            self.zone_image_source(new_zone_id, zone_type.kind());
 
         self.sled_add_zone(
             sled_id,
@@ -1999,15 +2002,19 @@ impl<'a> BlueprintBuilder<'a> {
     /// Try to find an artifact in either the current or previous release repo
     /// that contains an image for a zone of the given kind; see RFD 565 §9.
     /// Defaults to the install dataset.
+    ///
+    /// Takes an optional "zone_id" as input, to avoid downgrading zones which
+    /// have already committed to using the new repo.
     pub(crate) fn zone_image_source(
         &self,
+        zone_id: OmicronZoneUuid,
         zone_kind: ZoneKind,
     ) -> BlueprintZoneImageSource {
         let new_repo = self.input.tuf_repo().description();
         let old_repo =
             self.input.old_repo().and_then(|repo| repo.description());
         Self::zone_image_artifact(
-            if self.zone_is_ready_for_update(zone_kind, new_repo) {
+            if self.zone_should_use_new_repo(zone_id, zone_kind, new_repo) {
                 new_repo
             } else {
                 old_repo
@@ -2016,14 +2023,31 @@ impl<'a> BlueprintBuilder<'a> {
         )
     }
 
-    /// Return `true` iff a zone of the given kind is ready to be updated;
+    /// Return `true` iff a zone of the given kind is ready to use the new repo,
     /// i.e., its dependencies have been updated, or its data sufficiently
     /// replicated, etc.
-    fn zone_is_ready_for_update(
+    fn zone_should_use_new_repo(
         &self,
+        zone_id: OmicronZoneUuid,
         zone_kind: ZoneKind,
         new_repo: Option<&TufRepoDescription>,
     ) -> bool {
+        // If the zone is already using the new repo, keep using it.
+        //
+        // Otherwise, consider whether we should upgrade.
+        if new_repo.is_some()
+            && self
+                .parent_blueprint
+                .all_omicron_zones(BlueprintZoneDisposition::is_in_service)
+                .any(|(_, zone)| {
+                    zone.id == zone_id
+                        && zone.image_source
+                            == Self::zone_image_artifact(new_repo, zone_kind)
+                })
+        {
+            return true;
+        };
+
         match zone_kind {
             ZoneKind::Nexus => {
                 // Nexus can only be updated if all non-Nexus zones have been updated,
@@ -2040,8 +2064,31 @@ impl<'a> BlueprintBuilder<'a> {
                     })
                 })
             }
-            // <https://github.com/oxidecomputer/omicron/issues/6404>
-            // ZoneKind::CockroachDb => todo!("check cluster status in inventory"),
+            ZoneKind::CockroachDb => {
+                // We only update CockroachDb if the latest inventory
+                // collection has observed "no underreplicated ranges".
+                //
+                // It's always possible that a TOCTTOU issue causes this to
+                // change after we decide the zone can be updated - the
+                // control plane must have some degree of tolerance to
+                // failures, even mid-update - but this prevents our system
+                // from self-sabotage when range underreplication is already
+                // present.
+                if let (Some(ranges_underreplicated), Some(live_nodes)) = (
+                    self.collection.cockroach_status.ranges_underreplicated,
+                    self.collection.cockroach_status.liveness_live_nodes,
+                ) {
+                    return ranges_underreplicated == 0
+                        && live_nodes == COCKROACHDB_REDUNDANCY as u64;
+                }
+
+                // If we can't read stats from Cockroach, OR the number of
+                // under-replicated ranges is non-zero, refuse to update.
+                //
+                // It's possible in either of these scenarios that we have
+                // degraded redundancy, and need to recover.
+                false
+            }
             _ => true, // other zone kinds have no special dependencies
         }
     }
