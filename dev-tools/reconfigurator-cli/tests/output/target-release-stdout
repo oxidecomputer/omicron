@@ -516,8 +516,8 @@ external DNS:
 > # Collect inventory from it and use that collection for another planning step.
 > # This should report that the update completed, remove that update, and add one
 > # for an SP on the same sled.
-> sled-update-rot 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6 --slot-a 1.0.0 --active-slot a --persistent-boot-preference a
-set sled 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6 RoT settings: active slot -> A, slot a -> 1.0.0, persistent boot preference -> A
+> sled-update-rot 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6 --slot-a 1.0.0
+set sled 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6 RoT settings: slot a -> 1.0.0
 
 > inventory-generate
 generated inventory collection eb0796d5-ab8a-4f7b-a884-b4aeacb8ab51 from configured sleds
@@ -903,9 +903,8 @@ external DNS:
 > # This time, make it more interesting.  Change the inactive slot contents of
 > # the simulated RoT.  This should make the configured update impossible and cause
 > # the planner to fix it.
-> # sled-update-sp 2b8f0cb3-0295-4b3c-bc58-4fe88b57112c --inactive 0.5.0
-> sled-update-rot 2b8f0cb3-0295-4b3c-bc58-4fe88b57112c --slot-b 0.5.0 --active-slot a --persistent-boot-preference a
-set sled 2b8f0cb3-0295-4b3c-bc58-4fe88b57112c RoT settings: active slot -> A, slot b -> 0.5.0, persistent boot preference -> A
+> sled-update-rot 2b8f0cb3-0295-4b3c-bc58-4fe88b57112c --slot-b 0.5.0
+set sled 2b8f0cb3-0295-4b3c-bc58-4fe88b57112c RoT settings: slot b -> 0.5.0
 
 > inventory-generate
 generated inventory collection b1bda47d-2c19-4fba-96e3-d9df28db7436 from configured sleds
@@ -1095,8 +1094,8 @@ external DNS:
 
 > # Now simulate the update completing successfully.
 > # Like before, we should see a pending SP update for this sled.
-> sled-update-rot 2b8f0cb3-0295-4b3c-bc58-4fe88b57112c --slot-a 1.0.0 --active-slot a --persistent-boot-preference a
-set sled 2b8f0cb3-0295-4b3c-bc58-4fe88b57112c RoT settings: active slot -> A, slot a -> 1.0.0, persistent boot preference -> A
+> sled-update-rot 2b8f0cb3-0295-4b3c-bc58-4fe88b57112c --slot-a 1.0.0
+set sled 2b8f0cb3-0295-4b3c-bc58-4fe88b57112c RoT settings: slot a -> 1.0.0
 
 > inventory-generate
 generated inventory collection a71f7a73-35a6-45e8-acbe-f1c5925eed69 from configured sleds
@@ -1479,8 +1478,8 @@ external DNS:
 
 > # Update the RoT on the last sled.
 > # There should be one last pending SP update.
-> sled-update-rot d81c6a84-79b8-4958-ae41-ea46c9b19763 --slot-a 1.0.0 --active-slot a --persistent-boot-preference a
-set sled d81c6a84-79b8-4958-ae41-ea46c9b19763 RoT settings: active slot -> A, slot a -> 1.0.0, persistent boot preference -> A
+> sled-update-rot d81c6a84-79b8-4958-ae41-ea46c9b19763 --slot-a 1.0.0
+set sled d81c6a84-79b8-4958-ae41-ea46c9b19763 RoT settings: slot a -> 1.0.0
 
 > inventory-generate
 generated inventory collection 78f72e8d-46a9-40a9-8618-602f54454d80 from configured sleds

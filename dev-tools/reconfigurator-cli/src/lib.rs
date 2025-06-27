@@ -8,7 +8,6 @@ use anyhow::{Context, anyhow, bail};
 use camino::Utf8PathBuf;
 use clap::ValueEnum;
 use clap::{Args, Parser, Subcommand};
-use gateway_types::rot::RotSlot;
 use iddqd::IdOrdMap;
 use indent_write::fmt::IndentWriter;
 use internal_dns_types::diff::DnsDiff;
@@ -399,10 +398,6 @@ struct SledUpdateRotArgs {
     /// id of the sled
     sled_id: SledUuid,
 
-    /// whether we expect the "A" or "B" slot to be active
-    #[clap(long)]
-    active_slot: RotSlot,
-
     /// sets the version reported for the RoT slot a
     #[clap(long, required_unless_present_any = &["slot_b"])]
     slot_a: Option<ExpectedVersion>,
@@ -411,22 +406,10 @@ struct SledUpdateRotArgs {
     #[clap(long, required_unless_present_any = &["slot_a"])]
     slot_b: Option<ExpectedVersion>,
 
-    /// set the persistent boot preference written into the current
-    /// authoritative CFPA page (ping or pong).
-    /// Will default to the value of active_version when not set
-    #[clap(long)]
-    persistent_boot_preference: RotSlot,
-
-    /// set the persistent boot preference written into the CFPA scratch
-    /// page that will become the persistent boot preference in the authoritative
-    /// CFPA page upon reboot, unless CFPA update of the authoritative page fails
-    /// for some reason
-    #[clap(long)]
-    pending_persistent_boot_preference: Option<RotSlot>,
-
-    /// override persistent preference selection for a single boot
-    #[clap(long)]
-    transient_boot_preference: Option<RotSlot>,
+    // TODO: In the future we could set other fields as well.
+    // They would be useful to simulate failures.
+    // These would be: active_slot, persistent_boot_preference,
+    // transient_boot_preference and pending_persistent_boot_preference.
 }
 
 #[derive(Debug, Args)]
@@ -1045,32 +1028,11 @@ fn cmd_sled_update_rot(
 ) -> anyhow::Result<Option<String>> {
     let mut labels = Vec::new();
 
-    labels.push(format!("active slot -> {}", &args.active_slot));
     if let Some(slot_a) = &args.slot_a {
         labels.push(format!("slot a -> {}", slot_a));
     }
     if let Some(slot_b) = &args.slot_b {
         labels.push(format!("slot b -> {}", slot_b));
-    }
-    // TODO-K: Do I need these settings as well?
-    // Maybe only to test failure cases.
-    labels.push(format!(
-        "persistent boot preference -> {}",
-        &args.persistent_boot_preference
-    ));
-    if let Some(pending_persistent_boot_preference) =
-        &args.pending_persistent_boot_preference
-    {
-        labels.push(format!(
-            "pending persistent boot preference -> {}",
-            pending_persistent_boot_preference
-        ));
-    }
-    if let Some(transient_boot_preference) = &args.transient_boot_preference {
-        labels.push(format!(
-            "transient boot preference -> {}",
-            transient_boot_preference
-        ));
     }
 
     assert!(

@@ -40,7 +40,7 @@ blueprint-diff 8da82a8e-bf97-4fbd-8ddd-9f6462732cf1 58d5e830-0884-47d8-a7cd-b2b3
 # Collect inventory from it and use that collection for another planning step.
 # This should report that the update completed, remove that update, and add one
 # for an SP on the same sled.
-sled-update-rot 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6 --slot-a 1.0.0 --active-slot a --persistent-boot-preference a
+sled-update-rot 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6 --slot-a 1.0.0
 inventory-generate
 blueprint-plan 58d5e830-0884-47d8-a7cd-b2b3751adeb4 eb0796d5-ab8a-4f7b-a884-b4aeacb8ab51
 blueprint-diff 58d5e830-0884-47d8-a7cd-b2b3751adeb4 af934083-59b5-4bf6-8966-6fb5292c29e1
@@ -58,15 +58,14 @@ blueprint-diff af934083-59b5-4bf6-8966-6fb5292c29e1 df06bb57-ad42-4431-9206-abff
 # This time, make it more interesting.  Change the inactive slot contents of
 # the simulated RoT.  This should make the configured update impossible and cause
 # the planner to fix it.
-# sled-update-sp 2b8f0cb3-0295-4b3c-bc58-4fe88b57112c --inactive 0.5.0
-sled-update-rot 2b8f0cb3-0295-4b3c-bc58-4fe88b57112c --slot-b 0.5.0 --active-slot a --persistent-boot-preference a
+sled-update-rot 2b8f0cb3-0295-4b3c-bc58-4fe88b57112c --slot-b 0.5.0
 inventory-generate
 blueprint-plan df06bb57-ad42-4431-9206-abff322896c7 b1bda47d-2c19-4fba-96e3-d9df28db7436
 blueprint-diff df06bb57-ad42-4431-9206-abff322896c7 7f976e0d-d2a5-4eeb-9e82-c82bc2824aba
 
 # Now simulate the update completing successfully.
 # Like before, we should see a pending SP update for this sled.
-sled-update-rot 2b8f0cb3-0295-4b3c-bc58-4fe88b57112c --slot-a 1.0.0 --active-slot a --persistent-boot-preference a
+sled-update-rot 2b8f0cb3-0295-4b3c-bc58-4fe88b57112c --slot-a 1.0.0
 inventory-generate
 blueprint-plan 7f976e0d-d2a5-4eeb-9e82-c82bc2824aba a71f7a73-35a6-45e8-acbe-f1c5925eed69
 blueprint-diff 7f976e0d-d2a5-4eeb-9e82-c82bc2824aba 9034c710-3e57-45f3-99e5-4316145e87ac
@@ -80,7 +79,7 @@ blueprint-diff 9034c710-3e57-45f3-99e5-4316145e87ac d60afc57-f15d-476c-bd0f-b107
 
 # Update the RoT on the last sled.
 # There should be one last pending SP update.
-sled-update-rot d81c6a84-79b8-4958-ae41-ea46c9b19763 --slot-a 1.0.0 --active-slot a --persistent-boot-preference a
+sled-update-rot d81c6a84-79b8-4958-ae41-ea46c9b19763 --slot-a 1.0.0
 inventory-generate
 blueprint-plan d60afc57-f15d-476c-bd0f-b1071e2bb976 78f72e8d-46a9-40a9-8618-602f54454d80
 blueprint-diff d60afc57-f15d-476c-bd0f-b1071e2bb976 a5a8f242-ffa5-473c-8efd-2acf2dc0b736
