@@ -202,9 +202,6 @@ impl SpComponentUpdateHelper for ReconfiguratorRotBootloaderUpdater {
         mgs_clients: &'a mut MgsClients,
         update: &'a PendingMgsUpdate,
     ) -> BoxFuture<'a, Result<(), PostUpdateError>> {
-        // TODO-K: Again, we're resetting the ROT twice here, what happens
-        // if an RoT update is happening at the same time?
-
         async move {
             // Before setting stage0 to the new version we want to ensure
             // the image is good and we're not going to brick the device.
@@ -363,6 +360,11 @@ async fn wait_for_stage0_next_image_check(
             // The RoT might still be booting
             Err(error) => {
                 if before.elapsed() >= timeout {
+                    error!(
+                        log,
+                        "failed to get RoT boot info";
+                        "error" => %error
+                    );
                     return Err(PostUpdateError::GatewayClientError(error));
                 }
 
