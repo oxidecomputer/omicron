@@ -59,7 +59,6 @@ pub(crate) mod background;
 mod bfd;
 mod bgp;
 mod certificate;
-pub mod cockroach_http;
 mod crucible;
 mod deployment;
 mod device_auth;
