@@ -22,6 +22,7 @@ omicron-sled-agent.workspace = true
 omicron-test-utils.workspace = true
 omicron-uuid-kinds.workspace = true
 oxide-client.workspace = true
+oxide-tokio-rt.workspace = true
 rand.workspace = true
 reqwest = { workspace = true, features = ["cookies"] }
 russh = "0.45.0"

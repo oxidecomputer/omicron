@@ -15,8 +15,11 @@ use serde::{Deserialize, de::DeserializeOwned};
 use std::time::Duration;
 use uuid::Uuid;
 
-#[tokio::main]
-async fn main() -> Result<()> {
+fn main() -> Result<()> {
+    oxide_tokio_rt::run(run_test())
+}
+
+async fn run_test() -> Result<()> {
     let params = ClientParams::new()?;
     let client = params.build_client().await?;
 
