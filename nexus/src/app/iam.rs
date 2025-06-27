@@ -174,26 +174,4 @@ impl super::Nexus {
         };
         Ok(user)
     }
-
-    // Built-in roles
-
-    pub(crate) async fn roles_builtin_list(
-        &self,
-        opctx: &OpContext,
-        pagparams: &DataPageParams<'_, (String, String)>,
-    ) -> ListResultVec<db::model::RoleBuiltin> {
-        self.db_datastore.roles_builtin_list_by_name(opctx, pagparams).await
-    }
-
-    pub(crate) async fn role_builtin_fetch(
-        &self,
-        opctx: &OpContext,
-        name: &str,
-    ) -> LookupResult<db::model::RoleBuiltin> {
-        let (.., db_role_builtin) = LookupPath::new(opctx, &self.db_datastore)
-            .role_builtin_name(name)
-            .fetch()
-            .await?;
-        Ok(db_role_builtin)
-    }
 }

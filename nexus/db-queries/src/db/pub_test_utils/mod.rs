@@ -313,7 +313,6 @@ async fn datastore_test(
 
     // TODO: Can we just call "Populate" instead of doing this?
     datastore.load_builtin_users(&opctx).await.unwrap();
-    datastore.load_builtin_roles(&opctx).await.unwrap();
     datastore.load_builtin_role_asgns(&opctx).await.unwrap();
     datastore.load_builtin_silos(&opctx).await.unwrap();
     datastore.load_builtin_projects(&opctx).await.unwrap();
