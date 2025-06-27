@@ -9,6 +9,9 @@ use chrono::SecondsFormat;
 use chrono::Utc;
 use futures::future::ready;
 use futures::stream::StreamExt;
+use iddqd::IdOrdItem;
+use iddqd::IdOrdMap;
+use iddqd::id_upcast;
 use nexus_sled_agent_shared::inventory::ConfigReconcilerInventory;
 use nexus_sled_agent_shared::inventory::ConfigReconcilerInventoryResult;
 use nexus_sled_agent_shared::inventory::OmicronZoneImageSource;
@@ -348,8 +351,8 @@ pub struct Ipv4NatEntryView {
 )]
 pub struct MgsUpdateDriverStatus {
     pub recent: VecDeque<CompletedAttempt>,
-    pub in_progress: BTreeMap<Arc<BaseboardId>, InProgressUpdateStatus>,
-    pub waiting: BTreeMap<Arc<BaseboardId>, WaitingStatus>,
+    pub in_progress: IdOrdMap<InProgressUpdateStatus>,
+    pub waiting: IdOrdMap<WaitingStatus>,
 }
 
 impl MgsUpdateDriverStatus {
@@ -386,7 +389,7 @@ impl Display for MgsUpdateDriverStatusDisplay<'_> {
         }
 
         writeln!(f, "\ncurrently in progress:")?;
-        for (baseboard_id, status) in &status.in_progress {
+        for status in &status.in_progress {
             // Ignore units smaller than a millisecond.
             let elapsed = Duration::from_millis(
                 u64::try_from(
@@ -400,7 +403,7 @@ impl Display for MgsUpdateDriverStatusDisplay<'_> {
                 status
                     .time_started
                     .to_rfc3339_opts(SecondsFormat::Millis, true),
-                baseboard_id.serial_number,
+                status.baseboard_id.serial_number,
                 status.status,
                 status.nattempts_done + 1,
                 humantime::format_duration(elapsed),
@@ -408,11 +411,11 @@ impl Display for MgsUpdateDriverStatusDisplay<'_> {
         }
 
         writeln!(f, "\nwaiting for retry:")?;
-        for (baseboard_id, wait_info) in &status.waiting {
+        for wait_info in &status.waiting {
             writeln!(
                 f,
                 "    serial {}: will try again at {} (attempt {})",
-                baseboard_id.serial_number,
+                wait_info.baseboard_id.serial_number,
                 wait_info.next_attempt_time,
                 wait_info.nattempts_done + 1,
             )?;
@@ -429,7 +432,7 @@ pub struct CompletedAttempt {
     pub time_done: DateTime<Utc>,
     pub elapsed: Duration,
     pub request: PendingMgsUpdate,
-    #[serde(serialize_with = "snake_case_result::serialize")]
+    #[serde(with = "snake_case_result")]
     #[schemars(
         schema_with = "SnakeCaseResult::<UpdateCompletedHow, String>::json_schema"
     )]
@@ -451,9 +454,20 @@ pub enum UpdateCompletedHow {
 /// externally-exposed status for each in-progress update
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize, JsonSchema)]
 pub struct InProgressUpdateStatus {
+    pub baseboard_id: Arc<BaseboardId>,
     pub time_started: DateTime<Utc>,
     pub status: UpdateAttemptStatus,
     pub nattempts_done: u32,
+}
+
+impl IdOrdItem for InProgressUpdateStatus {
+    type Key<'a> = &'a Arc<BaseboardId>;
+
+    fn key(&self) -> Self::Key<'_> {
+        &self.baseboard_id
+    }
+
+    id_upcast!();
 }
 
 /// status of a single update attempt
@@ -475,8 +489,19 @@ pub enum UpdateAttemptStatus {
 /// externally-exposed status for waiting updates
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize, JsonSchema)]
 pub struct WaitingStatus {
+    pub baseboard_id: Arc<BaseboardId>,
     pub next_attempt_time: DateTime<Utc>,
     pub nattempts_done: u32,
+}
+
+impl IdOrdItem for WaitingStatus {
+    type Key<'a> = &'a Arc<BaseboardId>;
+
+    fn key(&self) -> Self::Key<'_> {
+        &self.baseboard_id
+    }
+
+    id_upcast!();
 }
 
 #[derive(
@@ -611,7 +636,6 @@ mod test {
     use crate::inventory::BaseboardId;
     use chrono::Utc;
     use gateway_client::types::SpType;
-    use std::collections::BTreeMap;
     use std::collections::VecDeque;
     use std::sync::Arc;
     use std::time::Instant;
@@ -628,9 +652,13 @@ mod test {
             part_number: String::from("a_port"),
             serial_number: String::from("a_serial"),
         });
-        let waiting =
-            WaitingStatus { next_attempt_time: Utc::now(), nattempts_done: 2 };
+        let waiting = WaitingStatus {
+            baseboard_id: baseboard_id.clone(),
+            next_attempt_time: Utc::now(),
+            nattempts_done: 2,
+        };
         let in_progress = InProgressUpdateStatus {
+            baseboard_id: baseboard_id.clone(),
             time_started: Utc::now(),
             status: UpdateAttemptStatus::Updating,
             nattempts_done: 3,
@@ -656,8 +684,8 @@ mod test {
 
         let status = MgsUpdateDriverStatus {
             recent: VecDeque::from([completed]),
-            in_progress: BTreeMap::from([(baseboard_id.clone(), in_progress)]),
-            waiting: BTreeMap::from([(baseboard_id.clone(), waiting)]),
+            in_progress: std::iter::once(in_progress).collect(),
+            waiting: std::iter::once(waiting).collect(),
         };
 
         let serialized =

@@ -190,14 +190,15 @@ impl UpdateDescription<'_> {
         let (status_tx, status_rx) =
             watch::channel(MgsUpdateDriverStatus::default());
         status_tx.send_modify(|status| {
-            status.in_progress.insert(
-                baseboard_id.clone(),
-                InProgressUpdateStatus {
+            status
+                .in_progress
+                .insert_unique(InProgressUpdateStatus {
+                    baseboard_id: baseboard_id.clone(),
                     time_started: chrono::Utc::now(),
                     status: UpdateAttemptStatus::NotStarted,
                     nattempts_done: 0,
-                },
-            );
+                })
+                .unwrap();
         });
         let status_updater =
             UpdateAttemptStatusUpdater::new(status_tx.clone(), baseboard_id);
@@ -316,8 +317,7 @@ impl InProgressAttempt {
             // future itself to finish and then return indicating that it's
             // done.
             let overall_status = self.status_rx.borrow();
-            let maybe_current_status =
-                overall_status.in_progress.values().next();
+            let maybe_current_status = overall_status.in_progress.iter().next();
             if let Some(current_status) = maybe_current_status {
                 if current_status.status == status {
                     debug!(
