@@ -552,6 +552,15 @@ table! {
 }
 
 table! {
+    silo_auth_settings(silo_id) {
+        silo_id -> Uuid,
+        time_created -> Timestamptz,
+        time_modified -> Timestamptz,
+        device_token_max_ttl_seconds -> Nullable<Int8>,
+    }
+}
+
+table! {
     network_interface (id) {
         id -> Uuid,
         name -> Text,
@@ -928,7 +937,8 @@ table! {
 }
 
 table! {
-    console_session (token) {
+    console_session (id) {
+        id -> Uuid,
         token -> Text,
         time_created -> Timestamptz,
         time_last_used -> Timestamptz,
@@ -1350,11 +1360,13 @@ table! {
         device_code -> Text,
         time_created -> Timestamptz,
         time_expires -> Timestamptz,
+        token_ttl_seconds -> Nullable<Int8>,
     }
 }
 
 table! {
-    device_access_token (token) {
+    device_access_token (id) {
+        id -> Uuid,
         token -> Text,
         client_id -> Uuid,
         device_code -> Text,
@@ -1476,6 +1488,7 @@ table! {
         git_commit -> Text,
         name -> Text,
         version -> Text,
+        sign -> Nullable<Text>,
     }
 }
 
@@ -1581,7 +1594,105 @@ table! {
         usable_hardware_threads -> Int8,
         usable_physical_ram -> Int8,
         reservoir_size -> Int8,
-        omicron_physical_disks_generation -> Int8,
+
+        ledgered_sled_config -> Nullable<Uuid>,
+        last_reconciliation_sled_config -> Nullable<Uuid>,
+        reconciler_status_kind -> crate::enums::InvConfigReconcilerStatusKindEnum,
+        reconciler_status_sled_config -> Nullable<Uuid>,
+        reconciler_status_timestamp -> Nullable<Timestamptz>,
+        reconciler_status_duration_secs -> Nullable<Float8>,
+
+        zone_manifest_boot_disk_path -> Text,
+        zone_manifest_source -> Nullable<crate::enums::InvZoneManifestSourceEnum>,
+        zone_manifest_mupdate_id -> Nullable<Uuid>,
+        zone_manifest_boot_disk_error -> Nullable<Text>,
+
+        mupdate_override_boot_disk_path -> Text,
+        mupdate_override_id -> Nullable<Uuid>,
+        mupdate_override_boot_disk_error -> Nullable<Text>,
+    }
+}
+
+table! {
+    inv_last_reconciliation_disk_result (inv_collection_id, sled_id, disk_id) {
+        inv_collection_id -> Uuid,
+        sled_id -> Uuid,
+        disk_id -> Uuid,
+
+        error_message -> Nullable<Text>,
+    }
+}
+
+table! {
+    inv_last_reconciliation_dataset_result
+        (inv_collection_id, sled_id, dataset_id)
+    {
+        inv_collection_id -> Uuid,
+        sled_id -> Uuid,
+        dataset_id -> Uuid,
+
+        error_message -> Nullable<Text>,
+    }
+}
+
+table! {
+    inv_last_reconciliation_orphaned_dataset
+        (inv_collection_id, sled_id, pool_id, kind, zone_name)
+    {
+        inv_collection_id -> Uuid,
+        sled_id -> Uuid,
+        pool_id -> Uuid,
+        kind -> crate::enums::DatasetKindEnum,
+        zone_name -> Text,
+        reason -> Text,
+        id -> Nullable<Uuid>,
+        mounted -> Bool,
+        available -> Int8,
+        used -> Int8,
+    }
+}
+
+table! {
+    inv_last_reconciliation_zone_result (inv_collection_id, sled_id, zone_id) {
+        inv_collection_id -> Uuid,
+        sled_id -> Uuid,
+        zone_id -> Uuid,
+
+        error_message -> Nullable<Text>,
+    }
+}
+
+table! {
+    inv_zone_manifest_zone (inv_collection_id, sled_id, zone_file_name) {
+        inv_collection_id -> Uuid,
+        sled_id -> Uuid,
+        zone_file_name -> Text,
+        path -> Text,
+        expected_size -> Int8,
+        expected_sha256 -> Text,
+        error -> Nullable<Text>,
+    }
+}
+
+table! {
+    inv_zone_manifest_non_boot (inv_collection_id, sled_id, non_boot_zpool_id) {
+        inv_collection_id -> Uuid,
+        sled_id -> Uuid,
+        non_boot_zpool_id -> Uuid,
+        path -> Text,
+        is_valid -> Bool,
+        message -> Text,
+    }
+}
+
+table! {
+    inv_mupdate_override_non_boot (inv_collection_id, sled_id, non_boot_zpool_id) {
+        inv_collection_id -> Uuid,
+        sled_id -> Uuid,
+        non_boot_zpool_id -> Uuid,
+        path -> Text,
+        is_valid -> Bool,
+        message -> Text,
     }
 }
 
@@ -1639,20 +1750,19 @@ table! {
 }
 
 table! {
-    inv_sled_omicron_zones (inv_collection_id, sled_id) {
+    inv_omicron_sled_config (inv_collection_id, id) {
         inv_collection_id -> Uuid,
-        time_collected -> Timestamptz,
-        source -> Text,
-        sled_id -> Uuid,
+        id -> Uuid,
 
         generation -> Int8,
+        remove_mupdate_override -> Nullable<Uuid>,
     }
 }
 
 table! {
-    inv_omicron_zone (inv_collection_id, id) {
+    inv_omicron_sled_config_zone (inv_collection_id, sled_config_id, id) {
         inv_collection_id -> Uuid,
-        sled_id -> Uuid,
+        sled_config_id -> Uuid,
 
         id -> Uuid,
         zone_type -> crate::enums::ZoneTypeEnum,
@@ -1674,12 +1784,16 @@ table! {
         snat_first_port -> Nullable<Int4>,
         snat_last_port -> Nullable<Int4>,
         filesystem_pool -> Nullable<Uuid>,
+
+        image_source -> crate::enums::InvZoneImageSourceEnum,
+        image_artifact_sha256 -> Nullable<Text>,
     }
 }
 
 table! {
-    inv_omicron_zone_nic (inv_collection_id, id) {
+    inv_omicron_sled_config_zone_nic (inv_collection_id, sled_config_id, id) {
         inv_collection_id -> Uuid,
+        sled_config_id -> Uuid,
         id -> Uuid,
         name -> Text,
         ip -> Inet,
@@ -1692,11 +1806,51 @@ table! {
 }
 
 table! {
+    inv_omicron_sled_config_dataset (inv_collection_id, sled_config_id, id) {
+        inv_collection_id -> Uuid,
+        sled_config_id -> Uuid,
+        sled_id -> Uuid,
+        id -> Uuid,
+
+        pool_id -> Uuid,
+        kind -> crate::enums::DatasetKindEnum,
+        zone_name -> Nullable<Text>,
+
+        quota -> Nullable<Int8>,
+        reservation -> Nullable<Int8>,
+        compression -> Text,
+    }
+}
+
+table! {
+    inv_omicron_sled_config_disk (inv_collection_id, sled_config_id, id) {
+        inv_collection_id -> Uuid,
+        sled_config_id -> Uuid,
+        sled_id -> Uuid,
+        id -> Uuid,
+
+        vendor -> Text,
+        serial -> Text,
+        model -> Text,
+
+        pool_id -> Uuid,
+    }
+}
+
+table! {
     inv_clickhouse_keeper_membership (inv_collection_id, queried_keeper_id) {
         inv_collection_id -> Uuid,
         queried_keeper_id -> Int8,
         leader_committed_log_index -> Int8,
         raft_config -> Array<Int8>,
+    }
+}
+
+table! {
+    reconfigurator_chicken_switches (version) {
+        version -> Int8,
+        planner_enabled -> Bool,
+        time_modified -> Timestamptz,
     }
 }
 
@@ -1717,6 +1871,8 @@ table! {
         cockroachdb_fingerprint -> Text,
 
         cockroachdb_setting_preserve_downgrade -> Nullable<Text>,
+
+        target_release_minimum_generation -> Int8,
     }
 }
 
@@ -1738,6 +1894,7 @@ table! {
 
         sled_state -> crate::enums::SledStateEnum,
         sled_agent_generation -> Int8,
+        remove_mupdate_override -> Nullable<Uuid>,
     }
 }
 
@@ -2150,14 +2307,35 @@ allow_tables_to_appear_in_same_query!(external_ip, project);
 allow_tables_to_appear_in_same_query!(external_ip, ip_pool_resource);
 allow_tables_to_appear_in_same_query!(external_ip, vmm);
 allow_tables_to_appear_in_same_query!(external_ip, network_interface);
-allow_tables_to_appear_in_same_query!(external_ip, inv_omicron_zone);
-allow_tables_to_appear_in_same_query!(external_ip, inv_omicron_zone_nic);
-allow_tables_to_appear_in_same_query!(inv_omicron_zone, inv_omicron_zone_nic);
-allow_tables_to_appear_in_same_query!(network_interface, inv_omicron_zone);
-allow_tables_to_appear_in_same_query!(network_interface, inv_omicron_zone_nic);
+allow_tables_to_appear_in_same_query!(
+    external_ip,
+    inv_omicron_sled_config_zone
+);
+allow_tables_to_appear_in_same_query!(
+    external_ip,
+    inv_omicron_sled_config_zone_nic
+);
+allow_tables_to_appear_in_same_query!(
+    inv_omicron_sled_config_zone,
+    inv_omicron_sled_config_zone_nic
+);
+allow_tables_to_appear_in_same_query!(
+    network_interface,
+    inv_omicron_sled_config_zone
+);
+allow_tables_to_appear_in_same_query!(
+    network_interface,
+    inv_omicron_sled_config_zone_nic
+);
 allow_tables_to_appear_in_same_query!(network_interface, inv_collection);
-allow_tables_to_appear_in_same_query!(inv_omicron_zone, inv_collection);
-allow_tables_to_appear_in_same_query!(inv_omicron_zone_nic, inv_collection);
+allow_tables_to_appear_in_same_query!(
+    inv_omicron_sled_config_zone,
+    inv_collection
+);
+allow_tables_to_appear_in_same_query!(
+    inv_omicron_sled_config_zone_nic,
+    inv_collection
+);
 allow_tables_to_appear_in_same_query!(external_ip, inv_collection);
 allow_tables_to_appear_in_same_query!(external_ip, internet_gateway);
 allow_tables_to_appear_in_same_query!(external_ip, internet_gateway_ip_pool);
@@ -2172,6 +2350,12 @@ allow_tables_to_appear_in_same_query!(
     switch_port,
     switch_port_settings_bgp_peer_config,
     bgp_config
+);
+
+allow_tables_to_appear_in_same_query!(
+    address_lot,
+    address_lot_block,
+    switch_port_settings,
 );
 
 allow_tables_to_appear_in_same_query!(disk, virtual_provisioning_resource);
@@ -2203,7 +2387,7 @@ table! {
 }
 
 table! {
-    webhook_receiver (id) {
+    alert_receiver (id) {
         id -> Uuid,
         name -> Text,
         description -> Text,
@@ -2228,16 +2412,16 @@ table! {
 }
 
 table! {
-    webhook_rx_subscription (rx_id, event_class) {
+    alert_subscription (rx_id, alert_class) {
         rx_id -> Uuid,
-        event_class -> crate::enums::WebhookEventClassEnum,
+        alert_class -> crate::enums::AlertClassEnum,
         glob -> Nullable<Text>,
         time_created -> Timestamptz,
     }
 }
 
 table! {
-    webhook_rx_event_glob (rx_id, glob) {
+    alert_glob (rx_id, glob) {
         rx_id -> Uuid,
         glob -> Text,
         regex -> Text,
@@ -2247,23 +2431,23 @@ table! {
 }
 
 allow_tables_to_appear_in_same_query!(
-    webhook_receiver,
+    alert_receiver,
     webhook_secret,
-    webhook_rx_subscription,
-    webhook_rx_event_glob,
-    webhook_event,
+    alert_subscription,
+    alert_glob,
+    alert,
 );
-joinable!(webhook_rx_subscription -> webhook_receiver (rx_id));
-joinable!(webhook_secret -> webhook_receiver (rx_id));
-joinable!(webhook_rx_event_glob -> webhook_receiver (rx_id));
+joinable!(alert_subscription -> alert_receiver (rx_id));
+joinable!(webhook_secret -> alert_receiver (rx_id));
+joinable!(alert_glob -> alert_receiver (rx_id));
 
 table! {
-    webhook_event (id) {
+    alert (id) {
         id -> Uuid,
         time_created -> Timestamptz,
         time_modified -> Timestamptz,
-        event_class -> crate::enums::WebhookEventClassEnum,
-        event -> Jsonb,
+        alert_class -> crate::enums::AlertClassEnum,
+        payload -> Jsonb,
         time_dispatched -> Nullable<Timestamptz>,
         num_dispatched -> Int8,
     }
@@ -2272,23 +2456,23 @@ table! {
 table! {
     webhook_delivery (id) {
         id -> Uuid,
-        event_id -> Uuid,
+        alert_id -> Uuid,
         rx_id -> Uuid,
-        triggered_by -> crate::enums::WebhookDeliveryTriggerEnum,
+        triggered_by -> crate::enums::AlertDeliveryTriggerEnum,
         attempts -> Int2,
         time_created -> Timestamptz,
         time_completed -> Nullable<Timestamptz>,
-        state -> crate::enums::WebhookDeliveryStateEnum,
+        state -> crate::enums::AlertDeliveryStateEnum,
         deliverator_id -> Nullable<Uuid>,
         time_leased -> Nullable<Timestamptz>,
     }
 }
 
-allow_tables_to_appear_in_same_query!(webhook_receiver, webhook_delivery);
-joinable!(webhook_delivery -> webhook_receiver (rx_id));
-allow_tables_to_appear_in_same_query!(webhook_delivery, webhook_event);
-allow_tables_to_appear_in_same_query!(webhook_delivery_attempt, webhook_event);
-joinable!(webhook_delivery -> webhook_event (event_id));
+allow_tables_to_appear_in_same_query!(alert_receiver, webhook_delivery);
+joinable!(webhook_delivery -> alert_receiver (rx_id));
+allow_tables_to_appear_in_same_query!(webhook_delivery, alert);
+allow_tables_to_appear_in_same_query!(webhook_delivery_attempt, alert);
+joinable!(webhook_delivery -> alert (alert_id));
 
 table! {
     webhook_delivery_attempt (id) {
@@ -2309,6 +2493,41 @@ allow_tables_to_appear_in_same_query!(
     webhook_delivery_attempt
 );
 joinable!(webhook_delivery_attempt -> webhook_delivery (delivery_id));
+
+table! {
+    sp_ereport (restart_id, ena) {
+        restart_id -> Uuid,
+        ena -> Int8,
+        time_deleted -> Nullable<Timestamptz>,
+        time_collected -> Timestamptz,
+        collector_id -> Uuid,
+
+        sp_type -> crate::enums::SpTypeEnum,
+        sp_slot -> Int4,
+
+        part_number -> Nullable<Text>,
+        serial_number -> Nullable<Text>,
+        class -> Nullable<Text>,
+
+        report -> Jsonb,
+    }
+}
+
+table! {
+    host_ereport (restart_id, ena) {
+        restart_id -> Uuid,
+        ena -> Int8,
+        time_deleted -> Nullable<Timestamptz>,
+        time_collected -> Timestamptz,
+        collector_id -> Uuid,
+
+        sled_id -> Uuid,
+        sled_serial -> Text,
+        class -> Nullable<Text>,
+
+        report -> Jsonb,
+    }
+}
 
 table! {
     setting (name) {

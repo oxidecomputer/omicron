@@ -5,31 +5,69 @@
 //! Example collections used for testing
 
 use crate::CollectionBuilder;
+use crate::now_db_precision;
+use camino::Utf8Path;
 use clickhouse_admin_types::ClickhouseKeeperClusterMembership;
 use clickhouse_admin_types::KeeperId;
 use gateway_client::types::PowerState;
-use gateway_client::types::RotSlot;
 use gateway_client::types::RotState;
 use gateway_client::types::SpComponentCaboose;
 use gateway_client::types::SpState;
 use gateway_client::types::SpType;
+use gateway_types::rot::RotSlot;
+use iddqd::id_ord_map;
 use nexus_sled_agent_shared::inventory::Baseboard;
+use nexus_sled_agent_shared::inventory::ConfigReconcilerInventory;
+use nexus_sled_agent_shared::inventory::ConfigReconcilerInventoryStatus;
 use nexus_sled_agent_shared::inventory::Inventory;
 use nexus_sled_agent_shared::inventory::InventoryDataset;
 use nexus_sled_agent_shared::inventory::InventoryDisk;
 use nexus_sled_agent_shared::inventory::InventoryZpool;
+use nexus_sled_agent_shared::inventory::OmicronSledConfig;
 use nexus_sled_agent_shared::inventory::OmicronZonesConfig;
+use nexus_sled_agent_shared::inventory::OrphanedDataset;
 use nexus_sled_agent_shared::inventory::SledRole;
+use nexus_sled_agent_shared::inventory::ZoneImageResolverInventory;
 use nexus_types::inventory::BaseboardId;
 use nexus_types::inventory::CabooseWhich;
 use nexus_types::inventory::RotPage;
 use nexus_types::inventory::RotPageWhich;
+use nexus_types::inventory::ZpoolName;
 use omicron_common::api::external::ByteCount;
-use omicron_common::api::external::Generation;
+use omicron_common::disk::DatasetConfig;
+use omicron_common::disk::DatasetKind;
+use omicron_common::disk::DatasetName;
 use omicron_common::disk::DiskVariant;
+use omicron_common::disk::OmicronPhysicalDiskConfig;
+use omicron_common::disk::SharedDatasetConfig;
+use omicron_uuid_kinds::DatasetUuid;
+use omicron_uuid_kinds::PhysicalDiskUuid;
 use omicron_uuid_kinds::SledUuid;
+use omicron_uuid_kinds::ZpoolUuid;
+use sled_agent_types::zone_images::MupdateOverrideNonBootInfo;
+use sled_agent_types::zone_images::MupdateOverrideNonBootMismatch;
+use sled_agent_types::zone_images::MupdateOverrideNonBootResult;
+use sled_agent_types::zone_images::MupdateOverrideReadError;
+use sled_agent_types::zone_images::MupdateOverrideStatus;
+use sled_agent_types::zone_images::ResolverStatus;
+use sled_agent_types::zone_images::ZoneManifestNonBootInfo;
+use sled_agent_types::zone_images::ZoneManifestNonBootMismatch;
+use sled_agent_types::zone_images::ZoneManifestNonBootResult;
+use sled_agent_types::zone_images::ZoneManifestReadError;
+use sled_agent_types::zone_images::ZoneManifestStatus;
+use sled_agent_zone_images_examples::BOOT_PATHS;
+use sled_agent_zone_images_examples::NON_BOOT_2_PATHS;
+use sled_agent_zone_images_examples::NON_BOOT_2_UUID;
+use sled_agent_zone_images_examples::NON_BOOT_3_PATHS;
+use sled_agent_zone_images_examples::NON_BOOT_3_UUID;
+use sled_agent_zone_images_examples::NON_BOOT_PATHS;
+use sled_agent_zone_images_examples::NON_BOOT_UUID;
+use sled_agent_zone_images_examples::WriteInstallDatasetContext;
+use sled_agent_zone_images_examples::dataset_missing_error;
 use std::sync::Arc;
+use std::time::Duration;
 use strum::IntoEnumIterator;
+use uuid::Uuid;
 
 /// Returns an example Collection used for testing
 ///
@@ -295,6 +333,54 @@ pub fn representative() -> Representative {
     let sled16: OmicronZonesConfig = serde_json::from_str(sled16_data).unwrap();
     let sled17: OmicronZonesConfig = serde_json::from_str(sled17_data).unwrap();
 
+    // Convert these to `OmicronSledConfig`s. We'll start with empty disks and
+    // datasets for now, and add to them below for sled14.
+    let mut sled14 = OmicronSledConfig {
+        generation: sled14.generation,
+        disks: Default::default(),
+        datasets: Default::default(),
+        zones: sled14.zones.into_iter().collect(),
+        remove_mupdate_override: None,
+    };
+    let sled16 = OmicronSledConfig {
+        generation: sled16.generation,
+        disks: Default::default(),
+        datasets: Default::default(),
+        zones: sled16.zones.into_iter().collect(),
+        remove_mupdate_override: None,
+    };
+    let sled17 = OmicronSledConfig {
+        generation: sled17.generation,
+        disks: Default::default(),
+        datasets: Default::default(),
+        zones: sled17.zones.into_iter().collect(),
+        remove_mupdate_override: None,
+    };
+
+    // Create iterator producing fixed IDs.
+    let mut disk_id_iter = std::iter::from_fn({
+        //              "physicaldisk"
+        let mut value = "70687973-6963-616c-6469-736b00000000"
+            .parse::<Uuid>()
+            .unwrap()
+            .as_u128();
+        move || {
+            value += 1;
+            Some(PhysicalDiskUuid::from_u128(value))
+        }
+    });
+    let mut zpool_id_iter = std::iter::from_fn({
+        //              "zpool"
+        let mut value = "7a706f6f-6c00-0000-0000-000000000000"
+            .parse::<Uuid>()
+            .unwrap()
+            .as_u128();
+        move || {
+            value += 1;
+            Some(ZpoolUuid::from_u128(value))
+        }
+    });
+
     // Report some sled agents.
     //
     // This first one will match "sled1_bb"'s baseboard information.
@@ -362,19 +448,41 @@ pub fn representative() -> Representative {
             slot_firmware_versions: vec![Some("EXAMP1".to_string())],
         },
     ];
-    let zpools = vec![InventoryZpool {
-        id: "283f5475-2606-4e83-b001-9a025dbcb8a0".parse().unwrap(),
-        total_size: ByteCount::from(4096),
-    }];
+    let mut zpools = Vec::new();
+    for disk in &disks {
+        let pool_id = zpool_id_iter.next().unwrap();
+        sled14.disks.insert(OmicronPhysicalDiskConfig {
+            identity: disk.identity.clone(),
+            id: disk_id_iter.next().unwrap(),
+            pool_id,
+        });
+        zpools.push(InventoryZpool {
+            id: pool_id,
+            total_size: ByteCount::from(4096),
+        });
+    }
+    let dataset_name = DatasetName::new(
+        ZpoolName::new_external(zpools[0].id),
+        DatasetKind::Debug,
+    );
     let datasets = vec![InventoryDataset {
         id: Some("afc00483-0d7b-4181-87d5-0def937d3cd7".parse().unwrap()),
-        name: "mydataset".to_string(),
+        name: dataset_name.full_name(),
         available: ByteCount::from(1024),
         used: ByteCount::from(0),
         quota: None,
         reservation: None,
         compression: "lz4".to_string(),
     }];
+    sled14.datasets.insert(DatasetConfig {
+        id: datasets[0].id.unwrap(),
+        name: dataset_name,
+        inner: SharedDatasetConfig {
+            compression: datasets[0].compression.parse().unwrap(),
+            quota: datasets[0].quota,
+            reservation: datasets[0].reservation,
+        },
+    });
 
     builder
         .found_sled_inventory(
@@ -387,10 +495,14 @@ pub fn representative() -> Representative {
                     revision: 0,
                 },
                 SledRole::Gimlet,
-                sled14,
                 disks,
                 zpools,
                 datasets,
+                Some(sled14),
+                zone_image_resolver(ZoneImageResolverExampleKind::Success {
+                    deserialized_zone_manifest: true,
+                    has_mupdate_override: true,
+                }),
             ),
         )
         .unwrap();
@@ -415,10 +527,14 @@ pub fn representative() -> Representative {
                     revision: 0,
                 },
                 SledRole::Scrimlet,
-                sled16,
                 vec![],
                 vec![],
                 vec![],
+                Some(sled16),
+                zone_image_resolver(ZoneImageResolverExampleKind::Success {
+                    deserialized_zone_manifest: false,
+                    has_mupdate_override: false,
+                }),
             ),
         )
         .unwrap();
@@ -438,10 +554,17 @@ pub fn representative() -> Representative {
                     model: String::from("fellofftruck"),
                 },
                 SledRole::Gimlet,
-                sled17,
                 vec![],
                 vec![],
                 vec![],
+                Some(sled17),
+                // Simulate a mismatch in this case with the mupdate override
+                // being present. There's one case that's unexplored: mismatch
+                // with no mupdate override. But to express that case we would
+                // need an additional fifth sled.
+                zone_image_resolver(ZoneImageResolverExampleKind::Mismatch {
+                    has_mupdate_override: true,
+                }),
             ),
         )
         .unwrap();
@@ -459,15 +582,14 @@ pub fn representative() -> Representative {
                 sled_agent_id_unknown,
                 Baseboard::Unknown,
                 SledRole::Gimlet,
-                // We only have omicron zones for three sleds so use empty zone
-                // info here.
-                OmicronZonesConfig {
-                    generation: Generation::new(),
-                    zones: Vec::new(),
-                },
                 vec![],
                 vec![],
                 vec![],
+                // We only have omicron zones for three sleds so report no sled
+                // config here.
+                None,
+                // Simulate an error here.
+                zone_image_resolver(ZoneImageResolverExampleKind::Error),
             ),
         )
         .unwrap();
@@ -540,7 +662,7 @@ pub fn caboose(unique: &str) -> SpComponentCaboose {
         git_commit: format!("git_commit_{}", unique),
         name: format!("name_{}", unique),
         version: format!("version_{}", unique),
-        sign: None,
+        sign: Some(format!("sign_{}", unique)),
         epoch: None,
     }
 }
@@ -552,15 +674,199 @@ pub fn rot_page(unique: &str) -> RotPage {
     }
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ZoneImageResolverExampleKind {
+    /// Success, with or without treating the manifest as deserialized and the
+    /// mupdate override being present.
+    Success { deserialized_zone_manifest: bool, has_mupdate_override: bool },
+
+    /// The zone manifest is successfully read but doesn't match entries on
+    /// disk.
+    Mismatch { has_mupdate_override: bool },
+
+    /// Errors while reading the zone manifest and mupdate override status.
+    Error,
+}
+
+/// Generate an example zone image resolver inventory.
+pub fn zone_image_resolver(
+    kind: ZoneImageResolverExampleKind,
+) -> ZoneImageResolverInventory {
+    let dir_path = Utf8Path::new("/some/path");
+
+    // Create a bunch of contexts.
+    let mut cx = WriteInstallDatasetContext::new_basic();
+
+    let mut invalid_cx = WriteInstallDatasetContext::new_basic();
+    invalid_cx.make_error_cases();
+
+    // Determine the zone manifest and mupdate override results for the boot
+    // disk.
+    let (boot_zm_result, boot_override_result) = match kind {
+        ZoneImageResolverExampleKind::Success {
+            deserialized_zone_manifest,
+            has_mupdate_override,
+        } => {
+            if !deserialized_zone_manifest {
+                cx.write_zone_manifest_to_disk(false);
+            }
+            let zm_result = Ok(
+                cx.expected_result(&dir_path.join(&BOOT_PATHS.install_dataset))
+            );
+            let override_result =
+                Ok(has_mupdate_override.then(|| cx.override_info()));
+            (zm_result, override_result)
+        }
+        ZoneImageResolverExampleKind::Mismatch { has_mupdate_override } => {
+            // In this case, the zone manifest result is generated using the
+            // invalid (mismatched) context.
+            let zm_result = Ok(invalid_cx
+                .expected_result(&dir_path.join(&BOOT_PATHS.install_dataset)));
+            let override_result =
+                Ok(has_mupdate_override.then(|| cx.override_info()));
+            (zm_result, override_result)
+        }
+        ZoneImageResolverExampleKind::Error => {
+            // Use the invalid context to generate an error.
+            let zm_result = Err(ZoneManifestReadError::InstallMetadata(
+                dataset_missing_error(
+                    &dir_path.join(&BOOT_PATHS.install_dataset),
+                ),
+            ));
+            let override_result =
+                Err(MupdateOverrideReadError::InstallMetadata(
+                    dataset_missing_error(
+                        &dir_path.join(&BOOT_PATHS.install_dataset),
+                    ),
+                ));
+            (zm_result, override_result)
+        }
+    };
+
+    // Generate a status struct first.
+    let status = ResolverStatus {
+        zone_manifest: ZoneManifestStatus {
+            boot_disk_path: dir_path.join(&BOOT_PATHS.zones_json),
+            boot_disk_result: boot_zm_result,
+            non_boot_disk_metadata: id_ord_map! {
+                // Non-boot disk metadata that matches.
+                ZoneManifestNonBootInfo {
+                    zpool_id: NON_BOOT_UUID,
+                    dataset_dir: dir_path.join(&NON_BOOT_PATHS.install_dataset),
+                    path: dir_path.join(&NON_BOOT_PATHS.zones_json),
+                    // XXX Technically, if the boot disk had an error, this
+                    // can't be Matches. We choose to punt on this issue because
+                    // the conversion to the inventory type squishes down
+                    // errors into a string.
+                    result: ZoneManifestNonBootResult::Matches(
+                        cx.expected_result(
+                            &dir_path.join(&NON_BOOT_PATHS.install_dataset)
+                        )
+                    ),
+                },
+                // Non-boot disk mismatch (zones different + errors).
+                ZoneManifestNonBootInfo {
+                    zpool_id: NON_BOOT_2_UUID,
+                    dataset_dir: dir_path.join(&NON_BOOT_2_PATHS.install_dataset),
+                    path: dir_path.join(&NON_BOOT_2_PATHS.zones_json),
+                    result: ZoneManifestNonBootResult::Mismatch(
+                        ZoneManifestNonBootMismatch::ValueMismatch {
+                            non_boot_disk_result: invalid_cx.expected_result(
+                                &dir_path.join(&NON_BOOT_2_PATHS.install_dataset),
+                            ),
+                        },
+                    ),
+                },
+                // Non-boot disk mismatch (error reading zone manifest).
+                ZoneManifestNonBootInfo {
+                    zpool_id: NON_BOOT_3_UUID,
+                    dataset_dir: dir_path.join(&NON_BOOT_3_PATHS.install_dataset),
+                    path: dir_path.join(&NON_BOOT_3_PATHS.zones_json),
+                    result: ZoneManifestNonBootResult::ReadError(
+                        dataset_missing_error(
+                            &dir_path.join(&NON_BOOT_3_PATHS.install_dataset),
+                        ).into(),
+                    ),
+                },
+            },
+        },
+        mupdate_override: MupdateOverrideStatus {
+            boot_disk_path: dir_path.join(&BOOT_PATHS.mupdate_override_json),
+            boot_disk_override: boot_override_result,
+            non_boot_disk_overrides: id_ord_map! {
+                // Non-boot disk mupdate overrides that match.
+                MupdateOverrideNonBootInfo {
+                    zpool_id: NON_BOOT_UUID,
+                    path: dir_path.join(&NON_BOOT_PATHS.mupdate_override_json),
+                    // XXX Technically, if the boot disk had an error, this
+                    // can't be Matches. We choose to punt on this issue because
+                    // the conversion to the inventory type squishes down errors
+                    // into a string.
+                    result: MupdateOverrideNonBootResult::MatchesPresent,
+                },
+                // Non-boot disk mupdate overrides that have a mismatch.
+                MupdateOverrideNonBootInfo {
+                    zpool_id: NON_BOOT_2_UUID,
+                    path: dir_path.join(&NON_BOOT_2_PATHS.mupdate_override_json),
+                    result: MupdateOverrideNonBootResult::Mismatch(
+                        MupdateOverrideNonBootMismatch::BootPresentOtherAbsent,
+                    ),
+                },
+                // Non-boot disk updates (error reading zone manifest).
+                MupdateOverrideNonBootInfo {
+                    zpool_id: NON_BOOT_3_UUID,
+                    path: dir_path.join(&NON_BOOT_3_PATHS.mupdate_override_json),
+                    result: MupdateOverrideNonBootResult::ReadError(
+                        dataset_missing_error(
+                            &dir_path.join(&NON_BOOT_3_PATHS.install_dataset),
+                        ).into(),
+                    ),
+                },
+            },
+        },
+    };
+
+    status.to_inventory()
+}
+
+#[expect(clippy::too_many_arguments)]
 pub fn sled_agent(
     sled_id: SledUuid,
     baseboard: Baseboard,
     sled_role: SledRole,
-    omicron_zones: OmicronZonesConfig,
     disks: Vec<InventoryDisk>,
     zpools: Vec<InventoryZpool>,
     datasets: Vec<InventoryDataset>,
+    ledgered_sled_config: Option<OmicronSledConfig>,
+    zone_image_resolver: ZoneImageResolverInventory,
 ) -> Inventory {
+    // Assume the `ledgered_sled_config` was reconciled successfully.
+    let last_reconciliation = ledgered_sled_config.clone().map(|config| {
+        let mut inv = ConfigReconcilerInventory::debug_assume_success(config);
+        // Add an orphaned dataset with no tie to other pools/datasets.
+        inv.orphaned_datasets.insert_overwrite(OrphanedDataset {
+            name: DatasetName::new(
+                ZpoolName::new_external(ZpoolUuid::new_v4()),
+                DatasetKind::ExternalDns,
+            ),
+            reason: "example orphaned dataset".to_string(),
+            id: Some(DatasetUuid::new_v4()),
+            mounted: false,
+            available: 0.into(),
+            used: 0.into(),
+        });
+        inv
+    });
+
+    let reconciler_status = if last_reconciliation.is_some() {
+        ConfigReconcilerInventoryStatus::Idle {
+            completed_at: now_db_precision(),
+            ran_for: Duration::from_secs(5),
+        }
+    } else {
+        ConfigReconcilerInventoryStatus::NotYetRun
+    };
+
     Inventory {
         baseboard,
         reservoir_size: ByteCount::from(1024),
@@ -569,10 +875,12 @@ pub fn sled_agent(
         sled_id,
         usable_hardware_threads: 10,
         usable_physical_ram: ByteCount::from(1024 * 1024),
-        omicron_zones,
         disks,
         zpools,
         datasets,
-        omicron_physical_disks_generation: Generation::new(),
+        ledgered_sled_config,
+        reconciler_status,
+        last_reconciliation,
+        zone_image_resolver,
     }
 }

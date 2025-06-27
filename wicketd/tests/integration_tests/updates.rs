@@ -4,19 +4,32 @@
 
 //! Tests for wicketd updates.
 
-use std::{collections::BTreeSet, time::Duration};
+use std::{collections::BTreeSet, sync::Arc, time::Duration};
 
 use super::setup::WicketdTestContext;
+use camino::Utf8Path;
 use camino_tempfile::Utf8TempDir;
 use clap::Parser;
 use gateway_messages::SpPort;
 use gateway_test_utils::setup as gateway_setup;
 use installinator::HOST_PHASE_2_FILE_NAME;
 use maplit::btreeset;
+use omicron_common::{
+    disk::DiskIdentity,
+    update::{
+        MupdateOverrideInfo, OmicronZoneManifest, OmicronZoneManifestSource,
+    },
+};
+use omicron_uuid_kinds::{InternalZpoolUuid, MupdateUuid};
+use sled_agent_config_reconciler::{
+    InternalDisksReceiver, InternalDisksWithBootDisk,
+};
+use sled_agent_types::zone_images::MupdateOverrideNonBootResult;
+use sled_agent_zone_images::ZoneImageSourceResolver;
+use sled_storage::config::MountConfig;
 use tokio::sync::oneshot;
 use tufaceous_artifact::{ArtifactHashId, ArtifactKind, KnownArtifactKind};
 use update_engine::NestedError;
-use uuid::Uuid;
 use wicket::OutputKind;
 use wicket_common::{
     inventory::{SpIdentifier, SpType},
@@ -344,9 +357,9 @@ async fn test_installinator_fetch() {
 
     // Create a new update ID and register it. This is required to ensure the
     // installinator reaches completion.
-    let update_id = Uuid::new_v4();
+    let mupdate_id = MupdateUuid::new_v4();
     let start_receiver =
-        wicketd_testctx.server.ipr_update_tracker.register(update_id);
+        wicketd_testctx.server.ipr_update_tracker.register(mupdate_id);
 
     // Process the receiver rather than dropping it, since dropping it causes
     // 410 Gone errors.
@@ -358,8 +371,14 @@ async fn test_installinator_fetch() {
         }
     });
 
-    let update_id_str = update_id.to_string();
-    let dest_path = temp_dir.path().join("installinator-out");
+    // Simulate a couple of zpools.
+    let boot_zpool = InternalZpoolUuid::new_v4();
+    let non_boot_zpool = InternalZpoolUuid::new_v4();
+    let a_path = temp_dir.path().join("pool/int").join(boot_zpool.to_string());
+    let b_path =
+        temp_dir.path().join("pool/int").join(non_boot_zpool.to_string());
+
+    let update_id_str = mupdate_id.to_string();
     let args = installinator::InstallinatorApp::try_parse_from([
         "installinator",
         "install",
@@ -371,7 +390,8 @@ async fn test_installinator_fetch() {
         host_phase_2_hash.as_str(),
         "--control-plane",
         control_plane_hash.as_str(),
-        dest_path.as_str(),
+        a_path.as_str(),
+        b_path.as_str(),
         "--data-link0",
         "cxgbe0",
         "--data-link1",
@@ -385,7 +405,7 @@ async fn test_installinator_fetch() {
 
     // Check that the update status is marked as closed.
     assert_eq!(
-        wicketd_testctx.server.ipr_update_tracker.update_state(update_id),
+        wicketd_testctx.server.ipr_update_tracker.update_state(mupdate_id),
         Some(RunningUpdateState::Closed),
         "update should be marked as closed at the end of the run"
     );
@@ -396,11 +416,151 @@ async fn test_installinator_fetch() {
     // The control plane zone names here are defined in `fake.toml` which we
     // load above.
     for file_name in
-        [HOST_PHASE_2_FILE_NAME, "zones/zone1.tar.gz", "zones/zone2.tar.gz"]
+        [HOST_PHASE_2_FILE_NAME, "install/zone1.tar.gz", "install/zone2.tar.gz"]
     {
-        let path = dest_path.join(file_name);
-        assert!(path.is_file(), "{path} was written out");
+        let a_path = a_path.join(file_name);
+        assert!(a_path.is_file(), "{a_path} was written out");
+
+        let b_path = b_path.join(file_name);
+        assert!(b_path.is_file(), "{b_path} was written out");
     }
+
+    // Ensure that the MUPdate override files were written correctly.
+    //
+    // In the mode where we specify a destination directory to write to,
+    // the install dataset translates to "<dest-path>/install".
+    let b_override_path =
+        a_path.join("install").join(MupdateOverrideInfo::FILE_NAME);
+    assert!(b_override_path.is_file(), "{b_override_path} was written out");
+
+    // Ensure that the MUPdate override file can be parsed.
+    let a_override_bytes = std::fs::read(b_override_path)
+        .expect("mupdate override file successfully read");
+    let a_override_info =
+        serde_json::from_slice::<MupdateOverrideInfo>(&a_override_bytes)
+            .expect("mupdate override file successfully deserialized");
+
+    assert_eq!(
+        a_override_info.hash_ids,
+        btreeset! {
+            host_phase_2_id, control_plane_id,
+        }
+    );
+
+    // Ensure that the B path also had the same file written out.
+    let b_override_path =
+        b_path.join("install").join(MupdateOverrideInfo::FILE_NAME);
+    assert!(b_override_path.is_file(), "{b_override_path} was written out");
+
+    // Ensure that the MUPdate override file can be parsed.
+    let b_override_bytes = std::fs::read(b_override_path)
+        .expect("mupdate override file successfully read");
+    let b_override_info =
+        serde_json::from_slice::<MupdateOverrideInfo>(&b_override_bytes)
+            .expect("mupdate override file successfully deserialized");
+
+    assert_eq!(
+        a_override_info, b_override_info,
+        "mupdate override info matches across A and B drives",
+    );
+
+    // Ensure that the zone manifest can be parsed.
+    let a_manifest_path =
+        a_path.join("install").join(OmicronZoneManifest::FILE_NAME);
+    let a_manifest_bytes = std::fs::read(a_manifest_path)
+        .expect("zone manifest file successfully read");
+    let a_manifest =
+        serde_json::from_slice::<OmicronZoneManifest>(&a_manifest_bytes)
+            .expect("zone manifest file successfully deserialized");
+
+    // Check that the source was correctly specified and that the mupdate ID
+    // matches.
+    assert_eq!(
+        a_manifest.source,
+        OmicronZoneManifestSource::Installinator { mupdate_id },
+        "mupdate ID matches",
+    );
+
+    // Check that the zone1 and zone2 images are present in the zone set. (The
+    // names come from fake-non-semver.toml, under
+    // [artifact.control-plane.source]).
+    assert!(
+        a_manifest.zones.contains_key("zone1.tar.gz"),
+        "zone1 is present in the zone set"
+    );
+    assert!(
+        a_manifest.zones.contains_key("zone2.tar.gz"),
+        "zone2 is present in the zone set"
+    );
+
+    // Ensure that the B path also had the same file written out.
+    let b_manifest_path =
+        b_path.join("install").join(OmicronZoneManifest::FILE_NAME);
+    assert!(b_manifest_path.is_file(), "{b_manifest_path} was written out");
+    // Ensure that the zone manifest can be parsed.
+    let b_override_bytes = std::fs::read(b_manifest_path)
+        .expect("zone manifest file successfully read");
+    let b_manifest =
+        serde_json::from_slice::<OmicronZoneManifest>(&b_override_bytes)
+            .expect("zone manifest file successfully deserialized");
+
+    assert_eq!(
+        a_manifest, b_manifest,
+        "zone manifests match across A and B drives"
+    );
+
+    // Run sled-agent-zone-images against these paths, and ensure that the
+    // mupdate override is correctly picked up. Pick zpool1 arbitrarily as the
+    // boot zpool.
+    let internal_disks =
+        make_internal_disks(temp_dir.path(), boot_zpool, &[non_boot_zpool]);
+    let image_resolver = ZoneImageSourceResolver::new(&log, internal_disks);
+
+    // Ensure that the resolver picks up the zone manifest and mupdate override.
+    let status = image_resolver.status();
+    eprintln!("status: {:#?}", status);
+
+    // Zone manifest:
+    let zone_manifest_status = status.zone_manifest;
+    let result = zone_manifest_status
+        .boot_disk_result
+        .expect("zone manifest successful");
+    assert!(result.is_valid(), "zone manifest: boot disk result is valid");
+    assert_eq!(
+        result.manifest, a_manifest,
+        "zone manifest: manifest matches a_manifest"
+    );
+
+    let non_boot_result = zone_manifest_status
+        .non_boot_disk_metadata
+        .get(&non_boot_zpool)
+        .expect("non-boot disk result should be present");
+    assert!(
+        non_boot_result.result.is_valid(),
+        "zone manifest: non-boot disk result is valid"
+    );
+
+    // Mupdate override:
+    let override_status = status.mupdate_override;
+
+    let info = override_status
+        .boot_disk_override
+        .expect("mupdate override successful")
+        .expect("mupdate override present");
+    assert_eq!(
+        info, a_override_info,
+        "mupdate override: info matches a_override_info"
+    );
+
+    let non_boot_status = override_status
+        .non_boot_disk_overrides
+        .get(&non_boot_zpool)
+        .expect("non-boot disk status should be present");
+    assert_eq!(
+        non_boot_status.result,
+        MupdateOverrideNonBootResult::MatchesPresent,
+        "mupdate override: non-boot disk status matches present",
+    );
 
     recv_handle.await.expect("recv_handle succeeded");
 
@@ -516,4 +676,30 @@ async fn test_update_races() {
     );
 
     wicketd_testctx.teardown().await;
+}
+
+fn make_internal_disks(
+    root: &Utf8Path,
+    boot_zpool: InternalZpoolUuid,
+    other_zpools: &[InternalZpoolUuid],
+) -> InternalDisksWithBootDisk {
+    let identity_from_zpool = |zpool: InternalZpoolUuid| DiskIdentity {
+        vendor: "wicketd-integration-test".to_string(),
+        model: "fake-disk".to_string(),
+        serial: zpool.to_string(),
+    };
+    let mount_config = MountConfig {
+        root: root.to_path_buf(),
+        synthetic_disk_root: root.to_path_buf(),
+    };
+    InternalDisksReceiver::fake_static(
+        Arc::new(mount_config),
+        std::iter::once((identity_from_zpool(boot_zpool), boot_zpool)).chain(
+            other_zpools
+                .iter()
+                .copied()
+                .map(|pool| (identity_from_zpool(pool), pool)),
+        ),
+    )
+    .current_with_boot_disk()
 }

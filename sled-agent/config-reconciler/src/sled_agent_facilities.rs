@@ -5,17 +5,22 @@
 //! Traits that allow `sled-agent-config-reconciler` to be a separate crate but
 //! still use facilities implemented in `sled-agent` proper.
 
+use illumos_utils::dladm::EtherstubVnic;
 use illumos_utils::running_zone::RunningZone;
-use illumos_utils::zpool::ZpoolName;
+use illumos_utils::zpool::PathInPool;
 use nexus_sled_agent_shared::inventory::OmicronZoneConfig;
 use omicron_common::address::Ipv6Subnet;
 use omicron_common::address::SLED_PREFIX;
 use sled_agent_types::zone_bundle::ZoneBundleCause;
-use sled_storage::config::MountConfig;
 use std::future::Future;
 use tufaceous_artifact::ArtifactHash;
 
-pub trait SledAgentFacilities: Send + 'static {
+pub trait SledAgentFacilities: Send + Sync + 'static {
+    /// The underlay VNIC interface in the global zone.
+    ///
+    /// Used to determine `AddrObject`s for internal DNS global zone interaces.
+    fn underlay_vnic(&self) -> &EtherstubVnic;
+
     /// Called by the reconciler task to inform sled-agent that time is
     /// sychronized. May be called multiple times.
     // TODO-cleanup should we do this work ourselves instead? This is
@@ -32,9 +37,7 @@ pub trait SledAgentFacilities: Send + 'static {
     fn start_omicron_zone(
         &self,
         zone_config: &OmicronZoneConfig,
-        mount_config: &MountConfig,
-        is_time_synchronized: bool,
-        all_u2_pools: &[ZpoolName],
+        zone_root_path: PathInPool,
     ) -> impl Future<Output = anyhow::Result<RunningZone>> + Send;
 
     /// Stop tracking metrics for a zone's datalinks.
@@ -42,9 +45,6 @@ pub trait SledAgentFacilities: Send + 'static {
         &self,
         zone: &RunningZone,
     ) -> anyhow::Result<()>;
-
-    /// Instruct DDM to start advertising a prefix.
-    fn ddm_add_internal_dns_prefix(&self, prefix: Ipv6Subnet<SLED_PREFIX>);
 
     /// Instruct DDM to stop advertising a prefix.
     fn ddm_remove_internal_dns_prefix(&self, prefix: Ipv6Subnet<SLED_PREFIX>);

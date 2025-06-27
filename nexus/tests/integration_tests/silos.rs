@@ -16,7 +16,7 @@ use nexus_test_utils::http_testing::{AuthnMode, NexusRequest, RequestBuilder};
 use nexus_test_utils::resource_helpers::{
     create_ip_pool, create_local_user, create_project, create_silo, grant_iam,
     link_ip_pool, object_create, object_delete, objects_list_page_authz,
-    projects_list,
+    projects_list, test_params,
 };
 use nexus_test_utils_macros::nexus_test;
 use nexus_types::external_api::views::Certificate;
@@ -38,7 +38,8 @@ use std::fmt::Write;
 use std::str::FromStr;
 
 use base64::Engine;
-use hickory_resolver::error::ResolveErrorKind;
+use hickory_resolver::ResolveErrorKind;
+use hickory_resolver::proto::ProtoErrorKind;
 use http::StatusCode;
 use http::method::Method;
 use httptest::{Expectation, Server, matchers::*, responders::*};
@@ -145,7 +146,7 @@ async fn test_silos(cptestctx: &ControlPlaneTestContext) {
         client,
         &silos[0],
         &"some-silo-user".parse().unwrap(),
-        params::UserPassword::LoginDisallowed,
+        test_params::UserPassword::LoginDisallowed,
     )
     .await
     .id;
@@ -797,7 +798,7 @@ async fn test_silo_user_provision_types(cptestctx: &ControlPlaneTestContext) {
                         client,
                         &silo,
                         &"external-id-com".parse().unwrap(),
-                        params::UserPassword::LoginDisallowed,
+                        test_params::UserPassword::LoginDisallowed,
                     )
                     .await;
                 }
@@ -871,7 +872,7 @@ async fn test_silo_user_fetch_by_external_id(
         client,
         &silo,
         &"f5513e049dac9468de5bdff36ab17d04f".parse().unwrap(),
-        params::UserPassword::LoginDisallowed,
+        test_params::UserPassword::LoginDisallowed,
     )
     .await;
 
@@ -935,7 +936,7 @@ async fn test_silo_users_list(cptestctx: &ControlPlaneTestContext) {
         client,
         &views::Silo::try_from(DEFAULT_SILO.clone()).unwrap(),
         &new_silo_user_external_id.parse().unwrap(),
-        params::UserPassword::LoginDisallowed,
+        test_params::UserPassword::LoginDisallowed,
     )
     .await
     .id;
@@ -979,7 +980,7 @@ async fn test_silo_users_list(cptestctx: &ControlPlaneTestContext) {
         client,
         &silo,
         &new_silo_user_name.parse().unwrap(),
-        params::UserPassword::LoginDisallowed,
+        test_params::UserPassword::LoginDisallowed,
     )
     .await
     .id;
@@ -1109,7 +1110,7 @@ async fn test_silo_groups_fixed(cptestctx: &ControlPlaneTestContext) {
         client,
         &silo,
         &"external-id-com".parse().unwrap(),
-        params::UserPassword::LoginDisallowed,
+        test_params::UserPassword::LoginDisallowed,
     )
     .await;
 
@@ -1545,7 +1546,7 @@ async fn test_silo_user_views(cptestctx: &ControlPlaneTestContext) {
         client,
         &silo2,
         &"silo2-user1".parse().unwrap(),
-        params::UserPassword::LoginDisallowed,
+        test_params::UserPassword::LoginDisallowed,
     )
     .await;
     let silo2_user1_id = silo2_user1.id;
@@ -1553,7 +1554,7 @@ async fn test_silo_user_views(cptestctx: &ControlPlaneTestContext) {
         client,
         &silo2,
         &"silo2-user2".parse().unwrap(),
-        params::UserPassword::LoginDisallowed,
+        test_params::UserPassword::LoginDisallowed,
     )
     .await;
     let silo2_user2_id = silo2_user2.id;
@@ -1768,9 +1769,9 @@ async fn test_jit_silo_constraints(cptestctx: &ControlPlaneTestContext) {
                 StatusCode::NOT_FOUND,
                 Method::POST,
                 "/v1/system/identity-providers/local/users?silo=jit",
-                &params::UserCreate {
+                &test_params::UserCreate {
                     external_id: UserId::from_str("dummy").unwrap(),
-                    password: params::UserPassword::LoginDisallowed,
+                    password: test_params::UserPassword::LoginDisallowed,
                 },
             )
             .authn_as(caller),
@@ -1793,7 +1794,7 @@ async fn test_jit_silo_constraints(cptestctx: &ControlPlaneTestContext) {
     // Neither the "test-privileged" user nor the Silo Admin ought to be able to
     // remove this user via the local identity provider, nor set the user's
     // password.
-    let password = params::Password::from_str("dummy").unwrap();
+    let password = "dummy";
     for caller in
         [AuthnMode::PrivilegedUser, AuthnMode::SiloUser(admin_user.id)]
     {
@@ -1814,7 +1815,7 @@ async fn test_jit_silo_constraints(cptestctx: &ControlPlaneTestContext) {
                 StatusCode::NOT_FOUND,
                 Method::POST,
                 &user_url_set_password,
-                &params::UserPassword::Password(password.clone()),
+                &test_params::UserPassword::Password(password.to_string()),
             )
             .authn_as(caller.clone()),
         )
@@ -1828,9 +1829,9 @@ async fn test_jit_silo_constraints(cptestctx: &ControlPlaneTestContext) {
         StatusCode::NOT_FOUND,
         Method::POST,
         "/v1/login/jit/local",
-        &params::UsernamePasswordCredentials {
+        &test_params::UsernamePasswordCredentials {
             username: UserId::from_str(admin_username).unwrap(),
-            password: password.clone(),
+            password: password.to_string(),
         },
     ))
     .await;
@@ -1841,9 +1842,9 @@ async fn test_jit_silo_constraints(cptestctx: &ControlPlaneTestContext) {
         StatusCode::NOT_FOUND,
         Method::POST,
         "/v1/login/jit/local",
-        &params::UsernamePasswordCredentials {
+        &test_params::UsernamePasswordCredentials {
             username: UserId::from_str("bogus").unwrap(),
-            password: password.clone(),
+            password: password.to_string(),
         },
     ))
     .await;
@@ -1879,7 +1880,7 @@ async fn test_local_silo_constraints(cptestctx: &ControlPlaneTestContext) {
         client,
         &silo,
         &"admin-user".parse().unwrap(),
-        params::UserPassword::LoginDisallowed,
+        test_params::UserPassword::LoginDisallowed,
     )
     .await
     .id;
@@ -1988,7 +1989,7 @@ async fn test_local_silo_users(cptestctx: &ControlPlaneTestContext) {
         client,
         &silo1,
         &"admin-user".parse().unwrap(),
-        params::UserPassword::LoginDisallowed,
+        test_params::UserPassword::LoginDisallowed,
     )
     .await;
     grant_iam(
@@ -2039,9 +2040,9 @@ async fn run_user_tests(
     let user_created = NexusRequest::objects_post(
         client,
         &url_user_create,
-        &params::UserCreate {
+        &test_params::UserCreate {
             external_id: UserId::from_str("a-test-user").unwrap(),
-            password: params::UserPassword::LoginDisallowed,
+            password: test_params::UserPassword::LoginDisallowed,
         },
     )
     .authn_as(authn_mode.clone())
@@ -2165,8 +2166,8 @@ pub async fn verify_silo_dns_name(
                         true
                     }
                 }
-                Err(error) => match error.kind() {
-                    ResolveErrorKind::NoRecordsFound { .. } => false,
+                Err(error) => match resolve_error_proto_kind(&error) {
+                    Some(ProtoErrorKind::NoRecordsFound { .. }) => false,
                     _ => panic!(
                         "unexpected error querying external \
                             DNS server for Silo DNS name {:?}: {:#}",
@@ -2186,6 +2187,13 @@ pub async fn verify_silo_dns_name(
     )
     .await
     .expect("failed to verify external DNS configuration");
+}
+
+fn resolve_error_proto_kind(
+    e: &hickory_resolver::ResolveError,
+) -> Option<&ProtoErrorKind> {
+    let ResolveErrorKind::Proto(proto_error) = e.kind() else { return None };
+    Some(proto_error.kind())
 }
 
 // Test the basic behavior of the Silo-level IAM policy that supports
@@ -2274,7 +2282,7 @@ async fn test_silo_authn_policy(cptestctx: &ControlPlaneTestContext) {
             client,
             &silo,
             &(format!("{}-user", label).parse().unwrap()),
-            params::UserPassword::LoginDisallowed,
+            test_params::UserPassword::LoginDisallowed,
         )
         .await;
         grant_iam(
@@ -2469,7 +2477,7 @@ async fn test_silo_admin_can_create_certs(cptestctx: &ControlPlaneTestContext) {
         client,
         &silo,
         &"admin".parse().unwrap(),
-        params::UserPassword::LoginDisallowed,
+        test_params::UserPassword::LoginDisallowed,
     )
     .await
     .id;

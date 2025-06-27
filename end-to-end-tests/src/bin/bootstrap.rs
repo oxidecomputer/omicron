@@ -8,15 +8,18 @@ use oxide_client::types::{
     NameOrId, SiloQuotasUpdate,
 };
 use oxide_client::{
-    ClientDisksExt, ClientHiddenExt, ClientProjectsExt, ClientSystemIpPoolsExt,
-    ClientSystemSilosExt,
+    ClientConsoleAuthExt, ClientDisksExt, ClientProjectsExt,
+    ClientSystemIpPoolsExt, ClientSystemSilosExt,
 };
 use serde::{Deserialize, de::DeserializeOwned};
 use std::time::Duration;
 use uuid::Uuid;
 
-#[tokio::main]
-async fn main() -> Result<()> {
+fn main() -> Result<()> {
+    oxide_tokio_rt::run(run_test())
+}
+
+async fn run_test() -> Result<()> {
     let params = ClientParams::new()?;
     let client = params.build_client().await?;
 
@@ -115,7 +118,7 @@ async fn main() -> Result<()> {
         deserialize_byte_stream(
             ctx.client
                 .device_auth_request()
-                .body(DeviceAuthRequest { client_id })
+                .body(DeviceAuthRequest { client_id, ttl_seconds: None })
                 .send()
                 .await?,
         )

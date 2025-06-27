@@ -339,7 +339,8 @@ mod test {
     use dropshot::PaginationOrder;
     use nexus_db_lookup::LookupPath;
     use nexus_sled_agent_shared::inventory::{
-        Baseboard, Inventory, InventoryDisk, OmicronZonesConfig, SledRole,
+        Baseboard, ConfigReconcilerInventoryStatus, Inventory, InventoryDisk,
+        SledRole, ZoneImageResolverInventory,
     };
     use nexus_types::identity::Asset;
     use omicron_common::api::external::ByteCount;
@@ -435,7 +436,7 @@ mod test {
             String::from("Noxide"),
             String::from("456"),
             String::from("UnrealDisk"),
-            PhysicalDiskKind::M2,
+            PhysicalDiskKind::U2,
             sled_id,
         );
         datastore
@@ -692,15 +693,14 @@ mod test {
                     sled_id: SledUuid::from_untyped_uuid(sled.id()),
                     usable_hardware_threads: 10,
                     usable_physical_ram: ByteCount::from(1024 * 1024),
-                    omicron_zones: OmicronZonesConfig {
-                        generation: OmicronZonesConfig::INITIAL_GENERATION,
-                        zones: vec![],
-                    },
                     disks,
                     zpools: vec![],
                     datasets: vec![],
-                    omicron_physical_disks_generation:
-                        omicron_common::api::external::Generation::new(),
+                    ledgered_sled_config: None,
+                    reconciler_status:
+                        ConfigReconcilerInventoryStatus::NotYetRun,
+                    last_reconciliation: None,
+                    zone_image_resolver: ZoneImageResolverInventory::new_fake(),
                 },
             )
             .unwrap();

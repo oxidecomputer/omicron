@@ -36,10 +36,10 @@ use propolis_client::Client as PropolisClient;
 use propolis_client::instance_spec::{ComponentV0, SpecKey};
 use rand::SeedableRng;
 use rand::prelude::IteratorRandom;
+use sled_agent_config_reconciler::AvailableDatasetsReceiver;
 use sled_agent_types::instance::*;
 use sled_agent_types::zone_bundle::ZoneBundleCause;
-use sled_storage::dataset::ZONE_DATASET;
-use sled_storage::manager::StorageHandle;
+use sled_agent_zone_images::ramdisk_file_source;
 use slog::Logger;
 use std::net::IpAddr;
 use std::net::SocketAddr;
@@ -530,8 +530,8 @@ struct InstanceRunner {
     // Connection to Nexus
     nexus_client: NexusClient,
 
-    // Storage resources
-    storage: StorageHandle,
+    // Available datasets for choosing zone roots
+    available_datasets_rx: AvailableDatasetsReceiver,
 
     // Used to create propolis zones
     zone_builder_factory: ZoneBuilderFactory,
@@ -1556,10 +1556,10 @@ impl Instance {
             nexus_client,
             vnic_allocator,
             port_manager,
-            storage,
             zone_bundler,
             zone_builder_factory,
             metrics_queue,
+            available_datasets_rx,
         } = services;
 
         let mut dhcp_config = DhcpCfg {
@@ -1645,7 +1645,7 @@ impl Instance {
             state: InstanceStates::new(vmm_runtime, migration_id),
             running_state: None,
             nexus_client,
-            storage,
+            available_datasets_rx,
             zone_builder_factory,
             zone_bundler,
             metrics_queue,
@@ -1991,13 +1991,10 @@ impl InstanceRunner {
         // configured VNICs.
         let zname = propolis_zone_name(&self.propolis_id);
         let mut rng = rand::rngs::StdRng::from_entropy();
-        let latest_disks = self
-            .storage
-            .get_latest_disks()
-            .await
-            .all_u2_mountpoints(ZONE_DATASET);
 
-        let root = latest_disks
+        let root = self
+            .available_datasets_rx
+            .all_mounted_zone_root_datasets()
             .into_iter()
             .choose(&mut rng)
             .ok_or_else(|| Error::U2NotFound)?;
@@ -2007,7 +2004,7 @@ impl InstanceRunner {
             .with_log(self.log.clone())
             .with_underlay_vnic_allocator(&self.vnic_allocator)
             .with_zone_root_path(root)
-            .with_zone_image_paths(&["/opt/oxide".into()])
+            .with_file_source(&ramdisk_file_source("propolis-server"))
             .with_zone_type("propolis-server")
             .with_unique_name(OmicronZoneUuid::from_untyped_uuid(
                 self.propolis_id.into_untyped_uuid(),
@@ -2275,11 +2272,16 @@ mod tests {
     use omicron_common::api::external::{Generation, Hostname};
     use omicron_common::api::internal::nexus::VmmState;
     use omicron_common::api::internal::shared::{DhcpConfig, SledIdentifiers};
+    use omicron_common::disk::DiskIdentity;
+    use omicron_uuid_kinds::InternalZpoolUuid;
     use propolis_client::types::{
         InstanceMigrateStatusResponse, InstanceStateMonitorResponse,
     };
+    use sled_agent_config_reconciler::{
+        CurrentlyManagedZpoolsReceiver, InternalDisksReceiver,
+    };
     use sled_agent_types::zone_bundle::CleanupContext;
-    use sled_storage::manager_test_harness::StorageManagerTestHarness;
+    use sled_storage::config::MountConfig;
     use std::net::SocketAddrV6;
     use std::net::{Ipv4Addr, Ipv6Addr, SocketAddrV4};
     use std::str::FromStr;
@@ -2409,26 +2411,12 @@ mod tests {
             .expect("single-stepping mock server failed unexpectedly");
     }
 
-    async fn setup_storage_manager(log: &Logger) -> StorageManagerTestHarness {
-        let mut harness = StorageManagerTestHarness::new(log).await;
-        let raw_disks =
-            harness.add_vdevs(&["u2_under_test.vdev", "m2_helping.vdev"]).await;
-        harness.handle().key_manager_ready().await;
-        let config = harness.make_config(1, &raw_disks);
-        let _ = harness
-            .handle()
-            .omicron_physical_disks_ensure(config.clone())
-            .await
-            .expect("Ensuring disks should work after key manager is ready");
-        harness
-    }
-
     async fn instance_struct(
         log: &Logger,
         propolis_addr: SocketAddr,
         nexus_client: NexusClient,
-        storage_handle: StorageHandle,
-        temp_dir: &String,
+        available_datasets_rx: AvailableDatasetsReceiver,
+        temp_dir: &str,
     ) -> (Instance, MetricsRx) {
         let id = InstanceUuid::new_v4();
         let propolis_id = PropolisUuid::from_untyped_uuid(PROPOLIS_ID);
@@ -2439,10 +2427,11 @@ mod tests {
 
         let (services, rx) = fake_instance_manager_services(
             log,
-            storage_handle,
+            available_datasets_rx,
             nexus_client,
             temp_dir,
-        );
+        )
+        .await;
 
         let metadata = InstanceMetadata {
             silo_id: Uuid::new_v4(),
@@ -2520,11 +2509,11 @@ mod tests {
     // Helper alias for the receive-side of the metrics request queue.
     type MetricsRx = mpsc::Receiver<metrics::Message>;
 
-    fn fake_instance_manager_services(
+    async fn fake_instance_manager_services(
         log: &Logger,
-        storage_handle: StorageHandle,
+        available_datasets_rx: AvailableDatasetsReceiver,
         nexus_client: NexusClient,
-        temp_dir: &String,
+        temp_dir: &str,
     ) -> (InstanceManagerServices, MetricsRx) {
         let vnic_allocator = VnicAllocator::new(
             "Instance",
@@ -2539,16 +2528,29 @@ mod tests {
         let cleanup_context = CleanupContext::default();
         let zone_bundler = ZoneBundler::new(
             log.new(o!("component" => "ZoneBundler")),
-            storage_handle.clone(),
+            InternalDisksReceiver::fake_static(
+                Arc::new(MountConfig::default()),
+                [(
+                    DiskIdentity {
+                        vendor: "test-vendor".to_string(),
+                        model: "test-model".to_string(),
+                        serial: "test-serial".to_string(),
+                    },
+                    InternalZpoolUuid::new_v4(),
+                )]
+                .into_iter(),
+            ),
+            available_datasets_rx.clone(),
             cleanup_context,
-        );
+        )
+        .await;
 
         let (metrics_queue, rx) = MetricsRequestQueue::for_test();
         let services = InstanceManagerServices {
             nexus_client,
             vnic_allocator,
             port_manager,
-            storage: storage_handle,
+            available_datasets_rx,
             zone_bundler,
             zone_builder_factory: ZoneBuilderFactory::fake(
                 Some(temp_dir),
@@ -2563,7 +2565,6 @@ mod tests {
     /// interactions with other parts of the system (e.g. Nexus and metrics).
     #[allow(dead_code)]
     struct InstanceTestObjects {
-        storage_harness: StorageManagerTestHarness,
         nexus: FakeNexusParts,
         _temp_guard: Utf8TempDir,
         instance_manager: crate::instance_manager::InstanceManager,
@@ -2572,21 +2573,23 @@ mod tests {
 
     impl InstanceTestObjects {
         async fn new(log: &slog::Logger) -> Self {
-            let storage_harness = setup_storage_manager(log).await;
             let nexus = FakeNexusParts::new(&log).await;
             let temp_guard = Utf8TempDir::new().unwrap();
             let (services, metrics_rx) = fake_instance_manager_services(
                 log,
-                storage_harness.handle().clone(),
+                AvailableDatasetsReceiver::fake_in_tempdir_for_tests(
+                    ZpoolOrRamdisk::Ramdisk,
+                ),
                 nexus.nexus_client.clone(),
-                &temp_guard.path().to_string(),
-            );
+                temp_guard.path().as_str(),
+            )
+            .await;
 
             let InstanceManagerServices {
                 nexus_client,
                 vnic_allocator,
                 port_manager,
-                storage,
+                available_datasets_rx,
                 zone_bundler,
                 zone_builder_factory,
                 metrics_queue,
@@ -2600,7 +2603,10 @@ mod tests {
                     nexus_client,
                     vnic_allocator,
                     port_manager,
-                    storage,
+                    CurrentlyManagedZpoolsReceiver::fake_static(
+                        std::iter::empty(),
+                    ),
+                    available_datasets_rx,
                     zone_bundler,
                     zone_builder_factory,
                     vmm_reservoir_manager,
@@ -2609,16 +2615,11 @@ mod tests {
                 .unwrap();
 
             Self {
-                storage_harness,
                 nexus,
                 _temp_guard: temp_guard,
                 instance_manager,
                 metrics_rx,
             }
-        }
-
-        async fn cleanup(mut self) {
-            self.storage_harness.cleanup().await;
         }
     }
 
@@ -2639,11 +2640,7 @@ mod tests {
             _nexus_server,
         } = FakeNexusParts::new(&log).await;
 
-        let mut storage_harness = setup_storage_manager(&log).await;
-        let storage_handle = storage_harness.handle().clone();
-
         let temp_guard = Utf8TempDir::new().unwrap();
-        let temp_dir = temp_guard.path().to_string();
 
         let (inst, mut metrics_rx) = timeout(
             TIMEOUT_DURATION,
@@ -2651,8 +2648,10 @@ mod tests {
                 &log,
                 propolis_addr,
                 nexus_client,
-                storage_handle,
-                &temp_dir,
+                AvailableDatasetsReceiver::fake_in_tempdir_for_tests(
+                    ZpoolOrRamdisk::Ramdisk,
+                ),
+                temp_guard.path().as_str(),
             ),
         )
         .await
@@ -2706,7 +2705,6 @@ mod tests {
             .try_recv()
             .expect_err("The metrics request queue should have one message");
 
-        storage_harness.cleanup().await;
         logctx.cleanup_successful();
     }
 
@@ -2725,11 +2723,7 @@ mod tests {
             _nexus_server,
         } = FakeNexusParts::new(&log).await;
 
-        let mut storage_harness = setup_storage_manager(&logctx.log).await;
-        let storage_handle = storage_harness.handle().clone();
-
         let temp_guard = Utf8TempDir::new().unwrap();
-        let temp_dir = temp_guard.path().to_string();
 
         let (inst, _) = timeout(
             TIMEOUT_DURATION,
@@ -2738,8 +2732,10 @@ mod tests {
                 // we want to test propolis not ever coming up
                 SocketAddr::V6(SocketAddrV6::new(Ipv6Addr::LOCALHOST, 1, 0, 0)),
                 nexus_client,
-                storage_handle,
-                &temp_dir,
+                AvailableDatasetsReceiver::fake_in_tempdir_for_tests(
+                    ZpoolOrRamdisk::Ramdisk,
+                ),
+                temp_guard.path().as_str(),
             ),
         )
         .await
@@ -2774,7 +2770,6 @@ mod tests {
             );
         }
 
-        storage_harness.cleanup().await;
         logctx.cleanup_successful();
     }
 
@@ -2873,7 +2868,6 @@ mod tests {
             .try_recv()
             .expect_err("The metrics request queue should have one message");
 
-        test_objects.cleanup().await;
         logctx.cleanup_successful();
     }
 
@@ -3019,7 +3013,6 @@ mod tests {
         .expect("timed out waiting for VmmState::Stopped in FakeNexus")
         .expect("failed to receive FakeNexus' InstanceState");
 
-        test_objects.cleanup().await;
         logctx.cleanup_successful();
     }
 
@@ -3066,7 +3059,7 @@ mod tests {
                 nexus_client,
                 vnic_allocator,
                 port_manager,
-                storage,
+                available_datasets_rx,
                 zone_bundler,
                 zone_builder_factory,
                 metrics_queue,
@@ -3101,7 +3094,7 @@ mod tests {
                 state: InstanceStates::new(vmm_runtime, migration_id),
                 running_state: None,
                 nexus_client,
-                storage,
+                available_datasets_rx,
                 zone_builder_factory,
                 zone_bundler,
                 metrics_queue,
@@ -3124,12 +3117,10 @@ mod tests {
         // them directly.
         _nexus_server: HttpServer<ServerContext>,
         _dns_server: TransientServer,
-        storage_harness: StorageManagerTestHarness,
     }
 
     impl TestInstanceRunner {
         async fn new(log: &slog::Logger) -> Self {
-            let storage_harness = setup_storage_manager(&log).await;
             let FakeNexusParts {
                 nexus_client,
                 _nexus_server,
@@ -3140,10 +3131,13 @@ mod tests {
             let temp_guard = Utf8TempDir::new().unwrap();
             let (services, _metrics_rx) = fake_instance_manager_services(
                 &log,
-                storage_harness.handle().clone(),
+                AvailableDatasetsReceiver::fake_in_tempdir_for_tests(
+                    ZpoolOrRamdisk::Ramdisk,
+                ),
                 nexus_client,
-                &temp_guard.path().to_string(),
-            );
+                temp_guard.path().as_str(),
+            )
+            .await;
             let propolis_id = PropolisUuid::new_v4();
             let propolis_addr = SocketAddr::V4(SocketAddrV4::new(
                 Ipv4Addr::new(127, 0, 0, 1),
@@ -3181,7 +3175,6 @@ mod tests {
                 remove_rx,
                 _nexus_server,
                 _dns_server,
-                storage_harness,
             }
         }
     }
@@ -3202,7 +3195,6 @@ mod tests {
             mut remove_rx,
             _nexus_server,
             _dns_server,
-            mut storage_harness,
         } = TestInstanceRunner::new(&log).await;
 
         let (resp_tx, resp_rx) = oneshot::channel();
@@ -3256,7 +3248,6 @@ mod tests {
         drop(terminate_tx);
         let _ = runner_task.await;
 
-        storage_harness.cleanup().await;
         logctx.cleanup_successful();
     }
 
@@ -3276,7 +3267,6 @@ mod tests {
             mut remove_rx,
             _nexus_server,
             _dns_server,
-            mut storage_harness,
         } = TestInstanceRunner::new(&log).await;
 
         let (resp_tx, resp_rx) = oneshot::channel();
@@ -3299,7 +3289,6 @@ mod tests {
         };
 
         assert_eq!(state.vmm_state.state, VmmState::Failed);
-        storage_harness.cleanup().await;
         logctx.cleanup_successful();
     }
 }

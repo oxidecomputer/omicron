@@ -82,6 +82,34 @@ impl SpComponentUpdate {
                 firmware_slot: 0,
                 update_id,
             },
+            PendingMgsUpdateDetails::Rot { expected_active_slot, .. } => {
+                SpComponentUpdate {
+                    log: log.clone(),
+                    component: SpComponent::ROT,
+                    target_sp_type: request.sp_type,
+                    target_sp_slot: request.slot_id,
+                    // Like the SP, we request an update to the inactive slot
+                    firmware_slot: expected_active_slot
+                        .slot()
+                        .toggled()
+                        .to_u16(),
+                    update_id,
+                }
+            }
+            PendingMgsUpdateDetails::RotBootloader { .. } => {
+                SpComponentUpdate {
+                    log: log.clone(),
+                    component: SpComponent::STAGE0,
+                    target_sp_type: request.sp_type,
+                    target_sp_slot: request.slot_id,
+                    // The RoT bootloader has two firmware slots, stage0 and
+                    // stage0next. We always request an update to stage0next, which
+                    // is the staging area for the bootloader and in this context
+                    // means "the inactive slot".
+                    firmware_slot: 1,
+                    update_id,
+                }
+            }
         }
     }
 }
@@ -101,10 +129,10 @@ pub enum ApplyUpdateError {
     #[error("SP reports not knowing about our update attempt")]
     SpUpdateLost,
     #[error(
-        "gave up after {}ms waiting for update {0} to finish",
-        .1.as_millis())
+        "gave up after {}ms waiting for update {update_id} to finish",
+        timeout.as_millis())
     ]
-    StuckUpdating(Uuid, Duration),
+    StuckUpdating { update_id: Uuid, timeout: Duration },
     #[error("failed to abort in-progress SP update")]
     SpUpdateAbortFailed(#[from] AbortError),
     #[error("SP reports that reset failed: {0:?}")]
@@ -274,7 +302,10 @@ pub(crate) async fn apply_update(
             // error.  The caller will have to do the retry if they want it.
             DeliveryWaitStatus::StuckUpdating(id, timeout) => {
                 abort_update(&mut mgs_clients, sp_update, id, "stuck").await?;
-                return Err(ApplyUpdateError::StuckUpdating(id, timeout));
+                return Err(ApplyUpdateError::StuckUpdating {
+                    update_id: id,
+                    timeout,
+                });
             }
 
             DeliveryWaitStatus::Failed(id, message) => {
@@ -570,11 +601,14 @@ async fn wait_for_update_done(
             // Check if we're done.
             Ok(PrecheckStatus::UpdateComplete) => return Ok(()),
 
-            // An incorrect version in the "inactive" slot is normal during the
-            // upgrade.  We have no reason to think this won't converge so we
-            // proceed with waiting.
+            // An incorrect version in the "inactive" slot, incorrect active slot,
+            // or non-empty pending_persistent_boot_preference/transient_boot_preference
+            // are normal during the upgrade. We have no reason to think these won't
+            // converge so we proceed with waiting.
             Err(PrecheckError::GatewayClientError(_))
             | Err(PrecheckError::WrongInactiveVersion { .. })
+            | Err(PrecheckError::WrongActiveSlot { .. })
+            | Err(PrecheckError::EphemeralRotBootPreferenceSet)
             | Ok(PrecheckStatus::ReadyForUpdate) => {
                 if before.elapsed() >= timeout {
                     return Err(UpdateWaitError::Timeout(timeout));
@@ -585,7 +619,8 @@ async fn wait_for_update_done(
             }
 
             Err(error @ PrecheckError::WrongDevice { .. })
-            | Err(error @ PrecheckError::WrongActiveVersion { .. }) => {
+            | Err(error @ PrecheckError::WrongActiveVersion { .. })
+            | Err(error @ PrecheckError::RotCommunicationFailed { .. }) => {
                 // Stop trying to make this update happen.  It's not going to
                 // happen.
                 return Err(UpdateWaitError::Indeterminate(error));
@@ -598,11 +633,14 @@ async fn wait_for_update_done(
 mod test {
     use super::ApplyUpdateError;
     use crate::test_util::test_artifacts::TestArtifacts;
+    use crate::test_util::updates::ExpectedSpComponent;
     use crate::test_util::updates::UpdateDescription;
     use assert_matches::assert_matches;
     use gateway_client::types::SpType;
     use gateway_messages::SpPort;
     use gateway_test_utils::setup::GatewayTestContext;
+    use gateway_types::rot::RotSlot;
+    use nexus_types::deployment::ExpectedActiveRotSlot;
     use nexus_types::deployment::ExpectedVersion;
     use nexus_types::internal_api::views::UpdateAttemptStatus;
     use nexus_types::internal_api::views::UpdateCompletedHow;
@@ -623,7 +661,7 @@ mod test {
         let artifacts = TestArtifacts::new(log).await.unwrap();
 
         // Basic case: normal update
-        run_one_successful_update(
+        run_one_successful_sp_update(
             &gwtestctx,
             &artifacts,
             SpType::Sled,
@@ -634,7 +672,7 @@ mod test {
         .await;
 
         // Basic case: attempted update, found no changes needed
-        run_one_successful_update(
+        run_one_successful_sp_update(
             &gwtestctx,
             &artifacts,
             SpType::Sled,
@@ -645,7 +683,7 @@ mod test {
         .await;
 
         // Run the same two tests for a switch SP.
-        run_one_successful_update(
+        run_one_successful_sp_update(
             &gwtestctx,
             &artifacts,
             SpType::Switch,
@@ -654,7 +692,7 @@ mod test {
             UpdateCompletedHow::CompletedUpdate,
         )
         .await;
-        run_one_successful_update(
+        run_one_successful_sp_update(
             &gwtestctx,
             &artifacts,
             SpType::Switch,
@@ -668,7 +706,7 @@ mod test {
         gwtestctx.teardown().await;
     }
 
-    async fn run_one_successful_update(
+    async fn run_one_successful_sp_update(
         gwtestctx: &GatewayTestContext,
         artifacts: &TestArtifacts,
         sp_type: SpType,
@@ -683,14 +721,103 @@ mod test {
             slot_id,
             artifact_hash,
             override_baseboard_id: None,
-            override_expected_active: None,
-            override_expected_inactive: None,
+            override_expected_sp_component: ExpectedSpComponent::Sp {
+                override_expected_active: None,
+                override_expected_inactive: None,
+            },
             override_progress_timeout: None,
         };
 
         let in_progress = desc.setup().await;
         let finished = in_progress.finish().await;
-        finished.expect_success(expected_result);
+        finished.expect_sp_success(expected_result);
+    }
+
+    /// Tests several happy-path cases of updating an RoT
+    #[tokio::test]
+    async fn test_rot_update_basic() {
+        let gwtestctx = gateway_test_utils::setup::test_setup(
+            "test_rot_update_basic",
+            SpPort::One,
+        )
+        .await;
+        let log = &gwtestctx.logctx.log;
+        let artifacts = TestArtifacts::new(log).await.unwrap();
+
+        // Basic case: normal update
+        run_one_successful_rot_update(
+            &gwtestctx,
+            &artifacts,
+            SpType::Sled,
+            1,
+            &artifacts.rot_gimlet_artifact_hash,
+            UpdateCompletedHow::CompletedUpdate,
+        )
+        .await;
+
+        // Basic case: attempted update, found no changes needed
+        run_one_successful_rot_update(
+            &gwtestctx,
+            &artifacts,
+            SpType::Sled,
+            1,
+            &artifacts.rot_gimlet_artifact_hash,
+            UpdateCompletedHow::FoundNoChangesNeeded,
+        )
+        .await;
+
+        // Run the same two tests for a switch RoT.
+        run_one_successful_rot_update(
+            &gwtestctx,
+            &artifacts,
+            SpType::Switch,
+            0,
+            &artifacts.rot_sidecar_artifact_hash,
+            UpdateCompletedHow::CompletedUpdate,
+        )
+        .await;
+        run_one_successful_rot_update(
+            &gwtestctx,
+            &artifacts,
+            SpType::Switch,
+            0,
+            &artifacts.rot_sidecar_artifact_hash,
+            UpdateCompletedHow::FoundNoChangesNeeded,
+        )
+        .await;
+
+        artifacts.teardown().await;
+        gwtestctx.teardown().await;
+    }
+
+    async fn run_one_successful_rot_update(
+        gwtestctx: &GatewayTestContext,
+        artifacts: &TestArtifacts,
+        sp_type: SpType,
+        slot_id: u32,
+        artifact_hash: &ArtifactHash,
+        expected_result: UpdateCompletedHow,
+    ) {
+        let desc = UpdateDescription {
+            gwtestctx,
+            artifacts,
+            sp_type,
+            slot_id,
+            artifact_hash,
+            override_baseboard_id: None,
+            override_expected_sp_component: ExpectedSpComponent::Rot {
+                override_expected_active_slot: None,
+                override_expected_inactive_version: None,
+                override_expected_persistent_boot_preference: None,
+                override_expected_pending_persistent_boot_preference: None,
+                override_expected_transient_boot_preference: None,
+            },
+            override_progress_timeout: None,
+        };
+
+        let in_progress = desc.setup().await;
+        let finished = in_progress.finish().await;
+        finished.expect_rot_success(expected_result);
     }
 
     /// Tests the case where two updates run concurrently.  One notices another
@@ -724,8 +851,10 @@ mod test {
             slot_id: 1,
             artifact_hash: &artifacts.sp_gimlet_artifact_hash,
             override_baseboard_id: None,
-            override_expected_active: None,
-            override_expected_inactive: None,
+            override_expected_sp_component: ExpectedSpComponent::Sp {
+                override_expected_active: None,
+                override_expected_inactive: None,
+            },
             override_progress_timeout: None,
         };
 
@@ -736,19 +865,23 @@ mod test {
             slot_id: 1,
             artifact_hash: &artifacts.sp_gimlet_artifact_hash,
             override_baseboard_id: None,
-            override_expected_active: None,
-            override_expected_inactive: Some(ExpectedVersion::Version(
-                std::str::from_utf8(
-                    artifacts
-                        .deployed_caboose(&artifacts.sp_gimlet_artifact_hash)
-                        .expect("deployed caboose for generated artifact")
-                        .version()
-                        .expect("valid version"),
-                )
-                .expect("version is UTF-8")
-                .parse()
-                .expect("version is valid"),
-            )),
+            override_expected_sp_component: ExpectedSpComponent::Sp {
+                override_expected_active: None,
+                override_expected_inactive: Some(ExpectedVersion::Version(
+                    std::str::from_utf8(
+                        artifacts
+                            .deployed_caboose(
+                                &artifacts.sp_gimlet_artifact_hash,
+                            )
+                            .expect("deployed caboose for generated artifact")
+                            .version()
+                            .expect("valid version"),
+                    )
+                    .expect("version is UTF-8")
+                    .parse()
+                    .expect("version is valid"),
+                )),
+            },
             override_progress_timeout: None,
         };
 
@@ -767,8 +900,9 @@ mod test {
         let finished2 = in_progress2.finish().await;
 
         // Both should succeed, but with different codes.
-        finished1.expect_success(UpdateCompletedHow::CompletedUpdate);
-        finished2.expect_success(UpdateCompletedHow::WaitedForConcurrentUpdate);
+        finished1.expect_sp_success(UpdateCompletedHow::CompletedUpdate);
+        finished2
+            .expect_sp_success(UpdateCompletedHow::WaitedForConcurrentUpdate);
 
         artifacts.teardown().await;
         gwtestctx.teardown().await;
@@ -793,8 +927,10 @@ mod test {
             slot_id: 1,
             artifact_hash: &artifacts.sp_gimlet_artifact_hash,
             override_baseboard_id: None,
-            override_expected_active: None,
-            override_expected_inactive: None,
+            override_expected_sp_component: ExpectedSpComponent::Sp {
+                override_expected_active: None,
+                override_expected_inactive: None,
+            },
             override_progress_timeout: None,
         };
 
@@ -805,19 +941,23 @@ mod test {
             slot_id: 1,
             artifact_hash: &artifacts.sp_gimlet_artifact_hash,
             override_baseboard_id: None,
-            override_expected_active: None,
-            override_expected_inactive: Some(ExpectedVersion::Version(
-                std::str::from_utf8(
-                    artifacts
-                        .deployed_caboose(&artifacts.sp_gimlet_artifact_hash)
-                        .expect("deployed caboose for generated artifact")
-                        .version()
-                        .expect("valid version"),
-                )
-                .expect("version is UTF-8")
-                .parse()
-                .expect("version is valid"),
-            )),
+            override_expected_sp_component: ExpectedSpComponent::Sp {
+                override_expected_active: None,
+                override_expected_inactive: Some(ExpectedVersion::Version(
+                    std::str::from_utf8(
+                        artifacts
+                            .deployed_caboose(
+                                &artifacts.sp_gimlet_artifact_hash,
+                            )
+                            .expect("deployed caboose for generated artifact")
+                            .version()
+                            .expect("valid version"),
+                    )
+                    .expect("version is UTF-8")
+                    .parse()
+                    .expect("version is valid"),
+                )),
+            },
             // This timeout (10 seconds) seeks to balance being long enough to
             // be relevant without making the tests take too long.  (It's
             // assumed that 10 seconds here is not a huge deal because this is
@@ -838,7 +978,8 @@ mod test {
         // This time, resume the second update first.  It will take over the
         // first one.
         let finished2 = in_progress2.finish().await;
-        finished2.expect_success(UpdateCompletedHow::TookOverConcurrentUpdate);
+        finished2
+            .expect_sp_success(UpdateCompletedHow::TookOverConcurrentUpdate);
 
         // Now if we resume the first update, it will find that the SP has been
         // reset out from under it.  This is the closest thing we have to a test
@@ -879,8 +1020,10 @@ mod test {
                 part_number: String::from("i86pc"),
                 serial_number: String::from("SimGimlet0"),
             }),
-            override_expected_active: None,
-            override_expected_inactive: None,
+            override_expected_sp_component: ExpectedSpComponent::Sp {
+                override_expected_active: None,
+                override_expected_inactive: None,
+            },
             override_progress_timeout: None,
         };
 
@@ -906,8 +1049,10 @@ mod test {
             slot_id: 1,
             artifact_hash: &artifacts.sp_gimlet_artifact_hash,
             override_baseboard_id: None,
-            override_expected_active: Some("not-right".parse().unwrap()),
-            override_expected_inactive: None,
+            override_expected_sp_component: ExpectedSpComponent::Sp {
+                override_expected_active: Some("not-right".parse().unwrap()),
+                override_expected_inactive: None,
+            },
             override_progress_timeout: None,
         };
 
@@ -933,8 +1078,12 @@ mod test {
             slot_id: 1,
             artifact_hash: &artifacts.sp_gimlet_artifact_hash,
             override_baseboard_id: None,
-            override_expected_active: None,
-            override_expected_inactive: Some(ExpectedVersion::NoValidVersion),
+            override_expected_sp_component: ExpectedSpComponent::Sp {
+                override_expected_active: None,
+                override_expected_inactive: Some(
+                    ExpectedVersion::NoValidVersion,
+                ),
+            },
             override_progress_timeout: None,
         };
 
@@ -960,10 +1109,12 @@ mod test {
             slot_id: 1,
             artifact_hash: &artifacts.sp_gimlet_artifact_hash,
             override_baseboard_id: None,
-            override_expected_active: None,
-            override_expected_inactive: Some(ExpectedVersion::Version(
-                "something-else".parse().unwrap(),
-            )),
+            override_expected_sp_component: ExpectedSpComponent::Sp {
+                override_expected_active: None,
+                override_expected_inactive: Some(ExpectedVersion::Version(
+                    "something-else".parse().unwrap(),
+                )),
+            },
             override_progress_timeout: None,
         };
 
@@ -990,8 +1141,222 @@ mod test {
             slot_id: 1,
             artifact_hash: &artifacts.sp_gimlet_artifact_hash,
             override_baseboard_id: None,
-            override_expected_active: None,
-            override_expected_inactive: None,
+            override_expected_sp_component: ExpectedSpComponent::Sp {
+                override_expected_active: None,
+                override_expected_inactive: None,
+            },
+            override_progress_timeout: None,
+        };
+        let in_progress = desc.setup().await;
+        artifacts.teardown().await;
+        in_progress.finish().await.expect_failure(&|error, sp1, sp2| {
+            assert_matches!(error, ApplyUpdateError::FetchArtifact(..));
+            // No changes should have been made in this case.
+            assert_eq!(sp1, sp2);
+        });
+
+        gwtestctx.teardown().await;
+    }
+
+    /// Tests several RoT update easy fast-failure cases.
+    #[tokio::test]
+    async fn test_rot_basic_failures() {
+        let gwtestctx = gateway_test_utils::setup::test_setup(
+            "test_rot_basic_failures",
+            SpPort::One,
+        )
+        .await;
+        let log = &gwtestctx.logctx.log;
+        let artifacts = TestArtifacts::new(log).await.unwrap();
+
+        // Test a case of mistaken identity (reported baseboard does not match
+        // the one that we expect).
+        let desc = UpdateDescription {
+            gwtestctx: &gwtestctx,
+            artifacts: &artifacts,
+            sp_type: SpType::Sled,
+            slot_id: 1,
+            artifact_hash: &artifacts.sp_gimlet_artifact_hash,
+            override_baseboard_id: Some(BaseboardId {
+                part_number: String::from("i86pc"),
+                serial_number: String::from("SimGimlet0"),
+            }),
+            override_expected_sp_component: ExpectedSpComponent::Rot {
+                override_expected_active_slot: None,
+                override_expected_inactive_version: None,
+                override_expected_persistent_boot_preference: None,
+                override_expected_pending_persistent_boot_preference: None,
+                override_expected_transient_boot_preference: None,
+            },
+            override_progress_timeout: None,
+        };
+
+        desc.setup().await.finish().await.expect_failure(&|error, sp1, sp2| {
+            assert_matches!(error, ApplyUpdateError::PreconditionFailed(..));
+            let message = InlineErrorChain::new(error).to_string();
+            eprintln!("{}", message);
+            assert!(message.contains(
+                "in sled slot 1, expected to find part \"i86pc\" serial \
+                 \"SimGimlet0\", but found part \"i86pc\" serial \
+                 \"SimGimlet01\"",
+            ));
+
+            // No changes should have been made in this case.
+            assert_eq!(sp1, sp2);
+        });
+
+        // Test a case where the active version doesn't match what we expect.
+        let desc = UpdateDescription {
+            gwtestctx: &gwtestctx,
+            artifacts: &artifacts,
+            sp_type: SpType::Sled,
+            slot_id: 1,
+            artifact_hash: &artifacts.sp_gimlet_artifact_hash,
+            override_baseboard_id: None,
+            override_expected_sp_component: ExpectedSpComponent::Rot {
+                override_expected_active_slot: Some(ExpectedActiveRotSlot {
+                    slot: RotSlot::A,
+                    version: "not-right".parse().unwrap(),
+                }),
+                override_expected_inactive_version: None,
+                override_expected_persistent_boot_preference: None,
+                override_expected_pending_persistent_boot_preference: None,
+                override_expected_transient_boot_preference: None,
+            },
+            override_progress_timeout: None,
+        };
+
+        desc.setup().await.finish().await.expect_failure(&|error, sp1, sp2| {
+            assert_matches!(error, ApplyUpdateError::PreconditionFailed(..));
+            let message = InlineErrorChain::new(error).to_string();
+            eprintln!("{}", message);
+            assert!(message.contains(
+                "expected to find active version \"not-right\", but \
+                     found \"0.0.4\""
+            ));
+
+            // No changes should have been made in this case.
+            assert_eq!(sp1, sp2);
+        });
+
+        // Test a case where the active slot doesn't match what we expect.
+        let desc = UpdateDescription {
+            gwtestctx: &gwtestctx,
+            artifacts: &artifacts,
+            sp_type: SpType::Sled,
+            slot_id: 1,
+            artifact_hash: &artifacts.sp_gimlet_artifact_hash,
+            override_baseboard_id: None,
+            override_expected_sp_component: ExpectedSpComponent::Rot {
+                override_expected_active_slot: Some(ExpectedActiveRotSlot {
+                    slot: RotSlot::B,
+                    version: "0.0.4".parse().unwrap(),
+                }),
+                override_expected_inactive_version: None,
+                override_expected_persistent_boot_preference: None,
+                override_expected_pending_persistent_boot_preference: None,
+                override_expected_transient_boot_preference: None,
+            },
+            override_progress_timeout: None,
+        };
+
+        desc.setup().await.finish().await.expect_failure(&|error, sp1, sp2| {
+            assert_matches!(error, ApplyUpdateError::PreconditionFailed(..));
+            let message = InlineErrorChain::new(error).to_string();
+            eprintln!("{}", message);
+            assert!(
+                message.contains("expected to find active slot B, but found A")
+            );
+
+            // No changes should have been made in this case.
+            assert_eq!(sp1, sp2);
+        });
+
+        // Test a case where the inactive version doesn't match what it should
+        // (expected invalid, found something else).
+        let desc = UpdateDescription {
+            gwtestctx: &gwtestctx,
+            artifacts: &artifacts,
+            sp_type: SpType::Sled,
+            slot_id: 1,
+            artifact_hash: &artifacts.sp_gimlet_artifact_hash,
+            override_baseboard_id: None,
+            override_expected_sp_component: ExpectedSpComponent::Rot {
+                override_expected_active_slot: None,
+                override_expected_inactive_version: Some(
+                    ExpectedVersion::NoValidVersion,
+                ),
+                override_expected_persistent_boot_preference: None,
+                override_expected_pending_persistent_boot_preference: None,
+                override_expected_transient_boot_preference: None,
+            },
+            override_progress_timeout: None,
+        };
+
+        desc.setup().await.finish().await.expect_failure(&|error, sp1, sp2| {
+            assert_matches!(error, ApplyUpdateError::PreconditionFailed(..));
+            let message = InlineErrorChain::new(error).to_string();
+            eprintln!("{}", message);
+            assert!(message.contains(
+                "expected to find inactive version NoValidVersion, \
+                     but found Version(\"0.0.3\")"
+            ));
+
+            // No changes should have been made in this case.
+            assert_eq!(sp1, sp2);
+        });
+
+        // Now test a case where the inactive version doesn't match what it
+        // should (expected a different valid version).
+        let desc = UpdateDescription {
+            gwtestctx: &gwtestctx,
+            artifacts: &artifacts,
+            sp_type: SpType::Sled,
+            slot_id: 1,
+            artifact_hash: &artifacts.sp_gimlet_artifact_hash,
+            override_baseboard_id: None,
+            override_expected_sp_component: ExpectedSpComponent::Rot {
+                override_expected_active_slot: None,
+                override_expected_inactive_version: Some(
+                    ExpectedVersion::Version("something-else".parse().unwrap()),
+                ),
+                override_expected_persistent_boot_preference: None,
+                override_expected_pending_persistent_boot_preference: None,
+                override_expected_transient_boot_preference: None,
+            },
+            override_progress_timeout: None,
+        };
+
+        desc.setup().await.finish().await.expect_failure(&|error, sp1, sp2| {
+            assert_matches!(error, ApplyUpdateError::PreconditionFailed(..));
+            let message = InlineErrorChain::new(error).to_string();
+            eprintln!("{}", message);
+            assert!(message.contains(
+                "expected to find inactive version \
+                     Version(ArtifactVersion(\"something-else\")), but found \
+                     Version(\"0.0.3\")"
+            ));
+
+            // No changes should have been made in this case.
+            assert_eq!(sp1, sp2);
+        });
+
+        // Test a case where we fail to fetch the artifact.  We simulate this by
+        // tearing down our artifact server before the update starts.
+        let desc = UpdateDescription {
+            gwtestctx: &gwtestctx,
+            artifacts: &artifacts,
+            sp_type: SpType::Sled,
+            slot_id: 1,
+            artifact_hash: &artifacts.sp_gimlet_artifact_hash,
+            override_baseboard_id: None,
+            override_expected_sp_component: ExpectedSpComponent::Rot {
+                override_expected_active_slot: None,
+                override_expected_inactive_version: None,
+                override_expected_persistent_boot_preference: None,
+                override_expected_pending_persistent_boot_preference: None,
+                override_expected_transient_boot_preference: None,
+            },
             override_progress_timeout: None,
         };
         let in_progress = desc.setup().await;

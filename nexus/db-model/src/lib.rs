@@ -11,6 +11,11 @@ extern crate newtype_derive;
 
 mod address_lot;
 mod affinity;
+mod alert;
+mod alert_class;
+mod alert_delivery_state;
+mod alert_delivery_trigger;
+mod alert_subscription;
 mod allow_list;
 mod bfd;
 mod bgp;
@@ -61,9 +66,11 @@ mod physical_disk_state;
 mod probe;
 mod producer_endpoint;
 mod project;
+mod reconfigurator_chicken_switches;
 mod rendezvous_debug_dataset;
 mod semver_version;
 mod serde_time_delta;
+mod silo_auth_settings;
 mod switch_interface;
 mod switch_port;
 mod target_release;
@@ -71,15 +78,12 @@ mod v2p_mapping;
 mod vmm_state;
 mod webhook_delivery;
 mod webhook_delivery_attempt_result;
-mod webhook_delivery_state;
-mod webhook_delivery_trigger;
-mod webhook_event;
-mod webhook_event_class;
 mod webhook_rx;
 // These actually represent subqueries, not real table.
 // However, they must be defined in the same crate as our tables
 // for join-based marker trait generation.
 mod deployment;
+mod ereport;
 mod ipv4_nat_entry;
 mod omicron_zone_config;
 mod quota;
@@ -142,6 +146,11 @@ pub use self::macaddr::*;
 pub use self::unsigned::*;
 pub use address_lot::*;
 pub use affinity::*;
+pub use alert::*;
+pub use alert_class::*;
+pub use alert_delivery_state::*;
+pub use alert_delivery_trigger::*;
+pub use alert_subscription::*;
 pub use allow_list::*;
 pub use bfd::*;
 pub use bgp::*;
@@ -163,6 +172,7 @@ pub use disk::*;
 pub use disk_state::*;
 pub use dns::*;
 pub use downstairs::*;
+pub use ereport::*;
 pub use external_ip::*;
 pub use generation::*;
 pub use identity_provider::*;
@@ -195,6 +205,7 @@ pub use producer_endpoint::*;
 pub use project::*;
 pub use quota::*;
 pub use rack::*;
+pub use reconfigurator_chicken_switches::*;
 pub use region::*;
 pub use region_replacement::*;
 pub use region_replacement_step::*;
@@ -210,6 +221,7 @@ pub use semver_version::*;
 pub use service_kind::*;
 pub use setting::*;
 pub use silo::*;
+pub use silo_auth_settings::*;
 pub use silo_group::*;
 pub use silo_user::*;
 pub use silo_user_password_hash::*;
@@ -247,10 +259,6 @@ pub use vpc_router::*;
 pub use vpc_subnet::*;
 pub use webhook_delivery::*;
 pub use webhook_delivery_attempt_result::*;
-pub use webhook_delivery_state::*;
-pub use webhook_delivery_trigger::*;
-pub use webhook_event::*;
-pub use webhook_event_class::*;
 pub use webhook_rx::*;
 pub use zpool::*;
 
@@ -371,6 +379,39 @@ macro_rules! impl_enum_type {
 
 pub(crate) use impl_enum_type;
 
+/// Automatically implement `FromSql<Text, _>` and `ToSql<Text, _>` on a provided
+/// type which implements the [`DatabaseString`] trait.
+///
+/// This is necessary because we cannot blanket impl these (foreign) traits on
+/// all implementors.
+macro_rules! impl_from_sql_text {
+    (
+        $model_type:ident
+    ) => {
+        impl ::diesel::serialize::ToSql<::diesel::sql_types::Text, ::diesel::pg::Pg> for $model_type {
+            fn to_sql<'a>(
+                &'a self,
+                out: &mut ::diesel::serialize::Output<'a, '_, ::diesel::pg::Pg>,
+            ) -> ::diesel::serialize::Result {
+                <str as ::diesel::serialize::ToSql<::diesel::sql_types::Text, ::diesel::pg::Pg>>::to_sql(
+                    &self.to_database_string(),
+                    &mut out.reborrow(),
+                )
+            }
+        }
+
+        impl ::diesel::deserialize::FromSql<::diesel::sql_types::Text, ::diesel::pg::Pg> for $model_type {
+            fn from_sql(bytes: <::diesel::pg::Pg as ::diesel::backend::Backend>::RawValue<'_>)
+                -> ::diesel::deserialize::Result<Self>
+            {
+                Ok($model_type::from_database_string(::std::str::from_utf8(bytes.as_bytes())?)?)
+            }
+        }
+    }
+}
+
+pub(crate) use impl_from_sql_text;
+
 /// Describes a type that's represented in the database using a String
 ///
 /// If you're reaching for this type, consider whether it'd be better to use an
@@ -388,7 +429,7 @@ pub(crate) use impl_enum_type;
 pub trait DatabaseString: Sized {
     type Error: std::fmt::Display;
 
-    fn to_database_string(&self) -> &str;
+    fn to_database_string(&self) -> Cow<str>;
     fn from_database_string(s: &str) -> Result<Self, Self::Error>;
 }
 
@@ -396,16 +437,18 @@ use anyhow::anyhow;
 use nexus_types::external_api::shared::FleetRole;
 use nexus_types::external_api::shared::ProjectRole;
 use nexus_types::external_api::shared::SiloRole;
+use std::borrow::Cow;
 
 impl DatabaseString for FleetRole {
     type Error = anyhow::Error;
 
-    fn to_database_string(&self) -> &str {
+    fn to_database_string(&self) -> Cow<str> {
         match self {
             FleetRole::Admin => "admin",
             FleetRole::Collaborator => "collaborator",
             FleetRole::Viewer => "viewer",
         }
+        .into()
     }
 
     // WARNING: if you're considering changing this (including removing
@@ -424,12 +467,13 @@ impl DatabaseString for FleetRole {
 impl DatabaseString for SiloRole {
     type Error = anyhow::Error;
 
-    fn to_database_string(&self) -> &str {
+    fn to_database_string(&self) -> Cow<str> {
         match self {
             SiloRole::Admin => "admin",
             SiloRole::Collaborator => "collaborator",
             SiloRole::Viewer => "viewer",
         }
+        .into()
     }
 
     // WARNING: if you're considering changing this (including removing
@@ -448,12 +492,13 @@ impl DatabaseString for SiloRole {
 impl DatabaseString for ProjectRole {
     type Error = anyhow::Error;
 
-    fn to_database_string(&self) -> &str {
+    fn to_database_string(&self) -> Cow<str> {
         match self {
             ProjectRole::Admin => "admin",
             ProjectRole::Collaborator => "collaborator",
             ProjectRole::Viewer => "viewer",
         }
+        .into()
     }
 
     // WARNING: if you're considering changing this (including removing
@@ -665,7 +710,7 @@ mod tests {
             // Serialize the variant.  Verify that we can deserialize the thing
             // we just got back.
             let serialized = variant.to_database_string();
-            let deserialized = T::from_database_string(serialized)
+            let deserialized = T::from_database_string(&serialized)
                 .unwrap_or_else(|_| {
                     panic!(
                         "failed to deserialize the string {:?}, which we \

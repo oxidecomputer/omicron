@@ -409,6 +409,7 @@ mod test {
     use crate::StaticSledAgentEnumerator;
     use gateway_messages::SpPort;
     use id_map::IdMap;
+    use nexus_sled_agent_shared::inventory::ConfigReconcilerInventoryStatus;
     use nexus_sled_agent_shared::inventory::OmicronSledConfig;
     use nexus_sled_agent_shared::inventory::OmicronZoneConfig;
     use nexus_sled_agent_shared::inventory::OmicronZoneImageSource;
@@ -425,6 +426,52 @@ mod test {
     use std::net::Ipv6Addr;
     use std::net::SocketAddrV6;
     use std::sync::Arc;
+
+    fn dump_sled_config(s: &mut String, config: &OmicronSledConfig) {
+        let OmicronSledConfig {
+            generation,
+            disks,
+            datasets,
+            zones,
+            remove_mupdate_override,
+        } = config;
+
+        writeln!(s, "        generation: {generation}").unwrap();
+        writeln!(
+            s,
+            "        remove_mupdate_override: {remove_mupdate_override:?}"
+        )
+        .unwrap();
+        for disk in disks {
+            writeln!(
+                s,
+                "        disk {}: {} / {} / {}",
+                disk.id,
+                disk.identity.vendor,
+                disk.identity.model,
+                disk.identity.serial
+            )
+            .unwrap();
+        }
+        for dataset in datasets {
+            writeln!(
+                s,
+                "        dataset {}: {}",
+                dataset.id,
+                dataset.name.full_name()
+            )
+            .unwrap();
+        }
+        for zone in zones {
+            writeln!(
+                s,
+                "        zone {} type {}",
+                zone.id,
+                zone.zone_type.kind().report_str(),
+            )
+            .unwrap();
+        }
+    }
 
     fn dump_collection(collection: &Collection) -> String {
         // Construct a stable, human-readable summary of the Collection
@@ -449,8 +496,8 @@ mod test {
         for c in &collection.cabooses {
             write!(
                 &mut s,
-                "    board {:?} name {:?} version {:?} git_commit {:?}\n",
-                c.board, c.name, c.version, c.git_commit,
+                "    board {:?} name {:?} version {:?} git_commit {:?} sign {:?}\n",
+                c.board, c.name, c.version, c.git_commit, c.sign,
             )
             .unwrap();
         }
@@ -513,28 +560,61 @@ mod test {
         }
 
         write!(&mut s, "\nsled agents found:\n").unwrap();
-        for (sled_id, sled_info) in &collection.sled_agents {
-            assert_eq!(*sled_id, sled_info.sled_id);
-            write!(&mut s, "  sled {} ({:?})\n", sled_id, sled_info.sled_role)
-                .unwrap();
+        for sled_info in &collection.sled_agents {
+            write!(
+                &mut s,
+                "  sled {} ({:?})\n",
+                sled_info.sled_id, sled_info.sled_role
+            )
+            .unwrap();
             write!(&mut s, "    baseboard {:?}\n", sled_info.baseboard_id)
                 .unwrap();
 
-            write!(
-                &mut s,
-                "    zone generation: {:?}\n",
-                sled_info.omicron_zones.generation
-            )
-            .unwrap();
-            write!(&mut s, "    zones found:\n").unwrap();
-            for zone in &sled_info.omicron_zones.zones {
-                write!(
+            if let Some(config) = &sled_info.ledgered_sled_config {
+                writeln!(&mut s, "    ledgered sled config:").unwrap();
+                dump_sled_config(&mut s, config);
+            } else {
+                writeln!(&mut s, "    no ledgered sled config").unwrap();
+            }
+
+            if let Some(last_reconciliation) = &sled_info.last_reconciliation {
+                writeln!(&mut s, "    last reconciled config:").unwrap();
+                dump_sled_config(
                     &mut s,
-                    "        zone {} type {}\n",
-                    zone.id,
-                    zone.zone_type.kind().report_str(),
-                )
-                .unwrap();
+                    &last_reconciliation.last_reconciled_config,
+                );
+                for (id, result) in &last_reconciliation.external_disks {
+                    writeln!(&mut s, "    result for disk {id}: {result:?}")
+                        .unwrap();
+                }
+                for (id, result) in &last_reconciliation.datasets {
+                    writeln!(&mut s, "    result for dataset {id}: {result:?}")
+                        .unwrap();
+                }
+                for (id, result) in &last_reconciliation.zones {
+                    writeln!(&mut s, "    result for zone {id}: {result:?}")
+                        .unwrap();
+                }
+            } else {
+                writeln!(&mut s, "    no completed reconciliation").unwrap();
+            }
+
+            match &sled_info.reconciler_status {
+                ConfigReconcilerInventoryStatus::NotYetRun => {
+                    writeln!(&mut s, "    reconciler task not yet run")
+                        .unwrap();
+                }
+                ConfigReconcilerInventoryStatus::Running { config, .. } => {
+                    writeln!(
+                        &mut s,
+                        "    reconciler task running with config:"
+                    )
+                    .unwrap();
+                    dump_sled_config(&mut s, config);
+                }
+                ConfigReconcilerInventoryStatus::Idle { .. } => {
+                    writeln!(&mut s, "    reconciler task idle").unwrap();
+                }
             }
         }
 
@@ -606,6 +686,7 @@ mod test {
                 }]
                 .into_iter()
                 .collect(),
+                remove_mupdate_override: None,
             })
             .await
             .expect("failed to write initial zone version to fake sled agent");

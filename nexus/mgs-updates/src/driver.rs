@@ -5,10 +5,13 @@
 //! Drive one or more in-progress MGS-managed updates
 
 use crate::ArtifactCache;
+use crate::SpComponentUpdateHelper;
 use crate::driver_update::ApplyUpdateError;
 use crate::driver_update::PROGRESS_TIMEOUT;
 use crate::driver_update::SpComponentUpdate;
 use crate::driver_update::apply_update;
+use crate::rot_bootloader_updater::ReconfiguratorRotBootloaderUpdater;
+use crate::rot_updater::ReconfiguratorRotUpdater;
 use crate::sp_updater::ReconfiguratorSpUpdater;
 use futures::FutureExt;
 use futures::future::BoxFuture;
@@ -302,12 +305,31 @@ impl MgsUpdateDriver {
         ));
         info!(&log, "begin update attempt for baseboard");
 
-        let (sp_update, updater) = match &request.details {
+        let (sp_update, updater): (
+            _,
+            Box<dyn SpComponentUpdateHelper + Send + Sync>,
+        ) = match &request.details {
             nexus_types::deployment::PendingMgsUpdateDetails::Sp { .. } => {
                 let sp_update =
                     SpComponentUpdate::from_request(&log, &request, update_id);
 
                 (sp_update, Box::new(ReconfiguratorSpUpdater {}))
+            }
+            nexus_types::deployment::PendingMgsUpdateDetails::Rot {
+                ..
+            } => {
+                let sp_update =
+                    SpComponentUpdate::from_request(&log, &request, update_id);
+
+                (sp_update, Box::new(ReconfiguratorRotUpdater {}))
+            }
+            nexus_types::deployment::PendingMgsUpdateDetails::RotBootloader {
+                ..
+            } => {
+                let sp_update =
+                    SpComponentUpdate::from_request(&log, &request, update_id);
+
+                (sp_update, Box::new(ReconfiguratorRotBootloaderUpdater {}))
             }
         };
 

@@ -15,9 +15,9 @@ use daft::Diffable;
 use omicron_common::api::external::{
     AffinityPolicy, AllowedSourceIps as ExternalAllowedSourceIps, ByteCount,
     Digest, Error, FailureDomain, IdentityMetadata, InstanceState, Name,
-    ObjectIdentity, RoleName, SimpleIdentityOrName,
+    ObjectIdentity, RoleName, SimpleIdentity, SimpleIdentityOrName,
 };
-use omicron_uuid_kinds::{WebhookEventUuid, WebhookReceiverUuid};
+use omicron_uuid_kinds::{AlertReceiverUuid, AlertUuid};
 use oxnet::{Ipv4Net, Ipv6Net};
 use schemars::JsonSchema;
 use semver::Version;
@@ -114,6 +114,15 @@ impl SimpleIdentityOrName for SiloUtilization {
     fn name(&self) -> &Name {
         &self.silo_name
     }
+}
+
+/// View of silo authentication settings
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
+pub struct SiloAuthSettings {
+    pub silo_id: Uuid,
+    /// Maximum lifetime of a device token in seconds. If set to null, users
+    /// will be able to create tokens that do not expire.
+    pub device_token_max_ttl_seconds: Option<u32>,
 }
 
 // AFFINITY GROUPS
@@ -580,7 +589,7 @@ pub struct Sled {
     pub rack_id: Uuid,
     /// The operator-defined policy of a sled.
     pub policy: SledPolicy,
-    /// The current state Nexus believes the sled to be in.
+    /// The current state of the sled.
     pub state: SledState,
     /// The number of hardware threads which can execute on this sled
     pub usable_hardware_threads: u32,
@@ -720,7 +729,7 @@ impl fmt::Display for SledPolicy {
     }
 }
 
-/// The current state of the sled, as determined by Nexus.
+/// The current state of the sled.
 #[derive(
     Copy,
     Clone,
@@ -980,16 +989,35 @@ pub struct SshKey {
     pub public_key: String,
 }
 
+/// View of a device access token
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema, PartialEq)]
+pub struct DeviceAccessToken {
+    /// A unique, immutable, system-controlled identifier for the token.
+    /// Note that this ID is not the bearer token itself, which starts with
+    /// "oxide-token-"
+    pub id: Uuid,
+    pub time_created: DateTime<Utc>,
+
+    /// Expiration timestamp. A null value means the token does not automatically expire.
+    pub time_expires: Option<DateTime<Utc>>,
+}
+
+impl SimpleIdentity for DeviceAccessToken {
+    fn id(&self) -> Uuid {
+        self.id
+    }
+}
+
 // OAUTH 2.0 DEVICE AUTHORIZATION REQUESTS & TOKENS
 
 /// Response to an initial device authorization request.
 /// See RFC 8628 §3.2 (Device Authorization Response).
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
 pub struct DeviceAuthResponse {
-    /// The device verification code.
+    /// The device verification code
     pub device_code: String,
 
-    /// The end-user verification code.
+    /// The end-user verification code
     pub user_code: String,
 
     /// The end-user verification URI on the authorization server.
@@ -997,18 +1025,24 @@ pub struct DeviceAuthResponse {
     /// may be asked to manually type it into their user agent.
     pub verification_uri: String,
 
-    /// The lifetime in seconds of the `device_code` and `user_code`.
+    /// The lifetime in seconds of the `device_code` and `user_code`
     pub expires_in: u16,
 }
 
 /// Successful access token grant. See RFC 6749 §5.1.
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
 pub struct DeviceAccessTokenGrant {
-    /// The access token issued to the client.
+    /// The access token issued to the client
     pub access_token: String,
 
     /// The type of the token issued, as described in RFC 6749 §7.1.
     pub token_type: DeviceAccessTokenType,
+
+    /// A unique, immutable, system-controlled identifier for the token
+    pub token_id: Uuid,
+
+    /// Expiration timestamp. A null value means the token does not automatically expire.
+    pub time_expires: Option<DateTime<Utc>>,
 }
 
 /// The kind of token granted.
@@ -1055,19 +1089,47 @@ pub struct OxqlQueryResult {
     pub tables: Vec<oxql_types::Table>,
 }
 
-// WEBHOOKS
+// ALERTS
 
-/// A webhook event class.
+/// An alert class.
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
-pub struct EventClass {
-    /// The name of the event class.
+pub struct AlertClass {
+    /// The name of the alert class.
     pub name: String,
 
-    /// A description of what this event class represents.
+    /// A description of what this alert class represents.
     pub description: String,
 }
 
-/// The configuration for a webhook.
+/// The configuration for an alert receiver.
+#[derive(
+    ObjectIdentity, Clone, Debug, Deserialize, Serialize, JsonSchema, PartialEq,
+)]
+pub struct AlertReceiver {
+    #[serde(flatten)]
+    pub identity: IdentityMetadata,
+
+    /// The list of alert classes to which this receiver is subscribed.
+    pub subscriptions: Vec<shared::AlertSubscription>,
+
+    /// Configuration specific to the kind of alert receiver that this is.
+    pub kind: AlertReceiverKind,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
+pub struct AlertSubscriptionCreated {
+    /// The new subscription added to the receiver.
+    pub subscription: shared::AlertSubscription,
+}
+
+/// The possible alert delivery mechanisms for an alert receiver.
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema, PartialEq)]
+#[serde(rename_all = "snake_case", tag = "kind")]
+pub enum AlertReceiverKind {
+    Webhook(WebhookReceiverConfig),
+}
+
+/// The configuration for a webhook alert receiver.
 #[derive(
     ObjectIdentity, Clone, Debug, Deserialize, Serialize, JsonSchema, PartialEq,
 )]
@@ -1075,56 +1137,104 @@ pub struct WebhookReceiver {
     #[serde(flatten)]
     pub identity: IdentityMetadata,
 
+    /// The list of alert classes to which this receiver is subscribed.
+    pub subscriptions: Vec<shared::AlertSubscription>,
+
+    #[serde(flatten)]
+    pub config: WebhookReceiverConfig,
+}
+
+impl From<WebhookReceiver> for AlertReceiver {
+    fn from(
+        WebhookReceiver { identity, subscriptions, config }: WebhookReceiver,
+    ) -> Self {
+        Self {
+            identity,
+            subscriptions,
+            kind: AlertReceiverKind::Webhook(config),
+        }
+    }
+}
+
+impl PartialEq<WebhookReceiver> for AlertReceiver {
+    fn eq(&self, other: &WebhookReceiver) -> bool {
+        // Will become refutable if/when more variants are added...
+        #[allow(irrefutable_let_patterns)]
+        let AlertReceiverKind::Webhook(ref config) = self.kind else {
+            return false;
+        };
+        self.identity == other.identity
+            && self.subscriptions == other.subscriptions
+            && config == &other.config
+    }
+}
+
+impl PartialEq<AlertReceiver> for WebhookReceiver {
+    fn eq(&self, other: &AlertReceiver) -> bool {
+        // Will become refutable if/when more variants are added...
+        #[allow(irrefutable_let_patterns)]
+        let AlertReceiverKind::Webhook(ref config) = other.kind else {
+            return false;
+        };
+        self.identity == other.identity
+            && self.subscriptions == other.subscriptions
+            && &self.config == config
+    }
+}
+
+/// Webhook-specific alert receiver configuration.
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema, PartialEq)]
+pub struct WebhookReceiverConfig {
     /// The URL that webhook notification requests are sent to.
     pub endpoint: Url,
     // A list containing the IDs of the secret keys used to sign payloads sent
     // to this receiver.
-    pub secrets: Vec<WebhookSecretId>,
-    /// The list of event classes to which this receiver is subscribed.
-    pub subscriptions: Vec<shared::WebhookSubscription>,
+    pub secrets: Vec<WebhookSecret>,
 }
 
-#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
-pub struct WebhookSubscriptionCreated {
-    /// The new subscription added to the receiver.
-    pub subscription: shared::WebhookSubscription,
-}
-
-/// A list of the IDs of secrets associated with a webhook.
+/// A list of the IDs of secrets associated with a webhook receiver.
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
 pub struct WebhookSecrets {
-    pub secrets: Vec<WebhookSecretId>,
+    pub secrets: Vec<WebhookSecret>,
 }
 
-/// The public ID of a secret key assigned to a webhook.
+/// A view of a shared secret key assigned to a webhook receiver.
+///
+/// Once a secret is created, the value of the secret is not available in the
+/// API, as it must remain secret. Instead, secrets are referenced by their
+/// unique IDs assigned when they are created.
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema, PartialEq)]
-pub struct WebhookSecretId {
+pub struct WebhookSecret {
+    /// The public unique ID of the secret.
     pub id: Uuid,
+
+    /// The UTC timestamp at which this secret was created.
+    pub time_created: DateTime<Utc>,
 }
 
 /// A delivery of a webhook event.
 #[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize, JsonSchema)]
-pub struct WebhookDelivery {
+pub struct AlertDelivery {
     /// The UUID of this delivery attempt.
     pub id: Uuid,
 
-    /// The UUID of the webhook receiver that this event was delivered to.
-    pub webhook_id: WebhookReceiverUuid,
+    /// The UUID of the alert receiver that this event was delivered to.
+    pub receiver_id: AlertReceiverUuid,
 
     /// The event class.
-    pub event_class: String,
+    pub alert_class: String,
 
     /// The UUID of the event.
-    pub event_id: WebhookEventUuid,
+    pub alert_id: AlertUuid,
 
     /// The state of this delivery.
-    pub state: WebhookDeliveryState,
+    pub state: AlertDeliveryState,
 
     /// Why this delivery was performed.
-    pub trigger: WebhookDeliveryTrigger,
+    pub trigger: AlertDeliveryTrigger,
 
     /// Individual attempts to deliver this webhook event, and their outcomes.
-    pub attempts: Vec<WebhookDeliveryAttempt>,
+    pub attempts: AlertDeliveryAttempts,
 
     /// The time at which this delivery began (i.e. the event was dispatched to
     /// the receiver).
@@ -1144,7 +1254,7 @@ pub struct WebhookDelivery {
     strum::VariantArray,
 )]
 #[serde(rename_all = "snake_case")]
-pub enum WebhookDeliveryState {
+pub enum AlertDeliveryState {
     /// The webhook event has not yet been delivered successfully.
     ///
     /// Either no delivery attempts have yet been performed, or the delivery has
@@ -1157,7 +1267,7 @@ pub enum WebhookDeliveryState {
     Failed,
 }
 
-impl WebhookDeliveryState {
+impl AlertDeliveryState {
     pub const ALL: &[Self] = <Self as strum::VariantArray>::VARIANTS;
 
     pub fn as_str(&self) -> &'static str {
@@ -1169,28 +1279,28 @@ impl WebhookDeliveryState {
     }
 }
 
-impl fmt::Display for WebhookDeliveryState {
+impl fmt::Display for AlertDeliveryState {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.write_str(self.as_str())
     }
 }
 
-impl std::str::FromStr for WebhookDeliveryState {
+impl std::str::FromStr for AlertDeliveryState {
     type Err = Error;
     fn from_str(s: &str) -> Result<Self, Error> {
         static EXPECTED_ONE_OF: LazyLock<String> =
-            LazyLock::new(expected_one_of::<WebhookDeliveryState>);
+            LazyLock::new(expected_one_of::<AlertDeliveryState>);
 
         for &v in Self::ALL {
             if s.trim().eq_ignore_ascii_case(v.as_str()) {
                 return Ok(v);
             }
         }
-        Err(Error::invalid_value("WebhookDeliveryState", &*EXPECTED_ONE_OF))
+        Err(Error::invalid_value("AlertDeliveryState", &*EXPECTED_ONE_OF))
     }
 }
 
-/// The reason a webhook event was delivered
+/// The reason an alert was delivered
 #[derive(
     Copy,
     Clone,
@@ -1203,44 +1313,57 @@ impl std::str::FromStr for WebhookDeliveryState {
     strum::VariantArray,
 )]
 #[serde(rename_all = "snake_case")]
-pub enum WebhookDeliveryTrigger {
-    /// Delivery was triggered by the event occurring for the first time.
-    Event,
-    /// Delivery was triggered by a request to resend the event.
+pub enum AlertDeliveryTrigger {
+    /// Delivery was triggered by the alert itself.
+    Alert,
+    /// Delivery was triggered by a request to resend the alert.
     Resend,
     /// This delivery is a liveness probe.
     Probe,
 }
 
-impl WebhookDeliveryTrigger {
+impl AlertDeliveryTrigger {
     pub fn as_str(&self) -> &'static str {
         match self {
-            Self::Event => "event",
+            Self::Alert => "alert",
             Self::Resend => "resend",
             Self::Probe => "probe",
         }
     }
 }
 
-impl fmt::Display for WebhookDeliveryTrigger {
+impl fmt::Display for AlertDeliveryTrigger {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.write_str(self.as_str())
     }
 }
 
-impl std::str::FromStr for WebhookDeliveryTrigger {
+impl std::str::FromStr for AlertDeliveryTrigger {
     type Err = Error;
     fn from_str(s: &str) -> Result<Self, Error> {
         static EXPECTED_ONE_OF: LazyLock<String> =
-            LazyLock::new(expected_one_of::<WebhookDeliveryTrigger>);
+            LazyLock::new(expected_one_of::<AlertDeliveryTrigger>);
 
         for &v in <Self as strum::VariantArray>::VARIANTS {
             if s.trim().eq_ignore_ascii_case(v.as_str()) {
                 return Ok(v);
             }
         }
-        Err(Error::invalid_value("WebhookDeliveryTrigger", &*EXPECTED_ONE_OF))
+        Err(Error::invalid_value("AlertDeliveryTrigger", &*EXPECTED_ONE_OF))
     }
+}
+
+/// A list of attempts to deliver an alert to a receiver.
+///
+/// The type of the delivery attempt model depends on the receiver type, as it
+/// may contain information specific to that delivery mechanism. For example,
+/// webhook delivery attempts contain the HTTP status code of the webhook
+/// request.
+#[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum AlertDeliveryAttempts {
+    /// A list of attempts to deliver an alert to a webhook receiver.
+    Webhook(Vec<WebhookDeliveryAttempt>),
 }
 
 /// An individual delivery attempt for a webhook event.
@@ -1322,15 +1445,15 @@ pub struct WebhookDeliveryResponse {
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Deserialize, Serialize, JsonSchema)]
-pub struct WebhookDeliveryId {
+pub struct AlertDeliveryId {
     pub delivery_id: Uuid,
 }
 
-/// Data describing the result of a webhook liveness probe attempt.
+/// Data describing the result of an alert receiver liveness probe attempt.
 #[derive(Clone, Debug, Eq, PartialEq, Deserialize, Serialize, JsonSchema)]
-pub struct WebhookProbeResult {
-    /// The outcome of the probe request.
-    pub probe: WebhookDelivery,
+pub struct AlertProbeResult {
+    /// The outcome of the probe delivery.
+    pub probe: AlertDelivery,
     /// If the probe request succeeded, and resending failed deliveries on
     /// success was requested, the number of new delivery attempts started.
     /// Otherwise, if the probe did not succeed, or resending failed deliveries

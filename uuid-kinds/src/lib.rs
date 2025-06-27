@@ -51,18 +51,31 @@ macro_rules! impl_typed_uuid_kind {
 // Please keep this list in alphabetical order.
 
 impl_typed_uuid_kind! {
+    AccessToken => "access_token",
     AffinityGroup => "affinity_group",
+    Alert => "alert",
+    AlertReceiver => "alert_receiver",
     AntiAffinityGroup => "anti_affinity_group",
     Blueprint => "blueprint",
     Collection => "collection",
+    ConsoleSession => "console_session",
     Dataset => "dataset",
     DemoSaga => "demo_saga",
     Downstairs => "downstairs",
     DownstairsRegion => "downstairs_region",
-    EreporterGeneration => "ereporter_generation",
+    EreporterRestart => "ereporter_restart",
     ExternalIp => "external_ip",
+    ExternalZpool => "external_zpool",
     Instance => "instance",
+    InternalZpool => "internal_zpool",
     LoopbackAddress => "loopback_address",
+    Mupdate => "mupdate",
+    MupdateOverride => "mupdate_override",
+    // `OmicronSledConfig`s do not themselves contain IDs, but we generate IDs
+    // for them when they're serialized to the database during inventory
+    // collection. This ID type is therefore only used by nexus-db-model and
+    // nexus-db-queries.
+    OmicronSledConfig => "omicron_sled_config",
     OmicronZone => "service",
     PhysicalDisk => "physical_disk",
     Propolis => "propolis",
@@ -81,10 +94,20 @@ impl_typed_uuid_kind! {
     UpstairsSession => "upstairs_session",
     Vnic => "vnic",
     Volume => "volume",
-    WebhookEvent => "webhook_event",
-    WebhookReceiver => "webhook_receiver",
     WebhookDelivery => "webhook_delivery",
     WebhookDeliveryAttempt => "webhook_delivery_attempt",
     WebhookSecret => "webhook_secret",
     Zpool => "zpool",
+}
+
+impl From<ExternalZpoolKind> for ZpoolKind {
+    fn from(kind: ExternalZpoolKind) -> Self {
+        match kind {}
+    }
+}
+
+impl From<InternalZpoolKind> for ZpoolKind {
+    fn from(kind: InternalZpoolKind) -> Self {
+        match kind {}
+    }
 }

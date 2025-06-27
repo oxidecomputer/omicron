@@ -10,6 +10,7 @@ use crate::context::ApiContext;
 use crate::external_api::shared;
 use dropshot::ApiDescription;
 use dropshot::Body;
+use dropshot::Header;
 use dropshot::HttpError;
 use dropshot::HttpResponseCreated;
 use dropshot::HttpResponseDeleted;
@@ -28,6 +29,9 @@ use nexus_types::deployment::BlueprintTarget;
 use nexus_types::deployment::BlueprintTargetSet;
 use nexus_types::deployment::ClickhousePolicy;
 use nexus_types::deployment::OximeterReadPolicy;
+use nexus_types::deployment::ReconfiguratorChickenSwitches;
+use nexus_types::deployment::ReconfiguratorChickenSwitchesParam;
+use nexus_types::external_api::headers::RangeRequest;
 use nexus_types::external_api::params::PhysicalDiskPath;
 use nexus_types::external_api::params::SledSelector;
 use nexus_types::external_api::params::SupportBundleFilePath;
@@ -45,6 +49,7 @@ use nexus_types::internal_api::views::DemoSaga;
 use nexus_types::internal_api::views::Ipv4NatEntryView;
 use nexus_types::internal_api::views::MgsUpdateDriverStatus;
 use nexus_types::internal_api::views::Saga;
+use nexus_types::internal_api::views::UpdateStatus;
 use nexus_types::internal_api::views::to_list;
 use omicron_common::api::external::Instance;
 use omicron_common::api::external::http_pagination::PaginatedById;
@@ -63,7 +68,7 @@ use omicron_common::api::internal::nexus::SledVmmState;
 use omicron_uuid_kinds::GenericUuid;
 use omicron_uuid_kinds::InstanceUuid;
 use omicron_uuid_kinds::SupportBundleUuid;
-use range_requests::RequestContextEx;
+use range_requests::PotentialRange;
 use std::collections::BTreeMap;
 
 type NexusApiDescription = ApiDescription<ApiContext>;
@@ -855,6 +860,101 @@ impl NexusInternalApi for NexusInternalApiImpl {
             .await
     }
 
+    async fn reconfigurator_chicken_switches_show_current(
+        rqctx: RequestContext<Self::Context>,
+    ) -> Result<HttpResponseOk<ReconfiguratorChickenSwitches>, HttpError> {
+        let apictx = &rqctx.context().context;
+        let handler = async {
+            let datastore = &apictx.nexus.datastore();
+            let opctx =
+                crate::context::op_context_for_internal_api(&rqctx).await;
+            match datastore
+                .reconfigurator_chicken_switches_get_latest(&opctx)
+                .await?
+            {
+                Some(switches) => Ok(HttpResponseOk(switches)),
+                None => Err(HttpError::for_not_found(
+                    None,
+                    "No chicken switches in database".into(),
+                )),
+            }
+        };
+        apictx
+            .internal_latencies
+            .instrument_dropshot_handler(&rqctx, handler)
+            .await
+    }
+
+    async fn reconfigurator_chicken_switches_show(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<VersionPathParam>,
+    ) -> Result<HttpResponseOk<ReconfiguratorChickenSwitches>, HttpError> {
+        let apictx = &rqctx.context().context;
+        let handler = async {
+            let datastore = &apictx.nexus.datastore();
+            let opctx =
+                crate::context::op_context_for_internal_api(&rqctx).await;
+            let version = path_params.into_inner().version;
+            match datastore
+                .reconfigurator_chicken_switches_get(&opctx, version)
+                .await?
+            {
+                Some(switches) => Ok(HttpResponseOk(switches)),
+                None => Err(HttpError::for_not_found(
+                    None,
+                    format!(
+                        "No chicken switches in database at version {version}"
+                    ),
+                )),
+            }
+        };
+        apictx
+            .internal_latencies
+            .instrument_dropshot_handler(&rqctx, handler)
+            .await
+    }
+
+    async fn reconfigurator_chicken_switches_set(
+        rqctx: RequestContext<Self::Context>,
+        switches: TypedBody<ReconfiguratorChickenSwitchesParam>,
+    ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
+        let apictx = &rqctx.context().context;
+        let handler = async {
+            let datastore = &apictx.nexus.datastore();
+            let opctx =
+                crate::context::op_context_for_internal_api(&rqctx).await;
+
+            datastore
+                .reconfigurator_chicken_switches_insert_latest_version(
+                    &opctx,
+                    switches.into_inner(),
+                )
+                .await?;
+            Ok(HttpResponseUpdatedNoContent())
+        };
+        apictx
+            .internal_latencies
+            .instrument_dropshot_handler(&rqctx, handler)
+            .await
+    }
+
+    async fn update_status(
+        rqctx: RequestContext<Self::Context>,
+    ) -> Result<HttpResponseOk<UpdateStatus>, HttpError> {
+        let apictx = &rqctx.context().context;
+        let handler = async {
+            let opctx =
+                crate::context::op_context_for_internal_api(&rqctx).await;
+            let nexus = &apictx.nexus;
+            let result = nexus.update_status(&opctx).await?;
+            Ok(HttpResponseOk(result))
+        };
+        apictx
+            .internal_latencies
+            .instrument_dropshot_handler(&rqctx, handler)
+            .await
+    }
+
     async fn sled_list_uninitialized(
         rqctx: RequestContext<Self::Context>,
     ) -> Result<HttpResponseOk<ResultsPage<UninitializedSled>>, HttpError> {
@@ -979,7 +1079,7 @@ impl NexusInternalApi for NexusInternalApiImpl {
             let bundle = nexus
                 .support_bundle_view(
                     &opctx,
-                    SupportBundleUuid::from_untyped_uuid(path.support_bundle),
+                    SupportBundleUuid::from_untyped_uuid(path.bundle_id),
                 )
                 .await?;
 
@@ -994,6 +1094,7 @@ impl NexusInternalApi for NexusInternalApiImpl {
 
     async fn support_bundle_index(
         rqctx: RequestContext<Self::Context>,
+        headers: Header<RangeRequest>,
         path_params: Path<SupportBundlePath>,
     ) -> Result<Response<Body>, HttpError> {
         let apictx = rqctx.context();
@@ -1004,12 +1105,15 @@ impl NexusInternalApi for NexusInternalApiImpl {
                 crate::context::op_context_for_internal_api(&rqctx).await;
 
             let head = false;
-            let range = rqctx.range();
+            let range = headers
+                .into_inner()
+                .range
+                .map(|r| PotentialRange::new(r.as_bytes()));
 
             let body = nexus
                 .support_bundle_download(
                     &opctx,
-                    SupportBundleUuid::from_untyped_uuid(path.support_bundle),
+                    SupportBundleUuid::from_untyped_uuid(path.bundle_id),
                     SupportBundleQueryType::Index,
                     head,
                     range,
@@ -1026,6 +1130,7 @@ impl NexusInternalApi for NexusInternalApiImpl {
 
     async fn support_bundle_download(
         rqctx: RequestContext<Self::Context>,
+        headers: Header<RangeRequest>,
         path_params: Path<SupportBundlePath>,
     ) -> Result<Response<Body>, HttpError> {
         let apictx = rqctx.context();
@@ -1036,12 +1141,15 @@ impl NexusInternalApi for NexusInternalApiImpl {
                 crate::context::op_context_for_internal_api(&rqctx).await;
 
             let head = false;
-            let range = rqctx.range();
+            let range = headers
+                .into_inner()
+                .range
+                .map(|r| PotentialRange::new(r.as_bytes()));
 
             let body = nexus
                 .support_bundle_download(
                     &opctx,
-                    SupportBundleUuid::from_untyped_uuid(path.support_bundle),
+                    SupportBundleUuid::from_untyped_uuid(path.bundle_id),
                     SupportBundleQueryType::Whole,
                     head,
                     range,
@@ -1058,6 +1166,7 @@ impl NexusInternalApi for NexusInternalApiImpl {
 
     async fn support_bundle_download_file(
         rqctx: RequestContext<Self::Context>,
+        headers: Header<RangeRequest>,
         path_params: Path<SupportBundleFilePath>,
     ) -> Result<Response<Body>, HttpError> {
         let apictx = rqctx.context();
@@ -1067,14 +1176,15 @@ impl NexusInternalApi for NexusInternalApiImpl {
             let opctx =
                 crate::context::op_context_for_internal_api(&rqctx).await;
             let head = false;
-            let range = rqctx.range();
+            let range = headers
+                .into_inner()
+                .range
+                .map(|r| PotentialRange::new(r.as_bytes()));
 
             let body = nexus
                 .support_bundle_download(
                     &opctx,
-                    SupportBundleUuid::from_untyped_uuid(
-                        path.bundle.support_bundle,
-                    ),
+                    SupportBundleUuid::from_untyped_uuid(path.bundle.bundle_id),
                     SupportBundleQueryType::Path { file_path: path.file },
                     head,
                     range,
@@ -1091,6 +1201,7 @@ impl NexusInternalApi for NexusInternalApiImpl {
 
     async fn support_bundle_head(
         rqctx: RequestContext<Self::Context>,
+        headers: Header<RangeRequest>,
         path_params: Path<SupportBundlePath>,
     ) -> Result<Response<Body>, HttpError> {
         let apictx = rqctx.context();
@@ -1100,12 +1211,15 @@ impl NexusInternalApi for NexusInternalApiImpl {
             let opctx =
                 crate::context::op_context_for_internal_api(&rqctx).await;
             let head = true;
-            let range = rqctx.range();
+            let range = headers
+                .into_inner()
+                .range
+                .map(|r| PotentialRange::new(r.as_bytes()));
 
             let body = nexus
                 .support_bundle_download(
                     &opctx,
-                    SupportBundleUuid::from_untyped_uuid(path.support_bundle),
+                    SupportBundleUuid::from_untyped_uuid(path.bundle_id),
                     SupportBundleQueryType::Whole,
                     head,
                     range,
@@ -1122,6 +1236,7 @@ impl NexusInternalApi for NexusInternalApiImpl {
 
     async fn support_bundle_head_file(
         rqctx: RequestContext<Self::Context>,
+        headers: Header<RangeRequest>,
         path_params: Path<SupportBundleFilePath>,
     ) -> Result<Response<Body>, HttpError> {
         let apictx = rqctx.context();
@@ -1131,14 +1246,15 @@ impl NexusInternalApi for NexusInternalApiImpl {
             let opctx =
                 crate::context::op_context_for_internal_api(&rqctx).await;
             let head = true;
-            let range = rqctx.range();
+            let range = headers
+                .into_inner()
+                .range
+                .map(|r| PotentialRange::new(r.as_bytes()));
 
             let body = nexus
                 .support_bundle_download(
                     &opctx,
-                    SupportBundleUuid::from_untyped_uuid(
-                        path.bundle.support_bundle,
-                    ),
+                    SupportBundleUuid::from_untyped_uuid(path.bundle.bundle_id),
                     SupportBundleQueryType::Path { file_path: path.file },
                     head,
                     range,
@@ -1190,7 +1306,7 @@ impl NexusInternalApi for NexusInternalApiImpl {
             nexus
                 .support_bundle_delete(
                     &opctx,
-                    SupportBundleUuid::from_untyped_uuid(path.support_bundle),
+                    SupportBundleUuid::from_untyped_uuid(path.bundle_id),
                 )
                 .await?;
 

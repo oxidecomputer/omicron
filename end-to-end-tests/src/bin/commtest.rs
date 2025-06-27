@@ -3,7 +3,7 @@ use clap::{Parser, Subcommand};
 use end_to_end_tests::helpers::cli::oxide_cli_style;
 use end_to_end_tests::helpers::icmp::ping4_test_run;
 use oxide_client::{
-    ClientHiddenExt, ClientLoginExt, ClientProjectsExt,
+    ClientExperimentalExt, ClientLoginExt, ClientProjectsExt,
     ClientSystemHardwareExt, ClientSystemIpPoolsExt, ClientSystemStatusExt,
     ClientVpcsExt,
     types::{
@@ -64,13 +64,14 @@ struct RunArgs {
 
 const API_RETRY_ATTEMPTS: usize = 15;
 
-#[tokio::main]
-pub async fn main() -> Result<()> {
-    let cli = Cli::parse();
-    match cli.command {
-        Commands::Run(ref args) => run(&cli, args).await,
-        Commands::Cleanup => cleanup(&cli).await,
-    }
+fn main() -> Result<()> {
+    oxide_tokio_rt::run(async {
+        let cli = Cli::parse();
+        match cli.command {
+            Commands::Run(ref args) => run(&cli, args).await,
+            Commands::Cleanup => cleanup(&cli).await,
+        }
+    })
 }
 
 async fn run(cli: &Cli, args: &RunArgs) -> Result<()> {

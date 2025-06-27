@@ -5,22 +5,22 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 use dropshot::{
-    Body, HttpError, HttpResponseCreated, HttpResponseDeleted, HttpResponseOk,
-    HttpResponseUpdatedNoContent, Path, Query, RequestContext, ResultsPage,
-    TypedBody,
+    Body, Header, HttpError, HttpResponseCreated, HttpResponseDeleted,
+    HttpResponseOk, HttpResponseUpdatedNoContent, Path, Query, RequestContext,
+    ResultsPage, TypedBody,
 };
 use http::Response;
 use nexus_types::{
     deployment::{
         Blueprint, BlueprintMetadata, BlueprintTarget, BlueprintTargetSet,
-        ClickhousePolicy, OximeterReadPolicy,
+        ClickhousePolicy, OximeterReadPolicy, ReconfiguratorChickenSwitches,
+        ReconfiguratorChickenSwitchesParam,
     },
     external_api::{
+        headers::RangeRequest,
         params::{self, PhysicalDiskPath, SledSelector, UninitializedSledId},
         shared::{self, ProbeInfo, UninitializedSled},
-        views::Ping,
-        views::PingStatus,
-        views::SledPolicy,
+        views::{Ping, PingStatus, SledPolicy},
     },
     internal_api::{
         params::{
@@ -29,7 +29,7 @@ use nexus_types::{
         },
         views::{
             BackgroundTask, DemoSaga, Ipv4NatEntryView, MgsUpdateDriverStatus,
-            Saga,
+            Saga, UpdateStatus,
         },
     },
 };
@@ -486,6 +486,44 @@ pub trait NexusInternalApi {
         blueprint: TypedBody<Blueprint>,
     ) -> Result<HttpResponseUpdatedNoContent, HttpError>;
 
+    /// Get the current set of chicken switches
+    #[endpoint {
+        method = GET,
+        path = "/deployment/chicken-switches"
+    }]
+    async fn reconfigurator_chicken_switches_show_current(
+        rqctx: RequestContext<Self::Context>,
+    ) -> Result<HttpResponseOk<ReconfiguratorChickenSwitches>, HttpError>;
+
+    /// Get the chicken switches at `version` if it exists
+    #[endpoint {
+        method = GET,
+        path = "/deployment/chicken-switches/{version}"
+    }]
+    async fn reconfigurator_chicken_switches_show(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<VersionPathParam>,
+    ) -> Result<HttpResponseOk<ReconfiguratorChickenSwitches>, HttpError>;
+
+    /// Update the chicken switches at the latest versions
+    #[endpoint {
+        method = POST,
+        path = "/deployment/chicken-switches"
+    }]
+    async fn reconfigurator_chicken_switches_set(
+        rqctx: RequestContext<Self::Context>,
+        switches: TypedBody<ReconfiguratorChickenSwitchesParam>,
+    ) -> Result<HttpResponseUpdatedNoContent, HttpError>;
+
+    /// Show deployed versions of artifacts
+    #[endpoint {
+        method = GET,
+        path = "/deployment/update-status"
+    }]
+    async fn update_status(
+        rqctx: RequestContext<Self::Context>,
+    ) -> Result<HttpResponseOk<UpdateStatus>, HttpError>;
+
     /// List uninitialized sleds
     #[endpoint {
         method = GET,
@@ -555,7 +593,7 @@ pub trait NexusInternalApi {
     /// View a support bundle
     #[endpoint {
         method = GET,
-        path = "/experimental/v1/system/support-bundles/{support_bundle}",
+        path = "/experimental/v1/system/support-bundles/{bundle_id}",
     }]
     async fn support_bundle_view(
         rqctx: RequestContext<Self::Context>,
@@ -565,50 +603,55 @@ pub trait NexusInternalApi {
     /// Download the index of a support bundle
     #[endpoint {
         method = GET,
-        path = "/experimental/v1/system/support-bundles/{support_bundle}/index",
+        path = "/experimental/v1/system/support-bundles/{bundle_id}/index",
     }]
     async fn support_bundle_index(
         rqctx: RequestContext<Self::Context>,
+        headers: Header<RangeRequest>,
         path_params: Path<params::SupportBundlePath>,
     ) -> Result<Response<Body>, HttpError>;
 
     /// Download the contents of a support bundle
     #[endpoint {
         method = GET,
-        path = "/experimental/v1/system/support-bundles/{support_bundle}/download",
+        path = "/experimental/v1/system/support-bundles/{bundle_id}/download",
     }]
     async fn support_bundle_download(
         rqctx: RequestContext<Self::Context>,
+        headers: Header<RangeRequest>,
         path_params: Path<params::SupportBundlePath>,
     ) -> Result<Response<Body>, HttpError>;
 
     /// Download a file within a support bundle
     #[endpoint {
         method = GET,
-        path = "/experimental/v1/system/support-bundles/{support_bundle}/download/{file}",
+        path = "/experimental/v1/system/support-bundles/{bundle_id}/download/{file}",
     }]
     async fn support_bundle_download_file(
         rqctx: RequestContext<Self::Context>,
+        headers: Header<RangeRequest>,
         path_params: Path<params::SupportBundleFilePath>,
     ) -> Result<Response<Body>, HttpError>;
 
     /// Download the metadata of a support bundle
     #[endpoint {
         method = HEAD,
-        path = "/experimental/v1/system/support-bundles/{support_bundle}/download",
+        path = "/experimental/v1/system/support-bundles/{bundle_id}/download",
     }]
     async fn support_bundle_head(
         rqctx: RequestContext<Self::Context>,
+        headers: Header<RangeRequest>,
         path_params: Path<params::SupportBundlePath>,
     ) -> Result<Response<Body>, HttpError>;
 
     /// Download the metadata of a file within the support bundle
     #[endpoint {
         method = HEAD,
-        path = "/experimental/v1/system/support-bundles/{support_bundle}/download/{file}",
+        path = "/experimental/v1/system/support-bundles/{bundle_id}/download/{file}",
     }]
     async fn support_bundle_head_file(
         rqctx: RequestContext<Self::Context>,
+        headers: Header<RangeRequest>,
         path_params: Path<params::SupportBundleFilePath>,
     ) -> Result<Response<Body>, HttpError>;
 
@@ -627,7 +670,7 @@ pub trait NexusInternalApi {
     /// collected, or to remove metadata for a support bundle that has failed.
     #[endpoint {
         method = DELETE,
-        path = "/experimental/v1/system/support-bundles/{support_bundle}",
+        path = "/experimental/v1/system/support-bundles/{bundle_id}",
     }]
     async fn support_bundle_delete(
         rqctx: RequestContext<Self::Context>,
@@ -800,4 +843,9 @@ pub struct SledId {
 #[derive(Deserialize, JsonSchema)]
 pub struct ProbePathParam {
     pub sled: Uuid,
+}
+
+#[derive(Deserialize, JsonSchema)]
+pub struct VersionPathParam {
+    pub version: u32,
 }

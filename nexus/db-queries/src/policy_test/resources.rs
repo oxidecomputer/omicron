@@ -8,9 +8,11 @@ use super::resource_builder::ResourceBuilder;
 use super::resource_builder::ResourceSet;
 use nexus_auth::authz;
 use omicron_common::api::external::LookupType;
+use omicron_uuid_kinds::AccessTokenKind;
 use omicron_uuid_kinds::GenericUuid;
 use omicron_uuid_kinds::PhysicalDiskUuid;
 use omicron_uuid_kinds::SupportBundleUuid;
+use omicron_uuid_kinds::TypedUuid;
 use oso::PolarClass;
 use std::collections::BTreeSet;
 use uuid::Uuid;
@@ -74,7 +76,7 @@ pub async fn make_resources(
     builder.new_resource(authz::INVENTORY);
     builder.new_resource(authz::IP_POOL_LIST);
     builder.new_resource(authz::TARGET_RELEASE_CONFIG);
-    builder.new_resource(authz::WEBHOOK_EVENT_CLASS_LIST);
+    builder.new_resource(authz::ALERT_CLASS_LIST);
 
     // Silo/organization/project hierarchy
     make_silo(&mut builder, "silo1", main_silo_id, true).await;
@@ -127,11 +129,12 @@ pub async fn make_resources(
         LookupType::ByName(device_user_code),
     ));
 
-    let device_access_token = String::from("a-device-access-token");
+    let device_access_token_id: TypedUuid<AccessTokenKind> =
+        "3b80c7f9-bee0-4b42-8550-6cdfc74dafdb".parse().unwrap();
     builder.new_resource(authz::DeviceAccessToken::new(
         authz::FLEET,
-        device_access_token.clone(),
-        LookupType::ByName(device_access_token),
+        device_access_token_id,
+        LookupType::ById(device_access_token_id.into_untyped_uuid()),
     ));
 
     let blueprint_id = "b9e923f6-caf3-4c83-96f9-8ffe8c627dd2".parse().unwrap();
@@ -172,12 +175,12 @@ pub async fn make_resources(
         LookupType::ById(loopback_address_id.into_untyped_uuid()),
     ));
 
-    let webhook_event_id =
+    let webhook_alert_id =
         "31cb17da-4164-4cbf-b9a3-b3e4a687c08b".parse().unwrap();
-    builder.new_resource(authz::WebhookEvent::new(
+    builder.new_resource(authz::Alert::new(
         authz::FLEET,
-        webhook_event_id,
-        LookupType::ById(webhook_event_id.into_untyped_uuid()),
+        webhook_alert_id,
+        LookupType::ById(webhook_alert_id.into_untyped_uuid()),
     ));
 
     make_webhook_rx(&mut builder).await;
@@ -403,9 +406,9 @@ async fn make_project(
 /// very miniscule hierarchy (a secret).
 async fn make_webhook_rx(builder: &mut ResourceBuilder<'_>) {
     let rx_name = "webhooked-on-phonics";
-    let webhook_rx = authz::WebhookReceiver::new(
+    let webhook_rx = authz::AlertReceiver::new(
         authz::FLEET,
-        omicron_uuid_kinds::WebhookReceiverUuid::new_v4(),
+        omicron_uuid_kinds::AlertReceiverUuid::new_v4(),
         LookupType::ByName(rx_name.to_string()),
     );
     builder.new_resource(webhook_rx.clone());

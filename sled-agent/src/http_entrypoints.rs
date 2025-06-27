@@ -12,13 +12,13 @@ use bootstore::schemes::v0::NetworkConfig;
 use camino::Utf8PathBuf;
 use display_error_chain::DisplayErrorChain;
 use dropshot::{
-    ApiDescription, Body, ErrorStatusCode, FreeformBody, HttpError,
+    ApiDescription, Body, ErrorStatusCode, FreeformBody, Header, HttpError,
     HttpResponseAccepted, HttpResponseCreated, HttpResponseDeleted,
     HttpResponseHeaders, HttpResponseOk, HttpResponseUpdatedNoContent, Path,
     Query, RequestContext, StreamingBody, TypedBody,
 };
 use nexus_sled_agent_shared::inventory::{
-    Inventory, OmicronSledConfig, OmicronSledConfigResult, SledRole,
+    Inventory, OmicronSledConfig, SledRole,
 };
 use omicron_common::api::external::Error;
 use omicron_common::api::internal::nexus::{DiskRuntimeState, SledVmmState};
@@ -26,10 +26,7 @@ use omicron_common::api::internal::shared::{
     ExternalIpGatewayMap, ResolvedVpcRouteSet, ResolvedVpcRouteState,
     SledIdentifiers, SwitchPorts, VirtualNetworkInterfaceHost,
 };
-use omicron_common::disk::{
-    DatasetsConfig, DiskVariant, M2Slot, OmicronPhysicalDisksConfig,
-};
-use range_requests::RequestContextEx;
+use range_requests::PotentialRange;
 use sled_agent_api::*;
 use sled_agent_types::boot_disk::{
     BootDiskOsWriteStatus, BootDiskPathParams, BootDiskUpdatePathParams,
@@ -255,13 +252,17 @@ impl SledAgentApi for SledAgentImpl {
 
     async fn support_bundle_download(
         rqctx: RequestContext<Self::Context>,
+        headers: Header<RangeRequestHeaders>,
         path_params: Path<SupportBundlePathParam>,
     ) -> Result<http::Response<Body>, HttpError> {
         let sa = rqctx.context();
         let SupportBundlePathParam { zpool_id, dataset_id, support_bundle_id } =
             path_params.into_inner();
 
-        let range = rqctx.range();
+        let range = headers
+            .into_inner()
+            .range
+            .map(|r| PotentialRange::new(r.as_bytes()));
         Ok(sa
             .as_support_bundle_storage()
             .get(
@@ -276,6 +277,7 @@ impl SledAgentApi for SledAgentImpl {
 
     async fn support_bundle_download_file(
         rqctx: RequestContext<Self::Context>,
+        headers: Header<RangeRequestHeaders>,
         path_params: Path<SupportBundleFilePathParam>,
     ) -> Result<http::Response<Body>, HttpError> {
         let sa = rqctx.context();
@@ -285,7 +287,10 @@ impl SledAgentApi for SledAgentImpl {
             file,
         } = path_params.into_inner();
 
-        let range = rqctx.range();
+        let range = headers
+            .into_inner()
+            .range
+            .map(|r| PotentialRange::new(r.as_bytes()));
         Ok(sa
             .as_support_bundle_storage()
             .get(
@@ -300,13 +305,17 @@ impl SledAgentApi for SledAgentImpl {
 
     async fn support_bundle_index(
         rqctx: RequestContext<Self::Context>,
+        headers: Header<RangeRequestHeaders>,
         path_params: Path<SupportBundlePathParam>,
     ) -> Result<http::Response<Body>, HttpError> {
         let sa = rqctx.context();
         let SupportBundlePathParam { zpool_id, dataset_id, support_bundle_id } =
             path_params.into_inner();
 
-        let range = rqctx.range();
+        let range = headers
+            .into_inner()
+            .range
+            .map(|r| PotentialRange::new(r.as_bytes()));
         Ok(sa
             .as_support_bundle_storage()
             .get(
@@ -321,13 +330,17 @@ impl SledAgentApi for SledAgentImpl {
 
     async fn support_bundle_head(
         rqctx: RequestContext<Self::Context>,
+        headers: Header<RangeRequestHeaders>,
         path_params: Path<SupportBundlePathParam>,
     ) -> Result<http::Response<Body>, HttpError> {
         let sa = rqctx.context();
         let SupportBundlePathParam { zpool_id, dataset_id, support_bundle_id } =
             path_params.into_inner();
 
-        let range = rqctx.range();
+        let range = headers
+            .into_inner()
+            .range
+            .map(|r| PotentialRange::new(r.as_bytes()));
         Ok(sa
             .as_support_bundle_storage()
             .head(
@@ -342,6 +355,7 @@ impl SledAgentApi for SledAgentImpl {
 
     async fn support_bundle_head_file(
         rqctx: RequestContext<Self::Context>,
+        headers: Header<RangeRequestHeaders>,
         path_params: Path<SupportBundleFilePathParam>,
     ) -> Result<http::Response<Body>, HttpError> {
         let sa = rqctx.context();
@@ -351,7 +365,10 @@ impl SledAgentApi for SledAgentImpl {
             file,
         } = path_params.into_inner();
 
-        let range = rqctx.range();
+        let range = headers
+            .into_inner()
+            .range
+            .map(|r| PotentialRange::new(r.as_bytes()));
         Ok(sa
             .as_support_bundle_storage()
             .head(
@@ -366,13 +383,17 @@ impl SledAgentApi for SledAgentImpl {
 
     async fn support_bundle_head_index(
         rqctx: RequestContext<Self::Context>,
+        headers: Header<RangeRequestHeaders>,
         path_params: Path<SupportBundlePathParam>,
     ) -> Result<http::Response<Body>, HttpError> {
         let sa = rqctx.context();
         let SupportBundlePathParam { zpool_id, dataset_id, support_bundle_id } =
             path_params.into_inner();
 
-        let range = rqctx.range();
+        let range = headers
+            .into_inner()
+            .range
+            .map(|r| PotentialRange::new(r.as_bytes()));
         Ok(sa
             .as_support_bundle_storage()
             .head(
@@ -400,13 +421,6 @@ impl SledAgentApi for SledAgentImpl {
         Ok(HttpResponseDeleted())
     }
 
-    async fn datasets_get(
-        rqctx: RequestContext<Self::Context>,
-    ) -> Result<HttpResponseOk<DatasetsConfig>, HttpError> {
-        let sa = rqctx.context();
-        Ok(HttpResponseOk(sa.datasets_config_list().await?))
-    }
-
     async fn zone_bundle_cleanup(
         rqctx: RequestContext<Self::Context>,
     ) -> Result<HttpResponseOk<BTreeMap<Utf8PathBuf, CleanupCount>>, HttpError>
@@ -428,27 +442,11 @@ impl SledAgentApi for SledAgentImpl {
     async fn omicron_config_put(
         rqctx: RequestContext<Self::Context>,
         body: TypedBody<OmicronSledConfig>,
-    ) -> Result<HttpResponseOk<OmicronSledConfigResult>, HttpError> {
+    ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
         let sa = rqctx.context();
         let body_args = body.into_inner();
-        sa.set_omicron_config(body_args)
-            .await
-            .map(HttpResponseOk)
-            .map_err(HttpError::from)
-    }
-
-    async fn omicron_physical_disks_get(
-        rqctx: RequestContext<Self::Context>,
-    ) -> Result<HttpResponseOk<OmicronPhysicalDisksConfig>, HttpError> {
-        let sa = rqctx.context();
-        Ok(HttpResponseOk(sa.omicron_physical_disks_list().await?))
-    }
-
-    async fn zpools_get(
-        rqctx: RequestContext<Self::Context>,
-    ) -> Result<HttpResponseOk<Vec<Zpool>>, HttpError> {
-        let sa = rqctx.context();
-        Ok(HttpResponseOk(sa.zpools_get().await))
+        sa.set_omicron_config(body_args).await??;
+        Ok(HttpResponseUpdatedNoContent())
     }
 
     async fn sled_role_get(
@@ -792,29 +790,7 @@ impl SledAgentApi for SledAgentImpl {
         let boot_disk = path_params.into_inner().boot_disk;
 
         // Find our corresponding disk.
-        let maybe_disk_path =
-            sa.storage().get_latest_disks().await.iter_managed().find_map(
-                |(_identity, disk)| {
-                    // Synthetic disks panic if asked for their `slot()`, so filter
-                    // them out first; additionally, filter out any non-M2 disks.
-                    if disk.is_synthetic() || disk.variant() != DiskVariant::M2
-                    {
-                        return None;
-                    }
-
-                    // Convert this M2 disk's slot to an M2Slot, and skip any that
-                    // don't match the requested boot_disk.
-                    let Ok(slot) = M2Slot::try_from(disk.slot()) else {
-                        return None;
-                    };
-                    if slot != boot_disk {
-                        return None;
-                    }
-
-                    let raw_devs_path = true;
-                    Some(disk.boot_image_devfs_path(raw_devs_path))
-                },
-            );
+        let maybe_disk_path = sa.boot_image_raw_devfs_path(boot_disk);
 
         let disk_path = match maybe_disk_path {
             Some(Ok(path)) => path,
@@ -1036,6 +1012,20 @@ impl SledAgentApi for SledAgentImpl {
         Ok(HttpResponseOk(res.get_output()))
     }
 
+    async fn support_health_check(
+        request_context: RequestContext<Self::Context>,
+    ) -> Result<HttpResponseOk<Vec<SledDiagnosticsQueryOutput>>, HttpError>
+    {
+        let sa = request_context.context();
+        Ok(HttpResponseOk(
+            sa.support_health_check()
+                .await
+                .into_iter()
+                .map(|cmd| cmd.get_output())
+                .collect::<Vec<_>>(),
+        ))
+    }
+
     async fn support_logs(
         request_context: RequestContext<Self::Context>,
     ) -> Result<HttpResponseOk<Vec<String>>, HttpError> {
@@ -1062,5 +1052,27 @@ impl SledAgentApi for SledAgentImpl {
             .get_logs_for_zone(zone, max_rotated)
             .await
             .map_err(HttpError::from)
+    }
+
+    async fn chicken_switch_destroy_orphaned_datasets_get(
+        request_context: RequestContext<Self::Context>,
+    ) -> Result<HttpResponseOk<ChickenSwitchDestroyOrphanedDatasets>, HttpError>
+    {
+        let sa = request_context.context();
+        let destroy_orphans = sa.chicken_switch_destroy_orphaned_datasets();
+        Ok(HttpResponseOk(ChickenSwitchDestroyOrphanedDatasets {
+            destroy_orphans,
+        }))
+    }
+
+    async fn chicken_switch_destroy_orphaned_datasets_put(
+        request_context: RequestContext<Self::Context>,
+        body: TypedBody<ChickenSwitchDestroyOrphanedDatasets>,
+    ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
+        let ChickenSwitchDestroyOrphanedDatasets { destroy_orphans } =
+            body.into_inner();
+        let sa = request_context.context();
+        sa.set_chicken_switch_destroy_orphaned_datasets(destroy_orphans);
+        Ok(HttpResponseUpdatedNoContent())
     }
 }

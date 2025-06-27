@@ -34,6 +34,15 @@
 //!     there could be a fair bit of data and it may be updated fairly
 //!     frequently.
 //!
+//! (4) DNS data is managed by Nexus, persisted in Cockroach, and propagated out
+//!     to these severs.  Critically, these servers may serve records derived
+//!     from but not explicitly defined as a
+//!     [`internal_dns_types::config::DnsRecord`].  SOA records are an example
+//!     here.  On the HTTP interface, there is one consistent "upstream" view of
+//!     the DNS server: the configuration that has been given to this DNS
+//!     server.  This avoids the burden of having to rectify any intermediary
+//!     state (in a database or Nexus) with synthesized "downstream" records.
+//!
 //! This crate provides three main pieces for running the DNS server program:
 //!
 //! 1. Persistent [`storage::Store`] of DNS data
@@ -47,11 +56,11 @@ pub mod http_server;
 pub mod storage;
 
 use anyhow::{Context, anyhow};
-use hickory_resolver::TokioAsyncResolver;
+use hickory_resolver::TokioResolver;
 use hickory_resolver::config::NameServerConfig;
-use hickory_resolver::config::Protocol;
 use hickory_resolver::config::ResolverConfig;
 use hickory_resolver::config::ResolverOpts;
+use hickory_resolver::name_server::TokioConnectionProvider;
 use internal_dns_types::config::DnsConfigParams;
 use slog::o;
 use std::net::SocketAddr;
@@ -86,6 +95,14 @@ pub async fn start_servers(
             log.new(o!("component" => "http")),
         )
         .config(dropshot_config.clone())
+        .version_policy(dropshot::VersionPolicy::Dynamic(Box::new(
+            dropshot::ClientSpecifiesVersionInHeader::new(
+                "api-version"
+                    .parse::<http::header::HeaderName>()
+                    .expect("api-version is a valid header name"),
+                semver::Version::new(2, 0, 0),
+            ),
+        )))
         .start()
         .map_err(|error| anyhow!("setting up HTTP server: {:#}", error))?
     };
@@ -162,20 +179,23 @@ impl TransientServer {
         Ok(())
     }
 
-    pub async fn resolver(&self) -> Result<TokioAsyncResolver, anyhow::Error> {
+    pub async fn resolver(&self) -> Result<TokioResolver, anyhow::Error> {
         let mut resolver_config = ResolverConfig::new();
-        resolver_config.add_name_server(NameServerConfig {
-            socket_addr: self.dns_server.local_address(),
-            protocol: Protocol::Udp,
-            tls_dns_name: None,
-            trust_negative_responses: false,
-            bind_addr: None,
-        });
+        resolver_config.add_name_server(NameServerConfig::new(
+            self.dns_server.local_address(),
+            hickory_proto::xfer::Protocol::Udp,
+        ));
         let mut resolver_opts = ResolverOpts::default();
         // Enable edns for potentially larger records
         resolver_opts.edns0 = true;
-        let resolver =
-            TokioAsyncResolver::tokio(resolver_config, resolver_opts);
+
+        let resolver = TokioResolver::builder_with_config(
+            resolver_config,
+            TokioConnectionProvider::default(),
+        )
+        .with_options(resolver_opts)
+        .build();
+
         Ok(resolver)
     }
 }

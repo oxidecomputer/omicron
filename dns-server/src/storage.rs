@@ -94,10 +94,11 @@
 
 use anyhow::{Context, anyhow};
 use camino::Utf8PathBuf;
-use hickory_proto::rr::LowerName;
+use hickory_proto::{op::LowerQuery, rr::LowerName};
 use hickory_resolver::Name;
-use internal_dns_types::config::{
-    DnsConfig, DnsConfigParams, DnsConfigZone, DnsRecord,
+use internal_dns_types::{
+    config::{DnsConfig, DnsConfigParams, DnsConfigZone, DnsRecord},
+    names::ZONE_APEX_NAME,
 };
 use omicron_common::api::external::Generation;
 use serde::{Deserialize, Serialize};
@@ -131,12 +132,100 @@ pub struct Store {
     poisoned: Arc<AtomicBool>,
 }
 
+/// A temporary schema for DNS configurations from before the presence of the
+/// `serial` field.
+///
+/// This form of `CurrentConfig` can be removed once we are certain all DNS
+/// configurations have been updated to include a `serial` field.
+///
+/// This is necessary for an unfortunate chicken-and-egg problem: each DNS zone
+/// (both internal and external) has a copy of its current configuration as a
+/// JSON file in its zone. When upgraded, Nexus will be able to provide a new
+/// configuration consistent with `CurrentConfig`. But to get Nexus running,
+/// internal DNS must be able to function sufficiently for internal services to
+/// start - Nexus, CockroachDB, etc. And herein lies the problem; immediately
+/// after upgrading, internal DNS will have a configuration without `serial` on
+/// disk, so it won't be able to load the configuration, won't serve any
+/// records, and sled-agent will get stuck very early on in bringing up the
+/// system post-upgrade.
+///
+/// So, we maintain support for reading the previous configuration schema which
+/// is trivially and (almost) infallibly convertable to the new schema with
+/// `serial`.
 #[derive(Debug, Deserialize, Eq, PartialEq, Serialize)]
-struct CurrentConfig {
+struct ConfigWithoutSerial {
     generation: Generation,
     zones: Vec<String>,
     time_created: chrono::DateTime<chrono::Utc>,
     time_applied: chrono::DateTime<chrono::Utc>,
+}
+
+#[derive(Debug, Deserialize, Eq, PartialEq, Serialize)]
+struct CurrentConfig {
+    generation: Generation,
+    serial: u32,
+    zones: Vec<String>,
+    time_created: chrono::DateTime<chrono::Utc>,
+    time_applied: chrono::DateTime<chrono::Utc>,
+}
+
+impl TryFrom<ConfigWithoutSerial> for CurrentConfig {
+    type Error = anyhow::Error;
+
+    fn try_from(value: ConfigWithoutSerial) -> Result<Self, Self::Error> {
+        let ConfigWithoutSerial {
+            generation,
+            zones,
+            time_created,
+            time_applied,
+        } = value;
+
+        // This is.. unlikely to say the least, but it would be impolite to
+        // panic here. To overflow a u32, the generation number would have had
+        // to be bumped on average 68 times a second, every second, for two
+        // years. If the generation number were this high, it would certainly
+        // imply other issues (and we would imminently have issues when Nexus
+        // tries this same conversion).
+        let serial = generation
+            .as_u64()
+            .try_into()
+            .context("generation overflows u32?")?;
+
+        Ok(CurrentConfig {
+            generation,
+            serial,
+            zones,
+            time_created,
+            time_applied,
+        })
+    }
+}
+
+impl CurrentConfig {
+    /// Try parsing the provided bytes as JSON representing a `CurrentConfig`.
+    /// If not a `CurrentConfig`, try parsing as a `ConfigWithoutSerial` and
+    /// converting it forward.
+    fn parse_with_fallback(bytes: &[u8]) -> anyhow::Result<Self> {
+        let current_result = serde_json::from_slice::<Self>(&bytes)
+            .context("parsing current config");
+
+        // If we can't parse the current on-disk configuration format,
+        // it may just be in the old format. Try parsing it that way
+        // instead; if we can read it as an old configuration, we can
+        // translate it forward and move on. If we still can't read it,
+        // the initial result is more representative of whatever went
+        // wrong, so if there's an error here we ignore it.
+        if current_result.is_err() {
+            let without_serial =
+                serde_json::from_slice::<ConfigWithoutSerial>(&bytes);
+
+            if let Ok(without_serial) = without_serial {
+                return CurrentConfig::try_from(without_serial);
+            }
+        }
+
+        current_result
+    }
 }
 
 #[derive(Debug, Error)]
@@ -198,6 +287,7 @@ impl Store {
             let now = chrono::Utc::now();
             let initial_config_bytes = serde_json::to_vec(&CurrentConfig {
                 generation: Generation::from_u32(0),
+                serial: 0,
                 zones: vec![],
                 time_created: now,
                 time_applied: now,
@@ -232,8 +322,7 @@ impl Store {
             .get(KEY_CONFIG)
             .context("fetching current config")?
             .map(|config_bytes| {
-                serde_json::from_slice(&config_bytes)
-                    .context("parsing current config")
+                CurrentConfig::parse_with_fallback(config_bytes.as_ref())
             })
             .transpose()
     }
@@ -297,10 +386,77 @@ impl Store {
 
         Ok(DnsConfig {
             generation: config.generation,
+            serial: config.serial,
             time_created: config.time_created,
             time_applied: config.time_applied,
             zones,
         })
+    }
+
+    pub(crate) fn soa_for(
+        &self,
+        answer: &Answer,
+    ) -> Result<hickory_proto::rr::Record, QueryError> {
+        fn name_from_str(s: impl AsRef<str>) -> Result<Name, QueryError> {
+            let name_str = s.as_ref();
+            Name::from_str(name_str).map_err(|error| {
+                QueryError::ParseFail(anyhow!(
+                    "unable to create a Name from {:?}: {:#}",
+                    name_str,
+                    error
+                ))
+            })
+        }
+
+        let apex_answer =
+            self.query_name(&name_from_str(answer.zone.as_str())?)?;
+
+        let mut nameservers = apex_answer
+            .records
+            .as_ref()
+            .map(|records| {
+                records
+                    .iter()
+                    .filter_map(|record| {
+                        if let DnsRecord::Ns(nsdname) = record {
+                            Some(nsdname)
+                        } else {
+                            None
+                        }
+                    })
+                    .collect::<Vec<_>>()
+            })
+            .unwrap_or(Vec::new());
+
+        nameservers.sort();
+        let preferred_nameserver = nameservers
+            .first()
+            .ok_or_else(|| {
+                QueryError::QueryFail(anyhow!(
+                    "tried to produce an SOA record but \
+                    the zone has no nameservers"
+                ))
+            })
+            .map(name_from_str)??;
+
+        let soa_name = name_from_str(&answer.queried_fqdn())?;
+        let rname = name_from_str(format!("admin.{}", answer.zone.as_str()))?;
+
+        let record = hickory_proto::rr::Record::from_rdata(
+            soa_name,
+            0,
+            hickory_proto::rr::RData::SOA(hickory_proto::rr::rdata::SOA::new(
+                preferred_nameserver,
+                rname,
+                answer.serial,
+                3600,
+                600,
+                1800,
+                600,
+            )),
+        );
+
+        Ok(record)
     }
 
     async fn begin_update<'a, 'b>(
@@ -399,6 +555,12 @@ impl Store {
 
         // For each zone in the config, create the corresponding tree.  Populate
         // it with the data from the config.
+        //
+        // We are authoritative for zones whose records we serve, so we also
+        // create an SOA record at this point.  This record is not provided by
+        // the control plane for simplicity; we can determine the serial from
+        // the generation we are updating to.
+        //
         // TODO-performance This would probably be a lot faster with a batch
         // operation.
         for zone_config in &config.zones {
@@ -418,6 +580,7 @@ impl Store {
                     // the name.
                     continue;
                 }
+
                 let records_json =
                     serde_json::to_vec(&records).with_context(|| {
                         format!(
@@ -449,6 +612,7 @@ impl Store {
 
         let new_config = CurrentConfig {
             generation,
+            serial: config.serial,
             zones: config.zones.iter().map(|z| z.zone_name.clone()).collect(),
             time_created: config.time_created,
             time_applied: chrono::Utc::now(),
@@ -468,7 +632,8 @@ impl Store {
             })?;
 
             let old_config: CurrentConfig =
-                serde_json::from_slice(&old_config_bytes).map_err(|error| {
+                CurrentConfig::parse_with_fallback(old_config_bytes.as_ref())
+                    .map_err(|error| {
                     ConflictableTransactionError::Abort(anyhow!(
                         "parsing config: {:#}",
                         error
@@ -587,26 +752,26 @@ impl Store {
         self.prune_trees(trees_to_prune, "too old");
     }
 
-    /// Returns a non-empty list of DNS records associated with the name in the
-    /// given DNS request.
+    /// Returns an [`Answer`] describing the records associated with the name in
+    /// the given DNS request, as well as the zone containing the name and the
+    /// name prefix in that zone that the query is for.
     ///
-    /// If the returned set would have been empty, returns `QueryError::NoName`.
+    /// If the name does not match any zone, returns `QueryError::NoZone`.
     pub(crate) fn query(
         &self,
-        mr: &hickory_server::authority::MessageRequest,
-    ) -> Result<Vec<DnsRecord>, QueryError> {
-        let name = mr.query().name();
-        let orig_name = mr.query().original().name();
+        query: &LowerQuery,
+    ) -> Result<Answer, QueryError> {
+        let name = query.name();
+        let orig_name = query.original().name();
         self.query_raw(name, orig_name)
     }
 
-    /// Returns a non-empty list of DNS records associated with the given name.
+    /// Returns an [`Answer`] describing the records associated with the given
+    /// name, as well as the zone containing the name and the name prefix in
+    /// that zone that the query is for.
     ///
-    /// If the returned set would have been empty, returns `QueryError::NoName`.
-    pub(crate) fn query_name(
-        &self,
-        name: &Name,
-    ) -> Result<Vec<DnsRecord>, QueryError> {
+    /// If the name does not match any zone, returns `QueryError::NoZone`.
+    pub(crate) fn query_name(&self, name: &Name) -> Result<Answer, QueryError> {
         self.query_raw(&LowerName::new(name), name)
     }
 
@@ -614,7 +779,7 @@ impl Store {
         &self,
         name: &LowerName,
         orig_name: &Name,
-    ) -> Result<Vec<DnsRecord>, QueryError> {
+    ) -> Result<Answer, QueryError> {
         let config = self.read_config().map_err(QueryError::QueryFail)?;
 
         let zone_name = config
@@ -636,7 +801,6 @@ impl Store {
         // The name tree stores just the part of each name that doesn't include
         // the zone.  So we need to trim the zone part from the name provided in
         // the request.  (This basically duplicates work in `zone_of` above.)
-        let name_str = orig_name.to_string();
         let key = {
             let zone_name = Name::from_str(zone_name).unwrap();
             // This is implied by passing the `zone_of()` check above.
@@ -649,34 +813,46 @@ impl Store {
             name_only.set_fqdn(false);
             let key = name_only.to_string().to_lowercase();
             assert!(!key.ends_with('.'));
-            key
+            if key.is_empty() { ZONE_APEX_NAME.to_string() } else { key }
         };
 
         debug!(&self.log, "query key"; "key" => &key);
 
-        let bits = tree
+        let mut answer = Answer {
+            zone: zone_name.clone(),
+            name: if key == ZONE_APEX_NAME { None } else { Some(key.clone()) },
+            serial: config.serial,
+            records: None,
+        };
+
+        let record_json = tree
             .get(key.as_bytes())
             .with_context(|| format!("query tree {:?}", tree_name))
-            .map_err(QueryError::QueryFail)?
-            .ok_or_else(|| QueryError::NoName(name_str.clone()))?;
+            .map_err(QueryError::QueryFail)?;
 
-        let records: Vec<DnsRecord> = serde_json::from_slice(&bits)
-            .with_context(|| format!("deserialize record for key {:?}", key))
-            .map_err(QueryError::ParseFail)?;
+        if let Some(record_json) = record_json {
+            let records: Vec<DnsRecord> = serde_json::from_slice(&record_json)
+                .with_context(|| {
+                    format!("deserialize record for key {:?}", key)
+                })
+                .map_err(QueryError::ParseFail)?;
 
-        if records.is_empty() {
-            // This shouldn't be possible because we don't insert names with no
-            // records.
-            warn!(
-                &self.log,
-                "found name with no records";
-                "key" => &key
-            );
+            if records.is_empty() {
+                // This shouldn't be possible because we don't insert names with no
+                // records.
+                warn!(
+                    &self.log,
+                    "found name with no records";
+                    "key" => &key
+                );
 
-            return Err(QueryError::NoName(name_str));
+                return Ok(answer);
+            }
+
+            answer.records = Some(records);
         }
 
-        Ok(records)
+        Ok(answer)
     }
 }
 
@@ -685,14 +861,36 @@ pub(crate) enum QueryError {
     #[error("server is not authoritative for name: {0:?}")]
     NoZone(String),
 
-    #[error("no records found for name: {0:?}")]
-    NoName(String),
-
     #[error("failed to query database")]
     QueryFail(#[source] anyhow::Error),
 
     #[error("failed to parse database result")]
     ParseFail(#[source] anyhow::Error),
+}
+
+/// The records to answer a query, along with the name and zone that matched the
+/// query.
+#[derive(Debug)]
+pub(crate) struct Answer {
+    zone: String,
+    /// The name in `zone` that this answer describes. `None` if the query is
+    /// for the zone apex.
+    pub name: Option<String>,
+    /// The serial number for the zone which provided this answer. While this
+    /// currently matches the DNS config generation that provided this answer,
+    /// they may differ in the future.
+    serial: u32,
+    pub records: Option<Vec<DnsRecord>>,
+}
+
+impl Answer {
+    pub fn queried_fqdn(&self) -> String {
+        if let Some(name) = self.name.as_ref() {
+            format!("{}.{}", name, self.zone)
+        } else {
+            self.zone.clone()
+        }
+    }
 }
 
 /// Describes an ongoing update, if any
@@ -793,6 +991,7 @@ mod test {
     use internal_dns_types::config::DnsConfigParams;
     use internal_dns_types::config::DnsConfigZone;
     use internal_dns_types::config::DnsRecord;
+    use internal_dns_types::names::ZONE_APEX_NAME;
     use omicron_common::api::external::Generation;
     use omicron_test_utils::dev::test_setup_log;
     use std::collections::BTreeSet;
@@ -851,6 +1050,7 @@ mod test {
     enum Expect<'a> {
         NoZone,
         NoName,
+        Only(&'a DnsRecord),
         Record(&'a DnsRecord),
     }
 
@@ -860,20 +1060,35 @@ mod test {
         let dns_name_orig = Name::from_str(name).expect("bad DNS name");
         let dns_name_lower = LowerName::from(dns_name_orig.clone());
         let result = store.query_raw(&dns_name_lower, &dns_name_orig);
-        println!(
-            "expecting {:?} for query of {:?}: {:?}",
-            expect, name, result
-        );
 
-        match (expect, result) {
+        let records = result.map(|answer| {
+            // Regardless of if the answer's records are as we expect, the name
+            // and zone in the answer must describe the queried name.
+            assert_eq!(name.to_lowercase(), answer.queried_fqdn());
+
+            // And if there are no records, it is represented as `None` here,
+            // rather than recording a key with an empty list of records into
+            // the database:
+            assert!(answer.records != Some(Vec::new()));
+
+            answer.records
+        });
+
+        match (expect, records) {
             (Expect::NoZone, Err(QueryError::NoZone(n))) if n == name => (),
-            (Expect::NoName, Err(QueryError::NoName(n))) if n == name => (),
-            (Expect::Record(r), Ok(records))
+            (Expect::NoName, Ok(None)) => {
+                // No records, as expected.
+            }
+            (Expect::Only(r), Ok(Some(records)))
                 if records.len() == 1 && records[0] == *r =>
             {
                 ()
             }
-            _ => panic!("did not get what we expected from DNS query"),
+            (Expect::Record(r), Ok(Some(records))) if records.contains(r) => (),
+            (expected, answer) => panic!(
+                "did not get what we expected from DNS query, expected {:?} but got {:?}",
+                expected, answer
+            ),
         }
     }
 
@@ -909,6 +1124,7 @@ mod test {
         let update1 = DnsConfigParams {
             time_created: chrono::Utc::now(),
             generation: Generation::from_u32(1),
+            serial: 1,
             zones: vec![DnsConfigZone {
                 zone_name: "zone1.internal".to_string(),
                 records: HashMap::from([
@@ -926,22 +1142,22 @@ mod test {
         expect(
             &tc.store,
             "gen1_name.zone1.internal",
-            Expect::Record(&dummy_record),
+            Expect::Only(&dummy_record),
         );
         expect(
             &tc.store,
             "gen1_name.ZONE1.internal",
-            Expect::Record(&dummy_record),
+            Expect::Only(&dummy_record),
         );
         expect(
             &tc.store,
             "Gen1_name.zone1.internal",
-            Expect::Record(&dummy_record),
+            Expect::Only(&dummy_record),
         );
         expect(
             &tc.store,
             "shared_name.zone1.internal",
-            Expect::Record(&dummy_record),
+            Expect::Only(&dummy_record),
         );
         expect(&tc.store, "enoent.zone1.internal", Expect::NoName);
         expect(&tc.store, "gen2_name.zone2.internal", Expect::NoZone);
@@ -952,6 +1168,7 @@ mod test {
         let update2 = DnsConfigParams {
             time_created: chrono::Utc::now(),
             generation: Generation::from_u32(2),
+            serial: 2,
             zones: vec![
                 DnsConfigZone {
                     zone_name: "zone1.internal".to_string(),
@@ -980,12 +1197,12 @@ mod test {
         expect(
             &tc.store,
             "shared_name.zone1.internal",
-            Expect::Record(&dummy_record),
+            Expect::Only(&dummy_record),
         );
         expect(
             &tc.store,
             "gen2_name.zone2.internal",
-            Expect::Record(&dummy_record),
+            Expect::Only(&dummy_record),
         );
         expect(&tc.store, "gen8_name.zone8.internal", Expect::NoZone);
 
@@ -993,6 +1210,7 @@ mod test {
         let update8 = DnsConfigParams {
             time_created: chrono::Utc::now(),
             generation: Generation::from_u32(8),
+            serial: 8,
             zones: vec![DnsConfigZone {
                 zone_name: "zone8.internal".to_string(),
                 records: HashMap::from([(
@@ -1016,7 +1234,7 @@ mod test {
         expect(
             &tc.store,
             "gen8_name.zone8.internal",
-            Expect::Record(&dummy_record),
+            Expect::Only(&dummy_record),
         );
 
         // Updating to generation 8 again should be a no-op.  It should succeed
@@ -1036,7 +1254,7 @@ mod test {
         expect(
             &tc.store,
             "gen8_name.zone8.internal",
-            Expect::Record(&dummy_record),
+            Expect::Only(&dummy_record),
         );
 
         // Failure: try a backwards update.
@@ -1073,6 +1291,7 @@ mod test {
         let update9 = DnsConfigParams {
             time_created: chrono::Utc::now(),
             generation: Generation::from_u32(9),
+            serial: 9,
             zones: vec![DnsConfigZone {
                 zone_name: "zone8.internal".to_string(),
                 records: HashMap::from([(
@@ -1109,6 +1328,7 @@ mod test {
         let update1 = DnsConfigParams {
             time_created: chrono::Utc::now(),
             generation: Generation::from_u32(1),
+            serial: 1,
             zones: vec![DnsConfigZone {
                 zone_name: "zone1.internal".to_string(),
                 records: HashMap::from([(
@@ -1137,6 +1357,7 @@ mod test {
         let update2 = DnsConfigParams {
             time_created: chrono::Utc::now(),
             generation: Generation::from_u32(2),
+            serial: 2,
             zones: vec![DnsConfigZone {
                 zone_name: "zone2.internal".to_string(),
                 records: HashMap::from([(
@@ -1151,7 +1372,7 @@ mod test {
         expect(
             &tc.store,
             "gen1_name.zone1.internal",
-            Expect::Record(&dummy_record),
+            Expect::Only(&dummy_record),
         );
         expect(&tc.store, "gen2_name.zone2.internal", Expect::NoZone);
 
@@ -1166,7 +1387,7 @@ mod test {
         expect(
             &tc.store,
             "gen2_name.zone2.internal",
-            Expect::Record(&dummy_record),
+            Expect::Only(&dummy_record),
         );
 
         // At this point, we want to drop the Store, but we need to keep around
@@ -1203,11 +1424,7 @@ mod test {
             generations_with_trees(&store)
         );
         // The rest of the behavior ought to be like generation 1.
-        expect(
-            &store,
-            "gen1_name.zone1.internal",
-            Expect::Record(&dummy_record),
-        );
+        expect(&store, "gen1_name.zone1.internal", Expect::Only(&dummy_record));
         expect(&store, "gen2_name.zone2.internal", Expect::NoZone);
 
         // Now we can do another update to generation 2.
@@ -1219,11 +1436,7 @@ mod test {
         let gen2_config = store.read_config().unwrap();
         assert_eq!(Generation::from_u32(2), gen2_config.generation);
         expect(&store, "gen1_name.zone1.internal", Expect::NoZone);
-        expect(
-            &store,
-            "gen2_name.zone2.internal",
-            Expect::Record(&dummy_record),
-        );
+        expect(&store, "gen2_name.zone2.internal", Expect::Only(&dummy_record));
 
         let tc = TestContext { logctx, tmpdir, store, db };
         tc.cleanup_successful();
@@ -1247,6 +1460,7 @@ mod test {
         let update2 = DnsConfigParams {
             time_created: chrono::Utc::now(),
             generation: Generation::from_u32(1),
+            serial: 1,
             zones: vec![DnsConfigZone {
                 zone_name: "zone1.internal".to_string(),
                 records: HashMap::from([(
@@ -1294,6 +1508,102 @@ mod test {
             .dns_config_update(&update2, "my request id")
             .await
             .expect("unexpected failure");
+
+        tc.cleanup_successful();
+    }
+
+    #[tokio::test]
+    async fn test_zone_gets_soa_record() {
+        let tc = TestContext::new("test_zone_gets_soa_record");
+
+        let ns1_a = DnsRecord::Aaaa(Ipv6Addr::LOCALHOST);
+        let ns1_ns = DnsRecord::Ns("ns1.zone1.internal".to_string());
+        let update = DnsConfigParams {
+            time_created: chrono::Utc::now(),
+            generation: Generation::from_u32(1),
+            serial: 1,
+            zones: vec![DnsConfigZone {
+                zone_name: "zone1.internal".to_string(),
+                records: HashMap::from([
+                    ("ns1".to_string(), vec![ns1_a.clone()]),
+                    (ZONE_APEX_NAME.to_string(), vec![ns1_ns.clone()]),
+                ]),
+            }],
+        };
+
+        tc.store
+            .dns_config_update(&update, "my request id")
+            .await
+            .expect("can apply update");
+
+        // These two records are ones we provided, they ought to be there.
+        expect(&tc.store, "ns1.zone1.internal", Expect::Only(&ns1_a));
+
+        expect(
+            &tc.store,
+            "zone1.internal",
+            Expect::Record(&DnsRecord::Ns("ns1.zone1.internal".to_string())),
+        );
+
+        // We can update DNS to a configuration without NS records and the
+        // server will survive the encounter.  We won't have an SOA record
+        // without a nameserver to indicate as the primary source for this zone,
+        // though.
+
+        let update2 = DnsConfigParams {
+            time_created: chrono::Utc::now(),
+            generation: Generation::from_u32(2),
+            serial: 2,
+            zones: vec![DnsConfigZone {
+                zone_name: "zone1.internal".to_string(),
+                records: HashMap::from([(
+                    "ns1".to_string(),
+                    vec![ns1_a.clone()],
+                )]),
+            }],
+        };
+
+        tc.store
+            .dns_config_update(&update2, "my request id")
+            .await
+            .expect("can apply update");
+
+        // At this point we have a zone `zone1.internal`, but no records on the
+        // zone itself.
+        expect(&tc.store, "zone1.internal", Expect::NoName);
+
+        let ns2_a = DnsRecord::Aaaa(Ipv6Addr::LOCALHOST);
+        let ns2_ns = DnsRecord::Ns("ns2.zone1.internal".to_string());
+
+        // Finally, even if the NS records are ordered in a strange way, we'll
+        // consistently reorder records in the update so that the
+        // lowest-numbered NS record is first and used as the SOA mname.
+        let update3 = DnsConfigParams {
+            time_created: chrono::Utc::now(),
+            generation: Generation::from_u32(3),
+            serial: 3,
+            zones: vec![DnsConfigZone {
+                zone_name: "zone1.internal".to_string(),
+                records: HashMap::from([
+                    ("ns2".to_string(), vec![ns2_a.clone()]),
+                    ("ns1".to_string(), vec![ns1_a.clone()]),
+                    (
+                        ZONE_APEX_NAME.to_string(),
+                        vec![ns1_ns.clone(), ns2_ns.clone()],
+                    ),
+                ]),
+            }],
+        };
+
+        tc.store
+            .dns_config_update(&update3, "my request id")
+            .await
+            .expect("can apply update");
+
+        // Both NS records *are* present at the zone apex.
+        expect(&tc.store, "zone1.internal", Expect::Record(&ns1_ns));
+
+        expect(&tc.store, "zone1.internal", Expect::Record(&ns2_ns));
 
         tc.cleanup_successful();
     }

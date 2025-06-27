@@ -17,9 +17,7 @@ use nexus_db_lookup::LookupPath;
 use nexus_db_model::Ipv4NatValues;
 use nexus_db_queries::context::OpContext;
 use nexus_db_queries::db::DataStore;
-use nexus_sled_agent_shared::inventory::{
-    OmicronZoneConfig, OmicronZoneType, OmicronZonesConfig,
-};
+use nexus_sled_agent_shared::inventory::OmicronZoneType;
 use omicron_common::address::{MAX_PORT, MIN_PORT};
 use omicron_uuid_kinds::GenericUuid;
 use serde_json::json;
@@ -106,9 +104,9 @@ impl BackgroundTask for ServiceZoneNatTracker {
             let mut nexus_count = 0;
             let mut dns_count = 0;
 
-            for (sled_id, sa) in collection.sled_agents {
+            for sa in &collection.sled_agents {
                 let (_, sled) = match LookupPath::new(opctx, &*self.datastore)
-                    .sled_id(sled_id.into_untyped_uuid())
+                    .sled_id(sa.sled_id.into_untyped_uuid())
                     .fetch()
                     .await
                     .context("failed to look up sled")
@@ -118,7 +116,7 @@ impl BackgroundTask for ServiceZoneNatTracker {
                         error!(
                             &log,
                             "failed to lookup sled by id";
-                            "id" => ?sled_id,
+                            "id" => ?sa.sled_id,
                             "error" => ?e,
                         );
                         continue;
@@ -127,8 +125,18 @@ impl BackgroundTask for ServiceZoneNatTracker {
 
                 let sled_address = oxnet::Ipv6Net::host_net(*sled.ip);
 
-                let zones_config: OmicronZonesConfig = sa.omicron_zones;
-                let zones: Vec<OmicronZoneConfig> = zones_config.zones;
+                // TODO-correctness Looking at inventory here is a little
+                // sketchy. We check the last reconciliation result, which
+                // should be a view of what zones are actually running on the
+                // sled. But maybe it would be better to act on a rendezvous
+                // table populated by reconfigurator if the goal is to sync with
+                // what's Nexus thinks is supposed to be running on the sled?
+                let zones = sa
+                    .last_reconciliation
+                    .iter()
+                    .flat_map(|reconciliation| {
+                        reconciliation.running_omicron_zones().cloned()
+                    });
 
                 for zone in zones {
                     let zone_type: OmicronZoneType = zone.zone_type;

@@ -189,7 +189,58 @@ async fn bundle_download(
     let body = NexusRequest::new(
         RequestBuilder::new(client, Method::GET, &url)
             .expect_status(Some(StatusCode::OK))
-            .expect_range_requestable(),
+            .expect_range_requestable("application/zip"),
+    )
+    .authn_as(AuthnMode::PrivilegedUser)
+    .execute()
+    .await
+    .context("failed to request bundle download")?
+    .body;
+
+    Ok(body)
+}
+
+async fn bundle_download_head(
+    client: &ClientTestContext,
+    id: SupportBundleUuid,
+) -> Result<usize> {
+    let url = format!("{BUNDLES_URL}/{id}/download");
+    let len = NexusRequest::new(
+        RequestBuilder::new(client, Method::HEAD, &url)
+            .expect_status(Some(StatusCode::OK))
+            .expect_range_requestable("application/zip"),
+    )
+    .authn_as(AuthnMode::PrivilegedUser)
+    .execute()
+    .await
+    .context("failed to request bundle download")?
+    .headers
+    .get(http::header::CONTENT_LENGTH)
+    .context("Missing content length response header")?
+    .to_str()
+    .context("Failed to convert content length to string")?
+    .parse()
+    .context("Failed to parse content length")?;
+
+    Ok(len)
+}
+
+async fn bundle_download_range(
+    client: &ClientTestContext,
+    id: SupportBundleUuid,
+    value: &str,
+    expected_content_range: &str,
+) -> Result<bytes::Bytes> {
+    let url = format!("{BUNDLES_URL}/{id}/download");
+    let body = NexusRequest::new(
+        RequestBuilder::new(client, Method::GET, &url)
+            .header(http::header::RANGE, value)
+            .expect_status(Some(StatusCode::PARTIAL_CONTENT))
+            .expect_response_header(
+                http::header::CONTENT_RANGE,
+                expected_content_range,
+            )
+            .expect_range_requestable("application/zip"),
     )
     .authn_as(AuthnMode::PrivilegedUser)
     .execute()
@@ -400,6 +451,7 @@ async fn test_support_bundle_lifecycle(cptestctx: &ControlPlaneTestContext) {
         Some(SupportBundleCollectionReport {
             bundle: bundle.id,
             listed_in_service_sleds: true,
+            listed_sps: true,
             activated_in_db_ok: true,
         })
     );
@@ -412,6 +464,7 @@ async fn test_support_bundle_lifecycle(cptestctx: &ControlPlaneTestContext) {
     let mut names = archive.file_names();
     assert_eq!(names.next(), Some("bundle_id.txt"));
     assert_eq!(names.next(), Some("rack/"));
+    assert!(names.any(|n| n == "sp_task_dumps/"));
     // There's much more data in the bundle, but validating it isn't the point
     // of this test, which cares more about bundle lifecycle.
 
@@ -463,4 +516,78 @@ async fn test_support_bundle_lifecycle(cptestctx: &ControlPlaneTestContext) {
     );
     assert_eq!(second_bundle.reason_for_creation, "Created by external API");
     assert_eq!(second_bundle.state, SupportBundleState::Collecting);
+}
+
+// Test range requests on a bundle
+#[nexus_test]
+async fn test_support_bundle_range_requests(
+    cptestctx: &ControlPlaneTestContext,
+) {
+    let client = &cptestctx.external_client;
+
+    let disk_test =
+        DiskTestBuilder::new(&cptestctx).with_zpool_count(1).build().await;
+
+    // Validate our test setup: We should see a single Debug dataset
+    // in our disk test.
+    let mut debug_dataset_count = 0;
+    for zpool in disk_test.zpools() {
+        let _dataset = zpool.debug_dataset();
+        debug_dataset_count += 1;
+    }
+    assert_eq!(debug_dataset_count, 1);
+
+    let bundle = bundle_create(&client).await.unwrap();
+    assert_eq!(bundle.state, SupportBundleState::Collecting);
+
+    // Finish collection, activate the bundle.
+    let output = activate_bundle_collection_background_task(&cptestctx).await;
+    assert_eq!(output.collection_err, None);
+    assert_eq!(
+        output.collection_report,
+        Some(SupportBundleCollectionReport {
+            bundle: bundle.id,
+            listed_in_service_sleds: true,
+            listed_sps: true,
+            activated_in_db_ok: true,
+        })
+    );
+    let bundle = bundle_get(&client, bundle.id).await.unwrap();
+    assert_eq!(bundle.state, SupportBundleState::Active);
+
+    // Download the bundle without using range requests.
+    let full_contents = bundle_download(&client, bundle.id).await.unwrap();
+    let len = full_contents.len();
+
+    // HEAD the bundle length
+    let head_len = bundle_download_head(&client, bundle.id).await.unwrap();
+    assert_eq!(
+        len, head_len,
+        "Length from 'download bundle' vs 'HEAD bundle' did not match"
+    );
+
+    // Download portions of the bundle using range requests.
+    let (rr1_start, rr1_end) = (0, len / 2);
+    let (rr2_start, rr2_end) = (len / 2 + 1, len - 1);
+    let rr_header1 = format!("bytes={rr1_start}-{rr1_end}");
+    let rr_header2 = format!("bytes={rr2_start}-{rr2_end}");
+    let first_half = bundle_download_range(
+        &client,
+        bundle.id,
+        &rr_header1,
+        &format!("bytes {rr1_start}-{rr1_end}/{len}"),
+    )
+    .await
+    .unwrap();
+    assert_eq!(first_half, full_contents[..first_half.len()]);
+
+    let second_half = bundle_download_range(
+        &client,
+        bundle.id,
+        &rr_header2,
+        &format!("bytes {rr2_start}-{rr2_end}/{len}"),
+    )
+    .await
+    .unwrap();
+    assert_eq!(second_half, full_contents[first_half.len()..]);
 }

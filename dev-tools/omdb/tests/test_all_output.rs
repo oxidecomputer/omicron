@@ -85,6 +85,10 @@ async fn test_omdb_usage_errors() {
         &["db", "inventory", "collections", "show", "--help"],
         &["db", "inventory", "collections", "show", "all", "--help"],
         &["db", "inventory", "collections", "show", "sp", "--help"],
+        &["db", "ereport"],
+        &["db", "ereport", "list", "--help"],
+        &["db", "ereport", "reporters", "--help"],
+        &["db", "ereport", "info", "--help"],
         &["db", "sleds", "--help"],
         &["db", "saga"],
         &["db", "snapshots"],
@@ -107,7 +111,6 @@ async fn test_omdb_usage_errors() {
         &["nexus", "sleds"],
         &["sled-agent"],
         &["sled-agent", "zones"],
-        &["sled-agent", "zpools"],
         &["oximeter", "--help"],
         &["oxql", "--help"],
         // Mispelled argument
@@ -208,6 +211,8 @@ async fn test_omdb_success_cases(cptestctx: &ControlPlaneTestContext) {
             &initial_blueprint_id,
             "current-target",
         ],
+        // This one should fail because it has no parent.
+        &["nexus", "blueprints", "diff", &initial_blueprint_id],
         &["reconfigurator", "export", tmppath.as_str()],
         // We can't easily test the sled agent output because that's only
         // provided by a real sled agent, which is not available in the

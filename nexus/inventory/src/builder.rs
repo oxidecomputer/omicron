@@ -8,6 +8,7 @@
 //! from sources like MGS) from assembling a representation of what was
 //! collected.
 
+use anyhow::Context;
 use anyhow::anyhow;
 use chrono::DateTime;
 use chrono::Utc;
@@ -15,6 +16,7 @@ use clickhouse_admin_types::ClickhouseKeeperClusterMembership;
 use gateway_client::types::SpComponentCaboose;
 use gateway_client::types::SpState;
 use gateway_client::types::SpType;
+use iddqd::IdOrdMap;
 use nexus_sled_agent_shared::inventory::Baseboard;
 use nexus_sled_agent_shared::inventory::Inventory;
 use nexus_types::inventory::BaseboardId;
@@ -30,7 +32,6 @@ use nexus_types::inventory::ServiceProcessor;
 use nexus_types::inventory::SledAgent;
 use nexus_types::inventory::Zpool;
 use omicron_uuid_kinds::CollectionKind;
-use omicron_uuid_kinds::SledUuid;
 use std::collections::BTreeMap;
 use std::collections::BTreeSet;
 use std::hash::Hash;
@@ -111,7 +112,7 @@ pub struct CollectionBuilder {
         BTreeMap<CabooseWhich, BTreeMap<Arc<BaseboardId>, CabooseFound>>,
     rot_pages_found:
         BTreeMap<RotPageWhich, BTreeMap<Arc<BaseboardId>, RotPageFound>>,
-    sleds: BTreeMap<SledUuid, SledAgent>,
+    sleds: IdOrdMap<SledAgent>,
     clickhouse_keeper_cluster_membership:
         BTreeSet<ClickhouseKeeperClusterMembership>,
     // CollectionBuilderRng is taken by value, rather than passed in as a
@@ -141,7 +142,7 @@ impl CollectionBuilder {
             rots: BTreeMap::new(),
             cabooses_found: BTreeMap::new(),
             rot_pages_found: BTreeMap::new(),
-            sleds: BTreeMap::new(),
+            sleds: IdOrdMap::new(),
             clickhouse_keeper_cluster_membership: BTreeSet::new(),
             rng: CollectionBuilderRng::from_entropy(),
         }
@@ -149,12 +150,6 @@ impl CollectionBuilder {
 
     /// Assemble a complete `Collection` representation
     pub fn build(mut self) -> Collection {
-        // This is not strictly necessary.  But for testing, it's helpful for
-        // things to be in sorted order.
-        for v in self.sleds.values_mut() {
-            v.omicron_zones.zones.sort_by(|a, b| a.id.cmp(&b.id));
-        }
-
         Collection {
             id: self.rng.id_rng.next(),
             errors: self.errors.into_iter().map(|e| e.to_string()).collect(),
@@ -531,7 +526,6 @@ impl CollectionBuilder {
             reservoir_size: inventory.reservoir_size,
             time_collected,
             sled_id,
-            omicron_zones: inventory.omicron_zones,
             disks: inventory.disks.into_iter().map(|d| d.into()).collect(),
             zpools: inventory
                 .zpools
@@ -543,19 +537,18 @@ impl CollectionBuilder {
                 .into_iter()
                 .map(|d| d.into())
                 .collect(),
-            omicron_physical_disks_generation: inventory
-                .omicron_physical_disks_generation,
+            ledgered_sled_config: inventory.ledgered_sled_config,
+            reconciler_status: inventory.reconciler_status,
+            last_reconciliation: inventory.last_reconciliation,
+            zone_image_resolver: inventory.zone_image_resolver,
         };
 
-        if let Some(previous) = self.sleds.get(&sled_id) {
-            Err(anyhow!(
-                "sled {sled_id}: reported sled multiple times \
-                (previously {previous:?}, now {sled:?})",
-            ))
-        } else {
-            self.sleds.insert(sled_id, sled);
-            Ok(())
-        }
+        self.sleds
+            .insert_unique(sled)
+            .map_err(|error| error.into_owned())
+            .with_context(|| {
+                anyhow!("sled {sled_id}: reported sled multiple times")
+            })
     }
 
     /// Record information about Keeper cluster membership learned from the
@@ -591,11 +584,11 @@ mod test {
     use base64::Engine;
     use base64::engine::general_purpose::STANDARD as BASE64_STANDARD;
     use gateway_client::types::PowerState;
-    use gateway_client::types::RotSlot;
     use gateway_client::types::RotState;
     use gateway_client::types::SpComponentCaboose;
     use gateway_client::types::SpState;
     use gateway_client::types::SpType;
+    use gateway_types::rot::RotSlot;
     use nexus_sled_agent_shared::inventory::SledRole;
     use nexus_types::inventory::BaseboardId;
     use nexus_types::inventory::Caboose;
@@ -717,6 +710,7 @@ mod test {
             git_commit: String::from("git_commit_1"),
             name: String::from("name_1"),
             version: String::from("version_1"),
+            sign: Some(String::from("sign_1")),
         };
         for bb in &common_caboose_baseboards {
             let _ = collection.sps.get(*bb).unwrap();
@@ -961,9 +955,8 @@ mod test {
 
         // Verify that we found the sled agents.
         assert_eq!(collection.sled_agents.len(), 4);
-        for (sled_id, sled_agent) in &collection.sled_agents {
-            assert_eq!(*sled_id, sled_agent.sled_id);
-            if *sled_id == sled_agent_id_extra {
+        for sled_agent in &collection.sled_agents {
+            if sled_agent.sled_id == sled_agent_id_extra {
                 assert_eq!(sled_agent.sled_role, SledRole::Scrimlet);
             } else {
                 assert_eq!(sled_agent.sled_role, SledRole::Gimlet);
@@ -981,7 +974,8 @@ mod test {
             assert_eq!(sled_agent.reservoir_size, ByteCount::from(1024));
         }
 
-        let sled1_agent = &collection.sled_agents[&sled_agent_id_basic];
+        let sled1_agent =
+            collection.sled_agents.get(&sled_agent_id_basic).unwrap();
         let sled1_bb = sled1_agent.baseboard_id.as_ref().unwrap();
         assert_eq!(sled1_bb.part_number, "model1");
         assert_eq!(sled1_bb.serial_number, "s1");
@@ -990,14 +984,23 @@ mod test {
         assert_eq!(sled1_agent.disks[0].identity.model, "box");
         assert_eq!(sled1_agent.disks[0].identity.serial, "XXIV");
 
-        let sled4_agent = &collection.sled_agents[&sled_agent_id_extra];
+        let sled4_agent =
+            collection.sled_agents.get(&sled_agent_id_extra).unwrap();
         let sled4_bb = sled4_agent.baseboard_id.as_ref().unwrap();
         assert_eq!(sled4_bb.serial_number, "s4");
         assert!(
-            collection.sled_agents[&sled_agent_id_pc].baseboard_id.is_none()
+            collection
+                .sled_agents
+                .get(&sled_agent_id_pc)
+                .unwrap()
+                .baseboard_id
+                .is_none()
         );
         assert!(
-            collection.sled_agents[&sled_agent_id_unknown]
+            collection
+                .sled_agents
+                .get(&sled_agent_id_unknown)
+                .unwrap()
                 .baseboard_id
                 .is_none()
         );
@@ -1105,7 +1108,7 @@ mod test {
             git_commit: String::from("git_commit1"),
             name: String::from("name1"),
             version: String::from("version1"),
-            sign: None,
+            sign: Some(String::from("sign1")),
             epoch: None,
         };
         assert!(
@@ -1125,7 +1128,7 @@ mod test {
             "reporting caboose for unknown baseboard: \
             BaseboardId { part_number: \"p1\", serial_number: \"bogus\" } \
             (Caboose { board: \"board1\", git_commit: \"git_commit1\", \
-            name: \"name1\", version: \"version1\" })"
+            name: \"name1\", version: \"version1\", sign: Some(\"sign1\") })"
         );
         assert!(
             !builder
@@ -1177,7 +1180,7 @@ mod test {
                     git_commit: String::from("git_commit2"),
                     name: String::from("name2"),
                     version: String::from("version2"),
-                    sign: None,
+                    sign: Some(String::from("sign2")),
                     epoch: None,
                 },
             )

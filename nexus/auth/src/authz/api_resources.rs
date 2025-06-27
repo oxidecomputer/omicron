@@ -711,23 +711,21 @@ impl AuthorizedResource for TargetReleaseConfig {
     }
 }
 
-/// Synthetic resource used for modeling access to the list of webhook event
-/// classes.
+/// Synthetic resource used for modeling access to the list of alert classes.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub struct WebhookEventClassList;
-pub const WEBHOOK_EVENT_CLASS_LIST: WebhookEventClassList =
-    WebhookEventClassList {};
+pub struct AlertClassList;
+pub const ALERT_CLASS_LIST: AlertClassList = AlertClassList {};
 
-impl oso::PolarClass for WebhookEventClassList {
+impl oso::PolarClass for AlertClassList {
     fn get_polar_class_builder() -> oso::ClassBuilder<Self> {
-        // Roles are not directly attached to EventClassList
+        // Roles are not directly attached to AlertClassList
         oso::Class::builder()
             .with_equality_check()
             .add_attribute_getter("fleet", |_| FLEET)
     }
 }
 
-impl AuthorizedResource for WebhookEventClassList {
+impl AuthorizedResource for AlertClassList {
     fn load_roles<'fut>(
         &'fut self,
         opctx: &'fut OpContext,
@@ -941,7 +939,7 @@ authz_resource! {
 authz_resource! {
     name = "ConsoleSession",
     parent = "Fleet",
-    primary_key = String,
+    primary_key = { uuid_kind = ConsoleSessionKind },
     roles_allowed = false,
     polar_snippet = FleetChild,
 }
@@ -957,7 +955,7 @@ authz_resource! {
 authz_resource! {
     name = "DeviceAccessToken",
     parent = "Fleet",
-    primary_key = String, // token
+    primary_key = { uuid_kind = AccessTokenKind },
     roles_allowed = false,
     polar_snippet = FleetChild,
 }
@@ -1144,24 +1142,24 @@ authz_resource! {
 }
 
 authz_resource! {
-    name = "WebhookEvent",
+    name = "Alert",
     parent = "Fleet",
-    primary_key = { uuid_kind = WebhookEventKind },
+    primary_key = { uuid_kind = AlertKind },
     roles_allowed = false,
     polar_snippet = FleetChild,
 }
 
 authz_resource! {
-    name = "WebhookReceiver",
+    name = "AlertReceiver",
     parent = "Fleet",
-    primary_key = { uuid_kind = WebhookReceiverKind },
+    primary_key = { uuid_kind = AlertReceiverKind },
     roles_allowed = false,
     polar_snippet = FleetChild,
 }
 
 authz_resource! {
     name = "WebhookSecret",
-    parent = "WebhookReceiver",
+    parent = "AlertReceiver",
     primary_key = { uuid_kind = WebhookSecretKind },
     roles_allowed = false,
     polar_snippet = Custom,

@@ -9,22 +9,21 @@ use anyhow::Context;
 use anyhow::anyhow;
 use futures::StreamExt;
 use futures::stream;
+use iddqd::IdOrdMap;
 use nexus_db_queries::context::OpContext;
-use nexus_sled_agent_shared::inventory::OmicronSledConfigResult;
 use nexus_types::deployment::BlueprintSledConfig;
 use omicron_uuid_kinds::GenericUuid;
 use omicron_uuid_kinds::SledUuid;
-use slog::Logger;
 use slog::info;
 use slog::warn;
+use slog_error_chain::InlineErrorChain;
 use std::collections::BTreeMap;
-use update_engine::merge_anyhow_list;
 
 /// Idempotently ensure that the specified Omicron sled configs are deployed to
 /// the corresponding sleds
 pub(crate) async fn deploy_sled_configs(
     opctx: &OpContext,
-    sleds_by_id: &BTreeMap<SledUuid, Sled>,
+    sleds_by_id: &IdOrdMap<Sled>,
     sled_configs: &BTreeMap<SledUuid, BlueprintSledConfig>,
 ) -> Result<(), Vec<anyhow::Error>> {
     let errors: Vec<_> = stream::iter(sled_configs)
@@ -34,7 +33,7 @@ pub(crate) async fn deploy_sled_configs(
                 "generation" => i64::from(&config.sled_agent_generation),
             ));
 
-            let db_sled = match sleds_by_id.get(&sled_id) {
+            let db_sled = match sleds_by_id.get(sled_id) {
                 Some(sled) => sled,
                 None => {
                     if config.are_all_items_expunged() {
@@ -63,12 +62,13 @@ pub(crate) async fn deploy_sled_configs(
                     format!("Failed to put {config:#?} to sled {sled_id}")
                 });
             match result {
+                Ok(_) => None,
                 Err(error) => {
-                    warn!(log, "{error:#}");
+                    warn!(
+                        log, "failed to put sled config";
+                        InlineErrorChain::new(error.as_ref()),
+                    );
                     Some(error)
-                }
-                Ok(result) => {
-                    parse_config_result(result.into_inner(), &log).err()
                 }
             }
         })
@@ -78,73 +78,11 @@ pub(crate) async fn deploy_sled_configs(
     if errors.is_empty() { Ok(()) } else { Err(errors) }
 }
 
-fn parse_config_result(
-    result: OmicronSledConfigResult,
-    log: &Logger,
-) -> anyhow::Result<()> {
-    let (disk_errs, disk_successes): (Vec<_>, Vec<_>) =
-        result.disks.into_iter().partition(|status| status.err.is_some());
-
-    if !disk_errs.is_empty() {
-        warn!(
-            log,
-            "Failed to deploy disks for sled agent";
-            "successfully configured disks" => disk_successes.len(),
-            "failed disk configurations" => disk_errs.len(),
-        );
-        for err in &disk_errs {
-            warn!(log, "{err:?}");
-        }
-        return Err(merge_anyhow_list(disk_errs.into_iter().map(|status| {
-            anyhow!(
-                "failed to deploy disk {:?}: {:#}",
-                status.identity,
-                // `disk_errs` was partitioned by `status.err.is_some()`, so
-                // this is safe to unwrap.
-                status.err.unwrap(),
-            )
-        })));
-    }
-
-    let (dataset_errs, dataset_successes): (Vec<_>, Vec<_>) =
-        result.datasets.into_iter().partition(|status| status.err.is_some());
-
-    if !dataset_errs.is_empty() {
-        warn!(
-            log,
-            "Failed to deploy datasets for sled agent";
-            "successfully configured datasets" => dataset_successes.len(),
-            "failed dataset configurations" => dataset_errs.len(),
-        );
-        for err in &dataset_errs {
-            warn!(log, "{err:?}");
-        }
-        return Err(merge_anyhow_list(dataset_errs.into_iter().map(
-            |status| {
-                anyhow!(
-                    "failed to deploy dataset {}: {:#}",
-                    status.dataset_name.full_name(),
-                    // `dataset_errs` was partitioned by `status.err.is_some()`,
-                    // so this is safe to unwrap.
-                    status.err.unwrap(),
-                )
-            },
-        )));
-    }
-
-    info!(
-        log,
-        "Successfully deployed config to sled agent";
-        "successfully configured disks" => disk_successes.len(),
-        "successfully configured datasets" => dataset_successes.len(),
-    );
-    Ok(())
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
     use id_map::IdMap;
+    use iddqd::id_ord_map;
     use nexus_sled_agent_shared::inventory::OmicronZonesConfig;
     use nexus_sled_agent_shared::inventory::SledRole;
     use nexus_test_utils_macros::nexus_test;
@@ -195,8 +133,7 @@ mod tests {
         let sim_sled_agent_config_generation =
             sim_sled_agent.omicron_zones_list().generation;
 
-        let sleds_by_id = BTreeMap::from([(
-            sim_sled_agent.id,
+        let sleds_by_id = id_ord_map! {
             Sled::new(
                 sim_sled_agent.id,
                 SledPolicy::InService {
@@ -206,7 +143,7 @@ mod tests {
                 REPO_DEPOT_PORT,
                 SledRole::Scrimlet,
             ),
-        )]);
+        };
 
         // This is a fully fabricated dataset list for a simulated sled agent.
         //
@@ -315,6 +252,7 @@ mod tests {
             disks,
             datasets,
             zones,
+            remove_mupdate_override: None,
         };
         let sled_configs =
             [(sim_sled_agent.id, sled_config.clone())].into_iter().collect();
@@ -326,6 +264,9 @@ mod tests {
 
         // Observe the latest configuration stored on the simulated sled agent,
         // and verify that this output matches the input.
+        //
+        // TODO-cleanup Simulated sled-agent should report a unified
+        // `OmicronSledConfig`.
         let observed_disks =
             sim_sled_agent.omicron_physical_disks_list().unwrap();
         let observed_datasets = sim_sled_agent.datasets_config_list().unwrap();

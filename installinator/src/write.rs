@@ -12,20 +12,29 @@ use std::{
 use anyhow::{Context, Result, anyhow, ensure};
 use async_trait::async_trait;
 use buf_list::BufList;
-use bytes::Buf;
+use bytes::{Buf, Bytes};
 use camino::{Utf8Path, Utf8PathBuf};
+use iddqd::IdOrdMap;
 use illumos_utils::zpool::{Zpool, ZpoolName};
 use installinator_common::{
     ControlPlaneZonesSpec, ControlPlaneZonesStepId, RawDiskWriter, StepContext,
     StepProgress, StepResult, StepSuccess, UpdateEngine, WriteComponent,
     WriteError, WriteOutput, WriteSpec, WriteStepId,
 };
-use omicron_common::disk::M2Slot;
+use omicron_common::{
+    disk::M2Slot,
+    update::{
+        MupdateOverrideInfo, OmicronZoneFileMetadata, OmicronZoneManifest,
+        OmicronZoneManifestSource,
+    },
+};
+use omicron_uuid_kinds::{MupdateOverrideUuid, MupdateUuid};
 use sha2::{Digest, Sha256};
 use slog::{Logger, info, warn};
 use tokio::{
     fs::File,
     io::{AsyncWrite, AsyncWriteExt},
+    task::JoinSet,
 };
 use tufaceous_artifact::{ArtifactHash, ArtifactHashId};
 use tufaceous_lib::ControlPlaneZoneImages;
@@ -53,6 +62,22 @@ struct ArtifactDestination {
     control_plane_zpool: Option<ZpoolName>,
 }
 
+impl ArtifactDestination {
+    fn from_directory(dir: &Utf8Path) -> Result<Self> {
+        // The install dataset goes into a directory called "install".
+        let control_plane_dir = dir.join("install");
+        std::fs::create_dir_all(&control_plane_dir)
+            .with_context(|| format!("error creating directories at {dir}"))?;
+
+        Ok(Self {
+            host_phase_2: dir.join(HOST_PHASE_2_FILE_NAME),
+            clean_control_plane_dir: false,
+            control_plane_dir,
+            control_plane_zpool: None,
+        })
+    }
+}
+
 #[derive(Clone, Debug)]
 pub(crate) struct WriteDestination {
     drives: BTreeMap<M2Slot, ArtifactDestination>,
@@ -65,23 +90,18 @@ pub(crate) struct WriteDestination {
 pub static HOST_PHASE_2_FILE_NAME: &str = "host_phase_2.bin";
 
 impl WriteDestination {
-    pub(crate) fn in_directory(dir: &Utf8Path) -> Result<Self> {
-        let control_plane_dir = dir.join("zones");
-        std::fs::create_dir_all(&control_plane_dir)
-            .with_context(|| format!("error creating directories at {dir}"))?;
-
-        // `in_directory()` is only used for testing (e.g., on
-        // not-really-gimlets); pretend we're only writing to M.2 A.
+    pub(crate) fn in_directories(
+        a_dir: &Utf8Path,
+        b_dir: Option<&Utf8Path>,
+    ) -> Result<Self> {
         let mut drives = BTreeMap::new();
-        drives.insert(
-            M2Slot::A,
-            ArtifactDestination {
-                host_phase_2: dir.join(HOST_PHASE_2_FILE_NAME),
-                clean_control_plane_dir: false,
-                control_plane_dir,
-                control_plane_zpool: None,
-            },
-        );
+
+        drives.insert(M2Slot::A, ArtifactDestination::from_directory(a_dir)?);
+        if let Some(dir) = b_dir {
+            // b_dir can fail after we insert a_dir into drives, but that's okay
+            // because we drop drives.
+            drives.insert(M2Slot::B, ArtifactDestination::from_directory(dir)?);
+        }
 
         Ok(Self { drives, is_host_phase_2_block_device: false })
     }
@@ -189,6 +209,7 @@ pub(crate) struct ArtifactWriter<'a> {
 
 impl<'a> ArtifactWriter<'a> {
     pub(crate) fn new(
+        mupdate_id: MupdateUuid,
         host_phase_2_id: &'a ArtifactHashId,
         host_phase_2_data: &'a BufList,
         control_plane_id: &'a ArtifactHashId,
@@ -200,6 +221,13 @@ impl<'a> ArtifactWriter<'a> {
             .into_iter()
             .map(|(key, value)| (key, (value, DriveWriteProgress::Unstarted)))
             .collect();
+
+        // The mupdate override UUID is freshly generated within installinator.
+        // At the moment, there's no reason to have it be passed in via Wicket
+        // or some other means, though there are conceivably reasons to do so in
+        // the future.
+        let mupdate_override_uuid = MupdateOverrideUuid::new_v4();
+
         Self {
             drives,
             is_host_phase_2_block_device: destination
@@ -209,6 +237,8 @@ impl<'a> ArtifactWriter<'a> {
                 host_phase_2_data,
                 control_plane_id,
                 control_plane_zones,
+                mupdate_id,
+                mupdate_override_uuid,
             },
         }
     }
@@ -514,6 +544,8 @@ struct ArtifactsToWrite<'a> {
     host_phase_2_data: &'a BufList,
     control_plane_id: &'a ArtifactHashId,
     control_plane_zones: &'a ControlPlaneZoneImages,
+    mupdate_id: MupdateUuid,
+    mupdate_override_uuid: MupdateOverrideUuid,
 }
 
 impl ArtifactsToWrite<'_> {
@@ -559,6 +591,10 @@ impl ArtifactsToWrite<'_> {
             clean_output_directory: destinations.clean_control_plane_dir,
             output_directory: &destinations.control_plane_dir,
             zones: self.control_plane_zones,
+            host_phase_2_id: self.host_phase_2_id,
+            control_plane_id: self.control_plane_id,
+            mupdate_id: self.mupdate_id,
+            mupdate_override_uuid: self.mupdate_override_uuid,
         };
         cx.with_nested_engine(|engine| {
             inner_cx.register_steps(
@@ -592,6 +628,10 @@ struct ControlPlaneZoneWriteContext<'a> {
     clean_output_directory: bool,
     output_directory: &'a Utf8Path,
     zones: &'a ControlPlaneZoneImages,
+    host_phase_2_id: &'a ArtifactHashId,
+    control_plane_id: &'a ArtifactHashId,
+    mupdate_id: MupdateUuid,
+    mupdate_override_uuid: MupdateOverrideUuid,
 }
 
 impl ControlPlaneZoneWriteContext<'_> {
@@ -604,6 +644,7 @@ impl ControlPlaneZoneWriteContext<'_> {
         use update_engine::StepHandle;
 
         let slot = self.slot;
+        let mupdate_override_uuid = self.mupdate_override_uuid;
 
         // If we're on a gimlet, remove any files in the control plane
         // destination directory.
@@ -639,6 +680,77 @@ impl ControlPlaneZoneWriteContext<'_> {
         // return it on completion. This way each step passes it forward to its
         // successor.
         let mut transport = StepHandle::ready(transport);
+
+        // Write out a file to indicate that installinator has updated the
+        // dataset. Do this at the very beginning to ensure that installinator's
+        // presence is recorded even if something goes wrong after this step.
+        transport = engine
+            .new_step(
+                WriteComponent::ControlPlane,
+                ControlPlaneZonesStepId::MupdateOverride,
+                "Writing MUPdate override file",
+                async move |cx| {
+                    let transport = transport.into_value(cx.token()).await;
+                    let mupdate_json =
+                        self.mupdate_override_artifact(mupdate_override_uuid);
+
+                    let out_path = self
+                        .output_directory
+                        .join(MupdateOverrideInfo::FILE_NAME);
+
+                    write_artifact_impl(
+                        WriteComponent::ControlPlane,
+                        slot,
+                        mupdate_json,
+                        &out_path,
+                        transport,
+                        &cx,
+                    )
+                    .await?;
+
+                    StepSuccess::new(transport)
+                        .with_message(format!(
+                            "{out_path} written with mupdate override UUID: \
+                             {mupdate_override_uuid}",
+                        ))
+                        .into()
+                },
+            )
+            .register();
+
+        transport = engine
+            .new_step(
+                WriteComponent::ControlPlane,
+                ControlPlaneZonesStepId::ZoneManifest,
+                "Writing zone manifest",
+                async move |cx| {
+                    let transport = transport.into_value(cx.token()).await;
+                    let zone_manifest_json =
+                        self.omicron_zone_manifest_artifact().await;
+
+                    let out_path = self
+                        .output_directory
+                        .join(OmicronZoneManifest::FILE_NAME);
+
+                    write_artifact_impl(
+                        WriteComponent::ControlPlane,
+                        slot,
+                        zone_manifest_json,
+                        &out_path,
+                        transport,
+                        &cx,
+                    )
+                    .await?;
+
+                    StepSuccess::new(transport)
+                        .with_message(format!(
+                            "{out_path} written with mupdate UUID: {}",
+                            self.mupdate_id,
+                        ))
+                        .into()
+                },
+            )
+            .register();
 
         for (name, data) in &self.zones.zones {
             let out_path = self.output_directory.join(name);
@@ -687,7 +799,7 @@ impl ControlPlaneZoneWriteContext<'_> {
                     std::mem::drop(output_directory);
 
                     if let Some(zpool) = zpool {
-                        Zpool::export(zpool)?;
+                        Zpool::export(zpool).await?;
                     }
 
                     StepSuccess::new(()).into()
@@ -695,6 +807,77 @@ impl ControlPlaneZoneWriteContext<'_> {
             )
             .register();
     }
+
+    fn mupdate_override_artifact(
+        &self,
+        mupdate_override_uuid: MupdateOverrideUuid,
+    ) -> BufList {
+        let hash_ids =
+            [self.host_phase_2_id.clone(), self.control_plane_id.clone()]
+                .into_iter()
+                .collect();
+
+        let mupdate_override = MupdateOverrideInfo {
+            mupdate_uuid: mupdate_override_uuid,
+            hash_ids,
+        };
+        let json_bytes = serde_json::to_vec(&mupdate_override)
+            .expect("this serialization is infallible");
+        BufList::from(json_bytes)
+    }
+
+    async fn omicron_zone_manifest_artifact(&self) -> BufList {
+        let zones = compute_zone_hashes(&self.zones).await;
+
+        let omicron_zone_manifest = OmicronZoneManifest {
+            source: OmicronZoneManifestSource::Installinator {
+                mupdate_id: self.mupdate_id,
+            },
+            zones,
+        };
+        let json_bytes = serde_json::to_vec(&omicron_zone_manifest)
+            .expect("this serialization is infallible");
+        BufList::from(json_bytes)
+    }
+}
+
+/// Computes the zone hash IDs.
+///
+/// Hash computation is done in parallel on blocking tasks.
+///
+/// # Panics
+///
+/// Panics if the runtime shuts down causing a task abort, or a task panics.
+async fn compute_zone_hashes(
+    images: &ControlPlaneZoneImages,
+) -> IdOrdMap<OmicronZoneFileMetadata> {
+    let mut tasks = JoinSet::new();
+    for (file_name, data) in &images.zones {
+        let file_name = file_name.clone();
+        // data is a Bytes so is cheap to clone.
+        let data: Bytes = data.clone();
+        // Compute hashes in parallel.
+        tasks.spawn_blocking(move || {
+            let mut hasher = Sha256::new();
+            hasher.update(&data);
+            let hash = hasher.finalize();
+            OmicronZoneFileMetadata {
+                file_name,
+                file_size: u64::try_from(data.len()).unwrap(),
+                hash: ArtifactHash(hash.into()),
+            }
+        });
+    }
+
+    let mut output = IdOrdMap::new();
+    while let Some(res) = tasks.join_next().await {
+        // Propagate panics across tasks—this is the standard pattern we follow
+        // in installinator.
+        output
+            .insert_unique(res.expect("task panicked"))
+            .expect("filenames are unique");
+    }
+    output
 }
 
 fn remove_contents_of(path: &Utf8Path) -> io::Result<()> {
@@ -1107,6 +1290,7 @@ mod tests {
         };
 
         let mut writer = ArtifactWriter::new(
+            MupdateUuid::new_v4(),
             &host_id,
             &artifact_host,
             &control_plane_id,

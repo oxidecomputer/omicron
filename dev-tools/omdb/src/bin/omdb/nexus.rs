@@ -4,6 +4,8 @@
 
 //! omdb commands that query or update specific Nexus instances
 
+mod chicken_switches;
+
 use crate::Omdb;
 use crate::check_allow_destructive::DestructiveOperationToken;
 use crate::db::DbUrlOptions;
@@ -12,9 +14,11 @@ use crate::helpers::ConfirmationPrompt;
 use crate::helpers::const_max_len;
 use crate::helpers::display_option_blank;
 use crate::helpers::should_colorize;
-use anyhow::Context;
+use anyhow::Context as _;
 use anyhow::bail;
 use camino::Utf8PathBuf;
+use chicken_switches::ChickenSwitchesArgs;
+use chicken_switches::cmd_nexus_chicken_switches;
 use chrono::DateTime;
 use chrono::SecondsFormat;
 use chrono::Utc;
@@ -24,7 +28,6 @@ use clap::Subcommand;
 use clap::ValueEnum;
 use futures::StreamExt;
 use futures::TryStreamExt;
-use futures::future::try_join;
 use http::StatusCode;
 use internal_dns_types::names::ServiceName;
 use itertools::Itertools;
@@ -47,7 +50,9 @@ use nexus_types::deployment::ClickhousePolicy;
 use nexus_types::deployment::OximeterReadMode;
 use nexus_types::deployment::OximeterReadPolicy;
 use nexus_types::internal_api::background::AbandonedVmmReaperStatus;
+use nexus_types::internal_api::background::BlueprintPlannerStatus;
 use nexus_types::internal_api::background::BlueprintRendezvousStatus;
+use nexus_types::internal_api::background::EreporterStatus;
 use nexus_types::internal_api::background::InstanceReincarnationStatus;
 use nexus_types::internal_api::background::InstanceUpdaterStatus;
 use nexus_types::internal_api::background::LookupRegionPortStatus;
@@ -76,8 +81,11 @@ use serde::Deserialize;
 use slog_error_chain::InlineErrorChain;
 use std::collections::BTreeMap;
 use std::collections::BTreeSet;
+use std::fs::OpenOptions;
 use std::str::FromStr;
 use std::sync::Arc;
+use support_bundle_viewer::LocalFileAccess;
+use support_bundle_viewer::SupportBundleAccessor;
 use tabled::Tabled;
 use tabled::settings::Padding;
 use tabled::settings::object::Columns;
@@ -119,6 +127,8 @@ enum NexusCommands {
     BackgroundTasks(BackgroundTasksArgs),
     /// interact with blueprints
     Blueprints(BlueprintsArgs),
+    /// interact with reconfigurator chicken switches
+    ChickenSwitches(ChickenSwitchesArgs),
     /// interact with clickhouse policy
     ClickhousePolicy(ClickhousePolicyArgs),
     /// print information about pending MGS updates
@@ -132,6 +142,8 @@ enum NexusCommands {
     /// interact with support bundles
     #[command(visible_alias = "sb")]
     SupportBundles(SupportBundleArgs),
+    /// show running artifact versions
+    UpdateStatus,
 }
 
 #[derive(Debug, Args)]
@@ -266,17 +278,12 @@ struct BlueprintIdArgs {
 }
 
 #[derive(Debug, Args)]
-struct BlueprintIdsArgs {
+struct BlueprintDiffArgs {
     /// id of first blueprint (or `target` for the current target)
     blueprint1_id: BlueprintIdOrCurrentTarget,
-    /// id of second blueprint (or `target` for the current target)
-    blueprint2_id: BlueprintIdOrCurrentTarget,
-}
-
-#[derive(Debug, Args)]
-struct BlueprintDiffArgs {
-    #[clap(flatten)]
-    ids: BlueprintIdsArgs,
+    /// id of second blueprint (or `target` for the current target, or omitted
+    /// to use the parent of the first blueprint)
+    blueprint2_id: Option<BlueprintIdOrCurrentTarget>,
     /// Exit with 1 if there were differences, 0 if no differences.
     #[arg(long, default_value_t = false)]
     exit_code: bool,
@@ -495,17 +502,38 @@ enum SupportBundleCommands {
     Create,
     /// Delete a support bundle
     Delete(SupportBundleDeleteArgs),
+    /// Download an entire support bundle
+    Download(SupportBundleDownloadArgs),
     /// Download the index of a support bundle
     ///
     /// This is a "list of files", from which individual files can be accessed
     GetIndex(SupportBundleIndexArgs),
-    /// View a file within a support bundle
+    /// Download a single file within a support bundle
     GetFile(SupportBundleFileArgs),
+    /// Creates a dashboard for viewing the contents of a support bundle
+    Inspect(SupportBundleInspectArgs),
 }
 
 #[derive(Debug, Args)]
 struct SupportBundleDeleteArgs {
     id: SupportBundleUuid,
+}
+
+#[derive(Debug, Args)]
+struct SupportBundleDownloadArgs {
+    id: SupportBundleUuid,
+
+    /// Optional output path where the file should be written,
+    /// instead of stdout.
+    #[arg(short, long)]
+    output: Option<Utf8PathBuf>,
+
+    /// If "true" and using an output path, resumes downloading.
+    ///
+    /// This assumes the contents of "output" are already valid, and resumes
+    /// downloading at the end of the file.
+    #[arg(short, long, default_value_t = false)]
+    resume: bool,
 }
 
 #[derive(Debug, Args)]
@@ -521,6 +549,23 @@ struct SupportBundleFileArgs {
     /// instead of stdout.
     #[arg(short, long)]
     output: Option<Utf8PathBuf>,
+}
+
+#[derive(Debug, Args)]
+struct SupportBundleInspectArgs {
+    /// A specific bundle to inspect.
+    ///
+    /// If none is supplied, the latest active bundle is used.
+    /// Mutually exclusive with "path".
+    #[arg(short, long)]
+    id: Option<SupportBundleUuid>,
+
+    /// A local bundle file to inspect.
+    ///
+    /// If none is supplied, the latest active bundle is used.
+    /// Mutually exclusive with "id".
+    #[arg(short, long)]
+    path: Option<Utf8PathBuf>,
 }
 
 impl NexusArgs {
@@ -639,6 +684,10 @@ impl NexusArgs {
                 cmd_nexus_blueprints_import(&client, token, args).await
             }
 
+            NexusCommands::ChickenSwitches(args) => {
+                cmd_nexus_chicken_switches(&omdb, &client, args).await
+            }
+
             NexusCommands::ClickhousePolicy(ClickhousePolicyArgs {
                 command,
             }) => match command {
@@ -732,11 +781,20 @@ impl NexusArgs {
                 cmd_nexus_support_bundles_delete(&client, args, token).await
             }
             NexusCommands::SupportBundles(SupportBundleArgs {
+                command: SupportBundleCommands::Download(args),
+            }) => cmd_nexus_support_bundles_download(&client, args).await,
+            NexusCommands::SupportBundles(SupportBundleArgs {
                 command: SupportBundleCommands::GetIndex(args),
             }) => cmd_nexus_support_bundles_get_index(&client, args).await,
             NexusCommands::SupportBundles(SupportBundleArgs {
                 command: SupportBundleCommands::GetFile(args),
             }) => cmd_nexus_support_bundles_get_file(&client, args).await,
+            NexusCommands::SupportBundles(SupportBundleArgs {
+                command: SupportBundleCommands::Inspect(args),
+            }) => cmd_nexus_support_bundles_inspect(&client, args).await,
+            NexusCommands::UpdateStatus => {
+                cmd_nexus_update_status(&client).await
+            }
         }
     }
 }
@@ -1015,6 +1073,9 @@ fn print_task_details(bgtask: &BackgroundTask, details: &serde_json::Value) {
         "abandoned_vmm_reaper" => {
             print_task_abandoned_vmm_reaper(details);
         }
+        "blueprint_planner" => {
+            print_task_blueprint_planner(details);
+        }
         "blueprint_executor" => {
             print_task_blueprint_executor(details);
         }
@@ -1081,14 +1142,17 @@ fn print_task_details(bgtask: &BackgroundTask, details: &serde_json::Value) {
         "service_firewall_rule_propagation" => {
             print_task_service_firewall_rule_propagation(details);
         }
+        "sp_ereport_ingester" => {
+            print_task_sp_ereport_ingester(details);
+        }
         "support_bundle_collector" => {
             print_task_support_bundle_collector(details);
         }
         "tuf_artifact_replication" => {
             print_task_tuf_artifact_replication(details);
         }
-        "webhook_dispatcher" => {
-            print_task_webhook_dispatcher(details);
+        "alert_dispatcher" => {
+            print_task_alert_dispatcher(details);
         }
         "webhook_deliverator" => {
             print_task_webhook_deliverator(details);
@@ -1161,6 +1225,44 @@ fn print_task_abandoned_vmm_reaper(details: &serde_json::Value) {
             );
         }
     };
+}
+
+fn print_task_blueprint_planner(details: &serde_json::Value) {
+    let status =
+        match serde_json::from_value::<BlueprintPlannerStatus>(details.clone())
+        {
+            Ok(status) => status,
+            Err(error) => {
+                eprintln!(
+                    "warning: failed to interpret task details: {:?}: {:?}",
+                    error, details
+                );
+                return;
+            }
+        };
+    match status {
+        BlueprintPlannerStatus::Disabled => {
+            println!("    blueprint planning explicitly disabled by config!");
+        }
+        BlueprintPlannerStatus::Error(error) => {
+            println!("    task did not complete successfully: {error}");
+        }
+        BlueprintPlannerStatus::Unchanged { parent_blueprint_id } => {
+            println!("    plan unchanged from parent {parent_blueprint_id}");
+        }
+        BlueprintPlannerStatus::Planned { parent_blueprint_id, error } => {
+            println!(
+                "    planned new blueprint from parent {parent_blueprint_id}, \
+                     but could not make it the target: {error}"
+            );
+        }
+        BlueprintPlannerStatus::Targeted { blueprint_id, .. } => {
+            println!(
+                "    planned new blueprint {blueprint_id}, \
+                     and made it the current target"
+            );
+        }
+    }
 }
 
 fn print_task_blueprint_executor(details: &serde_json::Value) {
@@ -2308,6 +2410,7 @@ fn print_task_support_bundle_collector(details: &serde_json::Value) {
             if let Some(SupportBundleCollectionReport {
                 bundle,
                 listed_in_service_sleds,
+                listed_sps,
                 activated_in_db_ok,
             }) = collection_report
             {
@@ -2315,6 +2418,9 @@ fn print_task_support_bundle_collector(details: &serde_json::Value) {
                 println!("      Bundle ID: {bundle}");
                 println!(
                     "      Bundle was able to list in-service sleds: {listed_in_service_sleds}"
+                );
+                println!(
+                    "      Bundle was able to list service processors: {listed_sps}"
                 );
                 println!(
                     "      Bundle was activated in the database: {activated_in_db_ok}"
@@ -2390,19 +2496,18 @@ fn print_task_tuf_artifact_replication(details: &serde_json::Value) {
     }
 }
 
-fn print_task_webhook_dispatcher(details: &serde_json::Value) {
-    use nexus_types::internal_api::background::WebhookDispatched;
-    use nexus_types::internal_api::background::WebhookDispatcherStatus;
-    use nexus_types::internal_api::background::WebhookGlobStatus;
+fn print_task_alert_dispatcher(details: &serde_json::Value) {
+    use nexus_types::internal_api::background::AlertDispatched;
+    use nexus_types::internal_api::background::AlertDispatcherStatus;
+    use nexus_types::internal_api::background::AlertGlobStatus;
 
-    let WebhookDispatcherStatus {
+    let AlertDispatcherStatus {
         globs_reprocessed,
         glob_version,
         errors,
         dispatched,
         no_receivers,
-    } = match serde_json::from_value::<WebhookDispatcherStatus>(details.clone())
-    {
+    } = match serde_json::from_value::<AlertDispatcherStatus>(details.clone()) {
         Err(error) => {
             eprintln!(
                 "warning: failed to interpret task details: {:?}: {:?}",
@@ -2423,8 +2528,8 @@ fn print_task_webhook_dispatcher(details: &serde_json::Value) {
         }
     }
 
-    const DISPATCHED: &str = "events dispatched:";
-    const NO_RECEIVERS: &str = "events with no receivers subscribed:";
+    const DISPATCHED: &str = "alerts dispatched:";
+    const NO_RECEIVERS: &str = "alerts with no receivers subscribed:";
     const OUTDATED_GLOBS: &str = "outdated glob subscriptions:";
     const GLOBS_REPROCESSED: &str = "glob subscriptions reprocessed:";
     const ALREADY_REPROCESSED: &str =
@@ -2452,9 +2557,9 @@ fn print_task_webhook_dispatcher(details: &serde_json::Value) {
             dispatched: usize,
         }
         let table_rows = dispatched.iter().map(
-            |&WebhookDispatched { event_id, subscribed, dispatched }| {
+            |&AlertDispatched { alert_id, subscribed, dispatched }| {
                 DispatchedRow {
-                    event: event_id.into_untyped_uuid(),
+                    event: alert_id.into_untyped_uuid(),
                     subscribed,
                     dispatched,
                 }
@@ -2487,11 +2592,11 @@ fn print_task_webhook_dispatcher(details: &serde_json::Value) {
             println!("      receiver {rx_id:?}:");
             for (glob, status) in globs {
                 match status {
-                    Ok(WebhookGlobStatus::AlreadyReprocessed) => {
+                    Ok(AlertGlobStatus::AlreadyReprocessed) => {
                         println!("      > {glob:?}: already reprocessed");
                         already_reprocessed += 1;
                     }
-                    Ok(WebhookGlobStatus::Reprocessed {
+                    Ok(AlertGlobStatus::Reprocessed {
                         created,
                         deleted,
                         prev_version,
@@ -2622,7 +2727,7 @@ fn print_task_webhook_deliverator(details: &serde_json::Value) {
             let table_rows = failed_deliveries.into_iter().map(
                 |WebhookDeliveryFailure {
                      delivery_id,
-                     event_id,
+                     alert_id,
                      attempt,
                      result,
                      response_status,
@@ -2631,7 +2736,7 @@ fn print_task_webhook_deliverator(details: &serde_json::Value) {
                     // Turn these into untyped `Uuid`s so that the Display impl
                     // doesn't include the UUID kind in the table.
                     delivery: delivery_id.into_untyped_uuid(),
-                    event: event_id.into_untyped_uuid(),
+                    event: alert_id.into_untyped_uuid(),
                     attempt,
                     result,
                     status: response_status,
@@ -2649,7 +2754,7 @@ fn print_task_webhook_deliverator(details: &serde_json::Value) {
         if n_internal_errors > 0 {
             total_errors += n_internal_errors;
             println!(
-                "/!\\   {ERRORS:<WIDTH$}{:>NUM_WIDTH$}",
+                "{ERRICON}   {ERRORS:<WIDTH$}{:>NUM_WIDTH$}",
                 n_internal_errors,
             );
             if let Some(error) = error {
@@ -2676,8 +2781,129 @@ fn print_task_webhook_deliverator(details: &serde_json::Value) {
     );
 }
 
+fn print_task_sp_ereport_ingester(details: &serde_json::Value) {
+    use nexus_types::internal_api::background::SpEreportIngesterStatus;
+    use nexus_types::internal_api::background::SpEreporterStatus;
+
+    let SpEreportIngesterStatus { sps, errors } =
+        match serde_json::from_value(details.clone()) {
+            Err(error) => {
+                eprintln!(
+                    "warning: failed to interpret task details: {:?}: {:?}",
+                    error, details
+                );
+                return;
+            }
+            Ok(status) => status,
+        };
+
+    const NEW_EREPORTS: &str = "new ereports ingested:";
+    const HTTP_REQUESTS: &str = "HTTP requests sent:";
+    const ERRORS: &str = "errors:";
+    const WIDTH: usize =
+        const_max_len(&[NEW_EREPORTS, HTTP_REQUESTS, ERRORS]) + 1;
+    const NUM_WIDTH: usize = 3;
+
+    if !errors.is_empty() {
+        println!("{ERRICON} {ERRORS:<WIDTH$}{:>NUM_WIDTH$}", errors.len());
+        for error in errors {
+            println!("      - {error}");
+        }
+    }
+
+    print_ereporter_status_totals(sps.iter().map(|sp| &sp.status));
+
+    if !sps.is_empty() {
+        println!("\n    service processors:");
+        for SpEreporterStatus { sp_type, slot, status } in &sps {
+            println!(
+                "    - {sp_type:<6} {slot:02}: {:>NUM_WIDTH$} ereports",
+                status.ereports_received
+            );
+            println!(
+                "      {NEW_EREPORTS:<WIDTH$}{:>NUM_WIDTH$}",
+                status.new_ereports
+            );
+            println!(
+                "      {HTTP_REQUESTS:<WIDTH$}{:>NUM_WIDTH$}",
+                status.requests
+            );
+
+            if !status.errors.is_empty() {
+                println!(
+                    "{ERRICON}   {ERRORS:<WIDTH$}{:>NUM_WIDTH$}",
+                    status.errors.len()
+                );
+                for error in &status.errors {
+                    println!("        - {error}");
+                }
+            }
+        }
+    }
+}
+
+fn print_ereporter_status_totals<'status>(
+    statuses: impl Iterator<Item = &'status EreporterStatus>,
+) {
+    let mut total_received = 0;
+    let mut total_new = 0;
+    let mut total_reqs = 0;
+    let mut total_errors = 0;
+    let mut reporters_with_ereports = 0;
+    let mut reporters_with_errors = 0;
+
+    for &EreporterStatus {
+        ereports_received,
+        new_ereports,
+        requests,
+        ref errors,
+    } in statuses
+    {
+        total_received += ereports_received;
+        total_new += new_ereports;
+        total_reqs += requests;
+        total_errors += errors.len();
+        if total_received > 0 {
+            reporters_with_ereports += 1;
+        }
+        if total_errors > 0 {
+            reporters_with_errors += 1;
+        }
+    }
+
+    const EREPORTS_RECEIVED: &str = "total ereports received:";
+    const NEW_EREPORTS: &str = "  new ereports ingested:";
+    const HTTP_REQUESTS: &str = "total HTTP requests sent:";
+    const ERRORS: &str = "  total collection errors:";
+    const REPORTERS_WITH_EREPORTS: &str = "reporters with ereports:";
+    const REPORTERS_WITH_ERRORS: &str = "reporters with collection errors:";
+    const WIDTH: usize = const_max_len(&[
+        EREPORTS_RECEIVED,
+        NEW_EREPORTS,
+        HTTP_REQUESTS,
+        ERRORS,
+        REPORTERS_WITH_EREPORTS,
+    ]) + 1;
+    const NUM_WIDTH: usize = 4;
+
+    println!("    {EREPORTS_RECEIVED:<WIDTH$}{total_received:>NUM_WIDTH$}");
+    println!("    {NEW_EREPORTS:<WIDTH$}{total_new:>NUM_WIDTH$}");
+    println!("    {HTTP_REQUESTS:<WIDTH$}{total_reqs:>NUM_WIDTH$}");
+    println!("    {ERRORS:<WIDTH$}{total_reqs:>NUM_WIDTH$}");
+    println!(
+        "    {REPORTERS_WITH_EREPORTS:<WIDTH$}\
+         {reporters_with_ereports:>NUM_WIDTH$}"
+    );
+    println!(
+        "    {REPORTERS_WITH_ERRORS:<WIDTH$}\
+         {reporters_with_errors:>NUM_WIDTH$}"
+    );
+}
+
+const ERRICON: &str = "/!\\";
+
 fn warn_if_nonzero(n: usize) -> &'static str {
-    if n > 0 { "/!\\" } else { "   " }
+    if n > 0 { ERRICON } else { "   " }
 }
 
 /// Summarizes an `ActivationReason`
@@ -3018,11 +3244,21 @@ async fn cmd_nexus_blueprints_diff(
     client: &nexus_client::Client,
     args: &BlueprintDiffArgs,
 ) -> Result<(), anyhow::Error> {
-    let (b1, b2) = try_join(
-        args.ids.blueprint1_id.resolve_to_blueprint(client),
-        args.ids.blueprint2_id.resolve_to_blueprint(client),
-    )
-    .await?;
+    let blueprint = args.blueprint1_id.resolve_to_blueprint(client).await?;
+    let (b1, b2) = if let Some(blueprint2_arg) = &args.blueprint2_id {
+        (blueprint, blueprint2_arg.resolve_to_blueprint(client).await?)
+    } else if let Some(parent_id) = blueprint.parent_blueprint_id {
+        (
+            client
+                .blueprint_view(parent_id.as_untyped_uuid())
+                .await?
+                .into_inner(),
+            blueprint,
+        )
+    } else {
+        bail!("`blueprint2_id` was not specified and blueprint1 has no parent");
+    };
+
     let diff = b2.diff_since_blueprint(&b1);
     println!("{}", diff.display());
     if args.exit_code && diff.has_changes() {
@@ -3683,10 +3919,10 @@ async fn cmd_nexus_sled_expunge_disk_with_datastore(
 
             let mut sleds_containing_disk = vec![];
 
-            for (sled_id, sled_agent) in collection.sled_agents {
+            for sled_agent in collection.sled_agents {
                 for sled_disk in sled_agent.disks {
                     if sled_disk.identity == disk_identity {
-                        sleds_containing_disk.push(sled_id);
+                        sleds_containing_disk.push(sled_agent.sled_id);
                     }
                 }
             }
@@ -3819,10 +4055,10 @@ async fn cmd_nexus_support_bundles_delete(
 }
 
 async fn write_stream_to_sink(
-    mut stream: impl futures::Stream<Item = reqwest::Result<bytes::Bytes>>
-    + std::marker::Unpin,
+    mut stream: impl futures::Stream<Item = anyhow::Result<bytes::Bytes>>,
     mut sink: impl std::io::Write,
 ) -> Result<(), anyhow::Error> {
+    let mut stream = std::pin::pin!(stream);
     while let Some(data) = stream.next().await {
         match data {
             Err(err) => return Err(anyhow::anyhow!(err)),
@@ -3832,18 +4068,107 @@ async fn write_stream_to_sink(
     Ok(())
 }
 
+// Downloads a portion of a support bundle using range requests.
+//
+// "range" is in bytes, and is inclusive on both sides.
+async fn support_bundle_download_range(
+    client: &nexus_client::Client,
+    id: SupportBundleUuid,
+    range: (u64, u64),
+) -> anyhow::Result<impl futures::Stream<Item = anyhow::Result<bytes::Bytes>>> {
+    let range = format!("bytes={}-{}", range.0, range.1);
+    Ok(client
+        .support_bundle_download(id.as_untyped_uuid(), Some(&range))
+        .await
+        .with_context(|| format!("downloading support bundle {}", id))?
+        .into_inner_stream()
+        .map(|r| r.map_err(|err| anyhow::anyhow!(err))))
+}
+
+// Downloads all ranges of a support bundle, and combines them into a single
+// stream.
+//
+// Starts the download at "start" bytes (inclusive) and continues up to "end"
+// bytes (exclusive).
+fn support_bundle_download_ranges(
+    client: &nexus_client::Client,
+    id: SupportBundleUuid,
+    start: u64,
+    end: u64,
+) -> impl futures::Stream<Item = anyhow::Result<bytes::Bytes>> + use<'_> {
+    // Arbitrary chunk size of 100 MiB.
+    //
+    // Note that we'll still stream data in packets which are smaller than this,
+    // but we won't keep a single connection to Nexus open for longer than a 100
+    // MiB download.
+    const CHUNK_SIZE: u64 = 100 * (1 << 20);
+    futures::stream::try_unfold(
+        (start, start + CHUNK_SIZE - 1),
+        move |range| async move {
+            if end <= range.0 {
+                return Ok(None);
+            }
+
+            let stream =
+                support_bundle_download_range(client, id, range).await?;
+            let next_range = (range.0 + CHUNK_SIZE, range.1 + CHUNK_SIZE);
+            Ok::<_, anyhow::Error>(Some((stream, next_range)))
+        },
+    )
+    .try_flatten()
+}
+
+/// Runs `omdb nexus support-bundles download`
+async fn cmd_nexus_support_bundles_download(
+    client: &nexus_client::Client,
+    args: &SupportBundleDownloadArgs,
+) -> Result<(), anyhow::Error> {
+    let total_length = client
+        .support_bundle_head(args.id.as_untyped_uuid(), None)
+        .await?
+        .content_length()
+        .ok_or_else(|| anyhow::anyhow!("No content length"))?;
+
+    let start = match &args.output {
+        Some(output) if output.exists() && args.resume => {
+            output.metadata()?.len()
+        }
+        _ => 0,
+    };
+
+    let stream =
+        support_bundle_download_ranges(client, args.id, start, total_length);
+
+    let sink: Box<dyn std::io::Write> = match &args.output {
+        Some(path) => Box::new(
+            OpenOptions::new()
+                .create(true)
+                .append(true)
+                .truncate(!args.resume)
+                .open(path)?,
+        ),
+        None => Box::new(std::io::stdout()),
+    };
+
+    write_stream_to_sink(stream, sink)
+        .await
+        .with_context(|| format!("streaming support bundle {}", args.id))?;
+    Ok(())
+}
+
 /// Runs `omdb nexus support-bundles get-index`
 async fn cmd_nexus_support_bundles_get_index(
     client: &nexus_client::Client,
     args: &SupportBundleIndexArgs,
 ) -> Result<(), anyhow::Error> {
     let stream = client
-        .support_bundle_index(args.id.as_untyped_uuid())
+        .support_bundle_index(args.id.as_untyped_uuid(), None)
         .await
         .with_context(|| {
             format!("downloading support bundle index {}", args.id)
         })?
-        .into_inner_stream();
+        .into_inner_stream()
+        .map(|r| r.map_err(|err| anyhow::anyhow!(err)));
 
     write_stream_to_sink(stream, std::io::stdout()).await.with_context(
         || format!("streaming support bundle index {}", args.id),
@@ -3860,6 +4185,7 @@ async fn cmd_nexus_support_bundles_get_file(
         .support_bundle_download_file(
             args.id.as_untyped_uuid(),
             args.path.as_str(),
+            None,
         )
         .await
         .with_context(|| {
@@ -3868,7 +4194,8 @@ async fn cmd_nexus_support_bundles_get_file(
                 args.id, args.path
             )
         })?
-        .into_inner_stream();
+        .into_inner_stream()
+        .map(|r| r.map_err(|err| anyhow::anyhow!(err)));
 
     let sink: Box<dyn std::io::Write> = match &args.output {
         Some(path) => Box::new(std::fs::File::create(path)?),
@@ -3878,5 +4205,68 @@ async fn cmd_nexus_support_bundles_get_file(
     write_stream_to_sink(stream, sink).await.with_context(|| {
         format!("streaming support bundle file {}: {}", args.id, args.path)
     })?;
+    Ok(())
+}
+
+/// Runs `omdb nexus support-bundles inspect`
+async fn cmd_nexus_support_bundles_inspect(
+    client: &nexus_client::Client,
+    args: &SupportBundleInspectArgs,
+) -> Result<(), anyhow::Error> {
+    let accessor: Box<dyn SupportBundleAccessor> = match (args.id, &args.path) {
+        (None, Some(path)) => Box::new(LocalFileAccess::new(path)?),
+        (maybe_id, None) => Box::new(
+            crate::support_bundle::access_bundle_from_id(client, maybe_id)
+                .await?,
+        ),
+        (Some(_), Some(_)) => {
+            bail!("Cannot specify both UUID and path");
+        }
+    };
+
+    support_bundle_viewer::run_dashboard(accessor).await
+}
+
+/// Runs `omdb nexus upgrade-status`
+async fn cmd_nexus_update_status(
+    client: &nexus_client::Client,
+) -> Result<(), anyhow::Error> {
+    let status = client
+        .update_status()
+        .await
+        .context("retrieving update status")?
+        .into_inner();
+
+    #[derive(Tabled)]
+    #[tabled(rename_all = "SCREAMING_SNAKE_CASE")]
+    struct ZoneRow {
+        sled_id: String,
+        zone_type: String,
+        zone_id: String,
+        version: String,
+    }
+
+    let mut rows = Vec::new();
+    for (sled_id, mut statuses) in status.zones.into_iter() {
+        statuses.sort_unstable_by_key(|s| {
+            (s.zone_type.kind(), s.zone_id, s.version.clone())
+        });
+        for status in statuses {
+            rows.push(ZoneRow {
+                sled_id: sled_id.to_string(),
+                zone_type: status.zone_type.kind().name_prefix().into(),
+                zone_id: status.zone_id.to_string(),
+                version: status.version.to_string(),
+            });
+        }
+    }
+
+    let table = tabled::Table::new(rows)
+        .with(tabled::settings::Style::empty())
+        .with(tabled::settings::Padding::new(0, 1, 0, 0))
+        .to_string();
+
+    println!("Running Zones");
+    println!("{}", table);
     Ok(())
 }

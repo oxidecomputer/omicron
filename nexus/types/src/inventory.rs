@@ -17,16 +17,21 @@ use clickhouse_admin_types::ClickhouseKeeperClusterMembership;
 use daft::Diffable;
 pub use gateway_client::types::PowerState;
 pub use gateway_client::types::RotImageError;
-pub use gateway_client::types::RotSlot;
 pub use gateway_client::types::SpType;
+pub use gateway_types::rot::RotSlot;
+use iddqd::IdOrdItem;
+use iddqd::IdOrdMap;
+use iddqd::id_upcast;
+use nexus_sled_agent_shared::inventory::ConfigReconcilerInventory;
+use nexus_sled_agent_shared::inventory::ConfigReconcilerInventoryStatus;
 use nexus_sled_agent_shared::inventory::InventoryDataset;
 use nexus_sled_agent_shared::inventory::InventoryDisk;
 use nexus_sled_agent_shared::inventory::InventoryZpool;
+use nexus_sled_agent_shared::inventory::OmicronSledConfig;
 use nexus_sled_agent_shared::inventory::OmicronZoneConfig;
-use nexus_sled_agent_shared::inventory::OmicronZonesConfig;
 use nexus_sled_agent_shared::inventory::SledRole;
+use nexus_sled_agent_shared::inventory::ZoneImageResolverInventory;
 use omicron_common::api::external::ByteCount;
-use omicron_common::api::external::Generation;
 pub use omicron_common::api::internal::shared::NetworkInterface;
 pub use omicron_common::api::internal::shared::NetworkInterfaceKind;
 pub use omicron_common::api::internal::shared::SourceNatConfig;
@@ -117,7 +122,7 @@ pub struct Collection {
         BTreeMap<RotPageWhich, BTreeMap<Arc<BaseboardId>, RotPageFound>>,
 
     /// Sled Agent information, by *sled* id
-    pub sled_agents: BTreeMap<SledUuid, SledAgent>,
+    pub sled_agents: IdOrdMap<SledAgent>,
 
     /// The raft configuration (cluster membership) of the clickhouse keeper
     /// cluster as returned from each available keeper via `clickhouse-admin` in
@@ -166,19 +171,33 @@ impl Collection {
             .and_then(|by_bb| by_bb.get(baseboard_id))
     }
 
-    /// Iterate over all the Omicron zones in the collection
-    pub fn all_omicron_zones(
+    /// Iterate over all the Omicron zones in the sled-agent ledgers of this
+    /// collection
+    pub fn all_ledgered_omicron_zones(
         &self,
     ) -> impl Iterator<Item = &OmicronZoneConfig> {
-        self.sled_agents.values().flat_map(|sa| sa.omicron_zones.zones.iter())
+        self.sled_agents
+            .iter()
+            .filter_map(|sa| sa.ledgered_sled_config.as_ref())
+            .flat_map(|config| config.zones.iter())
+    }
+
+    /// Iterate over all the successfully-started Omicron zones (as reported by
+    /// each sled-agent's last reconciliation attempt)
+    pub fn all_running_omicron_zones(
+        &self,
+    ) -> impl Iterator<Item = &OmicronZoneConfig> {
+        self.sled_agents
+            .iter()
+            .filter_map(|sa| sa.last_reconciliation.as_ref())
+            .flat_map(|reconciliation| reconciliation.running_omicron_zones())
     }
 
     /// Iterate over the sled ids of sleds identified as Scrimlets
     pub fn scrimlets(&self) -> impl Iterator<Item = SledUuid> + '_ {
-        self.sled_agents
-            .iter()
-            .filter(|(_, inventory)| inventory.sled_role == SledRole::Scrimlet)
-            .map(|(sled_id, _)| *sled_id)
+        self.sled_agents.iter().filter_map(|sa| {
+            (sa.sled_role == SledRole::Scrimlet).then_some(sa.sled_id)
+        })
     }
 
     /// Return the latest clickhouse keeper configuration in this collection, if
@@ -260,6 +279,9 @@ pub struct Caboose {
     pub git_commit: String,
     pub name: String,
     pub version: String,
+    // The sign will generally be present for production RoT and RoT bootloader images.
+    // It's currently absent from SP images and could be absent from RoT images as well.
+    pub sign: Option<String>,
 }
 
 impl From<gateway_client::types::SpComponentCaboose> for Caboose {
@@ -269,6 +291,7 @@ impl From<gateway_client::types::SpComponentCaboose> for Caboose {
             git_commit: c.git_commit,
             name: c.name,
             version: c.version,
+            sign: c.sign,
         }
     }
 }
@@ -539,17 +562,19 @@ pub struct SledAgent {
     pub usable_hardware_threads: u32,
     pub usable_physical_ram: ByteCount,
     pub reservoir_size: ByteCount,
-    pub omicron_zones: OmicronZonesConfig,
     pub disks: Vec<PhysicalDisk>,
     pub zpools: Vec<Zpool>,
     pub datasets: Vec<Dataset>,
-    /// As part of reconfigurator planning we need to know the control plane
-    /// disks configuration that the sled-agent has seen last. Specifically,
-    /// this allows the planner to know if a disk expungement has been seen by
-    /// the sled-agent, so that the planner can decommission the expunged disk.
-    ///
-    /// This field corresponds to the `generation` field in
-    /// `OmicronPhysicalDisksConfig` that is stored in the blueprint and sent to
-    /// the sled-agent via the executor over the internal API.
-    pub omicron_physical_disks_generation: Generation,
+    pub ledgered_sled_config: Option<OmicronSledConfig>,
+    pub reconciler_status: ConfigReconcilerInventoryStatus,
+    pub last_reconciliation: Option<ConfigReconcilerInventory>,
+    pub zone_image_resolver: ZoneImageResolverInventory,
+}
+
+impl IdOrdItem for SledAgent {
+    type Key<'a> = SledUuid;
+    fn key(&self) -> Self::Key<'_> {
+        self.sled_id
+    }
+    id_upcast!();
 }

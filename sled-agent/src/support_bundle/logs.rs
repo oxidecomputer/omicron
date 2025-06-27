@@ -6,8 +6,10 @@
 
 use camino_tempfile::tempfile_in;
 use dropshot::HttpError;
+use futures::StreamExt;
+use futures::stream::FuturesUnordered;
 use range_requests::make_get_response;
-use sled_storage::manager::StorageHandle;
+use sled_agent_config_reconciler::AvailableDatasetsReceiver;
 use slog::Logger;
 use slog_error_chain::InlineErrorChain;
 use tokio::io::AsyncSeekExt;
@@ -43,12 +45,15 @@ impl From<Error> for HttpError {
 
 pub struct SupportBundleLogs<'a> {
     log: &'a Logger,
-    sled_storage: &'a StorageHandle,
+    available_datasets_rx: AvailableDatasetsReceiver,
 }
 
 impl<'a> SupportBundleLogs<'a> {
-    pub fn new(log: &'a Logger, sled_storage: &'a StorageHandle) -> Self {
-        Self { log, sled_storage }
+    pub fn new(
+        log: &'a Logger,
+        available_datasets_rx: AvailableDatasetsReceiver,
+    ) -> Self {
+        Self { log, available_datasets_rx }
     }
 
     /// Get a list of zones on a sled containing logs that we want to include in
@@ -75,28 +80,20 @@ impl<'a> SupportBundleLogs<'a> {
     where
         Z: Into<String>,
     {
-        // We are using an M.2 device for temporary storage to assemble a zip
-        // file made up of all of the discovered zone's logs.
-        let m2_debug_datasets = self
-            .sled_storage
-            .get_latest_disks()
-            .await
-            .all_sled_diagnostics_directories();
-        let tempdir = m2_debug_datasets.first().ok_or(Error::MissingStorage)?;
-        let mut tempfile = tempfile_in(tempdir)?;
+        let dataset_path = self.dataset_for_temporary_storage().await?;
+        let mut tempfile = tempfile_in(dataset_path)?;
 
         let log = self.log.clone();
         let zone = zone.into();
 
-        let zip_file = tokio::task::spawn_blocking(move || {
+        let zip_file = {
             let handle = sled_diagnostics::LogsHandle::new(log);
-            match handle.get_zone_logs(&zone, max_rotated, &mut tempfile) {
+            match handle.get_zone_logs(&zone, max_rotated, &mut tempfile).await
+            {
                 Ok(_) => Ok(tempfile),
                 Err(e) => Err(e),
             }
-        })
-        .await
-        .map_err(Error::Join)?
+        }
         .map_err(Error::Logs)?;
 
         // Since we are using a tempfile and the file path has already been
@@ -121,5 +118,58 @@ impl<'a> SupportBundleLogs<'a> {
             content_type,
             ReaderStream::new(zip_file_async),
         )?)
+    }
+
+    /// Attempt to find a U.2 device with the most available free space
+    /// for temporary storage to assemble a zip file made up of all of the
+    /// discovered zone's logs.
+    async fn dataset_for_temporary_storage(
+        &self,
+    ) -> Result<camino::Utf8PathBuf, Error> {
+        let mounted_debug_datasets =
+            self.available_datasets_rx.all_mounted_debug_datasets();
+        let storage_paths_to_size: Vec<_> = mounted_debug_datasets
+            .into_iter()
+            .map(|dataset_path| {
+                let path = dataset_path.path;
+                async move {
+                    match illumos_utils::zfs::Zfs::get_value(
+                        path.as_str(),
+                        "available",
+                    )
+                    .await
+                    {
+                        Ok(size_str) => match size_str.parse::<usize>() {
+                            Ok(size) => Some((path, size)),
+                            Err(e) => {
+                                warn!(
+                                    &self.log,
+                                    "failed to parse available size for the \
+                                    dataset at path {path}: {e}"
+                                );
+                                None
+                            }
+                        },
+                        Err(e) => {
+                            warn!(
+                                &self.log,
+                                "failed to get available size for the  dataset \
+                                at path {path}: {e}"
+                            );
+                            None
+                        }
+                    }
+                }
+            })
+            .collect::<FuturesUnordered<_>>()
+            .collect()
+            .await;
+
+        storage_paths_to_size
+            .into_iter()
+            .flatten()
+            .max_by_key(|(_, size)| *size)
+            .map(|(dataset_path, _)| dataset_path)
+            .ok_or(Error::MissingStorage)
     }
 }

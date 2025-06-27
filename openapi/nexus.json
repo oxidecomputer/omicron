@@ -13,7 +13,7 @@
     "/device/auth": {
       "post": {
         "tags": [
-          "hidden"
+          "console-auth"
         ],
         "summary": "Start an OAuth 2.0 Device Authorization Grant",
         "description": "This endpoint is designed to be accessed from an *unauthenticated* API client. It generates and records a `device_code` and `user_code` which must be verified and confirmed prior to a token being granted.",
@@ -43,7 +43,7 @@
     "/device/confirm": {
       "post": {
         "tags": [
-          "hidden"
+          "console-auth"
         ],
         "summary": "Confirm an OAuth 2.0 Device Authorization Grant",
         "description": "This endpoint is designed to be accessed by the user agent (browser), not the client requesting the token. So we do not actually return the token here; it will be returned in response to the poll on `/device/token`.",
@@ -74,7 +74,7 @@
     "/device/token": {
       "post": {
         "tags": [
-          "hidden"
+          "console-auth"
         ],
         "summary": "Request a device access token",
         "description": "This endpoint should be polled by the client until the user code is verified and the grant is confirmed.",
@@ -104,7 +104,7 @@
     "/experimental/v1/probes": {
       "get": {
         "tags": [
-          "hidden"
+          "experimental"
         ],
         "summary": "List instrumentation probes",
         "operationId": "probe_list",
@@ -171,7 +171,7 @@
       },
       "post": {
         "tags": [
-          "hidden"
+          "experimental"
         ],
         "summary": "Create instrumentation probe",
         "operationId": "probe_create",
@@ -219,7 +219,7 @@
     "/experimental/v1/probes/{probe}": {
       "get": {
         "tags": [
-          "hidden"
+          "experimental"
         ],
         "summary": "View instrumentation probe",
         "operationId": "probe_view",
@@ -264,7 +264,7 @@
       },
       "delete": {
         "tags": [
-          "hidden"
+          "experimental"
         ],
         "summary": "Delete instrumentation probe",
         "operationId": "probe_delete",
@@ -304,7 +304,7 @@
     "/experimental/v1/system/support-bundles": {
       "get": {
         "tags": [
-          "hidden"
+          "experimental"
         ],
         "summary": "List all support bundles",
         "operationId": "support_bundle_list",
@@ -361,7 +361,7 @@
       },
       "post": {
         "tags": [
-          "hidden"
+          "experimental"
         ],
         "summary": "Create a new support bundle",
         "operationId": "support_bundle_create",
@@ -385,17 +385,17 @@
         }
       }
     },
-    "/experimental/v1/system/support-bundles/{support_bundle}": {
+    "/experimental/v1/system/support-bundles/{bundle_id}": {
       "get": {
         "tags": [
-          "hidden"
+          "experimental"
         ],
         "summary": "View a support bundle",
         "operationId": "support_bundle_view",
         "parameters": [
           {
             "in": "path",
-            "name": "support_bundle",
+            "name": "bundle_id",
             "description": "ID of the support bundle",
             "required": true,
             "schema": {
@@ -425,7 +425,7 @@
       },
       "delete": {
         "tags": [
-          "hidden"
+          "experimental"
         ],
         "summary": "Delete an existing support bundle",
         "description": "May also be used to cancel a support bundle which is currently being collected, or to remove metadata for a support bundle that has failed.",
@@ -433,7 +433,7 @@
         "parameters": [
           {
             "in": "path",
-            "name": "support_bundle",
+            "name": "bundle_id",
             "description": "ID of the support bundle",
             "required": true,
             "schema": {
@@ -455,17 +455,25 @@
         }
       }
     },
-    "/experimental/v1/system/support-bundles/{support_bundle}/download": {
+    "/experimental/v1/system/support-bundles/{bundle_id}/download": {
       "get": {
         "tags": [
-          "hidden"
+          "experimental"
         ],
         "summary": "Download the contents of a support bundle",
         "operationId": "support_bundle_download",
         "parameters": [
           {
+            "in": "header",
+            "name": "range",
+            "description": "A request to access a portion of the resource, such as `bytes=0-499`\n\nSee: <https://developer.mozilla.org/en-US/docs/Web/HTTP/Reference/Headers/Range>",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
             "in": "path",
-            "name": "support_bundle",
+            "name": "bundle_id",
             "description": "ID of the support bundle",
             "required": true,
             "schema": {
@@ -487,14 +495,22 @@
       },
       "head": {
         "tags": [
-          "hidden"
+          "experimental"
         ],
         "summary": "Download the metadata of a support bundle",
         "operationId": "support_bundle_head",
         "parameters": [
           {
+            "in": "header",
+            "name": "range",
+            "description": "A request to access a portion of the resource, such as `bytes=0-499`\n\nSee: <https://developer.mozilla.org/en-US/docs/Web/HTTP/Reference/Headers/Range>",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
             "in": "path",
-            "name": "support_bundle",
+            "name": "bundle_id",
             "description": "ID of the support bundle",
             "required": true,
             "schema": {
@@ -515,14 +531,32 @@
         }
       }
     },
-    "/experimental/v1/system/support-bundles/{support_bundle}/download/{file}": {
+    "/experimental/v1/system/support-bundles/{bundle_id}/download/{file}": {
       "get": {
         "tags": [
-          "hidden"
+          "experimental"
         ],
         "summary": "Download a file within a support bundle",
         "operationId": "support_bundle_download_file",
         "parameters": [
+          {
+            "in": "header",
+            "name": "range",
+            "description": "A request to access a portion of the resource, such as `bytes=0-499`\n\nSee: <https://developer.mozilla.org/en-US/docs/Web/HTTP/Reference/Headers/Range>",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "bundle_id",
+            "description": "ID of the support bundle",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
           {
             "in": "path",
             "name": "file",
@@ -530,16 +564,6 @@
             "required": true,
             "schema": {
               "type": "string"
-            }
-          },
-          {
-            "in": "path",
-            "name": "support_bundle",
-            "description": "ID of the support bundle",
-            "required": true,
-            "schema": {
-              "type": "string",
-              "format": "uuid"
             }
           }
         ],
@@ -556,11 +580,29 @@
       },
       "head": {
         "tags": [
-          "hidden"
+          "experimental"
         ],
         "summary": "Download the metadata of a file within the support bundle",
         "operationId": "support_bundle_head_file",
         "parameters": [
+          {
+            "in": "header",
+            "name": "range",
+            "description": "A request to access a portion of the resource, such as `bytes=0-499`\n\nSee: <https://developer.mozilla.org/en-US/docs/Web/HTTP/Reference/Headers/Range>",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "bundle_id",
+            "description": "ID of the support bundle",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
           {
             "in": "path",
             "name": "file",
@@ -568,16 +610,6 @@
             "required": true,
             "schema": {
               "type": "string"
-            }
-          },
-          {
-            "in": "path",
-            "name": "support_bundle",
-            "description": "ID of the support bundle",
-            "required": true,
-            "schema": {
-              "type": "string",
-              "format": "uuid"
             }
           }
         ],
@@ -593,17 +625,25 @@
         }
       }
     },
-    "/experimental/v1/system/support-bundles/{support_bundle}/index": {
+    "/experimental/v1/system/support-bundles/{bundle_id}/index": {
       "get": {
         "tags": [
-          "hidden"
+          "experimental"
         ],
         "summary": "Download the index of a support bundle",
         "operationId": "support_bundle_index",
         "parameters": [
           {
+            "in": "header",
+            "name": "range",
+            "description": "A request to access a portion of the resource, such as `bytes=0-499`\n\nSee: <https://developer.mozilla.org/en-US/docs/Web/HTTP/Reference/Headers/Range>",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
             "in": "path",
-            "name": "support_bundle",
+            "name": "bundle_id",
             "description": "ID of the support bundle",
             "required": true,
             "schema": {
@@ -686,7 +726,7 @@
     "/v1/affinity-groups": {
       "get": {
         "tags": [
-          "hidden"
+          "experimental"
         ],
         "summary": "List affinity groups",
         "operationId": "affinity_group_list",
@@ -753,7 +793,7 @@
       },
       "post": {
         "tags": [
-          "hidden"
+          "experimental"
         ],
         "summary": "Create affinity group",
         "operationId": "affinity_group_create",
@@ -801,7 +841,7 @@
     "/v1/affinity-groups/{affinity_group}": {
       "get": {
         "tags": [
-          "hidden"
+          "experimental"
         ],
         "summary": "Fetch affinity group",
         "operationId": "affinity_group_view",
@@ -845,7 +885,7 @@
       },
       "put": {
         "tags": [
-          "hidden"
+          "experimental"
         ],
         "summary": "Update affinity group",
         "operationId": "affinity_group_update",
@@ -899,7 +939,7 @@
       },
       "delete": {
         "tags": [
-          "hidden"
+          "experimental"
         ],
         "summary": "Delete affinity group",
         "operationId": "affinity_group_delete",
@@ -938,7 +978,7 @@
     "/v1/affinity-groups/{affinity_group}/members": {
       "get": {
         "tags": [
-          "hidden"
+          "experimental"
         ],
         "summary": "List affinity group members",
         "operationId": "affinity_group_member_list",
@@ -1014,7 +1054,7 @@
     "/v1/affinity-groups/{affinity_group}/members/instance/{instance}": {
       "get": {
         "tags": [
-          "hidden"
+          "experimental"
         ],
         "summary": "Fetch affinity group member",
         "operationId": "affinity_group_member_instance_view",
@@ -1065,7 +1105,7 @@
       },
       "post": {
         "tags": [
-          "hidden"
+          "experimental"
         ],
         "summary": "Add member to affinity group",
         "operationId": "affinity_group_member_instance_add",
@@ -1116,7 +1156,7 @@
       },
       "delete": {
         "tags": [
-          "hidden"
+          "experimental"
         ],
         "summary": "Remove member from affinity group",
         "operationId": "affinity_group_member_instance_delete",
@@ -1149,6 +1189,471 @@
         "responses": {
           "204": {
             "description": "successful deletion"
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/v1/alert-classes": {
+      "get": {
+        "tags": [
+          "system/alerts"
+        ],
+        "summary": "List alert classes",
+        "operationId": "alert_class_list",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "limit",
+            "description": "Maximum number of items returned by a single call",
+            "schema": {
+              "nullable": true,
+              "type": "integer",
+              "format": "uint32",
+              "minimum": 1
+            }
+          },
+          {
+            "in": "query",
+            "name": "page_token",
+            "description": "Token returned by previous call to retrieve the subsequent page",
+            "schema": {
+              "nullable": true,
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "filter",
+            "description": "An optional glob pattern for filtering alert class names.\n\nIf provided, only alert classes which match this glob pattern will be included in the response.",
+            "schema": {
+              "$ref": "#/components/schemas/AlertSubscription"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AlertClassResultsPage"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "x-dropshot-pagination": {
+          "required": []
+        }
+      }
+    },
+    "/v1/alert-receivers": {
+      "get": {
+        "tags": [
+          "system/alerts"
+        ],
+        "summary": "List alert receivers",
+        "operationId": "alert_receiver_list",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "limit",
+            "description": "Maximum number of items returned by a single call",
+            "schema": {
+              "nullable": true,
+              "type": "integer",
+              "format": "uint32",
+              "minimum": 1
+            }
+          },
+          {
+            "in": "query",
+            "name": "page_token",
+            "description": "Token returned by previous call to retrieve the subsequent page",
+            "schema": {
+              "nullable": true,
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "sort_by",
+            "schema": {
+              "$ref": "#/components/schemas/NameOrIdSortMode"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AlertReceiverResultsPage"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "x-dropshot-pagination": {
+          "required": []
+        }
+      }
+    },
+    "/v1/alert-receivers/{receiver}": {
+      "get": {
+        "tags": [
+          "system/alerts"
+        ],
+        "summary": "Fetch alert receiver",
+        "operationId": "alert_receiver_view",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "receiver",
+            "description": "The name or ID of the webhook receiver.",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/NameOrId"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AlertReceiver"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      },
+      "delete": {
+        "tags": [
+          "system/alerts"
+        ],
+        "summary": "Delete alert receiver",
+        "operationId": "alert_receiver_delete",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "receiver",
+            "description": "The name or ID of the webhook receiver.",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/NameOrId"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "successful deletion"
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/v1/alert-receivers/{receiver}/deliveries": {
+      "get": {
+        "tags": [
+          "system/alerts"
+        ],
+        "summary": "List delivery attempts to alert receiver",
+        "description": "Optional query parameters to this endpoint may be used to filter deliveries by state. If none of the `failed`, `pending` or `delivered` query parameters are present, all deliveries are returned. If one or more of these parameters are provided, only those which are set to \"true\" are included in the response.",
+        "operationId": "alert_delivery_list",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "receiver",
+            "description": "The name or ID of the webhook receiver.",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/NameOrId"
+            }
+          },
+          {
+            "in": "query",
+            "name": "delivered",
+            "description": "If true, include deliveries which have succeeded.\n\nIf any of the \"pending\", \"failed\", or \"delivered\" query parameters are set to true, only deliveries matching those state(s) will be included in the response. If NO state filter parameters are set, then all deliveries are included.",
+            "schema": {
+              "nullable": true,
+              "type": "boolean"
+            }
+          },
+          {
+            "in": "query",
+            "name": "failed",
+            "description": "If true, include deliveries which have failed permanently.\n\nIf any of the \"pending\", \"failed\", or \"delivered\" query parameters are set to true, only deliveries matching those state(s) will be included in the response. If NO state filter parameters are set, then all deliveries are included.\n\nA delivery fails permanently when the retry limit of three total attempts is reached without a successful delivery.",
+            "schema": {
+              "nullable": true,
+              "type": "boolean"
+            }
+          },
+          {
+            "in": "query",
+            "name": "pending",
+            "description": "If true, include deliveries which are currently in progress.\n\nIf any of the \"pending\", \"failed\", or \"delivered\" query parameters are set to true, only deliveries matching those state(s) will be included in the response. If NO state filter parameters are set, then all deliveries are included.\n\nA delivery is considered \"pending\" if it has not yet been sent at all, or if a delivery attempt has failed but the delivery has retries remaining.",
+            "schema": {
+              "nullable": true,
+              "type": "boolean"
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "description": "Maximum number of items returned by a single call",
+            "schema": {
+              "nullable": true,
+              "type": "integer",
+              "format": "uint32",
+              "minimum": 1
+            }
+          },
+          {
+            "in": "query",
+            "name": "page_token",
+            "description": "Token returned by previous call to retrieve the subsequent page",
+            "schema": {
+              "nullable": true,
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "sort_by",
+            "schema": {
+              "$ref": "#/components/schemas/TimeAndIdSortMode"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AlertDeliveryResultsPage"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "x-dropshot-pagination": {
+          "required": []
+        }
+      }
+    },
+    "/v1/alert-receivers/{receiver}/probe": {
+      "post": {
+        "tags": [
+          "system/alerts"
+        ],
+        "summary": "Send liveness probe to alert receiver",
+        "description": "This endpoint synchronously sends a liveness probe to the selected alert receiver. The response message describes the outcome of the probe: either the successful response (as appropriate), or indication of why the probe failed.\n\nThe result of the probe is represented as an `AlertDelivery` model. Details relating to the status of the probe depend on the alert delivery mechanism, and are included in the `AlertDeliveryAttempts` model. For example, webhook receiver liveness probes include the HTTP status code returned by the receiver endpoint.\n\nNote that the response status is `200 OK` as long as a probe request was able to be sent to the receiver endpoint. If an HTTP-based receiver, such as a webhook, responds to the another status code, including an error, this will be indicated by the response body, *not* the status of the response.\n\nThe `resend` query parameter can be used to request re-delivery of failed events if the liveness probe succeeds. If it is set to true and the liveness probe succeeds, any alerts for which delivery to this receiver has failed will be queued for re-delivery.",
+        "operationId": "alert_receiver_probe",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "receiver",
+            "description": "The name or ID of the webhook receiver.",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/NameOrId"
+            }
+          },
+          {
+            "in": "query",
+            "name": "resend",
+            "description": "If true, resend all events that have not been delivered successfully if the probe request succeeds.",
+            "schema": {
+              "type": "boolean"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AlertProbeResult"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/v1/alert-receivers/{receiver}/subscriptions": {
+      "post": {
+        "tags": [
+          "system/alerts"
+        ],
+        "summary": "Add alert receiver subscription",
+        "operationId": "alert_receiver_subscription_add",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "receiver",
+            "description": "The name or ID of the webhook receiver.",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/NameOrId"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AlertSubscriptionCreate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "description": "successful creation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AlertSubscriptionCreated"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/v1/alert-receivers/{receiver}/subscriptions/{subscription}": {
+      "delete": {
+        "tags": [
+          "system/alerts"
+        ],
+        "summary": "Remove alert receiver subscription",
+        "operationId": "alert_receiver_subscription_remove",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "receiver",
+            "description": "The name or ID of the webhook receiver.",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/NameOrId"
+            }
+          },
+          {
+            "in": "path",
+            "name": "subscription",
+            "description": "The event class subscription itself.",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/AlertSubscription"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "successful deletion"
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/v1/alerts/{alert_id}/resend": {
+      "post": {
+        "tags": [
+          "system/alerts"
+        ],
+        "summary": "Request re-delivery of alert",
+        "operationId": "alert_delivery_resend",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "alert_id",
+            "description": "UUID of the alert",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "in": "query",
+            "name": "receiver",
+            "description": "The name or ID of the webhook receiver.",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/NameOrId"
+            }
+          }
+        ],
+        "responses": {
+          "201": {
+            "description": "successful creation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AlertDeliveryId"
+                }
+              }
+            }
           },
           "4XX": {
             "$ref": "#/components/responses/Error"
@@ -1625,6 +2130,68 @@
         "responses": {
           "204": {
             "description": "successful deletion"
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/v1/auth-settings": {
+      "get": {
+        "tags": [
+          "silos"
+        ],
+        "summary": "Fetch current silo's auth settings",
+        "operationId": "auth_settings_view",
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SiloAuthSettings"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      },
+      "put": {
+        "tags": [
+          "silos"
+        ],
+        "summary": "Update current silo's auth settings",
+        "operationId": "auth_settings_update",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SiloAuthSettingsUpdate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SiloAuthSettings"
+                }
+              }
+            }
           },
           "4XX": {
             "$ref": "#/components/responses/Error"
@@ -3283,7 +3850,7 @@
     "/v1/instances/{instance}/affinity-groups": {
       "get": {
         "tags": [
-          "hidden"
+          "experimental"
         ],
         "summary": "List affinity groups containing instance",
         "operationId": "instance_affinity_group_list",
@@ -4901,7 +5468,7 @@
     "/v1/logout": {
       "post": {
         "tags": [
-          "hidden"
+          "console-auth"
         ],
         "summary": "Log user out of web console by deleting session on client and server",
         "operationId": "logout",
@@ -4921,7 +5488,7 @@
     "/v1/me": {
       "get": {
         "tags": [
-          "session"
+          "current-user"
         ],
         "summary": "Fetch user for current session",
         "operationId": "current_user_view",
@@ -4945,10 +5512,103 @@
         }
       }
     },
+    "/v1/me/access-tokens": {
+      "get": {
+        "tags": [
+          "tokens"
+        ],
+        "summary": "List access tokens",
+        "description": "List device access tokens for the currently authenticated user.",
+        "operationId": "current_user_access_token_list",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "limit",
+            "description": "Maximum number of items returned by a single call",
+            "schema": {
+              "nullable": true,
+              "type": "integer",
+              "format": "uint32",
+              "minimum": 1
+            }
+          },
+          {
+            "in": "query",
+            "name": "page_token",
+            "description": "Token returned by previous call to retrieve the subsequent page",
+            "schema": {
+              "nullable": true,
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "sort_by",
+            "schema": {
+              "$ref": "#/components/schemas/IdSortMode"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DeviceAccessTokenResultsPage"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "x-dropshot-pagination": {
+          "required": []
+        }
+      }
+    },
+    "/v1/me/access-tokens/{token_id}": {
+      "delete": {
+        "tags": [
+          "tokens"
+        ],
+        "summary": "Delete access token",
+        "description": "Delete a device access token for the currently authenticated user.",
+        "operationId": "current_user_access_token_delete",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "token_id",
+            "description": "ID of the token",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "successful deletion"
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
     "/v1/me/groups": {
       "get": {
         "tags": [
-          "session"
+          "current-user"
         ],
         "summary": "Fetch current user's groups",
         "operationId": "current_user_groups",
@@ -5007,7 +5667,7 @@
     "/v1/me/ssh-keys": {
       "get": {
         "tags": [
-          "session"
+          "current-user"
         ],
         "summary": "List SSH public keys",
         "description": "Lists SSH public keys for the currently authenticated user.",
@@ -5065,7 +5725,7 @@
       },
       "post": {
         "tags": [
-          "session"
+          "current-user"
         ],
         "summary": "Create SSH public key",
         "description": "Create an SSH public key for the currently authenticated user.",
@@ -5103,7 +5763,7 @@
     "/v1/me/ssh-keys/{ssh_key}": {
       "get": {
         "tags": [
-          "session"
+          "current-user"
         ],
         "summary": "Fetch SSH public key",
         "description": "Fetch SSH public key associated with the currently authenticated user.",
@@ -5140,7 +5800,7 @@
       },
       "delete": {
         "tags": [
-          "session"
+          "current-user"
         ],
         "summary": "Delete SSH public key",
         "description": "Delete an SSH public key associated with the currently authenticated user.",
@@ -7523,7 +8183,6 @@
             "in": "query",
             "name": "silo",
             "description": "Name or ID of the silo",
-            "required": true,
             "schema": {
               "$ref": "#/components/schemas/NameOrId"
             }
@@ -8949,8 +9608,8 @@
           "required": true
         },
         "responses": {
-          "201": {
-            "description": "successful creation",
+          "200": {
+            "description": "successful operation",
             "content": {
               "application/json": {
                 "schema": {
@@ -9389,7 +10048,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/SwitchPortSettingsResultsPage"
+                  "$ref": "#/components/schemas/SwitchPortSettingsIdentityResultsPage"
                 }
               }
             }
@@ -9427,7 +10086,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/SwitchPortSettingsView"
+                  "$ref": "#/components/schemas/SwitchPortSettings"
                 }
               }
             }
@@ -9493,7 +10152,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/SwitchPortSettingsView"
+                  "$ref": "#/components/schemas/SwitchPortSettings"
                 }
               }
             }
@@ -10210,10 +10869,99 @@
         }
       }
     },
+    "/v1/system/update/repository": {
+      "put": {
+        "tags": [
+          "experimental"
+        ],
+        "summary": "Upload TUF repository",
+        "operationId": "system_update_put_repository",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "file_name",
+            "description": "The name of the uploaded file.",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/octet-stream": {
+              "schema": {
+                "type": "string",
+                "format": "binary"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TufRepoInsertResponse"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/v1/system/update/repository/{system_version}": {
+      "get": {
+        "tags": [
+          "experimental"
+        ],
+        "summary": "Fetch TUF repository description",
+        "description": "Fetch description of TUF repository by system version.",
+        "operationId": "system_update_get_repository",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "system_version",
+            "description": "The version to get.",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "pattern": "^(0|[1-9]\\d*)\\.(0|[1-9]\\d*)\\.(0|[1-9]\\d*)(?:-((?:0|[1-9]\\d*|\\d*[a-zA-Z-][0-9a-zA-Z-]*)(?:\\.(?:0|[1-9]\\d*|\\d*[a-zA-Z-][0-9a-zA-Z-]*))*))?(?:\\+([0-9a-zA-Z-]+(?:\\.[0-9a-zA-Z-]+)*))?$"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TufRepoGetResponse"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
     "/v1/system/update/target-release": {
       "get": {
         "tags": [
-          "hidden"
+          "experimental"
         ],
         "summary": "Get the current target release of the rack's system software",
         "description": "This may not correspond to the actual software running on the rack at the time of request; it is instead the release that the rack reconfigurator should be moving towards as a goal state. After some number of planning and execution phases, the software running on the rack should eventually correspond to the release described here.",
@@ -10239,7 +10987,7 @@
       },
       "put": {
         "tags": [
-          "hidden"
+          "experimental"
         ],
         "summary": "Set the current target release of the rack's system software",
         "description": "The rack reconfigurator will treat the software specified here as a goal state for the rack's software, and attempt to asynchronously update to that release.",
@@ -10587,7 +11335,7 @@
     "/v1/timeseries/query": {
       "post": {
         "tags": [
-          "hidden"
+          "experimental"
         ],
         "summary": "Run project-scoped timeseries query",
         "description": "Queries are written in OxQL. Project must be specified by name or ID in URL query parameter. The OxQL query will only return timeseries data from the specified project.",
@@ -12082,271 +12830,10 @@
         }
       }
     },
-    "/v1/webhooks/deliveries": {
-      "get": {
-        "tags": [
-          "system/webhooks"
-        ],
-        "summary": "List delivery attempts to webhook receiver",
-        "description": "Optional query parameters to this endpoint may be used to filter deliveries by state. If none of the `failed`, `pending` or `delivered` query parameters are present, all deliveries are returned. If one or more of these parameters are provided, only those which are set to \"true\" are included in the response.",
-        "operationId": "webhook_delivery_list",
-        "parameters": [
-          {
-            "in": "query",
-            "name": "receiver",
-            "description": "The name or ID of the webhook receiver.",
-            "required": true,
-            "schema": {
-              "$ref": "#/components/schemas/NameOrId"
-            }
-          },
-          {
-            "in": "query",
-            "name": "delivered",
-            "description": "If true, include deliveries which have succeeded.\n\nIf any of the \"pending\", \"failed\", or \"delivered\" query parameters are set to true, only deliveries matching those state(s) will be included in the response. If NO state filter parameters are set, then all deliveries are included.",
-            "schema": {
-              "nullable": true,
-              "type": "boolean"
-            }
-          },
-          {
-            "in": "query",
-            "name": "failed",
-            "description": "If true, include deliveries which have failed permanently.\n\nIf any of the \"pending\", \"failed\", or \"delivered\" query parameters are set to true, only deliveries matching those state(s) will be included in the response. If NO state filter parameters are set, then all deliveries are included.\n\nA delivery fails permanently when the retry limit of three total attempts is reached without a successful delivery.",
-            "schema": {
-              "nullable": true,
-              "type": "boolean"
-            }
-          },
-          {
-            "in": "query",
-            "name": "pending",
-            "description": "If true, include deliveries which are currently in progress.\n\nIf any of the \"pending\", \"failed\", or \"delivered\" query parameters are set to true, only deliveries matching those state(s) will be included in the response. If NO state filter parameters are set, then all deliveries are included.\n\nA delivery is considered \"pending\" if it has not yet been sent at all, or if a delivery attempt has failed but the delivery has retries remaining.",
-            "schema": {
-              "nullable": true,
-              "type": "boolean"
-            }
-          },
-          {
-            "in": "query",
-            "name": "limit",
-            "description": "Maximum number of items returned by a single call",
-            "schema": {
-              "nullable": true,
-              "type": "integer",
-              "format": "uint32",
-              "minimum": 1
-            }
-          },
-          {
-            "in": "query",
-            "name": "page_token",
-            "description": "Token returned by previous call to retrieve the subsequent page",
-            "schema": {
-              "nullable": true,
-              "type": "string"
-            }
-          },
-          {
-            "in": "query",
-            "name": "sort_by",
-            "schema": {
-              "$ref": "#/components/schemas/TimeAndIdSortMode"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "successful operation",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/WebhookDeliveryResultsPage"
-                }
-              }
-            }
-          },
-          "4XX": {
-            "$ref": "#/components/responses/Error"
-          },
-          "5XX": {
-            "$ref": "#/components/responses/Error"
-          }
-        },
-        "x-dropshot-pagination": {
-          "required": []
-        }
-      }
-    },
-    "/v1/webhooks/deliveries/{event_id}/resend": {
+    "/v1/webhook-receivers": {
       "post": {
         "tags": [
-          "system/webhooks"
-        ],
-        "summary": "Request re-delivery of webhook event",
-        "operationId": "webhook_delivery_resend",
-        "parameters": [
-          {
-            "in": "path",
-            "name": "event_id",
-            "description": "UUID of the event",
-            "required": true,
-            "schema": {
-              "type": "string",
-              "format": "uuid"
-            }
-          },
-          {
-            "in": "query",
-            "name": "receiver",
-            "description": "The name or ID of the webhook receiver.",
-            "required": true,
-            "schema": {
-              "$ref": "#/components/schemas/NameOrId"
-            }
-          }
-        ],
-        "responses": {
-          "201": {
-            "description": "successful creation",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/WebhookDeliveryId"
-                }
-              }
-            }
-          },
-          "4XX": {
-            "$ref": "#/components/responses/Error"
-          },
-          "5XX": {
-            "$ref": "#/components/responses/Error"
-          }
-        }
-      }
-    },
-    "/v1/webhooks/event-classes": {
-      "get": {
-        "tags": [
-          "system/webhooks"
-        ],
-        "summary": "List webhook event classes",
-        "operationId": "webhook_event_class_list",
-        "parameters": [
-          {
-            "in": "query",
-            "name": "limit",
-            "description": "Maximum number of items returned by a single call",
-            "schema": {
-              "nullable": true,
-              "type": "integer",
-              "format": "uint32",
-              "minimum": 1
-            }
-          },
-          {
-            "in": "query",
-            "name": "page_token",
-            "description": "Token returned by previous call to retrieve the subsequent page",
-            "schema": {
-              "nullable": true,
-              "type": "string"
-            }
-          },
-          {
-            "in": "query",
-            "name": "filter",
-            "description": "An optional glob pattern for filtering event class names.\n\nIf provided, only event classes which match this glob pattern will be included in the response.",
-            "schema": {
-              "$ref": "#/components/schemas/WebhookSubscription"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "successful operation",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/EventClassResultsPage"
-                }
-              }
-            }
-          },
-          "4XX": {
-            "$ref": "#/components/responses/Error"
-          },
-          "5XX": {
-            "$ref": "#/components/responses/Error"
-          }
-        },
-        "x-dropshot-pagination": {
-          "required": []
-        }
-      }
-    },
-    "/v1/webhooks/receivers": {
-      "get": {
-        "tags": [
-          "system/webhooks"
-        ],
-        "summary": "List webhook receivers",
-        "operationId": "webhook_receiver_list",
-        "parameters": [
-          {
-            "in": "query",
-            "name": "limit",
-            "description": "Maximum number of items returned by a single call",
-            "schema": {
-              "nullable": true,
-              "type": "integer",
-              "format": "uint32",
-              "minimum": 1
-            }
-          },
-          {
-            "in": "query",
-            "name": "page_token",
-            "description": "Token returned by previous call to retrieve the subsequent page",
-            "schema": {
-              "nullable": true,
-              "type": "string"
-            }
-          },
-          {
-            "in": "query",
-            "name": "sort_by",
-            "schema": {
-              "$ref": "#/components/schemas/NameOrIdSortMode"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "successful operation",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/WebhookReceiverResultsPage"
-                }
-              }
-            }
-          },
-          "4XX": {
-            "$ref": "#/components/responses/Error"
-          },
-          "5XX": {
-            "$ref": "#/components/responses/Error"
-          }
-        },
-        "x-dropshot-pagination": {
-          "required": []
-        }
-      },
-      "post": {
-        "tags": [
-          "system/webhooks"
+          "system/alerts"
         ],
         "summary": "Create webhook receiver",
         "operationId": "webhook_receiver_create",
@@ -12380,46 +12867,10 @@
         }
       }
     },
-    "/v1/webhooks/receivers/{receiver}": {
-      "get": {
-        "tags": [
-          "system/webhooks"
-        ],
-        "summary": "Fetch webhook receiver",
-        "operationId": "webhook_receiver_view",
-        "parameters": [
-          {
-            "in": "path",
-            "name": "receiver",
-            "description": "The name or ID of the webhook receiver.",
-            "required": true,
-            "schema": {
-              "$ref": "#/components/schemas/NameOrId"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "successful operation",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/WebhookReceiver"
-                }
-              }
-            }
-          },
-          "4XX": {
-            "$ref": "#/components/responses/Error"
-          },
-          "5XX": {
-            "$ref": "#/components/responses/Error"
-          }
-        }
-      },
+    "/v1/webhook-receivers/{receiver}": {
       "put": {
         "tags": [
-          "system/webhooks"
+          "system/alerts"
         ],
         "summary": "Update webhook receiver",
         "description": "Note that receiver secrets are NOT added or removed using this endpoint. Instead, use the `/v1/webhooks/{secrets}/?receiver={receiver}` endpoint to add and remove secrets.",
@@ -12456,176 +12907,12 @@
             "$ref": "#/components/responses/Error"
           }
         }
-      },
-      "delete": {
-        "tags": [
-          "system/webhooks"
-        ],
-        "summary": "Delete webhook receiver",
-        "operationId": "webhook_receiver_delete",
-        "parameters": [
-          {
-            "in": "path",
-            "name": "receiver",
-            "description": "The name or ID of the webhook receiver.",
-            "required": true,
-            "schema": {
-              "$ref": "#/components/schemas/NameOrId"
-            }
-          }
-        ],
-        "responses": {
-          "204": {
-            "description": "successful deletion"
-          },
-          "4XX": {
-            "$ref": "#/components/responses/Error"
-          },
-          "5XX": {
-            "$ref": "#/components/responses/Error"
-          }
-        }
       }
     },
-    "/v1/webhooks/receivers/{receiver}/probe": {
-      "post": {
-        "tags": [
-          "system/webhooks"
-        ],
-        "summary": "Send liveness probe to webhook receiver",
-        "description": "This endpoint synchronously sends a liveness probe request to the selected webhook receiver. The response message describes the outcome of the probe request: either the response from the receiver endpoint, or an indication of why the probe failed.\n\nNote that the response status is `200 OK` as long as a probe request was able to be sent to the receiver endpoint. If the receiver responds with another status code, including an error, this will be indicated by the response body, *not* the status of the response.\n\nThe `resend` query parameter can be used to request re-delivery of failed events if the liveness probe succeeds. If it is set to true and the webhook receiver responds to the probe request with a `2xx` status code, any events for which delivery to this receiver has failed will be queued for re-delivery.",
-        "operationId": "webhook_receiver_probe",
-        "parameters": [
-          {
-            "in": "path",
-            "name": "receiver",
-            "description": "The name or ID of the webhook receiver.",
-            "required": true,
-            "schema": {
-              "$ref": "#/components/schemas/NameOrId"
-            }
-          },
-          {
-            "in": "query",
-            "name": "resend",
-            "description": "If true, resend all events that have not been delivered successfully if the probe request succeeds.",
-            "schema": {
-              "type": "boolean"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "successful operation",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/WebhookProbeResult"
-                }
-              }
-            }
-          },
-          "4XX": {
-            "$ref": "#/components/responses/Error"
-          },
-          "5XX": {
-            "$ref": "#/components/responses/Error"
-          }
-        }
-      }
-    },
-    "/v1/webhooks/receivers/{receiver}/subscriptions": {
-      "post": {
-        "tags": [
-          "system/webhooks"
-        ],
-        "summary": "Add webhook receiver subscription",
-        "operationId": "webhook_receiver_subscription_add",
-        "parameters": [
-          {
-            "in": "path",
-            "name": "receiver",
-            "description": "The name or ID of the webhook receiver.",
-            "required": true,
-            "schema": {
-              "$ref": "#/components/schemas/NameOrId"
-            }
-          }
-        ],
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/WebhookSubscriptionCreate"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "201": {
-            "description": "successful creation",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/WebhookSubscriptionCreated"
-                }
-              }
-            }
-          },
-          "4XX": {
-            "$ref": "#/components/responses/Error"
-          },
-          "5XX": {
-            "$ref": "#/components/responses/Error"
-          }
-        }
-      }
-    },
-    "/v1/webhooks/receivers/{receiver}/subscriptions/{subscription}": {
-      "delete": {
-        "tags": [
-          "system/webhooks"
-        ],
-        "summary": "Remove webhook receiver subscription",
-        "operationId": "webhook_receiver_subscription_remove",
-        "parameters": [
-          {
-            "in": "path",
-            "name": "receiver",
-            "description": "The name or ID of the webhook receiver.",
-            "required": true,
-            "schema": {
-              "$ref": "#/components/schemas/NameOrId"
-            }
-          },
-          {
-            "in": "path",
-            "name": "subscription",
-            "description": "The event class subscription itself.",
-            "required": true,
-            "schema": {
-              "$ref": "#/components/schemas/WebhookSubscription"
-            }
-          }
-        ],
-        "responses": {
-          "204": {
-            "description": "successful deletion"
-          },
-          "4XX": {
-            "$ref": "#/components/responses/Error"
-          },
-          "5XX": {
-            "$ref": "#/components/responses/Error"
-          }
-        }
-      }
-    },
-    "/v1/webhooks/secrets": {
+    "/v1/webhook-secrets": {
       "get": {
         "tags": [
-          "system/webhooks"
+          "system/alerts"
         ],
         "summary": "List webhook receiver secret IDs",
         "operationId": "webhook_secrets_list",
@@ -12661,7 +12948,7 @@
       },
       "post": {
         "tags": [
-          "system/webhooks"
+          "system/alerts"
         ],
         "summary": "Add secret to webhook receiver",
         "operationId": "webhook_secrets_add",
@@ -12692,7 +12979,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/WebhookSecretId"
+                  "$ref": "#/components/schemas/WebhookSecret"
                 }
               }
             }
@@ -12706,10 +12993,10 @@
         }
       }
     },
-    "/v1/webhooks/secrets/{secret_id}": {
+    "/v1/webhook-secrets/{secret_id}": {
       "delete": {
         "tags": [
-          "system/webhooks"
+          "system/alerts"
         ],
         "summary": "Remove secret from webhook receiver",
         "operationId": "webhook_secrets_delete",
@@ -12784,10 +13071,19 @@
             "items": {
               "$ref": "#/components/schemas/Address"
             }
+          },
+          "link_name": {
+            "description": "Link to assign the addresses to. On ports that are not broken out, this is always phy0. On a 2x breakout the options are phy0 and phy1, on 4x phy0-phy3, etc.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/Name"
+              }
+            ]
           }
         },
         "required": [
-          "addresses"
+          "addresses",
+          "link_name"
         ]
       },
       "AddressLot": {
@@ -13216,6 +13512,394 @@
           "switch_histories"
         ]
       },
+      "AlertClass": {
+        "description": "An alert class.",
+        "type": "object",
+        "properties": {
+          "description": {
+            "description": "A description of what this alert class represents.",
+            "type": "string"
+          },
+          "name": {
+            "description": "The name of the alert class.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "description",
+          "name"
+        ]
+      },
+      "AlertClassResultsPage": {
+        "description": "A single page of results",
+        "type": "object",
+        "properties": {
+          "items": {
+            "description": "list of items on this page of results",
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/AlertClass"
+            }
+          },
+          "next_page": {
+            "nullable": true,
+            "description": "token used to fetch the next page of results (if any)",
+            "type": "string"
+          }
+        },
+        "required": [
+          "items"
+        ]
+      },
+      "AlertDelivery": {
+        "description": "A delivery of a webhook event.",
+        "type": "object",
+        "properties": {
+          "alert_class": {
+            "description": "The event class.",
+            "type": "string"
+          },
+          "alert_id": {
+            "description": "The UUID of the event.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/TypedUuidForAlertKind"
+              }
+            ]
+          },
+          "attempts": {
+            "description": "Individual attempts to deliver this webhook event, and their outcomes.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/AlertDeliveryAttempts"
+              }
+            ]
+          },
+          "id": {
+            "description": "The UUID of this delivery attempt.",
+            "type": "string",
+            "format": "uuid"
+          },
+          "receiver_id": {
+            "description": "The UUID of the alert receiver that this event was delivered to.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/TypedUuidForAlertReceiverKind"
+              }
+            ]
+          },
+          "state": {
+            "description": "The state of this delivery.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/AlertDeliveryState"
+              }
+            ]
+          },
+          "time_started": {
+            "description": "The time at which this delivery began (i.e. the event was dispatched to the receiver).",
+            "type": "string",
+            "format": "date-time"
+          },
+          "trigger": {
+            "description": "Why this delivery was performed.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/AlertDeliveryTrigger"
+              }
+            ]
+          }
+        },
+        "required": [
+          "alert_class",
+          "alert_id",
+          "attempts",
+          "id",
+          "receiver_id",
+          "state",
+          "time_started",
+          "trigger"
+        ]
+      },
+      "AlertDeliveryAttempts": {
+        "description": "A list of attempts to deliver an alert to a receiver.\n\nThe type of the delivery attempt model depends on the receiver type, as it may contain information specific to that delivery mechanism. For example, webhook delivery attempts contain the HTTP status code of the webhook request.",
+        "oneOf": [
+          {
+            "description": "A list of attempts to deliver an alert to a webhook receiver.",
+            "type": "object",
+            "properties": {
+              "webhook": {
+                "type": "array",
+                "items": {
+                  "$ref": "#/components/schemas/WebhookDeliveryAttempt"
+                }
+              }
+            },
+            "required": [
+              "webhook"
+            ],
+            "additionalProperties": false
+          }
+        ]
+      },
+      "AlertDeliveryId": {
+        "type": "object",
+        "properties": {
+          "delivery_id": {
+            "type": "string",
+            "format": "uuid"
+          }
+        },
+        "required": [
+          "delivery_id"
+        ]
+      },
+      "AlertDeliveryResultsPage": {
+        "description": "A single page of results",
+        "type": "object",
+        "properties": {
+          "items": {
+            "description": "list of items on this page of results",
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/AlertDelivery"
+            }
+          },
+          "next_page": {
+            "nullable": true,
+            "description": "token used to fetch the next page of results (if any)",
+            "type": "string"
+          }
+        },
+        "required": [
+          "items"
+        ]
+      },
+      "AlertDeliveryState": {
+        "description": "The state of a webhook delivery attempt.",
+        "oneOf": [
+          {
+            "description": "The webhook event has not yet been delivered successfully.\n\nEither no delivery attempts have yet been performed, or the delivery has failed at least once but has retries remaining.",
+            "type": "string",
+            "enum": [
+              "pending"
+            ]
+          },
+          {
+            "description": "The webhook event has been delivered successfully.",
+            "type": "string",
+            "enum": [
+              "delivered"
+            ]
+          },
+          {
+            "description": "The webhook delivery attempt has failed permanently and will not be retried again.",
+            "type": "string",
+            "enum": [
+              "failed"
+            ]
+          }
+        ]
+      },
+      "AlertDeliveryTrigger": {
+        "description": "The reason an alert was delivered",
+        "oneOf": [
+          {
+            "description": "Delivery was triggered by the alert itself.",
+            "type": "string",
+            "enum": [
+              "alert"
+            ]
+          },
+          {
+            "description": "Delivery was triggered by a request to resend the alert.",
+            "type": "string",
+            "enum": [
+              "resend"
+            ]
+          },
+          {
+            "description": "This delivery is a liveness probe.",
+            "type": "string",
+            "enum": [
+              "probe"
+            ]
+          }
+        ]
+      },
+      "AlertProbeResult": {
+        "description": "Data describing the result of an alert receiver liveness probe attempt.",
+        "type": "object",
+        "properties": {
+          "probe": {
+            "description": "The outcome of the probe delivery.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/AlertDelivery"
+              }
+            ]
+          },
+          "resends_started": {
+            "nullable": true,
+            "description": "If the probe request succeeded, and resending failed deliveries on success was requested, the number of new delivery attempts started. Otherwise, if the probe did not succeed, or resending failed deliveries was not requested, this is null.\n\nNote that this may be 0, if there were no events found which had not been delivered successfully to this receiver.",
+            "type": "integer",
+            "format": "uint",
+            "minimum": 0
+          }
+        },
+        "required": [
+          "probe"
+        ]
+      },
+      "AlertReceiver": {
+        "description": "The configuration for an alert receiver.",
+        "type": "object",
+        "properties": {
+          "description": {
+            "description": "human-readable free-form text about a resource",
+            "type": "string"
+          },
+          "id": {
+            "description": "unique, immutable, system-controlled identifier for each resource",
+            "type": "string",
+            "format": "uuid"
+          },
+          "kind": {
+            "description": "Configuration specific to the kind of alert receiver that this is.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/AlertReceiverKind"
+              }
+            ]
+          },
+          "name": {
+            "description": "unique, mutable, user-controlled identifier for each resource",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/Name"
+              }
+            ]
+          },
+          "subscriptions": {
+            "description": "The list of alert classes to which this receiver is subscribed.",
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/AlertSubscription"
+            }
+          },
+          "time_created": {
+            "description": "timestamp when this resource was created",
+            "type": "string",
+            "format": "date-time"
+          },
+          "time_modified": {
+            "description": "timestamp when this resource was last modified",
+            "type": "string",
+            "format": "date-time"
+          }
+        },
+        "required": [
+          "description",
+          "id",
+          "kind",
+          "name",
+          "subscriptions",
+          "time_created",
+          "time_modified"
+        ]
+      },
+      "AlertReceiverKind": {
+        "description": "The possible alert delivery mechanisms for an alert receiver.",
+        "oneOf": [
+          {
+            "description": "Webhook-specific alert receiver configuration.",
+            "type": "object",
+            "properties": {
+              "endpoint": {
+                "description": "The URL that webhook notification requests are sent to.",
+                "type": "string",
+                "format": "uri"
+              },
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "webhook"
+                ]
+              },
+              "secrets": {
+                "type": "array",
+                "items": {
+                  "$ref": "#/components/schemas/WebhookSecret"
+                }
+              }
+            },
+            "required": [
+              "endpoint",
+              "kind",
+              "secrets"
+            ]
+          }
+        ]
+      },
+      "AlertReceiverResultsPage": {
+        "description": "A single page of results",
+        "type": "object",
+        "properties": {
+          "items": {
+            "description": "list of items on this page of results",
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/AlertReceiver"
+            }
+          },
+          "next_page": {
+            "nullable": true,
+            "description": "token used to fetch the next page of results (if any)",
+            "type": "string"
+          }
+        },
+        "required": [
+          "items"
+        ]
+      },
+      "AlertSubscription": {
+        "title": "A webhook event class subscription",
+        "description": "A webhook event class subscription matches either a single event class exactly, or a glob pattern including wildcards that may match multiple event classes",
+        "type": "string",
+        "pattern": "^([a-zA-Z0-9_]+|\\*|\\*\\*)(\\.([a-zA-Z0-9_]+|\\*|\\*\\*))*$"
+      },
+      "AlertSubscriptionCreate": {
+        "type": "object",
+        "properties": {
+          "subscription": {
+            "description": "The event class pattern to subscribe to.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/AlertSubscription"
+              }
+            ]
+          }
+        },
+        "required": [
+          "subscription"
+        ]
+      },
+      "AlertSubscriptionCreated": {
+        "type": "object",
+        "properties": {
+          "subscription": {
+            "description": "The new subscription added to the receiver.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/AlertSubscription"
+              }
+            ]
+          }
+        },
+        "required": [
+          "subscription"
+        ]
+      },
       "AllowList": {
         "description": "Allowlist of IPs or subnets that can make requests to user-facing services.",
         "type": "object",
@@ -13480,6 +14164,29 @@
             ]
           }
         }
+      },
+      "ArtifactId": {
+        "description": "An identifier for an artifact.",
+        "type": "object",
+        "properties": {
+          "kind": {
+            "description": "The kind of artifact this is.",
+            "type": "string"
+          },
+          "name": {
+            "description": "The artifact's name.",
+            "type": "string"
+          },
+          "version": {
+            "description": "The artifact's version.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "kind",
+          "name",
+          "version"
+        ]
       },
       "AuthzScope": {
         "description": "Authorization scope for a timeseries.\n\nThis describes the level at which a user must be authorized to read data from a timeseries. For example, fleet-scoping means the data is only visible to an operator or fleet reader. Project-scoped, on the other hand, indicates that a user will see data limited to the projects on which they have read permissions.",
@@ -14051,7 +14758,11 @@
           },
           "interface_name": {
             "description": "The name of interface to peer on. This is relative to the port configuration this BGP peer configuration is a part of. For example this value could be phy0 to refer to a primary physical interface. Or it could be vlan47 to refer to a VLAN interface.",
-            "type": "string"
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/Name"
+              }
+            ]
           },
           "keepalive": {
             "description": "How often to send keepalive requests (seconds).",
@@ -14118,6 +14829,14 @@
       "BgpPeerConfig": {
         "type": "object",
         "properties": {
+          "link_name": {
+            "description": "Link that the peer is reachable on. On ports that are not broken out, this is always phy0. On a 2x breakout the options are phy0 and phy1, on 4x phy0-phy3, etc.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/Name"
+              }
+            ]
+          },
           "peers": {
             "type": "array",
             "items": {
@@ -14126,6 +14845,7 @@
           }
         },
         "required": [
+          "link_name",
           "peers"
         ]
       },
@@ -16001,6 +16721,31 @@
           "public_cert"
         ]
       },
+      "DeviceAccessToken": {
+        "description": "View of a device access token",
+        "type": "object",
+        "properties": {
+          "id": {
+            "description": "A unique, immutable, system-controlled identifier for the token. Note that this ID is not the bearer token itself, which starts with \"oxide-token-\"",
+            "type": "string",
+            "format": "uuid"
+          },
+          "time_created": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "time_expires": {
+            "nullable": true,
+            "description": "Expiration timestamp. A null value means the token does not automatically expire.",
+            "type": "string",
+            "format": "date-time"
+          }
+        },
+        "required": [
+          "id",
+          "time_created"
+        ]
+      },
       "DeviceAccessTokenRequest": {
         "type": "object",
         "properties": {
@@ -16021,12 +16766,40 @@
           "grant_type"
         ]
       },
+      "DeviceAccessTokenResultsPage": {
+        "description": "A single page of results",
+        "type": "object",
+        "properties": {
+          "items": {
+            "description": "list of items on this page of results",
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/DeviceAccessToken"
+            }
+          },
+          "next_page": {
+            "nullable": true,
+            "description": "token used to fetch the next page of results (if any)",
+            "type": "string"
+          }
+        },
+        "required": [
+          "items"
+        ]
+      },
       "DeviceAuthRequest": {
         "type": "object",
         "properties": {
           "client_id": {
             "type": "string",
             "format": "uuid"
+          },
+          "ttl_seconds": {
+            "nullable": true,
+            "description": "Optional lifetime for the access token in seconds. If not specified, the silo's max TTL will be used (if set).",
+            "type": "integer",
+            "format": "uint32",
+            "minimum": 1
           }
         },
         "required": [
@@ -16668,45 +17441,6 @@
         "required": [
           "message",
           "request_id"
-        ]
-      },
-      "EventClass": {
-        "description": "A webhook event class.",
-        "type": "object",
-        "properties": {
-          "description": {
-            "description": "A description of what this event class represents.",
-            "type": "string"
-          },
-          "name": {
-            "description": "The name of the event class.",
-            "type": "string"
-          }
-        },
-        "required": [
-          "description",
-          "name"
-        ]
-      },
-      "EventClassResultsPage": {
-        "description": "A single page of results",
-        "type": "object",
-        "properties": {
-          "items": {
-            "description": "list of items on this page of results",
-            "type": "array",
-            "items": {
-              "$ref": "#/components/schemas/EventClass"
-            }
-          },
-          "next_page": {
-            "nullable": true,
-            "description": "token used to fetch the next page of results (if any)",
-            "type": "string"
-          }
-        },
-        "required": [
-          "items"
         ]
       },
       "ExternalIp": {
@@ -18766,7 +19500,7 @@
           },
           "boot_disk": {
             "nullable": true,
-            "description": "The disk this instance should boot into. This disk can either be attached if it already exists, or created, if it should be a new disk.\n\nIt is strongly recommended to either provide a boot disk at instance creation, or update the instance after creation to set a boot disk.\n\nAn instance without an explicit boot disk can be booted: the options are as managed by UEFI, and as controlled by the guest OS, but with some risk.  If this instance later has a disk attached or detached, it is possible that boot options can end up reordered, with the intended boot disk moved after the EFI shell in boot priority. This may result in an instance that only boots to the EFI shell until the desired disk is set as an explicit boot disk and the instance rebooted.",
+            "description": "The disk the instance is configured to boot from.\n\nThis disk can either be attached if it already exists or created along with the instance.\n\nSpecifying a boot disk is optional but recommended to ensure predictable boot behavior. The boot disk can be set during instance creation or later if the instance is stopped. The boot disk counts against the disk attachment limit.\n\nAn instance that does not have a boot disk set will use the boot options specified in its UEFI settings, which are controlled by both the instance's UEFI firmware and the guest operating system. Boot options can change as disks are attached and detached, which may result in an instance that only boots to the EFI shell until a boot disk is set.",
             "default": null,
             "allOf": [
               {
@@ -18778,7 +19512,7 @@
             "type": "string"
           },
           "disks": {
-            "description": "The disks to be created or attached for this instance.",
+            "description": "A list of disks to be attached to the instance.\n\nDisk attachments of type \"create\" will be created, while those of type \"attach\" must already exist.\n\nThe order of this list does not guarantee a boot order for the instance. Use the boot_disk attribute to specify a boot disk. When boot_disk is specified it will count against the disk attachment limit.",
             "default": [],
             "type": "array",
             "items": {
@@ -20043,7 +20777,7 @@
         "type": "object",
         "properties": {
           "autoneg": {
-            "description": "Whether or not to set autonegotiation",
+            "description": "Whether or not to set autonegotiation.",
             "type": "boolean"
           },
           "fec": {
@@ -20052,6 +20786,14 @@
             "allOf": [
               {
                 "$ref": "#/components/schemas/LinkFec"
+              }
+            ]
+          },
+          "link_name": {
+            "description": "Link name. On ports that are not broken out, this is always phy0. On a 2x breakout the options are phy0 and phy1, on 4x phy0-phy3, etc.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/Name"
               }
             ]
           },
@@ -20079,7 +20821,7 @@
           },
           "tx_eq": {
             "nullable": true,
-            "description": "Optional tx_eq settings",
+            "description": "Optional tx_eq settings.",
             "allOf": [
               {
                 "$ref": "#/components/schemas/TxEqConfig"
@@ -20089,6 +20831,7 @@
         },
         "required": [
           "autoneg",
+          "link_name",
           "lldp",
           "mtu",
           "speed"
@@ -20219,11 +20962,8 @@
           "management_ip": {
             "nullable": true,
             "description": "The LLDP management IP TLV.",
-            "allOf": [
-              {
-                "$ref": "#/components/schemas/IpNet"
-              }
-            ]
+            "type": "string",
+            "format": "ip"
           },
           "system_description": {
             "nullable": true,
@@ -21478,6 +22218,14 @@
         "description": "Route configuration data associated with a switch port configuration.",
         "type": "object",
         "properties": {
+          "link_name": {
+            "description": "Link name. On ports that are not broken out, this is always phy0. On a 2x breakout the options are phy0 and phy1, on 4x phy0-phy3, etc.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/Name"
+              }
+            ]
+          },
           "routes": {
             "description": "The set of routes assigned to a switch port.",
             "type": "array",
@@ -21487,6 +22235,7 @@
           }
         },
         "required": [
+          "link_name",
           "routes"
         ]
       },
@@ -22119,6 +22868,42 @@
           "time_modified"
         ]
       },
+      "SiloAuthSettings": {
+        "description": "View of silo authentication settings",
+        "type": "object",
+        "properties": {
+          "device_token_max_ttl_seconds": {
+            "nullable": true,
+            "description": "Maximum lifetime of a device token in seconds. If set to null, users will be able to create tokens that do not expire.",
+            "type": "integer",
+            "format": "uint32",
+            "minimum": 0
+          },
+          "silo_id": {
+            "type": "string",
+            "format": "uuid"
+          }
+        },
+        "required": [
+          "silo_id"
+        ]
+      },
+      "SiloAuthSettingsUpdate": {
+        "description": "Updateable properties of a silo's settings.",
+        "type": "object",
+        "properties": {
+          "device_token_max_ttl_seconds": {
+            "nullable": true,
+            "description": "Maximum lifetime of a device token in seconds. If set to null, users will be able to create tokens that do not expire.",
+            "type": "integer",
+            "format": "uint32",
+            "minimum": 1
+          }
+        },
+        "required": [
+          "device_token_max_ttl_seconds"
+        ]
+      },
       "SiloCreate": {
         "description": "Create-time parameters for a `Silo`",
         "type": "object",
@@ -22530,7 +23315,7 @@
             "format": "uuid"
           },
           "state": {
-            "description": "The current state Nexus believes the sled to be in.",
+            "description": "The current state of the sled.",
             "allOf": [
               {
                 "$ref": "#/components/schemas/SledState"
@@ -22798,7 +23583,7 @@
         ]
       },
       "SledState": {
-        "description": "The current state of the sled, as determined by Nexus.",
+        "description": "The current state of the sled.",
         "oneOf": [
           {
             "description": "The sled is currently active, and has resources allocated on it.",
@@ -23175,7 +23960,11 @@
           },
           "interface_name": {
             "description": "The name of this switch interface.",
-            "type": "string"
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/Name"
+              }
+            ]
           },
           "kind": {
             "description": "The switch interface kind.",
@@ -23215,6 +24004,14 @@
               }
             ]
           },
+          "link_name": {
+            "description": "Link name. On ports that are not broken out, this is always phy0. On a 2x breakout the options are phy0 and phy1, on 4x phy0-phy3, etc.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/Name"
+              }
+            ]
+          },
           "v6_enabled": {
             "description": "Whether or not IPv6 is enabled.",
             "type": "boolean"
@@ -23222,6 +24019,7 @@
         },
         "required": [
           "kind",
+          "link_name",
           "v6_enabled"
         ]
       },
@@ -23339,7 +24137,11 @@
           },
           "port_name": {
             "description": "The name of this switch port.",
-            "type": "string"
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/Name"
+              }
+            ]
           },
           "port_settings_id": {
             "nullable": true,
@@ -23364,7 +24166,7 @@
           "switch_location"
         ]
       },
-      "SwitchPortAddressConfig": {
+      "SwitchPortAddressView": {
         "description": "An IP address configuration for a port settings object.",
         "type": "object",
         "properties": {
@@ -23381,9 +24183,26 @@
             "type": "string",
             "format": "uuid"
           },
+          "address_lot_id": {
+            "description": "The id of the address lot this address is drawn from.",
+            "type": "string",
+            "format": "uuid"
+          },
+          "address_lot_name": {
+            "description": "The name of the address lot this address is drawn from.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/Name"
+              }
+            ]
+          },
           "interface_name": {
             "description": "The interface name this address belongs to.",
-            "type": "string"
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/Name"
+              }
+            ]
           },
           "port_settings_id": {
             "description": "The port settings object this address configuration belongs to.",
@@ -23401,6 +24220,8 @@
         "required": [
           "address",
           "address_lot_block_id",
+          "address_lot_id",
+          "address_lot_name",
           "interface_name",
           "port_settings_id"
         ]
@@ -23533,13 +24354,20 @@
           },
           "link_name": {
             "description": "The name of this link.",
-            "type": "string"
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/Name"
+              }
+            ]
           },
-          "lldp_link_config_id": {
+          "lldp_link_config": {
             "nullable": true,
-            "description": "The link-layer discovery protocol service configuration id for this link.",
-            "type": "string",
-            "format": "uuid"
+            "description": "The link-layer discovery protocol service configuration for this link.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/LldpLinkConfig"
+              }
+            ]
           },
           "mtu": {
             "description": "The maximum transmission unit for this link.",
@@ -23560,11 +24388,14 @@
               }
             ]
           },
-          "tx_eq_config_id": {
+          "tx_eq_config": {
             "nullable": true,
-            "description": "The tx_eq configuration id for this link.",
-            "type": "string",
-            "format": "uuid"
+            "description": "The tx_eq configuration for this link.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/TxEqConfig2"
+              }
+            ]
           }
         },
         "required": [
@@ -23610,15 +24441,16 @@
           },
           "gw": {
             "description": "The route's gateway address.",
-            "allOf": [
-              {
-                "$ref": "#/components/schemas/IpNet"
-              }
-            ]
+            "type": "string",
+            "format": "ip"
           },
           "interface_name": {
             "description": "The interface name this route configuration is assigned to.",
-            "type": "string"
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/Name"
+              }
+            ]
           },
           "port_settings_id": {
             "description": "The port settings object this route configuration belongs to.",
@@ -23648,6 +24480,198 @@
         ]
       },
       "SwitchPortSettings": {
+        "description": "This structure contains all port settings information in one place. It's a convenience data structure for getting a complete view of a particular port's settings.",
+        "type": "object",
+        "properties": {
+          "addresses": {
+            "description": "Layer 3 IP address settings.",
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/SwitchPortAddressView"
+            }
+          },
+          "bgp_peers": {
+            "description": "BGP peer settings.",
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/BgpPeer"
+            }
+          },
+          "description": {
+            "description": "human-readable free-form text about a resource",
+            "type": "string"
+          },
+          "groups": {
+            "description": "Switch port settings included from other switch port settings groups.",
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/SwitchPortSettingsGroups"
+            }
+          },
+          "id": {
+            "description": "unique, immutable, system-controlled identifier for each resource",
+            "type": "string",
+            "format": "uuid"
+          },
+          "interfaces": {
+            "description": "Layer 3 interface settings.",
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/SwitchInterfaceConfig"
+            }
+          },
+          "links": {
+            "description": "Layer 2 link settings.",
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/SwitchPortLinkConfig"
+            }
+          },
+          "name": {
+            "description": "unique, mutable, user-controlled identifier for each resource",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/Name"
+              }
+            ]
+          },
+          "port": {
+            "description": "Layer 1 physical port settings.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/SwitchPortConfig"
+              }
+            ]
+          },
+          "routes": {
+            "description": "IP route settings.",
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/SwitchPortRouteConfig"
+            }
+          },
+          "time_created": {
+            "description": "timestamp when this resource was created",
+            "type": "string",
+            "format": "date-time"
+          },
+          "time_modified": {
+            "description": "timestamp when this resource was last modified",
+            "type": "string",
+            "format": "date-time"
+          },
+          "vlan_interfaces": {
+            "description": "Vlan interface settings.",
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/SwitchVlanInterfaceConfig"
+            }
+          }
+        },
+        "required": [
+          "addresses",
+          "bgp_peers",
+          "description",
+          "groups",
+          "id",
+          "interfaces",
+          "links",
+          "name",
+          "port",
+          "routes",
+          "time_created",
+          "time_modified",
+          "vlan_interfaces"
+        ]
+      },
+      "SwitchPortSettingsCreate": {
+        "description": "Parameters for creating switch port settings. Switch port settings are the central data structure for setting up external networking. Switch port settings include link, interface, route, address and dynamic network protocol configuration.",
+        "type": "object",
+        "properties": {
+          "addresses": {
+            "description": "Address configurations.",
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/AddressConfig"
+            }
+          },
+          "bgp_peers": {
+            "description": "BGP peer configurations.",
+            "default": [],
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/BgpPeerConfig"
+            }
+          },
+          "description": {
+            "type": "string"
+          },
+          "groups": {
+            "default": [],
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/NameOrId"
+            }
+          },
+          "interfaces": {
+            "description": "Interface configurations.",
+            "default": [],
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/SwitchInterfaceConfigCreate"
+            }
+          },
+          "links": {
+            "description": "Link configurations.",
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/LinkConfigCreate"
+            }
+          },
+          "name": {
+            "$ref": "#/components/schemas/Name"
+          },
+          "port_config": {
+            "$ref": "#/components/schemas/SwitchPortConfigCreate"
+          },
+          "routes": {
+            "description": "Route configurations.",
+            "default": [],
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/RouteConfig"
+            }
+          }
+        },
+        "required": [
+          "addresses",
+          "description",
+          "links",
+          "name",
+          "port_config"
+        ]
+      },
+      "SwitchPortSettingsGroups": {
+        "description": "This structure maps a port settings object to a port settings groups. Port settings objects may inherit settings from groups. This mapping defines the relationship between settings objects and the groups they reference.",
+        "type": "object",
+        "properties": {
+          "port_settings_group_id": {
+            "description": "The id of a port settings group being referenced by a port settings object.",
+            "type": "string",
+            "format": "uuid"
+          },
+          "port_settings_id": {
+            "description": "The id of a port settings object referencing a port settings group.",
+            "type": "string",
+            "format": "uuid"
+          }
+        },
+        "required": [
+          "port_settings_group_id",
+          "port_settings_id"
+        ]
+      },
+      "SwitchPortSettingsIdentity": {
         "description": "A switch port settings identity whose id may be used to view additional details.",
         "type": "object",
         "properties": {
@@ -23687,94 +24711,7 @@
           "time_modified"
         ]
       },
-      "SwitchPortSettingsCreate": {
-        "description": "Parameters for creating switch port settings. Switch port settings are the central data structure for setting up external networking. Switch port settings include link, interface, route, address and dynamic network protocol configuration.",
-        "type": "object",
-        "properties": {
-          "addresses": {
-            "description": "Addresses indexed by interface name.",
-            "type": "object",
-            "additionalProperties": {
-              "$ref": "#/components/schemas/AddressConfig"
-            }
-          },
-          "bgp_peers": {
-            "description": "BGP peers indexed by interface name.",
-            "type": "object",
-            "additionalProperties": {
-              "$ref": "#/components/schemas/BgpPeerConfig"
-            }
-          },
-          "description": {
-            "type": "string"
-          },
-          "groups": {
-            "type": "array",
-            "items": {
-              "$ref": "#/components/schemas/NameOrId"
-            }
-          },
-          "interfaces": {
-            "description": "Interfaces indexed by link name.",
-            "type": "object",
-            "additionalProperties": {
-              "$ref": "#/components/schemas/SwitchInterfaceConfigCreate"
-            }
-          },
-          "links": {
-            "description": "Links indexed by phy name. On ports that are not broken out, this is always phy0. On a 2x breakout the options are phy0 and phy1, on 4x phy0-phy3, etc.",
-            "type": "object",
-            "additionalProperties": {
-              "$ref": "#/components/schemas/LinkConfigCreate"
-            }
-          },
-          "name": {
-            "$ref": "#/components/schemas/Name"
-          },
-          "port_config": {
-            "$ref": "#/components/schemas/SwitchPortConfigCreate"
-          },
-          "routes": {
-            "description": "Routes indexed by interface name.",
-            "type": "object",
-            "additionalProperties": {
-              "$ref": "#/components/schemas/RouteConfig"
-            }
-          }
-        },
-        "required": [
-          "addresses",
-          "bgp_peers",
-          "description",
-          "groups",
-          "interfaces",
-          "links",
-          "name",
-          "port_config",
-          "routes"
-        ]
-      },
-      "SwitchPortSettingsGroups": {
-        "description": "This structure maps a port settings object to a port settings groups. Port settings objects may inherit settings from groups. This mapping defines the relationship between settings objects and the groups they reference.",
-        "type": "object",
-        "properties": {
-          "port_settings_group_id": {
-            "description": "The id of a port settings group being referenced by a port settings object.",
-            "type": "string",
-            "format": "uuid"
-          },
-          "port_settings_id": {
-            "description": "The id of a port settings object referencing a port settings group.",
-            "type": "string",
-            "format": "uuid"
-          }
-        },
-        "required": [
-          "port_settings_group_id",
-          "port_settings_id"
-        ]
-      },
-      "SwitchPortSettingsResultsPage": {
+      "SwitchPortSettingsIdentityResultsPage": {
         "description": "A single page of results",
         "type": "object",
         "properties": {
@@ -23782,7 +24719,7 @@
             "description": "list of items on this page of results",
             "type": "array",
             "items": {
-              "$ref": "#/components/schemas/SwitchPortSettings"
+              "$ref": "#/components/schemas/SwitchPortSettingsIdentity"
             }
           },
           "next_page": {
@@ -23793,109 +24730,6 @@
         },
         "required": [
           "items"
-        ]
-      },
-      "SwitchPortSettingsView": {
-        "description": "This structure contains all port settings information in one place. It's a convenience data structure for getting a complete view of a particular port's settings.",
-        "type": "object",
-        "properties": {
-          "addresses": {
-            "description": "Layer 3 IP address settings.",
-            "type": "array",
-            "items": {
-              "$ref": "#/components/schemas/SwitchPortAddressConfig"
-            }
-          },
-          "bgp_peers": {
-            "description": "BGP peer settings.",
-            "type": "array",
-            "items": {
-              "$ref": "#/components/schemas/BgpPeer"
-            }
-          },
-          "groups": {
-            "description": "Switch port settings included from other switch port settings groups.",
-            "type": "array",
-            "items": {
-              "$ref": "#/components/schemas/SwitchPortSettingsGroups"
-            }
-          },
-          "interfaces": {
-            "description": "Layer 3 interface settings.",
-            "type": "array",
-            "items": {
-              "$ref": "#/components/schemas/SwitchInterfaceConfig"
-            }
-          },
-          "link_lldp": {
-            "description": "Link-layer discovery protocol (LLDP) settings.",
-            "type": "array",
-            "items": {
-              "$ref": "#/components/schemas/LldpLinkConfig"
-            }
-          },
-          "links": {
-            "description": "Layer 2 link settings.",
-            "type": "array",
-            "items": {
-              "$ref": "#/components/schemas/SwitchPortLinkConfig"
-            }
-          },
-          "port": {
-            "description": "Layer 1 physical port settings.",
-            "allOf": [
-              {
-                "$ref": "#/components/schemas/SwitchPortConfig"
-              }
-            ]
-          },
-          "routes": {
-            "description": "IP route settings.",
-            "type": "array",
-            "items": {
-              "$ref": "#/components/schemas/SwitchPortRouteConfig"
-            }
-          },
-          "settings": {
-            "description": "The primary switch port settings handle.",
-            "allOf": [
-              {
-                "$ref": "#/components/schemas/SwitchPortSettings"
-              }
-            ]
-          },
-          "tx_eq": {
-            "description": "TX equalization settings.  These are optional, and most links will not need them.",
-            "type": "array",
-            "items": {
-              "nullable": true,
-              "allOf": [
-                {
-                  "$ref": "#/components/schemas/TxEqConfig"
-                }
-              ]
-            }
-          },
-          "vlan_interfaces": {
-            "description": "Vlan interface settings.",
-            "type": "array",
-            "items": {
-              "$ref": "#/components/schemas/SwitchVlanInterfaceConfig"
-            }
-          }
-        },
-        "required": [
-          "addresses",
-          "bgp_peers",
-          "groups",
-          "interfaces",
-          "link_lldp",
-          "links",
-          "port",
-          "routes",
-          "settings",
-          "tx_eq",
-          "vlan_interfaces"
         ]
       },
       "SwitchResultsPage": {
@@ -24150,6 +24984,161 @@
           "items"
         ]
       },
+      "TufArtifactMeta": {
+        "description": "Metadata about an individual TUF artifact.\n\nFound within a `TufRepoDescription`.",
+        "type": "object",
+        "properties": {
+          "hash": {
+            "description": "The hash of the artifact.",
+            "type": "string",
+            "format": "hex string (32 bytes)"
+          },
+          "id": {
+            "description": "The artifact ID.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/ArtifactId"
+              }
+            ]
+          },
+          "size": {
+            "description": "The size of the artifact in bytes.",
+            "type": "integer",
+            "format": "uint64",
+            "minimum": 0
+          }
+        },
+        "required": [
+          "hash",
+          "id",
+          "size"
+        ]
+      },
+      "TufRepoDescription": {
+        "description": "A description of an uploaded TUF repository.",
+        "type": "object",
+        "properties": {
+          "artifacts": {
+            "description": "Information about the artifacts present in the repository.",
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/TufArtifactMeta"
+            }
+          },
+          "repo": {
+            "description": "Information about the repository.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/TufRepoMeta"
+              }
+            ]
+          }
+        },
+        "required": [
+          "artifacts",
+          "repo"
+        ]
+      },
+      "TufRepoGetResponse": {
+        "description": "Data about a successful TUF repo get from Nexus.",
+        "type": "object",
+        "properties": {
+          "description": {
+            "description": "The description of the repository.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/TufRepoDescription"
+              }
+            ]
+          }
+        },
+        "required": [
+          "description"
+        ]
+      },
+      "TufRepoInsertResponse": {
+        "description": "Data about a successful TUF repo import into Nexus.",
+        "type": "object",
+        "properties": {
+          "recorded": {
+            "description": "The repository as present in the database.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/TufRepoDescription"
+              }
+            ]
+          },
+          "status": {
+            "description": "Whether this repository already existed or is new.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/TufRepoInsertStatus"
+              }
+            ]
+          }
+        },
+        "required": [
+          "recorded",
+          "status"
+        ]
+      },
+      "TufRepoInsertStatus": {
+        "description": "Status of a TUF repo import.\n\nPart of `TufRepoInsertResponse`.",
+        "oneOf": [
+          {
+            "description": "The repository already existed in the database.",
+            "type": "string",
+            "enum": [
+              "already_exists"
+            ]
+          },
+          {
+            "description": "The repository did not exist, and was inserted into the database.",
+            "type": "string",
+            "enum": [
+              "inserted"
+            ]
+          }
+        ]
+      },
+      "TufRepoMeta": {
+        "description": "Metadata about a TUF repository.\n\nFound within a `TufRepoDescription`.",
+        "type": "object",
+        "properties": {
+          "file_name": {
+            "description": "The file name of the repository.\n\nThis is purely used for debugging and may not always be correct (e.g. with wicket, we read the file contents from stdin so we don't know the correct file name).",
+            "type": "string"
+          },
+          "hash": {
+            "description": "The hash of the repository.\n\nThis is a slight abuse of `ArtifactHash`, since that's the hash of individual artifacts within the repository. However, we use it here for convenience.",
+            "type": "string",
+            "format": "hex string (32 bytes)"
+          },
+          "system_version": {
+            "description": "The system version in artifacts.json.",
+            "type": "string",
+            "pattern": "^(0|[1-9]\\d*)\\.(0|[1-9]\\d*)\\.(0|[1-9]\\d*)(?:-((?:0|[1-9]\\d*|\\d*[a-zA-Z-][0-9a-zA-Z-]*)(?:\\.(?:0|[1-9]\\d*|\\d*[a-zA-Z-][0-9a-zA-Z-]*))*))?(?:\\+([0-9a-zA-Z-]+(?:\\.[0-9a-zA-Z-]+)*))?$"
+          },
+          "targets_role_version": {
+            "description": "The version of the targets role.",
+            "type": "integer",
+            "format": "uint64",
+            "minimum": 0
+          },
+          "valid_until": {
+            "description": "The time until which the repo is valid.",
+            "type": "string",
+            "format": "date-time"
+          }
+        },
+        "required": [
+          "file_name",
+          "hash",
+          "system_version",
+          "targets_role_version",
+          "valid_until"
+        ]
+      },
       "TxEqConfig": {
         "description": "Per-port tx-eq overrides.  This can be used to fine-tune the transceiver equalization settings to improve signal integrity.",
         "type": "object",
@@ -24186,19 +25175,55 @@
           }
         }
       },
+      "TxEqConfig2": {
+        "description": "Per-port tx-eq overrides.  This can be used to fine-tune the transceiver equalization settings to improve signal integrity.",
+        "type": "object",
+        "properties": {
+          "main": {
+            "nullable": true,
+            "description": "Main tap",
+            "type": "integer",
+            "format": "int32"
+          },
+          "post1": {
+            "nullable": true,
+            "description": "Post-cursor tap1",
+            "type": "integer",
+            "format": "int32"
+          },
+          "post2": {
+            "nullable": true,
+            "description": "Post-cursor tap2",
+            "type": "integer",
+            "format": "int32"
+          },
+          "pre1": {
+            "nullable": true,
+            "description": "Pre-cursor tap1",
+            "type": "integer",
+            "format": "int32"
+          },
+          "pre2": {
+            "nullable": true,
+            "description": "Pre-cursor tap2",
+            "type": "integer",
+            "format": "int32"
+          }
+        }
+      },
+      "TypedUuidForAlertKind": {
+        "type": "string",
+        "format": "uuid"
+      },
+      "TypedUuidForAlertReceiverKind": {
+        "type": "string",
+        "format": "uuid"
+      },
       "TypedUuidForInstanceKind": {
         "type": "string",
         "format": "uuid"
       },
       "TypedUuidForSupportBundleKind": {
-        "type": "string",
-        "format": "uuid"
-      },
-      "TypedUuidForWebhookEventKind": {
-        "type": "string",
-        "format": "uuid"
-      },
-      "TypedUuidForWebhookReceiverKind": {
         "type": "string",
         "format": "uuid"
       },
@@ -25266,16 +26291,14 @@
         "type": "object",
         "properties": {
           "rules": {
+            "default": [],
             "type": "array",
             "items": {
               "$ref": "#/components/schemas/VpcFirewallRuleUpdate"
             },
             "maxItems": 1024
           }
-        },
-        "required": [
-          "rules"
-        ]
+        }
       },
       "VpcFirewallRules": {
         "description": "Collection of a Vpc's firewall rules",
@@ -25639,7 +26662,7 @@
             "default": [],
             "type": "array",
             "items": {
-              "$ref": "#/components/schemas/WebhookSubscription"
+              "$ref": "#/components/schemas/AlertSubscription"
             }
           }
         },
@@ -25648,75 +26671,6 @@
           "endpoint",
           "name",
           "secrets"
-        ]
-      },
-      "WebhookDelivery": {
-        "description": "A delivery of a webhook event.",
-        "type": "object",
-        "properties": {
-          "attempts": {
-            "description": "Individual attempts to deliver this webhook event, and their outcomes.",
-            "type": "array",
-            "items": {
-              "$ref": "#/components/schemas/WebhookDeliveryAttempt"
-            }
-          },
-          "event_class": {
-            "description": "The event class.",
-            "type": "string"
-          },
-          "event_id": {
-            "description": "The UUID of the event.",
-            "allOf": [
-              {
-                "$ref": "#/components/schemas/TypedUuidForWebhookEventKind"
-              }
-            ]
-          },
-          "id": {
-            "description": "The UUID of this delivery attempt.",
-            "type": "string",
-            "format": "uuid"
-          },
-          "state": {
-            "description": "The state of this delivery.",
-            "allOf": [
-              {
-                "$ref": "#/components/schemas/WebhookDeliveryState"
-              }
-            ]
-          },
-          "time_started": {
-            "description": "The time at which this delivery began (i.e. the event was dispatched to the receiver).",
-            "type": "string",
-            "format": "date-time"
-          },
-          "trigger": {
-            "description": "Why this delivery was performed.",
-            "allOf": [
-              {
-                "$ref": "#/components/schemas/WebhookDeliveryTrigger"
-              }
-            ]
-          },
-          "webhook_id": {
-            "description": "The UUID of the webhook receiver that this event was delivered to.",
-            "allOf": [
-              {
-                "$ref": "#/components/schemas/TypedUuidForWebhookReceiverKind"
-              }
-            ]
-          }
-        },
-        "required": [
-          "attempts",
-          "event_class",
-          "event_id",
-          "id",
-          "state",
-          "time_started",
-          "trigger",
-          "webhook_id"
         ]
       },
       "WebhookDeliveryAttempt": {
@@ -25789,18 +26743,6 @@
           }
         ]
       },
-      "WebhookDeliveryId": {
-        "type": "object",
-        "properties": {
-          "delivery_id": {
-            "type": "string",
-            "format": "uuid"
-          }
-        },
-        "required": [
-          "delivery_id"
-        ]
-      },
       "WebhookDeliveryResponse": {
         "description": "The response received from a webhook receiver endpoint.",
         "type": "object",
@@ -25823,105 +26765,8 @@
           "status"
         ]
       },
-      "WebhookDeliveryResultsPage": {
-        "description": "A single page of results",
-        "type": "object",
-        "properties": {
-          "items": {
-            "description": "list of items on this page of results",
-            "type": "array",
-            "items": {
-              "$ref": "#/components/schemas/WebhookDelivery"
-            }
-          },
-          "next_page": {
-            "nullable": true,
-            "description": "token used to fetch the next page of results (if any)",
-            "type": "string"
-          }
-        },
-        "required": [
-          "items"
-        ]
-      },
-      "WebhookDeliveryState": {
-        "description": "The state of a webhook delivery attempt.",
-        "oneOf": [
-          {
-            "description": "The webhook event has not yet been delivered successfully.\n\nEither no delivery attempts have yet been performed, or the delivery has failed at least once but has retries remaining.",
-            "type": "string",
-            "enum": [
-              "pending"
-            ]
-          },
-          {
-            "description": "The webhook event has been delivered successfully.",
-            "type": "string",
-            "enum": [
-              "delivered"
-            ]
-          },
-          {
-            "description": "The webhook delivery attempt has failed permanently and will not be retried again.",
-            "type": "string",
-            "enum": [
-              "failed"
-            ]
-          }
-        ]
-      },
-      "WebhookDeliveryTrigger": {
-        "description": "The reason a webhook event was delivered",
-        "oneOf": [
-          {
-            "description": "Delivery was triggered by the event occurring for the first time.",
-            "type": "string",
-            "enum": [
-              "event"
-            ]
-          },
-          {
-            "description": "Delivery was triggered by a request to resend the event.",
-            "type": "string",
-            "enum": [
-              "resend"
-            ]
-          },
-          {
-            "description": "This delivery is a liveness probe.",
-            "type": "string",
-            "enum": [
-              "probe"
-            ]
-          }
-        ]
-      },
-      "WebhookProbeResult": {
-        "description": "Data describing the result of a webhook liveness probe attempt.",
-        "type": "object",
-        "properties": {
-          "probe": {
-            "description": "The outcome of the probe request.",
-            "allOf": [
-              {
-                "$ref": "#/components/schemas/WebhookDelivery"
-              }
-            ]
-          },
-          "resends_started": {
-            "nullable": true,
-            "description": "If the probe request succeeded, and resending failed deliveries on success was requested, the number of new delivery attempts started. Otherwise, if the probe did not succeed, or resending failed deliveries was not requested, this is null.\n\nNote that this may be 0, if there were no events found which had not been delivered successfully to this receiver.",
-            "type": "integer",
-            "format": "uint",
-            "minimum": 0
-          }
-        },
-        "required": [
-          "probe"
-        ]
-      },
       "WebhookReceiver": {
-        "description": "The configuration for a webhook.",
+        "description": "The configuration for a webhook alert receiver.",
         "type": "object",
         "properties": {
           "description": {
@@ -25949,14 +26794,14 @@
           "secrets": {
             "type": "array",
             "items": {
-              "$ref": "#/components/schemas/WebhookSecretId"
+              "$ref": "#/components/schemas/WebhookSecret"
             }
           },
           "subscriptions": {
-            "description": "The list of event classes to which this receiver is subscribed.",
+            "description": "The list of alert classes to which this receiver is subscribed.",
             "type": "array",
             "items": {
-              "$ref": "#/components/schemas/WebhookSubscription"
+              "$ref": "#/components/schemas/AlertSubscription"
             }
           },
           "time_created": {
@@ -25979,27 +26824,6 @@
           "subscriptions",
           "time_created",
           "time_modified"
-        ]
-      },
-      "WebhookReceiverResultsPage": {
-        "description": "A single page of results",
-        "type": "object",
-        "properties": {
-          "items": {
-            "description": "list of items on this page of results",
-            "type": "array",
-            "items": {
-              "$ref": "#/components/schemas/WebhookReceiver"
-            }
-          },
-          "next_page": {
-            "nullable": true,
-            "description": "token used to fetch the next page of results (if any)",
-            "type": "string"
-          }
-        },
-        "required": [
-          "items"
         ]
       },
       "WebhookReceiverUpdate": {
@@ -26026,6 +26850,26 @@
           }
         }
       },
+      "WebhookSecret": {
+        "description": "A view of a shared secret key assigned to a webhook receiver.\n\nOnce a secret is created, the value of the secret is not available in the API, as it must remain secret. Instead, secrets are referenced by their unique IDs assigned when they are created.",
+        "type": "object",
+        "properties": {
+          "id": {
+            "description": "The public unique ID of the secret.",
+            "type": "string",
+            "format": "uuid"
+          },
+          "time_created": {
+            "description": "The UTC timestamp at which this secret was created.",
+            "type": "string",
+            "format": "date-time"
+          }
+        },
+        "required": [
+          "id",
+          "time_created"
+        ]
+      },
       "WebhookSecretCreate": {
         "type": "object",
         "properties": {
@@ -26038,70 +26882,19 @@
           "secret"
         ]
       },
-      "WebhookSecretId": {
-        "description": "The public ID of a secret key assigned to a webhook.",
-        "type": "object",
-        "properties": {
-          "id": {
-            "type": "string",
-            "format": "uuid"
-          }
-        },
-        "required": [
-          "id"
-        ]
-      },
       "WebhookSecrets": {
-        "description": "A list of the IDs of secrets associated with a webhook.",
+        "description": "A list of the IDs of secrets associated with a webhook receiver.",
         "type": "object",
         "properties": {
           "secrets": {
             "type": "array",
             "items": {
-              "$ref": "#/components/schemas/WebhookSecretId"
+              "$ref": "#/components/schemas/WebhookSecret"
             }
           }
         },
         "required": [
           "secrets"
-        ]
-      },
-      "WebhookSubscription": {
-        "title": "A webhook event class subscription",
-        "description": "A webhook event class subscription matches either a single event class exactly, or a glob pattern including wildcards that may match multiple event classes",
-        "type": "string",
-        "pattern": "^([a-zA-Z0-9_]+|\\*|\\*\\*)(\\.([a-zA-Z0-9_]+|\\*|\\*\\*))*$"
-      },
-      "WebhookSubscriptionCreate": {
-        "type": "object",
-        "properties": {
-          "subscription": {
-            "description": "The event class pattern to subscribe to.",
-            "allOf": [
-              {
-                "$ref": "#/components/schemas/WebhookSubscription"
-              }
-            ]
-          }
-        },
-        "required": [
-          "subscription"
-        ]
-      },
-      "WebhookSubscriptionCreated": {
-        "type": "object",
-        "properties": {
-          "subscription": {
-            "description": "The new subscription added to the receiver.",
-            "allOf": [
-              {
-                "$ref": "#/components/schemas/WebhookSubscription"
-              }
-            ]
-          }
-        },
-        "required": [
-          "subscription"
         ]
       },
       "NameOrIdSortMode": {
@@ -26138,6 +26931,25 @@
             "type": "string",
             "enum": [
               "id_ascending"
+            ]
+          }
+        ]
+      },
+      "TimeAndIdSortMode": {
+        "description": "Supported set of sort modes for scanning by timestamp and ID",
+        "oneOf": [
+          {
+            "description": "sort in increasing order of timestamp and ID, i.e., earliest first",
+            "type": "string",
+            "enum": [
+              "ascending"
+            ]
+          },
+          {
+            "description": "sort in increasing order of timestamp and ID, i.e., most recent first",
+            "type": "string",
+            "enum": [
+              "descending"
             ]
           }
         ]
@@ -26180,25 +26992,6 @@
             ]
           }
         ]
-      },
-      "TimeAndIdSortMode": {
-        "description": "Supported set of sort modes for scanning by timestamp and ID",
-        "oneOf": [
-          {
-            "description": "sort in increasing order of timestamp and ID, i.e., earliest first",
-            "type": "string",
-            "enum": [
-              "ascending"
-            ]
-          },
-          {
-            "description": "sort in increasing order of timestamp and ID, i.e., most recent first",
-            "type": "string",
-            "enum": [
-              "descending"
-            ]
-          }
-        ]
       }
     },
     "responses": {
@@ -26223,6 +27016,20 @@
       }
     },
     {
+      "name": "console-auth",
+      "description": "API for console authentication",
+      "externalDocs": {
+        "url": "http://docs.oxide.computer/api/console-auth"
+      }
+    },
+    {
+      "name": "current-user",
+      "description": "Information pertaining to the current user.",
+      "externalDocs": {
+        "url": "http://docs.oxide.computer/api/current-user"
+      }
+    },
+    {
       "name": "disks",
       "description": "Virtual disks are used to store instance-local data which includes the operating system.",
       "externalDocs": {
@@ -26230,17 +27037,17 @@
       }
     },
     {
+      "name": "experimental",
+      "description": "Experimental, unstable interfaces, primarily for use by Oxide personnel",
+      "externalDocs": {
+        "url": "http://docs.oxide.computer/api/experimental"
+      }
+    },
+    {
       "name": "floating-ips",
       "description": "Floating IPs allow a project to allocate well-known IPs to instances.",
       "externalDocs": {
         "url": "http://docs.oxide.computer/api/floating-ips"
-      }
-    },
-    {
-      "name": "hidden",
-      "description": "TODO operations that will not ship to customers",
-      "externalDocs": {
-        "url": "http://docs.oxide.computer/api"
       }
     },
     {
@@ -26293,13 +27100,6 @@
       }
     },
     {
-      "name": "session",
-      "description": "Information pertaining to the current session.",
-      "externalDocs": {
-        "url": "http://docs.oxide.computer/api/session"
-      }
-    },
-    {
       "name": "silos",
       "description": "Silos represent a logical partition of users and resources.",
       "externalDocs": {
@@ -26311,6 +27111,13 @@
       "description": "Snapshots of virtual disks at a particular point in time.",
       "externalDocs": {
         "url": "http://docs.oxide.computer/api/snapshots"
+      }
+    },
+    {
+      "name": "system/alerts",
+      "description": "Alerts deliver notifications for events that occur on the Oxide rack",
+      "externalDocs": {
+        "url": "http://docs.oxide.computer/api/alerts"
       }
     },
     {
@@ -26363,13 +27170,10 @@
       }
     },
     {
-      "name": "system/update"
-    },
-    {
-      "name": "system/webhooks",
-      "description": "Webhooks deliver notifications for audit log events and fault management alerts.",
+      "name": "tokens",
+      "description": "API clients use device access tokens for authentication.",
       "externalDocs": {
-        "url": "http://docs.oxide.computer/api/webhooks"
+        "url": "http://docs.oxide.computer/api/tokens"
       }
     },
     {

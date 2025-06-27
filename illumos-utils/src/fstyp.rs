@@ -5,9 +5,10 @@
 //! Helper for calling fstyp.
 
 use crate::zpool::ZpoolName;
-use crate::{PFEXEC, execute};
+use crate::{PFEXEC, execute_async};
 use camino::Utf8Path;
 use std::str::FromStr;
+use tokio::process::Command;
 
 const FSTYP: &str = "/usr/sbin/fstyp";
 
@@ -32,14 +33,14 @@ pub struct Fstyp {}
 impl Fstyp {
     /// Executes the 'fstyp' command and parses the name of a zpool from it, if
     /// one exists.
-    pub fn get_zpool(path: &Utf8Path) -> Result<ZpoolName, Error> {
-        let mut cmd = std::process::Command::new(PFEXEC);
+    pub async fn get_zpool(path: &Utf8Path) -> Result<ZpoolName, Error> {
+        let mut cmd = Command::new(PFEXEC);
         cmd.env_clear();
         cmd.env("LC_ALL", "C.UTF-8");
 
         let cmd = cmd.arg(FSTYP).arg("-a").arg(path);
 
-        let output = execute(cmd).map_err(Error::from)?;
+        let output = execute_async(cmd).await.map_err(Error::from)?;
         let stdout = String::from_utf8(output.stdout)?;
 
         let mut seen_zfs_marker = false;

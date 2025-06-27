@@ -890,7 +890,7 @@
         ]
       },
       "ArtifactId": {
-        "description": "An identifier for an artifact.\n\nThe kind is [`ArtifactKind`], indicating that it might represent an artifact whose kind is unknown.",
+        "description": "An identifier for an artifact.",
         "type": "object",
         "properties": {
           "kind": {
@@ -903,11 +903,7 @@
           },
           "version": {
             "description": "The artifact's version.",
-            "allOf": [
-              {
-                "$ref": "#/components/schemas/ArtifactVersion"
-              }
-            ]
+            "type": "string"
           }
         },
         "required": [
@@ -915,11 +911,6 @@
           "name",
           "version"
         ]
-      },
-      "ArtifactVersion": {
-        "description": "An artifact version.\n\nThis is a freeform identifier with some basic validation. It may be the serialized form of a semver version, or a custom identifier that uses the same character set as a semver, plus `_`.\n\nThe exact pattern accepted is `^[a-zA-Z0-9._+-]{1,63}$`.\n\n# Ord implementation\n\n`ArtifactVersion`s are not intended to be sorted, just compared for equality. `ArtifactVersion` implements `Ord` only for storage within sorted collections.",
-        "type": "string",
-        "pattern": "^[a-zA-Z0-9._+-]{1,63}$"
       },
       "Aux1Monitor": {
         "description": "The first auxlliary CMIS monitor.",
@@ -3582,7 +3573,7 @@
         ]
       },
       "RotImageError": {
-        "description": "RotImageError\n\n<details><summary>JSON schema</summary>\n\n```json { \"type\": \"string\", \"enum\": [ \"unchecked\", \"first_page_erased\", \"partially_programmed\", \"invalid_length\", \"header_not_programmed\", \"bootloader_too_small\", \"bad_magic\", \"header_image_size\", \"unaligned_length\", \"unsupported_type\", \"reset_vector_not_thumb2\", \"reset_vector\", \"signature\" ] } ``` </details>",
+        "description": "`RotImageError`\n\n<details><summary>JSON schema</summary>\n\n```json { \"type\": \"string\", \"enum\": [ \"unchecked\", \"first_page_erased\", \"partially_programmed\", \"invalid_length\", \"header_not_programmed\", \"bootloader_too_small\", \"bad_magic\", \"header_image_size\", \"unaligned_length\", \"unsupported_type\", \"reset_vector_not_thumb2\", \"reset_vector\", \"signature\" ] } ``` </details>",
         "type": "string",
         "enum": [
           "unchecked",
@@ -3645,7 +3636,6 @@
         ]
       },
       "RotSlot": {
-        "description": "RotSlot\n\n<details><summary>JSON schema</summary>\n\n```json { \"oneOf\": [ { \"type\": \"object\", \"required\": [ \"slot\" ], \"properties\": { \"slot\": { \"type\": \"string\", \"enum\": [ \"a\" ] } } }, { \"type\": \"object\", \"required\": [ \"slot\" ], \"properties\": { \"slot\": { \"type\": \"string\", \"enum\": [ \"b\" ] } } } ] } ``` </details>",
         "oneOf": [
           {
             "type": "object",
@@ -3678,7 +3668,7 @@
         ]
       },
       "RotState": {
-        "description": "RotState\n\n<details><summary>JSON schema</summary>\n\n```json { \"oneOf\": [ { \"type\": \"object\", \"required\": [ \"active\", \"persistent_boot_preference\", \"state\" ], \"properties\": { \"active\": { \"$ref\": \"#/components/schemas/RotSlot\" }, \"pending_persistent_boot_preference\": { \"oneOf\": [ { \"type\": \"null\" }, { \"allOf\": [ { \"$ref\": \"#/components/schemas/RotSlot\" } ] } ] }, \"persistent_boot_preference\": { \"$ref\": \"#/components/schemas/RotSlot\" }, \"slot_a_sha3_256_digest\": { \"type\": [ \"string\", \"null\" ] }, \"slot_b_sha3_256_digest\": { \"type\": [ \"string\", \"null\" ] }, \"state\": { \"type\": \"string\", \"enum\": [ \"v2\" ] }, \"transient_boot_preference\": { \"oneOf\": [ { \"type\": \"null\" }, { \"allOf\": [ { \"$ref\": \"#/components/schemas/RotSlot\" } ] } ] } } }, { \"type\": \"object\", \"required\": [ \"message\", \"state\" ], \"properties\": { \"message\": { \"type\": \"string\" }, \"state\": { \"type\": \"string\", \"enum\": [ \"communication_failed\" ] } } }, { \"type\": \"object\", \"required\": [ \"active\", \"persistent_boot_preference\", \"slot_a_fwid\", \"slot_b_fwid\", \"stage0_fwid\", \"stage0next_fwid\", \"state\" ], \"properties\": { \"active\": { \"$ref\": \"#/components/schemas/RotSlot\" }, \"pending_persistent_boot_preference\": { \"oneOf\": [ { \"type\": \"null\" }, { \"allOf\": [ { \"$ref\": \"#/components/schemas/RotSlot\" } ] } ] }, \"persistent_boot_preference\": { \"$ref\": \"#/components/schemas/RotSlot\" }, \"slot_a_error\": { \"oneOf\": [ { \"type\": \"null\" }, { \"allOf\": [ { \"$ref\": \"#/components/schemas/RotImageError\" } ] } ] }, \"slot_a_fwid\": { \"type\": \"string\" }, \"slot_b_error\": { \"oneOf\": [ { \"type\": \"null\" }, { \"allOf\": [ { \"$ref\": \"#/components/schemas/RotImageError\" } ] } ] }, \"slot_b_fwid\": { \"type\": \"string\" }, \"stage0_error\": { \"oneOf\": [ { \"type\": \"null\" }, { \"allOf\": [ { \"$ref\": \"#/components/schemas/RotImageError\" } ] } ] }, \"stage0_fwid\": { \"type\": \"string\" }, \"stage0next_error\": { \"oneOf\": [ { \"type\": \"null\" }, { \"allOf\": [ { \"$ref\": \"#/components/schemas/RotImageError\" } ] } ] }, \"stage0next_fwid\": { \"type\": \"string\" }, \"state\": { \"type\": \"string\", \"enum\": [ \"v3\" ] }, \"transient_boot_preference\": { \"oneOf\": [ { \"type\": \"null\" }, { \"allOf\": [ { \"$ref\": \"#/components/schemas/RotSlot\" } ] } ] } } } ] } ``` </details>",
+        "description": "`RotState`\n\n<details><summary>JSON schema</summary>\n\n```json { \"oneOf\": [ { \"type\": \"object\", \"required\": [ \"active\", \"persistent_boot_preference\", \"state\" ], \"properties\": { \"active\": { \"$ref\": \"#/components/schemas/RotSlot\" }, \"pending_persistent_boot_preference\": { \"oneOf\": [ { \"type\": \"null\" }, { \"allOf\": [ { \"$ref\": \"#/components/schemas/RotSlot\" } ] } ] }, \"persistent_boot_preference\": { \"$ref\": \"#/components/schemas/RotSlot\" }, \"slot_a_sha3_256_digest\": { \"type\": [ \"string\", \"null\" ] }, \"slot_b_sha3_256_digest\": { \"type\": [ \"string\", \"null\" ] }, \"state\": { \"type\": \"string\", \"enum\": [ \"v2\" ] }, \"transient_boot_preference\": { \"oneOf\": [ { \"type\": \"null\" }, { \"allOf\": [ { \"$ref\": \"#/components/schemas/RotSlot\" } ] } ] } } }, { \"type\": \"object\", \"required\": [ \"message\", \"state\" ], \"properties\": { \"message\": { \"type\": \"string\" }, \"state\": { \"type\": \"string\", \"enum\": [ \"communication_failed\" ] } } }, { \"type\": \"object\", \"required\": [ \"active\", \"persistent_boot_preference\", \"slot_a_fwid\", \"slot_b_fwid\", \"stage0_fwid\", \"stage0next_fwid\", \"state\" ], \"properties\": { \"active\": { \"$ref\": \"#/components/schemas/RotSlot\" }, \"pending_persistent_boot_preference\": { \"oneOf\": [ { \"type\": \"null\" }, { \"allOf\": [ { \"$ref\": \"#/components/schemas/RotSlot\" } ] } ] }, \"persistent_boot_preference\": { \"$ref\": \"#/components/schemas/RotSlot\" }, \"slot_a_error\": { \"oneOf\": [ { \"type\": \"null\" }, { \"allOf\": [ { \"$ref\": \"#/components/schemas/RotImageError\" } ] } ] }, \"slot_a_fwid\": { \"type\": \"string\" }, \"slot_b_error\": { \"oneOf\": [ { \"type\": \"null\" }, { \"allOf\": [ { \"$ref\": \"#/components/schemas/RotImageError\" } ] } ] }, \"slot_b_fwid\": { \"type\": \"string\" }, \"stage0_error\": { \"oneOf\": [ { \"type\": \"null\" }, { \"allOf\": [ { \"$ref\": \"#/components/schemas/RotImageError\" } ] } ] }, \"stage0_fwid\": { \"type\": \"string\" }, \"stage0next_error\": { \"oneOf\": [ { \"type\": \"null\" }, { \"allOf\": [ { \"$ref\": \"#/components/schemas/RotImageError\" } ] } ] }, \"stage0next_fwid\": { \"type\": \"string\" }, \"state\": { \"type\": \"string\", \"enum\": [ \"v3\" ] }, \"transient_boot_preference\": { \"oneOf\": [ { \"type\": \"null\" }, { \"allOf\": [ { \"$ref\": \"#/components/schemas/RotSlot\" } ] } ] } } } ] } ``` </details>",
         "oneOf": [
           {
             "type": "object",
@@ -4207,7 +4197,7 @@
         ]
       },
       "SpComponentCaboose": {
-        "description": "SpComponentCaboose\n\n<details><summary>JSON schema</summary>\n\n```json { \"type\": \"object\", \"required\": [ \"board\", \"git_commit\", \"name\", \"version\" ], \"properties\": { \"board\": { \"type\": \"string\" }, \"epoch\": { \"type\": [ \"string\", \"null\" ] }, \"git_commit\": { \"type\": \"string\" }, \"name\": { \"type\": \"string\" }, \"sign\": { \"type\": [ \"string\", \"null\" ] }, \"version\": { \"type\": \"string\" } } } ``` </details>",
+        "description": "`SpComponentCaboose`\n\n<details><summary>JSON schema</summary>\n\n```json { \"type\": \"object\", \"required\": [ \"board\", \"git_commit\", \"name\", \"version\" ], \"properties\": { \"board\": { \"type\": \"string\" }, \"epoch\": { \"type\": [ \"string\", \"null\" ] }, \"git_commit\": { \"type\": \"string\" }, \"name\": { \"type\": \"string\" }, \"sign\": { \"type\": [ \"string\", \"null\" ] }, \"version\": { \"type\": \"string\" } } } ``` </details>",
         "type": "object",
         "properties": {
           "board": {
@@ -4330,7 +4320,7 @@
         ]
       },
       "SpIdentifier": {
-        "description": "SpIdentifier\n\n<details><summary>JSON schema</summary>\n\n```json { \"type\": \"object\", \"required\": [ \"slot\", \"type\" ], \"properties\": { \"slot\": { \"type\": \"integer\", \"format\": \"uint32\", \"minimum\": 0.0 }, \"type\": { \"$ref\": \"#/components/schemas/SpType\" } } } ``` </details>",
+        "description": "`SpIdentifier`\n\n<details><summary>JSON schema</summary>\n\n```json { \"type\": \"object\", \"required\": [ \"slot\", \"type\" ], \"properties\": { \"slot\": { \"type\": \"integer\", \"format\": \"uint32\", \"minimum\": 0.0 }, \"type\": { \"$ref\": \"#/components/schemas/SpType\" } } } ``` </details>",
         "type": "object",
         "properties": {
           "slot": {
@@ -4539,7 +4529,7 @@
         ]
       },
       "SpState": {
-        "description": "SpState\n\n<details><summary>JSON schema</summary>\n\n```json { \"type\": \"object\", \"required\": [ \"base_mac_address\", \"hubris_archive_id\", \"model\", \"power_state\", \"revision\", \"rot\", \"serial_number\" ], \"properties\": { \"base_mac_address\": { \"type\": \"array\", \"items\": { \"type\": \"integer\", \"format\": \"uint8\", \"minimum\": 0.0 }, \"maxItems\": 6, \"minItems\": 6 }, \"hubris_archive_id\": { \"type\": \"string\" }, \"model\": { \"type\": \"string\" }, \"power_state\": { \"$ref\": \"#/components/schemas/PowerState\" }, \"revision\": { \"type\": \"integer\", \"format\": \"uint32\", \"minimum\": 0.0 }, \"rot\": { \"$ref\": \"#/components/schemas/RotState\" }, \"serial_number\": { \"type\": \"string\" } } } ``` </details>",
+        "description": "`SpState`\n\n<details><summary>JSON schema</summary>\n\n```json { \"type\": \"object\", \"required\": [ \"base_mac_address\", \"hubris_archive_id\", \"model\", \"power_state\", \"revision\", \"rot\", \"serial_number\" ], \"properties\": { \"base_mac_address\": { \"type\": \"array\", \"items\": { \"type\": \"integer\", \"format\": \"uint8\", \"minimum\": 0.0 }, \"maxItems\": 6, \"minItems\": 6 }, \"hubris_archive_id\": { \"type\": \"string\" }, \"model\": { \"type\": \"string\" }, \"power_state\": { \"$ref\": \"#/components/schemas/PowerState\" }, \"revision\": { \"type\": \"integer\", \"format\": \"uint32\", \"minimum\": 0.0 }, \"rot\": { \"$ref\": \"#/components/schemas/RotState\" }, \"serial_number\": { \"type\": \"string\" } } } ``` </details>",
         "type": "object",
         "properties": {
           "base_mac_address": {
@@ -4584,7 +4574,7 @@
         ]
       },
       "SpType": {
-        "description": "SpType\n\n<details><summary>JSON schema</summary>\n\n```json { \"type\": \"string\", \"enum\": [ \"sled\", \"power\", \"switch\" ] } ``` </details>",
+        "description": "`SpType`\n\n<details><summary>JSON schema</summary>\n\n```json { \"type\": \"string\", \"enum\": [ \"sled\", \"power\", \"switch\" ] } ``` </details>",
         "type": "string",
         "enum": [
           "sled",
@@ -6781,20 +6771,82 @@
         "type": "object",
         "properties": {
           "datapath": {
-            "nullable": true,
             "description": "Status of the transceiver's machinery for carrying data, the \"datapath\".",
-            "allOf": [
+            "x-rust-type": {
+              "crate": "std",
+              "parameters": [
+                {
+                  "$ref": "#/components/schemas/Datapath"
+                },
+                {
+                  "type": "string"
+                }
+              ],
+              "path": "::std::result::Result",
+              "version": "*"
+            },
+            "oneOf": [
               {
-                "$ref": "#/components/schemas/Datapath"
+                "type": "object",
+                "properties": {
+                  "ok": {
+                    "$ref": "#/components/schemas/Datapath"
+                  }
+                },
+                "required": [
+                  "ok"
+                ]
+              },
+              {
+                "type": "object",
+                "properties": {
+                  "err": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "err"
+                ]
               }
             ]
           },
           "monitors": {
-            "nullable": true,
             "description": "Environmental monitoring data, such as temperature or optical power.",
-            "allOf": [
+            "x-rust-type": {
+              "crate": "std",
+              "parameters": [
+                {
+                  "$ref": "#/components/schemas/Monitors"
+                },
+                {
+                  "type": "string"
+                }
+              ],
+              "path": "::std::result::Result",
+              "version": "*"
+            },
+            "oneOf": [
               {
-                "$ref": "#/components/schemas/Monitors"
+                "type": "object",
+                "properties": {
+                  "ok": {
+                    "$ref": "#/components/schemas/Monitors"
+                  }
+                },
+                "required": [
+                  "ok"
+                ]
+              },
+              {
+                "type": "object",
+                "properties": {
+                  "err": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "err"
+                ]
               }
             ]
           },
@@ -6803,35 +6855,133 @@
             "type": "string"
           },
           "power": {
-            "nullable": true,
             "description": "Information about the power state of the transceiver.",
-            "allOf": [
+            "x-rust-type": {
+              "crate": "std",
+              "parameters": [
+                {
+                  "$ref": "#/components/schemas/PowerMode"
+                },
+                {
+                  "type": "string"
+                }
+              ],
+              "path": "::std::result::Result",
+              "version": "*"
+            },
+            "oneOf": [
               {
-                "$ref": "#/components/schemas/PowerMode"
+                "type": "object",
+                "properties": {
+                  "ok": {
+                    "$ref": "#/components/schemas/PowerMode"
+                  }
+                },
+                "required": [
+                  "ok"
+                ]
+              },
+              {
+                "type": "object",
+                "properties": {
+                  "err": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "err"
+                ]
               }
             ]
           },
           "status": {
-            "nullable": true,
             "description": "The general status of the transceiver, such as presence and faults.",
-            "allOf": [
+            "x-rust-type": {
+              "crate": "std",
+              "parameters": [
+                {
+                  "$ref": "#/components/schemas/ExtendedStatus"
+                },
+                {
+                  "type": "string"
+                }
+              ],
+              "path": "::std::result::Result",
+              "version": "*"
+            },
+            "oneOf": [
               {
-                "$ref": "#/components/schemas/ExtendedStatus"
+                "type": "object",
+                "properties": {
+                  "ok": {
+                    "$ref": "#/components/schemas/ExtendedStatus"
+                  }
+                },
+                "required": [
+                  "ok"
+                ]
+              },
+              {
+                "type": "object",
+                "properties": {
+                  "err": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "err"
+                ]
               }
             ]
           },
           "vendor": {
-            "nullable": true,
             "description": "Details about the vendor, part number, and serial number.",
-            "allOf": [
+            "x-rust-type": {
+              "crate": "std",
+              "parameters": [
+                {
+                  "$ref": "#/components/schemas/VendorInfo"
+                },
+                {
+                  "type": "string"
+                }
+              ],
+              "path": "::std::result::Result",
+              "version": "*"
+            },
+            "oneOf": [
               {
-                "$ref": "#/components/schemas/VendorInfo"
+                "type": "object",
+                "properties": {
+                  "ok": {
+                    "$ref": "#/components/schemas/VendorInfo"
+                  }
+                },
+                "required": [
+                  "ok"
+                ]
+              },
+              {
+                "type": "object",
+                "properties": {
+                  "err": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "err"
+                ]
               }
             ]
           }
         },
         "required": [
-          "port"
+          "datapath",
+          "monitors",
+          "port",
+          "power",
+          "status",
+          "vendor"
         ]
       },
       "TransceiverInventorySnapshot": {

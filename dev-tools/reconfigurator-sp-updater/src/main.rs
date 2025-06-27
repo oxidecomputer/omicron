@@ -13,9 +13,11 @@ use clap::Subcommand;
 use futures::StreamExt;
 use gateway_client::types::SpIgnition;
 use gateway_client::types::SpType;
+use gateway_types::rot::RotSlot;
 use internal_dns_types::names::ServiceName;
 use nexus_mgs_updates::ArtifactCache;
 use nexus_mgs_updates::MgsUpdateDriver;
+use nexus_types::deployment::ExpectedActiveRotSlot;
 use nexus_types::deployment::ExpectedVersion;
 use nexus_types::deployment::PendingMgsUpdate;
 use nexus_types::deployment::PendingMgsUpdateDetails;
@@ -35,11 +37,10 @@ use tokio::sync::watch;
 use tufaceous_artifact::ArtifactHash;
 use tufaceous_artifact::ArtifactVersion;
 
-#[tokio::main]
-async fn main() -> Result<(), anyhow::Error> {
+fn main() -> Result<(), anyhow::Error> {
     let args = ReconfiguratorSpUpdater::parse();
 
-    if let Err(error) = args.exec().await {
+    if let Err(error) = oxide_tokio_rt::run(args.exec()) {
         eprintln!("error: {:#}", error);
         std::process::exit(1);
     }
@@ -118,6 +119,7 @@ impl ReconfiguratorSpUpdater {
                 .expect("we just waited for this condition");
             format!("http://{}", mgs_backend.address)
         };
+
         let mgs_client = gateway_client::Client::new(
             &mgs_url,
             log.new(o!("mgs_url" => mgs_url.clone())),
@@ -322,6 +324,37 @@ fn cmd_config(
                     expected_active_version, expected_inactive_version,
                 )?;
             }
+            PendingMgsUpdateDetails::Rot {
+                expected_active_slot,
+                expected_inactive_version,
+                expected_persistent_boot_preference,
+                expected_pending_persistent_boot_preference,
+                expected_transient_boot_preference,
+            } => {
+                writeln!(
+                    &mut s,
+                    "        preconditions: expected active slot {:?}
+                                            expected active version {:?}
+                                            expected inactive version {:?}
+                                            expected persistent_boot_preference {:?}
+                                            expected pending_persistent_boot_preference {:?}
+                                            expected transient_boot_preference {:?}",
+                    expected_active_slot.slot(), expected_active_slot.version(),
+                    expected_inactive_version, expected_persistent_boot_preference,
+                    expected_pending_persistent_boot_preference,
+                    expected_transient_boot_preference,
+                )?;
+            }
+            PendingMgsUpdateDetails::RotBootloader {
+                expected_stage0_version,
+                expected_stage0_next_version,
+            } => {
+                writeln!(
+                    &mut s,
+                    "        preconditions: stage 0 {:?}, stage 0 next {:?}",
+                    expected_stage0_version, expected_stage0_next_version,
+                )?;
+            }
         }
 
         writeln!(&mut s)?;
@@ -353,8 +386,47 @@ struct SetArgs {
 #[derive(Clone, Debug, Subcommand)]
 enum Component {
     Sp {
+        /// expected version of the active slot
+        #[arg(long, short = 'a')]
         expected_active_version: ArtifactVersion,
+        /// expected version of the inactive slot
+        #[arg(long, short = 'i')]
         expected_inactive_version: ExpectedVersion,
+    },
+    Rot {
+        /// whether we expect the "A" or "B" slot to be active
+        #[arg(long, short = 's')]
+        expected_active_slot: RotSlot,
+        /// expected version of the "A" slot
+        #[arg(long, short = 'a')]
+        expected_slot_a_version: ExpectedVersion,
+        /// expected version of the "B" slot
+        #[arg(long, short = 'b')]
+        expected_slot_b_version: ExpectedVersion,
+        /// the expected persistent boot preference written into the current
+        /// authoritative CFPA page (ping or pong).
+        /// Will default to the value of expected_active_version when not set
+        #[arg(long, short = 'p')]
+        expected_persistent_boot_preference: Option<RotSlot>,
+        /// the expected persistent boot preference written into the CFPA scratch
+        /// page that will become the persistent boot preference in the authoritative
+        /// CFPA page upon reboot, unless CFPA update of the authoritative page fails
+        /// for some reason
+        #[arg(long, short = 'x')]
+        expected_pending_persistent_boot_preference: Option<RotSlot>,
+        // this field is not in use yet.
+        //
+        /// override persistent preference selection for a single boot
+        #[arg(long, short = 't')]
+        expected_transient_boot_preference: Option<RotSlot>,
+    },
+    RotBootloader {
+        /// expected version of stage0 (active slot)
+        #[arg(long, short = 'a')]
+        expected_stage0_version: ArtifactVersion,
+        /// expected version of stage0 next (inactive slot)
+        #[arg(long, short = 'i')]
+        expected_stage0_next_version: ExpectedVersion,
     },
 }
 
@@ -375,6 +447,53 @@ fn cmd_set(
             } => PendingMgsUpdateDetails::Sp {
                 expected_active_version,
                 expected_inactive_version,
+            },
+            Component::Rot {
+                expected_active_slot,
+                expected_slot_a_version,
+                expected_slot_b_version,
+                expected_persistent_boot_preference,
+                expected_pending_persistent_boot_preference,
+                expected_transient_boot_preference,
+            } => {
+                let (active_version, expected_inactive_version) =
+                    match expected_active_slot {
+                        RotSlot::A => {
+                            (expected_slot_a_version, expected_slot_b_version)
+                        }
+                        RotSlot::B => {
+                            (expected_slot_b_version, expected_slot_a_version)
+                        }
+                    };
+
+                let expected_active_version = match active_version {
+                    ExpectedVersion::Version(v) => v,
+                    ExpectedVersion::NoValidVersion => {
+                        return Err(anyhow!(
+                            "the expected active slot version must have a valid version"
+                        ));
+                    }
+                };
+
+                PendingMgsUpdateDetails::Rot {
+                    expected_active_slot: ExpectedActiveRotSlot {
+                        slot: expected_active_slot,
+                        version: expected_active_version,
+                    },
+                    expected_inactive_version,
+                    expected_persistent_boot_preference:
+                        expected_persistent_boot_preference
+                            .unwrap_or(expected_active_slot),
+                    expected_pending_persistent_boot_preference,
+                    expected_transient_boot_preference,
+                }
+            }
+            Component::RotBootloader {
+                expected_stage0_version,
+                expected_stage0_next_version,
+            } => PendingMgsUpdateDetails::RotBootloader {
+                expected_stage0_version,
+                expected_stage0_next_version,
             },
         },
         artifact_hash: args.artifact_hash,

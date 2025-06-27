@@ -109,6 +109,56 @@
           }
         }
       }
+    },
+    "/proxy/status/nodes": {
+      "get": {
+        "summary": "Proxy to CockroachDB's /_status/nodes endpoint",
+        "operationId": "status_nodes",
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "title": "String",
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/proxy/status/vars": {
+      "get": {
+        "summary": "Proxy to CockroachDB's /_status/vars endpoint",
+        "operationId": "status_vars",
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "title": "String",
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
     }
   },
   "components": {
@@ -290,17 +340,62 @@
           "build": {
             "type": "string"
           },
+          "gossiped_replicas": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "intent_bytes": {
+            "type": "integer",
+            "format": "int64"
+          },
           "is_available": {
+            "type": "boolean"
+          },
+          "is_decommissioning": {
+            "type": "boolean"
+          },
+          "is_draining": {
             "type": "boolean"
           },
           "is_live": {
             "type": "boolean"
           },
+          "key_bytes": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "live_bytes": {
+            "type": "integer",
+            "format": "int64"
+          },
           "locality": {
+            "type": "string"
+          },
+          "membership": {
             "type": "string"
           },
           "node_id": {
             "type": "string"
+          },
+          "ranges": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "ranges_unavailable": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "ranges_underreplicated": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "replicas_leaders": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "replicas_leaseholders": {
+            "type": "integer",
+            "format": "int64"
           },
           "sql_address": {
             "type": "string"
@@ -309,21 +404,43 @@
             "type": "string",
             "format": "date-time"
           },
+          "system_bytes": {
+            "type": "integer",
+            "format": "int64"
+          },
           "updated_at": {
             "type": "string",
             "format": "date-time"
+          },
+          "value_bytes": {
+            "type": "integer",
+            "format": "int64"
           }
         },
         "required": [
           "address",
           "build",
+          "gossiped_replicas",
+          "intent_bytes",
           "is_available",
+          "is_decommissioning",
+          "is_draining",
           "is_live",
+          "key_bytes",
+          "live_bytes",
           "locality",
+          "membership",
           "node_id",
+          "ranges",
+          "ranges_unavailable",
+          "ranges_underreplicated",
+          "replicas_leaders",
+          "replicas_leaseholders",
           "sql_address",
           "started_at",
-          "updated_at"
+          "system_bytes",
+          "updated_at",
+          "value_bytes"
         ]
       },
       "TypedUuidForOmicronZoneKind": {

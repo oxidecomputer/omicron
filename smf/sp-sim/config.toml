@@ -15,6 +15,14 @@ bind_addr = "[::1]:33300"
 [simulated_sps.sidecar.network_config.simulated]
 bind_addr = "[::1]:33301"
 
+[[simulated_sps.sidecar.ereport_network_config]]
+[simulated_sps.sidecar.ereport_network_config.simulated]
+bind_addr = "[::1]:44400"
+
+[[simulated_sps.sidecar.ereport_network_config]]
+[simulated_sps.sidecar.ereport_network_config.simulated]
+bind_addr = "[::1]:44401"
+
 [[simulated_sps.gimlet]]
 serial_number = "SimGimlet0"
 manufacturing_root_cert_seed = "01de01de01de01de01de01de01de01de01de01de01de01de01de01de01de01de"
@@ -27,6 +35,14 @@ bind_addr = "[::1]:33310"
 [[simulated_sps.gimlet.network_config]]
 [simulated_sps.gimlet.network_config.simulated]
 bind_addr = "[::1]:33311"
+
+[[simulated_sps.gimlet.ereport_network_config]]
+[simulated_sps.gimlet.ereport_network_config.simulated]
+bind_addr = "[::1]:44410"
+
+[[simulated_sps.gimlet.ereport_network_config]]
+[simulated_sps.gimlet.ereport_network_config.simulated]
+bind_addr = "[::1]:44411"
 
 [[simulated_sps.gimlet.components]]
 id = "sp3-host-cpu"
@@ -48,6 +64,14 @@ bind_addr = "[::1]:33320"
 [[simulated_sps.gimlet.network_config]]
 [simulated_sps.gimlet.network_config.simulated]
 bind_addr = "[::1]:33321"
+
+[[simulated_sps.gimlet.ereport_network_config]]
+[simulated_sps.gimlet.ereport_network_config.simulated]
+bind_addr = "[::1]:44420"
+
+[[simulated_sps.gimlet.ereport_network_config]]
+[simulated_sps.gimlet.ereport_network_config.simulated]
+bind_addr = "[::1]:44421"
 
 [[simulated_sps.gimlet.components]]
 id = "sp3-host-cpu"

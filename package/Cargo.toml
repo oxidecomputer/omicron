@@ -21,6 +21,7 @@ indent_write.workspace = true
 indicatif.workspace = true
 omicron-workspace-hack.workspace = true
 omicron-zone-package.workspace = true
+oxide-tokio-rt.workspace = true
 petgraph.workspace = true
 rayon.workspace = true
 reqwest = { workspace = true, features = [ "rustls-tls" ] }

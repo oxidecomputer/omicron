@@ -71,7 +71,7 @@ impl super::Nexus {
         id: SupportBundleUuid,
         query: SupportBundleQueryType,
         head: bool,
-        _range: Option<PotentialRange>,
+        range: Option<PotentialRange>,
     ) -> Result<Response<Body>, Error> {
         // Lookup the bundle, confirm it's accessible
         let (.., bundle) = LookupPath::new(opctx, &self.db_datastore)
@@ -90,9 +90,31 @@ impl super::Nexus {
             .db_datastore
             .zpool_get_sled_if_in_service(&opctx, bundle.zpool_id.into())
             .await?;
-        let client = self.sled_client(&sled_id).await?;
 
-        // TODO: Use "range"?
+        let short_timeout = std::time::Duration::from_secs(60);
+        let long_timeout = std::time::Duration::from_secs(3600);
+        let client = nexus_networking::default_reqwest_client_builder()
+            // Continuing to read from the sled agent should happen relatively
+            // quickly.
+            .read_timeout(short_timeout)
+            // However, the bundle itself may be large. As long as we're
+            // continuing to make progress (see: read_timeout) we should be
+            // willing to keep transferring the bundle for a while longer.
+            .timeout(long_timeout)
+            .build()
+            .expect("Failed to build reqwest Client");
+        let client = self.sled_client_ext(&sled_id, client).await?;
+
+        let range = if let Some(potential_range) = &range {
+            Some(potential_range.try_into_str().map_err(|err| match err {
+                range_requests::Error::Parse(_) => Error::invalid_request(
+                    "Failed to parse range request header",
+                ),
+                _ => Error::internal_error("Invalid range request"),
+            })?)
+        } else {
+            None
+        };
 
         let response = match (query, head) {
             (SupportBundleQueryType::Whole, true) => {
@@ -101,6 +123,7 @@ impl super::Nexus {
                         &ZpoolUuid::from(bundle.zpool_id),
                         &DatasetUuid::from(bundle.dataset_id),
                         &SupportBundleUuid::from(bundle.id),
+                        range,
                     )
                     .await
             }
@@ -110,6 +133,7 @@ impl super::Nexus {
                         &ZpoolUuid::from(bundle.zpool_id),
                         &DatasetUuid::from(bundle.dataset_id),
                         &SupportBundleUuid::from(bundle.id),
+                        range,
                     )
                     .await
             }
@@ -119,6 +143,7 @@ impl super::Nexus {
                         &ZpoolUuid::from(bundle.zpool_id),
                         &DatasetUuid::from(bundle.dataset_id),
                         &SupportBundleUuid::from(bundle.id),
+                        range,
                     )
                     .await
             }
@@ -128,6 +153,7 @@ impl super::Nexus {
                         &ZpoolUuid::from(bundle.zpool_id),
                         &DatasetUuid::from(bundle.dataset_id),
                         &SupportBundleUuid::from(bundle.id),
+                        range,
                     )
                     .await
             }
@@ -138,6 +164,7 @@ impl super::Nexus {
                         &DatasetUuid::from(bundle.dataset_id),
                         &SupportBundleUuid::from(bundle.id),
                         &file_path,
+                        range,
                     )
                     .await
             }
@@ -148,6 +175,7 @@ impl super::Nexus {
                         &DatasetUuid::from(bundle.dataset_id),
                         &SupportBundleUuid::from(bundle.id),
                         &file_path,
+                        range,
                     )
                     .await
             }

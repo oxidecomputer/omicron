@@ -18,7 +18,7 @@ target_os=$1
 # NOTE: This version should be in sync with the recommended version in
 # .config/nextest.toml. (Maybe build an automated way to pull the recommended
 # version in the future.)
-NEXTEST_VERSION='0.9.91'
+NEXTEST_VERSION='0.9.98'
 
 cargo --version
 rustc --version
@@ -92,7 +92,7 @@ banner ls-apis
 # from end-to-end-tests.
 #
 banner build
-export RUSTFLAGS="-D warnings"
+export RUSTFLAGS="--cfg tokio_unstable -D warnings"
 export RUSTDOCFLAGS="--document-private-items -D warnings"
 # When running on illumos we need to pass an additional runpath that is
 # usually configured via ".cargo/config" but the `RUSTFLAGS` env variable

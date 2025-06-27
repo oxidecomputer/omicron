@@ -39,11 +39,12 @@ use omicron_ddm_admin_client::DdmError;
 use omicron_ddm_admin_client::types::EnableStatsRequest;
 use omicron_uuid_kinds::GenericUuid;
 use omicron_uuid_kinds::RackInitUuid;
+use sled_agent_config_reconciler::ConfigReconcilerSpawnToken;
+use sled_agent_config_reconciler::InternalDisksReceiver;
 use sled_agent_types::rack_init::RackInitializeRequest;
 use sled_agent_types::sled::StartSledAgentRequest;
 use sled_hardware::underlay;
 use sled_storage::dataset::CONFIG_DATASET;
-use sled_storage::manager::StorageHandle;
 use slog::Logger;
 use std::io;
 use std::net::SocketAddr;
@@ -180,12 +181,15 @@ impl Server {
             service_manager,
             long_running_task_handles,
             sled_agent_started_tx,
+            config_reconciler_spawn_token,
         } = BootstrapAgentStartup::run(config).await?;
 
         // Do we have a StartSledAgentRequest stored in the ledger?
-        let paths =
-            sled_config_paths(&long_running_task_handles.storage_manager)
-                .await?;
+        let internal_disks_rx = long_running_task_handles
+            .config_reconciler
+            .internal_disks_rx()
+            .clone();
+        let paths = sled_config_paths(&internal_disks_rx).await?;
         let maybe_ledger =
             Ledger::<StartSledAgentRequest>::new(&startup_log, paths).await;
 
@@ -204,7 +208,7 @@ impl Server {
         let bootstrap_context = BootstrapServerContext {
             base_log: base_log.clone(),
             global_zone_bootstrap_ip,
-            storage_manager: long_running_task_handles.storage_manager.clone(),
+            internal_disks_rx,
             bootstore_node_handle: long_running_task_handles.bootstore.clone(),
             baseboard: long_running_task_handles.hardware_manager.baseboard(),
             rss_access,
@@ -244,6 +248,7 @@ impl Server {
                 &config,
                 start_sled_agent_request,
                 long_running_task_handles.clone(),
+                config_reconciler_spawn_token,
                 service_manager.clone(),
                 &base_log,
                 &startup_log,
@@ -257,14 +262,12 @@ impl Server {
                 .map_err(|_| ())
                 .expect("Failed to send to StorageMonitor");
 
-            // For cold boot specifically, we now need to load the services
-            // we're responsible for, while continuing to handle hardware
-            // notifications. This cannot fail: we retry indefinitely until
-            // we're done loading services.
-            sled_agent.load_services().await;
             SledAgentState::ServerStarted(sled_agent_server)
         } else {
-            SledAgentState::Bootstrapping(Some(sled_agent_started_tx))
+            SledAgentState::Bootstrapping(Some(BootstrappingDependencies {
+                sled_agent_started_tx,
+                config_reconciler_spawn_token,
+            }))
         };
 
         // Spawn our inner task that handles any future hardware updates and any
@@ -306,9 +309,14 @@ impl Server {
 // bootstrap server).
 enum SledAgentState {
     // We're still in the bootstrapping phase, waiting for a sled-agent request.
-    Bootstrapping(Option<oneshot::Sender<SledAgent>>),
+    Bootstrapping(Option<BootstrappingDependencies>),
     // ... or the sled agent server is running.
     ServerStarted(SledAgentServer),
+}
+
+struct BootstrappingDependencies {
+    sled_agent_started_tx: oneshot::Sender<SledAgent>,
+    config_reconciler_spawn_token: ConfigReconcilerSpawnToken,
 }
 
 #[derive(thiserror::Error, Debug)]
@@ -350,6 +358,7 @@ async fn start_sled_agent(
     config: &SledConfig,
     request: StartSledAgentRequest,
     long_running_task_handles: LongRunningTaskHandles,
+    config_reconciler_spawn_token: ConfigReconcilerSpawnToken,
     service_manager: ServiceManager,
     base_log: &Logger,
     log: &Logger,
@@ -386,9 +395,6 @@ async fn start_sled_agent(
         }
     }
 
-    // Inform the storage service that the key manager is available
-    long_running_task_handles.storage_manager.key_manager_ready().await;
-
     // Inform our DDM reconciler of our underlay subnet and the information it
     // needs for maghemite to enable Oximeter stats.
     let ddm_reconciler = service_manager.ddm_reconciler();
@@ -404,6 +410,7 @@ async fn start_sled_agent(
         base_log.clone(),
         request.clone(),
         long_running_task_handles.clone(),
+        config_reconciler_spawn_token,
         service_manager,
     )
     .await
@@ -413,8 +420,10 @@ async fn start_sled_agent(
 
     // Record this request so the sled agent can be automatically
     // initialized on the next boot.
-    let paths =
-        sled_config_paths(&long_running_task_handles.storage_manager).await?;
+    let paths = sled_config_paths(
+        long_running_task_handles.config_reconciler.internal_disks_rx(),
+    )
+    .await?;
 
     let mut ledger = Ledger::new_with(&log, paths, request);
     ledger.commit().await?;
@@ -468,12 +477,11 @@ impl From<MissingM2Paths> for SledAgentServerStartError {
 }
 
 async fn sled_config_paths(
-    storage: &StorageHandle,
+    internal_disks_rx: &InternalDisksReceiver,
 ) -> Result<Vec<Utf8PathBuf>, MissingM2Paths> {
-    let resources = storage.get_latest_disks().await;
-    let paths: Vec<_> = resources
-        .all_m2_mountpoints(CONFIG_DATASET)
-        .into_iter()
+    let paths: Vec<_> = internal_disks_rx
+        .current()
+        .all_config_datasets()
         .map(|p| p.join(SLED_AGENT_REQUEST_FILE))
         .collect();
 
@@ -536,7 +544,7 @@ impl Inner {
         log: &Logger,
     ) {
         match &mut self.state {
-            SledAgentState::Bootstrapping(sled_agent_started_tx) => {
+            SledAgentState::Bootstrapping(deps) => {
                 let request_id = request.body.id.into_untyped_uuid();
 
                 // Extract from options to satisfy the borrow checker.
@@ -545,13 +553,16 @@ impl Inner {
                 // we explicitly unwrap here, and panic on error below.
                 //
                 // See https://github.com/oxidecomputer/omicron/issues/4494
-                let sled_agent_started_tx =
-                    sled_agent_started_tx.take().unwrap();
+                let BootstrappingDependencies {
+                    sled_agent_started_tx,
+                    config_reconciler_spawn_token,
+                } = deps.take().unwrap();
 
                 let response = match start_sled_agent(
                     &self.config,
                     request,
                     self.long_running_task_handles.clone(),
+                    config_reconciler_spawn_token,
                     self.service_manager.clone(),
                     &self.base_log,
                     &log,
@@ -620,15 +631,13 @@ impl Inner {
     }
 
     async fn uninstall_sled_local_config(&self) -> Result<(), BootstrapError> {
-        let config_dirs = self
+        let internal_disks = self
             .long_running_task_handles
-            .storage_manager
-            .get_latest_disks()
-            .await
-            .all_m2_mountpoints(CONFIG_DATASET)
-            .into_iter();
+            .config_reconciler
+            .internal_disks_rx()
+            .current();
 
-        for dir in config_dirs {
+        for dir in internal_disks.all_config_datasets() {
             for entry in dir.read_dir_utf8().map_err(|err| {
                 BootstrapError::Io { message: format!("Deleting {dir}"), err }
             })? {
@@ -686,10 +695,11 @@ impl Inner {
         log: &Logger,
     ) -> Result<(), BootstrapError> {
         let datasets = zfs::get_all_omicron_datasets_for_delete()
+            .await
             .map_err(BootstrapError::ZfsDatasetsList)?;
         for dataset in &datasets {
             info!(log, "Removing dataset: {dataset}");
-            zfs::Zfs::destroy_dataset(dataset)?;
+            zfs::Zfs::destroy_dataset(dataset).await?;
         }
 
         Ok(())

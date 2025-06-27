@@ -5,6 +5,7 @@
 //! Propagates DNS changes in a given blueprint
 
 use crate::Sled;
+use iddqd::IdOrdMap;
 use internal_dns_types::diff::DnsDiff;
 use nexus_db_model::DnsGroup;
 use nexus_db_queries::context::OpContext;
@@ -21,16 +22,14 @@ use nexus_types::internal_api::params::DnsConfigZone;
 use omicron_common::api::external::Error;
 use omicron_common::api::external::InternalContext;
 use omicron_common::bail_unless;
-use omicron_uuid_kinds::SledUuid;
 use slog::{debug, info, o};
-use std::collections::BTreeMap;
 
 pub(crate) async fn deploy_dns(
     opctx: &OpContext,
     datastore: &DataStore,
     creator: String,
     blueprint: &Blueprint,
-    sleds_by_id: &BTreeMap<SledUuid, Sled>,
+    sleds_by_id: &IdOrdMap<Sled>,
     overrides: &Overridables,
 ) -> Result<(), Error> {
     // First, fetch the current DNS configs.
@@ -215,10 +214,17 @@ pub(crate) async fn deploy_dns_one(
         DnsGroup::Internal => blueprint.internal_dns_version,
         DnsGroup::External => blueprint.external_dns_version,
     };
+    let new_dns_generation = blueprint_generation.next();
     let dns_config_blueprint = DnsConfigParams {
         zones: vec![dns_zone_blueprint],
         time_created: chrono::Utc::now(),
-        generation: blueprint_generation.next(),
+        serial: new_dns_generation.as_u64().try_into().map_err(|_| {
+            Error::internal_error(&format!(
+                "DNS config would wrap the DNS serial number: {}",
+                new_dns_generation.as_u64()
+            ))
+        })?,
+        generation: new_dns_generation,
     };
 
     info!(
@@ -343,6 +349,7 @@ mod test {
     use nexus_types::deployment::OximeterReadPolicy;
     use nexus_types::deployment::PendingMgsUpdates;
     use nexus_types::deployment::SledFilter;
+    use nexus_types::deployment::TufRepoPolicy;
     use nexus_types::deployment::blueprint_zone_type;
     use nexus_types::external_api::params;
     use nexus_types::external_api::shared;
@@ -390,8 +397,13 @@ mod test {
         nexus_test_utils::ControlPlaneTestContext<omicron_nexus::Server>;
 
     fn dns_config_empty() -> DnsConfigParams {
+        let initial_generation = Generation::new();
         DnsConfigParams {
-            generation: Generation::new(),
+            generation: initial_generation,
+            serial: initial_generation
+                .as_u64()
+                .try_into()
+                .expect("initial DNS generation is a valid serial"),
             time_created: chrono::Utc::now(),
             zones: vec![DnsConfigZone {
                 zone_name: String::from("internal"),
@@ -628,7 +640,7 @@ mod test {
         );
         let blueprint_dns = blueprint_internal_dns_config(
             &blueprint,
-            &BTreeMap::new(),
+            &IdOrdMap::new(),
             &Default::default(),
         )
         .unwrap();
@@ -654,12 +666,14 @@ mod test {
 
         let mut blueprint_sleds = BTreeMap::new();
 
-        for (sled_id, sa) in collection.sled_agents {
+        for sa in collection.sled_agents {
+            let ledgered_sled_config =
+                sa.ledgered_sled_config.unwrap_or_default();
+
             // Convert the inventory `OmicronZonesConfig`s into
             // `BlueprintZoneConfig`s. This is going to get more painful over
             // time as we add to blueprints, but for now we can make this work.
-            let zones = sa
-                .omicron_zones
+            let zones = ledgered_sled_config
                 .zones
                 .into_iter()
                 .map(|config| -> BlueprintZoneConfig {
@@ -675,13 +689,14 @@ mod test {
                 })
                 .collect();
             blueprint_sleds.insert(
-                sled_id,
+                sa.sled_id,
                 BlueprintSledConfig {
                     state: SledState::Active,
-                    sled_agent_generation: sa.omicron_zones.generation,
+                    sled_agent_generation: ledgered_sled_config.generation,
                     disks: IdMap::new(),
                     datasets: IdMap::new(),
                     zones,
+                    remove_mupdate_override: None,
                 },
             );
         }
@@ -697,6 +712,7 @@ mod test {
             parent_blueprint_id: None,
             internal_dns_version: initial_dns_generation,
             external_dns_version: Generation::new(),
+            target_release_minimum_generation: Generation::new(),
             cockroachdb_fingerprint: String::new(),
             clickhouse_cluster_config: None,
             oximeter_read_version: Generation::new(),
@@ -740,7 +756,7 @@ mod test {
             .zip(possible_sled_subnets)
             .enumerate()
             .map(|(i, (sled_id, subnet))| {
-                let sled_info = Sled::new(
+                Sled::new(
                     *sled_id,
                     SledPolicy::InService {
                         provision_policy: SledProvisionPolicy::Provisionable,
@@ -750,8 +766,7 @@ mod test {
                     // The first two of these (arbitrarily) will be marked
                     // Scrimlets.
                     if i < 2 { SledRole::Scrimlet } else { SledRole::Gimlet },
-                );
-                (*sled_id, sled_info)
+                )
             })
             .collect();
 
@@ -792,7 +807,7 @@ mod test {
 
         // To start, we need a mapping from underlay IP to the corresponding
         // Omicron zone.
-        let mut omicron_zones_by_ip: BTreeMap<_, _> = blueprint
+        let omicron_zones_by_ip: BTreeMap<_, _> = blueprint
             .all_omicron_zones(BlueprintZoneDisposition::is_in_service)
             .map(|(_, zone)| (zone.underlay_ip(), zone.id))
             .collect();
@@ -805,14 +820,14 @@ mod test {
 
         // We also want a mapping from underlay IP to the corresponding switch
         // zone.  In this case, the value is the Scrimlet's sled id.
-        let mut switch_sleds_by_ip: BTreeMap<_, _> = sleds_by_id
+        let switch_sleds_by_ip: BTreeMap<_, _> = sleds_by_id
             .iter()
-            .filter_map(|(sled_id, sled)| {
+            .filter_map(|sled| {
                 if sled.is_scrimlet() {
                     let sled_subnet =
-                        sleds_by_id.get(sled_id).unwrap().subnet();
+                        sleds_by_id.get(&sled.id()).unwrap().subnet();
                     let switch_zone_ip = get_switch_zone_address(sled_subnet);
-                    Some((switch_zone_ip, *sled_id))
+                    Some((switch_zone_ip, sled.id()))
                 } else {
                     None
                 }
@@ -821,12 +836,12 @@ mod test {
 
         // We also want a mapping from underlay IP to each sled global zone.
         // In this case, the value is the sled id.
-        let mut all_sleds_by_ip: BTreeMap<_, _> = sleds_by_id
-            .keys()
-            .map(|sled_id| {
-                let sled_subnet = sleds_by_id.get(sled_id).unwrap().subnet();
+        let all_sleds_by_ip: BTreeMap<_, _> = sleds_by_id
+            .iter()
+            .map(|sled| {
+                let sled_subnet = sleds_by_id.get(&sled.id()).unwrap().subnet();
                 let global_zone_ip = *get_sled_address(sled_subnet).ip();
-                (global_zone_ip, *sled_id)
+                (global_zone_ip, sled.id())
             })
             .collect();
 
@@ -861,8 +876,12 @@ mod test {
         // any corresponding Omicron zone.  While doing this, construct a set of
         // the fully-qualified DNS names (i.e., with the zone name suffix
         // appended) that had AAAA records.  We'll use this later to make sure
-        // all the SRV records' targets that we find are valid.
+        // all the SRV records' targets that we find are valid.  Some IPs may be
+        // represented with multiple AAAA records, and not all AAAA records are
+        // the target of a SRV.
         let mut expected_srv_targets: BTreeSet<_> = BTreeSet::new();
+        let mut unaccounted_omicron_zones = omicron_zones_by_ip.clone();
+        let mut unaccounted_switch_zones = switch_sleds_by_ip.clone();
         for (name, records) in &blueprint_dns_zone.records {
             let addrs: Vec<_> = records
                 .iter()
@@ -872,7 +891,8 @@ mod test {
                 })
                 .collect();
             for addr in addrs {
-                if let Some(zone_id) = omicron_zones_by_ip.remove(addr) {
+                if let Some(zone_id) = omicron_zones_by_ip.get(addr) {
+                    unaccounted_omicron_zones.remove(addr);
                     println!(
                         "IP {} found in DNS corresponds with zone {}",
                         addr, zone_id
@@ -884,7 +904,8 @@ mod test {
                     continue;
                 }
 
-                if let Some(scrimlet_id) = switch_sleds_by_ip.remove(addr) {
+                if let Some(scrimlet_id) = switch_sleds_by_ip.get(addr) {
+                    unaccounted_switch_zones.remove(addr);
                     println!(
                         "IP {} found in DNS corresponds with switch zone \
                         for Scrimlet {}",
@@ -897,7 +918,7 @@ mod test {
                     continue;
                 }
 
-                if let Some(sled_id) = all_sleds_by_ip.remove(addr) {
+                if let Some(sled_id) = all_sleds_by_ip.get(addr) {
                     println!(
                         "IP {} found in DNS corresponds with global zone \
                         for sled {}",
@@ -921,19 +942,19 @@ mod test {
 
         println!(
             "Omicron zones whose IPs were not found in DNS: {:?}",
-            omicron_zones_by_ip,
+            unaccounted_omicron_zones,
         );
         assert!(
-            omicron_zones_by_ip.is_empty(),
+            unaccounted_omicron_zones.is_empty(),
             "some Omicron zones' IPs were not found in DNS"
         );
 
         println!(
             "Scrimlets whose switch zone IPs were not found in DNS: {:?}",
-            switch_sleds_by_ip,
+            unaccounted_switch_zones,
         );
         assert!(
-            switch_sleds_by_ip.is_empty(),
+            unaccounted_switch_zones.is_empty(),
             "some switch zones' IPs were not found in DNS"
         );
 
@@ -1018,8 +1039,12 @@ mod test {
     async fn test_blueprint_external_dns_basic() {
         static TEST_NAME: &str = "test_blueprint_external_dns_basic";
         let logctx = test_setup_log(TEST_NAME);
-        let (_, mut blueprint) =
-            ExampleSystemBuilder::new(&logctx.log, TEST_NAME).nsleds(5).build();
+        let system_builder = ExampleSystemBuilder::new(&logctx.log, TEST_NAME)
+            .nsleds(5)
+            .external_dns_count(3)
+            .expect("can set external dns count");
+        let external_dns_count = system_builder.get_external_dns_zones();
+        let (_, mut blueprint) = system_builder.build();
         blueprint.internal_dns_version = Generation::new();
         blueprint.external_dns_version = Generation::new();
 
@@ -1045,7 +1070,45 @@ mod test {
             String::from("oxide.test"),
         );
         assert_eq!(external_dns_zone.zone_name, "oxide.test");
-        assert!(external_dns_zone.records.is_empty());
+        // We'll only have external DNS nameserver records - the A/AAAA records
+        // for servers themselves, and NS records at the apex.
+        let baseline_external_dns_names = external_dns_count + 1;
+        // Note that `records` is a map of names to records for each name, so
+        // we're asserting on the number of names here.
+        assert_eq!(
+            external_dns_zone.records.len(),
+            baseline_external_dns_names
+        );
+        // Each nameserver has one A/AAAA record and an NS record at the apex.
+        // These should be the only records in external DNS at this point.
+        assert_eq!(
+            external_dns_zone
+                .records
+                .values()
+                .map(|recs| recs.len())
+                .sum::<usize>(),
+            external_dns_count * 2
+        );
+
+        use internal_dns_types::names::ZONE_APEX_NAME;
+        let apex_records = external_dns_zone
+            .records
+            .get(ZONE_APEX_NAME)
+            .expect("records are present for zone apex");
+        assert_eq!(apex_records.len(), external_dns_count);
+        for i in 0..external_dns_count {
+            // The nameserver records have 1-indexed numbering, but we iterate
+            // from 0. Add one to line up expectations for the test.
+            let ns_name = format!("ns{}", i + 1);
+            assert!(external_dns_zone.records.contains_key(&ns_name));
+            assert_eq!(
+                apex_records[i],
+                DnsRecord::Ns(format!(
+                    "{ns_name}.{}",
+                    external_dns_zone.zone_name
+                ))
+            );
+        }
 
         // Now check a more typical case.
         let external_dns_zone = blueprint_external_dns_config(
@@ -1055,19 +1118,28 @@ mod test {
         );
         assert_eq!(external_dns_zone.zone_name, String::from("oxide.test"));
         let records = &external_dns_zone.records;
-        assert_eq!(records.len(), 1);
+        // One name for the silo, three for the nameservers, and one more for
+        // the zone apex.
+        let expected_dns_names = 1 + baseline_external_dns_names;
+        assert_eq!(records.len(), expected_dns_names);
         let silo_records = records
             .get(&silo_dns_name(my_silo.name()))
             .expect("missing silo DNS records");
 
-        // Helper for converting dns records for a given silo to IpAddrs
+        // Helper for converting dns records for a given silo to IpAddrs. Below
+        // we'll check about the Nexuses represented in a silo's DNS records.
+        // These currently are the *only* records that can be present for a
+        // silo's name. If that changes in the future, this section of the test
+        // probably needs to be reworked.
         let records_to_ips = |silo_records: &Vec<_>| {
             let mut ips: Vec<_> = silo_records
                 .into_iter()
                 .map(|record| match record {
                     DnsRecord::A(v) => IpAddr::V4(*v),
                     DnsRecord::Aaaa(v) => IpAddr::V6(*v),
-                    DnsRecord::Srv(_) => panic!("unexpected SRV record"),
+                    other @ DnsRecord::Srv(_) | other @ DnsRecord::Ns(_) => {
+                        panic!("unexpected DNS record for silo: {other:?}")
+                    }
                 })
                 .collect();
             ips.sort();
@@ -1424,6 +1496,8 @@ mod test {
                 target_crucible_pantry_zone_count: CRUCIBLE_PANTRY_REDUNDANCY,
                 clickhouse_policy: None,
                 oximeter_read_policy: OximeterReadPolicy::new(1),
+                tuf_repo: TufRepoPolicy::initial(),
+                old_repo: None,
                 log,
             }
             .build()
@@ -1679,10 +1753,18 @@ mod test {
         let (new_name, new_records) = added[0];
         assert_eq!(new_name, silo_dns_name(&silo.identity.name));
         // And it should have the same IP addresses as all of the other Silos.
-        assert_eq!(
-            new_records,
-            old_external.zones[0].records.values().next().unwrap()
-        );
+        for (prior_record_name, prior_records) in
+            old_external.zones[0].records.iter()
+        {
+            // Only some records in the external zone are for Silos, though.
+            if prior_record_name.ends_with(".sys") {
+                assert_eq!(
+                    new_records, prior_records,
+                    "new silo ({new_name}) DNS records differ from \
+                    another silo ({prior_record_name})"
+                );
+            }
+        }
 
         // If we execute the blueprint, DNS should not be changed.
         _ = realize_blueprint_and_expect(

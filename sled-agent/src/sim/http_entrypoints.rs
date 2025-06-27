@@ -10,6 +10,7 @@ use camino::Utf8PathBuf;
 use dropshot::ApiDescription;
 use dropshot::ErrorStatusCode;
 use dropshot::FreeformBody;
+use dropshot::Header;
 use dropshot::HttpError;
 use dropshot::HttpResponseAccepted;
 use dropshot::HttpResponseCreated;
@@ -25,7 +26,6 @@ use dropshot::TypedBody;
 use dropshot::endpoint;
 use nexus_sled_agent_shared::inventory::Inventory;
 use nexus_sled_agent_shared::inventory::OmicronSledConfig;
-use nexus_sled_agent_shared::inventory::OmicronSledConfigResult;
 use nexus_sled_agent_shared::inventory::SledRole;
 use omicron_common::api::internal::nexus::DiskRuntimeState;
 use omicron_common::api::internal::nexus::SledVmmState;
@@ -35,9 +35,7 @@ use omicron_common::api::internal::shared::VirtualNetworkInterfaceHost;
 use omicron_common::api::internal::shared::{
     ResolvedVpcRouteSet, ResolvedVpcRouteState, SwitchPorts,
 };
-use omicron_common::disk::DatasetsConfig;
-use omicron_common::disk::OmicronPhysicalDisksConfig;
-use range_requests::RequestContextEx;
+use range_requests::PotentialRange;
 use sled_agent_api::*;
 use sled_agent_types::boot_disk::BootDiskOsWriteStatus;
 use sled_agent_types::boot_disk::BootDiskPathParams;
@@ -339,28 +337,14 @@ impl SledAgentApi for SledAgentSimImpl {
         ))
     }
 
-    async fn datasets_get(
-        rqctx: RequestContext<Self::Context>,
-    ) -> Result<HttpResponseOk<DatasetsConfig>, HttpError> {
-        let sa = rqctx.context();
-        Ok(HttpResponseOk(sa.datasets_config_list()?))
-    }
-
-    async fn omicron_physical_disks_get(
-        rqctx: RequestContext<Self::Context>,
-    ) -> Result<HttpResponseOk<OmicronPhysicalDisksConfig>, HttpError> {
-        let sa = rqctx.context();
-        Ok(HttpResponseOk(sa.omicron_physical_disks_list()?))
-    }
-
     async fn omicron_config_put(
         rqctx: RequestContext<Self::Context>,
         body: TypedBody<OmicronSledConfig>,
-    ) -> Result<HttpResponseOk<OmicronSledConfigResult>, HttpError> {
+    ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
         let sa = rqctx.context();
         let body_args = body.into_inner();
-        let result = sa.set_omicron_config(body_args)?;
-        Ok(HttpResponseOk(result))
+        sa.set_omicron_config(body_args)?;
+        Ok(HttpResponseUpdatedNoContent())
     }
 
     async fn sled_add(
@@ -425,13 +409,17 @@ impl SledAgentApi for SledAgentSimImpl {
 
     async fn support_bundle_download(
         rqctx: RequestContext<Self::Context>,
+        headers: Header<RangeRequestHeaders>,
         path_params: Path<SupportBundlePathParam>,
     ) -> Result<http::Response<dropshot::Body>, HttpError> {
         let sa = rqctx.context();
         let SupportBundlePathParam { zpool_id, dataset_id, support_bundle_id } =
             path_params.into_inner();
 
-        let range = rqctx.range();
+        let range = headers
+            .into_inner()
+            .range
+            .map(|r| PotentialRange::new(r.as_bytes()));
         sa.support_bundle_get(
             zpool_id,
             dataset_id,
@@ -444,6 +432,7 @@ impl SledAgentApi for SledAgentSimImpl {
 
     async fn support_bundle_download_file(
         rqctx: RequestContext<Self::Context>,
+        headers: Header<RangeRequestHeaders>,
         path_params: Path<SupportBundleFilePathParam>,
     ) -> Result<http::Response<dropshot::Body>, HttpError> {
         let sa = rqctx.context();
@@ -453,7 +442,10 @@ impl SledAgentApi for SledAgentSimImpl {
             file,
         } = path_params.into_inner();
 
-        let range = rqctx.range();
+        let range = headers
+            .into_inner()
+            .range
+            .map(|r| PotentialRange::new(r.as_bytes()));
         sa.support_bundle_get(
             zpool_id,
             dataset_id,
@@ -466,13 +458,17 @@ impl SledAgentApi for SledAgentSimImpl {
 
     async fn support_bundle_index(
         rqctx: RequestContext<Self::Context>,
+        headers: Header<RangeRequestHeaders>,
         path_params: Path<SupportBundlePathParam>,
     ) -> Result<http::Response<dropshot::Body>, HttpError> {
         let sa = rqctx.context();
         let SupportBundlePathParam { zpool_id, dataset_id, support_bundle_id } =
             path_params.into_inner();
 
-        let range = rqctx.range();
+        let range = headers
+            .into_inner()
+            .range
+            .map(|r| PotentialRange::new(r.as_bytes()));
         sa.support_bundle_get(
             zpool_id,
             dataset_id,
@@ -485,13 +481,17 @@ impl SledAgentApi for SledAgentSimImpl {
 
     async fn support_bundle_head(
         rqctx: RequestContext<Self::Context>,
+        headers: Header<RangeRequestHeaders>,
         path_params: Path<SupportBundlePathParam>,
     ) -> Result<http::Response<dropshot::Body>, HttpError> {
         let sa = rqctx.context();
         let SupportBundlePathParam { zpool_id, dataset_id, support_bundle_id } =
             path_params.into_inner();
 
-        let range = rqctx.range();
+        let range = headers
+            .into_inner()
+            .range
+            .map(|r| PotentialRange::new(r.as_bytes()));
         sa.support_bundle_head(
             zpool_id,
             dataset_id,
@@ -504,6 +504,7 @@ impl SledAgentApi for SledAgentSimImpl {
 
     async fn support_bundle_head_file(
         rqctx: RequestContext<Self::Context>,
+        headers: Header<RangeRequestHeaders>,
         path_params: Path<SupportBundleFilePathParam>,
     ) -> Result<http::Response<dropshot::Body>, HttpError> {
         let sa = rqctx.context();
@@ -513,7 +514,10 @@ impl SledAgentApi for SledAgentSimImpl {
             file,
         } = path_params.into_inner();
 
-        let range = rqctx.range();
+        let range = headers
+            .into_inner()
+            .range
+            .map(|r| PotentialRange::new(r.as_bytes()));
         sa.support_bundle_get(
             zpool_id,
             dataset_id,
@@ -526,13 +530,17 @@ impl SledAgentApi for SledAgentSimImpl {
 
     async fn support_bundle_head_index(
         rqctx: RequestContext<Self::Context>,
+        headers: Header<RangeRequestHeaders>,
         path_params: Path<SupportBundlePathParam>,
     ) -> Result<http::Response<dropshot::Body>, HttpError> {
         let sa = rqctx.context();
         let SupportBundlePathParam { zpool_id, dataset_id, support_bundle_id } =
             path_params.into_inner();
 
-        let range = rqctx.range();
+        let range = headers
+            .into_inner()
+            .range
+            .map(|r| PotentialRange::new(r.as_bytes()));
         sa.support_bundle_head(
             zpool_id,
             dataset_id,
@@ -630,12 +638,6 @@ impl SledAgentApi for SledAgentSimImpl {
     async fn zones_list(
         _rqctx: RequestContext<Self::Context>,
     ) -> Result<HttpResponseOk<Vec<String>>, HttpError> {
-        method_unimplemented()
-    }
-
-    async fn zpools_get(
-        _rqctx: RequestContext<Self::Context>,
-    ) -> Result<HttpResponseOk<Vec<Zpool>>, HttpError> {
         method_unimplemented()
     }
 
@@ -745,6 +747,13 @@ impl SledAgentApi for SledAgentSimImpl {
         method_unimplemented()
     }
 
+    async fn support_health_check(
+        _request_context: RequestContext<Self::Context>,
+    ) -> Result<HttpResponseOk<Vec<SledDiagnosticsQueryOutput>>, HttpError>
+    {
+        method_unimplemented()
+    }
+
     async fn support_logs(
         _request_context: RequestContext<Self::Context>,
     ) -> Result<HttpResponseOk<Vec<String>>, HttpError> {
@@ -757,6 +766,20 @@ impl SledAgentApi for SledAgentSimImpl {
         _path_params: Path<SledDiagnosticsLogsDownloadPathParm>,
         _query_params: Query<SledDiagnosticsLogsDownloadQueryParam>,
     ) -> Result<http::Response<dropshot::Body>, HttpError> {
+        method_unimplemented()
+    }
+
+    async fn chicken_switch_destroy_orphaned_datasets_get(
+        _request_context: RequestContext<Self::Context>,
+    ) -> Result<HttpResponseOk<ChickenSwitchDestroyOrphanedDatasets>, HttpError>
+    {
+        method_unimplemented()
+    }
+
+    async fn chicken_switch_destroy_orphaned_datasets_put(
+        _request_context: RequestContext<Self::Context>,
+        _body: TypedBody<ChickenSwitchDestroyOrphanedDatasets>,
+    ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
         method_unimplemented()
     }
 }

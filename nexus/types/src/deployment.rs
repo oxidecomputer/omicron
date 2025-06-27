@@ -26,6 +26,7 @@ use nexus_sled_agent_shared::inventory::OmicronZoneImageSource;
 use nexus_sled_agent_shared::inventory::ZoneKind;
 use omicron_common::api::external::ByteCount;
 use omicron_common::api::external::Generation;
+use omicron_common::api::external::TufArtifactMeta;
 use omicron_common::api::internal::shared::DatasetKind;
 use omicron_common::disk::CompressionAlgorithm;
 use omicron_common::disk::DatasetConfig;
@@ -35,6 +36,7 @@ use omicron_common::disk::OmicronPhysicalDiskConfig;
 use omicron_common::disk::SharedDatasetConfig;
 use omicron_uuid_kinds::BlueprintUuid;
 use omicron_uuid_kinds::DatasetUuid;
+use omicron_uuid_kinds::MupdateOverrideUuid;
 use omicron_uuid_kinds::OmicronZoneUuid;
 use omicron_uuid_kinds::PhysicalDiskUuid;
 use omicron_uuid_kinds::SledUuid;
@@ -56,18 +58,21 @@ use tufaceous_artifact::ArtifactVersionError;
 
 mod blueprint_diff;
 mod blueprint_display;
+mod chicken_switches;
 mod clickhouse;
 pub mod execution;
 mod network_resources;
 mod planning_input;
-mod tri_map;
 mod zone_type;
 
 use crate::inventory::BaseboardId;
 pub use blueprint_diff::BlueprintDiffSummary;
 use blueprint_display::BpPendingMgsUpdates;
+pub use chicken_switches::ReconfiguratorChickenSwitches;
+pub use chicken_switches::ReconfiguratorChickenSwitchesParam;
 pub use clickhouse::ClickhouseClusterConfig;
 use gateway_client::types::SpType;
+use gateway_types::rot::RotSlot;
 pub use network_resources::AddNetworkResourceError;
 pub use network_resources::OmicronZoneExternalFloatingAddr;
 pub use network_resources::OmicronZoneExternalFloatingIp;
@@ -96,6 +101,7 @@ pub use planning_input::SledFilter;
 pub use planning_input::SledLookupError;
 pub use planning_input::SledLookupErrorKind;
 pub use planning_input::SledResources;
+pub use planning_input::TufRepoPolicy;
 pub use planning_input::ZpoolFilter;
 use std::sync::Arc;
 pub use zone_type::BlueprintZoneType;
@@ -169,9 +175,24 @@ pub struct Blueprint {
     // See blueprint execution for more on this.
     pub internal_dns_version: Generation,
 
-    /// external DNS version when thi blueprint was created
+    /// external DNS version when this blueprint was created
     // See blueprint execution for more on this.
     pub external_dns_version: Generation,
+
+    /// The minimum release generation to accept for target release
+    /// configuration. Target release configuration with a generation less than
+    /// this number will be ignored.
+    ///
+    /// For example, let's say that the current target release generation is 5.
+    /// Then, when reconfigurator detects a MUPdate:
+    ///
+    /// * the target release is ignored in favor of the install dataset
+    /// * this field is set to 6
+    ///
+    /// Once an operator sets a new target release, its generation will be 6 or
+    /// higher. Reconfigurator will then know that it is back in charge of
+    /// driving the system to the target release.
+    pub target_release_minimum_generation: Generation,
 
     /// CockroachDB state fingerprint when this blueprint was created
     // See `nexus/db-queries/src/db/datastore/cockroachdb_settings.rs` for more
@@ -214,6 +235,8 @@ impl Blueprint {
             parent_blueprint_id: self.parent_blueprint_id,
             internal_dns_version: self.internal_dns_version,
             external_dns_version: self.external_dns_version,
+            target_release_minimum_generation: self
+                .target_release_minimum_generation,
             cockroachdb_fingerprint: self.cockroachdb_fingerprint.clone(),
             cockroachdb_setting_preserve_downgrade: Some(
                 self.cockroachdb_setting_preserve_downgrade,
@@ -491,6 +514,12 @@ impl BlueprintDisplay<'_> {
                     EXTERNAL_DNS_VERSION,
                     self.blueprint.external_dns_version.to_string(),
                 ),
+                (
+                    TARGET_RELEASE_MIN_GEN,
+                    self.blueprint
+                        .target_release_minimum_generation
+                        .to_string(),
+                ),
             ],
         )
     }
@@ -530,8 +559,9 @@ impl fmt::Display for BlueprintDisplay<'_> {
             // Handled by `make_oximeter_table`, called below.
             oximeter_read_version: _,
             oximeter_read_mode: _,
-            // These five fields are handled by `make_metadata_table()`, called
+            // These six fields are handled by `make_metadata_table()`, called
             // below.
+            target_release_minimum_generation: _,
             internal_dns_version: _,
             external_dns_version: _,
             time_created: _,
@@ -569,8 +599,17 @@ impl fmt::Display for BlueprintDisplay<'_> {
             writeln!(
                 f,
                 "\n  sled: {sled_id} ({sled_state}, config generation \
-                 {generation})\n\n{disks_table}\n",
+                 {generation})",
             )?;
+
+            let mut rows = Vec::new();
+            if let Some(id) = config.remove_mupdate_override {
+                rows.push((WILL_REMOVE_MUPDATE_OVERRIDE, id.to_string()));
+            }
+            let list = KvList::new_unchanged(None, rows);
+            writeln!(f, "{list}")?;
+
+            writeln!(f, "{disks_table}\n")?;
 
             // Construct the datasets subtable
             let datasets_tab = BpTable::new(
@@ -656,6 +695,7 @@ pub struct BlueprintSledConfig {
     pub disks: IdMap<BlueprintPhysicalDiskConfig>,
     pub datasets: IdMap<BlueprintDatasetConfig>,
     pub zones: IdMap<BlueprintZoneConfig>,
+    pub remove_mupdate_override: Option<MupdateOverrideUuid>,
 }
 
 impl BlueprintSledConfig {
@@ -700,6 +740,7 @@ impl BlueprintSledConfig {
                     }
                 })
                 .collect(),
+            remove_mupdate_override: self.remove_mupdate_override,
         }
     }
 
@@ -945,7 +986,7 @@ impl fmt::Display for BlueprintZoneDisposition {
     }
 }
 
-/// Where a blueprint's image source is located.
+/// Where the zone's image source is located.
 ///
 /// This is the blueprint version of [`OmicronZoneImageSource`].
 #[derive(
@@ -982,6 +1023,17 @@ pub enum BlueprintZoneImageSource {
     /// replicated out to all sleds.
     #[serde(rename_all = "snake_case")]
     Artifact { version: BlueprintZoneImageVersion, hash: ArtifactHash },
+}
+
+impl BlueprintZoneImageSource {
+    pub fn from_available_artifact(artifact: &TufArtifactMeta) -> Self {
+        BlueprintZoneImageSource::Artifact {
+            version: BlueprintZoneImageVersion::Available {
+                version: artifact.id.version.clone(),
+            },
+            hash: artifact.hash,
+        }
+    }
 }
 
 impl From<BlueprintZoneImageSource> for OmicronZoneImageSource {
@@ -1176,7 +1228,6 @@ pub struct PendingMgsUpdate {
     pub details: PendingMgsUpdateDetails,
 
     /// which artifact to apply to this device
-    /// (implies which component is being updated)
     pub artifact_hash: ArtifactHash,
     pub artifact_version: ArtifactVersion,
 }
@@ -1195,6 +1246,10 @@ impl slog::KV for PendingMgsUpdate {
         serializer.emit_str(
             Key::from("artifact_hash"),
             &self.artifact_hash.to_string(),
+        )?;
+        serializer.emit_str(
+            Key::from("artifact_version"),
+            &self.artifact_version.to_string(),
         )
     }
 }
@@ -1245,6 +1300,44 @@ pub enum PendingMgsUpdateDetails {
         /// expected contents of the inactive slot
         expected_inactive_version: ExpectedVersion,
     },
+    /// the RoT is being updated
+    Rot {
+        // implicit: component = ROT
+        // implicit: firmware slot id will be the inactive slot
+        // whether we expect the "A" or "B" slot to be active
+        // and its expected version
+        expected_active_slot: ExpectedActiveRotSlot,
+        // expected version of the "A" or "B" slot (opposite to
+        // the active slot as specified above)
+        expected_inactive_version: ExpectedVersion,
+        // under normal operation, this should always match the active slot.
+        // if this field changed without the active slot changing, that might
+        // reflect a bad update.
+        //
+        /// the persistent boot preference written into the current authoritative
+        /// CFPA page (ping or pong)
+        expected_persistent_boot_preference: RotSlot,
+        // if this value changed, but not any of this other information, that could
+        // reflect an attempt to switch to the other slot.
+        //
+        /// the persistent boot preference written into the CFPA scratch page that
+        /// will become the persistent boot preference in the authoritative CFPA
+        /// page upon reboot, unless CFPA update of the authoritative page fails
+        /// for some reason.
+        expected_pending_persistent_boot_preference: Option<RotSlot>,
+        // this field is not in use yet.
+        //
+        /// override persistent preference selection for a single boot
+        expected_transient_boot_preference: Option<RotSlot>,
+    },
+    RotBootloader {
+        // implicit: component = STAGE0
+        // implicit: firmware slot id = 1 (always 1 (Stage0Next) for RoT bootloader)
+        /// expected contents of the stage 0
+        expected_stage0_version: ArtifactVersion,
+        /// expected contents of the stage 0 next
+        expected_stage0_next_version: ExpectedVersion,
+    },
 }
 
 impl slog::KV for PendingMgsUpdateDetails {
@@ -1266,6 +1359,53 @@ impl slog::KV for PendingMgsUpdateDetails {
                 serializer.emit_str(
                     Key::from("expected_inactive_version"),
                     &format!("{:?}", expected_inactive_version),
+                )
+            }
+            PendingMgsUpdateDetails::Rot {
+                expected_active_slot,
+                expected_inactive_version,
+                expected_persistent_boot_preference,
+                expected_pending_persistent_boot_preference,
+                expected_transient_boot_preference,
+            } => {
+                serializer.emit_str(Key::from("component"), "rot")?;
+                serializer.emit_str(
+                    Key::from("expected_inactive_version"),
+                    &format!("{:?}", expected_inactive_version),
+                )?;
+                serializer.emit_str(
+                    Key::from("expected_active_slot"),
+                    &format!("{:?}", expected_active_slot),
+                )?;
+                serializer.emit_str(
+                    Key::from("expected_persistent_boot_preference"),
+                    &format!("{:?}", expected_persistent_boot_preference),
+                )?;
+                serializer.emit_str(
+                    Key::from("expected_pending_persistent_boot_preference"),
+                    &format!(
+                        "{:?}",
+                        expected_pending_persistent_boot_preference
+                    ),
+                )?;
+                serializer.emit_str(
+                    Key::from("expected_transient_boot_preference"),
+                    &format!("{:?}", expected_transient_boot_preference),
+                )
+            }
+            PendingMgsUpdateDetails::RotBootloader {
+                expected_stage0_version,
+                expected_stage0_next_version,
+            } => {
+                serializer
+                    .emit_str(Key::from("component"), "rot_bootloader")?;
+                serializer.emit_str(
+                    Key::from("expected_stage0_version"),
+                    &expected_stage0_version.to_string(),
+                )?;
+                serializer.emit_str(
+                    Key::from("expected_stage0_next_version"),
+                    &format!("{:?}", expected_stage0_next_version),
                 )
             }
         }
@@ -1293,6 +1433,34 @@ impl FromStr for ExpectedVersion {
         } else {
             Ok(ExpectedVersion::Version(s.parse()?))
         }
+    }
+}
+
+impl fmt::Display for ExpectedVersion {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            ExpectedVersion::NoValidVersion => f.write_str("invalid"),
+            ExpectedVersion::Version(v) => v.fmt(f),
+        }
+    }
+}
+
+/// Describes the expected active RoT slot, and the version we expect to find for it
+#[derive(
+    Clone, Debug, Eq, PartialEq, JsonSchema, Deserialize, Serialize, Diffable,
+)]
+pub struct ExpectedActiveRotSlot {
+    pub slot: RotSlot,
+    pub version: ArtifactVersion,
+}
+
+impl ExpectedActiveRotSlot {
+    pub fn slot(&self) -> &RotSlot {
+        &self.slot
+    }
+
+    pub fn version(&self) -> ArtifactVersion {
+        self.version.clone()
     }
 }
 
@@ -1571,6 +1739,10 @@ pub struct BlueprintMetadata {
     pub internal_dns_version: Generation,
     /// external DNS version when this blueprint was created
     pub external_dns_version: Generation,
+    /// The minimum generation for the target release.
+    ///
+    /// See [`Blueprint::target_release_minimum_generation`].
+    pub target_release_minimum_generation: Generation,
     /// CockroachDB state fingerprint when this blueprint was created
     pub cockroachdb_fingerprint: String,
     /// Whether to set `cluster.preserve_downgrade_option` and what to set it to

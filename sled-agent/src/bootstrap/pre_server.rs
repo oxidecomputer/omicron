@@ -20,7 +20,6 @@ use crate::long_running_tasks::{
     LongRunningTaskHandles, spawn_all_longrunning_tasks,
 };
 use crate::services::ServiceManager;
-use crate::services::TimeSyncConfig;
 use crate::sled_agent::SledAgent;
 use camino::Utf8PathBuf;
 use cancel_safe_futures::TryStreamExt;
@@ -36,6 +35,7 @@ use illumos_utils::zone::Api;
 use illumos_utils::zone::Zones;
 use omicron_common::FileKv;
 use omicron_common::address::Ipv6Subnet;
+use sled_agent_config_reconciler::ConfigReconcilerSpawnToken;
 use sled_hardware::DendriteAsic;
 use sled_hardware::SledMode;
 use sled_hardware::underlay;
@@ -54,6 +54,7 @@ pub(super) struct BootstrapAgentStartup {
     pub(super) service_manager: ServiceManager,
     pub(super) long_running_task_handles: LongRunningTaskHandles,
     pub(super) sled_agent_started_tx: oneshot::Sender<SledAgent>,
+    pub(super) config_reconciler_spawn_token: ConfigReconcilerSpawnToken,
 }
 
 impl BootstrapAgentStartup {
@@ -74,22 +75,24 @@ impl BootstrapAgentStartup {
         // Perform several blocking startup tasks first; we move `config` and
         // `log` into this task, and on success, it gives them back to us.
         let (config, log, startup_networking) =
-            tokio::task::spawn_blocking(move || {
-                enable_mg_ddm(&config, &log)?;
+            tokio::task::spawn_blocking(|| async move {
+                enable_mg_ddm(&config, &log).await?;
                 pumpkind::enable_pumpkind_service(&log)?;
                 ensure_zfs_key_directory_exists(&log)?;
 
-                let startup_networking = BootstrapNetworking::setup(&config)?;
+                let startup_networking =
+                    BootstrapNetworking::setup(&config).await?;
 
                 // Before we create the switch zone, we need to ensure that the
                 // necessary ZFS and Zone resources are ready. All other zones
                 // are created on U.2 drives.
-                ensure_zfs_ramdisk_dataset()?;
+                ensure_zfs_ramdisk_dataset().await?;
 
                 Ok::<_, StartError>((config, log, startup_networking))
             })
             .await
-            .unwrap()?;
+            .unwrap()
+            .await?;
 
         // Start the DDM reconciler, giving it our bootstrap subnet to
         // advertise to other sleds.
@@ -119,6 +122,7 @@ impl BootstrapAgentStartup {
         // the process and are used by both the bootstrap agent and sled agent
         let (
             long_running_task_handles,
+            config_reconciler_spawn_token,
             sled_agent_started_tx,
             service_manager_ready_tx,
         ) = spawn_all_longrunning_tasks(
@@ -132,22 +136,18 @@ impl BootstrapAgentStartup {
         let global_zone_bootstrap_ip =
             startup_networking.global_zone_bootstrap_ip;
 
-        let time_sync = if let Some(true) = config.skip_timesync {
-            TimeSyncConfig::Skip
-        } else {
-            TimeSyncConfig::Normal
-        };
-
         let service_manager = ServiceManager::new(
             &base_log,
             ddm_reconciler,
             startup_networking,
             sled_mode,
-            time_sync,
             config.sidecar_revision.clone(),
             config.switch_zone_maghemite_links.clone(),
-            long_running_task_handles.storage_manager.clone(),
-            long_running_task_handles.zone_bundler.clone(),
+            long_running_task_handles.zone_image_resolver.clone(),
+            long_running_task_handles
+                .config_reconciler
+                .internal_disks_rx()
+                .clone(),
         );
 
         // Inform the hardware monitor that the service manager is ready
@@ -165,6 +165,7 @@ impl BootstrapAgentStartup {
             service_manager,
             long_running_task_handles,
             sled_agent_started_tx,
+            config_reconciler_spawn_token,
         })
     }
 }
@@ -245,9 +246,13 @@ async fn cleanup_all_old_global_state(log: &Logger) -> Result<(), StartError> {
     Ok(())
 }
 
-fn enable_mg_ddm(config: &Config, log: &Logger) -> Result<(), StartError> {
+async fn enable_mg_ddm(
+    config: &Config,
+    log: &Logger,
+) -> Result<(), StartError> {
     info!(log, "finding links {:?}", config.data_links);
     let mg_addr_objs = underlay::find_nics(&config.data_links)
+        .await
         .map_err(StartError::FindMaghemiteAddrObjs)?;
     if mg_addr_objs.is_empty() {
         return Err(StartError::NoUnderlayAddrObjs);
@@ -272,7 +277,7 @@ fn ensure_zfs_key_directory_exists(log: &Logger) -> Result<(), StartError> {
     })
 }
 
-fn ensure_zfs_ramdisk_dataset() -> Result<(), StartError> {
+async fn ensure_zfs_ramdisk_dataset() -> Result<(), StartError> {
     Zfs::ensure_dataset(zfs::DatasetEnsureArgs {
         name: zfs::ZONE_ZFS_RAMDISK_DATASET,
         mountpoint: zfs::Mountpoint(Utf8PathBuf::from(
@@ -285,6 +290,7 @@ fn ensure_zfs_ramdisk_dataset() -> Result<(), StartError> {
         id: None,
         additional_options: None,
     })
+    .await
     .map_err(StartError::EnsureZfsRamdiskDataset)
 }
 
@@ -343,27 +349,30 @@ pub(crate) struct BootstrapNetworking {
 }
 
 impl BootstrapNetworking {
-    fn setup(config: &Config) -> Result<Self, StartError> {
-        let link_for_mac = config.get_link().map_err(StartError::ConfigLink)?;
+    async fn setup(config: &Config) -> Result<Self, StartError> {
+        let link_for_mac =
+            config.get_link().await.map_err(StartError::ConfigLink)?;
         let global_zone_bootstrap_ip = BootstrapInterface::GlobalZone
             .ip(&link_for_mac)
+            .await
             .map_err(StartError::BootstrapLinkMac)?;
 
-        let bootstrap_etherstub = Dladm::ensure_etherstub(
-            dladm::BOOTSTRAP_ETHERSTUB_NAME,
-        )
-        .map_err(|err| StartError::EnsureEtherstubError {
-            name: dladm::BOOTSTRAP_ETHERSTUB_NAME,
-            err,
-        })?;
+        let bootstrap_etherstub =
+            Dladm::ensure_etherstub(dladm::BOOTSTRAP_ETHERSTUB_NAME)
+                .await
+                .map_err(|err| StartError::EnsureEtherstubError {
+                    name: dladm::BOOTSTRAP_ETHERSTUB_NAME,
+                    err,
+                })?;
         let bootstrap_etherstub_vnic =
-            Dladm::ensure_etherstub_vnic(&bootstrap_etherstub)?;
+            Dladm::ensure_etherstub_vnic(&bootstrap_etherstub).await?;
 
         Zones::ensure_has_global_zone_v6_address(
             bootstrap_etherstub_vnic.clone(),
             global_zone_bootstrap_ip,
             "bootstrap6",
-        )?;
+        )
+        .await?;
 
         let global_zone_bootstrap_link_local_address = Zones::get_address(
             None,
@@ -371,7 +380,8 @@ impl BootstrapNetworking {
             // malformed, but we just got it from `Dladm`, so we know it's
             // valid.
             &AddrObject::link_local(&bootstrap_etherstub_vnic.0).unwrap(),
-        )?;
+        )
+        .await?;
 
         // Convert the `IpNetwork` down to just the IP address.
         let global_zone_bootstrap_link_local_ip =
@@ -384,17 +394,18 @@ impl BootstrapNetworking {
 
         let switch_zone_bootstrap_ip = BootstrapInterface::SwitchZone
             .ip(&link_for_mac)
+            .await
             .map_err(StartError::BootstrapLinkMac)?;
 
-        let underlay_etherstub = Dladm::ensure_etherstub(
-            dladm::UNDERLAY_ETHERSTUB_NAME,
-        )
-        .map_err(|err| StartError::EnsureEtherstubError {
-            name: dladm::UNDERLAY_ETHERSTUB_NAME,
-            err,
-        })?;
+        let underlay_etherstub =
+            Dladm::ensure_etherstub(dladm::UNDERLAY_ETHERSTUB_NAME)
+                .await
+                .map_err(|err| StartError::EnsureEtherstubError {
+                    name: dladm::UNDERLAY_ETHERSTUB_NAME,
+                    err,
+                })?;
         let underlay_etherstub_vnic =
-            Dladm::ensure_etherstub_vnic(&underlay_etherstub)?;
+            Dladm::ensure_etherstub_vnic(&underlay_etherstub).await?;
 
         Ok(Self {
             bootstrap_etherstub,

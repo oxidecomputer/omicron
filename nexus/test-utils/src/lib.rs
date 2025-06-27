@@ -17,11 +17,12 @@ use dropshot::test_util::LogContext;
 use futures::FutureExt;
 use futures::future::BoxFuture;
 use gateway_test_utils::setup::GatewayTestContext;
-use hickory_resolver::TokioAsyncResolver;
+use hickory_resolver::TokioResolver;
 use hickory_resolver::config::NameServerConfig;
-use hickory_resolver::config::Protocol;
 use hickory_resolver::config::ResolverConfig;
 use hickory_resolver::config::ResolverOpts;
+use hickory_resolver::name_server::TokioConnectionProvider;
+use hickory_resolver::proto::xfer::Protocol;
 use id_map::IdMap;
 use internal_dns_types::config::DnsConfigBuilder;
 use internal_dns_types::names::DNS_ZONE_EXTERNAL_TESTING;
@@ -50,12 +51,15 @@ use nexus_types::deployment::BlueprintZoneType;
 use nexus_types::deployment::CockroachDbPreserveDowngrade;
 use nexus_types::deployment::OmicronZoneExternalFloatingAddr;
 use nexus_types::deployment::OmicronZoneExternalFloatingIp;
+use nexus_types::deployment::OmicronZoneExternalSnatIp;
 use nexus_types::deployment::OximeterReadMode;
 use nexus_types::deployment::blueprint_zone_type;
 use nexus_types::external_api::views::SledState;
 use nexus_types::internal_api::params::DnsConfigParams;
 use omicron_common::address::DNS_OPTE_IPV4_SUBNET;
 use omicron_common::address::NEXUS_OPTE_IPV4_SUBNET;
+use omicron_common::address::NTP_OPTE_IPV4_SUBNET;
+use omicron_common::address::NTP_PORT;
 use omicron_common::api::external::Generation;
 use omicron_common::api::external::MacAddr;
 use omicron_common::api::external::UserId;
@@ -67,6 +71,7 @@ use omicron_common::api::internal::nexus::ProducerKind;
 use omicron_common::api::internal::shared::DatasetKind;
 use omicron_common::api::internal::shared::NetworkInterface;
 use omicron_common::api::internal::shared::NetworkInterfaceKind;
+use omicron_common::api::internal::shared::SourceNatConfig;
 use omicron_common::api::internal::shared::SwitchLocation;
 use omicron_common::disk::CompressionAlgorithm;
 use omicron_common::zpool_name::ZpoolName;
@@ -91,7 +96,7 @@ use slog::{Logger, debug, error, o};
 use std::collections::BTreeMap;
 use std::collections::HashMap;
 use std::fmt::Debug;
-use std::net::{IpAddr, Ipv6Addr, SocketAddr, SocketAddrV6};
+use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr, SocketAddrV6};
 use std::sync::Arc;
 use std::time::Duration;
 use uuid::Uuid;
@@ -161,6 +166,7 @@ pub struct ControlPlaneTestContext<N> {
     pub internal_client: ClientTestContext,
     pub server: N,
     pub database: dev::db::CockroachInstance,
+    pub database_admin: omicron_cockroach_admin::Server,
     pub clickhouse: dev::clickhouse::ClickHouseDeployment,
     pub logctx: LogContext,
     pub sled_agents: Vec<ControlPlaneTestContextSledAgent>,
@@ -338,6 +344,24 @@ impl RackInitRequestBuilder {
             )
             .expect("Failed to setup ClickHouse DNS");
     }
+
+    // Special handling of internal DNS, which has a second A/AAAA record and an
+    // NS record pointing to it.
+    fn add_internal_name_server_to_dns(
+        &mut self,
+        zone_id: OmicronZoneUuid,
+        http_address: SocketAddrV6,
+        dns_address: SocketAddrV6,
+    ) {
+        self.internal_dns_config
+            .host_zone_internal_dns(
+                zone_id,
+                ServiceName::InternalDns,
+                http_address,
+                dns_address,
+            )
+            .expect("Failed to setup internal DNS");
+    }
 }
 
 pub struct ControlPlaneTestContextBuilder<'a, N: NexusServer> {
@@ -354,6 +378,7 @@ pub struct ControlPlaneTestContextBuilder<'a, N: NexusServer> {
 
     pub server: Option<N>,
     pub database: Option<dev::db::CockroachInstance>,
+    pub database_admin: Option<omicron_cockroach_admin::Server>,
     pub clickhouse: Option<dev::clickhouse::ClickHouseDeployment>,
     pub sled_agents: Vec<ControlPlaneTestContextSledAgent>,
     pub oximeter: Option<Oximeter>,
@@ -406,6 +431,7 @@ impl<'a, N: NexusServer> ControlPlaneTestContextBuilder<'a, N> {
             internal_client: None,
             server: None,
             database: None,
+            database_admin: None,
             clickhouse: None,
             sled_agents: vec![],
             oximeter: None,
@@ -518,7 +544,28 @@ impl<'a, N: NexusServer> ControlPlaneTestContextBuilder<'a, N> {
             ),
             image_source: BlueprintZoneImageSource::InstallDataset,
         });
+        let http_address = database.http_addr();
         self.database = Some(database);
+
+        let cli = omicron_cockroach_admin::CockroachCli::new(
+            omicron_test_utils::dev::db::COCKROACHDB_BIN.into(),
+            address,
+            http_address,
+        );
+        let server = omicron_cockroach_admin::start_server(
+            zone_id,
+            cli,
+            omicron_cockroach_admin::Config {
+                dropshot: dropshot::ConfigDropshot::default(),
+                log: ConfigLogging::StderrTerminal {
+                    level: ConfigLoggingLevel::Error,
+                },
+            },
+        )
+        .await
+        .expect("Failed to start CRDB admin server");
+
+        self.database_admin = Some(server);
     }
 
     // Start ClickHouse database server.
@@ -933,6 +980,7 @@ impl<'a, N: NexusServer> ControlPlaneTestContextBuilder<'a, N> {
                         disks,
                         datasets,
                         zones,
+                        remove_mupdate_override: None,
                     },
                 );
             }
@@ -944,6 +992,7 @@ impl<'a, N: NexusServer> ControlPlaneTestContextBuilder<'a, N> {
                 parent_blueprint_id: None,
                 internal_dns_version: dns_config.generation,
                 external_dns_version: Generation::new(),
+                target_release_minimum_generation: Generation::new(),
                 cockroachdb_fingerprint: String::new(),
                 cockroachdb_setting_preserve_downgrade:
                     CockroachDbPreserveDowngrade::DoNotModify,
@@ -1097,6 +1146,7 @@ impl<'a, N: NexusServer> ControlPlaneTestContextBuilder<'a, N> {
                     .into_iter()
                     .map(From::from)
                     .collect(),
+                remove_mupdate_override: None,
             })
             .await
             .expect("Failed to configure sled agent with our zones");
@@ -1135,6 +1185,7 @@ impl<'a, N: NexusServer> ControlPlaneTestContextBuilder<'a, N> {
                     disks: IdMap::default(),
                     datasets: IdMap::default(),
                     zones: IdMap::default(),
+                    remove_mupdate_override: None,
                 })
                 .await
                 .expect("Failed to configure sled agent with our zones");
@@ -1176,6 +1227,63 @@ impl<'a, N: NexusServer> ControlPlaneTestContextBuilder<'a, N> {
             _storage: tempdir,
             server: sled_agent,
         })
+    }
+
+    /// Configure a mock boundary-NTP server on the first sled agent
+    pub async fn configure_boundary_ntp(&mut self) {
+        let mac = self
+            .rack_init_builder
+            .mac_addrs
+            .next()
+            .expect("ran out of MAC addresses");
+        let internal_ip = NTP_OPTE_IPV4_SUBNET
+            .nth(NUM_INITIAL_RESERVED_IP_ADDRESSES + 1)
+            .unwrap();
+        let external_ip = IpAddr::V4(Ipv4Addr::new(1, 2, 3, 4));
+        let address = format!("[::1]:{NTP_PORT}").parse().unwrap(); // localhost
+        let zone_id = OmicronZoneUuid::new_v4();
+        let zpool_id = ZpoolUuid::new_v4();
+
+        self.rack_init_builder.add_service_to_dns(
+            zone_id,
+            address,
+            ServiceName::BoundaryNtp,
+        );
+        self.blueprint_zones.push(BlueprintZoneConfig {
+            disposition: BlueprintZoneDisposition::InService,
+            id: zone_id,
+            filesystem_pool: ZpoolName::new_external(zpool_id),
+            zone_type: BlueprintZoneType::BoundaryNtp(
+                blueprint_zone_type::BoundaryNtp {
+                    address,
+                    ntp_servers: vec![],
+                    dns_servers: vec![],
+                    domain: None,
+                    nic: NetworkInterface {
+                        id: Uuid::new_v4(),
+                        kind: NetworkInterfaceKind::Service {
+                            id: zone_id.into_untyped_uuid(),
+                        },
+                        ip: internal_ip.into(),
+                        mac,
+                        name: format!("boundary-ntp-{zone_id}")
+                            .parse()
+                            .unwrap(),
+                        primary: true,
+                        slot: 0,
+                        subnet: (*NTP_OPTE_IPV4_SUBNET).into(),
+                        vni: Vni::SERVICES_VNI,
+                        transit_ips: vec![],
+                    },
+                    external_ip: OmicronZoneExternalSnatIp {
+                        id: ExternalIpUuid::new_v4(),
+                        snat_cfg: SourceNatConfig::new(external_ip, 0, 16383)
+                            .unwrap(),
+                    },
+                },
+            ),
+            image_source: BlueprintZoneImageSource::InstallDataset,
+        });
     }
 
     /// Set up the Crucible Pantry on the first sled agent
@@ -1287,10 +1395,10 @@ impl<'a, N: NexusServer> ControlPlaneTestContextBuilder<'a, N> {
             panic!("Unsupported IPv4 DNS address");
         };
         let zone_id = OmicronZoneUuid::new_v4();
-        self.rack_init_builder.add_service_to_dns(
+        self.rack_init_builder.add_internal_name_server_to_dns(
             zone_id,
             http_address,
-            ServiceName::InternalDns,
+            dns_address,
         );
 
         let zpool_id = ZpoolUuid::new_v4();
@@ -1325,6 +1433,7 @@ impl<'a, N: NexusServer> ControlPlaneTestContextBuilder<'a, N> {
             techport_client: self.techport_client.unwrap(),
             internal_client: self.internal_client.unwrap(),
             database: self.database.unwrap(),
+            database_admin: self.database_admin.unwrap(),
             clickhouse: self.clickhouse.unwrap(),
             sled_agents: self.sled_agents,
             oximeter: self.oximeter.unwrap(),
@@ -1665,6 +1774,12 @@ async fn setup_with_config_impl<N: NexusServer>(
         .init_with_steps(
             vec![
                 (
+                    "configure_boundary_ntp",
+                    Box::new(|builder| {
+                        builder.configure_boundary_ntp().boxed()
+                    }),
+                ),
+                (
                     "start_crucible_pantry",
                     Box::new(|builder| builder.start_crucible_pantry().boxed()),
                 ),
@@ -1868,7 +1983,7 @@ pub async fn start_dns_server(
     (
         dns_server::dns_server::ServerHandle,
         dropshot::HttpServer<dns_server::http_server::Context>,
-        TokioAsyncResolver,
+        TokioResolver,
     ),
     anyhow::Error,
 > {
@@ -1899,16 +2014,18 @@ pub async fn start_dns_server(
     .unwrap();
 
     let mut resolver_config = ResolverConfig::new();
-    resolver_config.add_name_server(NameServerConfig {
-        socket_addr: dns_server.local_address(),
-        protocol: Protocol::Udp,
-        tls_dns_name: None,
-        trust_negative_responses: false,
-        bind_addr: None,
-    });
+    resolver_config.add_name_server(NameServerConfig::new(
+        dns_server.local_address(),
+        Protocol::Udp,
+    ));
     let mut resolver_opts = ResolverOpts::default();
     resolver_opts.edns0 = true;
-    let resolver = TokioAsyncResolver::tokio(resolver_config, resolver_opts);
+    let resolver = TokioResolver::builder_with_config(
+        resolver_config,
+        TokioConnectionProvider::default(),
+    )
+    .with_options(resolver_opts)
+    .build();
 
     Ok((dns_server, http_server, resolver))
 }

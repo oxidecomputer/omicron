@@ -50,7 +50,7 @@ const SYNTHETIC_FIRMWARE_SLOT1: &str = "SYNTH1";
 impl SyntheticDisk {
     // "Manages" a SyntheticDisk by ensuring that it has a Zpool and importing
     // it. If the zpool already exists, it is imported, but not re-created.
-    pub fn new(
+    pub async fn new(
         log: &Logger,
         mount_config: &MountConfig,
         raw: RawSyntheticDisk,
@@ -75,12 +75,16 @@ impl SyntheticDisk {
             &path,
             zpool_id,
         )
+        .await
         .unwrap();
-        sled_hardware::disk::ensure_zpool_imported(log, &zpool_name).unwrap();
+        sled_hardware::disk::ensure_zpool_imported(log, &zpool_name)
+            .await
+            .unwrap();
         sled_hardware::disk::ensure_zpool_failmode_is_continue(
             log,
             &zpool_name,
         )
+        .await
         .unwrap();
 
         Self { raw, zpool_name }
@@ -267,13 +271,12 @@ impl Disk {
         key_requester: Option<&StorageKeyRequester>,
     ) -> Result<Self, DiskError> {
         let disk: Disk = match raw_disk {
-            RawDisk::Real(disk) => PooledDisk::new(log, disk, pool_id)?.into(),
-            RawDisk::Synthetic(disk) => Disk::Synthetic(SyntheticDisk::new(
-                log,
-                mount_config,
-                disk,
-                pool_id,
-            )),
+            RawDisk::Real(disk) => {
+                PooledDisk::new(log, disk, pool_id).await?.into()
+            }
+            RawDisk::Synthetic(disk) => Disk::Synthetic(
+                SyntheticDisk::new(log, mount_config, disk, pool_id).await,
+            ),
         };
         dataset::ensure_zpool_has_datasets(
             log,
@@ -383,7 +386,7 @@ impl Disk {
         }
     }
 
-    pub(crate) fn update_firmware_metadata(&mut self, raw_disk: &RawDisk) {
+    pub fn update_firmware_metadata(&mut self, raw_disk: &RawDisk) {
         match self {
             Disk::Real(pooled_disk) => {
                 pooled_disk.firmware = raw_disk.firmware().clone();

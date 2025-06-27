@@ -24,8 +24,9 @@ use dropshot::Body;
 use dropshot::HttpError;
 use futures::Stream;
 use nexus_sled_agent_shared::inventory::{
-    Inventory, InventoryDataset, InventoryDisk, InventoryZpool,
-    OmicronSledConfig, OmicronSledConfigResult, OmicronZonesConfig, SledRole,
+    ConfigReconcilerInventoryStatus, Inventory, InventoryDataset,
+    InventoryDisk, InventoryZpool, OmicronSledConfig, OmicronZonesConfig,
+    SledRole, ZoneImageResolverInventory,
 };
 use omicron_common::api::external::{
     ByteCount, DiskState, Error, Generation, ResourceType,
@@ -727,6 +728,21 @@ impl SledAgent {
         };
 
         let storage = self.storage.lock();
+
+        let disks_config =
+            storage.omicron_physical_disks_list().unwrap_or_default();
+        let datasets_config =
+            storage.datasets_config_list().unwrap_or_default();
+        let zones_config = self.fake_zones.lock().unwrap().clone();
+
+        let sled_config = OmicronSledConfig {
+            generation: zones_config.generation,
+            disks: disks_config.disks.into_iter().collect(),
+            datasets: datasets_config.datasets.into_values().collect(),
+            zones: zones_config.zones.into_iter().collect(),
+            remove_mupdate_override: None,
+        };
+
         Ok(Inventory {
             sled_id: self.id,
             sled_agent_address,
@@ -741,7 +757,6 @@ impl SledAgent {
                 self.config.hardware.reservoir_ram,
             )
             .context("reservoir_size")?,
-            omicron_zones: self.fake_zones.lock().unwrap().clone(),
             disks: storage
                 .physical_disks()
                 .values()
@@ -789,7 +804,11 @@ impl SledAgent {
                         .collect::<Vec<_>>()
                 })
                 .unwrap_or_else(|_| vec![]),
-            omicron_physical_disks_generation: Generation::new(),
+            ledgered_sled_config: Some(sled_config),
+            reconciler_status: ConfigReconcilerInventoryStatus::NotYetRun,
+            last_reconciliation: None,
+            // TODO: simulate the zone image resolver with greater fidelity
+            zone_image_resolver: ZoneImageResolverInventory::new_fake(),
         })
     }
 
@@ -896,7 +915,9 @@ impl SledAgent {
     pub fn set_omicron_config(
         &self,
         config: OmicronSledConfig,
-    ) -> Result<OmicronSledConfigResult, HttpError> {
+    ) -> Result<(), HttpError> {
+        // TODO Update the simulator to work on `OmicronSledConfig` instead of
+        // the three separate legacy configs
         let disks_config = OmicronPhysicalDisksConfig {
             generation: config.generation,
             disks: config.disks.into_iter().collect(),
@@ -909,16 +930,14 @@ impl SledAgent {
             generation: config.generation,
             zones: config.zones.into_iter().collect(),
         };
-        let (disks, datasets) = {
-            let mut storage = self.storage.lock();
-            let DisksManagementResult { status: disks } =
-                storage.omicron_physical_disks_ensure(disks_config)?;
-            let DatasetsManagementResult { status: datasets } =
-                storage.datasets_ensure(datasets_config)?;
-            (disks, datasets)
-        };
+
+        let mut storage = self.storage.lock();
+        let _ = storage.omicron_physical_disks_ensure(disks_config)?;
+        let _ = storage.datasets_ensure(datasets_config)?;
         *self.fake_zones.lock().unwrap() = zones_config;
-        Ok(OmicronSledConfigResult { disks, datasets })
+        //*self.sled_config.lock().unwrap() = Some(config);
+
+        Ok(())
     }
 
     pub fn omicron_zones_list(&self) -> OmicronZonesConfig {

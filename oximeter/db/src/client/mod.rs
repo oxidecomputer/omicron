@@ -119,6 +119,7 @@ impl Client {
         let schema = Mutex::new(BTreeMap::new());
         let request_timeout = DEFAULT_REQUEST_TIMEOUT;
         let native_pool = match Pool::new(
+            "clickhouse".to_string(),
             native_resolver,
             Arc::new(native::connection::Connector),
             policy,
@@ -164,6 +165,7 @@ impl Client {
         ));
         let schema = Mutex::new(BTreeMap::new());
         let native_pool = match Pool::new(
+            "clickhouse".to_string(),
             Box::new(FixedResolver::new([address])),
             Arc::new(native::connection::Connector),
             Default::default(),
@@ -1008,8 +1010,8 @@ impl Client {
                         "sample" => ?sample,
                     );
                     Err(Error::SchemaMismatch {
-                        expected: existing_schema.clone(),
-                        actual: sample_schema,
+                        expected: Box::new(existing_schema.clone()),
+                        actual: Box::new(sample_schema),
                     })
                 }
             }

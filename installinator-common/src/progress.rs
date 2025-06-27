@@ -294,6 +294,12 @@ pub enum ControlPlaneZonesStepId {
     /// Writing a zone.
     Zone { name: String },
 
+    /// Writing the MUPdate override file.
+    MupdateOverride,
+
+    /// Writing the zone manifest.
+    ZoneManifest,
+
     /// Syncing writes to disk.
     Fsync,
 

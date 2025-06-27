@@ -21,6 +21,7 @@ display-error-chain.workspace = true
 futures.workspace = true
 hex.workspace = true
 http.workspace = true
+iddqd.workspace = true
 illumos-utils.workspace = true
 installinator-client.workspace = true
 installinator-common.workspace = true
@@ -29,8 +30,11 @@ itertools.workspace = true
 libc.workspace = true
 omicron-common.workspace = true
 omicron-ddm-admin-client.workspace = true
+omicron-uuid-kinds.workspace = true
+oxide-tokio-rt.workspace = true
 reqwest.workspace = true
 sha2.workspace = true
+serde_json.workspace = true
 sled-hardware.workspace = true
 sled-hardware-types.workspace = true
 sled-storage.workspace = true
@@ -45,7 +49,6 @@ tokio = { workspace = true, features = ["full"] }
 tufaceous-artifact.workspace = true
 tufaceous-lib.workspace = true
 update-engine.workspace = true
-uuid.workspace = true
 omicron-workspace-hack.workspace = true
 
 [dev-dependencies]

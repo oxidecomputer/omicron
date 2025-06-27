@@ -28,8 +28,10 @@ DNS zone:                   oxide-dev.test (External)
 requested version:          2 (created at <REDACTED_TIMESTAMP>)
 version created by Nexus:   ..........<REDACTED_UUID>...........
 version created because:    create silo: "test-suite-silo"
-changes:                    names added: 1, names removed: 0
+changes:                    names added: 3, names removed: 0
 
++  @                                                  NS   ns1.oxide-dev.test
++  ns1                                                AAAA ::1
 +  test-suite-silo.sys                                A    127.0.0.1
 ---------------------------------------------
 stderr:
@@ -42,6 +44,8 @@ termination: Exited(0)
 stdout:
 External zone: oxide-dev.test
   NAME                                               RECORDS
+  @                                                  NS   ns1.oxide-dev.test
+  ns1                                                AAAA ::1
   test-suite-silo.sys                                A    127.0.0.1
 ---------------------------------------------
 stderr:
@@ -238,6 +242,10 @@ task: "abandoned_vmm_reaper"
     instances
 
 
+task: "alert_dispatcher"
+    dispatches queued alerts to receivers
+
+
 task: "bfd_manager"
     Manages bidirectional fowarding detection (BFD) configuration on rack
     switches
@@ -249,6 +257,10 @@ task: "blueprint_executor"
 
 task: "blueprint_loader"
     Loads the current target blueprint from the DB
+
+
+task: "blueprint_planner"
+    Updates the target blueprint
 
 
 task: "blueprint_rendezvous"
@@ -379,6 +391,10 @@ task: "service_zone_nat_tracker"
     ensures service zone nat records are recorded in NAT RPW table
 
 
+task: "sp_ereport_ingester"
+    collects error reports from service processors
+
+
 task: "support_bundle_collector"
     Manage support bundle collection and cleanup
 
@@ -401,10 +417,6 @@ task: "vpc_route_manager"
 
 task: "webhook_deliverator"
     sends webhook delivery requests
-
-
-task: "webhook_dispatcher"
-    dispatches queued webhook events to receivers
 
 
 ---------------------------------------------
@@ -476,7 +488,7 @@ task: "nat_v4_garbage_collector"
   currently executing: no
   last completed activation: <REDACTED ITERATIONS>, triggered by a periodic timer firing
     started at <REDACTED_TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
-    last completion reported error: failed to resolve addresses for Dendrite services: no record found for Query { name: Name("_dendrite._tcp.control-plane.oxide.internal."), query_type: SRV, query_class: IN }
+    last completion reported error: failed to resolve addresses for Dendrite services: proto error: no records found for Query { name: Name("_dendrite._tcp.control-plane.oxide.internal."), query_type: SRV, query_class: IN }
 
 task: "blueprint_loader"
   configured period: every <REDACTED_DURATION>m <REDACTED_DURATION>s
@@ -502,12 +514,27 @@ task: "abandoned_vmm_reaper"
       VMMs already deleted by another Nexus:   0
     sled resource reservations deleted:        0
 
+task: "alert_dispatcher"
+  configured period: every <REDACTED_DURATION>m
+  currently executing: no
+  last completed activation: <REDACTED ITERATIONS>, triggered by a periodic timer firing
+    started at <REDACTED_TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
+    alerts dispatched:                            0
+    alerts with no receivers subscribed:          0
+
 task: "bfd_manager"
   configured period: every <REDACTED_DURATION>s
   currently executing: no
   last completed activation: <REDACTED ITERATIONS>, triggered by a periodic timer firing
     started at <REDACTED_TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
-    last completion reported error: failed to resolve addresses for Dendrite services: no record found for Query { name: Name("_dendrite._tcp.control-plane.oxide.internal."), query_type: SRV, query_class: IN }
+    last completion reported error: failed to resolve addresses for Dendrite services: proto error: no records found for Query { name: Name("_dendrite._tcp.control-plane.oxide.internal."), query_type: SRV, query_class: IN }
+
+task: "blueprint_planner"
+  configured period: every <REDACTED_DURATION>m
+  currently executing: no
+  last completed activation: <REDACTED ITERATIONS>, triggered by a dependent task completing
+    started at <REDACTED_TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
+    blueprint planning explicitly disabled by config!
 
 task: "blueprint_rendezvous"
   configured period: every <REDACTED_DURATION>m
@@ -723,6 +750,20 @@ task: "service_zone_nat_tracker"
     started at <REDACTED_TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
     last completion reported error: inventory collection is None
 
+task: "sp_ereport_ingester"
+  configured period: every <REDACTED_DURATION>s
+  currently executing: no
+  last completed activation: <REDACTED ITERATIONS>, triggered by a periodic timer firing
+    started at <REDACTED_TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
+/!\ errors:                  1
+      - failed to resolve MGS addresses: proto error: no records found for Query { name: Name("_mgs._tcp.control-plane.oxide.internal."), query_type: SRV, query_class: IN }
+    total ereports received:      0
+      new ereports ingested:      0
+    total HTTP requests sent:     0
+      total collection errors:    0
+    reporters with ereports:      0
+    reporters with collection errors:   0
+
 task: "support_bundle_collector"
   configured period: every <REDACTED_DURATION>days <REDACTED_DURATION>h <REDACTED_DURATION>m <REDACTED_DURATION>s
   currently executing: no
@@ -794,14 +835,6 @@ task: "webhook_deliverator"
     internal delivery errors:             0
     already delivered by another Nexus:   0
     in progress by another Nexus:         0
-
-task: "webhook_dispatcher"
-  configured period: every <REDACTED_DURATION>m
-  currently executing: no
-  last completed activation: <REDACTED ITERATIONS>, triggered by a periodic timer firing
-    started at <REDACTED_TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
-    events dispatched:                            0
-    events with no receivers subscribed:          0
 
 ---------------------------------------------
 stderr:
@@ -995,7 +1028,7 @@ task: "nat_v4_garbage_collector"
   currently executing: no
   last completed activation: <REDACTED ITERATIONS>, triggered by a periodic timer firing
     started at <REDACTED_TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
-    last completion reported error: failed to resolve addresses for Dendrite services: no record found for Query { name: Name("_dendrite._tcp.control-plane.oxide.internal."), query_type: SRV, query_class: IN }
+    last completion reported error: failed to resolve addresses for Dendrite services: proto error: no records found for Query { name: Name("_dendrite._tcp.control-plane.oxide.internal."), query_type: SRV, query_class: IN }
 
 task: "blueprint_loader"
   configured period: every <REDACTED_DURATION>m <REDACTED_DURATION>s
@@ -1021,12 +1054,27 @@ task: "abandoned_vmm_reaper"
       VMMs already deleted by another Nexus:   0
     sled resource reservations deleted:        0
 
+task: "alert_dispatcher"
+  configured period: every <REDACTED_DURATION>m
+  currently executing: no
+  last completed activation: <REDACTED ITERATIONS>, triggered by a periodic timer firing
+    started at <REDACTED_TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
+    alerts dispatched:                            0
+    alerts with no receivers subscribed:          0
+
 task: "bfd_manager"
   configured period: every <REDACTED_DURATION>s
   currently executing: no
   last completed activation: <REDACTED ITERATIONS>, triggered by a periodic timer firing
     started at <REDACTED_TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
-    last completion reported error: failed to resolve addresses for Dendrite services: no record found for Query { name: Name("_dendrite._tcp.control-plane.oxide.internal."), query_type: SRV, query_class: IN }
+    last completion reported error: failed to resolve addresses for Dendrite services: proto error: no records found for Query { name: Name("_dendrite._tcp.control-plane.oxide.internal."), query_type: SRV, query_class: IN }
+
+task: "blueprint_planner"
+  configured period: every <REDACTED_DURATION>m
+  currently executing: no
+  last completed activation: <REDACTED ITERATIONS>, triggered by a dependent task completing
+    started at <REDACTED_TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
+    blueprint planning explicitly disabled by config!
 
 task: "blueprint_rendezvous"
   configured period: every <REDACTED_DURATION>m
@@ -1242,6 +1290,20 @@ task: "service_zone_nat_tracker"
     started at <REDACTED_TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
     last completion reported error: inventory collection is None
 
+task: "sp_ereport_ingester"
+  configured period: every <REDACTED_DURATION>s
+  currently executing: no
+  last completed activation: <REDACTED ITERATIONS>, triggered by a periodic timer firing
+    started at <REDACTED_TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
+/!\ errors:                  1
+      - failed to resolve MGS addresses: proto error: no records found for Query { name: Name("_mgs._tcp.control-plane.oxide.internal."), query_type: SRV, query_class: IN }
+    total ereports received:      0
+      new ereports ingested:      0
+    total HTTP requests sent:     0
+      total collection errors:    0
+    reporters with ereports:      0
+    reporters with collection errors:   0
+
 task: "support_bundle_collector"
   configured period: every <REDACTED_DURATION>days <REDACTED_DURATION>h <REDACTED_DURATION>m <REDACTED_DURATION>s
   currently executing: no
@@ -1313,14 +1375,6 @@ task: "webhook_deliverator"
     internal delivery errors:             0
     already delivered by another Nexus:   0
     in progress by another Nexus:         0
-
-task: "webhook_dispatcher"
-  configured period: every <REDACTED_DURATION>m
-  currently executing: no
-  last completed activation: <REDACTED ITERATIONS>, triggered by a periodic timer firing
-    started at <REDACTED_TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
-    events dispatched:                            0
-    events with no receivers subscribed:          0
 
 ---------------------------------------------
 stderr:
@@ -1446,12 +1500,14 @@ parent:    <none>
     oxp_..........<REDACTED_UUID>.........../crypt/zone/oxz_external_dns_..........<REDACTED_UUID>...........      ..........<REDACTED_UUID>...........   in service    none    none          off        
     oxp_..........<REDACTED_UUID>.........../crypt/zone/oxz_internal_dns_..........<REDACTED_UUID>...........      ..........<REDACTED_UUID>...........   in service    none    none          off        
     oxp_..........<REDACTED_UUID>.........../crypt/zone/oxz_nexus_..........<REDACTED_UUID>...........             ..........<REDACTED_UUID>...........   in service    none    none          off        
+    oxp_..........<REDACTED_UUID>.........../crypt/zone/oxz_ntp_..........<REDACTED_UUID>...........               ..........<REDACTED_UUID>...........   in service    none    none          off        
 
 
     omicron zones:
     ---------------------------------------------------------------------------------------------------------
     zone type         zone id                                image source      disposition   underlay IP     
     ---------------------------------------------------------------------------------------------------------
+    boundary_ntp      ..........<REDACTED_UUID>...........   install dataset   in service    ::1             
     clickhouse        ..........<REDACTED_UUID>...........   install dataset   in service    ::1             
     cockroach_db      ..........<REDACTED_UUID>...........   install dataset   in service    ::1             
     crucible_pantry   ..........<REDACTED_UUID>...........   install dataset   in service    ::1             
@@ -1469,11 +1525,12 @@ parent:    <none>
     read from::   SingleNode
 
  METADATA:
-    created by:::::::::::   nexus-test-utils
-    created at:::::::::::   <REDACTED_TIMESTAMP>
-    comment::::::::::::::   initial test blueprint
-    internal DNS version:   1
-    external DNS version:   2
+    created by:::::::::::::   nexus-test-utils
+    created at:::::::::::::   <REDACTED_TIMESTAMP>
+    comment::::::::::::::::   initial test blueprint
+    internal DNS version:::   1
+    external DNS version:::   2
+    target release min gen:   1
 
  PENDING MGS-MANAGED UPDATES: 0
 
@@ -1547,12 +1604,14 @@ parent:    <none>
     oxp_..........<REDACTED_UUID>.........../crypt/zone/oxz_external_dns_..........<REDACTED_UUID>...........      ..........<REDACTED_UUID>...........   in service    none    none          off        
     oxp_..........<REDACTED_UUID>.........../crypt/zone/oxz_internal_dns_..........<REDACTED_UUID>...........      ..........<REDACTED_UUID>...........   in service    none    none          off        
     oxp_..........<REDACTED_UUID>.........../crypt/zone/oxz_nexus_..........<REDACTED_UUID>...........             ..........<REDACTED_UUID>...........   in service    none    none          off        
+    oxp_..........<REDACTED_UUID>.........../crypt/zone/oxz_ntp_..........<REDACTED_UUID>...........               ..........<REDACTED_UUID>...........   in service    none    none          off        
 
 
     omicron zones:
     ---------------------------------------------------------------------------------------------------------
     zone type         zone id                                image source      disposition   underlay IP     
     ---------------------------------------------------------------------------------------------------------
+    boundary_ntp      ..........<REDACTED_UUID>...........   install dataset   in service    ::1             
     clickhouse        ..........<REDACTED_UUID>...........   install dataset   in service    ::1             
     cockroach_db      ..........<REDACTED_UUID>...........   install dataset   in service    ::1             
     crucible_pantry   ..........<REDACTED_UUID>...........   install dataset   in service    ::1             
@@ -1570,11 +1629,12 @@ parent:    <none>
     read from::   SingleNode
 
  METADATA:
-    created by:::::::::::   nexus-test-utils
-    created at:::::::::::   <REDACTED_TIMESTAMP>
-    comment::::::::::::::   initial test blueprint
-    internal DNS version:   1
-    external DNS version:   2
+    created by:::::::::::::   nexus-test-utils
+    created at:::::::::::::   <REDACTED_TIMESTAMP>
+    comment::::::::::::::::   initial test blueprint
+    internal DNS version:::   1
+    external DNS version:::   2
+    target release min gen:   1
 
  PENDING MGS-MANAGED UPDATES: 0
 
@@ -1589,75 +1649,14 @@ stdout:
 from: blueprint ......<REDACTED_BLUEPRINT_ID>.......
 to:   blueprint ......<REDACTED_BLUEPRINT_ID>.......
 
- UNCHANGED SLEDS:
-
-  sled ..........<REDACTED_UUID>........... (active, config generation 2):
-
-    physical disks:
-    -----------------------------------------------------------------
-    vendor        model              serial               disposition
-    -----------------------------------------------------------------
-    nexus-tests   nexus-test-model   nexus-test-disk-10   in service 
-    nexus-tests   nexus-test-model   nexus-test-disk-11   in service 
-    nexus-tests   nexus-test-model   nexus-test-disk-12   in service 
-    nexus-tests   nexus-test-model   nexus-test-disk-13   in service 
-    nexus-tests   nexus-test-model   nexus-test-disk-14   in service 
-    nexus-tests   nexus-test-model   nexus-test-disk-15   in service 
-    nexus-tests   nexus-test-model   nexus-test-disk-16   in service 
-    nexus-tests   nexus-test-model   nexus-test-disk-17   in service 
-    nexus-tests   nexus-test-model   nexus-test-disk-18   in service 
-    nexus-tests   nexus-test-model   nexus-test-disk-19   in service 
-
-
-  sled ..........<REDACTED_UUID>........... (active, config generation 2):
-
-    physical disks:
-    ----------------------------------------------------------------
-    vendor        model              serial              disposition
-    ----------------------------------------------------------------
-    nexus-tests   nexus-test-model   nexus-test-disk-0   in service 
-    nexus-tests   nexus-test-model   nexus-test-disk-1   in service 
-    nexus-tests   nexus-test-model   nexus-test-disk-2   in service 
-    nexus-tests   nexus-test-model   nexus-test-disk-3   in service 
-    nexus-tests   nexus-test-model   nexus-test-disk-4   in service 
-    nexus-tests   nexus-test-model   nexus-test-disk-5   in service 
-    nexus-tests   nexus-test-model   nexus-test-disk-6   in service 
-    nexus-tests   nexus-test-model   nexus-test-disk-7   in service 
-    nexus-tests   nexus-test-model   nexus-test-disk-8   in service 
-    nexus-tests   nexus-test-model   nexus-test-disk-9   in service 
-
-
-    datasets:
-    -----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
-    dataset name                                                                                                   dataset id                             disposition   quota   reservation   compression
-    -----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
-    oxp_..........<REDACTED_UUID>.........../crypt/zone/oxz_clickhouse_..........<REDACTED_UUID>...........        ..........<REDACTED_UUID>...........   in service    none    none          off        
-    oxp_..........<REDACTED_UUID>.........../crypt/zone/oxz_cockroachdb_..........<REDACTED_UUID>...........       ..........<REDACTED_UUID>...........   in service    none    none          off        
-    oxp_..........<REDACTED_UUID>.........../crypt/zone/oxz_crucible_pantry_..........<REDACTED_UUID>...........   ..........<REDACTED_UUID>...........   in service    none    none          off        
-    oxp_..........<REDACTED_UUID>.........../crypt/zone/oxz_external_dns_..........<REDACTED_UUID>...........      ..........<REDACTED_UUID>...........   in service    none    none          off        
-    oxp_..........<REDACTED_UUID>.........../crypt/zone/oxz_internal_dns_..........<REDACTED_UUID>...........      ..........<REDACTED_UUID>...........   in service    none    none          off        
-    oxp_..........<REDACTED_UUID>.........../crypt/zone/oxz_nexus_..........<REDACTED_UUID>...........             ..........<REDACTED_UUID>...........   in service    none    none          off        
-
-
-    omicron zones:
-    ---------------------------------------------------------------------------------------------------------
-    zone type         zone id                                image source      disposition   underlay IP     
-    ---------------------------------------------------------------------------------------------------------
-    clickhouse        ..........<REDACTED_UUID>...........   install dataset   in service    ::1             
-    cockroach_db      ..........<REDACTED_UUID>...........   install dataset   in service    ::1             
-    crucible_pantry   ..........<REDACTED_UUID>...........   install dataset   in service    ::1             
-    external_dns      ..........<REDACTED_UUID>...........   install dataset   in service    ::1             
-    internal_dns      ..........<REDACTED_UUID>...........   install dataset   in service    ::1             
-    nexus             ..........<REDACTED_UUID>...........   install dataset   in service    ::ffff:127.0.0.1
-
-
  COCKROACHDB SETTINGS:
     state fingerprint:::::::::::::::::   <COCKROACHDB_FINGERPRINT_REDACTED> (unchanged)
     cluster.preserve_downgrade_option:   <COCKROACHDB_VERSION_REDACTED> (unchanged)
 
  METADATA:
-    internal DNS version:   1 (unchanged)
-    external DNS version:   2 (unchanged)
+    internal DNS version:::   1 (unchanged)
+    external DNS version:::   2 (unchanged)
+    target release min gen:   1 (unchanged)
 
  OXIMETER SETTINGS:
     generation:   1 (unchanged)
@@ -1667,6 +1666,15 @@ to:   blueprint ......<REDACTED_BLUEPRINT_ID>.......
 ---------------------------------------------
 stderr:
 note: using Nexus URL http://127.0.0.1:REDACTED_PORT/
+=============================================
+EXECUTING COMMAND: omdb ["nexus", "blueprints", "diff", "......<REDACTED_BLUEPRINT_ID>......."]
+termination: Exited(1)
+---------------------------------------------
+stdout:
+---------------------------------------------
+stderr:
+note: using Nexus URL http://127.0.0.1:REDACTED_PORT/
+Error: `blueprint2_id` was not specified and blueprint1 has no parent
 =============================================
 EXECUTING COMMAND: omdb ["reconfigurator", "export", "<TMP_PATH_REDACTED>"]
 termination: Exited(0)

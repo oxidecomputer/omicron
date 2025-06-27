@@ -59,13 +59,13 @@ pub enum ClickHouseDeployment {
     ///
     /// This starts a single replica on one server. It is expected to work with
     /// the non-replicated version of the `oximeter` database.
-    SingleNode(ClickHouseReplica),
+    SingleNode(Box<ClickHouseReplica>),
     /// A replicated ClickHouse cluster.
     ///
     /// This starts several replica servers, and the required ClickHouse Keeper
     /// nodes that manage the cluster. It is expected to work with the
     /// replicated version of the `oximeter` database.
-    Cluster(ClickHouseCluster),
+    Cluster(Box<ClickHouseCluster>),
 }
 
 /// Port numbers that a ClickHouse replica listens on.
@@ -146,7 +146,7 @@ impl ClickHouseDeployment {
     ) -> Result<Self, anyhow::Error> {
         ClickHouseProcess::new_single_node(logctx, ports)
             .await
-            .map(Self::SingleNode)
+            .map(|replica| Self::SingleNode(Box::new(replica)))
     }
 
     /// Create a replicated cluster deployment.
@@ -157,7 +157,7 @@ impl ClickHouseDeployment {
     ) -> Result<Self, anyhow::Error> {
         ClickHouseCluster::new(logctx, replica_config, keeper_config)
             .await
-            .map(Self::Cluster)
+            .map(|cluster| Self::Cluster(Box::new(cluster)))
     }
 
     /// Return true if this is a cluster deployment.
@@ -296,7 +296,7 @@ impl ClickHouseDeployment {
     ) -> Box<dyn Iterator<Item = &ClickHouseReplica> + '_> {
         match self {
             ClickHouseDeployment::SingleNode(instance) => {
-                Box::new(std::iter::once(instance))
+                Box::new(std::iter::once(&**instance))
             }
             ClickHouseDeployment::Cluster(cluster) => {
                 Box::new(cluster.replicas())
@@ -825,7 +825,7 @@ impl ClickHouseDataDir {
         ];
         // Persist this temporary directory since we're going to be doing the
         // cleanup ourselves.
-        let dir = self.dir.into_path();
+        let dir = self.dir.keep();
 
         let mut error_paths = BTreeMap::new();
         // contents_first = true ensures that we delete inner files before

@@ -334,20 +334,47 @@
         }
       }
     },
-    "/datasets": {
+    "/chicken-switch/destroy-orphaned-datasets": {
       "get": {
-        "summary": "Lists the datasets that this sled is configured to use",
-        "operationId": "datasets_get",
+        "summary": "This endpoint reports the status of the `destroy_orphaned_datasets`",
+        "description": "chicken switch. It will be removed with omicron#6177.",
+        "operationId": "chicken_switch_destroy_orphaned_datasets_get",
         "responses": {
           "200": {
             "description": "successful operation",
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/DatasetsConfig"
+                  "$ref": "#/components/schemas/ChickenSwitchDestroyOrphanedDatasets"
                 }
               }
             }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      },
+      "put": {
+        "summary": "This endpoint sets the `destroy_orphaned_datasets` chicken switch",
+        "description": "(allowing sled-agent to delete datasets it believes are orphaned). It will be removed with omicron#6177.",
+        "operationId": "chicken_switch_destroy_orphaned_datasets_put",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ChickenSwitchDestroyOrphanedDatasets"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "204": {
+            "description": "resource updated"
           },
           "4XX": {
             "$ref": "#/components/responses/Error"
@@ -516,38 +543,8 @@
           "required": true
         },
         "responses": {
-          "200": {
-            "description": "successful operation",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/OmicronSledConfigResult"
-                }
-              }
-            }
-          },
-          "4XX": {
-            "$ref": "#/components/responses/Error"
-          },
-          "5XX": {
-            "$ref": "#/components/responses/Error"
-          }
-        }
-      }
-    },
-    "/omicron-physical-disks": {
-      "get": {
-        "operationId": "omicron_physical_disks_get",
-        "responses": {
-          "200": {
-            "description": "successful operation",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/OmicronPhysicalDisksConfig"
-                }
-              }
-            }
+          "204": {
+            "description": "resource updated"
           },
           "4XX": {
             "$ref": "#/components/responses/Error"
@@ -635,6 +632,33 @@
     "/support/dladm-info": {
       "get": {
         "operationId": "support_dladm_info",
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "title": "Array_of_SledDiagnosticsQueryOutput",
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/SledDiagnosticsQueryOutput"
+                  }
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/support/health-check": {
+      "get": {
+        "operationId": "support_health_check",
         "responses": {
           "200": {
             "description": "successful operation",
@@ -1097,6 +1121,14 @@
         "operationId": "support_bundle_download",
         "parameters": [
           {
+            "in": "header",
+            "name": "range",
+            "description": "A request to access a portion of the resource, such as `bytes=0-499`\n\nSee: <https://developer.mozilla.org/en-US/docs/Web/HTTP/Reference/Headers/Range>",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
             "in": "path",
             "name": "dataset_id",
             "description": "The dataset on which this support bundle was provisioned",
@@ -1139,6 +1171,14 @@
         "summary": "Fetch metadata about a support bundle from a particular dataset",
         "operationId": "support_bundle_head",
         "parameters": [
+          {
+            "in": "header",
+            "name": "range",
+            "description": "A request to access a portion of the resource, such as `bytes=0-499`\n\nSee: <https://developer.mozilla.org/en-US/docs/Web/HTTP/Reference/Headers/Range>",
+            "schema": {
+              "type": "string"
+            }
+          },
           {
             "in": "path",
             "name": "dataset_id",
@@ -1184,6 +1224,14 @@
         "summary": "Fetch a file within a support bundle from a particular dataset",
         "operationId": "support_bundle_download_file",
         "parameters": [
+          {
+            "in": "header",
+            "name": "range",
+            "description": "A request to access a portion of the resource, such as `bytes=0-499`\n\nSee: <https://developer.mozilla.org/en-US/docs/Web/HTTP/Reference/Headers/Range>",
+            "schema": {
+              "type": "string"
+            }
+          },
           {
             "in": "path",
             "name": "dataset_id",
@@ -1236,6 +1284,14 @@
         "summary": "Fetch metadata about a file within a support bundle from a particular dataset",
         "operationId": "support_bundle_head_file",
         "parameters": [
+          {
+            "in": "header",
+            "name": "range",
+            "description": "A request to access a portion of the resource, such as `bytes=0-499`\n\nSee: <https://developer.mozilla.org/en-US/docs/Web/HTTP/Reference/Headers/Range>",
+            "schema": {
+              "type": "string"
+            }
+          },
           {
             "in": "path",
             "name": "dataset_id",
@@ -1291,6 +1347,14 @@
         "operationId": "support_bundle_index",
         "parameters": [
           {
+            "in": "header",
+            "name": "range",
+            "description": "A request to access a portion of the resource, such as `bytes=0-499`\n\nSee: <https://developer.mozilla.org/en-US/docs/Web/HTTP/Reference/Headers/Range>",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
             "in": "path",
             "name": "dataset_id",
             "description": "The dataset on which this support bundle was provisioned",
@@ -1333,6 +1397,14 @@
         "summary": "Fetch metadata about the list of files within a support bundle",
         "operationId": "support_bundle_head_index",
         "parameters": [
+          {
+            "in": "header",
+            "name": "range",
+            "description": "A request to access a portion of the resource, such as `bytes=0-499`\n\nSee: <https://developer.mozilla.org/en-US/docs/Web/HTTP/Reference/Headers/Range>",
+            "schema": {
+              "type": "string"
+            }
+          },
           {
             "in": "path",
             "name": "dataset_id",
@@ -2154,33 +2226,6 @@
           }
         }
       }
-    },
-    "/zpools": {
-      "get": {
-        "operationId": "zpools_get",
-        "responses": {
-          "200": {
-            "description": "successful operation",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "title": "Array_of_Zpool",
-                  "type": "array",
-                  "items": {
-                    "$ref": "#/components/schemas/Zpool"
-                  }
-                }
-              }
-            }
-          },
-          "4XX": {
-            "$ref": "#/components/responses/Error"
-          },
-          "5XX": {
-            "$ref": "#/components/responses/Error"
-          }
-        }
-      }
     }
   },
   "components": {
@@ -2932,6 +2977,18 @@
         "format": "uint64",
         "minimum": 0
       },
+      "ChickenSwitchDestroyOrphanedDatasets": {
+        "type": "object",
+        "properties": {
+          "destroy_orphans": {
+            "description": "If true, sled-agent will attempt to destroy durable ZFS datasets that it believes were associated with now-expunged Omicron zones.",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "destroy_orphans"
+        ]
+      },
       "Chipset": {
         "description": "A kind of virtual chipset.",
         "oneOf": [
@@ -3486,6 +3543,166 @@
           }
         ]
       },
+      "ConfigReconcilerInventory": {
+        "description": "Describes the last attempt made by the sled-agent-config-reconciler to reconcile the current sled config against the actual state of the sled.",
+        "type": "object",
+        "properties": {
+          "datasets": {
+            "type": "object",
+            "additionalProperties": {
+              "$ref": "#/components/schemas/ConfigReconcilerInventoryResult"
+            }
+          },
+          "external_disks": {
+            "type": "object",
+            "additionalProperties": {
+              "$ref": "#/components/schemas/ConfigReconcilerInventoryResult"
+            }
+          },
+          "last_reconciled_config": {
+            "$ref": "#/components/schemas/OmicronSledConfig"
+          },
+          "orphaned_datasets": {
+            "title": "IdOrdMap",
+            "x-rust-type": {
+              "crate": "iddqd",
+              "parameters": [
+                {
+                  "$ref": "#/components/schemas/OrphanedDataset"
+                }
+              ],
+              "path": "iddqd::IdOrdMap",
+              "version": "*"
+            },
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/OrphanedDataset"
+            },
+            "uniqueItems": true
+          },
+          "zones": {
+            "type": "object",
+            "additionalProperties": {
+              "$ref": "#/components/schemas/ConfigReconcilerInventoryResult"
+            }
+          }
+        },
+        "required": [
+          "datasets",
+          "external_disks",
+          "last_reconciled_config",
+          "orphaned_datasets",
+          "zones"
+        ]
+      },
+      "ConfigReconcilerInventoryResult": {
+        "oneOf": [
+          {
+            "type": "object",
+            "properties": {
+              "result": {
+                "type": "string",
+                "enum": [
+                  "ok"
+                ]
+              }
+            },
+            "required": [
+              "result"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "message": {
+                "type": "string"
+              },
+              "result": {
+                "type": "string",
+                "enum": [
+                  "err"
+                ]
+              }
+            },
+            "required": [
+              "message",
+              "result"
+            ]
+          }
+        ]
+      },
+      "ConfigReconcilerInventoryStatus": {
+        "description": "Status of the sled-agent-config-reconciler task.",
+        "oneOf": [
+          {
+            "description": "The reconciler task has not yet run for the first time since sled-agent started.",
+            "type": "object",
+            "properties": {
+              "status": {
+                "type": "string",
+                "enum": [
+                  "not_yet_run"
+                ]
+              }
+            },
+            "required": [
+              "status"
+            ]
+          },
+          {
+            "description": "The reconciler task is actively running.",
+            "type": "object",
+            "properties": {
+              "config": {
+                "$ref": "#/components/schemas/OmicronSledConfig"
+              },
+              "running_for": {
+                "$ref": "#/components/schemas/Duration"
+              },
+              "started_at": {
+                "type": "string",
+                "format": "date-time"
+              },
+              "status": {
+                "type": "string",
+                "enum": [
+                  "running"
+                ]
+              }
+            },
+            "required": [
+              "config",
+              "running_for",
+              "started_at",
+              "status"
+            ]
+          },
+          {
+            "description": "The reconciler task is currently idle, but previously did complete a reconciliation attempt.\n\nThis variant does not include the `OmicronSledConfig` used in the last attempt, because that's always available via [`ConfigReconcilerInventory::last_reconciled_config`].",
+            "type": "object",
+            "properties": {
+              "completed_at": {
+                "type": "string",
+                "format": "date-time"
+              },
+              "ran_for": {
+                "$ref": "#/components/schemas/Duration"
+              },
+              "status": {
+                "type": "string",
+                "enum": [
+                  "idle"
+                ]
+              }
+            },
+            "required": [
+              "completed_at",
+              "ran_for",
+              "status"
+            ]
+          }
+        ]
+      },
       "Cpuid": {
         "description": "A set of CPUID values to expose to a guest.",
         "type": "object",
@@ -3647,22 +3864,6 @@
         "description": "The kind of dataset. See the `DatasetKind` enum in omicron-common for possible values.",
         "type": "string"
       },
-      "DatasetManagementStatus": {
-        "description": "Identifies how a single dataset management operation may have succeeded or failed.",
-        "type": "object",
-        "properties": {
-          "dataset_name": {
-            "$ref": "#/components/schemas/DatasetName"
-          },
-          "err": {
-            "nullable": true,
-            "type": "string"
-          }
-        },
-        "required": [
-          "dataset_name"
-        ]
-      },
       "DatasetName": {
         "type": "object",
         "properties": {
@@ -3676,29 +3877,6 @@
         "required": [
           "kind",
           "pool_name"
-        ]
-      },
-      "DatasetsConfig": {
-        "type": "object",
-        "properties": {
-          "datasets": {
-            "type": "object",
-            "additionalProperties": {
-              "$ref": "#/components/schemas/DatasetConfig"
-            }
-          },
-          "generation": {
-            "description": "generation number of this configuration\n\nThis generation number is owned by the control plane (i.e., RSS or Nexus, depending on whether RSS-to-Nexus handoff has happened).  It should not be bumped within Sled Agent.\n\nSled Agent rejects attempts to set the configuration to a generation older than the one it's currently running.\n\nNote that \"Generation::new()\", AKA, the first generation number, is reserved for \"no datasets\". This is the default configuration for a sled before any requests have been made.",
-            "allOf": [
-              {
-                "$ref": "#/components/schemas/Generation"
-              }
-            ]
-          }
-        },
-        "required": [
-          "datasets",
-          "generation"
         ]
       },
       "DhcpConfig": {
@@ -3775,110 +3953,6 @@
           "model",
           "serial",
           "vendor"
-        ]
-      },
-      "DiskManagementError": {
-        "oneOf": [
-          {
-            "type": "object",
-            "properties": {
-              "type": {
-                "type": "string",
-                "enum": [
-                  "not_found"
-                ]
-              }
-            },
-            "required": [
-              "type"
-            ]
-          },
-          {
-            "type": "object",
-            "properties": {
-              "type": {
-                "type": "string",
-                "enum": [
-                  "zpool_uuid_mismatch"
-                ]
-              },
-              "value": {
-                "type": "object",
-                "properties": {
-                  "expected": {
-                    "$ref": "#/components/schemas/TypedUuidForZpoolKind"
-                  },
-                  "observed": {
-                    "$ref": "#/components/schemas/TypedUuidForZpoolKind"
-                  }
-                },
-                "required": [
-                  "expected",
-                  "observed"
-                ]
-              }
-            },
-            "required": [
-              "type",
-              "value"
-            ]
-          },
-          {
-            "type": "object",
-            "properties": {
-              "type": {
-                "type": "string",
-                "enum": [
-                  "key_manager"
-                ]
-              },
-              "value": {
-                "type": "string"
-              }
-            },
-            "required": [
-              "type",
-              "value"
-            ]
-          },
-          {
-            "type": "object",
-            "properties": {
-              "type": {
-                "type": "string",
-                "enum": [
-                  "other"
-                ]
-              },
-              "value": {
-                "type": "string"
-              }
-            },
-            "required": [
-              "type",
-              "value"
-            ]
-          }
-        ]
-      },
-      "DiskManagementStatus": {
-        "description": "Identifies how a single disk management operation may have succeeded or failed.",
-        "type": "object",
-        "properties": {
-          "err": {
-            "nullable": true,
-            "allOf": [
-              {
-                "$ref": "#/components/schemas/DiskManagementError"
-              }
-            ]
-          },
-          "identity": {
-            "$ref": "#/components/schemas/DiskIdentity"
-          }
-        },
-        "required": [
-          "identity"
         ]
       },
       "DiskRuntimeState": {
@@ -4177,13 +4251,6 @@
               "state"
             ]
           }
-        ]
-      },
-      "DiskType": {
-        "type": "string",
-        "enum": [
-          "U2",
-          "M2"
         ]
       },
       "DiskVariant": {
@@ -4844,11 +4911,24 @@
               "$ref": "#/components/schemas/InventoryDisk"
             }
           },
-          "omicron_physical_disks_generation": {
-            "$ref": "#/components/schemas/Generation"
+          "last_reconciliation": {
+            "nullable": true,
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/ConfigReconcilerInventory"
+              }
+            ]
           },
-          "omicron_zones": {
-            "$ref": "#/components/schemas/OmicronZonesConfig"
+          "ledgered_sled_config": {
+            "nullable": true,
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/OmicronSledConfig"
+              }
+            ]
+          },
+          "reconciler_status": {
+            "$ref": "#/components/schemas/ConfigReconcilerInventoryStatus"
           },
           "reservoir_size": {
             "$ref": "#/components/schemas/ByteCount"
@@ -4870,6 +4950,9 @@
           "usable_physical_ram": {
             "$ref": "#/components/schemas/ByteCount"
           },
+          "zone_image_resolver": {
+            "$ref": "#/components/schemas/ZoneImageResolverInventory"
+          },
           "zpools": {
             "type": "array",
             "items": {
@@ -4881,14 +4964,14 @@
           "baseboard",
           "datasets",
           "disks",
-          "omicron_physical_disks_generation",
-          "omicron_zones",
+          "reconciler_status",
           "reservoir_size",
           "sled_agent_address",
           "sled_id",
           "sled_role",
           "usable_hardware_threads",
           "usable_physical_ram",
+          "zone_image_resolver",
           "zpools"
         ]
       },
@@ -5245,6 +5328,137 @@
           }
         ]
       },
+      "MupdateOverrideBootInventory": {
+        "description": "Inventory representation of the MUPdate override on the boot disk.",
+        "type": "object",
+        "properties": {
+          "mupdate_override_id": {
+            "description": "The ID of the MUPdate override.\n\nThis is unique and generated by Installinator each time it is run. During a MUPdate, each sled gets a MUPdate override ID. (The ID is shared across boot disks and non-boot disks, though.)",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/TypedUuidForMupdateOverrideKind"
+              }
+            ]
+          }
+        },
+        "required": [
+          "mupdate_override_id"
+        ]
+      },
+      "MupdateOverrideInventory": {
+        "description": "Inventory representation of MUPdate override status.\n\nPart of [`ZoneImageResolverInventory`].\n\nThis is used by Reconfigurator to determine if a MUPdate override has occurred. For more about mixing MUPdate and updates, see RFD 556.",
+        "type": "object",
+        "properties": {
+          "boot_disk_path": {
+            "description": "The full path to the mupdate override JSON on the boot disk.",
+            "type": "string",
+            "format": "Utf8PathBuf"
+          },
+          "boot_override": {
+            "description": "The boot disk override, or an error if it could not be parsed.\n\nThis is `None` if the override is not present.",
+            "x-rust-type": {
+              "crate": "std",
+              "parameters": [
+                {
+                  "$ref": "#/components/schemas/MupdateOverrideBootInventory",
+                  "nullable": true
+                },
+                {
+                  "type": "string"
+                }
+              ],
+              "path": "::std::result::Result",
+              "version": "*"
+            },
+            "oneOf": [
+              {
+                "type": "object",
+                "properties": {
+                  "ok": {
+                    "nullable": true,
+                    "allOf": [
+                      {
+                        "$ref": "#/components/schemas/MupdateOverrideBootInventory"
+                      }
+                    ]
+                  }
+                },
+                "required": [
+                  "ok"
+                ]
+              },
+              {
+                "type": "object",
+                "properties": {
+                  "err": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "err"
+                ]
+              }
+            ]
+          },
+          "non_boot_status": {
+            "title": "IdOrdMap",
+            "description": "Information about the MUPdate override on non-boot disks.",
+            "x-rust-type": {
+              "crate": "iddqd",
+              "parameters": [
+                {
+                  "$ref": "#/components/schemas/MupdateOverrideNonBootInventory"
+                }
+              ],
+              "path": "iddqd::IdOrdMap",
+              "version": "*"
+            },
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/MupdateOverrideNonBootInventory"
+            },
+            "uniqueItems": true
+          }
+        },
+        "required": [
+          "boot_disk_path",
+          "boot_override",
+          "non_boot_status"
+        ]
+      },
+      "MupdateOverrideNonBootInventory": {
+        "description": "Inventory representation of the MUPdate override on a non-boot disk.\n\nUnlike [`MupdateOverrideBootInventory`] which is structured since Reconfigurator makes decisions based on it, information about non-boot disks is purely advisory. For simplicity, we store information in an unstructured format.",
+        "type": "object",
+        "properties": {
+          "is_valid": {
+            "description": "Whether the status is valid.",
+            "type": "boolean"
+          },
+          "message": {
+            "description": "A message describing the status.\n\nIf `is_valid` is true, then the message is a short description saying that it matches the boot disk, and whether the MUPdate override is present.\n\nIf `is_valid` is false, then this message describes the reason for the invalid status. This could include errors reading the MUPdate override JSON, or a mismatch between the boot and non-boot disks.",
+            "type": "string"
+          },
+          "path": {
+            "description": "The path to the mupdate override JSON on the non-boot disk.",
+            "type": "string",
+            "format": "Utf8PathBuf"
+          },
+          "zpool_id": {
+            "description": "The non-boot zpool ID.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/TypedUuidForInternalZpoolKind"
+              }
+            ]
+          }
+        },
+        "required": [
+          "is_valid",
+          "message",
+          "path",
+          "zpool_id"
+        ]
+      },
       "Name": {
         "title": "A name unique within the parent collection",
         "description": "Names must begin with a lower case ASCII letter, be composed exclusively of lowercase ASCII, uppercase ASCII, numbers, and '-', and may not end with a '-'. Names cannot be a UUID, but they may contain a UUID. They can be at most 63 characters long.",
@@ -5431,29 +5645,6 @@
           "pool_id"
         ]
       },
-      "OmicronPhysicalDisksConfig": {
-        "type": "object",
-        "properties": {
-          "disks": {
-            "type": "array",
-            "items": {
-              "$ref": "#/components/schemas/OmicronPhysicalDiskConfig"
-            }
-          },
-          "generation": {
-            "description": "generation number of this configuration\n\nThis generation number is owned by the control plane (i.e., RSS or Nexus, depending on whether RSS-to-Nexus handoff has happened).  It should not be bumped within Sled Agent.\n\nSled Agent rejects attempts to set the configuration to a generation older than the one it's currently running.",
-            "allOf": [
-              {
-                "$ref": "#/components/schemas/Generation"
-              }
-            ]
-          }
-        },
-        "required": [
-          "disks",
-          "generation"
-        ]
-      },
       "OmicronSledConfig": {
         "description": "Describes the set of Reconfigurator-managed configuration elements of a sled",
         "type": "object",
@@ -5467,6 +5658,14 @@
           "generation": {
             "$ref": "#/components/schemas/Generation"
           },
+          "remove_mupdate_override": {
+            "nullable": true,
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/TypedUuidForMupdateOverrideKind"
+              }
+            ]
+          },
           "zones": {
             "$ref": "#/components/schemas/IdMapOmicronZoneConfig"
           }
@@ -5476,28 +5675,6 @@
           "disks",
           "generation",
           "zones"
-        ]
-      },
-      "OmicronSledConfigResult": {
-        "description": "Result of the currently-synchronous `omicron_config_put` endpoint.",
-        "type": "object",
-        "properties": {
-          "datasets": {
-            "type": "array",
-            "items": {
-              "$ref": "#/components/schemas/DatasetManagementStatus"
-            }
-          },
-          "disks": {
-            "type": "array",
-            "items": {
-              "$ref": "#/components/schemas/DiskManagementStatus"
-            }
-          }
-        },
-        "required": [
-          "datasets",
-          "disks"
         ]
       },
       "OmicronZoneConfig": {
@@ -5583,6 +5760,50 @@
             "required": [
               "hash",
               "type"
+            ]
+          }
+        ]
+      },
+      "OmicronZoneManifestSource": {
+        "description": "The source of truth for an Omicron zone manifest.",
+        "oneOf": [
+          {
+            "description": "The manifest was written out by installinator and the mupdate process.",
+            "type": "object",
+            "properties": {
+              "mupdate_id": {
+                "description": "The UUID of the mupdate.",
+                "allOf": [
+                  {
+                    "$ref": "#/components/schemas/TypedUuidForMupdateKind"
+                  }
+                ]
+              },
+              "source": {
+                "type": "string",
+                "enum": [
+                  "installinator"
+                ]
+              }
+            },
+            "required": [
+              "mupdate_id",
+              "source"
+            ]
+          },
+          {
+            "description": "The zone manifest was not found during the install process. A synthetic zone manifest was generated by Sled Agent by looking at all the `.tar.gz` files in the install dataset.",
+            "type": "object",
+            "properties": {
+              "source": {
+                "type": "string",
+                "enum": [
+                  "sled_agent"
+                ]
+              }
+            },
+            "required": [
+              "source"
             ]
           }
         ]
@@ -5938,29 +6159,39 @@
           }
         ]
       },
-      "OmicronZonesConfig": {
-        "description": "Describes the set of Omicron-managed zones running on a sled",
+      "OrphanedDataset": {
         "type": "object",
         "properties": {
-          "generation": {
-            "description": "generation number of this configuration\n\nThis generation number is owned by the control plane (i.e., RSS or Nexus, depending on whether RSS-to-Nexus handoff has happened).  It should not be bumped within Sled Agent.\n\nSled Agent rejects attempts to set the configuration to a generation older than the one it's currently running.",
+          "available": {
+            "$ref": "#/components/schemas/ByteCount"
+          },
+          "id": {
+            "nullable": true,
             "allOf": [
               {
-                "$ref": "#/components/schemas/Generation"
+                "$ref": "#/components/schemas/TypedUuidForDatasetKind"
               }
             ]
           },
-          "zones": {
-            "description": "list of running zones",
-            "type": "array",
-            "items": {
-              "$ref": "#/components/schemas/OmicronZoneConfig"
-            }
+          "mounted": {
+            "type": "boolean"
+          },
+          "name": {
+            "$ref": "#/components/schemas/DatasetName"
+          },
+          "reason": {
+            "type": "string"
+          },
+          "used": {
+            "$ref": "#/components/schemas/ByteCount"
           }
         },
         "required": [
-          "generation",
-          "zones"
+          "available",
+          "mounted",
+          "name",
+          "reason",
+          "used"
         ]
       },
       "P9fs": {
@@ -7058,6 +7289,18 @@
         "type": "string",
         "format": "uuid"
       },
+      "TypedUuidForInternalZpoolKind": {
+        "type": "string",
+        "format": "uuid"
+      },
+      "TypedUuidForMupdateKind": {
+        "type": "string",
+        "format": "uuid"
+      },
+      "TypedUuidForMupdateOverrideKind": {
+        "type": "string",
+        "format": "uuid"
+      },
       "TypedUuidForOmicronZoneKind": {
         "type": "string",
         "format": "uuid"
@@ -7493,6 +7736,82 @@
           "vni"
         ]
       },
+      "ZoneArtifactInventory": {
+        "description": "Inventory representation of a single zone artifact on a boot disk.\n\nPart of [`ZoneManifestBootInventory`].",
+        "type": "object",
+        "properties": {
+          "expected_hash": {
+            "description": "The expected digest of the file's contents.",
+            "type": "string",
+            "format": "hex string (32 bytes)"
+          },
+          "expected_size": {
+            "description": "The expected size of the file, in bytes.",
+            "type": "integer",
+            "format": "uint64",
+            "minimum": 0
+          },
+          "file_name": {
+            "description": "The name of the zone file on disk, for example `nexus.tar.gz`. Zone files are always \".tar.gz\".",
+            "type": "string"
+          },
+          "path": {
+            "description": "The full path to the zone file.",
+            "type": "string",
+            "format": "Utf8PathBuf"
+          },
+          "status": {
+            "description": "The status of the artifact.\n\nThis is `Ok(())` if the artifact is present and matches the expected size and digest, or an error message if it is missing or does not match.",
+            "x-rust-type": {
+              "crate": "std",
+              "parameters": [
+                {
+                  "type": "null"
+                },
+                {
+                  "type": "string"
+                }
+              ],
+              "path": "::std::result::Result",
+              "version": "*"
+            },
+            "oneOf": [
+              {
+                "type": "object",
+                "properties": {
+                  "ok": {
+                    "type": "string",
+                    "enum": [
+                      null
+                    ]
+                  }
+                },
+                "required": [
+                  "ok"
+                ]
+              },
+              {
+                "type": "object",
+                "properties": {
+                  "err": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "err"
+                ]
+              }
+            ]
+          }
+        },
+        "required": [
+          "expected_hash",
+          "expected_size",
+          "file_name",
+          "path",
+          "status"
+        ]
+      },
       "ZoneBundleCause": {
         "description": "The reason or cause for a zone bundle, i.e., why it was created.",
         "oneOf": [
@@ -7577,19 +7896,175 @@
           "version"
         ]
       },
-      "Zpool": {
+      "ZoneImageResolverInventory": {
+        "description": "Inventory representation of zone image resolver status and health.",
         "type": "object",
         "properties": {
-          "disk_type": {
-            "$ref": "#/components/schemas/DiskType"
+          "mupdate_override": {
+            "description": "The mupdate override status.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/MupdateOverrideInventory"
+              }
+            ]
           },
-          "id": {
-            "$ref": "#/components/schemas/TypedUuidForZpoolKind"
+          "zone_manifest": {
+            "description": "The zone manifest status.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/ZoneManifestInventory"
+              }
+            ]
           }
         },
         "required": [
-          "disk_type",
-          "id"
+          "mupdate_override",
+          "zone_manifest"
+        ]
+      },
+      "ZoneManifestBootInventory": {
+        "description": "Inventory representation of zone artifacts on the boot disk.\n\nPart of [`ZoneManifestInventory`].",
+        "type": "object",
+        "properties": {
+          "artifacts": {
+            "title": "IdOrdMap",
+            "description": "The artifacts on disk.",
+            "x-rust-type": {
+              "crate": "iddqd",
+              "parameters": [
+                {
+                  "$ref": "#/components/schemas/ZoneArtifactInventory"
+                }
+              ],
+              "path": "iddqd::IdOrdMap",
+              "version": "*"
+            },
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ZoneArtifactInventory"
+            },
+            "uniqueItems": true
+          },
+          "source": {
+            "description": "The manifest source.\n\nIn production this is [`OmicronZoneManifestSource::Installinator`], but in some development and testing flows Sled Agent synthesizes zone manifests. In those cases, the source is [`OmicronZoneManifestSource::SledAgent`].",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/OmicronZoneManifestSource"
+              }
+            ]
+          }
+        },
+        "required": [
+          "artifacts",
+          "source"
+        ]
+      },
+      "ZoneManifestInventory": {
+        "description": "Inventory representation of a zone manifest.\n\nPart of [`ZoneImageResolverInventory`].\n\nA zone manifest is a listing of all the zones present in a system's install dataset. This struct contains information about the install dataset gathered from a system.",
+        "type": "object",
+        "properties": {
+          "boot_disk_path": {
+            "description": "The full path to the zone manifest file on the boot disk.",
+            "type": "string",
+            "format": "Utf8PathBuf"
+          },
+          "boot_inventory": {
+            "description": "The manifest read from the boot disk, and whether the manifest is valid.",
+            "x-rust-type": {
+              "crate": "std",
+              "parameters": [
+                {
+                  "$ref": "#/components/schemas/ZoneManifestBootInventory"
+                },
+                {
+                  "type": "string"
+                }
+              ],
+              "path": "::std::result::Result",
+              "version": "*"
+            },
+            "oneOf": [
+              {
+                "type": "object",
+                "properties": {
+                  "ok": {
+                    "$ref": "#/components/schemas/ZoneManifestBootInventory"
+                  }
+                },
+                "required": [
+                  "ok"
+                ]
+              },
+              {
+                "type": "object",
+                "properties": {
+                  "err": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "err"
+                ]
+              }
+            ]
+          },
+          "non_boot_status": {
+            "title": "IdOrdMap",
+            "description": "Information about the install dataset on non-boot disks.",
+            "x-rust-type": {
+              "crate": "iddqd",
+              "parameters": [
+                {
+                  "$ref": "#/components/schemas/ZoneManifestNonBootInventory"
+                }
+              ],
+              "path": "iddqd::IdOrdMap",
+              "version": "*"
+            },
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ZoneManifestNonBootInventory"
+            },
+            "uniqueItems": true
+          }
+        },
+        "required": [
+          "boot_disk_path",
+          "boot_inventory",
+          "non_boot_status"
+        ]
+      },
+      "ZoneManifestNonBootInventory": {
+        "description": "Inventory representation of a zone manifest on a non-boot disk.\n\nUnlike [`ZoneManifestBootInventory`] which is structured since Reconfigurator makes decisions based on it, information about non-boot disks is purely advisory. For simplicity, we store information in an unstructured format.",
+        "type": "object",
+        "properties": {
+          "is_valid": {
+            "description": "Whether the status is valid.",
+            "type": "boolean"
+          },
+          "message": {
+            "description": "A message describing the status.\n\nIf `is_valid` is true, then the message describes the list of artifacts found and their hashes.\n\nIf `is_valid` is false, then this message describes the reason for the invalid status. This could include errors reading the zone manifest, or zone file mismatches.",
+            "type": "string"
+          },
+          "path": {
+            "description": "The full path to the zone manifest JSON on the non-boot disk.",
+            "type": "string",
+            "format": "Utf8PathBuf"
+          },
+          "zpool_id": {
+            "description": "The ID of the non-boot zpool.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/TypedUuidForInternalZpoolKind"
+              }
+            ]
+          }
+        },
+        "required": [
+          "is_valid",
+          "message",
+          "path",
+          "zpool_id"
         ]
       },
       "ZpoolName": {

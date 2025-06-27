@@ -33,7 +33,6 @@ dns-service-client.workspace = true
 dpd-client.workspace = true
 display-error-chain.workspace = true
 dropshot.workspace = true
-ereport-api.workspace = true
 flate2.workspace = true
 flume.workspace = true
 futures.workspace = true
@@ -63,6 +62,7 @@ nexus-types.workspace = true
 omicron-common.workspace = true
 omicron-ddm-admin-client.workspace = true
 omicron-uuid-kinds.workspace = true
+oxide-tokio-rt.workspace = true
 oximeter.workspace = true
 oximeter-instruments.workspace = true
 oximeter-producer.workspace = true
@@ -85,6 +85,7 @@ sled-agent-api.workspace = true
 sled-agent-client.workspace = true
 sled-agent-config-reconciler.workspace = true
 sled-agent-types.workspace = true
+sled-agent-zone-images.workspace = true
 sled-diagnostics.workspace = true
 sled-hardware.workspace = true
 sled-hardware-types.workspace = true
@@ -138,6 +139,7 @@ tokio-stream.workspace = true
 tokio-util.workspace = true
 
 illumos-utils = { workspace = true, features = ["testing"] }
+sled-agent-config-reconciler = { workspace = true, features = ["testing"] }
 sled-storage = { workspace = true, features = ["testing"] }
 
 #

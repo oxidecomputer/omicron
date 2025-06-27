@@ -3,23 +3,27 @@
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 use camino::Utf8PathBuf;
-use illumos_utils::dladm::EtherstubVnic;
 use illumos_utils::zpool::PathInPool;
 use key_manager::StorageKeyRequester;
+use nexus_sled_agent_shared::inventory::ConfigReconcilerInventory;
+use nexus_sled_agent_shared::inventory::ConfigReconcilerInventoryStatus;
 use nexus_sled_agent_shared::inventory::InventoryDataset;
 use nexus_sled_agent_shared::inventory::InventoryDisk;
 use nexus_sled_agent_shared::inventory::InventoryZpool;
 use nexus_sled_agent_shared::inventory::OmicronSledConfig;
 use omicron_common::disk::DatasetName;
-use omicron_common::disk::DiskIdentity;
 use sled_agent_api::ArtifactConfig;
 use sled_storage::config::MountConfig;
+use sled_storage::disk::Disk;
 use sled_storage::manager::NestedDatasetConfig;
 use sled_storage::manager::NestedDatasetListOptions;
 use sled_storage::manager::NestedDatasetLocation;
 use slog::Logger;
+use std::collections::HashSet;
 use std::sync::Arc;
 use std::sync::OnceLock;
+use std::sync::atomic::AtomicBool;
+use std::sync::atomic::Ordering;
 use tokio::sync::watch;
 
 #[cfg(feature = "testing")]
@@ -34,6 +38,7 @@ use sled_storage::dataset::U2_DEBUG_DATASET;
 use sled_storage::dataset::ZONE_DATASET;
 
 use crate::DatasetTaskError;
+use crate::InternalDisksWithBootDisk;
 use crate::LedgerArtifactConfigError;
 use crate::LedgerNewConfigError;
 use crate::LedgerTaskError;
@@ -45,14 +50,27 @@ use crate::SledAgentFacilities;
 use crate::TimeSyncStatus;
 use crate::dataset_serialization_task::DatasetTaskHandle;
 use crate::dataset_serialization_task::NestedDatasetMountError;
+use crate::dump_setup_task;
 use crate::internal_disks::InternalDisksReceiver;
+use crate::ledger::CurrentSledConfig;
 use crate::ledger::LedgerTaskHandle;
 use crate::raw_disks;
+use crate::raw_disks::RawDisksReceiver;
 use crate::raw_disks::RawDisksSender;
 use crate::reconciler_task;
 use crate::reconciler_task::CurrentlyManagedZpools;
 use crate::reconciler_task::CurrentlyManagedZpoolsReceiver;
 use crate::reconciler_task::ReconcilerResult;
+
+#[derive(Debug, thiserror::Error)]
+pub enum InventoryError {
+    #[error("ledger contents not yet available")]
+    LedgerContentsNotAvailable,
+    #[error("could not contact dataset task")]
+    DatasetTaskError(#[from] DatasetTaskError),
+    #[error("could not list dataset properties")]
+    ListDatasetProperties(#[source] anyhow::Error),
+}
 
 #[derive(Debug, Clone, Copy)]
 pub enum TimeSyncConfig {
@@ -68,6 +86,8 @@ pub struct ConfigReconcilerSpawnToken {
     time_sync_config: TimeSyncConfig,
     reconciler_result_tx: watch::Sender<ReconcilerResult>,
     currently_managed_zpools_tx: watch::Sender<Arc<CurrentlyManagedZpools>>,
+    external_disks_tx: watch::Sender<HashSet<Disk>>,
+    raw_disks_rx: RawDisksReceiver,
     ledger_task_log: Logger,
     reconciler_task_log: Logger,
 }
@@ -79,6 +99,7 @@ pub struct ConfigReconcilerHandle {
     dataset_task: DatasetTaskHandle,
     reconciler_result_rx: watch::Receiver<ReconcilerResult>,
     currently_managed_zpools_rx: CurrentlyManagedZpoolsReceiver,
+    destroy_orphans: Arc<AtomicBool>,
 
     // Empty until `spawn_reconciliation_task()` is called.
     ledger_task: OnceLock<LedgerTaskHandle>,
@@ -107,12 +128,22 @@ impl ConfigReconcilerHandle {
         let internal_disks_rx =
             InternalDisksReceiver::spawn_internal_disks_task(
                 Arc::clone(&mount_config),
-                raw_disks_rx,
+                raw_disks_rx.clone(),
                 base_log,
             );
 
+        // Spawn the task that manages dump devices.
+        let (external_disks_tx, external_disks_rx) =
+            watch::channel(HashSet::new());
+        dump_setup_task::spawn(
+            internal_disks_rx.clone(),
+            external_disks_rx,
+            Arc::clone(&mount_config),
+            base_log,
+        );
+
         let (reconciler_result_tx, reconciler_result_rx) =
-            watch::channel(ReconcilerResult::default());
+            watch::channel(ReconcilerResult::new(Arc::clone(&mount_config)));
         let (currently_managed_zpools_tx, currently_managed_zpools_rx) =
             watch::channel(Arc::default());
         let currently_managed_zpools_rx =
@@ -121,7 +152,6 @@ impl ConfigReconcilerHandle {
         // Spawn the task that serializes dataset operations.
         let dataset_task = DatasetTaskHandle::spawn_dataset_task(
             Arc::clone(&mount_config),
-            currently_managed_zpools_rx.clone(),
             base_log,
         );
 
@@ -133,6 +163,10 @@ impl ConfigReconcilerHandle {
                 ledger_task: OnceLock::new(),
                 reconciler_result_rx,
                 currently_managed_zpools_rx,
+                // By default, we only report (and don't destroy) orphans.
+                // Destruction can be turned on by sled-agent. This will go away
+                // with omicron#6177.
+                destroy_orphans: Arc::new(AtomicBool::new(false)),
             },
             // Stash the dependencies the reconciler task will need in
             // `spawn_reconciliation_task()` inside this token that the caller
@@ -142,6 +176,8 @@ impl ConfigReconcilerHandle {
                 time_sync_config,
                 reconciler_result_tx,
                 currently_managed_zpools_tx,
+                external_disks_tx,
+                raw_disks_rx,
                 ledger_task_log: base_log
                     .new(slog::o!("component" => "SledConfigLedgerTask")),
                 reconciler_task_log: base_log
@@ -164,7 +200,6 @@ impl ConfigReconcilerHandle {
         U: SledAgentArtifactStore,
     >(
         &self,
-        underlay_vnic: EtherstubVnic,
         sled_agent_facilities: T,
         sled_agent_artifact_store: U,
         token: ConfigReconcilerSpawnToken,
@@ -174,6 +209,8 @@ impl ConfigReconcilerHandle {
             time_sync_config,
             reconciler_result_tx,
             currently_managed_zpools_tx,
+            external_disks_tx,
+            raw_disks_rx,
             ledger_task_log,
             reconciler_task_log,
         } = token;
@@ -198,15 +235,29 @@ impl ConfigReconcilerHandle {
         }
 
         reconciler_task::spawn(
+            Arc::clone(self.internal_disks_rx.mount_config()),
+            self.dataset_task.clone(),
             key_requester,
             time_sync_config,
-            underlay_vnic,
             current_config_rx,
             reconciler_result_tx,
             currently_managed_zpools_tx,
+            external_disks_tx,
+            raw_disks_rx,
+            Arc::clone(&self.destroy_orphans),
             sled_agent_facilities,
             reconciler_task_log,
         );
+    }
+
+    /// Read whether or not we try to destroy orphaned datasets.
+    pub fn will_destroy_orphans(&self) -> bool {
+        self.destroy_orphans.load(Ordering::Relaxed)
+    }
+
+    /// Control whether or not we try to destroy orphaned datasets.
+    pub fn set_destroy_orphans(&self, destroy_orphans: bool) {
+        self.destroy_orphans.store(destroy_orphans, Ordering::Relaxed);
     }
 
     /// Get the current timesync status.
@@ -243,7 +294,7 @@ impl ConfigReconcilerHandle {
     }
 
     /// Wait for the internal disks task to start managing the boot disk.
-    pub async fn wait_for_boot_disk(&mut self) -> DiskIdentity {
+    pub async fn wait_for_boot_disk(&mut self) -> InternalDisksWithBootDisk {
         self.internal_disks_rx.wait_for_boot_disk().await
     }
 
@@ -309,9 +360,63 @@ impl ConfigReconcilerHandle {
             .await
     }
 
+    /// Return the currently-ledgered [`OmicronSledConfig`].
+    ///
+    /// # Errors
+    ///
+    /// Fails if `spawn_reconciliation_task()` has not yet been called or if we
+    /// have not yet checked the internal disks for a ledgered config.
+    pub fn ledgered_sled_config(
+        &self,
+    ) -> Result<Option<OmicronSledConfig>, InventoryError> {
+        match self.ledger_task.get().map(LedgerTaskHandle::current_config) {
+            // If we haven't yet spawned the ledger task, or we have but
+            // it's still waiting on disks, we don't know whether we have a
+            // ledgered sled config. It's not reasonable to report `None` in
+            // this case (since `None` means "we don't have a config"), so
+            // bail out.
+            //
+            // This shouldn't happen in practice: sled-agent should both wait
+            // for the boot disk and spawn the reconciler task before starting
+            // the dropshot server that allows Nexus to collect inventory.
+            None | Some(CurrentSledConfig::WaitingForInternalDisks) => {
+                Err(InventoryError::LedgerContentsNotAvailable)
+            }
+            Some(CurrentSledConfig::WaitingForInitialConfig) => Ok(None),
+            Some(CurrentSledConfig::Ledgered(config)) => Ok(Some(config)),
+        }
+    }
+
     /// Collect inventory fields relevant to config reconciliation.
-    pub fn inventory(&self) -> ReconcilerInventory {
-        unimplemented!()
+    pub async fn inventory(
+        &self,
+        log: &Logger,
+    ) -> Result<ReconcilerInventory, InventoryError> {
+        let ledgered_sled_config = self.ledgered_sled_config()?;
+        let zpools = self.currently_managed_zpools_rx.to_inventory(log).await;
+
+        let datasets = self
+            .dataset_task
+            .inventory(zpools.iter().map(|&(name, _)| name).collect())
+            .await??;
+
+        let (reconciler_status, last_reconciliation) =
+            self.reconciler_result_rx.borrow().to_inventory();
+
+        Ok(ReconcilerInventory {
+            disks: self.raw_disks_tx.to_inventory(),
+            zpools: zpools
+                .into_iter()
+                .map(|(name, total_size)| InventoryZpool {
+                    id: name.id(),
+                    total_size,
+                })
+                .collect(),
+            datasets,
+            ledgered_sled_config,
+            reconciler_status,
+            last_reconciliation,
+        })
     }
 }
 
@@ -325,12 +430,20 @@ struct ReconcilerTaskDependencies {
     reconciler_task_log: Logger,
 }
 
+/// Fields of sled-agent inventory reported by the config reconciler subsystem.
+///
+/// Note that much like inventory in general, these fields are not collected
+/// atomically; if there are active changes being made while this struct is
+/// being assembled, different fields may have be populated from different
+/// states of the world.
 #[derive(Debug)]
 pub struct ReconcilerInventory {
     pub disks: Vec<InventoryDisk>,
     pub zpools: Vec<InventoryZpool>,
     pub datasets: Vec<InventoryDataset>,
     pub ledgered_sled_config: Option<OmicronSledConfig>,
+    pub reconciler_status: ConfigReconcilerInventoryStatus,
+    pub last_reconciliation: Option<ConfigReconcilerInventory>,
 }
 
 #[derive(Debug, Clone)]
@@ -379,7 +492,7 @@ impl AvailableDatasetsReceiver {
             AvailableDatasetsReceiverInner::FakeStatic(pools) => pools
                 .iter()
                 .map(|(pool, path)| PathInPool {
-                    pool: ZpoolOrRamdisk::Zpool(pool.clone()),
+                    pool: ZpoolOrRamdisk::Zpool(*pool),
                     path: path.join(U2_DEBUG_DATASET),
                 })
                 .collect(),
@@ -402,7 +515,7 @@ impl AvailableDatasetsReceiver {
             AvailableDatasetsReceiverInner::FakeStatic(pools) => pools
                 .iter()
                 .map(|(pool, path)| PathInPool {
-                    pool: ZpoolOrRamdisk::Zpool(pool.clone()),
+                    pool: ZpoolOrRamdisk::Zpool(*pool),
                     path: path.join(ZONE_DATASET),
                 })
                 .collect(),

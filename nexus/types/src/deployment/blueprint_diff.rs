@@ -19,7 +19,7 @@ use super::{
     CockroachDbPreserveDowngrade, PendingMgsUpdatesDiff, unwrap_or_none,
     zone_sort_key,
 };
-use daft::Diffable;
+use daft::{Diffable, Leaf};
 use nexus_sled_agent_shared::inventory::ZoneKind;
 use omicron_common::api::external::ByteCount;
 use omicron_common::disk::{CompressionAlgorithm, DatasetName};
@@ -62,6 +62,7 @@ impl<'a> BlueprintDiffSummary<'a> {
             sleds,
             pending_mgs_updates,
             clickhouse_cluster_config,
+            target_release_minimum_generation,
             // Metadata fields for which changes don't reflect semantic
             // changes from one blueprint to the next.
             id: _,
@@ -99,6 +100,13 @@ impl<'a> BlueprintDiffSummary<'a> {
 
         // Did oximeter read policy change?
         if oximeter_read_mode.before != oximeter_read_mode.after {
+            return true;
+        }
+
+        // Did the target release minimum generation change?
+        if target_release_minimum_generation.before
+            != target_release_minimum_generation.after
+        {
             return true;
         }
 
@@ -1762,6 +1770,10 @@ impl<'diff> BlueprintDiffDisplay<'diff> {
                 vec![
                     diff_row!(internal_dns_version, INTERNAL_DNS_VERSION),
                     diff_row!(external_dns_version, EXTERNAL_DNS_VERSION),
+                    diff_row!(
+                        target_release_minimum_generation,
+                        TARGET_RELEASE_MIN_GEN
+                    ),
                 ],
             ),
         ]
@@ -1881,31 +1893,13 @@ impl fmt::Display for BlueprintDiffDisplay<'_> {
         //
         // The order is:
         //
-        // 1. Unchanged
-        // 2. Removed
-        // 3. Modified
-        // 4. Added
-        // 5. Errors
+        // 1. Removed
+        // 2. Modified
+        // 3. Added
+        // 4. Errors
         //
-        // The idea behind the order is to (a) group all changes together
-        // and (b) put changes towards the bottom, so people have to scroll
-        // back less.
-        //
+        // The idea behind the order is to group all changes together.
         // We put errors at the bottom to ensure they are seen immediately.
-
-        // Write out tables for unchanged sleds
-        let mut unchanged_iter = summary.diff.sleds.unchanged().peekable();
-        if unchanged_iter.peek().is_some() {
-            writeln!(f, " UNCHANGED SLEDS:\n")?;
-            for (sled_id, sled) in unchanged_iter {
-                writeln!(
-                    f,
-                    "  sled {sled_id} ({}, config generation {}):\n",
-                    sled.state, sled.sled_agent_generation
-                )?;
-                self.write_tables(f, sled_id)?;
-            }
-        }
 
         // Write out tables for removed sleds
         if !summary.diff.sleds.removed.is_empty() {
@@ -1913,9 +1907,21 @@ impl fmt::Display for BlueprintDiffDisplay<'_> {
             for (sled_id, sled) in &summary.diff.sleds.removed {
                 writeln!(
                     f,
-                    "  sled {sled_id} (was {}, config generation {}):\n",
+                    "  sled {sled_id} (was {}, config generation {}):",
                     sled.state, sled.sled_agent_generation
                 )?;
+
+                let mut rows = Vec::new();
+                if let Some(id) = sled.remove_mupdate_override {
+                    rows.push(KvPair::new(
+                        BpDiffState::Removed,
+                        WOULD_HAVE_REMOVED_MUPDATE_OVERRIDE,
+                        id.to_string(),
+                    ));
+                }
+                let list = KvList::new(None, rows);
+                writeln!(f, "{list}")?;
+
                 self.write_tables(f, sled_id)?;
             }
         }
@@ -1945,8 +1951,26 @@ impl fmt::Display for BlueprintDiffDisplay<'_> {
                 writeln!(
                     f,
                     "  sled {sled_id} \
-                       ({state}, config generation {generation}):\n"
+                       ({state}, config generation {generation}):"
                 )?;
+
+                let mut rows = Vec::new();
+                // If either before or after is set for remove_mupdate_override,
+                // display it.
+                if sled.before.remove_mupdate_override.is_some()
+                    || sled.after.remove_mupdate_override.is_some()
+                {
+                    rows.push(KvPair::new_option_leaf(
+                        WILL_REMOVE_MUPDATE_OVERRIDE,
+                        Leaf {
+                            before: sled.before.remove_mupdate_override,
+                            after: sled.after.remove_mupdate_override,
+                        },
+                    ));
+                }
+                let list = KvList::new(None, rows);
+                writeln!(f, "{list}")?;
+
                 self.write_tables(f, sled_id)?;
             }
         }
@@ -1957,9 +1981,21 @@ impl fmt::Display for BlueprintDiffDisplay<'_> {
             for (sled_id, sled) in &summary.diff.sleds.added {
                 writeln!(
                     f,
-                    "  sled {sled_id} ({}, config generation {}):\n",
+                    "  sled {sled_id} ({}, config generation {}):",
                     sled.state, sled.sled_agent_generation
                 )?;
+
+                let mut rows = Vec::new();
+                if let Some(id) = sled.remove_mupdate_override {
+                    rows.push(KvPair::new(
+                        BpDiffState::Added,
+                        WILL_REMOVE_MUPDATE_OVERRIDE,
+                        id.to_string(),
+                    ));
+                }
+                let list = KvList::new(None, rows);
+                writeln!(f, "{list}")?;
+
                 self.write_tables(f, sled_id)?;
             }
         }

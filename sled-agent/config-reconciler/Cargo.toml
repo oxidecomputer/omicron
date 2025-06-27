@@ -16,9 +16,11 @@ chrono.workspace = true
 debug-ignore.workspace = true
 derive_more.workspace = true
 dropshot.workspace = true
+either.workspace = true
 futures.workspace = true
 glob.workspace = true
 id-map.workspace = true
+iddqd.workspace = true
 illumos-utils.workspace = true
 key-manager.workspace = true
 nexus-sled-agent-shared.workspace = true
@@ -41,8 +43,11 @@ omicron-workspace-hack.workspace = true
 [dev-dependencies]
 assert_matches.workspace = true
 expectorate.workspace = true
+illumos-utils = { workspace = true, features = ["testing"] }
+omicron-common = { workspace = true, features = ["testing"] }
 omicron-test-utils.workspace = true
 proptest.workspace = true
+schemars.workspace = true
 scopeguard.workspace = true
 serde_json.workspace = true
 sled-storage = { workspace = true, features = ["testing"] }

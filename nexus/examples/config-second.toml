@@ -118,7 +118,9 @@ phantom_disks.period_secs = 30
 physical_disk_adoption.period_secs = 30
 support_bundle_collector.period_secs = 30
 decommissioned_disk_cleaner.period_secs = 60
+blueprints.disable_planner = true
 blueprints.period_secs_load = 10
+blueprints.period_secs_plan = 60
 blueprints.period_secs_execute = 60
 blueprints.period_secs_rendezvous = 300
 blueprints.period_secs_collect_crdb_node_ids = 180
@@ -145,9 +147,10 @@ tuf_artifact_replication.period_secs = 300
 tuf_artifact_replication.min_sled_replication = 1
 # In general, the webhook dispatcher will be activated when events are queued,
 # so we don't need to periodically activate it *that* frequently.
-webhook_dispatcher.period_secs = 60
+alert_dispatcher.period_secs = 60
 webhook_deliverator.period_secs = 60
 read_only_region_replacement_start.period_secs = 30
+sp_ereport_ingester.period_secs = 30
 
 [default_region_allocation_strategy]
 # allocate region on 3 random distinct zpools, on 3 random distinct sleds.

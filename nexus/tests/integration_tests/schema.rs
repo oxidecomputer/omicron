@@ -10,6 +10,7 @@ use nexus_config::SchemaConfig;
 use nexus_db_lookup::DataStoreConnection;
 use nexus_db_model::EARLIEST_SUPPORTED_VERSION;
 use nexus_db_model::SCHEMA_VERSION as LATEST_SCHEMA_VERSION;
+use nexus_db_model::SchemaUpgradeStep;
 use nexus_db_model::{AllSchemaVersions, SchemaVersion};
 use nexus_db_queries::db::DISALLOW_FULL_TABLE_SCAN_SQL;
 use nexus_db_queries::db::pub_test_utils::TestDatabase;
@@ -25,6 +26,7 @@ use pretty_assertions::{assert_eq, assert_ne};
 use semver::Version;
 use similar_asserts;
 use slog::Logger;
+use slog_error_chain::InlineErrorChain;
 use std::collections::BTreeMap;
 use std::net::IpAddr;
 use std::sync::Mutex;
@@ -64,10 +66,16 @@ async fn test_setup<'a>(
 // Only returns an error if the transaction failed to commit.
 async fn apply_update_as_transaction_inner(
     client: &omicron_test_utils::dev::db::Client,
-    sql: &str,
+    step: &SchemaUpgradeStep,
 ) -> Result<(), tokio_postgres::Error> {
     client.batch_execute("BEGIN;").await.expect("Failed to BEGIN transaction");
-    client.batch_execute(&sql).await.expect("Failed to execute update");
+    if let Err(err) = client.batch_execute(step.sql()).await {
+        panic!(
+            "Failed to execute update step {}: {}",
+            step.label(),
+            InlineErrorChain::new(&err)
+        );
+    };
     client.batch_execute("COMMIT;").await?;
     Ok(())
 }
@@ -78,13 +86,16 @@ async fn apply_update_as_transaction_inner(
 async fn apply_update_as_transaction(
     log: &Logger,
     client: &omicron_test_utils::dev::db::Client,
-    sql: &str,
+    step: &SchemaUpgradeStep,
 ) {
     loop {
-        match apply_update_as_transaction_inner(client, sql).await {
+        match apply_update_as_transaction_inner(client, step).await {
             Ok(()) => break,
             Err(err) => {
-                warn!(log, "Failed to apply update as transaction"; "err" => err.to_string());
+                warn!(
+                    log, "Failed to apply update as transaction";
+                    InlineErrorChain::new(&err),
+                );
                 client
                     .batch_execute("ROLLBACK;")
                     .await
@@ -95,7 +106,7 @@ async fn apply_update_as_transaction(
                         continue;
                     }
                 }
-                panic!("Failed to apply update: {err}");
+                panic!("Failed to apply update {}: {err}", step.label());
             }
         }
     }
@@ -142,7 +153,7 @@ async fn apply_update(
         );
 
         for _ in 0..times_to_apply {
-            apply_update_as_transaction(&log, &client, step.sql()).await;
+            apply_update_as_transaction(&log, &client, step).await;
 
             // The following is a set of "versions exempt from being
             // re-applied" multiple times. PLEASE AVOID ADDING TO THIS LIST.
@@ -2044,7 +2055,7 @@ fn after_134_0_0<'a>(ctx: &'a MigrationContext<'a>) -> BoxFuture<'a, ()> {
 
 fn after_139_0_0<'a>(ctx: &'a MigrationContext<'a>) -> BoxFuture<'a, ()> {
     Box::pin(async {
-        let probe_event_id: Uuid =
+        let probe_alert_id: Uuid =
             "001de000-7768-4000-8000-000000000001".parse().unwrap();
         let rows = ctx
             .client
@@ -2080,7 +2091,7 @@ fn after_139_0_0<'a>(ctx: &'a MigrationContext<'a>) -> BoxFuture<'a, ()> {
         assert_eq!(
             records[0].values,
             vec![
-                ColumnValue::new("id", probe_event_id),
+                ColumnValue::new("id", probe_alert_id),
                 ColumnValue::new(
                     "event_class",
                     SqlEnum::from(("webhook_event_class", "probe")),
@@ -2187,6 +2198,203 @@ fn after_140_0_0<'a>(ctx: &'a MigrationContext<'a>) -> BoxFuture<'a, ()> {
     })
 }
 
+fn before_145_0_0<'a>(ctx: &'a MigrationContext<'a>) -> BoxFuture<'a, ()> {
+    Box::pin(async move {
+        // Create one console_session without id, and one device_access_token without id.
+        ctx.client
+            .batch_execute(
+                "
+        INSERT INTO omicron.public.console_session
+          (token, time_created, time_last_used, silo_user_id)
+        VALUES
+          ('tok-console-145', now(), now(), gen_random_uuid());
+
+        INSERT INTO omicron.public.device_access_token
+          (token, client_id, device_code, silo_user_id, time_created, time_requested)
+        VALUES
+          ('tok-device-145', gen_random_uuid(), 'code-145', gen_random_uuid(), now(), now());
+        ",
+            )
+            .await
+            .expect("failed to insert pre-migration rows for 145");
+    })
+}
+
+fn after_145_0_0<'a>(ctx: &'a MigrationContext<'a>) -> BoxFuture<'a, ()> {
+    Box::pin(async move {
+        // After the migration each row should have a non-null id,
+        // keep its token, and enforce primary-key/unique index.
+
+        // console_session: check id ≠ NULL and token unchanged
+        let rows = ctx
+            .client
+            .query(
+                "SELECT id, token FROM omicron.public.console_session WHERE token = 'tok-console-145';",
+                &[],
+            )
+            .await
+            .expect("failed to query post-migration console_session");
+        assert_eq!(rows.len(), 1);
+
+        let id: Option<Uuid> = (&rows[0]).get("id");
+        assert!(id.is_some());
+
+        let token: &str = (&rows[0]).get("token");
+        assert_eq!(token, "tok-console-145");
+
+        // device_access_token: same checks
+        let rows = ctx
+            .client
+            .query(
+                "SELECT id, token FROM omicron.public.device_access_token WHERE token = 'tok-device-145';",
+                &[],
+            )
+            .await
+            .expect("failed to query post-migration device_access_token");
+        assert_eq!(rows.len(), 1);
+
+        let id: Option<Uuid> = (&rows[0]).get("id");
+        assert!(id.is_some());
+
+        let token: &str = (&rows[0]).get("token");
+        assert_eq!(token, "tok-device-145",);
+    })
+}
+
+const M2_DISK: &str = "db7d37d5-b32c-42cd-b871-598cf9d46782";
+const M2_ZPOOL: &str = "8117dbdb-0112-4c4e-ac41-500b8ab0aaf7";
+const U2_DISK: &str = "5d21f0d6-8af3-4d33-977d-63b2a79d6a58";
+const U2_ZPOOL: &str = "dc28856d-3896-4b3c-bd3d-33a770d49c92";
+
+// Insert two disks with a zpool on each: one m.2, one u.2
+fn before_148_0_0<'a>(ctx: &'a MigrationContext<'a>) -> BoxFuture<'a, ()> {
+    Box::pin(async move {
+        ctx.client
+            .batch_execute(
+                &format!("
+        INSERT INTO omicron.public.physical_disk
+          (id, time_created, time_modified, time_deleted, rcgen, vendor, serial, model, variant, sled_id, disk_policy, disk_state)
+        VALUES
+          (
+            '{M2_DISK}', now(), now(), NULL, 0, 'vend', 'serial-m2', 'model', 'm2', gen_random_uuid(), 'in_service', 'active'
+          ),
+          (
+            '{U2_DISK}', now(), now(), NULL, 0, 'vend', 'serial-u2', 'model', 'u2', gen_random_uuid(), 'in_service', 'active'
+          );
+
+        INSERT INTO omicron.public.zpool
+          (id, time_created, time_modified, time_deleted, rcgen, sled_id, physical_disk_id, control_plane_storage_buffer)
+        VALUES
+          ('{M2_ZPOOL}', now(), now(), NULL, 0, gen_random_uuid(), '{M2_DISK}', 0),
+          ('{U2_ZPOOL}', now(), now(), NULL, 0, gen_random_uuid(), '{U2_DISK}', 0)
+        "),
+            )
+            .await
+            .expect("failed to insert pre-migration rows for 148");
+    })
+}
+
+// Validate that the m.2 is gone, and the u.2 still exists
+fn after_148_0_0<'a>(ctx: &'a MigrationContext<'a>) -> BoxFuture<'a, ()> {
+    Box::pin(async move {
+        let rows = ctx
+            .client
+            .query("SELECT id FROM omicron.public.physical_disk;", &[])
+            .await
+            .expect("failed to query post-migration disks");
+        assert_eq!(rows.len(), 1);
+
+        let id: Uuid = (&rows[0]).get::<&str, Uuid>("id");
+        assert_eq!(id.to_string(), U2_DISK);
+
+        let rows = ctx
+            .client
+            .query("SELECT id FROM omicron.public.zpool;", &[])
+            .await
+            .expect("failed to query post-migration zpools");
+        assert_eq!(rows.len(), 1);
+
+        let id: Uuid = (&rows[0]).get::<&str, Uuid>("id");
+        assert_eq!(id.to_string(), U2_ZPOOL);
+    })
+}
+
+fn before_151_0_0<'a>(ctx: &'a MigrationContext<'a>) -> BoxFuture<'a, ()> {
+    Box::pin(async move {
+        // Create some fake inventory data to test the zone image resolver migration.
+        // Insert a sled agent record without the new zone image resolver columns.
+        let sled_id = Uuid::new_v4();
+        let inv_collection_id = Uuid::new_v4();
+
+        ctx.client
+            .batch_execute(&format!(
+                "
+        INSERT INTO omicron.public.inv_sled_agent
+          (inv_collection_id, time_collected, source, sled_id, sled_agent_ip,
+           sled_agent_port, sled_role, usable_hardware_threads, usable_physical_ram,
+           reservoir_size, reconciler_status_kind)
+        VALUES
+          ('{inv_collection_id}', now(), 'test-source', '{sled_id}', '192.168.1.1',
+           8080, 'gimlet', 32, 68719476736, 1073741824, 'not-yet-run');
+        ",
+                inv_collection_id = inv_collection_id,
+                sled_id = sled_id
+            ))
+            .await
+            .expect("inserted pre-migration inv_sled_agent data");
+    })
+}
+
+fn after_151_0_0<'a>(ctx: &'a MigrationContext<'a>) -> BoxFuture<'a, ()> {
+    Box::pin(async move {
+        // Verify that the zone image resolver columns have been added with
+        // correct defaults.
+        let rows = ctx
+            .client
+            .query(
+                "SELECT zone_manifest_boot_disk_path, zone_manifest_source,
+                        zone_manifest_mupdate_id, zone_manifest_boot_disk_error,
+                        mupdate_override_boot_disk_path,
+                        mupdate_override_id, mupdate_override_boot_disk_error
+                 FROM omicron.public.inv_sled_agent
+                 ORDER BY time_collected",
+                &[],
+            )
+            .await
+            .expect("inserted post-migration inv_sled_agent data");
+
+        assert_eq!(rows.len(), 1);
+        let row = &rows[0];
+
+        // Check that path fields have the expected default message.
+        let zone_manifest_path: String =
+            row.get("zone_manifest_boot_disk_path");
+        let mupdate_override_path: String =
+            row.get("mupdate_override_boot_disk_path");
+        assert_eq!(zone_manifest_path, "old-collection-data-missing");
+        assert_eq!(mupdate_override_path, "old-collection-data-missing");
+
+        // Check that the zone manifest and mupdate override source fields are
+        // NULL.
+        let zone_manifest_source: Option<AnySqlType> =
+            row.get("zone_manifest_source");
+        assert_eq!(zone_manifest_source, None);
+        let zone_manifest_id: Option<Uuid> =
+            row.get("zone_manifest_mupdate_id");
+        let mupdate_override_id: Option<Uuid> = row.get("mupdate_override_id");
+        assert_eq!(zone_manifest_id, None);
+        assert_eq!(mupdate_override_id, None);
+
+        // Check that error fields have the expected default message.
+        let zone_manifest_error: String =
+            row.get("zone_manifest_boot_disk_error");
+        let mupdate_override_error: String =
+            row.get("mupdate_override_boot_disk_error");
+        assert_eq!(zone_manifest_error, "old collection, data missing");
+        assert_eq!(mupdate_override_error, "old collection, data missing");
+    })
+}
+
 // Lazily initializes all migration checks. The combination of Rust function
 // pointers and async makes defining a static table fairly painful, so we're
 // using lazy initialization instead.
@@ -2250,6 +2458,18 @@ fn get_migration_checks() -> BTreeMap<Version, DataMigrationFns> {
     map.insert(
         Version::new(140, 0, 0),
         DataMigrationFns::new().before(before_140_0_0).after(after_140_0_0),
+    );
+    map.insert(
+        Version::new(145, 0, 0),
+        DataMigrationFns::new().before(before_145_0_0).after(after_145_0_0),
+    );
+    map.insert(
+        Version::new(148, 0, 0),
+        DataMigrationFns::new().before(before_148_0_0).after(after_148_0_0),
+    );
+    map.insert(
+        Version::new(151, 0, 0),
+        DataMigrationFns::new().before(before_151_0_0).after(after_151_0_0),
     );
 
     map

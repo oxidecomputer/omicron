@@ -8,6 +8,7 @@ use anyhow::{Context, anyhow, bail};
 use camino::Utf8PathBuf;
 use clap::ValueEnum;
 use clap::{Args, Parser, Subcommand};
+use iddqd::IdOrdMap;
 use indent_write::fmt::IndentWriter;
 use internal_dns_types::diff::DnsDiff;
 use itertools::Itertools;
@@ -19,9 +20,9 @@ use nexus_reconfigurator_planning::blueprint_builder::BlueprintBuilder;
 use nexus_reconfigurator_planning::example::ExampleSystemBuilder;
 use nexus_reconfigurator_planning::planner::Planner;
 use nexus_reconfigurator_planning::system::{SledBuilder, SystemDescription};
-use nexus_reconfigurator_simulation::SimState;
 use nexus_reconfigurator_simulation::SimStateBuilder;
 use nexus_reconfigurator_simulation::Simulator;
+use nexus_reconfigurator_simulation::{BlueprintId, SimState};
 use nexus_types::deployment::OmicronZoneNic;
 use nexus_types::deployment::PlanningInput;
 use nexus_types::deployment::SledFilter;
@@ -42,22 +43,24 @@ use omicron_common::api::external::Name;
 use omicron_common::policy::NEXUS_REDUNDANCY;
 use omicron_repl_utils::run_repl_from_file;
 use omicron_repl_utils::run_repl_on_stdin;
-use omicron_uuid_kinds::BlueprintUuid;
 use omicron_uuid_kinds::CollectionUuid;
 use omicron_uuid_kinds::GenericUuid;
 use omicron_uuid_kinds::OmicronZoneUuid;
 use omicron_uuid_kinds::ReconfiguratorSimUuid;
 use omicron_uuid_kinds::SledUuid;
 use omicron_uuid_kinds::VnicUuid;
+use omicron_uuid_kinds::{BlueprintUuid, MupdateOverrideUuid};
 use std::borrow::Cow;
-use std::collections::BTreeMap;
-use std::fmt::Write;
+use std::fmt::{self, Write};
 use std::io::IsTerminal;
+use std::num::ParseIntError;
+use std::str::FromStr;
 use swrite::{SWrite, swriteln};
 use tabled::Tabled;
 use tufaceous_artifact::ArtifactHash;
 use tufaceous_artifact::ArtifactVersion;
 use tufaceous_artifact::ArtifactVersionError;
+use update_common::artifacts::{ArtifactsWithPlan, ControlPlaneZonesMode};
 
 mod log_capture;
 
@@ -203,7 +206,10 @@ fn process_command(
     let cmd_result = match command {
         Commands::SledList => cmd_sled_list(sim),
         Commands::SledAdd(args) => cmd_sled_add(sim, args),
+        Commands::SledRemove(args) => cmd_sled_remove(sim, args),
         Commands::SledShow(args) => cmd_sled_show(sim, args),
+        Commands::SledSetPolicy(args) => cmd_sled_set_policy(sim, args),
+        Commands::SledUpdateSp(args) => cmd_sled_update_sp(sim, args),
         Commands::SiloList => cmd_silo_list(sim),
         Commands::SiloAdd(args) => cmd_silo_add(sim, args),
         Commands::SiloRemove(args) => cmd_silo_remove(sim, args),
@@ -251,8 +257,14 @@ enum Commands {
     SledList,
     /// add a new sled
     SledAdd(SledAddArgs),
+    /// remove a sled from the system
+    SledRemove(SledRemoveArgs),
     /// show details about one sled
     SledShow(SledArgs),
+    /// set a sled's policy
+    SledSetPolicy(SledSetPolicyArgs),
+    /// simulate updating the sled's SP versions
+    SledUpdateSp(SledUpdateSpArgs),
 
     /// list silos
     SiloList,
@@ -307,6 +319,10 @@ enum Commands {
 struct SledAddArgs {
     /// id of the new sled
     sled_id: Option<SledUuid>,
+
+    /// number of disks or pools
+    #[clap(short = 'd', long, visible_alias = "npools", default_value_t = SledBuilder::DEFAULT_NPOOLS)]
+    ndisks: u8,
 }
 
 #[derive(Debug, Args)]
@@ -317,6 +333,67 @@ struct SledArgs {
     /// Filter to match sled ID against
     #[clap(short = 'F', long, value_enum, default_value_t = SledFilter::Commissioned)]
     filter: SledFilter,
+}
+
+#[derive(Debug, Args)]
+struct SledSetPolicyArgs {
+    /// id of the sled
+    sled_id: SledUuid,
+
+    /// The policy to set for the sled
+    #[clap(value_enum)]
+    policy: SledPolicyOpt,
+}
+
+#[derive(Clone, Copy, Debug, ValueEnum)]
+enum SledPolicyOpt {
+    InService,
+    NonProvisionable,
+    Expunged,
+}
+
+impl fmt::Display for SledPolicyOpt {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            SledPolicyOpt::InService => write!(f, "in-service"),
+            SledPolicyOpt::NonProvisionable => write!(f, "non-provisionable"),
+            SledPolicyOpt::Expunged => write!(f, "expunged"),
+        }
+    }
+}
+
+impl From<SledPolicyOpt> for SledPolicy {
+    fn from(value: SledPolicyOpt) -> Self {
+        match value {
+            SledPolicyOpt::InService => SledPolicy::InService {
+                provision_policy: SledProvisionPolicy::Provisionable,
+            },
+            SledPolicyOpt::NonProvisionable => SledPolicy::InService {
+                provision_policy: SledProvisionPolicy::NonProvisionable,
+            },
+            SledPolicyOpt::Expunged => SledPolicy::Expunged,
+        }
+    }
+}
+
+#[derive(Debug, Args)]
+struct SledUpdateSpArgs {
+    /// id of the sled
+    sled_id: SledUuid,
+
+    /// sets the version reported for the SP active slot
+    #[clap(long, required_unless_present_any = &["inactive"])]
+    active: Option<ArtifactVersion>,
+
+    /// sets the version reported for the SP inactive slot
+    #[clap(long, required_unless_present_any = &["active"])]
+    inactive: Option<ExpectedVersion>,
+}
+
+#[derive(Debug, Args)]
+struct SledRemoveArgs {
+    /// id of the sled
+    sled_id: SledUuid,
 }
 
 #[derive(Debug, Args)]
@@ -333,8 +410,9 @@ struct InventoryArgs {
 
 #[derive(Debug, Args)]
 struct BlueprintPlanArgs {
-    /// id of the blueprint on which this one will be based
-    parent_blueprint_id: BlueprintUuid,
+    /// id of the blueprint on which this one will be based, "latest", or
+    /// "target"
+    parent_blueprint_id: BlueprintIdOpt,
     /// id of the inventory collection to use in planning
     ///
     /// Must be provided unless there is only one collection in the loaded
@@ -344,8 +422,8 @@ struct BlueprintPlanArgs {
 
 #[derive(Debug, Args)]
 struct BlueprintEditArgs {
-    /// id of the blueprint to edit
-    blueprint_id: BlueprintUuid,
+    /// id of the blueprint to edit, "latest", or "target"
+    blueprint_id: BlueprintIdOpt,
     /// "creator" field for the new blueprint
     #[arg(long)]
     creator: Option<String>,
@@ -372,8 +450,28 @@ enum BlueprintEditCommands {
         #[command(subcommand)]
         image_source: ImageSourceArgs,
     },
+    /// set the remove_mupdate_override field for a sled
+    SetRemoveMupdateOverride {
+        /// sled to set the field on
+        sled_id: SledUuid,
+
+        /// the UUID to set the field to, or "unset"
+        value: MupdateOverrideUuidOpt,
+    },
+    /// set the minimum generation for which target releases are accepted
+    ///
+    /// At the moment, this just sets the field to the given value. In the
+    /// future, we'll likely want to set this based on the current target
+    /// release generation.
+    #[clap(visible_alias = "set-target-release-min-gen")]
+    SetTargetReleaseMinimumGeneration {
+        /// the minimum target release generation
+        generation: Generation,
+    },
     /// expunge a zone
     ExpungeZone { zone_id: OmicronZoneUuid },
+    /// mark an expunged zone ready for cleanup
+    MarkForCleanup { zone_id: OmicronZoneUuid },
     /// configure an SP update
     SetSpUpdate {
         /// serial number to update
@@ -391,6 +489,141 @@ enum BlueprintEditCommands {
         /// baseboard serial number whose update to delete
         serial: String,
     },
+    /// debug commands that bypass normal checks
+    ///
+    /// These commands mutate the blueprint directly, bypassing higher-level
+    /// planner checks. They're meant for getting into weird states to test
+    /// against.
+    Debug {
+        #[command(subcommand)]
+        command: BlueprintEditDebugCommands,
+    },
+}
+
+#[derive(Debug, Subcommand)]
+enum BlueprintEditDebugCommands {
+    /// remove a sled from the blueprint
+    ///
+    /// This bypasses expungement and decommissioning checks, and simply drops
+    /// the sled from the blueprint.
+    RemoveSled {
+        /// the sled to remove
+        sled: SledUuid,
+    },
+
+    /// Bump a sled's generation number, even if nothing else about the sled has
+    /// changed.
+    ForceSledGenerationBump {
+        /// the sled to bump the sled-agent generation number of
+        sled: SledUuid,
+    },
+}
+
+#[derive(Clone, Debug)]
+enum BlueprintIdOpt {
+    /// use the target blueprint
+    Target,
+    /// use the latest blueprint sorted by time created
+    Latest,
+    /// use a specific blueprint
+    Id(BlueprintUuid),
+}
+
+impl FromStr for BlueprintIdOpt {
+    type Err = anyhow::Error;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        match s {
+            "latest" => Ok(BlueprintIdOpt::Latest),
+            // These values match the ones supported in omdb.
+            "current-target" | "current" | "target" => {
+                Ok(BlueprintIdOpt::Target)
+            }
+            _ => Ok(BlueprintIdOpt::Id(s.parse()?)),
+        }
+    }
+}
+
+impl From<BlueprintIdOpt> for BlueprintId {
+    fn from(value: BlueprintIdOpt) -> Self {
+        match value {
+            BlueprintIdOpt::Latest => BlueprintId::Latest,
+            BlueprintIdOpt::Target => BlueprintId::Target,
+            BlueprintIdOpt::Id(id) => BlueprintId::Id(id),
+        }
+    }
+}
+
+/// Clap field for an optional mupdate override UUID.
+///
+/// This structure is similar to `Option`, but is specified separately to:
+///
+/// 1. Disable clap's magic around `Option`.
+/// 2. Provide a custom parser.
+///
+/// There are other ways to do both 1 and 2 (e.g. specify the type as
+/// `std::option::Option`), but when combined they're uglier than this.
+#[derive(Clone, Copy, Debug)]
+enum MupdateOverrideUuidOpt {
+    Unset,
+    Set(MupdateOverrideUuid),
+}
+
+impl FromStr for MupdateOverrideUuidOpt {
+    type Err = newtype_uuid::ParseError;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        if s == "unset" || s == "none" {
+            Ok(MupdateOverrideUuidOpt::Unset)
+        } else {
+            Ok(MupdateOverrideUuidOpt::Set(s.parse::<MupdateOverrideUuid>()?))
+        }
+    }
+}
+
+impl From<MupdateOverrideUuidOpt> for Option<MupdateOverrideUuid> {
+    fn from(value: MupdateOverrideUuidOpt) -> Self {
+        match value {
+            MupdateOverrideUuidOpt::Unset => None,
+            MupdateOverrideUuidOpt::Set(uuid) => Some(uuid),
+        }
+    }
+}
+
+/// Clap field for an optional generation.
+///
+/// This structure is similar to `Option`, but is specified separately to:
+///
+/// 1. Disable clap's magic around `Option`.
+/// 2. Provide a custom parser.
+///
+/// There are other ways to do both 1 and 2 (e.g. specify the type as
+/// `std::option::Option`), but when combined they're uglier than this.
+#[derive(Clone, Copy, Debug)]
+enum GenerationOpt {
+    Unset,
+    Set(Generation),
+}
+
+impl FromStr for GenerationOpt {
+    type Err = ParseIntError;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        if s == "unset" || s == "none" {
+            Ok(Self::Unset)
+        } else {
+            Ok(Self::Set(s.parse::<Generation>()?))
+        }
+    }
+}
+
+impl From<GenerationOpt> for Option<Generation> {
+    fn from(value: GenerationOpt) -> Self {
+        match value {
+            GenerationOpt::Unset => None,
+            GenerationOpt::Set(generation) => Some(generation),
+        }
+    }
 }
 
 #[derive(Clone, Debug, Subcommand)]
@@ -442,8 +675,8 @@ fn parse_blueprint_zone_image_version(
 
 #[derive(Debug, Args)]
 struct BlueprintArgs {
-    /// id of the blueprint
-    blueprint_id: BlueprintUuid,
+    /// id of the blueprint, "latest", or "target"
+    blueprint_id: BlueprintIdOpt,
 }
 
 #[derive(Debug, Args)]
@@ -452,8 +685,8 @@ struct BlueprintDiffDnsArgs {
     dns_group: CliDnsGroup,
     /// DNS version to diff against
     dns_version: u32,
-    /// id of the blueprint
-    blueprint_id: BlueprintUuid,
+    /// id of the blueprint, "latest", or "target"
+    blueprint_id: BlueprintIdOpt,
 }
 
 #[derive(Clone, Copy, Debug, ValueEnum)]
@@ -466,32 +699,40 @@ enum CliDnsGroup {
 struct BlueprintDiffInventoryArgs {
     /// id of the inventory collection
     collection_id: CollectionUuid,
-    /// id of the blueprint
-    blueprint_id: BlueprintUuid,
+    /// id of the blueprint, "latest", or "target"
+    blueprint_id: BlueprintIdOpt,
 }
 
 #[derive(Debug, Args)]
 struct BlueprintSaveArgs {
-    /// id of the blueprint
-    blueprint_id: BlueprintUuid,
+    /// id of the blueprint, "latest", or "target"
+    blueprint_id: BlueprintIdOpt,
     /// output file
     filename: Utf8PathBuf,
 }
 
 #[derive(Debug, Args)]
 struct BlueprintDiffArgs {
-    /// id of the first blueprint
-    blueprint1_id: BlueprintUuid,
-    /// id of the second blueprint
-    blueprint2_id: BlueprintUuid,
+    /// id of the first blueprint, "latest", or "target"
+    blueprint1_id: BlueprintIdOpt,
+    /// id of the second blueprint, "latest", or "target", or None to mean "the
+    /// parent of blueprint1"
+    blueprint2_id: Option<BlueprintIdOpt>,
 }
 
 #[derive(Debug, Subcommand)]
 enum SetArgs {
+    /// RNG seed for future commands
+    Seed { seed: String },
     /// target number of Nexus instances (for planning)
     NumNexus { num_nexus: u16 },
     /// system's external DNS zone name (suffix)
     ExternalDnsZoneName { zone_name: String },
+    /// system target release
+    TargetRelease {
+        /// TUF repo containing release artifacts
+        filename: Utf8PathBuf,
+    },
 }
 
 #[derive(Debug, Args)]
@@ -603,6 +844,7 @@ fn cmd_sled_list(
     #[tabled(rename_all = "SCREAMING_SNAKE_CASE")]
     struct Sled {
         id: SledUuid,
+        serial: String,
         nzpools: usize,
         subnet: String,
     }
@@ -614,11 +856,12 @@ fn cmd_sled_list(
         .to_planning_input_builder()
         .context("failed to generate planning input")?
         .build();
-    let rows = planning_input.all_sled_resources(SledFilter::Commissioned).map(
-        |(sled_id, sled_resources)| Sled {
+    let rows = planning_input.all_sleds(SledFilter::Commissioned).map(
+        |(sled_id, sled_details)| Sled {
             id: sled_id,
-            subnet: sled_resources.subnet.net().to_string(),
-            nzpools: sled_resources.zpools.len(),
+            serial: sled_details.baseboard_id.serial_number.clone(),
+            subnet: sled_details.resources.subnet.net().to_string(),
+            nzpools: sled_details.resources.zpools.len(),
         },
     );
     let table = tabled::Table::new(rows)
@@ -634,7 +877,7 @@ fn cmd_sled_add(
 ) -> anyhow::Result<Option<String>> {
     let mut state = sim.current_state().to_mut();
     let sled_id = add.sled_id.unwrap_or_else(|| state.rng_mut().next_sled_id());
-    let new_sled = SledBuilder::new().id(sled_id);
+    let new_sled = SledBuilder::new().id(sled_id).npools(add.ndisks);
     state.system_mut().description_mut().sled(new_sled)?;
     sim.commit_and_bump(
         format!("reconfigurator-cli sled-add: {sled_id}"),
@@ -644,29 +887,110 @@ fn cmd_sled_add(
     Ok(Some(format!("added sled {}", sled_id)))
 }
 
+fn cmd_sled_remove(
+    sim: &mut ReconfiguratorSim,
+    args: SledRemoveArgs,
+) -> anyhow::Result<Option<String>> {
+    let mut state = sim.current_state().to_mut();
+    let sled_id = args.sled_id;
+    state
+        .system_mut()
+        .description_mut()
+        .sled_remove(sled_id)
+        .context("failed to remove sled")?;
+    sim.commit_and_bump(
+        format!("reconfigurator-cli sled-remove: {sled_id}"),
+        state,
+    );
+    Ok(Some(format!("removed sled {} from system", sled_id)))
+}
+
 fn cmd_sled_show(
     sim: &mut ReconfiguratorSim,
     args: SledArgs,
 ) -> anyhow::Result<Option<String>> {
     let state = sim.current_state();
-    let planning_input = state
-        .system()
-        .description()
+    let description = state.system().description();
+    let sled_id = args.sled_id;
+    let sp_active_version = description.sled_sp_active_version(sled_id)?;
+    let sp_inactive_version = description.sled_sp_inactive_version(sled_id)?;
+    let planning_input = description
         .to_planning_input_builder()
         .context("failed to generate planning_input builder")?
         .build();
-    let sled_id = args.sled_id;
-    let sled_resources =
-        &planning_input.sled_lookup(args.filter, sled_id)?.resources;
+    let sled = planning_input.sled_lookup(args.filter, sled_id)?;
+    let sled_resources = &sled.resources;
     let mut s = String::new();
     swriteln!(s, "sled {}", sled_id);
+    swriteln!(s, "serial {}", sled.baseboard_id.serial_number);
     swriteln!(s, "subnet {}", sled_resources.subnet.net());
+    swriteln!(s, "SP active version:   {:?}", sp_active_version);
+    swriteln!(s, "SP inactive version: {:?}", sp_inactive_version);
     swriteln!(s, "zpools ({}):", sled_resources.zpools.len());
     for (zpool, disk) in &sled_resources.zpools {
         swriteln!(s, "    {:?}", zpool);
         swriteln!(s, "    {:?}", disk);
     }
     Ok(Some(s))
+}
+
+fn cmd_sled_set_policy(
+    sim: &mut ReconfiguratorSim,
+    args: SledSetPolicyArgs,
+) -> anyhow::Result<Option<String>> {
+    let mut state = sim.current_state().to_mut();
+    state
+        .system_mut()
+        .description_mut()
+        .sled_set_policy(args.sled_id, args.policy.into())?;
+    sim.commit_and_bump(
+        format!(
+            "reconfigurator-cli sled-set-policy: {} to {}",
+            args.sled_id, args.policy,
+        ),
+        state,
+    );
+    Ok(Some(format!("set sled {} policy to {}", args.sled_id, args.policy)))
+}
+
+fn cmd_sled_update_sp(
+    sim: &mut ReconfiguratorSim,
+    args: SledUpdateSpArgs,
+) -> anyhow::Result<Option<String>> {
+    let mut labels = Vec::new();
+    if let Some(active) = &args.active {
+        labels.push(format!("active -> {}", active));
+    }
+    if let Some(inactive) = &args.inactive {
+        labels.push(format!("inactive -> {}", inactive));
+    }
+
+    assert!(
+        !labels.is_empty(),
+        "clap configuration requires that at least one argument is specified"
+    );
+
+    let mut state = sim.current_state().to_mut();
+    state.system_mut().description_mut().sled_update_sp_versions(
+        args.sled_id,
+        args.active,
+        args.inactive,
+    )?;
+
+    sim.commit_and_bump(
+        format!(
+            "reconfigurator-cli sled-update-sp: {}: {}",
+            args.sled_id,
+            labels.join(", "),
+        ),
+        state,
+    );
+
+    Ok(Some(format!(
+        "set sled {} SP versions: {}",
+        args.sled_id,
+        labels.join(", ")
+    )))
 }
 
 fn cmd_inventory_list(
@@ -775,7 +1099,9 @@ fn cmd_blueprint_blippy(
     args: BlueprintArgs,
 ) -> anyhow::Result<Option<String>> {
     let state = sim.current_state();
-    let blueprint = state.system().get_blueprint(args.blueprint_id)?;
+    let resolved_id =
+        state.system().resolve_blueprint_id(args.blueprint_id.into())?;
+    let blueprint = state.system().get_blueprint(&resolved_id)?;
     let report =
         Blippy::new(&blueprint).into_report(BlippyReportSortKey::Severity);
     Ok(Some(format!("{}", report.display())))
@@ -789,9 +1115,10 @@ fn cmd_blueprint_plan(
     let rng = state.rng_mut().next_planner_rng();
     let system = state.system_mut();
 
-    let parent_blueprint_id = args.parent_blueprint_id;
+    let parent_blueprint_id =
+        system.resolve_blueprint_id(args.parent_blueprint_id.into())?;
     let collection_id = args.collection_id;
-    let parent_blueprint = system.get_blueprint(parent_blueprint_id)?;
+    let parent_blueprint = system.get_blueprint(&parent_blueprint_id)?;
     let collection = match collection_id {
         Some(collection_id) => system.get_collection(collection_id)?,
         None => {
@@ -824,7 +1151,7 @@ fn cmd_blueprint_plan(
     let blueprint = planner.plan().context("generating blueprint")?;
     let rv = format!(
         "generated blueprint {} based on parent blueprint {}",
-        blueprint.id, parent_blueprint_id,
+        blueprint.id, parent_blueprint.id,
     );
     system.add_blueprint(blueprint)?;
 
@@ -841,8 +1168,8 @@ fn cmd_blueprint_edit(
     let rng = state.rng_mut().next_planner_rng();
     let system = state.system_mut();
 
-    let blueprint_id = args.blueprint_id;
-    let blueprint = system.get_blueprint(blueprint_id)?;
+    let resolved_id = system.resolve_blueprint_id(args.blueprint_id.into())?;
+    let blueprint = system.get_blueprint(&resolved_id)?;
     let creator = args.creator.as_deref().unwrap_or("reconfigurator-cli");
     let planning_input = sim
         .planning_input(blueprint)
@@ -883,6 +1210,30 @@ fn cmd_blueprint_edit(
                 .context("failed to add CockroachDB zone")?;
             format!("added CockroachDB zone to sled {}", sled_id)
         }
+        BlueprintEditCommands::SetRemoveMupdateOverride { sled_id, value } => {
+            builder
+                .sled_set_remove_mupdate_override(sled_id, value.into())
+                .context("failed to set remove_mupdate_override")?;
+            match value {
+                MupdateOverrideUuidOpt::Unset => {
+                    "unset remove_mupdate_override".to_owned()
+                }
+                MupdateOverrideUuidOpt::Set(uuid) => {
+                    format!("set remove_mupdate_override to {uuid}")
+                }
+            }
+        }
+        BlueprintEditCommands::SetTargetReleaseMinimumGeneration {
+            generation,
+        } => {
+            builder
+                .set_target_release_minimum_generation(
+                    blueprint.target_release_minimum_generation,
+                    generation,
+                )
+                .context("failed to set target release minimum generation")?;
+            format!("set target release minimum generation to {generation}")
+        }
         BlueprintEditCommands::SetZoneImage { zone_id, image_source } => {
             let sled_id = sled_with_zone(&builder, &zone_id)?;
             let source = BlueprintZoneImageSource::from(image_source);
@@ -901,6 +1252,13 @@ fn cmd_blueprint_edit(
                 .sled_expunge_zone(sled_id, zone_id)
                 .context("failed to expunge zone")?;
             format!("expunged zone {zone_id} from sled {sled_id}")
+        }
+        BlueprintEditCommands::MarkForCleanup { zone_id } => {
+            let sled_id = sled_with_zone(&builder, &zone_id)?;
+            builder
+                .sled_mark_expunged_zone_ready_for_cleanup(sled_id, zone_id)
+                .context("failed to mark zone ready for cleanup")?;
+            format!("marked zone {zone_id} ready for cleanup")
         }
         BlueprintEditCommands::SetSpUpdate {
             serial,
@@ -956,6 +1314,19 @@ fn cmd_blueprint_edit(
             builder.pending_mgs_update_delete(baseboard_id);
             format!("deleted configured update for serial {serial}")
         }
+        BlueprintEditCommands::Debug {
+            command: BlueprintEditDebugCommands::RemoveSled { sled },
+        } => {
+            builder.debug_sled_remove(sled)?;
+            format!("debug: removed sled {sled} from blueprint")
+        }
+        BlueprintEditCommands::Debug {
+            command:
+                BlueprintEditDebugCommands::ForceSledGenerationBump { sled },
+        } => {
+            builder.debug_sled_force_generation_bump(sled)?;
+            format!("debug: forced sled {sled} generation bump")
+        }
     };
 
     let mut new_blueprint = builder.build();
@@ -970,8 +1341,8 @@ fn cmd_blueprint_edit(
         .clone_from(&blueprint.cockroachdb_fingerprint);
 
     let rv = format!(
-        "blueprint {} created from blueprint {}: {}",
-        new_blueprint.id, blueprint_id, label
+        "blueprint {} created from {}: {}",
+        new_blueprint.id, resolved_id, label
     );
     system.add_blueprint(new_blueprint)?;
 
@@ -1004,7 +1375,8 @@ fn cmd_blueprint_show(
     args: BlueprintArgs,
 ) -> anyhow::Result<Option<String>> {
     let state = sim.current_state();
-    let blueprint = state.system().get_blueprint(args.blueprint_id)?;
+    let blueprint =
+        state.system().resolve_and_get_blueprint(args.blueprint_id.into())?;
     Ok(Some(format!("{}", blueprint.display())))
 }
 
@@ -1014,11 +1386,32 @@ fn cmd_blueprint_diff(
 ) -> anyhow::Result<Option<String>> {
     let mut rv = String::new();
     let blueprint1_id = args.blueprint1_id;
-    let blueprint2_id = args.blueprint2_id;
 
     let state = sim.current_state();
-    let blueprint1 = state.system().get_blueprint(blueprint1_id)?;
-    let blueprint2 = state.system().get_blueprint(blueprint2_id)?;
+    let blueprint =
+        state.system().resolve_and_get_blueprint(blueprint1_id.into())?;
+    let (blueprint1, blueprint2) = if let Some(blueprint2_arg) =
+        args.blueprint2_id
+    {
+        // Two blueprint ids were provided.  Diff from the first to the second.
+        let blueprint1 = blueprint;
+        let blueprint2 =
+            state.system().resolve_and_get_blueprint(blueprint2_arg.into())?;
+        (blueprint1, blueprint2)
+    } else if let Some(parent_id) = blueprint.parent_blueprint_id {
+        // Only one blueprint id was provided.  Diff from that blueprint's
+        // parent to the blueprint.
+        let blueprint1 = state
+            .system()
+            .resolve_and_get_blueprint(BlueprintId::Id(parent_id))?;
+        let blueprint2 = blueprint;
+        (blueprint1, blueprint2)
+    } else {
+        bail!(
+            "`blueprint2_id` was not specified and blueprint1 has no \
+             parent blueprint"
+        );
+    };
 
     let sled_diff = blueprint2.diff_since_blueprint(&blueprint1);
     swriteln!(rv, "{}", sled_diff.display());
@@ -1061,27 +1454,27 @@ fn cmd_blueprint_diff(
 
 fn make_sleds_by_id(
     system: &SystemDescription,
-) -> Result<BTreeMap<SledUuid, execution::Sled>, anyhow::Error> {
+) -> Result<IdOrdMap<execution::Sled>, anyhow::Error> {
     let collection = system
         .to_collection_builder()
         .context(
             "unexpectedly failed to create collection for current set of sleds",
         )?
         .build();
-    let sleds_by_id: BTreeMap<_, _> = collection
+    let sleds_by_id: IdOrdMap<_> = collection
         .sled_agents
         .iter()
-        .map(|(sled_id, sled_agent_info)| {
+        .map(|sa| {
             let sled = execution::Sled::new(
-                *sled_id,
+                sa.sled_id,
                 SledPolicy::InService {
                     provision_policy: SledProvisionPolicy::Provisionable,
                 },
-                sled_agent_info.sled_agent_address,
+                sa.sled_agent_address,
                 REPO_DEPOT_PORT,
-                sled_agent_info.sled_role,
+                sa.sled_role,
             );
-            (*sled_id, sled)
+            sled
         })
         .collect();
     Ok(sleds_by_id)
@@ -1096,7 +1489,8 @@ fn cmd_blueprint_diff_dns(
     let blueprint_id = args.blueprint_id;
 
     let state = sim.current_state();
-    let blueprint = state.system().get_blueprint(blueprint_id)?;
+    let blueprint =
+        state.system().resolve_and_get_blueprint(blueprint_id.into())?;
 
     let existing_dns_config = match dns_group {
         CliDnsGroup::Internal => {
@@ -1138,7 +1532,8 @@ fn cmd_blueprint_diff_inventory(
 
     let state = sim.current_state();
     let _collection = state.system().get_collection(collection_id)?;
-    let _blueprint = state.system().get_blueprint(blueprint_id)?;
+    let _blueprint =
+        state.system().resolve_and_get_blueprint(blueprint_id.into())?;
     // See https://github.com/oxidecomputer/omicron/issues/7242
     // let diff = blueprint.diff_since_collection(&collection);
     // Ok(Some(diff.display().to_string()))
@@ -1152,14 +1547,16 @@ fn cmd_blueprint_save(
     let blueprint_id = args.blueprint_id;
 
     let state = sim.current_state();
-    let blueprint = state.system().get_blueprint(blueprint_id)?;
+    let resolved_id =
+        state.system().resolve_blueprint_id(blueprint_id.into())?;
+    let blueprint = state.system().get_blueprint(&resolved_id)?;
 
     let output_path = &args.filename;
     let output_str = serde_json::to_string_pretty(&blueprint)
         .context("serializing blueprint")?;
     std::fs::write(&output_path, &output_str)
         .with_context(|| format!("write {:?}", output_path))?;
-    Ok(Some(format!("saved blueprint {} to {:?}", blueprint_id, output_path)))
+    Ok(Some(format!("saved {} to {:?}", resolved_id, output_path)))
 }
 
 fn cmd_save(
@@ -1229,20 +1626,7 @@ fn cmd_wipe(
 fn cmd_show(sim: &mut ReconfiguratorSim) -> anyhow::Result<Option<String>> {
     let mut s = String::new();
     let state = sim.current_state();
-    do_print_properties(&mut s, state);
-    swriteln!(
-        s,
-        "target number of Nexus instances: {}",
-        state
-            .config()
-            .num_nexus()
-            .map_or_else(|| "default".to_owned(), |n| n.to_string())
-    );
-    Ok(Some(s))
-}
 
-// TODO: consider moving this to a method on `SimState`.
-fn do_print_properties(s: &mut String, state: &SimState) {
     swriteln!(
         s,
         "configured external DNS zone name: {}",
@@ -1278,6 +1662,46 @@ fn do_print_properties(s: &mut String, state: &SimState) {
             .collect::<Vec<_>>()
             .join(", "),
     );
+    swriteln!(
+        s,
+        "target number of Nexus instances: {}",
+        state
+            .config()
+            .num_nexus()
+            .map_or_else(|| "default".to_owned(), |n| n.to_string())
+    );
+
+    let target_release = state.system().description().target_release();
+    match target_release.description() {
+        Some(tuf_desc) => {
+            swriteln!(
+                s,
+                "target release (generation {}): {} ({})",
+                target_release.target_release_generation,
+                tuf_desc.repo.system_version,
+                tuf_desc.repo.file_name
+            );
+            for artifact in &tuf_desc.artifacts {
+                swriteln!(
+                    s,
+                    "    artifact: {} {} ({} version {})",
+                    artifact.hash,
+                    artifact.id.kind,
+                    artifact.id.name,
+                    artifact.id.version
+                );
+            }
+        }
+        None => {
+            swriteln!(
+                s,
+                "target release (generation {}): unset",
+                target_release.target_release_generation,
+            );
+        }
+    }
+
+    Ok(Some(s))
 }
 
 fn cmd_set(
@@ -1286,6 +1710,12 @@ fn cmd_set(
 ) -> anyhow::Result<Option<String>> {
     let mut state = sim.current_state().to_mut();
     let rv = match args {
+        SetArgs::Seed { seed } => {
+            // In this case, reset the RNG state to the provided seed.
+            let rv = format!("new RNG seed: {seed}");
+            state.rng_mut().set_seed(seed);
+            rv
+        }
         SetArgs::NumNexus { num_nexus } => {
             let rv = format!(
                 "target number of Nexus zones: {:?} -> {}",
@@ -1307,6 +1737,33 @@ fn cmd_set(
             );
             state.config_mut().set_external_dns_zone_name(zone_name);
             rv
+        }
+        SetArgs::TargetRelease { filename } => {
+            let file = std::fs::File::open(&filename)
+                .with_context(|| format!("open {:?}", filename))?;
+            let buf = std::io::BufReader::new(file);
+            let rt = tokio::runtime::Runtime::new()
+                .context("creating tokio runtime")?;
+            // We're not using the repo hash here.  Make one up.
+            let repo_hash = ArtifactHash([0; 32]);
+            let artifacts_with_plan = rt.block_on(async {
+                ArtifactsWithPlan::from_zip(
+                    buf,
+                    None,
+                    repo_hash,
+                    ControlPlaneZonesMode::Split,
+                    &sim.log,
+                )
+                .await
+                .with_context(|| format!("unpacking {:?}", filename))
+            })?;
+            let description = artifacts_with_plan.description().clone();
+            drop(artifacts_with_plan);
+            state
+                .system_mut()
+                .description_mut()
+                .set_target_release(Some(description));
+            format!("set target release based on {}", filename)
         }
     };
 

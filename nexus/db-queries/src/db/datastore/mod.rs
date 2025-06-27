@@ -46,6 +46,8 @@ use std::sync::Arc;
 
 mod address_lot;
 mod affinity;
+mod alert;
+mod alert_rx;
 mod allow_list;
 mod auth;
 mod bfd;
@@ -62,6 +64,7 @@ mod deployment;
 mod device_auth;
 mod disk;
 mod dns;
+mod ereport;
 mod external_ip;
 mod identity_provider;
 mod image;
@@ -80,6 +83,7 @@ mod probe;
 mod project;
 mod quota;
 mod rack;
+mod reconfigurator_chicken_switches;
 mod region;
 mod region_replacement;
 mod region_snapshot;
@@ -89,6 +93,7 @@ mod role;
 mod saga;
 mod setting;
 mod silo;
+mod silo_auth_settings;
 mod silo_group;
 mod silo_user;
 mod sled;
@@ -111,8 +116,6 @@ mod volume;
 mod volume_repair;
 mod vpc;
 pub mod webhook_delivery;
-mod webhook_event;
-mod webhook_rx;
 mod zpool;
 
 pub use address_lot::AddressLotCreateResult;
@@ -483,12 +486,12 @@ mod test {
         ByteCount, Error, IdentityMetadataCreateParams, LookupType, Name,
     };
     use omicron_test_utils::dev;
-    use omicron_uuid_kinds::CollectionUuid;
     use omicron_uuid_kinds::DatasetUuid;
     use omicron_uuid_kinds::GenericUuid;
     use omicron_uuid_kinds::PhysicalDiskUuid;
     use omicron_uuid_kinds::SledUuid;
     use omicron_uuid_kinds::VolumeUuid;
+    use omicron_uuid_kinds::{CollectionUuid, TypedUuid};
     use std::collections::HashMap;
     use std::collections::HashSet;
     use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddrV6};
@@ -576,6 +579,7 @@ mod test {
         let silo_user_id = Uuid::new_v4();
 
         let session = ConsoleSession {
+            id: TypedUuid::new_v4().into(),
             token: token.clone(),
             time_created: Utc::now() - Duration::minutes(5),
             time_last_used: Utc::now() - Duration::minutes(5),
@@ -613,12 +617,21 @@ mod test {
         assert_eq!(DEFAULT_SILO_ID, db_silo_user.silo_id);
 
         // fetch the one we just created
+        let (.., fetched) = datastore
+            .session_lookup_by_token(&authn_opctx, token.clone())
+            .await
+            .unwrap();
+        assert_eq!(session.silo_user_id, fetched.silo_user_id);
+        assert_eq!(session.id, fetched.id);
+
+        // also try looking it up by ID
         let (.., fetched) = LookupPath::new(&opctx, datastore)
-            .console_session_token(&token)
+            .console_session_id(session.id.into())
             .fetch()
             .await
             .unwrap();
         assert_eq!(session.silo_user_id, fetched.silo_user_id);
+        assert_eq!(session.token, fetched.token);
 
         // trying to insert the same one again fails
         let duplicate =
@@ -631,8 +644,8 @@ mod test {
         // update last used (i.e., renew token)
         let authz_session = authz::ConsoleSession::new(
             authz::FLEET,
-            token.clone(),
-            LookupType::ByCompositeId(token.clone()),
+            session.id.into(),
+            LookupType::ById(session.id.into_untyped_uuid()),
         );
         let renewed = datastore
             .session_update_last_used(&opctx, &authz_session)
@@ -643,24 +656,11 @@ mod test {
         );
 
         // time_last_used change persists in DB
-        let (.., fetched) = LookupPath::new(&opctx, datastore)
-            .console_session_token(&token)
-            .fetch()
+        let (.., fetched) = datastore
+            .session_lookup_by_token(&opctx, token.clone())
             .await
             .unwrap();
         assert!(fetched.time_last_used > session.time_last_used);
-
-        // deleting it using `opctx` (which represents the test-privileged user)
-        // should succeed but not do anything -- you can't delete someone else's
-        // session
-        let delete =
-            datastore.session_hard_delete(&opctx, &authz_session).await;
-        assert_eq!(delete, Ok(()));
-        let fetched = LookupPath::new(&opctx, datastore)
-            .console_session_token(&token)
-            .fetch()
-            .await;
-        assert!(fetched.is_ok());
 
         // delete it and fetch should come back with nothing
         let silo_user_opctx = OpContext::for_background(
@@ -674,12 +674,11 @@ mod test {
             Arc::clone(&datastore) as Arc<dyn nexus_auth::storage::Storage>,
         );
         let delete = datastore
-            .session_hard_delete(&silo_user_opctx, &authz_session)
+            .session_hard_delete_by_token(&silo_user_opctx, token.clone())
             .await;
         assert_eq!(delete, Ok(()));
-        let fetched = LookupPath::new(&opctx, datastore)
-            .console_session_token(&token)
-            .fetch()
+        let fetched = datastore
+            .session_lookup_by_token(&authn_opctx, token.clone())
             .await;
         assert!(matches!(
             fetched,
@@ -688,7 +687,11 @@ mod test {
 
         // deleting an already nonexistent is considered a success
         let delete_again =
-            datastore.session_hard_delete(&opctx, &authz_session).await;
+            datastore.session_hard_delete_by_token(&opctx, token.clone()).await;
+        assert_eq!(delete_again, Ok(()));
+
+        let delete_again =
+            datastore.session_hard_delete_by_token(&opctx, token.clone()).await;
         assert_eq!(delete_again, Ok(()));
 
         db.terminate().await;

@@ -7,8 +7,11 @@ edition = "2021"
 workspace = true
 
 [dependencies]
+camino.workspace = true
+chrono.workspace = true
 daft.workspace = true
 id-map.workspace = true
+iddqd.workspace = true
 illumos-utils.workspace = true
 omicron-common.workspace = true
 omicron-passwords.workspace = true

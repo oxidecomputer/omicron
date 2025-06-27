@@ -56,9 +56,13 @@ mod oximeter;
 mod oxql;
 mod reconfigurator;
 mod sled_agent;
+mod support_bundle;
 
-#[tokio::main]
-async fn main() -> Result<(), anyhow::Error> {
+fn main() -> Result<(), anyhow::Error> {
+    oxide_tokio_rt::run(main_impl())
+}
+
+async fn main_impl() -> Result<(), anyhow::Error> {
     let args = Omdb::parse();
 
     let log = dropshot::ConfigLogging::StderrTerminal {

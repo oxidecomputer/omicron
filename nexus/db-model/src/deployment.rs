@@ -46,8 +46,8 @@ use omicron_common::disk::DiskIdentity;
 use omicron_common::zpool_name::ZpoolName;
 use omicron_uuid_kinds::{
     BlueprintKind, BlueprintUuid, DatasetKind, ExternalIpKind, ExternalIpUuid,
-    GenericUuid, OmicronZoneKind, OmicronZoneUuid, PhysicalDiskKind, SledKind,
-    SledUuid, ZpoolKind, ZpoolUuid,
+    GenericUuid, MupdateOverrideKind, OmicronZoneKind, OmicronZoneUuid,
+    PhysicalDiskKind, SledKind, SledUuid, ZpoolKind, ZpoolUuid,
 };
 use std::net::{IpAddr, SocketAddrV6};
 use uuid::Uuid;
@@ -65,6 +65,7 @@ pub struct Blueprint {
     pub time_created: DateTime<Utc>,
     pub creator: String,
     pub comment: String,
+    pub target_release_minimum_generation: Generation,
 }
 
 impl From<&'_ nexus_types::deployment::Blueprint> for Blueprint {
@@ -81,6 +82,9 @@ impl From<&'_ nexus_types::deployment::Blueprint> for Blueprint {
             time_created: bp.time_created,
             creator: bp.creator.clone(),
             comment: bp.comment.clone(),
+            target_release_minimum_generation: Generation(
+                bp.target_release_minimum_generation,
+            ),
         }
     }
 }
@@ -92,6 +96,8 @@ impl From<Blueprint> for nexus_types::deployment::BlueprintMetadata {
             parent_blueprint_id: value.parent_blueprint_id.map(From::from),
             internal_dns_version: *value.internal_dns_version,
             external_dns_version: *value.external_dns_version,
+            target_release_minimum_generation: *value
+                .target_release_minimum_generation,
             cockroachdb_fingerprint: value.cockroachdb_fingerprint,
             cockroachdb_setting_preserve_downgrade:
                 CockroachDbPreserveDowngrade::from_optional_string(
@@ -144,6 +150,7 @@ pub struct BpSledMetadata {
     pub sled_id: DbTypedUuid<SledKind>,
     pub sled_state: SledState,
     pub sled_agent_generation: Generation,
+    pub remove_mupdate_override: Option<DbTypedUuid<MupdateOverrideKind>>,
 }
 
 impl_enum_type!(

@@ -26,13 +26,15 @@ use nexus_types::identity::Resource;
 use omicron_common::api::external::Error;
 use omicron_common::api::external::InternalContext;
 use omicron_common::api::external::{LookupResult, LookupType, ResourceType};
+use omicron_uuid_kinds::AccessTokenKind;
+use omicron_uuid_kinds::AlertReceiverUuid;
+use omicron_uuid_kinds::AlertUuid;
+use omicron_uuid_kinds::ConsoleSessionUuid;
 use omicron_uuid_kinds::PhysicalDiskUuid;
 use omicron_uuid_kinds::SupportBundleUuid;
 use omicron_uuid_kinds::TufArtifactKind;
 use omicron_uuid_kinds::TufRepoKind;
 use omicron_uuid_kinds::TypedUuid;
-use omicron_uuid_kinds::WebhookEventUuid;
-use omicron_uuid_kinds::WebhookReceiverUuid;
 use omicron_uuid_kinds::WebhookSecretUuid;
 use slog::{error, trace};
 use uuid::Uuid;
@@ -199,19 +201,12 @@ impl<'a> LookupPath<'a> {
 
     // Fleet-level resources
 
-    /// Select a resource of type ConsoleSession, identified by its `token`
-    pub fn console_session_token<'b, 'c>(
+    /// Select a resource of type ConsoleSession, identified by its `id`
+    pub fn console_session_id(
         self,
-        token: &'b str,
-    ) -> ConsoleSession<'c>
-    where
-        'a: 'c,
-        'b: 'c,
-    {
-        ConsoleSession::PrimaryKey(
-            Root { lookup_root: self },
-            token.to_string(),
-        )
+        id: ConsoleSessionUuid,
+    ) -> ConsoleSession<'a> {
+        ConsoleSession::PrimaryKey(Root { lookup_root: self }, id)
     }
 
     /// Select a resource of type DeviceAuthRequest, identified by its `user_code`
@@ -229,19 +224,12 @@ impl<'a> LookupPath<'a> {
         )
     }
 
-    /// Select a resource of type DeviceAccessToken, identified by its `token`
-    pub fn device_access_token<'b, 'c>(
+    /// Select a resource of type DeviceAccessToken, identified by its `id`
+    pub fn device_access_token_id(
         self,
-        token: &'b str,
-    ) -> DeviceAccessToken<'c>
-    where
-        'a: 'c,
-        'b: 'c,
-    {
-        DeviceAccessToken::PrimaryKey(
-            Root { lookup_root: self },
-            token.to_string(),
-        )
+        id: TypedUuid<AccessTokenKind>,
+    ) -> DeviceAccessToken<'a> {
+        DeviceAccessToken::PrimaryKey(Root { lookup_root: self }, id)
     }
 
     /// Select a resource of type RoleBuiltin, identified by its `name`
@@ -480,38 +468,38 @@ impl<'a> LookupPath<'a> {
         SamlIdentityProvider::PrimaryKey(Root { lookup_root: self }, id)
     }
 
-    pub fn webhook_receiver_id<'b>(
+    pub fn alert_receiver_id<'b>(
         self,
-        id: WebhookReceiverUuid,
-    ) -> WebhookReceiver<'b>
+        id: AlertReceiverUuid,
+    ) -> AlertReceiver<'b>
     where
         'a: 'b,
     {
-        WebhookReceiver::PrimaryKey(Root { lookup_root: self }, id)
+        AlertReceiver::PrimaryKey(Root { lookup_root: self }, id)
     }
 
-    /// Select a resource of type [`WebhookReceiver`], identified by its name
-    pub fn webhook_receiver_name<'b, 'c>(
+    /// Select a resource of type [`AlertReceiver`], identified by its name
+    pub fn alert_receiver_name<'b, 'c>(
         self,
         name: &'b Name,
-    ) -> WebhookReceiver<'c>
+    ) -> AlertReceiver<'c>
     where
         'a: 'c,
         'b: 'c,
     {
-        WebhookReceiver::Name(Root { lookup_root: self }, name)
+        AlertReceiver::Name(Root { lookup_root: self }, name)
     }
 
-    /// Select a resource of type [`WebhookReceiver`], identified by its owned name
-    pub fn webhook_receiver_name_owned<'b, 'c>(
+    /// Select a resource of type [`AlertReceiver`], identified by its owned name
+    pub fn alert_receiver_name_owned<'b, 'c>(
         self,
         name: Name,
-    ) -> WebhookReceiver<'c>
+    ) -> AlertReceiver<'c>
     where
         'a: 'c,
         'b: 'c,
     {
-        WebhookReceiver::OwnedName(Root { lookup_root: self }, name)
+        AlertReceiver::OwnedName(Root { lookup_root: self }, name)
     }
 
     /// Select a resource of type [`WebhookSecret`], identified by its UUID.
@@ -525,12 +513,12 @@ impl<'a> LookupPath<'a> {
         WebhookSecret::PrimaryKey(Root { lookup_root: self }, id)
     }
 
-    /// Select a resource of type [`WebhookEvent`], identified by its UUID.
-    pub fn webhook_event_id<'b>(self, id: WebhookEventUuid) -> WebhookEvent<'b>
+    /// Select a resource of type [`Alert`], identified by its UUID.
+    pub fn alert_id<'b>(self, id: AlertUuid) -> Alert<'b>
     where
         'a: 'b,
     {
-        WebhookEvent::PrimaryKey(Root { lookup_root: self }, id)
+        Alert::PrimaryKey(Root { lookup_root: self }, id)
     }
 }
 
@@ -761,9 +749,7 @@ lookup_resource! {
     ancestors = [],
     lookup_by_name = false,
     soft_deletes = false,
-    primary_key_columns = [
-        { column_name = "token", rust_type = String },
-    ]
+    primary_key_columns = [ { column_name = "id", uuid_kind = ConsoleSessionKind } ]
 }
 
 lookup_resource! {
@@ -781,9 +767,7 @@ lookup_resource! {
     ancestors = [],
     lookup_by_name = false,
     soft_deletes = false,
-    primary_key_columns = [
-        { column_name = "token", rust_type = String },
-    ]
+    primary_key_columns = [ { column_name = "id", uuid_kind = AccessTokenKind } ]
 }
 
 lookup_resource! {
@@ -908,18 +892,18 @@ lookup_resource! {
 }
 
 lookup_resource! {
-    name = "WebhookReceiver",
+    name = "AlertReceiver",
     ancestors = [],
     lookup_by_name = true,
     soft_deletes = true,
     primary_key_columns = [
-        { column_name = "id", uuid_kind = WebhookReceiverKind }
+        { column_name = "id", uuid_kind = AlertReceiverKind }
     ]
 }
 
 lookup_resource! {
     name = "WebhookSecret",
-    ancestors = ["WebhookReceiver"],
+    ancestors = ["AlertReceiver"],
     lookup_by_name = false,
     soft_deletes = false,
     primary_key_columns = [
@@ -928,12 +912,12 @@ lookup_resource! {
 }
 
 lookup_resource! {
-    name = "WebhookEvent",
+    name = "Alert",
     ancestors = [],
     lookup_by_name = false,
     soft_deletes = false,
     primary_key_columns = [
-        { column_name = "id", uuid_kind = WebhookEventKind }
+        { column_name = "id", uuid_kind = AlertKind }
     ]
 }
 

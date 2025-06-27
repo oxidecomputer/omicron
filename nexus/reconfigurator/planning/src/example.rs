@@ -14,7 +14,6 @@ use crate::planner::rng::PlannerRng;
 use crate::system::SledBuilder;
 use crate::system::SystemDescription;
 use nexus_inventory::CollectionBuilderRng;
-use nexus_sled_agent_shared::inventory::OmicronZonesConfig;
 use nexus_types::deployment::Blueprint;
 use nexus_types::deployment::OmicronZoneNic;
 use nexus_types::deployment::PlanningInput;
@@ -331,6 +330,14 @@ impl ExampleSystemBuilder {
         self.nexus_count.unwrap_or(ZoneCount(self.nsleds))
     }
 
+    pub fn get_internal_dns_zones(&self) -> usize {
+        self.internal_dns_count.0
+    }
+
+    pub fn get_external_dns_zones(&self) -> usize {
+        self.external_dns_count.0
+    }
+
     /// Create a new example system with the given modifications.
     ///
     /// Return the system, and the initial blueprint that matches it.
@@ -486,15 +493,7 @@ impl ExampleSystemBuilder {
 
         for (sled_id, sled_cfg) in &blueprint.sleds {
             let sled_cfg = sled_cfg.clone().into_in_service_sled_config();
-            system
-                .sled_set_omicron_zones(
-                    *sled_id,
-                    OmicronZonesConfig {
-                        generation: sled_cfg.generation,
-                        zones: sled_cfg.zones.into_iter().collect(),
-                    },
-                )
-                .unwrap();
+            system.sled_set_omicron_config(*sled_id, sled_cfg).unwrap();
         }
 
         // We just ensured that a handful of datasets should exist in
@@ -530,7 +529,7 @@ impl ExampleSystemBuilder {
 // A little wrapper to try and avoid having an `on` function which takes 3
 // usize parameters.
 #[derive(Clone, Copy, Debug)]
-struct ZoneCount(usize);
+struct ZoneCount(pub usize);
 
 impl ZoneCount {
     fn on(self, sled_id: usize, total_sleds: usize) -> usize {
@@ -544,7 +543,7 @@ impl ZoneCount {
 
 #[cfg(test)]
 mod tests {
-    use chrono::{NaiveDateTime, TimeZone, Utc};
+    use chrono::{DateTime, Utc};
     use nexus_sled_agent_shared::inventory::{OmicronZoneConfig, ZoneKind};
     use nexus_types::deployment::BlueprintZoneConfig;
     use nexus_types::deployment::BlueprintZoneDisposition;
@@ -590,8 +589,7 @@ mod tests {
                 .build();
 
         // Define a time_created for consistent output across runs.
-        blueprint.time_created =
-            Utc.from_utc_datetime(&NaiveDateTime::UNIX_EPOCH);
+        blueprint.time_created = DateTime::<Utc>::UNIX_EPOCH;
 
         expectorate::assert_contents(
             "tests/output/example_builder_zone_counts_blueprint.txt",
@@ -613,8 +611,10 @@ mod tests {
             nexus_zones.len(),
             nexus_zones,
         );
-        let nexus_zones =
-            collection_zones_of_kind(&example.collection, ZoneKind::Nexus);
+        let nexus_zones = collection_ledgered_zones_of_kind(
+            &example.collection,
+            ZoneKind::Nexus,
+        );
         assert_eq!(
             nexus_zones.len(),
             6,
@@ -632,7 +632,7 @@ mod tests {
             internal_dns_zones.len(),
             internal_dns_zones,
         );
-        let internal_dns_zones = collection_zones_of_kind(
+        let internal_dns_zones = collection_ledgered_zones_of_kind(
             &example.collection,
             ZoneKind::InternalDns,
         );
@@ -653,7 +653,7 @@ mod tests {
             external_dns_zones.len(),
             external_dns_zones,
         );
-        let external_dns_zones = collection_zones_of_kind(
+        let external_dns_zones = collection_ledgered_zones_of_kind(
             &example.collection,
             ZoneKind::ExternalDns,
         );
@@ -674,7 +674,7 @@ mod tests {
             crucible_pantry_zones.len(),
             crucible_pantry_zones,
         );
-        let crucible_pantry_zones = collection_zones_of_kind(
+        let crucible_pantry_zones = collection_ledgered_zones_of_kind(
             &example.collection,
             ZoneKind::CruciblePantry,
         );
@@ -701,12 +701,12 @@ mod tests {
             .collect()
     }
 
-    fn collection_zones_of_kind(
+    fn collection_ledgered_zones_of_kind(
         collection: &Collection,
         kind: ZoneKind,
     ) -> Vec<&OmicronZoneConfig> {
         collection
-            .all_omicron_zones()
+            .all_ledgered_omicron_zones()
             .filter(|zone| zone.zone_type.kind() == kind)
             .collect()
     }

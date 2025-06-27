@@ -677,6 +677,115 @@
         }
       }
     },
+    "/deployment/chicken-switches": {
+      "get": {
+        "summary": "Get the current set of chicken switches",
+        "operationId": "reconfigurator_chicken_switches_show_current",
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ReconfiguratorChickenSwitches"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      },
+      "post": {
+        "summary": "Update the chicken switches at the latest versions",
+        "operationId": "reconfigurator_chicken_switches_set",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ReconfiguratorChickenSwitchesParam"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "204": {
+            "description": "resource updated"
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/deployment/chicken-switches/{version}": {
+      "get": {
+        "summary": "Get the chicken switches at `version` if it exists",
+        "operationId": "reconfigurator_chicken_switches_show",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "version",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "format": "uint32",
+              "minimum": 0
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ReconfiguratorChickenSwitches"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/deployment/update-status": {
+      "get": {
+        "summary": "Show deployed versions of artifacts",
+        "operationId": "update_status",
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UpdateStatus"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
     "/disk/{disk_id}/remove-read-only-parent": {
       "post": {
         "summary": "Request removal of a read_only_parent from a disk.",
@@ -822,14 +931,14 @@
         }
       }
     },
-    "/experimental/v1/system/support-bundles/{support_bundle}": {
+    "/experimental/v1/system/support-bundles/{bundle_id}": {
       "get": {
         "summary": "View a support bundle",
         "operationId": "support_bundle_view",
         "parameters": [
           {
             "in": "path",
-            "name": "support_bundle",
+            "name": "bundle_id",
             "description": "ID of the support bundle",
             "required": true,
             "schema": {
@@ -864,7 +973,7 @@
         "parameters": [
           {
             "in": "path",
-            "name": "support_bundle",
+            "name": "bundle_id",
             "description": "ID of the support bundle",
             "required": true,
             "schema": {
@@ -886,14 +995,22 @@
         }
       }
     },
-    "/experimental/v1/system/support-bundles/{support_bundle}/download": {
+    "/experimental/v1/system/support-bundles/{bundle_id}/download": {
       "get": {
         "summary": "Download the contents of a support bundle",
         "operationId": "support_bundle_download",
         "parameters": [
           {
+            "in": "header",
+            "name": "range",
+            "description": "A request to access a portion of the resource, such as `bytes=0-499`\n\nSee: <https://developer.mozilla.org/en-US/docs/Web/HTTP/Reference/Headers/Range>",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
             "in": "path",
-            "name": "support_bundle",
+            "name": "bundle_id",
             "description": "ID of the support bundle",
             "required": true,
             "schema": {
@@ -918,8 +1035,16 @@
         "operationId": "support_bundle_head",
         "parameters": [
           {
+            "in": "header",
+            "name": "range",
+            "description": "A request to access a portion of the resource, such as `bytes=0-499`\n\nSee: <https://developer.mozilla.org/en-US/docs/Web/HTTP/Reference/Headers/Range>",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
             "in": "path",
-            "name": "support_bundle",
+            "name": "bundle_id",
             "description": "ID of the support bundle",
             "required": true,
             "schema": {
@@ -940,11 +1065,29 @@
         }
       }
     },
-    "/experimental/v1/system/support-bundles/{support_bundle}/download/{file}": {
+    "/experimental/v1/system/support-bundles/{bundle_id}/download/{file}": {
       "get": {
         "summary": "Download a file within a support bundle",
         "operationId": "support_bundle_download_file",
         "parameters": [
+          {
+            "in": "header",
+            "name": "range",
+            "description": "A request to access a portion of the resource, such as `bytes=0-499`\n\nSee: <https://developer.mozilla.org/en-US/docs/Web/HTTP/Reference/Headers/Range>",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "bundle_id",
+            "description": "ID of the support bundle",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
           {
             "in": "path",
             "name": "file",
@@ -952,16 +1095,6 @@
             "required": true,
             "schema": {
               "type": "string"
-            }
-          },
-          {
-            "in": "path",
-            "name": "support_bundle",
-            "description": "ID of the support bundle",
-            "required": true,
-            "schema": {
-              "type": "string",
-              "format": "uuid"
             }
           }
         ],
@@ -981,22 +1114,30 @@
         "operationId": "support_bundle_head_file",
         "parameters": [
           {
-            "in": "path",
-            "name": "file",
-            "description": "The file within the bundle to download",
-            "required": true,
+            "in": "header",
+            "name": "range",
+            "description": "A request to access a portion of the resource, such as `bytes=0-499`\n\nSee: <https://developer.mozilla.org/en-US/docs/Web/HTTP/Reference/Headers/Range>",
             "schema": {
               "type": "string"
             }
           },
           {
             "in": "path",
-            "name": "support_bundle",
+            "name": "bundle_id",
             "description": "ID of the support bundle",
             "required": true,
             "schema": {
               "type": "string",
               "format": "uuid"
+            }
+          },
+          {
+            "in": "path",
+            "name": "file",
+            "description": "The file within the bundle to download",
+            "required": true,
+            "schema": {
+              "type": "string"
             }
           }
         ],
@@ -1012,14 +1153,22 @@
         }
       }
     },
-    "/experimental/v1/system/support-bundles/{support_bundle}/index": {
+    "/experimental/v1/system/support-bundles/{bundle_id}/index": {
       "get": {
         "summary": "Download the index of a support bundle",
         "operationId": "support_bundle_index",
         "parameters": [
           {
+            "in": "header",
+            "name": "range",
+            "description": "A request to access a portion of the resource, such as `bytes=0-499`\n\nSee: <https://developer.mozilla.org/en-US/docs/Web/HTTP/Reference/Headers/Range>",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
             "in": "path",
-            "name": "support_bundle",
+            "name": "bundle_id",
             "description": "ID of the support bundle",
             "required": true,
             "schema": {
@@ -2302,7 +2451,7 @@
             "type": "string"
           },
           "external_dns_version": {
-            "description": "external DNS version when thi blueprint was created",
+            "description": "external DNS version when this blueprint was created",
             "allOf": [
               {
                 "$ref": "#/components/schemas/Generation"
@@ -2365,6 +2514,14 @@
               "$ref": "#/components/schemas/BlueprintSledConfig"
             }
           },
+          "target_release_minimum_generation": {
+            "description": "The minimum release generation to accept for target release configuration. Target release configuration with a generation less than this number will be ignored.\n\nFor example, let's say that the current target release generation is 5. Then, when reconfigurator detects a MUPdate:\n\n* the target release is ignored in favor of the install dataset * this field is set to 6\n\nOnce an operator sets a new target release, its generation will be 6 or higher. Reconfigurator will then know that it is back in charge of driving the system to the target release.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/Generation"
+              }
+            ]
+          },
           "time_created": {
             "description": "when this blueprint was generated (for debugging)",
             "type": "string",
@@ -2383,6 +2540,7 @@
           "oximeter_read_version",
           "pending_mgs_updates",
           "sleds",
+          "target_release_minimum_generation",
           "time_created"
         ]
       },
@@ -2511,6 +2669,14 @@
               }
             ]
           },
+          "target_release_minimum_generation": {
+            "description": "The minimum generation for the target release.\n\nSee [`Blueprint::target_release_minimum_generation`].",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/Generation"
+              }
+            ]
+          },
           "time_created": {
             "description": "when this blueprint was generated (for debugging)",
             "type": "string",
@@ -2524,6 +2690,7 @@
           "external_dns_version",
           "id",
           "internal_dns_version",
+          "target_release_minimum_generation",
           "time_created"
         ]
       },
@@ -2630,6 +2797,14 @@
           },
           "disks": {
             "$ref": "#/components/schemas/IdMapBlueprintPhysicalDiskConfig"
+          },
+          "remove_mupdate_override": {
+            "nullable": true,
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/TypedUuidForMupdateOverrideKind"
+              }
+            ]
           },
           "sled_agent_generation": {
             "description": "Generation number used when this type is converted into an `OmicronSledConfig` for use by sled-agent.\n\nThis field is explicitly named `sled_agent_generation` to indicate that it is only required to cover information that changes what Reconfigurator sends to sled agent. For example, changing the sled `state` from `Active` to `Decommissioned` would not require a bump to `sled_agent_generation`, because a `Decommissioned` sled will never be sent an `OmicronSledConfig`.",
@@ -2786,7 +2961,7 @@
         ]
       },
       "BlueprintZoneImageSource": {
-        "description": "Where a blueprint's image source is located.\n\nThis is the blueprint version of [`OmicronZoneImageSource`].",
+        "description": "Where the zone's image source is located.\n\nThis is the blueprint version of [`OmicronZoneImageSource`].",
         "oneOf": [
           {
             "description": "This zone's image source is whatever happens to be on the sled's \"install\" dataset.\n\nThis is whatever was put in place at the factory or by the latest MUPdate. The image used here can vary by sled and even over time (if the sled gets MUPdated again).\n\nHistorically, this was the only source for zone images. In an system with automated control-plane-driven update we expect to only use this variant in emergencies where the system had to be recovered via MUPdate.",
@@ -3494,6 +3669,19 @@
             "$ref": "#/components/schemas/PendingMgsUpdate"
           },
           "result": {
+            "x-rust-type": {
+              "crate": "std",
+              "parameters": [
+                {
+                  "$ref": "#/components/schemas/UpdateCompletedHow"
+                },
+                {
+                  "type": "string"
+                }
+              ],
+              "path": "::std::result::Result",
+              "version": "*"
+            },
             "oneOf": [
               {
                 "type": "object",
@@ -3504,8 +3692,7 @@
                 },
                 "required": [
                   "ok"
-                ],
-                "additionalProperties": false
+                ]
               },
               {
                 "type": "object",
@@ -3516,8 +3703,7 @@
                 },
                 "required": [
                   "err"
-                ],
-                "additionalProperties": false
+                ]
               }
             ]
           },
@@ -4011,6 +4197,12 @@
           "generation": {
             "$ref": "#/components/schemas/Generation"
           },
+          "serial": {
+            "description": "See [`DnsConfig`]'s `serial` field for how this is different from `generation`",
+            "type": "integer",
+            "format": "uint32",
+            "minimum": 0
+          },
           "time_created": {
             "type": "string",
             "format": "date-time"
@@ -4024,11 +4216,13 @@
         },
         "required": [
           "generation",
+          "serial",
           "time_created",
           "zones"
         ]
       },
       "DnsConfigZone": {
+        "description": "Configuration for a specific DNS zone, as opposed to illumos zones in which the services described by these records run.\n\nThe name `@` is special: it describes records that should be provided for queries about `zone_name`. This is used in favor of the empty string as `@` is the name used for this purpose in zone files for most DNS configurations. It also avoids potentially-confusing debug output from naively printing out records and their names - if you've seen an `@` record and tools are unclear about what that means, hopefully you've arrived here!",
         "type": "object",
         "properties": {
           "records": {
@@ -4099,6 +4293,24 @@
                 "type": "string",
                 "enum": [
                   "SRV"
+                ]
+              }
+            },
+            "required": [
+              "data",
+              "type"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "data": {
+                "type": "string"
+              },
+              "type": {
+                "type": "string",
+                "enum": [
+                  "NS"
                 ]
               }
             },
@@ -4220,6 +4432,22 @@
         "required": [
           "message",
           "request_id"
+        ]
+      },
+      "ExpectedActiveRotSlot": {
+        "description": "Describes the expected active RoT slot, and the version we expect to find for it",
+        "type": "object",
+        "properties": {
+          "slot": {
+            "$ref": "#/components/schemas/RotSlot"
+          },
+          "version": {
+            "$ref": "#/components/schemas/ArtifactVersion"
+          }
+        },
+        "required": [
+          "slot",
+          "version"
         ]
       },
       "ExpectedVersion": {
@@ -5217,6 +5445,357 @@
           "snat_cfg"
         ]
       },
+      "OmicronZoneType": {
+        "description": "Describes what kind of zone this is (i.e., what component is running in it) as well as any type-specific configuration",
+        "oneOf": [
+          {
+            "type": "object",
+            "properties": {
+              "address": {
+                "type": "string"
+              },
+              "dns_servers": {
+                "type": "array",
+                "items": {
+                  "type": "string",
+                  "format": "ip"
+                }
+              },
+              "domain": {
+                "nullable": true,
+                "type": "string"
+              },
+              "nic": {
+                "description": "The service vNIC providing outbound connectivity using OPTE.",
+                "allOf": [
+                  {
+                    "$ref": "#/components/schemas/NetworkInterface"
+                  }
+                ]
+              },
+              "ntp_servers": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "snat_cfg": {
+                "description": "The SNAT configuration for outbound connections.",
+                "allOf": [
+                  {
+                    "$ref": "#/components/schemas/SourceNatConfig"
+                  }
+                ]
+              },
+              "type": {
+                "type": "string",
+                "enum": [
+                  "boundary_ntp"
+                ]
+              }
+            },
+            "required": [
+              "address",
+              "dns_servers",
+              "nic",
+              "ntp_servers",
+              "snat_cfg",
+              "type"
+            ]
+          },
+          {
+            "description": "Type of clickhouse zone used for a single node clickhouse deployment",
+            "type": "object",
+            "properties": {
+              "address": {
+                "type": "string"
+              },
+              "dataset": {
+                "$ref": "#/components/schemas/OmicronZoneDataset"
+              },
+              "type": {
+                "type": "string",
+                "enum": [
+                  "clickhouse"
+                ]
+              }
+            },
+            "required": [
+              "address",
+              "dataset",
+              "type"
+            ]
+          },
+          {
+            "description": "A zone used to run a Clickhouse Keeper node\n\nKeepers are only used in replicated clickhouse setups",
+            "type": "object",
+            "properties": {
+              "address": {
+                "type": "string"
+              },
+              "dataset": {
+                "$ref": "#/components/schemas/OmicronZoneDataset"
+              },
+              "type": {
+                "type": "string",
+                "enum": [
+                  "clickhouse_keeper"
+                ]
+              }
+            },
+            "required": [
+              "address",
+              "dataset",
+              "type"
+            ]
+          },
+          {
+            "description": "A zone used to run a Clickhouse Server in a replicated deployment",
+            "type": "object",
+            "properties": {
+              "address": {
+                "type": "string"
+              },
+              "dataset": {
+                "$ref": "#/components/schemas/OmicronZoneDataset"
+              },
+              "type": {
+                "type": "string",
+                "enum": [
+                  "clickhouse_server"
+                ]
+              }
+            },
+            "required": [
+              "address",
+              "dataset",
+              "type"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "address": {
+                "type": "string"
+              },
+              "dataset": {
+                "$ref": "#/components/schemas/OmicronZoneDataset"
+              },
+              "type": {
+                "type": "string",
+                "enum": [
+                  "cockroach_db"
+                ]
+              }
+            },
+            "required": [
+              "address",
+              "dataset",
+              "type"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "address": {
+                "type": "string"
+              },
+              "dataset": {
+                "$ref": "#/components/schemas/OmicronZoneDataset"
+              },
+              "type": {
+                "type": "string",
+                "enum": [
+                  "crucible"
+                ]
+              }
+            },
+            "required": [
+              "address",
+              "dataset",
+              "type"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "address": {
+                "type": "string"
+              },
+              "type": {
+                "type": "string",
+                "enum": [
+                  "crucible_pantry"
+                ]
+              }
+            },
+            "required": [
+              "address",
+              "type"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "dataset": {
+                "$ref": "#/components/schemas/OmicronZoneDataset"
+              },
+              "dns_address": {
+                "description": "The address at which the external DNS server is reachable.",
+                "type": "string"
+              },
+              "http_address": {
+                "description": "The address at which the external DNS server API is reachable.",
+                "type": "string"
+              },
+              "nic": {
+                "description": "The service vNIC providing external connectivity using OPTE.",
+                "allOf": [
+                  {
+                    "$ref": "#/components/schemas/NetworkInterface"
+                  }
+                ]
+              },
+              "type": {
+                "type": "string",
+                "enum": [
+                  "external_dns"
+                ]
+              }
+            },
+            "required": [
+              "dataset",
+              "dns_address",
+              "http_address",
+              "nic",
+              "type"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "dataset": {
+                "$ref": "#/components/schemas/OmicronZoneDataset"
+              },
+              "dns_address": {
+                "type": "string"
+              },
+              "gz_address": {
+                "description": "The addresses in the global zone which should be created\n\nFor the DNS service, which exists outside the sleds's typical subnet - adding an address in the GZ is necessary to allow inter-zone traffic routing.",
+                "type": "string",
+                "format": "ipv6"
+              },
+              "gz_address_index": {
+                "description": "The address is also identified with an auxiliary bit of information to ensure that the created global zone address can have a unique name.",
+                "type": "integer",
+                "format": "uint32",
+                "minimum": 0
+              },
+              "http_address": {
+                "type": "string"
+              },
+              "type": {
+                "type": "string",
+                "enum": [
+                  "internal_dns"
+                ]
+              }
+            },
+            "required": [
+              "dataset",
+              "dns_address",
+              "gz_address",
+              "gz_address_index",
+              "http_address",
+              "type"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "address": {
+                "type": "string"
+              },
+              "type": {
+                "type": "string",
+                "enum": [
+                  "internal_ntp"
+                ]
+              }
+            },
+            "required": [
+              "address",
+              "type"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "external_dns_servers": {
+                "description": "External DNS servers Nexus can use to resolve external hosts.",
+                "type": "array",
+                "items": {
+                  "type": "string",
+                  "format": "ip"
+                }
+              },
+              "external_ip": {
+                "description": "The address at which the external nexus server is reachable.",
+                "type": "string",
+                "format": "ip"
+              },
+              "external_tls": {
+                "description": "Whether Nexus's external endpoint should use TLS",
+                "type": "boolean"
+              },
+              "internal_address": {
+                "description": "The address at which the internal nexus server is reachable.",
+                "type": "string"
+              },
+              "nic": {
+                "description": "The service vNIC providing external connectivity using OPTE.",
+                "allOf": [
+                  {
+                    "$ref": "#/components/schemas/NetworkInterface"
+                  }
+                ]
+              },
+              "type": {
+                "type": "string",
+                "enum": [
+                  "nexus"
+                ]
+              }
+            },
+            "required": [
+              "external_dns_servers",
+              "external_ip",
+              "external_tls",
+              "internal_address",
+              "nic",
+              "type"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "address": {
+                "type": "string"
+              },
+              "type": {
+                "type": "string",
+                "enum": [
+                  "oximeter"
+                ]
+              }
+            },
+            "required": [
+              "address",
+              "type"
+            ]
+          }
+        ]
+      },
       "OximeterInfo": {
         "description": "Message used to notify Nexus that this oximeter instance is up and running.",
         "type": "object",
@@ -5295,7 +5874,7 @@
         "type": "object",
         "properties": {
           "artifact_hash": {
-            "description": "which artifact to apply to this device (implies which component is being updated)",
+            "description": "which artifact to apply to this device",
             "type": "string",
             "format": "hex string (32 bytes)"
           },
@@ -5376,6 +5955,88 @@
               "component",
               "expected_active_version",
               "expected_inactive_version"
+            ]
+          },
+          {
+            "description": "the RoT is being updated",
+            "type": "object",
+            "properties": {
+              "component": {
+                "type": "string",
+                "enum": [
+                  "rot"
+                ]
+              },
+              "expected_active_slot": {
+                "$ref": "#/components/schemas/ExpectedActiveRotSlot"
+              },
+              "expected_inactive_version": {
+                "$ref": "#/components/schemas/ExpectedVersion"
+              },
+              "expected_pending_persistent_boot_preference": {
+                "nullable": true,
+                "description": "the persistent boot preference written into the CFPA scratch page that will become the persistent boot preference in the authoritative CFPA page upon reboot, unless CFPA update of the authoritative page fails for some reason.",
+                "allOf": [
+                  {
+                    "$ref": "#/components/schemas/RotSlot"
+                  }
+                ]
+              },
+              "expected_persistent_boot_preference": {
+                "description": "the persistent boot preference written into the current authoritative CFPA page (ping or pong)",
+                "allOf": [
+                  {
+                    "$ref": "#/components/schemas/RotSlot"
+                  }
+                ]
+              },
+              "expected_transient_boot_preference": {
+                "nullable": true,
+                "description": "override persistent preference selection for a single boot",
+                "allOf": [
+                  {
+                    "$ref": "#/components/schemas/RotSlot"
+                  }
+                ]
+              }
+            },
+            "required": [
+              "component",
+              "expected_active_slot",
+              "expected_inactive_version",
+              "expected_persistent_boot_preference"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "component": {
+                "type": "string",
+                "enum": [
+                  "rot_bootloader"
+                ]
+              },
+              "expected_stage0_next_version": {
+                "description": "expected contents of the stage 0 next",
+                "allOf": [
+                  {
+                    "$ref": "#/components/schemas/ExpectedVersion"
+                  }
+                ]
+              },
+              "expected_stage0_version": {
+                "description": "expected contents of the stage 0",
+                "allOf": [
+                  {
+                    "$ref": "#/components/schemas/ArtifactVersion"
+                  }
+                ]
+              }
+            },
+            "required": [
+              "component",
+              "expected_stage0_next_version",
+              "expected_stage0_version"
             ]
           }
         ]
@@ -5913,6 +6574,45 @@
           "rack_subnet"
         ]
       },
+      "ReconfiguratorChickenSwitches": {
+        "type": "object",
+        "properties": {
+          "planner_enabled": {
+            "type": "boolean"
+          },
+          "time_modified": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "version": {
+            "type": "integer",
+            "format": "uint32",
+            "minimum": 0
+          }
+        },
+        "required": [
+          "planner_enabled",
+          "time_modified",
+          "version"
+        ]
+      },
+      "ReconfiguratorChickenSwitchesParam": {
+        "type": "object",
+        "properties": {
+          "planner_enabled": {
+            "type": "boolean"
+          },
+          "version": {
+            "type": "integer",
+            "format": "uint32",
+            "minimum": 0
+          }
+        },
+        "required": [
+          "planner_enabled",
+          "version"
+        ]
+      },
       "RecoverySiloConfig": {
         "type": "object",
         "properties": {
@@ -6018,6 +6718,38 @@
           "repairs",
           "session_id",
           "time"
+        ]
+      },
+      "RotSlot": {
+        "oneOf": [
+          {
+            "type": "object",
+            "properties": {
+              "slot": {
+                "type": "string",
+                "enum": [
+                  "a"
+                ]
+              }
+            },
+            "required": [
+              "slot"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "slot": {
+                "type": "string",
+                "enum": [
+                  "b"
+                ]
+              }
+            },
+            "required": [
+              "slot"
+            ]
+          }
         ]
       },
       "RouteConfig": {
@@ -6460,7 +7192,7 @@
         ]
       },
       "SledState": {
-        "description": "The current state of the sled, as determined by Nexus.",
+        "description": "The current state of the sled.",
         "oneOf": [
           {
             "description": "The sled is currently active, and has resources allocated on it.",
@@ -6542,7 +7274,7 @@
         ]
       },
       "SpType": {
-        "description": "SpType\n\n<details><summary>JSON schema</summary>\n\n```json { \"type\": \"string\", \"enum\": [ \"sled\", \"power\", \"switch\" ] } ``` </details>",
+        "description": "`SpType`\n\n<details><summary>JSON schema</summary>\n\n```json { \"type\": \"string\", \"enum\": [ \"sled\", \"power\", \"switch\" ] } ``` </details>",
         "type": "string",
         "enum": [
           "sled",
@@ -6754,6 +7486,10 @@
         "type": "string",
         "format": "uuid"
       },
+      "TypedUuidForMupdateOverrideKind": {
+        "type": "string",
+        "format": "uuid"
+      },
       "TypedUuidForOmicronZoneKind": {
         "type": "string",
         "format": "uuid"
@@ -6863,6 +7599,23 @@
           "completed_update",
           "waited_for_concurrent_update",
           "took_over_concurrent_update"
+        ]
+      },
+      "UpdateStatus": {
+        "type": "object",
+        "properties": {
+          "zones": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "array",
+              "items": {
+                "$ref": "#/components/schemas/ZoneStatus"
+              }
+            }
+          }
+        },
+        "required": [
+          "zones"
         ]
       },
       "UplinkAddressConfig": {
@@ -7015,6 +7768,94 @@
         "required": [
           "nattempts_done",
           "next_attempt_time"
+        ]
+      },
+      "ZoneStatus": {
+        "type": "object",
+        "properties": {
+          "version": {
+            "$ref": "#/components/schemas/ZoneStatusVersion"
+          },
+          "zone_id": {
+            "$ref": "#/components/schemas/TypedUuidForOmicronZoneKind"
+          },
+          "zone_type": {
+            "$ref": "#/components/schemas/OmicronZoneType"
+          }
+        },
+        "required": [
+          "version",
+          "zone_id",
+          "zone_type"
+        ]
+      },
+      "ZoneStatusVersion": {
+        "oneOf": [
+          {
+            "type": "object",
+            "properties": {
+              "zone_status_version": {
+                "type": "string",
+                "enum": [
+                  "unknown"
+                ]
+              }
+            },
+            "required": [
+              "zone_status_version"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "zone_status_version": {
+                "type": "string",
+                "enum": [
+                  "install_dataset"
+                ]
+              }
+            },
+            "required": [
+              "zone_status_version"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "details": {
+                "type": "string",
+                "pattern": "^(0|[1-9]\\d*)\\.(0|[1-9]\\d*)\\.(0|[1-9]\\d*)(?:-((?:0|[1-9]\\d*|\\d*[a-zA-Z-][0-9a-zA-Z-]*)(?:\\.(?:0|[1-9]\\d*|\\d*[a-zA-Z-][0-9a-zA-Z-]*))*))?(?:\\+([0-9a-zA-Z-]+(?:\\.[0-9a-zA-Z-]+)*))?$"
+              },
+              "zone_status_version": {
+                "type": "string",
+                "enum": [
+                  "version"
+                ]
+              }
+            },
+            "required": [
+              "details",
+              "zone_status_version"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "details": {
+                "type": "string"
+              },
+              "zone_status_version": {
+                "type": "string",
+                "enum": [
+                  "error"
+                ]
+              }
+            },
+            "required": [
+              "details",
+              "zone_status_version"
+            ]
+          }
         ]
       },
       "ZpoolName": {

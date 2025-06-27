@@ -3,18 +3,18 @@ use std::collections::BTreeMap;
 use anyhow::anyhow;
 use dropshot::Body;
 use dropshot::{
-    EmptyScanParams, EndpointTagPolicy, HttpError, HttpResponseAccepted,
-    HttpResponseCreated, HttpResponseDeleted, HttpResponseFound,
-    HttpResponseHeaders, HttpResponseOk, HttpResponseSeeOther,
-    HttpResponseUpdatedNoContent, PaginationParams, Path, Query,
-    RequestContext, ResultsPage, StreamingBody, TypedBody,
+    EmptyScanParams, EndpointTagPolicy, Header, HttpError,
+    HttpResponseAccepted, HttpResponseCreated, HttpResponseDeleted,
+    HttpResponseFound, HttpResponseHeaders, HttpResponseOk,
+    HttpResponseSeeOther, HttpResponseUpdatedNoContent, PaginationParams, Path,
+    Query, RequestContext, ResultsPage, StreamingBody, TypedBody,
     WebsocketChannelResult, WebsocketConnection,
 };
 use http::Response;
 use ipnetwork::IpNetwork;
 use nexus_types::{
     authn::cookies::Cookies,
-    external_api::{params, shared, views},
+    external_api::{headers, params, shared, views},
 };
 use omicron_common::api::external::{
     http_pagination::{
@@ -84,22 +84,34 @@ const PUT_UPDATE_REPOSITORY_MAX_BYTES: usize = 4 * GIB;
                 }
 
             },
+            "console-auth" = {
+                description = "API for console authentication",
+                external_docs = {
+                    url = "http://docs.oxide.computer/api/console-auth"
+                }
+            },
+            "current-user" = {
+                description = "Information pertaining to the current user.",
+                external_docs = {
+                    url = "http://docs.oxide.computer/api/current-user"
+                }
+            },
             "disks" = {
                 description = "Virtual disks are used to store instance-local data which includes the operating system.",
                 external_docs = {
                     url = "http://docs.oxide.computer/api/disks"
                 }
             },
+            "experimental" = {
+                description = "Experimental, unstable interfaces, primarily for use by Oxide personnel",
+                external_docs = {
+                    url = "http://docs.oxide.computer/api/experimental"
+                }
+            },
             "floating-ips" = {
                 description = "Floating IPs allow a project to allocate well-known IPs to instances.",
                 external_docs = {
                     url = "http://docs.oxide.computer/api/floating-ips"
-                }
-            },
-            "hidden" = {
-                description = "TODO operations that will not ship to customers",
-                external_docs = {
-                    url = "http://docs.oxide.computer/api"
                 }
             },
             "images" = {
@@ -144,12 +156,6 @@ const PUT_UPDATE_REPOSITORY_MAX_BYTES: usize = 4 * GIB;
                     url = "http://docs.oxide.computer/api/roles"
                 }
             },
-            "session" = {
-                description = "Information pertaining to the current session.",
-                external_docs = {
-                    url = "http://docs.oxide.computer/api/session"
-                }
-            },
             "silos" = {
                 description = "Silos represent a logical partition of users and resources.",
                 external_docs = {
@@ -162,16 +168,22 @@ const PUT_UPDATE_REPOSITORY_MAX_BYTES: usize = 4 * GIB;
                     url = "http://docs.oxide.computer/api/snapshots"
                 }
             },
+            "tokens" = {
+                description = "API clients use device access tokens for authentication.",
+                external_docs = {
+                    url = "http://docs.oxide.computer/api/tokens"
+                }
+            },
             "vpcs" = {
                 description = "Virtual Private Clouds (VPCs) provide isolated network environments for managing and deploying services.",
                 external_docs = {
                     url = "http://docs.oxide.computer/api/vpcs"
                 }
             },
-            "system/webhooks" = {
-                description = "Webhooks deliver notifications for audit log events and fault management alerts.",
+            "system/alerts" = {
+                description = "Alerts deliver notifications for events that occur on the Oxide rack",
                 external_docs = {
-                    url = "http://docs.oxide.computer/api/webhooks"
+                    url = "http://docs.oxide.computer/api/alerts"
                 }
             },
             "system/probes" = {
@@ -277,6 +289,27 @@ pub trait NexusExternalApi {
         rqctx: RequestContext<Self::Context>,
         new_policy: TypedBody<shared::Policy<shared::SiloRole>>,
     ) -> Result<HttpResponseOk<shared::Policy<shared::SiloRole>>, HttpError>;
+
+    /// Fetch current silo's auth settings
+    #[endpoint {
+        method = GET,
+        path = "/v1/auth-settings",
+        tags = ["silos"],
+    }]
+    async fn auth_settings_view(
+        rqctx: RequestContext<Self::Context>,
+    ) -> Result<HttpResponseOk<views::SiloAuthSettings>, HttpError>;
+
+    /// Update current silo's auth settings
+    #[endpoint {
+        method = PUT,
+        path = "/v1/auth-settings",
+        tags = ["silos"],
+    }]
+    async fn auth_settings_update(
+        rqctx: RequestContext<Self::Context>,
+        new_settings: TypedBody<params::SiloAuthSettingsUpdate>,
+    ) -> Result<HttpResponseOk<views::SiloAuthSettings>, HttpError>;
 
     /// Fetch resource utilization for user's current silo
     #[endpoint {
@@ -498,7 +531,7 @@ pub trait NexusExternalApi {
     async fn saml_identity_provider_view(
         rqctx: RequestContext<Self::Context>,
         path_params: Path<params::ProviderPath>,
-        query_params: Query<params::SiloSelector>,
+        query_params: Query<params::OptionalSiloSelector>,
     ) -> Result<HttpResponseOk<views::SamlIdentityProvider>, HttpError>;
 
     // TODO: no DELETE for identity providers?
@@ -1279,7 +1312,7 @@ pub trait NexusExternalApi {
     #[endpoint {
         method = GET,
         path = "/v1/instances/{instance}/affinity-groups",
-        tags = ["hidden"],
+        tags = ["experimental"],
     }]
     async fn instance_affinity_group_list(
         rqctx: RequestContext<Self::Context>,
@@ -1309,7 +1342,7 @@ pub trait NexusExternalApi {
     #[endpoint {
         method = GET,
         path = "/v1/affinity-groups",
-        tags = ["hidden"],
+        tags = ["experimental"],
     }]
     async fn affinity_group_list(
         rqctx: RequestContext<Self::Context>,
@@ -1320,7 +1353,7 @@ pub trait NexusExternalApi {
     #[endpoint {
         method = GET,
         path = "/v1/affinity-groups/{affinity_group}",
-        tags = ["hidden"],
+        tags = ["experimental"],
     }]
     async fn affinity_group_view(
         rqctx: RequestContext<Self::Context>,
@@ -1332,7 +1365,7 @@ pub trait NexusExternalApi {
     #[endpoint {
         method = GET,
         path = "/v1/affinity-groups/{affinity_group}/members",
-        tags = ["hidden"],
+        tags = ["experimental"],
     }]
     async fn affinity_group_member_list(
         rqctx: RequestContext<Self::Context>,
@@ -1346,7 +1379,7 @@ pub trait NexusExternalApi {
     #[endpoint {
         method = GET,
         path = "/v1/affinity-groups/{affinity_group}/members/instance/{instance}",
-        tags = ["hidden"],
+        tags = ["experimental"],
     }]
     async fn affinity_group_member_instance_view(
         rqctx: RequestContext<Self::Context>,
@@ -1358,7 +1391,7 @@ pub trait NexusExternalApi {
     #[endpoint {
         method = POST,
         path = "/v1/affinity-groups/{affinity_group}/members/instance/{instance}",
-        tags = ["hidden"],
+        tags = ["experimental"],
     }]
     async fn affinity_group_member_instance_add(
         rqctx: RequestContext<Self::Context>,
@@ -1370,7 +1403,7 @@ pub trait NexusExternalApi {
     #[endpoint {
         method = DELETE,
         path = "/v1/affinity-groups/{affinity_group}/members/instance/{instance}",
-        tags = ["hidden"],
+        tags = ["experimental"],
     }]
     async fn affinity_group_member_instance_delete(
         rqctx: RequestContext<Self::Context>,
@@ -1382,7 +1415,7 @@ pub trait NexusExternalApi {
     #[endpoint {
         method = POST,
         path = "/v1/affinity-groups",
-        tags = ["hidden"],
+        tags = ["experimental"],
     }]
     async fn affinity_group_create(
         rqctx: RequestContext<Self::Context>,
@@ -1394,7 +1427,7 @@ pub trait NexusExternalApi {
     #[endpoint {
         method = PUT,
         path = "/v1/affinity-groups/{affinity_group}",
-        tags = ["hidden"],
+        tags = ["experimental"],
     }]
     async fn affinity_group_update(
         rqctx: RequestContext<Self::Context>,
@@ -1407,7 +1440,7 @@ pub trait NexusExternalApi {
     #[endpoint {
         method = DELETE,
         path = "/v1/affinity-groups/{affinity_group}",
-        tags = ["hidden"],
+        tags = ["experimental"],
     }]
     async fn affinity_group_delete(
         rqctx: RequestContext<Self::Context>,
@@ -1669,7 +1702,7 @@ pub trait NexusExternalApi {
     async fn networking_switch_port_settings_create(
         rqctx: RequestContext<Self::Context>,
         new_settings: TypedBody<params::SwitchPortSettingsCreate>,
-    ) -> Result<HttpResponseCreated<SwitchPortSettingsView>, HttpError>;
+    ) -> Result<HttpResponseCreated<SwitchPortSettings>, HttpError>;
 
     /// Delete switch port settings
     #[endpoint {
@@ -1693,7 +1726,10 @@ pub trait NexusExternalApi {
         query_params: Query<
             PaginatedByNameOrId<params::SwitchPortSettingsSelector>,
         >,
-    ) -> Result<HttpResponseOk<ResultsPage<SwitchPortSettings>>, HttpError>;
+    ) -> Result<
+        HttpResponseOk<ResultsPage<SwitchPortSettingsIdentity>>,
+        HttpError,
+    >;
 
     /// Get information about switch port
     #[endpoint {
@@ -1704,7 +1740,7 @@ pub trait NexusExternalApi {
     async fn networking_switch_port_settings_view(
         rqctx: RequestContext<Self::Context>,
         path_params: Path<params::SwitchPortSettingsInfoSelector>,
-    ) -> Result<HttpResponseOk<SwitchPortSettingsView>, HttpError>;
+    ) -> Result<HttpResponseOk<SwitchPortSettings>, HttpError>;
 
     /// List switch ports
     #[endpoint {
@@ -1881,7 +1917,7 @@ pub trait NexusExternalApi {
     async fn networking_bgp_announce_set_update(
         rqctx: RequestContext<Self::Context>,
         config: TypedBody<params::BgpAnnounceSetCreate>,
-    ) -> Result<HttpResponseCreated<BgpAnnounceSet>, HttpError>;
+    ) -> Result<HttpResponseOk<BgpAnnounceSet>, HttpError>;
 
     /// List BGP announce sets
     #[endpoint {
@@ -2892,7 +2928,7 @@ pub trait NexusExternalApi {
     #[endpoint {
         method = POST,
         path = "/v1/timeseries/query",
-        tags = ["hidden"],
+        tags = ["experimental"],
     }]
     async fn timeseries_query(
         rqctx: RequestContext<Self::Context>,
@@ -2906,8 +2942,7 @@ pub trait NexusExternalApi {
     #[endpoint {
         method = PUT,
         path = "/v1/system/update/repository",
-        tags = ["system/update"],
-        unpublished = true,
+        tags = ["experimental"], // ["system/update"],
         request_body_max_bytes = PUT_UPDATE_REPOSITORY_MAX_BYTES,
     }]
     async fn system_update_put_repository(
@@ -2922,8 +2957,7 @@ pub trait NexusExternalApi {
     #[endpoint {
         method = GET,
         path = "/v1/system/update/repository/{system_version}",
-        tags = ["system/update"],
-        unpublished = true,
+        tags = ["experimental"], // ["system/update"],
     }]
     async fn system_update_get_repository(
         rqctx: RequestContext<Self::Context>,
@@ -2940,7 +2974,7 @@ pub trait NexusExternalApi {
     #[endpoint {
         method = GET,
         path = "/v1/system/update/target-release",
-        tags = ["hidden"], // "system/update"
+        tags = ["experimental"], // "system/update"
     }]
     async fn target_release_view(
         rqctx: RequestContext<Self::Context>,
@@ -2954,7 +2988,7 @@ pub trait NexusExternalApi {
     #[endpoint {
         method = PUT,
         path = "/v1/system/update/target-release",
-        tags = ["hidden"], // "system/update"
+        tags = ["experimental"], // "system/update"
     }]
     async fn target_release_update(
         rqctx: RequestContext<Self::Context>,
@@ -3054,7 +3088,7 @@ pub trait NexusExternalApi {
     #[endpoint {
         method = GET,
         path = "/v1/me",
-        tags = ["session"],
+        tags = ["current-user"],
     }]
     async fn current_user_view(
         rqctx: RequestContext<Self::Context>,
@@ -3064,7 +3098,7 @@ pub trait NexusExternalApi {
     #[endpoint {
         method = GET,
         path = "/v1/me/groups",
-        tags = ["session"],
+        tags = ["current-user"],
     }]
     async fn current_user_groups(
         rqctx: RequestContext<Self::Context>,
@@ -3079,7 +3113,7 @@ pub trait NexusExternalApi {
     #[endpoint {
         method = GET,
         path = "/v1/me/ssh-keys",
-        tags = ["session"],
+        tags = ["current-user"],
     }]
     async fn current_user_ssh_key_list(
         rqctx: RequestContext<Self::Context>,
@@ -3092,7 +3126,7 @@ pub trait NexusExternalApi {
     #[endpoint {
         method = POST,
         path = "/v1/me/ssh-keys",
-        tags = ["session"],
+        tags = ["current-user"],
     }]
     async fn current_user_ssh_key_create(
         rqctx: RequestContext<Self::Context>,
@@ -3105,7 +3139,7 @@ pub trait NexusExternalApi {
     #[endpoint {
         method = GET,
         path = "/v1/me/ssh-keys/{ssh_key}",
-        tags = ["session"],
+        tags = ["current-user"],
     }]
     async fn current_user_ssh_key_view(
         rqctx: RequestContext<Self::Context>,
@@ -3118,11 +3152,37 @@ pub trait NexusExternalApi {
     #[endpoint {
         method = DELETE,
         path = "/v1/me/ssh-keys/{ssh_key}",
-        tags = ["session"],
+        tags = ["current-user"],
     }]
     async fn current_user_ssh_key_delete(
         rqctx: RequestContext<Self::Context>,
         path_params: Path<params::SshKeyPath>,
+    ) -> Result<HttpResponseDeleted, HttpError>;
+
+    /// List access tokens
+    ///
+    /// List device access tokens for the currently authenticated user.
+    #[endpoint {
+        method = GET,
+        path = "/v1/me/access-tokens",
+        tags = ["tokens"],
+    }]
+    async fn current_user_access_token_list(
+        rqctx: RequestContext<Self::Context>,
+        query_params: Query<PaginatedById>,
+    ) -> Result<HttpResponseOk<ResultsPage<views::DeviceAccessToken>>, HttpError>;
+
+    /// Delete access token
+    ///
+    /// Delete a device access token for the currently authenticated user.
+    #[endpoint {
+        method = DELETE,
+        path = "/v1/me/access-tokens/{token_id}",
+        tags = ["tokens"],
+    }]
+    async fn current_user_access_token_delete(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<params::TokenPath>,
     ) -> Result<HttpResponseDeleted, HttpError>;
 
     // Support bundles (experimental)
@@ -3131,7 +3191,7 @@ pub trait NexusExternalApi {
     #[endpoint {
         method = GET,
         path = "/experimental/v1/system/support-bundles",
-        tags = ["hidden"], // system/support-bundles: only one tag is allowed
+        tags = ["experimental"], // system/support-bundles: only one tag is allowed
     }]
     async fn support_bundle_list(
         rqctx: RequestContext<Self::Context>,
@@ -3141,8 +3201,8 @@ pub trait NexusExternalApi {
     /// View a support bundle
     #[endpoint {
         method = GET,
-        path = "/experimental/v1/system/support-bundles/{support_bundle}",
-        tags = ["hidden"], // system/support-bundles: only one tag is allowed
+        path = "/experimental/v1/system/support-bundles/{bundle_id}",
+        tags = ["experimental"], // system/support-bundles: only one tag is allowed
     }]
     async fn support_bundle_view(
         rqctx: RequestContext<Self::Context>,
@@ -3152,55 +3212,60 @@ pub trait NexusExternalApi {
     /// Download the index of a support bundle
     #[endpoint {
         method = GET,
-        path = "/experimental/v1/system/support-bundles/{support_bundle}/index",
-        tags = ["hidden"], // system/support-bundles: only one tag is allowed
+        path = "/experimental/v1/system/support-bundles/{bundle_id}/index",
+        tags = ["experimental"], // system/support-bundles: only one tag is allowed
     }]
     async fn support_bundle_index(
         rqctx: RequestContext<Self::Context>,
+        headers: Header<headers::RangeRequest>,
         path_params: Path<params::SupportBundlePath>,
     ) -> Result<Response<Body>, HttpError>;
 
     /// Download the contents of a support bundle
     #[endpoint {
         method = GET,
-        path = "/experimental/v1/system/support-bundles/{support_bundle}/download",
-        tags = ["hidden"], // system/support-bundles: only one tag is allowed
+        path = "/experimental/v1/system/support-bundles/{bundle_id}/download",
+        tags = ["experimental"], // system/support-bundles: only one tag is allowed
     }]
     async fn support_bundle_download(
         rqctx: RequestContext<Self::Context>,
+        headers: Header<headers::RangeRequest>,
         path_params: Path<params::SupportBundlePath>,
     ) -> Result<Response<Body>, HttpError>;
 
     /// Download a file within a support bundle
     #[endpoint {
         method = GET,
-        path = "/experimental/v1/system/support-bundles/{support_bundle}/download/{file}",
-        tags = ["hidden"], // system/support-bundles: only one tag is allowed
+        path = "/experimental/v1/system/support-bundles/{bundle_id}/download/{file}",
+        tags = ["experimental"], // system/support-bundles: only one tag is allowed
     }]
     async fn support_bundle_download_file(
         rqctx: RequestContext<Self::Context>,
+        headers: Header<headers::RangeRequest>,
         path_params: Path<params::SupportBundleFilePath>,
     ) -> Result<Response<Body>, HttpError>;
 
     /// Download the metadata of a support bundle
     #[endpoint {
         method = HEAD,
-        path = "/experimental/v1/system/support-bundles/{support_bundle}/download",
-        tags = ["hidden"], // system/support-bundles: only one tag is allowed
+        path = "/experimental/v1/system/support-bundles/{bundle_id}/download",
+        tags = ["experimental"], // system/support-bundles: only one tag is allowed
     }]
     async fn support_bundle_head(
         rqctx: RequestContext<Self::Context>,
+        headers: Header<headers::RangeRequest>,
         path_params: Path<params::SupportBundlePath>,
     ) -> Result<Response<Body>, HttpError>;
 
     /// Download the metadata of a file within the support bundle
     #[endpoint {
         method = HEAD,
-        path = "/experimental/v1/system/support-bundles/{support_bundle}/download/{file}",
-        tags = ["hidden"], // system/support-bundles: only one tag is allowed
+        path = "/experimental/v1/system/support-bundles/{bundle_id}/download/{file}",
+        tags = ["experimental"], // system/support-bundles: only one tag is allowed
     }]
     async fn support_bundle_head_file(
         rqctx: RequestContext<Self::Context>,
+        headers: Header<headers::RangeRequest>,
         path_params: Path<params::SupportBundleFilePath>,
     ) -> Result<Response<Body>, HttpError>;
 
@@ -3208,7 +3273,7 @@ pub trait NexusExternalApi {
     #[endpoint {
         method = POST,
         path = "/experimental/v1/system/support-bundles",
-        tags = ["hidden"], // system/support-bundles: only one tag is allowed
+        tags = ["experimental"], // system/support-bundles: only one tag is allowed
     }]
     async fn support_bundle_create(
         rqctx: RequestContext<Self::Context>,
@@ -3220,8 +3285,8 @@ pub trait NexusExternalApi {
     /// collected, or to remove metadata for a support bundle that has failed.
     #[endpoint {
         method = DELETE,
-        path = "/experimental/v1/system/support-bundles/{support_bundle}",
-        tags = ["hidden"], // system/support-bundles: only one tag is allowed
+        path = "/experimental/v1/system/support-bundles/{bundle_id}",
+        tags = ["experimental"], // system/support-bundles: only one tag is allowed
     }]
     async fn support_bundle_delete(
         rqctx: RequestContext<Self::Context>,
@@ -3234,7 +3299,7 @@ pub trait NexusExternalApi {
     #[endpoint {
         method = GET,
         path = "/experimental/v1/probes",
-        tags = ["hidden"], // system/probes: only one tag is allowed
+        tags = ["experimental"], // system/probes: only one tag is allowed
     }]
     async fn probe_list(
         rqctx: RequestContext<Self::Context>,
@@ -3245,7 +3310,7 @@ pub trait NexusExternalApi {
     #[endpoint {
         method = GET,
         path = "/experimental/v1/probes/{probe}",
-        tags = ["hidden"], // system/probes: only one tag is allowed
+        tags = ["experimental"], // system/probes: only one tag is allowed
     }]
     async fn probe_view(
         rqctx: RequestContext<Self::Context>,
@@ -3257,7 +3322,7 @@ pub trait NexusExternalApi {
     #[endpoint {
         method = POST,
         path = "/experimental/v1/probes",
-        tags = ["hidden"], // system/probes: only one tag is allowed
+        tags = ["experimental"], // system/probes: only one tag is allowed
     }]
     async fn probe_create(
         rqctx: RequestContext<Self::Context>,
@@ -3269,7 +3334,7 @@ pub trait NexusExternalApi {
     #[endpoint {
         method = DELETE,
         path = "/experimental/v1/probes/{probe}",
-        tags = ["hidden"], // system/probes: only one tag is allowed
+        tags = ["experimental"], // system/probes: only one tag is allowed
     }]
     async fn probe_delete(
         rqctx: RequestContext<Self::Context>,
@@ -3350,7 +3415,7 @@ pub trait NexusExternalApi {
         // important for security that this be a POST despite the empty req body
         method = POST,
         path = "/v1/logout",
-        tags = ["hidden"],
+        tags = ["console-auth"],
     }]
     async fn logout(
         rqctx: RequestContext<Self::Context>,
@@ -3374,7 +3439,6 @@ pub trait NexusExternalApi {
     // route definitions, so we cannot use a catchall `/*` route for console pages
     // because it would overlap with the API routes definitions. So instead we have
     // to manually define more specific routes.
-
     #[endpoint {
         method = GET,
         path = "/projects/{path:.*}",
@@ -3480,7 +3544,7 @@ pub trait NexusExternalApi {
         method = POST,
         path = "/device/auth",
         content_type = "application/x-www-form-urlencoded",
-        tags = ["hidden"], // "token"
+        tags = ["console-auth"],
     }]
     async fn device_auth_request(
         rqctx: RequestContext<Self::Context>,
@@ -3520,7 +3584,7 @@ pub trait NexusExternalApi {
     #[endpoint {
         method = POST,
         path = "/device/confirm",
-        tags = ["hidden"], // "token"
+        tags = ["console-auth"],
     }]
     async fn device_auth_confirm(
         rqctx: RequestContext<Self::Context>,
@@ -3535,56 +3599,157 @@ pub trait NexusExternalApi {
         method = POST,
         path = "/device/token",
         content_type = "application/x-www-form-urlencoded",
-        tags = ["hidden"], // "token"
+        tags = ["console-auth"],
     }]
     async fn device_access_token(
         rqctx: RequestContext<Self::Context>,
         params: TypedBody<params::DeviceAccessTokenRequest>,
     ) -> Result<Response<Body>, HttpError>;
 
-    // Webhooks
+    // Alerts
 
-    /// List webhook event classes
+    /// List alert classes
     #[endpoint {
         method = GET,
-        path = "/v1/webhooks/event-classes",
-        tags = ["system/webhooks"],
+        path = "/v1/alert-classes",
+        tags = ["system/alerts"],
     }]
-    async fn webhook_event_class_list(
+    async fn alert_class_list(
         rqctx: RequestContext<Self::Context>,
         pag_params: Query<
-            PaginationParams<EmptyScanParams, params::EventClassPage>,
+            PaginationParams<EmptyScanParams, params::AlertClassPage>,
         >,
-        filter: Query<params::EventClassFilter>,
-    ) -> Result<HttpResponseOk<ResultsPage<views::EventClass>>, HttpError>;
+        filter: Query<params::AlertClassFilter>,
+    ) -> Result<HttpResponseOk<ResultsPage<views::AlertClass>>, HttpError>;
 
-    /// List webhook receivers
+    /// List alert receivers
     #[endpoint {
         method = GET,
-        path = "/v1/webhooks/receivers",
-        tags = ["system/webhooks"],
+        path = "/v1/alert-receivers",
+        tags = ["system/alerts"],
     }]
-    async fn webhook_receiver_list(
+    async fn alert_receiver_list(
         rqctx: RequestContext<Self::Context>,
         query_params: Query<PaginatedByNameOrId>,
-    ) -> Result<HttpResponseOk<ResultsPage<views::WebhookReceiver>>, HttpError>;
+    ) -> Result<HttpResponseOk<ResultsPage<views::AlertReceiver>>, HttpError>;
 
-    /// Fetch webhook receiver
+    /// Fetch alert receiver
     #[endpoint {
         method = GET,
-        path = "/v1/webhooks/receivers/{receiver}",
-        tags = ["system/webhooks"],
+        path = "/v1/alert-receivers/{receiver}",
+        tags = ["system/alerts"],
     }]
-    async fn webhook_receiver_view(
+    async fn alert_receiver_view(
         rqctx: RequestContext<Self::Context>,
-        path_params: Path<params::WebhookReceiverSelector>,
-    ) -> Result<HttpResponseOk<views::WebhookReceiver>, HttpError>;
+        path_params: Path<params::AlertReceiverSelector>,
+    ) -> Result<HttpResponseOk<views::AlertReceiver>, HttpError>;
+
+    /// Delete alert receiver
+    #[endpoint {
+        method = DELETE,
+        path = "/v1/alert-receivers/{receiver}",
+        tags = ["system/alerts"],
+    }]
+    async fn alert_receiver_delete(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<params::AlertReceiverSelector>,
+    ) -> Result<HttpResponseDeleted, HttpError>;
+
+    /// Add alert receiver subscription
+    #[endpoint {
+        method = POST,
+        path = "/v1/alert-receivers/{receiver}/subscriptions",
+        tags = ["system/alerts"],
+    }]
+    async fn alert_receiver_subscription_add(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<params::AlertReceiverSelector>,
+        params: TypedBody<params::AlertSubscriptionCreate>,
+    ) -> Result<HttpResponseCreated<views::AlertSubscriptionCreated>, HttpError>;
+
+    /// Remove alert receiver subscription
+    #[endpoint {
+        method = DELETE,
+        path = "/v1/alert-receivers/{receiver}/subscriptions/{subscription}",
+        tags = ["system/alerts"],
+    }]
+    async fn alert_receiver_subscription_remove(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<params::AlertSubscriptionSelector>,
+    ) -> Result<HttpResponseDeleted, HttpError>;
+
+    /// List delivery attempts to alert receiver
+    ///
+    /// Optional query parameters to this endpoint may be used to filter
+    /// deliveries by state. If none of the `failed`, `pending` or `delivered`
+    /// query parameters are present, all deliveries are returned. If one or
+    /// more of these parameters are provided, only those which are set to
+    /// "true" are included in the response.
+    #[endpoint {
+        method = GET,
+        path = "/v1/alert-receivers/{receiver}/deliveries",
+        tags = ["system/alerts"],
+    }]
+    async fn alert_delivery_list(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<params::AlertReceiverSelector>,
+        state_filter: Query<params::AlertDeliveryStateFilter>,
+        pagination: Query<PaginatedByTimeAndId>,
+    ) -> Result<HttpResponseOk<ResultsPage<views::AlertDelivery>>, HttpError>;
+
+    /// Send liveness probe to alert receiver
+    ///
+    /// This endpoint synchronously sends a liveness probe to the selected alert
+    /// receiver. The response message describes the outcome of the probe:
+    /// either the successful response (as appropriate), or indication of why
+    /// the probe failed.
+    ///
+    /// The result of the probe is represented as an `AlertDelivery` model.
+    /// Details relating to the status of the probe depend on the alert delivery
+    /// mechanism, and are included in the `AlertDeliveryAttempts` model. For
+    /// example, webhook receiver liveness probes include the HTTP status code
+    /// returned by the receiver endpoint.
+    ///
+    /// Note that the response status is `200 OK` as long as a probe request was
+    /// able to be sent to the receiver endpoint. If an HTTP-based receiver,
+    /// such as a webhook, responds to the another status code, including an
+    /// error, this will be indicated by the response body, *not* the status of
+    /// the response.
+    ///
+    /// The `resend` query parameter can be used to request re-delivery of
+    /// failed events if the liveness probe succeeds. If it is set to true and
+    /// the liveness probe succeeds, any alerts for which delivery to this
+    /// receiver has failed will be queued for re-delivery.
+    #[endpoint {
+        method = POST,
+        path = "/v1/alert-receivers/{receiver}/probe",
+        tags = ["system/alerts"],
+    }]
+    async fn alert_receiver_probe(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<params::AlertReceiverSelector>,
+        query_params: Query<params::AlertReceiverProbe>,
+    ) -> Result<HttpResponseOk<views::AlertProbeResult>, HttpError>;
+
+    /// Request re-delivery of alert
+    #[endpoint {
+        method = POST,
+        path = "/v1/alerts/{alert_id}/resend",
+        tags = ["system/alerts"],
+    }]
+    async fn alert_delivery_resend(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<params::AlertSelector>,
+        receiver: Query<params::AlertReceiverSelector>,
+    ) -> Result<HttpResponseCreated<views::AlertDeliveryId>, HttpError>;
+
+    // ALERTS: WEBHOOKS
 
     /// Create webhook receiver
     #[endpoint {
         method = POST,
-        path = "/v1/webhooks/receivers",
-        tags = ["system/webhooks"],
+        path = "/v1/webhook-receivers",
+        tags = ["system/alerts"],
     }]
     async fn webhook_receiver_create(
         rqctx: RequestContext<Self::Context>,
@@ -3598,141 +3763,48 @@ pub trait NexusExternalApi {
     /// to add and remove secrets.
     #[endpoint {
         method = PUT,
-        path = "/v1/webhooks/receivers/{receiver}",
-        tags = ["system/webhooks"],
+        path = "/v1/webhook-receivers/{receiver}",
+        tags = ["system/alerts"],
     }]
     async fn webhook_receiver_update(
         rqctx: RequestContext<Self::Context>,
-        path_params: Path<params::WebhookReceiverSelector>,
+        path_params: Path<params::AlertReceiverSelector>,
         params: TypedBody<params::WebhookReceiverUpdate>,
     ) -> Result<HttpResponseUpdatedNoContent, HttpError>;
-
-    /// Delete webhook receiver
-    #[endpoint {
-        method = DELETE,
-        path = "/v1/webhooks/receivers/{receiver}",
-        tags = ["system/webhooks"],
-    }]
-    async fn webhook_receiver_delete(
-        rqctx: RequestContext<Self::Context>,
-        path_params: Path<params::WebhookReceiverSelector>,
-    ) -> Result<HttpResponseDeleted, HttpError>;
-
-    /// Add webhook receiver subscription
-    #[endpoint {
-        method = POST,
-        path = "/v1/webhooks/receivers/{receiver}/subscriptions",
-        tags = ["system/webhooks"],
-    }]
-    async fn webhook_receiver_subscription_add(
-        rqctx: RequestContext<Self::Context>,
-        path_params: Path<params::WebhookReceiverSelector>,
-        params: TypedBody<params::WebhookSubscriptionCreate>,
-    ) -> Result<HttpResponseCreated<views::WebhookSubscriptionCreated>, HttpError>;
-
-    /// Remove webhook receiver subscription
-    #[endpoint {
-        method = DELETE,
-        path = "/v1/webhooks/receivers/{receiver}/subscriptions/{subscription}",
-        tags = ["system/webhooks"],
-    }]
-    async fn webhook_receiver_subscription_remove(
-        rqctx: RequestContext<Self::Context>,
-        path_params: Path<params::WebhookSubscriptionSelector>,
-    ) -> Result<HttpResponseDeleted, HttpError>;
-
-    /// Send liveness probe to webhook receiver
-    ///
-    /// This endpoint synchronously sends a liveness probe request to the
-    /// selected webhook receiver. The response message describes the outcome of
-    /// the probe request: either the response from the receiver endpoint, or an
-    /// indication of why the probe failed.
-    ///
-    /// Note that the response status is `200 OK` as long as a probe request was
-    /// able to be sent to the receiver endpoint. If the receiver responds with
-    /// another status code, including an error, this will be indicated by the
-    /// response body, *not* the status of the response.
-    ///
-    /// The `resend` query parameter can be used to request re-delivery of
-    /// failed events if the liveness probe succeeds. If it is set to true and
-    /// the webhook receiver responds to the probe request with a `2xx` status
-    /// code, any events for which delivery to this receiver has failed will be
-    /// queued for re-delivery.
-    #[endpoint {
-        method = POST,
-        path = "/v1/webhooks/receivers/{receiver}/probe",
-        tags = ["system/webhooks"],
-    }]
-    async fn webhook_receiver_probe(
-        rqctx: RequestContext<Self::Context>,
-        path_params: Path<params::WebhookReceiverSelector>,
-        query_params: Query<params::WebhookProbe>,
-    ) -> Result<HttpResponseOk<views::WebhookProbeResult>, HttpError>;
 
     /// List webhook receiver secret IDs
     #[endpoint {
         method = GET,
-        path = "/v1/webhooks/secrets",
-        tags = ["system/webhooks"],
+        path = "/v1/webhook-secrets",
+        tags = ["system/alerts"],
     }]
     async fn webhook_secrets_list(
         rqctx: RequestContext<Self::Context>,
-        query_params: Query<params::WebhookReceiverSelector>,
+        query_params: Query<params::AlertReceiverSelector>,
     ) -> Result<HttpResponseOk<views::WebhookSecrets>, HttpError>;
 
     /// Add secret to webhook receiver
     #[endpoint {
         method = POST,
-        path = "/v1/webhooks/secrets",
-        tags = ["system/webhooks"],
+        path = "/v1/webhook-secrets",
+        tags = ["system/alerts"],
     }]
     async fn webhook_secrets_add(
         rqctx: RequestContext<Self::Context>,
-        query_params: Query<params::WebhookReceiverSelector>,
+        query_params: Query<params::AlertReceiverSelector>,
         params: TypedBody<params::WebhookSecretCreate>,
-    ) -> Result<HttpResponseCreated<views::WebhookSecretId>, HttpError>;
+    ) -> Result<HttpResponseCreated<views::WebhookSecret>, HttpError>;
 
     /// Remove secret from webhook receiver
     #[endpoint {
         method = DELETE,
-        path = "/v1/webhooks/secrets/{secret_id}",
-        tags = ["system/webhooks"],
+        path = "/v1/webhook-secrets/{secret_id}",
+        tags = ["system/alerts"],
     }]
     async fn webhook_secrets_delete(
         rqctx: RequestContext<Self::Context>,
         path_params: Path<params::WebhookSecretSelector>,
     ) -> Result<HttpResponseDeleted, HttpError>;
-
-    /// List delivery attempts to webhook receiver
-    ///
-    /// Optional query parameters to this endpoint may be used to filter
-    /// deliveries by state. If none of the `failed`, `pending` or `delivered`
-    /// query parameters are present, all deliveries are returned. If one or
-    /// more of these parameters are provided, only those which are set to
-    /// "true" are included in the response.
-    #[endpoint {
-        method = GET,
-        path = "/v1/webhooks/deliveries",
-        tags = ["system/webhooks"],
-    }]
-    async fn webhook_delivery_list(
-        rqctx: RequestContext<Self::Context>,
-        receiver: Query<params::WebhookReceiverSelector>,
-        state_filter: Query<params::WebhookDeliveryStateFilter>,
-        pagination: Query<PaginatedByTimeAndId>,
-    ) -> Result<HttpResponseOk<ResultsPage<views::WebhookDelivery>>, HttpError>;
-
-    /// Request re-delivery of webhook event
-    #[endpoint {
-        method = POST,
-        path = "/v1/webhooks/deliveries/{event_id}/resend",
-        tags = ["system/webhooks"],
-    }]
-    async fn webhook_delivery_resend(
-        rqctx: RequestContext<Self::Context>,
-        path_params: Path<params::WebhookEventSelector>,
-        receiver: Query<params::WebhookReceiverSelector>,
-    ) -> Result<HttpResponseCreated<views::WebhookDeliveryId>, HttpError>;
 }
 
 /// Perform extra validations on the OpenAPI spec.
@@ -3786,7 +3858,8 @@ pub fn validate_api(spec: &OpenAPI, mut cx: ValidationContext<'_>) {
         }
 
         // Every non-hidden endpoint must have a summary
-        if op.tags.contains(&"hidden".to_string()) && op.summary.is_none() {
+        if op.tags.contains(&"console-auth".to_string()) && op.summary.is_none()
+        {
             cx.report_error(anyhow!(
                 "operation '{}' is missing a summary doc comment",
                 op.operation_id.as_ref().unwrap()

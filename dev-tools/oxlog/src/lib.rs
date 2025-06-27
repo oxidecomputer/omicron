@@ -8,7 +8,9 @@
 
 use anyhow::Context;
 use camino::{Utf8DirEntry, Utf8Path, Utf8PathBuf};
+use glob::Pattern;
 use jiff::Timestamp;
+use rayon::prelude::*;
 use std::collections::BTreeMap;
 use std::io;
 use uuid::Uuid;
@@ -347,8 +349,20 @@ impl Zones {
         }
 
         sort_logs(&mut output);
-
         output
+    }
+
+    /// Return log files for all zones whose names match `zone_pattern`
+    pub fn matching_zone_logs(
+        &self,
+        zone_pattern: &Pattern,
+        filter: Filter,
+    ) -> Vec<BTreeMap<ServiceName, SvcLogs>> {
+        self.zones
+            .par_iter()
+            .filter(|(zone, _)| zone_pattern.matches(zone))
+            .map(|(zone, _)| self.zone_logs(zone, filter))
+            .collect()
     }
 }
 

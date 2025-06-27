@@ -4,8 +4,9 @@
 
 //! Utilities for internal simulation.
 
-use std::fmt;
+use std::{fmt, hash::Hash};
 
+use indexmap::IndexMap;
 use swrite::{SWrite, swrite};
 
 pub(crate) fn join_comma_or_none<I, T: fmt::Display>(iter: I) -> String
@@ -19,5 +20,75 @@ where
             acc
         }),
         None => "(none)".to_string(),
+    }
+}
+
+/// Inserts an entry into an `IndexMap` in sorted order. Assumes that the map is
+/// sorted by `pred` already.
+///
+/// `pred` should return true for all entries that are less than the new entry,
+/// and false for all entries greater than the new entry. This function uses
+/// [`slice::partition_point`] internally; for more, see the documentation for
+/// that function. (Generally, `pred` should be of the form `|k, v| k <=
+/// to_insert`).
+///
+/// Returns an error if the key already exists in the map.
+pub(crate) fn insert_sorted_by<K, V, P>(
+    map: &mut IndexMap<K, V>,
+    key: K,
+    value: V,
+    pred: P,
+) -> Result<(), DuplicateKey<K>>
+where
+    K: Hash + Eq,
+    P: FnMut(&K, &V) -> bool,
+{
+    // It would be nice to use the entry API for this, but that API does mutable
+    // access, and doesn't permit a binary search to be run on the map. (There's
+    // `VacantEntry::insert_sorted`, but not `VacantEntry::insert_sorted_by`.)
+    if map.contains_key(&key) {
+        return Err(DuplicateKey(key));
+    }
+
+    let ix = map.partition_point(pred);
+    map.shift_insert(ix, key, value);
+
+    Ok(())
+}
+
+#[derive(Debug)]
+pub(crate) struct DuplicateKey<K>(pub(crate) K);
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_insert_sorted_by() {
+        let mut map = IndexMap::new();
+        map.insert(1, "a");
+        map.insert(2, "y");
+
+        insert_sorted_by(&mut map, 3, "x", |_, other| *other <= "x").unwrap();
+        insert_sorted_by(&mut map, 4, "t", |_, other| *other <= "t").unwrap();
+        insert_sorted_by(&mut map, 5, "b", |_, other| *other <= "b").unwrap();
+        // Compares to the same as "x", but will be inserted after 3 because of
+        // `<=`.
+        insert_sorted_by(&mut map, 6, "x", |_, other| *other <= "x").unwrap();
+        insert_sorted_by(&mut map, 7, "z", |_, other| *other <= "z").unwrap();
+
+        let v: Vec<_> = map.into_iter().collect();
+        assert_eq!(
+            &v,
+            &[
+                (1, "a"),
+                (5, "b"),
+                (4, "t"),
+                (3, "x"),
+                (6, "x"),
+                (2, "y"),
+                (7, "z"),
+            ]
+        );
     }
 }

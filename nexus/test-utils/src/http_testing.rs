@@ -247,17 +247,19 @@ impl<'a> RequestBuilder<'a> {
     }
 
     /// Tells the requst to expect headers related to range requests
-    pub fn expect_range_requestable(mut self) -> Self {
+    pub fn expect_range_requestable<V, VE>(mut self, content_type: V) -> Self
+    where
+        V: TryInto<http::header::HeaderValue, Error = VE> + Debug,
+        VE: std::error::Error + Send + Sync + 'static,
+    {
         self.allowed_headers.as_mut().unwrap().extend([
             http::header::CONTENT_LENGTH,
+            http::header::CONTENT_RANGE,
             http::header::CONTENT_TYPE,
             http::header::ACCEPT_RANGES,
         ]);
-        self.expect_response_header(
-            http::header::CONTENT_TYPE,
-            "application/zip",
-        )
-        .expect_response_header(http::header::ACCEPT_RANGES, "bytes")
+        self.expect_response_header(http::header::CONTENT_TYPE, content_type)
+            .expect_response_header(http::header::ACCEPT_RANGES, "bytes")
     }
 
     /// Tells the request to initiate and expect a WebSocket upgrade handshake.

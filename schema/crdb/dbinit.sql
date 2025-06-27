@@ -427,6 +427,10 @@ CREATE TYPE IF NOT EXISTS omicron.public.physical_disk_state AS ENUM (
 );
 
 -- A physical disk which exists inside the rack.
+--
+-- This is currently limited to U.2 disks, which are managed by the
+-- control plane. A disk may exist within inventory, but not in this row:
+-- if that's the case, it is not explicitly "managed" by Nexus.
 CREATE TABLE IF NOT EXISTS omicron.public.physical_disk (
     id UUID PRIMARY KEY,
     time_created TIMESTAMPTZ NOT NULL,
@@ -444,7 +448,15 @@ CREATE TABLE IF NOT EXISTS omicron.public.physical_disk (
     sled_id UUID NOT NULL,
 
     disk_policy omicron.public.physical_disk_policy NOT NULL,
-    disk_state omicron.public.physical_disk_state NOT NULL
+    disk_state omicron.public.physical_disk_state NOT NULL,
+
+    -- This table should be limited to U.2s, and disallow inserting
+    -- other disk kinds, unless we explicitly want them to be controlled
+    -- by Nexus.
+    --
+    -- See https://github.com/oxidecomputer/omicron/issues/8258 for additional
+    -- context.
+    CONSTRAINT physical_disk_variant_u2 CHECK (variant = 'u2')
 );
 
 -- This constraint only needs to be upheld for disks that are not deleted
@@ -592,6 +604,8 @@ CREATE INDEX IF NOT EXISTS lookup_zpool_by_disk on omicron.public.zpool (
     id
 ) WHERE physical_disk_id IS NOT NULL AND time_deleted IS NULL;
 
+-- TODO-cleanup If modifying this enum, please remove 'update'; see
+-- https://github.com/oxidecomputer/omicron/issues/8268.
 CREATE TYPE IF NOT EXISTS omicron.public.dataset_kind AS ENUM (
   'crucible',
   'cockroach',
@@ -1065,6 +1079,14 @@ WHERE
 AND
     s.time_deleted IS NULL;
 
+CREATE TABLE IF NOT EXISTS omicron.public.silo_auth_settings (
+    silo_id UUID PRIMARY KEY,
+    time_created TIMESTAMPTZ NOT NULL,
+    time_modified TIMESTAMPTZ NOT NULL,
+
+    -- null means no max: users can tokens that never expire
+    device_token_max_ttl_seconds INT8 CHECK (device_token_max_ttl_seconds > 0)
+);
 /*
  * Projects
  */
@@ -2406,7 +2428,8 @@ CREATE TABLE IF NOT EXISTS omicron.public.saga_node_event (
  * Sessions for use by web console.
  */
 CREATE TABLE IF NOT EXISTS omicron.public.console_session (
-    token STRING(40) PRIMARY KEY,
+    id UUID PRIMARY KEY,
+    token STRING(40) NOT NULL,
     time_created TIMESTAMPTZ NOT NULL,
     time_last_used TIMESTAMPTZ NOT NULL,
     silo_user_id UUID NOT NULL
@@ -2415,14 +2438,20 @@ CREATE TABLE IF NOT EXISTS omicron.public.console_session (
 -- to be used for cleaning up old tokens
 -- It's okay that this index is non-unique because we don't need to page through
 -- this list.  We'll just grab the next N, delete them, then repeat.
-CREATE INDEX IF NOT EXISTS lookup_console_by_creation ON omicron.public.console_session (
-    time_created
-);
+CREATE INDEX IF NOT EXISTS lookup_console_by_creation
+    ON omicron.public.console_session (time_created);
 
 -- This index is used to remove sessions for a user that's being deleted.
-CREATE INDEX IF NOT EXISTS lookup_console_by_silo_user ON omicron.public.console_session (
-    silo_user_id
-);
+CREATE INDEX IF NOT EXISTS lookup_console_by_silo_user
+    ON omicron.public.console_session (silo_user_id);
+
+-- We added a UUID as the primary key, but we need the token to keep acting like
+-- it did before. "When you change a primary key with ALTER PRIMARY KEY, the old
+-- primary key index becomes a secondary index." We chose to use DROP CONSTRAINT
+-- and ADD CONSTRAINT instead and manually create the index.
+-- https://www.cockroachlabs.com/docs/v22.1/primary-key#changing-primary-key-columns
+CREATE UNIQUE INDEX IF NOT EXISTS console_session_token_unique
+	ON omicron.public.console_session (token);
 
 /*******************************************************************/
 
@@ -2796,12 +2825,15 @@ CREATE TABLE IF NOT EXISTS omicron.public.device_auth_request (
     client_id UUID NOT NULL,
     device_code STRING(40) NOT NULL,
     time_created TIMESTAMPTZ NOT NULL,
-    time_expires TIMESTAMPTZ NOT NULL
+    time_expires TIMESTAMPTZ NOT NULL,
+    -- requested TTL for the token in seconds (if specified by the user)
+    token_ttl_seconds INT8 CHECK (token_ttl_seconds > 0)
 );
 
 -- Access tokens granted in response to successful device authorization flows.
 CREATE TABLE IF NOT EXISTS omicron.public.device_access_token (
-    token STRING(40) PRIMARY KEY,
+    id UUID PRIMARY KEY,
+    token STRING(40) NOT NULL,
     client_id UUID NOT NULL,
     device_code STRING(40) NOT NULL,
     silo_user_id UUID NOT NULL,
@@ -2812,14 +2844,17 @@ CREATE TABLE IF NOT EXISTS omicron.public.device_access_token (
 
 -- This UNIQUE constraint is critical for ensuring that at most
 -- one token is ever created for a given device authorization flow.
-CREATE UNIQUE INDEX IF NOT EXISTS lookup_device_access_token_by_client ON omicron.public.device_access_token (
-    client_id, device_code
-);
+CREATE UNIQUE INDEX IF NOT EXISTS lookup_device_access_token_by_client
+    ON omicron.public.device_access_token (client_id, device_code);
+
+-- We added a UUID as the primary key, but we need the token to keep acting like
+-- it did before
+CREATE UNIQUE INDEX IF NOT EXISTS device_access_token_unique
+    ON omicron.public.device_access_token (token);
 
 -- This index is used to remove tokens for a user that's being deleted.
-CREATE INDEX IF NOT EXISTS lookup_device_access_token_by_silo_user ON omicron.public.device_access_token (
-    silo_user_id
-);
+CREATE INDEX IF NOT EXISTS lookup_device_access_token_by_silo_user
+    ON omicron.public.device_access_token (silo_user_id);
 
 /*
  * Roles built into the system
@@ -3375,10 +3410,22 @@ CREATE TABLE IF NOT EXISTS omicron.public.sw_caboose (
     board TEXT NOT NULL,
     git_commit TEXT NOT NULL,
     name TEXT NOT NULL,
-    version TEXT NOT NULL
+    version TEXT NOT NULL,
+    sign TEXT -- nullable
 );
+
+/*
+ * We use a complete and a partial index to ensure uniqueness.
+ * This is necessary because the sign column is NULLable, but in SQL, NULL values
+ * are considered distinct. That means that a single complete index on all of these
+ * columns would allow duplicate rows where sign is NULL, which we don't want.
+ */
 CREATE UNIQUE INDEX IF NOT EXISTS caboose_properties
-    on omicron.public.sw_caboose (board, git_commit, name, version);
+    on omicron.public.sw_caboose (board, git_commit, name, version, sign);
+
+CREATE UNIQUE INDEX IF NOT EXISTS caboose_properties_no_sign
+    on omicron.public.sw_caboose (board, git_commit, name, version)
+    WHERE sign IS NULL;
 
 /* root of trust pages: this table assigns unique ids to distinct RoT CMPA
    and CFPA page contents, each of which is a 512-byte blob */
@@ -3557,6 +3604,18 @@ CREATE TYPE IF NOT EXISTS omicron.public.sled_role AS ENUM (
     'gimlet'
 );
 
+CREATE TYPE IF NOT EXISTS omicron.public.inv_config_reconciler_status_kind
+AS ENUM (
+    'not-yet-run',
+    'running',
+    'idle'
+);
+
+CREATE TYPE IF NOT EXISTS omicron.public.inv_zone_manifest_source AS ENUM (
+    'installinator',
+    'sled-agent'
+);
+
 -- observations from and about sled agents
 CREATE TABLE IF NOT EXISTS omicron.public.inv_sled_agent (
     -- where this observation came from
@@ -3587,8 +3646,103 @@ CREATE TABLE IF NOT EXISTS omicron.public.inv_sled_agent (
     usable_physical_ram INT8 NOT NULL,
     reservoir_size INT8 CHECK (reservoir_size < usable_physical_ram) NOT NULL,
 
-    -- The last generation of OmicronPhysicalDisksConfig seen by the sled-agent
-    omicron_physical_disks_generation INT8 NOT NULL,
+    -- Currently-ledgered `OmicronSledConfig`
+    -- (foreign key into `inv_omicron_sled_config` table)
+    -- This is optional because newly-added sleds don't yet have a config.
+    ledgered_sled_config UUID,
+
+    -- Most-recently-reconciled `OmicronSledConfig`
+    -- (foreign key into `inv_omicron_sled_config` table)
+    -- This is optional because the reconciler may not have run yet
+    last_reconciliation_sled_config UUID,
+
+    -- Columns making up the status of the config reconciler.
+    reconciler_status_kind omicron.public.inv_config_reconciler_status_kind NOT NULL,
+    -- (foreign key into `inv_omicron_sled_config` table)
+    -- only present if `reconciler_status_kind = 'running'`
+    reconciler_status_sled_config UUID,
+    -- only present if `reconciler_status_kind != 'not-yet-run'`
+    reconciler_status_timestamp TIMESTAMPTZ,
+    -- only present if `reconciler_status_kind != 'not-yet-run'`
+    reconciler_status_duration_secs FLOAT,
+
+    -- Columns making up the zone image resolver's zone manifest description:
+    --
+    -- The path to the boot disk image file.
+    zone_manifest_boot_disk_path TEXT NOT NULL,
+    -- The source of the zone manifest on the boot disk: from installinator or
+    -- sled-agent (synthetic). NULL means there is an error reading the zone manifest.
+    zone_manifest_source omicron.public.inv_zone_manifest_source,
+    -- The mupdate ID that created the zone manifest if this is from installinator. If
+    -- this is NULL, then either the zone manifest is synthetic or there was an
+    -- error reading the zone manifest.
+    zone_manifest_mupdate_id UUID,
+    -- Message describing the status of the zone manifest on the boot disk. If
+    -- this is NULL, then the zone manifest was successfully read, and the
+    -- inv_zone_manifest_zone table has entries corresponding to the zone
+    -- manifest.
+    zone_manifest_boot_disk_error TEXT,
+
+    -- Columns making up the zone image resolver's mupdate override description.
+    mupdate_override_boot_disk_path TEXT NOT NULL,
+    -- The ID of the mupdate override. NULL means either that the mupdate
+    -- override was not found or that we failed to read it -- the two cases are
+    -- differentiated by the presence of a non-NULL value in the
+    -- mupdate_override_boot_disk_error column.
+    mupdate_override_id UUID,
+    -- Error reading the mupdate override, if any. If this is NULL then
+    -- the mupdate override was either successfully read or is not
+    -- present.
+    mupdate_override_boot_disk_error TEXT,
+
+    CONSTRAINT reconciler_status_sled_config_present_if_running CHECK (
+        (reconciler_status_kind = 'running'
+            AND reconciler_status_sled_config IS NOT NULL)
+        OR
+        (reconciler_status_kind != 'running'
+            AND reconciler_status_sled_config IS NULL)
+    ),
+    CONSTRAINT reconciler_status_timing_present_unless_not_yet_run CHECK (
+        (reconciler_status_kind = 'not-yet-run'
+            AND reconciler_status_timestamp IS NULL
+            AND reconciler_status_duration_secs IS NULL)
+        OR
+        (reconciler_status_kind != 'not-yet-run'
+            AND reconciler_status_timestamp IS NOT NULL
+            AND reconciler_status_duration_secs IS NOT NULL)
+    ),
+
+    -- For the zone manifest, there are three valid states:
+    -- 1. Successfully read from installinator (has mupdate_id, no error)
+    -- 2. Synthetic from sled-agent (no mupdate_id, no error)
+    -- 3. Error reading (no mupdate_id, has error)
+    --
+    -- This is equivalent to Result<OmicronZoneManifestSource, String>.
+    CONSTRAINT zone_manifest_consistency CHECK (
+        (zone_manifest_source = 'installinator'
+            AND zone_manifest_mupdate_id IS NOT NULL
+            AND zone_manifest_boot_disk_error IS NULL)
+        OR (zone_manifest_source = 'sled-agent'
+            AND zone_manifest_mupdate_id IS NULL
+            AND zone_manifest_boot_disk_error IS NULL)
+        OR (
+            zone_manifest_source IS NULL
+            AND zone_manifest_mupdate_id IS NULL
+            AND zone_manifest_boot_disk_error IS NOT NULL
+        )
+    ),
+
+    -- For the mupdate override, three states are valid:
+    -- 1. No override, no error
+    -- 2. Override, no error
+    -- 3. No override, error
+    --
+    -- This is equivalent to Result<Option<T>, String>.
+    CONSTRAINT mupdate_override_consistency CHECK (
+        (mupdate_override_id IS NULL
+            AND mupdate_override_boot_disk_error IS NOT NULL)
+        OR mupdate_override_boot_disk_error IS NULL
+    ),
 
     PRIMARY KEY (inv_collection_id, sled_id)
 );
@@ -3674,7 +3828,7 @@ CREATE TABLE IF NOT EXISTS omicron.public.inv_dataset (
     inv_collection_id UUID NOT NULL,
     sled_id UUID NOT NULL,
 
-    -- The control plane ID of the zpool.
+    -- The control plane ID of the dataset.
     -- This is nullable because datasets have been historically
     -- self-managed by the Sled Agent, and some don't have explicit UUIDs.
     id UUID,
@@ -3693,25 +3847,196 @@ CREATE TABLE IF NOT EXISTS omicron.public.inv_dataset (
     PRIMARY KEY (inv_collection_id, sled_id, name)
 );
 
--- TODO: This table is vestigial and can be combined with `inv_sled_agent`. See
--- https://github.com/oxidecomputer/omicron/issues/6770.
-CREATE TABLE IF NOT EXISTS omicron.public.inv_sled_omicron_zones (
+CREATE TABLE IF NOT EXISTS omicron.public.inv_omicron_sled_config (
     -- where this observation came from
     -- (foreign key into `inv_collection` table)
     inv_collection_id UUID NOT NULL,
-    -- when this observation was made
-    time_collected TIMESTAMPTZ NOT NULL,
-    -- URL of the sled agent that reported this data
-    source TEXT NOT NULL,
+
+    -- ID of this sled config. A given inventory report from a sled agent may
+    -- contain 0-3 sled configs, so we generate these IDs on insertion and
+    -- record them as the foreign keys in `inv_sled_agent`.
+    id UUID NOT NULL,
+
+    -- config generation
+    generation INT8 NOT NULL,
+
+    -- remove mupdate override ID, if set
+    remove_mupdate_override UUID,
+
+    PRIMARY KEY (inv_collection_id, id)
+);
+
+CREATE TABLE IF NOT EXISTS omicron.public.inv_last_reconciliation_disk_result (
+    -- where this observation came from
+    -- (foreign key into `inv_collection` table)
+    inv_collection_id UUID NOT NULL,
 
     -- unique id for this sled (should be foreign keys into `sled` table, though
     -- it's conceivable a sled will report an id that we don't know about)
     sled_id UUID NOT NULL,
 
-    -- OmicronZonesConfig generation reporting these zones
-    generation INT8 NOT NULL,
+    -- unique id for this physical disk
+    disk_id UUID NOT NULL,
 
-    PRIMARY KEY (inv_collection_id, sled_id)
+    -- error message; if NULL, an "ok" result
+    error_message TEXT,
+
+    PRIMARY KEY (inv_collection_id, sled_id, disk_id)
+);
+
+CREATE TABLE IF NOT EXISTS omicron.public.inv_last_reconciliation_dataset_result (
+    -- where this observation came from
+    -- (foreign key into `inv_collection` table)
+    inv_collection_id UUID NOT NULL,
+
+    -- unique id for this sled (should be foreign keys into `sled` table, though
+    -- it's conceivable a sled will report an id that we don't know about)
+    sled_id UUID NOT NULL,
+
+    -- unique id for this dataset
+    dataset_id UUID NOT NULL,
+
+    -- error message; if NULL, an "ok" result
+    error_message TEXT,
+
+    PRIMARY KEY (inv_collection_id, sled_id, dataset_id)
+);
+
+CREATE TABLE IF NOT EXISTS omicron.public.inv_last_reconciliation_orphaned_dataset (
+    -- where this observation came from
+    -- (foreign key into `inv_collection` table)
+    inv_collection_id UUID NOT NULL,
+
+    -- unique id for this sled (should be foreign keys into `sled` table, though
+    -- it's conceivable a sled will report an id that we don't know about)
+    sled_id UUID NOT NULL,
+
+    -- These three columns compose a `DatasetName`. Other tables that store a
+    -- `DatasetName` use a nullable `zone_name` (since it's only supposed to be
+    -- set for datasets with `kind = 'zone'`). This table instead uses the empty
+    -- string for non-'zone' kinds, which allows the column to be NOT NULL and
+    -- hence be a member of our primary key. (We have no other unique ID to
+    -- distinguish different `DatasetName`s.)
+    pool_id UUID NOT NULL,
+    kind omicron.public.dataset_kind NOT NULL,
+    zone_name TEXT NOT NULL,
+    CONSTRAINT zone_name_for_zone_kind CHECK (
+      (kind != 'zone' AND zone_name = '') OR
+      (kind = 'zone' AND zone_name != '')
+    ),
+
+    reason TEXT NOT NULL,
+
+    -- The control plane ID of the dataset.
+    -- This is nullable because this is attached as the `oxide:uuid` property in
+    -- ZFS, and we can't guarantee it exists for any given dataset.
+    id UUID,
+
+    -- Properties of the dataset at the time we detected it was an orphan.
+    mounted BOOL NOT NULL,
+    available INT8 NOT NULL,
+    used INT8 NOT NULL,
+
+    PRIMARY KEY (inv_collection_id, sled_id, pool_id, kind, zone_name)
+);
+
+CREATE TABLE IF NOT EXISTS omicron.public.inv_last_reconciliation_zone_result (
+    -- where this observation came from
+    -- (foreign key into `inv_collection` table)
+    inv_collection_id UUID NOT NULL,
+
+    -- unique id for this sled (should be foreign keys into `sled` table, though
+    -- it's conceivable a sled will report an id that we don't know about)
+    sled_id UUID NOT NULL,
+
+    -- unique id for this zone
+    zone_id UUID NOT NULL,
+
+    -- error message; if NULL, an "ok" result
+    error_message TEXT,
+
+    PRIMARY KEY (inv_collection_id, sled_id, zone_id)
+);
+
+-- A table describing a single zone within a zone manifest collected by inventory.
+CREATE TABLE IF NOT EXISTS omicron.public.inv_zone_manifest_zone (
+    -- where this observation came from
+    -- (foreign key into `inv_collection` table)
+    inv_collection_id UUID NOT NULL,
+
+    -- unique id for this sled (should be foreign keys into `sled` table, though
+    -- it's conceivable a sled will report an id that we don't know about)
+    sled_id UUID NOT NULL,
+
+    -- Zone file name, part of the primary key within this table.
+    zone_file_name TEXT NOT NULL,
+
+    -- The full path to the file.
+    path TEXT NOT NULL,
+
+    -- The expected file size.
+    expected_size INT8 NOT NULL,
+
+    -- The expected hash.
+    expected_sha256 STRING(64) NOT NULL,
+
+    -- The error while reading the zone or matching it to the manifest, if any.
+    -- NULL indicates success.
+    error TEXT,
+
+    PRIMARY KEY (inv_collection_id, sled_id, zone_file_name)
+);
+
+-- A table describing status for a single zone manifest on a non-boot disk
+-- collected by inventory.
+CREATE TABLE IF NOT EXISTS omicron.public.inv_zone_manifest_non_boot (
+    -- where this observation came from
+    -- (foreign key into `inv_collection` table)
+    inv_collection_id UUID NOT NULL,
+
+    -- unique id for this sled (should be foreign keys into `sled` table, though
+    -- it's conceivable a sled will report an id that we don't know about)
+    sled_id UUID NOT NULL,
+
+    -- unique ID for this non-boot disk
+    non_boot_zpool_id UUID NOT NULL,
+
+    -- The full path to the zone manifest.
+    path TEXT NOT NULL,
+
+    -- Whether the non-boot disk is in a valid state.
+    is_valid BOOLEAN NOT NULL,
+
+    -- A message attached to this disk.
+    message TEXT NOT NULL,
+
+    PRIMARY KEY (inv_collection_id, sled_id, non_boot_zpool_id)
+);
+
+-- A table describing status for a single mupdate override on a non-boot disk
+-- collected by inventory.
+CREATE TABLE IF NOT EXISTS omicron.public.inv_mupdate_override_non_boot (
+    -- where this observation came from
+    -- (foreign key into `inv_collection` table)
+    inv_collection_id UUID NOT NULL,
+
+    -- unique id for this sled (should be foreign keys into `sled` table, though
+    -- it's conceivable a sled will report an id that we don't know about)
+    sled_id UUID NOT NULL,
+
+    -- unique id for this non-boot disk
+    non_boot_zpool_id UUID NOT NULL,
+
+    -- The full path to the mupdate override file.
+    path TEXT NOT NULL,
+
+    -- Whether the non-boot disk is in a valid state.
+    is_valid BOOLEAN NOT NULL,
+
+    -- A message attached to this disk.
+    message TEXT NOT NULL,
+
+    PRIMARY KEY (inv_collection_id, sled_id, non_boot_zpool_id)
 );
 
 CREATE TYPE IF NOT EXISTS omicron.public.zone_type AS ENUM (
@@ -3729,15 +4054,18 @@ CREATE TYPE IF NOT EXISTS omicron.public.zone_type AS ENUM (
   'oximeter'
 );
 
--- observations from sled agents about Omicron-managed zones
-CREATE TABLE IF NOT EXISTS omicron.public.inv_omicron_zone (
+CREATE TYPE IF NOT EXISTS omicron.public.inv_zone_image_source AS ENUM (
+    'install_dataset',
+    'artifact'
+);
+
+-- `zones` portion of an `OmicronSledConfig` observed from sled-agent
+CREATE TABLE IF NOT EXISTS omicron.public.inv_omicron_sled_config_zone (
     -- where this observation came from
-    -- (foreign key into `inv_collection` table)
     inv_collection_id UUID NOT NULL,
 
-    -- unique id for this sled (should be foreign keys into `sled` table, though
-    -- it's conceivable a sled will report an id that we don't know about)
-    sled_id UUID NOT NULL,
+    -- (foreign key into `inv_omicron_sled_config` table)
+    sled_config_id UUID NOT NULL,
 
     -- unique id for this zone
     id UUID NOT NULL,
@@ -3769,7 +4097,7 @@ CREATE TABLE IF NOT EXISTS omicron.public.inv_omicron_zone (
     dataset_zpool_name TEXT,
 
     -- Zones with external IPs have an associated NIC and sockaddr for listening
-    -- (first is a foreign key into `inv_omicron_zone_nic`)
+    -- (first is a foreign key into `inv_omicron_sled_config_zone_nic`)
     nic_id UUID,
 
     -- Properties for internal DNS servers
@@ -3798,14 +4126,34 @@ CREATE TABLE IF NOT EXISTS omicron.public.inv_omicron_zone (
     -- Eventually, that nullability should be removed.
     filesystem_pool UUID,
 
-    PRIMARY KEY (inv_collection_id, id)
+    -- zone image source
+    image_source omicron.public.inv_zone_image_source NOT NULL,
+    image_artifact_sha256 STRING(64),
+
+    CONSTRAINT zone_image_source_artifact_hash_present CHECK (
+        (image_source = 'artifact'
+            AND image_artifact_sha256 IS NOT NULL)
+        OR
+        (image_source != 'artifact'
+            AND image_artifact_sha256 IS NULL)
+    ),
+
+    PRIMARY KEY (inv_collection_id, sled_config_id, id)
 );
 
-CREATE INDEX IF NOT EXISTS inv_omicron_zone_nic_id ON omicron.public.inv_omicron_zone
-    (nic_id) STORING (sled_id, primary_service_ip, second_service_ip, snat_ip);
+CREATE INDEX IF NOT EXISTS inv_omicron_sled_config_zone_nic_id
+    ON omicron.public.inv_omicron_sled_config_zone (nic_id)
+    STORING (
+        primary_service_ip,
+        second_service_ip,
+        snat_ip
+    );
 
-CREATE TABLE IF NOT EXISTS omicron.public.inv_omicron_zone_nic (
+CREATE TABLE IF NOT EXISTS omicron.public.inv_omicron_sled_config_zone_nic (
+    -- where this observation came from
     inv_collection_id UUID NOT NULL,
+
+    sled_config_id UUID NOT NULL,
     id UUID NOT NULL,
     name TEXT NOT NULL,
     ip INET NOT NULL,
@@ -3815,7 +4163,49 @@ CREATE TABLE IF NOT EXISTS omicron.public.inv_omicron_zone_nic (
     is_primary BOOLEAN NOT NULL,
     slot INT2 NOT NULL,
 
-    PRIMARY KEY (inv_collection_id, id)
+    PRIMARY KEY (inv_collection_id, sled_config_id, id)
+);
+
+CREATE TABLE IF NOT EXISTS omicron.public.inv_omicron_sled_config_dataset (
+    -- where this observation came from
+    inv_collection_id UUID NOT NULL,
+
+    -- foreign key into the `inv_omicron_sled_config` table
+    sled_config_id UUID NOT NULL,
+    id UUID NOT NULL,
+
+    pool_id UUID NOT NULL,
+    kind omicron.public.dataset_kind NOT NULL,
+    -- Only valid if kind = zone
+    zone_name TEXT,
+
+    quota INT8,
+    reservation INT8,
+    compression TEXT NOT NULL,
+
+    CONSTRAINT zone_name_for_zone_kind CHECK (
+      (kind != 'zone') OR
+      (kind = 'zone' AND zone_name IS NOT NULL)
+    ),
+
+    PRIMARY KEY (inv_collection_id, sled_config_id, id)
+);
+
+CREATE TABLE IF NOT EXISTS omicron.public.inv_omicron_sled_config_disk (
+    -- where this observation came from
+    inv_collection_id UUID NOT NULL,
+
+    -- foreign key into the `inv_omicron_sled_config` table
+    sled_config_id UUID NOT NULL,
+    id UUID NOT NULL,
+
+    vendor TEXT NOT NULL,
+    serial TEXT NOT NULL,
+    model TEXT NOT NULL,
+
+    pool_id UUID NOT NULL,
+
+    PRIMARY KEY (inv_collection_id, sled_config_id, id)
 );
 
 CREATE TABLE IF NOT EXISTS omicron.public.inv_clickhouse_keeper_membership (
@@ -3825,6 +4215,26 @@ CREATE TABLE IF NOT EXISTS omicron.public.inv_clickhouse_keeper_membership (
     raft_config INT8[] NOT NULL,
 
     PRIMARY KEY (inv_collection_id, queried_keeper_id)
+);
+
+/*
+ * Various runtime configuration switches for reconfigurator
+ *
+ * Each configuration option is a single column in a row, and the whole row
+ * of configurations is updated atomically. The latest `version` is the active
+ * configuration.
+ *
+ * See https://github.com/oxidecomputer/omicron/issues/8253 for more details.
+ */
+CREATE TABLE IF NOT EXISTS omicron.public.reconfigurator_chicken_switches (
+    -- Monotonically increasing version for all bp_targets
+    version INT8 PRIMARY KEY,
+
+    -- Enable the planner background task
+    planner_enabled BOOL NOT NULL DEFAULT FALSE,
+
+    -- The time at which the configuration for a version was set
+    time_modified TIMESTAMPTZ NOT NULL
 );
 
 /*
@@ -3904,7 +4314,23 @@ CREATE TABLE IF NOT EXISTS omicron.public.blueprint (
     -- represented by the presence of the default value in that field.
     --
     -- `cluster.preserve_downgrade_option`
-    cockroachdb_setting_preserve_downgrade TEXT
+    cockroachdb_setting_preserve_downgrade TEXT,
+
+    -- The smallest value of the target_release table's generation field that's
+    -- accepted by the blueprint.
+    --
+    -- For example, let's say that the current target release generation is 5.
+    -- Then, when reconfigurator detects a MUPdate:
+    --
+    -- * the target release is ignored in favor of the install dataset
+    -- * this field is set to 6
+    --
+    -- Once an operator sets a new target release, its generation will be 6 or
+    -- higher. Reconfigurator will then know that it is back in charge of
+    -- driving the system to the target release.
+    --
+    -- This is set to 1 by default in application code.
+    target_release_minimum_generation INT8 NOT NULL
 );
 
 -- table describing both the current and historical target blueprints of the
@@ -3939,6 +4365,8 @@ CREATE TABLE IF NOT EXISTS omicron.public.bp_sled_metadata (
     sled_id UUID NOT NULL,
     sled_state omicron.public.sled_state NOT NULL,
     sled_agent_generation INT8 NOT NULL,
+    -- NULL means do not remove any overrides
+    remove_mupdate_override UUID,
     PRIMARY KEY (blueprint_id, sled_id)
 );
 
@@ -4019,11 +4447,6 @@ CREATE TYPE IF NOT EXISTS omicron.public.bp_zone_image_source AS ENUM (
 );
 
 -- description of omicron zones specified in a blueprint
---
--- This is currently identical to `inv_omicron_zone`, except that the foreign
--- keys reference other blueprint tables intead of inventory tables. We expect
--- their sameness to diverge over time as either inventory or blueprints (or
--- both) grow context-specific properties.
 CREATE TABLE IF NOT EXISTS omicron.public.bp_omicron_zone (
     -- foreign key into the `blueprint` table
     blueprint_id UUID NOT NULL,
@@ -5116,15 +5539,15 @@ CREATE UNIQUE INDEX IF NOT EXISTS one_record_per_volume_resource_usage on omicro
 );
 
 /*
- * WEBHOOKS
+ * Alerts
  */
 
 
 /*
- * Webhook receivers, receiver secrets, and receiver subscriptions.
+ * Alert webhook receivers, receiver secrets, and receiver subscriptions.
  */
 
-CREATE TABLE IF NOT EXISTS omicron.public.webhook_receiver (
+CREATE TABLE IF NOT EXISTS omicron.public.alert_receiver (
     /* Identity metadata (resource) */
     id UUID PRIMARY KEY,
     name STRING(63) NOT NULL,
@@ -5143,13 +5566,13 @@ CREATE TABLE IF NOT EXISTS omicron.public.webhook_receiver (
     endpoint STRING(512) NOT NULL
 );
 
-CREATE UNIQUE INDEX IF NOT EXISTS lookup_webhook_rx_by_id
-ON omicron.public.webhook_receiver (id)
+CREATE UNIQUE INDEX IF NOT EXISTS lookup_alert_rx_by_id
+ON omicron.public.alert_receiver (id)
 WHERE
     time_deleted IS NULL;
 
-CREATE UNIQUE INDEX IF NOT EXISTS lookup_webhook_rx_by_name
-ON omicron.public.webhook_receiver (
+CREATE UNIQUE INDEX IF NOT EXISTS lookup_alert_rx_by_name
+ON omicron.public.alert_receiver (
     name
 ) WHERE
     time_deleted IS NULL;
@@ -5175,11 +5598,11 @@ ON omicron.public.webhook_secret (
 ) WHERE
     time_deleted IS NULL;
 
--- Webhook event classes.
+-- Alert classes.
 --
--- When creating new event classes, be sure to add them here!
-CREATE TYPE IF NOT EXISTS omicron.public.webhook_event_class AS ENUM (
-    -- Liveness probes, which are technically not real events, but, you know...
+-- When creating new alert classes, be sure to add them here!
+CREATE TYPE IF NOT EXISTS omicron.public.alert_class AS ENUM (
+    -- Liveness probes, which are technically not real alerts, but, you know...
     'probe',
     -- Test classes used to test globbing.
     --
@@ -5189,21 +5612,21 @@ CREATE TYPE IF NOT EXISTS omicron.public.webhook_event_class AS ENUM (
     'test.foo.baz',
     'test.quux.bar',
     'test.quux.bar.baz'
-    -- Add new event classes here!
+    -- Add new alert classes here!
 );
 
--- The set of event class filters (either event class names or event class glob
--- patterns) associated with a webhook receiver.
+-- The set of alert class filters (either alert class names or alert class glob
+-- patterns) associated with a alert receiver.
 --
--- This is used when creating entries in the webhook_rx_subscription table to
--- indicate that a webhook receiver is interested in a given event class.
-CREATE TABLE IF NOT EXISTS omicron.public.webhook_rx_event_glob (
-    -- UUID of the webhook receiver (foreign key into
-    -- `omicron.public.webhook_rx`)
+-- This is used when creating entries in the alert_subscription table to
+-- indicate that a alert receiver is interested in a given event class.
+CREATE TABLE IF NOT EXISTS omicron.public.alert_glob (
+    -- UUID of the alert receiver (foreign key into
+    -- `omicron.public.alert_receiver`)
     rx_id UUID NOT NULL,
     -- An event class glob to which this receiver is subscribed.
     glob STRING(512) NOT NULL,
-    -- Regex used when evaluating this filter against concrete event classes.
+    -- Regex used when evaluating this filter against concrete alert classes.
     regex STRING(512) NOT NULL,
     time_created TIMESTAMPTZ NOT NULL,
     -- The database schema version at which this glob was last expanded.
@@ -5218,21 +5641,21 @@ CREATE TABLE IF NOT EXISTS omicron.public.webhook_rx_event_glob (
     PRIMARY KEY (rx_id, glob)
 );
 
--- Look up all event class globs for a webhook receiver.
-CREATE INDEX IF NOT EXISTS lookup_webhook_event_globs_for_rx
-ON omicron.public.webhook_rx_event_glob (
+-- Look up all event class globs for an alert receiver.
+CREATE INDEX IF NOT EXISTS lookup_alert_globs_for_rx
+ON omicron.public.alert_glob (
     rx_id
 );
 
-CREATE INDEX IF NOT EXISTS lookup_webhook_event_globs_by_schema_version
-ON omicron.public.webhook_rx_event_glob (schema_version);
+CREATE INDEX IF NOT EXISTS lookup_alert_globs_by_schema_version
+ON omicron.public.alert_glob (schema_version);
 
-CREATE TABLE IF NOT EXISTS omicron.public.webhook_rx_subscription (
-    -- UUID of the webhook receiver (foreign key into
-    -- `omicron.public.webhook_rx`)
+CREATE TABLE IF NOT EXISTS omicron.public.alert_subscription (
+    -- UUID of the alert receiver (foreign key into
+    -- `omicron.public.alert_receiver`)
     rx_id UUID NOT NULL,
-    -- An event class to which the receiver is subscribed.
-    event_class omicron.public.webhook_event_class NOT NULL,
+    -- An alert class to which the receiver is subscribed.
+    alert_class omicron.public.alert_class NOT NULL,
     -- If this subscription is a concrete instantiation of a glob pattern, the
     -- value of the glob that created it (and, a foreign key into
     -- `webhook_rx_event_glob`). If the receiver is subscribed to this exact
@@ -5245,14 +5668,14 @@ CREATE TABLE IF NOT EXISTS omicron.public.webhook_rx_subscription (
 
     time_created TIMESTAMPTZ NOT NULL,
 
-    PRIMARY KEY (rx_id, event_class)
+    PRIMARY KEY (rx_id, alert_class)
 );
 
--- Look up all webhook receivers subscribed to an event class. This is used by
+-- Look up all receivers subscribed to an alert class. This is used by
 -- the dispatcher to determine who is interested in a particular event.
-CREATE INDEX IF NOT EXISTS lookup_webhook_rxs_for_event_class
-ON omicron.public.webhook_rx_subscription (
-    event_class
+CREATE INDEX IF NOT EXISTS lookup_alert_rxs_for_class
+ON omicron.public.alert_subscription (
+    alert_class
 );
 
 -- Look up all exact event class subscriptions for a receiver.
@@ -5260,28 +5683,28 @@ ON omicron.public.webhook_rx_subscription (
 -- This is used when generating a view of all user-provided original
 -- subscriptions provided for a receiver. That list is generated by looking up
 -- all exact event class subscriptions for the receiver ID in this table,
--- combined with the list of all globs in the `webhook_rx_event_glob` table.
-CREATE INDEX IF NOT EXISTS lookup_exact_subscriptions_for_webhook_rx
-on omicron.public.webhook_rx_subscription (
+-- combined with the list of all globs in the `alert_glob` table.
+CREATE INDEX IF NOT EXISTS lookup_exact_subscriptions_for_alert_rx
+on omicron.public.alert_subscription (
     rx_id
 ) WHERE glob IS NULL;
 
 /*
- * Webhook event message queue.
+ * Alert message queue.
  */
 
-CREATE TABLE IF NOT EXISTS omicron.public.webhook_event (
+CREATE TABLE IF NOT EXISTS omicron.public.alert (
     id UUID PRIMARY KEY,
     time_created TIMESTAMPTZ NOT NULL,
     time_modified TIMESTAMPTZ NOT NULL,
-    -- The class of event that this is.
-    event_class omicron.public.webhook_event_class NOT NULL,
-    -- Actual event data. The structure of this depends on the event class.
-    event JSONB NOT NULL,
+    -- The class of alert that this is.
+    alert_class omicron.public.alert_class NOT NULL,
+    -- Actual alert data. The structure of this depends on the alert class.
+    payload JSONB NOT NULL,
 
-    -- Set when dispatch entries have been created for this event.
+    -- Set when dispatch entries have been created for this alert.
     time_dispatched TIMESTAMPTZ,
-    -- The number of receivers that this event was dispatched to.
+    -- The number of receivers that this alart was dispatched to.
     num_dispatched INT8 NOT NULL,
 
     CONSTRAINT time_dispatched_set_if_dispatched CHECK (
@@ -5293,23 +5716,23 @@ CREATE TABLE IF NOT EXISTS omicron.public.webhook_event (
     )
 );
 
--- Singleton probe event
-INSERT INTO omicron.public.webhook_event (
+-- Singleton probe alert
+INSERT INTO omicron.public.alert (
     id,
     time_created,
     time_modified,
-    event_class,
-    event,
+    alert_class,
+    payload,
     time_dispatched,
     num_dispatched
 ) VALUES (
-    -- NOTE: this UUID is duplicated in nexus_db_model::webhook_event.
+    -- NOTE: this UUID is duplicated in nexus_db_model::alert.
     '001de000-7768-4000-8000-000000000001',
     NOW(),
     NOW(),
     'probe',
     '{}',
-    -- Pretend to be dispatched so we won't show up in "list events needing
+    -- Pretend to be dispatched so we won't show up in "list alerts needing
     -- dispatch" queries
     NOW(),
     0
@@ -5318,29 +5741,28 @@ INSERT INTO omicron.public.webhook_event (
 -- Look up webhook events in need of dispatching.
 --
 -- This is used by the message dispatcher when looking for events to dispatch.
-CREATE INDEX IF NOT EXISTS lookup_undispatched_webhook_events
-ON omicron.public.webhook_event (
+CREATE INDEX IF NOT EXISTS lookup_undispatched_alerts
+ON omicron.public.alert (
     id, time_created
 ) WHERE time_dispatched IS NULL;
 
 
 /*
- * Webhook message dispatching and delivery attempts.
+ * Alert message dispatching and delivery attempts.
  */
 
--- Describes why a webhook delivery was triggered
-CREATE TYPE IF NOT EXISTS omicron.public.webhook_delivery_trigger AS ENUM (
-    --  This delivery was triggered by the event being dispatched.
-    'event',
-    -- This delivery was triggered by an explicit call to the webhook event
-    -- resend API.
+-- Describes why an alert delivery was triggered
+CREATE TYPE IF NOT EXISTS omicron.public.alert_delivery_trigger AS ENUM (
+    --  This delivery was triggered by the alert being dispatched.
+    'alert',
+    -- This delivery was triggered by an explicit call to the alert resend API.
     'resend',
     --- This delivery is a liveness probe.
     'probe'
 );
 
--- Describes the state of a webhook delivery
-CREATE TYPE IF NOT EXISTS omicron.public.webhook_delivery_state AS ENUM (
+-- Describes the state of an alert delivery
+CREATE TYPE IF NOT EXISTS omicron.public.alert_delivery_state AS ENUM (
     --  This delivery has not yet completed.
     'pending',
     -- This delivery has failed.
@@ -5349,16 +5771,17 @@ CREATE TYPE IF NOT EXISTS omicron.public.webhook_delivery_state AS ENUM (
     'delivered'
 );
 
+-- Delivery dispatch table for webhook receivers.
 CREATE TABLE IF NOT EXISTS omicron.public.webhook_delivery (
     -- UUID of this delivery.
     id UUID PRIMARY KEY,
-    --- UUID of the event (foreign key into `omicron.public.webhook_event`).
-    event_id UUID NOT NULL,
+    --- UUID of the alert (foreign key into `omicron.public.alert`).
+    alert_id UUID NOT NULL,
     -- UUID of the webhook receiver (foreign key into
-    -- `omicron.public.webhook_rx`)
+    -- `omicron.public.alert_receiver`)
     rx_id UUID NOT NULL,
 
-    triggered_by omicron.public.webhook_delivery_trigger NOT NULL,
+    triggered_by omicron.public.alert_delivery_trigger NOT NULL,
 
     --- Delivery attempt count. Starts at 0.
     attempts INT2 NOT NULL,
@@ -5368,7 +5791,7 @@ CREATE TABLE IF NOT EXISTS omicron.public.webhook_delivery (
     -- successfully, or is considered permanently failed.
     time_completed TIMESTAMPTZ,
 
-    state omicron.public.webhook_delivery_state NOT NULL,
+    state omicron.public.alert_delivery_state NOT NULL,
 
     -- Deliverator coordination bits
     deliverator_id UUID,
@@ -5387,26 +5810,26 @@ CREATE TABLE IF NOT EXISTS omicron.public.webhook_delivery (
 );
 
 -- Ensure that initial delivery attempts (nexus-dispatched) are unique to avoid
--- duplicate work when an event is dispatched. For deliveries created by calls
+-- duplicate work when an alert is dispatched. For deliveries created by calls
 -- to the webhook event resend API, we don't enforce this constraint, to allow
 -- re-delivery to be triggered multiple times.
 CREATE UNIQUE INDEX IF NOT EXISTS one_webhook_event_dispatch_per_rx
 ON omicron.public.webhook_delivery (
-    event_id, rx_id
+    alert_id, rx_id
 )
 WHERE
-    triggered_by = 'event';
+    triggered_by = 'alert';
 
 -- Index for looking up all webhook messages dispatched to a receiver ID
 CREATE INDEX IF NOT EXISTS lookup_webhook_delivery_dispatched_to_rx
 ON omicron.public.webhook_delivery (
-    rx_id, event_id
+    rx_id, alert_id
 );
 
--- Index for looking up all delivery attempts for an event
-CREATE INDEX IF NOT EXISTS lookup_webhook_deliveries_for_event
+-- Index for looking up all delivery attempts for an alert
+CREATE INDEX IF NOT EXISTS lookup_webhook_deliveries_for_alert
 ON omicron.public.webhook_delivery (
-    event_id
+    alert_id
 );
 
 -- Index for looking up all currently in-flight webhook messages, and ordering
@@ -5504,6 +5927,174 @@ CREATE TABLE IF NOT EXISTS omicron.public.setting (
 );
 
 /*
+ * Ereports
+ *
+ * See RFD 520 for details:
+ * https://rfd.shared.oxide.computer/rfd/520
+ */
+
+/* Ereports from service processors */
+CREATE TABLE IF NOT EXISTS omicron.public.sp_ereport (
+    /*
+     * the primary key for an ereport is formed from the tuple of the
+     * reporter's restart ID (a randomly generated UUID) and the ereport's ENA
+     * (a 64-bit integer that uniquely identifies the ereport within that
+     * restart of the reporter).
+     *
+     * see: https://rfd.shared.oxide.computer/rfd/520#ereport-metadata
+     */
+    restart_id UUID NOT NULL,
+    ena INT8 NOT NULL,
+    time_deleted TIMESTAMPTZ,
+
+    /* time at which the ereport was collected */
+    time_collected TIMESTAMPTZ NOT NULL,
+    /* UUID of the Nexus instance that collected the ereport */
+    collector_id UUID NOT NULL,
+
+    /*
+     * physical location of the reporting SP
+     *
+     * these fields are always present, as they are how requests to collect
+     * ereports are indexed by MGS.
+     */
+    sp_type omicron.public.sp_type NOT NULL,
+    sp_slot INT4 NOT NULL,
+
+    /*
+     * VPD identity of the reporting SP.
+     *
+     * unlike the physical location, these fields are nullable, as an ereport
+     * may be generated in a state where the SP doesn't know who or what it is.
+     * consider that "i don't know my own identity" is a reasonable condition
+     * to want to generate an ereport about!
+     */
+    serial_number STRING,
+    part_number STRING,
+
+    /*
+     * The ereport class, which indicates the category of event reported.
+     *
+     * This is nullable, as it is extracted from the report JSON, and reports
+     * missing class information must still be ingested.
+     */
+    class STRING,
+
+    /*
+     * JSON representation of the ereport as received from the SP.
+     *
+     * the raw JSON representation of the ereport is always stored, alongside
+     * any more structured data that we extract from it, as extracting data
+     * from the received ereport requires additional knowledge of the ereport
+     * formats generated by the SP and its various tasks. as these may change,
+     * and new ereports may be added which Nexus may not yet be aware of,
+     * we always store the raw JSON representation of the ereport. as Nexus
+     * becomes aware of new ereport schemas, it can go back and extract
+     * structured data from previously collected ereports with those schemas,
+     * but this is only possible if the JSON blob is persisted.
+     *
+     * see also: https://rfd.shared.oxide.computer/rfd/520#data-model
+     */
+    report JSONB NOT NULL,
+
+    PRIMARY KEY (restart_id, ena)
+);
+
+CREATE INDEX IF NOT EXISTS lookup_sp_ereports_by_slot
+ON omicron.public.sp_ereport (
+    sp_type,
+    sp_slot,
+    time_collected
+)
+where
+    time_deleted IS NULL;
+
+CREATE INDEX IF NOT EXISTS order_sp_ereports_by_timestamp
+ON omicron.public.sp_ereport(
+    time_collected
+)
+WHERE
+    time_deleted IS NULL;
+
+CREATE INDEX IF NOT EXISTS lookup_sp_ereports_by_serial
+ON omicron.public.sp_ereport (
+    serial_number
+) WHERE
+    time_deleted IS NULL;
+
+/* Ereports from the host operating system */
+CREATE TABLE IF NOT EXISTS omicron.public.host_ereport (
+    /*
+    * the primary key for an ereport is formed from the tuple of the
+    * reporter's restart ID (a randomly generated UUID) and the ereport's ENA
+    * (a 64-bit integer that uniquely identifies the ereport within that
+    * restart of the reporter).
+    *
+    * see: https://rfd.shared.oxide.computer/rfd/520#ereport-metadata
+    */
+    restart_id UUID NOT NULL,
+    ena INT8 NOT NULL,
+    time_deleted TIMESTAMPTZ,
+
+    /* time at which the ereport was collected */
+    time_collected TIMESTAMPTZ NOT NULL,
+    /* UUID of the Nexus instance that collected the ereport */
+    collector_id UUID NOT NULL,
+
+    /* identity of the reporting sled */
+    sled_id UUID NOT NULL,
+    sled_serial TEXT NOT NULL,
+
+    /*
+     * The ereport class, which indicates the category of event reported.
+     *
+     * This is nullable, as it is extracted from the report JSON, and reports
+     * missing class information must still be ingested.
+     */
+    class STRING,
+
+    /*
+     * JSON representation of the ereport as received from the sled-agent.
+     *
+     * the raw JSON representation of the ereport is always stored, alongside
+     * any more structured data that we extract from it, as extracting data
+     * from the received ereport requires additional knowledge of the ereport
+     * formats generated by the host OS' fault management system. as these may
+     * change, and new ereports may be added which Nexus may not yet be aware
+     * of, we always store the raw JSON representation of the ereport. as Nexus
+     * becomes aware of new ereport schemas, it can go back and extract
+     * structured data from previously collected ereports with those schemas,
+     * but this is only possible if the JSON blob is persisted.
+     *
+     * see also: https://rfd.shared.oxide.computer/rfd/520#data-model
+     */
+    report JSONB NOT NULL,
+
+    PRIMARY KEY (restart_id, ena)
+);
+
+CREATE INDEX IF NOT EXISTS lookup_host_ereports_by_sled
+ON omicron.public.host_ereport (
+    sled_id,
+    time_collected
+)
+WHERE
+    time_deleted IS NULL;
+
+CREATE INDEX IF NOT EXISTS order_host_ereports_by_timestamp
+ON omicron.public.host_ereport (
+    time_collected
+)
+WHERE
+    time_deleted IS NULL;
+
+CREATE INDEX IF NOT EXISTS lookup_host_ereports_by_serial
+ON omicron.public.host_ereport (
+    sled_serial
+) WHERE
+    time_deleted IS NULL;
+
+/*
  * Keep this at the end of file so that the database does not contain a version
  * until it is fully populated.
  */
@@ -5514,7 +6105,7 @@ INSERT INTO omicron.public.db_metadata (
     version,
     target_version
 ) VALUES
-    (TRUE, NOW(), NOW(), '141.0.0', NULL)
+    (TRUE, NOW(), NOW(), '154.0.0', NULL)
 ON CONFLICT DO NOTHING;
 
 COMMIT;

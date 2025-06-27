@@ -19,6 +19,7 @@ use gateway_client::types::SpComponentFirmwareSlot;
 use gateway_client::types::SpIdentifier;
 use gateway_client::types::SpUpdateStatus;
 use gateway_client::types::UpdateAbortBody;
+use omicron_uuid_kinds::MupdateUuid;
 use serde::Serialize;
 use slog::Drain;
 use slog::Level;
@@ -148,7 +149,7 @@ enum Command {
             conflicts_with = "clear",
             required_unless_present = "clear"
         )]
-        update_id: Option<Uuid>,
+        update_id: Option<MupdateUuid>,
         /// Hash of the host OS image.
         #[clap(
             long,
@@ -365,8 +366,11 @@ impl Dumper {
     }
 }
 
-#[tokio::main]
-async fn main() -> Result<()> {
+fn main() -> Result<()> {
+    oxide_tokio_rt::run(main_impl())
+}
+
+async fn main_impl() -> Result<()> {
     let args = Args::parse();
     let decorator = slog_term::TermDecorator::new().build();
     let drain = slog_term::FullFormat::new(decorator)

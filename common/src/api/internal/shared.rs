@@ -920,7 +920,7 @@ pub struct ExternalIpGatewayMap {
 #[derive(
     Debug, Clone, PartialEq, Eq, Ord, PartialOrd, Hash, EnumCount, Diffable,
 )]
-#[cfg_attr(feature = "testing", derive(test_strategy::Arbitrary))]
+#[cfg_attr(any(test, feature = "testing"), derive(test_strategy::Arbitrary))]
 pub enum DatasetKind {
     // Durable datasets for zones
     Cockroach,
@@ -937,13 +937,12 @@ pub enum DatasetKind {
     // Zone filesystems
     TransientZoneRoot,
     TransientZone {
+        #[cfg_attr(any(test, feature = "testing"), strategy("[^/]+"))]
         name: String,
     },
 
     // Other datasets
     Debug,
-    // Stores update artifacts (the "TUF Repo Depot")
-    Update,
 }
 
 impl Serialize for DatasetKind {
@@ -1004,7 +1003,7 @@ impl DatasetKind {
         match self {
             Cockroach | Crucible | Clickhouse | ClickhouseKeeper
             | ClickhouseServer | ExternalDns | InternalDns => true,
-            TransientZoneRoot | TransientZone { .. } | Debug | Update => false,
+            TransientZoneRoot | TransientZone { .. } | Debug => false,
         }
     }
 
@@ -1042,7 +1041,6 @@ impl fmt::Display for DatasetKind {
                 return Ok(());
             }
             Debug => "debug",
-            Update => "update",
         };
         write!(f, "{}", s)
     }
@@ -1069,7 +1067,6 @@ impl FromStr for DatasetKind {
             "internal_dns" => InternalDns,
             "zone" => TransientZoneRoot,
             "debug" => Debug,
-            "update" => Update,
             other => {
                 if let Some(name) = other.strip_prefix("zone/") {
                     TransientZone { name: name.to_string() }
@@ -1165,7 +1162,6 @@ mod tests {
             DatasetKind::TransientZoneRoot,
             DatasetKind::TransientZone { name: String::from("myzone") },
             DatasetKind::Debug,
-            DatasetKind::Update,
         ];
 
         assert_eq!(kinds.len(), DatasetKind::COUNT);

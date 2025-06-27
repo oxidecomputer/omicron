@@ -10,6 +10,22 @@ anti_affinity_group_member_list          GET      /v1/anti-affinity-groups/{anti
 anti_affinity_group_update               PUT      /v1/anti-affinity-groups/{anti_affinity_group}
 anti_affinity_group_view                 GET      /v1/anti-affinity-groups/{anti_affinity_group}
 
+API operations found with tag "console-auth"
+OPERATION ID                             METHOD   URL PATH
+device_access_token                      POST     /device/token
+device_auth_confirm                      POST     /device/confirm
+device_auth_request                      POST     /device/auth
+logout                                   POST     /v1/logout
+
+API operations found with tag "current-user"
+OPERATION ID                             METHOD   URL PATH
+current_user_groups                      GET      /v1/me/groups
+current_user_ssh_key_create              POST     /v1/me/ssh-keys
+current_user_ssh_key_delete              DELETE   /v1/me/ssh-keys/{ssh_key}
+current_user_ssh_key_list                GET      /v1/me/ssh-keys
+current_user_ssh_key_view                GET      /v1/me/ssh-keys/{ssh_key}
+current_user_view                        GET      /v1/me
+
 API operations found with tag "disks"
 OPERATION ID                             METHOD   URL PATH
 disk_bulk_write_import                   POST     /v1/disks/{disk}/bulk-write
@@ -22,17 +38,7 @@ disk_list                                GET      /v1/disks
 disk_metrics_list                        GET      /v1/disks/{disk}/metrics/{metric}
 disk_view                                GET      /v1/disks/{disk}
 
-API operations found with tag "floating-ips"
-OPERATION ID                             METHOD   URL PATH
-floating_ip_attach                       POST     /v1/floating-ips/{floating_ip}/attach
-floating_ip_create                       POST     /v1/floating-ips
-floating_ip_delete                       DELETE   /v1/floating-ips/{floating_ip}
-floating_ip_detach                       POST     /v1/floating-ips/{floating_ip}/detach
-floating_ip_list                         GET      /v1/floating-ips
-floating_ip_update                       PUT      /v1/floating-ips/{floating_ip}
-floating_ip_view                         GET      /v1/floating-ips/{floating_ip}
-
-API operations found with tag "hidden"
+API operations found with tag "experimental"
 OPERATION ID                             METHOD   URL PATH
 affinity_group_create                    POST     /v1/affinity-groups
 affinity_group_delete                    DELETE   /v1/affinity-groups/{affinity_group}
@@ -43,27 +49,35 @@ affinity_group_member_instance_view      GET      /v1/affinity-groups/{affinity_
 affinity_group_member_list               GET      /v1/affinity-groups/{affinity_group}/members
 affinity_group_update                    PUT      /v1/affinity-groups/{affinity_group}
 affinity_group_view                      GET      /v1/affinity-groups/{affinity_group}
-device_access_token                      POST     /device/token
-device_auth_confirm                      POST     /device/confirm
-device_auth_request                      POST     /device/auth
 instance_affinity_group_list             GET      /v1/instances/{instance}/affinity-groups
-logout                                   POST     /v1/logout
 probe_create                             POST     /experimental/v1/probes
 probe_delete                             DELETE   /experimental/v1/probes/{probe}
 probe_list                               GET      /experimental/v1/probes
 probe_view                               GET      /experimental/v1/probes/{probe}
 support_bundle_create                    POST     /experimental/v1/system/support-bundles
-support_bundle_delete                    DELETE   /experimental/v1/system/support-bundles/{support_bundle}
-support_bundle_download                  GET      /experimental/v1/system/support-bundles/{support_bundle}/download
-support_bundle_download_file             GET      /experimental/v1/system/support-bundles/{support_bundle}/download/{file}
-support_bundle_head                      HEAD     /experimental/v1/system/support-bundles/{support_bundle}/download
-support_bundle_head_file                 HEAD     /experimental/v1/system/support-bundles/{support_bundle}/download/{file}
-support_bundle_index                     GET      /experimental/v1/system/support-bundles/{support_bundle}/index
+support_bundle_delete                    DELETE   /experimental/v1/system/support-bundles/{bundle_id}
+support_bundle_download                  GET      /experimental/v1/system/support-bundles/{bundle_id}/download
+support_bundle_download_file             GET      /experimental/v1/system/support-bundles/{bundle_id}/download/{file}
+support_bundle_head                      HEAD     /experimental/v1/system/support-bundles/{bundle_id}/download
+support_bundle_head_file                 HEAD     /experimental/v1/system/support-bundles/{bundle_id}/download/{file}
+support_bundle_index                     GET      /experimental/v1/system/support-bundles/{bundle_id}/index
 support_bundle_list                      GET      /experimental/v1/system/support-bundles
-support_bundle_view                      GET      /experimental/v1/system/support-bundles/{support_bundle}
+support_bundle_view                      GET      /experimental/v1/system/support-bundles/{bundle_id}
+system_update_get_repository             GET      /v1/system/update/repository/{system_version}
+system_update_put_repository             PUT      /v1/system/update/repository
 target_release_update                    PUT      /v1/system/update/target-release
 target_release_view                      GET      /v1/system/update/target-release
 timeseries_query                         POST     /v1/timeseries/query
+
+API operations found with tag "floating-ips"
+OPERATION ID                             METHOD   URL PATH
+floating_ip_attach                       POST     /v1/floating-ips/{floating_ip}/attach
+floating_ip_create                       POST     /v1/floating-ips
+floating_ip_delete                       DELETE   /v1/floating-ips/{floating_ip}
+floating_ip_detach                       POST     /v1/floating-ips/{floating_ip}/detach
+floating_ip_list                         GET      /v1/floating-ips
+floating_ip_update                       PUT      /v1/floating-ips/{floating_ip}
+floating_ip_view                         GET      /v1/floating-ips/{floating_ip}
 
 API operations found with tag "images"
 OPERATION ID                             METHOD   URL PATH
@@ -131,17 +145,10 @@ OPERATION ID                             METHOD   URL PATH
 role_list                                GET      /v1/system/roles
 role_view                                GET      /v1/system/roles/{role_name}
 
-API operations found with tag "session"
-OPERATION ID                             METHOD   URL PATH
-current_user_groups                      GET      /v1/me/groups
-current_user_ssh_key_create              POST     /v1/me/ssh-keys
-current_user_ssh_key_delete              DELETE   /v1/me/ssh-keys/{ssh_key}
-current_user_ssh_key_list                GET      /v1/me/ssh-keys
-current_user_ssh_key_view                GET      /v1/me/ssh-keys/{ssh_key}
-current_user_view                        GET      /v1/me
-
 API operations found with tag "silos"
 OPERATION ID                             METHOD   URL PATH
+auth_settings_update                     PUT      /v1/auth-settings
+auth_settings_view                       GET      /v1/auth-settings
 certificate_create                       POST     /v1/certificates
 certificate_delete                       DELETE   /v1/certificates/{certificate}
 certificate_list                         GET      /v1/certificates
@@ -159,6 +166,23 @@ snapshot_create                          POST     /v1/snapshots
 snapshot_delete                          DELETE   /v1/snapshots/{snapshot}
 snapshot_list                            GET      /v1/snapshots
 snapshot_view                            GET      /v1/snapshots/{snapshot}
+
+API operations found with tag "system/alerts"
+OPERATION ID                             METHOD   URL PATH
+alert_class_list                         GET      /v1/alert-classes
+alert_delivery_list                      GET      /v1/alert-receivers/{receiver}/deliveries
+alert_delivery_resend                    POST     /v1/alerts/{alert_id}/resend
+alert_receiver_delete                    DELETE   /v1/alert-receivers/{receiver}
+alert_receiver_list                      GET      /v1/alert-receivers
+alert_receiver_probe                     POST     /v1/alert-receivers/{receiver}/probe
+alert_receiver_subscription_add          POST     /v1/alert-receivers/{receiver}/subscriptions
+alert_receiver_subscription_remove       DELETE   /v1/alert-receivers/{receiver}/subscriptions/{subscription}
+alert_receiver_view                      GET      /v1/alert-receivers/{receiver}
+webhook_receiver_create                  POST     /v1/webhook-receivers
+webhook_receiver_update                  PUT      /v1/webhook-receivers/{receiver}
+webhook_secrets_add                      POST     /v1/webhook-secrets
+webhook_secrets_delete                   DELETE   /v1/webhook-secrets/{secret_id}
+webhook_secrets_list                     GET      /v1/webhook-secrets
 
 API operations found with tag "system/hardware"
 OPERATION ID                             METHOD   URL PATH
@@ -268,22 +292,10 @@ API operations found with tag "system/status"
 OPERATION ID                             METHOD   URL PATH
 ping                                     GET      /v1/ping
 
-API operations found with tag "system/webhooks"
+API operations found with tag "tokens"
 OPERATION ID                             METHOD   URL PATH
-webhook_delivery_list                    GET      /v1/webhooks/deliveries
-webhook_delivery_resend                  POST     /v1/webhooks/deliveries/{event_id}/resend
-webhook_event_class_list                 GET      /v1/webhooks/event-classes
-webhook_receiver_create                  POST     /v1/webhooks/receivers
-webhook_receiver_delete                  DELETE   /v1/webhooks/receivers/{receiver}
-webhook_receiver_list                    GET      /v1/webhooks/receivers
-webhook_receiver_probe                   POST     /v1/webhooks/receivers/{receiver}/probe
-webhook_receiver_subscription_add        POST     /v1/webhooks/receivers/{receiver}/subscriptions
-webhook_receiver_subscription_remove     DELETE   /v1/webhooks/receivers/{receiver}/subscriptions/{subscription}
-webhook_receiver_update                  PUT      /v1/webhooks/receivers/{receiver}
-webhook_receiver_view                    GET      /v1/webhooks/receivers/{receiver}
-webhook_secrets_add                      POST     /v1/webhooks/secrets
-webhook_secrets_delete                   DELETE   /v1/webhooks/secrets/{secret_id}
-webhook_secrets_list                     GET      /v1/webhooks/secrets
+current_user_access_token_delete         DELETE   /v1/me/access-tokens/{token_id}
+current_user_access_token_list           GET      /v1/me/access-tokens
 
 API operations found with tag "vpcs"
 OPERATION ID                             METHOD   URL PATH

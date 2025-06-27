@@ -17,6 +17,7 @@ use std::collections::BTreeMap;
 use std::fmt;
 use std::str::FromStr;
 
+use crate::api::internal::shared::DatasetKindParseError;
 use crate::{
     api::external::{ByteCount, Generation},
     ledger::Ledgerable,
@@ -169,6 +170,69 @@ impl DatasetName {
 
     fn full_unencrypted_name(&self) -> String {
         format!("{}/{}", self.pool_name, self.kind)
+    }
+}
+
+#[derive(Debug, thiserror::Error)]
+pub enum DatasetNameParseError {
+    #[error("missing '/' separator in dataset name {0}")]
+    MissingSlash(String),
+    #[error("could not parse zpool name {zpool}: {err}")]
+    ParseZpoolName { zpool: String, err: String },
+    #[error("could not parse dataset kind {kind}")]
+    ParseDatasetKind {
+        kind: String,
+        #[source]
+        err: DatasetKindParseError,
+    },
+    #[error("expected `crypt/` for kind {kind:?} in dataset name {name}")]
+    MissingCryptInName { kind: DatasetKind, name: String },
+    #[error("unexpected `crypt/` for kind {kind:?} in dataset name {name}")]
+    UnexpectedCryptInName { kind: DatasetKind, name: String },
+}
+
+impl FromStr for DatasetName {
+    type Err = DatasetNameParseError;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        let (pool_name, remainder) = s.split_once('/').ok_or_else(|| {
+            DatasetNameParseError::MissingSlash(s.to_string())
+        })?;
+
+        let pool_name = ZpoolName::from_str(pool_name).map_err(|err| {
+            DatasetNameParseError::ParseZpoolName {
+                zpool: pool_name.to_string(),
+                err,
+            }
+        })?;
+
+        let (kind_str, name_has_crypt) =
+            if let Some(remainder) = remainder.strip_prefix("crypt/") {
+                (remainder, true)
+            } else {
+                (remainder, false)
+            };
+
+        let kind = DatasetKind::from_str(kind_str).map_err(|err| {
+            DatasetNameParseError::ParseDatasetKind {
+                kind: kind_str.to_string(),
+                err,
+            }
+        })?;
+
+        match (kind.dataset_should_be_encrypted(), name_has_crypt) {
+            (true, true) | (false, false) => Ok(Self { pool_name, kind }),
+            (true, false) => Err(DatasetNameParseError::MissingCryptInName {
+                kind,
+                name: s.to_string(),
+            }),
+            (false, true) => {
+                Err(DatasetNameParseError::UnexpectedCryptInName {
+                    kind,
+                    name: s.to_string(),
+                })
+            }
+        }
     }
 }
 
@@ -518,6 +582,9 @@ pub enum DiskManagementError {
     #[error("Disk requested by control plane, but not found on device")]
     NotFound,
 
+    #[error("Disk requested by control plane is an internal disk: {0}")]
+    InternalDiskControlPlaneRequest(PhysicalDiskUuid),
+
     #[error("Expected zpool UUID of {expected}, but saw {observed}")]
     ZpoolUuidMismatch { expected: ZpoolUuid, observed: ZpoolUuid },
 
@@ -577,6 +644,27 @@ impl TryFrom<i64> for M2Slot {
             17 => Ok(Self::A),
             18 => Ok(Self::B),
             _ => bail!("unexpected M.2 slot {value}"),
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use test_strategy::proptest;
+
+    #[proptest]
+    fn parse_dataset_name(pool_id: [u8; 16], kind: DatasetKind) {
+        let pool_id = ZpoolUuid::from_bytes(pool_id);
+        for pool in
+            [ZpoolName::new_internal(pool_id), ZpoolName::new_external(pool_id)]
+        {
+            let dataset_name = DatasetName::new(pool, kind.clone());
+            let s = dataset_name.full_name();
+            match DatasetName::from_str(&s) {
+                Ok(d) => assert_eq!(d, dataset_name),
+                Err(err) => panic!("failed to parse dataset name {s}: {err}"),
+            }
         }
     }
 }

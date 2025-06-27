@@ -269,22 +269,18 @@ impl nexus_test_interface::NexusServer for Server {
         let opctx =
             internal_server.apictx.context.nexus.opctx_for_internal_api();
 
-        // Allocation of the initial Nexus's external IP is a little funny.  In
+        // Allocation of initial external IP addresses is a little funny.  In
         // a real system, it'd be allocated by RSS and provided with the rack
         // initialization request (which we're about to simulate).  RSS also
         // provides information about the external IP pool ranges available for
-        // system services.  The Nexus external IP that it picks comes from this
-        // range.  During rack initialization, Nexus "allocates" the IP (which
-        // was really already allocated) -- recording that allocation like any
-        // other one.
-        //
-        // In this context, the IP was "allocated" by the user.  Most likely,
-        // it's 127.0.0.1, having come straight from the stock testing config
-        // file.  Whatever it is, we fake up an IP pool range for use by system
-        // services that includes solely this IP.
+        // system services.  But here, we fake up IP pool ranges based on the
+        // external addresses of services that we start or mock.
         let internal_services_ip_pool_ranges = blueprint
             .all_omicron_zones(BlueprintZoneDisposition::is_in_service)
             .filter_map(|(_, zc)| match &zc.zone_type {
+                BlueprintZoneType::BoundaryNtp(
+                    blueprint_zone_type::BoundaryNtp { external_ip, .. },
+                ) => Some(IpRange::from(external_ip.snat_cfg.ip)),
                 BlueprintZoneType::ExternalDns(
                     blueprint_zone_type::ExternalDns { dns_address, .. },
                 ) => Some(IpRange::from(dns_address.addr.ip())),
