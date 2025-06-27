@@ -501,21 +501,82 @@ impl SystemDescription {
         sled_id: SledUuid,
     ) -> anyhow::Result<&RotSlot> {
         let sp_state = self.sled_sp_state(sled_id)?;
-        if let Some((_hw_slot, sp_state)) = sp_state {
-            let slot = match &sp_state.rot {
+        sp_state
+            .ok_or_else(|| {
+                anyhow!("failed to retrieve SP state from sled id: {sled_id}")
+            })
+            .and_then(|(_hw_slot, sp_state)| match &sp_state.rot {
                 RotState::V2 { active, .. } | RotState::V3 { active, .. } => {
-                    active
+                    Ok(active)
                 }
-                RotState::CommunicationFailed { message } => {
-                    return Err(anyhow!(
-                        "failed to retrieve active RoT slot due to communication failure: {message}"
-                    ));
+                RotState::CommunicationFailed { message } => Err(anyhow!(
+                    "failed to retrieve active RoT slot due to \
+                        communication failure: {message}"
+                )),
+            })
+    }
+
+    pub fn sled_rot_persistent_boot_preference(
+        &self,
+        sled_id: SledUuid,
+    ) -> anyhow::Result<&RotSlot> {
+        let sp_state = self.sled_sp_state(sled_id)?;
+        sp_state
+            .ok_or_else(|| {
+                anyhow!("failed to retrieve SP state from sled id: {sled_id}")
+            })
+            .and_then(|(_hw_slot, sp_state)| match &sp_state.rot {
+                RotState::V2 { persistent_boot_preference, .. }
+                | RotState::V3 { persistent_boot_preference, .. } => {
+                    Ok(persistent_boot_preference)
                 }
-            };
-            Ok(slot)
-        } else {
-            Err(anyhow!("failed to retrieve SP state from sled id: {sled_id}"))
-        }
+                RotState::CommunicationFailed { message } => Err(anyhow!(
+                    "failed to retrieve persistent boot preference slot \
+                        due to communication failure: {message}"
+                )),
+            })
+    }
+
+    pub fn sled_rot_pending_persistent_boot_preference(
+        &self,
+        sled_id: SledUuid,
+    ) -> anyhow::Result<&Option<RotSlot>> {
+        let sp_state = self.sled_sp_state(sled_id)?;
+        sp_state
+            .ok_or_else(|| {
+                anyhow!("failed to retrieve SP state from sled id: {sled_id}")
+            })
+            .and_then(|(_hw_slot, sp_state)| match &sp_state.rot {
+                RotState::V2 { pending_persistent_boot_preference, .. }
+                | RotState::V3 { pending_persistent_boot_preference, .. } => {
+                    Ok(pending_persistent_boot_preference)
+                }
+                RotState::CommunicationFailed { message } => Err(anyhow!(
+                    "failed to retrieve pending persistent boot \
+                        preference slot due to communication failure: {message}"
+                )),
+            })
+    }
+
+    pub fn sled_rot_transient_boot_preference(
+        &self,
+        sled_id: SledUuid,
+    ) -> anyhow::Result<&Option<RotSlot>> {
+        let sp_state = self.sled_sp_state(sled_id)?;
+        sp_state
+            .ok_or_else(|| {
+                anyhow!("failed to retrieve SP state from sled id: {sled_id}")
+            })
+            .and_then(|(_hw_slot, sp_state)| match &sp_state.rot {
+                RotState::V2 { transient_boot_preference, .. }
+                | RotState::V3 { transient_boot_preference, .. } => {
+                    Ok(transient_boot_preference)
+                }
+                RotState::CommunicationFailed { message } => Err(anyhow!(
+                    "failed to retrieve transient boot preference slot \
+                        due to communication failure: {message}"
+                )),
+            })
     }
 
     pub fn sled_rot_slot_a_version(

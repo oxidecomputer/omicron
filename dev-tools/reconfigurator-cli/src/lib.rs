@@ -405,8 +405,7 @@ struct SledUpdateRotArgs {
     /// sets the version reported for the RoT slot b
     #[clap(long, required_unless_present_any = &["slot_a"])]
     slot_b: Option<ExpectedVersion>,
-
-    // TODO: In the future we could set other fields as well.
+    // TODO: In a follow up PR we could set other fields as well.
     // They would be useful to simulate failures.
     // These would be: active_slot, persistent_boot_preference,
     // transient_boot_preference and pending_persistent_boot_preference.
@@ -939,6 +938,12 @@ fn cmd_sled_show(
     let rot_active_slot = description.sled_rot_active_slot(sled_id)?;
     let rot_slot_a_version = description.sled_rot_slot_a_version(sled_id)?;
     let rot_slot_b_version = description.sled_rot_slot_b_version(sled_id)?;
+    let rot_persistent_boot_preference =
+        description.sled_rot_persistent_boot_preference(sled_id)?;
+    let rot_pending_persistent_boot_preference =
+        description.sled_rot_pending_persistent_boot_preference(sled_id)?;
+    let rot_transient_boot_preference =
+        description.sled_rot_transient_boot_preference(sled_id)?;
     let planning_input = description
         .to_planning_input_builder()
         .context("failed to generate planning_input builder")?
@@ -952,9 +957,23 @@ fn cmd_sled_show(
     swriteln!(s, "SP active version:   {:?}", sp_active_version);
     swriteln!(s, "SP inactive version: {:?}", sp_inactive_version);
     swriteln!(s, "RoT active slot: {}", rot_active_slot);
-    // TODO-K: Include all other RoT settings?
     swriteln!(s, "RoT slot A version: {:?}", rot_slot_a_version);
     swriteln!(s, "RoT slot B version: {:?}", rot_slot_b_version);
+    swriteln!(
+        s,
+        "RoT persistent boot preference: {}",
+        rot_persistent_boot_preference
+    );
+    swriteln!(
+        s,
+        "RoT pending persistent boot preference: {:?}",
+        rot_pending_persistent_boot_preference
+    );
+    swriteln!(
+        s,
+        "RoT transient boot preference: {:?}",
+        rot_transient_boot_preference
+    );
     swriteln!(s, "zpools ({}):", sled_resources.zpools.len());
     for (zpool, disk) in &sled_resources.zpools {
         swriteln!(s, "    {:?}", zpool);
