@@ -585,4 +585,5 @@ impl IdOrdItem for SledAgent {
 #[derive(Clone, Default, Debug, PartialEq, Eq, Deserialize, Serialize)]
 pub struct CockroachStatus {
     pub ranges_underreplicated: Option<u64>,
+    pub liveness_live_nodes: Option<u64>,
 }

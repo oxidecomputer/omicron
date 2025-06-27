@@ -2531,6 +2531,7 @@ impl InvClickhouseKeeperMembership {
 pub struct InvCockroachStatus {
     pub inv_collection_id: DbTypedUuid<CollectionKind>,
     pub ranges_underreplicated: Option<i64>,
+    pub liveness_live_nodes: Option<i64>,
 }
 
 impl InvCockroachStatus {
@@ -2547,6 +2548,13 @@ impl InvCockroachStatus {
                 .with_context(
                     || "Converting ranges_underreplicated from u64 to i64",
                 )?,
+            liveness_live_nodes: status
+                .liveness_live_nodes
+                .map(|n| i64::try_from(n))
+                .transpose()
+                .with_context(
+                    || "Converting liveness_live_nodes from u64 to i64",
+                )?,
         })
     }
 }
@@ -2560,7 +2568,15 @@ impl TryFrom<InvCockroachStatus> for CockroachStatus {
                 .ranges_underreplicated
                 .map(|n| {
                     u64::try_from(n).with_context(|| {
-                        format!("Failed to convert {n} to u64")
+                        format!("Failed to convert ranges_underreplicated ({n}) to u64")
+                    })
+                })
+                .transpose()?,
+            liveness_live_nodes: value
+                .liveness_live_nodes
+                .map(|n| {
+                    u64::try_from(n).with_context(|| {
+                        format!("Failed to convert liveness_live_nodes ({n}) to u64")
                     })
                 })
                 .transpose()?,
