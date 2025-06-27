@@ -23,6 +23,7 @@ use nexus_types::inventory::BaseboardId;
 use nexus_types::inventory::Caboose;
 use nexus_types::inventory::CabooseFound;
 use nexus_types::inventory::CabooseWhich;
+use nexus_types::inventory::CockroachStatus;
 use nexus_types::inventory::Collection;
 use nexus_types::inventory::RotPage;
 use nexus_types::inventory::RotPageFound;
@@ -31,6 +32,8 @@ use nexus_types::inventory::RotState;
 use nexus_types::inventory::ServiceProcessor;
 use nexus_types::inventory::SledAgent;
 use nexus_types::inventory::Zpool;
+use omicron_cockroach_metrics::CockroachMetric;
+use omicron_cockroach_metrics::PrometheusMetrics;
 use omicron_uuid_kinds::CollectionKind;
 use std::collections::BTreeMap;
 use std::collections::BTreeSet;
@@ -115,6 +118,7 @@ pub struct CollectionBuilder {
     sleds: IdOrdMap<SledAgent>,
     clickhouse_keeper_cluster_membership:
         BTreeSet<ClickhouseKeeperClusterMembership>,
+    cockroach_status: CockroachStatus,
     // CollectionBuilderRng is taken by value, rather than passed in as a
     // mutable ref, to encourage a tree-like structure where each RNG is
     // generally independent.
@@ -144,6 +148,7 @@ impl CollectionBuilder {
             rot_pages_found: BTreeMap::new(),
             sleds: IdOrdMap::new(),
             clickhouse_keeper_cluster_membership: BTreeSet::new(),
+            cockroach_status: CockroachStatus::default(),
             rng: CollectionBuilderRng::from_entropy(),
         }
     }
@@ -166,6 +171,7 @@ impl CollectionBuilder {
             sled_agents: self.sleds,
             clickhouse_keeper_cluster_membership: self
                 .clickhouse_keeper_cluster_membership,
+            cockroach_status: self.cockroach_status,
         }
     }
 
@@ -558,6 +564,12 @@ impl CollectionBuilder {
         membership: ClickhouseKeeperClusterMembership,
     ) {
         self.clickhouse_keeper_cluster_membership.insert(membership);
+    }
+
+    /// Record the number of under-replicated ranges in CockroachDB
+    pub fn found_cockroach_metrics(&mut self, metrics: PrometheusMetrics) {
+        self.cockroach_status.ranges_underreplicated =
+            metrics.get_metric_unsigned(CockroachMetric::RangesUnderreplicated);
     }
 }
 

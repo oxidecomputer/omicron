@@ -282,6 +282,7 @@ mod test {
         )
         .unwrap();
         let mut collector = InventoryCollector::new(
+            &opctx,
             datastore.clone(),
             resolver.clone(),
             "test_planner",

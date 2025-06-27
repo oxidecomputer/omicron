@@ -32,6 +32,7 @@ use nexus_db_errors::public_error_from_diesel;
 use nexus_db_errors::public_error_from_diesel_lookup;
 use nexus_db_model::InvCaboose;
 use nexus_db_model::InvClickhouseKeeperMembership;
+use nexus_db_model::InvCockroachStatus;
 use nexus_db_model::InvCollection;
 use nexus_db_model::InvCollectionError;
 use nexus_db_model::InvConfigReconcilerStatus;
@@ -367,6 +368,12 @@ impl DataStore {
                 .map_err(|e| Error::internal_error(&e.to_string()))?,
             );
         }
+
+        let inv_cockroach_status = InvCockroachStatus::new(
+            collection_id,
+            &collection.cockroach_status,
+        )
+        .map_err(|e| Error::internal_error(&e.to_string()))?;
 
         // This implementation inserts all records associated with the
         // collection in one transaction.  This is primarily for simplicity.  It
@@ -1361,6 +1368,16 @@ impl DataStore {
                     .await?;
             }
 
+            // Insert the cockroach status information we've observed
+            {
+                use nexus_db_schema::schema::inv_cockroachdb_status::dsl;
+                diesel::insert_into(dsl::inv_cockroachdb_status)
+                    .values(inv_cockroach_status)
+                    .execute_async(&conn)
+                    .await?;
+            }
+
+
             // Finally, insert the list of errors.
             {
                 use nexus_db_schema::schema::inv_collection_error::dsl as errors_dsl;
@@ -1647,6 +1664,7 @@ impl DataStore {
             nzpools: usize,
             nerrors: usize,
             nclickhouse_keeper_membership: usize,
+            ncockroach_status: usize,
         }
 
         let NumRowsDeleted {
@@ -1674,6 +1692,7 @@ impl DataStore {
             nzpools,
             nerrors,
             nclickhouse_keeper_membership,
+            ncockroach_status,
         } =
             self.transaction_retry_wrapper("inventory_delete_collection")
                 .transaction(&conn, |conn| async move {
@@ -1901,6 +1920,17 @@ impl DataStore {
                         .execute_async(&conn)
                         .await?
                     };
+                    // Remove rows for cockroach status
+                    let ncockroach_status = {
+                        use nexus_db_schema::schema::inv_cockroachdb_status::dsl;
+                        diesel::delete(
+                            dsl::inv_cockroachdb_status.filter(
+                                dsl::inv_collection_id.eq(db_collection_id),
+                            ),
+                        )
+                        .execute_async(&conn)
+                        .await?
+                    };
 
                     Ok(NumRowsDeleted {
                         ncollections,
@@ -1927,6 +1957,7 @@ impl DataStore {
                         nzpools,
                         nerrors,
                         nclickhouse_keeper_membership,
+                        ncockroach_status,
                     })
                 })
                 .await
@@ -1963,7 +1994,8 @@ impl DataStore {
             "nomicron_sled_config_zone_nics" => nomicron_sled_config_zone_nics,
             "nzpools" => nzpools,
             "nerrors" => nerrors,
-            "nclickhouse_keeper_membership" => nclickhouse_keeper_membership
+            "nclickhouse_keeper_membership" => nclickhouse_keeper_membership,
+            "ncockroach_status" => ncockroach_status,
         );
 
         Ok(())
@@ -3151,6 +3183,34 @@ impl DataStore {
             memberships
         };
 
+        // Load the cockroach status, if it exists.
+        let cockroach_status: nexus_types::inventory::CockroachStatus = {
+            use nexus_db_schema::schema::inv_cockroachdb_status::dsl;
+
+            let maybe_status = dsl::inv_cockroachdb_status
+                .filter(dsl::inv_collection_id.eq(db_id))
+                .select(InvCockroachStatus::as_select())
+                .first_async(&*conn)
+                .await
+                .optional()
+                .map_err(|e| {
+                    public_error_from_diesel(e, ErrorHandler::Server)
+                })?;
+
+            if let Some(status) = maybe_status {
+                // If we can read a record of Cockroach Status, use it.
+                status
+                    .try_into()
+                    .map_err(|e| Error::internal_error(&format!("{e:#}")))?
+            } else {
+                // If we have no record of Cockroach Status, make a default one.
+                //
+                // This provides backwards compatibility for collections without
+                // CockroachDB statuses.
+                nexus_types::inventory::CockroachStatus::default()
+            }
+        };
+
         // Finally, build up the sled-agent map using the sled agent and
         // omicron zone rows. A for loop is easier to understand than into_iter
         // + filter_map + return Result + collect.
@@ -3330,6 +3390,7 @@ impl DataStore {
             rot_pages_found,
             sled_agents,
             clickhouse_keeper_cluster_membership,
+            cockroach_status,
         })
     }
 }

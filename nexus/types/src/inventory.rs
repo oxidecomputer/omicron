@@ -148,6 +148,9 @@ pub struct Collection {
     /// mappings and guarantee unique pairs.
     pub clickhouse_keeper_cluster_membership:
         BTreeSet<ClickhouseKeeperClusterMembership>,
+
+    /// The status of our cockroachdb cluster
+    pub cockroach_status: CockroachStatus,
 }
 
 impl Collection {
@@ -577,4 +580,10 @@ impl IdOrdItem for SledAgent {
         self.sled_id
     }
     id_upcast!();
+}
+
+#[derive(Clone, Default, Debug, PartialEq, Eq, Deserialize, Serialize)]
+pub struct CockroachStatus {
+    pub ranges_underreplicated: Option<u64>,
+    pub liveness_live_nodes: Option<u64>,
 }
