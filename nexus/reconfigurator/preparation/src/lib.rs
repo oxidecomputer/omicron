@@ -30,6 +30,7 @@ use nexus_types::deployment::SledDetails;
 use nexus_types::deployment::SledDisk;
 use nexus_types::deployment::SledFilter;
 use nexus_types::deployment::SledResources;
+use nexus_types::deployment::TargetReleaseDescription;
 use nexus_types::deployment::TufRepoPolicy;
 use nexus_types::deployment::UnstableReconfiguratorState;
 use nexus_types::identity::Asset;
@@ -153,9 +154,9 @@ impl PlanningInputFromDb<'_> {
             .target_release_get_current(opctx)
             .await
             .internal_context("fetching current target release")?;
-        let tuf_repo_desc = match target_release.tuf_repo_id {
-            None => None,
-            Some(repo_id) => Some(
+        let target_release_desc = match target_release.tuf_repo_id {
+            None => TargetReleaseDescription::Initial,
+            Some(repo_id) => TargetReleaseDescription::TufRepo(
                 datastore
                     .tuf_repo_get_by_id(opctx, repo_id.into())
                     .await
@@ -165,7 +166,7 @@ impl PlanningInputFromDb<'_> {
         };
         let tuf_repo = TufRepoPolicy {
             target_release_generation: target_release.generation.0,
-            description: tuf_repo_desc,
+            description: target_release_desc,
         };
         // NOTE: We currently assume that only two generations are in play: the
         // target release generation and its previous one. This depends on us
@@ -181,7 +182,7 @@ impl PlanningInputFromDb<'_> {
                 .internal_context("fetching previous target release")?;
             let description = if let Some(prev_release) = prev_release {
                 if let Some(repo_id) = prev_release.tuf_repo_id {
-                    Some(
+                    TargetReleaseDescription::TufRepo(
                         datastore
                             .tuf_repo_get_by_id(opctx, repo_id.into())
                             .await
@@ -191,10 +192,10 @@ impl PlanningInputFromDb<'_> {
                             .into_external(),
                     )
                 } else {
-                    None
+                    TargetReleaseDescription::Initial
                 }
             } else {
-                None
+                TargetReleaseDescription::Initial
             };
             Some(TufRepoPolicy { target_release_generation: prev, description })
         } else {

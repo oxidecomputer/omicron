@@ -977,8 +977,8 @@ pub struct TufRepoPolicy {
     /// The generation of the target release for the TUF repo.
     pub target_release_generation: Generation,
 
-    /// A description of the TUF repo, or None if no TUF repo is in use.
-    pub description: Option<TufRepoDescription>,
+    /// A description of the target release.
+    pub description: TargetReleaseDescription,
 }
 
 impl TufRepoPolicy {
@@ -988,12 +988,36 @@ impl TufRepoPolicy {
     /// * There is no target release.
     #[inline]
     pub fn initial() -> Self {
-        Self { target_release_generation: Generation::new(), description: None }
+        Self {
+            target_release_generation: Generation::new(),
+            description: TargetReleaseDescription::Initial,
+        }
     }
 
     #[inline]
-    pub fn description(&self) -> Option<&TufRepoDescription> {
-        self.description.as_ref()
+    pub fn description(&self) -> &TargetReleaseDescription {
+        &self.description
+    }
+}
+
+/// Source of artifacts for a given target release.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub enum TargetReleaseDescription {
+    /// The initial release source for an Oxide deployment, before any TUF repo
+    /// has been provided for upgrades.
+    Initial,
+
+    /// A TUF repo: this is the target release once an Oxide deployment has
+    /// undergone operator-driven updates.
+    TufRepo(TufRepoDescription),
+}
+
+impl TargetReleaseDescription {
+    pub fn tuf_repo(&self) -> Option<&TufRepoDescription> {
+        match self {
+            Self::Initial => None,
+            Self::TufRepo(tuf_repo) => Some(tuf_repo),
+        }
     }
 }
 

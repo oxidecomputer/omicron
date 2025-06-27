@@ -214,7 +214,7 @@ impl super::Nexus {
         let old = planning_context
             .planning_input
             .old_repo()
-            .and_then(|repo| repo.description());
+            .map(|repo| repo.description());
         let status = UpdateStatus::new(
             old,
             new,

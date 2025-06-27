@@ -45,6 +45,7 @@ use nexus_types::deployment::PendingMgsUpdates;
 use nexus_types::deployment::PlanningInput;
 use nexus_types::deployment::SledFilter;
 use nexus_types::deployment::SledResources;
+use nexus_types::deployment::TargetReleaseDescription;
 use nexus_types::deployment::ZpoolFilter;
 use nexus_types::deployment::ZpoolName;
 use nexus_types::deployment::blueprint_zone_type;
@@ -56,7 +57,6 @@ use omicron_common::address::DNS_PORT;
 use omicron_common::address::NTP_PORT;
 use omicron_common::address::ReservedRackSubnet;
 use omicron_common::api::external::Generation;
-use omicron_common::api::external::TufRepoDescription;
 use omicron_common::api::external::Vni;
 use omicron_common::api::internal::shared::NetworkInterface;
 use omicron_common::api::internal::shared::NetworkInterfaceKind;
@@ -1982,18 +1982,26 @@ impl<'a> BlueprintBuilder<'a> {
     }
 
     fn zone_image_artifact(
-        repo: Option<&TufRepoDescription>,
+        repo: Option<&TargetReleaseDescription>,
         zone_kind: ZoneKind,
     ) -> BlueprintZoneImageSource {
-        repo.and_then(|repo| {
-            repo.artifacts
-                .iter()
-                .find(|artifact| {
-                    zone_kind.is_control_plane_zone_artifact(&artifact.id)
-                })
-                .map(BlueprintZoneImageSource::from_available_artifact)
-        })
-        .unwrap_or(BlueprintZoneImageSource::InstallDataset)
+        let repo = match repo {
+            // TODO-john make this non optional
+            None | Some(TargetReleaseDescription::Initial) => {
+                return BlueprintZoneImageSource::InstallDataset;
+            }
+            Some(TargetReleaseDescription::TufRepo(repo)) => repo,
+        };
+
+        repo.artifacts
+            .iter()
+            .find(|artifact| {
+                zone_kind.is_control_plane_zone_artifact(&artifact.id)
+            })
+            .map(BlueprintZoneImageSource::from_available_artifact)
+            // TODO-john this should be an error - this is a repo that's missing
+            // an artifact of a known zone kind
+            .unwrap_or(BlueprintZoneImageSource::InstallDataset)
     }
 
     /// Try to find an artifact in either the current or previous release repo
@@ -2004,11 +2012,10 @@ impl<'a> BlueprintBuilder<'a> {
         zone_kind: ZoneKind,
     ) -> BlueprintZoneImageSource {
         let new_repo = self.input.tuf_repo().description();
-        let old_repo =
-            self.input.old_repo().and_then(|repo| repo.description());
+        let old_repo = self.input.old_repo().map(|repo| repo.description());
         Self::zone_image_artifact(
             if self.zone_is_ready_for_update(zone_kind, new_repo) {
-                new_repo
+                Some(new_repo)
             } else {
                 old_repo
             },
@@ -2022,7 +2029,7 @@ impl<'a> BlueprintBuilder<'a> {
     fn zone_is_ready_for_update(
         &self,
         zone_kind: ZoneKind,
-        new_repo: Option<&TufRepoDescription>,
+        new_repo: &TargetReleaseDescription,
     ) -> bool {
         match zone_kind {
             ZoneKind::Nexus => {
@@ -2036,7 +2043,10 @@ impl<'a> BlueprintBuilder<'a> {
                     .filter(|z| z.zone_type.kind() != ZoneKind::Nexus)
                     .all(|z| {
                         z.image_source
-                            == Self::zone_image_artifact(new_repo, z.kind())
+                            == Self::zone_image_artifact(
+                                Some(new_repo),
+                                z.kind(),
+                            )
                     })
                 })
             }

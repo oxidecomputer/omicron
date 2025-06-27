@@ -34,6 +34,7 @@ use nexus_types::deployment::Policy;
 use nexus_types::deployment::SledDetails;
 use nexus_types::deployment::SledDisk;
 use nexus_types::deployment::SledResources;
+use nexus_types::deployment::TargetReleaseDescription;
 use nexus_types::deployment::TufRepoPolicy;
 use nexus_types::external_api::views::PhysicalDiskPolicy;
 use nexus_types::external_api::views::PhysicalDiskState;
@@ -53,7 +54,6 @@ use omicron_common::address::SLED_PREFIX;
 use omicron_common::address::get_sled_address;
 use omicron_common::api::external::ByteCount;
 use omicron_common::api::external::Generation;
-use omicron_common::api::external::TufRepoDescription;
 use omicron_common::disk::DiskIdentity;
 use omicron_common::disk::DiskVariant;
 use omicron_common::policy::INTERNAL_DNS_REDUNDANCY;
@@ -475,7 +475,7 @@ impl SystemDescription {
 
     pub fn set_target_release(
         &mut self,
-        tuf_repo: Option<TufRepoDescription>,
+        description: TargetReleaseDescription,
     ) -> &mut Self {
         // Create a new TufRepoPolicy by bumping the generation.
         let new_repo = TufRepoPolicy {
@@ -483,7 +483,7 @@ impl SystemDescription {
                 .tuf_repo
                 .target_release_generation
                 .next(),
-            description: tuf_repo,
+            description,
         };
 
         self.tuf_repo = new_repo;
