@@ -1497,7 +1497,7 @@ mod test {
                 clickhouse_policy: None,
                 oximeter_read_policy: OximeterReadPolicy::new(1),
                 tuf_repo: TufRepoPolicy::initial(),
-                old_repo: None,
+                old_repo: TufRepoPolicy::initial(),
                 log,
             }
             .build()

@@ -1277,6 +1277,7 @@ pub(crate) mod test {
     use nexus_types::deployment::ClickhouseMode;
     use nexus_types::deployment::ClickhousePolicy;
     use nexus_types::deployment::SledDisk;
+    use nexus_types::deployment::TargetReleaseDescription;
     use nexus_types::deployment::TufRepoPolicy;
     use nexus_types::deployment::blueprint_zone_type;
     use nexus_types::deployment::blueprint_zone_type::InternalDns;
@@ -4728,7 +4729,7 @@ pub(crate) mod test {
         verify_blueprint(&blueprint1);
 
         // We should start with no specified TUF repo and nothing to do.
-        assert!(example.input.tuf_repo().description().is_none());
+        assert!(example.input.tuf_repo().description().tuf_repo().is_none());
         assert_planning_makes_no_changes(
             &logctx.log,
             &blueprint1,
@@ -4758,16 +4759,18 @@ pub(crate) mod test {
             // We use generation 2 to represent the first generation set to a
             // target TUF repo.
             target_release_generation,
-            description: Some(TufRepoDescription {
-                repo: TufRepoMeta {
-                    hash: ArtifactHash([0; 32]),
-                    targets_role_version: 0,
-                    valid_until: Utc::now(),
-                    system_version: Version::new(0, 0, 0),
-                    file_name: String::from(""),
+            description: TargetReleaseDescription::TufRepo(
+                TufRepoDescription {
+                    repo: TufRepoMeta {
+                        hash: ArtifactHash([0; 32]),
+                        targets_role_version: 0,
+                        valid_until: Utc::now(),
+                        system_version: Version::new(0, 0, 0),
+                        file_name: String::from(""),
+                    },
+                    artifacts: vec![],
                 },
-                artifacts: vec![],
-            }),
+            ),
         };
         let input = input_builder.build();
         let blueprint2 = Planner::new_based_on(
@@ -4812,16 +4815,18 @@ pub(crate) mod test {
         let target_release_generation = target_release_generation.next();
         input_builder.policy_mut().tuf_repo = TufRepoPolicy {
             target_release_generation,
-            description: Some(TufRepoDescription {
-                repo: TufRepoMeta {
-                    hash: fake_hash,
-                    targets_role_version: 0,
-                    valid_until: Utc::now(),
-                    system_version: Version::new(1, 0, 0),
-                    file_name: String::from(""),
+            description: TargetReleaseDescription::TufRepo(
+                TufRepoDescription {
+                    repo: TufRepoMeta {
+                        hash: fake_hash,
+                        targets_role_version: 0,
+                        valid_until: Utc::now(),
+                        system_version: Version::new(1, 0, 0),
+                        file_name: String::from(""),
+                    },
+                    artifacts,
                 },
-                artifacts,
-            }),
+            ),
         };
 
         // Some helper predicates for the assertions below.
@@ -5065,29 +5070,31 @@ pub(crate) mod test {
         let target_release_generation = Generation::new().next();
         let tuf_repo = TufRepoPolicy {
             target_release_generation,
-            description: Some(TufRepoDescription {
-                repo: TufRepoMeta {
-                    hash: fake_hash,
-                    targets_role_version: 0,
-                    valid_until: Utc::now(),
-                    system_version: Version::new(1, 0, 0),
-                    file_name: String::from(""),
+            description: TargetReleaseDescription::TufRepo(
+                TufRepoDescription {
+                    repo: TufRepoMeta {
+                        hash: fake_hash,
+                        targets_role_version: 0,
+                        valid_until: Utc::now(),
+                        system_version: Version::new(1, 0, 0),
+                        file_name: String::from(""),
+                    },
+                    artifacts: vec![
+                        fake_zone_artifact!(BoundaryNtp, version.clone()),
+                        fake_zone_artifact!(Clickhouse, version.clone()),
+                        fake_zone_artifact!(ClickhouseKeeper, version.clone()),
+                        fake_zone_artifact!(ClickhouseServer, version.clone()),
+                        fake_zone_artifact!(CockroachDb, version.clone()),
+                        fake_zone_artifact!(Crucible, version.clone()),
+                        fake_zone_artifact!(CruciblePantry, version.clone()),
+                        fake_zone_artifact!(ExternalDns, version.clone()),
+                        fake_zone_artifact!(InternalDns, version.clone()),
+                        fake_zone_artifact!(InternalNtp, version.clone()),
+                        fake_zone_artifact!(Nexus, version.clone()),
+                        fake_zone_artifact!(Oximeter, version.clone()),
+                    ],
                 },
-                artifacts: vec![
-                    fake_zone_artifact!(BoundaryNtp, version.clone()),
-                    fake_zone_artifact!(Clickhouse, version.clone()),
-                    fake_zone_artifact!(ClickhouseKeeper, version.clone()),
-                    fake_zone_artifact!(ClickhouseServer, version.clone()),
-                    fake_zone_artifact!(CockroachDb, version.clone()),
-                    fake_zone_artifact!(Crucible, version.clone()),
-                    fake_zone_artifact!(CruciblePantry, version.clone()),
-                    fake_zone_artifact!(ExternalDns, version.clone()),
-                    fake_zone_artifact!(InternalDns, version.clone()),
-                    fake_zone_artifact!(InternalNtp, version.clone()),
-                    fake_zone_artifact!(Nexus, version.clone()),
-                    fake_zone_artifact!(Oximeter, version.clone()),
-                ],
-            }),
+            ),
         };
         input_builder.policy_mut().tuf_repo = tuf_repo;
         let input = input_builder.build();

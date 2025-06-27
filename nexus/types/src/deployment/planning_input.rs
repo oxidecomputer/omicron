@@ -158,8 +158,8 @@ impl PlanningInput {
         &self.policy.tuf_repo
     }
 
-    pub fn old_repo(&self) -> Option<&TufRepoPolicy> {
-        self.policy.old_repo.as_ref()
+    pub fn old_repo(&self) -> &TufRepoPolicy {
+        &self.policy.old_repo
     }
 
     pub fn service_ip_pool_ranges(&self) -> &[IpRange] {
@@ -944,12 +944,19 @@ pub struct Policy {
     /// with one that does.
     pub tuf_repo: TufRepoPolicy,
 
-    /// Previous system software release repository, if any. Once Nexus-driven
-    /// update is active on a rack, this is always `Some`.
+    /// Previous system software release repository.
+    ///
+    /// On initial system deployment, both `tuf_repo` and `old_repo` will be set
+    /// to `TufRepoPolicy::initial()` (the special TUF repo policy for "we don't
+    /// have a TUF repo yet"). After one target release has been set, `tuf_repo`
+    /// will reflect that target release and `old_repo` will still be
+    /// `TufRepoPolicy::initial()`. Once two or more target releases have been
+    /// set, `old_repo` will contain "the previous target release" behind
+    /// whatever value is in `tuf_repo`.
     ///
     /// New zones deployed mid-update may use artifacts in this repo as
     /// their image sources. See RFD 565 §9.
-    pub old_repo: Option<TufRepoPolicy>,
+    pub old_repo: TufRepoPolicy,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
@@ -977,8 +984,8 @@ pub struct TufRepoPolicy {
     /// The generation of the target release for the TUF repo.
     pub target_release_generation: Generation,
 
-    /// A description of the TUF repo, or None if no TUF repo is in use.
-    pub description: Option<TufRepoDescription>,
+    /// A description of the target release.
+    pub description: TargetReleaseDescription,
 }
 
 impl TufRepoPolicy {
@@ -988,12 +995,36 @@ impl TufRepoPolicy {
     /// * There is no target release.
     #[inline]
     pub fn initial() -> Self {
-        Self { target_release_generation: Generation::new(), description: None }
+        Self {
+            target_release_generation: Generation::new(),
+            description: TargetReleaseDescription::Initial,
+        }
     }
 
     #[inline]
-    pub fn description(&self) -> Option<&TufRepoDescription> {
-        self.description.as_ref()
+    pub fn description(&self) -> &TargetReleaseDescription {
+        &self.description
+    }
+}
+
+/// Source of artifacts for a given target release.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub enum TargetReleaseDescription {
+    /// The initial release source for an Oxide deployment, before any TUF repo
+    /// has been provided for upgrades.
+    Initial,
+
+    /// A TUF repo: this is the target release once an Oxide deployment has
+    /// undergone operator-driven updates.
+    TufRepo(TufRepoDescription),
+}
+
+impl TargetReleaseDescription {
+    pub fn tuf_repo(&self) -> Option<&TufRepoDescription> {
+        match self {
+            Self::Initial => None,
+            Self::TufRepo(tuf_repo) => Some(tuf_repo),
+        }
     }
 }
 
@@ -1148,7 +1179,7 @@ impl PlanningInputBuilder {
                 clickhouse_policy: None,
                 oximeter_read_policy: OximeterReadPolicy::new(1),
                 tuf_repo: TufRepoPolicy::initial(),
-                old_repo: None,
+                old_repo: TufRepoPolicy::initial(),
             },
             internal_dns_version: Generation::new(),
             external_dns_version: Generation::new(),
