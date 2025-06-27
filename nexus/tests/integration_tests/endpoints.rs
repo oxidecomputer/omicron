@@ -1676,6 +1676,14 @@ pub static VERIFY_ENDPOINTS: LazyLock<Vec<VerifyEndpoint>> =
                 allowed_methods: vec![AllowedMethod::Get],
             },
             VerifyEndpoint {
+                url: "/v1/users/af47bf12-2eab-4892-8a2f-c064a812c884/logout",
+                visibility: Visibility::Protected,
+                unprivileged_access: UnprivilegedAccess::None,
+                allowed_methods: vec![AllowedMethod::Post(serde_json::json!(
+                    {}
+                ))],
+            },
+            VerifyEndpoint {
                 url: "/v1/groups",
                 visibility: Visibility::Public,
                 unprivileged_access: UnprivilegedAccess::ReadOnly,

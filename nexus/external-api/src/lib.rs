@@ -3076,6 +3076,17 @@ pub trait NexusExternalApi {
         query_params: Query<PaginatedById<params::OptionalGroupSelector>>,
     ) -> Result<HttpResponseOk<ResultsPage<views::User>>, HttpError>;
 
+    /// Expire all of user's tokens and sessions
+    #[endpoint {
+        method = POST,
+        path = "/v1/users/{user_id}/logout",
+        tags = ["silos"],
+    }]
+    async fn user_logout(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<params::UserPath>,
+    ) -> Result<HttpResponseUpdatedNoContent, HttpError>;
+
     // Silo groups
 
     /// List groups

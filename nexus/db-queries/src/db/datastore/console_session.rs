@@ -12,6 +12,8 @@ use crate::db::model::ConsoleSession;
 use async_bb8_diesel::AsyncRunQueryDsl;
 use chrono::Utc;
 use diesel::prelude::*;
+use nexus_db_errors::ErrorHandler;
+use nexus_db_errors::public_error_from_diesel;
 use nexus_db_lookup::LookupPath;
 use nexus_db_schema::schema::console_session;
 use omicron_common::api::external::CreateResult;
@@ -153,5 +155,24 @@ impl DataStore {
                     e
                 ))
             })
+    }
+
+    /// Delete all session for the user
+    pub async fn silo_user_sessions_delete(
+        &self,
+        opctx: &OpContext,
+        user: &authz::SiloUser,
+    ) -> Result<(), Error> {
+        // TODO: check for silo admin on opctx
+        // TODO: ensure this can only be used in current silo
+        // TODO: think about dueling admins problem
+
+        use nexus_db_schema::schema::console_session;
+        diesel::delete(console_session::table)
+            .filter(console_session::silo_user_id.eq(user.id()))
+            .execute_async(&*self.pool_connection_authorized(opctx).await?)
+            .await
+            .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))
+            .map(|_x| ())
     }
 }

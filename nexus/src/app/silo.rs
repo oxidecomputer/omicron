@@ -313,6 +313,28 @@ impl super::Nexus {
         Ok(db_silo_user)
     }
 
+    /// Fetch a user in a Silo
+    pub(crate) async fn current_silo_user_logout(
+        &self,
+        opctx: &OpContext,
+        silo_user_id: Uuid,
+    ) -> UpdateResult<()> {
+        let (_, authz_silo_user, _) = LookupPath::new(opctx, self.datastore())
+            .silo_user_id(silo_user_id)
+            .fetch()
+            .await?;
+
+        self.datastore()
+            .silo_user_tokens_delete(opctx, &authz_silo_user)
+            .await?;
+
+        self.datastore()
+            .silo_user_sessions_delete(opctx, &authz_silo_user)
+            .await?;
+
+        Ok(())
+    }
+
     // The "local" identity provider (available only in `LocalOnly` Silos)
 
     /// Helper function for looking up a LocalOnly Silo by name

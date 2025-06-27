@@ -11577,6 +11577,38 @@
         }
       }
     },
+    "/v1/users/{user_id}/logout": {
+      "post": {
+        "tags": [
+          "silos"
+        ],
+        "summary": "Expire all of user's tokens and sessions",
+        "operationId": "user_logout",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "user_id",
+            "description": "ID of the user",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "resource updated"
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
     "/v1/utilization": {
       "get": {
         "tags": [
