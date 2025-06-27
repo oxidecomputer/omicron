@@ -52,14 +52,6 @@ pub const DEFAULT_RETRY_TIMEOUT: Duration = Duration::from_secs(60);
 /// How long to wait after resetting the device before expecting it to come up
 const RESET_TIMEOUT: Duration = Duration::from_secs(60);
 
-/// How long to wait for an ongoing RoT bootloader update
-const WAIT_FOR_ONGOING_ROT_BOOTLOADER_UPDATE_TIMEOUT: Duration =
-    Duration::from_secs(180);
-
-/// How long to wait between poll attempts on RoT bootloader update status
-const ROT_BOOLOADER_UPDATE_PROGRESS_INTERVAL: Duration =
-    Duration::from_secs(10);
-
 /// Parameters describing a request to update one SP-managed component
 ///
 /// This is similar in spirit to the `SpComponentUpdater` trait but uses a
@@ -226,23 +218,34 @@ pub(crate) async fn apply_update(
     debug!(log, "loaded artifact contents");
 
     // Check the live state first to see if:
-    // - this update has already been completed, or
+    // - this update has already been completed,
+    // - we are waiting for an ongoing update, or
     // - if not, then if our required preconditions are met
     status.update(UpdateAttemptStatus::Precheck);
-    match update_helper.precheck(log, &mut mgs_clients, update).await {
-        Ok(PrecheckStatus::ReadyForUpdate) |
-        // This is the first time a Nexus instance is attempting to
-        // update the RoT bootloader, we don't need to wait for an
-        // ongoing update.
-        Ok(PrecheckStatus::WaitingForOngoingUpdate) => (),
-        Ok(PrecheckStatus::UpdateComplete) => {
-            return Ok(UpdateCompletedHow::FoundNoChangesNeeded);
-        }
-        Err(error) => {
-            return Err(ApplyUpdateError::PreconditionFailed(error));
-        }
-    };
+    let before = Instant::now();
+    loop {
+        match update_helper.precheck(log, &mut mgs_clients, update).await {
+            Ok(PrecheckStatus::ReadyForUpdate) => break,
+            Ok(PrecheckStatus::WaitingForOngoingUpdate) => {
+                if before.elapsed() >= progress_timeout {
+                    warn!(
+                        log,
+                        "update takeover: timed out while waiting for ongoing update"
+                    );
+                    break;
+                }
 
+                tokio::time::sleep(PROGRESS_POLL_INTERVAL).await;
+                continue;
+            }
+            Ok(PrecheckStatus::UpdateComplete) => {
+                return Ok(UpdateCompletedHow::FoundNoChangesNeeded);
+            }
+            Err(error) => {
+                return Err(ApplyUpdateError::PreconditionFailed(error));
+            }
+        };
+    }
     // Start the update.
     debug!(log, "ready to start update");
     status.update(UpdateAttemptStatus::Updating);
@@ -632,20 +635,6 @@ async fn wait_for_update_done(
             // Check if we're done.
             Ok(PrecheckStatus::UpdateComplete) => return Ok(()),
 
-            Ok(PrecheckStatus::WaitingForOngoingUpdate) => {
-                if before.elapsed()
-                    >= WAIT_FOR_ONGOING_ROT_BOOTLOADER_UPDATE_TIMEOUT
-                {
-                    return Err(UpdateWaitError::Timeout(
-                        WAIT_FOR_ONGOING_ROT_BOOTLOADER_UPDATE_TIMEOUT,
-                    ));
-                }
-
-                tokio::time::sleep(ROT_BOOLOADER_UPDATE_PROGRESS_INTERVAL)
-                    .await;
-                continue;
-            }
-
             // An incorrect version in the "inactive" slot, incorrect active slot,
             // or non-empty pending_persistent_boot_preference/transient_boot_preference
             // are normal during the upgrade. We have no reason to think these won't
@@ -654,6 +643,7 @@ async fn wait_for_update_done(
             | Err(PrecheckError::WrongInactiveVersion { .. })
             | Err(PrecheckError::WrongActiveSlot { .. })
             | Err(PrecheckError::EphemeralRotBootPreferenceSet)
+            | Ok(PrecheckStatus::WaitingForOngoingUpdate)
             | Ok(PrecheckStatus::ReadyForUpdate) => {
                 if before.elapsed() >= timeout {
                     return Err(UpdateWaitError::Timeout(timeout));
