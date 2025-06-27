@@ -343,7 +343,9 @@ pub struct Ipv4NatEntryView {
 
 /// Status of ongoing update attempts, recently completed attempts, and update
 /// requests that are waiting for retry.
-#[derive(Clone, Debug, Default, Deserialize, Serialize, JsonSchema)]
+#[derive(
+    Clone, Debug, Default, Eq, PartialEq, Deserialize, Serialize, JsonSchema,
+)]
 pub struct MgsUpdateDriverStatus {
     pub recent: VecDeque<CompletedAttempt>,
     pub in_progress: BTreeMap<Arc<BaseboardId>, InProgressUpdateStatus>,
@@ -421,7 +423,7 @@ impl Display for MgsUpdateDriverStatusDisplay<'_> {
 }
 
 /// externally-exposed status for a completed attempt
-#[derive(Debug, Clone, Deserialize, Serialize, JsonSchema)]
+#[derive(Debug, Clone, Deserialize, Eq, PartialEq, Serialize, JsonSchema)]
 pub struct CompletedAttempt {
     pub time_started: DateTime<Utc>,
     pub time_done: DateTime<Utc>,
@@ -447,7 +449,7 @@ pub enum UpdateCompletedHow {
 }
 
 /// externally-exposed status for each in-progress update
-#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize, JsonSchema)]
 pub struct InProgressUpdateStatus {
     pub time_started: DateTime<Utc>,
     pub status: UpdateAttemptStatus,
@@ -471,7 +473,7 @@ pub enum UpdateAttemptStatus {
 }
 
 /// externally-exposed status for waiting updates
-#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize, JsonSchema)]
 pub struct WaitingStatus {
     pub next_attempt_time: DateTime<Utc>,
     pub nattempts_done: u32,
@@ -592,5 +594,77 @@ impl UpdateStatus {
         }
 
         ZoneStatusVersion::Unknown
+    }
+}
+
+#[cfg(test)]
+mod test {
+    use super::CompletedAttempt;
+    use super::InProgressUpdateStatus;
+    use super::MgsUpdateDriverStatus;
+    use super::UpdateCompletedHow;
+    use super::WaitingStatus;
+    use crate::deployment::ExpectedVersion;
+    use crate::deployment::PendingMgsUpdate;
+    use crate::deployment::PendingMgsUpdateDetails;
+    use crate::internal_api::views::UpdateAttemptStatus;
+    use crate::inventory::BaseboardId;
+    use chrono::Utc;
+    use gateway_client::types::SpType;
+    use std::collections::BTreeMap;
+    use std::collections::VecDeque;
+    use std::sync::Arc;
+    use std::time::Instant;
+    use tufaceous_artifact::ArtifactHash;
+
+    #[test]
+    fn test_can_serialize_mgs_updates() {
+        let start = Instant::now();
+        let artifact_hash: ArtifactHash =
+            "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+                .parse()
+                .unwrap();
+        let baseboard_id = Arc::new(BaseboardId {
+            part_number: String::from("a_port"),
+            serial_number: String::from("a_serial"),
+        });
+        let waiting =
+            WaitingStatus { next_attempt_time: Utc::now(), nattempts_done: 2 };
+        let in_progress = InProgressUpdateStatus {
+            time_started: Utc::now(),
+            status: UpdateAttemptStatus::Updating,
+            nattempts_done: 3,
+        };
+        let completed = CompletedAttempt {
+            time_started: Utc::now(),
+            time_done: Utc::now(),
+            elapsed: start.elapsed(),
+            request: PendingMgsUpdate {
+                baseboard_id: baseboard_id.clone(),
+                sp_type: SpType::Sled,
+                slot_id: 12,
+                details: PendingMgsUpdateDetails::Sp {
+                    expected_active_version: "1.0.0".parse().unwrap(),
+                    expected_inactive_version: ExpectedVersion::NoValidVersion,
+                },
+                artifact_hash,
+                artifact_version: "2.0.0".parse().unwrap(),
+            },
+            result: Ok(UpdateCompletedHow::FoundNoChangesNeeded),
+            nattempts_done: 8,
+        };
+
+        let status = MgsUpdateDriverStatus {
+            recent: VecDeque::from([completed]),
+            in_progress: BTreeMap::from([(baseboard_id.clone(), in_progress)]),
+            waiting: BTreeMap::from([(baseboard_id.clone(), waiting)]),
+        };
+
+        let serialized =
+            serde_json::to_string(&status).expect("failed to serialize value");
+        let deserialized: MgsUpdateDriverStatus =
+            serde_json::from_str(&serialized)
+                .expect("failed to deserialize value");
+        assert_eq!(deserialized, status);
     }
 }
