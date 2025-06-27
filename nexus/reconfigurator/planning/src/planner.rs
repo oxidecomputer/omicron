@@ -22,6 +22,7 @@ use nexus_types::deployment::Blueprint;
 use nexus_types::deployment::BlueprintPhysicalDiskDisposition;
 use nexus_types::deployment::BlueprintZoneConfig;
 use nexus_types::deployment::BlueprintZoneDisposition;
+use nexus_types::deployment::BlueprintZoneImageSource;
 use nexus_types::deployment::CockroachDbClusterVersion;
 use nexus_types::deployment::CockroachDbPreserveDowngrade;
 use nexus_types::deployment::CockroachDbSettings;
@@ -570,7 +571,11 @@ impl<'a> Planner<'a> {
             // there, all we can do is provision that one zone.  We have to wait
             // for that to succeed and synchronize the clock before we can
             // provision anything else.
-            if self.blueprint.sled_ensure_zone_ntp(sled_id)? == Ensure::Added {
+            if self.blueprint.sled_ensure_zone_ntp(
+                sled_id,
+                self.image_source_for_new_zone(ZoneKind::InternalNtp)?,
+            )? == Ensure::Added
+            {
                 info!(
                     &self.log,
                     "found sled missing NTP zone (will add one)";
@@ -668,10 +673,11 @@ impl<'a> Planner<'a> {
             // on it.
             let mut ncrucibles_added = 0;
             for zpool_id in sled_resources.all_zpools(ZpoolFilter::InService) {
-                if self
-                    .blueprint
-                    .sled_ensure_zone_crucible(sled_id, *zpool_id)?
-                    == Ensure::Added
+                if self.blueprint.sled_ensure_zone_crucible(
+                    sled_id,
+                    *zpool_id,
+                    self.image_source_for_new_zone(ZoneKind::Crucible)?,
+                )? == Ensure::Added
                 {
                     info!(
                         &self.log,
@@ -919,37 +925,41 @@ impl<'a> Planner<'a> {
                 }
             };
 
+            let image_source = self.image_source_for_new_zone(kind.into())?;
             match kind {
-                DiscretionaryOmicronZone::BoundaryNtp => self
+                DiscretionaryOmicronZone::BoundaryNtp => {
+                    self.blueprint.sled_promote_internal_ntp_to_boundary_ntp(
+                        sled_id,
+                        image_source,
+                    )?
+                }
+                DiscretionaryOmicronZone::Clickhouse => self
                     .blueprint
-                    .sled_promote_internal_ntp_to_boundary_ntp(sled_id)?,
-                DiscretionaryOmicronZone::Clickhouse => {
-                    self.blueprint.sled_add_zone_clickhouse(sled_id)?
-                }
-                DiscretionaryOmicronZone::ClickhouseKeeper => {
-                    self.blueprint.sled_add_zone_clickhouse_keeper(sled_id)?
-                }
-                DiscretionaryOmicronZone::ClickhouseServer => {
-                    self.blueprint.sled_add_zone_clickhouse_server(sled_id)?
-                }
-                DiscretionaryOmicronZone::CockroachDb => {
-                    self.blueprint.sled_add_zone_cockroachdb(sled_id)?
-                }
-                DiscretionaryOmicronZone::CruciblePantry => {
-                    self.blueprint.sled_add_zone_crucible_pantry(sled_id)?
-                }
-                DiscretionaryOmicronZone::InternalDns => {
-                    self.blueprint.sled_add_zone_internal_dns(sled_id)?
-                }
-                DiscretionaryOmicronZone::ExternalDns => {
-                    self.blueprint.sled_add_zone_external_dns(sled_id)?
-                }
+                    .sled_add_zone_clickhouse(sled_id, image_source)?,
+                DiscretionaryOmicronZone::ClickhouseKeeper => self
+                    .blueprint
+                    .sled_add_zone_clickhouse_keeper(sled_id, image_source)?,
+                DiscretionaryOmicronZone::ClickhouseServer => self
+                    .blueprint
+                    .sled_add_zone_clickhouse_server(sled_id, image_source)?,
+                DiscretionaryOmicronZone::CockroachDb => self
+                    .blueprint
+                    .sled_add_zone_cockroachdb(sled_id, image_source)?,
+                DiscretionaryOmicronZone::CruciblePantry => self
+                    .blueprint
+                    .sled_add_zone_crucible_pantry(sled_id, image_source)?,
+                DiscretionaryOmicronZone::InternalDns => self
+                    .blueprint
+                    .sled_add_zone_internal_dns(sled_id, image_source)?,
+                DiscretionaryOmicronZone::ExternalDns => self
+                    .blueprint
+                    .sled_add_zone_external_dns(sled_id, image_source)?,
                 DiscretionaryOmicronZone::Nexus => {
-                    self.blueprint.sled_add_zone_nexus(sled_id)?
+                    self.blueprint.sled_add_zone_nexus(sled_id, image_source)?
                 }
-                DiscretionaryOmicronZone::Oximeter => {
-                    self.blueprint.sled_add_zone_oximeter(sled_id)?
-                }
+                DiscretionaryOmicronZone::Oximeter => self
+                    .blueprint
+                    .sled_add_zone_oximeter(sled_id, image_source)?,
             };
             info!(
                 self.log, "added zone to sled";
@@ -1084,7 +1094,7 @@ impl<'a> Planner<'a> {
                             }
                         };
                         if zone.image_source != desired_image_source {
-                            Some((sled_id, zone))
+                            Some((sled_id, zone, desired_image_source))
                         } else {
                             None
                         }
@@ -1101,7 +1111,7 @@ impl<'a> Planner<'a> {
         // either because they're not ready or because it wouldn't be safe to
         // bounce them.
         let mut updateable_zones =
-            out_of_date_zones.filter(|(_sled_id, zone)| {
+            out_of_date_zones.filter(|(_sled_id, zone, _new_image_source)| {
                 let kind = zone.zone_type.kind();
                 if !self.can_zone_be_shut_down_safely(kind) {
                     return false;
@@ -1124,7 +1134,8 @@ impl<'a> Planner<'a> {
             });
 
         // Update the first out-of-date zone.
-        if let Some((sled_id, zone)) = updateable_zones.next() {
+        if let Some((sled_id, zone, new_image_source)) = updateable_zones.next()
+        {
             // Borrow check workaround: `self.update_or_expunge_zone` needs
             // `&mut self`, but `self` is borrowed in the `updateable_zones`
             // iterator. Clone the one zone we want to update, then drop the
@@ -1132,7 +1143,11 @@ impl<'a> Planner<'a> {
             let zone = zone.clone();
             std::mem::drop(updateable_zones);
 
-            return self.update_or_expunge_zone(sled_id, &zone);
+            return self.update_or_expunge_zone(
+                sled_id,
+                &zone,
+                new_image_source,
+            );
         }
 
         if have_out_of_date_zones {
@@ -1153,66 +1168,60 @@ impl<'a> Planner<'a> {
         &mut self,
         sled_id: SledUuid,
         zone: &BlueprintZoneConfig,
+        new_image_source: BlueprintZoneImageSource,
     ) -> Result<(), Error> {
         let zone_kind = zone.zone_type.kind();
-        let image_source = self.blueprint.zone_image_source(zone_kind)?;
-        if zone.image_source == image_source {
-            // This should only happen in the event of a planning error above.
-            error!(
-                self.log, "zone is already up-to-date";
-                "sled_id" => %sled_id,
-                "zone_id" => %zone.id,
-                "kind" => ?zone.zone_type.kind(),
-                "image_source" => %image_source,
-            );
-            return Err(Error::ZoneAlreadyUpToDate);
-        } else {
-            match zone_kind {
-                ZoneKind::Crucible
-                | ZoneKind::Clickhouse
-                | ZoneKind::ClickhouseKeeper
-                | ZoneKind::ClickhouseServer
-                | ZoneKind::CockroachDb => {
-                    info!(
-                        self.log, "updating zone image source in-place";
-                        "sled_id" => %sled_id,
-                        "zone_id" => %zone.id,
-                        "kind" => ?zone.zone_type.kind(),
-                        "image_source" => %image_source,
-                    );
-                    self.blueprint.comment(format!(
-                        "updating {:?} zone {} in-place",
-                        zone.zone_type.kind(),
-                        zone.id
-                    ));
-                    self.blueprint.sled_set_zone_source(
-                        sled_id,
-                        zone.id,
-                        image_source,
-                    )?;
-                }
-                ZoneKind::BoundaryNtp
-                | ZoneKind::CruciblePantry
-                | ZoneKind::ExternalDns
-                | ZoneKind::InternalDns
-                | ZoneKind::InternalNtp
-                | ZoneKind::Nexus
-                | ZoneKind::Oximeter => {
-                    info!(
-                        self.log, "expunging out-of-date zone";
-                        "sled_id" => %sled_id,
-                        "zone_id" => %zone.id,
-                        "kind" => ?zone.zone_type.kind(),
-                    );
-                    self.blueprint.comment(format!(
-                        "expunge {:?} zone {} for update",
-                        zone.zone_type.kind(),
-                        zone.id
-                    ));
-                    self.blueprint.sled_expunge_zone(sled_id, zone.id)?;
-                }
+
+        // We're called by `do_plan_zone_updates()`, which guarantees the
+        // `new_image_source` is different from the current image source.
+        debug_assert_ne!(zone.image_source, new_image_source);
+
+        match zone_kind {
+            ZoneKind::Crucible
+            | ZoneKind::Clickhouse
+            | ZoneKind::ClickhouseKeeper
+            | ZoneKind::ClickhouseServer
+            | ZoneKind::CockroachDb => {
+                info!(
+                    self.log, "updating zone image source in-place";
+                    "sled_id" => %sled_id,
+                    "zone_id" => %zone.id,
+                    "kind" => ?zone.zone_type.kind(),
+                    "image_source" => %new_image_source,
+                );
+                self.blueprint.comment(format!(
+                    "updating {:?} zone {} in-place",
+                    zone.zone_type.kind(),
+                    zone.id
+                ));
+                self.blueprint.sled_set_zone_source(
+                    sled_id,
+                    zone.id,
+                    new_image_source,
+                )?;
+            }
+            ZoneKind::BoundaryNtp
+            | ZoneKind::CruciblePantry
+            | ZoneKind::ExternalDns
+            | ZoneKind::InternalDns
+            | ZoneKind::InternalNtp
+            | ZoneKind::Nexus
+            | ZoneKind::Oximeter => {
+                info!(
+                    self.log, "expunging out-of-date zone";
+                    "sled_id" => %sled_id,
+                    "zone_id" => %zone.id,
+                    "kind" => ?zone.zone_type.kind(),
+                );
+                self.blueprint.comment(format!(
+                    "expunge {:?} zone {} for update",
+                    zone.zone_type.kind(),
+                    zone.id
+                ));
+                self.blueprint.sled_expunge_zone(sled_id, zone.id)?;
             }
         }
+
         Ok(())
     }
 
@@ -1308,6 +1317,19 @@ impl<'a> Planner<'a> {
         // cluster version -- we're likely in the middle of an upgrade!
         //
         // https://www.cockroachlabs.com/docs/stable/cluster-settings#change-a-cluster-setting
+    }
+
+    /// Return the image source for zones that we need to add.
+    fn image_source_for_new_zone(
+        &self,
+        zone_kind: ZoneKind,
+    ) -> Result<BlueprintZoneImageSource, TufRepoContentsError> {
+        let source_repo = if self.is_zone_ready_for_update(zone_kind)? {
+            self.input.tuf_repo().description()
+        } else {
+            self.input.old_repo().description()
+        };
+        source_repo.zone_image_source(zone_kind)
     }
 
     /// Return `true` iff a zone of the given kind is ready to be updated;

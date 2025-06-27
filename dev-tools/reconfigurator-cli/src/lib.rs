@@ -23,6 +23,7 @@ use nexus_reconfigurator_planning::system::{SledBuilder, SystemDescription};
 use nexus_reconfigurator_simulation::SimStateBuilder;
 use nexus_reconfigurator_simulation::Simulator;
 use nexus_reconfigurator_simulation::{BlueprintId, SimState};
+use nexus_sled_agent_shared::inventory::ZoneKind;
 use nexus_types::deployment::PlanningInput;
 use nexus_types::deployment::SledFilter;
 use nexus_types::deployment::execution;
@@ -1199,14 +1200,29 @@ fn cmd_blueprint_edit(
 
     let label = match args.edit_command {
         BlueprintEditCommands::AddNexus { sled_id } => {
+            // TODO-correctness We need to implement some nontrivial planner
+            // logic to correctly choose between `tuf_repo()` and `old_repo()`.
+            // Should we assume using `tuf_repo()` is okay? Require the caller
+            // to tell us? Decide like the planner?
+            let image_source = planning_input
+                .tuf_repo()
+                .description()
+                .zone_image_source(ZoneKind::Nexus)
+                .context("could not determine image source")?;
             builder
-                .sled_add_zone_nexus(sled_id)
+                .sled_add_zone_nexus(sled_id, image_source)
                 .context("failed to add Nexus zone")?;
             format!("added Nexus zone to sled {}", sled_id)
         }
         BlueprintEditCommands::AddCockroach { sled_id } => {
+            // TODO-correctness Same issue as nexus above
+            let image_source = planning_input
+                .tuf_repo()
+                .description()
+                .zone_image_source(ZoneKind::CockroachDb)
+                .context("could not determine image source")?;
             builder
-                .sled_add_zone_cockroachdb(sled_id)
+                .sled_add_zone_cockroachdb(sled_id, image_source)
                 .context("failed to add CockroachDB zone")?;
             format!("added CockroachDB zone to sled {}", sled_id)
         }
