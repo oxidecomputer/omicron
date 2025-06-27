@@ -351,13 +351,13 @@ impl InternalDisks {
         })
     }
 
-    pub fn image_raw_devfs_path(
+    pub fn boot_image_raw_devfs_path(
         &self,
         slot: M2Slot,
     ) -> Option<Result<Utf8PathBuf, Arc<PooledDiskError>>> {
         self.disks.iter().find_map(|disk| {
             if disk.slot == Some(slot) {
-                disk.raw_devfs_path.clone()
+                disk.boot_image_raw_devfs_path.clone()
             } else {
                 None
             }
@@ -485,7 +485,8 @@ struct InternalDiskDetails {
     // These two fields are optional because they don't exist for synthetic
     // disks.
     slot: Option<M2Slot>,
-    raw_devfs_path: Option<Result<Utf8PathBuf, Arc<PooledDiskError>>>,
+    boot_image_raw_devfs_path:
+        Option<Result<Utf8PathBuf, Arc<PooledDiskError>>>,
 }
 
 impl IdMappable for InternalDiskDetails {
@@ -528,7 +529,7 @@ impl From<&'_ Disk> for InternalDiskDetails {
             },
             zpool_id,
             slot,
-            raw_devfs_path,
+            boot_image_raw_devfs_path: raw_devfs_path,
         }
     }
 }
@@ -555,7 +556,7 @@ impl InternalDiskDetails {
             // We can expand the interface for fake disks if we need to be able
             // to specify more of these properties in future tests.
             slot: None,
-            raw_devfs_path: None,
+            boot_image_raw_devfs_path: None,
         }
     }
 
@@ -940,7 +941,7 @@ mod tests {
                 id: id.into(),
                 zpool_id: InternalZpoolUuid::new_v4(),
                 slot: None,
-                raw_devfs_path: None,
+                boot_image_raw_devfs_path: None,
             })
             .collect();
 

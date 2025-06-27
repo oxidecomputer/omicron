@@ -31,10 +31,6 @@ pub trait SledAgentFacilities: Send + Sync + 'static {
     fn on_time_sync(&self);
 
     /// Method to start a zone.
-    // TODO-cleanup This is implemented by
-    // `ServiceManager::start_omicron_zone()`, which does too much; we should
-    // absorb some of its functionality and shrink this interface. We definitely
-    // should not need to pass the full list of U2 zpools.
     fn start_omicron_zone(
         &self,
         zone_config: &OmicronZoneConfig,
@@ -62,9 +58,9 @@ pub trait SledAgentFacilities: Send + Sync + 'static {
 }
 
 pub trait SledAgentArtifactStore: Send + Sync + 'static {
-    /// Check an artifact exists in the TUF Repo Depot storage.
-    fn validate_artifact_exists_in_storage(
+    /// Get an artifact from the local artifact store.
+    fn get_artifact(
         &self,
         artifact: ArtifactHash,
-    ) -> impl Future<Output = anyhow::Result<()>> + Send;
+    ) -> impl Future<Output = anyhow::Result<tokio::fs::File>> + Send;
 }

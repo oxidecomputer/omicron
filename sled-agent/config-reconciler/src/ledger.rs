@@ -443,12 +443,8 @@ impl<T: SledAgentArtifactStore> LedgerTask<T> {
         // artifact store.
         let mut artifact_validation_errors = Vec::new();
         for artifact_hash in config_artifact_hashes(new_config) {
-            match self
-                .artifact_store
-                .validate_artifact_exists_in_storage(artifact_hash)
-                .await
-            {
-                Ok(()) => (),
+            match self.artifact_store.get_artifact(artifact_hash).await {
+                Ok(_file) => (),
                 Err(err) => {
                     artifact_validation_errors.push(format!("{err:#}"));
                 }
@@ -653,6 +649,7 @@ mod tests {
     use anyhow::anyhow;
     use camino::Utf8Path;
     use camino_tempfile::Utf8TempDir;
+    use camino_tempfile::tempfile;
     use id_map::IdMap;
     use illumos_utils::zpool::ZpoolName;
     use nexus_sled_agent_shared::inventory::HostPhase2DesiredContents;
@@ -679,15 +676,23 @@ mod tests {
     }
 
     impl SledAgentArtifactStore for FakeArtifactStore {
-        async fn validate_artifact_exists_in_storage(
+        async fn get_artifact(
             &self,
             artifact: ArtifactHash,
-        ) -> anyhow::Result<()> {
+        ) -> anyhow::Result<tokio::fs::File> {
+            // Our ledgering task only cares whether files _exist_, and doesn't
+            // try to read the file we return. If we're supposed to have this
+            // artifact, return a handle to an empty temp file.
+            let make_file_handle = || {
+                let f = tempfile().expect("created temp file");
+                tokio::fs::File::from(f)
+            };
+
             let Some(artifacts) = self.artifacts.as_ref() else {
-                return Ok(());
+                return Ok(make_file_handle());
             };
             if artifacts.contains(&artifact) {
-                Ok(())
+                Ok(make_file_handle())
             } else {
                 Err(anyhow!("no such artifact: {artifact}"))
             }

@@ -6,9 +6,13 @@
 //! partitions.
 
 use crate::InternalDisks;
+use crate::SledAgentArtifactStore;
 use camino::Utf8PathBuf;
+use installinator_common::RawDiskWriter;
 use nexus_sled_agent_shared::inventory::BootPartitionContents as BootPartitionContentsInventory;
 use nexus_sled_agent_shared::inventory::BootPartitionDetails;
+use nexus_sled_agent_shared::inventory::HostPhase2DesiredContents;
+use nexus_sled_agent_shared::inventory::HostPhase2DesiredSlots;
 use omicron_common::disk::M2Slot;
 use sled_hardware::PooledDiskError;
 use slog_error_chain::InlineErrorChain;
@@ -25,7 +29,7 @@ pub struct BootDiskNotFound;
 
 #[derive(Debug, thiserror::Error)]
 pub enum BootPartitionError {
-    #[error("no disk found in this slot")]
+    #[error("no disk found")]
     NoDiskInSlot,
     #[error("could not determine raw devfs path")]
     DetermineDevfsPath(#[source] Arc<PooledDiskError>),
@@ -35,7 +39,7 @@ pub enum BootPartitionError {
         #[source]
         err: io::Error,
     },
-    #[error("failed fetching disk's extended media info at {path}")]
+    #[error("failed fetching extended media info at {path}")]
     MediaInfoExtended {
         path: Utf8PathBuf,
         #[source]
@@ -71,29 +75,219 @@ pub enum BootPartitionError {
         expected: ArtifactHash,
         got: ArtifactHash,
     },
+    #[error("failed to {path} for writing")]
+    OpenForWriting {
+        path: Utf8PathBuf,
+        #[source]
+        err: io::Error,
+    },
+    #[error("could not find desired artifact {desired}")]
+    MissingDesiredArtifact {
+        desired: ArtifactHash,
+        #[source]
+        err: anyhow::Error,
+    },
+    #[error("failed to write to path {path}")]
+    Write {
+        path: Utf8PathBuf,
+        #[source]
+        err: io::Error,
+    },
+    #[error("failed to finalize writes to path {path}")]
+    FinalizeWrite {
+        path: Utf8PathBuf,
+        #[source]
+        err: io::Error,
+    },
 }
 
-#[derive(Debug)]
-pub struct BootPartitionContents {
-    pub boot_disk: Result<M2Slot, BootDiskNotFound>,
-    pub slot_a: Result<BootPartitionDetails, BootPartitionError>,
-    pub slot_b: Result<BootPartitionDetails, BootPartitionError>,
+#[derive(Debug, Default)]
+pub(crate) struct BootPartitionReconciler {
+    // Any time the config reconciler runs, we want to report the contents of
+    // our boot partitions, which requires reading and hashing a full OS image.
+    // This isn't super expensive, but does take a handful of seconds, and it's
+    // really easy for us to cache previous results.
+    //
+    // Cache invalidation is hard; this assumes:
+    //
+    // * What disk we booted from never changes; once we've read it once, we
+    //   know it forever.
+    // * We are the only entity writing to the boot partition. (Therefore, if
+    //   we've successfully read the current contents and we haven't changed
+    //   them, we can return our cached value.)
+    cached_boot_disk: Option<M2Slot>,
+    cached_slot_a: Option<BootPartitionDetails>,
+    cached_slot_b: Option<BootPartitionDetails>,
 }
 
-impl BootPartitionContents {
-    pub async fn read(internal_disks: &InternalDisks) -> Self {
+impl BootPartitionReconciler {
+    pub(crate) async fn reconcile<T: SledAgentArtifactStore>(
+        &mut self,
+        internal_disks: &InternalDisks,
+        desired: &HostPhase2DesiredSlots,
+        artifact_store: &T,
+        // TODO We should also consider the mupdate override, once that work
+        // lands. Never overwrite the boot partitions while we're in that state.
+    ) -> BootPartitionContents {
         let (slot_a, slot_b) = futures::join!(
-            boot_partition_details::read(M2Slot::A, internal_disks),
-            boot_partition_details::read(M2Slot::B, internal_disks),
+            Self::reconcile_slot(
+                M2Slot::A,
+                internal_disks,
+                &mut self.cached_slot_a,
+                &desired.slot_a,
+                artifact_store,
+            ),
+            Self::reconcile_slot(
+                M2Slot::B,
+                internal_disks,
+                &mut self.cached_slot_b,
+                &desired.slot_b,
+                artifact_store,
+            ),
         );
-        Self {
-            boot_disk: internal_disks.boot_disk_slot().ok_or(BootDiskNotFound),
+        BootPartitionContents {
+            boot_disk: self.determine_boot_disk(internal_disks),
             slot_a,
             slot_b,
         }
     }
 
-    pub fn into_inventory(self) -> BootPartitionContentsInventory {
+    fn determine_boot_disk(
+        &mut self,
+        internal_disks: &InternalDisks,
+    ) -> Result<M2Slot, BootDiskNotFound> {
+        if let Some(slot) = self.cached_boot_disk {
+            return Ok(slot);
+        }
+        self.cached_boot_disk = internal_disks.boot_disk_slot();
+        self.cached_boot_disk.ok_or(BootDiskNotFound)
+    }
+
+    async fn reconcile_slot<T: SledAgentArtifactStore>(
+        slot: M2Slot,
+        internal_disks: &InternalDisks,
+        cache: &mut Option<BootPartitionDetails>,
+        desired: &HostPhase2DesiredContents,
+        artifact_store: &T,
+    ) -> Result<BootPartitionDetails, BootPartitionError> {
+        // If we don't know what's there, try to read it first.
+        if cache.is_none() {
+            match boot_partition_details::read(slot, internal_disks).await {
+                Ok(details) => {
+                    *cache = Some(details);
+                }
+                Err(err) => {
+                    // We couldn't read this slot; if we have a target we want
+                    // to write, that's okay and we'll fall through. If we
+                    // don't, there's nothing else we can do here.
+                    match desired {
+                        HostPhase2DesiredContents::CurrentContents => {
+                            return Err(err);
+                        }
+                        HostPhase2DesiredContents::Artifact(_) => (),
+                    }
+                }
+            }
+        }
+
+        // See if we need to write: does what we have already match what it's
+        // supposed to be?
+        match (&cache, desired) {
+            // Two common cases: we know what's there, and either don't have a
+            // desired target or it already matches what we have. In both cases,
+            // we can return our cached details.
+            (Some(details), HostPhase2DesiredContents::CurrentContents) => {
+                Ok(details.clone())
+            }
+            (Some(details), HostPhase2DesiredContents::Artifact(artifact))
+                if details.artifact_hash == *artifact =>
+            {
+                Ok(details.clone())
+            }
+            // Less common: we need to write the desired artifact to this slot.
+            // It doesn't matter whether we failed to read the slot (hopefully
+            // because it doesn't have an image - if read failed due to I/O
+            // problems, our write will probably fail too, but we can at least
+            // try) or whether we read the slot and the contents don't match.
+            (_, HostPhase2DesiredContents::Artifact(artifact)) => {
+                Self::write_artifact(
+                    slot,
+                    internal_disks,
+                    cache,
+                    *artifact,
+                    artifact_store,
+                )
+                .await
+            }
+            // Impossible: this case is handled above. If we have no cached
+            // details, we must have failed to read the slot above, and if we
+            // aren't supposed to write anything, we would have returned the
+            // error we got from trying to read.
+            (None, HostPhase2DesiredContents::CurrentContents) => {
+                unreachable!("covered by read case above")
+            }
+        }
+    }
+
+    async fn write_artifact<T: SledAgentArtifactStore>(
+        slot: M2Slot,
+        internal_disks: &InternalDisks,
+        cache: &mut Option<BootPartitionDetails>,
+        desired: ArtifactHash,
+        artifact_store: &T,
+    ) -> Result<BootPartitionDetails, BootPartitionError> {
+        let artifact =
+            artifact_store.get_artifact(desired).await.map_err(|err| {
+                BootPartitionError::MissingDesiredArtifact { desired, err }
+            })?;
+        let mut reader = tokio::io::BufReader::new(artifact);
+
+        let path = match internal_disks.boot_image_raw_devfs_path(slot) {
+            Some(Ok(path)) => path,
+            Some(Err(err)) => {
+                return Err(BootPartitionError::DetermineDevfsPath(err));
+            }
+            None => return Err(BootPartitionError::NoDiskInSlot),
+        };
+
+        let mut writer =
+            RawDiskWriter::open(path.as_std_path()).await.map_err(|err| {
+                BootPartitionError::OpenForWriting { path: path.clone(), err }
+            })?;
+
+        // We're about to write to the disk; invalidate our cache of what it
+        // contains.
+        *cache = None;
+
+        tokio::io::copy(&mut reader, &mut writer).await.map_err(|err| {
+            BootPartitionError::Write { path: path.clone(), err }
+        })?;
+
+        // Ensure the writes are sync'd to disk.
+        writer
+            .finalize()
+            .await
+            .map_err(|err| BootPartitionError::FinalizeWrite { path, err })?;
+
+        // Re-read the disk we just wrote; this both gets us the metadata
+        // describing it and confirms we wrote a valid image.
+        let details =
+            boot_partition_details::read(slot, internal_disks).await?;
+        *cache = Some(details.clone());
+
+        Ok(details)
+    }
+}
+
+#[derive(Debug)]
+pub(crate) struct BootPartitionContents {
+    pub(crate) boot_disk: Result<M2Slot, BootDiskNotFound>,
+    pub(crate) slot_a: Result<BootPartitionDetails, BootPartitionError>,
+    pub(crate) slot_b: Result<BootPartitionDetails, BootPartitionError>,
+}
+
+impl BootPartitionContents {
+    pub(crate) fn into_inventory(self) -> BootPartitionContentsInventory {
         let err_to_string = |err: &dyn std::error::Error| {
             InlineErrorChain::new(err).to_string()
         };
@@ -119,7 +313,7 @@ mod boot_partition_details {
         slot: M2Slot,
         internal_disks: &InternalDisks,
     ) -> Result<BootPartitionDetails, BootPartitionError> {
-        match internal_disks.image_raw_devfs_path(slot) {
+        match internal_disks.boot_image_raw_devfs_path(slot) {
             Some(Ok(path)) => {
                 tokio::task::spawn_blocking(|| read_blocking(path))
                     .await
