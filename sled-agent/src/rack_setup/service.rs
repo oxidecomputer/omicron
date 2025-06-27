@@ -1044,6 +1044,8 @@ impl ServiceInner {
             rack_network_config,
             external_port_count: port_discovery_mode.into(),
             allowed_source_ips,
+            control_plane_storage_buffer_gib: config
+                .control_plane_storage_buffer_gib,
         };
 
         let notify_nexus = || async {

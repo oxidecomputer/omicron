@@ -429,18 +429,6 @@ do
 	ACTUAL_ZPOOL_COUNT=$(pfexec zlogin oxz_switch /opt/oxide/omdb/bin/omdb db zpool list -i | wc -l)
 done
 
-# The bootstrap command creates a disk, so before that: adjust the control plane
-# storage buffer to 0 as the virtual hardware only creates 20G pools
-
-pfexec zlogin oxz_switch /opt/oxide/omdb/bin/omdb db zpool list
-
-for ZPOOL in $(pfexec zlogin oxz_switch /opt/oxide/omdb/bin/omdb db zpool list -i);
-do
-	pfexec zlogin oxz_switch /opt/oxide/omdb/bin/omdb -w db zpool set-storage-buffer "${ZPOOL}" 0
-done
-
-pfexec zlogin oxz_switch /opt/oxide/omdb/bin/omdb db zpool list
-
 export RUST_BACKTRACE=1
 export E2E_TLS_CERT IPPOOL_START IPPOOL_END
 eval "$(./target/debug/bootstrap)"

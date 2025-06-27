@@ -5916,6 +5916,16 @@ ON omicron.public.webhook_delivery_attempt (
     rx_id
 );
 
+CREATE TYPE IF NOT EXISTS omicron.public.setting_name AS ENUM (
+    'control_plane_storage_buffer'
+);
+
+/* A table of Nexus' dynamic settings */
+CREATE TABLE IF NOT EXISTS omicron.public.setting (
+    name         omicron.public.setting_name PRIMARY KEY,
+    int_value    INT
+);
+
 /*
  * Ereports
  *
@@ -6095,7 +6105,7 @@ INSERT INTO omicron.public.db_metadata (
     version,
     target_version
 ) VALUES
-    (TRUE, NOW(), NOW(), '153.0.0', NULL)
+    (TRUE, NOW(), NOW(), '154.0.0', NULL)
 ON CONFLICT DO NOTHING;
 
 COMMIT;

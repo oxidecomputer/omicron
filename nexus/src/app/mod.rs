@@ -31,7 +31,6 @@ use nexus_types::deployment::PendingMgsUpdates;
 use omicron_common::address::DENDRITE_PORT;
 use omicron_common::address::MGD_PORT;
 use omicron_common::address::MGS_PORT;
-use omicron_common::api::external::ByteCount;
 use omicron_common::api::external::Error;
 use omicron_common::api::internal::shared::SwitchLocation;
 use omicron_uuid_kinds::OmicronZoneUuid;
@@ -150,14 +149,6 @@ pub const MAX_DISK_SIZE_BYTES: u64 = 1023 * (1 << 30); // 1023 GiB
 
 /// This value is aribtrary
 pub const MAX_SSH_KEYS_PER_INSTANCE: u32 = 100;
-
-/// The amount of disk space to reserve for non-Crucible / control plane
-/// storage. This amount represents a buffer that the region allocation query
-/// will not use for each U2.
-///
-/// See oxidecomputer/omicron#7875 for the 250G determination.
-pub const CONTROL_PLANE_STORAGE_BUFFER: ByteCount =
-    ByteCount::from_gibibytes_u32(250);
 
 /// Manages an Oxide fleet -- the heart of the control plane
 pub struct Nexus {
