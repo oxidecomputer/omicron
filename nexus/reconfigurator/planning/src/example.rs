@@ -15,6 +15,7 @@ use crate::system::SledBuilder;
 use crate::system::SystemDescription;
 use nexus_inventory::CollectionBuilderRng;
 use nexus_types::deployment::Blueprint;
+use nexus_types::deployment::BlueprintZoneImageSource;
 use nexus_types::deployment::OmicronZoneNic;
 use nexus_types::deployment::PlanningInput;
 use nexus_types::deployment::SledFilter;
@@ -435,29 +436,56 @@ impl ExampleSystemBuilder {
                     .unwrap();
             }
             if self.create_zones {
-                let _ = builder.sled_ensure_zone_ntp(sled_id).unwrap();
+                let image_source = BlueprintZoneImageSource::InstallDataset;
+                let _ = builder
+                    .sled_ensure_zone_ntp(sled_id, image_source.clone())
+                    .unwrap();
                 for _ in 0..nexus_count.on(i, self.nsleds) {
                     builder
-                        .sled_add_zone_nexus_with_config(sled_id, false, vec![])
+                        .sled_add_zone_nexus_with_config(
+                            sled_id,
+                            false,
+                            vec![],
+                            image_source.clone(),
+                        )
                         .unwrap();
                 }
                 if i == 0 {
-                    builder.sled_add_zone_clickhouse(sled_id).unwrap();
+                    builder
+                        .sled_add_zone_clickhouse(sled_id, image_source.clone())
+                        .unwrap();
                 }
                 for _ in 0..self.internal_dns_count.on(i, self.nsleds) {
-                    builder.sled_add_zone_internal_dns(sled_id).unwrap();
+                    builder
+                        .sled_add_zone_internal_dns(
+                            sled_id,
+                            image_source.clone(),
+                        )
+                        .unwrap();
                 }
                 for _ in 0..self.external_dns_count.on(i, self.nsleds) {
-                    builder.sled_add_zone_external_dns(sled_id).unwrap();
+                    builder
+                        .sled_add_zone_external_dns(
+                            sled_id,
+                            image_source.clone(),
+                        )
+                        .unwrap();
                 }
                 for _ in 0..self.crucible_pantry_count.on(i, self.nsleds) {
-                    builder.sled_add_zone_crucible_pantry(sled_id).unwrap();
+                    builder
+                        .sled_add_zone_crucible_pantry(
+                            sled_id,
+                            image_source.clone(),
+                        )
+                        .unwrap();
                 }
-            }
-            if self.create_zones {
                 for pool_name in sled_details.resources.zpools.keys() {
                     let _ = builder
-                        .sled_ensure_zone_crucible(sled_id, *pool_name)
+                        .sled_ensure_zone_crucible(
+                            sled_id,
+                            *pool_name,
+                            image_source.clone(),
+                        )
                         .unwrap();
                 }
             }
