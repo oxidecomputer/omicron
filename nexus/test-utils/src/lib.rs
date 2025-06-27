@@ -167,6 +167,7 @@ pub struct ControlPlaneTestContext<N> {
     pub internal_client: ClientTestContext,
     pub server: N,
     pub database: dev::db::CockroachInstance,
+    pub database_admin: omicron_cockroach_admin::Server,
     pub clickhouse: dev::clickhouse::ClickHouseDeployment,
     pub logctx: LogContext,
     pub sled_agents: Vec<ControlPlaneTestContextSledAgent>,
@@ -378,6 +379,7 @@ pub struct ControlPlaneTestContextBuilder<'a, N: NexusServer> {
 
     pub server: Option<N>,
     pub database: Option<dev::db::CockroachInstance>,
+    pub database_admin: Option<omicron_cockroach_admin::Server>,
     pub clickhouse: Option<dev::clickhouse::ClickHouseDeployment>,
     pub sled_agents: Vec<ControlPlaneTestContextSledAgent>,
     pub oximeter: Option<Oximeter>,
@@ -432,6 +434,7 @@ impl<'a, N: NexusServer> ControlPlaneTestContextBuilder<'a, N> {
             internal_client: None,
             server: None,
             database: None,
+            database_admin: None,
             clickhouse: None,
             sled_agents: vec![],
             oximeter: None,
@@ -546,7 +549,28 @@ impl<'a, N: NexusServer> ControlPlaneTestContextBuilder<'a, N> {
             ),
             image_source: BlueprintZoneImageSource::InstallDataset,
         });
+        let http_address = database.http_addr();
         self.database = Some(database);
+
+        let cli = omicron_cockroach_admin::CockroachCli::new(
+            omicron_test_utils::dev::db::COCKROACHDB_BIN.into(),
+            address,
+            http_address,
+        );
+        let server = omicron_cockroach_admin::start_server(
+            zone_id,
+            cli,
+            omicron_cockroach_admin::Config {
+                dropshot: dropshot::ConfigDropshot::default(),
+                log: ConfigLogging::StderrTerminal {
+                    level: ConfigLoggingLevel::Error,
+                },
+            },
+        )
+        .await
+        .expect("Failed to start CRDB admin server");
+
+        self.database_admin = Some(server);
     }
 
     // Start ClickHouse database server.
@@ -1396,6 +1420,7 @@ impl<'a, N: NexusServer> ControlPlaneTestContextBuilder<'a, N> {
             techport_client: self.techport_client.unwrap(),
             internal_client: self.internal_client.unwrap(),
             database: self.database.unwrap(),
+            database_admin: self.database_admin.unwrap(),
             clickhouse: self.clickhouse.unwrap(),
             sled_agents: self.sled_agents,
             oximeter: self.oximeter.unwrap(),

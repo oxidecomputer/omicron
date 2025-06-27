@@ -703,7 +703,7 @@ impl SledAgent {
     pub(crate) fn as_support_bundle_logs(&self) -> SupportBundleLogs<'_> {
         SupportBundleLogs::new(
             &self.log,
-            self.inner.config_reconciler.internal_disks_rx(),
+            self.inner.config_reconciler.available_datasets_rx(),
         )
     }
 

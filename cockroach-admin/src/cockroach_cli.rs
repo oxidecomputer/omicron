@@ -12,7 +12,7 @@ use illumos_utils::output_to_exec_error;
 use slog_error_chain::InlineErrorChain;
 use slog_error_chain::SlogInlineError;
 use std::io;
-use std::net::SocketAddrV6;
+use std::net::{SocketAddr, SocketAddrV6};
 use std::process::Output;
 use tokio::process::Command;
 
@@ -93,18 +93,28 @@ impl From<CockroachCliError> for HttpError {
 pub struct CockroachCli {
     path_to_cockroach_binary: Utf8PathBuf,
     cockroach_address: SocketAddrV6,
+    cockroach_http_address: SocketAddr,
 }
 
 impl CockroachCli {
     pub fn new(
         path_to_cockroach_binary: Utf8PathBuf,
         cockroach_address: SocketAddrV6,
+        cockroach_http_address: SocketAddr,
     ) -> Self {
-        Self { path_to_cockroach_binary, cockroach_address }
+        Self {
+            path_to_cockroach_binary,
+            cockroach_address,
+            cockroach_http_address,
+        }
     }
 
     pub fn cockroach_address(&self) -> SocketAddrV6 {
         self.cockroach_address
+    }
+
+    pub fn cockroach_http_address(&self) -> SocketAddr {
+        self.cockroach_http_address
     }
 
     pub async fn cluster_init(&self) -> Result<(), CockroachCliError> {
@@ -169,6 +179,11 @@ impl CockroachCli {
         self.invoke_node_decommission(node_id).await
     }
 
+    // TODO-correctness These validation checks are NOT sufficient; see
+    // https://github.com/oxidecomputer/omicron/issues/8445. Our request handler
+    // for node decommissioning rejects requests, but we keep this method around
+    // for documentation and because we hope to extend it to have correct checks
+    // in the near future.
     fn validate_node_decommissionable(
         &self,
         node_id: &str,
@@ -181,7 +196,9 @@ impl CockroachCli {
         // 2. The node must not have any `gossiped_replicas` (the cockroach
         //    cluster must not think this node is an active member of any ranges
         //    - in practice, we see this go to 0 about 60 seconds after a node
-        //    goes offline)
+        //    goes offline). This attempts to guard against a window of time
+        //    where a node has gone offline but cockroach has not yet reflected
+        //    that fact in the counts of underreplicated ranges.
         // 3. The range descriptor for all ranges must not include the node we
         //    want to decommission. This gate shouldn't be necessary, but exists
         //    as a safeguard to avoid triggering what appears to be a CRDB race
@@ -443,7 +460,11 @@ mod tests {
         )
         .parse()
         .expect("valid SocketAddrV6");
-        let cli = CockroachCli::new("cockroach".into(), cockroach_address);
+        let cli = CockroachCli::new(
+            "cockroach".into(),
+            cockroach_address,
+            SocketAddr::V6(cockroach_address),
+        );
         let status = cli.node_status().await.expect("got node status");
 
         // We can't check all the fields exactly, but some we know based on the
@@ -505,7 +526,11 @@ mod tests {
         )
         .parse()
         .expect("valid SocketAddrV6");
-        let cli = CockroachCli::new("cockroach".into(), cockroach_address);
+        let cli = CockroachCli::new(
+            "cockroach".into(),
+            cockroach_address,
+            SocketAddr::V6(cockroach_address),
+        );
         let result = cli
             .invoke_node_decommission("1")
             .await
@@ -652,7 +677,11 @@ mod tests {
         // Repeat the above test but using our wrapper.
         {
             let db = UninitializedCockroach::start().await;
-            let cli = CockroachCli::new("cockroach".into(), db.listen_addr);
+            let cli = CockroachCli::new(
+                "cockroach".into(),
+                db.listen_addr,
+                SocketAddr::V6(db.listen_addr),
+            );
 
             cli.cluster_init().await.expect("cluster initialized");
             cli.cluster_init().await.expect("cluster still initialized");
@@ -675,7 +704,11 @@ mod tests {
         .parse()
         .expect("valid SocketAddrV6");
 
-        let cli = CockroachCli::new("cockroach".into(), cockroach_address);
+        let cli = CockroachCli::new(
+            "cockroach".into(),
+            cockroach_address,
+            SocketAddr::V6(cockroach_address),
+        );
         cli.schema_init_impl(DBINIT_RELATIVE_PATH)
             .await
             .expect("initialized schema");
@@ -692,7 +725,11 @@ mod tests {
         let logctx =
             dev::test_setup_log("test_cluster_schema_init_interleaved");
         let db = UninitializedCockroach::start().await;
-        let cli = CockroachCli::new("cockroach".into(), db.listen_addr);
+        let cli = CockroachCli::new(
+            "cockroach".into(),
+            db.listen_addr,
+            SocketAddr::V6(db.listen_addr),
+        );
 
         // We should be able to initialize the cluster, then install the schema,
         // then do both of those things again.
@@ -778,6 +815,7 @@ mod tests {
         let cli = CockroachCli::new(
             "never-called".into(),
             "[::1]:0".parse().unwrap(),
+            SocketAddr::V6("[::1]:0".parse().unwrap()),
         );
 
         match cli.validate_node_decommissionable(
