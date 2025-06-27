@@ -102,6 +102,7 @@ pub use planning_input::SledLookupError;
 pub use planning_input::SledLookupErrorKind;
 pub use planning_input::SledResources;
 pub use planning_input::TargetReleaseDescription;
+pub use planning_input::TufRepoContentsError;
 pub use planning_input::TufRepoPolicy;
 pub use planning_input::ZpoolFilter;
 use std::sync::Arc;
