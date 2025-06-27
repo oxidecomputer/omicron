@@ -332,6 +332,18 @@ pub enum PostUpdateError {
     FatalError { error: String },
 }
 
+impl PostUpdateError {
+    pub fn is_fatal(&self) -> bool {
+        match self {
+            PostUpdateError::GatewayClientError(error) => {
+                !matches!(error, gateway_client::Error::CommunicationError(_))
+            }
+            PostUpdateError::TransientError { .. } => false,
+            PostUpdateError::FatalError { .. } => true,
+        }
+    }
+}
+
 #[derive(Debug)]
 pub enum FoundVersion {
     MissingVersion,

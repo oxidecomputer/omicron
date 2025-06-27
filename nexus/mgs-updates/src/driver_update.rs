@@ -4,7 +4,6 @@
 
 //! Concurrent-safe facilities for doing MGS-managed upates
 
-use crate::common_sp_update::PostUpdateError;
 use crate::common_sp_update::PrecheckError;
 use crate::common_sp_update::PrecheckStatus;
 use crate::common_sp_update::STATUS_POLL_INTERVAL;
@@ -376,26 +375,10 @@ pub(crate) async fn apply_update(
         while let Err(error) =
             update_helper.post_update(log, &mut mgs_clients, update).await
         {
-            match error {
-                PostUpdateError::GatewayClientError(error) => {
-                    if !matches!(
-                        error,
-                        gateway_client::Error::CommunicationError(_)
-                    ) {
-                        let error = InlineErrorChain::new(&error);
-                        error!(log, "post_update failed"; &error);
-                        return Err(ApplyUpdateError::SpResetFailed(
-                            error.to_string(),
-                        ));
-                    }
-                }
-                PostUpdateError::FatalError { error } => {
-                    error!(log, "post_update failed"; "error" => ?error);
-                    return Err(ApplyUpdateError::SpResetFailed(
-                        error.to_string(),
-                    ));
-                }
-                PostUpdateError::TransientError { message: _ } => {}
+            if error.is_fatal() {
+                let error = InlineErrorChain::new(&error);
+                error!(log, "post_update failed"; &error);
+                return Err(ApplyUpdateError::SpResetFailed(error.to_string()));
             }
 
             tokio::time::sleep(RESET_DELAY_INTERVAL).await;
