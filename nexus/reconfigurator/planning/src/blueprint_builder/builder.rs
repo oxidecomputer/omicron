@@ -60,6 +60,7 @@ use omicron_common::api::external::TufRepoDescription;
 use omicron_common::api::external::Vni;
 use omicron_common::api::internal::shared::NetworkInterface;
 use omicron_common::api::internal::shared::NetworkInterfaceKind;
+use omicron_common::policy::COCKROACHDB_REDUNDANCY;
 use omicron_common::policy::INTERNAL_DNS_REDUNDANCY;
 use omicron_uuid_kinds::GenericUuid;
 use omicron_uuid_kinds::MupdateOverrideUuid;
@@ -2073,10 +2074,12 @@ impl<'a> BlueprintBuilder<'a> {
                 // failures, even mid-update - but this prevents our system
                 // from self-sabotage when range underreplication is already
                 // present.
-                if let Some(ranges_underreplicated) =
-                    self.collection.cockroach_status.ranges_underreplicated
-                {
-                    return ranges_underreplicated == 0;
+                if let (Some(ranges_underreplicated), Some(live_nodes)) = (
+                    self.collection.cockroach_status.ranges_underreplicated,
+                    self.collection.cockroach_status.liveness_live_nodes,
+                ) {
+                    return ranges_underreplicated == 0
+                        && live_nodes == COCKROACHDB_REDUNDANCY as u64;
                 }
 
                 // If we can't read stats from Cockroach, OR the number of

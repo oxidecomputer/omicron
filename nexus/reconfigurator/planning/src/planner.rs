@@ -5133,9 +5133,10 @@ pub(crate) mod test {
             zone.zone_type.is_cockroach() && zone.image_source == image_source
         };
 
-        // If we have no "ranges_underreplicated" info in our inventory, the
+        // If we have missing info in our inventory, the
         // planner will not update any Cockroach zones.
         example.collection.cockroach_status.ranges_underreplicated = None;
+        example.collection.cockroach_status.liveness_live_nodes = None;
         assert_planning_makes_no_changes(
             &log,
             &blueprint,
@@ -5144,9 +5145,25 @@ pub(crate) mod test {
             TEST_NAME,
         );
 
+        let goal_redundancy = COCKROACHDB_REDUNDANCY as u64;
+
         // If we have any non-zero "ranges_underreplicated" in in our inventory,
         // the planner will not update any Cockroach zones.
         example.collection.cockroach_status.ranges_underreplicated = Some(1);
+        example.collection.cockroach_status.liveness_live_nodes =
+            Some(goal_redundancy);
+        assert_planning_makes_no_changes(
+            &log,
+            &blueprint,
+            &example.input,
+            &example.collection,
+            TEST_NAME,
+        );
+
+        // If we don't have enough live nodes, we won't update Cockroach zones.
+        example.collection.cockroach_status.ranges_underreplicated = Some(0);
+        example.collection.cockroach_status.liveness_live_nodes =
+            Some(goal_redundancy - 1);
         assert_planning_makes_no_changes(
             &log,
             &blueprint,
@@ -5165,6 +5182,8 @@ pub(crate) mod test {
             // "update_collection_from_blueprint" resets it to "None".
             example.collection.cockroach_status.ranges_underreplicated =
                 Some(0);
+            example.collection.cockroach_status.liveness_live_nodes =
+                Some(goal_redundancy);
 
             println!("Updating cockroach {i} of {COCKROACHDB_REDUNDANCY}");
             let new_blueprint = Planner::new_based_on(
