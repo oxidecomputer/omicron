@@ -493,6 +493,7 @@ T ENA ID                                   PARENT                               
 * yes ade5749d-bdf3-4fab-a8ae-00bea01b3a5a 02697f74-b14a-4418-90f0-c28b2a3a6aa9 <REDACTED_TIMESTAMP> 
 
 > blueprint-plan ade5749d-bdf3-4fab-a8ae-00bea01b3a5a
+INFO skipping noop image source check for all sleds (no current TUF repo)
 INFO found sled missing NTP zone (will add one), sled_id: 89d02b1b-478c-401a-8e28-7a26f74fa41b
 INFO sufficient BoundaryNtp zones exist in plan, desired_count: 0, current_count: 0
 WARN failed to place all new desired Clickhouse zones, placed: 0, wanted_to_place: 1
