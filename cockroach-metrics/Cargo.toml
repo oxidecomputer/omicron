@@ -1,0 +1,24 @@
+[package]
+name = "omicron-cockroach-metrics"
+version = "0.1.0"
+edition = "2021"
+license = "MPL-2.0"
+
+[dependencies]
+anyhow.workspace = true
+chrono.workspace = true
+cockroach-admin-client.workspace = true
+futures.workspace = true
+serde_json.workspace = true
+slog.workspace = true
+serde.workspace = true
+strum.workspace = true
+tokio.workspace = true
+
+omicron-workspace-hack.workspace = true
+
+[dev-dependencies]
+proptest.workspace = true
+
+[lints]
+workspace = true
