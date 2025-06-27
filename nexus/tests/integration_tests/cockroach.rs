@@ -134,6 +134,19 @@ async fn test_cockroach_http_prometheus_metrics(
         panic!("Missing metrics; failing test");
     }
 
+    assert_eq!(
+        metrics
+            .get_metric_unsigned(CockroachMetric::RangesUnderreplicated)
+            .expect("Missing 'ranges underreplicated' metric"),
+        0
+    );
+    assert_eq!(
+        metrics
+            .get_metric_unsigned(CockroachMetric::LivenessLiveNodes)
+            .expect("Missing 'live nodes' metric"),
+        1
+    );
+
     println!("\nTesting SQL execution latency histogram:");
     if let Some(histogram) =
         metrics.get_metric_histogram(CockroachMetric::SqlExecLatency)

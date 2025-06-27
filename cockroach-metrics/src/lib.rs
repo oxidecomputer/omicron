@@ -307,6 +307,10 @@ pub enum CockroachMetric {
     #[strum(serialize = "leases_transfers_error")]
     LeasesTransfersError,
 
+    // Number of live nodes in the cluster
+    #[strum(serialize = "liveness_livenodes")]
+    LivenessLiveNodes,
+
     // Range metrics - critical for understanding data distribution and splits
     #[strum(serialize = "range_splits")]
     RangeSplits,
@@ -355,6 +359,7 @@ impl CockroachMetric {
             // All counter/gauge metrics are numbers
             CockroachMetric::LeasesError
             | CockroachMetric::LeasesTransfersError
+            | CockroachMetric::LivenessLiveNodes
             | CockroachMetric::RangeSplits
             | CockroachMetric::RangeRemoves
             | CockroachMetric::RangesUnderreplicated
@@ -380,6 +385,9 @@ impl CockroachMetric {
             }
             CockroachMetric::LeasesTransfersError => {
                 "Number of lease transfer operations that failed"
+            }
+            CockroachMetric::LivenessLiveNodes => {
+                "Number of live nodes in the CockroachDB cluster"
             }
             CockroachMetric::RangeSplits => {
                 "Number of range split operations performed"
