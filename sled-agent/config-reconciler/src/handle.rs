@@ -242,6 +242,7 @@ impl ConfigReconcilerHandle {
             current_config_rx,
             reconciler_result_tx,
             currently_managed_zpools_tx,
+            self.internal_disks_rx.clone(),
             external_disks_tx,
             raw_disks_rx,
             Arc::clone(&self.destroy_orphans),
@@ -418,16 +419,6 @@ impl ConfigReconcilerHandle {
             last_reconciliation,
         })
     }
-}
-
-#[derive(Debug)]
-struct ReconcilerTaskDependencies {
-    key_requester: StorageKeyRequester,
-    time_sync_config: TimeSyncConfig,
-    reconciler_result_tx: watch::Sender<ReconcilerResult>,
-    currently_managed_zpools_tx: watch::Sender<Arc<CurrentlyManagedZpools>>,
-    ledger_task_log: Logger,
-    reconciler_task_log: Logger,
 }
 
 /// Fields of sled-agent inventory reported by the config reconciler subsystem.

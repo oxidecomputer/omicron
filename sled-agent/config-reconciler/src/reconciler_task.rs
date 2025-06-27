@@ -36,8 +36,10 @@ use std::time::Duration;
 use std::time::Instant;
 use tokio::sync::watch;
 
+use crate::InternalDisksReceiver;
 use crate::TimeSyncConfig;
 use crate::dataset_serialization_task::DatasetTaskHandle;
+use crate::host_phase_2::BootPartitionContents;
 use crate::ledger::CurrentSledConfig;
 use crate::raw_disks::RawDisksReceiver;
 use crate::sled_agent_facilities::SledAgentFacilities;
@@ -64,6 +66,7 @@ pub(crate) fn spawn<T: SledAgentFacilities>(
     current_config_rx: watch::Receiver<CurrentSledConfig>,
     reconciler_result_tx: watch::Sender<ReconcilerResult>,
     currently_managed_zpools_tx: watch::Sender<Arc<CurrentlyManagedZpools>>,
+    internal_disks_rx: InternalDisksReceiver,
     external_disks_tx: watch::Sender<HashSet<Disk>>,
     raw_disks_rx: RawDisksReceiver,
     destroy_orphans: Arc<AtomicBool>,
@@ -85,6 +88,7 @@ pub(crate) fn spawn<T: SledAgentFacilities>(
             current_config_rx,
             reconciler_result_tx,
             raw_disks_rx,
+            internal_disks_rx,
             external_disks,
             datasets,
             zones,
@@ -258,6 +262,7 @@ struct ReconcilerTask {
     current_config_rx: watch::Receiver<CurrentSledConfig>,
     reconciler_result_tx: watch::Sender<ReconcilerResult>,
     raw_disks_rx: RawDisksReceiver,
+    internal_disks_rx: InternalDisksReceiver,
     external_disks: ExternalDisks,
     datasets: OmicronDatasets,
     zones: OmicronZones,
@@ -399,6 +404,13 @@ impl ReconcilerTask {
             }
         };
 
+        // Concurrently with all the disk / dataset / zone config updates below,
+        // we can reconcile our boot partitions. This is mostly I/O.
+        let boot_partition_contents_fut = tokio::spawn({
+            let internal_disks = self.internal_disks_rx.current();
+            async move { BootPartitionContents::read(&internal_disks).await }
+        });
+
         // ---
         // We go through the removal process first: shut down zones, then stop
         // managing disks, then remove any orphaned datasets.
@@ -508,6 +520,24 @@ impl ReconcilerTask {
         } else {
             ReconciliationResult::NoRetryNeeded
         };
+
+        let boot_partition_contents = boot_partition_contents_fut
+            .await
+            .expect("reading boot partition details did not panic");
+
+        // TODO These details should go into `LatestReconciliationResult` and be
+        // reported via inventory; that will happen shortly, but for now just
+        // log them.
+        {
+            let BootPartitionContents { boot_disk, slot_a, slot_b } =
+                boot_partition_contents;
+            info!(
+                self.log, "read boot partition details";
+                "boot_disk" => ?boot_disk,
+                "slot_a" => ?slot_a,
+                "slot_b" => ?slot_b,
+            );
+        }
 
         let inner = LatestReconciliationResult {
             sled_config,

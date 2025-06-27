@@ -59,7 +59,7 @@ pub(super) struct OmicronDatasets {
 }
 
 impl OmicronDatasets {
-    #[cfg(any(test, feature = "testing"))]
+    #[cfg(test)]
     pub(super) fn with_datasets<I>(datasets: I) -> Self
     where
         I: Iterator<Item = (DatasetConfig, Result<(), DatasetEnsureError>)>,

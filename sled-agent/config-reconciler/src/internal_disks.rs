@@ -311,6 +311,9 @@ impl InternalDisksReceiver {
     /// Note that this error set is not atomically collected with the
     /// `current()` set of disks. It is only useful for inventory reporting
     /// purposes.
+    // TODO-correctness We should report these errors somehow!
+    // https://github.com/oxidecomputer/omicron/issues/8422
+    #[allow(dead_code)]
     pub(crate) fn errors(&self) -> Arc<BTreeMap<DiskIdentity, DiskError>> {
         Arc::clone(&*self.errors_rx.borrow())
     }
@@ -326,10 +329,16 @@ impl InternalDisks {
         &self.mount_config
     }
 
+    fn boot_disk(&self) -> Option<&InternalDiskDetails> {
+        self.disks.iter().find(|d| d.is_boot_disk())
+    }
+
+    pub(crate) fn boot_disk_slot(&self) -> Option<M2Slot> {
+        self.boot_disk().and_then(|d| d.slot)
+    }
+
     pub fn boot_disk_zpool_id(&self) -> Option<InternalZpoolUuid> {
-        self.disks.iter().find_map(|d| {
-            if d.is_boot_disk() { Some(d.zpool_id) } else { None }
-        })
+        self.boot_disk().map(|d| d.zpool_id)
     }
 
     pub fn boot_disk_zpool_name(&self) -> Option<ZpoolName> {
