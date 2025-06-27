@@ -73,7 +73,6 @@ pub fn plan_mgs_updates(
                 boards_preferred.insert(update.baseboard_id.clone());
             }
             Ok(MgsUpdateStatus::Impossible) => {
-                // TODO-K: Would be nice if it said why it was impossible
                 info!(
                     log,
                     "SP update impossible \
@@ -131,7 +130,6 @@ pub fn plan_mgs_updates(
 
         match try_make_update(log, board, inventory, current_artifacts) {
             Some(update) => {
-                // TODO-K: should this somehow change to say RoT or bootloader or whatever?
                 info!(log, "configuring SP update"; &update);
                 rv.insert(update);
             }
@@ -514,9 +512,6 @@ fn try_make_update(
     // updates, we'll try these in a hardcoded priority order until any of them
     // returns `Some`.  The order is described in RFD 565 section "Update
     // Sequence".  For now, we only plan SP and RoT updates.
-
-    // let cabooses = &inventory.cabooses_found;
-    // info!(&log, "DEBUG: Components"; "baseboard-id" => ?baseboard_id, "cabooses" => ?cabooses, "artifacts" => ?current_artifacts);
     try_make_update_rot(log, baseboard_id, inventory, current_artifacts)
         .or_else(|| {
             try_make_update_sp(log, baseboard_id, inventory, current_artifacts)
@@ -729,7 +724,6 @@ fn try_make_update_rot(
                 return false;
             }
 
-            // info!(&log, "DEBUG: active slot {}", active_slot);
             match active_slot {
                 RotSlot::A => {
                     let slot_a_artifacts = [
@@ -737,7 +731,6 @@ fn try_make_update_rot(
                         ArtifactKind::PSC_ROT_IMAGE_A,
                         ArtifactKind::SWITCH_ROT_IMAGE_A,
                     ];
-                    // info!(&log, "DEBUG: match slot a artifact kind {}", a.id.kind);
 
                     if slot_a_artifacts.contains(&a.id.kind) {
                         return true;
@@ -750,14 +743,12 @@ fn try_make_update_rot(
                         ArtifactKind::SWITCH_ROT_IMAGE_B,
                     ];
 
-                    // info!(&log, "DEBUG: match slot b artifact kind {}", a.id.kind);
                     if slot_b_artifacts.contains(&a.id.kind) {
                         return true;
                     }
                 }
             }
 
-            // info!(&log, "DEBUG: no match artifact kind {}", a.id.kind);
             false
         })
         .collect();
