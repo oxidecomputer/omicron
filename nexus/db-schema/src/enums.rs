@@ -45,6 +45,7 @@ define_enums! {
     IdentityTypeEnum => "identity_type",
     InstanceAutoRestartPolicyEnum => "instance_auto_restart",
     InstanceIntendedStateEnum => "instance_intended_state",
+    InstanceStateEnum => "instance_state_v2",
     InvConfigReconcilerStatusKindEnum => "inv_config_reconciler_status_kind",
     InvZoneImageSourceEnum => "inv_zone_image_source",
     InvZoneManifestSourceEnum => "inv_zone_manifest_source",
