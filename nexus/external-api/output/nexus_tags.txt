@@ -252,6 +252,8 @@ networking_bgp_exported                  GET      /v1/system/networking/bgp-expo
 networking_bgp_imported_routes_ipv4      GET      /v1/system/networking/bgp-routes-ipv4
 networking_bgp_message_history           GET      /v1/system/networking/bgp-message-history
 networking_bgp_status                    GET      /v1/system/networking/bgp-status
+networking_inbound_icmp_update           PUT      /v1/system/networking/inbound-icmp
+networking_inbound_icmp_view             GET      /v1/system/networking/inbound-icmp
 networking_loopback_address_create       POST     /v1/system/networking/loopback-address
 networking_loopback_address_delete       DELETE   /v1/system/networking/loopback-address/{rack_id}/{switch_location}/{address}/{subnet_mask}
 networking_loopback_address_list         GET      /v1/system/networking/loopback-address
