@@ -110,7 +110,6 @@ support_bundle_collector.period_secs = 999999
 decommissioned_disk_cleaner.period_secs = 60
 # Disable disk decommissioning cleanup to avoid interfering with tests.
 decommissioned_disk_cleaner.disable = true
-blueprints.disable_planner = true
 blueprints.period_secs_load = 100
 blueprints.period_secs_plan = 600
 blueprints.period_secs_execute = 600
@@ -174,6 +173,7 @@ webhook_deliverator.first_retry_backoff_secs = 10
 webhook_deliverator.second_retry_backoff_secs = 20
 read_only_region_replacement_start.period_secs = 60
 sp_ereport_ingester.period_secs = 30
+chicken_switches.period_secs = 30
 
 [default_region_allocation_strategy]
 # we only have one sled in the test environment, so we need to use the
