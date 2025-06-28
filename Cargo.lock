@@ -6498,6 +6498,7 @@ dependencies = [
  "gateway-types",
  "hubtools",
  "id-map",
+ "iddqd",
  "internal-dns-resolver",
  "internal-dns-types",
  "nexus-types",
