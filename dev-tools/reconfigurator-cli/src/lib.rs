@@ -441,9 +441,26 @@ enum BlueprintEditCommands {
     AddNexus {
         /// sled on which to deploy the new instance
         sled_id: SledUuid,
+        /// image source for the new zone
+        ///
+        /// The image source is required if the planning input of the system
+        /// being edited has a TUF repo; otherwise, it will default to the
+        /// install dataset.
+        #[clap(subcommand)]
+        image_source: Option<ImageSourceArgs>,
     },
     /// add a CockroachDB instance to a particular sled
-    AddCockroach { sled_id: SledUuid },
+    AddCockroach {
+        /// sled on which to deploy the new instance
+        sled_id: SledUuid,
+        /// image source for the new zone
+        ///
+        /// The image source is required if the planning input of the system
+        /// being edited has a TUF repo; otherwise, it will default to the
+        /// install dataset.
+        #[clap(subcommand)]
+        image_source: Option<ImageSourceArgs>,
+    },
     /// set the image source for a zone
     SetZoneImage {
         /// id of zone whose image to set
@@ -646,6 +663,24 @@ enum ImageSourceArgs {
         version: BlueprintZoneImageVersion,
         hash: ArtifactHash,
     },
+}
+
+fn image_source_unwrap_or(
+    image_source: Option<ImageSourceArgs>,
+    planning_input: &PlanningInput,
+    zone_kind: ZoneKind,
+) -> anyhow::Result<BlueprintZoneImageSource> {
+    if let Some(image_source) = image_source {
+        Ok(image_source.into())
+    } else if planning_input.tuf_repo() == planning_input.old_repo() {
+        planning_input
+            .tuf_repo()
+            .description()
+            .zone_image_source(zone_kind)
+            .context("could not determine image source")
+    } else {
+        bail!("must specify image source for new zone")
+    }
 }
 
 impl From<ImageSourceArgs> for BlueprintZoneImageSource {
@@ -1199,28 +1234,23 @@ fn cmd_blueprint_edit(
     }
 
     let label = match args.edit_command {
-        BlueprintEditCommands::AddNexus { sled_id } => {
-            // TODO-correctness We need to implement some nontrivial planner
-            // logic to correctly choose between `tuf_repo()` and `old_repo()`.
-            // Should we assume using `tuf_repo()` is okay? Require the caller
-            // to tell us? Decide like the planner?
-            let image_source = planning_input
-                .tuf_repo()
-                .description()
-                .zone_image_source(ZoneKind::Nexus)
-                .context("could not determine image source")?;
+        BlueprintEditCommands::AddNexus { sled_id, image_source } => {
+            let image_source = image_source_unwrap_or(
+                image_source,
+                &planning_input,
+                ZoneKind::Nexus,
+            )?;
             builder
                 .sled_add_zone_nexus(sled_id, image_source)
                 .context("failed to add Nexus zone")?;
             format!("added Nexus zone to sled {}", sled_id)
         }
-        BlueprintEditCommands::AddCockroach { sled_id } => {
-            // TODO-correctness Same issue as nexus above
-            let image_source = planning_input
-                .tuf_repo()
-                .description()
-                .zone_image_source(ZoneKind::CockroachDb)
-                .context("could not determine image source")?;
+        BlueprintEditCommands::AddCockroach { sled_id, image_source } => {
+            let image_source = image_source_unwrap_or(
+                image_source,
+                &planning_input,
+                ZoneKind::CockroachDb,
+            )?;
             builder
                 .sled_add_zone_cockroachdb(sled_id, image_source)
                 .context("failed to add CockroachDB zone")?;
