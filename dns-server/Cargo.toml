@@ -22,6 +22,7 @@ hickory-server.workspace = true
 http.workspace = true
 internal-dns-types.workspace = true
 omicron-common.workspace = true
+oxide-tokio-rt.workspace = true
 pretty-hex.workspace = true
 schemars.workspace = true
 semver.workspace = true

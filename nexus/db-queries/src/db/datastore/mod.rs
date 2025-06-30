@@ -83,6 +83,7 @@ mod probe;
 mod project;
 mod quota;
 mod rack;
+mod reconfigurator_chicken_switches;
 mod region;
 mod region_replacement;
 mod region_snapshot;

@@ -29,6 +29,8 @@ use nexus_types::deployment::BlueprintTarget;
 use nexus_types::deployment::BlueprintTargetSet;
 use nexus_types::deployment::ClickhousePolicy;
 use nexus_types::deployment::OximeterReadPolicy;
+use nexus_types::deployment::ReconfiguratorChickenSwitches;
+use nexus_types::deployment::ReconfiguratorChickenSwitchesParam;
 use nexus_types::external_api::headers::RangeRequest;
 use nexus_types::external_api::params::PhysicalDiskPath;
 use nexus_types::external_api::params::SledSelector;
@@ -850,6 +852,84 @@ impl NexusInternalApi for NexusInternalApiImpl {
             let nexus = &apictx.nexus;
             let blueprint = blueprint.into_inner();
             nexus.blueprint_import(&opctx, blueprint).await?;
+            Ok(HttpResponseUpdatedNoContent())
+        };
+        apictx
+            .internal_latencies
+            .instrument_dropshot_handler(&rqctx, handler)
+            .await
+    }
+
+    async fn reconfigurator_chicken_switches_show_current(
+        rqctx: RequestContext<Self::Context>,
+    ) -> Result<HttpResponseOk<ReconfiguratorChickenSwitches>, HttpError> {
+        let apictx = &rqctx.context().context;
+        let handler = async {
+            let datastore = &apictx.nexus.datastore();
+            let opctx =
+                crate::context::op_context_for_internal_api(&rqctx).await;
+            match datastore
+                .reconfigurator_chicken_switches_get_latest(&opctx)
+                .await?
+            {
+                Some(switches) => Ok(HttpResponseOk(switches)),
+                None => Err(HttpError::for_not_found(
+                    None,
+                    "No chicken switches in database".into(),
+                )),
+            }
+        };
+        apictx
+            .internal_latencies
+            .instrument_dropshot_handler(&rqctx, handler)
+            .await
+    }
+
+    async fn reconfigurator_chicken_switches_show(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<VersionPathParam>,
+    ) -> Result<HttpResponseOk<ReconfiguratorChickenSwitches>, HttpError> {
+        let apictx = &rqctx.context().context;
+        let handler = async {
+            let datastore = &apictx.nexus.datastore();
+            let opctx =
+                crate::context::op_context_for_internal_api(&rqctx).await;
+            let version = path_params.into_inner().version;
+            match datastore
+                .reconfigurator_chicken_switches_get(&opctx, version)
+                .await?
+            {
+                Some(switches) => Ok(HttpResponseOk(switches)),
+                None => Err(HttpError::for_not_found(
+                    None,
+                    format!(
+                        "No chicken switches in database at version {version}"
+                    ),
+                )),
+            }
+        };
+        apictx
+            .internal_latencies
+            .instrument_dropshot_handler(&rqctx, handler)
+            .await
+    }
+
+    async fn reconfigurator_chicken_switches_set(
+        rqctx: RequestContext<Self::Context>,
+        switches: TypedBody<ReconfiguratorChickenSwitchesParam>,
+    ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
+        let apictx = &rqctx.context().context;
+        let handler = async {
+            let datastore = &apictx.nexus.datastore();
+            let opctx =
+                crate::context::op_context_for_internal_api(&rqctx).await;
+
+            datastore
+                .reconfigurator_chicken_switches_insert_latest_version(
+                    &opctx,
+                    switches.into_inner(),
+                )
+                .await?;
             Ok(HttpResponseUpdatedNoContent())
         };
         apictx

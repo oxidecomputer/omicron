@@ -179,6 +179,11 @@ impl CockroachCli {
         self.invoke_node_decommission(node_id).await
     }
 
+    // TODO-correctness These validation checks are NOT sufficient; see
+    // https://github.com/oxidecomputer/omicron/issues/8445. Our request handler
+    // for node decommissioning rejects requests, but we keep this method around
+    // for documentation and because we hope to extend it to have correct checks
+    // in the near future.
     fn validate_node_decommissionable(
         &self,
         node_id: &str,
@@ -191,7 +196,9 @@ impl CockroachCli {
         // 2. The node must not have any `gossiped_replicas` (the cockroach
         //    cluster must not think this node is an active member of any ranges
         //    - in practice, we see this go to 0 about 60 seconds after a node
-        //    goes offline)
+        //    goes offline). This attempts to guard against a window of time
+        //    where a node has gone offline but cockroach has not yet reflected
+        //    that fact in the counts of underreplicated ranges.
         // 3. The range descriptor for all ranges must not include the node we
         //    want to decommission. This gate shouldn't be necessary, but exists
         //    as a safeguard to avoid triggering what appears to be a CRDB race
