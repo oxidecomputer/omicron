@@ -13,31 +13,31 @@ use cockroach_admin_client::Client;
 use futures::stream::{FuturesUnordered, StreamExt};
 use serde::{Deserialize, Serialize};
 use slog::{Logger, debug, warn};
-use std::collections::HashMap;
+use std::collections::BTreeMap;
 use std::net::SocketAddr;
 use std::sync::Arc;
 use strum::{Display, EnumIter, EnumString, IntoStaticStr};
 use tokio::sync::RwLock;
 
-// A CockroachDB client for accessing metrics and node status
-//
-// Only accesses a single client at a time. To query from multiple nodes
-// in a cluster concurrently, use [CockroachClusterAdminClient].
+/// A CockroachDB client for accessing metrics and node status
+///
+/// Only accesses a single client at a time. To query from multiple nodes
+/// in a cluster concurrently, use [CockroachClusterAdminClient].
 struct CockroachAdminClient {
     client: Client,
 }
 
 impl CockroachAdminClient {
-    // Create a new CockroachDB HTTP client
+    /// Create a new CockroachDB HTTP client
     fn new(log: Logger, address: SocketAddr) -> Self {
         let client = Client::new(&format!("http://{address}"), log);
 
         Self { client }
     }
 
-    // Fetch Prometheus metrics from the /_status/vars endpoint
-    //
-    // This API is (and must remain) cancel-safe
+    /// Fetch Prometheus metrics from the /_status/vars endpoint
+    ///
+    /// This API is (and must remain) cancel-safe
     async fn fetch_prometheus_metrics(&self) -> Result<PrometheusMetrics> {
         let response = self
             .client
@@ -57,9 +57,12 @@ impl CockroachAdminClient {
             .with_context(|| "Failed to parse Prometheus metrics")
     }
 
-    // Fetch node status information for all nodes
-    //
-    // This API is (and must remain) cancel-safe
+    /// Fetch node status information for all nodes
+    ///
+    /// Note that although we're asking a single node for this information, the
+    /// response should describe all nodes in the cluster.
+    ///
+    /// This API is (and must remain) cancel-safe
     async fn fetch_node_status(&self) -> Result<NodesResponse> {
         let response = self
             .client
@@ -96,23 +99,32 @@ impl CockroachAdminClient {
 /// let cluster = CockroachClusterAdminClient::new(log);
 ///
 /// // Update backends when addresses change (e.g., from DNS resolution)
-/// let backends: Vec<SocketAddr> = vec!["192.168.1.1:8080".parse()?, "192.168.1.2:8080".parse()?];
+/// let backends: Vec<SocketAddr> = vec![
+///     "192.168.1.1:8080".parse()?,
+///     "192.168.1.2:8080".parse()?
+/// ];
 /// cluster.update_backends(&backends).await;
 ///
 /// // Fetch metrics - will try all backends concurrently, return first success
 /// let metrics = cluster.fetch_prometheus_metrics().await?;
 ///
 /// // Later, if backends change, just update the cluster
-/// let new_backends: Vec<SocketAddr> = vec!["192.168.1.2:8080".parse()?, "192.168.1.3:8080".parse()?];
-/// cluster.update_backends(&new_backends).await; // Keeps 192.168.1.2, drops 192.168.1.1, adds 192.168.1.3
+/// let new_backends: Vec<SocketAddr> = vec![
+///     "192.168.1.2:8080".parse()?,
+///     "192.168.1.3:8080".parse()?
+/// ];
+///
+/// // Keeps 192.168.1.2, drops 192.168.1.1, adds 192.168.1.3
+/// cluster.update_backends(&new_backends).await;
 ///
 /// let status = cluster.fetch_node_status().await?;
 /// # Ok(())
 /// # }
 /// ```
+#[derive(Clone)]
 pub struct CockroachClusterAdminClient {
     /// Cached clients for each backend address
-    clients: Arc<RwLock<HashMap<SocketAddr, CockroachAdminClient>>>,
+    clients: Arc<RwLock<BTreeMap<SocketAddr, CockroachAdminClient>>>,
     log: Logger,
 }
 
@@ -120,7 +132,7 @@ impl CockroachClusterAdminClient {
     /// Create a new cluster client
     pub fn new(log: Logger) -> Self {
         Self {
-            clients: Arc::new(RwLock::new(HashMap::new())),
+            clients: Arc::new(RwLock::new(BTreeMap::new())),
             log: log
                 .new(slog::o!("component" => "CockroachClusterAdminClient")),
         }
@@ -138,7 +150,7 @@ impl CockroachClusterAdminClient {
         // Add new clients for addresses we don't have yet
         let mut added_count = 0;
         for &addr in addresses {
-            if let std::collections::hash_map::Entry::Vacant(e) =
+            if let std::collections::btree_map::Entry::Vacant(e) =
                 clients.entry(addr)
             {
                 e.insert(CockroachAdminClient::new(self.log.clone(), addr));
@@ -344,7 +356,7 @@ pub enum CockroachMetric {
 #[derive(Debug, Clone)]
 pub struct PrometheusMetrics {
     /// Raw metrics as key-value pairs
-    pub metrics: HashMap<String, MetricValue>,
+    pub metrics: BTreeMap<String, MetricValue>,
 }
 
 impl CockroachMetric {
@@ -426,7 +438,7 @@ impl CockroachMetric {
 impl PrometheusMetrics {
     /// Parse Prometheus text format into structured metrics
     pub fn parse(text: &str) -> Result<Self> {
-        let mut metrics = HashMap::new();
+        let mut metrics = BTreeMap::new();
 
         for line in text.lines() {
             let line = line.trim();
@@ -440,8 +452,8 @@ impl PrometheusMetrics {
             if let Some((name_and_labels, value_str)) = line.rsplit_once(' ') {
                 // Extract metric name (before any labels)
                 let metric_name =
-                    if let Some(brace_pos) = name_and_labels.find('{') {
-                        &name_and_labels[..brace_pos]
+                    if let Some((name, _)) = name_and_labels.split_once('{') {
+                        name
                     } else {
                         name_and_labels
                     };
@@ -459,7 +471,7 @@ impl PrometheusMetrics {
 
                             // Add to existing histogram or create new one
                             match metrics.entry(base_name.to_string()) {
-                                std::collections::hash_map::Entry::Occupied(
+                                std::collections::btree_map::Entry::Occupied(
                                     mut entry,
                                 ) => {
                                     if let MetricValue::Histogram(
@@ -469,7 +481,7 @@ impl PrometheusMetrics {
                                         buckets.push(bucket);
                                     }
                                 }
-                                std::collections::hash_map::Entry::Vacant(
+                                std::collections::btree_map::Entry::Vacant(
                                     entry,
                                 ) => {
                                     entry.insert(MetricValue::Histogram(vec![
@@ -510,35 +522,27 @@ impl PrometheusMetrics {
     /// Extract the 'le' (less than or equal) label value from a Prometheus metric line
     fn extract_le_label(metric_line: &str) -> Option<&str> {
         // Look for le="value" in the labels
-        if let Some(start) = metric_line.find("le=\"") {
-            let start = start + 4; // Skip 'le="'
-            if let Some(end) = metric_line[start..].find('"') {
-                return Some(&metric_line[start..start + end]);
-            }
-        }
-        None
+        let (_, le_part) = metric_line.split_once("le=\"")?;
+        let (label, _) = le_part.split_once("\"")?;
+        Some(label)
     }
 
     /// Get a specific metric by its strongly-typed enum value
     pub fn get_metric(&self, metric: CockroachMetric) -> Option<&MetricValue> {
-        let Some(value) = self.metrics.get(metric.metric_name()) else {
-            return None;
-        };
+        let value = self.metrics.get(metric.metric_name())?;
 
         match (metric.expected_type(), &value) {
             (CockroachMetricType::Unsigned, &MetricValue::Unsigned(_)) => {
-                return Some(value);
+                Some(value)
             }
-            (CockroachMetricType::Float, &MetricValue::Float(_)) => {
-                return Some(value);
-            }
+            (CockroachMetricType::Float, &MetricValue::Float(_)) => Some(value),
             (CockroachMetricType::String, &MetricValue::String(_)) => {
-                return Some(value);
+                Some(value)
             }
             (CockroachMetricType::Histogram, &MetricValue::Histogram(_)) => {
-                return Some(value);
+                Some(value)
             }
-            _ => return None,
+            _ => None,
         }
     }
 
@@ -685,7 +689,7 @@ pub struct NodesResponse {
     pub nodes: Vec<NodeStatus>,
     /// Maps node ID to liveness status
     #[serde(rename = "livenessByNodeId")]
-    pub liveness_by_node_id: std::collections::HashMap<NodeId, NodeLiveness>,
+    pub liveness_by_node_id: std::collections::BTreeMap<NodeId, NodeLiveness>,
 }
 
 /// Node status information from CockroachDB /_status/nodes endpoint
@@ -758,14 +762,14 @@ mod tests {
 
     #[test]
     fn test_prometheus_metrics_parsing() {
-        let sample_metrics = r#"
-# TYPE go_memstats_alloc_bytes gauge
-go_memstats_alloc_bytes 1.234567e+07
-# TYPE cockroach_sql_query_count counter  
-cockroach_sql_query_count 42
-cockroach_node_id 1
-cockroach_build_timestamp 1234567890
-"#;
+        let sample_metrics = "
+            # TYPE go_memstats_alloc_bytes gauge
+            go_memstats_alloc_bytes 1.234567e+07
+            # TYPE cockroach_sql_query_count counter
+            cockroach_sql_query_count 42
+            cockroach_node_id 1
+            cockroach_build_timestamp 1234567890
+        ";
 
         let metrics = PrometheusMetrics::parse(sample_metrics).unwrap();
 
@@ -804,11 +808,11 @@ cockroach_build_timestamp 1234567890
 
     #[test]
     fn test_prometheus_metrics_comments_only() {
-        let sample_metrics = r#"
-# This is a comment
-# TYPE some_metric counter
-# Another comment
-"#;
+        let sample_metrics = "
+            # This is a comment
+            # TYPE some_metric counter
+            # Another comment
+        ";
         let metrics = PrometheusMetrics::parse(sample_metrics).unwrap();
         assert!(metrics.metrics.is_empty());
     }
@@ -1016,6 +1020,36 @@ sql_exec_latency_bucket{le="0.01"} 25
         assert!(cluster.fetch_node_status().await.is_err());
     }
 
+    #[test]
+    fn test_prometheus_metrics_parse_resilience() {
+        // Test various edge cases that could cause issues
+
+        // Empty input
+        let result = PrometheusMetrics::parse("");
+        assert!(result.is_ok());
+        assert!(result.unwrap().metrics.is_empty());
+
+        // Only comments
+        let result = PrometheusMetrics::parse("# comment\n# another comment");
+        assert!(result.is_ok());
+        assert!(result.unwrap().metrics.is_empty());
+
+        // Malformed lines (missing values, extra spaces, etc.)
+        let malformed_input = r#"
+metric_name_no_value
+metric_name_with_space 
+metric_name_multiple spaces here
+= value_no_name
+ leading_space_metric 123
+trailing_space_metric 456 
+metric{label=value} 789
+metric{malformed=label value} 999
+"#;
+        let result = PrometheusMetrics::parse(malformed_input);
+        assert!(result.is_ok());
+        // Should ignore malformed lines gracefully
+    }
+
     mod proptest_tests {
         use super::*;
         use proptest::prelude::*;
@@ -1036,37 +1070,6 @@ sql_exec_latency_bucket{le="0.01"} 25
                 let input = lines.join("\n");
                 let _result = PrometheusMetrics::parse(&input);
             }
-        }
-
-        #[test]
-        fn test_prometheus_metrics_parse_resilience() {
-            // Test various edge cases that could cause issues
-
-            // Empty input
-            let result = PrometheusMetrics::parse("");
-            assert!(result.is_ok());
-            assert!(result.unwrap().metrics.is_empty());
-
-            // Only comments
-            let result =
-                PrometheusMetrics::parse("# comment\n# another comment");
-            assert!(result.is_ok());
-            assert!(result.unwrap().metrics.is_empty());
-
-            // Malformed lines (missing values, extra spaces, etc.)
-            let malformed_input = r#"
-            metric_name_no_value
-            metric_name_with_space 
-            metric_name_multiple spaces here
-            = value_no_name
-             leading_space_metric 123
-            trailing_space_metric 456 
-            metric{label=value} 789
-            metric{malformed=label value} 999
-            "#;
-            let result = PrometheusMetrics::parse(malformed_input);
-            assert!(result.is_ok());
-            // Should ignore malformed lines gracefully
         }
     }
 }
