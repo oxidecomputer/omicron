@@ -90,6 +90,7 @@ pub struct RackInit {
     pub recovery_user_password_hash: omicron_passwords::PasswordHashString,
     pub dns_update: DnsVersionUpdateBuilder,
     pub allowed_source_ips: AllowedSourceIps,
+    pub control_plane_storage_buffer_gib: u32,
 }
 
 /// Possible errors while trying to initialize rack
@@ -112,6 +113,8 @@ enum RackInitError {
     Database(DieselError),
     // Error adding initial allowed source IP list
     AllowedSourceIpError(Error),
+    // Error changing a Nexus setting
+    ChangeSetting(Error),
 }
 
 // Catch-all for Diesel error conversion into RackInitError, which
@@ -175,6 +178,7 @@ impl From<RackInitError> for Error {
                 err
             )),
             RackInitError::AllowedSourceIpError(err) => err,
+            RackInitError::ChangeSetting(err) => err,
         }
     }
 }
@@ -911,6 +915,17 @@ impl DataStore {
                         DieselError::RollbackTransaction
                     })?;
 
+                    Self::set_control_plane_storage_buffer_gib_impl(
+                        opctx,
+                        &conn,
+                        rack_init.control_plane_storage_buffer_gib,
+                    )
+                    .await
+                    .map_err(|e| {
+                        err.set(RackInitError::ChangeSetting(e)).unwrap();
+                        DieselError::RollbackTransaction
+                    })?;
+
                     let rack = diesel::update(rack_dsl::rack)
                         .filter(rack_dsl::id.eq(rack_id))
                         .set((
@@ -1118,6 +1133,7 @@ mod test {
                     "test suite".to_string(),
                 ),
                 allowed_source_ips: AllowedSourceIps::Any,
+                control_plane_storage_buffer_gib: 0,
             }
         }
     }

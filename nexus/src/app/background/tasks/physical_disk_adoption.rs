@@ -11,7 +11,6 @@
 //!
 //! In the future, this may become more explicitly operator-controlled.
 
-use crate::app::CONTROL_PLANE_STORAGE_BUFFER;
 use crate::app::background::BackgroundTask;
 use futures::FutureExt;
 use futures::future::BoxFuture;
@@ -20,6 +19,7 @@ use nexus_db_model::Zpool;
 use nexus_db_queries::context::OpContext;
 use nexus_db_queries::db::DataStore;
 use nexus_types::identity::Asset;
+use omicron_common::api::external::ByteCount;
 use omicron_common::api::external::DataPageParams;
 use omicron_uuid_kinds::CollectionUuid;
 use omicron_uuid_kinds::GenericUuid;
@@ -61,6 +61,25 @@ impl BackgroundTask for PhysicalDiskAdoption {
             if self.disable {
                 return json!({ "error": "task disabled" });
             }
+
+            let control_plane_storage_buffer: ByteCount = match self
+                .datastore
+                .get_control_plane_storage_buffer(opctx)
+                .await {
+                    Ok(value) => match value {
+                        Some(value) => value,
+                        None => {
+                            // If no setting is in the database, use 0
+                            ByteCount::from(0)
+                        }
+                    },
+
+                    Err(e) => {
+                        return json!({ "error": format!(
+                            "error getting control plane storage buffer: {e}"
+                        )});
+                    }
+                };
 
             // Only adopt physical disks after rack handoff has completed.
             //
@@ -140,7 +159,7 @@ impl BackgroundTask for PhysicalDiskAdoption {
                     Uuid::new_v4(),
                     inv_disk.sled_id.into_untyped_uuid(),
                     disk.id(),
-                    CONTROL_PLANE_STORAGE_BUFFER.into(),
+                    control_plane_storage_buffer.into(),
                 );
 
                 let result = self.datastore.physical_disk_and_zpool_insert(

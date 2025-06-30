@@ -326,6 +326,7 @@ impl nexus_test_interface::NexusServer for Server {
                         bfd: Vec::new(),
                     },
                     allowed_source_ips: AllowedSourceIps::Any,
+                    control_plane_storage_buffer_gib: 0,
                 },
             )
             .await

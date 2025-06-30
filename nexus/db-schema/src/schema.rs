@@ -2528,3 +2528,10 @@ table! {
         report -> Jsonb,
     }
 }
+
+table! {
+    setting (name) {
+        name -> crate::enums::SettingNameEnum,
+        int_value -> Nullable<Int8>,
+    }
+}
