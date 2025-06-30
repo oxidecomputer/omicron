@@ -1,0 +1,35 @@
+# Load example system
+load-example --nsleds 4 --ndisks-per-sled 1
+
+sled-list
+
+# Create a TUF repository from a fake manifest. (The output TUF repo is
+# written to a temporary directory that this invocation of `reconfigurator-cli`
+# is running out of as its working directory.)
+tuf-assemble ../../update-common/manifests/fake.toml
+
+# Load the target release from the assembled TUF repository.
+set target-release repo-1.0.0.zip
+
+# On one sled, update the install dataset.
+sled-update-install-dataset 2b8f0cb3-0295-4b3c-bc58-4fe88b57112c --to-target-release
+
+# On another sled, simulate an error reading the zone manifest.
+sled-update-install-dataset 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6 --with-manifest-error
+
+# On a third sled, update the install dataset and simulate a mupdate override.
+# (Currently we do this in the blueprint, but with
+# https://github.com/oxidecomputer/omicron/pull/8456 we should update this test and
+# set a mupdate-override on the sled directly.)
+sled-update-install-dataset aff6c093-197d-42c5-ad80-9f10ba051a34 --to-target-release
+blueprint-edit latest set-remove-mupdate-override aff6c093-197d-42c5-ad80-9f10ba051a34 ffffffff-ffff-ffff-ffff-ffffffffffff
+
+# On a fourth sled, simulate an error validating the install dataset image on one zone.
+# We pick ntp because every sled has it.
+sled-update-install-dataset d81c6a84-79b8-4958-ae41-ea46c9b19763 --to-target-release --with-zone-error ntp
+
+# Generate an inventory and run a blueprint planning step.
+inventory-generate
+blueprint-plan latest eb0796d5-ab8a-4f7b-a884-b4aeacb8ab51
+blueprint-show latest
+blueprint-diff 8da82a8e-bf97-4fbd-8ddd-9f6462732cf1 latest
