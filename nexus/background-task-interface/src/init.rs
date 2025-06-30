@@ -22,6 +22,7 @@ pub struct BackgroundTasks {
     pub task_decommissioned_disk_cleaner: Activator,
     pub task_phantom_disks: Activator,
     pub task_blueprint_loader: Activator,
+    pub task_blueprint_planner: Activator,
     pub task_blueprint_executor: Activator,
     pub task_blueprint_rendezvous: Activator,
     pub task_crdb_node_id_collector: Activator,
@@ -46,6 +47,7 @@ pub struct BackgroundTasks {
     pub task_read_only_region_replacement_start: Activator,
     pub task_alert_dispatcher: Activator,
     pub task_webhook_deliverator: Activator,
+    pub task_sp_ereport_ingester: Activator,
 
     // Handles to activate background tasks that do not get used by Nexus
     // at-large.  These background tasks are implementation details as far as

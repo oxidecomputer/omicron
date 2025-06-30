@@ -336,6 +336,7 @@ impl Oximeter {
                 };
 
             match qorb::pool::Pool::new(
+                "oximeter-to-nexus".to_string(),
                 nexus_resolver,
                 Arc::new(NexusConnector { log: log.clone() }),
                 qorb::policy::Policy::default(),
