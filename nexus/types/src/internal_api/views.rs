@@ -461,7 +461,7 @@ pub struct InProgressUpdateStatus {
 }
 
 impl IdOrdItem for InProgressUpdateStatus {
-    type Key<'a> = &'a Arc<BaseboardId>;
+    type Key<'a> = &'a BaseboardId;
 
     fn key(&self) -> Self::Key<'_> {
         &self.baseboard_id
@@ -495,7 +495,7 @@ pub struct WaitingStatus {
 }
 
 impl IdOrdItem for WaitingStatus {
-    type Key<'a> = &'a Arc<BaseboardId>;
+    type Key<'a> = &'a BaseboardId;
 
     fn key(&self) -> Self::Key<'_> {
         &self.baseboard_id

@@ -283,7 +283,7 @@ impl MgsUpdateDriver {
         // Update the status to reflect that.
         self.status_tx.send_modify(|driver_status| {
             for baseboard_id in &to_stop_waiting {
-                driver_status.waiting.remove(baseboard_id);
+                driver_status.waiting.remove(&**baseboard_id);
             }
         });
 
@@ -441,7 +441,7 @@ impl MgsUpdateDriver {
         // Update the overall status to reflect all these changes.
         self.status_tx.send_modify(|driver_status| {
             // Remove this item from the list of in-progress attempts.
-            let found = driver_status.in_progress.remove(&baseboard_id);
+            let found = driver_status.in_progress.remove(&*baseboard_id);
             assert!(found.is_some());
 
             // Add this item to the list of requests waiting to be retried.
@@ -474,7 +474,7 @@ impl MgsUpdateDriver {
             .expect("waiting request for expired retry timer");
         // Update the external status to reflect that.
         self.status_tx.send_modify(|driver_status| {
-            driver_status.waiting.remove(&baseboard_id);
+            driver_status.waiting.remove(&*baseboard_id);
         });
 
         // Find the current configuration for this request.
@@ -580,7 +580,7 @@ impl UpdateAttemptStatusUpdater {
             // in the `in_progress` struct until it completes.  Thus, we should
             // always have a value here.
             let mut my_status =
-                driver_status.in_progress.get_mut(&self.baseboard_id).unwrap();
+                driver_status.in_progress.get_mut(&*self.baseboard_id).unwrap();
             my_status.status = new_status;
         });
     }
