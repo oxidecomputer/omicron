@@ -124,6 +124,8 @@ impl TestRepo {
     }
 }
 
+// =^..^=   =^..^=   =^..^=   =^..^=   =^..^=   =^..^=   =^..^=   =^..^=
+
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn test_repo_upload_unconfigured() -> Result<()> {
     let mut config = load_test_config();
@@ -138,9 +140,10 @@ async fn test_repo_upload_unconfigured() -> Result<()> {
     .await;
     let client = &cptestctx.external_client;
 
+    // Generate a trust root, but _don't_ upload it to Nexus.
+    let trust_root = TestTrustRoot::generate().await?;
     // Build a fake TUF repo and attempt to upload it to Nexus. This should fail
     // with a 400 error because we did not upload a trusted root role.
-    let trust_root = TestTrustRoot::generate().await?;
     trust_root
         .assemble_repo(&logctx.log, &[])
         .await?

@@ -5,10 +5,7 @@
 //! Get/set the target release via the external API.
 
 use anyhow::Result;
-use camino::Utf8Path;
-use camino_tempfile::Utf8TempDir;
 use chrono::Utc;
-use clap::Parser as _;
 use dropshot::test_util::{ClientTestContext, LogContext};
 use http::StatusCode;
 use http::method::Method;
@@ -21,7 +18,10 @@ use nexus_types::external_api::views::{TargetRelease, TargetReleaseSource};
 use omicron_common::api::external::TufRepoInsertResponse;
 use omicron_sled_agent::sim;
 use semver::Version;
-use tufaceous_lib::Key;
+use tufaceous_artifact::{ArtifactVersion, KnownArtifactKind};
+use tufaceous_lib::assemble::ManifestTweak;
+
+use crate::integration_tests::updates::TestTrustRoot;
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn get_set_target_release() -> Result<()> {
@@ -62,32 +62,22 @@ async fn get_set_target_release() -> Result<()> {
     .await
     .expect_err("invalid TUF repo");
 
-    let temp = Utf8TempDir::new().unwrap();
-    let key = Key::generate_ed25519().unwrap();
+    let trust_root = TestTrustRoot::generate().await?;
+    trust_root.to_upload_request(client, StatusCode::CREATED).execute().await?;
 
     // Adding a fake (tufaceous) repo and then setting it as the
     // target release should succeed.
     {
         let before = Utc::now();
         let system_version = Version::new(1, 0, 0);
-        let path = temp.path().join("repo-1.0.0.zip");
-        tufaceous::Args::try_parse_from([
-            "tufaceous",
-            "assemble",
-            "--key",
-            &key.to_string(),
-            "../update-common/manifests/fake.toml",
-            path.as_str(),
-        ])
-        .expect("can't parse tufaceous args")
-        .exec(&logctx.log)
-        .await
-        .expect("can't assemble TUF repo");
-
-        assert_eq!(
-            system_version,
-            upload_tuf_repo(client, &path).await?.recorded.repo.system_version
-        );
+        let response: TufRepoInsertResponse = trust_root
+            .assemble_repo(&logctx.log, &[])
+            .await?
+            .into_upload_request(client, StatusCode::OK)
+            .execute()
+            .await?
+            .parsed_body()?;
+        assert_eq!(system_version, response.recorded.repo.system_version);
 
         let target_release =
             set_target_release(client, system_version.clone()).await?;
@@ -105,25 +95,21 @@ async fn get_set_target_release() -> Result<()> {
     {
         let before = Utc::now();
         let system_version = Version::new(2, 0, 0);
-        let path = temp.path().join("repo-2.0.0.zip");
-        tufaceous::Args::try_parse_from([
-            "tufaceous",
-            "assemble",
-            "--key",
-            &key.to_string(),
-            "../update-common/manifests/fake-non-semver.toml",
-            "--allow-non-semver",
-            path.as_str(),
-        ])
-        .expect("can't parse tufaceous args")
-        .exec(&logctx.log)
-        .await
-        .expect("can't assemble TUF repo");
-
-        assert_eq!(
-            system_version,
-            upload_tuf_repo(client, &path).await?.recorded.repo.system_version
-        );
+        let tweaks = &[
+            ManifestTweak::SystemVersion(system_version.clone()),
+            ManifestTweak::ArtifactVersion {
+                kind: KnownArtifactKind::SwitchRotBootloader,
+                version: ArtifactVersion::new("non-semver-2").unwrap(),
+            },
+        ];
+        let response: TufRepoInsertResponse = trust_root
+            .assemble_repo(&logctx.log, tweaks)
+            .await?
+            .into_upload_request(client, StatusCode::OK)
+            .execute()
+            .await?
+            .parsed_body()?;
+        assert_eq!(system_version, response.recorded.repo.system_version);
 
         let target_release =
             set_target_release(client, system_version.clone()).await?;
@@ -146,25 +132,6 @@ async fn get_set_target_release() -> Result<()> {
     ctx.teardown().await;
     logctx.cleanup_successful();
     Ok(())
-}
-
-async fn upload_tuf_repo(
-    client: &ClientTestContext,
-    path: &Utf8Path,
-) -> Result<TufRepoInsertResponse> {
-    NexusRequest::new(
-        RequestBuilder::new(
-            client,
-            http::Method::PUT,
-            "/v1/system/update/repository?file_name=/tmp/foo.zip",
-        )
-        .body_file(Some(path))
-        .expect_status(Some(StatusCode::OK)),
-    )
-    .authn_as(AuthnMode::PrivilegedUser)
-    .execute()
-    .await
-    .map(|response| response.parsed_body().unwrap())
 }
 
 async fn set_target_release(
