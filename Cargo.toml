@@ -24,6 +24,7 @@ members = [
     "cockroach-admin",
     "cockroach-admin/api",
     "cockroach-admin/types",
+    "cockroach-metrics",
     "common",
     "dev-tools/cert-dev",
     "dev-tools/clickana",
@@ -175,6 +176,7 @@ default-members = [
     "cockroach-admin",
     "cockroach-admin/api",
     "cockroach-admin/types",
+    "cockroach-metrics",
     "common",
     "dev-tools/cert-dev",
     "dev-tools/clickana",
@@ -549,6 +551,7 @@ num = { version = "0.4.3", default-features = false, features = [ "libm" ] }
 omicron-clickhouse-admin = { path = "clickhouse-admin" }
 omicron-certificates = { path = "certificates" }
 omicron-cockroach-admin = { path = "cockroach-admin" }
+omicron-cockroach-metrics = { path = "cockroach-metrics" }
 omicron-common = { path = "common" }
 omicron-dev-lib = { path = "dev-tools/omicron-dev-lib" }
 omicron-gateway = { path = "gateway" }
@@ -564,6 +567,7 @@ omicron-test-utils = { path = "test-utils" }
 omicron-workspace-hack = "0.1.0"
 omicron-zone-package = "0.12.2"
 oxide-client = { path = "clients/oxide-client" }
+oxide-tokio-rt = "0.1.1"
 oxide-vpc = { git = "https://github.com/oxidecomputer/opte", rev = "f5560fae02ad3fc349fabc6454c321143199ca9e", features = [ "api", "std" ] }
 oxlog = { path = "dev-tools/oxlog" }
 oxnet = "0.1.2"

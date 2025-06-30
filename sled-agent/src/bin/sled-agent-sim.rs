@@ -85,9 +85,8 @@ struct Args {
     rss_tls_key: Option<Utf8PathBuf>,
 }
 
-#[tokio::main]
-async fn main() {
-    if let Err(message) = do_run().await {
+fn main() {
+    if let Err(message) = oxide_tokio_rt::run(do_run()) {
         fatal(message);
     }
 }

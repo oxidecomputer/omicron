@@ -1095,7 +1095,7 @@ impl ZoneKind {
             ZoneKind::BoundaryNtp => "ntp",
             ZoneKind::Clickhouse => "clickhouse",
             ZoneKind::ClickhouseKeeper => "clickhouse_keeper",
-            ZoneKind::ClickhouseServer => "clickhouse",
+            ZoneKind::ClickhouseServer => "clickhouse_server",
             ZoneKind::CockroachDb => "cockroachdb",
             ZoneKind::Crucible => "crucible-zone",
             ZoneKind::CruciblePantry => "crucible-pantry-zone",

@@ -10,6 +10,7 @@ workspace = true
 [dependencies]
 cockroach-admin-types.workspace = true
 dropshot.workspace = true
+http.workspace = true
 omicron-common.workspace = true
 omicron-uuid-kinds.workspace = true
 omicron-workspace-hack.workspace = true
