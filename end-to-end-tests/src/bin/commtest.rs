@@ -64,13 +64,14 @@ struct RunArgs {
 
 const API_RETRY_ATTEMPTS: usize = 15;
 
-#[tokio::main]
-pub async fn main() -> Result<()> {
-    let cli = Cli::parse();
-    match cli.command {
-        Commands::Run(ref args) => run(&cli, args).await,
-        Commands::Cleanup => cleanup(&cli).await,
-    }
+fn main() -> Result<()> {
+    oxide_tokio_rt::run(async {
+        let cli = Cli::parse();
+        match cli.command {
+            Commands::Run(ref args) => run(&cli, args).await,
+            Commands::Cleanup => cleanup(&cli).await,
+        }
+    })
 }
 
 async fn run(cli: &Cli, args: &RunArgs) -> Result<()> {

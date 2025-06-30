@@ -192,6 +192,11 @@ impl Args {
     }
 }
 
+#[expect(
+    clippy::disallowed_macros,
+    reason = "this is a dev-tool, and avoiding a dependency on \
+     `omicron-runtime` helps minimize compile time."
+)]
 #[tokio::main]
 async fn main() -> Result<()> {
     let args = Args::parse();

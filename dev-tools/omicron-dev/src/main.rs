@@ -11,10 +11,11 @@ use nexus_test_interface::NexusServer;
 use nexus_test_utils::resource_helpers::DiskTest;
 use signal_hook_tokio::Signals;
 
-#[tokio::main]
-async fn main() -> anyhow::Result<()> {
-    let args = OmicronDevApp::parse();
-    args.exec().await
+fn main() -> anyhow::Result<()> {
+    oxide_tokio_rt::run(async {
+        let args = OmicronDevApp::parse();
+        args.exec().await
+    })
 }
 
 /// Tools for working with a local Omicron deployment.

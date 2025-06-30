@@ -16,5 +16,6 @@ gateway-test-utils.workspace = true
 libc.workspace = true
 omicron-gateway.workspace = true
 omicron-workspace-hack.workspace = true
+oxide-tokio-rt.workspace = true
 signal-hook-tokio.workspace = true
 tokio.workspace = true

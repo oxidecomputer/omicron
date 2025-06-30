@@ -19,6 +19,7 @@ gateway-types.workspace = true
 hex = { workspace = true, features = [ "serde" ] }
 hubtools.workspace = true
 omicron-common.workspace = true
+oxide-tokio-rt.workspace = true
 serde.workspace = true
 serde_cbor.workspace = true
 sha3.workspace = true
