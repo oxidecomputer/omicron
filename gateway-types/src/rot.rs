@@ -5,6 +5,7 @@
 use daft::Diffable;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
+use std::fmt::Display;
 use std::str::FromStr;
 
 #[derive(
@@ -197,6 +198,16 @@ impl RotSlot {
             RotSlot::A => RotSlot::B,
             RotSlot::B => RotSlot::A,
         }
+    }
+}
+
+impl Display for RotSlot {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let s = match self {
+            RotSlot::A => "A",
+            RotSlot::B => "B",
+        };
+        write!(f, "{s}")
     }
 }
 
