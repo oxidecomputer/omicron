@@ -198,7 +198,7 @@ impl UpdateDescription<'_> {
                     status: UpdateAttemptStatus::NotStarted,
                     nattempts_done: 0,
                 })
-                .unwrap();
+                .expect("no value present in object we just created");
         });
         let status_updater =
             UpdateAttemptStatusUpdater::new(status_tx.clone(), baseboard_id);
