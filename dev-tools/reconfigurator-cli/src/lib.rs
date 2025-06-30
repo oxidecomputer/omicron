@@ -799,6 +799,10 @@ struct TufAssembleArgs {
     /// The tufaceous manifest path (relative to this crate's root)
     manifest_path: Utf8PathBuf,
 
+    /// Allow non-semver artifact versions.
+    #[clap(long)]
+    allow_non_semver: bool,
+
     #[clap(
         long,
         // Use help here rather than a doc comment because rustdoc doesn't like
@@ -1962,15 +1966,19 @@ fn cmd_tuf_assemble(
     // Just use a fixed key for now.
     //
     // In the future we may want to test changing the TUF key.
-    let args = tufaceous::Args::try_parse_from([
+    let mut tufaceous_args = vec![
         "tufaceous",
         "--key",
         DEFAULT_TUFACEOUS_KEY,
         "assemble",
         manifest_path.as_str(),
         output_path.as_str(),
-    ])
-    .expect("args are valid so this shouldn't fail");
+    ];
+    if args.allow_non_semver {
+        tufaceous_args.push("--allow-non-semver");
+    }
+    let args = tufaceous::Args::try_parse_from(tufaceous_args)
+        .expect("args are valid so this shouldn't fail");
     let rt =
         tokio::runtime::Runtime::new().context("creating tokio runtime")?;
     rt.block_on(async move { args.exec(&sim.log).await })

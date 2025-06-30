@@ -41,8 +41,17 @@ version = "2.0.0"
 [artifact.control_plane.source]
 kind = "composite-control-plane"
 zones = [
-    { kind = "fake", name = "zone1", size = "1MiB" },
-    { kind = "fake", name = "zone2", size = "1MiB" },
+    { kind = "fake", name = "clickhouse",           size = "128KiB" },
+    { kind = "fake", name = "clickhouse_keeper",    size = "128KiB" },
+    { kind = "fake", name = "clickhouse_server",    size = "128KiB" },
+    { kind = "fake", name = "cockroachdb",          size = "128KiB" },
+    { kind = "fake", name = "crucible-zone",        size = "128KiB" },
+    { kind = "fake", name = "crucible-pantry-zone", size = "128KiB" },
+    { kind = "fake", name = "external-dns",         size = "128KiB" },
+    { kind = "fake", name = "internal-dns",         size = "128KiB" },
+    { kind = "fake", name = "ntp",                  size = "128KiB" },
+    { kind = "fake", name = "nexus",                size = "128KiB" },
+    { kind = "fake", name = "oximeter",             size = "128KiB" },
 ]
 
 [[artifact.psc_sp]]
