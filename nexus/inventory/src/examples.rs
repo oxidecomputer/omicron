@@ -66,7 +66,7 @@ use sled_agent_zone_images_examples::NON_BOOT_PATHS;
 use sled_agent_zone_images_examples::NON_BOOT_UUID;
 use sled_agent_zone_images_examples::WriteInstallDatasetContext;
 use sled_agent_zone_images_examples::dataset_missing_error;
-use std::collections::HashMap;
+use std::collections::BTreeMap;
 use std::sync::Arc;
 use std::time::Duration;
 use strum::IntoEnumIterator;
@@ -606,7 +606,7 @@ pub fn representative() -> Representative {
     );
 
     builder.found_cockroach_metrics(PrometheusMetrics {
-        metrics: HashMap::from([(
+        metrics: BTreeMap::from([(
             "ranges_underreplicated".to_string(),
             MetricValue::Unsigned(0),
         )]),
