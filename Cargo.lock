@@ -7583,6 +7583,7 @@ dependencies = [
  "ereport-types",
  "expectorate",
  "fatfs",
+ "fs-err 3.1.1",
  "futures",
  "gateway-client",
  "gateway-messages",
