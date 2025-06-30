@@ -10599,8 +10599,10 @@ dependencies = [
  "swrite",
  "tabled 0.15.0",
  "tokio",
+ "toml 0.8.23",
  "tufaceous",
  "tufaceous-artifact",
+ "tufaceous-lib",
  "update-common",
  "uuid",
 ]
