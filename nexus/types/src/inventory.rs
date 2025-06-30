@@ -234,6 +234,7 @@ impl Collection {
     Diffable,
     Ord,
     Eq,
+    Hash,
     PartialOrd,
     PartialEq,
     Deserialize,
