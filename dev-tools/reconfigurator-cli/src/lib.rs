@@ -753,8 +753,12 @@ struct TufAssembleArgs {
     /// The tufaceous manifest path (relative to this crate's root)
     manifest_path: Utf8PathBuf,
 
-    /// The path to the output [default: repo-<system-version>.zip]
-    #[clap(long)]
+    #[clap(
+        long,
+        // Use help here rather than a doc comment because rustdoc doesn't like
+        // `<` and `>` in help messages.
+        help = "The path to the output [default: repo-<system-version>.zip]"
+    )]
     output: Option<Utf8PathBuf>,
 }
 
