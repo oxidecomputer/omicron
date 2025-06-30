@@ -85,12 +85,12 @@ struct ReconfiguratorSim {
 }
 
 impl ReconfiguratorSim {
-    fn new(log: slog::Logger, seed: Option<String>) -> anyhow::Result<Self> {
-        Ok(Self {
+    fn new(log: slog::Logger, seed: Option<String>) -> Self {
+        Self {
             sim: Simulator::new(&log, seed),
             current: Simulator::ROOT_ID,
             log,
-        })
+        }
     }
 
     fn current_state(&self) -> &SimState {
@@ -186,7 +186,7 @@ impl CmdReconfiguratorSim {
             LogCapture::new(std::io::stdout().is_terminal());
 
         let seed_provided = self.seed.is_some();
-        let mut sim = ReconfiguratorSim::new(log, self.seed)?;
+        let mut sim = ReconfiguratorSim::new(log, self.seed);
         if seed_provided {
             println!("using provided RNG seed: {}", sim.sim.initial_seed());
         } else {
@@ -1815,8 +1815,6 @@ fn cmd_tuf_assemble(
     };
 
     // Obtain the system version from the manifest.
-    //
-    // TODO: Support for this should be built into tufaceous directly.
     let manifest =
         ArtifactManifest::from_path(&manifest_path).with_context(|| {
             format!("error parsing manifest from `{manifest_path}`")
