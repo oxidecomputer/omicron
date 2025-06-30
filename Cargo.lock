@@ -7338,6 +7338,23 @@ dependencies = [
 ]
 
 [[package]]
+name = "omicron-cockroach-metrics"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "chrono",
+ "cockroach-admin-client",
+ "futures",
+ "omicron-workspace-hack",
+ "proptest",
+ "serde",
+ "serde_json",
+ "slog",
+ "strum",
+ "tokio",
+]
+
+[[package]]
 name = "omicron-common"
 version = "0.1.0"
 dependencies = [

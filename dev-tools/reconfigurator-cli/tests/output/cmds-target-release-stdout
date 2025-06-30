@@ -37,8 +37,17 @@ INFO added artifact, name: fake-host, kind: host_phase_1, version: 1.0.0, hash: 
 INFO added artifact, name: fake-host, kind: host_phase_2, version: 1.0.0, hash: f3dd0c7a1bd4500ea0d8bcf67581f576d47752b2f1998a4cb0f0c3155c483008, length: 1048576
 INFO added artifact, name: fake-trampoline, kind: trampoline_phase_1, version: 1.0.0, hash: 9b7575cad720f017e936fe5994fc4e21fe040acaaf83c2edd86132aa3d667c7b, length: 524288
 INFO added artifact, name: fake-trampoline, kind: trampoline_phase_2, version: 1.0.0, hash: f355fb8429a7e0f0716dad035f9a06c799168d6c0ffcde85b1a96fef21d4b53e, length: 1048576
-INFO added artifact, name: zone1, kind: zone, version: 1.0.0, hash: 3a20f7bf38820060363fc61ba4437e5bbd1c2500d91321417ab49687a255a30a, length: 11907
-INFO added artifact, name: zone2, kind: zone, version: 1.0.0, hash: a283b1343cc77beffdb610979bb9cafc66e5f14c142b070481e0be7ada588b79, length: 11909
+INFO added artifact, name: clickhouse, kind: zone, version: 1.0.0, hash: 52b1eb4daff6f9140491d547b11248392920230db3db0eef5f5fa5333fe9e659, length: 1686
+INFO added artifact, name: clickhouse_keeper, kind: zone, version: 1.0.0, hash: cda702919449d86663be97295043aeca0ead69ae5db3bbdb20053972254a27a3, length: 1690
+INFO added artifact, name: clickhouse_server, kind: zone, version: 1.0.0, hash: 5f9ae6a9821bbe8ff0bf60feddf8b167902fe5f3e2c98bd21edd1ec9d969a001, length: 1690
+INFO added artifact, name: cockroachdb, kind: zone, version: 1.0.0, hash: f3a1a3c0b3469367b005ee78665d982059d5e14e93a479412426bf941c4ed291, length: 1689
+INFO added artifact, name: crucible-zone, kind: zone, version: 1.0.0, hash: 6f17cf65fb5a5bec5542dd07c03cd0acc01e59130f02c532c8d848ecae810047, length: 1690
+INFO added artifact, name: crucible-pantry-zone, kind: zone, version: 1.0.0, hash: 21f0ada306859c23917361f2e0b9235806c32607ec689c7e8cf16bb898bc5a02, length: 1695
+INFO added artifact, name: external-dns, kind: zone, version: 1.0.0, hash: ccca13ed19b8731f9adaf0d6203b02ea3b9ede4fa426b9fac0a07ce95440046d, length: 1689
+INFO added artifact, name: internal-dns, kind: zone, version: 1.0.0, hash: ffbf1373f7ee08dddd74c53ed2a94e7c4c572a982d3a9bc94000c6956b700c6a, length: 1689
+INFO added artifact, name: ntp, kind: zone, version: 1.0.0, hash: 67593d686ed04a1709f93972b71f4ebc148a9362120f65d239943e814a9a7439, length: 1681
+INFO added artifact, name: nexus, kind: zone, version: 1.0.0, hash: 0e32b4a3e5d3668bb1d6a16fb06b74dc60b973fa479dcee0aae3adbb52bf1388, length: 1682
+INFO added artifact, name: oximeter, kind: zone, version: 1.0.0, hash: 048d8fe8cdef5b175aad714d0f148aa80ce36c9114ac15ce9d02ed3d37877a77, length: 1682
 INFO added artifact, name: fake-psc-sp, kind: psc_sp, version: 1.0.0, hash: f896cf5b19ca85864d470ad8587f980218bff3954e7f52bbd999699cd0f9635b, length: 744
 INFO added artifact, name: fake-psc-rot, kind: psc_rot_image_a, version: 1.0.0, hash: 179eb660ebc92e28b6748b6af03d9f998d6131319edd4654a1e948454c62551b, length: 750
 INFO added artifact, name: fake-psc-rot, kind: psc_rot_image_b, version: 1.0.0, hash: 179eb660ebc92e28b6748b6af03d9f998d6131319edd4654a1e948454c62551b, length: 750
@@ -66,8 +75,17 @@ target release (generation 2): 1.0.0 (system-update-v1.0.0.zip)
     artifact: f3dd0c7a1bd4500ea0d8bcf67581f576d47752b2f1998a4cb0f0c3155c483008 host_phase_2 (fake-host version 1.0.0)
     artifact: 9b7575cad720f017e936fe5994fc4e21fe040acaaf83c2edd86132aa3d667c7b trampoline_phase_1 (fake-trampoline version 1.0.0)
     artifact: f355fb8429a7e0f0716dad035f9a06c799168d6c0ffcde85b1a96fef21d4b53e trampoline_phase_2 (fake-trampoline version 1.0.0)
-    artifact: 3a20f7bf38820060363fc61ba4437e5bbd1c2500d91321417ab49687a255a30a zone (zone1 version 1.0.0)
-    artifact: a283b1343cc77beffdb610979bb9cafc66e5f14c142b070481e0be7ada588b79 zone (zone2 version 1.0.0)
+    artifact: 52b1eb4daff6f9140491d547b11248392920230db3db0eef5f5fa5333fe9e659 zone (clickhouse version 1.0.0)
+    artifact: cda702919449d86663be97295043aeca0ead69ae5db3bbdb20053972254a27a3 zone (clickhouse_keeper version 1.0.0)
+    artifact: 5f9ae6a9821bbe8ff0bf60feddf8b167902fe5f3e2c98bd21edd1ec9d969a001 zone (clickhouse_server version 1.0.0)
+    artifact: f3a1a3c0b3469367b005ee78665d982059d5e14e93a479412426bf941c4ed291 zone (cockroachdb version 1.0.0)
+    artifact: 6f17cf65fb5a5bec5542dd07c03cd0acc01e59130f02c532c8d848ecae810047 zone (crucible-zone version 1.0.0)
+    artifact: 21f0ada306859c23917361f2e0b9235806c32607ec689c7e8cf16bb898bc5a02 zone (crucible-pantry-zone version 1.0.0)
+    artifact: ccca13ed19b8731f9adaf0d6203b02ea3b9ede4fa426b9fac0a07ce95440046d zone (external-dns version 1.0.0)
+    artifact: ffbf1373f7ee08dddd74c53ed2a94e7c4c572a982d3a9bc94000c6956b700c6a zone (internal-dns version 1.0.0)
+    artifact: 67593d686ed04a1709f93972b71f4ebc148a9362120f65d239943e814a9a7439 zone (ntp version 1.0.0)
+    artifact: 0e32b4a3e5d3668bb1d6a16fb06b74dc60b973fa479dcee0aae3adbb52bf1388 zone (nexus version 1.0.0)
+    artifact: 048d8fe8cdef5b175aad714d0f148aa80ce36c9114ac15ce9d02ed3d37877a77 zone (oximeter version 1.0.0)
     artifact: f896cf5b19ca85864d470ad8587f980218bff3954e7f52bbd999699cd0f9635b psc_sp (fake-psc-sp version 1.0.0)
     artifact: 179eb660ebc92e28b6748b6af03d9f998d6131319edd4654a1e948454c62551b psc_rot_image_a (fake-psc-rot version 1.0.0)
     artifact: 179eb660ebc92e28b6748b6af03d9f998d6131319edd4654a1e948454c62551b psc_rot_image_b (fake-psc-rot version 1.0.0)
@@ -130,8 +148,17 @@ target release (generation 2): 1.0.0 (system-update-v1.0.0.zip)
     artifact: f3dd0c7a1bd4500ea0d8bcf67581f576d47752b2f1998a4cb0f0c3155c483008 host_phase_2 (fake-host version 1.0.0)
     artifact: 9b7575cad720f017e936fe5994fc4e21fe040acaaf83c2edd86132aa3d667c7b trampoline_phase_1 (fake-trampoline version 1.0.0)
     artifact: f355fb8429a7e0f0716dad035f9a06c799168d6c0ffcde85b1a96fef21d4b53e trampoline_phase_2 (fake-trampoline version 1.0.0)
-    artifact: 3a20f7bf38820060363fc61ba4437e5bbd1c2500d91321417ab49687a255a30a zone (zone1 version 1.0.0)
-    artifact: a283b1343cc77beffdb610979bb9cafc66e5f14c142b070481e0be7ada588b79 zone (zone2 version 1.0.0)
+    artifact: 52b1eb4daff6f9140491d547b11248392920230db3db0eef5f5fa5333fe9e659 zone (clickhouse version 1.0.0)
+    artifact: cda702919449d86663be97295043aeca0ead69ae5db3bbdb20053972254a27a3 zone (clickhouse_keeper version 1.0.0)
+    artifact: 5f9ae6a9821bbe8ff0bf60feddf8b167902fe5f3e2c98bd21edd1ec9d969a001 zone (clickhouse_server version 1.0.0)
+    artifact: f3a1a3c0b3469367b005ee78665d982059d5e14e93a479412426bf941c4ed291 zone (cockroachdb version 1.0.0)
+    artifact: 6f17cf65fb5a5bec5542dd07c03cd0acc01e59130f02c532c8d848ecae810047 zone (crucible-zone version 1.0.0)
+    artifact: 21f0ada306859c23917361f2e0b9235806c32607ec689c7e8cf16bb898bc5a02 zone (crucible-pantry-zone version 1.0.0)
+    artifact: ccca13ed19b8731f9adaf0d6203b02ea3b9ede4fa426b9fac0a07ce95440046d zone (external-dns version 1.0.0)
+    artifact: ffbf1373f7ee08dddd74c53ed2a94e7c4c572a982d3a9bc94000c6956b700c6a zone (internal-dns version 1.0.0)
+    artifact: 67593d686ed04a1709f93972b71f4ebc148a9362120f65d239943e814a9a7439 zone (ntp version 1.0.0)
+    artifact: 0e32b4a3e5d3668bb1d6a16fb06b74dc60b973fa479dcee0aae3adbb52bf1388 zone (nexus version 1.0.0)
+    artifact: 048d8fe8cdef5b175aad714d0f148aa80ce36c9114ac15ce9d02ed3d37877a77 zone (oximeter version 1.0.0)
     artifact: f896cf5b19ca85864d470ad8587f980218bff3954e7f52bbd999699cd0f9635b psc_sp (fake-psc-sp version 1.0.0)
     artifact: 179eb660ebc92e28b6748b6af03d9f998d6131319edd4654a1e948454c62551b psc_rot_image_a (fake-psc-rot version 1.0.0)
     artifact: 179eb660ebc92e28b6748b6af03d9f998d6131319edd4654a1e948454c62551b psc_rot_image_b (fake-psc-rot version 1.0.0)
@@ -1098,7 +1125,7 @@ external DNS:
 
 
 > # Finish updating the last sled and do one more planning run.
-> # There should be nothing left to do.
+> # This should update one control plane zone.
 > sled-update-sp d81c6a84-79b8-4958-ae41-ea46c9b19763 --active 1.0.0
 set sled d81c6a84-79b8-4958-ae41-ea46c9b19763 SP versions: active -> 1.0.0
 
@@ -1121,13 +1148,69 @@ INFO skipping board for SP update, serial_number: serial2, part_number: model2
 INFO skipping board for SP update, serial_number: serial0, part_number: model0
 INFO skipping board for SP update, serial_number: serial1, part_number: model1
 INFO ran out of boards for SP update
-INFO all zones up-to-date
+INFO updating zone image source in-place, sled_id: 2b8f0cb3-0295-4b3c-bc58-4fe88b57112c, zone_id: 353b3b65-20f7-48c3-88f7-495bd5d31545, kind: Clickhouse, image_source: artifact: version 1.0.0
 INFO will ensure cockroachdb setting, setting: cluster.preserve_downgrade_option, value: DoNotModify
 generated blueprint 9034c710-3e57-45f3-99e5-4316145e87ac based on parent blueprint 7f976e0d-d2a5-4eeb-9e82-c82bc2824aba
 
 > blueprint-diff 7f976e0d-d2a5-4eeb-9e82-c82bc2824aba 9034c710-3e57-45f3-99e5-4316145e87ac
 from: blueprint 7f976e0d-d2a5-4eeb-9e82-c82bc2824aba
 to:   blueprint 9034c710-3e57-45f3-99e5-4316145e87ac
+
+ MODIFIED SLEDS:
+
+  sled 2b8f0cb3-0295-4b3c-bc58-4fe88b57112c (active, config generation 2 -> 3):
+
+    physical disks:
+    ------------------------------------------------------------------------------------
+    vendor        model        serial                                        disposition
+    ------------------------------------------------------------------------------------
+    fake-vendor   fake-model   serial-727522a7-934f-494d-b5b3-160968e74463   in service 
+    fake-vendor   fake-model   serial-72c59873-31ff-4e36-8d76-ff834009349a   in service 
+    fake-vendor   fake-model   serial-b5fd5bc1-099e-4e77-8028-a9793c11f43b   in service 
+
+
+    datasets:
+    -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+    dataset name                                                                                                   dataset id                             disposition   quota     reservation   compression
+    -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+    oxp_727522a7-934f-494d-b5b3-160968e74463/crucible                                                              2f204c50-a327-479c-8852-f53ec7a19c1f   in service    none      none          off        
+    oxp_72c59873-31ff-4e36-8d76-ff834009349a/crucible                                                              78f34ce7-42f1-41da-995f-318f32054ad2   in service    none      none          off        
+    oxp_b5fd5bc1-099e-4e77-8028-a9793c11f43b/crucible                                                              1640adb6-70bf-44cf-b05c-bff6dd300cf3   in service    none      none          off        
+    oxp_727522a7-934f-494d-b5b3-160968e74463/crypt/clickhouse                                                      841d5648-05f0-47b0-b446-92f6b60fe9a6   in service    none      none          off        
+    oxp_727522a7-934f-494d-b5b3-160968e74463/crypt/external_dns                                                    8e0bd2bd-23b7-4bc6-9e73-c4d4ebc0bc8c   in service    none      none          off        
+    oxp_727522a7-934f-494d-b5b3-160968e74463/crypt/internal_dns                                                    2ad1875a-92ac-472f-8c26-593309f0e4da   in service    none      none          off        
+    oxp_727522a7-934f-494d-b5b3-160968e74463/crypt/zone                                                            4829f422-aa31-41a8-ab73-95684ff1ef48   in service    none      none          off        
+    oxp_72c59873-31ff-4e36-8d76-ff834009349a/crypt/zone                                                            775f9207-c42d-4af2-9186-27ffef67735e   in service    none      none          off        
+    oxp_b5fd5bc1-099e-4e77-8028-a9793c11f43b/crypt/zone                                                            3b66453b-7148-4c1b-84a9-499e43290ab4   in service    none      none          off        
+    oxp_727522a7-934f-494d-b5b3-160968e74463/crypt/zone/oxz_clickhouse_353b3b65-20f7-48c3-88f7-495bd5d31545        b46de15d-33e7-4cd0-aa7c-e7be2a61e71b   in service    none      none          off        
+    oxp_b5fd5bc1-099e-4e77-8028-a9793c11f43b/crypt/zone/oxz_crucible_86a22a56-0168-453d-9df1-cb2a7c64b5d3          3e0d6188-c503-49cf-a441-fa7df40ceb43   in service    none      none          off        
+    oxp_727522a7-934f-494d-b5b3-160968e74463/crypt/zone/oxz_crucible_bd354eef-d8a6-4165-9124-283fb5e46d77          5ae11c7e-08fa-4d78-a4ea-14b4a9a10241   in service    none      none          off        
+    oxp_72c59873-31ff-4e36-8d76-ff834009349a/crypt/zone/oxz_crucible_e2fdefe7-95b2-4fd2-ae37-56929a06d58c          b8f2a09f-8bd2-4418-872b-a4457a3f958c   in service    none      none          off        
+    oxp_727522a7-934f-494d-b5b3-160968e74463/crypt/zone/oxz_crucible_pantry_ad6a3a03-8d0f-4504-99a4-cbf73d69b973   49f8fbb6-5bac-4609-907f-6e3dfc206059   in service    none      none          off        
+    oxp_727522a7-934f-494d-b5b3-160968e74463/crypt/zone/oxz_external_dns_6c3ae381-04f7-41ea-b0ac-74db387dbc3a      8c4fa711-1d5d-4e93-85f0-d17bff47b063   in service    none      none          off        
+    oxp_727522a7-934f-494d-b5b3-160968e74463/crypt/zone/oxz_internal_dns_99e2f30b-3174-40bf-a78a-90da8abba8ca      c31623de-c19b-4615-9f1d-5e1daa5d3bda   in service    none      none          off        
+    oxp_727522a7-934f-494d-b5b3-160968e74463/crypt/zone/oxz_nexus_466a9f29-62bf-4e63-924a-b9efdb86afec             3560dd69-3b23-4c69-807d-d673104cfc68   in service    none      none          off        
+    oxp_727522a7-934f-494d-b5b3-160968e74463/crypt/zone/oxz_ntp_62620961-fc4a-481e-968b-f5acbac0dc63               09b9cc9b-3426-470b-a7bc-538f82dede03   in service    none      none          off        
+    oxp_727522a7-934f-494d-b5b3-160968e74463/crypt/debug                                                           93957ca0-9ed1-4e7b-8c34-2ce07a69541c   in service    100 GiB   none          gzip-9     
+    oxp_72c59873-31ff-4e36-8d76-ff834009349a/crypt/debug                                                           2db6b7c1-0f46-4ced-a3ad-48872793360e   in service    100 GiB   none          gzip-9     
+    oxp_b5fd5bc1-099e-4e77-8028-a9793c11f43b/crypt/debug                                                           318fae85-abcb-4259-b1b6-ac96d193f7b7   in service    100 GiB   none          gzip-9     
+
+
+    omicron zones:
+    -------------------------------------------------------------------------------------------------------------------------
+    zone type         zone id                                image source                disposition   underlay IP           
+    -------------------------------------------------------------------------------------------------------------------------
+    crucible          86a22a56-0168-453d-9df1-cb2a7c64b5d3   install dataset             in service    fd00:1122:3344:102::28
+    crucible          bd354eef-d8a6-4165-9124-283fb5e46d77   install dataset             in service    fd00:1122:3344:102::26
+    crucible          e2fdefe7-95b2-4fd2-ae37-56929a06d58c   install dataset             in service    fd00:1122:3344:102::27
+    crucible_pantry   ad6a3a03-8d0f-4504-99a4-cbf73d69b973   install dataset             in service    fd00:1122:3344:102::25
+    external_dns      6c3ae381-04f7-41ea-b0ac-74db387dbc3a   install dataset             in service    fd00:1122:3344:102::24
+    internal_dns      99e2f30b-3174-40bf-a78a-90da8abba8ca   install dataset             in service    fd00:1122:3344:1::1   
+    internal_ntp      62620961-fc4a-481e-968b-f5acbac0dc63   install dataset             in service    fd00:1122:3344:102::21
+    nexus             466a9f29-62bf-4e63-924a-b9efdb86afec   install dataset             in service    fd00:1122:3344:102::22
+*   clickhouse        353b3b65-20f7-48c3-88f7-495bd5d31545   - install dataset           in service    fd00:1122:3344:102::23
+     └─                                                      + artifact: version 1.0.0                                       
+
 
  COCKROACHDB SETTINGS:
     state fingerprint:::::::::::::::::   (none) (unchanged)
@@ -1289,3 +1372,7 @@ external DNS:
 
 
 
+
+> # We should continue walking through the update. We need to build out a
+> # reconfigurator-cli subcommand to simulate updated zone image sources (just
+> # like we have sled-update-sp for simulated SP updates).

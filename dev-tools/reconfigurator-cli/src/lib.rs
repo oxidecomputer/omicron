@@ -23,7 +23,6 @@ use nexus_reconfigurator_planning::system::{SledBuilder, SystemDescription};
 use nexus_reconfigurator_simulation::SimStateBuilder;
 use nexus_reconfigurator_simulation::Simulator;
 use nexus_reconfigurator_simulation::{BlueprintId, SimState};
-use nexus_types::deployment::OmicronZoneNic;
 use nexus_types::deployment::PlanningInput;
 use nexus_types::deployment::SledFilter;
 use nexus_types::deployment::execution;
@@ -35,6 +34,7 @@ use nexus_types::deployment::{
     BlueprintZoneImageSource, PendingMgsUpdateDetails,
 };
 use nexus_types::deployment::{BlueprintZoneImageVersion, PendingMgsUpdate};
+use nexus_types::deployment::{OmicronZoneNic, TargetReleaseDescription};
 use nexus_types::external_api::views::SledPolicy;
 use nexus_types::external_api::views::SledProvisionPolicy;
 use omicron_common::address::REPO_DEPOT_PORT;
@@ -1700,7 +1700,7 @@ fn cmd_show(sim: &mut ReconfiguratorSim) -> anyhow::Result<Option<String>> {
 
     let target_release = state.system().description().target_release();
     match target_release.description() {
-        Some(tuf_desc) => {
+        TargetReleaseDescription::TufRepo(tuf_desc) => {
             swriteln!(
                 s,
                 "target release (generation {}): {} ({})",
@@ -1719,7 +1719,7 @@ fn cmd_show(sim: &mut ReconfiguratorSim) -> anyhow::Result<Option<String>> {
                 );
             }
         }
-        None => {
+        TargetReleaseDescription::Initial => {
             swriteln!(
                 s,
                 "target release (generation {}): unset",
@@ -1786,10 +1786,9 @@ fn cmd_set(
             })?;
             let description = artifacts_with_plan.description().clone();
             drop(artifacts_with_plan);
-            state
-                .system_mut()
-                .description_mut()
-                .set_target_release(Some(description));
+            state.system_mut().description_mut().set_target_release(
+                TargetReleaseDescription::TufRepo(description),
+            );
             format!("set target release based on {}", filename)
         }
     };
