@@ -2976,7 +2976,7 @@ pub trait NexusExternalApi {
         method = GET,
         path = "/v1/system/update/trust-roots",
         tags = ["experimental"], // ["system/update"],
-            }]
+    }]
     async fn system_update_trust_root_list(
         rqctx: RequestContext<Self::Context>,
         query_params: Query<PaginatedById>,

@@ -6,17 +6,15 @@
 
 use anyhow::Result;
 use chrono::Utc;
-use dropshot::test_util::{ClientTestContext, LogContext};
+use dropshot::test_util::ClientTestContext;
 use http::StatusCode;
 use http::method::Method;
 use nexus_test_utils::http_testing::AuthnMode;
 use nexus_test_utils::http_testing::{NexusRequest, RequestBuilder};
-use nexus_test_utils::load_test_config;
-use nexus_test_utils::test_setup_with_config;
+use nexus_test_utils::test_setup;
 use nexus_types::external_api::params::SetTargetReleaseParams;
 use nexus_types::external_api::views::{TargetRelease, TargetReleaseSource};
 use omicron_common::api::external::TufRepoInsertResponse;
-use omicron_sled_agent::sim;
 use semver::Version;
 use tufaceous_artifact::{ArtifactVersion, KnownArtifactKind};
 use tufaceous_lib::assemble::ManifestTweak;
@@ -25,17 +23,10 @@ use crate::integration_tests::updates::TestTrustRoot;
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn get_set_target_release() -> Result<()> {
-    let mut config = load_test_config();
-    let ctx = test_setup_with_config::<omicron_nexus::Server>(
-        "test_update_uninitialized",
-        &mut config,
-        sim::SimMode::Explicit,
-        None,
-        0,
-    )
-    .await;
+    let ctx =
+        test_setup::<omicron_nexus::Server>("get_set_target_release", 0).await;
     let client = &ctx.external_client;
-    let logctx = LogContext::new("get_set_target_release", &config.pkg.log);
+    let logctx = &ctx.logctx;
 
     // There should always be a target release.
     let target_release: TargetRelease =
@@ -130,7 +121,6 @@ async fn get_set_target_release() -> Result<()> {
         .expect_err("shouldn't be able to downgrade system");
 
     ctx.teardown().await;
-    logctx.cleanup_successful();
     Ok(())
 }
 

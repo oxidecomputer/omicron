@@ -1491,7 +1491,7 @@ pub struct TargetRelease {
 }
 
 /// Trusted root role used by the update system to verify update repositories.
-#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize, JsonSchema)]
 pub struct UpdatesTrustRoot {
     /// The UUID of this trusted root role.
     pub id: TufTrustRootUuid,

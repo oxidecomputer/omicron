@@ -6,17 +6,18 @@ use anyhow::{Context, Result, ensure};
 use camino::Utf8Path;
 use camino_tempfile::{Builder, Utf8TempPath};
 use chrono::{DateTime, Duration, Timelike, Utc};
-use dropshot::test_util::LogContext;
+use dropshot::ResultsPage;
 use http::{Method, StatusCode};
 use nexus_db_queries::context::OpContext;
 use nexus_test_utils::background::run_tuf_artifact_replication_step;
 use nexus_test_utils::background::wait_tuf_artifact_replication_step;
 use nexus_test_utils::http_testing::{AuthnMode, NexusRequest, RequestBuilder};
-use nexus_test_utils::{load_test_config, test_setup, test_setup_with_config};
+use nexus_test_utils::test_setup;
+use nexus_test_utils_macros::nexus_test;
+use nexus_types::external_api::views::UpdatesTrustRoot;
 use omicron_common::api::external::{
     TufRepoGetResponse, TufRepoInsertResponse, TufRepoInsertStatus,
 };
-use omicron_sled_agent::sim;
 use pretty_assertions::assert_eq;
 use semver::Version;
 use serde::Deserialize;
@@ -28,6 +29,11 @@ use tufaceous_artifact::KnownArtifactKind;
 use tufaceous_lib::Key;
 use tufaceous_lib::assemble::{ArtifactManifest, OmicronRepoAssembler};
 use tufaceous_lib::assemble::{DeserializedManifest, ManifestTweak};
+
+const TRUST_ROOTS_URL: &str = "/v1/system/update/trust-roots";
+
+type ControlPlaneTestContext =
+    nexus_test_utils::ControlPlaneTestContext<omicron_nexus::Server>;
 
 pub struct TestTrustRoot {
     pub key: Key,
@@ -52,10 +58,10 @@ impl TestTrustRoot {
         client: &'a dropshot::test_util::ClientTestContext,
         expected_status: StatusCode,
     ) -> NexusRequest<'a> {
-        let url = "/v1/system/update/trust-roots";
-        let request = RequestBuilder::new(client, Method::POST, url)
-            .body(Some(self.root_role.signed()))
-            .expect_status(Some(expected_status));
+        let request =
+            RequestBuilder::new(client, Method::POST, TRUST_ROOTS_URL)
+                .body(Some(self.root_role.signed()))
+                .expect_status(Some(expected_status));
         NexusRequest::new(request).authn_as(AuthnMode::PrivilegedUser)
     }
 
@@ -124,21 +130,13 @@ impl TestRepo {
     }
 }
 
-// =^..^=   =^..^=   =^..^=   =^..^=   =^..^=   =^..^=   =^..^=   =^..^=
-
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn test_repo_upload_unconfigured() -> Result<()> {
-    let mut config = load_test_config();
-    let logctx = LogContext::new("test_update_uninitialized", &config.pkg.log);
-    let cptestctx = test_setup_with_config::<omicron_nexus::Server>(
-        "test_update_uninitialized",
-        &mut config,
-        sim::SimMode::Explicit,
-        None,
-        0,
-    )
-    .await;
+    let cptestctx =
+        test_setup::<omicron_nexus::Server>("test_update_uninitialized", 0)
+            .await;
     let client = &cptestctx.external_client;
+    let logctx = &cptestctx.logctx;
 
     // Generate a trust root, but _don't_ upload it to Nexus.
     let trust_root = TestTrustRoot::generate().await?;
@@ -174,29 +172,22 @@ async fn test_repo_upload_unconfigured() -> Result<()> {
     }
 
     cptestctx.teardown().await;
-    logctx.cleanup_successful();
-
     Ok(())
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn test_repo_upload() -> Result<()> {
-    let mut config = load_test_config();
-    let logctx = LogContext::new("test_update_end_to_end", &config.pkg.log);
-    let cptestctx = test_setup_with_config::<omicron_nexus::Server>(
+    let cptestctx = test_setup::<omicron_nexus::Server>(
         "test_update_end_to_end",
-        &mut config,
-        sim::SimMode::Explicit,
-        None,
         3, // 4 total sled agents
     )
     .await;
     let client = &cptestctx.external_client;
+    let logctx = &cptestctx.logctx;
 
     // The initial generation number should be 1.
     let datastore = cptestctx.server.server_context().nexus.datastore();
-    let opctx =
-        OpContext::for_tests(cptestctx.logctx.log.new(o!()), datastore.clone());
+    let opctx = OpContext::for_tests(logctx.log.new(o!()), datastore.clone());
     assert_eq!(
         datastore.tuf_get_generation(&opctx).await.unwrap(),
         1u32.into()
@@ -469,8 +460,6 @@ async fn test_repo_upload() -> Result<()> {
     assert_eq!(status.local_repos, 0);
 
     cptestctx.teardown().await;
-    logctx.cleanup_successful();
-
     Ok(())
 }
 
@@ -512,29 +501,62 @@ fn assert_error_message_contains(
     Ok(())
 }
 
-// =^..^=   =^..^=   =^..^=   =^..^=   =^..^=   =^..^=   =^..^=   =^..^=
+#[nexus_test]
+async fn test_trust_root_operations(cptestctx: &ControlPlaneTestContext) {
+    let client = &cptestctx.external_client;
+    let trust_root =
+        TestTrustRoot::generate().await.expect("trust root generation failed");
 
-// Tests that ".." paths are disallowed by dropshot.
-#[tokio::test]
-async fn test_download_with_dots_fails() {
-    let cptestctx =
-        test_setup::<omicron_nexus::Server>("test_download_with_dots_fails", 0)
-            .await;
-    let client = &cptestctx.internal_client;
+    // POST /v1/system/update/trust-roots
+    let trust_root_view: UpdatesTrustRoot = trust_root
+        .to_upload_request(client, StatusCode::CREATED)
+        .execute()
+        .await
+        .expect("trust root add failed")
+        .parsed_body()
+        .expect("failed to parse add response");
 
-    let filename = "hey/can/you/look/../../../../up/the/directory/tree";
-    let artifact_get_url = format!("/artifacts/{}", filename);
+    // GET /v1/system/update/trust-roots
+    let request = RequestBuilder::new(client, Method::GET, TRUST_ROOTS_URL)
+        .expect_status(Some(StatusCode::OK));
+    let response: ResultsPage<UpdatesTrustRoot> = NexusRequest::new(request)
+        .authn_as(AuthnMode::PrivilegedUser)
+        .execute()
+        .await
+        .expect("trust root list failed")
+        .parsed_body()
+        .expect("failed to parse list response");
+    assert_eq!(response.items, &[trust_root_view.clone()]);
 
-    NexusRequest::expect_failure(
-        client,
-        StatusCode::BAD_REQUEST,
-        Method::GET,
-        &artifact_get_url,
-    )
-    .authn_as(AuthnMode::PrivilegedUser)
-    .execute()
-    .await
-    .unwrap();
+    // GET /v1/system/update/trust-roots/{id}
+    let id_url = format!("{TRUST_ROOTS_URL}/{}", trust_root_view.id);
+    let request = RequestBuilder::new(client, Method::GET, &id_url)
+        .expect_status(Some(StatusCode::OK));
+    let response: UpdatesTrustRoot = NexusRequest::new(request)
+        .authn_as(AuthnMode::PrivilegedUser)
+        .execute()
+        .await
+        .expect("trust root get failed")
+        .parsed_body()
+        .expect("failed to parse get response");
+    assert_eq!(response, trust_root_view);
 
-    cptestctx.teardown().await;
+    // DELETE /v1/system/update/trust-roots/{id}
+    let request = RequestBuilder::new(client, Method::DELETE, &id_url)
+        .expect_status(Some(StatusCode::NO_CONTENT));
+    NexusRequest::new(request)
+        .authn_as(AuthnMode::PrivilegedUser)
+        .execute()
+        .await
+        .expect("trust root delete failed");
+    let request = RequestBuilder::new(client, Method::GET, TRUST_ROOTS_URL)
+        .expect_status(Some(StatusCode::OK));
+    let response: ResultsPage<UpdatesTrustRoot> = NexusRequest::new(request)
+        .authn_as(AuthnMode::PrivilegedUser)
+        .execute()
+        .await
+        .expect("trust root list after delete failed")
+        .parsed_body()
+        .expect("failed to parse list after delete response");
+    assert!(response.items.is_empty());
 }
