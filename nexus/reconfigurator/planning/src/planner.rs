@@ -1112,11 +1112,10 @@ impl<'a> Planner<'a> {
         // bounce them.
         let mut updateable_zones =
             out_of_date_zones.filter(|(_sled_id, zone, _new_image_source)| {
-                let kind = zone.zone_type.kind();
-                if !self.can_zone_be_shut_down_safely(kind) {
+                if !self.can_zone_be_shut_down_safely(zone) {
                     return false;
                 }
-                match self.is_zone_ready_for_update(kind) {
+                match self.is_zone_ready_for_update(zone.zone_type.kind()) {
                     Ok(true) => true,
                     Ok(false) => false,
                     Err(err) => {
@@ -1389,10 +1388,10 @@ impl<'a> Planner<'a> {
     /// because the underlying disk / sled has been expunged" case. In this
     /// case, we have no choice but to reconcile with the fact that the zone is
     /// now gone.
-    fn can_zone_be_shut_down_safely(&self, zone_kind: ZoneKind) -> bool {
+    fn can_zone_be_shut_down_safely(&self, zone: &BlueprintZoneConfig) -> bool {
         // TODO-cleanup remove this `allow` once we populate a variant below
         #[allow(clippy::match_single_binding)]
-        match zone_kind {
+        match zone.zone_type.kind() {
             // <https://github.com/oxidecomputer/omicron/issues/6404>
             // ZoneKind::CockroachDb => todo!("check cluster status in inventory"),
             _ => true, // other zone kinds have no special safety checks
