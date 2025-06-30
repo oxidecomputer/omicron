@@ -6,6 +6,7 @@
 //! blueprints.
 
 use super::AddNetworkResourceError;
+use super::BlueprintZoneImageSource;
 use super::OmicronZoneExternalIp;
 use super::OmicronZoneNetworkResources;
 use super::OmicronZoneNic;
@@ -20,6 +21,7 @@ use chrono::Utc;
 use clap::ValueEnum;
 use daft::Diffable;
 use ipnetwork::IpNetwork;
+use nexus_sled_agent_shared::inventory::ZoneKind;
 use omicron_common::address::IpRange;
 use omicron_common::address::Ipv6Subnet;
 use omicron_common::address::SLED_PREFIX;
@@ -28,6 +30,7 @@ use omicron_common::api::external::TufRepoDescription;
 use omicron_common::api::internal::shared::SourceNatConfigError;
 use omicron_common::disk::DiskIdentity;
 use omicron_common::policy::SINGLE_NODE_CLICKHOUSE_REDUNDANCY;
+use omicron_common::update::ArtifactId;
 use omicron_uuid_kinds::OmicronZoneUuid;
 use omicron_uuid_kinds::PhysicalDiskUuid;
 use omicron_uuid_kinds::SledUuid;
@@ -1026,6 +1029,49 @@ impl TargetReleaseDescription {
             Self::TufRepo(tuf_repo) => Some(tuf_repo),
         }
     }
+
+    pub fn zone_image_source(
+        &self,
+        zone_kind: ZoneKind,
+    ) -> Result<BlueprintZoneImageSource, TufRepoContentsError> {
+        match self {
+            Self::Initial => Ok(BlueprintZoneImageSource::InstallDataset),
+            Self::TufRepo(tuf_repo) => {
+                // We should have exactly one artifact for a given zone kind in
+                // every TUF repo; return an error if we have 0 or more than 1.
+                let mut matching_artifacts =
+                    tuf_repo.artifacts.iter().filter(|artifact| {
+                        zone_kind.is_control_plane_zone_artifact(&artifact.id)
+                    });
+                let artifact = matching_artifacts
+                    .next()
+                    .ok_or(TufRepoContentsError::MissingZoneKind(zone_kind))?;
+                if let Some(extra_artifact) = matching_artifacts.next() {
+                    return Err(
+                        TufRepoContentsError::MultipleArtifactsSameZoneKind {
+                            artifact1: artifact.id.clone(),
+                            artifact2: extra_artifact.id.clone(),
+                        },
+                    );
+                }
+                Ok(BlueprintZoneImageSource::from_available_artifact(artifact))
+            }
+        }
+    }
+}
+
+#[derive(Debug, thiserror::Error)]
+pub enum TufRepoContentsError {
+    #[error("TUF repo is missing an artifact for zone kind {0:?}")]
+    MissingZoneKind(ZoneKind),
+    #[error(
+        "TUF repo contains 2 or more artifacts for the same zone kind: \
+         {artifact1:?}, {artifact2:?}"
+    )]
+    MultipleArtifactsSameZoneKind {
+        artifact1: ArtifactId,
+        artifact2: ArtifactId,
+    },
 }
 
 /// Where oximeter should read from
