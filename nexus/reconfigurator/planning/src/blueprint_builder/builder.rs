@@ -2249,9 +2249,20 @@ pub mod test {
             example.input.all_sled_resources(SledFilter::Commissioned)
         {
             builder.sled_add_disks(sled_id, sled_resources).unwrap();
-            builder.sled_ensure_zone_ntp(sled_id).unwrap();
+            builder
+                .sled_ensure_zone_ntp(
+                    sled_id,
+                    BlueprintZoneImageSource::InstallDataset,
+                )
+                .unwrap();
             for pool_id in sled_resources.zpools.keys() {
-                builder.sled_ensure_zone_crucible(sled_id, *pool_id).unwrap();
+                builder
+                    .sled_ensure_zone_crucible(
+                        sled_id,
+                        *pool_id,
+                        BlueprintZoneImageSource::InstallDataset,
+                    )
+                    .unwrap();
             }
         }
 
@@ -2286,9 +2297,20 @@ pub mod test {
             .unwrap()
             .resources;
         builder.sled_add_disks(new_sled_id, &new_sled_resources).unwrap();
-        builder.sled_ensure_zone_ntp(new_sled_id).unwrap();
+        builder
+            .sled_ensure_zone_ntp(
+                new_sled_id,
+                BlueprintZoneImageSource::InstallDataset,
+            )
+            .unwrap();
         for pool_id in new_sled_resources.zpools.keys() {
-            builder.sled_ensure_zone_crucible(new_sled_id, *pool_id).unwrap();
+            builder
+                .sled_ensure_zone_crucible(
+                    new_sled_id,
+                    *pool_id,
+                    BlueprintZoneImageSource::InstallDataset,
+                )
+                .unwrap();
         }
         builder.sled_ensure_zone_datasets(new_sled_id).unwrap();
 
@@ -2750,6 +2772,7 @@ pub mod test {
                     .next()
                     .map(|sa| sa.sled_id)
                     .expect("no sleds present"),
+                BlueprintZoneImageSource::InstallDataset,
             )
             .unwrap_err();
 
@@ -2846,7 +2869,12 @@ pub mod test {
                 "test",
             )
             .expect("failed to create builder");
-            builder.sled_add_zone_nexus(sled_id).expect("added nexus zone");
+            builder
+                .sled_add_zone_nexus(
+                    sled_id,
+                    BlueprintZoneImageSource::InstallDataset,
+                )
+                .expect("added nexus zone");
         }
 
         {
@@ -2862,7 +2890,12 @@ pub mod test {
             )
             .expect("failed to create builder");
             for _ in 0..3 {
-                builder.sled_add_zone_nexus(sled_id).expect("added nexus zone");
+                builder
+                    .sled_add_zone_nexus(
+                        sled_id,
+                        BlueprintZoneImageSource::InstallDataset,
+                    )
+                    .expect("added nexus zone");
             }
         }
 
@@ -2895,7 +2928,12 @@ pub mod test {
                 "test",
             )
             .expect("failed to create builder");
-            let err = builder.sled_add_zone_nexus(sled_id).unwrap_err();
+            let err = builder
+                .sled_add_zone_nexus(
+                    sled_id,
+                    BlueprintZoneImageSource::InstallDataset,
+                )
+                .unwrap_err();
 
             assert!(
                 matches!(
@@ -2967,7 +3005,10 @@ pub mod test {
         .expect("constructed builder");
         for _ in 0..num_sled_zpools {
             builder
-                .sled_add_zone_cockroachdb(target_sled_id)
+                .sled_add_zone_cockroachdb(
+                    target_sled_id,
+                    BlueprintZoneImageSource::InstallDataset,
+                )
                 .expect("added CRDB zone");
         }
         builder.sled_ensure_zone_datasets(target_sled_id).unwrap();
@@ -3006,11 +3047,17 @@ pub mod test {
         .expect("constructed builder");
         for _ in 0..num_sled_zpools {
             builder
-                .sled_add_zone_cockroachdb(target_sled_id)
+                .sled_add_zone_cockroachdb(
+                    target_sled_id,
+                    BlueprintZoneImageSource::InstallDataset,
+                )
                 .expect("added CRDB zone");
         }
         let err = builder
-            .sled_add_zone_cockroachdb(target_sled_id)
+            .sled_add_zone_cockroachdb(
+                target_sled_id,
+                BlueprintZoneImageSource::InstallDataset,
+            )
             .expect_err("failed to create too many CRDB zones");
         match err {
             Error::NoAvailableZpool { sled_id, kind } => {

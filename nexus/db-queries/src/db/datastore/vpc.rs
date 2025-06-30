@@ -2883,6 +2883,7 @@ mod tests {
     use nexus_types::deployment::BlueprintTarget;
     use nexus_types::deployment::BlueprintZoneConfig;
     use nexus_types::deployment::BlueprintZoneDisposition;
+    use nexus_types::deployment::BlueprintZoneImageSource;
     use nexus_types::external_api::params;
     use nexus_types::identity::Asset;
     use omicron_common::api::external;
@@ -3238,7 +3239,12 @@ mod tests {
                     .expect("ensured disks");
             }
             builder
-                .sled_add_zone_nexus_with_config(sled_ids[2], false, Vec::new())
+                .sled_add_zone_nexus_with_config(
+                    sled_ids[2],
+                    false,
+                    Vec::new(),
+                    BlueprintZoneImageSource::InstallDataset,
+                )
                 .expect("added nexus to third sled");
             builder.build()
         };
@@ -3307,7 +3313,12 @@ mod tests {
             .expect("created blueprint builder");
             for &sled_id in &sled_ids {
                 builder
-                    .sled_add_zone_nexus_with_config(sled_id, false, Vec::new())
+                    .sled_add_zone_nexus_with_config(
+                        sled_id,
+                        false,
+                        Vec::new(),
+                        BlueprintZoneImageSource::InstallDataset,
+                    )
                     .expect("added nexus to third sled");
             }
             builder.build()

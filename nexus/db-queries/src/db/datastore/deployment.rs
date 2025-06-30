@@ -2381,13 +2381,22 @@ mod tests {
 
         // Add zones to our new sled.
         assert_eq!(
-            builder.sled_ensure_zone_ntp(new_sled_id).unwrap(),
+            builder
+                .sled_ensure_zone_ntp(
+                    new_sled_id,
+                    BlueprintZoneImageSource::InstallDataset
+                )
+                .unwrap(),
             Ensure::Added
         );
         for zpool_id in new_sled_zpools.keys() {
             assert_eq!(
                 builder
-                    .sled_ensure_zone_crucible(new_sled_id, *zpool_id)
+                    .sled_ensure_zone_crucible(
+                        new_sled_id,
+                        *zpool_id,
+                        BlueprintZoneImageSource::InstallDataset
+                    )
                     .unwrap(),
                 Ensure::Added
             );

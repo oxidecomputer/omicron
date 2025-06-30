@@ -2140,7 +2140,10 @@ pub(crate) mod test {
         .expect("failed to build blueprint builder");
         let sled_id = builder.sled_ids_with_zones().next().expect("no sleds");
         builder
-            .sled_add_zone_external_dns(sled_id)
+            .sled_add_zone_external_dns(
+                sled_id,
+                BlueprintZoneImageSource::InstallDataset,
+            )
             .expect_err("can't add external DNS zones");
 
         // Build a builder for a modfied blueprint that will include
@@ -2176,13 +2179,22 @@ pub(crate) mod test {
             )
         };
         blueprint_builder
-            .sled_add_zone_external_dns(sled_1)
+            .sled_add_zone_external_dns(
+                sled_1,
+                BlueprintZoneImageSource::InstallDataset,
+            )
             .expect("added external DNS zone");
         blueprint_builder
-            .sled_add_zone_external_dns(sled_1)
+            .sled_add_zone_external_dns(
+                sled_1,
+                BlueprintZoneImageSource::InstallDataset,
+            )
             .expect("added external DNS zone");
         blueprint_builder
-            .sled_add_zone_external_dns(sled_2)
+            .sled_add_zone_external_dns(
+                sled_2,
+                BlueprintZoneImageSource::InstallDataset,
+            )
             .expect("added external DNS zone");
 
         let blueprint1a = blueprint_builder.build();
