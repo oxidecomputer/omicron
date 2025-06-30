@@ -52,7 +52,8 @@ impl DecommissionedDiskCleaner {
     ) -> Result<(), anyhow::Error> {
         slog::info!(opctx.log, "Decommissioned disk cleaner running");
 
-        let mut paginator = Paginator::new(MAX_BATCH);
+        let mut paginator =
+            Paginator::new(MAX_BATCH, dropshot::PaginationOrder::Ascending);
         let mut last_err = Ok(());
         while let Some(p) = paginator.next() {
             let zpools = self

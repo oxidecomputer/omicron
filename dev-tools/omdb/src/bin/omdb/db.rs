@@ -3270,7 +3270,8 @@ async fn cmd_db_volume_cannot_activate(
 ) -> Result<(), anyhow::Error> {
     let conn = datastore.pool_connection_for_tests().await?;
 
-    let mut paginator = Paginator::new(SQL_BATCH_SIZE);
+    let mut paginator =
+        Paginator::new(SQL_BATCH_SIZE, dropshot::PaginationOrder::Ascending);
     while let Some(p) = paginator.next() {
         use nexus_db_schema::schema::volume::dsl;
         let batch = paginated(dsl::volume, dsl::id, &p.current_pagparams())

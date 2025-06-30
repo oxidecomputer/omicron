@@ -415,7 +415,8 @@ impl<M1, M2> RawPaginatorWithParams<'_, (M1, M2)> {
 /// let item2marker: &dyn Fn(&Item) -> Marker = &|u: &u32| *u;
 ///
 /// let mut all_records = Vec::new();
-/// let mut paginator = Paginator::new(batch_size);
+/// let direction = dropshot::PaginationOrder::Ascending;
+/// let mut paginator = Paginator::new(batch_size, direction);
 /// while let Some(p) = paginator.next() {
 ///     let records_batch = do_query(&p.current_pagparams());
 ///     paginator = p.found_batch(&records_batch, item2marker);
@@ -439,11 +440,15 @@ impl<M1, M2> RawPaginatorWithParams<'_, (M1, M2)> {
 pub struct Paginator<N> {
     batch_size: NonZeroU32,
     state: PaginatorState<N>,
+    direction: dropshot::PaginationOrder,
 }
 
 impl<N> Paginator<N> {
-    pub fn new(batch_size: NonZeroU32) -> Paginator<N> {
-        Paginator { batch_size, state: PaginatorState::Initial }
+    pub fn new(
+        batch_size: NonZeroU32,
+        direction: dropshot::PaginationOrder,
+    ) -> Paginator<N> {
+        Paginator { batch_size, state: PaginatorState::Initial, direction }
     }
 
     pub fn next(self) -> Option<PaginatorHelper<N>> {
@@ -451,10 +456,12 @@ impl<N> Paginator<N> {
             PaginatorState::Initial => Some(PaginatorHelper {
                 batch_size: self.batch_size,
                 marker: None,
+                direction: self.direction,
             }),
             PaginatorState::Middle { marker } => Some(PaginatorHelper {
                 batch_size: self.batch_size,
                 marker: Some(marker),
+                direction: self.direction,
             }),
             PaginatorState::Done => None,
         }
@@ -470,6 +477,7 @@ enum PaginatorState<N> {
 pub struct PaginatorHelper<N> {
     batch_size: NonZeroU32,
     marker: Option<N>,
+    direction: dropshot::PaginationOrder,
 }
 
 impl<N> PaginatorHelper<N> {
@@ -477,7 +485,7 @@ impl<N> PaginatorHelper<N> {
     pub fn current_pagparams(&self) -> DataPageParams<'_, N> {
         DataPageParams {
             marker: self.marker.as_ref(),
-            direction: dropshot::PaginationOrder::Ascending,
+            direction: self.direction,
             limit: self.batch_size,
         }
     }
@@ -506,7 +514,11 @@ impl<N> PaginatorHelper<N> {
                 PaginatorState::Middle { marker }
             };
 
-        Paginator { batch_size: self.batch_size, state }
+        Paginator {
+            batch_size: self.batch_size,
+            state,
+            direction: self.direction,
+        }
     }
 }
 
@@ -948,7 +960,10 @@ mod test {
         let do_list =
             |query: &dyn Fn(&DataPageParams<'_, Marker>) -> Vec<Item>| {
                 let mut all_records = Vec::new();
-                let mut paginator = Paginator::new(batch_size);
+                let mut paginator = Paginator::new(
+                    batch_size,
+                    dropshot::PaginationOrder::Ascending,
+                );
                 while let Some(p) = paginator.next() {
                     let records_batch = query(&p.current_pagparams());
                     paginator =

@@ -2505,7 +2505,10 @@ impl DataStore {
                 .internal_context("lookup router by id for rules")?;
         let vpc_id = authz_vpc.id();
 
-        let mut paginator = Paginator::new(SQL_BATCH_SIZE);
+        let mut paginator = Paginator::new(
+            SQL_BATCH_SIZE,
+            dropshot::PaginationOrder::Ascending,
+        );
         let mut all_rules = vec![];
         while let Some(p) = paginator.next() {
             let batch = self
