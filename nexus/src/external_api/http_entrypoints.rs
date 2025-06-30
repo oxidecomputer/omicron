@@ -9,8 +9,8 @@ use super::{
     views::{
         self, Certificate, FloatingIp, Group, IdentityProvider, Image, IpPool,
         IpPoolRange, PhysicalDisk, Project, Rack, Role, Silo, SiloQuotas,
-        SiloUtilization, Sled, Snapshot, SshKey, User, UserBuiltin,
-        Utilization, Vpc, VpcRouter, VpcSubnet,
+        SiloUtilization, Sled, Snapshot, SshKey, UpdatesTrustRoot, User,
+        UserBuiltin, Utilization, Vpc, VpcRouter, VpcSubnet,
     },
 };
 use crate::app::external_endpoints::authority_for_request;
@@ -6558,6 +6558,110 @@ impl NexusExternalApi for NexusExternalApiImpl {
             Ok(HttpResponseOk(TufRepoGetResponse {
                 description: description.into_external(),
             }))
+        };
+        apictx
+            .context
+            .external_latencies
+            .instrument_dropshot_handler(&rqctx, handler)
+            .await
+    }
+
+    async fn system_update_trust_root_list(
+        rqctx: RequestContext<Self::Context>,
+        query_params: Query<PaginatedById>,
+    ) -> Result<HttpResponseOk<ResultsPage<UpdatesTrustRoot>>, HttpError> {
+        let apictx = rqctx.context();
+        let handler = async {
+            let opctx =
+                crate::context::op_context_for_external_api(&rqctx).await?;
+            let nexus = &apictx.context.nexus;
+
+            let query = query_params.into_inner();
+            let pagparams = data_page_params_for(&rqctx, &query)?;
+
+            let trust_roots = nexus
+                .updates_list_trust_roots(&opctx, &pagparams)
+                .await?
+                .into_iter()
+                .map(|p| p.into())
+                .collect();
+
+            Ok(HttpResponseOk(ScanById::results_page(
+                &query,
+                trust_roots,
+                &|_, trust_root: &UpdatesTrustRoot| {
+                    trust_root.id.into_untyped_uuid()
+                },
+            )?))
+        };
+        apictx
+            .context
+            .external_latencies
+            .instrument_dropshot_handler(&rqctx, handler)
+            .await
+    }
+
+    async fn system_update_trust_root_create(
+        rqctx: RequestContext<Self::Context>,
+        body: TypedBody<serde_json::Value>,
+    ) -> Result<HttpResponseCreated<UpdatesTrustRoot>, HttpError> {
+        let apictx = rqctx.context();
+        let handler = async {
+            let opctx =
+                crate::context::op_context_for_external_api(&rqctx).await?;
+            let nexus = &apictx.context.nexus;
+
+            Ok(HttpResponseCreated(
+                nexus
+                    .updates_add_trust_root(&opctx, body.into_inner())
+                    .await?
+                    .into(),
+            ))
+        };
+        apictx
+            .context
+            .external_latencies
+            .instrument_dropshot_handler(&rqctx, handler)
+            .await
+    }
+
+    async fn system_update_trust_root_view(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<params::UpdatesTrustRoot>,
+    ) -> Result<HttpResponseOk<UpdatesTrustRoot>, HttpError> {
+        let apictx = rqctx.context();
+        let handler = async {
+            let opctx =
+                crate::context::op_context_for_external_api(&rqctx).await?;
+            let nexus = &apictx.context.nexus;
+
+            let id = path_params.into_inner().trust_root;
+
+            Ok(HttpResponseOk(
+                nexus.updates_get_trust_root(&opctx, id).await?.into(),
+            ))
+        };
+        apictx
+            .context
+            .external_latencies
+            .instrument_dropshot_handler(&rqctx, handler)
+            .await
+    }
+
+    async fn system_update_trust_root_delete(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<params::UpdatesTrustRoot>,
+    ) -> Result<HttpResponseDeleted, HttpError> {
+        let apictx = rqctx.context();
+        let handler = async {
+            let opctx =
+                crate::context::op_context_for_external_api(&rqctx).await?;
+            let nexus = &apictx.context.nexus;
+
+            let id = path_params.into_inner().trust_root;
+            nexus.updates_delete_trust_root(&opctx, id).await?;
+
+            Ok(HttpResponseDeleted())
         };
         apictx
             .context

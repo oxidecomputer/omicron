@@ -17,7 +17,7 @@ use omicron_common::api::external::{
     Digest, Error, FailureDomain, IdentityMetadata, InstanceState, Name,
     ObjectIdentity, RoleName, SimpleIdentity, SimpleIdentityOrName,
 };
-use omicron_uuid_kinds::{AlertReceiverUuid, AlertUuid};
+use omicron_uuid_kinds::{AlertReceiverUuid, AlertUuid, TufTrustRootUuid};
 use oxnet::{Ipv4Net, Ipv6Net};
 use schemars::JsonSchema;
 use semver::Version;
@@ -1488,6 +1488,18 @@ pub struct TargetRelease {
 
     /// The source of the target release.
     pub release_source: TargetReleaseSource,
+}
+
+/// Trusted root role used by the update system to verify update repositories.
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
+pub struct UpdatesTrustRoot {
+    /// The UUID of this trusted root role.
+    pub id: TufTrustRootUuid,
+    /// Time the trusted root role was added.
+    pub time_created: DateTime<Utc>,
+    /// The trusted root role itself, a JSON document as described by The Update
+    /// Framework.
+    pub root_role: serde_json::Value,
 }
 
 fn expected_one_of<T: strum::VariantArray + fmt::Display>() -> String {

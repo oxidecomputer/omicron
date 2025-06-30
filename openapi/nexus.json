@@ -10874,7 +10874,8 @@
         "tags": [
           "experimental"
         ],
-        "summary": "Upload TUF repository",
+        "summary": "Upload update repository",
+        "description": "Update repositories are verified by the update system trust store.",
         "operationId": "system_update_put_repository",
         "parameters": [
           {
@@ -10923,8 +10924,8 @@
         "tags": [
           "experimental"
         ],
-        "summary": "Fetch TUF repository description",
-        "description": "Fetch description of TUF repository by system version.",
+        "summary": "Fetch update repository description",
+        "description": "Fetch description of update repository by system version.",
         "operationId": "system_update_get_repository",
         "parameters": [
           {
@@ -11012,6 +11013,167 @@
                 }
               }
             }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/v1/system/update/trust-roots": {
+      "get": {
+        "tags": [
+          "experimental"
+        ],
+        "summary": "List root roles in the update system trust store",
+        "description": "Root roles are a JSON document describing the keys trusted to sign update repositories, as described by The Update Framework. Uploading an update repository requires its metadata to be signed by keys trusted by the trust store.",
+        "operationId": "system_update_trust_root_list",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "limit",
+            "description": "Maximum number of items returned by a single call",
+            "schema": {
+              "nullable": true,
+              "type": "integer",
+              "format": "uint32",
+              "minimum": 1
+            }
+          },
+          {
+            "in": "query",
+            "name": "page_token",
+            "description": "Token returned by previous call to retrieve the subsequent page",
+            "schema": {
+              "nullable": true,
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "sort_by",
+            "schema": {
+              "$ref": "#/components/schemas/IdSortMode"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UpdatesTrustRootResultsPage"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "x-dropshot-pagination": {
+          "required": []
+        }
+      },
+      "post": {
+        "tags": [
+          "experimental"
+        ],
+        "summary": "Add trusted root role to update system trust store",
+        "operationId": "system_update_trust_root_create",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {}
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "description": "successful creation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UpdatesTrustRoot"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/v1/system/update/trust-roots/{trust_root}": {
+      "get": {
+        "tags": [
+          "experimental"
+        ],
+        "summary": "Fetch trusted root role",
+        "operationId": "system_update_trust_root_view",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "trust_root",
+            "description": "Trust root ID.",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/TypedUuidForTufTrustRootKind"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UpdatesTrustRoot"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      },
+      "delete": {
+        "tags": [
+          "experimental"
+        ],
+        "summary": "Delete trusted root role",
+        "description": "Note that this method does not currently check for any uploaded update repositories that would become untrusted after deleting the root role.",
+        "operationId": "system_update_trust_root_delete",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "trust_root",
+            "description": "Trust root ID.",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/TypedUuidForTufTrustRootKind"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "successful deletion"
           },
           "4XX": {
             "$ref": "#/components/responses/Error"
@@ -25227,6 +25389,10 @@
         "type": "string",
         "format": "uuid"
       },
+      "TypedUuidForTufTrustRootKind": {
+        "type": "string",
+        "format": "uuid"
+      },
       "UninitializedSled": {
         "description": "A sled that has not been added to an initialized rack yet",
         "type": "object",
@@ -25317,6 +25483,54 @@
               "rpm"
             ]
           }
+        ]
+      },
+      "UpdatesTrustRoot": {
+        "description": "Trusted root role used by the update system to verify update repositories.",
+        "type": "object",
+        "properties": {
+          "id": {
+            "description": "The UUID of this trusted root role.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/TypedUuidForTufTrustRootKind"
+              }
+            ]
+          },
+          "root_role": {
+            "description": "The trusted root role itself, a JSON document as described by The Update Framework."
+          },
+          "time_created": {
+            "description": "Time the trusted root role was added.",
+            "type": "string",
+            "format": "date-time"
+          }
+        },
+        "required": [
+          "id",
+          "root_role",
+          "time_created"
+        ]
+      },
+      "UpdatesTrustRootResultsPage": {
+        "description": "A single page of results",
+        "type": "object",
+        "properties": {
+          "items": {
+            "description": "list of items on this page of results",
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/UpdatesTrustRoot"
+            }
+          },
+          "next_page": {
+            "nullable": true,
+            "description": "token used to fetch the next page of results (if any)",
+            "type": "string"
+          }
+        },
+        "required": [
+          "items"
         ]
       },
       "User": {

@@ -211,21 +211,17 @@ impl DataStore {
     pub async fn tuf_trust_root_list(
         &self,
         opctx: &OpContext,
-        pagparams: &DataPageParams<'_, TufTrustRootUuid>,
+        pagparams: &DataPageParams<'_, Uuid>,
     ) -> ListResultVec<TufTrustRoot> {
         use nexus_db_schema::schema::tuf_trust_root::dsl;
 
         opctx.authorize(authz::Action::Read, &authz::FLEET).await?;
-        paginated(
-            dsl::tuf_trust_root,
-            dsl::id,
-            &pagparams.map_name(|id| id.as_untyped_uuid()),
-        )
-        .select(TufTrustRoot::as_select())
-        .filter(dsl::time_deleted.is_null())
-        .load_async(&*self.pool_connection_authorized(opctx).await?)
-        .await
-        .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))
+        paginated(dsl::tuf_trust_root, dsl::id, pagparams)
+            .select(TufTrustRoot::as_select())
+            .filter(dsl::time_deleted.is_null())
+            .load_async(&*self.pool_connection_authorized(opctx).await?)
+            .await
+            .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))
     }
 
     /// Returns a trusted TUF root role.

@@ -11,6 +11,8 @@ use diesel::{deserialize::FromSql, serialize::ToSql, sql_types::Text};
 use nexus_db_schema::schema::{
     tuf_artifact, tuf_repo, tuf_repo_artifact, tuf_trust_root,
 };
+use nexus_types::external_api::views;
+use nexus_types::identity::Asset;
 use omicron_common::{api::external, update::ArtifactId};
 use omicron_uuid_kinds::TufArtifactKind;
 use omicron_uuid_kinds::TufRepoKind;
@@ -362,6 +364,16 @@ impl TufTrustRoot {
             identity: TufTrustRootIdentity::new(TufTrustRootUuid::new_v4()),
             time_deleted: None,
             root_role,
+        }
+    }
+}
+
+impl From<TufTrustRoot> for views::UpdatesTrustRoot {
+    fn from(trust_root: TufTrustRoot) -> views::UpdatesTrustRoot {
+        views::UpdatesTrustRoot {
+            id: trust_root.id(),
+            time_created: trust_root.time_created(),
+            root_role: trust_root.root_role,
         }
     }
 }

@@ -7,19 +7,21 @@
 use bytes::Bytes;
 use dropshot::HttpError;
 use futures::Stream;
-use nexus_db_model::TufRepoDescription;
+use nexus_db_model::{TufRepoDescription, TufTrustRoot};
 use nexus_db_queries::authz;
 use nexus_db_queries::context::OpContext;
 use nexus_db_queries::db::{datastore::SQL_BATCH_SIZE, pagination::Paginator};
 use nexus_types::identity::Asset;
 use omicron_common::api::external::{
-    Error, TufRepoInsertResponse, TufRepoInsertStatus,
+    DataPageParams, Error, TufRepoInsertResponse, TufRepoInsertStatus,
 };
-use omicron_uuid_kinds::TufTrustRootUuid;
+use omicron_uuid_kinds::{GenericUuid, TufTrustRootUuid};
 use semver::Version;
+use tough::schema::{Root, Signed};
 use update_common::artifacts::{
     ArtifactsWithPlan, ControlPlaneZonesMode, VerificationMode,
 };
+use uuid::Uuid;
 
 impl super::Nexus {
     pub(crate) async fn updates_put_repository(
@@ -31,13 +33,13 @@ impl super::Nexus {
         opctx.authorize(authz::Action::Modify, &authz::FLEET).await?;
 
         let mut trusted_roots = Vec::new();
-        let mut paginator = Paginator::<TufTrustRootUuid>::new(SQL_BATCH_SIZE);
+        let mut paginator = Paginator::new(SQL_BATCH_SIZE);
         while let Some(p) = paginator.next() {
             let batch = self
                 .db_datastore
                 .tuf_trust_root_list(opctx, &p.current_pagparams())
                 .await?;
-            paginator = p.found_batch(&batch, &|a| a.id());
+            paginator = p.found_batch(&batch, &|a| a.id().into_untyped_uuid());
             for root in batch {
                 trusted_roots.push(root.root_role.to_string().into_bytes());
             }
@@ -94,12 +96,78 @@ impl super::Nexus {
     ) -> Result<TufRepoDescription, HttpError> {
         opctx.authorize(authz::Action::Read, &authz::FLEET).await?;
 
-        let tuf_repo_description = self
-            .db_datastore
+        self.db_datastore
             .tuf_repo_get_by_version(opctx, system_version.into())
             .await
-            .map_err(HttpError::from)?;
+            .map_err(HttpError::from)
+    }
 
-        Ok(tuf_repo_description)
+    pub(crate) async fn updates_add_trust_root(
+        &self,
+        opctx: &OpContext,
+        trust_root: serde_json::Value,
+    ) -> Result<TufTrustRoot, HttpError> {
+        opctx.authorize(authz::Action::Modify, &authz::FLEET).await?;
+
+        // Verify that this appears to be a valid TUF root role.
+        let parsed: Signed<Root> =
+            match serde_json::from_value(trust_root.clone()) {
+                Ok(parsed) => Ok(parsed),
+                Err(err) => Err(HttpError::for_bad_request(
+                    None,
+                    format!("invalid root role: {err}"),
+                )),
+            }?;
+        // Verify the root role is self-signed.
+        if let Err(err) = parsed.signed.verify_role(&parsed) {
+            return Err(HttpError::for_bad_request(
+                None,
+                format!("invalid root role: {err}"),
+            ));
+        }
+
+        self.db_datastore
+            .tuf_trust_root_insert(opctx, TufTrustRoot::new(trust_root))
+            .await
+            .map_err(HttpError::from)
+    }
+
+    pub(crate) async fn updates_get_trust_root(
+        &self,
+        opctx: &OpContext,
+        id: TufTrustRootUuid,
+    ) -> Result<TufTrustRoot, HttpError> {
+        opctx.authorize(authz::Action::Read, &authz::FLEET).await?;
+
+        self.db_datastore
+            .tuf_trust_root_get_by_id(opctx, id)
+            .await
+            .map_err(HttpError::from)
+    }
+
+    pub(crate) async fn updates_list_trust_roots(
+        &self,
+        opctx: &OpContext,
+        pagparams: &DataPageParams<'_, Uuid>,
+    ) -> Result<Vec<TufTrustRoot>, HttpError> {
+        opctx.authorize(authz::Action::Read, &authz::FLEET).await?;
+
+        self.db_datastore
+            .tuf_trust_root_list(opctx, pagparams)
+            .await
+            .map_err(HttpError::from)
+    }
+
+    pub(crate) async fn updates_delete_trust_root(
+        &self,
+        opctx: &OpContext,
+        id: TufTrustRootUuid,
+    ) -> Result<(), HttpError> {
+        opctx.authorize(authz::Action::Modify, &authz::FLEET).await?;
+
+        self.db_datastore
+            .tuf_trust_root_delete(opctx, id)
+            .await
+            .map_err(HttpError::from)
     }
 }
