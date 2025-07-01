@@ -199,7 +199,9 @@ async fn inventory_activate(
         .await
         .context("looking up cockroach addresses")?;
 
-    // TODO: Allow a hard-coded option to find the admin interface here.
+    // TODO(https://github.com/oxidecomputer/omicron/issues/8496): If
+    // we could look up the admin service, instead of hard-coding it as
+    // "same as cockroach, but different port", that be preferable.
     let admin_addresses: Vec<_> = cockroach_addresses
         .into_iter()
         .map(|mut addr| {
