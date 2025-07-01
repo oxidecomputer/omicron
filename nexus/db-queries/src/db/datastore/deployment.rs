@@ -517,19 +517,13 @@ impl DataStore {
                             } => continue,
                         };
 
-                    // slot_ids fit into a u16 in practice.  This will be
-                    // enforced at compile time shortly.  See
-                    // oxidecomputer/omicron#8378.
-                    let update_slot_id = u16::try_from(update.slot_id)
-                        .expect("slot id to fit into u16");
-
                     let db_blueprint_id = DbTypedUuid::from(blueprint_id)
                         .into_sql::<diesel::sql_types::Uuid>(
                     );
                     let db_sp_type =
                         SpType::from(update.sp_type).into_sql::<SpTypeEnum>();
                     let db_slot_id =
-                        SpMgsSlot::from(SqlU16::from(update_slot_id))
+                        SpMgsSlot::from(SqlU16::from(update.slot_id))
                             .into_sql::<diesel::sql_types::Int4>();
                     let db_artifact_hash =
                         ArtifactHash::from(update.artifact_hash)
@@ -2813,7 +2807,7 @@ mod tests {
         builder.pending_mgs_update_insert(PendingMgsUpdate {
             baseboard_id: baseboard_id.clone(),
             sp_type: sp.sp_type,
-            slot_id: u32::from(sp.sp_slot),
+            slot_id: sp.sp_slot,
             details: PendingMgsUpdateDetails::Sp {
                 expected_active_version: "1.0.0".parse().unwrap(),
                 expected_inactive_version: ExpectedVersion::NoValidVersion,
