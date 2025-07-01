@@ -21,6 +21,7 @@ use omicron_common::disk::DatasetKind;
 use omicron_uuid_kinds::DatasetUuid;
 use omicron_uuid_kinds::OmicronZoneUuid;
 use omicron_uuid_kinds::PhysicalDiskUuid;
+use sled_agent_types::raw_disks::RawDisksReceiver;
 use sled_storage::config::MountConfig;
 use sled_storage::dataset::U2_DEBUG_DATASET;
 use sled_storage::dataset::ZONE_DATASET;
@@ -39,7 +40,6 @@ use tokio::sync::watch;
 use crate::TimeSyncConfig;
 use crate::dataset_serialization_task::DatasetTaskHandle;
 use crate::ledger::CurrentSledConfig;
-use crate::raw_disks::RawDisksReceiver;
 use crate::sled_agent_facilities::SledAgentFacilities;
 
 mod datasets;

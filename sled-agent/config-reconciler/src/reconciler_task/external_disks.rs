@@ -10,6 +10,7 @@
 use futures::future;
 use id_map::IdMap;
 use id_map::IdMappable;
+use iddqd::IdOrdMap;
 use illumos_utils::zpool::Zpool;
 use illumos_utils::zpool::ZpoolName;
 use key_manager::StorageKeyRequester;
@@ -38,7 +39,6 @@ use tokio::sync::watch;
 
 use crate::disks_common::MaybeUpdatedDisk;
 use crate::disks_common::update_properties_from_raw_disk;
-use crate::raw_disks::RawDiskWithId;
 
 /// Set of currently managed zpools.
 ///
@@ -316,7 +316,7 @@ impl ExternalDisks {
     /// set.
     pub(super) fn stop_managing_if_needed(
         &mut self,
-        raw_disks: &IdMap<RawDiskWithId>,
+        raw_disks: &IdOrdMap<RawDisk>,
         config: &IdMap<OmicronPhysicalDiskConfig>,
         log: &Logger,
     ) {
@@ -373,7 +373,7 @@ impl ExternalDisks {
     /// already managing.
     pub(super) async fn start_managing_if_needed(
         &mut self,
-        raw_disks: &IdMap<RawDiskWithId>,
+        raw_disks: &IdOrdMap<RawDisk>,
         config: &IdMap<OmicronPhysicalDiskConfig>,
         key_requester: &StorageKeyRequester,
         log: &Logger,
@@ -389,7 +389,7 @@ impl ExternalDisks {
 
     async fn start_managing_if_needed_with_disk_adopter<T: DiskAdopter>(
         &mut self,
-        raw_disks: &IdMap<RawDiskWithId>,
+        raw_disks: &IdOrdMap<RawDisk>,
         config: &IdMap<OmicronPhysicalDiskConfig>,
         log: &Logger,
         disk_adopter: &T,
@@ -705,7 +705,7 @@ mod tests {
         })
     }
 
-    fn make_raw_test_disk(variant: DiskVariant, serial: &str) -> RawDiskWithId {
+    fn make_raw_test_disk(variant: DiskVariant, serial: &str) -> RawDisk {
         RawDisk::Real(UnparsedDisk::new(
             "/test-devfs".into(),
             None,
@@ -719,7 +719,6 @@ mod tests {
             false,
             DiskFirmware::new(0, None, false, 1, vec![]),
         ))
-        .into()
     }
 
     fn with_test_runtime<Fut, T>(fut: Fut) -> T
@@ -770,7 +769,7 @@ mod tests {
         })
     }
 
-    async fn internal_disks_are_rejected_impl(raw_disks: IdMap<RawDiskWithId>) {
+    async fn internal_disks_are_rejected_impl(raw_disks: IdOrdMap<RawDisk>) {
         let logctx = dev::test_setup_log("internal_disks_are_rejected");
 
         let (currently_managed_zpools_tx, _rx) = watch::channel(Arc::default());
@@ -853,7 +852,7 @@ mod tests {
     // Report errors for any requested disks that don't exist.
     #[proptest]
     fn fail_if_disk_not_present(disks: BTreeMap<String, bool>) {
-        let mut raw_disks = IdMap::default();
+        let mut raw_disks = IdOrdMap::default();
         let mut config_disks = IdMap::default();
         let mut not_present = BTreeSet::new();
 
@@ -865,7 +864,7 @@ mod tests {
                 pool_id: ZpoolUuid::new_v4(),
             };
             if is_present {
-                raw_disks.insert(raw_disk);
+                raw_disks.insert_overwrite(raw_disk);
             } else {
                 not_present.insert(config_disk.id);
             }
@@ -879,7 +878,7 @@ mod tests {
     }
 
     async fn fail_if_disk_not_present_impl(
-        raw_disks: IdMap<RawDiskWithId>,
+        raw_disks: IdOrdMap<RawDisk>,
         config_disks: IdMap<OmicronPhysicalDiskConfig>,
         not_present: BTreeSet<PhysicalDiskUuid>,
     ) {
@@ -937,7 +936,7 @@ mod tests {
     // Stop managing disks if so requested.
     #[proptest]
     fn firmware_updates_are_propagated(disks: BTreeMap<String, bool>) {
-        let mut raw_disks = IdMap::default();
+        let mut raw_disks = IdOrdMap::default();
         let mut config_disks = IdMap::default();
         let mut should_mutate_firmware = BTreeSet::new();
 
@@ -951,7 +950,7 @@ mod tests {
             if should_mutate {
                 should_mutate_firmware.insert(raw_disk.identity().clone());
             }
-            raw_disks.insert(raw_disk);
+            raw_disks.insert_overwrite(raw_disk);
             config_disks.insert(config_disk);
         }
 
@@ -966,7 +965,7 @@ mod tests {
     }
 
     async fn firmware_updates_are_propagated_impl(
-        mut raw_disks: IdMap<RawDiskWithId>,
+        mut raw_disks: IdOrdMap<RawDisk>,
         config_disks: IdMap<OmicronPhysicalDiskConfig>,
         should_mutate_firmware: BTreeSet<DiskIdentity>,
     ) {
@@ -1059,7 +1058,7 @@ mod tests {
     // `ExternalDiskState`.
     #[proptest]
     fn remove_disks_not_in_config(disks: BTreeMap<String, bool>) {
-        let mut raw_disks = IdMap::default();
+        let mut raw_disks = IdOrdMap::default();
         let mut config_disks = IdMap::default();
         let mut should_remove_after_adding = BTreeSet::new();
 
@@ -1073,7 +1072,7 @@ mod tests {
             if should_remove {
                 should_remove_after_adding.insert(config_disk.id);
             }
-            raw_disks.insert(raw_disk);
+            raw_disks.insert_overwrite(raw_disk);
             config_disks.insert(config_disk);
         }
 
@@ -1088,7 +1087,7 @@ mod tests {
     }
 
     async fn remove_disks_not_in_config_impl(
-        raw_disks: IdMap<RawDiskWithId>,
+        raw_disks: IdOrdMap<RawDisk>,
         mut config_disks: IdMap<OmicronPhysicalDiskConfig>,
         should_remove_after_adding: BTreeSet<PhysicalDiskUuid>,
     ) {

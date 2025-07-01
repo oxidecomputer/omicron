@@ -15,16 +15,17 @@
 //! will spawn several tokio tasks that run for the duration of the sled-agent
 //! process:
 //!
-//! * A task for managing internal disks (in the `internal_disks` module of this
-//!   crate). This task takes raw disks as input over a watch channel, and emits
-//!   managed internal disks as output on another watch channel. Sled-agent
-//!   components that care about internal disks can get access to this output
-//!   channel via [`ConfigReconcilerHandle::internal_disks_rx()`]. On Gimlet and
-//!   Cosmo, "internal" disks have the M.2 form factor; much existing code will
-//!   refer to them as `m2` disks, but the form factor may change in future
-//!   sleds. The term "internal disks" is for "the disks that are not easily
-//!   swappable and can be managed before trust quorum has unlocked"; we use
-//!   them to store ledgers, etc.
+//! * A task for managing internal disks (implemented in the `sled-agent-types`
+//!   crate to avoid cyclic crate dependencies). This task takes raw disks as
+//!   input over a watch channel, and emits managed internal disks as output on
+//!   another watch channel. Sled-agent components that care about internal
+//!   disks can get access to this output channel via
+//!   [`ConfigReconcilerHandle::internal_disks_rx()`]. On Gimlet and Cosmo,
+//!   "internal" disks have the M.2 form factor; much existing code will refer
+//!   to them as `m2` disks, but the form factor may change in future sleds. The
+//!   term "internal disks" is for "the disks that are not easily swappable and
+//!   can be managed before trust quorum has unlocked"; we use them to store
+//!   ledgers, etc.
 //! * A task for serializing ZFS operations on datasets (in the
 //!   `dataset_serialization_task` module of this crate). This task takes
 //!   requests over an `mpsc` channel. This channel is not exposed directly;
@@ -53,9 +54,7 @@ mod dataset_serialization_task;
 mod disks_common;
 mod dump_setup_task;
 mod handle;
-mod internal_disks;
 mod ledger;
-mod raw_disks;
 mod reconciler_task;
 mod sled_agent_facilities;
 
@@ -74,16 +73,19 @@ pub use handle::ConfigReconcilerSpawnToken;
 pub use handle::InventoryError;
 pub use handle::ReconcilerInventory;
 pub use handle::TimeSyncConfig;
-pub use internal_disks::InternalDisks;
-pub use internal_disks::InternalDisksReceiver;
-pub use internal_disks::InternalDisksWithBootDisk;
 pub use ledger::LedgerArtifactConfigError;
 pub use ledger::LedgerNewConfigError;
 pub use ledger::LedgerTaskError;
-pub use raw_disks::RawDisksSender;
 pub use reconciler_task::CurrentlyManagedZpools;
 pub use reconciler_task::CurrentlyManagedZpoolsReceiver;
 pub use reconciler_task::TimeSyncError;
 pub use reconciler_task::TimeSyncStatus;
 pub use sled_agent_facilities::SledAgentArtifactStore;
 pub use sled_agent_facilities::SledAgentFacilities;
+
+// Re-export types that have moved to sled-agent-types purely for crate
+// dependency graph reasons.
+pub use sled_agent_types::internal_disks::InternalDisks;
+pub use sled_agent_types::internal_disks::InternalDisksReceiver;
+pub use sled_agent_types::internal_disks::InternalDisksWithBootDisk;
+pub use sled_agent_types::raw_disks::RawDisksSender;
