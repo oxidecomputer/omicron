@@ -1213,7 +1213,10 @@ impl DataStore {
         {
             use nexus_db_schema::schema::bp_pending_mgs_update_sp::dsl;
 
-            let mut paginator = Paginator::new(SQL_BATCH_SIZE);
+            let mut paginator = Paginator::new(
+                SQL_BATCH_SIZE,
+                dropshot::PaginationOrder::Ascending,
+            );
             while let Some(p) = paginator.next() {
                 let batch = paginated(
                     dsl::bp_pending_mgs_update_sp,
@@ -1244,7 +1247,10 @@ impl DataStore {
 
             let mut bbs = BTreeMap::new();
 
-            let mut paginator = Paginator::new(SQL_BATCH_SIZE);
+            let mut paginator = Paginator::new(
+                SQL_BATCH_SIZE,
+                dropshot::PaginationOrder::Ascending,
+            );
             while let Some(p) = paginator.next() {
                 let batch = paginated(
                     dsl::hw_baseboard_id,
