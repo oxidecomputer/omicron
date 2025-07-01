@@ -450,11 +450,7 @@ async fn wait_for_delivery(
         let status = mgs_clients
             .try_all_serially(log, |client| async move {
                 let update_status = client
-                    .sp_component_update_status(
-                        sp_type,
-                        sp_slot,
-                        component,
-                    )
+                    .sp_component_update_status(sp_type, sp_slot, component)
                     .await?;
 
                 debug!(
@@ -553,12 +549,7 @@ async fn abort_update(
         .try_all_serially(log, |mgs_client| async move {
             let arg = UpdateAbortBody { id: update_id };
             mgs_client
-                .sp_component_update_abort(
-                    sp_type,
-                    sp_slot,
-                    component,
-                    &arg,
-                )
+                .sp_component_update_abort(sp_type, sp_slot, component, &arg)
                 .await
         })
         .await
