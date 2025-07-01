@@ -44,7 +44,9 @@ const PROGRESS_POLL_INTERVAL: Duration = Duration::from_secs(10);
 pub const DEFAULT_RETRY_TIMEOUT: Duration = Duration::from_secs(60);
 
 /// How long to wait after resetting the device before expecting it to come up
-const RESET_TIMEOUT: Duration = Duration::from_secs(60);
+// 120 seconds is chosen as a generous overestimate, based on reports that
+// Sidecar SPs have been observed to take as many as 30 seconds to reset.
+const RESET_TIMEOUT: Duration = Duration::from_secs(120);
 
 /// Parameters describing a request to update one SP-managed component
 ///
@@ -54,7 +56,7 @@ pub(crate) struct SpComponentUpdate {
     pub log: slog::Logger,
     pub component: SpComponent,
     pub target_sp_type: SpType,
-    pub target_sp_slot: u32,
+    pub target_sp_slot: u16,
     pub firmware_slot: u16,
     pub update_id: SpUpdateUuid,
 }
@@ -240,7 +242,7 @@ pub(crate) async fn apply_update(
                 client
                     .sp_component_update(
                         sp_type,
-                        sp_slot,
+                        u32::from(sp_slot),
                         component,
                         sp_update.firmware_slot,
                         &sp_update.update_id.as_untyped_uuid(),
@@ -448,7 +450,11 @@ async fn wait_for_delivery(
         let status = mgs_clients
             .try_all_serially(log, |client| async move {
                 let update_status = client
-                    .sp_component_update_status(sp_type, sp_slot, component)
+                    .sp_component_update_status(
+                        sp_type,
+                        u32::from(sp_slot),
+                        component,
+                    )
                     .await?;
 
                 debug!(
@@ -547,7 +553,12 @@ async fn abort_update(
         .try_all_serially(log, |mgs_client| async move {
             let arg = UpdateAbortBody { id: update_id };
             mgs_client
-                .sp_component_update_abort(sp_type, sp_slot, component, &arg)
+                .sp_component_update_abort(
+                    sp_type,
+                    u32::from(sp_slot),
+                    component,
+                    &arg,
+                )
                 .await
         })
         .await
@@ -710,7 +721,7 @@ mod test {
         gwtestctx: &GatewayTestContext,
         artifacts: &TestArtifacts,
         sp_type: SpType,
-        slot_id: u32,
+        slot_id: u16,
         artifact_hash: &ArtifactHash,
         expected_result: UpdateCompletedHow,
     ) {
@@ -794,7 +805,7 @@ mod test {
         gwtestctx: &GatewayTestContext,
         artifacts: &TestArtifacts,
         sp_type: SpType,
-        slot_id: u32,
+        slot_id: u16,
         artifact_hash: &ArtifactHash,
         expected_result: UpdateCompletedHow,
     ) {

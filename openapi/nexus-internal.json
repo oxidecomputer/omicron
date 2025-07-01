@@ -4607,6 +4607,9 @@
         "description": "externally-exposed status for each in-progress update",
         "type": "object",
         "properties": {
+          "baseboard_id": {
+            "$ref": "#/components/schemas/BaseboardId"
+          },
           "nattempts_done": {
             "type": "integer",
             "format": "uint32",
@@ -4621,6 +4624,7 @@
           }
         },
         "required": [
+          "baseboard_id",
           "nattempts_done",
           "status",
           "time_started"
@@ -5163,10 +5167,22 @@
         "type": "object",
         "properties": {
           "in_progress": {
-            "type": "object",
-            "additionalProperties": {
+            "title": "IdOrdMap",
+            "x-rust-type": {
+              "crate": "iddqd",
+              "parameters": [
+                {
+                  "$ref": "#/components/schemas/InProgressUpdateStatus"
+                }
+              ],
+              "path": "iddqd::IdOrdMap",
+              "version": "*"
+            },
+            "type": "array",
+            "items": {
               "$ref": "#/components/schemas/InProgressUpdateStatus"
-            }
+            },
+            "uniqueItems": true
           },
           "recent": {
             "type": "array",
@@ -5175,10 +5191,22 @@
             }
           },
           "waiting": {
-            "type": "object",
-            "additionalProperties": {
+            "title": "IdOrdMap",
+            "x-rust-type": {
+              "crate": "iddqd",
+              "parameters": [
+                {
+                  "$ref": "#/components/schemas/WaitingStatus"
+                }
+              ],
+              "path": "iddqd::IdOrdMap",
+              "version": "*"
+            },
+            "type": "array",
+            "items": {
               "$ref": "#/components/schemas/WaitingStatus"
-            }
+            },
+            "uniqueItems": true
           }
         },
         "required": [
@@ -5900,7 +5928,7 @@
           "slot_id": {
             "description": "last known MGS slot (cubby number) of the baseboard",
             "type": "integer",
-            "format": "uint32",
+            "format": "uint16",
             "minimum": 0
           },
           "sp_type": {
@@ -7748,6 +7776,9 @@
         "description": "externally-exposed status for waiting updates",
         "type": "object",
         "properties": {
+          "baseboard_id": {
+            "$ref": "#/components/schemas/BaseboardId"
+          },
           "nattempts_done": {
             "type": "integer",
             "format": "uint32",
@@ -7759,6 +7790,7 @@
           }
         },
         "required": [
+          "baseboard_id",
           "nattempts_done",
           "next_attempt_time"
         ]

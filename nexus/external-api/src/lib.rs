@@ -2007,6 +2007,27 @@ pub trait NexusExternalApi {
         params: TypedBody<params::AllowListUpdate>,
     ) -> Result<HttpResponseOk<views::AllowList>, HttpError>;
 
+    /// Return whether API services can receive limited ICMP traffic
+    #[endpoint {
+        method = GET,
+        path = "/v1/system/networking/inbound-icmp",
+        tags = ["system/networking"],
+    }]
+    async fn networking_inbound_icmp_view(
+        rqctx: RequestContext<Self::Context>,
+    ) -> Result<HttpResponseOk<ServiceIcmpConfig>, HttpError>;
+
+    /// Set whether API services can receive limited ICMP traffic
+    #[endpoint {
+        method = PUT,
+        path = "/v1/system/networking/inbound-icmp",
+        tags = ["system/networking"],
+    }]
+    async fn networking_inbound_icmp_update(
+        rqctx: RequestContext<Self::Context>,
+        params: TypedBody<ServiceIcmpConfig>,
+    ) -> Result<HttpResponseUpdatedNoContent, HttpError>;
+
     // Images
 
     /// List images
