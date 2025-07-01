@@ -60,7 +60,10 @@ impl AbandonedVmmReaper {
         status: &mut AbandonedVmmReaperStatus,
         opctx: &OpContext,
     ) -> Result<(), anyhow::Error> {
-        let mut paginator = Paginator::new(SQL_BATCH_SIZE);
+        let mut paginator = Paginator::new(
+            SQL_BATCH_SIZE,
+            dropshot::PaginationOrder::Ascending,
+        );
         while let Some(p) = paginator.next() {
             let vmms = self
                 .datastore
@@ -364,7 +367,10 @@ mod tests {
         // order to simulate a condition where the VMM record was deleted
         // between when the listing query was run and when the bg task attempted
         // to delete the VMM record.
-        let paginator = Paginator::new(SQL_BATCH_SIZE);
+        let paginator = Paginator::new(
+            SQL_BATCH_SIZE,
+            dropshot::PaginationOrder::Ascending,
+        );
         let p = paginator.next().unwrap();
         let abandoned_vmms = datastore
             .vmm_list_abandoned(&opctx, &p.current_pagparams())
@@ -411,7 +417,10 @@ mod tests {
         // order to simulate a condition where the sled reservation record was
         // deleted between when the listing query was run and when the bg task
         // attempted to delete the sled reservation..
-        let paginator = Paginator::new(SQL_BATCH_SIZE);
+        let paginator = Paginator::new(
+            SQL_BATCH_SIZE,
+            dropshot::PaginationOrder::Ascending,
+        );
         let p = paginator.next().unwrap();
         let abandoned_vmms = datastore
             .vmm_list_abandoned(&opctx, &p.current_pagparams())

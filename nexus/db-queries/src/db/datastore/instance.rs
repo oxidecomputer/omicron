@@ -3341,6 +3341,7 @@ mod tests {
             // Make sure the batch size is small enough that we will require two
             // batches to list all the instances on a sled.
             std::num::NonZeroU32::new(INSTANCES_PER_SLED as u32 / 2).unwrap(),
+            dropshot::PaginationOrder::Ascending,
         );
         let mut i = 0;
         while let Some(p) = paginator.next() {

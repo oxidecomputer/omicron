@@ -684,8 +684,10 @@ mod tests {
         restart_id: EreporterRestartUuid,
         expected_ereports: &[(Ena, serde_json::Value)],
     ) {
-        let mut paginator =
-            Paginator::new(std::num::NonZeroU32::new(100).unwrap());
+        let mut paginator = Paginator::new(
+            std::num::NonZeroU32::new(100).unwrap(),
+            dropshot::PaginationOrder::Ascending,
+        );
         let mut found_ereports = BTreeMap::new();
         while let Some(p) = paginator.next() {
             let batch = datastore

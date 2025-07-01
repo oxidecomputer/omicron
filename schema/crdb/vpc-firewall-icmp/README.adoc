@@ -1,0 +1,16 @@
+# Overview
+
+This schema change alters the definition of a firewall rule's protocol filters from an `ENUM[]` to a `STRING[]`.
+The reason we're going through this is to be able to express more complex filters on protocol families, such as type/code restrictions on ICMP(v6) flows.
+This also allows us, in future, to let customers express arbitrary L4 protocols (once OPTE allows them to be sent/received).
+
+However, as with many other well-intentioned schema type changes, we need to go through a bit of a circuitous route to get there since a) `ALTER COLUMN xxx TYPE` is experimental, and b) we cannot idempotently rename a column:
+
+. Add a new `filter_protocols_2` column with the correct type. (`up01.sql`)
+. Populate this with the lower case contents of `filter_protocols`, then drop that column. (`up02.sql`, `up03.sql`)
+. Recreate `filter_protocols` with the new target type. Copy `filter_protocols_2` into it for all rows. (`up04.sql`, `up05.sql`)
+. Drop `filter_columns_2`. (`up06.sql`)
+. Drop the now unused `vpc_firewall_rule_protocol` enum type. (`up07.sql`)
+
+Finally, we add in a new builtin firewall rule to the services VPC to enable Path MTU discovery in Nexus (`up08.sql`).
+The presence of this rule is replied upon by the `/v1/system/networking/inbound-icmp` endpoint to enable/disable this access.
