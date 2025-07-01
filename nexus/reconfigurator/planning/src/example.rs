@@ -13,11 +13,13 @@ use crate::blueprint_builder::BlueprintBuilder;
 use crate::planner::rng::PlannerRng;
 use crate::system::SledBuilder;
 use crate::system::SystemDescription;
+use anyhow::bail;
 use nexus_inventory::CollectionBuilderRng;
 use nexus_types::deployment::Blueprint;
 use nexus_types::deployment::OmicronZoneNic;
 use nexus_types::deployment::PlanningInput;
 use nexus_types::deployment::SledFilter;
+use nexus_types::external_api::views::SledPolicy;
 use nexus_types::inventory::Collection;
 use omicron_common::policy::CRUCIBLE_PANTRY_REDUNDANCY;
 use omicron_common::policy::INTERNAL_DNS_REDUNDANCY;
@@ -177,9 +179,9 @@ pub fn example(
 pub struct ExampleSystemBuilder {
     log: slog::Logger,
     rng: ExampleSystemRng,
+    sled_settings: Vec<BuilderSledSettings>,
     // TODO: Store a Policy struct instead of these fields:
     // https://github.com/oxidecomputer/omicron/issues/6803
-    nsleds: usize,
     ndisks_per_sled: u8,
     // None means nsleds
     nexus_count: Option<ZoneCount>,
@@ -212,7 +214,10 @@ impl ExampleSystemBuilder {
                 "rng_seed" => rng.seed.clone(),
             )),
             rng,
-            nsleds: Self::DEFAULT_N_SLEDS,
+            sled_settings: vec![
+                BuilderSledSettings::default();
+                Self::DEFAULT_N_SLEDS
+            ],
             ndisks_per_sled: SledBuilder::DEFAULT_NPOOLS,
             nexus_count: None,
             internal_dns_count: ZoneCount(INTERNAL_DNS_REDUNDANCY),
@@ -228,7 +233,15 @@ impl ExampleSystemBuilder {
     /// Currently, this value can be anywhere between 0 and 5. (More can be
     /// added in the future if necessary.)
     pub fn nsleds(mut self, nsleds: usize) -> Self {
-        self.nsleds = nsleds;
+        // Add more sleds if there's a shortfall.
+        if nsleds > self.sled_settings.len() {
+            self.sled_settings.extend(vec![
+                BuilderSledSettings::default();
+                nsleds - self.sled_settings.len()
+            ]);
+        } else if nsleds < self.sled_settings.len() {
+            self.sled_settings.truncate(nsleds);
+        }
         self
     }
 
@@ -326,8 +339,27 @@ impl ExampleSystemBuilder {
         self
     }
 
+    /// Set the policy for a sled in the example system by index.
+    ///
+    /// Returns an error if `index >= nsleds`.
+    pub fn with_sled_policy(
+        mut self,
+        index: usize,
+        policy: SledPolicy,
+    ) -> anyhow::Result<Self> {
+        if index >= self.sled_settings.len() {
+            bail!(
+                "sled index {} out of range (0..{})",
+                index,
+                self.sled_settings.len(),
+            );
+        }
+        self.sled_settings[index].policy = policy;
+        Ok(self)
+    }
+
     fn get_nexus_zones(&self) -> ZoneCount {
-        self.nexus_count.unwrap_or(ZoneCount(self.nsleds))
+        self.nexus_count.unwrap_or(ZoneCount(self.sled_settings.len()))
     }
 
     pub fn get_internal_dns_zones(&self) -> usize {
@@ -347,7 +379,7 @@ impl ExampleSystemBuilder {
         slog::debug!(
             &self.log,
             "Creating example system";
-            "nsleds" => self.nsleds,
+            "nsleds" => self.sled_settings.len(),
             "ndisks_per_sled" => self.ndisks_per_sled,
             "nexus_count" => nexus_count.0,
             "internal_dns_count" => self.internal_dns_count.0,
@@ -366,15 +398,19 @@ impl ExampleSystemBuilder {
             .target_nexus_zone_count(nexus_count.0)
             .target_internal_dns_zone_count(self.internal_dns_count.0)
             .target_crucible_pantry_zone_count(self.crucible_pantry_count.0);
-        let sled_ids: Vec<_> =
-            (0..self.nsleds).map(|_| rng.sled_rng.next()).collect();
+        let sled_ids_with_settings: Vec<_> = self
+            .sled_settings
+            .iter()
+            .map(|settings| (rng.sled_rng.next(), settings))
+            .collect();
 
-        for sled_id in &sled_ids {
+        for (sled_id, settings) in &sled_ids_with_settings {
             let _ = system
                 .sled(
                     SledBuilder::new()
                         .id(*sled_id)
-                        .npools(self.ndisks_per_sled),
+                        .npools(self.ndisks_per_sled)
+                        .policy(settings.policy),
                 )
                 .unwrap();
         }
@@ -426,8 +462,14 @@ impl ExampleSystemBuilder {
                 );
         }
 
-        for (i, (sled_id, sled_details)) in
-            base_input.all_sleds(SledFilter::Commissioned).enumerate()
+        let discretionary_sled_count =
+            base_input.all_sled_ids(SledFilter::Discretionary).count();
+
+        // * Create disks and non-discretionary zones on all sleds.
+        // * Only create discretionary zones on discretionary sleds.
+        let mut discretionary_ix = 0;
+        for (sled_id, sled_details) in
+            base_input.all_sleds(SledFilter::Commissioned)
         {
             if self.create_disks_in_blueprint {
                 let _ = builder
@@ -436,25 +478,44 @@ impl ExampleSystemBuilder {
             }
             if self.create_zones {
                 let _ = builder.sled_ensure_zone_ntp(sled_id).unwrap();
-                for _ in 0..nexus_count.on(i, self.nsleds) {
-                    builder
-                        .sled_add_zone_nexus_with_config(sled_id, false, vec![])
-                        .unwrap();
+
+                // Create discretionary zones if allowed.
+                if sled_details.policy.matches(SledFilter::Discretionary) {
+                    for _ in 0..nexus_count
+                        .on(discretionary_ix, discretionary_sled_count)
+                    {
+                        builder
+                            .sled_add_zone_nexus_with_config(
+                                sled_id,
+                                false,
+                                vec![],
+                            )
+                            .unwrap();
+                    }
+                    if discretionary_ix == 0 {
+                        builder.sled_add_zone_clickhouse(sled_id).unwrap();
+                    }
+                    for _ in 0..self
+                        .internal_dns_count
+                        .on(discretionary_ix, discretionary_sled_count)
+                    {
+                        builder.sled_add_zone_internal_dns(sled_id).unwrap();
+                    }
+                    for _ in 0..self
+                        .external_dns_count
+                        .on(discretionary_ix, discretionary_sled_count)
+                    {
+                        builder.sled_add_zone_external_dns(sled_id).unwrap();
+                    }
+                    for _ in 0..self
+                        .crucible_pantry_count
+                        .on(discretionary_ix, discretionary_sled_count)
+                    {
+                        builder.sled_add_zone_crucible_pantry(sled_id).unwrap();
+                    }
+                    discretionary_ix += 1;
                 }
-                if i == 0 {
-                    builder.sled_add_zone_clickhouse(sled_id).unwrap();
-                }
-                for _ in 0..self.internal_dns_count.on(i, self.nsleds) {
-                    builder.sled_add_zone_internal_dns(sled_id).unwrap();
-                }
-                for _ in 0..self.external_dns_count.on(i, self.nsleds) {
-                    builder.sled_add_zone_external_dns(sled_id).unwrap();
-                }
-                for _ in 0..self.crucible_pantry_count.on(i, self.nsleds) {
-                    builder.sled_add_zone_crucible_pantry(sled_id).unwrap();
-                }
-            }
-            if self.create_zones {
+
                 for pool_name in sled_details.resources.zpools.keys() {
                     let _ = builder
                         .sled_ensure_zone_crucible(sled_id, *pool_name)
@@ -523,6 +584,18 @@ impl ExampleSystemBuilder {
             initial_blueprint,
         };
         (example, blueprint)
+    }
+}
+
+/// Per-sled state.
+#[derive(Clone, Debug)]
+struct BuilderSledSettings {
+    policy: SledPolicy,
+}
+
+impl Default for BuilderSledSettings {
+    fn default() -> Self {
+        Self { policy: SledPolicy::provisionable() }
     }
 }
 
