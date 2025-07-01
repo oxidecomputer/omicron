@@ -638,10 +638,10 @@ source.repo = "maghemite"
 # `tools/maghemite_openapi_version`. Failing to do so will cause a failure when
 # building `ddm-admin-client` (which will instruct you to update
 # `tools/maghemite_openapi_version`).
-source.commit = "638c897d5ed1e5d3f2de0c1cb9dfaa4d77a35dea"
+source.commit = "f50dfae72a013977b043bbd41ac5df02503143ac"
 # The SHA256 digest is automatically posted to:
 # https://buildomat.eng.oxide.computer/public/file/oxidecomputer/maghemite/image/<commit>/mg-ddm-gz.sha256.txt
-source.sha256 = "9a528e6af530c8a5dcd180a41e17ebb1adb05e336550c1ac2134acca1d6557ab"
+source.sha256 = "00f9f203a5660df01f99306fd48e7d95906ba39e8d1cc642ed3c150fa2a274f2"
 output.type = "tarball"
 
 [package.mg-ddm]
@@ -654,10 +654,10 @@ source.repo = "maghemite"
 # `tools/maghemite_openapi_version`. Failing to do so will cause a failure when
 # building `ddm-admin-client` (which will instruct you to update
 # `tools/maghemite_openapi_version`).
-source.commit = "638c897d5ed1e5d3f2de0c1cb9dfaa4d77a35dea"
+source.commit = "f50dfae72a013977b043bbd41ac5df02503143ac"
 # The SHA256 digest is automatically posted to:
 # https://buildomat.eng.oxide.computer/public/file/oxidecomputer/maghemite/image/<commit>/mg-ddm.sha256.txt
-source.sha256 = "275bf1088c548784e6a5eea7dd91db1878be1c44696a89f506b2a0515a5138ef"
+source.sha256 = "f80f85df6979f039614a4f514c75cb953c00c0a94541306acdedd8905d35964c"
 output.type = "zone"
 output.intermediate_only = true
 
@@ -669,7 +669,7 @@ source.repo = "maghemite"
 # `tools/maghemite_openapi_version`. Failing to do so will cause a failure when
 # building `ddm-admin-client` (which will instruct you to update
 # `tools/maghemite_openapi_version`).
-source.commit = "638c897d5ed1e5d3f2de0c1cb9dfaa4d77a35dea"
+source.commit = "f50dfae72a013977b043bbd41ac5df02503143ac"
 # The SHA256 digest is automatically posted to:
 # https://buildomat.eng.oxide.computer/public/file/oxidecomputer/maghemite/image/<commit>/mgd.sha256.txt
 source.sha256 = "6451cdc1473e555676bc33eb3e94f96205a2d839120318b3dfd4600232f95626"
