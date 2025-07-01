@@ -13,6 +13,7 @@ async-trait.workspace = true
 bootstore.workspace = true
 camino.workspace = true
 chrono.workspace = true
+futures.workspace = true
 iddqd.workspace = true
 nexus-sled-agent-shared.workspace = true
 # Note: we're trying to avoid a dependency from sled-agent-types to nexus-types
@@ -28,16 +29,26 @@ serde.workspace = true
 serde_human_bytes.workspace = true
 serde_json.workspace = true
 sha3.workspace = true
+sled-hardware.workspace = true
 sled-hardware-types.workspace = true
+sled-storage.workspace = true
 slog.workspace = true
 slog-error-chain.workspace = true
 strum.workspace = true
 thiserror.workspace = true
+tokio.workspace = true
 toml.workspace = true
 tufaceous-artifact.workspace = true
 uuid.workspace = true
 
 [dev-dependencies]
+assert_matches.workspace = true
 camino-tempfile.workspace = true
 omicron-test-utils.workspace = true
+proptest.workspace = true
 rcgen.workspace = true
+sled-storage = { workspace = true, features = ["testing"] }
+test-strategy.workspace = true
+
+[features]
+testing = []
