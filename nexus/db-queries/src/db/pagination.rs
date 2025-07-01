@@ -1036,7 +1036,11 @@ mod test {
         let query =
             paginated(dsl::test_users, dsl::age, &p.current_pagparams());
         let batch = execute_query(&pool, query).await;
+        paginator = p.found_batch(&batch, &|i| i.age);
         assert_eq!(ages(batch), vec![5]);
+
+        // There is nothing left
+        assert!(paginator.next().is_none());
 
         db.terminate().await;
         logctx.cleanup_successful();
@@ -1087,7 +1091,11 @@ mod test {
         let query =
             paginated(dsl::test_users, dsl::age, &p.current_pagparams());
         let batch = execute_query(&pool, query).await;
+        paginator = p.found_batch(&batch, &|i| i.age);
         assert_eq!(ages(batch), vec![1]);
+
+        // There is nothing left
+        assert!(paginator.next().is_none());
 
         db.terminate().await;
         logctx.cleanup_successful();
