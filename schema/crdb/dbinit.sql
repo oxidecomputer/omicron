@@ -4635,6 +4635,27 @@ CREATE TABLE IF NOT EXISTS omicron.public.bp_oximeter_read_policy (
     oximeter_read_mode omicron.public.oximeter_read_mode NOT NULL
 );
 
+-- Blueprint information related to pending SP upgrades.
+CREATE TABLE IF NOT EXISTS omicron.public.bp_pending_mgs_update_sp (
+    -- Foreign key into the `blueprint` table
+    blueprint_id UUID,
+    -- identify of the device to be updated
+    -- (foreign key into the `hw_baseboard_id` table)
+    hw_baseboard_id UUID NOT NULL,
+    -- location of this device according to MGS
+    sp_type omicron.public.sp_type NOT NULL,
+    sp_slot INT4 NOT NULL,
+    -- artifact to be deployed to this device
+    artifact_sha256 STRING(64) NOT NULL,
+    artifact_version STRING(64) NOT NULL,
+
+    -- SP-specific details
+    expected_active_version STRING NOT NULL,
+    expected_inactive_version STRING, -- NULL means invalid (no version expected)
+
+    PRIMARY KEY(blueprint_id, hw_baseboard_id)
+);
+
 -- Mapping of Omicron zone ID to CockroachDB node ID. This isn't directly used
 -- by the blueprint tables above, but is used by the more general Reconfigurator
 -- system along with them (e.g., to decommission expunged CRDB nodes).
@@ -6095,7 +6116,7 @@ INSERT INTO omicron.public.db_metadata (
     version,
     target_version
 ) VALUES
-    (TRUE, NOW(), NOW(), '153.0.0', NULL)
+    (TRUE, NOW(), NOW(), '154.0.0', NULL)
 ON CONFLICT DO NOTHING;
 
 COMMIT;

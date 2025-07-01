@@ -64,13 +64,11 @@ impl TargetRelease {
     pub fn into_external(
         &self,
         release_source: views::TargetReleaseSource,
-        mupdate_override: bool,
     ) -> views::TargetRelease {
         views::TargetRelease {
             generation: (&self.generation.0).into(),
             time_requested: self.time_requested,
             release_source,
-            mupdate_override,
         }
     }
 }

@@ -25,7 +25,7 @@ f45ba181-4b56-42cc-a762-874d90184a43 0       <REDACTED_TIMESTAMP>
 
 > # Add a new sled with no disks.
 > sled-add --ndisks 0
-added sled 00320471-945d-413c-85e7-03e091a70b3c
+added sled 00320471-945d-413c-85e7-03e091a70b3c (serial: serial3)
 
 
 > # Generate a new inventory collection that includes that sled.

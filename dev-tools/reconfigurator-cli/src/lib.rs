@@ -342,12 +342,16 @@ struct SledAddArgs {
     /// number of disks or pools
     #[clap(short = 'd', long, visible_alias = "npools", default_value_t = SledBuilder::DEFAULT_NPOOLS)]
     ndisks: u8,
+
+    /// The policy for the sled.
+    #[clap(long, value_enum, default_value_t = SledPolicyOpt::InService)]
+    policy: SledPolicyOpt,
 }
 
 #[derive(Debug, Args)]
 struct SledArgs {
     /// id of the sled
-    sled_id: SledUuid,
+    sled_id: SledOpt,
 
     /// Filter to match sled ID against
     #[clap(short = 'F', long, value_enum, default_value_t = SledFilter::Commissioned)]
@@ -357,7 +361,7 @@ struct SledArgs {
 #[derive(Debug, Args)]
 struct SledSetPolicyArgs {
     /// id of the sled
-    sled_id: SledUuid,
+    sled_id: SledOpt,
 
     /// The policy to set for the sled
     #[clap(value_enum)]
@@ -398,7 +402,7 @@ impl From<SledPolicyOpt> for SledPolicy {
 #[derive(Debug, Args)]
 struct SledUpdateInstallDatasetArgs {
     /// id of the sled
-    sled_id: SledUuid,
+    sled_id: SledOpt,
 
     #[clap(flatten)]
     source: SledMupdateSource,
@@ -438,7 +442,7 @@ struct SledMupdateValidSource {
 #[derive(Debug, Args)]
 struct SledUpdateSpArgs {
     /// id of the sled
-    sled_id: SledUuid,
+    sled_id: SledOpt,
 
     /// sets the version reported for the SP active slot
     #[clap(long, required_unless_present_any = &["inactive"])]
@@ -452,7 +456,7 @@ struct SledUpdateSpArgs {
 #[derive(Debug, Args)]
 struct SledRemoveArgs {
     /// id of the sled
-    sled_id: SledUuid,
+    sled_id: SledOpt,
 }
 
 #[derive(Debug, Args)]
@@ -498,10 +502,10 @@ enum BlueprintEditCommands {
     /// add a Nexus instance to a particular sled
     AddNexus {
         /// sled on which to deploy the new instance
-        sled_id: SledUuid,
+        sled_id: SledOpt,
     },
     /// add a CockroachDB instance to a particular sled
-    AddCockroach { sled_id: SledUuid },
+    AddCockroach { sled_id: SledOpt },
     /// set the image source for a zone
     SetZoneImage {
         /// id of zone whose image to set
@@ -512,7 +516,7 @@ enum BlueprintEditCommands {
     /// set the remove_mupdate_override field for a sled
     SetRemoveMupdateOverride {
         /// sled to set the field on
-        sled_id: SledUuid,
+        sled_id: SledOpt,
 
         /// the UUID to set the field to, or "unset"
         value: MupdateOverrideUuidOpt,
@@ -567,15 +571,55 @@ enum BlueprintEditDebugCommands {
     /// the sled from the blueprint.
     RemoveSled {
         /// the sled to remove
-        sled: SledUuid,
+        sled: SledOpt,
     },
 
     /// Bump a sled's generation number, even if nothing else about the sled has
     /// changed.
     ForceSledGenerationBump {
         /// the sled to bump the sled-agent generation number of
-        sled: SledUuid,
+        sled: SledOpt,
     },
+}
+
+/// Identifies a sled in a system.
+#[derive(Clone, Debug)]
+enum SledOpt {
+    /// Identifies a sled by its UUID.
+    Uuid(SledUuid),
+    /// Identifies a sled by its serial number.
+    Serial(String),
+}
+
+impl SledOpt {
+    /// Resolves this sled option into a sled UUID.
+    fn to_sled_id(
+        &self,
+        description: &SystemDescription,
+    ) -> anyhow::Result<SledUuid> {
+        match self {
+            SledOpt::Uuid(uuid) => Ok(*uuid),
+            SledOpt::Serial(serial) => description.serial_to_sled_id(&serial),
+        }
+    }
+}
+
+impl FromStr for SledOpt {
+    type Err = anyhow::Error;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        // If the sled looks like a UUID, parse it as that.
+        if let Ok(uuid) = s.parse::<SledUuid>() {
+            return Ok(SledOpt::Uuid(uuid));
+        }
+
+        // If the identifier starts with "serial", parse it as that.
+        if s.starts_with("serial") {
+            return Ok(Self::Serial(s.to_owned()));
+        }
+
+        bail!("sled `{s}` is neither a UUID nor starts with 'serial'")
+    }
 }
 
 #[derive(Clone, Debug)]
@@ -847,6 +891,44 @@ struct LoadExampleArgs {
     /// Do not create entries for disks in the blueprint.
     #[clap(long)]
     no_disks_in_blueprint: bool,
+
+    /// Set a 0-indexed sled's policy
+    #[clap(long, value_name = "INDEX:POLICY")]
+    sled_policy: Vec<LoadExampleSledPolicy>,
+}
+
+#[derive(Clone, Debug)]
+struct LoadExampleSledPolicy {
+    /// The index of the sled to set the policy for.
+    index: usize,
+
+    /// The policy to set.
+    policy: SledPolicy,
+}
+
+impl FromStr for LoadExampleSledPolicy {
+    type Err = anyhow::Error;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        let Some((index, policy)) = s.split_once(':') else {
+            return Err(anyhow!("invalid format, expected <index>:<policy>"));
+        };
+        let index = index.parse().with_context(|| {
+            format!("error parsing sled index `{index}` as a usize")
+        })?;
+        let policy = SledPolicyOpt::from_str(
+            policy, /* ignore_case */ false,
+        )
+        .map_err(|_message| {
+            // _message is just something like "invalid variant: <value>".
+            // We choose to use our own message instead.
+            anyhow!(
+                "invalid sled policy `{policy}` (possible values: {})",
+                SledPolicyOpt::value_variants().iter().join(", "),
+            )
+        })?;
+        Ok(LoadExampleSledPolicy { index, policy: policy.into() })
+    }
 }
 
 #[derive(Debug, Args)]
@@ -954,14 +1036,27 @@ fn cmd_sled_add(
 ) -> anyhow::Result<Option<String>> {
     let mut state = sim.current_state().to_mut();
     let sled_id = add.sled_id.unwrap_or_else(|| state.rng_mut().next_sled_id());
-    let new_sled = SledBuilder::new().id(sled_id).npools(add.ndisks);
-    state.system_mut().description_mut().sled(new_sled)?;
+    let new_sled = SledBuilder::new()
+        .id(sled_id)
+        .npools(add.ndisks)
+        .policy(add.policy.into());
+    let system = state.system_mut();
+    system.description_mut().sled(new_sled)?;
+    // Figure out what serial number this sled was assigned.
+    let added_sled = system
+        .description()
+        .get_sled(sled_id)
+        .expect("we just added this sled");
+    let serial = match added_sled.sp_state() {
+        Some((_, sp_state)) => sp_state.serial_number.clone(),
+        None => "(none)".to_owned(),
+    };
     sim.commit_and_bump(
-        format!("reconfigurator-cli sled-add: {sled_id}"),
+        format!("reconfigurator-cli sled-add: {sled_id} (serial: {serial})"),
         state,
     );
 
-    Ok(Some(format!("added sled {}", sled_id)))
+    Ok(Some(format!("added sled {} (serial: {})", sled_id, serial)))
 }
 
 fn cmd_sled_remove(
@@ -969,9 +1064,9 @@ fn cmd_sled_remove(
     args: SledRemoveArgs,
 ) -> anyhow::Result<Option<String>> {
     let mut state = sim.current_state().to_mut();
-    let sled_id = args.sled_id;
-    state
-        .system_mut()
+    let system = state.system_mut();
+    let sled_id = args.sled_id.to_sled_id(system.description())?;
+    system
         .description_mut()
         .sled_remove(sled_id)
         .context("failed to remove sled")?;
@@ -988,7 +1083,7 @@ fn cmd_sled_show(
 ) -> anyhow::Result<Option<String>> {
     let state = sim.current_state();
     let description = state.system().description();
-    let sled_id = args.sled_id;
+    let sled_id = args.sled_id.to_sled_id(description)?;
     let sp_active_version = description.sled_sp_active_version(sled_id)?;
     let sp_inactive_version = description.sled_sp_inactive_version(sled_id)?;
     let planning_input = description
@@ -998,7 +1093,7 @@ fn cmd_sled_show(
     let sled = planning_input.sled_lookup(args.filter, sled_id)?;
     let sled_resources = &sled.resources;
     let mut s = String::new();
-    swriteln!(s, "sled {}", sled_id);
+    swriteln!(s, "sled {} ({}, {})", sled_id, sled.policy, sled.state);
     swriteln!(s, "serial {}", sled.baseboard_id.serial_number);
     swriteln!(s, "subnet {}", sled_resources.subnet.net());
     swriteln!(s, "SP active version:   {:?}", sp_active_version);
@@ -1016,18 +1111,17 @@ fn cmd_sled_set_policy(
     args: SledSetPolicyArgs,
 ) -> anyhow::Result<Option<String>> {
     let mut state = sim.current_state().to_mut();
-    state
-        .system_mut()
-        .description_mut()
-        .sled_set_policy(args.sled_id, args.policy.into())?;
+    let system = state.system_mut();
+    let sled_id = args.sled_id.to_sled_id(system.description())?;
+    system.description_mut().sled_set_policy(sled_id, args.policy.into())?;
     sim.commit_and_bump(
         format!(
             "reconfigurator-cli sled-set-policy: {} to {}",
-            args.sled_id, args.policy,
+            sled_id, args.policy,
         ),
         state,
     );
-    Ok(Some(format!("set sled {} policy to {}", args.sled_id, args.policy)))
+    Ok(Some(format!("set sled {} policy to {}", sled_id, args.policy)))
 }
 
 fn cmd_sled_update_install_dataset(
@@ -1037,11 +1131,11 @@ fn cmd_sled_update_install_dataset(
     let description = mupdate_source_to_description(sim, &args.source)?;
 
     let mut state = sim.current_state().to_mut();
-    let description_mut = state.system_mut().description_mut();
-    description_mut.sled_set_zone_manifest(
-        args.sled_id,
-        description.to_boot_inventory(),
-    )?;
+    let system = state.system_mut();
+    let sled_id = args.sled_id.to_sled_id(system.description())?;
+    system
+        .description_mut()
+        .sled_set_zone_manifest(sled_id, description.to_boot_inventory())?;
 
     sim.commit_and_bump(
         format!(
@@ -1052,7 +1146,7 @@ fn cmd_sled_update_install_dataset(
     );
     Ok(Some(format!(
         "sled {}: install dataset updated: {}",
-        args.sled_id, description.message
+        sled_id, description.message
     )))
 }
 
@@ -1074,8 +1168,10 @@ fn cmd_sled_update_sp(
     );
 
     let mut state = sim.current_state().to_mut();
-    state.system_mut().description_mut().sled_update_sp_versions(
-        args.sled_id,
+    let system = state.system_mut();
+    let sled_id = args.sled_id.to_sled_id(system.description())?;
+    system.description_mut().sled_update_sp_versions(
+        sled_id,
         args.active,
         args.inactive,
     )?;
@@ -1083,17 +1179,13 @@ fn cmd_sled_update_sp(
     sim.commit_and_bump(
         format!(
             "reconfigurator-cli sled-update-sp: {}: {}",
-            args.sled_id,
+            sled_id,
             labels.join(", "),
         ),
         state,
     );
 
-    Ok(Some(format!(
-        "set sled {} SP versions: {}",
-        args.sled_id,
-        labels.join(", ")
-    )))
+    Ok(Some(format!("set sled {} SP versions: {}", sled_id, labels.join(", "))))
 }
 
 fn cmd_inventory_list(
@@ -1302,18 +1394,21 @@ fn cmd_blueprint_edit(
 
     let label = match args.edit_command {
         BlueprintEditCommands::AddNexus { sled_id } => {
+            let sled_id = sled_id.to_sled_id(system.description())?;
             builder
                 .sled_add_zone_nexus(sled_id)
                 .context("failed to add Nexus zone")?;
             format!("added Nexus zone to sled {}", sled_id)
         }
         BlueprintEditCommands::AddCockroach { sled_id } => {
+            let sled_id = sled_id.to_sled_id(system.description())?;
             builder
                 .sled_add_zone_cockroachdb(sled_id)
                 .context("failed to add CockroachDB zone")?;
             format!("added CockroachDB zone to sled {}", sled_id)
         }
         BlueprintEditCommands::SetRemoveMupdateOverride { sled_id, value } => {
+            let sled_id = sled_id.to_sled_id(system.description())?;
             builder
                 .sled_set_remove_mupdate_override(sled_id, value.into())
                 .context("failed to set remove_mupdate_override")?;
@@ -1420,15 +1515,17 @@ fn cmd_blueprint_edit(
         BlueprintEditCommands::Debug {
             command: BlueprintEditDebugCommands::RemoveSled { sled },
         } => {
-            builder.debug_sled_remove(sled)?;
-            format!("debug: removed sled {sled} from blueprint")
+            let sled_id = sled.to_sled_id(system.description())?;
+            builder.debug_sled_remove(sled_id)?;
+            format!("debug: removed sled {sled_id} from blueprint")
         }
         BlueprintEditCommands::Debug {
             command:
                 BlueprintEditDebugCommands::ForceSledGenerationBump { sled },
         } => {
-            builder.debug_sled_force_generation_bump(sled)?;
-            format!("debug: forced sled {sled} generation bump")
+            let sled_id = sled.to_sled_id(system.description())?;
+            builder.debug_sled_force_generation_bump(sled_id)?;
+            format!("debug: forced sled {sled_id} generation bump")
         }
     };
 
@@ -2084,21 +2181,26 @@ fn cmd_load_example(
     };
     let rng = state.rng_mut().next_example_rng();
 
-    let (example, blueprint) =
-        ExampleSystemBuilder::new_with_rng(&sim.log, rng)
-            .nsleds(args.nsleds)
-            .ndisks_per_sled(args.ndisks_per_sled)
-            .nexus_count(
-                state
-                    .config_mut()
-                    .num_nexus()
-                    .map_or(NEXUS_REDUNDANCY, |n| n.into()),
-            )
-            .external_dns_count(3)
-            .context("invalid external DNS zone count")?
-            .create_zones(!args.no_zones)
-            .create_disks_in_blueprint(!args.no_disks_in_blueprint)
-            .build();
+    let mut builder = ExampleSystemBuilder::new_with_rng(&sim.log, rng)
+        .nsleds(args.nsleds)
+        .ndisks_per_sled(args.ndisks_per_sled)
+        .nexus_count(
+            state
+                .config_mut()
+                .num_nexus()
+                .map_or(NEXUS_REDUNDANCY, |n| n.into()),
+        )
+        .external_dns_count(3)
+        .context("invalid external DNS zone count")?
+        .create_zones(!args.no_zones)
+        .create_disks_in_blueprint(!args.no_disks_in_blueprint);
+    for sled_policy in args.sled_policy {
+        builder = builder
+            .with_sled_policy(sled_policy.index, sled_policy.policy)
+            .context("setting sled policy")?;
+    }
+
+    let (example, blueprint) = builder.build();
 
     // Generate the internal and external DNS configs based on the blueprint.
     let sleds_by_id = make_sleds_by_id(&example.system)?;
