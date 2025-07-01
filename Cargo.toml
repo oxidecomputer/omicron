@@ -49,6 +49,7 @@ members = [
     "dev-tools/releng",
     "dev-tools/repl-utils",
     "dev-tools/repo-depot-standalone",
+    "dev-tools/schema",
     "dev-tools/xtask",
     "dns-server",
     "dns-server-api",
@@ -201,6 +202,7 @@ default-members = [
     "dev-tools/releng",
     "dev-tools/repl-utils",
     "dev-tools/repo-depot-standalone",
+    "dev-tools/schema",
     # Do not include xtask in the list of default members, because this causes
     # hakari to not work as well and build times to be longer.
     # See omicron#4392.

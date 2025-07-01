@@ -107,6 +107,9 @@ enum Cmds {
         /// substring of its name will be examined for probes.
         filter: Option<String>,
     },
+
+    /// Schema management utilities
+    Schema(external::External),
 }
 
 fn main() -> Result<()> {
@@ -154,6 +157,7 @@ fn main() -> Result<()> {
             anyhow::bail!("this command is only available on illumos");
         }
         Cmds::Probes { filter } => usdt::print_probes(filter),
+        Cmds::Schema(external) => external.exec_bin("schema"),
     }
 }
 

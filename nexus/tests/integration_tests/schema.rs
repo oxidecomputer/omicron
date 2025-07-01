@@ -2,22 +2,21 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
+use anyhow::{self, Context};
 use camino::Utf8PathBuf;
 use dropshot::test_util::LogContext;
 use futures::future::BoxFuture;
 use nexus_config::NexusConfig;
 use nexus_config::SchemaConfig;
-use nexus_db_lookup::DataStoreConnection;
 use nexus_db_model::EARLIEST_SUPPORTED_VERSION;
+use nexus_db_model::KNOWN_VERSIONS;
 use nexus_db_model::SCHEMA_VERSION as LATEST_SCHEMA_VERSION;
 use nexus_db_model::SchemaUpgradeStep;
 use nexus_db_model::{AllSchemaVersions, SchemaVersion};
 use nexus_db_queries::db::DISALLOW_FULL_TABLE_SCAN_SQL;
 use nexus_db_queries::db::pub_test_utils::TestDatabase;
 use nexus_test_utils::sql::AnySqlType;
-use nexus_test_utils::sql::ColumnValue;
 use nexus_test_utils::sql::Row;
-use nexus_test_utils::sql::SqlEnum;
 use nexus_test_utils::sql::process_rows;
 use nexus_test_utils::{ControlPlaneTestContextBuilder, load_test_config};
 use omicron_common::api::internal::shared::SwitchLocation;
@@ -28,9 +27,8 @@ use similar_asserts;
 use slog::Logger;
 use slog_error_chain::InlineErrorChain;
 use std::collections::BTreeMap;
-use std::net::IpAddr;
-use std::sync::Mutex;
 use tokio::time::Duration;
+use tokio::time::Instant;
 use tokio::time::timeout;
 use uuid::Uuid;
 
@@ -278,10 +276,40 @@ fn read_all_schema_versions() -> AllSchemaVersions {
     AllSchemaVersions::load(camino::Utf8Path::new(SCHEMA_DIR)).unwrap()
 }
 
+async fn apply_base_database_version(crdb: &CockroachInstance) {
+    let old_dbinit = match load_base_dbinit().await {
+        Ok(sql) => {
+            println!(
+                "Retrieved dbinit.sql for base dbinit ({} bytes)",
+                sql.len()
+            );
+            sql
+        }
+        Err(e) => {
+            panic!("Failed to get old dbinit.sql for base dbinit: {e}",);
+        }
+    };
+
+    let client = crdb.connect().await.expect("failed to connect");
+
+    // Apply dbinit.sql
+    client
+        .batch_execute(&old_dbinit)
+        .await
+        .expect("Failed to apply old dbinit.sql");
+}
+
+async fn new_base_database(log: &Logger) -> TestDatabase {
+    let db = TestDatabase::new_populate_nothing(log).await;
+    let crdb = db.crdb();
+    apply_base_database_version(&crdb).await;
+    db
+}
+
 // This test confirms the following behavior:
 //
-// - Nexus can boot using a "1.0.0" revision of the schema
-// - Nexus can automatically apply all subsequent updates automatically
+// - Nexus can boot using the 'base' revision of the schema
+// - Nexus can automatically apply the subsequent updates automatically
 // - This should eventually drive Nexus to the latest revision of the schema,
 // such that it can boot.
 #[tokio::test]
@@ -289,32 +317,17 @@ async fn nexus_applies_update_on_boot() {
     let mut config = load_test_config();
     let mut builder =
         test_setup(&mut config, "nexus_applies_update_on_boot").await;
-    let log = &builder.logctx.log;
     let crdb = builder.database.as_ref().expect("Should have started CRDB");
 
-    // We started with an empty database -- apply an update here to bring
-    // us forward to our oldest supported schema version before trying to boot
-    // nexus.
-    let all_versions = read_all_schema_versions();
-    let earliest = all_versions
-        .iter_versions()
-        .next()
-        .expect("missing earliest schema version");
-    apply_update(log, &crdb, earliest, 1).await;
-    assert_eq!(
-        EARLIEST_SUPPORTED_VERSION.to_string(),
-        query_crdb_schema_version(&crdb).await
-    );
+    // Jump forward to the previous schema version before Nexus boots.
+    apply_base_database_version(&crdb).await;
 
     // Start Nexus. It should auto-format itself to the latest version,
-    // upgrading through each intermediate update.
+    // upgrading through the last update.
     //
     // The timeout here is a bit longer than usual (120s vs 60s) because if
     // lots of tests are running at the same time, there can be contention
     // here.
-    //
-    // NOTE: If this grows excessively, we could break it into several smaller
-    // tests.
     assert!(
         timeout(Duration::from_secs(120), builder.start_nexus_internal())
             .await
@@ -366,18 +379,14 @@ async fn nexus_cannot_apply_update_from_unknown_version() {
         "nexus_cannot_apply_update_from_unknown_version",
     )
     .await;
-    let log = &builder.logctx.log;
     let crdb = builder.database.as_ref().expect("Should have started CRDB");
+    apply_base_database_version(&crdb).await;
 
-    let all_versions = read_all_schema_versions();
-    let earliest = all_versions
-        .iter_versions()
-        .next()
-        .expect("missing earliest schema version");
-    apply_update(log, &crdb, earliest, 1).await;
+    let observed_version = query_crdb_schema_version(&crdb).await;
     assert_eq!(
         EARLIEST_SUPPORTED_VERSION.to_string(),
-        query_crdb_schema_version(&crdb).await
+        observed_version,
+        "The 'base' schema version ({observed_version}) is not the EARLIEST_SUPPORTED_VERSION ({EARLIEST_SUPPORTED_VERSION})"
     );
 
     // This version is not valid; it does not exist.
@@ -404,22 +413,33 @@ async fn nexus_cannot_apply_update_from_unknown_version() {
     builder.teardown().await;
 }
 
-// This test verifies that executing all schemas, in order, twice, still
-// correctly performs an upgrade.
+// This test verifies that executing the most recent schema migrations, in order,
+// twice, still correctly performs an upgrade.
 //
 // This attempts to be a rough approximation for multiple Nexuses each
 // simultaneously executing these operations.
 #[tokio::test]
-async fn versions_have_idempotent_up() {
+async fn update_since_base_has_idempotent_up() {
     let config = load_test_config();
     let logctx =
-        LogContext::new("versions_have_idempotent_up", &config.pkg.log);
+        LogContext::new("update_since_base_has_idempotent_up", &config.pkg.log);
     let log = &logctx.log;
     let db = TestDatabase::new_populate_nothing(&logctx.log).await;
     let crdb = db.crdb();
 
+    // Apply the base schema version before Nexus boots.
+    let base_version_semver =
+        get_base_schema_version().expect("Cannot read base schema version");
+    apply_base_database_version(&crdb).await;
+
     let all_versions = read_all_schema_versions();
-    for version in all_versions.iter_versions() {
+    let migrations_to_apply: Vec<_> = all_versions
+        .versions_range((
+            std::ops::Bound::Excluded(base_version_semver.clone()),
+            std::ops::Bound::Unbounded,
+        ))
+        .collect();
+    for version in migrations_to_apply {
         apply_update(log, &crdb, &version, 2).await;
         assert_eq!(
             version.semver().to_string(),
@@ -732,121 +752,16 @@ impl InformationSchema {
     }
 }
 
-// Confirms that the application of all "up.sql" files, in order, is equivalent
-// to applying "dbinit.sql", which should represent the latest-known schema.
-#[tokio::test]
-async fn dbinit_equals_sum_of_all_up() {
-    let config = load_test_config();
-    let logctx =
-        LogContext::new("dbinit_equals_sum_of_all_up", &config.pkg.log);
-    let log = &logctx.log;
-
-    let db = TestDatabase::new_populate_nothing(&logctx.log).await;
-    let crdb = db.crdb();
-
-    let all_versions = read_all_schema_versions();
-
-    // Apply the very first schema migration. In particular, this creates the
-    // `omicron` database, which allows us to construct a `db::Pool` below.
-    for version in all_versions.iter_versions().take(1) {
-        apply_update(log, &crdb, version, 1).await;
-        assert_eq!(
-            version.semver().to_string(),
-            query_crdb_schema_version(&crdb).await
-        );
-    }
-
-    // Go from the second version to the latest version.
-    for version in all_versions.iter_versions().skip(1) {
-        apply_update(log, &crdb, version, 1).await;
-        assert_eq!(
-            version.semver().to_string(),
-            query_crdb_schema_version(&crdb).await
-        );
-    }
-    assert_eq!(
-        LATEST_SCHEMA_VERSION.to_string(),
-        query_crdb_schema_version(&crdb).await
-    );
-
-    // Query the newly constructed DB for information about its schema
-    let observed_schema = InformationSchema::new(&crdb).await;
-    let observed_data = observed_schema.query_all_tables(log, &crdb).await;
-
-    db.terminate().await;
-
-    // Create a new DB with data populated from dbinit.sql for comparison
-    let db = TestDatabase::new_populate_schema_only(&logctx.log).await;
-    let crdb = db.crdb();
-    let expected_schema = InformationSchema::new(&crdb).await;
-    let expected_data = expected_schema.query_all_tables(log, &crdb).await;
-
-    // Validate that the schema is identical
-    observed_schema.pretty_assert_eq(&expected_schema);
-
-    assert_eq!(observed_data, expected_data);
-    db.terminate().await;
-    logctx.cleanup_successful();
-}
-
-struct PoolAndConnection {
-    pool: nexus_db_queries::db::Pool,
-    conn: DataStoreConnection,
-}
-
-impl PoolAndConnection {
-    async fn cleanup(self) {
-        drop(self.conn);
-        self.pool.terminate().await;
-    }
-}
-
 struct MigrationContext<'a> {
+    #[allow(dead_code)]
     log: &'a Logger,
 
     // Postgres connection to database
     client: Client,
-
-    // Reference to the database itself
-    crdb: &'a CockroachInstance,
-
-    // An optionally-populated "pool and connection" from before
-    // a schema version upgrade.
-    //
-    // This can be used to validate properties of a database pool
-    // before and after a particular schema migration.
-    pool_and_conn: Mutex<BTreeMap<Version, PoolAndConnection>>,
-}
-
-impl MigrationContext<'_> {
-    // Populates a pool and connection.
-    //
-    // Typically called as a part of a "before" function, to set up a connection
-    // before a schema migration.
-    async fn populate_pool_and_connection(&self, version: Version) {
-        let pool = nexus_db_queries::db::Pool::new_single_host(
-            self.log,
-            &nexus_db_queries::db::Config {
-                url: self.crdb.pg_config().clone(),
-            },
-        );
-        let conn = pool.claim().await.expect("failed to get pooled connection");
-
-        let mut map = self.pool_and_conn.lock().unwrap();
-        map.insert(version, PoolAndConnection { pool, conn });
-    }
-
-    // Takes a pool and connection if they've been populated.
-    fn take_pool_and_connection(&self, version: &Version) -> PoolAndConnection {
-        let mut map = self.pool_and_conn.lock().unwrap();
-        map.remove(version).unwrap()
-    }
 }
 
 type BeforeFn = for<'a> fn(ctx: &'a MigrationContext<'a>) -> BoxFuture<'a, ()>;
 type AfterFn = for<'a> fn(ctx: &'a MigrationContext<'a>) -> BoxFuture<'a, ()>;
-type AtCurrentFn =
-    for<'a> fn(ctx: &'a MigrationContext<'a>) -> BoxFuture<'a, ()>;
 
 // Describes the operations which we might take before and after
 // migrations to check that they worked.
@@ -854,7 +769,6 @@ type AtCurrentFn =
 struct DataMigrationFns {
     before: Option<BeforeFn>,
     after: Option<AfterFn>,
-    at_current: Option<AtCurrentFn>,
 }
 
 impl DataMigrationFns {
@@ -869,1454 +783,6 @@ impl DataMigrationFns {
         self.after = Some(after);
         self
     }
-    fn at_current(mut self, at_current: AtCurrentFn) -> Self {
-        self.at_current = Some(at_current);
-        self
-    }
-}
-
-// "51F0" -> "Silo"
-const SILO1: Uuid = Uuid::from_u128(0x111151F0_5c3d_4647_83b0_8f3515da7be1);
-const SILO2: Uuid = Uuid::from_u128(0x222251F0_5c3d_4647_83b0_8f3515da7be1);
-
-// "6001" -> "Pool"
-const POOL0: Uuid = Uuid::from_u128(0x00006001_5c3d_4647_83b0_8f3515da7be1);
-const POOL1: Uuid = Uuid::from_u128(0x11116001_5c3d_4647_83b0_8f3515da7be1);
-const POOL2: Uuid = Uuid::from_u128(0x22226001_5c3d_4647_83b0_8f3515da7be1);
-const POOL3: Uuid = Uuid::from_u128(0x33336001_5c3d_4647_83b0_8f3515da7be1);
-const POOL4: Uuid = Uuid::from_u128(0x44446001_5c3d_4647_83b0_8f3515da7be1);
-
-// "513D" -> "Sled"
-const SLED1: Uuid = Uuid::from_u128(0x1111513d_5c3d_4647_83b0_8f3515da7be1);
-const SLED2: Uuid = Uuid::from_u128(0x2222513d_5c3d_4647_83b0_8f3515da7be1);
-
-// "7AC4" -> "Rack"
-const RACK1: Uuid = Uuid::from_u128(0x11117ac4_5c3d_4647_83b0_8f3515da7be1);
-
-// "6701" -> "Proj"ect
-const PROJECT: Uuid = Uuid::from_u128(0x11116701_5c3d_4647_83b0_8f3515da7be1);
-
-// "1257" -> "Inst"ance
-const INSTANCE1: Uuid = Uuid::from_u128(0x11111257_5c3d_4647_83b0_8f3515da7be1);
-const INSTANCE2: Uuid = Uuid::from_u128(0x22221257_5c3d_4647_83b0_8f3515da7be1);
-const INSTANCE3: Uuid = Uuid::from_u128(0x33331257_5c3d_4647_83b0_8f3515da7be1);
-const INSTANCE4: Uuid = Uuid::from_u128(0x44441257_5c3d_4647_83b0_8f3515da7be1);
-
-// "67060115" -> "Prop"olis
-const PROPOLIS: Uuid = Uuid::from_u128(0x11116706_5c3d_4647_83b0_8f3515da7be1);
-const PROPOLIS2: Uuid = Uuid::from_u128(0x22226706_5c3d_4647_83b0_8f3515da7be1);
-
-// "7154"-> "Disk"
-const DISK1: Uuid = Uuid::from_u128(0x11117154_5c3d_4647_83b0_8f3515da7be1);
-const DISK2: Uuid = Uuid::from_u128(0x22227154_5c3d_4647_83b0_8f3515da7be1);
-const DISK3: Uuid = Uuid::from_u128(0x33337154_5c3d_4647_83b0_8f3515da7be1);
-const DISK4: Uuid = Uuid::from_u128(0x44447154_5c3d_4647_83b0_8f3515da7be1);
-
-// "566F" -> "Vo"lume. V is difficult, OK?
-const VOLUME1: Uuid = Uuid::from_u128(0x1111566f_5c3d_4647_83b0_8f3515da7be1);
-const VOLUME2: Uuid = Uuid::from_u128(0x2222566f_5c3d_4647_83b0_8f3515da7be1);
-const VOLUME3: Uuid = Uuid::from_u128(0x3333566f_5c3d_4647_83b0_8f3515da7be1);
-const VOLUME4: Uuid = Uuid::from_u128(0x4444566f_5c3d_4647_83b0_8f3515da7be1);
-
-fn before_23_0_0<'a>(ctx: &'a MigrationContext<'a>) -> BoxFuture<'a, ()> {
-    Box::pin(async move {
-        // Create two silos
-        ctx.client.batch_execute(&format!("INSERT INTO silo
-            (id, name, description, time_created, time_modified, time_deleted, discoverable, authentication_mode, user_provision_type, mapped_fleet_roles, rcgen) VALUES
-          ('{SILO1}', 'silo1', '', now(), now(), NULL, false, 'local', 'jit', '{{}}', 1),
-          ('{SILO2}', 'silo2', '', now(), now(), NULL, false, 'local', 'jit', '{{}}', 1);
-        ")).await.expect("Failed to create silo");
-
-        // Create an IP pool for each silo, and a third "fleet pool" which has
-        // no corresponding silo.
-        ctx.client.batch_execute(&format!("INSERT INTO ip_pool
-            (id, name, description, time_created, time_modified, time_deleted, rcgen, silo_id, is_default) VALUES
-          ('{POOL0}', 'pool2', '', now(), now(), now(), 1, '{SILO2}', true),
-          ('{POOL1}', 'pool1', '', now(), now(), NULL, 1, '{SILO1}', true),
-          ('{POOL2}', 'pool2', '', now(), now(), NULL, 1, '{SILO2}', false),
-          ('{POOL3}', 'pool3', '', now(), now(), NULL, 1, null, true),
-          ('{POOL4}', 'pool4', '', now(), now(), NULL, 1, null, false);
-        ")).await.expect("Failed to create IP Pool");
-    })
-}
-
-fn after_23_0_0<'a>(ctx: &'a MigrationContext<'a>) -> BoxFuture<'a, ()> {
-    Box::pin(async {
-        // Confirm that the ip_pool_resource objects have been created
-        // by the migration.
-        let rows = ctx
-            .client
-            .query("SELECT * FROM ip_pool_resource ORDER BY ip_pool_id", &[])
-            .await
-            .expect("Failed to query ip pool resource");
-        let ip_pool_resources = process_rows(&rows);
-
-        assert_eq!(ip_pool_resources.len(), 6);
-
-        fn assert_row(
-            row: &Vec<ColumnValue>,
-            ip_pool_id: Uuid,
-            silo_id: Uuid,
-            is_default: bool,
-        ) {
-            let type_silo = SqlEnum::from(("ip_pool_resource_type", "silo"));
-            assert_eq!(
-                row,
-                &vec![
-                    ColumnValue::new("ip_pool_id", ip_pool_id),
-                    ColumnValue::new("resource_type", type_silo),
-                    ColumnValue::new("resource_id", silo_id),
-                    ColumnValue::new("is_default", is_default),
-                ],
-            );
-        }
-
-        // pool1 was default on silo1, so gets an entry in the join table
-        // reflecting that
-        assert_row(&ip_pool_resources[0].values, POOL1, SILO1, true);
-
-        // pool1 was default on silo1, so gets an entry in the join table
-        // reflecting that
-        assert_row(&ip_pool_resources[1].values, POOL2, SILO2, false);
-
-        // fleet-scoped silos are a little more complicated
-
-        // pool3 was a fleet-level default, so now it's associated with both
-        // silos. silo1 had its own default pool as well (pool1), so pool3
-        // cannot also be default for silo1. silo2 did not have its own default,
-        // so pool3 is default for silo2.
-        assert_row(&ip_pool_resources[2].values, POOL3, SILO1, false);
-        assert_row(&ip_pool_resources[3].values, POOL3, SILO2, true);
-
-        // fleet-level pool that was not default becomes non-default on all silos
-        assert_row(&ip_pool_resources[4].values, POOL4, SILO1, false);
-        assert_row(&ip_pool_resources[5].values, POOL4, SILO2, false);
-    })
-}
-
-fn before_24_0_0<'a>(ctx: &'a MigrationContext<'a>) -> BoxFuture<'a, ()> {
-    // IP addresses were pulled off dogfood sled 16
-    Box::pin(async move {
-        // Create two sleds. (SLED2 is marked non_provisionable for
-        // after_37_0_1.)
-        ctx.client
-            .batch_execute(&format!(
-                "INSERT INTO sled
-            (id, time_created, time_modified, time_deleted, rcgen, rack_id,
-            is_scrimlet, serial_number, part_number, revision,
-            usable_hardware_threads, usable_physical_ram, reservoir_size, ip,
-            port, last_used_address, provision_state) VALUES
-
-          ('{SLED1}', now(), now(), NULL, 1, '{RACK1}', true, 'abcd', 'defg',
-             '1', 64, 12345678, 77, 'fd00:1122:3344:104::1', 12345,
-            'fd00:1122:3344:104::1ac', 'provisionable'),
-          ('{SLED2}', now(), now(), NULL, 1, '{RACK1}', false, 'zzzz', 'xxxx',
-             '2', 64, 12345678, 77,'fd00:1122:3344:107::1', 12345,
-            'fd00:1122:3344:107::d4', 'non_provisionable');
-        "
-            ))
-            .await
-            .expect("Failed to create sleds");
-    })
-}
-
-fn after_24_0_0<'a>(ctx: &'a MigrationContext<'a>) -> BoxFuture<'a, ()> {
-    Box::pin(async {
-        // Confirm that the IP Addresses have the last 2 bytes changed to `0xFFFF`
-        let rows = ctx
-            .client
-            .query("SELECT last_used_address FROM sled ORDER BY id", &[])
-            .await
-            .expect("Failed to sled last_used_address");
-        let last_used_addresses = process_rows(&rows);
-
-        let expected_addr_1: IpAddr =
-            "fd00:1122:3344:104::ffff".parse().unwrap();
-        let expected_addr_2: IpAddr =
-            "fd00:1122:3344:107::ffff".parse().unwrap();
-
-        assert_eq!(
-            last_used_addresses[0].values,
-            vec![ColumnValue::new("last_used_address", expected_addr_1)]
-        );
-        assert_eq!(
-            last_used_addresses[1].values,
-            vec![ColumnValue::new("last_used_address", expected_addr_2)]
-        );
-    })
-}
-
-// This reuses the sleds created in before_24_0_0.
-fn after_37_0_1<'a>(ctx: &'a MigrationContext<'a>) -> BoxFuture<'a, ()> {
-    Box::pin(async {
-        // Confirm that the IP Addresses have the last 2 bytes changed to `0xFFFF`
-        let rows = ctx
-            .client
-            .query("SELECT sled_policy, sled_state FROM sled ORDER BY id", &[])
-            .await
-            .expect("Failed to select sled policy and state");
-        let policy_and_state = process_rows(&rows);
-
-        assert_eq!(
-            policy_and_state[0].values,
-            vec![
-                ColumnValue::new(
-                    "sled_policy",
-                    SqlEnum::from(("sled_policy", "in_service"))
-                ),
-                ColumnValue::new(
-                    "sled_state",
-                    SqlEnum::from(("sled_state", "active"))
-                ),
-            ]
-        );
-        assert_eq!(
-            policy_and_state[1].values,
-            vec![
-                ColumnValue::new(
-                    "sled_policy",
-                    SqlEnum::from(("sled_policy", "no_provision"))
-                ),
-                ColumnValue::new(
-                    "sled_state",
-                    SqlEnum::from(("sled_state", "active"))
-                ),
-            ]
-        );
-    })
-}
-
-fn before_70_0_0<'a>(ctx: &'a MigrationContext<'a>) -> BoxFuture<'a, ()> {
-    Box::pin(async move {
-        ctx.client
-            .batch_execute(&format!(
-                "
-        INSERT INTO instance (id, name, description, time_created,
-        time_modified, time_deleted, project_id, user_data, state,
-        time_state_updated, state_generation, active_propolis_id,
-        target_propolis_id, migration_id, ncpus, memory, hostname,
-        boot_on_fault, updater_id, updater_gen) VALUES
-
-        ('{INSTANCE1}', 'inst1', '', now(), now(), NULL, '{PROJECT}', '',
-        'stopped', now(), 1, NULL, NULL, NULL, 2, 1073741824, 'inst1', false,
-        NULL, 1),
-        ('{INSTANCE2}', 'inst2', '', now(), now(), NULL, '{PROJECT}', '',
-        'running', now(), 1, '{PROPOLIS}', NULL, NULL, 2, 1073741824, 'inst2',
-        true, NULL, 1),
-        ('{INSTANCE3}', 'inst3', '', now(), now(), NULL, '{PROJECT}', '',
-        'failed', now(), 1, NULL, NULL, NULL, 2, 1073741824, 'inst3', false,
-        NULL, 1);
-        "
-            ))
-            .await
-            .expect("failed to create instances");
-        ctx.client
-            .batch_execute(&format!(
-                "
-        INSERT INTO vmm (id, time_created, time_deleted, instance_id, state,
-        time_state_updated, state_generation, sled_id, propolis_ip,
-        propolis_port) VALUES
-
-        ('{PROPOLIS}', now(), NULL, '{INSTANCE2}', 'running', now(), 1,
-        '{SLED1}', 'fd00:1122:3344:200::1', '12400');
-                "
-            ))
-            .await
-            .expect("failed to create VMMs");
-    })
-}
-
-fn after_70_0_0<'a>(ctx: &'a MigrationContext<'a>) -> BoxFuture<'a, ()> {
-    Box::pin(async {
-        let rows = ctx
-            .client
-            .query("SELECT state FROM instance ORDER BY id", &[])
-            .await
-            .expect("failed to load instance states");
-        let instance_states = process_rows(&rows);
-
-        assert_eq!(
-            instance_states[0].values,
-            vec![ColumnValue::new(
-                "state",
-                SqlEnum::from(("instance_state_v2", "no_vmm"))
-            )]
-        );
-        assert_eq!(
-            instance_states[1].values,
-            vec![ColumnValue::new(
-                "state",
-                SqlEnum::from(("instance_state_v2", "vmm"))
-            )]
-        );
-        assert_eq!(
-            instance_states[2].values,
-            vec![ColumnValue::new(
-                "state",
-                SqlEnum::from(("instance_state_v2", "failed"))
-            )]
-        );
-
-        let rows = ctx
-            .client
-            .query("SELECT state FROM vmm ORDER BY id", &[])
-            .await
-            .expect("failed to load VMM states");
-        let vmm_states = process_rows(&rows);
-
-        assert_eq!(
-            vmm_states[0].values,
-            vec![ColumnValue::new(
-                "state",
-                SqlEnum::from(("vmm_state", "running"))
-            )]
-        );
-    })
-}
-
-fn before_95_0_0<'a>(ctx: &'a MigrationContext<'a>) -> BoxFuture<'a, ()> {
-    // This reuses the instance records created in `before_70_0_0`
-    const COLUMN: &'static str = "boot_on_fault";
-    Box::pin(async {
-        let rows = ctx
-            .client
-            .query("SELECT boot_on_fault FROM instance ORDER BY id", &[])
-            .await
-            .expect("failed to load instance boot_on_fault settings");
-        let instance_boot_on_faults = process_rows(&rows);
-
-        assert_eq!(
-            instance_boot_on_faults[0].values,
-            vec![ColumnValue::new(COLUMN, false,)]
-        );
-        assert_eq!(
-            instance_boot_on_faults[1].values,
-            vec![ColumnValue::new(COLUMN, true)]
-        );
-        assert_eq!(
-            instance_boot_on_faults[2].values,
-            vec![ColumnValue::new(COLUMN, false)]
-        );
-    })
-}
-
-const COLUMN_AUTO_RESTART: &'static str = "auto_restart_policy";
-const ENUM_AUTO_RESTART: &'static str = "instance_auto_restart";
-
-fn after_95_0_0<'a>(ctx: &'a MigrationContext<'a>) -> BoxFuture<'a, ()> {
-    // This reuses the instance records created in `before_70_0_0`
-    Box::pin(async {
-        let rows = ctx
-            .client
-            .query(
-                &format!(
-                    "SELECT {COLUMN_AUTO_RESTART} FROM instance ORDER BY id"
-                ),
-                &[],
-            )
-            .await
-            .expect("failed to load instance auto-restart policies");
-        let policies = process_rows(&rows);
-
-        assert_eq!(
-            policies[0].values,
-            vec![ColumnValue::null(COLUMN_AUTO_RESTART)]
-        );
-        assert_eq!(
-            policies[1].values,
-            vec![ColumnValue::new(
-                COLUMN_AUTO_RESTART,
-                SqlEnum::from((ENUM_AUTO_RESTART, "all_failures"))
-            )]
-        );
-        assert_eq!(
-            policies[2].values,
-            vec![ColumnValue::null(COLUMN_AUTO_RESTART)]
-        );
-    })
-}
-
-fn before_101_0_0<'a>(ctx: &'a MigrationContext<'a>) -> BoxFuture<'a, ()> {
-    Box::pin(async {
-        // Make a new instance with an explicit 'sled_failures_only' v1 auto-restart
-        // policy
-        ctx.client
-            .batch_execute(&format!(
-                "INSERT INTO instance (
-                    id, name, description, time_created, time_modified,
-                    time_deleted, project_id, user_data, state,
-                    time_state_updated, state_generation, active_propolis_id,
-                    target_propolis_id, migration_id, ncpus, memory, hostname,
-                    {COLUMN_AUTO_RESTART}, updater_id, updater_gen
-                )
-                VALUES (
-                    '{INSTANCE4}', 'inst4', '', now(), now(), NULL,
-                    '{PROJECT}', '', 'no_vmm', now(), 1, NULL, NULL, NULL,
-                    2, 1073741824, 'inst1', 'sled_failures_only', NULL, 1
-                );"
-            ))
-            .await
-            .expect("failed to create instance");
-        // Change one of the NULLs to an explicit 'never'.
-        ctx.client
-            .batch_execute(&format!(
-                "UPDATE instance
-                SET {COLUMN_AUTO_RESTART} = 'never'
-                WHERE id = '{INSTANCE3}';"
-            ))
-            .await
-            .expect("failed to update instance");
-
-        // Used as a regression test against
-        // https://github.com/oxidecomputer/omicron/issues/5561
-        //
-        // See 'at_current_101_0_0' - we create a connection here, because connections
-        // may be populating an OID cache. We use the connection after the
-        // schema migration to access the "instance_auto_restart" type.
-        let semver = Version::new(101, 0, 0);
-        ctx.populate_pool_and_connection(semver).await;
-    })
-}
-
-fn after_101_0_0<'a>(ctx: &'a MigrationContext<'a>) -> BoxFuture<'a, ()> {
-    const BEST_EFFORT: &'static str = "best_effort";
-    Box::pin(async {
-        let rows = ctx
-            .client
-            .query(
-                &format!(
-                    "SELECT {COLUMN_AUTO_RESTART} FROM instance ORDER BY id"
-                ),
-                &[],
-            )
-            .await
-            .expect("failed to load instance auto-restart policies");
-        let policies = process_rows(&rows);
-
-        assert_eq!(
-            policies[0].values,
-            vec![ColumnValue::null(COLUMN_AUTO_RESTART)],
-            "null auto-restart policies should remain null",
-        );
-        assert_eq!(
-            policies[1].values,
-            vec![ColumnValue::new(
-                COLUMN_AUTO_RESTART,
-                SqlEnum::from((ENUM_AUTO_RESTART, BEST_EFFORT))
-            )],
-            "'all_failures' auto-restart policies should be migrated to \
-             '{BEST_EFFORT}'",
-        );
-        assert_eq!(
-            policies[2].values,
-            vec![ColumnValue::new(
-                COLUMN_AUTO_RESTART,
-                SqlEnum::from((ENUM_AUTO_RESTART, "never"))
-            )],
-            "explicit 'never' auto-restart policies should remain 'never'",
-        );
-        assert_eq!(
-            policies[3].values,
-            vec![ColumnValue::new(
-                COLUMN_AUTO_RESTART,
-                SqlEnum::from((ENUM_AUTO_RESTART, BEST_EFFORT))
-            )],
-            "'sled_failures_only' auto-restart policies should be migrated \
-             to '{BEST_EFFORT}'",
-        );
-    })
-}
-
-fn at_current_101_0_0<'a>(ctx: &'a MigrationContext<'a>) -> BoxFuture<'a, ()> {
-    Box::pin(async {
-        // Used as a regression test against
-        // https://github.com/oxidecomputer/omicron/issues/5561
-        //
-        // See 'before_101_0_0' - we created a connection to validate that we can
-        // access the "instance_auto_restart" type without encountering
-        // OID cache poisoning.
-        //
-        // We care about the following:
-        //
-        // 1. This type was dropped and re-created in some schema migration,
-        // 2. The type still exists in the latest schema
-        //
-        // This can happen on any schema migration, but it happens to exist
-        // here. To find other schema migrations where this might be possible,
-        // try the following search from within the "omicron/schema/crdb"
-        // directory:
-        //
-        // ```bash
-        // rg 'DROP TYPE IF EXISTS (.*);' --no-filename -o --replace '$1'
-        //   | sort -u
-        //   | xargs -I {} rg 'CREATE TYPE .*{}' dbinit.sql
-        // ```
-        //
-        // This finds all user-defined types which have dropped at some point,
-        // but which still appear in the latest schema.
-        let semver = Version::new(101, 0, 0);
-        let pool_and_conn = ctx.take_pool_and_connection(&semver);
-
-        {
-            use async_bb8_diesel::AsyncRunQueryDsl;
-            use nexus_db_model::Instance;
-            use nexus_db_schema::schema::instance::dsl;
-            use nexus_types::external_api::params;
-            use omicron_common::api::external::IdentityMetadataCreateParams;
-            use omicron_uuid_kinds::InstanceUuid;
-
-            diesel::insert_into(dsl::instance)
-                .values(Instance::new(
-                    InstanceUuid::new_v4(),
-                    Uuid::new_v4(),
-                    &params::InstanceCreate {
-                        identity: IdentityMetadataCreateParams {
-                            name: "hello".parse().unwrap(),
-                            description: "hello".to_string(),
-                        },
-                        ncpus: 2.try_into().unwrap(),
-                        memory: 1024_u64.try_into().unwrap(),
-                        hostname: "inst".parse().unwrap(),
-                        user_data: vec![],
-                        ssh_public_keys: None,
-                        network_interfaces:
-                            params::InstanceNetworkInterfaceAttachment::Default,
-                        external_ips: vec![],
-                        boot_disk: None,
-                        disks: Vec::new(),
-                        start: false,
-                        auto_restart_policy: Default::default(),
-                        anti_affinity_groups: Vec::new(),
-                    },
-                ))
-                .execute_async(&*pool_and_conn.conn)
-                .await
-                .expect("failed to insert - did we poison the OID cache?");
-        }
-
-        pool_and_conn.cleanup().await;
-    })
-}
-
-fn before_107_0_0<'a>(ctx: &'a MigrationContext<'a>) -> BoxFuture<'a, ()> {
-    Box::pin(async {
-        // An instance with no attached disks (4) gets a NULL boot disk.
-        // An instance with one attached disk (5) gets that disk as a boot disk.
-        // An instance with two attached disks (6) gets a NULL boot disk.
-        ctx.client
-            .batch_execute(&format!(
-                "
-        INSERT INTO disk (
-            id, name, description, time_created,
-            time_modified, time_deleted, rcgen, project_id,
-            volume_id, disk_state, attach_instance_id, state_generation,
-            slot, time_state_updated, size_bytes, block_size,
-            origin_snapshot, origin_image, pantry_address
-        ) VALUES
-
-        ('{DISK1}', 'disk1', '', now(),
-        now(), NULL, 1, '{PROJECT}',
-        '{VOLUME1}', 'attached', '{INSTANCE1}', 1,
-        4, now(), 65536, '512',
-        NULL, NULL, NULL),
-        ('{DISK2}', 'disk2', '', now(),
-        now(), NULL, 1, '{PROJECT}',
-        '{VOLUME2}', 'attached', '{INSTANCE2}', 1,
-        4, now(), 65536, '512',
-        NULL, NULL, NULL),
-        ('{DISK3}', 'disk3', '', now(),
-        now(), NULL, 1,'{PROJECT}',
-        '{VOLUME3}', 'attached', '{INSTANCE3}', 1,
-        4, now(), 65536, '512',
-        NULL, NULL, NULL),
-        ('{DISK4}', 'disk4', '', now(),
-        now(), NULL, 1,'{PROJECT}',
-        '{VOLUME4}', 'attached', '{INSTANCE3}', 1,
-        4, now(), 65536, '512',
-        NULL, NULL, NULL);"
-            ))
-            .await
-            .expect("failed to create disks");
-    })
-}
-
-fn after_107_0_0<'a>(ctx: &'a MigrationContext<'a>) -> BoxFuture<'a, ()> {
-    Box::pin(async {
-        let rows = ctx
-            .client
-            .query("SELECT id, boot_disk_id FROM instance ORDER BY id;", &[])
-            .await
-            .expect("failed to load instance boot disks");
-        let boot_disks = process_rows(&rows);
-
-        assert_eq!(
-            boot_disks[0].values,
-            vec![
-                ColumnValue::new("id", INSTANCE1),
-                ColumnValue::new("boot_disk_id", DISK1),
-            ],
-            "instance {INSTANCE1} should have one attached disk that has been \
-             made the boot disk"
-        );
-
-        assert_eq!(
-            boot_disks[1].values,
-            vec![
-                ColumnValue::new("id", INSTANCE2),
-                ColumnValue::new("boot_disk_id", DISK2),
-            ],
-            "instance {INSTANCE2} should have a different attached disk that \
-             has been made the boot disk"
-        );
-
-        assert_eq!(
-            boot_disks[2].values,
-            vec![
-                ColumnValue::new("id", INSTANCE3),
-                ColumnValue::null("boot_disk_id"),
-            ],
-            "instance {INSTANCE3} should have two attached disks, neither the \
-             the boot disk"
-        );
-
-        assert_eq!(
-            boot_disks[3].values,
-            vec![
-                ColumnValue::new("id", INSTANCE4),
-                ColumnValue::null("boot_disk_id"),
-            ],
-            "instance {INSTANCE4} should have no attached disks, so \
-             no boot disk"
-        );
-    })
-}
-
-fn before_124_0_0<'a>(ctx: &'a MigrationContext<'a>) -> BoxFuture<'a, ()> {
-    Box::pin(async {
-        // Insert a region snapshot replacement record
-        let request_id: Uuid =
-            "5f867d89-a61f-48cd-ac7d-aecbcb23c2f9".parse().unwrap();
-        let dataset_id: Uuid =
-            "c625d694-185b-4c64-9369-402b7ba1362e".parse().unwrap();
-        let region_id: Uuid =
-            "bda60191-05a0-4881-8bca-0855464ecd9f".parse().unwrap();
-        let snapshot_id: Uuid =
-            "0b8382de-d787-450a-8516-235f33eb0946".parse().unwrap();
-
-        ctx.client
-            .batch_execute(&format!(
-                "
-        INSERT INTO region_snapshot_replacement (
-            id,
-            request_time,
-            old_dataset_id,
-            old_region_id,
-            old_snapshot_id,
-            old_snapshot_volume_id,
-            new_region_id,
-            replacement_state,
-            operating_saga_id,
-            new_region_volume_id
-        ) VALUES (
-            '{request_id}',
-            now(),
-            '{dataset_id}',
-            '{region_id}',
-            '{snapshot_id}',
-            NULL,
-            NULL,
-            'requested',
-            NULL,
-            NULL
-        );"
-            ))
-            .await
-            .expect("failed to insert record");
-    })
-}
-
-fn after_124_0_0<'a>(ctx: &'a MigrationContext<'a>) -> BoxFuture<'a, ()> {
-    Box::pin(async {
-        let rows = ctx
-            .client
-            .query(
-                "SELECT replacement_type FROM region_snapshot_replacement;",
-                &[],
-            )
-            .await
-            .expect("failed to load region snapshot replacements");
-
-        let records = process_rows(&rows);
-
-        assert_eq!(records.len(), 1);
-
-        assert_eq!(
-            records[0].values,
-            vec![ColumnValue::new(
-                "replacement_type",
-                SqlEnum::from((
-                    "read_only_target_replacement_type",
-                    "region_snapshot"
-                )),
-            )],
-            "existing region snapshot replacement should have replacement type",
-        );
-    })
-}
-
-fn before_125_0_0<'a>(ctx: &'a MigrationContext<'a>) -> BoxFuture<'a, ()> {
-    Box::pin(async {
-        // Insert a few bp_omicron_zone records and their parent
-        // bp_sled_omicron_zones row (from which we pull its generation)
-        let bp1_id: Uuid =
-            "00000000-0000-0000-0000-000000000001".parse().unwrap();
-        let bp2_id: Uuid =
-            "00000000-0000-0000-0000-000000000002".parse().unwrap();
-
-        let sled_id: Uuid = Uuid::new_v4();
-
-        let bp1_generation: i64 = 3;
-        let bp2_generation: i64 = 4;
-
-        ctx.client
-            .batch_execute(&format!(
-                "
-                    INSERT INTO bp_sled_omicron_zones (
-                        blueprint_id, sled_id, generation
-                    ) VALUES (
-                        '{bp1_id}', '{sled_id}', {bp1_generation}
-                    );
-
-                    INSERT INTO bp_sled_omicron_zones (
-                        blueprint_id, sled_id, generation
-                    ) VALUES (
-                        '{bp2_id}', '{sled_id}', {bp2_generation}
-                    );
-                "
-            ))
-            .await
-            .expect("inserted record");
-
-        // Insert an in-service zone and and expunged zone for each blueprint.
-        let in_service_zone_id: Uuid =
-            "00000001-0000-0000-0000-000000000000".parse().unwrap();
-        let expunged_zone_id: Uuid =
-            "00000002-0000-0000-0000-000000000000".parse().unwrap();
-
-        // Fill in a filesystem pool for each zone. This column was NULLable
-        // prior to schema version 132.0.0, but became NOT NULL in that version,
-        // so it's simplest to go ahead and populate it here (otherwise our test
-        // migration to 132 will fail). Operationally, we confirmed via omdb
-        // that all deployed systems had non-NULL filesystem_pool values prior
-        // to upgrading to 132.
-        let filesystem_pool: Uuid =
-            "00000000-0000-0000-0000-0000706f6f6c".parse().unwrap();
-
-        for bp_id in [bp1_id, bp2_id] {
-            for (zone_id, disposition) in [
-                (in_service_zone_id, "in_service"),
-                (expunged_zone_id, "expunged"),
-            ] {
-                ctx.client
-                    .batch_execute(&format!(
-                        "
-                        INSERT INTO bp_omicron_zone (
-                            blueprint_id,
-                            sled_id,
-                            id,
-                            zone_type,
-                            primary_service_ip,
-                            primary_service_port,
-                            filesystem_pool,
-                            disposition
-                        ) VALUES (
-                            '{bp_id}',
-                            '{sled_id}',
-                            '{zone_id}',
-                            'oximeter',
-                            '::1',
-                            0,
-                            '{filesystem_pool}',
-                            '{disposition}'
-                        );
-                    "
-                    ))
-                    .await
-                    .expect("inserted record");
-            }
-        }
-    })
-}
-
-fn after_125_0_0<'a>(ctx: &'a MigrationContext<'a>) -> BoxFuture<'a, ()> {
-    Box::pin(async {
-        let bp1_id: Uuid =
-            "00000000-0000-0000-0000-000000000001".parse().unwrap();
-        let bp2_id: Uuid =
-            "00000000-0000-0000-0000-000000000002".parse().unwrap();
-        let bp1_generation: i64 = 3;
-        let bp2_generation: i64 = 4;
-        let in_service_zone_id: Uuid =
-            "00000001-0000-0000-0000-000000000000".parse().unwrap();
-        let expunged_zone_id: Uuid =
-            "00000002-0000-0000-0000-000000000000".parse().unwrap();
-
-        let rows = ctx
-            .client
-            .query(
-                r#"
-                SELECT
-                    blueprint_id,
-                    id,
-                    disposition,
-                    disposition_expunged_as_of_generation,
-                    disposition_expunged_ready_for_cleanup
-                FROM bp_omicron_zone
-                ORDER BY blueprint_id, id
-                "#,
-                &[],
-            )
-            .await
-            .expect("loaded bp_omicron_zone rows");
-
-        let records = process_rows(&rows);
-
-        assert_eq!(records.len(), 4);
-
-        assert_eq!(
-            records[0].values,
-            vec![
-                ColumnValue::new("blueprint_id", bp1_id),
-                ColumnValue::new("id", in_service_zone_id),
-                ColumnValue::new(
-                    "disposition",
-                    SqlEnum::from(("bp_zone_disposition", "in_service")),
-                ),
-                ColumnValue::null("disposition_expunged_as_of_generation"),
-                ColumnValue::new(
-                    "disposition_expunged_ready_for_cleanup",
-                    false
-                ),
-            ],
-            "in_service zone left in service",
-        );
-        assert_eq!(
-            records[1].values,
-            vec![
-                ColumnValue::new("blueprint_id", bp1_id),
-                ColumnValue::new("id", expunged_zone_id),
-                ColumnValue::new(
-                    "disposition",
-                    SqlEnum::from(("bp_zone_disposition", "expunged")),
-                ),
-                ColumnValue::new(
-                    "disposition_expunged_as_of_generation",
-                    bp1_generation
-                ),
-                ColumnValue::new(
-                    "disposition_expunged_ready_for_cleanup",
-                    false
-                ),
-            ],
-            "expunged zone gets correct disposition and generation",
-        );
-        assert_eq!(
-            records[2].values,
-            vec![
-                ColumnValue::new("blueprint_id", bp2_id),
-                ColumnValue::new("id", in_service_zone_id),
-                ColumnValue::new(
-                    "disposition",
-                    SqlEnum::from(("bp_zone_disposition", "in_service")),
-                ),
-                ColumnValue::null("disposition_expunged_as_of_generation"),
-                ColumnValue::new(
-                    "disposition_expunged_ready_for_cleanup",
-                    false
-                ),
-            ],
-            "in_service zone left in service",
-        );
-        assert_eq!(
-            records[3].values,
-            vec![
-                ColumnValue::new("blueprint_id", bp2_id),
-                ColumnValue::new("id", expunged_zone_id),
-                ColumnValue::new(
-                    "disposition",
-                    SqlEnum::from(("bp_zone_disposition", "expunged")),
-                ),
-                ColumnValue::new(
-                    "disposition_expunged_as_of_generation",
-                    bp2_generation
-                ),
-                ColumnValue::new(
-                    "disposition_expunged_ready_for_cleanup",
-                    false
-                ),
-            ],
-            "expunged zone gets correct disposition and generation",
-        );
-    })
-}
-
-fn before_133_0_0<'a>(ctx: &'a MigrationContext<'a>) -> BoxFuture<'a, ()> {
-    Box::pin(async {
-        // This VMM will have a sled_resource_vmm record and a VMM record
-        let vmm1_id: Uuid =
-            "00000000-0000-0000-0000-000000000001".parse().unwrap();
-        // This VMM will have a sled_resource_vmm record only
-        let vmm2_id: Uuid =
-            "00000000-0000-0000-0000-000000000002".parse().unwrap();
-
-        let sled_id = Uuid::new_v4();
-        let instance1_id = Uuid::new_v4();
-        let instance2_id = Uuid::new_v4();
-
-        ctx.client
-            .batch_execute(&format!(
-                "
-                    INSERT INTO sled_resource_vmm (
-                        id,
-                        sled_id,
-                        hardware_threads,
-                        rss_ram,
-                        reservoir_ram,
-                        instance_id
-                    ) VALUES
-                    (
-                        '{vmm1_id}', '{sled_id}', 1, 0, 0, '{instance1_id}'
-                    ),
-                    (
-                        '{vmm2_id}', '{sled_id}', 1, 0, 0, '{instance2_id}'
-                    );
-
-                "
-            ))
-            .await
-            .expect("inserted record");
-
-        // Only insert a vmm record for one of these reservations
-        ctx.client
-            .batch_execute(&format!(
-                "
-                INSERT INTO vmm (
-                    id,
-                    time_created,
-                    time_deleted,
-                    instance_id,
-                    time_state_updated,
-                    state_generation,
-                    sled_id,
-                    propolis_ip,
-                    propolis_port,
-                    state
-                ) VALUES (
-                    '{vmm1_id}',
-                    now(),
-                    NULL,
-                    '{instance1_id}',
-                    now(),
-                    1,
-                    '{sled_id}',
-                    'fd00:1122:3344:104::1',
-                    12400,
-                    'running'
-                );
-            "
-            ))
-            .await
-            .expect("inserted record");
-    })
-}
-
-fn after_133_0_0<'a>(ctx: &'a MigrationContext<'a>) -> BoxFuture<'a, ()> {
-    Box::pin(async {
-        // This record should still have a sled_resource_vmm, and be the only
-        // one.
-        let vmm1_id: Uuid =
-            "00000000-0000-0000-0000-000000000001".parse().unwrap();
-
-        let rows = ctx
-            .client
-            .query(
-                r#"
-                SELECT id FROM sled_resource_vmm
-                "#,
-                &[],
-            )
-            .await
-            .expect("loaded sled_resource_vmm rows");
-
-        let records = process_rows(&rows);
-
-        assert_eq!(records.len(), 1, "{records:?}");
-
-        assert_eq!(
-            records[0].values,
-            vec![ColumnValue::new("id", vmm1_id),],
-            "Unexpected sled_resource_vmm record value",
-        );
-    })
-}
-
-fn before_134_0_0<'a>(ctx: &'a MigrationContext<'a>) -> BoxFuture<'a, ()> {
-    Box::pin(async {
-        // To test the size_used upgrader, create a few crucible datasets and
-        // regions
-
-        // First, a crucible dataset with no regions
-        let dataset_id: Uuid =
-            "00000001-0000-0000-0000-000000000000".parse().unwrap();
-        let pool_id = Uuid::new_v4();
-        let size_used = 0;
-
-        ctx.client
-            .batch_execute(&format!(
-                "INSERT INTO crucible_dataset VALUES (
-                    '{dataset_id}',
-                    now(),
-                    now(),
-                    null,
-                    1,
-                    '{pool_id}',
-                    '::1',
-                    10000,
-                    {size_used}
-                )"
-            ))
-            .await
-            .expect("inserted");
-
-        // Then, a crucible dataset with 1 region
-        let dataset_id: Uuid =
-            "00000002-0000-0000-0000-000000000000".parse().unwrap();
-
-        let region_id = Uuid::new_v4();
-        let pool_id = Uuid::new_v4();
-        let volume_id = Uuid::new_v4();
-        let block_size = 512;
-        let blocks_per_extent = 64;
-        let extent_count = 1000;
-
-        ctx.client
-            .batch_execute(&format!(
-                "INSERT INTO region VALUES (
-                    '{region_id}',
-                    now(),
-                    now(),
-                    '{dataset_id}',
-                    '{volume_id}',
-                    {block_size},
-                    {blocks_per_extent},
-                    {extent_count},
-                    5000,
-                    false,
-                    false
-                )"
-            ))
-            .await
-            .expect("inserted");
-
-        let size_used = block_size * blocks_per_extent * extent_count;
-
-        ctx.client
-            .batch_execute(&format!(
-                "INSERT INTO crucible_dataset VALUES (
-                    '{dataset_id}',
-                    now(),
-                    now(),
-                    null,
-                    1,
-                    '{pool_id}',
-                    '::1',
-                    10000,
-                    {size_used}
-                )"
-            ))
-            .await
-            .expect("inserted");
-
-        // Finally, a crucible dataset with 3 regions
-        let dataset_id: Uuid =
-            "00000003-0000-0000-0000-000000000000".parse().unwrap();
-        let pool_id = Uuid::new_v4();
-
-        let block_size = 512;
-        let blocks_per_extent = 64;
-        let extent_count = 7000;
-
-        for _ in 0..3 {
-            let region_id = Uuid::new_v4();
-            let volume_id = Uuid::new_v4();
-
-            ctx.client
-                .batch_execute(&format!(
-                    "INSERT INTO region VALUES (
-                        '{region_id}',
-                        now(),
-                        now(),
-                        '{dataset_id}',
-                        '{volume_id}',
-                        {block_size},
-                        {blocks_per_extent},
-                        {extent_count},
-                        5000,
-                        false,
-                        false
-                    )"
-                ))
-                .await
-                .expect("inserted");
-        }
-
-        let size_used = 3 * block_size * blocks_per_extent * extent_count;
-
-        ctx.client
-            .batch_execute(&format!(
-                "INSERT INTO crucible_dataset VALUES (
-                    '{dataset_id}',
-                    now(),
-                    now(),
-                    null,
-                    1,
-                    '{pool_id}',
-                    '::1',
-                    10000,
-                    {size_used}
-                )"
-            ))
-            .await
-            .expect("inserted");
-    })
-}
-
-fn after_134_0_0<'a>(ctx: &'a MigrationContext<'a>) -> BoxFuture<'a, ()> {
-    Box::pin(async {
-        // The first crucible dataset still has size_used = 0
-        let rows = ctx
-            .client
-            .query(
-                "SELECT size_used FROM crucible_dataset WHERE
-                id = '00000001-0000-0000-0000-000000000000'",
-                &[],
-            )
-            .await
-            .expect("select");
-
-        let records = process_rows(&rows);
-        assert_eq!(records.len(), 1);
-        assert_eq!(
-            records[0].values,
-            vec![ColumnValue::new("size_used", 0i64)],
-        );
-
-        // Note: the default crucible reservation factor is 1.25
-
-        // The second crucible dataset has
-        //  size_used = 1.25 * (512 * 64 * 1000)
-        let rows = ctx
-            .client
-            .query(
-                "SELECT size_used FROM crucible_dataset WHERE
-                id = '00000002-0000-0000-0000-000000000000'",
-                &[],
-            )
-            .await
-            .expect("select");
-
-        let records = process_rows(&rows);
-        assert_eq!(records.len(), 1);
-        assert_eq!(
-            records[0].values,
-            vec![ColumnValue::new("size_used", 40960000i64)],
-        );
-
-        // The third crucible dataset has
-        //  size_used = 1.25 * (3 * 512 * 64 * 7000)
-        let rows = ctx
-            .client
-            .query(
-                "SELECT size_used FROM crucible_dataset WHERE
-                id = '00000003-0000-0000-0000-000000000000'",
-                &[],
-            )
-            .await
-            .expect("select");
-
-        let records = process_rows(&rows);
-        assert_eq!(records.len(), 1);
-        assert_eq!(
-            records[0].values,
-            vec![ColumnValue::new("size_used", 860160000i64)],
-        );
-    })
-}
-
-fn after_139_0_0<'a>(ctx: &'a MigrationContext<'a>) -> BoxFuture<'a, ()> {
-    Box::pin(async {
-        let probe_alert_id: Uuid =
-            "001de000-7768-4000-8000-000000000001".parse().unwrap();
-        let rows = ctx
-            .client
-            .query(
-                // Don't select timestamps, as those are variable, and we don't
-                // want to assert that they always have a particular value.
-                // However, we *do* need to ensure that `time_dispatched` is
-                // set, so that the event is not eligible for dispatching ---
-                // include a WHERE clause ensuring it is not null.
-                r#"
-                SELECT
-                    id,
-                    event_class,
-                    event,
-                    num_dispatched
-                FROM webhook_event
-                WHERE time_dispatched IS NOT NULL
-                "#,
-                &[],
-            )
-            .await
-            .expect("loaded bp_omicron_zone rows");
-
-        let records = process_rows(&rows);
-
-        assert_eq!(
-            records.len(),
-            1,
-            "there should be exactly one singleton event in the webhook_event \
-             table"
-        );
-
-        assert_eq!(
-            records[0].values,
-            vec![
-                ColumnValue::new("id", probe_alert_id),
-                ColumnValue::new(
-                    "event_class",
-                    SqlEnum::from(("webhook_event_class", "probe")),
-                ),
-                ColumnValue::new("event", serde_json::json!({})),
-                ColumnValue::new("num_dispatched", 0i64),
-            ],
-            "singleton liveness probe webhook event record must have the \
-             correct values",
-        );
-    })
-}
-
-fn before_140_0_0<'a>(ctx: &'a MigrationContext<'a>) -> BoxFuture<'a, ()> {
-    Box::pin(async {
-        // We'll mostly reuse the instances from previous migration tests, but
-        // give instance 4 a VMM in the `Stopped` state.
-        ctx.client
-            .batch_execute(&format!(
-                "INSERT INTO vmm (
-                    id,
-                    time_created,
-                    time_deleted,
-                    instance_id,
-                    time_state_updated,
-                    state_generation,
-                    sled_id,
-                    propolis_ip,
-                    propolis_port,
-                    state
-                ) VALUES (
-                    '{PROPOLIS2}',
-                    now(),
-                    NULL,
-                    '{INSTANCE4}',
-                    now(),
-                    1,
-                    '{SLED2}',
-                    'fd00:1122:3344:104::1',
-                    12400,
-                    'stopped'
-                );"
-            ))
-            .await
-            .expect("inserted VMM record");
-        ctx.client
-            .batch_execute(&format!(
-                "UPDATE instance
-                SET
-                    state = 'vmm',
-                    active_propolis_id = '{PROPOLIS2}'
-                WHERE id = '{INSTANCE4}';"
-            ))
-            .await
-            .expect("updated instance4 record");
-    })
-}
-
-fn after_140_0_0<'a>(ctx: &'a MigrationContext<'a>) -> BoxFuture<'a, ()> {
-    Box::pin(async {
-        let rows = ctx
-            .client
-            .query("SELECT id, intended_state FROM instance ORDER BY id", &[])
-            .await
-            .expect("failed to load instance auto-restart policies");
-        let records = process_rows(&rows);
-        let instances = records.into_iter().map(|row| {
-            slog::info!(&ctx.log, "instance record: {row:?}");
-            let [id_value, state_value] = &row.values[..] else {
-                panic!("row did not have two columns! {row:?}");
-            };
-            let Some(&AnySqlType::Uuid(id)) = id_value.expect("id") else {
-                panic!("id column must be non-null UUID, but found: {id_value:?}")
-            };
-            let AnySqlType::Enum(intended_state) = state_value
-                .expect("intended_state")
-                .expect("intended state must not be null")
-            else {
-                panic!("intended_state column must be an enum, but found: {state_value:?}");
-            };
-            (id, intended_state.clone())
-        }).collect::<std::collections::HashMap<_, _>>();
-
-        assert_eq!(
-            instances.get(&INSTANCE1),
-            Some(&SqlEnum::from(("instance_intended_state", "stopped"))),
-            "instance 1 ({INSTANCE1}): state='no_vmm'"
-        );
-        assert_eq!(
-            instances.get(&INSTANCE2),
-            Some(&SqlEnum::from(("instance_intended_state", "running"))),
-            "instance 2 ({INSTANCE2}): state='vmm', active_vmm='running'"
-        );
-        assert_eq!(
-            instances.get(&INSTANCE3),
-            Some(&SqlEnum::from(("instance_intended_state", "running"))),
-            "instance 3 ({INSTANCE3}): state='failed'"
-        );
-        assert_eq!(
-            instances.get(&INSTANCE4),
-            Some(&SqlEnum::from(("instance_intended_state", "stopped"))),
-            "instance 4 ({INSTANCE4}): state='vmm',active_vmm='stopped'"
-        );
-    })
-}
-
-fn before_145_0_0<'a>(ctx: &'a MigrationContext<'a>) -> BoxFuture<'a, ()> {
-    Box::pin(async move {
-        // Create one console_session without id, and one device_access_token without id.
-        ctx.client
-            .batch_execute(
-                "
-        INSERT INTO omicron.public.console_session
-          (token, time_created, time_last_used, silo_user_id)
-        VALUES
-          ('tok-console-145', now(), now(), gen_random_uuid());
-
-        INSERT INTO omicron.public.device_access_token
-          (token, client_id, device_code, silo_user_id, time_created, time_requested)
-        VALUES
-          ('tok-device-145', gen_random_uuid(), 'code-145', gen_random_uuid(), now(), now());
-        ",
-            )
-            .await
-            .expect("failed to insert pre-migration rows for 145");
-    })
-}
-
-fn after_145_0_0<'a>(ctx: &'a MigrationContext<'a>) -> BoxFuture<'a, ()> {
-    Box::pin(async move {
-        // After the migration each row should have a non-null id,
-        // keep its token, and enforce primary-key/unique index.
-
-        // console_session: check id ≠ NULL and token unchanged
-        let rows = ctx
-            .client
-            .query(
-                "SELECT id, token FROM omicron.public.console_session WHERE token = 'tok-console-145';",
-                &[],
-            )
-            .await
-            .expect("failed to query post-migration console_session");
-        assert_eq!(rows.len(), 1);
-
-        let id: Option<Uuid> = (&rows[0]).get("id");
-        assert!(id.is_some());
-
-        let token: &str = (&rows[0]).get("token");
-        assert_eq!(token, "tok-console-145");
-
-        // device_access_token: same checks
-        let rows = ctx
-            .client
-            .query(
-                "SELECT id, token FROM omicron.public.device_access_token WHERE token = 'tok-device-145';",
-                &[],
-            )
-            .await
-            .expect("failed to query post-migration device_access_token");
-        assert_eq!(rows.len(), 1);
-
-        let id: Option<Uuid> = (&rows[0]).get("id");
-        assert!(id.is_some());
-
-        let token: &str = (&rows[0]).get("token");
-        assert_eq!(token, "tok-device-145",);
-    })
-}
-
-const M2_DISK: &str = "db7d37d5-b32c-42cd-b871-598cf9d46782";
-const M2_ZPOOL: &str = "8117dbdb-0112-4c4e-ac41-500b8ab0aaf7";
-const U2_DISK: &str = "5d21f0d6-8af3-4d33-977d-63b2a79d6a58";
-const U2_ZPOOL: &str = "dc28856d-3896-4b3c-bd3d-33a770d49c92";
-
-// Insert two disks with a zpool on each: one m.2, one u.2
-fn before_148_0_0<'a>(ctx: &'a MigrationContext<'a>) -> BoxFuture<'a, ()> {
-    Box::pin(async move {
-        ctx.client
-            .batch_execute(
-                &format!("
-        INSERT INTO omicron.public.physical_disk
-          (id, time_created, time_modified, time_deleted, rcgen, vendor, serial, model, variant, sled_id, disk_policy, disk_state)
-        VALUES
-          (
-            '{M2_DISK}', now(), now(), NULL, 0, 'vend', 'serial-m2', 'model', 'm2', gen_random_uuid(), 'in_service', 'active'
-          ),
-          (
-            '{U2_DISK}', now(), now(), NULL, 0, 'vend', 'serial-u2', 'model', 'u2', gen_random_uuid(), 'in_service', 'active'
-          );
-
-        INSERT INTO omicron.public.zpool
-          (id, time_created, time_modified, time_deleted, rcgen, sled_id, physical_disk_id, control_plane_storage_buffer)
-        VALUES
-          ('{M2_ZPOOL}', now(), now(), NULL, 0, gen_random_uuid(), '{M2_DISK}', 0),
-          ('{U2_ZPOOL}', now(), now(), NULL, 0, gen_random_uuid(), '{U2_DISK}', 0)
-        "),
-            )
-            .await
-            .expect("failed to insert pre-migration rows for 148");
-    })
-}
-
-// Validate that the m.2 is gone, and the u.2 still exists
-fn after_148_0_0<'a>(ctx: &'a MigrationContext<'a>) -> BoxFuture<'a, ()> {
-    Box::pin(async move {
-        let rows = ctx
-            .client
-            .query("SELECT id FROM omicron.public.physical_disk;", &[])
-            .await
-            .expect("failed to query post-migration disks");
-        assert_eq!(rows.len(), 1);
-
-        let id: Uuid = (&rows[0]).get::<&str, Uuid>("id");
-        assert_eq!(id.to_string(), U2_DISK);
-
-        let rows = ctx
-            .client
-            .query("SELECT id FROM omicron.public.zpool;", &[])
-            .await
-            .expect("failed to query post-migration zpools");
-        assert_eq!(rows.len(), 1);
-
-        let id: Uuid = (&rows[0]).get::<&str, Uuid>("id");
-        assert_eq!(id.to_string(), U2_ZPOOL);
-    })
 }
 
 fn before_151_0_0<'a>(ctx: &'a MigrationContext<'a>) -> BoxFuture<'a, ()> {
@@ -2405,69 +871,6 @@ fn get_migration_checks() -> BTreeMap<Version, DataMigrationFns> {
     let mut map = BTreeMap::new();
 
     map.insert(
-        Version::new(23, 0, 0),
-        DataMigrationFns::new().before(before_23_0_0).after(after_23_0_0),
-    );
-    map.insert(
-        Version::new(24, 0, 0),
-        DataMigrationFns::new().before(before_24_0_0).after(after_24_0_0),
-    );
-    map.insert(
-        Version::new(37, 0, 1),
-        DataMigrationFns::new().after(after_37_0_1),
-    );
-    map.insert(
-        Version::new(70, 0, 0),
-        DataMigrationFns::new().before(before_70_0_0).after(after_70_0_0),
-    );
-    map.insert(
-        Version::new(95, 0, 0),
-        DataMigrationFns::new().before(before_95_0_0).after(after_95_0_0),
-    );
-    map.insert(
-        Version::new(101, 0, 0),
-        DataMigrationFns::new()
-            .before(before_101_0_0)
-            .after(after_101_0_0)
-            .at_current(at_current_101_0_0),
-    );
-    map.insert(
-        Version::new(107, 0, 0),
-        DataMigrationFns::new().before(before_107_0_0).after(after_107_0_0),
-    );
-    map.insert(
-        Version::new(124, 0, 0),
-        DataMigrationFns::new().before(before_124_0_0).after(after_124_0_0),
-    );
-    map.insert(
-        Version::new(125, 0, 0),
-        DataMigrationFns::new().before(before_125_0_0).after(after_125_0_0),
-    );
-    map.insert(
-        Version::new(133, 0, 0),
-        DataMigrationFns::new().before(before_133_0_0).after(after_133_0_0),
-    );
-    map.insert(
-        Version::new(134, 0, 0),
-        DataMigrationFns::new().before(before_134_0_0).after(after_134_0_0),
-    );
-    map.insert(
-        Version::new(139, 0, 0),
-        DataMigrationFns::new().after(after_139_0_0),
-    );
-    map.insert(
-        Version::new(140, 0, 0),
-        DataMigrationFns::new().before(before_140_0_0).after(after_140_0_0),
-    );
-    map.insert(
-        Version::new(145, 0, 0),
-        DataMigrationFns::new().before(before_145_0_0).after(after_145_0_0),
-    );
-    map.insert(
-        Version::new(148, 0, 0),
-        DataMigrationFns::new().before(before_148_0_0).after(after_148_0_0),
-    );
-    map.insert(
         Version::new(151, 0, 0),
         DataMigrationFns::new().before(before_151_0_0).after(after_151_0_0),
     );
@@ -2475,49 +878,117 @@ fn get_migration_checks() -> BTreeMap<Version, DataMigrationFns> {
     map
 }
 
-// Performs all schema changes and runs version-specific assertions.
-//
-// HOW TO ADD A MIGRATION CHECK:
-// - Add a new "map.insert" line to "get_migration_checks", with the semver of
-// the version you'd like to inspect before / after.
-// - Define your "before" (optional) and "after" (required) functions. These
-// act on a connection to CockroachDB, and can observe and mutate arbitrary
-// state.
-//
-// ADVICE FOR MIGRATION CHECKS:
-// - Your migration check will run in the same test as all other migration
-// checks, because performing schema migrations isn't that fast. If you
-// perform an operation that could be disruptive to subsequent checks, I
-// recommend cleaning up after yourself (e.g., DELETE relevant rows).
-// - I recommend using schema checks that are NOT strongly-typed. When you
-// add a migration check, it'll happen to match the "latest" static schemas
-// defined by Nexus, but that won't always be the case. As the schema
-// continues to change (maybe a table you're trying to check gets a new column
-// in a later version), your code should continue operating on the OLD version,
-// and as such, should avoid needing any updates.
-#[tokio::test]
-async fn validate_data_migration() {
+// Parse the dbinit-base.sql file to get starting version
+fn get_base_schema_version() -> Result<semver::Version, anyhow::Error> {
+    let base_file = std::path::Path::new(SCHEMA_DIR).join("dbinit-base.sql");
+    if !base_file.exists() {
+        anyhow::bail!(
+            "Base schema file not found: {:?}\nRun 'cargo xtask schema generate-base <tag>' to generate it.",
+            base_file
+        );
+    }
+
+    let content = std::fs::read_to_string(&base_file).with_context(|| {
+        format!("Failed to read base schema file: {:?}", base_file)
+    })?;
+
+    // Parse the base schema version from the header
+    for line in content.lines() {
+        if line.starts_with("-- Schema version:") {
+            let version_str = line
+                .strip_prefix("-- Schema version:")
+                .ok_or_else(|| {
+                    anyhow::anyhow!("Invalid schema version line format")
+                })?
+                .trim();
+            return semver::Version::parse(version_str).with_context(|| {
+                format!("Failed to parse base schema version: {}", version_str)
+            });
+        }
+    }
+    anyhow::bail!("Could not find schema version in base file header")
+}
+
+// Load the base dbinit.sql for migration testing
+async fn load_base_dbinit() -> Result<String, anyhow::Error> {
+    let base_file = std::path::Path::new(SCHEMA_DIR).join("dbinit-base.sql");
+    if !base_file.exists() {
+        anyhow::bail!(
+            "Base schema file not found: {:?}\nRun 'cargo xtask schema generate-base <tag>' to generate it.",
+            base_file
+        );
+    }
+
+    tokio::fs::read_to_string(&base_file).await.with_context(|| {
+        format!("Failed to read base dbinit.sql: {:?}", base_file)
+    })
+}
+
+struct MigrationTimingInfo {
+    entire_task: Duration,
+    schema_setup: Duration,
+    migration_times: Vec<(semver::Version, Duration)>,
+}
+
+// Test data migration from a starting schema version to a target version
+async fn validate_data_migration_from_version_to_target(
+    base_version: semver::Version,
+    target_version: semver::Version,
+) -> MigrationTimingInfo {
+    let start = Instant::now();
     let config = load_test_config();
-    let logctx = LogContext::new("validate_data_migration", &config.pkg.log);
+    let logctx = LogContext::new("validate_data_migrations", &config.pkg.log);
     let log = &logctx.log;
 
     let db = TestDatabase::new_populate_nothing(&logctx.log).await;
     let crdb = db.crdb();
-    let ctx = MigrationContext {
-        log,
-        client: crdb.connect().await.expect("Failed to access CRDB client"),
-        crdb,
-        pool_and_conn: Mutex::new(BTreeMap::new()),
-    };
+
+    let base_sql =
+        load_base_dbinit().await.expect("Failed to load base schema");
+
+    let client = crdb.connect().await.expect("Failed to access CRDB client");
+    client.batch_execute(&base_sql).await.expect("Failed to apply base schema");
+
+    // Verify we're at the expected base version
+    let actual_version = query_crdb_schema_version(&crdb).await;
+    assert_eq!(base_version.to_string(), actual_version);
+    let schema_setup = start.elapsed();
+
+    let ctx = MigrationContext { log, client };
 
     let all_versions = read_all_schema_versions();
-    let all_checks = get_migration_checks();
+    let mut all_checks = get_migration_checks();
 
-    // Go from the first version to the latest version.
-    for version in all_versions.iter_versions() {
+    // Find all versions from base_version to target_version (inclusive)
+    let base_nexus_version = Version::new(
+        base_version.major,
+        base_version.minor,
+        base_version.patch,
+    );
+    let target_nexus_version = Version::new(
+        target_version.major,
+        target_version.minor,
+        target_version.patch,
+    );
+
+    let versions_to_apply: Vec<_> = all_versions
+        .iter_versions()
+        .filter(|v| {
+            v.semver() > &base_nexus_version
+                && v.semver() <= &target_nexus_version
+        })
+        .collect();
+
+    // Time migration steps
+    let mut migration_times = Vec::new();
+
+    // Apply each migration step
+    for version in &versions_to_apply {
+        let migration_start = Instant::now();
+
         // If this check has preconditions (or setup), run them.
-        let checks = all_checks.get(version.semver());
-        if let Some(before) = checks.and_then(|check| check.before) {
+        let checks = all_checks.remove(version.semver());
+        if let Some(before) = checks.as_ref().and_then(|check| check.before) {
             before(&ctx).await;
         }
 
@@ -2531,22 +1002,84 @@ async fn validate_data_migration() {
         if let Some(after) = checks.and_then(|check| check.after) {
             after(&ctx).await;
         }
+
+        let migration_time = migration_start.elapsed();
+        migration_times.push((version.semver().clone(), migration_time));
     }
+
+    // Verify we reached the target version
     assert_eq!(
-        LATEST_SCHEMA_VERSION.to_string(),
+        target_version.to_string(),
         query_crdb_schema_version(&crdb).await
     );
 
-    // If any version changes want to query the system post-upgrade, they can.
-    for version in all_versions.iter_versions() {
-        let checks = all_checks.get(version.semver());
-        if let Some(at_current) = checks.and_then(|check| check.at_current) {
-            at_current(&ctx).await;
+    // Verify there weren't any checks we missed
+    if !all_checks.is_empty() {
+        for version in all_checks.keys() {
+            println!("  Did not test migrations upgrading to: {version}");
         }
+        panic!(
+            "Unused checks: must be greater than {base_version} and less than or equal to {target_version}"
+        );
     }
 
     db.terminate().await;
     logctx.cleanup_successful();
+
+    MigrationTimingInfo {
+        entire_task: start.elapsed(),
+        schema_setup,
+        migration_times,
+    }
+}
+
+// Performs all schema changes and runs version-specific assertions.
+//
+// HOW TO ADD A MIGRATION CHECK:
+// - Add a new "map.insert" line to "get_migration_checks", with the semver of the version you'd
+// like to inspect before / after.
+// - Define your "before" (optional) and "after" (required) functions. These act on a connection to
+// CockroachDB, and can observe and mutate arbitrary state.
+// - Migrations will start at the base schema from schema/crdb/dbinit-base.sql
+//
+// ADVICE FOR MIGRATION CHECKS:
+// - Your migration check will run in the same test as all other migration checks. If you perform
+// an operation that could be disruptive to subsequent checks, I recommend cleaning up after
+// yourself (e.g., DELETE relevant rows).
+// - I recommend using schema checks that are NOT strongly-typed. When you add a migration check,
+// it'll happen to match the "latest" static schemas defined by Nexus, but that won't always be the
+// case. As the schema continues to change (maybe a table you're trying to check gets a new column
+// in a later version), your code should continue operating on the OLD version, and as such, should
+// avoid needing any updates.
+#[tokio::test]
+async fn validate_data_migrations() {
+    let base_version =
+        get_base_schema_version().expect("Failed to get base schema version");
+    let latest_version = LATEST_SCHEMA_VERSION.clone();
+
+    println!("Starting migration test: {} → {}", base_version, latest_version);
+
+    let timing = validate_data_migration_from_version_to_target(
+        base_version.clone(),
+        latest_version.clone(),
+    )
+    .await;
+
+    println!("\nMigration test summary:");
+    println!(
+        "Range: {} -> {}: {:.2}s",
+        base_version,
+        latest_version,
+        timing.entire_task.as_secs_f64()
+    );
+    println!(
+        "  Apply dbinit @ {}: {:.2}s",
+        base_version,
+        timing.schema_setup.as_secs_f64()
+    );
+    for (version, duration) in &timing.migration_times {
+        println!("  Upgrade → {version}: {:.2}s", duration.as_secs_f64());
+    }
 }
 
 // Returns the InformationSchema object for a database populated via `sql`.
@@ -2813,5 +1346,87 @@ async fn compare_table_differing_not_null_order() {
     .await;
 
     schema1.pretty_assert_eq(&schema2);
+    logctx.cleanup_successful();
+}
+
+#[tokio::test]
+async fn validate_migration_from_base_version() {
+    let config = load_test_config();
+    let logctx = LogContext::new(
+        "validate_migration_from_last_version",
+        &config.pkg.log,
+    );
+    let log = &logctx.log;
+
+    let base_version_semver =
+        get_base_schema_version().expect("Cannot read base schema version");
+    let base_version = KNOWN_VERSIONS
+        .iter()
+        .find(|v| *v.semver() == base_version_semver)
+        .expect("Base schema version not  in KNOWN_VERSIONS");
+
+    assert_ne!(base_version_semver, LATEST_SCHEMA_VERSION);
+
+    println!(
+        "Testing migration from base version {} to current version {}",
+        base_version, LATEST_SCHEMA_VERSION
+    );
+
+    // Create a new database and apply the historical dbinit.sql
+    let db = new_base_database(&logctx.log).await;
+    let crdb = db.crdb();
+
+    // Verify we're at the expected schema version
+    let current_version = query_crdb_schema_version(&crdb).await;
+    assert_eq!(base_version.to_string(), current_version);
+
+    // Load all schema versions and apply migrations from base_version to latest
+    let all_versions = read_all_schema_versions();
+    let migrations_to_apply: Vec<_> = all_versions
+        .versions_range((
+            std::ops::Bound::Excluded(base_version_semver.clone()),
+            std::ops::Bound::Unbounded,
+        ))
+        .collect();
+
+    // Apply each migration
+    for version in migrations_to_apply {
+        apply_update(log, &crdb, version, 1).await;
+        assert_eq!(
+            version.semver().to_string(),
+            query_crdb_schema_version(&crdb).await
+        );
+    }
+
+    // Verify we're now at the latest version
+    assert_eq!(
+        LATEST_SCHEMA_VERSION.to_string(),
+        query_crdb_schema_version(&crdb).await
+    );
+
+    // Query the schema from our migrated database
+    let migrated_schema = InformationSchema::new(&crdb).await;
+    let migrated_data = migrated_schema.query_all_tables(log, &crdb).await;
+
+    db.terminate().await;
+
+    // Create a fresh database with current dbinit.sql for comparison
+    let fresh_db = TestDatabase::new_populate_schema_only(&logctx.log).await;
+    let fresh_crdb = fresh_db.crdb();
+    let expected_schema = InformationSchema::new(&fresh_crdb).await;
+    let expected_data =
+        expected_schema.query_all_tables(log, &fresh_crdb).await;
+
+    // Compare the schemas and data
+    migrated_schema.pretty_assert_eq(&expected_schema);
+    assert_eq!(
+        migrated_data, expected_data,
+        "Data mismatch when migrating from version {}",
+        base_version
+    );
+
+    fresh_db.terminate().await;
+    println!("Successfully validated migration from version {}", base_version);
+
     logctx.cleanup_successful();
 }

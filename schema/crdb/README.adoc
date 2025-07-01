@@ -108,12 +108,22 @@ There are automated tests to validate many of these steps:
   must be sequential major numbers with minor and micro both being `0`.  (This
   catches various mismerge errors: accidentally duplicating a version, putting
   versions in the wrong order, etc.)
-* The combination of all `up*.sql` files results in the same schema as
+* The combination of the most recent `up*.sql` files results in the same schema as
   `dbinit.sql`.  (This catches forgetting to update dbinit.sql, forgetting to
   implement a schema update altogether, or a mismatch between dbinit.sql and
   the update.)
-* All `up*.sql` files can be applied twice without error.  (This catches
+* The most recent `up*.sql` files can be applied twice without error.  (This catches
   non-idempotent update steps.)
+
+We currently support schema migrations from one release of Omicron to the next.
+We track what this "oldest known release" version of the database looks like
+within `schema/crdb/dbinit-base.sql`. This file may be regenerated
+using `cargo xtask schema generate-base`, supplying either the commit or tag
+to identify as the new "oldest supported schema version".
+
+We recommend updating this base file after each release.
+The command `cargo xtask schema old-migrations` can be used to help clean up
+old schema versions.
 
 **If you've finished all this and another PR lands on "main" that chose the
 same `NEW_VERSION`:**, then your `OLD_VERSION` has changed and so _your_
