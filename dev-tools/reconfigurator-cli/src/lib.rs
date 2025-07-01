@@ -5,7 +5,7 @@
 //! developer REPL for driving blueprint planning
 
 use anyhow::{Context, anyhow, bail};
-use camino::Utf8PathBuf;
+use camino::{Utf8Path, Utf8PathBuf};
 use clap::ValueEnum;
 use clap::{Args, Parser, Subcommand};
 use iddqd::IdOrdMap;
@@ -19,10 +19,12 @@ use nexus_reconfigurator_blippy::BlippyReportSortKey;
 use nexus_reconfigurator_planning::blueprint_builder::BlueprintBuilder;
 use nexus_reconfigurator_planning::example::ExampleSystemBuilder;
 use nexus_reconfigurator_planning::planner::Planner;
-use nexus_reconfigurator_planning::system::{SledBuilder, SystemDescription};
-use nexus_reconfigurator_simulation::SimStateBuilder;
-use nexus_reconfigurator_simulation::Simulator;
+use nexus_reconfigurator_planning::system::{
+    SledBuilder, SledInventoryVisibility, SystemDescription,
+};
 use nexus_reconfigurator_simulation::{BlueprintId, SimState};
+use nexus_reconfigurator_simulation::{SimStateBuilder, SimTufRepoSource};
+use nexus_reconfigurator_simulation::{SimTufRepoDescription, Simulator};
 use nexus_types::deployment::PlanningInput;
 use nexus_types::deployment::SledFilter;
 use nexus_types::deployment::execution;
@@ -38,18 +40,19 @@ use nexus_types::deployment::{OmicronZoneNic, TargetReleaseDescription};
 use nexus_types::external_api::views::SledPolicy;
 use nexus_types::external_api::views::SledProvisionPolicy;
 use omicron_common::address::REPO_DEPOT_PORT;
-use omicron_common::api::external::Generation;
 use omicron_common::api::external::Name;
+use omicron_common::api::external::{Generation, TufRepoDescription};
 use omicron_common::policy::NEXUS_REDUNDANCY;
+use omicron_common::update::OmicronZoneManifestSource;
 use omicron_repl_utils::run_repl_from_file;
 use omicron_repl_utils::run_repl_on_stdin;
-use omicron_uuid_kinds::CollectionUuid;
 use omicron_uuid_kinds::GenericUuid;
 use omicron_uuid_kinds::OmicronZoneUuid;
 use omicron_uuid_kinds::ReconfiguratorSimUuid;
 use omicron_uuid_kinds::SledUuid;
 use omicron_uuid_kinds::VnicUuid;
 use omicron_uuid_kinds::{BlueprintUuid, MupdateOverrideUuid};
+use omicron_uuid_kinds::{CollectionUuid, MupdateUuid};
 use std::borrow::Cow;
 use std::convert::Infallible;
 use std::fmt::{self, Write};
@@ -218,7 +221,10 @@ fn process_command(
         Commands::SledAdd(args) => cmd_sled_add(sim, args),
         Commands::SledRemove(args) => cmd_sled_remove(sim, args),
         Commands::SledShow(args) => cmd_sled_show(sim, args),
-        Commands::SledSetPolicy(args) => cmd_sled_set_policy(sim, args),
+        Commands::SledSet(args) => cmd_sled_set(sim, args),
+        Commands::SledUpdateInstallDataset(args) => {
+            cmd_sled_update_install_dataset(sim, args)
+        }
         Commands::SledUpdateSp(args) => cmd_sled_update_sp(sim, args),
         Commands::SiloList => cmd_silo_list(sim),
         Commands::SiloAdd(args) => cmd_silo_add(sim, args),
@@ -272,8 +278,10 @@ enum Commands {
     SledRemove(SledRemoveArgs),
     /// show details about one sled
     SledShow(SledArgs),
-    /// set a sled's policy
-    SledSetPolicy(SledSetPolicyArgs),
+    /// set a value on a sled
+    SledSet(SledSetArgs),
+    /// update the install dataset on a sled, simulating a mupdate
+    SledUpdateInstallDataset(SledUpdateInstallDatasetArgs),
     /// simulate updating the sled's SP versions
     SledUpdateSp(SledUpdateSpArgs),
 
@@ -354,13 +362,49 @@ struct SledArgs {
 }
 
 #[derive(Debug, Args)]
-struct SledSetPolicyArgs {
+struct SledSetArgs {
     /// id of the sled
     sled_id: SledOpt,
 
-    /// The policy to set for the sled
+    /// the command to set on the sled
+    #[clap(subcommand)]
+    command: SledSetCommand,
+}
+
+#[derive(Debug, Subcommand)]
+enum SledSetCommand {
+    /// set the policy for this sled
+    Policy(SledSetPolicyArgs),
+    #[clap(flatten)]
+    Visibility(SledSetVisibilityCommand),
+}
+
+#[derive(Debug, Args)]
+struct SledSetPolicyArgs {
+    /// the policy to set
     #[clap(value_enum)]
     policy: SledPolicyOpt,
+}
+
+#[derive(Debug, Subcommand)]
+enum SledSetVisibilityCommand {
+    /// mark a sled hidden from inventory
+    InventoryHidden,
+    /// mark a sled visible in inventory
+    InventoryVisible,
+}
+
+impl SledSetVisibilityCommand {
+    fn to_visibility(&self) -> SledInventoryVisibility {
+        match self {
+            SledSetVisibilityCommand::InventoryHidden => {
+                SledInventoryVisibility::Hidden
+            }
+            SledSetVisibilityCommand::InventoryVisible => {
+                SledInventoryVisibility::Visible
+            }
+        }
+    }
 }
 
 #[derive(Clone, Copy, Debug, ValueEnum)]
@@ -392,6 +436,46 @@ impl From<SledPolicyOpt> for SledPolicy {
             SledPolicyOpt::Expunged => SledPolicy::Expunged,
         }
     }
+}
+
+#[derive(Debug, Args)]
+struct SledUpdateInstallDatasetArgs {
+    /// id of the sled
+    sled_id: SledOpt,
+
+    #[clap(flatten)]
+    source: SledMupdateSource,
+}
+
+#[derive(Debug, Args)]
+// This makes it so that only one source can be specified.
+struct SledMupdateSource {
+    #[clap(flatten)]
+    valid: SledMupdateValidSource,
+
+    /// set the mupdate source to Installinator with the given ID
+    #[clap(long, requires = "sled-mupdate-valid-source")]
+    mupdate_id: Option<MupdateUuid>,
+
+    /// simulate an error reading the zone manifest
+    #[clap(long, conflicts_with = "sled-mupdate-valid-source")]
+    with_manifest_error: bool,
+
+    /// simulate an error validating zones by this artifact name
+    #[clap(long, requires = "sled-mupdate-valid-source")]
+    with_zone_error: Vec<String>,
+}
+
+#[derive(Debug, Args)]
+#[group(id = "sled-mupdate-valid-source", multiple = false)]
+struct SledMupdateValidSource {
+    /// the TUF repo.zip to simulate the mupdate from
+    #[clap(long)]
+    from_repo: Option<Utf8PathBuf>,
+
+    /// simulate a mupdate to the target release
+    #[clap(long)]
+    to_target_release: bool,
 }
 
 #[derive(Debug, Args)]
@@ -807,6 +891,10 @@ struct TufAssembleArgs {
     /// The tufaceous manifest path (relative to this crate's root)
     manifest_path: Utf8PathBuf,
 
+    /// Allow non-semver artifact versions.
+    #[clap(long)]
+    allow_non_semver: bool,
+
     #[clap(
         long,
         // Use help here rather than a doc comment because rustdoc doesn't like
@@ -1066,22 +1154,77 @@ fn cmd_sled_show(
     Ok(Some(s))
 }
 
-fn cmd_sled_set_policy(
+fn cmd_sled_set(
     sim: &mut ReconfiguratorSim,
-    args: SledSetPolicyArgs,
+    args: SledSetArgs,
 ) -> anyhow::Result<Option<String>> {
     let mut state = sim.current_state().to_mut();
     let system = state.system_mut();
     let sled_id = args.sled_id.to_sled_id(system.description())?;
-    system.description_mut().sled_set_policy(sled_id, args.policy.into())?;
+
+    match args.command {
+        SledSetCommand::Policy(SledSetPolicyArgs { policy }) => {
+            system.description_mut().sled_set_policy(sled_id, policy.into())?;
+            sim.commit_and_bump(
+                format!(
+                    "reconfigurator-cli sled-set policy: {} to {}",
+                    sled_id, policy
+                ),
+                state,
+            );
+            Ok(Some(format!("set sled {sled_id} policy to {policy}")))
+        }
+        SledSetCommand::Visibility(command) => {
+            let new = command.to_visibility();
+            let prev = system
+                .description_mut()
+                .sled_set_inventory_visibility(sled_id, new)?;
+            if prev == new {
+                Ok(Some(format!(
+                    "sled {sled_id} inventory visibility was already set to \
+                     {new}, so no changes were performed",
+                )))
+            } else {
+                sim.commit_and_bump(
+                    format!(
+                        "reconfigurator-cli sled-set inventory visibility: {} \
+                         from {} to {}",
+                        sled_id, prev, new,
+                    ),
+                    state,
+                );
+                Ok(Some(format!(
+                    "set sled {sled_id} inventory visibility: {prev} -> {new}"
+                )))
+            }
+        }
+    }
+}
+
+fn cmd_sled_update_install_dataset(
+    sim: &mut ReconfiguratorSim,
+    args: SledUpdateInstallDatasetArgs,
+) -> anyhow::Result<Option<String>> {
+    let description = mupdate_source_to_description(sim, &args.source)?;
+
+    let mut state = sim.current_state().to_mut();
+    let system = state.system_mut();
+    let sled_id = args.sled_id.to_sled_id(system.description())?;
+    system
+        .description_mut()
+        .sled_set_zone_manifest(sled_id, description.to_boot_inventory())?;
+
     sim.commit_and_bump(
         format!(
-            "reconfigurator-cli sled-set-policy: {} to {}",
-            sled_id, args.policy,
+            "reconfigurator-cli sled-update-install-dataset: {}",
+            description.message,
         ),
         state,
     );
-    Ok(Some(format!("set sled {} policy to {}", sled_id, args.policy)))
+    Ok(Some(format!(
+        "sled {}: install dataset updated: {}",
+        sled_id, description.message
+    )))
 }
 
 fn cmd_sled_update_sp(
@@ -1873,26 +2016,8 @@ fn cmd_set(
             rv
         }
         SetArgs::TargetRelease { filename } => {
-            let file = std::fs::File::open(&filename)
-                .with_context(|| format!("open {:?}", filename))?;
-            let buf = std::io::BufReader::new(file);
-            let rt = tokio::runtime::Runtime::new()
-                .context("creating tokio runtime")?;
-            // We're not using the repo hash here.  Make one up.
-            let repo_hash = ArtifactHash([0; 32]);
-            let artifacts_with_plan = rt.block_on(async {
-                ArtifactsWithPlan::from_zip(
-                    buf,
-                    None,
-                    repo_hash,
-                    ControlPlaneZonesMode::Split,
-                    &sim.log,
-                )
-                .await
-                .with_context(|| format!("unpacking {:?}", filename))
-            })?;
-            let description = artifacts_with_plan.description().clone();
-            drop(artifacts_with_plan);
+            let description =
+                extract_tuf_repo_description(&sim.log, &filename)?;
             state.system_mut().description_mut().set_target_release(
                 TargetReleaseDescription::TufRepo(description),
             );
@@ -1902,6 +2027,84 @@ fn cmd_set(
 
     sim.commit_and_bump(format!("reconfigurator-cli set: {}", rv), state);
     Ok(Some(rv))
+}
+
+/// Converts a mupdate source to a TUF repo description.
+fn mupdate_source_to_description(
+    sim: &ReconfiguratorSim,
+    source: &SledMupdateSource,
+) -> anyhow::Result<SimTufRepoDescription> {
+    let manifest_source = match source.mupdate_id {
+        Some(mupdate_id) => {
+            OmicronZoneManifestSource::Installinator { mupdate_id }
+        }
+        None => OmicronZoneManifestSource::SledAgent,
+    };
+    if let Some(repo_path) = &source.valid.from_repo {
+        let description = extract_tuf_repo_description(&sim.log, repo_path)?;
+        let mut sim_source = SimTufRepoSource::new(
+            description,
+            manifest_source,
+            format!("from repo at {repo_path}"),
+        );
+        sim_source.simulate_zone_errors(&source.with_zone_error)?;
+        Ok(SimTufRepoDescription::new(sim_source))
+    } else if source.valid.to_target_release {
+        let description = sim
+            .current_state()
+            .system()
+            .description()
+            .target_release()
+            .description();
+        match description {
+            TargetReleaseDescription::Initial => {
+                bail!(
+                    "cannot mupdate zones without a target release \
+                     (use `set target-release` or --from-repo)"
+                )
+            }
+            TargetReleaseDescription::TufRepo(desc) => {
+                let mut sim_source = SimTufRepoSource::new(
+                    desc.clone(),
+                    manifest_source,
+                    "to target release".to_owned(),
+                );
+                sim_source.simulate_zone_errors(&source.with_zone_error)?;
+                Ok(SimTufRepoDescription::new(sim_source))
+            }
+        }
+    } else if source.with_manifest_error {
+        Ok(SimTufRepoDescription::new_error(
+            "simulated error obtaining zone manifest".to_owned(),
+        ))
+    } else {
+        bail!("an update source must be specified")
+    }
+}
+
+fn extract_tuf_repo_description(
+    log: &slog::Logger,
+    filename: &Utf8Path,
+) -> anyhow::Result<TufRepoDescription> {
+    let file = std::fs::File::open(filename)
+        .with_context(|| format!("open {:?}", filename))?;
+    let buf = std::io::BufReader::new(file);
+    let rt =
+        tokio::runtime::Runtime::new().context("creating tokio runtime")?;
+    let repo_hash = ArtifactHash([0; 32]);
+    let artifacts_with_plan = rt.block_on(async {
+        ArtifactsWithPlan::from_zip(
+            buf,
+            None,
+            repo_hash,
+            ControlPlaneZonesMode::Split,
+            log,
+        )
+        .await
+        .with_context(|| format!("unpacking {:?}", filename))
+    })?;
+    let description = artifacts_with_plan.description().clone();
+    Ok(description)
 }
 
 fn cmd_tuf_assemble(
@@ -1937,15 +2140,19 @@ fn cmd_tuf_assemble(
     // Just use a fixed key for now.
     //
     // In the future we may want to test changing the TUF key.
-    let args = tufaceous::Args::try_parse_from([
+    let mut tufaceous_args = vec![
         "tufaceous",
         "--key",
         DEFAULT_TUFACEOUS_KEY,
         "assemble",
         manifest_path.as_str(),
         output_path.as_str(),
-    ])
-    .expect("args are valid so this shouldn't fail");
+    ];
+    if args.allow_non_semver {
+        tufaceous_args.push("--allow-non-semver");
+    }
+    let args = tufaceous::Args::try_parse_from(tufaceous_args)
+        .expect("args are valid so this shouldn't fail");
     let rt =
         tokio::runtime::Runtime::new().context("creating tokio runtime")?;
     rt.block_on(async move { args.exec(&sim.log).await })
