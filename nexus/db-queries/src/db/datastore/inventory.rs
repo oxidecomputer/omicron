@@ -3281,7 +3281,8 @@ impl DataStore {
                 // If we have no record of Cockroach Status, make a default one.
                 //
                 // This provides backwards compatibility for collections without
-                // CockroachDB statuses.
+                // CockroachDB statuses, and also helps cope with cases where
+                // metrics could not be collected.
                 nexus_types::inventory::CockroachStatus::default()
             }
         };
