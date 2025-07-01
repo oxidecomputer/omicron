@@ -16,7 +16,7 @@ configured silo names: example-silo
 internal DNS generations: 1
 external DNS generations: 1
 target number of Nexus instances: default
-target release: unset
+target release (generation 1): unset
 
 
 

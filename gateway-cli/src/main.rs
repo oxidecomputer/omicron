@@ -366,8 +366,11 @@ impl Dumper {
     }
 }
 
-#[tokio::main]
-async fn main() -> Result<()> {
+fn main() -> Result<()> {
+    oxide_tokio_rt::run(main_impl())
+}
+
+async fn main_impl() -> Result<()> {
     let args = Args::parse();
     let decorator = slog_term::TermDecorator::new().build();
     let drain = slog_term::FullFormat::new(decorator)

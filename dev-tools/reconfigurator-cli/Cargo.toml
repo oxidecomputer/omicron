@@ -18,6 +18,7 @@ chrono.workspace = true
 clap.workspace = true
 colored.workspace = true
 humantime.workspace = true
+iddqd.workspace = true
 indent_write.workspace = true
 internal-dns-types.workspace = true
 itertools.workspace = true
@@ -41,7 +42,10 @@ slog.workspace = true
 swrite.workspace = true
 tabled.workspace = true
 tokio.workspace = true
+toml.workspace = true
+tufaceous.workspace = true
 tufaceous-artifact.workspace = true
+tufaceous-lib.workspace = true
 update-common.workspace = true
 uuid.workspace = true
 omicron-workspace-hack.workspace = true
@@ -58,7 +62,6 @@ omicron-test-utils.workspace = true
 serde.workspace = true
 subprocess.workspace = true
 tokio.workspace = true
-tufaceous.workspace = true
 
 # Disable doc builds by default for our binaries to work around issue
 # rust-lang/cargo#8373.  These docs would not be very useful anyway.

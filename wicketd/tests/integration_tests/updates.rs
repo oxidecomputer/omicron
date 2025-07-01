@@ -24,9 +24,8 @@ use omicron_uuid_kinds::{InternalZpoolUuid, MupdateUuid};
 use sled_agent_config_reconciler::{
     InternalDisksReceiver, InternalDisksWithBootDisk,
 };
-use sled_agent_zone_images::{
-    MupdateOverrideNonBootResult, ZoneImageSourceResolver,
-};
+use sled_agent_types::zone_images::MupdateOverrideNonBootResult;
+use sled_agent_zone_images::ZoneImageSourceResolver;
 use sled_storage::config::MountConfig;
 use tokio::sync::oneshot;
 use tufaceous_artifact::{ArtifactHashId, ArtifactKind, KnownArtifactKind};

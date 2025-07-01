@@ -6,6 +6,7 @@
 //! blueprints.
 
 use super::AddNetworkResourceError;
+use super::BlueprintZoneImageSource;
 use super::OmicronZoneExternalIp;
 use super::OmicronZoneNetworkResources;
 use super::OmicronZoneNic;
@@ -20,6 +21,7 @@ use chrono::Utc;
 use clap::ValueEnum;
 use daft::Diffable;
 use ipnetwork::IpNetwork;
+use nexus_sled_agent_shared::inventory::ZoneKind;
 use omicron_common::address::IpRange;
 use omicron_common::address::Ipv6Subnet;
 use omicron_common::address::SLED_PREFIX;
@@ -28,6 +30,7 @@ use omicron_common::api::external::TufRepoDescription;
 use omicron_common::api::internal::shared::SourceNatConfigError;
 use omicron_common::disk::DiskIdentity;
 use omicron_common::policy::SINGLE_NODE_CLICKHOUSE_REDUNDANCY;
+use omicron_common::update::ArtifactId;
 use omicron_uuid_kinds::OmicronZoneUuid;
 use omicron_uuid_kinds::PhysicalDiskUuid;
 use omicron_uuid_kinds::SledUuid;
@@ -154,12 +157,12 @@ impl PlanningInput {
             .unwrap_or(0)
     }
 
-    pub fn tuf_repo(&self) -> Option<&TufRepoDescription> {
-        self.policy.tuf_repo.as_ref()
+    pub fn tuf_repo(&self) -> &TufRepoPolicy {
+        &self.policy.tuf_repo
     }
 
-    pub fn old_repo(&self) -> Option<&TufRepoDescription> {
-        self.policy.old_repo.as_ref()
+    pub fn old_repo(&self) -> &TufRepoPolicy {
+        &self.policy.old_repo
     }
 
     pub fn service_ip_pool_ranges(&self) -> &[IpRange] {
@@ -942,13 +945,21 @@ pub struct Policy {
     /// New zones may use artifacts in this repo as their image sources,
     /// and at most one extant zone may be modified to use it or replaced
     /// with one that does.
-    pub tuf_repo: Option<TufRepoDescription>,
+    pub tuf_repo: TufRepoPolicy,
 
     /// Previous system software release repository.
     ///
+    /// On initial system deployment, both `tuf_repo` and `old_repo` will be set
+    /// to `TufRepoPolicy::initial()` (the special TUF repo policy for "we don't
+    /// have a TUF repo yet"). After one target release has been set, `tuf_repo`
+    /// will reflect that target release and `old_repo` will still be
+    /// `TufRepoPolicy::initial()`. Once two or more target releases have been
+    /// set, `old_repo` will contain "the previous target release" behind
+    /// whatever value is in `tuf_repo`.
+    ///
     /// New zones deployed mid-update may use artifacts in this repo as
     /// their image sources. See RFD 565 §9.
-    pub old_repo: Option<TufRepoDescription>,
+    pub old_repo: TufRepoPolicy,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
@@ -968,6 +979,99 @@ impl OximeterReadPolicy {
             time_created: Utc::now(),
         }
     }
+}
+
+/// TUF repo-related policy that's part of the planning input.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct TufRepoPolicy {
+    /// The generation of the target release for the TUF repo.
+    pub target_release_generation: Generation,
+
+    /// A description of the target release.
+    pub description: TargetReleaseDescription,
+}
+
+impl TufRepoPolicy {
+    /// Returns the initial TUF repo policy for an Oxide deployment:
+    ///
+    /// * The target release generation is 1.
+    /// * There is no target release.
+    #[inline]
+    pub fn initial() -> Self {
+        Self {
+            target_release_generation: Generation::new(),
+            description: TargetReleaseDescription::Initial,
+        }
+    }
+
+    #[inline]
+    pub fn description(&self) -> &TargetReleaseDescription {
+        &self.description
+    }
+}
+
+/// Source of artifacts for a given target release.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub enum TargetReleaseDescription {
+    /// The initial release source for an Oxide deployment, before any TUF repo
+    /// has been provided for upgrades.
+    Initial,
+
+    /// A TUF repo: this is the target release once an Oxide deployment has
+    /// undergone operator-driven updates.
+    TufRepo(TufRepoDescription),
+}
+
+impl TargetReleaseDescription {
+    pub fn tuf_repo(&self) -> Option<&TufRepoDescription> {
+        match self {
+            Self::Initial => None,
+            Self::TufRepo(tuf_repo) => Some(tuf_repo),
+        }
+    }
+
+    pub fn zone_image_source(
+        &self,
+        zone_kind: ZoneKind,
+    ) -> Result<BlueprintZoneImageSource, TufRepoContentsError> {
+        match self {
+            Self::Initial => Ok(BlueprintZoneImageSource::InstallDataset),
+            Self::TufRepo(tuf_repo) => {
+                // We should have exactly one artifact for a given zone kind in
+                // every TUF repo; return an error if we have 0 or more than 1.
+                let mut matching_artifacts =
+                    tuf_repo.artifacts.iter().filter(|artifact| {
+                        zone_kind.is_control_plane_zone_artifact(&artifact.id)
+                    });
+                let artifact = matching_artifacts
+                    .next()
+                    .ok_or(TufRepoContentsError::MissingZoneKind(zone_kind))?;
+                if let Some(extra_artifact) = matching_artifacts.next() {
+                    return Err(
+                        TufRepoContentsError::MultipleArtifactsSameZoneKind {
+                            artifact1: artifact.id.clone(),
+                            artifact2: extra_artifact.id.clone(),
+                        },
+                    );
+                }
+                Ok(BlueprintZoneImageSource::from_available_artifact(artifact))
+            }
+        }
+    }
+}
+
+#[derive(Debug, thiserror::Error)]
+pub enum TufRepoContentsError {
+    #[error("TUF repo is missing an artifact for zone kind {0:?}")]
+    MissingZoneKind(ZoneKind),
+    #[error(
+        "TUF repo contains 2 or more artifacts for the same zone kind: \
+         {artifact1:?}, {artifact2:?}"
+    )]
+    MultipleArtifactsSameZoneKind {
+        artifact1: ArtifactId,
+        artifact2: ArtifactId,
+    },
 }
 
 /// Where oximeter should read from
@@ -1120,8 +1224,8 @@ impl PlanningInputBuilder {
                 target_crucible_pantry_zone_count: 0,
                 clickhouse_policy: None,
                 oximeter_read_policy: OximeterReadPolicy::new(1),
-                tuf_repo: None,
-                old_repo: None,
+                tuf_repo: TufRepoPolicy::initial(),
+                old_repo: TufRepoPolicy::initial(),
             },
             internal_dns_version: Generation::new(),
             external_dns_version: Generation::new(),

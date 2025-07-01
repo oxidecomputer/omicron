@@ -30,6 +30,8 @@ use nexus_types::deployment::SledDetails;
 use nexus_types::deployment::SledDisk;
 use nexus_types::deployment::SledFilter;
 use nexus_types::deployment::SledResources;
+use nexus_types::deployment::TargetReleaseDescription;
+use nexus_types::deployment::TufRepoPolicy;
 use nexus_types::deployment::UnstableReconfiguratorState;
 use nexus_types::identity::Asset;
 use nexus_types::identity::Resource;
@@ -41,7 +43,6 @@ use omicron_common::address::SLED_PREFIX;
 use omicron_common::api::external::Error;
 use omicron_common::api::external::InternalContext;
 use omicron_common::api::external::LookupType;
-use omicron_common::api::external::TufRepoDescription;
 use omicron_common::disk::DiskIdentity;
 use omicron_common::policy::BOUNDARY_NTP_REDUNDANCY;
 use omicron_common::policy::COCKROACHDB_REDUNDANCY;
@@ -81,8 +82,8 @@ pub struct PlanningInputFromDb<'a> {
     pub cockroachdb_settings: &'a CockroachDbSettings,
     pub clickhouse_policy: Option<ClickhousePolicy>,
     pub oximeter_read_policy: OximeterReadPolicy,
-    pub tuf_repo: Option<TufRepoDescription>,
-    pub old_repo: Option<TufRepoDescription>,
+    pub tuf_repo: TufRepoPolicy,
+    pub old_repo: TufRepoPolicy,
     pub log: &'a Logger,
 }
 
@@ -153,9 +154,9 @@ impl PlanningInputFromDb<'_> {
             .target_release_get_current(opctx)
             .await
             .internal_context("fetching current target release")?;
-        let tuf_repo = match target_release.tuf_repo_id {
-            None => None,
-            Some(repo_id) => Some(
+        let target_release_desc = match target_release.tuf_repo_id {
+            None => TargetReleaseDescription::Initial,
+            Some(repo_id) => TargetReleaseDescription::TufRepo(
                 datastore
                     .tuf_repo_get_by_id(opctx, repo_id.into())
                     .await
@@ -163,24 +164,42 @@ impl PlanningInputFromDb<'_> {
                     .into_external(),
             ),
         };
-        let prev_release = if let Some(prev) = target_release.generation.prev()
-        {
-            datastore
+        let tuf_repo = TufRepoPolicy {
+            target_release_generation: target_release.generation.0,
+            description: target_release_desc,
+        };
+        // NOTE: We currently assume that only two generations are in play: the
+        // target release generation and its previous one. This depends on us
+        // not setting a new target release in the middle of an update: see
+        // https://github.com/oxidecomputer/omicron/issues/8056.
+        //
+        // We may need to revisit this decision in the future. See that issue
+        // for some discussion.
+        let old_repo = if let Some(prev) = target_release.generation.prev() {
+            let prev_release = datastore
                 .target_release_get_generation(opctx, Generation(prev))
                 .await
-                .internal_context("fetching current target release")?
+                .internal_context("fetching previous target release")?;
+            let description = if let Some(prev_release) = prev_release {
+                if let Some(repo_id) = prev_release.tuf_repo_id {
+                    TargetReleaseDescription::TufRepo(
+                        datastore
+                            .tuf_repo_get_by_id(opctx, repo_id.into())
+                            .await
+                            .internal_context(
+                                "fetching previous target release repo",
+                            )?
+                            .into_external(),
+                    )
+                } else {
+                    TargetReleaseDescription::Initial
+                }
+            } else {
+                TargetReleaseDescription::Initial
+            };
+            TufRepoPolicy { target_release_generation: prev, description }
         } else {
-            None
-        };
-        let old_repo = match prev_release.and_then(|r| r.tuf_repo_id) {
-            None => None,
-            Some(repo_id) => Some(
-                datastore
-                    .tuf_repo_get_by_id(opctx, repo_id.into())
-                    .await
-                    .internal_context("fetching target release repo")?
-                    .into_external(),
-            ),
+            TufRepoPolicy::initial()
         };
 
         let oximeter_read_policy = datastore

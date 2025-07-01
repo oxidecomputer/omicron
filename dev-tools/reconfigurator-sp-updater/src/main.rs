@@ -37,11 +37,10 @@ use tokio::sync::watch;
 use tufaceous_artifact::ArtifactHash;
 use tufaceous_artifact::ArtifactVersion;
 
-#[tokio::main]
-async fn main() -> Result<(), anyhow::Error> {
+fn main() -> Result<(), anyhow::Error> {
     let args = ReconfiguratorSpUpdater::parse();
 
-    if let Err(error) = args.exec().await {
+    if let Err(error) = oxide_tokio_rt::run(args.exec()) {
         eprintln!("error: {:#}", error);
         std::process::exit(1);
     }

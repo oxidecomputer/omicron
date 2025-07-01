@@ -45,6 +45,8 @@ use nexus_types::deployment::PendingMgsUpdates;
 use nexus_types::deployment::PlanningInput;
 use nexus_types::deployment::SledFilter;
 use nexus_types::deployment::SledResources;
+use nexus_types::deployment::TargetReleaseDescription;
+use nexus_types::deployment::TufRepoContentsError;
 use nexus_types::deployment::ZpoolFilter;
 use nexus_types::deployment::ZpoolName;
 use nexus_types::deployment::blueprint_zone_type;
@@ -56,7 +58,6 @@ use omicron_common::address::DNS_PORT;
 use omicron_common::address::NTP_PORT;
 use omicron_common::address::ReservedRackSubnet;
 use omicron_common::api::external::Generation;
-use omicron_common::api::external::TufRepoDescription;
 use omicron_common::api::external::Vni;
 use omicron_common::api::internal::shared::NetworkInterface;
 use omicron_common::api::internal::shared::NetworkInterfaceKind;
@@ -135,6 +136,8 @@ pub enum Error {
         expected: Generation,
         actual: Generation,
     },
+    #[error(transparent)]
+    TufRepoContentsError(#[from] TufRepoContentsError),
 }
 
 /// Describes the result of an idempotent "ensure" operation
@@ -1179,7 +1182,7 @@ impl<'a> BlueprintBuilder<'a> {
                 gz_address: dns_subnet.gz_address(),
                 gz_address_index,
             });
-        let image_source = self.zone_image_source(zone_type.kind());
+        let image_source = self.zone_image_source(zone_type.kind())?;
 
         let zone = BlueprintZoneConfig {
             disposition: BlueprintZoneDisposition::InService,
@@ -1232,7 +1235,7 @@ impl<'a> BlueprintBuilder<'a> {
                 dns_address,
                 nic,
             });
-        let image_source = self.zone_image_source(zone_type.kind());
+        let image_source = self.zone_image_source(zone_type.kind())?;
 
         let zone = BlueprintZoneConfig {
             disposition: BlueprintZoneDisposition::InService,
@@ -1272,7 +1275,7 @@ impl<'a> BlueprintBuilder<'a> {
             });
         let filesystem_pool =
             self.sled_select_zpool(sled_id, zone_type.kind())?;
-        let image_source = self.zone_image_source(zone_type.kind());
+        let image_source = self.zone_image_source(zone_type.kind())?;
 
         let zone = BlueprintZoneConfig {
             disposition: BlueprintZoneDisposition::InService,
@@ -1425,7 +1428,7 @@ impl<'a> BlueprintBuilder<'a> {
         });
         let filesystem_pool =
             self.sled_select_zpool(sled_id, zone_type.kind())?;
-        let image_source = self.zone_image_source(zone_type.kind());
+        let image_source = self.zone_image_source(zone_type.kind())?;
 
         let zone = BlueprintZoneConfig {
             disposition: BlueprintZoneDisposition::InService,
@@ -1451,7 +1454,7 @@ impl<'a> BlueprintBuilder<'a> {
             });
         let filesystem_pool =
             self.sled_select_zpool(sled_id, zone_type.kind())?;
-        let image_source = self.zone_image_source(zone_type.kind());
+        let image_source = self.zone_image_source(zone_type.kind())?;
 
         let zone = BlueprintZoneConfig {
             disposition: BlueprintZoneDisposition::InService,
@@ -1476,7 +1479,7 @@ impl<'a> BlueprintBuilder<'a> {
         );
         let filesystem_pool =
             self.sled_select_zpool(sled_id, zone_type.kind())?;
-        let image_source = self.zone_image_source(zone_type.kind());
+        let image_source = self.zone_image_source(zone_type.kind())?;
 
         let zone = BlueprintZoneConfig {
             disposition: BlueprintZoneDisposition::InService,
@@ -1511,7 +1514,7 @@ impl<'a> BlueprintBuilder<'a> {
                 dataset: OmicronZoneDataset { pool_name },
             });
         let filesystem_pool = pool_name;
-        let image_source = self.zone_image_source(zone_type.kind());
+        let image_source = self.zone_image_source(zone_type.kind())?;
 
         let zone = BlueprintZoneConfig {
             disposition: BlueprintZoneDisposition::InService,
@@ -1538,7 +1541,7 @@ impl<'a> BlueprintBuilder<'a> {
                 address,
                 dataset: OmicronZoneDataset { pool_name },
             });
-        let image_source = self.zone_image_source(zone_type.kind());
+        let image_source = self.zone_image_source(zone_type.kind())?;
 
         let zone = BlueprintZoneConfig {
             disposition: BlueprintZoneDisposition::InService,
@@ -1567,7 +1570,7 @@ impl<'a> BlueprintBuilder<'a> {
             },
         );
         let filesystem_pool = pool_name;
-        let image_source = self.zone_image_source(zone_type.kind());
+        let image_source = self.zone_image_source(zone_type.kind())?;
 
         let zone = BlueprintZoneConfig {
             disposition: BlueprintZoneDisposition::InService,
@@ -1596,7 +1599,7 @@ impl<'a> BlueprintBuilder<'a> {
             },
         );
         let filesystem_pool = pool_name;
-        let image_source = self.zone_image_source(zone_type.kind());
+        let image_source = self.zone_image_source(zone_type.kind())?;
 
         let zone = BlueprintZoneConfig {
             disposition: BlueprintZoneDisposition::InService,
@@ -1723,7 +1726,7 @@ impl<'a> BlueprintBuilder<'a> {
             });
         let filesystem_pool =
             self.sled_select_zpool(sled_id, zone_type.kind())?;
-        let image_source = self.zone_image_source(zone_type.kind());
+        let image_source = self.zone_image_source(zone_type.kind())?;
 
         self.sled_add_zone(
             sled_id,
@@ -1981,38 +1984,22 @@ impl<'a> BlueprintBuilder<'a> {
         self.pending_mgs_updates.remove(baseboard_id);
     }
 
-    fn zone_image_artifact(
-        repo: Option<&TufRepoDescription>,
-        zone_kind: ZoneKind,
-    ) -> BlueprintZoneImageSource {
-        repo.and_then(|repo| {
-            repo.artifacts
-                .iter()
-                .find(|artifact| {
-                    zone_kind.is_control_plane_zone_artifact(&artifact.id)
-                })
-                .map(BlueprintZoneImageSource::from_available_artifact)
-        })
-        .unwrap_or(BlueprintZoneImageSource::InstallDataset)
-    }
-
     /// Try to find an artifact in either the current or previous release repo
     /// that contains an image for a zone of the given kind; see RFD 565 §9.
     /// Defaults to the install dataset.
     pub(crate) fn zone_image_source(
         &self,
         zone_kind: ZoneKind,
-    ) -> BlueprintZoneImageSource {
-        let new_repo = self.input.tuf_repo();
-        let old_repo = self.input.old_repo();
-        Self::zone_image_artifact(
-            if self.zone_is_ready_for_update(zone_kind, new_repo) {
-                new_repo
-            } else {
-                old_repo
-            },
-            zone_kind,
-        )
+    ) -> Result<BlueprintZoneImageSource, TufRepoContentsError> {
+        let new_repo = self.input.tuf_repo().description();
+        let old_repo = self.input.old_repo().description();
+        let repo_choice = if self.zone_is_ready_for_update(zone_kind, new_repo)
+        {
+            new_repo
+        } else {
+            old_repo
+        };
+        repo_choice.zone_image_source(zone_kind)
     }
 
     /// Return `true` iff a zone of the given kind is ready to be updated;
@@ -2021,7 +2008,7 @@ impl<'a> BlueprintBuilder<'a> {
     fn zone_is_ready_for_update(
         &self,
         zone_kind: ZoneKind,
-        new_repo: Option<&TufRepoDescription>,
+        new_repo: &TargetReleaseDescription,
     ) -> bool {
         match zone_kind {
             ZoneKind::Nexus => {
@@ -2034,8 +2021,15 @@ impl<'a> BlueprintBuilder<'a> {
                     )
                     .filter(|z| z.zone_type.kind() != ZoneKind::Nexus)
                     .all(|z| {
-                        z.image_source
-                            == Self::zone_image_artifact(new_repo, z.kind())
+                        // This comparison ignores any TUF repo contents errors
+                        // from `zone_image_source`. This means we'll never be
+                        // able to update Nexus if we can't tell if _other_ zone
+                        // types aren't updated, which seems correct.
+                        Some(&z.image_source)
+                            == new_repo
+                                .zone_image_source(z.kind())
+                                .ok()
+                                .as_ref()
                     })
                 })
             }
@@ -2803,9 +2797,9 @@ pub mod test {
             .sled_add_zone_nexus(
                 collection
                     .sled_agents
-                    .keys()
+                    .iter()
                     .next()
-                    .copied()
+                    .map(|sa| sa.sled_id)
                     .expect("no sleds present"),
             )
             .unwrap_err();
@@ -2830,7 +2824,7 @@ pub mod test {
         // `sled_id`.
         let sled_id = {
             let mut selected_sled_id = None;
-            for (sled_id, sa) in &mut collection.sled_agents {
+            for mut sa in &mut collection.sled_agents {
                 let sa_zones = &mut sa
                     .ledgered_sled_config
                     .as_mut()
@@ -2839,12 +2833,12 @@ pub mod test {
                 let nzones_before_retain = sa_zones.len();
                 sa_zones.retain(|z| !z.zone_type.is_nexus());
                 if sa_zones.len() < nzones_before_retain {
-                    selected_sled_id = Some(*sled_id);
+                    selected_sled_id = Some(sa.sled_id);
                     // Also remove this zone from the blueprint.
                     let mut removed_nexus = None;
                     parent
                         .sleds
-                        .get_mut(sled_id)
+                        .get_mut(&sa.sled_id)
                         .expect("missing sled")
                         .zones
                         .retain(|z| match &z.zone_type {

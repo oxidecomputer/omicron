@@ -2,17 +2,14 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-use std::{
-    collections::{BTreeMap, HashMap},
-    net::IpAddr,
-};
+use std::{collections::HashMap, net::IpAddr};
 
+use iddqd::IdOrdMap;
 use internal_dns_types::{
     config::DnsConfigBuilder,
     names::{ServiceName, ZONE_APEX_NAME},
 };
 use omicron_common::api::external::Name;
-use omicron_uuid_kinds::SledUuid;
 
 use crate::{
     deployment::{
@@ -31,7 +28,7 @@ use super::{
 /// Returns the expected contents of internal DNS based on the given blueprint
 pub fn blueprint_internal_dns_config(
     blueprint: &Blueprint,
-    sleds_by_id: &BTreeMap<SledUuid, Sled>,
+    sleds_by_id: &IdOrdMap<Sled>,
     overrides: &Overridables,
 ) -> anyhow::Result<DnsConfigZone> {
     // The DNS names configured here should match what RSS configures for the
@@ -138,7 +135,7 @@ pub fn blueprint_internal_dns_config(
         )?;
     }
 
-    let scrimlets = sleds_by_id.values().filter(|sled| sled.is_scrimlet());
+    let scrimlets = sleds_by_id.iter().filter(|sled| sled.is_scrimlet());
     for scrimlet in scrimlets {
         let sled_subnet = scrimlet.subnet();
         let switch_zone_ip =
@@ -159,13 +156,13 @@ pub fn blueprint_internal_dns_config(
     // replicated synchronously or atomically to all instances.  That is: a
     // consumer should be careful when fetching an artifact about whether they
     // really can just pick any backend of this service or not.
-    for (sled_id, sled) in sleds_by_id {
+    for sled in sleds_by_id {
         if !sled.policy().matches(SledFilter::TufArtifactReplication) {
             continue;
         }
 
-        let dns_sled =
-            dns_builder.host_sled(*sled_id, *sled.sled_agent_address().ip())?;
+        let dns_sled = dns_builder
+            .host_sled(sled.id(), *sled.sled_agent_address().ip())?;
         dns_builder.service_backend_sled(
             ServiceName::RepoDepot,
             &dns_sled,
