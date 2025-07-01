@@ -648,7 +648,7 @@ impl SpPoller {
                         hubris_archive_id: Cow::Owned(
                             hubris_archive_id.clone(),
                         ),
-                        slot: self.spid.slot as u32,
+                        slot: u32::from(self.spid.slot),
                         component_kind: Cow::Owned(dev.device),
                         component_id,
                         description: Cow::Owned(dev.description),

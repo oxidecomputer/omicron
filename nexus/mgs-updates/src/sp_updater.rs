@@ -32,7 +32,7 @@ pub struct SpUpdater {
     log: Logger,
     progress: watch::Sender<Option<UpdateProgress>>,
     sp_type: SpType,
-    sp_slot: u32,
+    sp_slot: u16,
     update_id: Uuid,
     // TODO-clarity maybe a newtype for this? TBD how we get this from
     // wherever it's stored, which might give us a stronger type already.
@@ -42,7 +42,7 @@ pub struct SpUpdater {
 impl SpUpdater {
     pub fn new(
         sp_type: SpType,
-        sp_slot: u32,
+        sp_slot: u16,
         update_id: Uuid,
         sp_hubris_archive: Vec<u8>,
         log: &Logger,
@@ -123,7 +123,7 @@ impl SpComponentUpdater for SpUpdater {
         self.sp_type
     }
 
-    fn target_sp_slot(&self) -> u32 {
+    fn target_sp_slot(&self) -> u16 {
         self.sp_slot
     }
 

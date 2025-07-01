@@ -280,7 +280,7 @@ impl ComponentId {
         Ok(Self::Psc(slot))
     }
 
-    pub fn from_sp_type_and_slot(sp_type: SpType, slot: u32) -> Result<Self> {
+    pub fn from_sp_type_and_slot(sp_type: SpType, slot: u16) -> Result<Self> {
         let slot = slot.try_into().map_err(|_| {
             anyhow::anyhow!("invalid slot (must fit in a u8): {}", slot)
         })?;

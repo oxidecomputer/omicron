@@ -233,15 +233,7 @@ impl ExampleSystemBuilder {
     /// Currently, this value can be anywhere between 0 and 5. (More can be
     /// added in the future if necessary.)
     pub fn nsleds(mut self, nsleds: usize) -> Self {
-        // Add more sleds if there's a shortfall.
-        if nsleds > self.sled_settings.len() {
-            self.sled_settings.extend(vec![
-                BuilderSledSettings::default();
-                nsleds - self.sled_settings.len()
-            ]);
-        } else if nsleds < self.sled_settings.len() {
-            self.sled_settings.truncate(nsleds);
-        }
+        self.sled_settings.resize(nsleds, BuilderSledSettings::default());
         self
     }
 
@@ -347,14 +339,14 @@ impl ExampleSystemBuilder {
         index: usize,
         policy: SledPolicy,
     ) -> anyhow::Result<Self> {
-        if index >= self.sled_settings.len() {
+        let Some(settings) = self.sled_settings.get_mut(index) else {
             bail!(
                 "sled index {} out of range (0..{})",
                 index,
                 self.sled_settings.len(),
             );
-        }
-        self.sled_settings[index].policy = policy;
+        };
+        settings.policy = policy;
         Ok(self)
     }
 

@@ -271,7 +271,10 @@ impl DataStore {
         opctx.check_complex_operations_allowed()?;
 
         let mut producers = Vec::new();
-        let mut paginator = Paginator::new(SQL_BATCH_SIZE);
+        let mut paginator = Paginator::new(
+            SQL_BATCH_SIZE,
+            dropshot::PaginationOrder::Ascending,
+        );
         while let Some(p) = paginator.next() {
             let batch = self
                 .producers_list_expired(

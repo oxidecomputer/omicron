@@ -1,13 +1,13 @@
 using provided RNG seed: reconfigurator-cli-test
 > # Load example system with 7 sleds:
 > #
-> # sled 0: unset -> unset (unchanged)
-> # sled 1: unset -> set
-> # sled 2: set -> unset
-> # sled 3: set -> set (unchanged)
-> # sled 4: set -> set (changed)
-> # sled 5: set -> set (unchanged) but change something else
-> # sled 6: set -> sled removed
+> # serial0: unset -> unset (unchanged)
+> # serial1: unset -> set
+> # serial2: set -> unset
+> # serial3: set -> set (unchanged)
+> # serial4: set -> set (changed)
+> # serial5: set -> set (unchanged) but change something else
+> # serial6: set -> sled removed
 > #
 > # We'll also add another sled below (new_sled_id) with
 > # remove_mupdate_override set.
@@ -19,6 +19,16 @@ using provided RNG seed: reconfigurator-cli-test
 loaded example system with:
 - collection: f45ba181-4b56-42cc-a762-874d90184a43
 - blueprint: dbcbd3d6-41ff-48ae-ac0b-1becc9b2fd21
+
+> sled-list
+ID                                   SERIAL  NZPOOLS SUBNET                  
+2b8f0cb3-0295-4b3c-bc58-4fe88b57112c serial1 0       fd00:1122:3344:102::/64 
+98e6b7c2-2efa-41ca-b20a-0a4d61102fe6 serial0 0       fd00:1122:3344:101::/64 
+9a867dc9-d505-427f-9eff-cdb1d4d9bd73 serial5 0       fd00:1122:3344:106::/64 
+aff6c093-197d-42c5-ad80-9f10ba051a34 serial3 0       fd00:1122:3344:104::/64 
+b82ede02-399c-48c6-a1de-411df4fa49a7 serial4 0       fd00:1122:3344:105::/64 
+d81c6a84-79b8-4958-ae41-ea46c9b19763 serial2 0       fd00:1122:3344:103::/64 
+e96e226f-4ed9-4c01-91b9-69a9cd076c9e serial6 0       fd00:1122:3344:107::/64 
 
 
 > # Set the field on sleds 2-6 (0-indexed).
