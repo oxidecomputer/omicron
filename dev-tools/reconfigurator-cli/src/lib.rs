@@ -371,13 +371,13 @@ struct SledSetArgs {
 
 #[derive(Debug, Subcommand)]
 enum SledSetCommand {
-    /// Set the policy for the sled
+    /// set the policy for this sled
     Policy(SledSetPolicyArgs),
 }
 
 #[derive(Debug, Args)]
 struct SledSetPolicyArgs {
-    /// The policy to set for the sled
+    /// the policy to set
     #[clap(value_enum)]
     policy: SledPolicyOpt,
 }
