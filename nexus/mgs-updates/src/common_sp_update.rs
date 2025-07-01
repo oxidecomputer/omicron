@@ -69,7 +69,7 @@ pub trait SpComponentUpdater {
     fn target_sp_type(&self) -> SpType;
 
     /// The slot number of the target SP.
-    fn target_sp_slot(&self) -> u32;
+    fn target_sp_slot(&self) -> u16;
 
     /// The target firmware slot for the component.
     fn firmware_slot(&self) -> u16;

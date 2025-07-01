@@ -242,7 +242,7 @@ pub(crate) async fn apply_update(
                 client
                     .sp_component_update(
                         sp_type,
-                        u32::from(sp_slot),
+                        sp_slot,
                         component,
                         sp_update.firmware_slot,
                         &sp_update.update_id.as_untyped_uuid(),
@@ -452,7 +452,7 @@ async fn wait_for_delivery(
                 let update_status = client
                     .sp_component_update_status(
                         sp_type,
-                        u32::from(sp_slot),
+                        sp_slot,
                         component,
                     )
                     .await?;
@@ -555,7 +555,7 @@ async fn abort_update(
             mgs_client
                 .sp_component_update_abort(
                     sp_type,
-                    u32::from(sp_slot),
+                    sp_slot,
                     component,
                     &arg,
                 )
