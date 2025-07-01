@@ -35,7 +35,7 @@ pub struct RotUpdater {
     log: Logger,
     progress: watch::Sender<Option<UpdateProgress>>,
     sp_type: SpType,
-    sp_slot: u32,
+    sp_slot: u16,
     target_rot_slot: RotSlot,
     update_id: Uuid,
     // TODO-clarity maybe a newtype for this? TBD how we get this from
@@ -46,7 +46,7 @@ pub struct RotUpdater {
 impl RotUpdater {
     pub fn new(
         sp_type: SpType,
-        sp_slot: u32,
+        sp_slot: u16,
         target_rot_slot: RotSlot,
         update_id: Uuid,
         rot_hubris_archive: Vec<u8>,
@@ -176,7 +176,7 @@ impl SpComponentUpdater for RotUpdater {
         self.sp_type
     }
 
-    fn target_sp_slot(&self) -> u32 {
+    fn target_sp_slot(&self) -> u16 {
         self.sp_slot
     }
 
@@ -217,7 +217,7 @@ impl SpComponentUpdateHelper for ReconfiguratorRotUpdater {
             // Verify that the device is the one we think it is.
             let state = mgs_clients
             .try_all_serially(log, move |mgs_client| async move {
-                mgs_client.sp_get(update.sp_type, u32::from(update.slot_id)).await
+                mgs_client.sp_get(update.sp_type, update.slot_id).await
             })
             .await?
             .into_inner();
@@ -276,7 +276,7 @@ impl SpComponentUpdateHelper for ReconfiguratorRotUpdater {
                 mgs_client
                     .sp_component_caboose_get(
                         update.sp_type,
-                        u32::from(update.slot_id),
+                        update.slot_id,
                         &SpComponent::ROT.to_string(),
                         active.to_u16(),
                     )
@@ -326,7 +326,7 @@ impl SpComponentUpdateHelper for ReconfiguratorRotUpdater {
                     mgs_client
                         .sp_component_caboose_get(
                             update.sp_type,
-                            u32::from(update.slot_id),
+                            update.slot_id,
                             &SpComponent::ROT.to_string(),
                             expected_active_slot.slot().toggled().to_u16(),
                         )
@@ -415,7 +415,7 @@ impl SpComponentUpdateHelper for ReconfiguratorRotUpdater {
                 mgs_client
                     .sp_component_active_slot_set(
                         update.sp_type,
-                        u32::from(update.slot_id),
+                        update.slot_id,
                         &SpComponent::ROT.to_string(),
                         persist,
                         &SpComponentFirmwareSlot { slot: inactive_slot }
@@ -426,7 +426,7 @@ impl SpComponentUpdateHelper for ReconfiguratorRotUpdater {
                 mgs_client
                     .sp_component_reset(
                         update.sp_type,
-                        u32::from(update.slot_id),
+                        update.slot_id,
                         &SpComponent::ROT.to_string(),
                     )
                     .await?;

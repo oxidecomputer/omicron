@@ -550,7 +550,7 @@ impl SystemDescription {
                     .found_sp_state(
                         "fake MGS 1",
                         SpType::Sled,
-                        u32::from(*slot),
+                        *slot,
                         sp_state.clone(),
                     )
                     .context("recording SP state")?;
