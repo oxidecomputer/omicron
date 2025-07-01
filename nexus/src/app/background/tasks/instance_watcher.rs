@@ -437,7 +437,10 @@ impl BackgroundTask for InstanceWatcher {
         opctx: &'a OpContext,
     ) -> BoxFuture<'a, serde_json::Value> {
         async {
-            let mut paginator = Some(Paginator::new(nexus_db_queries::db::datastore::SQL_BATCH_SIZE));
+            let mut paginator = Some(Paginator::new(
+                nexus_db_queries::db::datastore::SQL_BATCH_SIZE,
+                dropshot::PaginationOrder::Ascending
+            ));
             let mut tasks = ParallelTaskSet::new_with_parallelism(
                 MAX_CONCURRENT_CHECKS,
             );

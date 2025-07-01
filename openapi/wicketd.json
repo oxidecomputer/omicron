@@ -22,7 +22,7 @@
             "required": true,
             "schema": {
               "type": "integer",
-              "format": "uint32",
+              "format": "uint16",
               "minimum": 0
             }
           },
@@ -186,7 +186,7 @@
             "required": true,
             "schema": {
               "type": "integer",
-              "format": "uint32",
+              "format": "uint16",
               "minimum": 0
             }
           },
@@ -721,7 +721,7 @@
             "required": true,
             "schema": {
               "type": "integer",
-              "format": "uint32",
+              "format": "uint16",
               "minimum": 0
             }
           },
@@ -3296,7 +3296,7 @@
             "type": "array",
             "items": {
               "type": "integer",
-              "format": "uint32",
+              "format": "uint16",
               "minimum": 0
             },
             "uniqueItems": true
@@ -4320,12 +4320,12 @@
         ]
       },
       "SpIdentifier": {
-        "description": "`SpIdentifier`\n\n<details><summary>JSON schema</summary>\n\n```json { \"type\": \"object\", \"required\": [ \"slot\", \"type\" ], \"properties\": { \"slot\": { \"type\": \"integer\", \"format\": \"uint32\", \"minimum\": 0.0 }, \"type\": { \"$ref\": \"#/components/schemas/SpType\" } } } ``` </details>",
+        "description": "`SpIdentifier`\n\n<details><summary>JSON schema</summary>\n\n```json { \"type\": \"object\", \"required\": [ \"slot\", \"type\" ], \"properties\": { \"slot\": { \"type\": \"integer\", \"format\": \"uint16\", \"minimum\": 0.0 }, \"type\": { \"$ref\": \"#/components/schemas/SpType\" } } } ``` </details>",
         "type": "object",
         "properties": {
           "slot": {
             "type": "integer",
-            "format": "uint32",
+            "format": "uint16",
             "minimum": 0
           },
           "type": {

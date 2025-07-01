@@ -440,7 +440,10 @@ impl DataStore {
 
         // Before we can check whether the receiver is subscribed to the
         // provided event, ensure that its glob subscriptions are up to date.
-        let mut paginator = Paginator::new(SQL_BATCH_SIZE);
+        let mut paginator = Paginator::new(
+            SQL_BATCH_SIZE,
+            dropshot::PaginationOrder::Ascending,
+        );
         while let Some(p) = paginator.next() {
             let batch = self
                 .rx_list_reprocessable_globs_on_conn(
@@ -1297,7 +1300,10 @@ mod test {
         // event classes, we must generate exact subscriptions for their globs.
         // The webhook dispatcher background task does this prior to listing
         // subscribed receivers, so this simulates its behavior.
-        let mut paginator = Paginator::new(SQL_BATCH_SIZE);
+        let mut paginator = Paginator::new(
+            SQL_BATCH_SIZE,
+            dropshot::PaginationOrder::Ascending,
+        );
         while let Some(p) = paginator.next() {
             let batch = datastore
                 .alert_glob_list_reprocessable(opctx, &p.current_pagparams())

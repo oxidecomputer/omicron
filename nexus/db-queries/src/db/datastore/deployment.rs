@@ -517,19 +517,13 @@ impl DataStore {
                             } => continue,
                         };
 
-                    // slot_ids fit into a u16 in practice.  This will be
-                    // enforced at compile time shortly.  See
-                    // oxidecomputer/omicron#8378.
-                    let update_slot_id = u16::try_from(update.slot_id)
-                        .expect("slot id to fit into u16");
-
                     let db_blueprint_id = DbTypedUuid::from(blueprint_id)
                         .into_sql::<diesel::sql_types::Uuid>(
                     );
                     let db_sp_type =
                         SpType::from(update.sp_type).into_sql::<SpTypeEnum>();
                     let db_slot_id =
-                        SpMgsSlot::from(SqlU16::from(update_slot_id))
+                        SpMgsSlot::from(SqlU16::from(update.slot_id))
                             .into_sql::<diesel::sql_types::Int4>();
                     let db_artifact_hash =
                         ArtifactHash::from(update.artifact_hash)
@@ -743,7 +737,10 @@ impl DataStore {
             use nexus_db_schema::schema::bp_sled_metadata::dsl;
 
             let mut sled_configs = BTreeMap::new();
-            let mut paginator = Paginator::new(SQL_BATCH_SIZE);
+            let mut paginator = Paginator::new(
+                SQL_BATCH_SIZE,
+                dropshot::PaginationOrder::Ascending,
+            );
             while let Some(p) = paginator.next() {
                 let batch = paginated(
                     dsl::bp_sled_metadata,
@@ -790,7 +787,10 @@ impl DataStore {
             use nexus_db_schema::schema::bp_omicron_zone_nic::dsl;
 
             let mut omicron_zone_nics = BTreeMap::new();
-            let mut paginator = Paginator::new(SQL_BATCH_SIZE);
+            let mut paginator = Paginator::new(
+                SQL_BATCH_SIZE,
+                dropshot::PaginationOrder::Ascending,
+            );
             while let Some(p) = paginator.next() {
                 let batch = paginated(
                     dsl::bp_omicron_zone_nic,
@@ -826,7 +826,10 @@ impl DataStore {
             use nexus_db_schema::schema::bp_omicron_zone::dsl;
             use nexus_db_schema::schema::tuf_artifact::dsl as tuf_artifact_dsl;
 
-            let mut paginator = Paginator::new(SQL_BATCH_SIZE);
+            let mut paginator = Paginator::new(
+                SQL_BATCH_SIZE,
+                dropshot::PaginationOrder::Ascending,
+            );
             while let Some(p) = paginator.next() {
                 // `paginated` implicitly orders by our `id`, which is also
                 // handy for testing: the zones are always consistently ordered
@@ -917,7 +920,10 @@ impl DataStore {
         {
             use nexus_db_schema::schema::bp_omicron_physical_disk::dsl;
 
-            let mut paginator = Paginator::new(SQL_BATCH_SIZE);
+            let mut paginator = Paginator::new(
+                SQL_BATCH_SIZE,
+                dropshot::PaginationOrder::Ascending,
+            );
             while let Some(p) = paginator.next() {
                 // `paginated` implicitly orders by our `id`, which is also
                 // handy for testing: the physical disks are always consistently ordered
@@ -965,7 +971,10 @@ impl DataStore {
         {
             use nexus_db_schema::schema::bp_omicron_dataset::dsl;
 
-            let mut paginator = Paginator::new(SQL_BATCH_SIZE);
+            let mut paginator = Paginator::new(
+                SQL_BATCH_SIZE,
+                dropshot::PaginationOrder::Ascending,
+            );
             while let Some(p) = paginator.next() {
                 // `paginated` implicitly orders by our `id`, which is also
                 // handy for testing: the datasets are always consistently ordered
@@ -1031,7 +1040,10 @@ impl DataStore {
                     let keepers: BTreeMap<OmicronZoneUuid, KeeperId> = {
                         use nexus_db_schema::schema::bp_clickhouse_keeper_zone_id_to_node_id::dsl;
                         let mut keepers = BTreeMap::new();
-                        let mut paginator = Paginator::new(SQL_BATCH_SIZE);
+                        let mut paginator = Paginator::new(
+                            SQL_BATCH_SIZE,
+                            dropshot::PaginationOrder::Ascending,
+                        );
                         while let Some(p) = paginator.next() {
                             let batch = paginated(
                                 dsl::bp_clickhouse_keeper_zone_id_to_node_id,
@@ -1081,7 +1093,10 @@ impl DataStore {
                     let servers: BTreeMap<OmicronZoneUuid, ServerId> = {
                         use nexus_db_schema::schema::bp_clickhouse_server_zone_id_to_node_id::dsl;
                         let mut servers = BTreeMap::new();
-                        let mut paginator = Paginator::new(SQL_BATCH_SIZE);
+                        let mut paginator = Paginator::new(
+                            SQL_BATCH_SIZE,
+                            dropshot::PaginationOrder::Ascending,
+                        );
                         while let Some(p) = paginator.next() {
                             let batch = paginated(
                                 dsl::bp_clickhouse_server_zone_id_to_node_id,
@@ -1198,7 +1213,10 @@ impl DataStore {
         {
             use nexus_db_schema::schema::bp_pending_mgs_update_sp::dsl;
 
-            let mut paginator = Paginator::new(SQL_BATCH_SIZE);
+            let mut paginator = Paginator::new(
+                SQL_BATCH_SIZE,
+                dropshot::PaginationOrder::Ascending,
+            );
             while let Some(p) = paginator.next() {
                 let batch = paginated(
                     dsl::bp_pending_mgs_update_sp,
@@ -1229,7 +1247,10 @@ impl DataStore {
 
             let mut bbs = BTreeMap::new();
 
-            let mut paginator = Paginator::new(SQL_BATCH_SIZE);
+            let mut paginator = Paginator::new(
+                SQL_BATCH_SIZE,
+                dropshot::PaginationOrder::Ascending,
+            );
             while let Some(p) = paginator.next() {
                 let batch = paginated(
                     dsl::hw_baseboard_id,
@@ -2792,7 +2813,7 @@ mod tests {
         builder.pending_mgs_update_insert(PendingMgsUpdate {
             baseboard_id: baseboard_id.clone(),
             sp_type: sp.sp_type,
-            slot_id: u32::from(sp.sp_slot),
+            slot_id: sp.sp_slot,
             details: PendingMgsUpdateDetails::Sp {
                 expected_active_version: "1.0.0".parse().unwrap(),
                 expected_inactive_version: ExpectedVersion::NoValidVersion,

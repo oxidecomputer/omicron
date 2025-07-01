@@ -1307,9 +1307,9 @@ table! {
         targets -> Array<Text>,
         filter_hosts -> Nullable<Array<Text>>,
         filter_ports -> Nullable<Array<Text>>,
-        filter_protocols -> Nullable<Array<crate::enums::VpcFirewallRuleProtocolEnum>>,
         action -> crate::enums::VpcFirewallRuleActionEnum,
         priority -> Int4,
+        filter_protocols -> Nullable<Array<Text>>,
     }
 }
 
