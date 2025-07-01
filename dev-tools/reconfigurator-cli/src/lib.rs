@@ -51,6 +51,7 @@ use omicron_uuid_kinds::SledUuid;
 use omicron_uuid_kinds::VnicUuid;
 use omicron_uuid_kinds::{BlueprintUuid, MupdateOverrideUuid};
 use std::borrow::Cow;
+use std::convert::Infallible;
 use std::fmt::{self, Write};
 use std::io::IsTerminal;
 use std::num::ParseIntError;
@@ -559,7 +560,7 @@ impl SledOpt {
 }
 
 impl FromStr for SledOpt {
-    type Err = anyhow::Error;
+    type Err = Infallible;
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         // If the sled looks like a UUID, parse it as that.
@@ -567,12 +568,21 @@ impl FromStr for SledOpt {
             return Ok(SledOpt::Uuid(uuid));
         }
 
-        // If the identifier starts with "serial", parse it as that.
-        if s.starts_with("serial") {
-            return Ok(Self::Serial(s.to_owned()));
-        }
-
-        bail!("sled `{s}` is neither a UUID nor starts with 'serial'")
+        // We treat anything that doesn't parse as a UUID as a serial number.
+        //
+        // Can we do something more intelligent here, like looking for a
+        // particular prefix? In principle, yes, but in reality there are
+        // several different sources of serial numbers:
+        //
+        // * simulated sleds ("serial0", "serial1", ...)
+        // * real sleds ("BRM42220014")
+        // * a4x2 ("g0", "g1", ...)
+        // * single-sled dev deployments
+        //
+        // and possibly more. We could exhaustively enumerate all of them, but
+        // it's easier to assume that if it doesn't look like a UUID, it's a
+        // serial number.
+        Ok(Self::Serial(s.to_owned()))
     }
 }
 
@@ -860,9 +870,9 @@ impl FromStr for LoadExampleSledPolicy {
     type Err = anyhow::Error;
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
-        let Some((index, policy)) = s.split_once(':') else {
-            return Err(anyhow!("invalid format, expected <index>:<policy>"));
-        };
+        let (index, policy) = s
+            .split_once(':')
+            .context("invalid format, expected <index>:<policy>")?;
         let index = index.parse().with_context(|| {
             format!("error parsing sled index `{index}` as a usize")
         })?;
@@ -1412,7 +1422,7 @@ fn cmd_blueprint_edit(
             let update = PendingMgsUpdate {
                 baseboard_id: baseboard_id.clone(),
                 sp_type: sp.sp_type,
-                slot_id: u32::from(sp.sp_slot),
+                slot_id: sp.sp_slot,
                 details,
                 artifact_hash,
                 artifact_version,

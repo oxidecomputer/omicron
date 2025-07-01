@@ -56,8 +56,9 @@ impl SpTestState {
     pub async fn load(
         mgs_client: &gateway_client::Client,
         sp_type: SpType,
-        sp_slot: u32,
+        sp_slot: u16,
     ) -> Result<SpTestState, GatewayClientError> {
+        let sp_slot = u32::from(sp_slot);
         let caboose_sp_active = mgs_client
             .sp_component_caboose_get(
                 sp_type,

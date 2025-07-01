@@ -415,7 +415,8 @@ impl<M1, M2> RawPaginatorWithParams<'_, (M1, M2)> {
 /// let item2marker: &dyn Fn(&Item) -> Marker = &|u: &u32| *u;
 ///
 /// let mut all_records = Vec::new();
-/// let mut paginator = Paginator::new(batch_size);
+/// let direction = dropshot::PaginationOrder::Ascending;
+/// let mut paginator = Paginator::new(batch_size, direction);
 /// while let Some(p) = paginator.next() {
 ///     let records_batch = do_query(&p.current_pagparams());
 ///     paginator = p.found_batch(&records_batch, item2marker);
@@ -439,11 +440,15 @@ impl<M1, M2> RawPaginatorWithParams<'_, (M1, M2)> {
 pub struct Paginator<N> {
     batch_size: NonZeroU32,
     state: PaginatorState<N>,
+    direction: dropshot::PaginationOrder,
 }
 
 impl<N> Paginator<N> {
-    pub fn new(batch_size: NonZeroU32) -> Paginator<N> {
-        Paginator { batch_size, state: PaginatorState::Initial }
+    pub fn new(
+        batch_size: NonZeroU32,
+        direction: dropshot::PaginationOrder,
+    ) -> Paginator<N> {
+        Paginator { batch_size, state: PaginatorState::Initial, direction }
     }
 
     pub fn next(self) -> Option<PaginatorHelper<N>> {
@@ -451,10 +456,12 @@ impl<N> Paginator<N> {
             PaginatorState::Initial => Some(PaginatorHelper {
                 batch_size: self.batch_size,
                 marker: None,
+                direction: self.direction,
             }),
             PaginatorState::Middle { marker } => Some(PaginatorHelper {
                 batch_size: self.batch_size,
                 marker: Some(marker),
+                direction: self.direction,
             }),
             PaginatorState::Done => None,
         }
@@ -470,6 +477,7 @@ enum PaginatorState<N> {
 pub struct PaginatorHelper<N> {
     batch_size: NonZeroU32,
     marker: Option<N>,
+    direction: dropshot::PaginationOrder,
 }
 
 impl<N> PaginatorHelper<N> {
@@ -477,7 +485,7 @@ impl<N> PaginatorHelper<N> {
     pub fn current_pagparams(&self) -> DataPageParams<'_, N> {
         DataPageParams {
             marker: self.marker.as_ref(),
-            direction: dropshot::PaginationOrder::Ascending,
+            direction: self.direction,
             limit: self.batch_size,
         }
     }
@@ -500,13 +508,17 @@ impl<N> PaginatorHelper<N> {
                 PaginatorState::Done
             } else {
                 // self.batch_size is non-zero, so if we got at least that many
-                // items, then there's at least one.
+                // items, then there's at least one left.
                 let last = batch.iter().last().unwrap();
                 let marker = item2marker(last);
                 PaginatorState::Middle { marker }
             };
 
-        Paginator { batch_size: self.batch_size, state }
+        Paginator {
+            batch_size: self.batch_size,
+            state,
+            direction: self.direction,
+        }
     }
 }
 
@@ -948,7 +960,10 @@ mod test {
         let do_list =
             |query: &dyn Fn(&DataPageParams<'_, Marker>) -> Vec<Item>| {
                 let mut all_records = Vec::new();
-                let mut paginator = Paginator::new(batch_size);
+                let mut paginator = Paginator::new(
+                    batch_size,
+                    dropshot::PaginationOrder::Ascending,
+                );
                 while let Some(p) = paginator.next() {
                     let records_batch = query(&p.current_pagparams());
                     paginator =
@@ -974,5 +989,115 @@ mod test {
                 Some(_) => Vec::new(),
             };
         assert_eq!(vec![mkitem(0), mkitem(1), mkitem(2)], do_list(&my_query));
+    }
+
+    #[tokio::test]
+    async fn test_paginated_single_column_ascending_paginator() {
+        let logctx = dev::test_setup_log(
+            "test_paginated_single_column_ascending_paginator",
+        );
+        let db = TestDatabase::new_with_pool(&logctx.log).await;
+        let pool = db.pool();
+
+        use schema::test_users::dsl;
+
+        populate_users(&pool, &vec![(1, 1), (2, 2), (3, 3), (4, 4), (5, 5)])
+            .await;
+
+        // Filter for the column we are sorting
+        let ages = |batch: Vec<User>| {
+            batch.into_iter().map(|u| u.age).collect::<Vec<_>>()
+        };
+
+        // Get the first paginated result.
+        let batch_size = NonZeroU32::new(2).unwrap();
+        let mut paginator = Paginator::<i64>::new(
+            batch_size,
+            dropshot::PaginationOrder::Ascending,
+        );
+        let p = paginator.next().unwrap();
+        let query =
+            paginated(dsl::test_users, dsl::age, &p.current_pagparams());
+        let batch = execute_query(&pool, query).await;
+        paginator = p.found_batch(&batch, &|i| i.age);
+        assert_eq!(ages(batch), vec![1, 2]);
+
+        // Get the next full page and check that results arrived in the order
+        // we expected.
+        let p = paginator.next().unwrap();
+        let query =
+            paginated(dsl::test_users, dsl::age, &p.current_pagparams());
+        let batch = execute_query(&pool, query).await;
+        paginator = p.found_batch(&batch, &|i| i.age);
+        assert_eq!(ages(batch), vec![3, 4]);
+
+        // Get the last item
+        let p = paginator.next().unwrap();
+        let query =
+            paginated(dsl::test_users, dsl::age, &p.current_pagparams());
+        let batch = execute_query(&pool, query).await;
+        paginator = p.found_batch(&batch, &|i| i.age);
+        assert_eq!(ages(batch), vec![5]);
+
+        // There is nothing left
+        assert!(paginator.next().is_none());
+
+        db.terminate().await;
+        logctx.cleanup_successful();
+    }
+
+    #[tokio::test]
+    async fn test_paginated_single_column_descending_paginator() {
+        let logctx = dev::test_setup_log(
+            "test_paginated_single_column_descending_paginator",
+        );
+        let db = TestDatabase::new_with_pool(&logctx.log).await;
+        let pool = db.pool();
+
+        use schema::test_users::dsl;
+
+        populate_users(&pool, &vec![(1, 1), (2, 2), (3, 3), (4, 4), (5, 5)])
+            .await;
+
+        // Filter for the column we are sorting
+        let ages = |batch: Vec<User>| {
+            batch.into_iter().map(|u| u.age).collect::<Vec<_>>()
+        };
+
+        // Get the first paginated result.
+        let batch_size = NonZeroU32::new(2).unwrap();
+        let mut paginator = Paginator::<i64>::new(
+            batch_size,
+            dropshot::PaginationOrder::Descending,
+        );
+        let p = paginator.next().unwrap();
+        let query =
+            paginated(dsl::test_users, dsl::age, &p.current_pagparams());
+        let batch = execute_query(&pool, query).await;
+        paginator = p.found_batch(&batch, &|i| i.age);
+        assert_eq!(ages(batch), vec![5, 4]);
+
+        // Get the next full page and check that results arrived in the order
+        // we expected.
+        let p = paginator.next().unwrap();
+        let query =
+            paginated(dsl::test_users, dsl::age, &p.current_pagparams());
+        let batch = execute_query(&pool, query).await;
+        paginator = p.found_batch(&batch, &|i| i.age);
+        assert_eq!(ages(batch), vec![3, 2]);
+
+        // Get the last item
+        let p = paginator.next().unwrap();
+        let query =
+            paginated(dsl::test_users, dsl::age, &p.current_pagparams());
+        let batch = execute_query(&pool, query).await;
+        paginator = p.found_batch(&batch, &|i| i.age);
+        assert_eq!(ages(batch), vec![1]);
+
+        // There is nothing left
+        assert!(paginator.next().is_none());
+
+        db.terminate().await;
+        logctx.cleanup_successful();
     }
 }

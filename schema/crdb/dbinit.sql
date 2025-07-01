@@ -1868,12 +1868,6 @@ CREATE TYPE IF NOT EXISTS omicron.public.vpc_firewall_rule_action AS ENUM (
     'deny'
 );
 
-CREATE TYPE IF NOT EXISTS omicron.public.vpc_firewall_rule_protocol AS ENUM (
-    'TCP',
-    'UDP',
-    'ICMP'
-);
-
 CREATE TABLE IF NOT EXISTS omicron.public.vpc_firewall_rule (
     /* Identity metadata (resource) */
     id UUID PRIMARY KEY,
@@ -1893,9 +1887,9 @@ CREATE TABLE IF NOT EXISTS omicron.public.vpc_firewall_rule (
     /* Also an array of targets */
     filter_hosts STRING(128)[],
     filter_ports STRING(11)[],
-    filter_protocols omicron.public.vpc_firewall_rule_protocol[],
     action omicron.public.vpc_firewall_rule_action NOT NULL,
-    priority INT4 CHECK (priority BETWEEN 0 AND 65535) NOT NULL
+    priority INT4 CHECK (priority BETWEEN 0 AND 65535) NOT NULL,
+    filter_protocols STRING(32)[]
 );
 
 CREATE UNIQUE INDEX IF NOT EXISTS lookup_firewall_by_vpc ON omicron.public.vpc_firewall_rule (
@@ -6116,7 +6110,7 @@ INSERT INTO omicron.public.db_metadata (
     version,
     target_version
 ) VALUES
-    (TRUE, NOW(), NOW(), '154.0.0', NULL)
+    (TRUE, NOW(), NOW(), '155.0.0', NULL)
 ON CONFLICT DO NOTHING;
 
 COMMIT;

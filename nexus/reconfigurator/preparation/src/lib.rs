@@ -397,7 +397,10 @@ pub async fn reconfigurator_state_load(
         .context("failed to read current target blueprint")?;
 
     let mut blueprint_ids = Vec::new();
-    let mut paginator = Paginator::new(SQL_BATCH_SIZE);
+    let mut paginator = Paginator::new(
+        SQL_BATCH_SIZE,
+        omicron_common::api::external::PaginationOrder::Ascending,
+    );
     while let Some(p) = paginator.next() {
         let batch = datastore
             .blueprints_list(opctx, &p.current_pagparams())

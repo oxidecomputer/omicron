@@ -549,8 +549,10 @@ mod test {
         );
 
         let mut all_deliveries = std::collections::HashSet::new();
-        let mut paginator =
-            Paginator::new(crate::db::datastore::SQL_BATCH_SIZE);
+        let mut paginator = Paginator::new(
+            crate::db::datastore::SQL_BATCH_SIZE,
+            dropshot::PaginationOrder::Ascending,
+        );
         while let Some(p) = paginator.next() {
             let deliveries = datastore
                 .webhook_rx_delivery_list(

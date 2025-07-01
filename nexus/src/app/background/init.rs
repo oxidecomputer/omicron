@@ -96,6 +96,7 @@ use super::tasks::blueprint_execution;
 use super::tasks::blueprint_load;
 use super::tasks::blueprint_planner;
 use super::tasks::blueprint_rendezvous;
+use super::tasks::chicken_switches::ChickenSwitchesLoader;
 use super::tasks::crdb_node_id_collector;
 use super::tasks::decommissioned_disk_cleaner;
 use super::tasks::dns_config;
@@ -230,6 +231,7 @@ impl BackgroundTasksInitializer {
             task_alert_dispatcher: Activator::new(),
             task_webhook_deliverator: Activator::new(),
             task_sp_ereport_ingester: Activator::new(),
+            task_chicken_switches_loader: Activator::new(),
 
             task_internal_dns_propagation: Activator::new(),
             task_external_dns_propagation: Activator::new(),
@@ -306,6 +308,7 @@ impl BackgroundTasksInitializer {
             task_alert_dispatcher,
             task_webhook_deliverator,
             task_sp_ereport_ingester,
+            task_chicken_switches_loader,
             // Add new background tasks here.  Be sure to use this binding in a
             // call to `Driver::register()` below.  That's what actually wires
             // up the Activator to the corresponding background task.
@@ -476,13 +479,26 @@ impl BackgroundTasksInitializer {
             inventory_watcher
         };
 
+        let chicken_switches_loader =
+            ChickenSwitchesLoader::new(datastore.clone());
+        let chicken_switches_watcher = chicken_switches_loader.watcher();
+        driver.register(TaskDefinition {
+            name: "chicken_switches_watcher",
+            description: "watch db for chicken switch changes",
+            period: config.blueprints.period_secs_load_chicken_switches,
+            task_impl: Box::new(chicken_switches_loader),
+            opctx: opctx.child(BTreeMap::new()),
+            watchers: vec![],
+            activator: task_chicken_switches_loader,
+        });
+
         // Background task: blueprint planner
         //
         // Replans on inventory collection and changes to the current
         // target blueprint.
         let blueprint_planner = blueprint_planner::BlueprintPlanner::new(
             datastore.clone(),
-            config.blueprints.disable_planner,
+            chicken_switches_watcher.clone(),
             inventory_watcher.clone(),
             rx_blueprint.clone(),
         );
@@ -496,6 +512,7 @@ impl BackgroundTasksInitializer {
             watchers: vec![
                 Box::new(inventory_watcher.clone()),
                 Box::new(rx_blueprint.clone()),
+                Box::new(chicken_switches_watcher),
             ],
             activator: task_blueprint_planner,
         });

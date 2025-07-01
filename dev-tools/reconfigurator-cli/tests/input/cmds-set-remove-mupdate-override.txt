@@ -1,12 +1,12 @@
 # Load example system with 7 sleds:
 #
-# sled 0: unset -> unset (unchanged)
-# sled 1: unset -> set
-# sled 2: set -> unset
-# sled 3: set -> set (unchanged)
-# sled 4: set -> set (changed)
-# sled 5: set -> set (unchanged) but change something else
-# sled 6: set -> sled removed
+# serial0: unset -> unset (unchanged)
+# serial1: unset -> set
+# serial2: set -> unset
+# serial3: set -> set (unchanged)
+# serial4: set -> set (changed)
+# serial5: set -> set (unchanged) but change something else
+# serial6: set -> sled removed
 #
 # We'll also add another sled below (new_sled_id) with
 # remove_mupdate_override set.
@@ -15,6 +15,7 @@
 # outputs minimal.
 
 load-example --nsleds 7 --ndisks-per-sled 0 --no-zones
+sled-list
 
 # Set the field on sleds 2-6 (0-indexed).
 blueprint-edit latest set-remove-mupdate-override serial2 00000000-0000-0000-0000-000000000000

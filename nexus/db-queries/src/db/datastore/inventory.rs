@@ -2077,7 +2077,10 @@ impl DataStore {
         let errors: Vec<String> = {
             use nexus_db_schema::schema::inv_collection_error::dsl;
             let mut errors = Vec::new();
-            let mut paginator = Paginator::new(batch_size);
+            let mut paginator = Paginator::new(
+                batch_size,
+                dropshot::PaginationOrder::Ascending,
+            );
             while let Some(p) = paginator.next() {
                 let batch = paginated(
                     dsl::inv_collection_error,
@@ -2104,7 +2107,10 @@ impl DataStore {
 
             let mut sps = BTreeMap::new();
 
-            let mut paginator = Paginator::new(batch_size);
+            let mut paginator = Paginator::new(
+                batch_size,
+                dropshot::PaginationOrder::Ascending,
+            );
             while let Some(p) = paginator.next() {
                 let batch = paginated(
                     dsl::inv_service_processor,
@@ -2135,7 +2141,10 @@ impl DataStore {
 
             let mut rots = BTreeMap::new();
 
-            let mut paginator = Paginator::new(batch_size);
+            let mut paginator = Paginator::new(
+                batch_size,
+                dropshot::PaginationOrder::Ascending,
+            );
             while let Some(p) = paginator.next() {
                 let batch = paginated(
                     dsl::inv_root_of_trust,
@@ -2166,7 +2175,10 @@ impl DataStore {
 
             let mut rows = Vec::new();
 
-            let mut paginator = Paginator::new(batch_size);
+            let mut paginator = Paginator::new(
+                batch_size,
+                dropshot::PaginationOrder::Ascending,
+            );
             while let Some(p) = paginator.next() {
                 let mut batch = paginated(
                     dsl::inv_sled_agent,
@@ -2198,7 +2210,10 @@ impl DataStore {
                 SledUuid,
                 BTreeMap<i64, nexus_types::inventory::PhysicalDiskFirmware>,
             >::new();
-            let mut paginator = Paginator::new(batch_size);
+            let mut paginator = Paginator::new(
+                batch_size,
+                dropshot::PaginationOrder::Ascending,
+            );
             while let Some(p) = paginator.next() {
                 let batch = paginated_multicolumn(
                     dsl::inv_nvme_disk_firmware,
@@ -2240,7 +2255,10 @@ impl DataStore {
                 SledUuid,
                 Vec<nexus_types::inventory::PhysicalDisk>,
             >::new();
-            let mut paginator = Paginator::new(batch_size);
+            let mut paginator = Paginator::new(
+                batch_size,
+                dropshot::PaginationOrder::Ascending,
+            );
             while let Some(p) = paginator.next() {
                 let batch = paginated_multicolumn(
                     dsl::inv_physical_disk,
@@ -2286,7 +2304,10 @@ impl DataStore {
 
             let mut zpools =
                 BTreeMap::<Uuid, Vec<nexus_types::inventory::Zpool>>::new();
-            let mut paginator = Paginator::new(batch_size);
+            let mut paginator = Paginator::new(
+                batch_size,
+                dropshot::PaginationOrder::Ascending,
+            );
             while let Some(p) = paginator.next() {
                 let batch = paginated_multicolumn(
                     dsl::inv_zpool,
@@ -2317,7 +2338,10 @@ impl DataStore {
 
             let mut datasets =
                 BTreeMap::<Uuid, Vec<nexus_types::inventory::Dataset>>::new();
-            let mut paginator = Paginator::new(batch_size);
+            let mut paginator = Paginator::new(
+                batch_size,
+                dropshot::PaginationOrder::Ascending,
+            );
             while let Some(p) = paginator.next() {
                 let batch = paginated_multicolumn(
                     dsl::inv_dataset,
@@ -2358,7 +2382,10 @@ impl DataStore {
 
             let mut bbs = BTreeMap::new();
 
-            let mut paginator = Paginator::new(batch_size);
+            let mut paginator = Paginator::new(
+                batch_size,
+                dropshot::PaginationOrder::Ascending,
+            );
             while let Some(p) = paginator.next() {
                 let batch = paginated(
                     dsl::hw_baseboard_id,
@@ -2418,7 +2445,10 @@ impl DataStore {
 
             let mut cabooses = Vec::new();
 
-            let mut paginator = Paginator::new(batch_size);
+            let mut paginator = Paginator::new(
+                batch_size,
+                dropshot::PaginationOrder::Ascending,
+            );
             while let Some(p) = paginator.next() {
                 let mut batch = paginated_multicolumn(
                     dsl::inv_caboose,
@@ -2452,7 +2482,10 @@ impl DataStore {
 
             let mut cabooses = BTreeMap::new();
 
-            let mut paginator = Paginator::new(batch_size);
+            let mut paginator = Paginator::new(
+                batch_size,
+                dropshot::PaginationOrder::Ascending,
+            );
             while let Some(p) = paginator.next() {
                 let batch =
                     paginated(dsl::sw_caboose, dsl::id, &p.current_pagparams())
@@ -2520,7 +2553,10 @@ impl DataStore {
 
             let mut rot_pages = Vec::new();
 
-            let mut paginator = Paginator::new(batch_size);
+            let mut paginator = Paginator::new(
+                batch_size,
+                dropshot::PaginationOrder::Ascending,
+            );
             while let Some(p) = paginator.next() {
                 let mut batch = paginated_multicolumn(
                     dsl::inv_root_of_trust_page,
@@ -2554,7 +2590,10 @@ impl DataStore {
 
             let mut rot_pages = BTreeMap::new();
 
-            let mut paginator = Paginator::new(batch_size);
+            let mut paginator = Paginator::new(
+                batch_size,
+                dropshot::PaginationOrder::Ascending,
+            );
             while let Some(p) = paginator.next() {
                 let batch = paginated(
                     dsl::sw_root_of_trust_page,
@@ -2638,7 +2677,10 @@ impl DataStore {
 
             let mut configs = IdMap::new();
 
-            let mut paginator = Paginator::new(batch_size);
+            let mut paginator = Paginator::new(
+                batch_size,
+                dropshot::PaginationOrder::Ascending,
+            );
             while let Some(p) = paginator.next() {
                 let batch = paginated(
                     dsl::inv_omicron_sled_config,
@@ -2681,7 +2723,10 @@ impl DataStore {
 
             let mut nics = BTreeMap::new();
 
-            let mut paginator = Paginator::new(batch_size);
+            let mut paginator = Paginator::new(
+                batch_size,
+                dropshot::PaginationOrder::Ascending,
+            );
             while let Some(p) = paginator.next() {
                 let batch = paginated(
                     dsl::inv_omicron_sled_config_zone_nic,
@@ -2713,7 +2758,10 @@ impl DataStore {
 
             let mut zones = Vec::new();
 
-            let mut paginator = Paginator::new(batch_size);
+            let mut paginator = Paginator::new(
+                batch_size,
+                dropshot::PaginationOrder::Ascending,
+            );
             while let Some(p) = paginator.next() {
                 let mut batch = paginated(
                     dsl::inv_omicron_sled_config_zone,
@@ -2785,7 +2833,10 @@ impl DataStore {
         {
             use nexus_db_schema::schema::inv_omicron_sled_config_dataset::dsl;
 
-            let mut paginator = Paginator::new(batch_size);
+            let mut paginator = Paginator::new(
+                batch_size,
+                dropshot::PaginationOrder::Ascending,
+            );
             while let Some(p) = paginator.next() {
                 let batch = paginated(
                     dsl::inv_omicron_sled_config_dataset,
@@ -2823,7 +2874,10 @@ impl DataStore {
         {
             use nexus_db_schema::schema::inv_omicron_sled_config_disk::dsl;
 
-            let mut paginator = Paginator::new(batch_size);
+            let mut paginator = Paginator::new(
+                batch_size,
+                dropshot::PaginationOrder::Ascending,
+            );
             while let Some(p) = paginator.next() {
                 let batch = paginated(
                     dsl::inv_omicron_sled_config_disk,
@@ -2863,7 +2917,10 @@ impl DataStore {
                 BTreeMap<PhysicalDiskUuid, ConfigReconcilerInventoryResult>,
             > = BTreeMap::new();
 
-            let mut paginator = Paginator::new(batch_size);
+            let mut paginator = Paginator::new(
+                batch_size,
+                dropshot::PaginationOrder::Ascending,
+            );
             while let Some(p) = paginator.next() {
                 let batch = paginated(
                     dsl::inv_last_reconciliation_disk_result,
@@ -2899,7 +2956,10 @@ impl DataStore {
                 BTreeMap<DatasetUuid, ConfigReconcilerInventoryResult>,
             > = BTreeMap::new();
 
-            let mut paginator = Paginator::new(batch_size);
+            let mut paginator = Paginator::new(
+                batch_size,
+                dropshot::PaginationOrder::Ascending,
+            );
             while let Some(p) = paginator.next() {
                 let batch = paginated(
                     dsl::inv_last_reconciliation_dataset_result,
@@ -2978,7 +3038,10 @@ impl DataStore {
                 BTreeMap<OmicronZoneUuid, ConfigReconcilerInventoryResult>,
             > = BTreeMap::new();
 
-            let mut paginator = Paginator::new(batch_size);
+            let mut paginator = Paginator::new(
+                batch_size,
+                dropshot::PaginationOrder::Ascending,
+            );
             while let Some(p) = paginator.next() {
                 let batch = paginated(
                     dsl::inv_last_reconciliation_zone_result,
@@ -3013,7 +3076,10 @@ impl DataStore {
                 IdOrdMap<ZoneArtifactInventory>,
             > = BTreeMap::new();
 
-            let mut paginator = Paginator::new(batch_size);
+            let mut paginator = Paginator::new(
+                batch_size,
+                dropshot::PaginationOrder::Ascending,
+            );
             while let Some(p) = paginator.next() {
                 let batch = paginated_multicolumn(
                     dsl::inv_zone_manifest_zone,
@@ -3052,7 +3118,10 @@ impl DataStore {
                 IdOrdMap<ZoneManifestNonBootInventory>,
             > = BTreeMap::new();
 
-            let mut paginator = Paginator::new(batch_size);
+            let mut paginator = Paginator::new(
+                batch_size,
+                dropshot::PaginationOrder::Ascending,
+            );
             while let Some(p) = paginator.next() {
                 let batch = paginated_multicolumn(
                     dsl::inv_zone_manifest_non_boot,
@@ -3091,7 +3160,10 @@ impl DataStore {
                 IdOrdMap<MupdateOverrideNonBootInventory>,
             > = BTreeMap::new();
 
-            let mut paginator = Paginator::new(batch_size);
+            let mut paginator = Paginator::new(
+                batch_size,
+                dropshot::PaginationOrder::Ascending,
+            );
             while let Some(p) = paginator.next() {
                 let batch = paginated_multicolumn(
                     dsl::inv_mupdate_override_non_boot,
@@ -3124,7 +3196,10 @@ impl DataStore {
         let clickhouse_keeper_cluster_membership = {
             use nexus_db_schema::schema::inv_clickhouse_keeper_membership::dsl;
             let mut memberships = BTreeSet::new();
-            let mut paginator = Paginator::new(batch_size);
+            let mut paginator = Paginator::new(
+                batch_size,
+                dropshot::PaginationOrder::Ascending,
+            );
             while let Some(p) = paginator.next() {
                 let batch = paginated(
                     dsl::inv_clickhouse_keeper_membership,
