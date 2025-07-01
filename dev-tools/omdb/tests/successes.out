@@ -268,7 +268,7 @@ task: "blueprint_rendezvous"
     owned rendezvous tables that other subsystems consume
 
 
-task: "chickens_switches_watcher"
+task: "chicken_switches_watcher"
     watch db for chicken switch changes
 
 
@@ -547,12 +547,12 @@ task: "blueprint_rendezvous"
     started at <REDACTED_TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
     last completion reported error: no blueprint
 
-task: "chickens_switches_watcher"
+task: "chicken_switches_watcher"
   configured period: every <REDACTED_DURATION>s
   currently executing: no
   last completed activation: <REDACTED ITERATIONS>, triggered by a periodic timer firing
     started at <REDACTED_TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
-warning: unknown background task: "chickens_switches_watcher" (don't know how to interpret details: Object {"chicken_switches_updated": Bool(false)})
+warning: unknown background task: "chicken_switches_watcher" (don't know how to interpret details: Object {"chicken_switches_updated": Bool(false)})
 
 task: "crdb_node_id_collector"
   configured period: every <REDACTED_DURATION>m
@@ -1094,12 +1094,12 @@ task: "blueprint_rendezvous"
     started at <REDACTED_TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
     last completion reported error: no blueprint
 
-task: "chickens_switches_watcher"
+task: "chicken_switches_watcher"
   configured period: every <REDACTED_DURATION>s
   currently executing: no
   last completed activation: <REDACTED ITERATIONS>, triggered by a periodic timer firing
     started at <REDACTED_TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
-warning: unknown background task: "chickens_switches_watcher" (don't know how to interpret details: Object {"chicken_switches_updated": Bool(false)})
+warning: unknown background task: "chicken_switches_watcher" (don't know how to interpret details: Object {"chicken_switches_updated": Bool(false)})
 
 task: "crdb_node_id_collector"
   configured period: every <REDACTED_DURATION>m
