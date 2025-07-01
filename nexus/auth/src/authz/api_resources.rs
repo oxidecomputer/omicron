@@ -668,6 +668,58 @@ impl AuthorizedResource for SiloUserList {
     }
 }
 
+// TODO: does it make sense to use a single authz resource to represent
+// both user sessions and tokens? seems silly to have two identical ones
+
+/// Synthetic resource for managing a user's sessions and tokens
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct UserSessions(SiloUser);
+
+impl UserSessions {
+    pub fn new(silo_user: SiloUser) -> Self {
+        Self(silo_user)
+    }
+
+    pub fn silo_user(&self) -> &SiloUser {
+        &self.0
+    }
+}
+
+impl oso::PolarClass for UserSessions {
+    fn get_polar_class_builder() -> oso::ClassBuilder<Self> {
+        oso::Class::builder().with_equality_check().add_attribute_getter(
+            "silo_user",
+            |user_sessions: &UserSessions| user_sessions.silo_user().clone(),
+        )
+    }
+}
+
+impl AuthorizedResource for UserSessions {
+    fn load_roles<'fut>(
+        &'fut self,
+        opctx: &'fut OpContext,
+        authn: &'fut authn::Context,
+        roleset: &'fut mut RoleSet,
+    ) -> futures::future::BoxFuture<'fut, Result<(), Error>> {
+        // To check for silo admin, we need to load roles from the parent silo.
+        self.silo_user().parent.load_roles(opctx, authn, roleset)
+    }
+
+    fn on_unauthorized(
+        &self,
+        _: &Authz,
+        error: Error,
+        _: AnyActor,
+        _: Action,
+    ) -> Error {
+        error
+    }
+
+    fn polar_class(&self) -> oso::Class {
+        Self::get_polar_class()
+    }
+}
+
 #[derive(Clone, Copy, Debug)]
 pub struct UpdateTrustRootList;
 
