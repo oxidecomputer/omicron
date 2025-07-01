@@ -944,7 +944,7 @@ dependencies = [
  "omicron-common",
  "omicron-uuid-kinds",
  "omicron-workspace-hack",
- "schemars",
+ "schemars 0.8.22",
  "serde",
  "sled-agent-types",
  "sled-hardware-types",
@@ -962,7 +962,7 @@ dependencies = [
  "progenitor 0.10.0",
  "regress",
  "reqwest",
- "schemars",
+ "schemars 0.8.22",
  "serde",
  "serde_json",
  "sled-hardware-types",
@@ -1448,7 +1448,7 @@ dependencies = [
  "omicron-workspace-hack",
  "oxide-tokio-rt",
  "ratatui",
- "schemars",
+ "schemars 0.8.22",
  "serde_json",
  "slog",
  "slog-async",
@@ -1468,7 +1468,7 @@ dependencies = [
  "omicron-common",
  "omicron-uuid-kinds",
  "omicron-workspace-hack",
- "schemars",
+ "schemars 0.8.22",
  "serde",
 ]
 
@@ -1482,7 +1482,7 @@ dependencies = [
  "omicron-workspace-hack",
  "progenitor 0.10.0",
  "reqwest",
- "schemars",
+ "schemars 0.8.22",
  "serde",
  "slog",
 ]
@@ -1497,7 +1497,7 @@ dependencies = [
  "omicron-workspace-hack",
  "progenitor 0.10.0",
  "reqwest",
- "schemars",
+ "schemars 0.8.22",
  "serde",
  "slog",
 ]
@@ -1512,7 +1512,7 @@ dependencies = [
  "omicron-workspace-hack",
  "progenitor 0.10.0",
  "reqwest",
- "schemars",
+ "schemars 0.8.22",
  "serde",
  "slog",
 ]
@@ -1543,7 +1543,7 @@ dependencies = [
  "itertools 0.14.0",
  "omicron-common",
  "omicron-workspace-hack",
- "schemars",
+ "schemars 0.8.22",
  "serde",
  "serde_json",
  "slog",
@@ -1576,7 +1576,7 @@ dependencies = [
  "camino",
  "clap",
  "derive_more",
- "schemars",
+ "schemars 0.8.22",
  "serde",
  "serde_json",
  "thiserror 1.0.69",
@@ -1617,7 +1617,7 @@ dependencies = [
  "omicron-common",
  "omicron-uuid-kinds",
  "omicron-workspace-hack",
- "schemars",
+ "schemars 0.8.22",
  "serde",
 ]
 
@@ -1630,7 +1630,7 @@ dependencies = [
  "omicron-workspace-hack",
  "progenitor 0.10.0",
  "reqwest",
- "schemars",
+ "schemars 0.8.22",
  "serde",
  "slog",
 ]
@@ -1644,7 +1644,7 @@ dependencies = [
  "omicron-common",
  "omicron-workspace-hack",
  "proptest",
- "schemars",
+ "schemars 0.8.22",
  "serde",
  "test-strategy",
  "thiserror 2.0.12",
@@ -1676,7 +1676,7 @@ dependencies = [
  "oximeter 0.1.0 (git+https://github.com/oxidecomputer/omicron?branch=main)",
  "oxnet",
  "rand 0.8.5",
- "schemars",
+ "schemars 0.8.22",
  "serde",
  "serde_json",
  "slog",
@@ -1695,7 +1695,7 @@ source = "git+https://github.com/oxidecomputer/lldp#82fbc8c9747eb9f74dde0f92ae77
 dependencies = [
  "anyhow",
  "dpd-client",
- "schemars",
+ "schemars 0.8.22",
  "serde",
  "serde_json",
  "slog",
@@ -2014,7 +2014,7 @@ dependencies = [
  "percent-encoding",
  "progenitor 0.10.0",
  "reqwest",
- "schemars",
+ "schemars 0.8.22",
  "serde",
  "serde_json",
 ]
@@ -2026,7 +2026,7 @@ source = "git+https://github.com/oxidecomputer/crucible?rev=e164393a88e7b6259889
 dependencies = [
  "base64 0.22.1",
  "crucible-workspace-hack",
- "schemars",
+ "schemars 0.8.22",
  "serde",
  "serde_json",
  "uuid",
@@ -2043,7 +2043,7 @@ dependencies = [
  "dropshot",
  "nix 0.29.0",
  "rustls-pemfile 1.0.4",
- "schemars",
+ "schemars 0.8.22",
  "serde",
  "serde_json",
  "slog",
@@ -2072,7 +2072,7 @@ dependencies = [
  "percent-encoding",
  "progenitor 0.10.0",
  "reqwest",
- "schemars",
+ "schemars 0.8.22",
  "serde",
  "serde_json",
  "uuid",
@@ -2670,7 +2670,7 @@ dependencies = [
  "pretty-hex 0.4.1",
  "progenitor 0.10.0",
  "reqwest",
- "schemars",
+ "schemars 0.8.22",
  "semver 1.0.26",
  "serde",
  "serde_json",
@@ -2696,7 +2696,7 @@ dependencies = [
  "internal-dns-types",
  "omicron-workspace-hack",
  "openapi-manager-types",
- "schemars",
+ "schemars 0.8.22",
  "semver 1.0.26",
  "serde",
 ]
@@ -2712,7 +2712,7 @@ dependencies = [
  "omicron-workspace-hack",
  "progenitor 0.10.0",
  "reqwest",
- "schemars",
+ "schemars 0.8.22",
  "serde",
  "slog",
 ]
@@ -2761,7 +2761,7 @@ dependencies = [
  "progenitor 0.9.1",
  "regress",
  "reqwest",
- "schemars",
+ "schemars 0.8.22",
  "serde",
  "serde_json",
  "slog",
@@ -2798,7 +2798,7 @@ dependencies = [
  "percent-encoding",
  "rustls 0.22.4",
  "rustls-pemfile 2.2.0",
- "schemars",
+ "schemars 0.8.22",
  "scopeguard",
  "semver 1.0.26",
  "serde",
@@ -3092,7 +3092,7 @@ dependencies = [
  "dropshot",
  "omicron-uuid-kinds",
  "omicron-workspace-hack",
- "schemars",
+ "schemars 0.8.22",
  "serde",
  "serde_json",
  "thiserror 2.0.12",
@@ -3520,7 +3520,7 @@ dependencies = [
  "omicron-common",
  "omicron-uuid-kinds",
  "omicron-workspace-hack",
- "schemars",
+ "schemars 0.8.22",
  "serde",
  "uuid",
 ]
@@ -3566,7 +3566,7 @@ dependencies = [
  "progenitor 0.10.0",
  "rand 0.8.5",
  "reqwest",
- "schemars",
+ "schemars 0.8.22",
  "serde",
  "serde_json",
  "slog",
@@ -3667,7 +3667,7 @@ dependencies = [
  "omicron-common",
  "omicron-uuid-kinds",
  "omicron-workspace-hack",
- "schemars",
+ "schemars 0.8.22",
  "serde",
  "tufaceous-artifact",
  "uuid",
@@ -4658,7 +4658,7 @@ dependencies = [
  "derive-where",
  "omicron-workspace-hack",
  "proptest",
- "schemars",
+ "schemars 0.8.22",
  "serde",
  "serde_json",
  "test-strategy",
@@ -4677,7 +4677,7 @@ dependencies = [
  "hashbrown 0.15.4",
  "ref-cast",
  "rustc-hash 2.1.1",
- "schemars",
+ "schemars 0.8.22",
  "serde",
  "serde_json",
 ]
@@ -4772,7 +4772,7 @@ dependencies = [
  "oxlog",
  "oxnet",
  "regress",
- "schemars",
+ "schemars 0.8.22",
  "serde",
  "serde_json",
  "slog",
@@ -4975,7 +4975,7 @@ dependencies = [
  "omicron-common",
  "omicron-uuid-kinds",
  "omicron-workspace-hack",
- "schemars",
+ "schemars 0.8.22",
  "serde",
  "slog",
  "tufaceous-artifact",
@@ -4993,7 +4993,7 @@ dependencies = [
  "progenitor 0.10.0",
  "regress",
  "reqwest",
- "schemars",
+ "schemars 0.8.22",
  "serde",
  "serde_json",
  "slog",
@@ -5011,7 +5011,7 @@ dependencies = [
  "omicron-common",
  "omicron-workspace-hack",
  "proptest",
- "schemars",
+ "schemars 0.8.22",
  "serde",
  "serde_json",
  "serde_with",
@@ -5088,7 +5088,7 @@ dependencies = [
  "omicron-common",
  "omicron-uuid-kinds",
  "omicron-workspace-hack",
- "schemars",
+ "schemars 0.8.22",
  "serde",
  "serde_json",
 ]
@@ -5142,7 +5142,7 @@ version = "0.21.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "cf370abdafd54d13e54a620e8c3e1145f28e46cc9d704bc6d94414559df41763"
 dependencies = [
- "schemars",
+ "schemars 0.8.22",
  "serde",
 ]
 
@@ -5668,7 +5668,7 @@ dependencies = [
  "progenitor 0.9.1",
  "protocol",
  "reqwest",
- "schemars",
+ "schemars 0.8.22",
  "serde",
  "serde_json",
  "slog",
@@ -5889,7 +5889,7 @@ dependencies = [
  "percent-encoding",
  "progenitor 0.9.1",
  "reqwest",
- "schemars",
+ "schemars 0.8.22",
  "serde",
  "serde_json",
  "slog",
@@ -6055,7 +6055,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "a17d82edb1c8a6c20c238747ae7aae9181133e766bc92cd2556fdd764407d0d1"
 dependencies = [
  "proptest",
- "schemars",
+ "schemars 0.8.22",
  "serde",
  "uuid",
 ]
@@ -6131,7 +6131,7 @@ dependencies = [
  "progenitor 0.10.0",
  "regress",
  "reqwest",
- "schemars",
+ "schemars 0.8.22",
  "serde",
  "serde_json",
  "slog",
@@ -6151,7 +6151,7 @@ dependencies = [
  "omicron-uuid-kinds",
  "omicron-workspace-hack",
  "pretty_assertions",
- "schemars",
+ "schemars 0.8.22",
  "serde",
  "serde_json",
  "serde_with",
@@ -6249,7 +6249,7 @@ dependencies = [
  "rand 0.8.5",
  "ref-cast",
  "regex",
- "schemars",
+ "schemars 0.8.22",
  "semver 1.0.26",
  "serde",
  "serde_json",
@@ -6330,7 +6330,7 @@ dependencies = [
  "ref-cast",
  "regex",
  "rustls 0.22.4",
- "schemars",
+ "schemars 0.8.22",
  "semver 1.0.26",
  "serde",
  "serde_json",
@@ -6400,7 +6400,7 @@ dependencies = [
  "omicron-common",
  "omicron-uuid-kinds",
  "omicron-workspace-hack",
- "schemars",
+ "schemars 0.8.22",
  "serde",
  "uuid",
 ]
@@ -6785,7 +6785,7 @@ dependencies = [
  "omicron-passwords",
  "omicron-uuid-kinds",
  "omicron-workspace-hack",
- "schemars",
+ "schemars 0.8.22",
  "serde",
  "serde_json",
  "sled-hardware-types",
@@ -6912,7 +6912,7 @@ dependencies = [
  "parse-display",
  "proptest",
  "regex",
- "schemars",
+ "schemars 0.8.22",
  "semver 1.0.26",
  "serde",
  "serde_json",
@@ -7277,7 +7277,7 @@ dependencies = [
  "oxide-tokio-rt",
  "oximeter-db",
  "oximeter-test-utils",
- "schemars",
+ "schemars 0.8.22",
  "serde",
  "serde_json",
  "slog",
@@ -7321,7 +7321,7 @@ dependencies = [
  "pq-sys",
  "proptest",
  "reqwest",
- "schemars",
+ "schemars 0.8.22",
  "serde",
  "serde_json",
  "slog",
@@ -7387,7 +7387,7 @@ dependencies = [
  "rand 0.8.5",
  "regress",
  "reqwest",
- "schemars",
+ "schemars 0.8.22",
  "semver 1.0.26",
  "serde",
  "serde_human_bytes",
@@ -7493,7 +7493,7 @@ dependencies = [
  "oximeter 0.1.0",
  "oximeter-instruments",
  "oximeter-producer",
- "schemars",
+ "schemars 0.8.22",
  "serde",
  "serde_json",
  "signal-hook",
@@ -7692,7 +7692,7 @@ dependencies = [
  "rustls 0.22.4",
  "rustls-pemfile 2.2.0",
  "samael",
- "schemars",
+ "schemars 0.8.22",
  "semver 1.0.26",
  "serde",
  "serde_json",
@@ -7860,7 +7860,7 @@ dependencies = [
  "omicron-workspace-hack",
  "rand 0.8.5",
  "rust-argon2",
- "schemars",
+ "schemars 0.8.22",
  "secrecy 0.10.3",
  "serde",
  "serde_with",
@@ -8063,7 +8063,7 @@ dependencies = [
  "repo-depot-api",
  "repo-depot-client",
  "reqwest",
- "schemars",
+ "schemars 0.8.22",
  "serde",
  "serde_human_bytes",
  "serde_json",
@@ -8156,7 +8156,7 @@ dependencies = [
  "newtype-uuid",
  "paste",
  "proptest",
- "schemars",
+ "schemars 0.8.22",
 ]
 
 [[package]]
@@ -8268,7 +8268,7 @@ dependencies = [
  "rustix 0.38.37",
  "rustls 0.23.19",
  "rustls-webpki 0.102.8",
- "schemars",
+ "schemars 0.8.22",
  "scopeguard",
  "semver 1.0.26",
  "serde",
@@ -8669,7 +8669,7 @@ dependencies = [
  "dropshot",
  "omicron-common",
  "omicron-workspace-hack",
- "schemars",
+ "schemars 0.8.22",
  "serde",
  "uuid",
 ]
@@ -8719,7 +8719,7 @@ dependencies = [
  "qorb",
  "rand 0.8.5",
  "reqwest",
- "schemars",
+ "schemars 0.8.22",
  "semver 1.0.26",
  "serde",
  "serde_json",
@@ -8783,7 +8783,7 @@ dependencies = [
  "regex",
  "reqwest",
  "rustyline",
- "schemars",
+ "schemars 0.8.22",
  "serde",
  "serde_json",
  "slog",
@@ -8819,7 +8819,7 @@ dependencies = [
  "omicron-workspace-hack",
  "oximeter 0.1.0",
  "rand 0.8.5",
- "schemars",
+ "schemars 0.8.22",
  "serde",
  "slog",
  "slog-async",
@@ -8865,7 +8865,7 @@ dependencies = [
  "omicron-test-utils",
  "omicron-workspace-hack",
  "oximeter 0.1.0",
- "schemars",
+ "schemars 0.8.22",
  "serde",
  "serde_json",
  "slog",
@@ -8889,7 +8889,7 @@ dependencies = [
  "prettyplease",
  "proc-macro2",
  "quote",
- "schemars",
+ "schemars 0.8.22",
  "serde",
  "slog-error-chain",
  "syn 2.0.104",
@@ -8910,7 +8910,7 @@ dependencies = [
  "prettyplease",
  "proc-macro2",
  "quote",
- "schemars",
+ "schemars 0.8.22",
  "serde",
  "slog-error-chain",
  "syn 2.0.104",
@@ -8976,7 +8976,7 @@ dependencies = [
  "rand_distr",
  "regex",
  "rstest",
- "schemars",
+ "schemars 0.8.22",
  "serde",
  "serde_json",
  "strum",
@@ -8998,7 +8998,7 @@ dependencies = [
  "omicron-workspace-hack",
  "parse-display",
  "regex",
- "schemars",
+ "schemars 0.8.22",
  "serde",
  "strum",
  "thiserror 1.0.69",
@@ -9028,7 +9028,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "80e1dc143c5a701f879552428910f357df8bd725575087cc713088fdfeafe812"
 dependencies = [
  "ipnetwork",
- "schemars",
+ "schemars 0.8.22",
  "serde",
  "serde_json",
 ]
@@ -9043,7 +9043,7 @@ dependencies = [
  "num",
  "omicron-workspace-hack",
  "oximeter-types 0.1.0",
- "schemars",
+ "schemars 0.8.22",
  "serde",
 ]
 
@@ -10010,7 +10010,7 @@ dependencies = [
  "proc-macro2",
  "quote",
  "regex",
- "schemars",
+ "schemars 0.8.22",
  "serde",
  "serde_json",
  "syn 2.0.104",
@@ -10032,7 +10032,7 @@ dependencies = [
  "proc-macro2",
  "quote",
  "regex",
- "schemars",
+ "schemars 0.8.22",
  "serde",
  "serde_json",
  "syn 2.0.104",
@@ -10054,7 +10054,7 @@ dependencies = [
  "proc-macro2",
  "quote",
  "regex",
- "schemars",
+ "schemars 0.8.22",
  "serde",
  "serde_json",
  "syn 2.0.104",
@@ -10073,7 +10073,7 @@ dependencies = [
  "proc-macro2",
  "progenitor-impl 0.8.0",
  "quote",
- "schemars",
+ "schemars 0.8.22",
  "serde",
  "serde_json",
  "serde_tokenstream",
@@ -10091,7 +10091,7 @@ dependencies = [
  "proc-macro2",
  "progenitor-impl 0.9.1",
  "quote",
- "schemars",
+ "schemars 0.8.22",
  "serde",
  "serde_json",
  "serde_tokenstream",
@@ -10109,7 +10109,7 @@ dependencies = [
  "proc-macro2",
  "progenitor-impl 0.10.0",
  "quote",
- "schemars",
+ "schemars 0.8.22",
  "serde",
  "serde_json",
  "serde_tokenstream",
@@ -10131,7 +10131,7 @@ dependencies = [
  "propolis_api_types",
  "rand 0.8.5",
  "reqwest",
- "schemars",
+ "schemars 0.8.22",
  "serde",
  "serde_json",
  "slog",
@@ -10152,7 +10152,7 @@ dependencies = [
  "progenitor 0.8.0",
  "rand 0.8.5",
  "reqwest",
- "schemars",
+ "schemars 0.8.22",
  "serde",
  "serde_json",
  "slog",
@@ -10179,7 +10179,7 @@ dependencies = [
  "propolis_types",
  "rand 0.8.5",
  "reqwest",
- "schemars",
+ "schemars 0.8.22",
  "semver 1.0.26",
  "serde",
  "serde_json",
@@ -10213,7 +10213,7 @@ source = "git+https://github.com/oxidecomputer/propolis?rev=e3988414bd68ecf80607
 dependencies = [
  "crucible-client-types",
  "propolis_types",
- "schemars",
+ "schemars 0.8.22",
  "serde",
  "thiserror 1.0.69",
  "uuid",
@@ -10224,7 +10224,7 @@ name = "propolis_types"
 version = "0.0.0"
 source = "git+https://github.com/oxidecomputer/propolis?rev=e3988414bd68ecf806078fb898120e1194451ee9#e3988414bd68ecf806078fb898120e1194451ee9"
 dependencies = [
- "schemars",
+ "schemars 0.8.22",
  "serde",
 ]
 
@@ -10254,7 +10254,7 @@ version = "0.1.0"
 source = "git+https://github.com/oxidecomputer/lldp#82fbc8c9747eb9f74dde0f92ae77ec67f65652c4"
 dependencies = [
  "anyhow",
- "schemars",
+ "schemars 0.8.22",
  "serde",
  "thiserror 1.0.69",
 ]
@@ -10768,7 +10768,7 @@ version = "0.1.0"
 dependencies = [
  "dropshot",
  "omicron-workspace-hack",
- "schemars",
+ "schemars 0.8.22",
  "serde",
  "tufaceous-artifact",
 ]
@@ -10780,7 +10780,7 @@ dependencies = [
  "omicron-workspace-hack",
  "progenitor 0.10.0",
  "reqwest",
- "schemars",
+ "schemars 0.8.22",
  "serde",
  "slog",
 ]
@@ -11397,6 +11397,30 @@ dependencies = [
 ]
 
 [[package]]
+name = "schemars"
+version = "0.9.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "4cd191f9397d57d581cddd31014772520aa448f65ef991055d7f61582c65165f"
+dependencies = [
+ "dyn-clone",
+ "ref-cast",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
+name = "schemars"
+version = "1.0.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "1375ba8ef45a6f15d83fa8748f1079428295d403d6ea991d09ab100155fbc06d"
+dependencies = [
+ "dyn-clone",
+ "ref-cast",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
 name = "schemars_derive"
 version = "0.8.22"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -11731,15 +11755,17 @@ dependencies = [
 
 [[package]]
 name = "serde_with"
-version = "3.12.0"
+version = "3.14.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d6b6f7f2fcb69f747921f79f3926bd1e203fce4fef62c268dd3abfb6d86029aa"
+checksum = "f2c45cd61fefa9db6f254525d46e392b852e0e61d9a1fd36e5bd183450a556d5"
 dependencies = [
  "base64 0.22.1",
  "chrono",
  "hex",
  "indexmap 1.9.3",
  "indexmap 2.9.0",
+ "schemars 0.9.0",
+ "schemars 1.0.3",
  "serde",
  "serde_derive",
  "serde_json",
@@ -11749,9 +11775,9 @@ dependencies = [
 
 [[package]]
 name = "serde_with_macros"
-version = "3.12.0"
+version = "3.14.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "8d00caa5193a3c8362ac2b73be6b9e768aa5a4b2f721d8f4b339600c3cb51f8e"
+checksum = "de90945e6565ce0d9a25098082ed4ee4002e047cb59892c318d66821e14bb30f"
 dependencies = [
  "darling",
  "proc-macro2",
@@ -11954,7 +11980,7 @@ dependencies = [
  "omicron-common",
  "omicron-uuid-kinds",
  "omicron-workspace-hack",
- "schemars",
+ "schemars 0.8.22",
  "serde",
  "sled-agent-types",
  "sled-diagnostics",
@@ -11979,7 +12005,7 @@ dependencies = [
  "propolis-client 0.1.0 (git+https://github.com/oxidecomputer/propolis?rev=e3988414bd68ecf806078fb898120e1194451ee9)",
  "regress",
  "reqwest",
- "schemars",
+ "schemars 0.8.22",
  "serde",
  "serde_json",
  "sled-agent-types",
@@ -12014,7 +12040,7 @@ dependencies = [
  "omicron-uuid-kinds",
  "omicron-workspace-hack",
  "proptest",
- "schemars",
+ "schemars 0.8.22",
  "scopeguard",
  "serde",
  "serde_json",
@@ -12051,7 +12077,7 @@ dependencies = [
  "oxnet",
  "propolis-client 0.1.0 (git+https://github.com/oxidecomputer/propolis?rev=e3988414bd68ecf806078fb898120e1194451ee9)",
  "rcgen",
- "schemars",
+ "schemars 0.8.22",
  "serde",
  "serde_human_bytes",
  "serde_json",
@@ -12130,7 +12156,7 @@ dependencies = [
  "oxlog",
  "parallel-task-set",
  "rand 0.8.5",
- "schemars",
+ "schemars 0.8.22",
  "serde",
  "sled-storage",
  "slog",
@@ -12159,7 +12185,7 @@ dependencies = [
  "omicron-uuid-kinds",
  "omicron-workspace-hack",
  "rand 0.8.5",
- "schemars",
+ "schemars 0.8.22",
  "serde",
  "sled-hardware-types",
  "slog",
@@ -12178,7 +12204,7 @@ dependencies = [
  "macaddr",
  "omicron-common",
  "omicron-workspace-hack",
- "schemars",
+ "schemars 0.8.22",
  "serde",
 ]
 
@@ -12203,7 +12229,7 @@ dependencies = [
  "omicron-uuid-kinds",
  "omicron-workspace-hack",
  "rand 0.8.5",
- "schemars",
+ "schemars 0.8.22",
  "serde",
  "serde_json",
  "sled-hardware",
@@ -12628,7 +12654,7 @@ dependencies = [
  "lazy_static",
  "newtype_derive",
  "petgraph 0.6.5",
- "schemars",
+ "schemars 0.8.22",
  "serde",
  "serde_json",
  "slog",
@@ -13660,7 +13686,7 @@ dependencies = [
  "hubpack",
  "itertools 0.14.0",
  "nix 0.29.0",
- "schemars",
+ "schemars 0.8.22",
  "serde",
  "slog",
  "slog-async",
@@ -13684,7 +13710,7 @@ dependencies = [
  "hubpack",
  "itertools 0.14.0",
  "nix 0.29.0",
- "schemars",
+ "schemars 0.8.22",
  "serde",
  "slog",
  "slog-async",
@@ -13703,7 +13729,7 @@ name = "transceiver-decode"
 version = "0.1.0"
 source = "git+https://github.com/oxidecomputer/transceiver-control?branch=main#f3cb309c2bd2c03423467fd93992e9033ae3133c"
 dependencies = [
- "schemars",
+ "schemars 0.8.22",
  "serde",
  "static_assertions",
  "thiserror 2.0.12",
@@ -13715,7 +13741,7 @@ name = "transceiver-decode"
 version = "0.1.0"
 source = "git+https://github.com/oxidecomputer/transceiver-control#4aac6125a8e6cefbb71d9f8a3d1fe6704207d476"
 dependencies = [
- "schemars",
+ "schemars 0.8.22",
  "serde",
  "static_assertions",
  "thiserror 2.0.12",
@@ -13730,7 +13756,7 @@ dependencies = [
  "bitflags 2.9.0",
  "clap",
  "hubpack",
- "schemars",
+ "schemars 0.8.22",
  "serde",
  "thiserror 2.0.12",
 ]
@@ -13743,7 +13769,7 @@ dependencies = [
  "bitflags 2.9.0",
  "clap",
  "hubpack",
- "schemars",
+ "schemars 0.8.22",
  "serde",
  "thiserror 2.0.12",
 ]
@@ -13831,7 +13857,7 @@ dependencies = [
  "daft",
  "hex",
  "proptest",
- "schemars",
+ "schemars 0.8.22",
  "semver 1.0.26",
  "serde",
  "serde_human_bytes",
@@ -14021,7 +14047,7 @@ dependencies = [
  "proc-macro2",
  "quote",
  "regress",
- "schemars",
+ "schemars 0.8.22",
  "semver 1.0.26",
  "serde",
  "serde_json",
@@ -14041,7 +14067,7 @@ dependencies = [
  "proc-macro2",
  "quote",
  "regress",
- "schemars",
+ "schemars 0.8.22",
  "semver 1.0.26",
  "serde",
  "serde_json",
@@ -14061,7 +14087,7 @@ dependencies = [
  "proc-macro2",
  "quote",
  "regress",
- "schemars",
+ "schemars 0.8.22",
  "semver 1.0.26",
  "serde",
  "serde_json",
@@ -14078,7 +14104,7 @@ checksum = "785e2cdcef0df8160fdd762ed548a637aaec1e83704fdbc14da0df66013ee8d0"
 dependencies = [
  "proc-macro2",
  "quote",
- "schemars",
+ "schemars 0.8.22",
  "semver 1.0.26",
  "serde",
  "serde_json",
@@ -14095,7 +14121,7 @@ checksum = "68b5780d745920ed73c5b7447496a9b5c42ed2681a9b70859377aec423ecf02b"
 dependencies = [
  "proc-macro2",
  "quote",
- "schemars",
+ "schemars 0.8.22",
  "semver 1.0.26",
  "serde",
  "serde_json",
@@ -14112,7 +14138,7 @@ checksum = "0ff5799be156e4f635c348c6051d165e1c59997827155133351a8c4d333d9841"
 dependencies = [
  "proc-macro2",
  "quote",
- "schemars",
+ "schemars 0.8.22",
  "semver 1.0.26",
  "serde",
  "serde_json",
@@ -14306,7 +14332,7 @@ dependencies = [
  "omicron-workspace-hack",
  "owo-colors",
  "petgraph 0.8.2",
- "schemars",
+ "schemars 0.8.22",
  "serde",
  "serde_json",
  "serde_with",
@@ -14785,7 +14811,7 @@ dependencies = [
  "omicron-workspace-hack",
  "owo-colors",
  "oxnet",
- "schemars",
+ "schemars 0.8.22",
  "serde",
  "serde_json",
  "sha2",
@@ -14875,7 +14901,7 @@ dependencies = [
  "oxnet",
  "rand 0.8.5",
  "reqwest",
- "schemars",
+ "schemars 0.8.22",
  "semver 1.0.26",
  "serde",
  "serde_json",
@@ -14920,7 +14946,7 @@ dependencies = [
  "omicron-passwords",
  "omicron-uuid-kinds",
  "omicron-workspace-hack",
- "schemars",
+ "schemars 0.8.22",
  "semver 1.0.26",
  "serde",
  "sled-hardware-types",
@@ -14941,7 +14967,7 @@ dependencies = [
  "progenitor 0.10.0",
  "regress",
  "reqwest",
- "schemars",
+ "schemars 0.8.22",
  "semver 1.0.26",
  "serde",
  "serde_json",
