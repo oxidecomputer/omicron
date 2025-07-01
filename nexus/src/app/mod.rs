@@ -264,6 +264,18 @@ pub struct Nexus {
 
     /// reports status of pending MGS-managed updates
     mgs_update_status_rx: watch::Receiver<MgsUpdateDriverStatus>,
+
+    /// DNS resolver used by MgsUpdateDriver for MGS
+    // We don't need to do anything with this, but we can't let it be dropped
+    // while Nexus is running.
+    #[allow(dead_code)]
+    mgs_resolver: Box<dyn qorb::resolver::Resolver>,
+
+    /// DNS resolver used by MgsUpdateDriver for Repo Depot
+    // We don't need to do anything with this, but we can't let it be dropped
+    // while Nexus is running.
+    #[allow(dead_code)]
+    repo_depot_resolver: Box<dyn qorb::resolver::Resolver>,
 }
 
 impl Nexus {
@@ -490,6 +502,8 @@ impl Nexus {
             )),
             tuf_artifact_replication_tx,
             mgs_update_status_rx,
+            mgs_resolver,
+            repo_depot_resolver,
         };
 
         // TODO-cleanup all the extra Arcs here seems wrong

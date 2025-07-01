@@ -34,6 +34,7 @@ use nexus_types::deployment::Policy;
 use nexus_types::deployment::SledDetails;
 use nexus_types::deployment::SledDisk;
 use nexus_types::deployment::SledResources;
+use nexus_types::deployment::TargetReleaseDescription;
 use nexus_types::deployment::TufRepoPolicy;
 use nexus_types::external_api::views::PhysicalDiskPolicy;
 use nexus_types::external_api::views::PhysicalDiskState;
@@ -53,7 +54,6 @@ use omicron_common::address::SLED_PREFIX;
 use omicron_common::address::get_sled_address;
 use omicron_common::api::external::ByteCount;
 use omicron_common::api::external::Generation;
-use omicron_common::api::external::TufRepoDescription;
 use omicron_common::disk::DiskIdentity;
 use omicron_common::disk::DiskVariant;
 use omicron_common::policy::INTERNAL_DNS_REDUNDANCY;
@@ -109,7 +109,7 @@ pub struct SystemDescription {
     clickhouse_policy: Option<ClickhousePolicy>,
     oximeter_read_policy: OximeterReadPolicy,
     tuf_repo: TufRepoPolicy,
-    old_repo: Option<TufRepoPolicy>,
+    old_repo: TufRepoPolicy,
 }
 
 impl SystemDescription {
@@ -190,7 +190,7 @@ impl SystemDescription {
             clickhouse_policy: None,
             oximeter_read_policy: OximeterReadPolicy::new(1),
             tuf_repo: TufRepoPolicy::initial(),
-            old_repo: None,
+            old_repo: TufRepoPolicy::initial(),
         }
     }
 
@@ -268,6 +268,39 @@ impl SystemDescription {
     pub fn clickhouse_policy(&mut self, policy: ClickhousePolicy) -> &mut Self {
         self.clickhouse_policy = Some(policy);
         self
+    }
+
+    /// Resolve a serial number into a sled ID.
+    pub fn serial_to_sled_id(&self, serial: &str) -> anyhow::Result<SledUuid> {
+        let sled_id = self.sleds.values().find_map(|sled| {
+            if let Some((_, sp_state)) = sled.sp_state() {
+                if sp_state.serial_number == serial {
+                    return Some(sled.sled_id);
+                }
+            }
+            None
+        });
+        sled_id.with_context(|| {
+            let known_serials = self
+                .sleds
+                .values()
+                .filter_map(|sled| {
+                    sled.sp_state()
+                        .map(|(_, sp_state)| sp_state.serial_number.as_str())
+                })
+                .collect::<Vec<_>>();
+            format!(
+                "sled not found with serial {serial} (known serials: {})",
+                known_serials.join(", "),
+            )
+        })
+    }
+
+    pub fn get_sled(&self, sled_id: SledUuid) -> anyhow::Result<&Sled> {
+        let Some(sled) = self.sleds.get(&sled_id) else {
+            bail!("Sled not found with id {sled_id}");
+        };
+        Ok(sled)
     }
 
     pub fn get_sled_mut(
@@ -475,7 +508,7 @@ impl SystemDescription {
 
     pub fn set_target_release(
         &mut self,
-        tuf_repo: Option<TufRepoDescription>,
+        description: TargetReleaseDescription,
     ) -> &mut Self {
         // Create a new TufRepoPolicy by bumping the generation.
         let new_repo = TufRepoPolicy {
@@ -483,7 +516,7 @@ impl SystemDescription {
                 .tuf_repo
                 .target_release_generation
                 .next(),
-            description: tuf_repo,
+            description,
         };
 
         self.tuf_repo = new_repo;
@@ -517,7 +550,7 @@ impl SystemDescription {
                     .found_sp_state(
                         "fake MGS 1",
                         SpType::Sled,
-                        u32::from(*slot),
+                        *slot,
                         sp_state.clone(),
                     )
                     .context("recording SP state")?;
@@ -1061,7 +1094,7 @@ impl Sled {
         });
     }
 
-    fn sp_state(&self) -> Option<&(u16, SpState)> {
+    pub fn sp_state(&self) -> Option<&(u16, SpState)> {
         self.inventory_sp.as_ref()
     }
 

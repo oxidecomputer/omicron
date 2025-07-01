@@ -9842,6 +9842,61 @@
         }
       }
     },
+    "/v1/system/networking/inbound-icmp": {
+      "get": {
+        "tags": [
+          "system/networking"
+        ],
+        "summary": "Return whether API services can receive limited ICMP traffic",
+        "operationId": "networking_inbound_icmp_view",
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ServiceIcmpConfig"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      },
+      "put": {
+        "tags": [
+          "system/networking"
+        ],
+        "summary": "Set whether API services can receive limited ICMP traffic",
+        "operationId": "networking_inbound_icmp_update",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ServiceIcmpConfig"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "204": {
+            "description": "resource updated"
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
     "/v1/system/networking/loopback-address": {
       "get": {
         "tags": [
@@ -19152,6 +19207,15 @@
         "minLength": 1,
         "maxLength": 253
       },
+      "IcmpParamRange": {
+        "example": "3",
+        "title": "A range of ICMP(v6) types or codes",
+        "description": "An inclusive-inclusive range of ICMP(v6) types or codes. The second value may be omitted to represent a single parameter.",
+        "type": "string",
+        "pattern": "^[0-9]{1,3}(-[0-9]{1,3})?$",
+        "minLength": 1,
+        "maxLength": 7
+      },
       "IdentityProvider": {
         "description": "View of an Identity Provider",
         "type": "object",
@@ -22938,6 +23002,19 @@
           "technical_contact_email"
         ]
       },
+      "ServiceIcmpConfig": {
+        "description": "Configuration of inbound ICMP allowed by API services.",
+        "type": "object",
+        "properties": {
+          "enabled": {
+            "description": "When enabled, Nexus is able to receive ICMP Destination Unreachable type 3 (port unreachable) and type 4 (fragmentation needed), Redirect, and Time Exceeded messages. These enable Nexus to perform Path MTU discovery and better cope with fragmentation issues. Otherwise all inbound ICMP traffic will be dropped.",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "enabled"
+        ]
+      },
       "ServiceUsingCertificate": {
         "description": "The service intended to use this certificate.",
         "oneOf": [
@@ -26064,6 +26141,27 @@
           "name"
         ]
       },
+      "VpcFirewallIcmpFilter": {
+        "type": "object",
+        "properties": {
+          "code": {
+            "nullable": true,
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/IcmpParamRange"
+              }
+            ]
+          },
+          "icmp_type": {
+            "type": "integer",
+            "format": "uint8",
+            "minimum": 0
+          }
+        },
+        "required": [
+          "icmp_type"
+        ]
+      },
       "VpcFirewallRule": {
         "description": "A single rule in a VPC firewall",
         "type": "object",
@@ -26311,11 +26409,58 @@
       },
       "VpcFirewallRuleProtocol": {
         "description": "The protocols that may be specified in a firewall rule's filter",
-        "type": "string",
-        "enum": [
-          "TCP",
-          "UDP",
-          "ICMP"
+        "oneOf": [
+          {
+            "type": "object",
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "tcp"
+                ]
+              }
+            },
+            "required": [
+              "type"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "udp"
+                ]
+              }
+            },
+            "required": [
+              "type"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "icmp"
+                ]
+              },
+              "value": {
+                "nullable": true,
+                "allOf": [
+                  {
+                    "$ref": "#/components/schemas/VpcFirewallIcmpFilter"
+                  }
+                ]
+              }
+            },
+            "required": [
+              "type",
+              "value"
+            ]
+          }
         ]
       },
       "VpcFirewallRuleStatus": {

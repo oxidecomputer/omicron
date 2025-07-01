@@ -151,11 +151,11 @@ pub async fn test_setup_with_config(
             port_description.location.get(&expected_location).unwrap();
         let (sp_addr, sp_ereport_addr) = match target_sp.typ {
             SpType::Switch => {
-                let switch = &simrack.sidecars[target_sp.slot];
+                let switch = &simrack.sidecars[usize::from(target_sp.slot)];
                 (switch.local_addr(sp_port), switch.local_ereport_addr(sp_port))
             }
             SpType::Sled => {
-                let sled = &simrack.gimlets[target_sp.slot];
+                let sled = &simrack.gimlets[usize::from(target_sp.slot)];
                 (sled.local_addr(sp_port), sled.local_ereport_addr(sp_port))
             }
             SpType::Power => todo!(),

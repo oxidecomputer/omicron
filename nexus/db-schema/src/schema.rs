@@ -1307,9 +1307,9 @@ table! {
         targets -> Array<Text>,
         filter_hosts -> Nullable<Array<Text>>,
         filter_ports -> Nullable<Array<Text>>,
-        filter_protocols -> Nullable<Array<crate::enums::VpcFirewallRuleProtocolEnum>>,
         action -> crate::enums::VpcFirewallRuleActionEnum,
         priority -> Int4,
+        filter_protocols -> Nullable<Array<Text>>,
     }
 }
 
@@ -2037,6 +2037,19 @@ table! {
         blueprint_id -> Uuid,
         version -> Int8,
         oximeter_read_mode -> crate::enums::OximeterReadModeEnum,
+    }
+}
+
+table! {
+    bp_pending_mgs_update_sp (blueprint_id, hw_baseboard_id) {
+        blueprint_id -> Uuid,
+        hw_baseboard_id -> Uuid,
+        sp_type -> crate::enums::SpTypeEnum,
+        sp_slot -> Int4,
+        artifact_sha256 -> Text,
+        artifact_version -> Text,
+        expected_active_version -> Text,
+        expected_inactive_version -> Nullable<Text>,
     }
 }
 

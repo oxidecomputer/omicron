@@ -26,7 +26,7 @@ pub(crate) struct SensorsArgs {
 
     /// restrict to specified sled(s)
     #[clap(long, use_value_delimiter = true)]
-    pub sled: Vec<u32>,
+    pub sled: Vec<u16>,
 
     /// exclude sleds rather than include them
     #[clap(long, short)]
@@ -256,7 +256,7 @@ struct SpInfo {
 async fn sp_info(
     mgs_client: gateway_client::Client,
     type_: SpType,
-    slot: u32,
+    slot: u16,
 ) -> Result<SpInfo, anyhow::Error> {
     let mut devices = MultiMap::new();
     let mut timestamps = vec![];
@@ -429,7 +429,7 @@ fn sp_info_csv<R: std::io::Read>(
             }
         };
 
-        let slot = parts[1].parse::<u32>().or_else(|_| {
+        let slot = parts[1].parse::<u16>().or_else(|_| {
             bail!("invalid slot in \"{field}\"");
         })?;
 

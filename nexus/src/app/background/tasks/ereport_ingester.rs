@@ -136,12 +136,6 @@ impl SpEreportIngester {
         let mut tasks = ParallelTaskSet::new();
 
         for gateway_client::types::SpIdentifier { type_, slot } in sps {
-            let Ok(slot) = u16::try_from(slot) else {
-                const MSG: &str = "invalid slot number received from MGS";
-                error!(opctx.log, "{MSG}"; "sp_type" => %type_, "slot" => %slot);
-                status.errors.push(format!("{MSG}: {type_} {slot}"));
-                continue;
-            };
             let sp_result = tasks
                 .spawn({
                     let opctx = opctx.child(BTreeMap::from([
@@ -359,7 +353,7 @@ impl Ingester {
             let res = client
                 .sp_ereports_ingest(
                     sp_type,
-                    u32::from(slot),
+                    slot,
                     committed_ena.as_ref(),
                     LIMIT,
                     &restart_id,
@@ -690,8 +684,10 @@ mod tests {
         restart_id: EreporterRestartUuid,
         expected_ereports: &[(Ena, serde_json::Value)],
     ) {
-        let mut paginator =
-            Paginator::new(std::num::NonZeroU32::new(100).unwrap());
+        let mut paginator = Paginator::new(
+            std::num::NonZeroU32::new(100).unwrap(),
+            dropshot::PaginationOrder::Ascending,
+        );
         let mut found_ereports = BTreeMap::new();
         while let Some(p) = paginator.next() {
             let batch = datastore
