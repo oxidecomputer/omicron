@@ -12,7 +12,8 @@ use nexus_db_queries::db::fixed_data::silo::DEFAULT_SILO;
 use nexus_db_queries::db::identity::{Asset, Resource};
 use nexus_test_utils::http_testing::TestResponse;
 use nexus_test_utils::resource_helpers::{
-    object_delete_error, object_get, object_put, object_put_error,
+    create_local_user, object_delete_error, object_get, object_put,
+    object_put_error, test_params,
 };
 use nexus_test_utils::{
     http_testing::{AuthnMode, NexusRequest, RequestBuilder},
@@ -28,7 +29,7 @@ use nexus_types::external_api::{
 };
 
 use http::{StatusCode, header, method::Method};
-use oxide_client::types::SiloRole;
+use oxide_client::types::{FleetRole, SiloRole};
 use serde::Deserialize;
 use tokio::time::{Duration, sleep};
 use uuid::Uuid;
@@ -245,6 +246,7 @@ async fn test_device_auth_flow(cptestctx: &ControlPlaneTestContext) {
 /// as a string
 async fn get_device_token(
     testctx: &ClientTestContext,
+    authn_mode: AuthnMode,
 ) -> DeviceAccessTokenGrant {
     let client_id = Uuid::new_v4();
     let authn_params = DeviceAuthRequest { client_id, ttl_seconds: None };
@@ -272,7 +274,7 @@ async fn get_device_token(
             .body(Some(&confirm_params))
             .expect_status(Some(StatusCode::NO_CONTENT)),
     )
-    .authn_as(AuthnMode::PrivilegedUser)
+    .authn_as(authn_mode.clone())
     .execute()
     .await
     .expect("failed to confirm");
@@ -290,7 +292,7 @@ async fn get_device_token(
             .body_urlencoded(Some(&token_params))
             .expect_status(Some(StatusCode::OK)),
     )
-    .authn_as(AuthnMode::PrivilegedUser)
+    .authn_as(authn_mode)
     .execute()
     .await
     .expect("failed to get token")
@@ -311,7 +313,8 @@ async fn test_device_token_expiration(cptestctx: &ControlPlaneTestContext) {
 
     // get a token for the privileged user. default silo max token expiration
     // is null, so tokens don't expire
-    let initial_token_grant = get_device_token(testctx).await;
+    let initial_token_grant =
+        get_device_token(testctx, AuthnMode::PrivilegedUser).await;
     let initial_token = initial_token_grant.access_token;
 
     // now there is a token in the list
@@ -381,7 +384,8 @@ async fn test_device_token_expiration(cptestctx: &ControlPlaneTestContext) {
     assert_eq!(settings.device_token_max_ttl_seconds, Some(3));
 
     // create token again (this one will have the 3-second expiration)
-    let expiring_token_grant = get_device_token(testctx).await;
+    let expiring_token_grant =
+        get_device_token(testctx, AuthnMode::PrivilegedUser).await;
 
     // check that expiration time is there and in the right range
     let exp = expiring_token_grant
@@ -624,11 +628,142 @@ async fn test_device_token_request_ttl(cptestctx: &ControlPlaneTestContext) {
         .expect("token should be expired");
 }
 
+#[nexus_test]
+async fn test_admin_logout_deletes_tokens(cptestctx: &ControlPlaneTestContext) {
+    let testctx = &cptestctx.external_client;
+
+    // create a user have a user ID on hand to use in the authn_as
+    let silo_url = "/v1/system/silos/test-suite-silo";
+    let test_suite_silo: views::Silo = object_get(testctx, silo_url).await;
+    let user1 = create_local_user(
+        testctx,
+        &test_suite_silo,
+        &"user1".parse().unwrap(),
+        test_params::UserPassword::LoginDisallowed,
+    )
+    .await;
+    let user2 = create_local_user(
+        testctx,
+        &test_suite_silo,
+        &"user2".parse().unwrap(),
+        test_params::UserPassword::LoginDisallowed,
+    )
+    .await;
+
+    // TODO: we are using the fetch my tokens endpoint, authed as user1, to
+    // check the tokens, but we will likely have a list tokens for user endpoint
+    // (accessible to silo admins only) so they can feel good about there being
+    // no tokens or sessions for a given user
+
+    // no tokens for user 1 yet
+    let tokens = get_tokens_as(testctx, AuthnMode::SiloUser(user1.id)).await;
+    assert!(tokens.is_empty());
+
+    // create a token for user1
+    get_device_token(testctx, AuthnMode::SiloUser(user1.id)).await;
+
+    // now there is a token for user1
+    let tokens = get_tokens_as(testctx, AuthnMode::SiloUser(user1.id)).await;
+    assert_eq!(tokens.len(), 1);
+
+    let logout_url = format!("/v1/users/{}/logout", user1.id);
+
+    // user 2 cannot hit the logout endpoint for user 1
+    NexusRequest::new(
+        RequestBuilder::new(testctx, Method::POST, &logout_url)
+            .body(Some(&serde_json::json!({})))
+            .expect_status(Some(StatusCode::FORBIDDEN)),
+    )
+    .authn_as(AuthnMode::SiloUser(user2.id))
+    .execute()
+    .await
+    .expect("User has no perms, can't delete another user's tokens");
+
+    let tokens = get_tokens_as(testctx, AuthnMode::SiloUser(user1.id)).await;
+    assert_eq!(tokens.len(), 1);
+
+    // user 1 can hit the logout endpoint for themselves
+    NexusRequest::new(
+        RequestBuilder::new(testctx, Method::POST, &logout_url)
+            .body(Some(&serde_json::json!({})))
+            .expect_status(Some(StatusCode::NO_CONTENT)),
+    )
+    .authn_as(AuthnMode::SiloUser(user1.id))
+    .execute()
+    .await
+    .expect("User 1 should be able to delete their own tokens");
+
+    let tokens = get_tokens_as(testctx, AuthnMode::SiloUser(user1.id)).await;
+    assert!(tokens.is_empty());
+
+    // create another couple of tokens for user1
+    get_device_token(testctx, AuthnMode::SiloUser(user1.id)).await;
+    get_device_token(testctx, AuthnMode::SiloUser(user1.id)).await;
+
+    let tokens = get_tokens_as(testctx, AuthnMode::SiloUser(user1.id)).await;
+    assert_eq!(tokens.len(), 2);
+
+    // make user 2 fleet admin to show that fleet admin does not inherit
+    // the appropriate role due to being fleet admin alone
+    grant_iam(
+        testctx,
+        "/v1/system",
+        FleetRole::Admin,
+        user2.id,
+        AuthnMode::PrivilegedUser,
+    )
+    .await;
+
+    NexusRequest::new(
+        RequestBuilder::new(testctx, Method::POST, &logout_url)
+            .body(Some(&serde_json::json!({})))
+            .expect_status(Some(StatusCode::FORBIDDEN)),
+    )
+    .authn_as(AuthnMode::SiloUser(user2.id))
+    .execute()
+    .await
+    .expect("Fleet admin is not sufficient to delete another user's tokens");
+
+    let tokens = get_tokens_as(testctx, AuthnMode::SiloUser(user1.id)).await;
+    assert_eq!(tokens.len(), 2);
+
+    // make user 2 a silo admin so they can delete user 1's tokens
+    grant_iam(
+        testctx,
+        silo_url,
+        SiloRole::Admin,
+        user2.id,
+        AuthnMode::PrivilegedUser,
+    )
+    .await;
+
+    NexusRequest::new(
+        RequestBuilder::new(testctx, Method::POST, &logout_url)
+            .body(Some(&serde_json::json!({})))
+            .expect_status(Some(StatusCode::NO_CONTENT)),
+    )
+    .authn_as(AuthnMode::SiloUser(user1.id))
+    .execute()
+    .await
+    .expect("Silo admin should be able to delete user 1's tokens");
+
+    // they're gone!
+    let tokens = get_tokens_as(testctx, AuthnMode::SiloUser(user1.id)).await;
+    assert!(tokens.is_empty());
+}
+
 async fn get_tokens_priv(
     testctx: &ClientTestContext,
 ) -> Vec<views::DeviceAccessToken> {
+    get_tokens_as(testctx, AuthnMode::PrivilegedUser).await
+}
+
+async fn get_tokens_as(
+    testctx: &ClientTestContext,
+    authn_mode: AuthnMode,
+) -> Vec<views::DeviceAccessToken> {
     NexusRequest::object_get(testctx, "/v1/me/access-tokens")
-        .authn_as(AuthnMode::PrivilegedUser)
+        .authn_as(authn_mode)
         .execute_and_parse_unwrap::<ResultsPage<views::DeviceAccessToken>>()
         .await
         .items
