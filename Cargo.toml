@@ -732,10 +732,11 @@ toml_edit = "0.22.27"
 tough = { version = "0.20.0", features = [ "http" ] }
 transceiver-controller = { git = "https://github.com/oxidecomputer/transceiver-control", features = [ "api-traits" ] }
 trybuild = "1.0.105"
-tufaceous = { git = "https://github.com/oxidecomputer/tufaceous", branch = "main" }
-tufaceous-artifact = { git = "https://github.com/oxidecomputer/tufaceous", branch = "main", features = ["proptest", "schemars"] }
-tufaceous-brand-metadata = { git = "https://github.com/oxidecomputer/tufaceous", branch = "main" }
-tufaceous-lib = { git = "https://github.com/oxidecomputer/tufaceous", branch = "main" }
+# XXX https://github.com/oxidecomputer/tufaceous/pull/30
+tufaceous = { git = "https://github.com/oxidecomputer/tufaceous", branch = "iliana/tuf-trust" }
+tufaceous-artifact = { git = "https://github.com/oxidecomputer/tufaceous", branch = "iliana/tuf-trust", features = ["proptest", "schemars"] }
+tufaceous-brand-metadata = { git = "https://github.com/oxidecomputer/tufaceous", branch = "iliana/tuf-trust" }
+tufaceous-lib = { git = "https://github.com/oxidecomputer/tufaceous", branch = "iliana/tuf-trust" }
 tui-tree-widget = "0.23.1"
 typed-rng = { path = "typed-rng" }
 typify = "0.3.0"
@@ -949,12 +950,11 @@ opt-level = 3
 # propolis-client = { path = "../propolis/lib/propolis-client" }
 # propolis-mock-server = { path = "../propolis/bin/mock-server" }
 
-# XXX https://github.com/oxidecomputer/tufaceous/pull/30
-[patch."https://github.com/oxidecomputer/tufaceous"]
-tufaceous = { path = "../tufaceous/bin" }
-tufaceous-artifact = { path = "../tufaceous/artifact" }
-tufaceous-brand-metadata = { path = "../tufaceous/brand-metadata" }
-tufaceous-lib = { path = "../tufaceous/lib" }
+# [patch."https://github.com/oxidecomputer/tufaceous"]
+# tufaceous = { path = "../tufaceous/bin" }
+# tufaceous-artifact = { path = "../tufaceous/artifact" }
+# tufaceous-brand-metadata = { path = "../tufaceous/brand-metadata" }
+# tufaceous-lib = { path = "../tufaceous/lib" }
 
 # [patch."https://github.com/oxidecomputer/typify"]
 # typify = { path = "../typify/typify" }
