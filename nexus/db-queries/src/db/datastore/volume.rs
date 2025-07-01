@@ -3951,7 +3951,10 @@ impl DataStore {
         opctx.check_complex_operations_allowed()?;
 
         let mut volumes = Vec::new();
-        let mut paginator = Paginator::new(SQL_BATCH_SIZE);
+        let mut paginator = Paginator::new(
+            SQL_BATCH_SIZE,
+            dropshot::PaginationOrder::Ascending,
+        );
         let conn = self.pool_connection_authorized(opctx).await?;
 
         let needle = match address {
@@ -4013,7 +4016,10 @@ impl DataStore {
         opctx.check_complex_operations_allowed()?;
 
         let mut volumes = Vec::new();
-        let mut paginator = Paginator::new(SQL_BATCH_SIZE);
+        let mut paginator = Paginator::new(
+            SQL_BATCH_SIZE,
+            dropshot::PaginationOrder::Ascending,
+        );
         let conn = self.pool_connection_authorized(opctx).await?;
 
         while let Some(p) = paginator.next() {
@@ -4060,7 +4066,10 @@ impl DataStore {
         opctx.check_complex_operations_allowed()?;
 
         let mut volumes = Vec::new();
-        let mut paginator = Paginator::new(SQL_BATCH_SIZE);
+        let mut paginator = Paginator::new(
+            SQL_BATCH_SIZE,
+            dropshot::PaginationOrder::Ascending,
+        );
         let conn = self.pool_connection_authorized(opctx).await?;
 
         while let Some(p) = paginator.next() {
@@ -4304,7 +4313,10 @@ impl DataStore {
     pub(crate) async fn validate_volume_invariants(
         conn: &async_bb8_diesel::Connection<DbConnection>,
     ) -> Result<(), diesel::result::Error> {
-        let mut paginator = Paginator::new(SQL_BATCH_SIZE);
+        let mut paginator = Paginator::new(
+            SQL_BATCH_SIZE,
+            dropshot::PaginationOrder::Ascending,
+        );
 
         while let Some(p) = paginator.next() {
             use nexus_db_schema::schema::volume::dsl;
@@ -4324,7 +4336,10 @@ impl DataStore {
             }
         }
 
-        let mut paginator = Paginator::new(SQL_BATCH_SIZE);
+        let mut paginator = Paginator::new(
+            SQL_BATCH_SIZE,
+            dropshot::PaginationOrder::Ascending,
+        );
 
         while let Some(p) = paginator.next() {
             use nexus_db_schema::schema::region::dsl;

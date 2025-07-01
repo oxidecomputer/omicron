@@ -743,7 +743,10 @@ impl DataStore {
             use nexus_db_schema::schema::bp_sled_metadata::dsl;
 
             let mut sled_configs = BTreeMap::new();
-            let mut paginator = Paginator::new(SQL_BATCH_SIZE);
+            let mut paginator = Paginator::new(
+                SQL_BATCH_SIZE,
+                dropshot::PaginationOrder::Ascending,
+            );
             while let Some(p) = paginator.next() {
                 let batch = paginated(
                     dsl::bp_sled_metadata,
@@ -790,7 +793,10 @@ impl DataStore {
             use nexus_db_schema::schema::bp_omicron_zone_nic::dsl;
 
             let mut omicron_zone_nics = BTreeMap::new();
-            let mut paginator = Paginator::new(SQL_BATCH_SIZE);
+            let mut paginator = Paginator::new(
+                SQL_BATCH_SIZE,
+                dropshot::PaginationOrder::Ascending,
+            );
             while let Some(p) = paginator.next() {
                 let batch = paginated(
                     dsl::bp_omicron_zone_nic,
@@ -826,7 +832,10 @@ impl DataStore {
             use nexus_db_schema::schema::bp_omicron_zone::dsl;
             use nexus_db_schema::schema::tuf_artifact::dsl as tuf_artifact_dsl;
 
-            let mut paginator = Paginator::new(SQL_BATCH_SIZE);
+            let mut paginator = Paginator::new(
+                SQL_BATCH_SIZE,
+                dropshot::PaginationOrder::Ascending,
+            );
             while let Some(p) = paginator.next() {
                 // `paginated` implicitly orders by our `id`, which is also
                 // handy for testing: the zones are always consistently ordered
@@ -917,7 +926,10 @@ impl DataStore {
         {
             use nexus_db_schema::schema::bp_omicron_physical_disk::dsl;
 
-            let mut paginator = Paginator::new(SQL_BATCH_SIZE);
+            let mut paginator = Paginator::new(
+                SQL_BATCH_SIZE,
+                dropshot::PaginationOrder::Ascending,
+            );
             while let Some(p) = paginator.next() {
                 // `paginated` implicitly orders by our `id`, which is also
                 // handy for testing: the physical disks are always consistently ordered
@@ -965,7 +977,10 @@ impl DataStore {
         {
             use nexus_db_schema::schema::bp_omicron_dataset::dsl;
 
-            let mut paginator = Paginator::new(SQL_BATCH_SIZE);
+            let mut paginator = Paginator::new(
+                SQL_BATCH_SIZE,
+                dropshot::PaginationOrder::Ascending,
+            );
             while let Some(p) = paginator.next() {
                 // `paginated` implicitly orders by our `id`, which is also
                 // handy for testing: the datasets are always consistently ordered
@@ -1031,7 +1046,10 @@ impl DataStore {
                     let keepers: BTreeMap<OmicronZoneUuid, KeeperId> = {
                         use nexus_db_schema::schema::bp_clickhouse_keeper_zone_id_to_node_id::dsl;
                         let mut keepers = BTreeMap::new();
-                        let mut paginator = Paginator::new(SQL_BATCH_SIZE);
+                        let mut paginator = Paginator::new(
+                            SQL_BATCH_SIZE,
+                            dropshot::PaginationOrder::Ascending,
+                        );
                         while let Some(p) = paginator.next() {
                             let batch = paginated(
                                 dsl::bp_clickhouse_keeper_zone_id_to_node_id,
@@ -1081,7 +1099,10 @@ impl DataStore {
                     let servers: BTreeMap<OmicronZoneUuid, ServerId> = {
                         use nexus_db_schema::schema::bp_clickhouse_server_zone_id_to_node_id::dsl;
                         let mut servers = BTreeMap::new();
-                        let mut paginator = Paginator::new(SQL_BATCH_SIZE);
+                        let mut paginator = Paginator::new(
+                            SQL_BATCH_SIZE,
+                            dropshot::PaginationOrder::Ascending,
+                        );
                         while let Some(p) = paginator.next() {
                             let batch = paginated(
                                 dsl::bp_clickhouse_server_zone_id_to_node_id,

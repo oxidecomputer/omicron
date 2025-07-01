@@ -147,7 +147,10 @@ impl InstanceReincarnation {
     ) -> anyhow::Result<()> {
         let serialized_authn = authn::saga::Serialized::for_opctx(opctx);
 
-        let mut paginator = Paginator::new(self.concurrency_limit);
+        let mut paginator = Paginator::new(
+            self.concurrency_limit,
+            dropshot::PaginationOrder::Ascending,
+        );
         let instances_found = status.instances_found.entry(reason).or_insert(0);
         let mut sagas_started = 0;
         while let Some(p) = paginator.next() {
