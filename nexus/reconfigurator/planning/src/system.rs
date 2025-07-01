@@ -270,6 +270,39 @@ impl SystemDescription {
         self
     }
 
+    /// Resolve a serial number into a sled ID.
+    pub fn serial_to_sled_id(&self, serial: &str) -> anyhow::Result<SledUuid> {
+        let sled_id = self.sleds.values().find_map(|sled| {
+            if let Some((_, sp_state)) = sled.sp_state() {
+                if sp_state.serial_number == serial {
+                    return Some(sled.sled_id);
+                }
+            }
+            None
+        });
+        sled_id.with_context(|| {
+            let known_serials = self
+                .sleds
+                .values()
+                .filter_map(|sled| {
+                    sled.sp_state()
+                        .map(|(_, sp_state)| sp_state.serial_number.as_str())
+                })
+                .collect::<Vec<_>>();
+            format!(
+                "sled not found with serial {serial} (known serials: {})",
+                known_serials.join(", "),
+            )
+        })
+    }
+
+    pub fn get_sled(&self, sled_id: SledUuid) -> anyhow::Result<&Sled> {
+        let Some(sled) = self.sleds.get(&sled_id) else {
+            bail!("Sled not found with id {sled_id}");
+        };
+        Ok(sled)
+    }
+
     pub fn get_sled_mut(
         &mut self,
         sled_id: SledUuid,
@@ -1061,7 +1094,7 @@ impl Sled {
         });
     }
 
-    fn sp_state(&self) -> Option<&(u16, SpState)> {
+    pub fn sp_state(&self) -> Option<&(u16, SpState)> {
         self.inventory_sp.as_ref()
     }
 
