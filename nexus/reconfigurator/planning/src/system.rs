@@ -356,6 +356,7 @@ impl SystemDescription {
             sled.unique,
             sled.hardware,
             hardware_slot,
+            sled.policy,
             sled.sled_config,
             sled.npools,
         );
@@ -677,6 +678,7 @@ pub struct SledBuilder {
     hardware: SledHardware,
     hardware_slot: Option<u16>,
     sled_role: SledRole,
+    policy: SledPolicy,
     sled_config: OmicronSledConfig,
     npools: u8,
 }
@@ -696,6 +698,9 @@ impl SledBuilder {
             hardware_slot: None,
             sled_role: SledRole::Gimlet,
             sled_config: OmicronSledConfig::default(),
+            policy: SledPolicy::InService {
+                provision_policy: SledProvisionPolicy::Provisionable,
+            },
             npools: Self::DEFAULT_NPOOLS,
         }
     }
@@ -750,6 +755,12 @@ impl SledBuilder {
         self.sled_role = sled_role;
         self
     }
+
+    /// Sets this sled's policy.
+    pub fn policy(mut self, policy: SledPolicy) -> Self {
+        self.policy = policy;
+        self
+    }
 }
 
 /// Convenience structure summarizing `Sled` inputs that come from inventory
@@ -788,6 +799,7 @@ impl Sled {
         unique: Option<String>,
         hardware: SledHardware,
         hardware_slot: u16,
+        policy: SledPolicy,
         sled_config: OmicronSledConfig,
         nzpools: u8,
     ) -> Sled {
@@ -919,9 +931,7 @@ impl Sled {
             sled_id,
             inventory_sp,
             inventory_sled_agent,
-            policy: SledPolicy::InService {
-                provision_policy: SledProvisionPolicy::Provisionable,
-            },
+            policy,
             state: SledState::Active,
             resources: SledResources { subnet: sled_subnet, zpools },
             sp_active_caboose: Some(Arc::new(Self::default_sp_caboose(

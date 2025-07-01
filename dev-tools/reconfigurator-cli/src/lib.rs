@@ -337,6 +337,10 @@ struct SledAddArgs {
     /// number of disks or pools
     #[clap(short = 'd', long, visible_alias = "npools", default_value_t = SledBuilder::DEFAULT_NPOOLS)]
     ndisks: u8,
+
+    /// The policy for the sled.
+    #[clap(long, value_enum, default_value_t = SledPolicyOpt::InService)]
+    policy: SledPolicyOpt,
 }
 
 #[derive(Debug, Args)]
@@ -847,6 +851,44 @@ struct LoadExampleArgs {
     /// Do not create entries for disks in the blueprint.
     #[clap(long)]
     no_disks_in_blueprint: bool,
+
+    /// Set a 0-indexed sled's policy
+    #[clap(long, value_name = "INDEX:POLICY")]
+    sled_policy: Vec<LoadExampleSledPolicy>,
+}
+
+#[derive(Clone, Debug)]
+struct LoadExampleSledPolicy {
+    /// The index of the sled to set the policy for.
+    index: usize,
+
+    /// The policy to set.
+    policy: SledPolicy,
+}
+
+impl FromStr for LoadExampleSledPolicy {
+    type Err = anyhow::Error;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        let (index, policy) = s
+            .split_once(':')
+            .context("invalid format, expected <index>:<policy>")?;
+        let index = index.parse().with_context(|| {
+            format!("error parsing sled index `{index}` as a usize")
+        })?;
+        let policy = SledPolicyOpt::from_str(
+            policy, /* ignore_case */ false,
+        )
+        .map_err(|_message| {
+            // _message is just something like "invalid variant: <value>".
+            // We choose to use our own message instead.
+            anyhow!(
+                "invalid sled policy `{policy}` (possible values: {})",
+                SledPolicyOpt::value_variants().iter().join(", "),
+            )
+        })?;
+        Ok(LoadExampleSledPolicy { index, policy: policy.into() })
+    }
 }
 
 #[derive(Debug, Args)]
@@ -954,7 +996,10 @@ fn cmd_sled_add(
 ) -> anyhow::Result<Option<String>> {
     let mut state = sim.current_state().to_mut();
     let sled_id = add.sled_id.unwrap_or_else(|| state.rng_mut().next_sled_id());
-    let new_sled = SledBuilder::new().id(sled_id).npools(add.ndisks);
+    let new_sled = SledBuilder::new()
+        .id(sled_id)
+        .npools(add.ndisks)
+        .policy(add.policy.into());
     let system = state.system_mut();
     system.description_mut().sled(new_sled)?;
     // Figure out what serial number this sled was assigned.
@@ -1008,7 +1053,7 @@ fn cmd_sled_show(
     let sled = planning_input.sled_lookup(args.filter, sled_id)?;
     let sled_resources = &sled.resources;
     let mut s = String::new();
-    swriteln!(s, "sled {}", sled_id);
+    swriteln!(s, "sled {} ({}, {})", sled_id, sled.policy, sled.state);
     swriteln!(s, "serial {}", sled.baseboard_id.serial_number);
     swriteln!(s, "subnet {}", sled_resources.subnet.net());
     swriteln!(s, "SP active version:   {:?}", sp_active_version);
@@ -2006,21 +2051,26 @@ fn cmd_load_example(
     };
     let rng = state.rng_mut().next_example_rng();
 
-    let (example, blueprint) =
-        ExampleSystemBuilder::new_with_rng(&sim.log, rng)
-            .nsleds(args.nsleds)
-            .ndisks_per_sled(args.ndisks_per_sled)
-            .nexus_count(
-                state
-                    .config_mut()
-                    .num_nexus()
-                    .map_or(NEXUS_REDUNDANCY, |n| n.into()),
-            )
-            .external_dns_count(3)
-            .context("invalid external DNS zone count")?
-            .create_zones(!args.no_zones)
-            .create_disks_in_blueprint(!args.no_disks_in_blueprint)
-            .build();
+    let mut builder = ExampleSystemBuilder::new_with_rng(&sim.log, rng)
+        .nsleds(args.nsleds)
+        .ndisks_per_sled(args.ndisks_per_sled)
+        .nexus_count(
+            state
+                .config_mut()
+                .num_nexus()
+                .map_or(NEXUS_REDUNDANCY, |n| n.into()),
+        )
+        .external_dns_count(3)
+        .context("invalid external DNS zone count")?
+        .create_zones(!args.no_zones)
+        .create_disks_in_blueprint(!args.no_disks_in_blueprint);
+    for sled_policy in args.sled_policy {
+        builder = builder
+            .with_sled_policy(sled_policy.index, sled_policy.policy)
+            .context("setting sled policy")?;
+    }
+
+    let (example, blueprint) = builder.build();
 
     // Generate the internal and external DNS configs based on the blueprint.
     let sleds_by_id = make_sleds_by_id(&example.system)?;
