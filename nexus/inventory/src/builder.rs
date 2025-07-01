@@ -1283,6 +1283,6 @@ mod test {
         );
 
         // We should see no errors.
-        assert_eq!(collection.errors.iter().next(), None);
+        assert!(collection.errors.is_empty());
     }
 }
