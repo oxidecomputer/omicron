@@ -22,6 +22,7 @@ use illumos_utils::zone::DeleteAddressError;
 use illumos_utils::zone::Zones;
 use nexus_sled_agent_shared::inventory::ConfigReconcilerInventoryResult;
 use nexus_sled_agent_shared::inventory::OmicronZoneConfig;
+use nexus_sled_agent_shared::inventory::OmicronZoneImageSource;
 use nexus_sled_agent_shared::inventory::OmicronZoneType;
 use omicron_common::address::Ipv6Subnet;
 use omicron_uuid_kinds::OmicronZoneUuid;
@@ -159,25 +160,31 @@ impl OmicronZones {
         // Filter desired zones down to just those that we need to stop. See
         // [`ZoneState`] for more discussion of why we're willing (or unwilling)
         // to stop zones in various current states.
-        let zones_to_shut_down = self.zones.iter().filter(|z| {
-            match desired_zones.get(&z.config.id) {
+        let mut zones_to_shut_down = Vec::new();
+        for mut z in self.zones.iter_mut() {
+            let zone_name = z.config.zone_name();
+
+            let should_shut_down = match desired_zones.get(&z.config.id) {
                 // We no longer want this zone to be running.
                 None => true,
 
                 // We do want this zone to be running; check the current
                 // state.
-                Some(desired_config) => match &z.state {
+                Some(desired_config) => match &mut z.state {
                     // Only shut down a running zone if the desired config
-                    // has changed from the config used to start it.
+                    // has changes that necessitate a restart.
                     ZoneState::Running(_) => {
-                        if z.config == *desired_config {
+                        if does_new_config_require_zone_restart(
+                            &mut z.config,
+                            desired_config,
+                        ) {
                             false
                         } else {
                             info!(
                                 log,
                                 "starting shutdown of running zone; config \
                                  has changed";
-                                "zone" => z.config.zone_name(),
+                                "zone" => zone_name,
                                 "old-config" => ?z.config,
                                 "new-config" => ?desired_config,
                             );
@@ -190,7 +197,7 @@ impl OmicronZones {
                         info!(
                             log,
                             "resuming shutdown of partially-shut-down zone";
-                            "zone" => z.config.zone_name(),
+                            "zone" => zone_name,
                             "prev_err" => InlineErrorChain::new(err),
                         );
                         true
@@ -200,17 +207,24 @@ impl OmicronZones {
                         info!(
                             log,
                             "starting shutdown of a failed-to-start zone";
-                            "zone" => z.config.zone_name(),
+                            "zone" => zone_name,
                             "prev_err" => InlineErrorChain::new(err),
                         );
                         true
                     }
                 },
+            };
+
+            if should_shut_down {
+                zones_to_shut_down.push(z.id());
             }
-        });
+        }
 
         // Map the zones to the futures that will try to shut them down.
-        let shutdown_futures = zones_to_shut_down.map(|zone| {
+        let shutdown_futures = zones_to_shut_down.iter().map(|zone_id| {
+            let zone = self.zones.get(zone_id).expect(
+                "zones_to_shut_down only has IDs present in self.zones",
+            );
             zone.try_shut_down(sled_agent_facilities, zone_facilities, log)
                 .map(|result| (zone.config.id, result))
         });
@@ -950,6 +964,79 @@ impl ZoneFacilities for RealZoneFacilities {
             .await
             .map_err(ZoneShutdownError::DeleteGzAddrObj)
     }
+}
+
+// It's possible some new zone configs do not require us to restart the zone.
+// A trivial case is if the config didn't change. We currently support one
+// nontrivial kind of change:
+//
+// If the only change is to the `image_source`, and the change is from
+// `InstallDataset` to `Artifact { hash }` (or vice versa), and the hash of the
+// zone in the install dataset is exactly equal to the hash specified by
+// `Artifact { hash }`, then we know the zone has not had any meaningful
+// changes: it's running the exact bits with the exact config it would have if
+// we restarted it, so we don't need to.
+fn does_new_config_require_zone_restart(
+    existing_config: &mut OmicronZoneConfig,
+    new_config: &OmicronZoneConfig,
+) -> bool {
+    // Trivial case
+    if *existing_config == *new_config {
+        return false;
+    }
+
+    match (&existing_config.image_source, &new_config.image_source) {
+        (
+            OmicronZoneImageSource::InstallDataset,
+            OmicronZoneImageSource::Artifact { hash },
+        )
+        | (
+            OmicronZoneImageSource::Artifact { hash },
+            OmicronZoneImageSource::InstallDataset,
+        ) => {
+            // TODO-john check hash!
+
+            // Hash matches; we don't have to restart as long as there are no
+            // other changes.
+            if config_differs_only_by_image_source(existing_config, new_config)
+            {
+                // TODO-john log
+                *existing_config = new_config.clone();
+                false
+            } else {
+                true
+            }
+        }
+        // Any other config change requires a restart.
+        //
+        // If we support other kinds of changes that don't require restart,
+        // we'll need to rework the structure of this function to support both
+        // kinds of changes happening simultaneously.
+        _ => true,
+    }
+}
+
+fn config_differs_only_by_image_source(
+    config1: &OmicronZoneConfig,
+    config2: &OmicronZoneConfig,
+) -> bool {
+    // Unpack both configs, ignoring the one field we want to ignore.
+    let OmicronZoneConfig {
+        id: id1,
+        filesystem_pool: filesystem_pool1,
+        zone_type: zone_type1,
+        image_source: _,
+    } = config1;
+    let OmicronZoneConfig {
+        id: id2,
+        filesystem_pool: filesystem_pool2,
+        zone_type: zone_type2,
+        image_source: _,
+    } = config2;
+
+    id1 == id2
+        && filesystem_pool1 == filesystem_pool2
+        && zone_type1 == zone_type2
 }
 
 #[cfg(test)]
