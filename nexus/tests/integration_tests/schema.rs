@@ -2401,7 +2401,7 @@ fn after_151_0_0<'a>(ctx: &'a MigrationContext<'a>) -> BoxFuture<'a, ()> {
     })
 }
 
-fn before_154_0_0<'a>(ctx: &'a MigrationContext<'a>) -> BoxFuture<'a, ()> {
+fn before_155_0_0<'a>(ctx: &'a MigrationContext<'a>) -> BoxFuture<'a, ()> {
     Box::pin(async {
         use nexus_db_queries::db::fixed_data::project::*;
         use nexus_db_queries::db::fixed_data::vpc::*;
@@ -2455,7 +2455,7 @@ fn before_154_0_0<'a>(ctx: &'a MigrationContext<'a>) -> BoxFuture<'a, ()> {
     })
 }
 
-fn after_154_0_0<'a>(ctx: &'a MigrationContext<'a>) -> BoxFuture<'a, ()> {
+fn after_155_0_0<'a>(ctx: &'a MigrationContext<'a>) -> BoxFuture<'a, ()> {
     Box::pin(async {
         use nexus_db_queries::db::fixed_data::vpc::*;
         // Firstly -- has the new firewall rule been added?
@@ -2582,8 +2582,8 @@ fn get_migration_checks() -> BTreeMap<Version, DataMigrationFns> {
         DataMigrationFns::new().before(before_151_0_0).after(after_151_0_0),
     );
     map.insert(
-        Version::new(154, 0, 0),
-        DataMigrationFns::new().before(before_154_0_0).after(after_154_0_0),
+        Version::new(155, 0, 0),
+        DataMigrationFns::new().before(before_155_0_0).after(after_155_0_0),
     );
 
     map

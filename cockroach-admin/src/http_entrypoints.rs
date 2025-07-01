@@ -60,19 +60,16 @@ impl CockroachAdminApi for CockroachAdminImpl {
     }
 
     async fn node_decommission(
-        rqctx: RequestContext<Self::Context>,
-        body: TypedBody<NodeId>,
+        _rqctx: RequestContext<Self::Context>,
+        _body: TypedBody<NodeId>,
     ) -> Result<HttpResponseOk<NodeDecommission>, HttpError> {
-        let ctx = rqctx.context();
-        let NodeId { node_id } = body.into_inner();
-        let decommission_status =
-            ctx.cockroach_cli().node_decommission(&node_id).await?;
-        info!(
-            ctx.log(), "successfully decommissioned node";
-            "node_id" => node_id,
-            "status" => ?decommission_status,
-        );
-        Ok(HttpResponseOk(decommission_status))
+        // We should call ctx.cockroach_cli().node_decommission(), but can't at
+        // the moment due to timing concerns.
+        Err(HttpError::for_bad_request(
+            None,
+            "decommissioning cockroach nodes not supported (see omicron#8445)"
+                .to_string(),
+        ))
     }
 
     async fn status_vars(
