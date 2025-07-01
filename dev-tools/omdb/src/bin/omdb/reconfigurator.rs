@@ -380,7 +380,10 @@ async fn cmd_reconfigurator_chicken_switches_history(
     let mut history = vec![];
     let limit = history_args.limit;
     let batch_size = NonZeroU32::min(limit.try_into().unwrap(), SQL_BATCH_SIZE);
-    let mut paginator = Paginator::<SqlU32>::new(batch_size);
+    let mut paginator = Paginator::<SqlU32>::new(
+        batch_size,
+        dropshot::PaginationOrder::Descending,
+    );
     while let Some(p) = paginator.next() {
         if history.len() >= limit as usize {
             break;
