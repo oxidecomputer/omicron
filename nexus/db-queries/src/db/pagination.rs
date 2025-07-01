@@ -508,7 +508,7 @@ impl<N> PaginatorHelper<N> {
                 PaginatorState::Done
             } else {
                 // self.batch_size is non-zero, so if we got at least that many
-                // items, then there's at least one.
+                // items, then there's at least one left.
                 let last = batch.iter().last().unwrap();
                 let marker = item2marker(last);
                 PaginatorState::Middle { marker }
@@ -989,5 +989,107 @@ mod test {
                 Some(_) => Vec::new(),
             };
         assert_eq!(vec![mkitem(0), mkitem(1), mkitem(2)], do_list(&my_query));
+    }
+
+    #[tokio::test]
+    async fn test_paginated_single_column_ascending_paginator() {
+        let logctx = dev::test_setup_log(
+            "test_paginated_single_column_ascending_paginator",
+        );
+        let db = TestDatabase::new_with_pool(&logctx.log).await;
+        let pool = db.pool();
+
+        use schema::test_users::dsl;
+
+        populate_users(&pool, &vec![(1, 1), (2, 2), (3, 3), (4, 4), (5, 5)])
+            .await;
+
+        // Filter for the column we are sorting
+        let ages = |batch: Vec<User>| {
+            batch.into_iter().map(|u| u.age).collect::<Vec<_>>()
+        };
+
+        // Get the first paginated result.
+        let batch_size = NonZeroU32::new(2).unwrap();
+        let mut paginator = Paginator::<i64>::new(
+            batch_size,
+            dropshot::PaginationOrder::Ascending,
+        );
+        let p = paginator.next().unwrap();
+        let query =
+            paginated(dsl::test_users, dsl::age, &p.current_pagparams());
+        let batch = execute_query(&pool, query).await;
+        paginator = p.found_batch(&batch, &|i| i.age);
+        assert_eq!(ages(batch), vec![1, 2]);
+
+        // Get the next full page and check that results arrived in the order
+        // we expected.
+        let p = paginator.next().unwrap();
+        let query =
+            paginated(dsl::test_users, dsl::age, &p.current_pagparams());
+        let batch = execute_query(&pool, query).await;
+        paginator = p.found_batch(&batch, &|i| i.age);
+        assert_eq!(ages(batch), vec![3, 4]);
+
+        // Get the last item
+        let p = paginator.next().unwrap();
+        let query =
+            paginated(dsl::test_users, dsl::age, &p.current_pagparams());
+        let batch = execute_query(&pool, query).await;
+        assert_eq!(ages(batch), vec![5]);
+
+        db.terminate().await;
+        logctx.cleanup_successful();
+    }
+
+    #[tokio::test]
+    async fn test_paginated_single_column_descending_paginator() {
+        let logctx = dev::test_setup_log(
+            "test_paginated_single_column_descending_paginator",
+        );
+        let db = TestDatabase::new_with_pool(&logctx.log).await;
+        let pool = db.pool();
+
+        use schema::test_users::dsl;
+
+        populate_users(&pool, &vec![(1, 1), (2, 2), (3, 3), (4, 4), (5, 5)])
+            .await;
+
+        // Filter for the column we are sorting
+        let ages = |batch: Vec<User>| {
+            batch.into_iter().map(|u| u.age).collect::<Vec<_>>()
+        };
+
+        // Get the first paginated result.
+        let batch_size = NonZeroU32::new(2).unwrap();
+        let mut paginator = Paginator::<i64>::new(
+            batch_size,
+            dropshot::PaginationOrder::Descending,
+        );
+        let p = paginator.next().unwrap();
+        let query =
+            paginated(dsl::test_users, dsl::age, &p.current_pagparams());
+        let batch = execute_query(&pool, query).await;
+        paginator = p.found_batch(&batch, &|i| i.age);
+        assert_eq!(ages(batch), vec![5, 4]);
+
+        // Get the next full page and check that results arrived in the order
+        // we expected.
+        let p = paginator.next().unwrap();
+        let query =
+            paginated(dsl::test_users, dsl::age, &p.current_pagparams());
+        let batch = execute_query(&pool, query).await;
+        paginator = p.found_batch(&batch, &|i| i.age);
+        assert_eq!(ages(batch), vec![3, 2]);
+
+        // Get the last item
+        let p = paginator.next().unwrap();
+        let query =
+            paginated(dsl::test_users, dsl::age, &p.current_pagparams());
+        let batch = execute_query(&pool, query).await;
+        assert_eq!(ages(batch), vec![1]);
+
+        db.terminate().await;
+        logctx.cleanup_successful();
     }
 }
