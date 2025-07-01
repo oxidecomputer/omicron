@@ -254,7 +254,8 @@ async fn cmd_reconfigurator_history(
     // This shouldn't be very large.
     let mut all_blueprints: BTreeMap<BlueprintUuid, BlueprintMetadata> =
         BTreeMap::new();
-    let mut paginator = Paginator::new(SQL_BATCH_SIZE);
+    let mut paginator =
+        Paginator::new(SQL_BATCH_SIZE, dropshot::PaginationOrder::Ascending);
     while let Some(p) = paginator.next() {
         let records_batch = datastore
             .blueprints_list(opctx, &p.current_pagparams())

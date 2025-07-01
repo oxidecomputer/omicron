@@ -12,6 +12,7 @@ use nexus_db_queries::context::OpContext;
 use nexus_db_queries::db::DataStore;
 use nexus_reconfigurator_planning::planner::Planner;
 use nexus_reconfigurator_preparation::PlanningInputFromDb;
+use nexus_types::deployment::ReconfiguratorChickenSwitches;
 use nexus_types::deployment::{Blueprint, BlueprintTarget};
 use nexus_types::internal_api::background::BlueprintPlannerStatus;
 use omicron_common::api::external::LookupType;
@@ -24,7 +25,7 @@ use tokio::sync::watch::{self, Receiver, Sender};
 /// Background task that runs the update planner.
 pub struct BlueprintPlanner {
     datastore: Arc<DataStore>,
-    disabled: bool,
+    rx_chicken_switches: Receiver<ReconfiguratorChickenSwitches>,
     rx_inventory: Receiver<Option<CollectionUuid>>,
     rx_blueprint: Receiver<Option<Arc<(BlueprintTarget, Blueprint)>>>,
     tx_blueprint: Sender<Option<Arc<(BlueprintTarget, Blueprint)>>>,
@@ -33,12 +34,18 @@ pub struct BlueprintPlanner {
 impl BlueprintPlanner {
     pub fn new(
         datastore: Arc<DataStore>,
-        disabled: bool,
+        rx_chicken_switches: Receiver<ReconfiguratorChickenSwitches>,
         rx_inventory: Receiver<Option<CollectionUuid>>,
         rx_blueprint: Receiver<Option<Arc<(BlueprintTarget, Blueprint)>>>,
     ) -> Self {
         let (tx_blueprint, _) = watch::channel(None);
-        Self { datastore, disabled, rx_inventory, rx_blueprint, tx_blueprint }
+        Self {
+            datastore,
+            rx_chicken_switches,
+            rx_inventory,
+            rx_blueprint,
+            tx_blueprint,
+        }
     }
 
     pub fn watcher(
@@ -51,7 +58,8 @@ impl BlueprintPlanner {
     /// If it is different from the current target blueprint,
     /// save it and make it the current target.
     pub async fn plan(&mut self, opctx: &OpContext) -> BlueprintPlannerStatus {
-        if self.disabled {
+        let switches = self.rx_chicken_switches.borrow_and_update().clone();
+        if !switches.planner_enabled {
             debug!(&opctx.log, "blueprint planning disabled, doing nothing");
             return BlueprintPlannerStatus::Disabled;
         }
@@ -251,6 +259,7 @@ mod test {
     use super::*;
     use crate::app::background::tasks::blueprint_load::TargetBlueprintLoader;
     use crate::app::background::tasks::inventory_collection::InventoryCollector;
+    use nexus_inventory::now_db_precision;
     use nexus_test_utils_macros::nexus_test;
 
     type ControlPlaneTestContext =
@@ -292,10 +301,18 @@ mod test {
         let rx_collector = collector.watcher();
         collector.activate(&opctx).await;
 
+        // Enable the planner
+        let (_tx, chicken_switches_collector_rx) =
+            watch::channel(ReconfiguratorChickenSwitches {
+                version: 1,
+                planner_enabled: true,
+                time_modified: now_db_precision(),
+            });
+
         // Finally, spin up the planner background task.
         let mut planner = BlueprintPlanner::new(
             datastore.clone(),
-            false,
+            chicken_switches_collector_rx,
             rx_collector,
             rx_loader.clone(),
         );

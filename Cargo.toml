@@ -511,8 +511,8 @@ lldp_protocol = { git = "https://github.com/oxidecomputer/lldp", package = "prot
 macaddr = { version = "1.0.1", features = ["serde_std"] }
 maplit = "1.0.2"
 newtype_derive = "0.1.6"
-mg-admin-client = { git = "https://github.com/oxidecomputer/maghemite", rev = "760b4b547e301a31d4dcb92ba97aabdb2a3e0cba" }
-ddm-admin-client = { git = "https://github.com/oxidecomputer/maghemite", rev = "760b4b547e301a31d4dcb92ba97aabdb2a3e0cba" }
+mg-admin-client = { git = "https://github.com/oxidecomputer/maghemite", rev = "638c897d5ed1e5d3f2de0c1cb9dfaa4d77a35dea" }
+ddm-admin-client = { git = "https://github.com/oxidecomputer/maghemite", rev = "638c897d5ed1e5d3f2de0c1cb9dfaa4d77a35dea" }
 multimap = "0.10.1"
 nexus-auth = { path = "nexus/auth" }
 nexus-background-task-interface = { path = "nexus/background-task-interface" }
@@ -568,7 +568,7 @@ omicron-workspace-hack = "0.1.0"
 omicron-zone-package = "0.12.2"
 oxide-client = { path = "clients/oxide-client" }
 oxide-tokio-rt = "0.1.1"
-oxide-vpc = { git = "https://github.com/oxidecomputer/opte", rev = "f5560fae02ad3fc349fabc6454c321143199ca9e", features = [ "api", "std" ] }
+oxide-vpc = { git = "https://github.com/oxidecomputer/opte", rev = "3f2dfe36f156b486e60e7a08263ad6227be1e969", features = [ "api", "std" ] }
 oxlog = { path = "dev-tools/oxlog" }
 oxnet = "0.1.2"
 once_cell = "1.21.3"
@@ -578,7 +578,7 @@ openapiv3 = "2.2.0"
 # must match samael's crate!
 openssl = "0.10"
 openssl-sys = "0.9"
-opte-ioctl = { git = "https://github.com/oxidecomputer/opte", rev = "f5560fae02ad3fc349fabc6454c321143199ca9e" }
+opte-ioctl = { git = "https://github.com/oxidecomputer/opte", rev = "3f2dfe36f156b486e60e7a08263ad6227be1e969" }
 oso = "0.27"
 owo-colors = "4.2.2"
 oximeter = { path = "oximeter/oximeter" }

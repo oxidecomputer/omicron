@@ -3,6 +3,7 @@
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 use crate::deployment::PendingMgsUpdate;
+use crate::deployment::TargetReleaseDescription;
 use crate::inventory::BaseboardId;
 use chrono::DateTime;
 use chrono::SecondsFormat;
@@ -18,7 +19,6 @@ use nexus_sled_agent_shared::inventory::OmicronZoneImageSource;
 use nexus_sled_agent_shared::inventory::OmicronZoneType;
 use omicron_common::api::external::MacAddr;
 use omicron_common::api::external::ObjectStream;
-use omicron_common::api::external::TufRepoDescription;
 use omicron_common::api::external::Vni;
 use omicron_common::snake_case_result;
 use omicron_common::snake_case_result::SnakeCaseResult;
@@ -461,7 +461,7 @@ pub struct InProgressUpdateStatus {
 }
 
 impl IdOrdItem for InProgressUpdateStatus {
-    type Key<'a> = &'a Arc<BaseboardId>;
+    type Key<'a> = &'a BaseboardId;
 
     fn key(&self) -> Self::Key<'_> {
         &self.baseboard_id
@@ -495,7 +495,7 @@ pub struct WaitingStatus {
 }
 
 impl IdOrdItem for WaitingStatus {
-    type Key<'a> = &'a Arc<BaseboardId>;
+    type Key<'a> = &'a BaseboardId;
 
     fn key(&self) -> Self::Key<'_> {
         &self.baseboard_id
@@ -556,8 +556,8 @@ pub struct UpdateStatus {
 
 impl UpdateStatus {
     pub fn new<'a>(
-        old: Option<&TufRepoDescription>,
-        new: Option<&TufRepoDescription>,
+        old: &TargetReleaseDescription,
+        new: &TargetReleaseDescription,
         sleds: impl Iterator<
             Item = (&'a SledUuid, &'a Option<ConfigReconcilerInventory>),
         >,
@@ -587,8 +587,8 @@ impl UpdateStatus {
     }
 
     pub fn zone_image_source_to_version(
-        old: Option<&TufRepoDescription>,
-        new: Option<&TufRepoDescription>,
+        old: &TargetReleaseDescription,
+        new: &TargetReleaseDescription,
         source: &OmicronZoneImageSource,
         res: &ConfigReconcilerInventoryResult,
     ) -> ZoneStatusVersion {
@@ -600,18 +600,16 @@ impl UpdateStatus {
             return ZoneStatusVersion::InstallDataset;
         };
 
-        if let Some(old) = old {
-            if let Some(_) = old.artifacts.iter().find(|meta| meta.hash == hash)
-            {
+        if let Some(old) = old.tuf_repo() {
+            if old.artifacts.iter().any(|meta| meta.hash == hash) {
                 return ZoneStatusVersion::Version(
                     old.repo.system_version.clone(),
                 );
             }
         }
 
-        if let Some(new) = new {
-            if let Some(_) = new.artifacts.iter().find(|meta| meta.hash == hash)
-            {
+        if let Some(new) = new.tuf_repo() {
+            if new.artifacts.iter().any(|meta| meta.hash == hash) {
                 return ZoneStatusVersion::Version(
                     new.repo.system_version.clone(),
                 );

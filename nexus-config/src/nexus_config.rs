@@ -594,9 +594,6 @@ pub struct PhantomDiskConfig {
 #[serde_as]
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 pub struct BlueprintTasksConfig {
-    /// background planner chicken switch
-    pub disable_planner: bool,
-
     /// period (in seconds) for periodic activations of the background task that
     /// reads the latest target blueprint from the database
     #[serde_as(as = "DurationSeconds<u64>")]
@@ -622,6 +619,11 @@ pub struct BlueprintTasksConfig {
     /// collects the node IDs of CockroachDB zones
     #[serde_as(as = "DurationSeconds<u64>")]
     pub period_secs_collect_crdb_node_ids: Duration,
+
+    /// period (in seconds) for periodic activations of the background task that
+    /// reads chicken switches from the database
+    #[serde_as(as = "DurationSeconds<u64>")]
+    pub period_secs_load_chicken_switches: Duration,
 }
 
 #[serde_as]
@@ -1079,12 +1081,12 @@ mod test {
             physical_disk_adoption.period_secs = 30
             decommissioned_disk_cleaner.period_secs = 30
             phantom_disks.period_secs = 30
-            blueprints.disable_planner = true
             blueprints.period_secs_load = 10
             blueprints.period_secs_plan = 60
             blueprints.period_secs_execute = 60
             blueprints.period_secs_rendezvous = 300
             blueprints.period_secs_collect_crdb_node_ids = 180
+            blueprints.period_secs_load_chicken_switches= 5
             sync_service_zone_nat.period_secs = 30
             switch_port_settings_manager.period_secs = 30
             region_replacement.period_secs = 30
@@ -1247,13 +1249,14 @@ mod test {
                             period_secs: Duration::from_secs(30),
                         },
                         blueprints: BlueprintTasksConfig {
-                            disable_planner: true,
                             period_secs_load: Duration::from_secs(10),
                             period_secs_plan: Duration::from_secs(60),
                             period_secs_execute: Duration::from_secs(60),
                             period_secs_collect_crdb_node_ids:
                                 Duration::from_secs(180),
                             period_secs_rendezvous: Duration::from_secs(300),
+                            period_secs_load_chicken_switches:
+                                Duration::from_secs(5)
                         },
                         sync_service_zone_nat: SyncServiceZoneNatConfig {
                             period_secs: Duration::from_secs(30)
@@ -1396,12 +1399,12 @@ mod test {
             physical_disk_adoption.period_secs = 30
             decommissioned_disk_cleaner.period_secs = 30
             phantom_disks.period_secs = 30
-            blueprints.disable_planner = true
             blueprints.period_secs_load = 10
             blueprints.period_secs_plan = 60
             blueprints.period_secs_execute = 60
             blueprints.period_secs_rendezvous = 300
             blueprints.period_secs_collect_crdb_node_ids = 180
+            blueprints.period_secs_load_chicken_switches= 5
             sync_service_zone_nat.period_secs = 30
             switch_port_settings_manager.period_secs = 30
             region_replacement.period_secs = 30
@@ -1424,6 +1427,7 @@ mod test {
             alert_dispatcher.period_secs = 42
             webhook_deliverator.period_secs = 43
             sp_ereport_ingester.period_secs = 44
+
             [default_region_allocation_strategy]
             type = "random"
             "##,

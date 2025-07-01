@@ -502,7 +502,8 @@ pub(crate) async fn read_all_endpoints(
 
     // Fetch all silos.
     let mut silos = Vec::new();
-    let mut paginator = Paginator::new(batch_size);
+    let mut paginator =
+        Paginator::new(batch_size, dropshot::PaginationOrder::Ascending);
     while let Some(p) = paginator.next() {
         let batch = datastore
             .silos_list(
@@ -518,7 +519,8 @@ pub(crate) async fn read_all_endpoints(
     // Fetch all external DNS zones.  We should really only ever have one, but
     // we may as well paginate this.
     let mut external_dns_zones = Vec::new();
-    let mut paginator = Paginator::new(batch_size);
+    let mut paginator =
+        Paginator::new(batch_size, dropshot::PaginationOrder::Ascending);
     while let Some(p) = paginator.next() {
         let batch = datastore
             .dns_zones_list(opctx, DnsGroup::External, &p.current_pagparams())
@@ -533,7 +535,8 @@ pub(crate) async fn read_all_endpoints(
 
     // Fetch all TLS certificates.
     let mut certs = Vec::new();
-    let mut paginator = Paginator::new(batch_size);
+    let mut paginator =
+        Paginator::new(batch_size, dropshot::PaginationOrder::Ascending);
     while let Some(p) = paginator.next() {
         let batch = datastore
             .certificate_list_for(
