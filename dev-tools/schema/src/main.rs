@@ -71,38 +71,18 @@ fn get_schema_version_from_commit(
         .output()
         .context("Failed to run git show")?;
 
-    let file_content = if show_output.status.success() {
-        String::from_utf8(show_output.stdout)?
-    } else {
-        // Try the old location (schema.rs) for older commits
-        let show_output_old = Command::new("git")
-            .current_dir(workspace_root)
-            .args([
-                "show",
-                &format!("{}:nexus/db-model/src/schema.rs", commit_hash),
-            ])
-            .output()
-            .context("Failed to run git show for old schema.rs")?;
-
-        if !show_output_old.status.success() {
-            return Ok(None); // File doesn't exist in either location
-        }
-
-        String::from_utf8(show_output_old.stdout)?
+    if !show_output.status.success() {
+        anyhow::bail!("Could not find schema_versions.rs in commit");
     };
+
+    let file_content = String::from_utf8(show_output.stdout)?;
 
     // Parse the SCHEMA_VERSION from the file
     for line in file_content.lines() {
         if line.contains("pub const SCHEMA_VERSION")
-            && (line.contains("Version::new(")
-                || line.contains("SemverVersion::new("))
+            && line.contains("Version::new(")
         {
-            // Handle both old format (SemverVersion::new) and new format (Version::new)
-            let version_part = if line.contains("Version::new(") {
-                line.split("Version::new(").nth(1)
-            } else {
-                line.split("SemverVersion::new(").nth(1)
-            };
+            let version_part = line.split("Version::new(").nth(1);
 
             if let Some(version_part) = version_part {
                 if let Some(version_nums) = version_part.split(')').next() {
