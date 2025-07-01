@@ -1488,17 +1488,6 @@ pub struct TargetRelease {
 
     /// The source of the target release.
     pub release_source: TargetReleaseSource,
-
-    /// If true, indicates that at least one sled in the system has been updated
-    /// through the recovery (MUPdate) path since the last time the target
-    /// release was set.
-    ///
-    /// In this case, the system will ignore the currently-set target release,
-    /// on the assumption that continuing an update may reintroduce or
-    /// exacerbate whatever problem caused the recovery path to be used. An
-    /// operator must set the target release again in order to resume automated
-    /// updates.
-    pub mupdate_override: bool,
 }
 
 fn expected_one_of<T: strum::VariantArray + fmt::Display>() -> String {

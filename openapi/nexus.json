@@ -24802,10 +24802,6 @@
             "type": "integer",
             "format": "int64"
           },
-          "mupdate_override": {
-            "description": "If true, indicates that at least one sled in the system has been updated through the recovery (MUPdate) path since the last time the target release was set.\n\nIn this case, the system will ignore the currently-set target release, on the assumption that continuing an update may reintroduce or exacerbate whatever problem caused the recovery path to be used. An operator must set the target release again in order to resume automated updates.",
-            "type": "boolean"
-          },
           "release_source": {
             "description": "The source of the target release.",
             "allOf": [
@@ -24822,7 +24818,6 @@
         },
         "required": [
           "generation",
-          "mupdate_override",
           "release_source",
           "time_requested"
         ]
