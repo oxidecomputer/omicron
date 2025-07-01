@@ -24,6 +24,7 @@ use nexus_sled_agent_shared::inventory::InventoryZpool;
 use nexus_sled_agent_shared::inventory::OmicronSledConfig;
 use nexus_sled_agent_shared::inventory::SledRole;
 use nexus_sled_agent_shared::inventory::ZoneImageResolverInventory;
+use nexus_sled_agent_shared::inventory::ZoneManifestBootInventory;
 use nexus_types::deployment::ClickhousePolicy;
 use nexus_types::deployment::CockroachDbClusterVersion;
 use nexus_types::deployment::CockroachDbSettings;
@@ -270,6 +271,39 @@ impl SystemDescription {
         self
     }
 
+    /// Resolve a serial number into a sled ID.
+    pub fn serial_to_sled_id(&self, serial: &str) -> anyhow::Result<SledUuid> {
+        let sled_id = self.sleds.values().find_map(|sled| {
+            if let Some((_, sp_state)) = sled.sp_state() {
+                if sp_state.serial_number == serial {
+                    return Some(sled.sled_id);
+                }
+            }
+            None
+        });
+        sled_id.with_context(|| {
+            let known_serials = self
+                .sleds
+                .values()
+                .filter_map(|sled| {
+                    sled.sp_state()
+                        .map(|(_, sp_state)| sp_state.serial_number.as_str())
+                })
+                .collect::<Vec<_>>();
+            format!(
+                "sled not found with serial {serial} (known serials: {})",
+                known_serials.join(", "),
+            )
+        })
+    }
+
+    pub fn get_sled(&self, sled_id: SledUuid) -> anyhow::Result<&Sled> {
+        let Some(sled) = self.sleds.get(&sled_id) else {
+            bail!("Sled not found with id {sled_id}");
+        };
+        Ok(sled)
+    }
+
     pub fn get_sled_mut(
         &mut self,
         sled_id: SledUuid,
@@ -323,6 +357,7 @@ impl SystemDescription {
             sled.unique,
             sled.hardware,
             hardware_slot,
+            sled.policy,
             sled.sled_config,
             sled.npools,
         );
@@ -446,6 +481,20 @@ impl SystemDescription {
         })?;
         let sled = Arc::make_mut(sled);
         sled.set_sp_versions(active_version, inactive_version);
+        Ok(self)
+    }
+
+    /// Set the zone manifest for a sled from a provided `TufRepoDescription`.
+    pub fn sled_set_zone_manifest(
+        &mut self,
+        sled_id: SledUuid,
+        boot_inventory: Result<ZoneManifestBootInventory, String>,
+    ) -> anyhow::Result<&mut Self> {
+        let sled = self.sleds.get_mut(&sled_id).with_context(|| {
+            format!("attempted to access sled {} not found in system", sled_id)
+        })?;
+        let sled = Arc::make_mut(sled);
+        sled.set_zone_manifest(boot_inventory);
         Ok(self)
     }
 
@@ -644,6 +693,7 @@ pub struct SledBuilder {
     hardware: SledHardware,
     hardware_slot: Option<u16>,
     sled_role: SledRole,
+    policy: SledPolicy,
     sled_config: OmicronSledConfig,
     npools: u8,
 }
@@ -663,6 +713,9 @@ impl SledBuilder {
             hardware_slot: None,
             sled_role: SledRole::Gimlet,
             sled_config: OmicronSledConfig::default(),
+            policy: SledPolicy::InService {
+                provision_policy: SledProvisionPolicy::Provisionable,
+            },
             npools: Self::DEFAULT_NPOOLS,
         }
     }
@@ -717,6 +770,12 @@ impl SledBuilder {
         self.sled_role = sled_role;
         self
     }
+
+    /// Sets this sled's policy.
+    pub fn policy(mut self, policy: SledPolicy) -> Self {
+        self.policy = policy;
+        self
+    }
 }
 
 /// Convenience structure summarizing `Sled` inputs that come from inventory
@@ -755,6 +814,7 @@ impl Sled {
         unique: Option<String>,
         hardware: SledHardware,
         hardware_slot: u16,
+        policy: SledPolicy,
         sled_config: OmicronSledConfig,
         nzpools: u8,
     ) -> Sled {
@@ -886,9 +946,7 @@ impl Sled {
             sled_id,
             inventory_sp,
             inventory_sled_agent,
-            policy: SledPolicy::InService {
-                provision_policy: SledProvisionPolicy::Provisionable,
-            },
+            policy,
             state: SledState::Active,
             resources: SledResources { subnet: sled_subnet, zpools },
             sp_active_caboose: Some(Arc::new(Self::default_sp_caboose(
@@ -1061,7 +1119,7 @@ impl Sled {
         });
     }
 
-    fn sp_state(&self) -> Option<&(u16, SpState)> {
+    pub fn sp_state(&self) -> Option<&(u16, SpState)> {
         self.inventory_sp.as_ref()
     }
 
@@ -1075,6 +1133,16 @@ impl Sled {
 
     fn sp_inactive_caboose(&self) -> Option<&Caboose> {
         self.sp_inactive_caboose.as_deref()
+    }
+
+    fn set_zone_manifest(
+        &mut self,
+        boot_inventory: Result<ZoneManifestBootInventory, String>,
+    ) {
+        self.inventory_sled_agent
+            .zone_image_resolver
+            .zone_manifest
+            .boot_inventory = boot_inventory;
     }
 
     /// Update the reported SP versions
