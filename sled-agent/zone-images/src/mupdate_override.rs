@@ -14,7 +14,7 @@ use camino::Utf8PathBuf;
 use iddqd::IdOrdMap;
 use omicron_common::update::MupdateOverrideInfo;
 use omicron_uuid_kinds::InternalZpoolUuid;
-use sled_agent_config_reconciler::InternalDisksWithBootDisk;
+use sled_agent_types::internal_disks::InternalDisksWithBootDisk;
 use sled_agent_types::zone_images::MupdateOverrideNonBootInfo;
 use sled_agent_types::zone_images::MupdateOverrideNonBootMismatch;
 use sled_agent_types::zone_images::MupdateOverrideNonBootResult;

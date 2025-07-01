@@ -10,7 +10,7 @@ use omicron_common::update::{
 use omicron_uuid_kinds::InternalZpoolUuid;
 use rayon::iter::{ParallelBridge, ParallelIterator};
 use sha2::{Digest, Sha256};
-use sled_agent_config_reconciler::InternalDisksWithBootDisk;
+use sled_agent_types::internal_disks::InternalDisksWithBootDisk;
 use sled_agent_types::zone_images::{
     ArcIoError, ArtifactReadResult, InstallMetadataReadError,
     ZoneManifestArtifactResult, ZoneManifestArtifactsResult,

@@ -19,7 +19,6 @@ rayon.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 sha2.workspace = true
-sled-agent-config-reconciler.workspace = true
 sled-agent-types.workspace = true
 sled-storage.workspace = true
 slog.workspace = true
@@ -32,5 +31,5 @@ dropshot.workspace = true
 expectorate.workspace = true
 omicron-uuid-kinds.workspace = true
 pretty_assertions.workspace = true
-sled-agent-config-reconciler = { workspace = true, features = ["testing"] }
+sled-agent-types = { workspace = true, features = ["testing"] }
 sled-agent-zone-images-examples.workspace = true

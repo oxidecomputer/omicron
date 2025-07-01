@@ -7,7 +7,7 @@ use std::sync::Arc;
 use camino::Utf8Path;
 use omicron_common::disk::DiskIdentity;
 use omicron_uuid_kinds::InternalZpoolUuid;
-use sled_agent_config_reconciler::InternalDisksReceiver;
+use sled_agent_types::internal_disks::InternalDisksReceiver;
 use sled_storage::config::MountConfig;
 
 pub(crate) fn make_internal_disks_rx(

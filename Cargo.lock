@@ -12093,7 +12093,6 @@ dependencies = [
  "serde",
  "serde_json",
  "sha2",
- "sled-agent-config-reconciler",
  "sled-agent-types",
  "sled-agent-zone-images-examples",
  "sled-storage",
