@@ -1317,7 +1317,7 @@ fn cmd_blueprint_edit(
             let update = PendingMgsUpdate {
                 baseboard_id: baseboard_id.clone(),
                 sp_type: sp.sp_type,
-                slot_id: u32::from(sp.sp_slot),
+                slot_id: sp.sp_slot,
                 details,
                 artifact_hash,
                 artifact_version,

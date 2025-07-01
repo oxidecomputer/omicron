@@ -5928,7 +5928,7 @@
           "slot_id": {
             "description": "last known MGS slot (cubby number) of the baseboard",
             "type": "integer",
-            "format": "uint32",
+            "format": "uint16",
             "minimum": 0
           },
           "sp_type": {
