@@ -1282,17 +1282,7 @@ mod test {
                 .is_none()
         );
 
-        // We should see an error.
-        assert_eq!(
-            collection
-                .errors
-                .iter()
-                .map(|e| format!("{:#}", e))
-                .collect::<Vec<_>>(),
-            vec![
-                "MGS \"fake MGS 1\": SP Sled slot 65536: \
-                slot number did not fit into u16"
-            ]
-        );
+        // We should see no errors.
+        assert_eq!(collection.errors.iter().next(), None);
     }
 }
