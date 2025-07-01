@@ -90,8 +90,6 @@ Process:
 ** Update the SQL statements to match what the database should look like
    after your up*.sql files are applied.
 ** Update the version field of `db_metadata` at the bottom of the file.
-* Re-run `cargo xtask schema generate-previous` to check a revision of `dbinit.sql`
-  into the codebase. This is used by tests.
 * Update `schema/crdb/dbwipe.sql` if needed.  (This is rare.)
 * Update `nexus/db-model/src/schema_versions.rs`:
 ** Update the major number of `SCHEMA_VERSION` so that it matches `NEW_VERSION`.
@@ -117,6 +115,16 @@ There are automated tests to validate many of these steps:
 * The most recent `up*.sql` files can be applied twice without error.  (This catches
   non-idempotent update steps.)
 
+We currently support schema migrations from one release of Omicron to the next.
+We track what this "oldest known release" version of the database looks like
+within `schema/crdb/dbinit-base.sql`. This file may be regenerated
+using `cargo xtask schema generate-base`, supplying either the commit or tag
+to identify as the new "oldest supported schema version".
+
+We recommend updating this base file after each release.
+The command `cargo xtask schema old-migrations` can be used to help clean up
+old schema versions.
+
 **If you've finished all this and another PR lands on "main" that chose the
 same `NEW_VERSION`:**, then your `OLD_VERSION` has changed and so _your_
 `NEW_VERSION` needs to change, too.  You'll need to:
@@ -127,7 +135,6 @@ same `NEW_VERSION`:**, then your `OLD_VERSION` has changed and so _your_
    `NEW_VERSION` and still appears at the top of the list (logically after the
    new version that came in from "main").
 * Update the version in `dbinit.sql` to match the new `NEW_VERSION`.
-* Re-run `cargo xtask schema generate-previous`.
 
 === Constraints on Schema Updates
 

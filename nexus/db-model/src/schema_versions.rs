@@ -34,168 +34,15 @@ pub static KNOWN_VERSIONS: LazyLock<Vec<KnownVersion>> = LazyLock::new(|| {
         KnownVersion::new(150, "add-last-reconciliation-orphaned-datasets"),
         KnownVersion::new(149, "bp-add-target-release-min-gen"),
         KnownVersion::new(148, "clean-misplaced-m2s"),
-        KnownVersion::new(147, "device-auth-request-ttl"),
-        KnownVersion::new(146, "silo-settings-token-expiration"),
-        KnownVersion::new(145, "token-and-session-ids"),
-        KnownVersion::new(144, "inventory-omicron-sled-config"),
-        KnownVersion::new(143, "alerts-renamening"),
-        KnownVersion::new(142, "bp-add-remove-mupdate-override"),
-        KnownVersion::new(141, "caboose-sign-value"),
-        KnownVersion::new(140, "instance-intended-state"),
-        KnownVersion::new(139, "webhooks"),
-        KnownVersion::new(138, "saga-abandoned-state"),
-        KnownVersion::new(137, "oximeter-read-policy"),
-        KnownVersion::new(136, "do-not-provision-flag-for-crucible-dataset"),
-        KnownVersion::new(135, "blueprint-zone-image-source"),
-        KnownVersion::new(134, "crucible-agent-reservation-overhead"),
-        KnownVersion::new(133, "delete-defunct-reservations"),
-        KnownVersion::new(132, "bp-omicron-zone-filesystem-pool-not-null"),
-        KnownVersion::new(131, "tuf-generation"),
-        KnownVersion::new(130, "bp-sled-agent-generation"),
-        KnownVersion::new(129, "create-target-release"),
-        KnownVersion::new(128, "sled-resource-for-vmm"),
-        KnownVersion::new(127, "bp-disk-disposition-expunged-cleanup"),
-        KnownVersion::new(126, "affinity"),
-        KnownVersion::new(125, "blueprint-disposition-expunged-cleanup"),
-        KnownVersion::new(124, "support-read-only-region-replacement"),
-        KnownVersion::new(123, "vpc-subnet-contention"),
-        KnownVersion::new(122, "tuf-artifact-replication"),
-        KnownVersion::new(121, "dataset-to-crucible-dataset"),
-        KnownVersion::new(120, "rendezvous-debug-dataset"),
-        KnownVersion::new(119, "tuf-artifact-key-uuid"),
-        KnownVersion::new(118, "support-bundles"),
-        KnownVersion::new(117, "add-completing-and-new-region-volume"),
-        KnownVersion::new(116, "bp-physical-disk-disposition"),
-        KnownVersion::new(115, "inv-omicron-physical-disks-generation"),
-        KnownVersion::new(114, "crucible-ref-count-records"),
-        KnownVersion::new(113, "add-tx-eq"),
-        KnownVersion::new(112, "blueprint-dataset"),
-        KnownVersion::new(111, "drop-omicron-zone-underlay-address"),
-        KnownVersion::new(110, "clickhouse-policy"),
-        KnownVersion::new(109, "inv-clickhouse-keeper-membership"),
-        KnownVersion::new(108, "internet-gateway"),
-        KnownVersion::new(107, "add-instance-boot-disk"),
-        KnownVersion::new(106, "dataset-kinds-update"),
-        KnownVersion::new(105, "inventory-nvme-firmware"),
-        KnownVersion::new(104, "lookup-bgp-config-indexes"),
-        KnownVersion::new(103, "lookup-instances-by-state-index"),
-        KnownVersion::new(102, "add-instance-auto-restart-cooldown"),
-        KnownVersion::new(101, "auto-restart-policy-v2"),
-        KnownVersion::new(100, "add-instance-last-auto-restarted-timestamp"),
-        KnownVersion::new(99, "blueprint-add-clickhouse-tables"),
-        KnownVersion::new(98, "oximeter-add-time-expunged"),
-        KnownVersion::new(97, "lookup-region-snapshot-by-region-id"),
-        KnownVersion::new(96, "inv-dataset"),
-        KnownVersion::new(95, "turn-boot-on-fault-into-auto-restart"),
-        KnownVersion::new(94, "put-back-creating-vmm-state"),
-        KnownVersion::new(93, "dataset-kinds-zone-and-debug"),
-        KnownVersion::new(92, "lldp-link-config-nullable"),
-        KnownVersion::new(91, "add-management-gateway-producer-kind"),
-        KnownVersion::new(90, "lookup-bgp-config-by-asn"),
-        KnownVersion::new(89, "collapse_lldp_settings"),
-        KnownVersion::new(88, "route-local-pref"),
-        KnownVersion::new(87, "add-clickhouse-server-enum-variants"),
-        KnownVersion::new(86, "snapshot-replacement"),
-        KnownVersion::new(85, "add-migrations-by-time-created-index"),
-        KnownVersion::new(84, "region-read-only"),
-        KnownVersion::new(83, "dataset-address-optional"),
-        KnownVersion::new(82, "region-port"),
-        KnownVersion::new(81, "add-nullable-filesystem-pool"),
-        KnownVersion::new(80, "add-instance-id-to-migrations"),
-        KnownVersion::new(79, "nic-spoof-allow"),
-        KnownVersion::new(78, "vpc-subnet-routing"),
-        KnownVersion::new(77, "remove-view-for-v2p-mappings"),
-        KnownVersion::new(76, "lookup-region-snapshot-by-snapshot-id"),
-        KnownVersion::new(75, "add-cockroach-zone-id-to-node-id"),
-        KnownVersion::new(74, "add-migration-table"),
-        KnownVersion::new(73, "add-vlan-to-uplink"),
-        KnownVersion::new(72, "fix-provisioning-counters"),
-        KnownVersion::new(71, "add-saga-unwound-vmm-state"),
-        KnownVersion::new(70, "separate-instance-and-vmm-states"),
-        KnownVersion::new(69, "expose-stage0"),
-        KnownVersion::new(68, "filter-v2p-mapping-by-instance-state"),
-        KnownVersion::new(67, "add-instance-updater-lock"),
-        KnownVersion::new(66, "blueprint-crdb-preserve-downgrade"),
-        KnownVersion::new(65, "region-replacement"),
-        KnownVersion::new(64, "add-view-for-v2p-mappings"),
-        KnownVersion::new(63, "remove-producer-base-route-column"),
-        KnownVersion::new(62, "allocate-subnet-decommissioned-sleds"),
-        KnownVersion::new(61, "blueprint-add-sled-state"),
-        KnownVersion::new(60, "add-lookup-vmm-by-sled-id-index"),
-        KnownVersion::new(59, "enforce-first-as-default"),
-        KnownVersion::new(58, "insert-default-allowlist"),
-        KnownVersion::new(57, "add-allowed-source-ips"),
-        KnownVersion::new(56, "bgp-oxpop-features"),
-        KnownVersion::new(55, "add-lookup-sled-by-policy-and-state-index"),
-        KnownVersion::new(54, "blueprint-add-external-ip-id"),
-        KnownVersion::new(53, "drop-service-table"),
-        KnownVersion::new(52, "blueprint-physical-disk"),
-        KnownVersion::new(51, "blueprint-disposition-column"),
-        KnownVersion::new(50, "add-lookup-disk-by-volume-id-index"),
-        KnownVersion::new(49, "physical-disk-state-and-policy"),
-        KnownVersion::new(48, "add-metrics-producers-time-modified-index"),
-        KnownVersion::new(47, "add-view-for-bgp-peer-configs"),
-        KnownVersion::new(46, "first-named-migration"),
-        // The first many schema versions only vary by major or patch number and
-        // their path is predictable based on the version number.  (This was
-        // historically a problem because two pull requests both adding a new
-        // schema version might merge cleanly but produce an invalid result.)
-        KnownVersion::legacy(45, 0),
-        KnownVersion::legacy(44, 0),
-        KnownVersion::legacy(43, 0),
-        KnownVersion::legacy(42, 0),
-        KnownVersion::legacy(41, 0),
-        KnownVersion::legacy(40, 0),
-        KnownVersion::legacy(39, 0),
-        KnownVersion::legacy(38, 0),
-        KnownVersion::legacy(37, 1),
-        KnownVersion::legacy(37, 0),
-        KnownVersion::legacy(36, 0),
-        KnownVersion::legacy(35, 0),
-        KnownVersion::legacy(34, 0),
-        KnownVersion::legacy(33, 1),
-        KnownVersion::legacy(33, 0),
-        KnownVersion::legacy(32, 0),
-        KnownVersion::legacy(31, 0),
-        KnownVersion::legacy(30, 0),
-        KnownVersion::legacy(29, 0),
-        KnownVersion::legacy(28, 0),
-        KnownVersion::legacy(27, 0),
-        KnownVersion::legacy(26, 0),
-        KnownVersion::legacy(25, 0),
-        KnownVersion::legacy(24, 0),
-        KnownVersion::legacy(23, 1),
-        KnownVersion::legacy(23, 0),
-        KnownVersion::legacy(22, 0),
-        KnownVersion::legacy(21, 0),
-        KnownVersion::legacy(20, 0),
-        KnownVersion::legacy(19, 0),
-        KnownVersion::legacy(18, 0),
-        KnownVersion::legacy(17, 0),
-        KnownVersion::legacy(16, 0),
-        KnownVersion::legacy(15, 0),
-        KnownVersion::legacy(14, 0),
-        KnownVersion::legacy(13, 0),
-        KnownVersion::legacy(12, 0),
-        KnownVersion::legacy(11, 0),
-        KnownVersion::legacy(10, 0),
-        KnownVersion::legacy(9, 0),
-        KnownVersion::legacy(8, 0),
-        KnownVersion::legacy(7, 0),
-        KnownVersion::legacy(6, 0),
-        KnownVersion::legacy(5, 0),
-        KnownVersion::legacy(4, 0),
-        KnownVersion::legacy(3, 3),
-        KnownVersion::legacy(3, 2),
-        KnownVersion::legacy(3, 1),
-        KnownVersion::legacy(3, 0),
-        KnownVersion::legacy(2, 0),
-        KnownVersion::legacy(1, 0),
     ]
 });
 
 /// The earliest supported schema version.
-pub const EARLIEST_SUPPORTED_VERSION: Version = Version::new(1, 0, 0);
+///
+/// Note that we no longer need the actual migration to get to this version, but
+/// this version should match the "base" schema we save in
+/// schema/crdb/dbinit-base.sql
+pub const EARLIEST_SUPPORTED_VERSION: Version = Version::new(148, 0, 0);
 
 /// Describes one version of the database schema
 #[derive(Debug, Clone)]
@@ -239,6 +86,11 @@ impl KnownVersion {
     /// Returns the semver for this known version
     pub fn semver(&self) -> &Version {
         &self.semver
+    }
+
+    /// Returns the name of this schema
+    pub fn relative_path(&self) -> &str {
+        &self.relative_path
     }
 }
 
@@ -533,7 +385,6 @@ mod test {
     // (Test the test function)
     #[test]
     fn test_verify() {
-        // EARLIEST_SUPPORTED_VERSION is somehow wrong
         let error = verify_known_versions(
             [&KnownVersion::legacy(2, 0), &KnownVersion::legacy(3, 0)],
             &Version::new(1, 0, 0),
@@ -543,7 +394,7 @@ mod test {
         .unwrap_err();
         assert_eq!(
             format!("{error:#}"),
-            "EARLIEST_SUPPORTED_VERSION is not the earliest in KNOWN_VERSIONS"
+            "Earliest version is not the earliest in KNOWN_VERSIONS"
         );
 
         // SCHEMA_VERSION was not updated
@@ -566,7 +417,7 @@ mod test {
                 &KnownVersion::legacy(2, 0),
                 &KnownVersion::legacy(2, 0),
             ],
-            &EARLIEST_SUPPORTED_VERSION,
+            &Version::new(1, 0, 0),
             &Version::new(2, 0, 0),
             100,
         )
@@ -583,7 +434,7 @@ mod test {
                 &KnownVersion::new(2, "dir1"),
                 &KnownVersion::new(2, "dir2"),
             ],
-            &EARLIEST_SUPPORTED_VERSION,
+            &Version::new(1, 0, 0),
             &Version::new(2, 0, 0),
             100,
         )
@@ -600,7 +451,7 @@ mod test {
                 &KnownVersion::legacy(2, 0),
                 &KnownVersion::legacy(1, 3),
             ],
-            &EARLIEST_SUPPORTED_VERSION,
+            &Version::new(1, 0, 0),
             &Version::new(3, 0, 0),
             100,
         )
@@ -617,7 +468,7 @@ mod test {
                 &KnownVersion::legacy(2, 0),
                 &KnownVersion::legacy(4, 0),
             ],
-            &EARLIEST_SUPPORTED_VERSION,
+            &Version::new(1, 0, 0),
             &Version::new(4, 0, 0),
             100,
         )
@@ -637,7 +488,7 @@ mod test {
                 &KnownVersion::legacy(2, 0),
                 &KnownVersion::legacy(3, 2),
             ],
-            &EARLIEST_SUPPORTED_VERSION,
+            &Version::new(1, 0, 0),
             &Version::new(3, 0, 2),
             2,
         )
@@ -653,7 +504,7 @@ mod test {
                 &KnownVersion::legacy(2, 0),
                 &KnownVersion::legacy(3, 0),
             ],
-            &EARLIEST_SUPPORTED_VERSION,
+            &Version::new(1, 0, 0),
             &Version::new(3, 0, 0),
             2,
         )
@@ -682,7 +533,7 @@ mod test {
             known_versions.next().expect("expected at least one KNOWN_VERSION");
         ensure!(
             first.semver == *earliest,
-            "EARLIEST_SUPPORTED_VERSION is not the earliest in KNOWN_VERSIONS"
+            "Earliest version is not the earliest in KNOWN_VERSIONS"
         );
 
         let mut prev = first;
