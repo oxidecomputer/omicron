@@ -7,7 +7,7 @@
 use anyhow::bail;
 use camino::{Utf8Path, Utf8PathBuf};
 use derive_more::From;
-use iddqd::{id_upcast, IdOrdItem};
+use iddqd::{IdOrdItem, id_upcast};
 use key_manager::StorageKeyRequester;
 use omicron_common::disk::{DiskIdentity, DiskVariant};
 use omicron_common::zpool_name::{ZpoolKind, ZpoolName};

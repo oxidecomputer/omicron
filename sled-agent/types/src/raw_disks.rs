@@ -66,9 +66,7 @@ pub fn new() -> (RawDisksSender, RawDisksReceiver) {
 }
 
 #[derive(Debug, Clone)]
-pub struct RawDisksReceiver(
-    pub(crate) watch::Receiver<Arc<IdOrdMap<RawDisk>>>,
-);
+pub struct RawDisksReceiver(pub(crate) watch::Receiver<Arc<IdOrdMap<RawDisk>>>);
 
 impl Deref for RawDisksReceiver {
     type Target = watch::Receiver<Arc<IdOrdMap<RawDisk>>>;

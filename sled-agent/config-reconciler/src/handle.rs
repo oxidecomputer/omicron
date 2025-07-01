@@ -3,20 +3,20 @@
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 use camino::Utf8PathBuf;
-use sled_agent_types::internal_disks::InternalDisksReceiver;
 use illumos_utils::zpool::PathInPool;
 use key_manager::StorageKeyRequester;
 use nexus_sled_agent_shared::inventory::ConfigReconcilerInventory;
 use nexus_sled_agent_shared::inventory::ConfigReconcilerInventoryStatus;
-use sled_agent_types::raw_disks;
-use sled_agent_types::raw_disks::RawDisksReceiver;
-use sled_agent_types::raw_disks::RawDisksSender;
 use nexus_sled_agent_shared::inventory::InventoryDataset;
 use nexus_sled_agent_shared::inventory::InventoryDisk;
 use nexus_sled_agent_shared::inventory::InventoryZpool;
 use nexus_sled_agent_shared::inventory::OmicronSledConfig;
 use omicron_common::disk::DatasetName;
 use sled_agent_api::ArtifactConfig;
+use sled_agent_types::internal_disks::InternalDisksReceiver;
+use sled_agent_types::raw_disks;
+use sled_agent_types::raw_disks::RawDisksReceiver;
+use sled_agent_types::raw_disks::RawDisksSender;
 use sled_storage::config::MountConfig;
 use sled_storage::disk::Disk;
 use sled_storage::manager::NestedDatasetConfig;
