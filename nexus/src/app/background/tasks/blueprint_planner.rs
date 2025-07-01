@@ -25,7 +25,7 @@ use tokio::sync::watch::{self, Receiver, Sender};
 /// Background task that runs the update planner.
 pub struct BlueprintPlanner {
     datastore: Arc<DataStore>,
-    rx_chicken_switches: Receiver<Option<ReconfiguratorChickenSwitches>>,
+    rx_chicken_switches: Receiver<ReconfiguratorChickenSwitches>,
     rx_inventory: Receiver<Option<CollectionUuid>>,
     rx_blueprint: Receiver<Option<Arc<(BlueprintTarget, Blueprint)>>>,
     tx_blueprint: Sender<Option<Arc<(BlueprintTarget, Blueprint)>>>,
@@ -34,7 +34,7 @@ pub struct BlueprintPlanner {
 impl BlueprintPlanner {
     pub fn new(
         datastore: Arc<DataStore>,
-        rx_chicken_switches: Receiver<Option<ReconfiguratorChickenSwitches>>,
+        rx_chicken_switches: Receiver<ReconfiguratorChickenSwitches>,
         rx_inventory: Receiver<Option<CollectionUuid>>,
         rx_blueprint: Receiver<Option<Arc<(BlueprintTarget, Blueprint)>>>,
     ) -> Self {
@@ -59,7 +59,7 @@ impl BlueprintPlanner {
     /// save it and make it the current target.
     pub async fn plan(&mut self, opctx: &OpContext) -> BlueprintPlannerStatus {
         let switches = self.rx_chicken_switches.borrow_and_update().clone();
-        if switches.is_none_or(|s| !s.planner_enabled) {
+        if !switches.planner_enabled {
             debug!(&opctx.log, "blueprint planning disabled, doing nothing");
             return BlueprintPlannerStatus::Disabled;
         }
@@ -302,11 +302,11 @@ mod test {
 
         // Enable the planner
         let (_tx, chicken_switches_collector_rx) =
-            watch::channel(Some(ReconfiguratorChickenSwitches {
+            watch::channel(ReconfiguratorChickenSwitches {
                 version: 1,
                 planner_enabled: true,
                 time_modified: now_db_precision(),
-            }));
+            });
 
         // Finally, spin up the planner background task.
         let mut planner = BlueprintPlanner::new(

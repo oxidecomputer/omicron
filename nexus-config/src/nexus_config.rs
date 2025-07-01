@@ -441,8 +441,6 @@ pub struct BackgroundTaskConfig {
     pub webhook_deliverator: WebhookDeliveratorConfig,
     /// configuration for SP ereport ingester task
     pub sp_ereport_ingester: SpEreportIngesterConfig,
-    /// reconfigurator runtime configuration
-    pub chicken_switches: ChickenSwitchesConfig,
 }
 
 #[serde_as]
@@ -621,6 +619,11 @@ pub struct BlueprintTasksConfig {
     /// collects the node IDs of CockroachDB zones
     #[serde_as(as = "DurationSeconds<u64>")]
     pub period_secs_collect_crdb_node_ids: Duration,
+
+    /// period (in seconds) for periodic activations of the background task that
+    /// reads chicken switches from the database
+    #[serde_as(as = "DurationSeconds<u64>")]
+    pub period_secs_load_chicken_switches: Duration,
 }
 
 #[serde_as]
@@ -823,20 +826,6 @@ pub struct SpEreportIngesterConfig {
 impl Default for SpEreportIngesterConfig {
     fn default() -> Self {
         Self { period_secs: Duration::from_secs(30) }
-    }
-}
-
-#[serde_as]
-#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
-pub struct ChickenSwitchesConfig {
-    /// period (in seconds) for periodic activations of this background task
-    #[serde_as(as = "DurationSeconds<u64>")]
-    pub period_secs: Duration,
-}
-
-impl Default for ChickenSwitchesConfig {
-    fn default() -> Self {
-        Self { period_secs: Duration::from_secs(5) }
     }
 }
 
@@ -1097,6 +1086,7 @@ mod test {
             blueprints.period_secs_execute = 60
             blueprints.period_secs_rendezvous = 300
             blueprints.period_secs_collect_crdb_node_ids = 180
+            blueprints.period_secs_load_chicken_switches= 5
             sync_service_zone_nat.period_secs = 30
             switch_port_settings_manager.period_secs = 30
             region_replacement.period_secs = 30
@@ -1123,7 +1113,6 @@ mod test {
             webhook_deliverator.first_retry_backoff_secs = 45
             webhook_deliverator.second_retry_backoff_secs = 46
             sp_ereport_ingester.period_secs = 47
-            chicken_switches.period_secs = 30
             [default_region_allocation_strategy]
             type = "random"
             seed = 0
@@ -1266,6 +1255,8 @@ mod test {
                             period_secs_collect_crdb_node_ids:
                                 Duration::from_secs(180),
                             period_secs_rendezvous: Duration::from_secs(300),
+                            period_secs_load_chicken_switches:
+                                Duration::from_secs(5)
                         },
                         sync_service_zone_nat: SyncServiceZoneNatConfig {
                             period_secs: Duration::from_secs(30)
@@ -1345,9 +1336,6 @@ mod test {
                         sp_ereport_ingester: SpEreportIngesterConfig {
                             period_secs: Duration::from_secs(47),
                         },
-                        chicken_switches: ChickenSwitchesConfig {
-                            period_secs: Duration::from_secs(30)
-                        }
                     },
                     default_region_allocation_strategy:
                         crate::nexus_config::RegionAllocationStrategy::Random {
@@ -1416,6 +1404,7 @@ mod test {
             blueprints.period_secs_execute = 60
             blueprints.period_secs_rendezvous = 300
             blueprints.period_secs_collect_crdb_node_ids = 180
+            blueprints.period_secs_load_chicken_switches= 5
             sync_service_zone_nat.period_secs = 30
             switch_port_settings_manager.period_secs = 30
             region_replacement.period_secs = 30
@@ -1438,7 +1427,6 @@ mod test {
             alert_dispatcher.period_secs = 42
             webhook_deliverator.period_secs = 43
             sp_ereport_ingester.period_secs = 44
-            chicken_switches.period_secs = 30
 
             [default_region_allocation_strategy]
             type = "random"

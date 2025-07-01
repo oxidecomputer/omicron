@@ -16,26 +16,24 @@ use std::sync::Arc;
 use tokio::sync::watch;
 
 /// Background task that tracks reconfigurator chicken switches from the DB
-pub struct ChickenSwitchesCollector {
+pub struct ChickenSwitchesLoader {
     datastore: Arc<DataStore>,
-    tx: watch::Sender<Option<ReconfiguratorChickenSwitches>>,
-    rx: watch::Receiver<Option<ReconfiguratorChickenSwitches>>,
+    tx: watch::Sender<ReconfiguratorChickenSwitches>,
+    rx: watch::Receiver<ReconfiguratorChickenSwitches>,
 }
 
-impl ChickenSwitchesCollector {
+impl ChickenSwitchesLoader {
     pub fn new(datastore: Arc<DataStore>) -> Self {
-        let (tx, rx) = watch::channel(None);
+        let (tx, rx) = watch::channel(ReconfiguratorChickenSwitches::default());
         Self { datastore, tx, rx }
     }
 
-    pub fn watcher(
-        &self,
-    ) -> watch::Receiver<Option<ReconfiguratorChickenSwitches>> {
+    pub fn watcher(&self) -> watch::Receiver<ReconfiguratorChickenSwitches> {
         self.rx.clone()
     }
 }
 
-impl BackgroundTask for ChickenSwitchesCollector {
+impl BackgroundTask for ChickenSwitchesLoader {
     fn activate<'a>(
         &'a mut self,
         opctx: &'a OpContext,
@@ -45,15 +43,16 @@ impl BackgroundTask for ChickenSwitchesCollector {
                 .datastore
                 .reconfigurator_chicken_switches_get_latest(opctx)
                 .await
-                .context("failed to collect chicken switches")
+                .context("failed to load chicken switches")
             {
                 Err(error) => {
                     let message = format!("{:#}", error);
-                    warn!(opctx.log, "chicken switches collection failed";
+                    warn!(opctx.log, "chicken switches load failed";
                         "error" => message.clone());
                     json!({ "error": message })
                 }
                 Ok(switches) => {
+                    let switches = switches.unwrap_or_default();
                     let updated = self.tx.send_if_modified(|s| {
                         if *s != switches {
                             *s = switches;
@@ -61,7 +60,7 @@ impl BackgroundTask for ChickenSwitchesCollector {
                         }
                         false
                     });
-                    debug!(opctx.log, "chicken switches collection complete");
+                    debug!(opctx.log, "chicken switches load complete");
                     json!({ "chicken_switches_updated": updated })
                 }
             }
@@ -88,7 +87,7 @@ mod test {
             datastore.clone(),
         );
 
-        let mut task = ChickenSwitchesCollector::new(datastore.clone());
+        let mut task = ChickenSwitchesLoader::new(datastore.clone());
         let out = task.activate(&opctx).await;
         assert_eq!(out["chicken_switches_updated"], false);
         let switches = ReconfiguratorChickenSwitchesParam {

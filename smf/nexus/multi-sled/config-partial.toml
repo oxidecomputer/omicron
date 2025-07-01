@@ -57,6 +57,7 @@ blueprints.period_secs_plan = 60
 blueprints.period_secs_execute = 60
 blueprints.period_secs_rendezvous = 300
 blueprints.period_secs_collect_crdb_node_ids = 180
+blueprints.period_secs_load_chicken_switches = 5
 sync_service_zone_nat.period_secs = 30
 switch_port_settings_manager.period_secs = 30
 region_replacement.period_secs = 30
@@ -82,7 +83,6 @@ read_only_region_replacement_start.period_secs = 30
 alert_dispatcher.period_secs = 60
 webhook_deliverator.period_secs = 60
 sp_ereport_ingester.period_secs = 30
-chicken_switches.period_secs = 30
 
 [default_region_allocation_strategy]
 # by default, allocate across 3 distinct sleds
