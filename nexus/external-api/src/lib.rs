@@ -3087,6 +3087,18 @@ pub trait NexusExternalApi {
         path_params: Path<params::UserPath>,
     ) -> Result<HttpResponseOk<views::User>, HttpError>;
 
+    /// List user's device access tokens
+    #[endpoint {
+        method = GET,
+        path = "/v1/users/{user_id}/access-tokens",
+        tags = ["silos"],
+    }]
+    async fn user_token_list(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<params::UserPath>,
+        query_params: Query<PaginatedById>,
+    ) -> Result<HttpResponseOk<ResultsPage<views::DeviceAccessToken>>, HttpError>;
+
     /// Expire all of user's tokens and sessions
     #[endpoint {
         method = POST,

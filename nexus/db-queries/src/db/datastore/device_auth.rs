@@ -214,6 +214,33 @@ impl DataStore {
             .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))
     }
 
+    /// List device access tokens for a specific user
+    pub async fn silo_user_token_list(
+        &self,
+        opctx: &OpContext,
+        user_authn_list: authz::SiloUserAuthnList,
+        pagparams: &DataPageParams<'_, Uuid>,
+    ) -> ListResultVec<DeviceAccessToken> {
+        opctx.authorize(authz::Action::ListChildren, &user_authn_list).await?;
+
+        let silo_user_id = user_authn_list.silo_user().id();
+
+        use nexus_db_schema::schema::device_access_token::dsl;
+        paginated(dsl::device_access_token, dsl::id, &pagparams)
+            .filter(dsl::silo_user_id.eq(silo_user_id))
+            // we don't have time_deleted on tokens. unfortunately this is not
+            // indexed well. maybe it can be!
+            .filter(
+                dsl::time_expires
+                    .is_null()
+                    .or(dsl::time_expires.gt(Utc::now())),
+            )
+            .select(DeviceAccessToken::as_select())
+            .load_async(&*self.pool_connection_authorized(opctx).await?)
+            .await
+            .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))
+    }
+
     pub async fn current_user_token_delete(
         &self,
         opctx: &OpContext,

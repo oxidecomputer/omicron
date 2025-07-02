@@ -11616,6 +11616,75 @@
         }
       }
     },
+    "/v1/users/{user_id}/access-tokens": {
+      "get": {
+        "tags": [
+          "silos"
+        ],
+        "summary": "List user's device access tokens",
+        "operationId": "user_token_list",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "user_id",
+            "description": "ID of the user",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "description": "Maximum number of items returned by a single call",
+            "schema": {
+              "nullable": true,
+              "type": "integer",
+              "format": "uint32",
+              "minimum": 1
+            }
+          },
+          {
+            "in": "query",
+            "name": "page_token",
+            "description": "Token returned by previous call to retrieve the subsequent page",
+            "schema": {
+              "nullable": true,
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "sort_by",
+            "schema": {
+              "$ref": "#/components/schemas/IdSortMode"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DeviceAccessTokenResultsPage"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "x-dropshot-pagination": {
+          "required": []
+        }
+      }
+    },
     "/v1/users/{user_id}/logout": {
       "post": {
         "tags": [

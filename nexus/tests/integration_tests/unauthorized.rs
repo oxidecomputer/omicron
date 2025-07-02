@@ -251,6 +251,7 @@ static SETUP_REQUESTS: LazyLock<Vec<SetupReq>> = LazyLock::new(|| {
                 &*DEMO_SILO_USER_ID_DELETE_URL,
                 &*DEMO_SILO_USER_ID_SET_PASSWORD_URL,
                 &*DEMO_SILO_USER_ID_IN_SILO_URL,
+                &*DEMO_SILO_USER_TOKEN_LIST_URL,
                 &*DEMO_SILO_USER_LOGOUT_URL,
             ],
         },

@@ -450,19 +450,25 @@ resource ConsoleSessionList {
 has_relation(fleet: Fleet, "parent_fleet", collection: ConsoleSessionList)
 	if collection.fleet = fleet;
 
-# Allow silo admins to delete user sessions
+# Allow silo admins to delete user sessions and list user tokens
 resource SiloUserAuthnList {
-    permissions = [ "modify" ];
+    permissions = [ "modify", "list_children" ];
     relations = { parent_silo: Silo };
 
     # A silo admin can modify (e.g., delete) a user's sessions.
     "modify" if "admin" on "parent_silo";
+
+    # A silo admin can list a user's tokens and sessions.
+    "list_children" if "admin" on "parent_silo";
 }
 has_relation(silo: Silo, "parent_silo", sessions: SiloUserAuthnList)
     if sessions.silo_user.silo = silo;
 
-# also give users 'modify' on their own sessions
+# also give users 'modify' and 'list_children' on their own sessions
 has_permission(actor: AuthenticatedActor, "modify", sessions: SiloUserAuthnList)
+    if actor.equals_silo_user(sessions.silo_user);
+
+has_permission(actor: AuthenticatedActor, "list_children", sessions: SiloUserAuthnList)
     if actor.equals_silo_user(sessions.silo_user);
 
 # Describes the policy for creating and managing device authorization requests.

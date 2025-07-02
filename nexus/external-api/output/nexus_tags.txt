@@ -158,6 +158,7 @@ policy_update                            PUT      /v1/policy
 policy_view                              GET      /v1/policy
 user_list                                GET      /v1/users
 user_logout                              POST     /v1/users/{user_id}/logout
+user_token_list                          GET      /v1/users/{user_id}/access-tokens
 user_view                                GET      /v1/users/{user_id}
 utilization_view                         GET      /v1/utilization
 
