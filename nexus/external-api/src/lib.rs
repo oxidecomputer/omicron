@@ -3087,7 +3087,7 @@ pub trait NexusExternalApi {
         path_params: Path<params::UserPath>,
     ) -> Result<HttpResponseOk<views::User>, HttpError>;
 
-    /// List user's device access tokens
+    /// List user's access tokens
     #[endpoint {
         method = GET,
         path = "/v1/users/{user_id}/access-tokens",
@@ -3111,7 +3111,7 @@ pub trait NexusExternalApi {
         query_params: Query<PaginatedById>,
     ) -> Result<HttpResponseOk<ResultsPage<views::ConsoleSession>>, HttpError>;
 
-    /// Expire all of user's tokens and sessions
+    /// Delete all of user's tokens and sessions
     #[endpoint {
         method = POST,
         path = "/v1/users/{user_id}/logout",

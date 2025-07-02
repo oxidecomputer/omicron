@@ -11621,7 +11621,7 @@
         "tags": [
           "silos"
         ],
-        "summary": "List user's device access tokens",
+        "summary": "List user's access tokens",
         "operationId": "user_token_list",
         "parameters": [
           {
@@ -11690,7 +11690,7 @@
         "tags": [
           "silos"
         ],
-        "summary": "Expire all of user's tokens and sessions",
+        "summary": "Delete all of user's tokens and sessions",
         "operationId": "user_logout",
         "parameters": [
           {
