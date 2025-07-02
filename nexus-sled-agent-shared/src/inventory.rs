@@ -6,7 +6,6 @@
 
 use std::collections::BTreeMap;
 use std::net::{IpAddr, Ipv6Addr, SocketAddr, SocketAddrV6};
-use std::sync::Mutex;
 use std::time::Duration;
 
 use camino::Utf8PathBuf;
@@ -1027,20 +1026,26 @@ impl ZoneKind {
 
     /// Return a string that identifies **zone image filenames** in the install
     /// dataset.
+    ///
+    /// This method is exactly equivalent to `format!("{}.tar.gz",
+    /// self.zone_prefix())`, but returns `&'static str`s. A unit test ensures
+    /// they stay consistent.
     pub fn artifact_in_install_dataset(self) -> &'static str {
-        // Ideally we'd `concat!(self.zone_prefix(), ".tar.gz")`, but `concat!`
-        // only works with string literals. There are crates to do this (like
-        // `const_format`), but those require some nontrivial `unsafe`. Instead,
-        // we'll just keep a map of leaked strings to avoid having to
-        // `format!()` these more than once per zone kind.
-        static STRING_CACHE: Mutex<BTreeMap<ZoneKind, &'static str>> =
-            Mutex::new(BTreeMap::new());
-
-        STRING_CACHE
-            .lock()
-            .unwrap()
-            .entry(self)
-            .or_insert_with(|| format!("{}.tar.gz", self.zone_prefix()).leak())
+        match self {
+            // BoundaryNtp and InternalNtp both use "ntp".
+            ZoneKind::BoundaryNtp | ZoneKind::InternalNtp => "ntp.tar.gz",
+            ZoneKind::Clickhouse => "clickhouse.tar.gz",
+            ZoneKind::ClickhouseKeeper => "clickhouse_keeper.tar.gz",
+            ZoneKind::ClickhouseServer => "clickhouse_server.tar.gz",
+            // Note "cockroachdb" for historical reasons.
+            ZoneKind::CockroachDb => "cockroachdb.tar.gz",
+            ZoneKind::Crucible => "crucible.tar.gz",
+            ZoneKind::CruciblePantry => "crucible_pantry.tar.gz",
+            ZoneKind::ExternalDns => "external_dns.tar.gz",
+            ZoneKind::InternalDns => "internal_dns.tar.gz",
+            ZoneKind::Nexus => "nexus.tar.gz",
+            ZoneKind::Oximeter => "oximeter.tar.gz",
+        }
     }
 
     /// Return a string that is used to construct **SMF service names**. This
@@ -1216,6 +1221,18 @@ mod tests {
                     name_prefix, zone_kind, e
                 );
             });
+        }
+    }
+
+    #[test]
+    fn test_zone_prefix_matches_artifact_in_install_dataset() {
+        for zone_kind in ZoneKind::iter() {
+            let zone_prefix = zone_kind.zone_prefix();
+            let expected_artifact = format!("{zone_prefix}.tar.gz");
+            assert_eq!(
+                expected_artifact,
+                zone_kind.artifact_in_install_dataset()
+            );
         }
     }
 }
