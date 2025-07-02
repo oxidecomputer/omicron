@@ -28,6 +28,7 @@ use omicron_common::address::Ipv6Subnet;
 use omicron_uuid_kinds::OmicronZoneUuid;
 use sled_agent_types::time_sync::TimeSync;
 use sled_agent_types::zone_bundle::ZoneBundleCause;
+use sled_agent_types::zone_images::ResolverStatus;
 use sled_storage::config::MountConfig;
 use slog::Logger;
 use slog::info;
@@ -157,6 +158,9 @@ impl OmicronZones {
         zone_facilities: &U,
         log: &Logger,
     ) -> Result<(), NonZeroUsize> {
+        let resolver_status =
+            sled_agent_facilities.zone_image_resolver_status();
+
         // Filter desired zones down to just those that we need to stop. See
         // [`ZoneState`] for more discussion of why we're willing (or unwilling)
         // to stop zones in various current states.
@@ -177,6 +181,8 @@ impl OmicronZones {
                         if does_new_config_require_zone_restart(
                             &mut z.config,
                             desired_config,
+                            &resolver_status,
+                            log,
                         ) {
                             false
                         } else {
@@ -979,6 +985,8 @@ impl ZoneFacilities for RealZoneFacilities {
 fn does_new_config_require_zone_restart(
     existing_config: &mut OmicronZoneConfig,
     new_config: &OmicronZoneConfig,
+    resolver_status: &ResolverStatus,
+    log: &Logger,
 ) -> bool {
     // Trivial case
     if *existing_config == *new_config {
@@ -994,13 +1002,40 @@ fn does_new_config_require_zone_restart(
             OmicronZoneImageSource::Artifact { hash },
             OmicronZoneImageSource::InstallDataset,
         ) => {
-            // TODO-john check hash!
-
-            // Hash matches; we don't have to restart as long as there are no
-            // other changes.
-            if config_differs_only_by_image_source(existing_config, new_config)
+            let install_dataset_hash = match resolver_status
+                .zone_manifest
+                .zone_hash(existing_config.zone_type.kind())
             {
-                // TODO-john log
+                Ok(hash) => hash,
+                Err(err) => {
+                    // If we can't get the hash, assume we have to bounce the
+                    // zone.
+                    warn!(
+                        log,
+                        "failed to determine install dataset hash for zone; \
+                         assuming zone must be restarted for new config";
+                        "zone_name" => new_config.zone_name(),
+                        InlineErrorChain::new(&err),
+                    );
+                    return true;
+                }
+            };
+
+            // If hash matches, we don't have to restart as long as there are no
+            // other changes.
+            if install_dataset_hash == *hash
+                && config_differs_only_by_image_source(
+                    existing_config,
+                    new_config,
+                )
+            {
+                info!(
+                    log,
+                    "updating config for zone without restarting; \
+                     only change is zone image source (install dataset <-> \
+                     artifact; hash of zone image matches in both)";
+                    "zone_name" => new_config.zone_name(),
+                );
                 *existing_config = new_config.clone();
                 false
             } else {

@@ -6,6 +6,7 @@
 
 use std::collections::BTreeMap;
 use std::net::{IpAddr, Ipv6Addr, SocketAddr, SocketAddrV6};
+use std::sync::Mutex;
 use std::time::Duration;
 
 use camino::Utf8PathBuf;
@@ -1024,6 +1025,24 @@ impl ZoneKind {
         }
     }
 
+    /// Return a string that identifies **zone image filenames** in the install
+    /// dataset.
+    pub fn artifact_in_install_dataset(self) -> &'static str {
+        // Ideally we'd `concat!(self.zone_prefix(), ".tar.gz")`, but `concat!`
+        // only works with string literals. There are crates to do this (like
+        // `const_format`), but those require some nontrivial `unsafe`. Instead,
+        // we'll just keep a map of leaked strings to avoid having to
+        // `format!()` these more than once per zone kind.
+        static STRING_CACHE: Mutex<BTreeMap<ZoneKind, &'static str>> =
+            Mutex::new(BTreeMap::new());
+
+        STRING_CACHE
+            .lock()
+            .unwrap()
+            .entry(self)
+            .or_insert_with(|| format!("{}.tar.gz", self.zone_prefix()).leak())
+    }
+
     /// Return a string that is used to construct **SMF service names**. This
     /// string is guaranteed to be stable over time.
     pub fn service_prefix(self) -> &'static str {
@@ -1090,7 +1109,12 @@ impl ZoneKind {
 
     /// Return a string used as an artifact name for control-plane zones.
     /// This is **not guaranteed** to be stable.
-    pub fn artifact_name(self) -> &'static str {
+    ///
+    /// These strings match the `ArtifactId::name`s Nexus constructs when
+    /// unpacking the composite control-plane artifact in a TUF repo. Currently,
+    /// these are chosen by reading the `pkg` value of the `oxide.json` object
+    /// inside each zone image tarball.
+    pub fn artifact_id_name(self) -> &'static str {
         match self {
             ZoneKind::BoundaryNtp => "ntp",
             ZoneKind::Clickhouse => "clickhouse",
@@ -1118,7 +1142,7 @@ impl ZoneKind {
             .to_known()
             .map(|kind| matches!(kind, KnownArtifactKind::Zone))
             .unwrap_or(false)
-            && artifact_id.name == self.artifact_name()
+            && artifact_id.name == self.artifact_id_name()
     }
 }
 
