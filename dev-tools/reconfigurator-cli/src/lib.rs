@@ -732,6 +732,15 @@ enum ImageSourceArgs {
     },
 }
 
+/// Adding a new zone to a blueprint needs to choose an image source for that
+/// zone. Subcommands that add a zone take an optional [`ImageSourceArgs`]
+/// parameter. In the (common in test) case where the planning input has no TUF
+/// repo at all, the new and old TUF repo policy are identical (i.e., "use the
+/// install dataset"), and therefore we have only one logical choice for the
+/// image source for any new zone (the install dataset). If a TUF repo _is_
+/// involved, we have two choices: use the artifact from the newest TUF repo, or
+/// use the artifact from the previous TUF repo policy (which might itself be
+/// another TUF repo, or might be the install dataset).
 fn image_source_unwrap_or(
     image_source: Option<ImageSourceArgs>,
     planning_input: &PlanningInput,
@@ -746,7 +755,34 @@ fn image_source_unwrap_or(
             .zone_image_source(zone_kind)
             .context("could not determine image source")
     } else {
-        bail!("must specify image source for new zone")
+        let mut options = vec!["`install-dataset`".to_string()];
+        for (name, repo) in [
+            ("previous", planning_input.old_repo()),
+            ("current", planning_input.tuf_repo()),
+        ] {
+            match repo.description().zone_image_source(zone_kind) {
+                // Install dataset is already covered, and if either TUF repo is
+                // missing an artifact of this kind, it's not an option.
+                Ok(BlueprintZoneImageSource::InstallDataset) | Err(_) => (),
+                Ok(BlueprintZoneImageSource::Artifact { version, hash }) => {
+                    let version = match version {
+                        BlueprintZoneImageVersion::Available { version } => {
+                            version.to_string()
+                        }
+                        BlueprintZoneImageVersion::Unknown => {
+                            "unknown".to_string()
+                        }
+                    };
+                    options.push(format!(
+                        "`artifact {version} {hash}` (from {name} TUF repo)"
+                    ));
+                }
+            }
+        }
+        bail!(
+            "must specify image source for new zone; options: {}",
+            options.join(", ")
+        )
     }
 }
 
