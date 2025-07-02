@@ -9,6 +9,7 @@ use anyhow::bail;
 use clap::Args;
 use clap::Subcommand;
 use crucible_pantry_client::Client;
+use crucible_pantry_client::types::VolumeStatus;
 use tabled::Tabled;
 use uuid::Uuid;
 
@@ -83,7 +84,7 @@ impl CruciblePantryArgs {
     }
 }
 
-/// Runs `omdb crucible-agent volume`
+/// Runs `omdb crucible-pantry volume`
 async fn cmd_is_finished(
     client: &crucible_pantry_client::Client,
     args: &FinishedArgs,
@@ -94,22 +95,24 @@ async fn cmd_is_finished(
     Ok(())
 }
 
-/// Runs `omdb crucible-agent volume`
+/// Runs `omdb crucible-pantry volume`
 async fn cmd_volume_info(
     client: &crucible_pantry_client::Client,
     args: &VolumeArgs,
 ) -> Result<(), anyhow::Error> {
     let volume = args.uuid.to_string();
-    let vs = client.volume_status(&volume).await.context("listing volumes")?;
-    println!("          active: {}", vs.active);
-    println!(" num_job_handles: {}", vs.num_job_handles);
-    println!("     seen_active: {}", vs.seen_active);
+    let VolumeStatus { active, num_job_handles, seen_active } =
+        *client.volume_status(&volume).await.context("listing volumes")?;
+
+    println!("          active: {}", active);
+    println!(" num_job_handles: {}", num_job_handles);
+    println!("     seen_active: {}", seen_active);
     Ok(())
 }
 
 #[derive(Tabled)]
 #[tabled(rename_all = "SCREAMING_SNAKE_CASE")]
-struct VolumeStatus {
+struct VolumeInfo {
     volume_id: String,
     active: String,
     num_job_handles: String,
@@ -130,7 +133,7 @@ async fn cmd_pantry_status(
         // let vs = client.volume_status(&v).await.context("listing volumes")?;
         match client.volume_status(&v).await.context("listing volumes") {
             Ok(vs) => {
-                rows.push(VolumeStatus {
+                rows.push(VolumeInfo {
                     volume_id: v.clone().to_string(),
                     active: vs.active.clone().to_string(),
                     num_job_handles: vs.num_job_handles.clone().to_string(),
