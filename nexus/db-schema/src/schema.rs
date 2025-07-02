@@ -1855,8 +1855,9 @@ table! {
 }
 
 table! {
-    inv_cockroachdb_status (inv_collection_id) {
+    inv_cockroachdb_status (inv_collection_id, node_id) {
         inv_collection_id -> Uuid,
+        node_id -> Int4,
         ranges_underreplicated -> Nullable<Int8>,
         liveness_live_nodes -> Nullable<Int8>,
     }

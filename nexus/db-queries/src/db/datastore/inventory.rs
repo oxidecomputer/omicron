@@ -85,9 +85,11 @@ use nexus_sled_agent_shared::inventory::OrphanedDataset;
 use nexus_sled_agent_shared::inventory::ZoneArtifactInventory;
 use nexus_sled_agent_shared::inventory::ZoneManifestNonBootInventory;
 use nexus_types::inventory::BaseboardId;
+use nexus_types::inventory::CockroachStatus;
 use nexus_types::inventory::Collection;
 use nexus_types::inventory::PhysicalDiskFirmware;
 use nexus_types::inventory::SledAgent;
+use omicron_cockroach_metrics::NodeId as CockroachNodeId;
 use omicron_common::api::external::Error;
 use omicron_common::api::external::InternalContext;
 use omicron_common::api::external::LookupType;
@@ -369,11 +371,14 @@ impl DataStore {
             );
         }
 
-        let inv_cockroach_status = InvCockroachStatus::new(
-            collection_id,
-            &collection.cockroach_status,
-        )
-        .map_err(|e| Error::internal_error(&e.to_string()))?;
+        let inv_cockroach_status_records: Vec<InvCockroachStatus> = collection
+            .cockroach_status
+            .iter()
+            .map(|(node_id, status)| {
+                InvCockroachStatus::new(collection_id, *node_id, status)
+            })
+            .collect::<Result<Vec<_>, _>>()
+            .map_err(|e| Error::internal_error(&e.to_string()))?;
 
         // This implementation inserts all records associated with the
         // collection in one transaction.  This is primarily for simplicity.  It
@@ -1369,10 +1374,10 @@ impl DataStore {
             }
 
             // Insert the cockroach status information we've observed
-            {
+            if !inv_cockroach_status_records.is_empty() {
                 use nexus_db_schema::schema::inv_cockroachdb_status::dsl;
                 diesel::insert_into(dsl::inv_cockroachdb_status)
-                    .values(inv_cockroach_status)
+                    .values(inv_cockroach_status_records)
                     .execute_async(&conn)
                     .await?;
             }
@@ -3258,33 +3263,29 @@ impl DataStore {
             memberships
         };
 
-        // Load the cockroach status, if it exists.
-        let cockroach_status: nexus_types::inventory::CockroachStatus = {
+        // Load the cockroach status records for all nodes.
+        let cockroach_status: BTreeMap<CockroachNodeId, CockroachStatus> = {
             use nexus_db_schema::schema::inv_cockroachdb_status::dsl;
 
-            let maybe_status = dsl::inv_cockroachdb_status
-                .filter(dsl::inv_collection_id.eq(db_id))
-                .select(InvCockroachStatus::as_select())
-                .first_async(&*conn)
-                .await
-                .optional()
-                .map_err(|e| {
-                    public_error_from_diesel(e, ErrorHandler::Server)
-                })?;
+            let status_records: Vec<InvCockroachStatus> =
+                dsl::inv_cockroachdb_status
+                    .filter(dsl::inv_collection_id.eq(db_id))
+                    .select(InvCockroachStatus::as_select())
+                    .load_async(&*conn)
+                    .await
+                    .map_err(|e| {
+                        public_error_from_diesel(e, ErrorHandler::Server)
+                    })?;
 
-            if let Some(status) = maybe_status {
-                // If we can read a record of Cockroach Status, use it.
-                status
+            let mut result = BTreeMap::new();
+            for record in status_records {
+                let node_id = CockroachNodeId::new(record.node_id);
+                let status: nexus_types::inventory::CockroachStatus = record
                     .try_into()
-                    .map_err(|e| Error::internal_error(&format!("{e:#}")))?
-            } else {
-                // If we have no record of Cockroach Status, make a default one.
-                //
-                // This provides backwards compatibility for collections without
-                // CockroachDB statuses, and also helps cope with cases where
-                // metrics could not be collected.
-                nexus_types::inventory::CockroachStatus::default()
+                    .map_err(|e| Error::internal_error(&format!("{e:#}")))?;
+                result.insert(node_id, status);
             }
+            result
         };
 
         // Finally, build up the sled-agent map using the sled agent and

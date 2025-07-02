@@ -2530,6 +2530,7 @@ impl InvClickhouseKeeperMembership {
 #[diesel(table_name = inv_cockroachdb_status)]
 pub struct InvCockroachStatus {
     pub inv_collection_id: DbTypedUuid<CollectionKind>,
+    pub node_id: i32,
     pub ranges_underreplicated: Option<i64>,
     pub liveness_live_nodes: Option<i64>,
 }
@@ -2537,10 +2538,12 @@ pub struct InvCockroachStatus {
 impl InvCockroachStatus {
     pub fn new(
         inv_collection_id: CollectionUuid,
+        node_id: omicron_cockroach_metrics::NodeId,
         status: &CockroachStatus,
     ) -> Result<Self, anyhow::Error> {
         Ok(Self {
             inv_collection_id: inv_collection_id.into(),
+            node_id: node_id.as_i32(),
             ranges_underreplicated: status
                 .ranges_underreplicated
                 .map(|n| i64::try_from(n))

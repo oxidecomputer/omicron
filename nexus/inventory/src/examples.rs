@@ -605,12 +605,15 @@ pub fn representative() -> Representative {
         },
     );
 
-    builder.found_cockroach_metrics(PrometheusMetrics {
-        metrics: BTreeMap::from([(
-            "ranges_underreplicated".to_string(),
-            MetricValue::Unsigned(0),
-        )]),
-    });
+    builder.found_cockroach_metrics(
+        omicron_cockroach_metrics::NodeId::new(1),
+        PrometheusMetrics {
+            metrics: BTreeMap::from([(
+                "ranges_underreplicated".to_string(),
+                MetricValue::Unsigned(0),
+            )]),
+        },
+    );
 
     Representative {
         builder,
