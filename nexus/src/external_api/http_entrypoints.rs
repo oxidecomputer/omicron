@@ -6870,9 +6870,8 @@ impl NexusExternalApi for NexusExternalApiImpl {
             let path = path_params.into_inner();
             let opctx =
                 crate::context::op_context_for_external_api(&rqctx).await?;
-            let (.., user) = nexus
-                .current_silo_user_lookup(&opctx, path.user_id)
-                .await?;
+            let (.., user) =
+                nexus.current_silo_user_lookup(&opctx, path.user_id).await?;
             Ok(HttpResponseOk(user.into()))
         };
         apictx
@@ -6886,7 +6885,8 @@ impl NexusExternalApi for NexusExternalApiImpl {
         rqctx: RequestContext<Self::Context>,
         path_params: Path<params::UserPath>,
         query_params: Query<PaginatedById>,
-    ) -> Result<HttpResponseOk<ResultsPage<views::DeviceAccessToken>>, HttpError> {
+    ) -> Result<HttpResponseOk<ResultsPage<views::DeviceAccessToken>>, HttpError>
+    {
         let apictx = rqctx.context();
         let handler = async {
             let nexus = &apictx.context.nexus;
@@ -6918,7 +6918,8 @@ impl NexusExternalApi for NexusExternalApiImpl {
         rqctx: RequestContext<Self::Context>,
         path_params: Path<params::UserPath>,
         query_params: Query<PaginatedById>,
-    ) -> Result<HttpResponseOk<ResultsPage<views::ConsoleSession>>, HttpError> {
+    ) -> Result<HttpResponseOk<ResultsPage<views::ConsoleSession>>, HttpError>
+    {
         let apictx = rqctx.context();
         let handler = async {
             let nexus = &apictx.context.nexus;
