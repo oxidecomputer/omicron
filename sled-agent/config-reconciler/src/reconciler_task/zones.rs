@@ -1045,7 +1045,9 @@ mod tests {
     use crate::dataset_serialization_task::DatasetEnsureError;
     use anyhow::anyhow;
     use assert_matches::assert_matches;
+    use camino::Utf8PathBuf;
     use camino_tempfile::Utf8TempDir;
+    use iddqd::IdOrdMap;
     use illumos_utils::dladm::Etherstub;
     use illumos_utils::dladm::EtherstubVnic;
     use illumos_utils::link::VnicAllocator;
@@ -1060,9 +1062,15 @@ mod tests {
     use omicron_common::disk::DatasetKind;
     use omicron_common::disk::DatasetName;
     use omicron_common::disk::SharedDatasetConfig;
+    use omicron_common::update::OmicronZoneManifest;
+    use omicron_common::update::OmicronZoneManifestSource;
     use omicron_test_utils::dev;
     use omicron_uuid_kinds::DatasetUuid;
     use omicron_uuid_kinds::ZpoolUuid;
+    use sled_agent_types::zone_images::MupdateOverrideStatus;
+    use sled_agent_types::zone_images::ResolverStatus;
+    use sled_agent_types::zone_images::ZoneManifestArtifactsResult;
+    use sled_agent_types::zone_images::ZoneManifestStatus;
     use std::collections::BTreeSet;
     use std::collections::VecDeque;
     use std::sync::Mutex;
@@ -1193,6 +1201,7 @@ mod tests {
     struct FakeSledAgentFacilitiesInner {
         start_responses: VecDeque<anyhow::Result<RunningZone>>,
         removed_ddm_prefixes: BTreeSet<Ipv6Subnet<SLED_PREFIX>>,
+        resolver_status: Option<ResolverStatus>,
     }
 
     impl Default for FakeSledAgentFacilities {
@@ -1228,6 +1237,33 @@ mod tests {
                 .start_responses
                 .pop_front()
                 .expect("test should populate responses for start_omicron_zone")
+        }
+
+        fn zone_image_resolver_status(&self) -> ResolverStatus {
+            self.inner.lock().unwrap().resolver_status.clone().unwrap_or_else(
+                || {
+                    let boot_disk_path = Utf8PathBuf::from("/test/boot/disk");
+                    ResolverStatus {
+                        zone_manifest: ZoneManifestStatus {
+                            boot_disk_path: boot_disk_path.clone(),
+                            boot_disk_result: Ok(ZoneManifestArtifactsResult {
+                                manifest: OmicronZoneManifest {
+                                    source:
+                                        OmicronZoneManifestSource::SledAgent,
+                                    zones: IdOrdMap::new(),
+                                },
+                                data: IdOrdMap::new(),
+                            }),
+                            non_boot_disk_metadata: IdOrdMap::new(),
+                        },
+                        mupdate_override: MupdateOverrideStatus {
+                            boot_disk_path,
+                            boot_disk_override: Ok(None),
+                            non_boot_disk_overrides: IdOrdMap::new(),
+                        },
+                    }
+                },
+            )
         }
 
         fn metrics_untrack_zone_links(
