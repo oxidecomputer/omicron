@@ -9,15 +9,16 @@ Omicron debugger (unstable)
 Usage: omdb [OPTIONS] <COMMAND>
 
 Commands:
-  crucible-agent  Debug a specific crucible-agent
-  db              Query the control plane database (CockroachDB)
-  mgs             Debug a specific Management Gateway Service instance
-  nexus           Debug a specific Nexus instance
-  oximeter        Query oximeter collector state
-  oxql            Enter the Oximeter Query Language shell for interactive querying
-  reconfigurator  Interact with the Reconfigurator system
-  sled-agent      Debug a specific Sled
-  help            Print this message or the help of the given subcommand(s)
+  crucible-agent   Debug a specific crucible-agent
+  crucible-pantry  Query a specific crucible-pantry
+  db               Query the control plane database (CockroachDB)
+  mgs              Debug a specific Management Gateway Service instance
+  nexus            Debug a specific Nexus instance
+  oximeter         Query oximeter collector state
+  oxql             Enter the Oximeter Query Language shell for interactive querying
+  reconfigurator   Interact with the Reconfigurator system
+  sled-agent       Debug a specific Sled
+  help             Print this message or the help of the given subcommand(s)
 
 Options:
       --log-level <LOG_LEVEL>  log level filter [env: LOG_LEVEL=] [default: warn]
@@ -42,15 +43,16 @@ using internal APIs.  This is a prototype.  The commands and output are unstable
 Usage: omdb [OPTIONS] <COMMAND>
 
 Commands:
-  crucible-agent  Debug a specific crucible-agent
-  db              Query the control plane database (CockroachDB)
-  mgs             Debug a specific Management Gateway Service instance
-  nexus           Debug a specific Nexus instance
-  oximeter        Query oximeter collector state
-  oxql            Enter the Oximeter Query Language shell for interactive querying
-  reconfigurator  Interact with the Reconfigurator system
-  sled-agent      Debug a specific Sled
-  help            Print this message or the help of the given subcommand(s)
+  crucible-agent   Debug a specific crucible-agent
+  crucible-pantry  Query a specific crucible-pantry
+  db               Query the control plane database (CockroachDB)
+  mgs              Debug a specific Management Gateway Service instance
+  nexus            Debug a specific Nexus instance
+  oximeter         Query oximeter collector state
+  oxql             Enter the Oximeter Query Language shell for interactive querying
+  reconfigurator   Interact with the Reconfigurator system
+  sled-agent       Debug a specific Sled
+  help             Print this message or the help of the given subcommand(s)
 
 Options:
       --log-level <LOG_LEVEL>
