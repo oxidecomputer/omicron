@@ -246,15 +246,18 @@ impl DataStore {
     pub async fn silo_user_tokens_delete(
         &self,
         opctx: &OpContext,
-        user: &authz::SiloUser,
+        authn_list: &authz::SiloUserAuthnList,
     ) -> Result<(), Error> {
-        // TODO: check for silo admin on opctx
-        // TODO: ensure this can only be used in current silo
-        // TODO: think about dueling admins problem
+        // authz policy enforces that the opctx actor is a silo admin on the
+        // target user's own silo in particular
+        opctx.authorize(authz::Action::Modify, authn_list).await?;
 
         use nexus_db_schema::schema::device_access_token;
         diesel::delete(device_access_token::table)
-            .filter(device_access_token::silo_user_id.eq(user.id()))
+            .filter(
+                device_access_token::silo_user_id
+                    .eq(authn_list.silo_user().id()),
+            )
             .execute_async(&*self.pool_connection_authorized(opctx).await?)
             .await
             .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))

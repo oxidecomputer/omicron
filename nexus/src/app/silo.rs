@@ -324,17 +324,15 @@ impl super::Nexus {
             .fetch()
             .await?;
 
-        let authz_user_sessions =
+        let authz_authn_list =
             authz::SiloUserAuthnList::new(authz_silo_user.clone());
-        // TODO: would rather do this check in the datastore functions
-        opctx.authorize(authz::Action::Modify, &authz_user_sessions).await?;
 
         self.datastore()
-            .silo_user_tokens_delete(opctx, &authz_silo_user)
+            .silo_user_tokens_delete(opctx, &authz_authn_list)
             .await?;
 
         self.datastore()
-            .silo_user_sessions_delete(opctx, &authz_silo_user)
+            .silo_user_sessions_delete(opctx, &authz_authn_list)
             .await?;
 
         Ok(())
