@@ -668,14 +668,14 @@ impl AuthorizedResource for SiloUserList {
     }
 }
 
-// TODO: does it make sense to use a single authz resource to represent
-// both user sessions and tokens? seems silly to have two identical ones
+// TODO: does it make sense to use a single resource to represent both user
+// sessions and tokens? it seems silly to have two identical ones
 
 /// Synthetic resource for managing a user's sessions and tokens
 #[derive(Clone, Debug, Eq, PartialEq)]
-pub struct UserSessions(SiloUser);
+pub struct SiloUserAuthnList(SiloUser);
 
-impl UserSessions {
+impl SiloUserAuthnList {
     pub fn new(silo_user: SiloUser) -> Self {
         Self(silo_user)
     }
@@ -689,16 +689,18 @@ impl UserSessions {
     }
 }
 
-impl oso::PolarClass for UserSessions {
+impl oso::PolarClass for SiloUserAuthnList {
     fn get_polar_class_builder() -> oso::ClassBuilder<Self> {
         oso::Class::builder().with_equality_check().add_attribute_getter(
             "silo_user",
-            |user_sessions: &UserSessions| user_sessions.silo_user().clone(),
+            |user_sessions: &SiloUserAuthnList| {
+                user_sessions.silo_user().clone()
+            },
         )
     }
 }
 
-impl AuthorizedResource for UserSessions {
+impl AuthorizedResource for SiloUserAuthnList {
     fn load_roles<'fut>(
         &'fut self,
         opctx: &'fut OpContext,
