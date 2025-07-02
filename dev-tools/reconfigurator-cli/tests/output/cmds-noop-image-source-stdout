@@ -536,7 +536,7 @@ INFO will ensure cockroachdb setting, setting: cluster.preserve_downgrade_option
 generated blueprint af934083-59b5-4bf6-8966-6fb5292c29e1 based on parent blueprint 58d5e830-0884-47d8-a7cd-b2b3751adeb4
 
 
-> # This diff should show changes to the new sled.
+> # This diff should show changes to the sled that's back in inventory.
 > blueprint-diff 58d5e830-0884-47d8-a7cd-b2b3751adeb4 latest
 from: blueprint 58d5e830-0884-47d8-a7cd-b2b3751adeb4
 to:   blueprint af934083-59b5-4bf6-8966-6fb5292c29e1
