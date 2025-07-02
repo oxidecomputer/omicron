@@ -27,7 +27,7 @@ pub trait SledAgentFacilities: Send + Sync + 'static {
     // currently implemented by `ServiceManager` and does a couple one-time
     // setup things (like rewrite the OS boot time). We could probably absorb
     // that work and remove this callback.
-    fn on_time_sync(&self) -> impl Future<Output = ()> + Send;
+    fn on_time_sync(&self);
 
     /// Method to start a zone.
     // TODO-cleanup This is implemented by

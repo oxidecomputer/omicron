@@ -1336,8 +1336,8 @@ impl SledAgentFacilities for ReconcilerFacilities {
         &self.etherstub_vnic
     }
 
-    async fn on_time_sync(&self) {
-        self.service_manager.on_time_sync().await
+    fn on_time_sync(&self) {
+        self.service_manager.on_time_sync();
     }
 
     async fn start_omicron_zone(
