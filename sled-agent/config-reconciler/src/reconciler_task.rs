@@ -466,6 +466,12 @@ impl ReconcilerTask {
         // and also we want to report it as part of each reconciler result).
         let timesync_status = self.zones.check_timesync().await;
 
+        // Call back into sled-agent and let it do any work that needs to happen
+        // once time is sync'd (e.g., rewrite `uptime`).
+        if timesync_status.is_synchronized() {
+            sled_agent_facilities.on_time_sync();
+        }
+
         // We conservatively refuse to start any new zones if any zones have
         // failed to shut down cleanly. This could be more precise, but we want
         // to avoid wandering into some really weird cases, such as:

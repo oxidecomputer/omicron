@@ -67,7 +67,7 @@ pub struct UpdateDescription<'a> {
 
     // Update parameters
     pub sp_type: SpType,
-    pub slot_id: u32,
+    pub slot_id: u16,
     pub artifact_hash: &'a ArtifactHash,
 
     // Overrides
@@ -266,7 +266,7 @@ pub struct InProgressAttempt {
 
     // Parameters of the update itself
     sp_type: SpType,
-    slot_id: u32,
+    slot_id: u16,
     deployed_caboose: hubtools::Caboose,
 
     // Status of the driver
@@ -385,7 +385,7 @@ pub struct FinishedUpdateAttempt {
 impl FinishedUpdateAttempt {
     async fn new(
         sp_type: SpType,
-        slot_id: u32,
+        slot_id: u16,
         sp1: SpTestState,
         deployed_caboose: hubtools::Caboose,
         result: Result<UpdateCompletedHow, ApplyUpdateError>,

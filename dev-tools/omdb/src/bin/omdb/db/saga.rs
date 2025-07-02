@@ -412,7 +412,8 @@ async fn get_all_sagas_in_state(
     state: SagaState,
 ) -> Result<Vec<Saga>, anyhow::Error> {
     let mut sagas = Vec::new();
-    let mut paginator = Paginator::new(SQL_BATCH_SIZE);
+    let mut paginator =
+        Paginator::new(SQL_BATCH_SIZE, dropshot::PaginationOrder::Ascending);
     while let Some(p) = paginator.next() {
         use nexus_db_schema::schema::saga::dsl;
         let records_batch =
