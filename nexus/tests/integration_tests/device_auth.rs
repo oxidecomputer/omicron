@@ -650,20 +650,15 @@ async fn test_admin_logout_deletes_tokens(cptestctx: &ControlPlaneTestContext) {
     )
     .await;
 
-    // TODO: we are using the fetch my tokens endpoint, authed as user1, to
-    // check the tokens, but we will likely have a list tokens for user endpoint
-    // (accessible to silo admins only) so they can feel good about there being
-    // no tokens or sessions for a given user
-
     // no tokens for user 1 yet
-    let tokens = get_tokens_as(testctx, AuthnMode::SiloUser(user1.id)).await;
+    let tokens = get_user_tokens(testctx, user1.id).await;
     assert!(tokens.is_empty());
 
     // create a token for user1
     get_device_token(testctx, AuthnMode::SiloUser(user1.id)).await;
 
     // now there is a token for user1
-    let tokens = get_tokens_as(testctx, AuthnMode::SiloUser(user1.id)).await;
+    let tokens = get_user_tokens(testctx, user1.id).await;
     assert_eq!(tokens.len(), 1);
 
     let logout_url = format!("/v1/users/{}/logout", user1.id);
@@ -679,7 +674,7 @@ async fn test_admin_logout_deletes_tokens(cptestctx: &ControlPlaneTestContext) {
     .await
     .expect("User has no perms, can't delete another user's tokens");
 
-    let tokens = get_tokens_as(testctx, AuthnMode::SiloUser(user1.id)).await;
+    let tokens = get_user_tokens(testctx, user1.id).await;
     assert_eq!(tokens.len(), 1);
 
     // user 1 can hit the logout endpoint for themselves
@@ -693,14 +688,14 @@ async fn test_admin_logout_deletes_tokens(cptestctx: &ControlPlaneTestContext) {
     .await
     .expect("User 1 should be able to delete their own tokens");
 
-    let tokens = get_tokens_as(testctx, AuthnMode::SiloUser(user1.id)).await;
+    let tokens = get_user_tokens(testctx, user1.id).await;
     assert!(tokens.is_empty());
 
     // create another couple of tokens for user1
     get_device_token(testctx, AuthnMode::SiloUser(user1.id)).await;
     get_device_token(testctx, AuthnMode::SiloUser(user1.id)).await;
 
-    let tokens = get_tokens_as(testctx, AuthnMode::SiloUser(user1.id)).await;
+    let tokens = get_user_tokens(testctx, user1.id).await;
     assert_eq!(tokens.len(), 2);
 
     // make user 2 fleet admin to show that fleet admin does not inherit
@@ -724,7 +719,7 @@ async fn test_admin_logout_deletes_tokens(cptestctx: &ControlPlaneTestContext) {
     .await
     .expect("Fleet admin is not sufficient to delete another user's tokens");
 
-    let tokens = get_tokens_as(testctx, AuthnMode::SiloUser(user1.id)).await;
+    let tokens = get_user_tokens(testctx, user1.id).await;
     assert_eq!(tokens.len(), 2);
 
     // make user 2 a silo admin so they can delete user 1's tokens
@@ -748,22 +743,26 @@ async fn test_admin_logout_deletes_tokens(cptestctx: &ControlPlaneTestContext) {
     .expect("Silo admin should be able to delete user 1's tokens");
 
     // they're gone!
-    let tokens = get_tokens_as(testctx, AuthnMode::SiloUser(user1.id)).await;
+    let tokens = get_user_tokens(testctx, user1.id).await;
     assert!(tokens.is_empty());
 }
 
 async fn get_tokens_priv(
     testctx: &ClientTestContext,
 ) -> Vec<views::DeviceAccessToken> {
-    get_tokens_as(testctx, AuthnMode::PrivilegedUser).await
+    NexusRequest::object_get(testctx, "/v1/me/access-tokens")
+        .authn_as(AuthnMode::PrivilegedUser)
+        .execute_and_parse_unwrap::<ResultsPage<views::DeviceAccessToken>>()
+        .await
+        .items
 }
 
-async fn get_tokens_as(
+async fn get_user_tokens(
     testctx: &ClientTestContext,
-    authn_mode: AuthnMode,
+    user_id: Uuid,
 ) -> Vec<views::DeviceAccessToken> {
     NexusRequest::object_get(testctx, "/v1/me/access-tokens")
-        .authn_as(authn_mode)
+        .authn_as(AuthnMode::SiloUser(user_id))
         .execute_and_parse_unwrap::<ResultsPage<views::DeviceAccessToken>>()
         .await
         .items
