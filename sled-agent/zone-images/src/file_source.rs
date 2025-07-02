@@ -5,7 +5,6 @@
 //! Utilities to construct `ZoneImageFileSource` instances.
 
 use illumos_utils::running_zone::ZoneImageFileSource;
-use sled_agent_types::zone_images::install_dataset_file_name;
 
 /// The location to look for images shipped with the RAM disk.
 pub const RAMDISK_IMAGE_PATH: &str = "/opt/oxide";
@@ -19,4 +18,9 @@ pub fn ramdisk_file_source(zone_type: &str) -> ZoneImageFileSource {
         file_name: install_dataset_file_name(zone_type),
         search_paths: vec![RAMDISK_IMAGE_PATH.into()],
     }
+}
+
+/// Returns the filename for install-dataset images.
+pub fn install_dataset_file_name(zone_type: &str) -> String {
+    format!("{}.tar.gz", zone_type)
 }

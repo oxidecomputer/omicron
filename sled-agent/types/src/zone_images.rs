@@ -97,11 +97,10 @@ impl ZoneManifestStatus {
                 ZoneManifestZoneHashError::ReadBootDisk(err.clone())
             })?;
 
-        let file_name =
-            install_dataset_file_name(kind.artifact_in_install_dataset());
-        let artifact = artifacts_result
+        let file_name = kind.artifact_in_install_dataset();
+        let artifact = &artifacts_result
             .data
-            .get(file_name.as_str())
+            .get(file_name)
             .ok_or(ZoneManifestZoneHashError::NoArtifactForZoneKind(kind))?;
 
         match &artifact.status {
@@ -119,11 +118,6 @@ impl ZoneManifestStatus {
             }
         }
     }
-}
-
-/// Returns the filename for install-dataset images.
-pub fn install_dataset_file_name(zone_type: &str) -> String {
-    format!("{}.tar.gz", zone_type)
 }
 
 #[derive(Debug, thiserror::Error)]

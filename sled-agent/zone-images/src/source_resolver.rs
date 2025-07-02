@@ -5,6 +5,7 @@
 //! Zone image lookup.
 
 use crate::RAMDISK_IMAGE_PATH;
+use crate::install_dataset_file_name;
 use crate::mupdate_override::AllMupdateOverrides;
 use crate::ramdisk_file_source;
 use crate::zone_manifest::AllZoneManifests;
@@ -15,7 +16,6 @@ use sled_agent_config_reconciler::InternalDisks;
 use sled_agent_config_reconciler::InternalDisksWithBootDisk;
 use sled_agent_types::zone_images::MupdateOverrideReadError;
 use sled_agent_types::zone_images::ResolverStatus;
-use sled_agent_types::zone_images::install_dataset_file_name;
 use slog::error;
 use slog::o;
 use slog_error_chain::InlineErrorChain;

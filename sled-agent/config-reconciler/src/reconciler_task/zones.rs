@@ -184,8 +184,6 @@ impl OmicronZones {
                             &resolver_status,
                             log,
                         ) {
-                            false
-                        } else {
                             info!(
                                 log,
                                 "starting shutdown of running zone; config \
@@ -195,6 +193,8 @@ impl OmicronZones {
                                 "new-config" => ?desired_config,
                             );
                             true
+                        } else {
+                            false
                         }
                     }
 
@@ -1092,6 +1092,7 @@ mod tests {
     use illumos_utils::zpool::ZpoolOrRamdisk;
     use nexus_sled_agent_shared::inventory::OmicronZoneDataset;
     use nexus_sled_agent_shared::inventory::OmicronZoneImageSource;
+    use nexus_sled_agent_shared::inventory::ZoneKind;
     use omicron_common::address::SLED_PREFIX;
     use omicron_common::disk::DatasetConfig;
     use omicron_common::disk::DatasetKind;
@@ -1102,13 +1103,16 @@ mod tests {
     use omicron_test_utils::dev;
     use omicron_uuid_kinds::DatasetUuid;
     use omicron_uuid_kinds::ZpoolUuid;
+    use sled_agent_types::zone_images::ArtifactReadResult;
     use sled_agent_types::zone_images::MupdateOverrideStatus;
     use sled_agent_types::zone_images::ResolverStatus;
+    use sled_agent_types::zone_images::ZoneManifestArtifactResult;
     use sled_agent_types::zone_images::ZoneManifestArtifactsResult;
     use sled_agent_types::zone_images::ZoneManifestStatus;
     use std::collections::BTreeSet;
     use std::collections::VecDeque;
     use std::sync::Mutex;
+    use tufaceous_artifact::ArtifactHash;
 
     // Helper to construct a `RunningZone` even on non-illumos systems.
     struct FakeZoneBuilder {
@@ -1227,16 +1231,45 @@ mod tests {
     }
 
     #[derive(Debug)]
-    struct FakeSledAgentFacilities {
-        inner: Mutex<FakeSledAgentFacilitiesInner>,
-        underlay_vnic: EtherstubVnic,
-    }
-
-    #[derive(Debug, Default)]
     struct FakeSledAgentFacilitiesInner {
         start_responses: VecDeque<anyhow::Result<RunningZone>>,
         removed_ddm_prefixes: BTreeSet<Ipv6Subnet<SLED_PREFIX>>,
-        resolver_status: Option<ResolverStatus>,
+        resolver_status: ResolverStatus,
+    }
+
+    impl Default for FakeSledAgentFacilitiesInner {
+        fn default() -> Self {
+            let boot_disk_path = Utf8PathBuf::from("/test/boot/disk");
+            Self {
+                start_responses: Default::default(),
+                removed_ddm_prefixes: Default::default(),
+                // successful status containing no artifacts
+                resolver_status: ResolverStatus {
+                    zone_manifest: ZoneManifestStatus {
+                        boot_disk_path: boot_disk_path.clone(),
+                        boot_disk_result: Ok(ZoneManifestArtifactsResult {
+                            manifest: OmicronZoneManifest {
+                                source: OmicronZoneManifestSource::SledAgent,
+                                zones: IdOrdMap::new(),
+                            },
+                            data: IdOrdMap::new(),
+                        }),
+                        non_boot_disk_metadata: IdOrdMap::new(),
+                    },
+                    mupdate_override: MupdateOverrideStatus {
+                        boot_disk_path,
+                        boot_disk_override: Ok(None),
+                        non_boot_disk_overrides: IdOrdMap::new(),
+                    },
+                },
+            }
+        }
+    }
+
+    #[derive(Debug)]
+    struct FakeSledAgentFacilities {
+        inner: Mutex<FakeSledAgentFacilitiesInner>,
+        underlay_vnic: EtherstubVnic,
     }
 
     impl Default for FakeSledAgentFacilities {
@@ -1252,6 +1285,11 @@ mod tests {
         fn push_start_response(&self, response: anyhow::Result<RunningZone>) {
             let mut inner = self.inner.lock().unwrap();
             inner.start_responses.push_back(response);
+        }
+
+        fn set_resolver_status_zone_manifest(&self, zm: ZoneManifestStatus) {
+            let mut inner = self.inner.lock().unwrap();
+            inner.resolver_status.zone_manifest = zm;
         }
     }
 
@@ -1275,30 +1313,7 @@ mod tests {
         }
 
         fn zone_image_resolver_status(&self) -> ResolverStatus {
-            self.inner.lock().unwrap().resolver_status.clone().unwrap_or_else(
-                || {
-                    let boot_disk_path = Utf8PathBuf::from("/test/boot/disk");
-                    ResolverStatus {
-                        zone_manifest: ZoneManifestStatus {
-                            boot_disk_path: boot_disk_path.clone(),
-                            boot_disk_result: Ok(ZoneManifestArtifactsResult {
-                                manifest: OmicronZoneManifest {
-                                    source:
-                                        OmicronZoneManifestSource::SledAgent,
-                                    zones: IdOrdMap::new(),
-                                },
-                                data: IdOrdMap::new(),
-                            }),
-                            non_boot_disk_metadata: IdOrdMap::new(),
-                        },
-                        mupdate_override: MupdateOverrideStatus {
-                            boot_disk_path,
-                            boot_disk_override: Ok(None),
-                            non_boot_disk_overrides: IdOrdMap::new(),
-                        },
-                    }
-                },
-            )
+            self.inner.lock().unwrap().resolver_status.clone()
         }
 
         fn metrics_untrack_zone_links(
@@ -1516,7 +1531,7 @@ mod tests {
                 &desired_zones,
                 &sled_agent_facilities,
                 &zone_facilities,
-                true,
+                true, // is_time_synchronized
                 &datasets,
                 &logctx.log,
             )
@@ -1954,6 +1969,236 @@ mod tests {
                 other => panic!("unexpected zone state: {other:?}"),
             }
         }
+
+        logctx.cleanup_successful();
+    }
+
+    #[tokio::test]
+    async fn dont_restart_zone_if_config_change_is_only_image_source() {
+        let logctx = dev::test_setup_log(
+            "dont_restart_zone_if_config_change_is_only_image_source",
+        );
+
+        // Construct two zones we want to start; one runs out of the install
+        // dataset, and one runs a specific artifact.
+        let install_dataset_zone_hash = ArtifactHash([1; 32]);
+        let artifact_zone_hash = ArtifactHash([2; 32]);
+        let mut install_dataset_zone =
+            make_zone_config(OmicronZoneUuid::new_v4());
+        let mut artifact_zone = make_zone_config(OmicronZoneUuid::new_v4());
+        artifact_zone.image_source =
+            OmicronZoneImageSource::Artifact { hash: artifact_zone_hash };
+
+        // Ensure our two zones are using different zone types (so we can
+        // populate our fake install dataset with two images).
+        install_dataset_zone.zone_type =
+            OmicronZoneType::Oximeter { address: "[::1]:0".parse().unwrap() };
+        artifact_zone.zone_type = OmicronZoneType::InternalNtp {
+            address: "[::1]:0".parse().unwrap(),
+        };
+
+        // Populate a zone image resolver where the install dataset contains
+        // both our zone types with hashes that match our fake zones.
+        let sled_agent_facilities = FakeSledAgentFacilities::default();
+        sled_agent_facilities.set_resolver_status_zone_manifest(
+            ZoneManifestStatus {
+                boot_disk_path: "/test/boot/disk".into(),
+                boot_disk_result: Ok(ZoneManifestArtifactsResult {
+                    manifest: OmicronZoneManifest {
+                        source: OmicronZoneManifestSource::SledAgent,
+                        zones: IdOrdMap::new(),
+                    },
+                    data: [
+                        ZoneManifestArtifactResult {
+                            file_name: ZoneKind::Oximeter
+                                .artifact_in_install_dataset()
+                                .to_string(),
+                            path: "/".into(),
+                            expected_size: 0,
+                            expected_hash: install_dataset_zone_hash,
+                            status: ArtifactReadResult::Valid,
+                        },
+                        ZoneManifestArtifactResult {
+                            file_name: ZoneKind::InternalNtp
+                                .artifact_in_install_dataset()
+                                .to_string(),
+                            path: "/".into(),
+                            expected_size: 0,
+                            expected_hash: artifact_zone_hash,
+                            status: ArtifactReadResult::Valid,
+                        },
+                    ]
+                    .into_iter()
+                    .collect(),
+                }),
+                non_boot_disk_metadata: IdOrdMap::new(),
+            },
+        );
+
+        let desired_zones: IdMap<_> =
+            [install_dataset_zone.clone(), artifact_zone.clone()]
+                .into_iter()
+                .collect();
+        let datasets = make_datasets(desired_zones.iter());
+
+        let zone_facilities = FakeZoneFacilities::default();
+
+        let fake_zone_builder = FakeZoneBuilder::new();
+        let fake_zone1 = fake_zone_builder
+            .make_running_zone("test1", logctx.log.clone())
+            .await;
+        let fake_zone2 = fake_zone_builder
+            .make_running_zone("test2", logctx.log.clone())
+            .await;
+        sled_agent_facilities.push_start_response(Ok(fake_zone1));
+        sled_agent_facilities.push_start_response(Ok(fake_zone2));
+
+        // "start" both fake zones.
+        let mut zones =
+            OmicronZones::new(nonexistent_mount_config(), TimeSyncConfig::Skip);
+        zones
+            .start_zones_if_needed_impl(
+                &desired_zones,
+                &sled_agent_facilities,
+                &zone_facilities,
+                true, // is_time_synchronized
+                &datasets,
+                &logctx.log,
+            )
+            .await;
+
+        assert_eq!(zones.zones.len(), 2);
+        assert!(
+            zones
+                .zones
+                .iter()
+                .all(|z| matches!(z.state, ZoneState::Running(_)))
+        );
+
+        // Change both zone configs, but only by swapping the image zone sources
+        // with ones with matching hashes.
+        install_dataset_zone.image_source = OmicronZoneImageSource::Artifact {
+            hash: install_dataset_zone_hash,
+        };
+        artifact_zone.image_source = OmicronZoneImageSource::InstallDataset;
+        let desired_zones: IdMap<_> =
+            [install_dataset_zone.clone(), artifact_zone.clone()]
+                .into_iter()
+                .collect();
+
+        // See if we try to shut down zones; we shouldn't shut down either.
+        // Their configs have only changed by the image source, and the image
+        // source hash matches in both cases.
+        zones
+            .shut_down_zones_if_needed_impl(
+                &desired_zones,
+                &sled_agent_facilities,
+                &zone_facilities,
+                &logctx.log,
+            )
+            .await
+            .expect("zone shutdown should succeed");
+        assert_eq!(zones.zones.len(), 2);
+        assert!(
+            zones
+                .zones
+                .iter()
+                .all(|z| matches!(z.state, ZoneState::Running(_)))
+        );
+
+        // The configs should have been updated to match the new request.
+        for z in &desired_zones {
+            assert_eq!(*z, zones.zones.get(&z.id).unwrap().config);
+        }
+
+        // Swap the image sources back. Change the install dataset to only have
+        // a matching hash for Oximeter; this should shut down our
+        // `artifact_zone` (running internal NTP).
+        install_dataset_zone.image_source =
+            OmicronZoneImageSource::InstallDataset;
+        artifact_zone.image_source =
+            OmicronZoneImageSource::Artifact { hash: artifact_zone_hash };
+        let desired_zones: IdMap<_> =
+            [install_dataset_zone.clone(), artifact_zone.clone()]
+                .into_iter()
+                .collect();
+        sled_agent_facilities.set_resolver_status_zone_manifest(
+            ZoneManifestStatus {
+                boot_disk_path: "/test/boot/disk".into(),
+                boot_disk_result: Ok(ZoneManifestArtifactsResult {
+                    manifest: OmicronZoneManifest {
+                        source: OmicronZoneManifestSource::SledAgent,
+                        zones: IdOrdMap::new(),
+                    },
+                    data: [
+                        ZoneManifestArtifactResult {
+                            file_name: ZoneKind::Oximeter
+                                .artifact_in_install_dataset()
+                                .to_string(),
+                            path: "/".into(),
+                            expected_size: 0,
+                            expected_hash: install_dataset_zone_hash,
+                            status: ArtifactReadResult::Valid,
+                        },
+                        ZoneManifestArtifactResult {
+                            file_name: ZoneKind::InternalNtp
+                                .artifact_in_install_dataset()
+                                .to_string(),
+                            path: "/".into(),
+                            expected_size: 0,
+                            // Wrong hash! We should bounce the zone.
+                            expected_hash: install_dataset_zone_hash,
+                            status: ArtifactReadResult::Valid,
+                        },
+                    ]
+                    .into_iter()
+                    .collect(),
+                }),
+                non_boot_disk_metadata: IdOrdMap::new(),
+            },
+        );
+        zones
+            .shut_down_zones_if_needed_impl(
+                &desired_zones,
+                &sled_agent_facilities,
+                &zone_facilities,
+                &logctx.log,
+            )
+            .await
+            .expect("zone shutdown should succeed");
+        assert_eq!(zones.zones.len(), 1);
+        assert!(
+            zones
+                .zones
+                .iter()
+                .all(|z| matches!(z.state, ZoneState::Running(_)))
+        );
+        assert_eq!(
+            install_dataset_zone,
+            zones.zones.get(&install_dataset_zone.id).unwrap().config,
+        );
+
+        // Swap it one more time, but this time also change a different part of
+        // the config (`filesystem_pool` here, but any property would do). We
+        // _should_ shut it down; even though the hash matches, there are other
+        // changes.
+        install_dataset_zone.image_source = OmicronZoneImageSource::Artifact {
+            hash: install_dataset_zone_hash,
+        };
+        install_dataset_zone.filesystem_pool =
+            Some(ZpoolName::new_external(ZpoolUuid::new_v4()));
+        let desired_zones: IdMap<_> =
+            [install_dataset_zone.clone()].into_iter().collect();
+        zones
+            .shut_down_zones_if_needed_impl(
+                &desired_zones,
+                &sled_agent_facilities,
+                &zone_facilities,
+                &logctx.log,
+            )
+            .await
+            .expect("zone shutdown should succeed");
+        assert_eq!(zones.zones.len(), 0);
 
         logctx.cleanup_successful();
     }
