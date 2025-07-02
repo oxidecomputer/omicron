@@ -629,7 +629,9 @@ async fn test_device_token_request_ttl(cptestctx: &ControlPlaneTestContext) {
 }
 
 #[nexus_test]
-async fn test_admin_logout_deletes_tokens(cptestctx: &ControlPlaneTestContext) {
+async fn test_admin_logout_deletes_tokens_and_sessions(
+    cptestctx: &ControlPlaneTestContext,
+) {
     let testctx = &cptestctx.external_client;
 
     // create a user have a user ID on hand to use in the authn_as
@@ -639,7 +641,7 @@ async fn test_admin_logout_deletes_tokens(cptestctx: &ControlPlaneTestContext) {
         testctx,
         &test_suite_silo,
         &"user1".parse().unwrap(),
-        test_params::UserPassword::LoginDisallowed,
+        test_params::UserPassword::Password("password1".to_string()),
     )
     .await;
     let user2 = create_local_user(
@@ -650,16 +652,22 @@ async fn test_admin_logout_deletes_tokens(cptestctx: &ControlPlaneTestContext) {
     )
     .await;
 
-    // no tokens for user 1 yet
-    let tokens = get_user_tokens(testctx, user1.id).await;
+    // no tokens or sessions for user 1 yet
+    let tokens = list_user_tokens(testctx, user1.id).await;
     assert!(tokens.is_empty());
+    let sessions = list_user_sessions(testctx, user1.id).await;
+    assert!(sessions.is_empty());
 
-    // create a token for user1
+    // create a token and session for user1
     get_device_token(testctx, AuthnMode::SiloUser(user1.id)).await;
+    create_session_for_user(testctx, "test-suite-silo", "user1", "password1")
+        .await;
 
-    // now there is a token for user1
-    let tokens = get_user_tokens(testctx, user1.id).await;
+    // now there is a token and session for user1
+    let tokens = list_user_tokens(testctx, user1.id).await;
     assert_eq!(tokens.len(), 1);
+    let sessions = list_user_sessions(testctx, user1.id).await;
+    assert_eq!(sessions.len(), 1);
 
     let logout_url = format!("/v1/users/{}/logout", user1.id);
 
@@ -674,8 +682,10 @@ async fn test_admin_logout_deletes_tokens(cptestctx: &ControlPlaneTestContext) {
     .await
     .expect("User has no perms, can't delete another user's tokens");
 
-    let tokens = get_user_tokens(testctx, user1.id).await;
+    let tokens = list_user_tokens(testctx, user1.id).await;
     assert_eq!(tokens.len(), 1);
+    let sessions = list_user_sessions(testctx, user1.id).await;
+    assert_eq!(sessions.len(), 1);
 
     // user 1 can hit the logout endpoint for themselves
     NexusRequest::new(
@@ -688,15 +698,23 @@ async fn test_admin_logout_deletes_tokens(cptestctx: &ControlPlaneTestContext) {
     .await
     .expect("User 1 should be able to delete their own tokens");
 
-    let tokens = get_user_tokens(testctx, user1.id).await;
+    let tokens = list_user_tokens(testctx, user1.id).await;
     assert!(tokens.is_empty());
+    let sessions = list_user_sessions(testctx, user1.id).await;
+    assert!(sessions.is_empty());
 
-    // create another couple of tokens for user1
+    // create another couple of tokens and sessions for user1
     get_device_token(testctx, AuthnMode::SiloUser(user1.id)).await;
     get_device_token(testctx, AuthnMode::SiloUser(user1.id)).await;
+    create_session_for_user(testctx, "test-suite-silo", "user1", "password1")
+        .await;
+    create_session_for_user(testctx, "test-suite-silo", "user1", "password1")
+        .await;
 
-    let tokens = get_user_tokens(testctx, user1.id).await;
+    let tokens = list_user_tokens(testctx, user1.id).await;
     assert_eq!(tokens.len(), 2);
+    let sessions = list_user_sessions(testctx, user1.id).await;
+    assert_eq!(sessions.len(), 2);
 
     // make user 2 fleet admin to show that fleet admin does not inherit
     // the appropriate role due to being fleet admin alone
@@ -719,8 +737,10 @@ async fn test_admin_logout_deletes_tokens(cptestctx: &ControlPlaneTestContext) {
     .await
     .expect("Fleet admin is not sufficient to delete another user's tokens");
 
-    let tokens = get_user_tokens(testctx, user1.id).await;
+    let tokens = list_user_tokens(testctx, user1.id).await;
     assert_eq!(tokens.len(), 2);
+    let sessions = list_user_sessions(testctx, user1.id).await;
+    assert_eq!(sessions.len(), 2);
 
     // make user 2 a silo admin so they can delete user 1's tokens
     grant_iam(
@@ -743,8 +763,10 @@ async fn test_admin_logout_deletes_tokens(cptestctx: &ControlPlaneTestContext) {
     .expect("Silo admin should be able to delete user 1's tokens");
 
     // they're gone!
-    let tokens = get_user_tokens(testctx, user1.id).await;
+    let tokens = list_user_tokens(testctx, user1.id).await;
     assert!(tokens.is_empty());
+    let sessions = list_user_sessions(testctx, user1.id).await;
+    assert!(sessions.is_empty());
 }
 
 async fn get_tokens_priv(
@@ -757,7 +779,7 @@ async fn get_tokens_priv(
         .items
 }
 
-async fn get_user_tokens(
+async fn list_user_tokens(
     testctx: &ClientTestContext,
     user_id: Uuid,
 ) -> Vec<views::DeviceAccessToken> {
@@ -766,6 +788,38 @@ async fn get_user_tokens(
         .execute_and_parse_unwrap::<ResultsPage<views::DeviceAccessToken>>()
         .await
         .items
+}
+
+async fn list_user_sessions(
+    testctx: &ClientTestContext,
+    user_id: Uuid,
+) -> Vec<views::ConsoleSession> {
+    let url = format!("/v1/users/{}/sessions", user_id);
+    NexusRequest::object_get(testctx, &url)
+        .authn_as(AuthnMode::SiloUser(user_id))
+        .execute_and_parse_unwrap::<ResultsPage<views::ConsoleSession>>()
+        .await
+        .items
+}
+
+async fn create_session_for_user(
+    testctx: &ClientTestContext,
+    silo_name: &str,
+    username: &str,
+    password: &str,
+) {
+    let url = format!("/v1/login/{}/local", silo_name);
+    let credentials = test_params::UsernamePasswordCredentials {
+        username: username.parse().unwrap(),
+        password: password.to_string(),
+    };
+    let _login = RequestBuilder::new(&testctx, Method::POST, &url)
+        .body(Some(&credentials))
+        .expect_status(Some(StatusCode::NO_CONTENT))
+        .execute()
+        .await
+        .expect("failed to log in");
+    // We don't need to extract the token, just creating the session is enough
 }
 
 async fn get_tokens_unpriv(
