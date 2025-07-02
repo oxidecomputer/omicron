@@ -325,7 +325,7 @@ impl super::Nexus {
             .await?;
 
         let authz_user_sessions =
-            authz::UserSessions::new(authz_silo_user.clone());
+            authz::SiloUserAuthnList::new(authz_silo_user.clone());
         // TODO: would rather do this check in the datastore functions
         opctx.authorize(authz::Action::Modify, &authz_user_sessions).await?;
 

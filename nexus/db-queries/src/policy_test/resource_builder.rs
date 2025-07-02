@@ -346,7 +346,7 @@ impl DynAuthorizedResource for authz::SiloUserList {
     }
 }
 
-impl DynAuthorizedResource for authz::UserSessions {
+impl DynAuthorizedResource for authz::SiloUserAuthnList {
     fn do_authorize<'a, 'b>(
         &'a self,
         opctx: &'b OpContext,
