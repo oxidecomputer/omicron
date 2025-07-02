@@ -11717,6 +11717,75 @@
         }
       }
     },
+    "/v1/users/{user_id}/sessions": {
+      "get": {
+        "tags": [
+          "silos"
+        ],
+        "summary": "List user's console sessions",
+        "operationId": "user_session_list",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "user_id",
+            "description": "ID of the user",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "description": "Maximum number of items returned by a single call",
+            "schema": {
+              "nullable": true,
+              "type": "integer",
+              "format": "uint32",
+              "minimum": 1
+            }
+          },
+          {
+            "in": "query",
+            "name": "page_token",
+            "description": "Token returned by previous call to retrieve the subsequent page",
+            "schema": {
+              "nullable": true,
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "sort_by",
+            "schema": {
+              "$ref": "#/components/schemas/IdSortMode"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ConsoleSessionResultsPage"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "x-dropshot-pagination": {
+          "required": []
+        }
+      }
+    },
     "/v1/utilization": {
       "get": {
         "tags": [
@@ -16293,6 +16362,51 @@
             "type": "array",
             "items": {
               "$ref": "#/components/schemas/Certificate"
+            }
+          },
+          "next_page": {
+            "nullable": true,
+            "description": "token used to fetch the next page of results (if any)",
+            "type": "string"
+          }
+        },
+        "required": [
+          "items"
+        ]
+      },
+      "ConsoleSession": {
+        "description": "View of a console session",
+        "type": "object",
+        "properties": {
+          "id": {
+            "description": "A unique, immutable, system-controlled identifier for the session",
+            "type": "string",
+            "format": "uuid"
+          },
+          "time_created": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "time_last_used": {
+            "type": "string",
+            "format": "date-time"
+          }
+        },
+        "required": [
+          "id",
+          "time_created",
+          "time_last_used"
+        ]
+      },
+      "ConsoleSessionResultsPage": {
+        "description": "A single page of results",
+        "type": "object",
+        "properties": {
+          "items": {
+            "description": "list of items on this page of results",
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ConsoleSession"
             }
           },
           "next_page": {

@@ -1000,6 +1000,21 @@ impl SimpleIdentity for DeviceAccessToken {
     }
 }
 
+/// View of a console session
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema, PartialEq)]
+pub struct ConsoleSession {
+    /// A unique, immutable, system-controlled identifier for the session
+    pub id: Uuid,
+    pub time_created: DateTime<Utc>,
+    pub time_last_used: DateTime<Utc>,
+}
+
+impl SimpleIdentity for ConsoleSession {
+    fn id(&self) -> Uuid {
+        self.id
+    }
+}
+
 // OAUTH 2.0 DEVICE AUTHORIZATION REQUESTS & TOKENS
 
 /// Response to an initial device authorization request.

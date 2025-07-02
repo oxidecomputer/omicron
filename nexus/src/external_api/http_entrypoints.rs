@@ -6914,6 +6914,38 @@ impl NexusExternalApi for NexusExternalApiImpl {
             .await
     }
 
+    async fn user_session_list(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<params::UserPath>,
+        query_params: Query<PaginatedById>,
+    ) -> Result<HttpResponseOk<ResultsPage<views::ConsoleSession>>, HttpError> {
+        let apictx = rqctx.context();
+        let handler = async {
+            let nexus = &apictx.context.nexus;
+            let path = path_params.into_inner();
+            let query = query_params.into_inner();
+            let pag_params = data_page_params_for(&rqctx, &query)?;
+            let opctx =
+                crate::context::op_context_for_external_api(&rqctx).await?;
+            let sessions = nexus
+                .silo_user_session_list(&opctx, path.user_id, &pag_params)
+                .await?
+                .into_iter()
+                .map(views::ConsoleSession::from)
+                .collect();
+            Ok(HttpResponseOk(ScanById::results_page(
+                &query,
+                sessions,
+                &marker_for_id,
+            )?))
+        };
+        apictx
+            .context
+            .external_latencies
+            .instrument_dropshot_handler(&rqctx, handler)
+            .await
+    }
+
     async fn user_logout(
         rqctx: RequestContext<Self::Context>,
         path_params: Path<params::UserPath>,

@@ -373,6 +373,26 @@ impl super::Nexus {
             .await
     }
 
+    /// List console sessions for a user in a Silo
+    pub(crate) async fn silo_user_session_list(
+        &self,
+        opctx: &OpContext,
+        silo_user_id: Uuid,
+        pagparams: &DataPageParams<'_, Uuid>,
+    ) -> ListResultVec<db::model::ConsoleSession> {
+        let (_, authz_silo_user, _db_silo_user) =
+            LookupPath::new(opctx, self.datastore())
+                .silo_user_id(silo_user_id)
+                .fetch_for(authz::Action::Read)
+                .await?;
+
+        let user_authn_list = authz::SiloUserAuthnList::new(authz_silo_user);
+
+        self.datastore()
+            .silo_user_session_list(opctx, user_authn_list, pagparams)
+            .await
+    }
+
     // The "local" identity provider (available only in `LocalOnly` Silos)
 
     /// Helper function for looking up a LocalOnly Silo by name

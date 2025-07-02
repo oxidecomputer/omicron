@@ -143,6 +143,8 @@ pub static DEMO_SILO_USER_ID_IN_SILO_URL: LazyLock<String> =
     LazyLock::new(|| "/v1/users/{id}".to_string());
 pub static DEMO_SILO_USER_TOKEN_LIST_URL: LazyLock<String> =
     LazyLock::new(|| "/v1/users/{id}/access-tokens".to_string());
+pub static DEMO_SILO_USER_SESSION_LIST_URL: LazyLock<String> =
+    LazyLock::new(|| "/v1/users/{id}/sessions".to_string());
 pub static DEMO_SILO_USER_LOGOUT_URL: LazyLock<String> =
     LazyLock::new(|| "/v1/users/{id}/logout".to_string());
 
@@ -1690,6 +1692,12 @@ pub static VERIFY_ENDPOINTS: LazyLock<Vec<VerifyEndpoint>> =
             },
             VerifyEndpoint {
                 url: &DEMO_SILO_USER_TOKEN_LIST_URL,
+                visibility: Visibility::Public,
+                unprivileged_access: UnprivilegedAccess::None,
+                allowed_methods: vec![AllowedMethod::Get],
+            },
+            VerifyEndpoint {
+                url: &DEMO_SILO_USER_SESSION_LIST_URL,
                 visibility: Visibility::Public,
                 unprivileged_access: UnprivilegedAccess::None,
                 allowed_methods: vec![AllowedMethod::Get],

@@ -3099,6 +3099,18 @@ pub trait NexusExternalApi {
         query_params: Query<PaginatedById>,
     ) -> Result<HttpResponseOk<ResultsPage<views::DeviceAccessToken>>, HttpError>;
 
+    /// List user's console sessions
+    #[endpoint {
+        method = GET,
+        path = "/v1/users/{user_id}/sessions",
+        tags = ["silos"],
+    }]
+    async fn user_session_list(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<params::UserPath>,
+        query_params: Query<PaginatedById>,
+    ) -> Result<HttpResponseOk<ResultsPage<views::ConsoleSession>>, HttpError>;
+
     /// Expire all of user's tokens and sessions
     #[endpoint {
         method = POST,

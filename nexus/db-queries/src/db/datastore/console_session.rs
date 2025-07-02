@@ -9,6 +9,7 @@ use crate::authn;
 use crate::authz;
 use crate::context::OpContext;
 use crate::db::model::ConsoleSession;
+use crate::db::pagination::paginated;
 use async_bb8_diesel::AsyncRunQueryDsl;
 use chrono::Utc;
 use diesel::prelude::*;
@@ -17,13 +18,16 @@ use nexus_db_errors::public_error_from_diesel;
 use nexus_db_lookup::LookupPath;
 use nexus_db_schema::schema::console_session;
 use omicron_common::api::external::CreateResult;
+use omicron_common::api::external::DataPageParams;
 use omicron_common::api::external::DeleteResult;
 use omicron_common::api::external::Error;
+use omicron_common::api::external::ListResultVec;
 use omicron_common::api::external::LookupResult;
 use omicron_common::api::external::LookupType;
 use omicron_common::api::external::ResourceType;
 use omicron_common::api::external::UpdateResult;
 use omicron_uuid_kinds::GenericUuid;
+use uuid::Uuid;
 
 impl DataStore {
     /// Look up session by token. The token is a kind of password, so simply
@@ -155,6 +159,26 @@ impl DataStore {
                     e
                 ))
             })
+    }
+
+    /// List console sessions for a specific user
+    pub async fn silo_user_session_list(
+        &self,
+        opctx: &OpContext,
+        user_authn_list: authz::SiloUserAuthnList,
+        pagparams: &DataPageParams<'_, Uuid>,
+    ) -> ListResultVec<ConsoleSession> {
+        opctx.authorize(authz::Action::ListChildren, &user_authn_list).await?;
+
+        let silo_user_id = user_authn_list.silo_user().id();
+
+        use nexus_db_schema::schema::console_session::dsl;
+        paginated(dsl::console_session, dsl::id, &pagparams)
+            .filter(dsl::silo_user_id.eq(silo_user_id))
+            .select(ConsoleSession::as_select())
+            .load_async(&*self.pool_connection_authorized(opctx).await?)
+            .await
+            .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))
     }
 
     /// Delete all session for the user
