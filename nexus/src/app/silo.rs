@@ -347,7 +347,7 @@ impl super::Nexus {
         let (_, authz_silo_user, db_silo_user) =
             LookupPath::new(opctx, self.datastore())
                 .silo_user_id(silo_user_id)
-                .fetch_for(authz::Action::Read)
+                .fetch()
                 .await?;
 
         Ok((authz_silo_user, db_silo_user))
@@ -363,7 +363,7 @@ impl super::Nexus {
         let (_, authz_silo_user, _db_silo_user) =
             LookupPath::new(opctx, self.datastore())
                 .silo_user_id(silo_user_id)
-                .fetch_for(authz::Action::Read)
+                .fetch()
                 .await?;
 
         let user_authn_list = authz::SiloUserAuthnList::new(authz_silo_user);
@@ -383,7 +383,7 @@ impl super::Nexus {
         let (_, authz_silo_user, _db_silo_user) =
             LookupPath::new(opctx, self.datastore())
                 .silo_user_id(silo_user_id)
-                .fetch_for(authz::Action::Read)
+                .fetch()
                 .await?;
 
         let user_authn_list = authz::SiloUserAuthnList::new(authz_silo_user);

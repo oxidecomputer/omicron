@@ -461,15 +461,14 @@ resource SiloUserAuthnList {
     # A silo admin can list a user's tokens and sessions.
     "list_children" if "admin" on "parent_silo";
 }
-has_relation(silo: Silo, "parent_silo", sessions: SiloUserAuthnList)
-    if sessions.silo_user.silo = silo;
+has_relation(silo: Silo, "parent_silo", authn_list: SiloUserAuthnList)
+    if authn_list.silo_user.silo = silo;
 
-# also give users 'modify' and 'list_children' on their own sessions
-has_permission(actor: AuthenticatedActor, "modify", sessions: SiloUserAuthnList)
-    if actor.equals_silo_user(sessions.silo_user);
-
-has_permission(actor: AuthenticatedActor, "list_children", sessions: SiloUserAuthnList)
-    if actor.equals_silo_user(sessions.silo_user);
+# give users 'modify' and 'list_children' on their own tokens and sessions
+has_permission(actor: AuthenticatedActor, "modify", authn_list: SiloUserAuthnList)
+    if actor.equals_silo_user(authn_list.silo_user);
+has_permission(actor: AuthenticatedActor, "list_children", authn_list: SiloUserAuthnList)
+    if actor.equals_silo_user(authn_list.silo_user);
 
 # Describes the policy for creating and managing device authorization requests.
 resource DeviceAuthRequestList {

@@ -165,16 +165,23 @@ impl DataStore {
     pub async fn silo_user_session_list(
         &self,
         opctx: &OpContext,
-        user_authn_list: authz::SiloUserAuthnList,
+        authn_list: authz::SiloUserAuthnList,
         pagparams: &DataPageParams<'_, Uuid>,
     ) -> ListResultVec<ConsoleSession> {
-        opctx.authorize(authz::Action::ListChildren, &user_authn_list).await?;
+        opctx.authorize(authz::Action::ListChildren, &authn_list).await?;
 
-        let silo_user_id = user_authn_list.silo_user().id();
+        let user_id = authn_list.silo_user().id();
 
         use nexus_db_schema::schema::console_session::dsl;
         paginated(dsl::console_session, dsl::id, &pagparams)
-            .filter(dsl::silo_user_id.eq(silo_user_id))
+            .filter(dsl::silo_user_id.eq(user_id))
+            // TODO: unlike with tokens, we do not have expiration time here,
+            // so we can't filter out expired sessions by comparing to now. In
+            // the authn code, this works by dynamically comparing the created
+            // and last used times against now + idle/absolute TTL. We may
+            // have to do that here but it's kind of sad. It might be nicer to
+            // make sessions work more like tokens and put idle and absolute
+            // expiration time right there in the table at session create time.
             .select(ConsoleSession::as_select())
             .load_async(&*self.pool_connection_authorized(opctx).await?)
             .await
@@ -191,11 +198,11 @@ impl DataStore {
         // target user's own silo in particular
         opctx.authorize(authz::Action::Modify, authn_list).await?;
 
+        let user_id = authn_list.silo_user().id();
+
         use nexus_db_schema::schema::console_session;
         diesel::delete(console_session::table)
-            .filter(
-                console_session::silo_user_id.eq(authn_list.silo_user().id()),
-            )
+            .filter(console_session::silo_user_id.eq(user_id))
             .execute_async(&*self.pool_connection_authorized(opctx).await?)
             .await
             .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))
