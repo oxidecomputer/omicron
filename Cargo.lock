@@ -7739,6 +7739,7 @@ dependencies = [
  "clap",
  "crossterm",
  "crucible-agent-client",
+ "crucible-pantry-client",
  "csv",
  "diesel",
  "dropshot",
