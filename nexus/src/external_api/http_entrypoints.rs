@@ -6860,6 +6860,28 @@ impl NexusExternalApi for NexusExternalApiImpl {
             .await
     }
 
+    async fn user_view(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<params::UserPath>,
+    ) -> Result<HttpResponseOk<views::User>, HttpError> {
+        let apictx = rqctx.context();
+        let handler = async {
+            let nexus = &apictx.context.nexus;
+            let path = path_params.into_inner();
+            let opctx =
+                crate::context::op_context_for_external_api(&rqctx).await?;
+            let (.., user) = nexus
+                .current_silo_user_lookup(&opctx, path.user_id)
+                .await?;
+            Ok(HttpResponseOk(user.into()))
+        };
+        apictx
+            .context
+            .external_latencies
+            .instrument_dropshot_handler(&rqctx, handler)
+            .await
+    }
+
     async fn user_logout(
         rqctx: RequestContext<Self::Context>,
         path_params: Path<params::UserPath>,

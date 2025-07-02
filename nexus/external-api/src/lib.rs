@@ -3076,6 +3076,17 @@ pub trait NexusExternalApi {
         query_params: Query<PaginatedById<params::OptionalGroupSelector>>,
     ) -> Result<HttpResponseOk<ResultsPage<views::User>>, HttpError>;
 
+    /// Fetch user
+    #[endpoint {
+        method = GET,
+        path = "/v1/users/{user_id}",
+        tags = ["silos"],
+    }]
+    async fn user_view(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<params::UserPath>,
+    ) -> Result<HttpResponseOk<views::User>, HttpError>;
+
     /// Expire all of user's tokens and sessions
     #[endpoint {
         method = POST,
