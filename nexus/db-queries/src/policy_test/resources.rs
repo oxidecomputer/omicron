@@ -265,7 +265,7 @@ async fn make_silo(
     builder.new_resource(silo_user.clone());
     let ssh_key_id = Uuid::new_v4();
     builder.new_resource(authz::SshKey::new(
-        silo_user,
+        silo_user.clone(),
         ssh_key_id,
         LookupType::ByName(format!("{}-user-ssh-key", silo_name)),
     ));
@@ -281,6 +281,7 @@ async fn make_silo(
         silo_image_id,
         LookupType::ByName(format!("{}-silo-image", silo_name)),
     ));
+    builder.new_resource(authz::UserSessions::new(silo_user));
 
     // Image is a special case in that this resource is technically just a
     // pass-through for `SiloImage` and `ProjectImage` resources.

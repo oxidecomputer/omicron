@@ -683,6 +683,10 @@ impl UserSessions {
     pub fn silo_user(&self) -> &SiloUser {
         &self.0
     }
+
+    pub fn silo(&self) -> &Silo {
+        &self.0.parent
+    }
 }
 
 impl oso::PolarClass for UserSessions {
