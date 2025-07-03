@@ -2982,7 +2982,10 @@ impl DataStore {
 
             let mut results: BTreeMap<SledUuid, _> = BTreeMap::new();
 
-            let mut paginator = Paginator::new(batch_size);
+            let mut paginator = Paginator::new(
+                batch_size,
+                dropshot::PaginationOrder::Ascending,
+            );
             while let Some(p) = paginator.next() {
                 let batch = paginated(
                     dsl::inv_sled_config_reconciler,
@@ -3014,7 +3017,10 @@ impl DataStore {
             let mut results: BTreeMap<SledUuid, BTreeMap<M2Slot, _>> =
                 BTreeMap::new();
 
-            let mut paginator = Paginator::new(batch_size);
+            let mut paginator = Paginator::new(
+                batch_size,
+                dropshot::PaginationOrder::Ascending,
+            );
             while let Some(p) = paginator.next() {
                 let batch = paginated_multicolumn(
                     dsl::inv_sled_boot_partition,

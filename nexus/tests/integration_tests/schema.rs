@@ -2648,7 +2648,6 @@ mod migration_156 {
             assert_eq!(seen, expected);
         })
     }
->>>>>>> 857fc1a24 (add schema migrations)
 }
 
 // Lazily initializes all migration checks. The combination of Rust function
