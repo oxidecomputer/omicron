@@ -136,9 +136,9 @@ impl DataStore {
                 .optional()?;
 
         if existing_export.is_some() {
-            return Err(
-                err.bail(Error::conflict("export already exists for resource"))
-            );
+            return Err(err.bail(Error::conflict(format!(
+                "export already exists for resource {resource_id}"
+            ))));
         }
 
         // Otherwise, insert the new export object
