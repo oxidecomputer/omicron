@@ -41,6 +41,21 @@ use wicketd_client::types::{
     GetInventoryParams, GetInventoryResponse, StartUpdateParams,
 };
 
+/// The list of zone file names defined in fake-non-semver.toml.
+static FAKE_NON_SEMVER_ZONE_FILE_NAMES: &[&str] = &[
+    "clickhouse.tar.gz",
+    "clickhouse_keeper.tar.gz",
+    "clickhouse_server.tar.gz",
+    "cockroachdb.tar.gz",
+    "crucible.tar.gz",
+    "crucible_pantry.tar.gz",
+    "external_dns.tar.gz",
+    "internal_dns.tar.gz",
+    "ntp.tar.gz",
+    "nexus.tar.gz",
+    "oximeter.tar.gz",
+];
+
 // See documentation for extract_nested_artifact_pair in update_plan.rs for why
 // multi_thread is required.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
@@ -413,15 +428,15 @@ async fn test_installinator_fetch() {
     // Check that the host and control plane artifacts were downloaded
     // correctly.
     //
-    // The control plane zone names here are defined in `fake.toml` which we
-    // load above.
-    for file_name in
-        [HOST_PHASE_2_FILE_NAME, "install/zone1.tar.gz", "install/zone2.tar.gz"]
-    {
-        let a_path = a_path.join(file_name);
+    // The control plane zone names here are defined in `fake-non-semver.toml`
+    // which we load above.
+    for file_name in [HOST_PHASE_2_FILE_NAME.to_owned()].into_iter().chain(
+        FAKE_NON_SEMVER_ZONE_FILE_NAMES.iter().map(|z| format!("install/{z}")),
+    ) {
+        let a_path = a_path.join(&file_name);
         assert!(a_path.is_file(), "{a_path} was written out");
 
-        let b_path = b_path.join(file_name);
+        let b_path = b_path.join(&file_name);
         assert!(b_path.is_file(), "{b_path} was written out");
     }
 
@@ -481,17 +496,13 @@ async fn test_installinator_fetch() {
         "mupdate ID matches",
     );
 
-    // Check that the zone1 and zone2 images are present in the zone set. (The
-    // names come from fake-non-semver.toml, under
-    // [artifact.control-plane.source]).
-    assert!(
-        a_manifest.zones.contains_key("zone1.tar.gz"),
-        "zone1 is present in the zone set"
-    );
-    assert!(
-        a_manifest.zones.contains_key("zone2.tar.gz"),
-        "zone2 is present in the zone set"
-    );
+    // Check that the images are present in the zone set.
+    for file_name in FAKE_NON_SEMVER_ZONE_FILE_NAMES {
+        assert!(
+            a_manifest.zones.contains_key(file_name),
+            "{file_name} is present in the zone set"
+        );
+    }
 
     // Ensure that the B path also had the same file written out.
     let b_manifest_path =
