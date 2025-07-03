@@ -298,7 +298,20 @@ impl DataStore {
             .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))
     }
 
-    pub async fn user_data_export_changeset(
+    /// Compute the work required related to user data export objects. Return:
+    ///
+    /// - which resources do not have any user data export object and need a
+    ///   record created
+    ///
+    /// - which user data export records are in state Requested that need the
+    ///   associated create saga run
+    ///
+    /// - which user data export records have been marked Deleted that need the
+    ///   associated delete saga run
+    ///
+    /// This function also marks user data export records as deleted if the
+    /// associated resource was itself delete.
+    pub async fn compute_user_data_export_changeset(
         &self,
         opctx: &OpContext,
     ) -> LookupResult<UserDataExportChangeset> {
@@ -974,7 +987,7 @@ mod tests {
         let (opctx, datastore) = (db.opctx(), db.datastore());
 
         let changeset =
-            datastore.user_data_export_changeset(&opctx).await.unwrap();
+            datastore.compute_user_data_export_changeset(&opctx).await.unwrap();
 
         assert!(changeset.request_required.is_empty());
         assert!(changeset.create_required.is_empty());
@@ -1075,7 +1088,7 @@ mod tests {
             .unwrap();
 
         let changeset =
-            datastore.user_data_export_changeset(&opctx).await.unwrap();
+            datastore.compute_user_data_export_changeset(&opctx).await.unwrap();
 
         assert!(changeset.request_required.is_empty());
         assert!(changeset.create_required.is_empty());
@@ -1107,7 +1120,7 @@ mod tests {
         .await;
 
         let changeset =
-            datastore.user_data_export_changeset(&opctx).await.unwrap();
+            datastore.compute_user_data_export_changeset(&opctx).await.unwrap();
 
         assert_eq!(changeset.request_required.len(), 1);
         assert_eq!(
@@ -1138,7 +1151,7 @@ mod tests {
                 .await;
 
         let changeset =
-            datastore.user_data_export_changeset(&opctx).await.unwrap();
+            datastore.compute_user_data_export_changeset(&opctx).await.unwrap();
 
         assert_eq!(changeset.request_required.len(), 1);
         assert_eq!(
@@ -1199,7 +1212,7 @@ mod tests {
             .unwrap();
 
         let changeset =
-            datastore.user_data_export_changeset(&opctx).await.unwrap();
+            datastore.compute_user_data_export_changeset(&opctx).await.unwrap();
 
         assert!(changeset.request_required.is_empty());
         assert!(changeset.create_required.is_empty());
@@ -1250,7 +1263,7 @@ mod tests {
             .unwrap();
 
         let changeset =
-            datastore.user_data_export_changeset(&opctx).await.unwrap();
+            datastore.compute_user_data_export_changeset(&opctx).await.unwrap();
 
         assert!(changeset.request_required.is_empty());
         assert!(changeset.create_required.is_empty());
@@ -1294,7 +1307,7 @@ mod tests {
         }
 
         let changeset =
-            datastore.user_data_export_changeset(&opctx).await.unwrap();
+            datastore.compute_user_data_export_changeset(&opctx).await.unwrap();
 
         assert_eq!(changeset.request_required.len(), LARGE_NUMBER_OF_ROWS);
         assert!(changeset.create_required.is_empty());
@@ -1375,7 +1388,7 @@ mod tests {
         }
 
         let changeset =
-            datastore.user_data_export_changeset(&opctx).await.unwrap();
+            datastore.compute_user_data_export_changeset(&opctx).await.unwrap();
 
         assert!(changeset.request_required.is_empty());
         assert!(changeset.create_required.is_empty());
@@ -1440,7 +1453,7 @@ mod tests {
         }
 
         let changeset =
-            datastore.user_data_export_changeset(&opctx).await.unwrap();
+            datastore.compute_user_data_export_changeset(&opctx).await.unwrap();
 
         assert!(changeset.request_required.is_empty());
         assert!(changeset.create_required.is_empty());
@@ -1553,12 +1566,12 @@ mod tests {
         ];
 
         datastore
-            .user_data_export_delete_expunged(&opctx, in_service_pantries)
+            .user_data_export_mark_expunged_deleted(&opctx, in_service_pantries)
             .await
             .unwrap();
 
         let changeset =
-            datastore.user_data_export_changeset(&opctx).await.unwrap();
+            datastore.compute_user_data_export_changeset(&opctx).await.unwrap();
 
         assert!(changeset.request_required.is_empty());
         assert!(changeset.create_required.is_empty());
@@ -1621,7 +1634,7 @@ mod tests {
         // record's resource_deleted field to true
 
         let _changeset =
-            datastore.user_data_export_changeset(&opctx).await.unwrap();
+            datastore.compute_user_data_export_changeset(&opctx).await.unwrap();
 
         // This shouldn't work anymore
 
@@ -1660,7 +1673,7 @@ mod tests {
         // record yet.
 
         let changeset =
-            datastore.user_data_export_changeset(&opctx).await.unwrap();
+            datastore.compute_user_data_export_changeset(&opctx).await.unwrap();
         assert_eq!(
             &changeset.request_required,
             &[UserDataExportResource::Image { id: image.id() }],
@@ -1681,7 +1694,7 @@ mod tests {
         // required.
 
         let changeset =
-            datastore.user_data_export_changeset(&opctx).await.unwrap();
+            datastore.compute_user_data_export_changeset(&opctx).await.unwrap();
         assert!(changeset.request_required.is_empty());
         assert_eq!(changeset.create_required.len(), 1);
         assert_eq!(changeset.create_required[0].id(), record.id());
@@ -1725,7 +1738,7 @@ mod tests {
         // The changeset should now be empty.
 
         let changeset =
-            datastore.user_data_export_changeset(&opctx).await.unwrap();
+            datastore.compute_user_data_export_changeset(&opctx).await.unwrap();
         assert!(changeset.request_required.is_empty());
         assert!(changeset.create_required.is_empty());
         assert!(changeset.delete_required.is_empty());
@@ -1754,7 +1767,7 @@ mod tests {
             .unwrap_err();
 
         let changeset =
-            datastore.user_data_export_changeset(&opctx).await.unwrap();
+            datastore.compute_user_data_export_changeset(&opctx).await.unwrap();
         assert!(changeset.request_required.is_empty());
         assert!(changeset.create_required.is_empty());
         assert!(changeset.delete_required.is_empty());
@@ -1767,7 +1780,7 @@ mod tests {
         // associated delete saga run.
 
         let changeset =
-            datastore.user_data_export_changeset(&opctx).await.unwrap();
+            datastore.compute_user_data_export_changeset(&opctx).await.unwrap();
         assert!(changeset.request_required.is_empty());
         assert!(changeset.create_required.is_empty());
         assert_eq!(changeset.delete_required.len(), 1);
@@ -1811,7 +1824,7 @@ mod tests {
         // delete saga.
 
         let changeset =
-            datastore.user_data_export_changeset(&opctx).await.unwrap();
+            datastore.compute_user_data_export_changeset(&opctx).await.unwrap();
         assert_eq!(
             &changeset.request_required,
             &[UserDataExportResource::Image { id: image.id() }],
