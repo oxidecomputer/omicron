@@ -48,6 +48,7 @@ use std::net::SocketAddrV6;
 use tokio::net::TcpSocket;
 
 mod crucible_agent;
+mod crucible_pantry;
 mod db;
 mod helpers;
 mod mgs;
@@ -82,6 +83,7 @@ async fn main_impl() -> Result<(), anyhow::Error> {
         }
         OmdbCommands::SledAgent(sled) => sled.run_cmd(&args, &log).await,
         OmdbCommands::CrucibleAgent(crucible) => crucible.run_cmd(&args).await,
+        OmdbCommands::CruciblePantry(crucible) => crucible.run_cmd(&args).await,
     }
 }
 
@@ -284,6 +286,8 @@ impl Omdb {
 enum OmdbCommands {
     /// Debug a specific crucible-agent
     CrucibleAgent(crucible_agent::CrucibleAgentArgs),
+    /// Query a specific crucible-pantry
+    CruciblePantry(crucible_pantry::CruciblePantryArgs),
     /// Query the control plane database (CockroachDB)
     Db(db::DbArgs),
     /// Debug a specific Management Gateway Service instance

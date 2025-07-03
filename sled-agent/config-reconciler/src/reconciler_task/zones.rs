@@ -984,7 +984,7 @@ mod tests {
     struct FakeZoneBuilder {
         vnic_alloc: VnicAllocator<Etherstub>,
         factory: ZoneBuilderFactory,
-        tempdir: Utf8TempDir,
+        _tempdir: Utf8TempDir,
     }
 
     impl FakeZoneBuilder {
@@ -1002,7 +1002,7 @@ mod tests {
                 Some(tempdir.path().as_str()),
                 illumos_utils::fakes::zone::Zones::new(),
             );
-            Self { vnic_alloc, factory, tempdir }
+            Self { vnic_alloc, factory, _tempdir: tempdir }
         }
 
         async fn make_running_zone(
@@ -1129,7 +1129,7 @@ mod tests {
             &self.underlay_vnic
         }
 
-        async fn on_time_sync(&self) {}
+        fn on_time_sync(&self) {}
 
         async fn start_omicron_zone(
             &self,
