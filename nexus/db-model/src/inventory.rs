@@ -1024,7 +1024,7 @@ pub struct InvSledBootPartition {
     pub inv_collection_id: DbTypedUuid<CollectionKind>,
     pub sled_id: DbTypedUuid<SledKind>,
     /// This field is `pub` so `nexus-db-queries` can use it during pagination;
-    /// consumes of this type probably want the `slot()` method instead, to
+    /// consumers of this type probably want the `slot()` method instead to
     /// convert this value to an [`M2Slot`].
     pub boot_disk_slot: SqlU8,
     artifact_hash: ArtifactHash,

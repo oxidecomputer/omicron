@@ -1,8 +1,9 @@
 SET LOCAL disallow_full_table_scans = off;
 
--- Move any non-NULL `last_reconciled_config` values out of `inv_sled_agent`
--- and into new rows in `inv_sled_config_reconciler`. We fill in the rest of the
--- columns with dummy errors for old collections that don't have data.
+-- Move any non-NULL `last_reconciliation_sled_config` values out of
+-- `inv_sled_agent` and into new rows in `inv_sled_config_reconciler`. We fill
+-- in the rest of the columns with dummy errors for old collections that don't
+-- have data.
 INSERT INTO omicron.public.inv_sled_config_reconciler (
     inv_collection_id,
     sled_id,
