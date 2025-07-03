@@ -19,6 +19,7 @@ use serde::Deserialize;
 use serde::Deserializer;
 use serde::Serialize;
 use serde::de::Error as _;
+use slog_error_chain::InlineErrorChain;
 use strum::EnumIter;
 use uuid::Uuid;
 
@@ -289,7 +290,8 @@ impl<'de> Deserialize<'de> for TufSignedRootRole {
         match root.signed.verify_role(&root) {
             Ok(()) => Ok(Self(value)),
             Err(err) => Err(D::Error::custom(format!(
-                "Unable to verify root role: {err}"
+                "Unable to verify root role: {}",
+                InlineErrorChain::new(&err)
             ))),
         }
     }
