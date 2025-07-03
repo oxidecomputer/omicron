@@ -536,11 +536,9 @@ impl DataStore {
                         Ok(())
                     } else {
                         Err(Error::conflict(format!(
-                            "user data export {} operating saga id is {:?} \
-                            gen {}",
-                            record.id(),
-                            record.operating_saga_id(),
-                            record.generation(),
+                            "failed to transition {:?} from requested to \
+                            assigning with operating saga id {} generation {}",
+                            record, operating_saga_id, generation,
                         )))
                     }
                 }
@@ -599,9 +597,9 @@ impl DataStore {
                             Ok(())
                         } else {
                             Err(Error::conflict(format!(
-                                "could not set assigning to requested for \
-                                user data export {:?} with operating saga id \
-                                {:?} and generation {}",
+                                "failed to transition {:?} from assigning to \
+                                requested with operating saga id {:?} \
+                                generation {}",
                                 record, operating_saga_id, generation,
                             )))
                         }
@@ -668,9 +666,9 @@ impl DataStore {
                             Ok(())
                         } else {
                             Err(Error::conflict(format!(
-                                "could not set assigning to live for \
-                                user data export {:?} with operating saga id \
-                                {:?} generation {} pantry_address {} volume {}",
+                                "failed to transition {:?} from assigning to \
+                                live with operating saga id {} generation {} \
+                                pantry_address {} volume {}",
                                 record,
                                 operating_saga_id,
                                 generation,
@@ -731,11 +729,9 @@ impl DataStore {
                         Ok(())
                     } else {
                         Err(Error::conflict(format!(
-                            "user data export {} operating saga id is {:?} \
-                            gen {}",
-                            record.id(),
-                            record.operating_saga_id(),
-                            record.generation(),
+                            "failed to transition {:?} from live to \
+                            deleting with operating saga id {} generation {}",
+                            record, operating_saga_id, generation,
                         )))
                     }
                 }
@@ -794,9 +790,8 @@ impl DataStore {
                             Ok(())
                         } else {
                             Err(Error::conflict(format!(
-                                "could not set assigning to requested for \
-                                user data export {:?} with operating saga id \
-                                {:?} and generation {}",
+                                "failed to transition {:?} from deleting to \
+                                live with operating saga id {:?} generation {}",
                                 record, operating_saga_id, generation,
                             )))
                         }
@@ -853,9 +848,8 @@ impl DataStore {
                         Ok(())
                     } else {
                         Err(Error::conflict(format!(
-                            "could not set deleting to deleted for \
-                            user data export {:?} with operating saga id \
-                            {:?} generation {}",
+                            "failed to transition {:?} from deleting to \
+                            deleted with operating saga id {:?} generation {}",
                             record, operating_saga_id, generation,
                         )))
                     }
@@ -898,12 +892,9 @@ impl DataStore {
                         Ok(())
                     } else {
                         Err(Error::conflict(format!(
-                            "user data export {} operating saga id is {:?} \
-                            gen {} state {:?}",
-                            record.id(),
-                            record.operating_saga_id(),
-                            record.generation(),
-                            record.state(),
+                            "failed to transition {:?} from requested to \
+                            deleted",
+                            record,
                         )))
                     }
                 }
