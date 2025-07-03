@@ -758,6 +758,7 @@ impl DataStore {
             .filter(dsl::state.eq(UserDataExportState::Deleting))
             .filter(dsl::operating_saga_id.eq(operating_saga_id))
             .filter(dsl::generation.eq(generation))
+            .filter(dsl::resource_deleted.eq(true))
             .set((
                 dsl::state.eq(UserDataExportState::Live),
                 dsl::operating_saga_id.eq(Option::<Uuid>::None),
@@ -820,6 +821,7 @@ impl DataStore {
             .filter(dsl::state.eq(UserDataExportState::Deleting))
             .filter(dsl::operating_saga_id.eq(operating_saga_id))
             .filter(dsl::generation.eq(generation))
+            .filter(dsl::resource_deleted.eq(true))
             .set((
                 dsl::state.eq(UserDataExportState::Deleted),
                 dsl::operating_saga_id.eq(Option::<Uuid>::None),
