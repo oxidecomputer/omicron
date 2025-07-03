@@ -11,12 +11,12 @@ use nexus_db_model::{TufRepoDescription, TufTrustRoot};
 use nexus_db_queries::authz;
 use nexus_db_queries::context::OpContext;
 use nexus_db_queries::db::{datastore::SQL_BATCH_SIZE, pagination::Paginator};
+use nexus_types::external_api::shared::TufSignedRootRole;
 use omicron_common::api::external::{
     DataPageParams, Error, TufRepoInsertResponse, TufRepoInsertStatus,
 };
 use omicron_uuid_kinds::{GenericUuid, TufTrustRootUuid};
 use semver::Version;
-use tough::schema::{Root, Signed};
 use update_common::artifacts::{
     ArtifactsWithPlan, ControlPlaneZonesMode, VerificationMode,
 };
@@ -43,7 +43,7 @@ impl super::Nexus {
                 .await?;
             paginator = p.found_batch(&batch, &|a| a.id.into_untyped_uuid());
             for root in batch {
-                trusted_roots.push(root.root_role.to_string().into_bytes());
+                trusted_roots.push(root.root_role.0.to_bytes());
             }
         }
 
@@ -107,26 +107,9 @@ impl super::Nexus {
     pub(crate) async fn updates_add_trust_root(
         &self,
         opctx: &OpContext,
-        trust_root: serde_json::Value,
+        trust_root: TufSignedRootRole,
     ) -> Result<TufTrustRoot, HttpError> {
         opctx.authorize(authz::Action::Modify, &authz::FLEET).await?;
-
-        // Verify that this appears to be a valid TUF root role.
-        let parsed: Signed<Root> =
-            match serde_json::from_value(trust_root.clone()) {
-                Ok(parsed) => Ok(parsed),
-                Err(err) => Err(HttpError::for_bad_request(
-                    None,
-                    format!("invalid root role: {err}"),
-                )),
-            }?;
-        // Verify the root role is self-signed.
-        if let Err(err) = parsed.signed.verify_role(&parsed) {
-            return Err(HttpError::for_bad_request(
-                None,
-                format!("invalid root role: {err}"),
-            ));
-        }
 
         self.db_datastore
             .tuf_trust_root_insert(opctx, TufTrustRoot::new(trust_root))

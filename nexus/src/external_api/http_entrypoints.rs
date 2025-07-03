@@ -6648,7 +6648,7 @@ impl NexusExternalApi for NexusExternalApiImpl {
 
     async fn system_update_trust_root_create(
         rqctx: RequestContext<Self::Context>,
-        body: TypedBody<serde_json::Value>,
+        body: TypedBody<shared::TufSignedRootRole>,
     ) -> Result<HttpResponseCreated<UpdatesTrustRoot>, HttpError> {
         let apictx = rqctx.context();
         let handler = async {

@@ -6924,6 +6924,7 @@ dependencies = [
  "strum",
  "test-strategy",
  "thiserror 2.0.12",
+ "tough",
  "tufaceous-artifact",
  "update-engine",
  "url",

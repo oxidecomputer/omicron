@@ -3011,7 +3011,7 @@ pub trait NexusExternalApi {
     }]
     async fn system_update_trust_root_create(
         rqctx: RequestContext<Self::Context>,
-        body: TypedBody<serde_json::Value>,
+        body: TypedBody<shared::TufSignedRootRole>,
     ) -> Result<HttpResponseCreated<views::UpdatesTrustRoot>, HttpError>;
 
     /// Fetch trusted root role

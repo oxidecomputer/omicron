@@ -6,6 +6,7 @@
 
 use crate::external_api::shared::{
     self, Baseboard, IpKind, IpRange, ServiceUsingCertificate,
+    TufSignedRootRole,
 };
 use crate::identity::AssetIdentityMetadata;
 use api_identity::ObjectIdentity;
@@ -1499,7 +1500,7 @@ pub struct UpdatesTrustRoot {
     pub time_created: DateTime<Utc>,
     /// The trusted root role itself, a JSON document as described by The Update
     /// Framework.
-    pub root_role: serde_json::Value,
+    pub root_role: TufSignedRootRole,
 }
 
 fn expected_one_of<T: strum::VariantArray + fmt::Display>() -> String {
