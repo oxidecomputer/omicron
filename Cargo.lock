@@ -6388,7 +6388,6 @@ dependencies = [
  "openapiv3",
  "oximeter-types 0.1.0",
  "oxql-types",
- "serde_json",
 ]
 
 [[package]]
@@ -7602,7 +7601,6 @@ dependencies = [
  "ereport-types",
  "expectorate",
  "fatfs",
- "fs-err 3.1.1",
  "futures",
  "gateway-client",
  "gateway-messages",

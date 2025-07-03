@@ -145,7 +145,6 @@ criterion.workspace = true
 diesel.workspace = true
 dns-server.workspace = true
 expectorate.workspace = true
-fs-err = { workspace = true, features = ["tokio"] }
 hyper-rustls.workspace = true
 gateway-messages.workspace = true
 gateway-test-utils.workspace = true

@@ -20,4 +20,3 @@ openapiv3.workspace = true
 openapi-manager-types.workspace = true
 oximeter-types.workspace = true
 oxql-types.workspace = true
-serde_json.workspace = true
