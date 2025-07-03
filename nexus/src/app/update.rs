@@ -8,7 +8,6 @@ use bytes::Bytes;
 use dropshot::HttpError;
 use futures::Stream;
 use nexus_db_model::{TufRepoDescription, TufTrustRoot};
-use nexus_db_queries::authz;
 use nexus_db_queries::context::OpContext;
 use nexus_db_queries::db::{datastore::SQL_BATCH_SIZE, pagination::Paginator};
 use nexus_types::external_api::shared::TufSignedRootRole;
@@ -29,8 +28,6 @@ impl super::Nexus {
         body: impl Stream<Item = Result<Bytes, HttpError>> + Send + Sync + 'static,
         file_name: String,
     ) -> Result<TufRepoInsertResponse, HttpError> {
-        opctx.authorize(authz::Action::Modify, &authz::FLEET).await?;
-
         let mut trusted_roots = Vec::new();
         let mut paginator = Paginator::new(
             SQL_BATCH_SIZE,
@@ -96,8 +93,6 @@ impl super::Nexus {
         opctx: &OpContext,
         system_version: Version,
     ) -> Result<TufRepoDescription, HttpError> {
-        opctx.authorize(authz::Action::Read, &authz::FLEET).await?;
-
         self.db_datastore
             .tuf_repo_get_by_version(opctx, system_version.into())
             .await
@@ -109,8 +104,6 @@ impl super::Nexus {
         opctx: &OpContext,
         trust_root: TufSignedRootRole,
     ) -> Result<TufTrustRoot, HttpError> {
-        opctx.authorize(authz::Action::Modify, &authz::FLEET).await?;
-
         self.db_datastore
             .tuf_trust_root_insert(opctx, TufTrustRoot::new(trust_root))
             .await
@@ -122,8 +115,6 @@ impl super::Nexus {
         opctx: &OpContext,
         id: TufTrustRootUuid,
     ) -> Result<TufTrustRoot, HttpError> {
-        opctx.authorize(authz::Action::Read, &authz::FLEET).await?;
-
         self.db_datastore
             .tuf_trust_root_get_by_id(opctx, id)
             .await
@@ -135,8 +126,6 @@ impl super::Nexus {
         opctx: &OpContext,
         pagparams: &DataPageParams<'_, Uuid>,
     ) -> Result<Vec<TufTrustRoot>, HttpError> {
-        opctx.authorize(authz::Action::Read, &authz::FLEET).await?;
-
         self.db_datastore
             .tuf_trust_root_list(opctx, pagparams)
             .await
@@ -148,8 +137,6 @@ impl super::Nexus {
         opctx: &OpContext,
         id: TufTrustRootUuid,
     ) -> Result<(), HttpError> {
-        opctx.authorize(authz::Action::Modify, &authz::FLEET).await?;
-
         self.db_datastore
             .tuf_trust_root_delete(opctx, id)
             .await
