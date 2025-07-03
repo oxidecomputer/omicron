@@ -7294,6 +7294,37 @@
           "last_port"
         ]
       },
+      "SpStatus": {
+        "type": "object",
+        "properties": {
+          "sled_id": {
+            "nullable": true,
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/TypedUuidForSledKind"
+              }
+            ]
+          },
+          "slot0_git_commit": {
+            "type": "string"
+          },
+          "slot0_version": {
+            "type": "string"
+          },
+          "slot1_git_commit": {
+            "type": "string"
+          },
+          "slot1_version": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "slot0_git_commit",
+          "slot0_version",
+          "slot1_git_commit",
+          "slot1_version"
+        ]
+      },
       "SpType": {
         "description": "`SpType`\n\n<details><summary>JSON schema</summary>\n\n```json { \"type\": \"string\", \"enum\": [ \"sled\", \"power\", \"switch\" ] } ``` </details>",
         "type": "string",
@@ -7625,6 +7656,12 @@
       "UpdateStatus": {
         "type": "object",
         "properties": {
+          "sps": {
+            "type": "object",
+            "additionalProperties": {
+              "$ref": "#/components/schemas/SpStatus"
+            }
+          },
           "zones": {
             "type": "object",
             "additionalProperties": {
@@ -7636,6 +7673,7 @@
           }
         },
         "required": [
+          "sps",
           "zones"
         ]
       },

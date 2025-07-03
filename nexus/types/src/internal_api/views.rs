@@ -5,6 +5,8 @@
 use crate::deployment::PendingMgsUpdate;
 use crate::deployment::TargetReleaseDescription;
 use crate::inventory::BaseboardId;
+use crate::inventory::CabooseWhich;
+use crate::inventory::Collection;
 use chrono::DateTime;
 use chrono::SecondsFormat;
 use chrono::Utc;
@@ -13,7 +15,6 @@ use futures::stream::StreamExt;
 use iddqd::IdOrdItem;
 use iddqd::IdOrdMap;
 use iddqd::id_upcast;
-use nexus_sled_agent_shared::inventory::ConfigReconcilerInventory;
 use nexus_sled_agent_shared::inventory::ConfigReconcilerInventoryResult;
 use nexus_sled_agent_shared::inventory::OmicronZoneImageSource;
 use nexus_sled_agent_shared::inventory::OmicronZoneType;
@@ -549,19 +550,31 @@ pub struct ZoneStatus {
     pub version: ZoneStatusVersion,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+pub struct SpStatus {
+    pub sled_id: Option<SledUuid>,
+    pub slot0_version: String,
+    pub slot0_git_commit: String,
+    pub slot1_version: String,
+    pub slot1_git_commit: String,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 pub struct UpdateStatus {
     pub zones: BTreeMap<SledUuid, Vec<ZoneStatus>>,
+    pub sps: BTreeMap<String, SpStatus>,
 }
 
 impl UpdateStatus {
     pub fn new<'a>(
         old: &TargetReleaseDescription,
         new: &TargetReleaseDescription,
-        sleds: impl Iterator<
-            Item = (&'a SledUuid, &'a Option<ConfigReconcilerInventory>),
-        >,
+        inventory: &Collection,
     ) -> UpdateStatus {
+        let sleds = inventory
+            .sled_agents
+            .iter()
+            .map(|agent| (&agent.sled_id, &agent.last_reconciliation));
         let zones = sleds
             .map(|(sled_id, inv)| {
                 (
@@ -583,7 +596,59 @@ impl UpdateStatus {
                 )
             })
             .collect();
-        UpdateStatus { zones }
+        let baseboard_ids: Vec<_> = inventory.sps.keys().cloned().collect();
+
+        // Find all SP versions and git commits via cabooses
+        let mut sps: BTreeMap<BaseboardId, SpStatus> = baseboard_ids
+            .into_iter()
+            .map(|baseboard_id| {
+                let (slot0_version, slot0_git_commit) = inventory
+                    .caboose_for(CabooseWhich::SpSlot0, &baseboard_id)
+                    .map_or(
+                        ("unknown".to_string(), "unknown".to_string()),
+                        |c| {
+                            (
+                                c.caboose.version.clone(),
+                                c.caboose.git_commit.clone(),
+                            )
+                        },
+                    );
+                let (slot1_version, slot1_git_commit) = inventory
+                    .caboose_for(CabooseWhich::SpSlot1, &baseboard_id)
+                    .map_or(
+                        ("unknown".to_string(), "unknown".to_string()),
+                        |c| {
+                            (
+                                c.caboose.version.clone(),
+                                c.caboose.git_commit.clone(),
+                            )
+                        },
+                    );
+                (
+                    (*baseboard_id).clone(),
+                    SpStatus {
+                        sled_id: None,
+                        slot0_version,
+                        slot0_git_commit,
+                        slot1_version,
+                        slot1_git_commit,
+                    },
+                )
+            })
+            .collect();
+
+        // Fill in the sled_id for the sp if known
+        for sa in inventory.sled_agents.iter() {
+            if let Some(baseboard_id) = &sa.baseboard_id {
+                if let Some(sp) = sps.get_mut(&*baseboard_id) {
+                    sp.sled_id = Some(sa.sled_id);
+                }
+            }
+        }
+
+        let sps = sps.into_iter().map(|(k, v)| (k.to_string(), v)).collect();
+
+        UpdateStatus { zones, sps }
     }
 
     pub fn zone_image_source_to_version(
