@@ -118,12 +118,21 @@ impl BootstrapAgentApi for BootstrapAgentImpl {
         rqctx: RequestContext<Self::Context>,
     ) -> Result<HttpResponseOk<RackResetUuid>, HttpError> {
         let ctx = rqctx.context();
+
+        let corpus =
+            crate::bootstrap::measurements::sled_new_measurement_paths(
+                &ctx.internal_disks_rx,
+            )
+            .await
+            .map_err(|err| HttpError::for_bad_request(None, err.to_string()))?;
+
         let id = ctx
             .rss_access
             .start_reset(
                 &ctx.base_log,
                 ctx.sprockets.clone(),
                 ctx.global_zone_bootstrap_ip,
+                corpus,
             )
             .map_err(|err| HttpError::for_bad_request(None, err.to_string()))?;
         Ok(HttpResponseOk(id))

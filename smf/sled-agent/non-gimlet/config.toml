@@ -121,4 +121,5 @@ if_exists = "append"
 # See the .kdl file for use with pki-playground for generating
 [sprockets]
 resolve = { which = "local", priv_key = "/opt/oxide/sled-agent/pkg/sprockets-auth.key.pem", cert_chain = "/opt/oxide/sled-agent/pkg/sprockets-chain.pem" }
+attest = { which = "local", priv_key = "/opt/oxide/sled-agent/pkg/sprockets-attest.key.pem", cert_chain = "/opt/oxide/sled-agent/pkg/sprockets-attest-chain.pem", log = "/opt/oxide/sled-agent/pkg/sprockets-log.bin" }
 roots = ["/opt/oxide/sled-agent/pkg/root.cert.pem"]

@@ -51,6 +51,10 @@ zones = [
     { kind = "fake", name = "nexus",                size = "128KiB" },
     { kind = "fake", name = "oximeter",             size = "128KiB" },
 ]
+measurement_corpus = [
+    { kind = "fake", name = "sp", size = "1MiB" },
+    { kind = "fake", name = "rot", size = "1MiB" },
+]
 
 [[artifact.psc_sp]]
 name = "fake-psc-sp"
