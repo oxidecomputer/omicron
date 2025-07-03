@@ -566,7 +566,7 @@ pub struct UpdateStatus {
 }
 
 impl UpdateStatus {
-    pub fn new<'a>(
+    pub fn new(
         old: &TargetReleaseDescription,
         new: &TargetReleaseDescription,
         inventory: &Collection,
@@ -640,7 +640,7 @@ impl UpdateStatus {
         // Fill in the sled_id for the sp if known
         for sa in inventory.sled_agents.iter() {
             if let Some(baseboard_id) = &sa.baseboard_id {
-                if let Some(sp) = sps.get_mut(&*baseboard_id) {
+                if let Some(sp) = sps.get_mut(baseboard_id) {
                     sp.sled_id = Some(sa.sled_id);
                 }
             }
