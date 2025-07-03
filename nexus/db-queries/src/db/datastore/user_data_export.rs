@@ -875,7 +875,7 @@ impl DataStore {
             .filter(dsl::state.eq(UserDataExportState::Requested))
             .filter(dsl::operating_saga_id.is_null())
             .filter(dsl::resource_deleted.eq(true))
-            .set((dsl::state.eq(UserDataExportState::Deleted),))
+            .set(dsl::state.eq(UserDataExportState::Deleted))
             .check_if_exists::<UserDataExportRecord>(untyped_id)
             .execute_and_check(&*self.pool_connection_authorized(opctx).await?)
             .await;
@@ -1831,6 +1831,69 @@ mod tests {
                 &opctx,
                 UserDataExportUuid::new_v4(),
                 image.identity.id,
+            )
+            .await
+            .unwrap();
+
+        db.terminate().await;
+        logctx.cleanup_successful();
+    }
+
+    /// Assert that a record can be marked for deletion in the Assigning state
+    /// and it will still transition to Live.
+    #[tokio::test]
+    async fn test_marked_for_delete_during_assigning() {
+        let logctx =
+            dev::test_setup_log("test_marked_for_delete_during_assigning");
+        let log = logctx.log.new(o!());
+        let db = TestDatabase::new_with_datastore(&log).await;
+        let (opctx, datastore) = (db.opctx(), db.datastore());
+
+        let (authz_project, _) =
+            create_project(&opctx, &datastore, PROJECT_NAME).await;
+
+        let snapshot = create_project_snapshot(
+            &opctx,
+            &datastore,
+            &authz_project,
+            Uuid::new_v4(),
+            "snap",
+        )
+        .await;
+
+        let record = datastore
+            .user_data_export_create_for_snapshot(
+                &opctx,
+                UserDataExportUuid::new_v4(),
+                snapshot.id(),
+            )
+            .await
+            .unwrap();
+
+        let operating_saga_id = Uuid::new_v4();
+
+        datastore
+            .set_user_data_export_requested_to_assigning(
+                &opctx,
+                record.id(),
+                operating_saga_id,
+                1,
+            )
+            .await
+            .unwrap();
+
+        // Note I'm not sure anything can do this today! But this test is a
+        // safe guard against a future where that could happen.
+        datastore.user_data_export_mark_deleted(record.id()).await.unwrap();
+
+        datastore
+            .set_user_data_export_assigning_to_live(
+                &opctx,
+                record.id(),
+                operating_saga_id,
+                1,
+                SocketAddrV6::new(Ipv6Addr::LOCALHOST, 8080, 0, 0),
+                VolumeUuid::new_v4(),
             )
             .await
             .unwrap();
