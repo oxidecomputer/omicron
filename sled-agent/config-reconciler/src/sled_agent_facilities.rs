@@ -12,6 +12,7 @@ use nexus_sled_agent_shared::inventory::OmicronZoneConfig;
 use omicron_common::address::Ipv6Subnet;
 use omicron_common::address::SLED_PREFIX;
 use sled_agent_types::zone_bundle::ZoneBundleCause;
+use sled_agent_types::zone_images::ResolverStatus;
 use std::future::Future;
 use tufaceous_artifact::ArtifactHash;
 
@@ -39,6 +40,9 @@ pub trait SledAgentFacilities: Send + Sync + 'static {
         zone_config: &OmicronZoneConfig,
         zone_root_path: PathInPool,
     ) -> impl Future<Output = anyhow::Result<RunningZone>> + Send;
+
+    /// Get the status of the zone image resolver.
+    fn zone_image_resolver_status(&self) -> ResolverStatus;
 
     /// Stop tracking metrics for a zone's datalinks.
     fn metrics_untrack_zone_links(

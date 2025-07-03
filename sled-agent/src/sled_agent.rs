@@ -69,6 +69,7 @@ use sled_agent_types::zone_bundle::{
     BundleUtilization, CleanupContext, CleanupCount, CleanupPeriod,
     PriorityOrder, StorageLimit, ZoneBundleCause, ZoneBundleMetadata,
 };
+use sled_agent_types::zone_images::ResolverStatus;
 use sled_diagnostics::SledDiagnosticsCmdError;
 use sled_diagnostics::SledDiagnosticsCmdOutput;
 use sled_hardware::{
@@ -1350,6 +1351,10 @@ impl SledAgentFacilities for ReconcilerFacilities {
             .start_omicron_zone(zone_config, zone_root_path)
             .await?;
         Ok(zone)
+    }
+
+    fn zone_image_resolver_status(&self) -> ResolverStatus {
+        self.service_manager.zone_image_resolver().status()
     }
 
     fn metrics_untrack_zone_links(
