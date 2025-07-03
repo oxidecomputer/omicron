@@ -23,6 +23,7 @@ use nexus_reconfigurator_planning::system::{SledBuilder, SystemDescription};
 use nexus_reconfigurator_simulation::SimStateBuilder;
 use nexus_reconfigurator_simulation::Simulator;
 use nexus_reconfigurator_simulation::{BlueprintId, SimState};
+use nexus_sled_agent_shared::inventory::ZoneKind;
 use nexus_types::deployment::PlanningInput;
 use nexus_types::deployment::SledFilter;
 use nexus_types::deployment::execution;
@@ -458,9 +459,26 @@ enum BlueprintEditCommands {
     AddNexus {
         /// sled on which to deploy the new instance
         sled_id: SledOpt,
+        /// image source for the new zone
+        ///
+        /// The image source is required if the planning input of the system
+        /// being edited has a TUF repo; otherwise, it will default to the
+        /// install dataset.
+        #[clap(subcommand)]
+        image_source: Option<ImageSourceArgs>,
     },
     /// add a CockroachDB instance to a particular sled
-    AddCockroach { sled_id: SledOpt },
+    AddCockroach {
+        /// sled on which to deploy the new instance
+        sled_id: SledOpt,
+        /// image source for the new zone
+        ///
+        /// The image source is required if the planning input of the system
+        /// being edited has a TUF repo; otherwise, it will default to the
+        /// install dataset.
+        #[clap(subcommand)]
+        image_source: Option<ImageSourceArgs>,
+    },
     /// set the image source for a zone
     SetZoneImage {
         /// id of zone whose image to set
@@ -712,6 +730,60 @@ enum ImageSourceArgs {
         version: BlueprintZoneImageVersion,
         hash: ArtifactHash,
     },
+}
+
+/// Adding a new zone to a blueprint needs to choose an image source for that
+/// zone. Subcommands that add a zone take an optional [`ImageSourceArgs`]
+/// parameter. In the (common in test) case where the planning input has no TUF
+/// repo at all, the new and old TUF repo policy are identical (i.e., "use the
+/// install dataset"), and therefore we have only one logical choice for the
+/// image source for any new zone (the install dataset). If a TUF repo _is_
+/// involved, we have two choices: use the artifact from the newest TUF repo, or
+/// use the artifact from the previous TUF repo policy (which might itself be
+/// another TUF repo, or might be the install dataset).
+fn image_source_unwrap_or(
+    image_source: Option<ImageSourceArgs>,
+    planning_input: &PlanningInput,
+    zone_kind: ZoneKind,
+) -> anyhow::Result<BlueprintZoneImageSource> {
+    if let Some(image_source) = image_source {
+        Ok(image_source.into())
+    } else if planning_input.tuf_repo() == planning_input.old_repo() {
+        planning_input
+            .tuf_repo()
+            .description()
+            .zone_image_source(zone_kind)
+            .context("could not determine image source")
+    } else {
+        let mut options = vec!["`install-dataset`".to_string()];
+        for (name, repo) in [
+            ("previous", planning_input.old_repo()),
+            ("current", planning_input.tuf_repo()),
+        ] {
+            match repo.description().zone_image_source(zone_kind) {
+                // Install dataset is already covered, and if either TUF repo is
+                // missing an artifact of this kind, it's not an option.
+                Ok(BlueprintZoneImageSource::InstallDataset) | Err(_) => (),
+                Ok(BlueprintZoneImageSource::Artifact { version, hash }) => {
+                    let version = match version {
+                        BlueprintZoneImageVersion::Available { version } => {
+                            version.to_string()
+                        }
+                        BlueprintZoneImageVersion::Unknown => {
+                            "unknown".to_string()
+                        }
+                    };
+                    options.push(format!(
+                        "`artifact {version} {hash}` (from {name} TUF repo)"
+                    ));
+                }
+            }
+        }
+        bail!(
+            "must specify image source for new zone; options: {}",
+            options.join(", ")
+        )
+    }
 }
 
 impl From<ImageSourceArgs> for BlueprintZoneImageSource {
@@ -1327,17 +1399,27 @@ fn cmd_blueprint_edit(
     }
 
     let label = match args.edit_command {
-        BlueprintEditCommands::AddNexus { sled_id } => {
+        BlueprintEditCommands::AddNexus { sled_id, image_source } => {
             let sled_id = sled_id.to_sled_id(system.description())?;
+            let image_source = image_source_unwrap_or(
+                image_source,
+                &planning_input,
+                ZoneKind::Nexus,
+            )?;
             builder
-                .sled_add_zone_nexus(sled_id)
+                .sled_add_zone_nexus(sled_id, image_source)
                 .context("failed to add Nexus zone")?;
             format!("added Nexus zone to sled {}", sled_id)
         }
-        BlueprintEditCommands::AddCockroach { sled_id } => {
+        BlueprintEditCommands::AddCockroach { sled_id, image_source } => {
             let sled_id = sled_id.to_sled_id(system.description())?;
+            let image_source = image_source_unwrap_or(
+                image_source,
+                &planning_input,
+                ZoneKind::CockroachDb,
+            )?;
             builder
-                .sled_add_zone_cockroachdb(sled_id)
+                .sled_add_zone_cockroachdb(sled_id, image_source)
                 .context("failed to add CockroachDB zone")?;
             format!("added CockroachDB zone to sled {}", sled_id)
         }
