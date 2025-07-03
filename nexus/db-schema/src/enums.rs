@@ -90,7 +90,6 @@ define_enums! {
     VolumeResourceUsageTypeEnum => "volume_resource_usage_type",
     VpcFirewallRuleActionEnum => "vpc_firewall_rule_action",
     VpcFirewallRuleDirectionEnum => "vpc_firewall_rule_direction",
-    VpcFirewallRuleProtocolEnum => "vpc_firewall_rule_protocol",
     VpcFirewallRuleStatusEnum => "vpc_firewall_rule_status",
     VpcRouterKindEnum => "vpc_router_kind",
     WebhookDeliveryAttemptResultEnum => "webhook_delivery_attempt_result",

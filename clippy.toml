@@ -26,7 +26,7 @@ disallowed-methods = [
 ]
 disallowed-types = [
     { path = "once_cell::unsync::Lazy", reason = "use `std::cell::LazyCell` instead" },
-    { path = "once_cell::unsync::LazyCell", reason = "use `std::cell::LazyCell` instead" },
+    { path = "once_cell::sync::Lazy", reason = "use `std::sync::LazyLock` instead" },
 ]
 
 [[disallowed-macros]]

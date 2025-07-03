@@ -245,7 +245,7 @@ fn mgs_update_status(
             update,
         );
         Ok(MgsUpdateStatus::Impossible)
-    } else if u32::from(sp_info.sp_slot) != update.slot_id {
+    } else if sp_info.sp_slot != update.slot_id {
         warn!(
             log,
             "baseboard with in-progress SP update has moved";
@@ -470,7 +470,7 @@ fn try_make_update_sp(
     Some(PendingMgsUpdate {
         baseboard_id: baseboard_id.clone(),
         sp_type: sp_info.sp_type,
-        slot_id: u32::from(sp_info.sp_slot),
+        slot_id: sp_info.sp_slot,
         details: PendingMgsUpdateDetails::Sp {
             expected_active_version,
             expected_inactive_version,
@@ -567,7 +567,7 @@ mod test {
     /// - switch 1: sidecar-c
     /// - psc 0: psc-b
     /// - psc 1: psc-c
-    fn test_config() -> BTreeMap<(SpType, u32), (&'static str, &'static str)> {
+    fn test_config() -> BTreeMap<(SpType, u16), (&'static str, &'static str)> {
         BTreeMap::from([
             ((SpType::Sled, 0), ("sled_0", "gimlet-d")),
             ((SpType::Sled, 1), ("sled_1", "gimlet-e")),
@@ -672,7 +672,7 @@ mod test {
     // `inactive_version` in the inactive slot.
     fn make_collection(
         active_version: ArtifactVersion,
-        active_version_exceptions: &BTreeMap<(SpType, u32), ArtifactVersion>,
+        active_version_exceptions: &BTreeMap<(SpType, u16), ArtifactVersion>,
         inactive_version: ExpectedVersion,
     ) -> Collection {
         let mut builder = nexus_inventory::CollectionBuilder::new(
@@ -1147,7 +1147,7 @@ mod test {
     }
 
     fn verify_one_sp_update(
-        expected_updates: &mut BTreeMap<(SpType, u32), (&str, ArtifactHash)>,
+        expected_updates: &mut BTreeMap<(SpType, u16), (&str, ArtifactHash)>,
         update: &PendingMgsUpdate,
     ) {
         let sp_type = update.sp_type;

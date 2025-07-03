@@ -48,6 +48,7 @@ pub struct BackgroundTasks {
     pub task_alert_dispatcher: Activator,
     pub task_webhook_deliverator: Activator,
     pub task_sp_ereport_ingester: Activator,
+    pub task_chicken_switches_loader: Activator,
 
     // Handles to activate background tasks that do not get used by Nexus
     // at-large.  These background tasks are implementation details as far as

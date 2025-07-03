@@ -1129,7 +1129,7 @@ mod tests {
             &self.underlay_vnic
         }
 
-        async fn on_time_sync(&self) {}
+        fn on_time_sync(&self) {}
 
         async fn start_omicron_zone(
             &self,
