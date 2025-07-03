@@ -2558,14 +2558,13 @@ ON CONFLICT DO NOTHING;
 
 -- Trusted TUF root roles, used to verify TUF repo signatures
 CREATE TABLE IF NOT EXISTS omicron.public.tuf_trust_root (
-    -- Identity metadata (resource)
     id UUID PRIMARY KEY,
     time_created TIMESTAMPTZ NOT NULL,
-    time_modified TIMESTAMPTZ NOT NULL,
     time_deleted TIMESTAMPTZ,
     root_role JSONB NOT NULL
 );
 
+-- This index is used for paginating through non-deleted roots.
 CREATE UNIQUE INDEX IF NOT EXISTS tuf_trust_root_by_id
 ON omicron.public.tuf_trust_root (id)
 WHERE

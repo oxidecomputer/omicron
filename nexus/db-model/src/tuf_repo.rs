@@ -6,16 +6,15 @@ use std::str::FromStr;
 
 use crate::{Generation, SemverVersion, typed_uuid::DbTypedUuid};
 use chrono::{DateTime, Utc};
-use db_macros::Asset;
 use diesel::{deserialize::FromSql, serialize::ToSql, sql_types::Text};
 use nexus_db_schema::schema::{
     tuf_artifact, tuf_repo, tuf_repo_artifact, tuf_trust_root,
 };
 use nexus_types::external_api::views;
-use nexus_types::identity::Asset;
 use omicron_common::{api::external, update::ArtifactId};
 use omicron_uuid_kinds::TufArtifactKind;
 use omicron_uuid_kinds::TufRepoKind;
+use omicron_uuid_kinds::TufTrustRootKind;
 use omicron_uuid_kinds::TufTrustRootUuid;
 use omicron_uuid_kinds::TypedUuid;
 use parse_display::Display;
@@ -340,20 +339,12 @@ impl FromSql<diesel::sql_types::Text, diesel::pg::Pg> for ArtifactHash {
 
 /// A trusted TUF root roles, used to verify TUF repo signatures.
 #[derive(
-    Clone,
-    Debug,
-    Queryable,
-    Insertable,
-    Selectable,
-    Asset,
-    Serialize,
-    Deserialize,
+    Clone, Debug, Queryable, Insertable, Selectable, Serialize, Deserialize,
 )]
 #[diesel(table_name = tuf_trust_root)]
-#[asset(uuid_kind = TufTrustRootKind)]
 pub struct TufTrustRoot {
-    #[diesel(embed)]
-    pub identity: TufTrustRootIdentity,
+    pub id: DbTypedUuid<TufTrustRootKind>,
+    pub time_created: DateTime<Utc>,
     pub time_deleted: Option<DateTime<Utc>>,
     pub root_role: serde_json::Value,
 }
@@ -361,7 +352,8 @@ pub struct TufTrustRoot {
 impl TufTrustRoot {
     pub fn new(root_role: serde_json::Value) -> TufTrustRoot {
         TufTrustRoot {
-            identity: TufTrustRootIdentity::new(TufTrustRootUuid::new_v4()),
+            id: TufTrustRootUuid::new_v4().into(),
+            time_created: Utc::now(),
             time_deleted: None,
             root_role,
         }
@@ -371,8 +363,8 @@ impl TufTrustRoot {
 impl From<TufTrustRoot> for views::UpdatesTrustRoot {
     fn from(trust_root: TufTrustRoot) -> views::UpdatesTrustRoot {
         views::UpdatesTrustRoot {
-            id: trust_root.id(),
-            time_created: trust_root.time_created(),
+            id: trust_root.id.into(),
+            time_created: trust_root.time_created,
             root_role: trust_root.root_role,
         }
     }

@@ -2,7 +2,6 @@ CREATE TABLE IF NOT EXISTS omicron.public.tuf_trust_root (
     -- Identity metadata (resource)
     id UUID PRIMARY KEY,
     time_created TIMESTAMPTZ NOT NULL,
-    time_modified TIMESTAMPTZ NOT NULL,
     time_deleted TIMESTAMPTZ,
     root_role JSONB NOT NULL
 );

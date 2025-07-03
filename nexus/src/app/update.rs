@@ -11,7 +11,6 @@ use nexus_db_model::{TufRepoDescription, TufTrustRoot};
 use nexus_db_queries::authz;
 use nexus_db_queries::context::OpContext;
 use nexus_db_queries::db::{datastore::SQL_BATCH_SIZE, pagination::Paginator};
-use nexus_types::identity::Asset;
 use omicron_common::api::external::{
     DataPageParams, Error, TufRepoInsertResponse, TufRepoInsertStatus,
 };
@@ -42,7 +41,7 @@ impl super::Nexus {
                 .db_datastore
                 .tuf_trust_root_list(opctx, &p.current_pagparams())
                 .await?;
-            paginator = p.found_batch(&batch, &|a| a.id().into_untyped_uuid());
+            paginator = p.found_batch(&batch, &|a| a.id.into_untyped_uuid());
             for root in batch {
                 trusted_roots.push(root.root_role.to_string().into_bytes());
             }
