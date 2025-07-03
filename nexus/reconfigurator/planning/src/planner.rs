@@ -39,6 +39,7 @@ use omicron_uuid_kinds::PhysicalDiskUuid;
 use omicron_uuid_kinds::SledUuid;
 use slog::error;
 use slog::{Logger, info, warn};
+use slog_error_chain::InlineErrorChain;
 use std::collections::BTreeMap;
 use std::collections::BTreeSet;
 use std::str::FromStr;
@@ -1056,18 +1057,35 @@ impl<'a> Planner<'a> {
             .into_iter()
             .flat_map(|sled_id| {
                 let blueprint = &self.blueprint;
+                let log = &self.log;
                 blueprint
                     .current_sled_zones(
                         sled_id,
                         BlueprintZoneDisposition::is_in_service,
                     )
                     .filter_map(move |zone| {
-                        (zone.image_source
-                            != blueprint.zone_image_source(
-                                zone.id,
-                                zone.zone_type.kind(),
-                            ))
-                        .then(|| (sled_id, zone.clone()))
+                        let desired_image_source = match blueprint
+                            .zone_image_source(zone.id, zone.zone_type.kind())
+                        {
+                            Ok(source) => source,
+                            Err(err) => {
+                                // If we can't tell whether a zone is out of
+                                // date, assume it isn't.
+                                warn!(
+                                    log,
+                                    "cannot determine whether zone is \
+                                     out of date";
+                                    "zone" => ?zone,
+                                    InlineErrorChain::new(&err),
+                                );
+                                return None;
+                            }
+                        };
+                        if zone.image_source != desired_image_source {
+                            Some((sled_id, zone.clone()))
+                        } else {
+                            None
+                        }
                     })
             })
             .collect::<Vec<(SledUuid, BlueprintZoneConfig)>>();
@@ -1087,7 +1105,8 @@ impl<'a> Planner<'a> {
         zone: &BlueprintZoneConfig,
     ) -> Result<(), Error> {
         let zone_kind = zone.zone_type.kind();
-        let image_source = self.blueprint.zone_image_source(zone.id, zone_kind);
+        let image_source =
+            self.blueprint.zone_image_source(zone.id, zone_kind)?;
         if zone.image_source == image_source {
             // This should only happen in the event of a planning error above.
             error!(
@@ -1279,12 +1298,14 @@ pub(crate) mod test {
     use nexus_types::deployment::ClickhouseMode;
     use nexus_types::deployment::ClickhousePolicy;
     use nexus_types::deployment::SledDisk;
+    use nexus_types::deployment::TargetReleaseDescription;
     use nexus_types::deployment::TufRepoPolicy;
     use nexus_types::deployment::blueprint_zone_type;
     use nexus_types::deployment::blueprint_zone_type::InternalDns;
     use nexus_types::external_api::views::PhysicalDiskState;
     use nexus_types::external_api::views::SledProvisionPolicy;
     use nexus_types::external_api::views::SledState;
+    use nexus_types::inventory::CockroachStatus;
     use omicron_common::api::external::Generation;
     use omicron_common::api::external::TufArtifactMeta;
     use omicron_common::api::external::TufRepoDescription;
@@ -4731,7 +4752,7 @@ pub(crate) mod test {
         verify_blueprint(&blueprint1);
 
         // We should start with no specified TUF repo and nothing to do.
-        assert!(example.input.tuf_repo().description().is_none());
+        assert!(example.input.tuf_repo().description().tuf_repo().is_none());
         assert_planning_makes_no_changes(
             &logctx.log,
             &blueprint1,
@@ -4761,19 +4782,21 @@ pub(crate) mod test {
             // We use generation 2 to represent the first generation set to a
             // target TUF repo.
             target_release_generation,
-            description: Some(TufRepoDescription {
-                repo: TufRepoMeta {
-                    hash: ArtifactHash([0; 32]),
-                    targets_role_version: 0,
-                    valid_until: Utc::now(),
-                    system_version: Version::new(0, 0, 0),
-                    file_name: String::from(""),
+            description: TargetReleaseDescription::TufRepo(
+                TufRepoDescription {
+                    repo: TufRepoMeta {
+                        hash: ArtifactHash([0; 32]),
+                        targets_role_version: 0,
+                        valid_until: Utc::now(),
+                        system_version: Version::new(0, 0, 0),
+                        file_name: String::from(""),
+                    },
+                    artifacts: vec![],
                 },
-                artifacts: vec![],
-            }),
+            ),
         };
         let input = input_builder.build();
-        let blueprint2 = Planner::new_based_on(
+        let mut blueprint2 = Planner::new_based_on(
             log.clone(),
             &blueprint1,
             &input,
@@ -4795,9 +4818,7 @@ pub(crate) mod test {
                 ))
         );
 
-        // Manually specify a TUF repo with fake zone images for Crucible Pantry
-        // and Nexus. Only the name and kind of the artifacts matter. The Nexus
-        // artifact is only there to make sure the planner *doesn't* use it.
+        // Manually specify a TUF repo with fake zone images.
         let mut input_builder = input.into_builder();
         let version = ArtifactVersion::new_static("1.0.0-freeform")
             .expect("can't parse artifact version");
@@ -4809,22 +4830,35 @@ pub(crate) mod test {
             hash: fake_hash,
         };
         let artifacts = vec![
+            // Omit `BoundaryNtp` because it has the same artifact name as
+            // `InternalNtp`.
+            fake_zone_artifact!(Clickhouse, version.clone()),
+            fake_zone_artifact!(ClickhouseKeeper, version.clone()),
+            fake_zone_artifact!(ClickhouseServer, version.clone()),
+            fake_zone_artifact!(CockroachDb, version.clone()),
+            fake_zone_artifact!(Crucible, version.clone()),
             fake_zone_artifact!(CruciblePantry, version.clone()),
+            fake_zone_artifact!(ExternalDns, version.clone()),
+            fake_zone_artifact!(InternalDns, version.clone()),
+            fake_zone_artifact!(InternalNtp, version.clone()),
             fake_zone_artifact!(Nexus, version.clone()),
+            fake_zone_artifact!(Oximeter, version.clone()),
         ];
         let target_release_generation = target_release_generation.next();
         input_builder.policy_mut().tuf_repo = TufRepoPolicy {
             target_release_generation,
-            description: Some(TufRepoDescription {
-                repo: TufRepoMeta {
-                    hash: fake_hash,
-                    targets_role_version: 0,
-                    valid_until: Utc::now(),
-                    system_version: Version::new(1, 0, 0),
-                    file_name: String::from(""),
+            description: TargetReleaseDescription::TufRepo(
+                TufRepoDescription {
+                    repo: TufRepoMeta {
+                        hash: fake_hash,
+                        targets_role_version: 0,
+                        valid_until: Utc::now(),
+                        system_version: Version::new(1, 0, 0),
+                        file_name: String::from(""),
+                    },
+                    artifacts,
                 },
-                artifacts,
-            }),
+            ),
         };
 
         // Some helper predicates for the assertions below.
@@ -4849,6 +4883,23 @@ pub(crate) mod test {
             zone.zone_type.is_crucible_pantry()
                 && zone.image_source == image_source
         };
+
+        // Manually "upgrade" all zones except CruciblePantry and Nexus.
+        for mut zone in blueprint2
+            .sleds
+            .values_mut()
+            .flat_map(|config| config.zones.iter_mut())
+            .filter(|z| {
+                !z.zone_type.is_nexus() && !z.zone_type.is_crucible_pantry()
+            })
+        {
+            zone.image_source = BlueprintZoneImageSource::Artifact {
+                version: BlueprintZoneImageVersion::Available {
+                    version: version.clone(),
+                },
+                hash: fake_hash,
+            };
+        }
 
         // Request another Nexus zone.
         input_builder.policy_mut().target_nexus_zone_count =
@@ -5108,16 +5159,18 @@ pub(crate) mod test {
         let target_release_generation = Generation::from_u32(2);
         input_builder.policy_mut().tuf_repo = TufRepoPolicy {
             target_release_generation,
-            description: Some(TufRepoDescription {
-                repo: TufRepoMeta {
-                    hash: fake_hash,
-                    targets_role_version: 0,
-                    valid_until: Utc::now(),
-                    system_version: Version::new(1, 0, 0),
-                    file_name: String::from(""),
+            description: TargetReleaseDescription::TufRepo(
+                TufRepoDescription {
+                    repo: TufRepoMeta {
+                        hash: fake_hash,
+                        targets_role_version: 0,
+                        valid_until: Utc::now(),
+                        system_version: Version::new(1, 0, 0),
+                        file_name: String::from(""),
+                    },
+                    artifacts,
                 },
-                artifacts,
-            }),
+            ),
         };
         example.input = input_builder.build();
 
@@ -5135,8 +5188,7 @@ pub(crate) mod test {
 
         // If we have missing info in our inventory, the
         // planner will not update any Cockroach zones.
-        example.collection.cockroach_status.ranges_underreplicated = None;
-        example.collection.cockroach_status.liveness_live_nodes = None;
+        example.collection.cockroach_status = BTreeMap::new();
         assert_planning_makes_no_changes(
             &log,
             &blueprint,
@@ -5149,9 +5201,13 @@ pub(crate) mod test {
 
         // If we have any non-zero "ranges_underreplicated" in in our inventory,
         // the planner will not update any Cockroach zones.
-        example.collection.cockroach_status.ranges_underreplicated = Some(1);
-        example.collection.cockroach_status.liveness_live_nodes =
-            Some(goal_redundancy);
+        example.collection.cockroach_status = BTreeMap::from([(
+            omicron_cockroach_metrics::NodeId(1),
+            CockroachStatus {
+                ranges_underreplicated: Some(1),
+                liveness_live_nodes: Some(goal_redundancy),
+            },
+        )]);
         assert_planning_makes_no_changes(
             &log,
             &blueprint,
@@ -5161,9 +5217,13 @@ pub(crate) mod test {
         );
 
         // If we don't have enough live nodes, we won't update Cockroach zones.
-        example.collection.cockroach_status.ranges_underreplicated = Some(0);
-        example.collection.cockroach_status.liveness_live_nodes =
-            Some(goal_redundancy - 1);
+        example.collection.cockroach_status = BTreeMap::from([(
+            omicron_cockroach_metrics::NodeId(1),
+            CockroachStatus {
+                ranges_underreplicated: Some(0),
+                liveness_live_nodes: Some(goal_redundancy - 1),
+            },
+        )]);
         assert_planning_makes_no_changes(
             &log,
             &blueprint,
@@ -5171,6 +5231,20 @@ pub(crate) mod test {
             &example.collection,
             TEST_NAME,
         );
+
+        let create_valid_looking_status = || {
+            let mut result = BTreeMap::new();
+            for i in 1..=COCKROACHDB_REDUNDANCY {
+                result.insert(
+                    omicron_cockroach_metrics::NodeId(i.try_into().unwrap()),
+                    CockroachStatus {
+                        ranges_underreplicated: Some(0),
+                        liveness_live_nodes: Some(goal_redundancy),
+                    },
+                );
+            }
+            result
+        };
 
         // Once we have zero underreplicated ranges, we can start to update
         // Cockroach zones.
@@ -5180,10 +5254,7 @@ pub(crate) mod test {
         for i in 1..=COCKROACHDB_REDUNDANCY {
             // Keep setting this value in a loop;
             // "update_collection_from_blueprint" resets it to "None".
-            example.collection.cockroach_status.ranges_underreplicated =
-                Some(0);
-            example.collection.cockroach_status.liveness_live_nodes =
-                Some(goal_redundancy);
+            example.collection.cockroach_status = create_valid_looking_status();
 
             println!("Updating cockroach {i} of {COCKROACHDB_REDUNDANCY}");
             let new_blueprint = Planner::new_based_on(
@@ -5219,8 +5290,8 @@ pub(crate) mod test {
 
         // Validate that we have no further changes to make, once all Cockroach
         // zones have been updated.
+        example.collection.cockroach_status = create_valid_looking_status();
 
-        example.collection.cockroach_status.ranges_underreplicated = Some(0);
         assert_planning_makes_no_changes(
             &log,
             &blueprint,
@@ -5231,8 +5302,15 @@ pub(crate) mod test {
 
         // Validate that we do not flip back to the install dataset after
         // performing the update.
+        example.collection.cockroach_status = create_valid_looking_status();
+        example
+            .collection
+            .cockroach_status
+            .values_mut()
+            .next()
+            .unwrap()
+            .ranges_underreplicated = Some(1);
 
-        example.collection.cockroach_status.ranges_underreplicated = Some(1);
         assert_planning_makes_no_changes(
             &log,
             &blueprint,
@@ -5287,29 +5365,32 @@ pub(crate) mod test {
         let target_release_generation = Generation::new().next();
         let tuf_repo = TufRepoPolicy {
             target_release_generation,
-            description: Some(TufRepoDescription {
-                repo: TufRepoMeta {
-                    hash: fake_hash,
-                    targets_role_version: 0,
-                    valid_until: Utc::now(),
-                    system_version: Version::new(1, 0, 0),
-                    file_name: String::from(""),
+            description: TargetReleaseDescription::TufRepo(
+                TufRepoDescription {
+                    repo: TufRepoMeta {
+                        hash: fake_hash,
+                        targets_role_version: 0,
+                        valid_until: Utc::now(),
+                        system_version: Version::new(1, 0, 0),
+                        file_name: String::from(""),
+                    },
+                    artifacts: vec![
+                        // Omit `BoundaryNtp` because it has the same artifact
+                        // name as `InternalNtp`.
+                        fake_zone_artifact!(Clickhouse, version.clone()),
+                        fake_zone_artifact!(ClickhouseKeeper, version.clone()),
+                        fake_zone_artifact!(ClickhouseServer, version.clone()),
+                        fake_zone_artifact!(CockroachDb, version.clone()),
+                        fake_zone_artifact!(Crucible, version.clone()),
+                        fake_zone_artifact!(CruciblePantry, version.clone()),
+                        fake_zone_artifact!(ExternalDns, version.clone()),
+                        fake_zone_artifact!(InternalDns, version.clone()),
+                        fake_zone_artifact!(InternalNtp, version.clone()),
+                        fake_zone_artifact!(Nexus, version.clone()),
+                        fake_zone_artifact!(Oximeter, version.clone()),
+                    ],
                 },
-                artifacts: vec![
-                    fake_zone_artifact!(BoundaryNtp, version.clone()),
-                    fake_zone_artifact!(Clickhouse, version.clone()),
-                    fake_zone_artifact!(ClickhouseKeeper, version.clone()),
-                    fake_zone_artifact!(ClickhouseServer, version.clone()),
-                    fake_zone_artifact!(CockroachDb, version.clone()),
-                    fake_zone_artifact!(Crucible, version.clone()),
-                    fake_zone_artifact!(CruciblePantry, version.clone()),
-                    fake_zone_artifact!(ExternalDns, version.clone()),
-                    fake_zone_artifact!(InternalDns, version.clone()),
-                    fake_zone_artifact!(InternalNtp, version.clone()),
-                    fake_zone_artifact!(Nexus, version.clone()),
-                    fake_zone_artifact!(Oximeter, version.clone()),
-                ],
-            }),
+            ),
         };
         input_builder.policy_mut().tuf_repo = tuf_repo;
         let input = input_builder.build();

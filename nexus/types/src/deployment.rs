@@ -101,6 +101,8 @@ pub use planning_input::SledFilter;
 pub use planning_input::SledLookupError;
 pub use planning_input::SledLookupErrorKind;
 pub use planning_input::SledResources;
+pub use planning_input::TargetReleaseDescription;
+pub use planning_input::TufRepoContentsError;
 pub use planning_input::TufRepoPolicy;
 pub use planning_input::ZpoolFilter;
 use std::sync::Arc;
@@ -1222,7 +1224,7 @@ pub struct PendingMgsUpdate {
     /// what type of baseboard this is
     pub sp_type: SpType,
     /// last known MGS slot (cubby number) of the baseboard
-    pub slot_id: u32,
+    pub slot_id: u16,
 
     /// component-specific details of the pending update
     pub details: PendingMgsUpdateDetails,
@@ -1241,7 +1243,7 @@ impl slog::KV for PendingMgsUpdate {
         slog::KV::serialize(&self.baseboard_id, record, serializer)?;
         serializer
             .emit_str(Key::from("sp_type"), &format!("{:?}", self.sp_type))?;
-        serializer.emit_u32(Key::from("sp_slot"), self.slot_id)?;
+        serializer.emit_u16(Key::from("sp_slot"), self.slot_id)?;
         slog::KV::serialize(&self.details, record, serializer)?;
         serializer.emit_str(
             Key::from("artifact_hash"),

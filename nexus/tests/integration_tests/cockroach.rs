@@ -69,7 +69,7 @@ async fn test_cockroach_http_prometheus_metrics(
     client.update_backends(&[admin_addr]).await;
 
     let metrics = client
-        .fetch_prometheus_metrics()
+        .fetch_prometheus_metrics_from_any_node()
         .await
         .expect("Should be able to fetch Prometheus metrics from CockroachDB");
 
@@ -203,7 +203,7 @@ async fn test_cockroach_http_node_status(cptestctx: &ControlPlaneTestContext) {
     client.update_backends(&[admin_addr]).await;
 
     let nodes_response = client
-        .fetch_node_status()
+        .fetch_node_status_from_any_node()
         .await
         .expect("Should be able to fetch nodes status from CockroachDB");
 
@@ -221,7 +221,7 @@ async fn test_cockroach_http_node_status(cptestctx: &ControlPlaneTestContext) {
         &NodeLiveness::Live
     );
 
-    assert_eq!(first_node.desc.node_id.as_u32(), 1);
+    assert_eq!(first_node.desc.node_id.as_i32(), 1);
     assert!(
         !first_node.build_info.tag.is_empty(),
         "Build tag should not be empty"

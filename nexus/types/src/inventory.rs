@@ -149,8 +149,9 @@ pub struct Collection {
     pub clickhouse_keeper_cluster_membership:
         BTreeSet<ClickhouseKeeperClusterMembership>,
 
-    /// The status of our cockroachdb cluster
-    pub cockroach_status: CockroachStatus,
+    /// The status of our cockroachdb cluster, keyed by node identifier
+    pub cockroach_status:
+        BTreeMap<omicron_cockroach_metrics::NodeId, CockroachStatus>,
 }
 
 impl Collection {

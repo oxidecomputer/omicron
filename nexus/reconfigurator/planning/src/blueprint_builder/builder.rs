@@ -45,6 +45,8 @@ use nexus_types::deployment::PendingMgsUpdates;
 use nexus_types::deployment::PlanningInput;
 use nexus_types::deployment::SledFilter;
 use nexus_types::deployment::SledResources;
+use nexus_types::deployment::TargetReleaseDescription;
+use nexus_types::deployment::TufRepoContentsError;
 use nexus_types::deployment::ZpoolFilter;
 use nexus_types::deployment::ZpoolName;
 use nexus_types::deployment::blueprint_zone_type;
@@ -56,7 +58,6 @@ use omicron_common::address::DNS_PORT;
 use omicron_common::address::NTP_PORT;
 use omicron_common::address::ReservedRackSubnet;
 use omicron_common::api::external::Generation;
-use omicron_common::api::external::TufRepoDescription;
 use omicron_common::api::external::Vni;
 use omicron_common::api::internal::shared::NetworkInterface;
 use omicron_common::api::internal::shared::NetworkInterfaceKind;
@@ -136,6 +137,8 @@ pub enum Error {
         expected: Generation,
         actual: Generation,
     },
+    #[error(transparent)]
+    TufRepoContentsError(#[from] TufRepoContentsError),
 }
 
 /// Describes the result of an idempotent "ensure" operation
@@ -1179,7 +1182,7 @@ impl<'a> BlueprintBuilder<'a> {
                 gz_address_index,
             });
         let id = self.rng.sled_rng(sled_id).next_zone();
-        let image_source = self.zone_image_source(id, zone_type.kind());
+        let image_source = self.zone_image_source(id, zone_type.kind())?;
 
         let zone = BlueprintZoneConfig {
             disposition: BlueprintZoneDisposition::InService,
@@ -1232,7 +1235,7 @@ impl<'a> BlueprintBuilder<'a> {
                 dns_address,
                 nic,
             });
-        let image_source = self.zone_image_source(id, zone_type.kind());
+        let image_source = self.zone_image_source(id, zone_type.kind())?;
 
         let zone = BlueprintZoneConfig {
             disposition: BlueprintZoneDisposition::InService,
@@ -1273,7 +1276,7 @@ impl<'a> BlueprintBuilder<'a> {
         let filesystem_pool =
             self.sled_select_zpool(sled_id, zone_type.kind())?;
         let id = self.rng.sled_rng(sled_id).next_zone();
-        let image_source = self.zone_image_source(id, zone_type.kind());
+        let image_source = self.zone_image_source(id, zone_type.kind())?;
 
         let zone = BlueprintZoneConfig {
             disposition: BlueprintZoneDisposition::InService,
@@ -1426,7 +1429,8 @@ impl<'a> BlueprintBuilder<'a> {
         });
         let filesystem_pool =
             self.sled_select_zpool(sled_id, zone_type.kind())?;
-        let image_source = self.zone_image_source(nexus_id, zone_type.kind());
+        let image_source =
+            self.zone_image_source(nexus_id, zone_type.kind())?;
 
         let zone = BlueprintZoneConfig {
             disposition: BlueprintZoneDisposition::InService,
@@ -1453,7 +1457,7 @@ impl<'a> BlueprintBuilder<'a> {
         let filesystem_pool =
             self.sled_select_zpool(sled_id, zone_type.kind())?;
         let image_source =
-            self.zone_image_source(oximeter_id, zone_type.kind());
+            self.zone_image_source(oximeter_id, zone_type.kind())?;
 
         let zone = BlueprintZoneConfig {
             disposition: BlueprintZoneDisposition::InService,
@@ -1478,7 +1482,8 @@ impl<'a> BlueprintBuilder<'a> {
         );
         let filesystem_pool =
             self.sled_select_zpool(sled_id, zone_type.kind())?;
-        let image_source = self.zone_image_source(pantry_id, zone_type.kind());
+        let image_source =
+            self.zone_image_source(pantry_id, zone_type.kind())?;
 
         let zone = BlueprintZoneConfig {
             disposition: BlueprintZoneDisposition::InService,
@@ -1513,7 +1518,7 @@ impl<'a> BlueprintBuilder<'a> {
                 dataset: OmicronZoneDataset { pool_name },
             });
         let filesystem_pool = pool_name;
-        let image_source = self.zone_image_source(zone_id, zone_type.kind());
+        let image_source = self.zone_image_source(zone_id, zone_type.kind())?;
 
         let zone = BlueprintZoneConfig {
             disposition: BlueprintZoneDisposition::InService,
@@ -1540,7 +1545,7 @@ impl<'a> BlueprintBuilder<'a> {
                 address,
                 dataset: OmicronZoneDataset { pool_name },
             });
-        let image_source = self.zone_image_source(id, zone_type.kind());
+        let image_source = self.zone_image_source(id, zone_type.kind())?;
 
         let zone = BlueprintZoneConfig {
             disposition: BlueprintZoneDisposition::InService,
@@ -1569,7 +1574,7 @@ impl<'a> BlueprintBuilder<'a> {
             },
         );
         let filesystem_pool = pool_name;
-        let image_source = self.zone_image_source(zone_id, zone_type.kind());
+        let image_source = self.zone_image_source(zone_id, zone_type.kind())?;
 
         let zone = BlueprintZoneConfig {
             disposition: BlueprintZoneDisposition::InService,
@@ -1598,7 +1603,7 @@ impl<'a> BlueprintBuilder<'a> {
             },
         );
         let filesystem_pool = pool_name;
-        let image_source = self.zone_image_source(zone_id, zone_type.kind());
+        let image_source = self.zone_image_source(zone_id, zone_type.kind())?;
 
         let zone = BlueprintZoneConfig {
             disposition: BlueprintZoneDisposition::InService,
@@ -1726,7 +1731,7 @@ impl<'a> BlueprintBuilder<'a> {
         let filesystem_pool =
             self.sled_select_zpool(sled_id, zone_type.kind())?;
         let image_source =
-            self.zone_image_source(new_zone_id, zone_type.kind());
+            self.zone_image_source(new_zone_id, zone_type.kind())?;
 
         self.sled_add_zone(
             sled_id,
@@ -1984,21 +1989,6 @@ impl<'a> BlueprintBuilder<'a> {
         self.pending_mgs_updates.remove(baseboard_id);
     }
 
-    fn zone_image_artifact(
-        repo: Option<&TufRepoDescription>,
-        zone_kind: ZoneKind,
-    ) -> BlueprintZoneImageSource {
-        repo.and_then(|repo| {
-            repo.artifacts
-                .iter()
-                .find(|artifact| {
-                    zone_kind.is_control_plane_zone_artifact(&artifact.id)
-                })
-                .map(BlueprintZoneImageSource::from_available_artifact)
-        })
-        .unwrap_or(BlueprintZoneImageSource::InstallDataset)
-    }
-
     /// Try to find an artifact in either the current or previous release repo
     /// that contains an image for a zone of the given kind; see RFD 565 §9.
     /// Defaults to the install dataset.
@@ -2009,18 +1999,16 @@ impl<'a> BlueprintBuilder<'a> {
         &self,
         zone_id: OmicronZoneUuid,
         zone_kind: ZoneKind,
-    ) -> BlueprintZoneImageSource {
+    ) -> Result<BlueprintZoneImageSource, TufRepoContentsError> {
         let new_repo = self.input.tuf_repo().description();
-        let old_repo =
-            self.input.old_repo().and_then(|repo| repo.description());
-        Self::zone_image_artifact(
+        let old_repo = self.input.old_repo().description();
+        let repo_choice =
             if self.zone_should_use_new_repo(zone_id, zone_kind, new_repo) {
                 new_repo
             } else {
                 old_repo
-            },
-            zone_kind,
-        )
+            };
+        repo_choice.zone_image_source(zone_kind)
     }
 
     /// Return `true` iff a zone of the given kind is ready to use the new repo,
@@ -2030,24 +2018,22 @@ impl<'a> BlueprintBuilder<'a> {
         &self,
         zone_id: OmicronZoneUuid,
         zone_kind: ZoneKind,
-        new_repo: Option<&TufRepoDescription>,
+        new_repo: &TargetReleaseDescription,
     ) -> bool {
         // If the zone is already using the new repo, keep using it.
         //
         // Otherwise, consider whether we should upgrade.
-        if new_repo.is_some()
-            && self
+        if let Ok(new_image_source) = new_repo.zone_image_source(zone_kind) {
+            if self
                 .parent_blueprint
                 .all_omicron_zones(BlueprintZoneDisposition::is_in_service)
                 .any(|(_, zone)| {
-                    zone.id == zone_id
-                        && zone.image_source
-                            == Self::zone_image_artifact(new_repo, zone_kind)
+                    zone.id == zone_id && zone.image_source == new_image_source
                 })
-        {
-            return true;
-        };
-
+            {
+                return true;
+            };
+        }
         match zone_kind {
             ZoneKind::Nexus => {
                 // Nexus can only be updated if all non-Nexus zones have been updated,
@@ -2059,8 +2045,15 @@ impl<'a> BlueprintBuilder<'a> {
                     )
                     .filter(|z| z.zone_type.kind() != ZoneKind::Nexus)
                     .all(|z| {
-                        z.image_source
-                            == Self::zone_image_artifact(new_repo, z.kind())
+                        // This comparison ignores any TUF repo contents errors
+                        // from `zone_image_source`. This means we'll never be
+                        // able to update Nexus if we can't tell if _other_ zone
+                        // types aren't updated, which seems correct.
+                        Some(&z.image_source)
+                            == new_repo
+                                .zone_image_source(z.kind())
+                                .ok()
+                                .as_ref()
                     })
                 })
             }
@@ -2074,20 +2067,32 @@ impl<'a> BlueprintBuilder<'a> {
                 // failures, even mid-update - but this prevents our system
                 // from self-sabotage when range underreplication is already
                 // present.
-                if let (Some(ranges_underreplicated), Some(live_nodes)) = (
-                    self.collection.cockroach_status.ranges_underreplicated,
-                    self.collection.cockroach_status.liveness_live_nodes,
-                ) {
-                    return ranges_underreplicated == 0
-                        && live_nodes == COCKROACHDB_REDUNDANCY as u64;
+
+                // We must hear from all nodes
+                let all_statuses = &self.collection.cockroach_status;
+                if all_statuses.len() < COCKROACHDB_REDUNDANCY {
+                    return false;
                 }
 
-                // If we can't read stats from Cockroach, OR the number of
-                // under-replicated ranges is non-zero, refuse to update.
-                //
-                // It's possible in either of these scenarios that we have
-                // degraded redundancy, and need to recover.
-                false
+                // All nodes must report: "We have the necessary redundancy, and
+                // have observed no underreplicated ranges".
+                for (_node_id, status) in all_statuses {
+                    let Some(ranges_underreplicated) =
+                        status.ranges_underreplicated
+                    else {
+                        return false;
+                    };
+                    if ranges_underreplicated != 0 {
+                        return false;
+                    }
+                    let Some(live_nodes) = status.liveness_live_nodes else {
+                        return false;
+                    };
+                    if live_nodes < COCKROACHDB_REDUNDANCY as u64 {
+                        return false;
+                    }
+                }
+                true
             }
             _ => true, // other zone kinds have no special dependencies
         }
