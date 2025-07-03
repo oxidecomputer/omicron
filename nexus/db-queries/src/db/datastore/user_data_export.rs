@@ -449,11 +449,11 @@ impl DataStore {
         Ok(changeset)
     }
 
-    /// Remove any records where the Pantry address is not in the list of
-    /// in-service addresses.
+    /// Mark any records where the Pantry address is not in the list of
+    /// in-service addresses as deleted.
     ///
     /// Returns how many records were marked for deletion.
-    pub async fn user_data_export_delete_expunged(
+    pub async fn user_data_export_mark_expunged_deleted(
         &self,
         opctx: &OpContext,
         in_service_pantries: Vec<ipv6::Ipv6Addr>,
