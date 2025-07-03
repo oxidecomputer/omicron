@@ -1045,6 +1045,7 @@ pub enum ResourceType {
     RoleBuiltin,
     TufRepo,
     TufArtifact,
+    TufTrustRoot,
     SwitchPort,
     UserBuiltin,
     Zpool,

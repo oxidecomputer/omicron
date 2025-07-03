@@ -17,6 +17,7 @@ use omicron_common::api::external::{
     RouteDestination, RouteTarget, UserId,
 };
 use omicron_common::disk::DiskVariant;
+use omicron_uuid_kinds::TufTrustRootUuid;
 use oxnet::{IpNet, Ipv4Net, Ipv6Net};
 use parse_display::Display;
 use schemars::JsonSchema;
@@ -2362,6 +2363,14 @@ pub struct UpdatesGetRepositoryParams {
 pub struct SetTargetReleaseParams {
     /// Version of the system software to make the target release.
     pub system_version: Version,
+}
+
+/// Path parameters for GET/DELETE requests to
+/// `/v1/system/update/trust-roots/{trust_root}`.
+#[derive(Clone, Debug, Deserialize, JsonSchema)]
+pub struct UpdatesTrustRoot {
+    /// Trust root ID.
+    pub trust_root: TufTrustRootUuid,
 }
 
 // Probes

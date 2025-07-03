@@ -57,6 +57,7 @@ omicron-common.workspace = true
 omicron-passwords.workspace = true
 omicron-workspace-hack.workspace = true
 semver.workspace = true
+tough.workspace = true
 # Note: we're trying to avoid a dependency from nexus-types to sled-agent-types
 # because the correct direction of dependency is unclear. If there are types
 # common to both, put them in `omicron-common` or `nexus-sled-agent-shared`.

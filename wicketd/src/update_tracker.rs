@@ -66,6 +66,7 @@ use update_common::artifacts::ArtifactIdData;
 use update_common::artifacts::ArtifactsWithPlan;
 use update_common::artifacts::ControlPlaneZonesMode;
 use update_common::artifacts::UpdatePlan;
+use update_common::artifacts::VerificationMode;
 use update_engine::AbortHandle;
 use update_engine::StepSpec;
 use update_engine::events::ProgressUnits;
@@ -361,6 +362,7 @@ impl UpdateTracker {
             // uploaded over stdin, so let ArtifactsWithPlan pick the name.
             None,
             ControlPlaneZonesMode::Composite,
+            VerificationMode::BlindlyTrustAnything,
             &self.log,
         )
         .await

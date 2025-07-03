@@ -89,6 +89,7 @@ impl_typed_uuid_kind! {
     SupportBundle => "support_bundle",
     TufArtifact => "tuf_artifact",
     TufRepo => "tuf_repo",
+    TufTrustRoot => "tuf_trust_root",
     Upstairs => "upstairs",
     UpstairsRepair => "upstairs_repair",
     UpstairsSession => "upstairs_session",

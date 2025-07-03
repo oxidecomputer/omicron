@@ -1449,6 +1449,16 @@ table! {
 }
 
 table! {
+    tuf_trust_root (id) {
+        id -> Uuid,
+        time_created -> Timestamptz,
+        time_modified -> Timestamptz,
+        time_deleted -> Nullable<Timestamptz>,
+        root_role -> Jsonb,
+    }
+}
+
+table! {
     target_release (generation) {
         generation -> Int8,
         time_requested -> Timestamptz,
