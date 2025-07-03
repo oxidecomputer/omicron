@@ -368,7 +368,7 @@ byteorder = "1.5.0"
 bytes = "1.10.1"
 camino = { version = "1.1", features = ["serde1"] }
 camino-tempfile = "1.4.1"
-camino-tempfile-ext = { version = "0.3.1", features = ["assert-color"] }
+camino-tempfile-ext = { version = "0.3.2", features = ["assert-color"] }
 cancel-safe-futures = "0.1.5"
 cargo_metadata = "0.20.0"
 chacha20poly1305 = "0.10.1"
