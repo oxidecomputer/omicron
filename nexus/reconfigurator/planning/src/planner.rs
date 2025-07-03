@@ -4871,7 +4871,7 @@ pub(crate) mod test {
         ($kind: ident, $version: expr) => {
             TufArtifactMeta {
                 id: ArtifactId {
-                    name: ZoneKind::$kind.artifact_name().to_string(),
+                    name: ZoneKind::$kind.artifact_id_name().to_string(),
                     version: $version,
                     kind: ArtifactKind::from_known(KnownArtifactKind::Zone),
                 },

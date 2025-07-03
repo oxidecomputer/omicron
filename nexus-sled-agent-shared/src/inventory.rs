@@ -961,14 +961,17 @@ impl OmicronZoneType {
 ///
 /// # String representations of this type
 ///
-/// There are no fewer than five string representations for this type, all
+/// There are no fewer than six string representations for this type, all
 /// slightly different from each other.
 ///
 /// 1. [`Self::zone_prefix`]: Used to construct zone names.
 /// 2. [`Self::service_prefix`]: Used to construct SMF service names.
 /// 3. [`Self::name_prefix`]: Used to construct `Name` instances.
 /// 4. [`Self::report_str`]: Used for reporting and testing.
-/// 5. [`Self::artifact_name`]: Used to match TUF artifact names.
+/// 5. [`Self::artifact_id_name`]: Used to match TUF artifact IDs.
+/// 6. [`Self::artifact_in_install_dataset`]: Used to match zone image tarballs
+///    in the install dataset. (This method is equivalent to appending `.tar.gz`
+///    to the result of [`Self::zone_prefix`].)
 ///
 /// There is no `Display` impl to ensure that users explicitly choose the
 /// representation they want. (Please play close attention to this! The
@@ -978,7 +981,7 @@ impl OmicronZoneType {
 /// ## Adding new representations
 ///
 /// If you have a new use case for a string representation, please reuse one of
-/// the four representations if at all possible. If you must add a new one,
+/// the six representations if at all possible. If you must add a new one,
 /// please add it here rather than doing something ad-hoc in the calling code
 /// so it's more legible.
 #[derive(
@@ -1021,6 +1024,30 @@ impl ZoneKind {
             ZoneKind::InternalDns => "internal_dns",
             ZoneKind::Nexus => "nexus",
             ZoneKind::Oximeter => "oximeter",
+        }
+    }
+
+    /// Return a string that identifies **zone image filenames** in the install
+    /// dataset.
+    ///
+    /// This method is exactly equivalent to `format!("{}.tar.gz",
+    /// self.zone_prefix())`, but returns `&'static str`s. A unit test ensures
+    /// they stay consistent.
+    pub fn artifact_in_install_dataset(self) -> &'static str {
+        match self {
+            // BoundaryNtp and InternalNtp both use "ntp".
+            ZoneKind::BoundaryNtp | ZoneKind::InternalNtp => "ntp.tar.gz",
+            ZoneKind::Clickhouse => "clickhouse.tar.gz",
+            ZoneKind::ClickhouseKeeper => "clickhouse_keeper.tar.gz",
+            ZoneKind::ClickhouseServer => "clickhouse_server.tar.gz",
+            // Note "cockroachdb" for historical reasons.
+            ZoneKind::CockroachDb => "cockroachdb.tar.gz",
+            ZoneKind::Crucible => "crucible.tar.gz",
+            ZoneKind::CruciblePantry => "crucible_pantry.tar.gz",
+            ZoneKind::ExternalDns => "external_dns.tar.gz",
+            ZoneKind::InternalDns => "internal_dns.tar.gz",
+            ZoneKind::Nexus => "nexus.tar.gz",
+            ZoneKind::Oximeter => "oximeter.tar.gz",
         }
     }
 
@@ -1090,7 +1117,12 @@ impl ZoneKind {
 
     /// Return a string used as an artifact name for control-plane zones.
     /// This is **not guaranteed** to be stable.
-    pub fn artifact_name(self) -> &'static str {
+    ///
+    /// These strings match the `ArtifactId::name`s Nexus constructs when
+    /// unpacking the composite control-plane artifact in a TUF repo. Currently,
+    /// these are chosen by reading the `pkg` value of the `oxide.json` object
+    /// inside each zone image tarball.
+    pub fn artifact_id_name(self) -> &'static str {
         match self {
             ZoneKind::BoundaryNtp => "ntp",
             ZoneKind::Clickhouse => "clickhouse",
@@ -1118,7 +1150,7 @@ impl ZoneKind {
             .to_known()
             .map(|kind| matches!(kind, KnownArtifactKind::Zone))
             .unwrap_or(false)
-            && artifact_id.name == self.artifact_name()
+            && artifact_id.name == self.artifact_id_name()
     }
 }
 
@@ -1192,6 +1224,18 @@ mod tests {
                     name_prefix, zone_kind, e
                 );
             });
+        }
+    }
+
+    #[test]
+    fn test_zone_prefix_matches_artifact_in_install_dataset() {
+        for zone_kind in ZoneKind::iter() {
+            let zone_prefix = zone_kind.zone_prefix();
+            let expected_artifact = format!("{zone_prefix}.tar.gz");
+            assert_eq!(
+                expected_artifact,
+                zone_kind.artifact_in_install_dataset()
+            );
         }
     }
 }
