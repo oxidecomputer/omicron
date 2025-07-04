@@ -23,7 +23,7 @@ pub struct HostPhase1Updater {
     log: Logger,
     progress: watch::Sender<Option<UpdateProgress>>,
     sp_type: SpType,
-    sp_slot: u32,
+    sp_slot: u16,
     target_host_slot: u16,
     update_id: Uuid,
     // TODO-clarity maybe a newtype for this? TBD how we get this from
@@ -34,7 +34,7 @@ pub struct HostPhase1Updater {
 impl HostPhase1Updater {
     pub fn new(
         sp_type: SpType,
-        sp_slot: u32,
+        sp_slot: u16,
         target_host_slot: u16,
         update_id: Uuid,
         phase1_data: Vec<u8>,
@@ -152,7 +152,7 @@ impl SpComponentUpdater for HostPhase1Updater {
         self.sp_type
     }
 
-    fn target_sp_slot(&self) -> u32 {
+    fn target_sp_slot(&self) -> u16 {
         self.sp_slot
     }
 

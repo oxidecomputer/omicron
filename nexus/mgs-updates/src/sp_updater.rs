@@ -32,7 +32,7 @@ pub struct SpUpdater {
     log: Logger,
     progress: watch::Sender<Option<UpdateProgress>>,
     sp_type: SpType,
-    sp_slot: u32,
+    sp_slot: u16,
     update_id: Uuid,
     // TODO-clarity maybe a newtype for this? TBD how we get this from
     // wherever it's stored, which might give us a stronger type already.
@@ -42,7 +42,7 @@ pub struct SpUpdater {
 impl SpUpdater {
     pub fn new(
         sp_type: SpType,
-        sp_slot: u32,
+        sp_slot: u16,
         update_id: Uuid,
         sp_hubris_archive: Vec<u8>,
         log: &Logger,
@@ -123,7 +123,7 @@ impl SpComponentUpdater for SpUpdater {
         self.sp_type
     }
 
-    fn target_sp_slot(&self) -> u32 {
+    fn target_sp_slot(&self) -> u16 {
         self.sp_slot
     }
 
@@ -164,9 +164,7 @@ impl SpComponentUpdateHelper for ReconfiguratorSpUpdater {
             // Verify that the device is the one we think it is.
             let state = mgs_clients
                 .try_all_serially(log, move |mgs_client| async move {
-                    mgs_client
-                        .sp_get(update.sp_type, u32::from(update.slot_id))
-                        .await
+                    mgs_client.sp_get(update.sp_type, update.slot_id).await
                 })
                 .await?
                 .into_inner();
@@ -190,7 +188,7 @@ impl SpComponentUpdateHelper for ReconfiguratorSpUpdater {
                     mgs_client
                         .sp_component_caboose_get(
                             update.sp_type,
-                            u32::from(update.slot_id),
+                            update.slot_id,
                             &SpComponent::SP_ITSELF.to_string(),
                             0,
                         )
@@ -242,7 +240,7 @@ impl SpComponentUpdateHelper for ReconfiguratorSpUpdater {
                     mgs_client
                         .sp_component_caboose_get(
                             update.sp_type,
-                            u32::from(update.slot_id),
+                            update.slot_id,
                             &SpComponent::SP_ITSELF.to_string(),
                             1,
                         )
@@ -302,7 +300,7 @@ impl SpComponentUpdateHelper for ReconfiguratorSpUpdater {
                 mgs_client
                     .sp_component_reset(
                         update.sp_type,
-                        u32::from(update.slot_id),
+                        update.slot_id,
                         &SpComponent::SP_ITSELF.to_string(),
                     )
                     .await?;

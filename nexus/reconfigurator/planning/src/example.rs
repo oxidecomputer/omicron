@@ -16,6 +16,7 @@ use crate::system::SystemDescription;
 use anyhow::bail;
 use nexus_inventory::CollectionBuilderRng;
 use nexus_types::deployment::Blueprint;
+use nexus_types::deployment::BlueprintZoneImageSource;
 use nexus_types::deployment::OmicronZoneNic;
 use nexus_types::deployment::PlanningInput;
 use nexus_types::deployment::SledFilter;
@@ -233,15 +234,7 @@ impl ExampleSystemBuilder {
     /// Currently, this value can be anywhere between 0 and 5. (More can be
     /// added in the future if necessary.)
     pub fn nsleds(mut self, nsleds: usize) -> Self {
-        // Add more sleds if there's a shortfall.
-        if nsleds > self.sled_settings.len() {
-            self.sled_settings.extend(vec![
-                BuilderSledSettings::default();
-                nsleds - self.sled_settings.len()
-            ]);
-        } else if nsleds < self.sled_settings.len() {
-            self.sled_settings.truncate(nsleds);
-        }
+        self.sled_settings.resize(nsleds, BuilderSledSettings::default());
         self
     }
 
@@ -347,14 +340,14 @@ impl ExampleSystemBuilder {
         index: usize,
         policy: SledPolicy,
     ) -> anyhow::Result<Self> {
-        if index >= self.sled_settings.len() {
+        let Some(settings) = self.sled_settings.get_mut(index) else {
             bail!(
                 "sled index {} out of range (0..{})",
                 index,
                 self.sled_settings.len(),
             );
-        }
-        self.sled_settings[index].policy = policy;
+        };
+        settings.policy = policy;
         Ok(self)
     }
 
@@ -477,7 +470,10 @@ impl ExampleSystemBuilder {
                     .unwrap();
             }
             if self.create_zones {
-                let _ = builder.sled_ensure_zone_ntp(sled_id).unwrap();
+                let image_source = BlueprintZoneImageSource::InstallDataset;
+                let _ = builder
+                    .sled_ensure_zone_ntp(sled_id, image_source.clone())
+                    .unwrap();
 
                 // Create discretionary zones if allowed.
                 if sled_details.policy.matches(SledFilter::Discretionary) {
@@ -489,36 +485,61 @@ impl ExampleSystemBuilder {
                                 sled_id,
                                 false,
                                 vec![],
+                                image_source.clone(),
                             )
                             .unwrap();
                     }
                     if discretionary_ix == 0 {
-                        builder.sled_add_zone_clickhouse(sled_id).unwrap();
+                        builder
+                            .sled_add_zone_clickhouse(
+                                sled_id,
+                                image_source.clone(),
+                            )
+                            .unwrap();
                     }
                     for _ in 0..self
                         .internal_dns_count
                         .on(discretionary_ix, discretionary_sled_count)
                     {
-                        builder.sled_add_zone_internal_dns(sled_id).unwrap();
+                        builder
+                            .sled_add_zone_internal_dns(
+                                sled_id,
+                                image_source.clone(),
+                            )
+                            .unwrap();
                     }
                     for _ in 0..self
                         .external_dns_count
                         .on(discretionary_ix, discretionary_sled_count)
                     {
-                        builder.sled_add_zone_external_dns(sled_id).unwrap();
+                        builder
+                            .sled_add_zone_external_dns(
+                                sled_id,
+                                image_source.clone(),
+                            )
+                            .unwrap();
                     }
                     for _ in 0..self
                         .crucible_pantry_count
                         .on(discretionary_ix, discretionary_sled_count)
                     {
-                        builder.sled_add_zone_crucible_pantry(sled_id).unwrap();
+                        builder
+                            .sled_add_zone_crucible_pantry(
+                                sled_id,
+                                image_source.clone(),
+                            )
+                            .unwrap();
                     }
                     discretionary_ix += 1;
                 }
 
                 for pool_name in sled_details.resources.zpools.keys() {
                     let _ = builder
-                        .sled_ensure_zone_crucible(sled_id, *pool_name)
+                        .sled_ensure_zone_crucible(
+                            sled_id,
+                            *pool_name,
+                            image_source.clone(),
+                        )
                         .unwrap();
                 }
             }

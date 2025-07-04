@@ -65,7 +65,7 @@ pub struct PutRssUserConfigInsensitive {
     /// `wicketd` will map this back to sleds with the correct `SpIdentifier`
     /// based on the `bootstrap_sleds` it provides in
     /// `CurrentRssUserConfigInsensitive`.
-    pub bootstrap_sleds: BTreeSet<u32>,
+    pub bootstrap_sleds: BTreeSet<u16>,
     pub ntp_servers: Vec<String>,
     pub dns_servers: Vec<IpAddr>,
     pub internal_services_ip_pool_ranges: Vec<address::IpRange>,

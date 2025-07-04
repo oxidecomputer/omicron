@@ -155,7 +155,7 @@ async fn test_repo_upload() -> Result<()> {
                 }
             })
             .collect::<Vec<_>>(),
-        ["zone1", "zone2"]
+        ["zone-1", "zone-2"]
     );
     assert!(!initial_description.artifacts.iter().any(|artifact| {
         artifact.id.kind == KnownArtifactKind::ControlPlane.into()
@@ -302,7 +302,7 @@ async fn test_repo_upload() -> Result<()> {
         )?;
         assert_error_message_contains(
             &response.body,
-            "For artifact (name: zone1, version: 1.0.0, kind: zone), uploaded \
+            "For artifact (name: zone-1, version: 1.0.0, kind: zone), uploaded \
              SHA256 hash",
         )?;
     }

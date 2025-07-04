@@ -45,7 +45,6 @@ use nexus_types::deployment::PendingMgsUpdates;
 use nexus_types::deployment::PlanningInput;
 use nexus_types::deployment::SledFilter;
 use nexus_types::deployment::SledResources;
-use nexus_types::deployment::TargetReleaseDescription;
 use nexus_types::deployment::TufRepoContentsError;
 use nexus_types::deployment::ZpoolFilter;
 use nexus_types::deployment::ZpoolName;
@@ -1191,6 +1190,7 @@ impl<'a> BlueprintBuilder<'a> {
     pub fn sled_add_zone_internal_dns(
         &mut self,
         sled_id: SledUuid,
+        image_source: BlueprintZoneImageSource,
     ) -> Result<(), Error> {
         let gz_address_index = self.next_internal_dns_gz_address_index(sled_id);
         let sled_subnet = self.sled_resources(sled_id)?.subnet;
@@ -1207,7 +1207,6 @@ impl<'a> BlueprintBuilder<'a> {
                 gz_address: dns_subnet.gz_address(),
                 gz_address_index,
             });
-        let image_source = self.zone_image_source(zone_type.kind())?;
 
         let zone = BlueprintZoneConfig {
             disposition: BlueprintZoneDisposition::InService,
@@ -1223,6 +1222,7 @@ impl<'a> BlueprintBuilder<'a> {
     pub fn sled_add_zone_external_dns(
         &mut self,
         sled_id: SledUuid,
+        image_source: BlueprintZoneImageSource,
     ) -> Result<(), Error> {
         let id = self.rng.sled_rng(sled_id).next_zone();
         let ExternalNetworkingChoice {
@@ -1260,7 +1260,6 @@ impl<'a> BlueprintBuilder<'a> {
                 dns_address,
                 nic,
             });
-        let image_source = self.zone_image_source(zone_type.kind())?;
 
         let zone = BlueprintZoneConfig {
             disposition: BlueprintZoneDisposition::InService,
@@ -1275,6 +1274,7 @@ impl<'a> BlueprintBuilder<'a> {
     pub fn sled_ensure_zone_ntp(
         &mut self,
         sled_id: SledUuid,
+        image_source: BlueprintZoneImageSource,
     ) -> Result<Ensure, Error> {
         // If there's already an NTP zone on this sled, do nothing.
         let has_ntp = {
@@ -1300,7 +1300,6 @@ impl<'a> BlueprintBuilder<'a> {
             });
         let filesystem_pool =
             self.sled_select_zpool(sled_id, zone_type.kind())?;
-        let image_source = self.zone_image_source(zone_type.kind())?;
 
         let zone = BlueprintZoneConfig {
             disposition: BlueprintZoneDisposition::InService,
@@ -1318,6 +1317,7 @@ impl<'a> BlueprintBuilder<'a> {
         &mut self,
         sled_id: SledUuid,
         zpool_id: ZpoolUuid,
+        image_source: BlueprintZoneImageSource,
     ) -> Result<Ensure, Error> {
         let pool_name = ZpoolName::new_external(zpool_id);
 
@@ -1368,7 +1368,7 @@ impl<'a> BlueprintBuilder<'a> {
             id: self.rng.sled_rng(sled_id).next_zone(),
             filesystem_pool,
             zone_type,
-            image_source: BlueprintZoneImageSource::InstallDataset,
+            image_source,
         };
 
         self.sled_add_zone(sled_id, zone)?;
@@ -1378,6 +1378,7 @@ impl<'a> BlueprintBuilder<'a> {
     pub fn sled_add_zone_nexus(
         &mut self,
         sled_id: SledUuid,
+        image_source: BlueprintZoneImageSource,
     ) -> Result<(), Error> {
         // Whether Nexus should use TLS and what the external DNS servers it
         // should use are currently provided at rack-setup time, and should be
@@ -1405,6 +1406,7 @@ impl<'a> BlueprintBuilder<'a> {
             sled_id,
             external_tls,
             external_dns_servers,
+            image_source,
         )
     }
 
@@ -1413,6 +1415,7 @@ impl<'a> BlueprintBuilder<'a> {
         sled_id: SledUuid,
         external_tls: bool,
         external_dns_servers: Vec<IpAddr>,
+        image_source: BlueprintZoneImageSource,
     ) -> Result<(), Error> {
         let nexus_id = self.rng.sled_rng(sled_id).next_zone();
         let ExternalNetworkingChoice {
@@ -1453,7 +1456,6 @@ impl<'a> BlueprintBuilder<'a> {
         });
         let filesystem_pool =
             self.sled_select_zpool(sled_id, zone_type.kind())?;
-        let image_source = self.zone_image_source(zone_type.kind())?;
 
         let zone = BlueprintZoneConfig {
             disposition: BlueprintZoneDisposition::InService,
@@ -1468,6 +1470,7 @@ impl<'a> BlueprintBuilder<'a> {
     pub fn sled_add_zone_oximeter(
         &mut self,
         sled_id: SledUuid,
+        image_source: BlueprintZoneImageSource,
     ) -> Result<(), Error> {
         let oximeter_id = self.rng.sled_rng(sled_id).next_zone();
         let ip = self.sled_alloc_ip(sled_id)?;
@@ -1479,7 +1482,6 @@ impl<'a> BlueprintBuilder<'a> {
             });
         let filesystem_pool =
             self.sled_select_zpool(sled_id, zone_type.kind())?;
-        let image_source = self.zone_image_source(zone_type.kind())?;
 
         let zone = BlueprintZoneConfig {
             disposition: BlueprintZoneDisposition::InService,
@@ -1494,6 +1496,7 @@ impl<'a> BlueprintBuilder<'a> {
     pub fn sled_add_zone_crucible_pantry(
         &mut self,
         sled_id: SledUuid,
+        image_source: BlueprintZoneImageSource,
     ) -> Result<(), Error> {
         let pantry_id = self.rng.sled_rng(sled_id).next_zone();
         let ip = self.sled_alloc_ip(sled_id)?;
@@ -1504,7 +1507,6 @@ impl<'a> BlueprintBuilder<'a> {
         );
         let filesystem_pool =
             self.sled_select_zpool(sled_id, zone_type.kind())?;
-        let image_source = self.zone_image_source(zone_type.kind())?;
 
         let zone = BlueprintZoneConfig {
             disposition: BlueprintZoneDisposition::InService,
@@ -1526,6 +1528,7 @@ impl<'a> BlueprintBuilder<'a> {
     pub fn sled_add_zone_cockroachdb(
         &mut self,
         sled_id: SledUuid,
+        image_source: BlueprintZoneImageSource,
     ) -> Result<(), Error> {
         let zone_id = self.rng.sled_rng(sled_id).next_zone();
         let underlay_ip = self.sled_alloc_ip(sled_id)?;
@@ -1539,7 +1542,6 @@ impl<'a> BlueprintBuilder<'a> {
                 dataset: OmicronZoneDataset { pool_name },
             });
         let filesystem_pool = pool_name;
-        let image_source = self.zone_image_source(zone_type.kind())?;
 
         let zone = BlueprintZoneConfig {
             disposition: BlueprintZoneDisposition::InService,
@@ -1554,6 +1556,7 @@ impl<'a> BlueprintBuilder<'a> {
     pub fn sled_add_zone_clickhouse(
         &mut self,
         sled_id: SledUuid,
+        image_source: BlueprintZoneImageSource,
     ) -> Result<(), Error> {
         let id = self.rng.sled_rng(sled_id).next_zone();
         let underlay_address = self.sled_alloc_ip(sled_id)?;
@@ -1566,7 +1569,6 @@ impl<'a> BlueprintBuilder<'a> {
                 address,
                 dataset: OmicronZoneDataset { pool_name },
             });
-        let image_source = self.zone_image_source(zone_type.kind())?;
 
         let zone = BlueprintZoneConfig {
             disposition: BlueprintZoneDisposition::InService,
@@ -1581,6 +1583,7 @@ impl<'a> BlueprintBuilder<'a> {
     pub fn sled_add_zone_clickhouse_server(
         &mut self,
         sled_id: SledUuid,
+        image_source: BlueprintZoneImageSource,
     ) -> Result<(), Error> {
         let zone_id = self.rng.sled_rng(sled_id).next_zone();
         let underlay_ip = self.sled_alloc_ip(sled_id)?;
@@ -1595,7 +1598,6 @@ impl<'a> BlueprintBuilder<'a> {
             },
         );
         let filesystem_pool = pool_name;
-        let image_source = self.zone_image_source(zone_type.kind())?;
 
         let zone = BlueprintZoneConfig {
             disposition: BlueprintZoneDisposition::InService,
@@ -1610,6 +1612,7 @@ impl<'a> BlueprintBuilder<'a> {
     pub fn sled_add_zone_clickhouse_keeper(
         &mut self,
         sled_id: SledUuid,
+        image_source: BlueprintZoneImageSource,
     ) -> Result<(), Error> {
         let zone_id = self.rng.sled_rng(sled_id).next_zone();
         let underlay_ip = self.sled_alloc_ip(sled_id)?;
@@ -1624,7 +1627,6 @@ impl<'a> BlueprintBuilder<'a> {
             },
         );
         let filesystem_pool = pool_name;
-        let image_source = self.zone_image_source(zone_type.kind())?;
 
         let zone = BlueprintZoneConfig {
             disposition: BlueprintZoneDisposition::InService,
@@ -1639,6 +1641,7 @@ impl<'a> BlueprintBuilder<'a> {
     pub fn sled_promote_internal_ntp_to_boundary_ntp(
         &mut self,
         sled_id: SledUuid,
+        image_source: BlueprintZoneImageSource,
     ) -> Result<(), Error> {
         // The upstream NTP/DNS servers and domain _should_ come from Nexus and
         // be modifiable by the operator, but currently can only be set at RSS.
@@ -1662,6 +1665,7 @@ impl<'a> BlueprintBuilder<'a> {
             ntp_servers,
             dns_servers,
             domain,
+            image_source,
         )
     }
 
@@ -1671,6 +1675,7 @@ impl<'a> BlueprintBuilder<'a> {
         ntp_servers: Vec<String>,
         dns_servers: Vec<IpAddr>,
         domain: Option<String>,
+        image_source: BlueprintZoneImageSource,
     ) -> Result<(), Error> {
         let editor = self.sled_editors.get_mut(&sled_id).ok_or_else(|| {
             Error::Planner(anyhow!(
@@ -1751,7 +1756,6 @@ impl<'a> BlueprintBuilder<'a> {
             });
         let filesystem_pool =
             self.sled_select_zpool(sled_id, zone_type.kind())?;
-        let image_source = self.zone_image_source(zone_type.kind())?;
 
         self.sled_add_zone(
             sled_id,
@@ -2007,61 +2011,6 @@ impl<'a> BlueprintBuilder<'a> {
         baseboard_id: &Arc<BaseboardId>,
     ) {
         self.pending_mgs_updates.remove(baseboard_id);
-    }
-
-    /// Try to find an artifact in either the current or previous release repo
-    /// that contains an image for a zone of the given kind; see RFD 565 §9.
-    /// Defaults to the install dataset.
-    pub(crate) fn zone_image_source(
-        &self,
-        zone_kind: ZoneKind,
-    ) -> Result<BlueprintZoneImageSource, TufRepoContentsError> {
-        let new_repo = self.input.tuf_repo().description();
-        let old_repo = self.input.old_repo().description();
-        let repo_choice = if self.zone_is_ready_for_update(zone_kind, new_repo)
-        {
-            new_repo
-        } else {
-            old_repo
-        };
-        repo_choice.zone_image_source(zone_kind)
-    }
-
-    /// Return `true` iff a zone of the given kind is ready to be updated;
-    /// i.e., its dependencies have been updated, or its data sufficiently
-    /// replicated, etc.
-    fn zone_is_ready_for_update(
-        &self,
-        zone_kind: ZoneKind,
-        new_repo: &TargetReleaseDescription,
-    ) -> bool {
-        match zone_kind {
-            ZoneKind::Nexus => {
-                // Nexus can only be updated if all non-Nexus zones have been updated,
-                // i.e., their image source is an artifact from the new repo.
-                self.sled_ids_with_zones().all(|sled_id| {
-                    self.current_sled_zones(
-                        sled_id,
-                        BlueprintZoneDisposition::is_in_service,
-                    )
-                    .filter(|z| z.zone_type.kind() != ZoneKind::Nexus)
-                    .all(|z| {
-                        // This comparison ignores any TUF repo contents errors
-                        // from `zone_image_source`. This means we'll never be
-                        // able to update Nexus if we can't tell if _other_ zone
-                        // types aren't updated, which seems correct.
-                        Some(&z.image_source)
-                            == new_repo
-                                .zone_image_source(z.kind())
-                                .ok()
-                                .as_ref()
-                    })
-                })
-            }
-            // <https://github.com/oxidecomputer/omicron/issues/6404>
-            // ZoneKind::CockroachDb => todo!("check cluster status in inventory"),
-            _ => true, // other zone kinds have no special dependencies
-        }
     }
 
     /// Debug method to remove a sled from a blueprint entirely.
@@ -2325,9 +2274,20 @@ pub mod test {
             example.input.all_sled_resources(SledFilter::Commissioned)
         {
             builder.sled_add_disks(sled_id, sled_resources).unwrap();
-            builder.sled_ensure_zone_ntp(sled_id).unwrap();
+            builder
+                .sled_ensure_zone_ntp(
+                    sled_id,
+                    BlueprintZoneImageSource::InstallDataset,
+                )
+                .unwrap();
             for pool_id in sled_resources.zpools.keys() {
-                builder.sled_ensure_zone_crucible(sled_id, *pool_id).unwrap();
+                builder
+                    .sled_ensure_zone_crucible(
+                        sled_id,
+                        *pool_id,
+                        BlueprintZoneImageSource::InstallDataset,
+                    )
+                    .unwrap();
             }
         }
 
@@ -2362,9 +2322,20 @@ pub mod test {
             .unwrap()
             .resources;
         builder.sled_add_disks(new_sled_id, &new_sled_resources).unwrap();
-        builder.sled_ensure_zone_ntp(new_sled_id).unwrap();
+        builder
+            .sled_ensure_zone_ntp(
+                new_sled_id,
+                BlueprintZoneImageSource::InstallDataset,
+            )
+            .unwrap();
         for pool_id in new_sled_resources.zpools.keys() {
-            builder.sled_ensure_zone_crucible(new_sled_id, *pool_id).unwrap();
+            builder
+                .sled_ensure_zone_crucible(
+                    new_sled_id,
+                    *pool_id,
+                    BlueprintZoneImageSource::InstallDataset,
+                )
+                .unwrap();
         }
         builder.sled_ensure_zone_datasets(new_sled_id).unwrap();
 
@@ -2826,6 +2797,7 @@ pub mod test {
                     .next()
                     .map(|sa| sa.sled_id)
                     .expect("no sleds present"),
+                BlueprintZoneImageSource::InstallDataset,
             )
             .unwrap_err();
 
@@ -2922,7 +2894,12 @@ pub mod test {
                 "test",
             )
             .expect("failed to create builder");
-            builder.sled_add_zone_nexus(sled_id).expect("added nexus zone");
+            builder
+                .sled_add_zone_nexus(
+                    sled_id,
+                    BlueprintZoneImageSource::InstallDataset,
+                )
+                .expect("added nexus zone");
         }
 
         {
@@ -2938,7 +2915,12 @@ pub mod test {
             )
             .expect("failed to create builder");
             for _ in 0..3 {
-                builder.sled_add_zone_nexus(sled_id).expect("added nexus zone");
+                builder
+                    .sled_add_zone_nexus(
+                        sled_id,
+                        BlueprintZoneImageSource::InstallDataset,
+                    )
+                    .expect("added nexus zone");
             }
         }
 
@@ -2971,7 +2953,12 @@ pub mod test {
                 "test",
             )
             .expect("failed to create builder");
-            let err = builder.sled_add_zone_nexus(sled_id).unwrap_err();
+            let err = builder
+                .sled_add_zone_nexus(
+                    sled_id,
+                    BlueprintZoneImageSource::InstallDataset,
+                )
+                .unwrap_err();
 
             assert!(
                 matches!(
@@ -3043,7 +3030,10 @@ pub mod test {
         .expect("constructed builder");
         for _ in 0..num_sled_zpools {
             builder
-                .sled_add_zone_cockroachdb(target_sled_id)
+                .sled_add_zone_cockroachdb(
+                    target_sled_id,
+                    BlueprintZoneImageSource::InstallDataset,
+                )
                 .expect("added CRDB zone");
         }
         builder.sled_ensure_zone_datasets(target_sled_id).unwrap();
@@ -3082,11 +3072,17 @@ pub mod test {
         .expect("constructed builder");
         for _ in 0..num_sled_zpools {
             builder
-                .sled_add_zone_cockroachdb(target_sled_id)
+                .sled_add_zone_cockroachdb(
+                    target_sled_id,
+                    BlueprintZoneImageSource::InstallDataset,
+                )
                 .expect("added CRDB zone");
         }
         let err = builder
-            .sled_add_zone_cockroachdb(target_sled_id)
+            .sled_add_zone_cockroachdb(
+                target_sled_id,
+                BlueprintZoneImageSource::InstallDataset,
+            )
             .expect_err("failed to create too many CRDB zones");
         match err {
             Error::NoAvailableZpool { sled_id, kind } => {

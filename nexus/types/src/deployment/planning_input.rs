@@ -982,7 +982,7 @@ impl OximeterReadPolicy {
 }
 
 /// TUF repo-related policy that's part of the planning input.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct TufRepoPolicy {
     /// The generation of the target release for the TUF repo.
     pub target_release_generation: Generation,
@@ -1011,7 +1011,7 @@ impl TufRepoPolicy {
 }
 
 /// Source of artifacts for a given target release.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub enum TargetReleaseDescription {
     /// The initial release source for an Oxide deployment, before any TUF repo
     /// has been provided for upgrades.
