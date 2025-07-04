@@ -19,7 +19,9 @@ use nexus_reconfigurator_blippy::BlippyReportSortKey;
 use nexus_reconfigurator_planning::blueprint_builder::BlueprintBuilder;
 use nexus_reconfigurator_planning::example::ExampleSystemBuilder;
 use nexus_reconfigurator_planning::planner::Planner;
-use nexus_reconfigurator_planning::system::{SledBuilder, SystemDescription};
+use nexus_reconfigurator_planning::system::{
+    SledBuilder, SledInventoryVisibility, SystemDescription,
+};
 use nexus_reconfigurator_simulation::{BlueprintId, SimState};
 use nexus_reconfigurator_simulation::{SimStateBuilder, SimTufRepoSource};
 use nexus_reconfigurator_simulation::{SimTufRepoDescription, Simulator};
@@ -374,6 +376,8 @@ struct SledSetArgs {
 enum SledSetCommand {
     /// set the policy for this sled
     Policy(SledSetPolicyArgs),
+    #[clap(flatten)]
+    Visibility(SledSetVisibilityCommand),
 }
 
 #[derive(Debug, Args)]
@@ -381,6 +385,27 @@ struct SledSetPolicyArgs {
     /// the policy to set
     #[clap(value_enum)]
     policy: SledPolicyOpt,
+}
+
+#[derive(Debug, Subcommand)]
+enum SledSetVisibilityCommand {
+    /// mark a sled hidden from inventory
+    InventoryHidden,
+    /// mark a sled visible in inventory
+    InventoryVisible,
+}
+
+impl SledSetVisibilityCommand {
+    fn to_visibility(&self) -> SledInventoryVisibility {
+        match self {
+            SledSetVisibilityCommand::InventoryHidden => {
+                SledInventoryVisibility::Hidden
+            }
+            SledSetVisibilityCommand::InventoryVisible => {
+                SledInventoryVisibility::Visible
+            }
+        }
+    }
 }
 
 #[derive(Clone, Copy, Debug, ValueEnum)]
@@ -1226,6 +1251,30 @@ fn cmd_sled_set(
                 state,
             );
             Ok(Some(format!("set sled {sled_id} policy to {policy}")))
+        }
+        SledSetCommand::Visibility(command) => {
+            let new = command.to_visibility();
+            let prev = system
+                .description_mut()
+                .sled_set_inventory_visibility(sled_id, new)?;
+            if prev == new {
+                Ok(Some(format!(
+                    "sled {sled_id} inventory visibility was already set to \
+                     {new}, so no changes were performed",
+                )))
+            } else {
+                sim.commit_and_bump(
+                    format!(
+                        "reconfigurator-cli sled-set inventory visibility: {} \
+                         from {} to {}",
+                        sled_id, prev, new,
+                    ),
+                    state,
+                );
+                Ok(Some(format!(
+                    "set sled {sled_id} inventory visibility: {prev} -> {new}"
+                )))
+            }
         }
     }
 }

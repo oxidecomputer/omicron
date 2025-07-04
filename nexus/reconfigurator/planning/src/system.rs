@@ -63,6 +63,7 @@ use omicron_uuid_kinds::SledUuid;
 use omicron_uuid_kinds::ZpoolUuid;
 use std::collections::BTreeMap;
 use std::collections::BTreeSet;
+use std::fmt;
 use std::fmt::Debug;
 use std::net::Ipv4Addr;
 use std::net::Ipv6Addr;
@@ -467,6 +468,22 @@ impl SystemDescription {
         Ok(self)
     }
 
+    /// Set whether a sled is visible in the inventory.
+    ///
+    /// Returns the previous visibility setting.
+    pub fn sled_set_inventory_visibility(
+        &mut self,
+        sled_id: SledUuid,
+        visibility: SledInventoryVisibility,
+    ) -> anyhow::Result<SledInventoryVisibility> {
+        let sled = self.sleds.get_mut(&sled_id).with_context(|| {
+            format!("attempted to access sled {} not found in system", sled_id)
+        })?;
+        let prev = Arc::make_mut(sled).inventory_visibility;
+        Arc::make_mut(sled).inventory_visibility = visibility;
+        Ok(prev)
+    }
+
     /// Update the SP versions reported for a sled.
     ///
     /// Where `None` is provided, no changes are made.
@@ -561,6 +578,10 @@ impl SystemDescription {
         let mut builder = CollectionBuilder::new(collector_label);
 
         for s in self.sleds.values() {
+            if s.inventory_visibility == SledInventoryVisibility::Hidden {
+                // Don't return this sled as part of the inventory collection.
+                continue;
+            }
             if let Some((slot, sp_state)) = s.sp_state() {
                 builder
                     .found_sp_state(
@@ -797,6 +818,7 @@ pub struct Sled {
     sled_id: SledUuid,
     inventory_sp: Option<(u16, SpState)>,
     inventory_sled_agent: Inventory,
+    inventory_visibility: SledInventoryVisibility,
     policy: SledPolicy,
     state: SledState,
     resources: SledResources,
@@ -946,6 +968,7 @@ impl Sled {
             sled_id,
             inventory_sp,
             inventory_sled_agent,
+            inventory_visibility: SledInventoryVisibility::Visible,
             policy,
             state: SledState::Active,
             resources: SledResources { subnet: sled_subnet, zpools },
@@ -1092,6 +1115,7 @@ impl Sled {
             sled_id,
             inventory_sp,
             inventory_sled_agent,
+            inventory_visibility: SledInventoryVisibility::Visible,
             policy: sled_policy,
             state: sled_state,
             resources: sled_resources,
@@ -1196,6 +1220,25 @@ impl Sled {
             name: board,
             version: version.to_string(),
             sign: None,
+        }
+    }
+}
+
+/// The visibility of a sled in the inventory.
+///
+/// This enum can be used to simulate a sled temporarily dropping out and it not
+/// being reported in the inventory.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum SledInventoryVisibility {
+    Visible,
+    Hidden,
+}
+
+impl fmt::Display for SledInventoryVisibility {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            SledInventoryVisibility::Visible => write!(f, "visible"),
+            SledInventoryVisibility::Hidden => write!(f, "hidden"),
         }
     }
 }

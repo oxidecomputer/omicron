@@ -3,7 +3,7 @@ using provided RNG seed: reconfigurator-cli-test
 > # so that discretionary zones don't make their way onto it. (We're going to
 > # expunge it below to test that we don't try and update zone image sources
 > # on expunged sleds.)
-> load-example --nsleds 6 --ndisks-per-sled 1 --sled-policy 5:non-provisionable
+> load-example --nsleds 7 --ndisks-per-sled 1 --sled-policy 5:non-provisionable
 loaded example system with:
 - collection: f45ba181-4b56-42cc-a762-874d90184a43
 - blueprint: dbcbd3d6-41ff-48ae-ac0b-1becc9b2fd21
@@ -17,6 +17,7 @@ ID                                   SERIAL  NZPOOLS SUBNET
 aff6c093-197d-42c5-ad80-9f10ba051a34 serial3 1       fd00:1122:3344:104::/64 
 b82ede02-399c-48c6-a1de-411df4fa49a7 serial4 1       fd00:1122:3344:105::/64 
 d81c6a84-79b8-4958-ae41-ea46c9b19763 serial2 1       fd00:1122:3344:103::/64 
+e96e226f-4ed9-4c01-91b9-69a9cd076c9e serial6 1       fd00:1122:3344:107::/64 
 
 
 > # Create a TUF repository from a fake manifest. (The output TUF repo is
@@ -139,11 +140,22 @@ sled 9a867dc9-d505-427f-9eff-cdb1d4d9bd73: install dataset updated: to target re
 set sled 9a867dc9-d505-427f-9eff-cdb1d4d9bd73 policy to expunged
 
 
+> # On the seventh sled, update to the target release but hide the sled
+> # from inventory. This should prevent changes to the blueprint for
+> # this sled.
+> sled-update-install-dataset serial6 --to-target-release
+sled e96e226f-4ed9-4c01-91b9-69a9cd076c9e: install dataset updated: to target release (system version 1.0.0)
+
+> sled-set serial6 inventory-hidden
+set sled e96e226f-4ed9-4c01-91b9-69a9cd076c9e inventory visibility: visible -> hidden
+
+
 > # Generate an inventory and run a blueprint planning step.
 > inventory-generate
 generated inventory collection eb0796d5-ab8a-4f7b-a884-b4aeacb8ab51 from configured sleds
 
 > blueprint-plan latest eb0796d5-ab8a-4f7b-a884-b4aeacb8ab51
+WARN skipping zones eligible for cleanup check (sled not present in latest inventory collection), sled_id: e96e226f-4ed9-4c01-91b9-69a9cd076c9e
 WARN skipping noop image source check since sled-agent encountered error retrieving zone manifest (this is abnormal), sled_id: 2b8f0cb3-0295-4b3c-bc58-4fe88b57112c, error: reconfigurator-sim simulated error: simulated error obtaining zone manifest
 INFO install dataset artifact hash matches TUF repo, switching out the zone image source to Artifact, sled_id: 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6, tuf_artifact_id: nexus v1.0.0 (zone)
 INFO install dataset artifact hash matches TUF repo, switching out the zone image source to Artifact, sled_id: 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6, tuf_artifact_id: internal-dns v1.0.0 (zone)
@@ -161,6 +173,8 @@ WARN zone manifest inventory indicated install dataset artifact is invalid, not 
 INFO noop converting 5/6 install-dataset zones to artifact store, sled_id: aff6c093-197d-42c5-ad80-9f10ba051a34
 INFO noop converting 0/2 install-dataset zones to artifact store, sled_id: b82ede02-399c-48c6-a1de-411df4fa49a7
 INFO skipping noop image source check on sled (blueprint has get_remove_mupdate_override set for sled), sled_id: d81c6a84-79b8-4958-ae41-ea46c9b19763, bp_remove_mupdate_override_id: ffffffff-ffff-ffff-ffff-ffffffffffff
+INFO skipping noop image source check (sled not present in latest inventory collection), sled_id: e96e226f-4ed9-4c01-91b9-69a9cd076c9e
+INFO parent blueprint contains NTP zone, but it's not in inventory yet, sled_id: e96e226f-4ed9-4c01-91b9-69a9cd076c9e
 INFO sufficient BoundaryNtp zones exist in plan, desired_count: 0, current_count: 0
 INFO sufficient Clickhouse zones exist in plan, desired_count: 1, current_count: 1
 INFO sufficient ClickhouseKeeper zones exist in plan, desired_count: 0, current_count: 0
@@ -393,22 +407,26 @@ internal DNS:
         SRV  port 32345 8e3dd7a4-75a3-4917-a6f4-0991bbdef7ea.host.control-plane.oxide.internal
     name: _crucible._tcp.bd354eef-d8a6-4165-9124-283fb5e46d77 (records: 1)
         SRV  port 32345 bd354eef-d8a6-4165-9124-283fb5e46d77.host.control-plane.oxide.internal
+    name: _crucible._tcp.c1467d0e-b3de-4bd8-b36a-d8b36626badc (records: 1)
+        SRV  port 32345 c1467d0e-b3de-4bd8-b36a-d8b36626badc.host.control-plane.oxide.internal
     name: _crucible._tcp.ecbe0b3d-1acc-44b2-b6d4-f4d2770516e4 (records: 1)
         SRV  port 32345 ecbe0b3d-1acc-44b2-b6d4-f4d2770516e4.host.control-plane.oxide.internal
     name: _external-dns._tcp                                 (records: 3)
         SRV  port  5353 43a0588f-5b57-469b-a173-db6cb6105e4c.host.control-plane.oxide.internal
         SRV  port  5353 6c3ae381-04f7-41ea-b0ac-74db387dbc3a.host.control-plane.oxide.internal
         SRV  port  5353 803bfb63-c246-41db-b0da-d3b87ddfc63d.host.control-plane.oxide.internal
-*   name: _internal-ntp._tcp                                 (records: 6 -> 5)
+*   name: _internal-ntp._tcp                                 (records: 7 -> 6)
 -       SRV  port   123 62620961-fc4a-481e-968b-f5acbac0dc63.host.control-plane.oxide.internal
 -       SRV  port   123 6444f8a5-6465-4f0b-a549-1993c113569c.host.control-plane.oxide.internal
 -       SRV  port   123 b910534b-2a53-4335-a3d9-5311d2f3186a.host.control-plane.oxide.internal
+-       SRV  port   123 c800ba17-240e-4b72-8ae6-afc30b6baa96.host.control-plane.oxide.internal
 -       SRV  port   123 db288a1e-c33c-44ca-8c79-9a8978afa34d.host.control-plane.oxide.internal
 -       SRV  port   123 dd66f033-4fe8-438e-afb4-29d3561d4c3e.host.control-plane.oxide.internal
 -       SRV  port   123 e8fe709c-725f-4bb2-b714-ffcda13a9e54.host.control-plane.oxide.internal
 +       SRV  port   123 62620961-fc4a-481e-968b-f5acbac0dc63.host.control-plane.oxide.internal
 +       SRV  port   123 6444f8a5-6465-4f0b-a549-1993c113569c.host.control-plane.oxide.internal
 +       SRV  port   123 b910534b-2a53-4335-a3d9-5311d2f3186a.host.control-plane.oxide.internal
++       SRV  port   123 c800ba17-240e-4b72-8ae6-afc30b6baa96.host.control-plane.oxide.internal
 +       SRV  port   123 dd66f033-4fe8-438e-afb4-29d3561d4c3e.host.control-plane.oxide.internal
 +       SRV  port   123 e8fe709c-725f-4bb2-b714-ffcda13a9e54.host.control-plane.oxide.internal
     name: _nameservice._tcp                                  (records: 3)
@@ -440,6 +458,10 @@ internal DNS:
         AAAA fd00:1122:3344:101::24
     name: bd354eef-d8a6-4165-9124-283fb5e46d77.host          (records: 1)
         AAAA fd00:1122:3344:102::26
+    name: c1467d0e-b3de-4bd8-b36a-d8b36626badc.host          (records: 1)
+        AAAA fd00:1122:3344:107::22
+    name: c800ba17-240e-4b72-8ae6-afc30b6baa96.host          (records: 1)
+        AAAA fd00:1122:3344:107::21
     name: d07a1fed-4235-4821-a1e5-f7eb2646ff33.host          (records: 1)
         AAAA fd00:1122:3344:104::24
     name: d81c6a84-79b8-4958-ae41-ea46c9b19763.sled          (records: 1)
@@ -450,6 +472,240 @@ internal DNS:
         AAAA fd00:1122:3344:103::21
     name: e8fe709c-725f-4bb2-b714-ffcda13a9e54.host          (records: 1)
         AAAA fd00:1122:3344:104::21
+    name: ecbe0b3d-1acc-44b2-b6d4-f4d2770516e4.host          (records: 1)
+        AAAA fd00:1122:3344:105::22
+    name: ns1                                                (records: 1)
+        AAAA fd00:1122:3344:1::1
+    name: ns2                                                (records: 1)
+        AAAA fd00:1122:3344:2::1
+    name: ns3                                                (records: 1)
+        AAAA fd00:1122:3344:3::1
+
+external DNS:
+  DNS zone: "oxide.example" (unchanged)
+    name: @                                                  (records: 3)
+        NS   ns1.oxide.example
+        NS   ns2.oxide.example
+        NS   ns3.oxide.example
+    name: example-silo.sys                                   (records: 3)
+        A    192.0.2.2
+        A    192.0.2.3
+        A    192.0.2.4
+    name: ns1                                                (records: 1)
+        A    198.51.100.1
+    name: ns2                                                (records: 1)
+        A    198.51.100.2
+    name: ns3                                                (records: 1)
+        A    198.51.100.3
+
+
+
+
+> # Bring the hidden sled back.
+> sled-set serial6 inventory-visible
+set sled e96e226f-4ed9-4c01-91b9-69a9cd076c9e inventory visibility: hidden -> visible
+
+
+> # Run another inventory and blueprint planning step.
+> inventory-generate
+generated inventory collection 61f451b3-2121-4ed6-91c7-a550054f6c21 from configured sleds
+
+> blueprint-plan latest 61f451b3-2121-4ed6-91c7-a550054f6c21
+WARN skipping noop image source check since sled-agent encountered error retrieving zone manifest (this is abnormal), sled_id: 2b8f0cb3-0295-4b3c-bc58-4fe88b57112c, error: reconfigurator-sim simulated error: simulated error obtaining zone manifest
+INFO noop converting 0/0 install-dataset zones to artifact store, sled_id: 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6
+WARN zone manifest inventory indicated install dataset artifact is invalid, not using artifact (this is abnormal), sled_id: aff6c093-197d-42c5-ad80-9f10ba051a34, zone_id: e8fe709c-725f-4bb2-b714-ffcda13a9e54, kind: internal_ntp, file_name: ntp.tar.gz, error: reconfigurator-sim: simulated error validating zone image
+INFO noop converting 0/1 install-dataset zones to artifact store, sled_id: aff6c093-197d-42c5-ad80-9f10ba051a34
+INFO noop converting 0/2 install-dataset zones to artifact store, sled_id: b82ede02-399c-48c6-a1de-411df4fa49a7
+INFO skipping noop image source check on sled (blueprint has get_remove_mupdate_override set for sled), sled_id: d81c6a84-79b8-4958-ae41-ea46c9b19763, bp_remove_mupdate_override_id: ffffffff-ffff-ffff-ffff-ffffffffffff
+INFO install dataset artifact hash matches TUF repo, switching out the zone image source to Artifact, sled_id: e96e226f-4ed9-4c01-91b9-69a9cd076c9e, tuf_artifact_id: crucible-zone v1.0.0 (zone)
+INFO install dataset artifact hash matches TUF repo, switching out the zone image source to Artifact, sled_id: e96e226f-4ed9-4c01-91b9-69a9cd076c9e, tuf_artifact_id: ntp v1.0.0 (zone)
+INFO noop converting 2/2 install-dataset zones to artifact store, sled_id: e96e226f-4ed9-4c01-91b9-69a9cd076c9e
+INFO sufficient BoundaryNtp zones exist in plan, desired_count: 0, current_count: 0
+INFO sufficient Clickhouse zones exist in plan, desired_count: 1, current_count: 1
+INFO sufficient ClickhouseKeeper zones exist in plan, desired_count: 0, current_count: 0
+INFO sufficient ClickhouseServer zones exist in plan, desired_count: 0, current_count: 0
+INFO sufficient CockroachDb zones exist in plan, desired_count: 0, current_count: 0
+INFO sufficient CruciblePantry zones exist in plan, desired_count: 3, current_count: 3
+INFO sufficient InternalDns zones exist in plan, desired_count: 3, current_count: 3
+INFO sufficient ExternalDns zones exist in plan, desired_count: 3, current_count: 3
+INFO sufficient Nexus zones exist in plan, desired_count: 3, current_count: 3
+INFO sufficient Oximeter zones exist in plan, desired_count: 0, current_count: 0
+INFO SP update not yet completed (will keep it), artifact_version: 1.0.0, artifact_hash: 7e6667e646ad001b54c8365a3d309c03f89c59102723d38d01697ee8079fe670, expected_inactive_version: NoValidVersion, expected_active_version: 0.0.1, component: sp, sp_slot: 0, sp_type: Sled, serial_number: serial0, part_number: model0
+INFO reached maximum number of pending SP updates, max: 1
+INFO will ensure cockroachdb setting, setting: cluster.preserve_downgrade_option, value: DoNotModify
+generated blueprint af934083-59b5-4bf6-8966-6fb5292c29e1 based on parent blueprint 58d5e830-0884-47d8-a7cd-b2b3751adeb4
+
+
+> # This diff should show changes to the sled that's back in inventory.
+> blueprint-diff 58d5e830-0884-47d8-a7cd-b2b3751adeb4 latest
+from: blueprint 58d5e830-0884-47d8-a7cd-b2b3751adeb4
+to:   blueprint af934083-59b5-4bf6-8966-6fb5292c29e1
+
+ MODIFIED SLEDS:
+
+  sled e96e226f-4ed9-4c01-91b9-69a9cd076c9e (active, config generation 2 -> 3):
+
+    physical disks:
+    ------------------------------------------------------------------------------------
+    vendor        model        serial                                        disposition
+    ------------------------------------------------------------------------------------
+    fake-vendor   fake-model   serial-1fa138c9-708a-4f08-b206-4ccf7436b9d9   in service 
+
+
+    datasets:
+    ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+    dataset name                                                                                            dataset id                             disposition   quota     reservation   compression
+    ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+    oxp_1fa138c9-708a-4f08-b206-4ccf7436b9d9/crucible                                                       0355ac47-a47c-4a90-86ec-0c434eb8d376   in service    none      none          off        
+    oxp_1fa138c9-708a-4f08-b206-4ccf7436b9d9/crypt/zone                                                     75339bab-d7af-4180-8562-b1754e3b5e6d   in service    none      none          off        
+    oxp_1fa138c9-708a-4f08-b206-4ccf7436b9d9/crypt/zone/oxz_crucible_c1467d0e-b3de-4bd8-b36a-d8b36626badc   5cf6fa86-965b-4d42-af5e-1973797bcb62   in service    none      none          off        
+    oxp_1fa138c9-708a-4f08-b206-4ccf7436b9d9/crypt/zone/oxz_ntp_c800ba17-240e-4b72-8ae6-afc30b6baa96        459f5fdd-1fc1-43b0-b0d0-022298f8abda   in service    none      none          off        
+    oxp_1fa138c9-708a-4f08-b206-4ccf7436b9d9/crypt/debug                                                    e0d0222a-f585-4fc3-b04b-1c4e7efb1830   in service    100 GiB   none          gzip-9     
+
+
+    omicron zones:
+    ----------------------------------------------------------------------------------------------------------------------
+    zone type      zone id                                image source                disposition   underlay IP           
+    ----------------------------------------------------------------------------------------------------------------------
+*   crucible       c1467d0e-b3de-4bd8-b36a-d8b36626badc   - install dataset           in service    fd00:1122:3344:107::22
+     └─                                                   + artifact: version 1.0.0                                       
+*   internal_ntp   c800ba17-240e-4b72-8ae6-afc30b6baa96   - install dataset           in service    fd00:1122:3344:107::21
+     └─                                                   + artifact: version 1.0.0                                       
+
+
+ COCKROACHDB SETTINGS:
+    state fingerprint:::::::::::::::::   (none) (unchanged)
+    cluster.preserve_downgrade_option:   (do not modify) (unchanged)
+
+ METADATA:
+    internal DNS version:::   1 (unchanged)
+    external DNS version:::   1 (unchanged)
+    target release min gen:   1 (unchanged)
+
+ OXIMETER SETTINGS:
+    generation:   1 (unchanged)
+    read from::   SingleNode (unchanged)
+
+
+internal DNS:
+  DNS zone: "control-plane.oxide.internal" (unchanged)
+    name: 0c71b3b2-6ceb-4e8f-b020-b08675e83038.host          (records: 1)
+        AAAA fd00:1122:3344:101::22
+    name: 2b8f0cb3-0295-4b3c-bc58-4fe88b57112c.sled          (records: 1)
+        AAAA fd00:1122:3344:102::1
+    name: 33862f97-2897-4d53-a9a6-78a80f7eb13f.host          (records: 1)
+        AAAA fd00:1122:3344:104::22
+    name: 353b3b65-20f7-48c3-88f7-495bd5d31545.host          (records: 1)
+        AAAA fd00:1122:3344:102::23
+    name: 3a7c2683-58bc-479c-9c16-2f9dfc102e29.host          (records: 1)
+        AAAA fd00:1122:3344:103::22
+    name: 427ec88f-f467-42fa-9bbb-66a91a36103c.host          (records: 1)
+        AAAA fd00:1122:3344:2::1
+    name: 43a0588f-5b57-469b-a173-db6cb6105e4c.host          (records: 1)
+        AAAA fd00:1122:3344:104::23
+    name: 466a9f29-62bf-4e63-924a-b9efdb86afec.host          (records: 1)
+        AAAA fd00:1122:3344:102::22
+    name: 5199c033-4cf9-4ab6-8ae7-566bd7606363.host          (records: 1)
+        AAAA fd00:1122:3344:101::25
+    name: 62620961-fc4a-481e-968b-f5acbac0dc63.host          (records: 1)
+        AAAA fd00:1122:3344:102::21
+    name: 6444f8a5-6465-4f0b-a549-1993c113569c.host          (records: 1)
+        AAAA fd00:1122:3344:101::21
+    name: 6c3ae381-04f7-41ea-b0ac-74db387dbc3a.host          (records: 1)
+        AAAA fd00:1122:3344:102::24
+    name: 803bfb63-c246-41db-b0da-d3b87ddfc63d.host          (records: 1)
+        AAAA fd00:1122:3344:101::23
+    name: 8e3dd7a4-75a3-4917-a6f4-0991bbdef7ea.host          (records: 1)
+        AAAA fd00:1122:3344:104::25
+    name: 97753dbd-5a0f-4273-b1be-db6bb2b69381.host          (records: 1)
+        AAAA fd00:1122:3344:3::1
+    name: 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6.sled          (records: 1)
+        AAAA fd00:1122:3344:101::1
+    name: 99e2f30b-3174-40bf-a78a-90da8abba8ca.host          (records: 1)
+        AAAA fd00:1122:3344:1::1
+    name: 9a867dc9-d505-427f-9eff-cdb1d4d9bd73.sled          (records: 1)
+        AAAA fd00:1122:3344:106::1
+    name: @                                                  (records: 3)
+        NS   ns1.control-plane.oxide.internal
+        NS   ns2.control-plane.oxide.internal
+        NS   ns3.control-plane.oxide.internal
+    name: _clickhouse-admin-single-server._tcp               (records: 1)
+        SRV  port  8888 353b3b65-20f7-48c3-88f7-495bd5d31545.host.control-plane.oxide.internal
+    name: _clickhouse-native._tcp                            (records: 1)
+        SRV  port  9000 353b3b65-20f7-48c3-88f7-495bd5d31545.host.control-plane.oxide.internal
+    name: _clickhouse._tcp                                   (records: 1)
+        SRV  port  8123 353b3b65-20f7-48c3-88f7-495bd5d31545.host.control-plane.oxide.internal
+    name: _crucible-pantry._tcp                              (records: 3)
+        SRV  port 17000 ad6a3a03-8d0f-4504-99a4-cbf73d69b973.host.control-plane.oxide.internal
+        SRV  port 17000 ba4994a8-23f9-4b1a-a84f-a08d74591389.host.control-plane.oxide.internal
+        SRV  port 17000 d07a1fed-4235-4821-a1e5-f7eb2646ff33.host.control-plane.oxide.internal
+    name: _crucible._tcp.3a7c2683-58bc-479c-9c16-2f9dfc102e29 (records: 1)
+        SRV  port 32345 3a7c2683-58bc-479c-9c16-2f9dfc102e29.host.control-plane.oxide.internal
+    name: _crucible._tcp.5199c033-4cf9-4ab6-8ae7-566bd7606363 (records: 1)
+        SRV  port 32345 5199c033-4cf9-4ab6-8ae7-566bd7606363.host.control-plane.oxide.internal
+    name: _crucible._tcp.8e3dd7a4-75a3-4917-a6f4-0991bbdef7ea (records: 1)
+        SRV  port 32345 8e3dd7a4-75a3-4917-a6f4-0991bbdef7ea.host.control-plane.oxide.internal
+    name: _crucible._tcp.bd354eef-d8a6-4165-9124-283fb5e46d77 (records: 1)
+        SRV  port 32345 bd354eef-d8a6-4165-9124-283fb5e46d77.host.control-plane.oxide.internal
+    name: _crucible._tcp.c1467d0e-b3de-4bd8-b36a-d8b36626badc (records: 1)
+        SRV  port 32345 c1467d0e-b3de-4bd8-b36a-d8b36626badc.host.control-plane.oxide.internal
+    name: _crucible._tcp.ecbe0b3d-1acc-44b2-b6d4-f4d2770516e4 (records: 1)
+        SRV  port 32345 ecbe0b3d-1acc-44b2-b6d4-f4d2770516e4.host.control-plane.oxide.internal
+    name: _external-dns._tcp                                 (records: 3)
+        SRV  port  5353 43a0588f-5b57-469b-a173-db6cb6105e4c.host.control-plane.oxide.internal
+        SRV  port  5353 6c3ae381-04f7-41ea-b0ac-74db387dbc3a.host.control-plane.oxide.internal
+        SRV  port  5353 803bfb63-c246-41db-b0da-d3b87ddfc63d.host.control-plane.oxide.internal
+    name: _internal-ntp._tcp                                 (records: 6)
+        SRV  port   123 62620961-fc4a-481e-968b-f5acbac0dc63.host.control-plane.oxide.internal
+        SRV  port   123 6444f8a5-6465-4f0b-a549-1993c113569c.host.control-plane.oxide.internal
+        SRV  port   123 b910534b-2a53-4335-a3d9-5311d2f3186a.host.control-plane.oxide.internal
+        SRV  port   123 c800ba17-240e-4b72-8ae6-afc30b6baa96.host.control-plane.oxide.internal
+        SRV  port   123 dd66f033-4fe8-438e-afb4-29d3561d4c3e.host.control-plane.oxide.internal
+        SRV  port   123 e8fe709c-725f-4bb2-b714-ffcda13a9e54.host.control-plane.oxide.internal
+    name: _nameservice._tcp                                  (records: 3)
+        SRV  port  5353 427ec88f-f467-42fa-9bbb-66a91a36103c.host.control-plane.oxide.internal
+        SRV  port  5353 97753dbd-5a0f-4273-b1be-db6bb2b69381.host.control-plane.oxide.internal
+        SRV  port  5353 99e2f30b-3174-40bf-a78a-90da8abba8ca.host.control-plane.oxide.internal
+    name: _nexus._tcp                                        (records: 3)
+        SRV  port 12221 0c71b3b2-6ceb-4e8f-b020-b08675e83038.host.control-plane.oxide.internal
+        SRV  port 12221 33862f97-2897-4d53-a9a6-78a80f7eb13f.host.control-plane.oxide.internal
+        SRV  port 12221 466a9f29-62bf-4e63-924a-b9efdb86afec.host.control-plane.oxide.internal
+    name: _oximeter-reader._tcp                              (records: 1)
+        SRV  port  9000 353b3b65-20f7-48c3-88f7-495bd5d31545.host.control-plane.oxide.internal
+    name: _repo-depot._tcp                                   (records: 7)
+        SRV  port 12348 2b8f0cb3-0295-4b3c-bc58-4fe88b57112c.sled.control-plane.oxide.internal
+        SRV  port 12348 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6.sled.control-plane.oxide.internal
+        SRV  port 12348 9a867dc9-d505-427f-9eff-cdb1d4d9bd73.sled.control-plane.oxide.internal
+        SRV  port 12348 aff6c093-197d-42c5-ad80-9f10ba051a34.sled.control-plane.oxide.internal
+        SRV  port 12348 b82ede02-399c-48c6-a1de-411df4fa49a7.sled.control-plane.oxide.internal
+        SRV  port 12348 d81c6a84-79b8-4958-ae41-ea46c9b19763.sled.control-plane.oxide.internal
+        SRV  port 12348 e96e226f-4ed9-4c01-91b9-69a9cd076c9e.sled.control-plane.oxide.internal
+    name: ad6a3a03-8d0f-4504-99a4-cbf73d69b973.host          (records: 1)
+        AAAA fd00:1122:3344:102::25
+    name: aff6c093-197d-42c5-ad80-9f10ba051a34.sled          (records: 1)
+        AAAA fd00:1122:3344:104::1
+    name: b82ede02-399c-48c6-a1de-411df4fa49a7.sled          (records: 1)
+        AAAA fd00:1122:3344:105::1
+    name: b910534b-2a53-4335-a3d9-5311d2f3186a.host          (records: 1)
+        AAAA fd00:1122:3344:105::21
+    name: ba4994a8-23f9-4b1a-a84f-a08d74591389.host          (records: 1)
+        AAAA fd00:1122:3344:101::24
+    name: bd354eef-d8a6-4165-9124-283fb5e46d77.host          (records: 1)
+        AAAA fd00:1122:3344:102::26
+    name: c1467d0e-b3de-4bd8-b36a-d8b36626badc.host          (records: 1)
+        AAAA fd00:1122:3344:107::22
+    name: c800ba17-240e-4b72-8ae6-afc30b6baa96.host          (records: 1)
+        AAAA fd00:1122:3344:107::21
+    name: d07a1fed-4235-4821-a1e5-f7eb2646ff33.host          (records: 1)
+        AAAA fd00:1122:3344:104::24
+    name: d81c6a84-79b8-4958-ae41-ea46c9b19763.sled          (records: 1)
+        AAAA fd00:1122:3344:103::1
+    name: dd66f033-4fe8-438e-afb4-29d3561d4c3e.host          (records: 1)
+        AAAA fd00:1122:3344:103::21
+    name: e8fe709c-725f-4bb2-b714-ffcda13a9e54.host          (records: 1)
+        AAAA fd00:1122:3344:104::21
+    name: e96e226f-4ed9-4c01-91b9-69a9cd076c9e.sled          (records: 1)
+        AAAA fd00:1122:3344:107::1
     name: ecbe0b3d-1acc-44b2-b6d4-f4d2770516e4.host          (records: 1)
         AAAA fd00:1122:3344:105::22
     name: ns1                                                (records: 1)

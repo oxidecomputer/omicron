@@ -2,7 +2,7 @@
 # so that discretionary zones don't make their way onto it. (We're going to
 # expunge it below to test that we don't try and update zone image sources
 # on expunged sleds.)
-load-example --nsleds 6 --ndisks-per-sled 1 --sled-policy 5:non-provisionable
+load-example --nsleds 7 --ndisks-per-sled 1 --sled-policy 5:non-provisionable
 
 sled-list
 
@@ -42,9 +42,25 @@ sled-update-install-dataset serial4 --from-repo repo-2.0.0.zip
 sled-update-install-dataset serial5 --to-target-release
 sled-set serial5 policy expunged
 
+# On the seventh sled, update to the target release but hide the sled
+# from inventory. This should prevent changes to the blueprint for
+# this sled.
+sled-update-install-dataset serial6 --to-target-release
+sled-set serial6 inventory-hidden
+
 # Generate an inventory and run a blueprint planning step.
 inventory-generate
 blueprint-plan latest eb0796d5-ab8a-4f7b-a884-b4aeacb8ab51
 
 # This diff should show expected changes to the blueprint.
 blueprint-diff 8da82a8e-bf97-4fbd-8ddd-9f6462732cf1 latest
+
+# Bring the hidden sled back.
+sled-set serial6 inventory-visible
+
+# Run another inventory and blueprint planning step.
+inventory-generate
+blueprint-plan latest 61f451b3-2121-4ed6-91c7-a550054f6c21
+
+# This diff should show changes to the sled that's back in inventory.
+blueprint-diff 58d5e830-0884-47d8-a7cd-b2b3751adeb4 latest
