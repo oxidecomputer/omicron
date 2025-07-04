@@ -2854,6 +2854,52 @@
           }
         ]
       },
+      "BootImageHeader": {
+        "type": "object",
+        "properties": {
+          "data_size": {
+            "type": "integer",
+            "format": "uint64",
+            "minimum": 0
+          },
+          "flags": {
+            "type": "integer",
+            "format": "uint64",
+            "minimum": 0
+          },
+          "image_name": {
+            "type": "string"
+          },
+          "image_size": {
+            "type": "integer",
+            "format": "uint64",
+            "minimum": 0
+          },
+          "sha256": {
+            "type": "array",
+            "items": {
+              "type": "integer",
+              "format": "uint8",
+              "minimum": 0
+            },
+            "minItems": 32,
+            "maxItems": 32
+          },
+          "target_size": {
+            "type": "integer",
+            "format": "uint64",
+            "minimum": 0
+          }
+        },
+        "required": [
+          "data_size",
+          "flags",
+          "image_name",
+          "image_size",
+          "sha256",
+          "target_size"
+        ]
+      },
       "BootOrderEntry": {
         "description": "An entry in the boot order stored in a [`BootSettings`] component.",
         "type": "object",
@@ -2869,6 +2915,155 @@
         },
         "required": [
           "id"
+        ]
+      },
+      "BootPartitionContents": {
+        "type": "object",
+        "properties": {
+          "boot_disk": {
+            "x-rust-type": {
+              "crate": "std",
+              "parameters": [
+                {
+                  "$ref": "#/components/schemas/M2Slot"
+                },
+                {
+                  "type": "string"
+                }
+              ],
+              "path": "::std::result::Result",
+              "version": "*"
+            },
+            "oneOf": [
+              {
+                "type": "object",
+                "properties": {
+                  "ok": {
+                    "$ref": "#/components/schemas/M2Slot"
+                  }
+                },
+                "required": [
+                  "ok"
+                ]
+              },
+              {
+                "type": "object",
+                "properties": {
+                  "err": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "err"
+                ]
+              }
+            ]
+          },
+          "slot_a": {
+            "x-rust-type": {
+              "crate": "std",
+              "parameters": [
+                {
+                  "$ref": "#/components/schemas/BootPartitionDetails"
+                },
+                {
+                  "type": "string"
+                }
+              ],
+              "path": "::std::result::Result",
+              "version": "*"
+            },
+            "oneOf": [
+              {
+                "type": "object",
+                "properties": {
+                  "ok": {
+                    "$ref": "#/components/schemas/BootPartitionDetails"
+                  }
+                },
+                "required": [
+                  "ok"
+                ]
+              },
+              {
+                "type": "object",
+                "properties": {
+                  "err": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "err"
+                ]
+              }
+            ]
+          },
+          "slot_b": {
+            "x-rust-type": {
+              "crate": "std",
+              "parameters": [
+                {
+                  "$ref": "#/components/schemas/BootPartitionDetails"
+                },
+                {
+                  "type": "string"
+                }
+              ],
+              "path": "::std::result::Result",
+              "version": "*"
+            },
+            "oneOf": [
+              {
+                "type": "object",
+                "properties": {
+                  "ok": {
+                    "$ref": "#/components/schemas/BootPartitionDetails"
+                  }
+                },
+                "required": [
+                  "ok"
+                ]
+              },
+              {
+                "type": "object",
+                "properties": {
+                  "err": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "err"
+                ]
+              }
+            ]
+          }
+        },
+        "required": [
+          "boot_disk",
+          "slot_a",
+          "slot_b"
+        ]
+      },
+      "BootPartitionDetails": {
+        "type": "object",
+        "properties": {
+          "artifact_hash": {
+            "type": "string",
+            "format": "hex string (32 bytes)"
+          },
+          "artifact_size": {
+            "type": "integer",
+            "format": "uint",
+            "minimum": 0
+          },
+          "header": {
+            "$ref": "#/components/schemas/BootImageHeader"
+          }
+        },
+        "required": [
+          "artifact_hash",
+          "artifact_size",
+          "header"
         ]
       },
       "BootSettings": {
@@ -3547,6 +3742,9 @@
         "description": "Describes the last attempt made by the sled-agent-config-reconciler to reconcile the current sled config against the actual state of the sled.",
         "type": "object",
         "properties": {
+          "boot_partitions": {
+            "$ref": "#/components/schemas/BootPartitionContents"
+          },
           "datasets": {
             "type": "object",
             "additionalProperties": {
@@ -3588,6 +3786,7 @@
           }
         },
         "required": [
+          "boot_partitions",
           "datasets",
           "external_disks",
           "last_reconciled_config",
@@ -5243,6 +5442,14 @@
         },
         "required": [
           "status"
+        ]
+      },
+      "M2Slot": {
+        "description": "Describes an M.2 slot, often in the context of writing a system image to it.",
+        "type": "string",
+        "enum": [
+          "A",
+          "B"
         ]
       },
       "MacAddr": {
@@ -8149,14 +8356,6 @@
         "description": "Zpool names are of the format ox{i,p}_<UUID>. They are either Internal or External, and should be unique",
         "type": "string",
         "pattern": "^ox[ip]_[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
-      },
-      "M2Slot": {
-        "description": "Describes an M.2 slot, often in the context of writing a system image to it.",
-        "type": "string",
-        "enum": [
-          "A",
-          "B"
-        ]
       },
       "TypedUuidForPropolisKind": {
         "type": "string",

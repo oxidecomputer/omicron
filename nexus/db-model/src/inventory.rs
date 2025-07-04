@@ -38,9 +38,11 @@ use nexus_db_schema::schema::{
     inv_omicron_sled_config_dataset, inv_omicron_sled_config_disk,
     inv_omicron_sled_config_zone, inv_omicron_sled_config_zone_nic,
     inv_physical_disk, inv_root_of_trust, inv_root_of_trust_page,
-    inv_service_processor, inv_sled_agent, inv_zpool, sw_caboose,
-    sw_root_of_trust_page,
+    inv_service_processor, inv_sled_agent, inv_sled_boot_partition,
+    inv_sled_config_reconciler, inv_zpool, sw_caboose, sw_root_of_trust_page,
 };
+use nexus_sled_agent_shared::inventory::BootImageHeader;
+use nexus_sled_agent_shared::inventory::BootPartitionDetails;
 use nexus_sled_agent_shared::inventory::ConfigReconcilerInventoryStatus;
 use nexus_sled_agent_shared::inventory::MupdateOverrideBootInventory;
 use nexus_sled_agent_shared::inventory::MupdateOverrideInventory;
@@ -64,6 +66,7 @@ use omicron_common::api::internal::shared::NetworkInterface;
 use omicron_common::disk::DatasetConfig;
 use omicron_common::disk::DatasetName;
 use omicron_common::disk::DiskIdentity;
+use omicron_common::disk::M2Slot;
 use omicron_common::disk::OmicronPhysicalDiskConfig;
 use omicron_common::update::OmicronZoneManifestSource;
 use omicron_common::zpool_name::ZpoolName;
@@ -87,6 +90,7 @@ use std::collections::BTreeSet;
 use std::net::{IpAddr, SocketAddrV6};
 use std::time::Duration;
 use thiserror::Error;
+use tufaceous_artifact::ArtifactHash as ExternalArtifactHash;
 use uuid::Uuid;
 
 // See [`nexus_types::inventory::PowerState`].
@@ -838,11 +842,6 @@ pub struct InvSledAgent {
     // Soft foreign key to an `InvOmicronSledConfig`
     pub ledgered_sled_config: Option<DbTypedUuid<OmicronSledConfigKind>>,
 
-    // Soft foreign key to an `InvOmicronSledConfig`. May or may not be the same
-    // as `ledgered_sled_config`.
-    pub last_reconciliation_sled_config:
-        Option<DbTypedUuid<OmicronSledConfigKind>>,
-
     #[diesel(embed)]
     pub reconciler_status: InvConfigReconcilerStatus,
 
@@ -943,13 +942,173 @@ impl_enum_type!(
     Idle => b"idle"
 );
 
+/// See [`nexus_sled_agent_shared::inventory::ConfigReconcilerInventory`].
+#[derive(Queryable, Clone, Debug, Selectable, Insertable)]
+#[diesel(table_name = inv_sled_config_reconciler)]
+pub struct InvSledConfigReconciler {
+    pub inv_collection_id: DbTypedUuid<CollectionKind>,
+    pub sled_id: DbTypedUuid<SledKind>,
+    pub last_reconciled_config: DbTypedUuid<OmicronSledConfigKind>,
+    boot_disk_slot: Option<SqlU8>,
+    boot_disk_error: Option<String>,
+    pub boot_partition_a_error: Option<String>,
+    pub boot_partition_b_error: Option<String>,
+}
+
+impl InvSledConfigReconciler {
+    pub fn new(
+        inv_collection_id: CollectionUuid,
+        sled_id: SledUuid,
+        last_reconciled_config: OmicronSledConfigUuid,
+        boot_disk: Result<M2Slot, String>,
+        boot_partition_a_error: Option<String>,
+        boot_partition_b_error: Option<String>,
+    ) -> Self {
+        let (boot_disk_slot, boot_disk_error) = match boot_disk {
+            Ok(M2Slot::A) => (Some(SqlU8(0)), None),
+            Ok(M2Slot::B) => (Some(SqlU8(1)), None),
+            Err(err) => (None, Some(err)),
+        };
+
+        Self {
+            inv_collection_id: inv_collection_id.into(),
+            sled_id: sled_id.into(),
+            last_reconciled_config: last_reconciled_config.into(),
+            boot_disk_slot,
+            boot_disk_error,
+            boot_partition_a_error,
+            boot_partition_b_error,
+        }
+    }
+
+    pub fn boot_disk(&self) -> anyhow::Result<Result<M2Slot, String>> {
+        match (self.boot_disk_slot.as_deref(), self.boot_disk_error.as_ref()) {
+            (Some(0), None) => Ok(Ok(M2Slot::A)),
+            (Some(1), None) => Ok(Ok(M2Slot::B)),
+            (Some(n), None) => {
+                bail!(
+                    "inv_sled_config_reconciler CHECK constraint violated \
+                     (collection {}, sled {}): \
+                     boot_disk_slot other than 0 or 1: {n}",
+                    self.inv_collection_id,
+                    self.sled_id,
+                );
+            }
+            (None, Some(err)) => Ok(Err(err.clone())),
+            (None, None) => {
+                bail!(
+                    "inv_sled_config_reconciler CHECK constraint violated \
+                     (collection {}, sled {}): \
+                     neither boot_disk_slot nor boot_disk_error set",
+                    self.inv_collection_id,
+                    self.sled_id,
+                );
+            }
+            (Some(_), Some(_)) => {
+                bail!(
+                    "inv_sled_config_reconciler CHECK constraint violated \
+                     (collection {}, sled {}): \
+                     both boot_disk_slot and boot_disk_error set",
+                    self.inv_collection_id,
+                    self.sled_id,
+                );
+            }
+        }
+    }
+}
+
+/// See [`nexus_sled_agent_shared::inventory::BootPartitionDetails`].
+#[derive(Queryable, Clone, Debug, Selectable, Insertable)]
+#[diesel(table_name = inv_sled_boot_partition)]
+pub struct InvSledBootPartition {
+    pub inv_collection_id: DbTypedUuid<CollectionKind>,
+    pub sled_id: DbTypedUuid<SledKind>,
+    /// This field is `pub` so `nexus-db-queries` can use it during pagination;
+    /// consumers of this type probably want the `slot()` method instead to
+    /// convert this value to an [`M2Slot`].
+    pub boot_disk_slot: SqlU8,
+    artifact_hash: ArtifactHash,
+    artifact_size: i64,
+    header_flags: i64,
+    header_data_size: i64,
+    header_image_size: i64,
+    header_target_size: i64,
+    header_sha256: ArtifactHash,
+    header_image_name: String,
+}
+
+impl InvSledBootPartition {
+    pub fn new(
+        inv_collection_id: CollectionUuid,
+        sled_id: SledUuid,
+        boot_disk_slot: M2Slot,
+        details: BootPartitionDetails,
+    ) -> Self {
+        let boot_disk_slot = match boot_disk_slot {
+            M2Slot::A => 0,
+            M2Slot::B => 1,
+        };
+        Self {
+            inv_collection_id: inv_collection_id.into(),
+            sled_id: sled_id.into(),
+            boot_disk_slot: SqlU8(boot_disk_slot),
+            artifact_hash: ArtifactHash(details.artifact_hash),
+            // We use `as i64` because we don't want to throw errors if any of
+            // these fields happen to have their high bit set, and we don't care
+            // that that might produce negative numbers in the DB. E.g., we
+            // never need to order columns based on any of these values; we only
+            // want to faithfully store and load them. My kingdom for unsigned
+            // integers in SQL.
+            artifact_size: details.artifact_size as i64,
+            header_flags: details.header.flags as i64,
+            header_data_size: details.header.data_size as i64,
+            header_image_size: details.header.image_size as i64,
+            header_target_size: details.header.target_size as i64,
+            header_sha256: ArtifactHash(ExternalArtifactHash(
+                details.header.sha256,
+            )),
+            header_image_name: details.header.image_name,
+        }
+    }
+
+    pub fn slot(&self) -> anyhow::Result<M2Slot> {
+        match *self.boot_disk_slot {
+            0 => Ok(M2Slot::A),
+            1 => Ok(M2Slot::B),
+            n => bail!(
+                "inv_sled_boot_partition CHECK constraint violated \
+                 (collection {}, sled {}): \
+                 boot_disk_slot other than 0 or 1: {n}",
+                self.inv_collection_id,
+                self.sled_id,
+            ),
+        }
+    }
+}
+
+impl From<InvSledBootPartition> for BootPartitionDetails {
+    fn from(value: InvSledBootPartition) -> Self {
+        Self {
+            artifact_hash: *value.artifact_hash,
+            artifact_size: value.artifact_size as usize,
+            header: BootImageHeader {
+                flags: value.header_flags as u64,
+                data_size: value.header_data_size as u64,
+                image_size: value.header_image_size as u64,
+                target_size: value.header_target_size as u64,
+                sha256: value.header_sha256.0.0,
+                image_name: value.header_image_name,
+            },
+        }
+    }
+}
+
 impl InvSledAgent {
     /// Construct a new `InvSledAgent`.
     pub fn new_without_baseboard(
         collection_id: CollectionUuid,
         sled_agent: &nexus_types::inventory::SledAgent,
         ledgered_sled_config: Option<OmicronSledConfigUuid>,
-        last_reconciliation_sled_config: Option<OmicronSledConfigUuid>,
         reconciler_status: InvConfigReconcilerStatus,
         zone_image_resolver: InvZoneImageResolver,
     ) -> Result<InvSledAgent, anyhow::Error> {
@@ -990,8 +1149,6 @@ impl InvSledAgent {
                 ),
                 reservoir_size: ByteCount::from(sled_agent.reservoir_size),
                 ledgered_sled_config: ledgered_sled_config.map(From::from),
-                last_reconciliation_sled_config:
-                    last_reconciliation_sled_config.map(From::from),
                 reconciler_status,
                 zone_image_resolver,
             })

@@ -3645,11 +3645,6 @@ CREATE TABLE IF NOT EXISTS omicron.public.inv_sled_agent (
     -- This is optional because newly-added sleds don't yet have a config.
     ledgered_sled_config UUID,
 
-    -- Most-recently-reconciled `OmicronSledConfig`
-    -- (foreign key into `inv_omicron_sled_config` table)
-    -- This is optional because the reconciler may not have run yet
-    last_reconciliation_sled_config UUID,
-
     -- Columns making up the status of the config reconciler.
     reconciler_status_kind omicron.public.inv_config_reconciler_status_kind NOT NULL,
     -- (foreign key into `inv_omicron_sled_config` table)
@@ -3739,6 +3734,76 @@ CREATE TABLE IF NOT EXISTS omicron.public.inv_sled_agent (
     ),
 
     PRIMARY KEY (inv_collection_id, sled_id)
+);
+
+CREATE TABLE IF NOT EXISTS omicron.public.inv_sled_config_reconciler (
+    -- where this observation came from
+    -- (foreign key into `inv_collection` table)
+    inv_collection_id UUID NOT NULL,
+
+    -- unique id for this sled (should be foreign keys into `sled` table, though
+    -- it's conceivable a sled will report an id that we don't know about);
+    -- guaranteed to match a row in this collection's `inv_sled_agent`
+    sled_id UUID NOT NULL,
+
+    -- Most-recently-reconciled `OmicronSledConfig`
+    -- (foreign key into `inv_omicron_sled_config` table)
+    last_reconciled_config UUID NOT NULL,
+
+    -- Which internal disk slot did we use at boot?
+    --
+    -- If not NULL, `boot_disk_slot` must be 0 or 1 (corresponding to M2Slot::A
+    -- and M2Slot::B, respectively). The column pair `boot_disk_slot` /
+    -- `boot_disk_error` represents a Rust `Result`; one or the other must be
+    -- non-NULL, but not both.
+    boot_disk_slot INT2 CHECK (boot_disk_slot >= 0 AND boot_disk_slot <= 1),
+    boot_disk_error TEXT,
+    CONSTRAINT boot_disk_slot_or_error CHECK (
+        (boot_disk_slot IS NULL AND boot_disk_error IS NOT NULL)
+        OR
+        (boot_disk_slot IS NOT NULL AND boot_disk_error IS NULL)
+    ),
+
+    -- If either error string is present, there was an error reading the boot
+    -- partition for the corresponding M2Slot.
+    --
+    -- For either or both columns if NULL, there will be a row in
+    -- `inv_sled_boot_partition` describing the contents of the boot partition
+    -- for the given slot. As above 0=a and 1=b.
+    boot_partition_a_error TEXT,
+    boot_partition_b_error TEXT,
+
+    PRIMARY KEY (inv_collection_id, sled_id)
+);
+
+CREATE TABLE IF NOT EXISTS omicron.public.inv_sled_boot_partition (
+    -- where this observation came from
+    -- (foreign key into `inv_collection` table)
+    inv_collection_id UUID NOT NULL,
+
+    -- unique id for this sled (should be foreign keys into `sled` table, though
+    -- it's conceivable a sled will report an id that we don't know about)
+    sled_id UUID NOT NULL,
+
+    -- the boot disk slot (0=M2Slot::A, 1=M2Slot::B)
+    boot_disk_slot INT2
+        CHECK (boot_disk_slot >= 0 AND boot_disk_slot <= 1) NOT NULL,
+
+    -- SHA256 hash of the artifact; if we have a TUF repo containing this OS
+    -- image, this will match the artifact hash of the phase 2 image
+    artifact_hash STRING(64) NOT NULL,
+    -- The length of the artifact in bytes
+    artifact_size INT8 NOT NULL,
+
+    -- Fields comprising the header of the phase 2 image
+    header_flags INT8 NOT NULL,
+    header_data_size INT8 NOT NULL,
+    header_image_size INT8 NOT NULL,
+    header_target_size INT8 NOT NULL,
+    header_sha256 STRING(64) NOT NULL,
+    header_image_name TEXT NOT NULL,
+
+    PRIMARY KEY (inv_collection_id, sled_id, boot_disk_slot)
 );
 
 CREATE TABLE IF NOT EXISTS omicron.public.inv_physical_disk (
@@ -6110,7 +6175,7 @@ INSERT INTO omicron.public.db_metadata (
     version,
     target_version
 ) VALUES
-    (TRUE, NOW(), NOW(), '155.0.0', NULL)
+    (TRUE, NOW(), NOW(), '156.0.0', NULL)
 ON CONFLICT DO NOTHING;
 
 COMMIT;
