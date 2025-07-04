@@ -135,7 +135,7 @@ sled b82ede02-399c-48c6-a1de-411df4fa49a7: install dataset updated: from repo at
 > sled-update-install-dataset serial5 --to-target-release
 sled 9a867dc9-d505-427f-9eff-cdb1d4d9bd73: install dataset updated: to target release (system version 1.0.0)
 
-> sled-set-policy serial5 expunged
+> sled-set serial5 policy expunged
 set sled 9a867dc9-d505-427f-9eff-cdb1d4d9bd73 policy to expunged
 
 

@@ -40,7 +40,7 @@ sled-update-install-dataset serial4 --from-repo repo-2.0.0.zip
 # On the sixth sled, update to the target release (so it shows up in inventory).
 # Then, mark the sled expunged (in the planning input).
 sled-update-install-dataset serial5 --to-target-release
-sled-set-policy serial5 expunged
+sled-set serial5 policy expunged
 
 # Generate an inventory and run a blueprint planning step.
 inventory-generate

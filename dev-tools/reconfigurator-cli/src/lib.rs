@@ -220,7 +220,7 @@ fn process_command(
         Commands::SledAdd(args) => cmd_sled_add(sim, args),
         Commands::SledRemove(args) => cmd_sled_remove(sim, args),
         Commands::SledShow(args) => cmd_sled_show(sim, args),
-        Commands::SledSetPolicy(args) => cmd_sled_set_policy(sim, args),
+        Commands::SledSet(args) => cmd_sled_set(sim, args),
         Commands::SledUpdateInstallDataset(args) => {
             cmd_sled_update_install_dataset(sim, args)
         }
@@ -277,8 +277,8 @@ enum Commands {
     SledRemove(SledRemoveArgs),
     /// show details about one sled
     SledShow(SledArgs),
-    /// set a sled's policy
-    SledSetPolicy(SledSetPolicyArgs),
+    /// set a value on a sled
+    SledSet(SledSetArgs),
     /// update the install dataset on a sled, simulating a mupdate
     SledUpdateInstallDataset(SledUpdateInstallDatasetArgs),
     /// simulate updating the sled's SP versions
@@ -361,11 +361,24 @@ struct SledArgs {
 }
 
 #[derive(Debug, Args)]
-struct SledSetPolicyArgs {
+struct SledSetArgs {
     /// id of the sled
     sled_id: SledOpt,
 
-    /// The policy to set for the sled
+    /// the command to set on the sled
+    #[clap(subcommand)]
+    command: SledSetCommand,
+}
+
+#[derive(Debug, Subcommand)]
+enum SledSetCommand {
+    /// set the policy for this sled
+    Policy(SledSetPolicyArgs),
+}
+
+#[derive(Debug, Args)]
+struct SledSetPolicyArgs {
+    /// the policy to set
     #[clap(value_enum)]
     policy: SledPolicyOpt,
 }
@@ -1194,22 +1207,27 @@ fn cmd_sled_show(
     Ok(Some(s))
 }
 
-fn cmd_sled_set_policy(
+fn cmd_sled_set(
     sim: &mut ReconfiguratorSim,
-    args: SledSetPolicyArgs,
+    args: SledSetArgs,
 ) -> anyhow::Result<Option<String>> {
     let mut state = sim.current_state().to_mut();
     let system = state.system_mut();
     let sled_id = args.sled_id.to_sled_id(system.description())?;
-    system.description_mut().sled_set_policy(sled_id, args.policy.into())?;
-    sim.commit_and_bump(
-        format!(
-            "reconfigurator-cli sled-set-policy: {} to {}",
-            sled_id, args.policy,
-        ),
-        state,
-    );
-    Ok(Some(format!("set sled {} policy to {}", sled_id, args.policy)))
+
+    match args.command {
+        SledSetCommand::Policy(SledSetPolicyArgs { policy }) => {
+            system.description_mut().sled_set_policy(sled_id, policy.into())?;
+            sim.commit_and_bump(
+                format!(
+                    "reconfigurator-cli sled-set policy: {} to {}",
+                    sled_id, policy
+                ),
+                state,
+            );
+            Ok(Some(format!("set sled {sled_id} policy to {policy}")))
+        }
+    }
 }
 
 fn cmd_sled_update_install_dataset(
