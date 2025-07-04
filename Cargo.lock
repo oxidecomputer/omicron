@@ -717,7 +717,7 @@ dependencies = [
  "bitflags 2.9.0",
  "cexpr",
  "clang-sys",
- "itertools 0.12.1",
+ "itertools 0.10.5",
  "lazy_static",
  "lazycell",
  "log",
@@ -740,7 +740,7 @@ dependencies = [
  "bitflags 2.9.0",
  "cexpr",
  "clang-sys",
- "itertools 0.13.0",
+ "itertools 0.10.5",
  "log",
  "prettyplease",
  "proc-macro2",
@@ -1068,9 +1068,9 @@ dependencies = [
 
 [[package]]
 name = "camino-tempfile-ext"
-version = "0.3.1"
+version = "0.3.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "97daccb5e4621ca2bbd3e8716a24f11721afed7fc82c9008d30c6fed3390183a"
+checksum = "1b7b17f16012d633d3e2bd2f8929c176963ba2cbb88cfff867c39ee49288447b"
 dependencies = [
  "anstream",
  "anstyle",
@@ -1663,7 +1663,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "117725a109d387c937a1533ce01b450cbde6b88abceea8473c4d7a85853cda3c"
 dependencies = [
  "lazy_static",
- "windows-sys 0.59.0",
+ "windows-sys 0.48.0",
 ]
 
 [[package]]
@@ -4519,7 +4519,7 @@ dependencies = [
  "js-sys",
  "log",
  "wasm-bindgen",
- "windows-core 0.60.1",
+ "windows-core 0.58.0",
 ]
 
 [[package]]
@@ -5476,7 +5476,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "4979f22fdb869068da03c9f7528f8297c6fd2606bc3a4affe42e6a823fdb8da4"
 dependencies = [
  "cfg-if",
- "windows-targets 0.52.6",
+ "windows-targets 0.48.5",
 ]
 
 [[package]]
@@ -6728,6 +6728,7 @@ dependencies = [
  "camino",
  "chrono",
  "indexmap 2.9.0",
+ "itertools 0.14.0",
  "nexus-inventory",
  "nexus-reconfigurator-planning",
  "nexus-sled-agent-shared",
@@ -7742,6 +7743,7 @@ dependencies = [
  "clap",
  "crossterm",
  "crucible-agent-client",
+ "crucible-pantry-client",
  "csv",
  "diesel",
  "dropshot",
@@ -8215,6 +8217,7 @@ dependencies = [
  "getrandom 0.3.1",
  "group",
  "hashbrown 0.15.4",
+ "heck 0.4.1",
  "hickory-proto 0.25.2",
  "hmac",
  "hyper",
@@ -8227,7 +8230,6 @@ dependencies = [
  "ipnet",
  "ipnetwork",
  "itertools 0.10.5",
- "itertools 0.12.1",
  "lalrpop-util",
  "lazy_static",
  "libc",
@@ -8604,10 +8606,11 @@ dependencies = [
 
 [[package]]
 name = "oxide-tokio-rt"
-version = "0.1.1"
+version = "0.1.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "4b64cff9722f687d5ba4c954d9a28e18d3e26c8861d588098cfe82871b3e31d1"
+checksum = "84bd87abf37c68d414e4df90a545857542140e07206f75039b8f63b244da87b8"
 dependencies = [
+ "anyhow",
  "tokio",
  "tokio-dtrace",
 ]
@@ -11994,6 +11997,7 @@ dependencies = [
  "anyhow",
  "assert_matches",
  "async-trait",
+ "bytes",
  "camino",
  "camino-tempfile",
  "chrono",
@@ -12018,6 +12022,7 @@ dependencies = [
  "scopeguard",
  "serde",
  "serde_json",
+ "sha2",
  "sled-agent-api",
  "sled-agent-types",
  "sled-hardware",
@@ -12426,7 +12431,7 @@ version = "0.8.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "03c3c6b7927ffe7ecaa769ee0e3994da3b8cafc8f444578982c83ecb161af917"
 dependencies = [
- "heck 0.5.0",
+ "heck 0.4.1",
  "proc-macro2",
  "quote",
  "syn 2.0.104",
@@ -13805,7 +13810,7 @@ dependencies = [
 [[package]]
 name = "tufaceous"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/tufaceous?branch=main#681cb87d43712ce0f00d469d538080e8368bf991"
+source = "git+https://github.com/oxidecomputer/tufaceous?branch=main#d2cf83250c5334d3e1e1166d92be1d80aa015871"
 dependencies = [
  "anyhow",
  "camino",
@@ -13826,7 +13831,7 @@ dependencies = [
 [[package]]
 name = "tufaceous-artifact"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/tufaceous?branch=main#681cb87d43712ce0f00d469d538080e8368bf991"
+source = "git+https://github.com/oxidecomputer/tufaceous?branch=main#d2cf83250c5334d3e1e1166d92be1d80aa015871"
 dependencies = [
  "daft",
  "hex",
@@ -13843,7 +13848,7 @@ dependencies = [
 [[package]]
 name = "tufaceous-brand-metadata"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/tufaceous?branch=main#681cb87d43712ce0f00d469d538080e8368bf991"
+source = "git+https://github.com/oxidecomputer/tufaceous?branch=main#d2cf83250c5334d3e1e1166d92be1d80aa015871"
 dependencies = [
  "semver 1.0.26",
  "serde",
@@ -13855,7 +13860,7 @@ dependencies = [
 [[package]]
 name = "tufaceous-lib"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/tufaceous?branch=main#681cb87d43712ce0f00d469d538080e8368bf991"
+source = "git+https://github.com/oxidecomputer/tufaceous?branch=main#d2cf83250c5334d3e1e1166d92be1d80aa015871"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -14981,7 +14986,7 @@ version = "0.1.9"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "cf221c93e13a30d793f7645a0e7762c55d169dbb0a49671918a2319d289b10bb"
 dependencies = [
- "windows-sys 0.59.0",
+ "windows-sys 0.48.0",
 ]
 
 [[package]]
@@ -15025,24 +15030,11 @@ version = "0.58.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "6ba6d44ec8c2591c134257ce647b7ea6b20335bf6379a27dac5f1641fcf59f99"
 dependencies = [
- "windows-implement 0.58.0",
- "windows-interface 0.58.0",
+ "windows-implement",
+ "windows-interface",
  "windows-result 0.2.0",
  "windows-strings 0.1.0",
  "windows-targets 0.52.6",
-]
-
-[[package]]
-name = "windows-core"
-version = "0.60.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "ca21a92a9cae9bf4ccae5cf8368dce0837100ddf6e6d57936749e85f152f6247"
-dependencies = [
- "windows-implement 0.59.0",
- "windows-interface 0.59.1",
- "windows-link",
- "windows-result 0.3.1",
- "windows-strings 0.3.1",
 ]
 
 [[package]]
@@ -15057,32 +15049,10 @@ dependencies = [
 ]
 
 [[package]]
-name = "windows-implement"
-version = "0.59.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "83577b051e2f49a058c308f17f273b570a6a758386fc291b5f6a934dd84e48c1"
-dependencies = [
- "proc-macro2",
- "quote",
- "syn 2.0.104",
-]
-
-[[package]]
 name = "windows-interface"
 version = "0.58.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "053c4c462dc91d3b1504c6fe5a726dd15e216ba718e84a0e46a88fbe5ded3515"
-dependencies = [
- "proc-macro2",
- "quote",
- "syn 2.0.104",
-]
-
-[[package]]
-name = "windows-interface"
-version = "0.59.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "bd9211b69f8dcdfa817bfd14bf1c97c9188afa36f4750130fcdf3f400eca9fa8"
 dependencies = [
  "proc-macro2",
  "quote",

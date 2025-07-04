@@ -368,7 +368,7 @@ byteorder = "1.5.0"
 bytes = "1.10.1"
 camino = { version = "1.1", features = ["serde1"] }
 camino-tempfile = "1.4.1"
-camino-tempfile-ext = { version = "0.3.1", features = ["assert-color"] }
+camino-tempfile-ext = { version = "0.3.2", features = ["assert-color"] }
 cancel-safe-futures = "0.1.5"
 cargo_metadata = "0.20.0"
 chacha20poly1305 = "0.10.1"
@@ -567,7 +567,7 @@ omicron-test-utils = { path = "test-utils" }
 omicron-workspace-hack = "0.1.0"
 omicron-zone-package = "0.12.2"
 oxide-client = { path = "clients/oxide-client" }
-oxide-tokio-rt = "0.1.1"
+oxide-tokio-rt = "0.1.2"
 oxide-vpc = { git = "https://github.com/oxidecomputer/opte", rev = "23cebf3b1c911f09c203f7df50cc06bf780338e5", features = [ "api", "std" ] }
 oxlog = { path = "dev-tools/oxlog" }
 oxnet = "0.1.2"
