@@ -911,7 +911,7 @@ dependencies = [
  "camino-tempfile",
  "chacha20poly1305",
  "ciborium",
- "derive_more",
+ "derive_more 0.99.20",
  "hex",
  "hkdf",
  "omicron-common",
@@ -1538,7 +1538,7 @@ dependencies = [
  "camino-tempfile",
  "chrono",
  "daft",
- "derive_more",
+ "derive_more 0.99.20",
  "expectorate",
  "itertools 0.14.0",
  "omicron-common",
@@ -1575,7 +1575,7 @@ dependencies = [
  "anyhow",
  "camino",
  "clap",
- "derive_more",
+ "derive_more 0.99.20",
  "schemars",
  "serde",
  "serde_json",
@@ -1778,6 +1778,15 @@ name = "convert_case"
 version = "0.4.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "6245d59a3e82a7fc217c5828a6692dbc6dfb63a0c8c90495621f7b9d79704a0e"
+
+[[package]]
+name = "convert_case"
+version = "0.7.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "bb402b8d4c85569410425650ce3eddc7d698ed96d39a73f941b08fb63082f1e7"
+dependencies = [
+ "unicode-segmentation",
+]
 
 [[package]]
 name = "cookie"
@@ -1989,6 +1998,25 @@ dependencies = [
  "parking_lot 0.12.3",
  "rustix 0.38.37",
  "serde",
+ "signal-hook",
+ "signal-hook-mio",
+ "winapi",
+]
+
+[[package]]
+name = "crossterm"
+version = "0.29.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "d8b9f2e4c67f833b660cdb0a3523065869fb35570177239812ed4c905aeff87b"
+dependencies = [
+ "bitflags 2.9.0",
+ "crossterm_winapi",
+ "derive_more 2.0.1",
+ "document-features",
+ "futures-core",
+ "mio",
+ "parking_lot 0.12.3",
+ "rustix 1.0.7",
  "signal-hook",
  "signal-hook-mio",
  "winapi",
@@ -2453,10 +2481,31 @@ version = "0.99.20"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "6edb4b64a43d977b8e99788fe3a04d483834fba1215a7e02caa415b626497f7f"
 dependencies = [
- "convert_case",
+ "convert_case 0.4.0",
  "proc-macro2",
  "quote",
  "rustc_version 0.4.1",
+ "syn 2.0.104",
+]
+
+[[package]]
+name = "derive_more"
+version = "2.0.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "093242cf7570c207c83073cf82f79706fe7b8317e98620a47d5be7c3d8497678"
+dependencies = [
+ "derive_more-impl",
+]
+
+[[package]]
+name = "derive_more-impl"
+version = "2.0.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "bda628edc44c4bb645fbe0f758797143e4e07926f7ebf4e9bdfbd3d2ce621df3"
+dependencies = [
+ "convert_case 0.7.1",
+ "proc-macro2",
+ "quote",
  "syn 2.0.104",
 ]
 
@@ -2724,9 +2773,9 @@ checksum = "fea41bba32d969b513997752735605054bc0dfa92b4c56bf1189f2e174be7a10"
 
 [[package]]
 name = "document-features"
-version = "0.2.10"
+version = "0.2.11"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "cb6969eaabd2421f8a2775cfd2471a2b634372b4a25d41e3bd647b79912850a0"
+checksum = "95249b50c6c185bee49034bcb378a49dc2b5dff0be90ff6616d31d64febab05d"
 dependencies = [
  "litrs",
 ]
@@ -6889,7 +6938,7 @@ dependencies = [
  "cookie",
  "daft",
  "derive-where",
- "derive_more",
+ "derive_more 0.99.20",
  "dropshot",
  "futures",
  "gateway-client",
@@ -7741,7 +7790,7 @@ dependencies = [
  "camino-tempfile",
  "chrono",
  "clap",
- "crossterm",
+ "crossterm 0.29.0",
  "crucible-agent-client",
  "crucible-pantry-client",
  "csv",
@@ -8009,7 +8058,7 @@ dependencies = [
  "clickhouse-admin-types",
  "cockroach-admin-client",
  "crucible-agent-client",
- "derive_more",
+ "derive_more 0.99.20",
  "display-error-chain",
  "dns-server",
  "dns-service-client",
@@ -8189,7 +8238,7 @@ dependencies = [
  "cookie",
  "crossbeam-epoch",
  "crossbeam-utils",
- "crossterm",
+ "crossterm 0.28.1",
  "crypto-common",
  "curve25519-dalek",
  "daft",
@@ -8269,6 +8318,7 @@ dependencies = [
  "rsa",
  "rustc-hash 2.1.1",
  "rustix 0.38.37",
+ "rustix 1.0.7",
  "rustls 0.23.19",
  "rustls-webpki 0.102.8",
  "schemars",
@@ -8759,7 +8809,7 @@ dependencies = [
  "clickward",
  "const_format",
  "criterion",
- "crossterm",
+ "crossterm 0.29.0",
  "debug-ignore",
  "display-error-chain",
  "dropshot",
@@ -10517,7 +10567,7 @@ dependencies = [
  "bitflags 2.9.0",
  "cassowary",
  "compact_str",
- "crossterm",
+ "crossterm 0.28.1",
  "indoc 2.0.6",
  "instability",
  "itertools 0.13.0",
@@ -10674,7 +10724,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "b5cdfab7494d13ebfb6ce64828648518205d3ce8541ef1f94a27887f29d2d50b"
 dependencies = [
  "chrono",
- "crossterm",
+ "crossterm 0.28.1",
  "fd-lock",
  "itertools 0.13.0",
  "nu-ansi-term 0.50.1",
@@ -12002,7 +12052,7 @@ dependencies = [
  "camino-tempfile",
  "chrono",
  "debug-ignore",
- "derive_more",
+ "derive_more 0.99.20",
  "dropshot",
  "either",
  "expectorate",
@@ -12197,7 +12247,7 @@ dependencies = [
  "camino-tempfile",
  "cfg-if",
  "debug-ignore",
- "derive_more",
+ "derive_more 0.99.20",
  "expectorate",
  "futures",
  "glob",
@@ -12784,7 +12834,7 @@ dependencies = [
  "async-trait",
  "bytes",
  "camino",
- "crossterm",
+ "crossterm 0.28.1",
  "ratatui",
  "tokio",
  "zip 4.2.0",
@@ -13762,7 +13812,7 @@ dependencies = [
  "bootstore",
  "camino",
  "chacha20poly1305",
- "derive_more",
+ "derive_more 0.99.20",
  "gfss",
  "hex",
  "hkdf",
@@ -14733,7 +14783,7 @@ dependencies = [
  "camino",
  "ciborium",
  "clap",
- "crossterm",
+ "crossterm 0.29.0",
  "expectorate",
  "futures",
  "hex",
@@ -14813,7 +14863,7 @@ dependencies = [
  "camino",
  "ciborium",
  "clap",
- "crossterm",
+ "crossterm 0.29.0",
  "omicron-workspace-hack",
  "oxide-tokio-rt",
  "reedline",
