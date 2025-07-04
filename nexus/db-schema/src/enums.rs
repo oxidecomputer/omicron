@@ -83,6 +83,8 @@ define_enums! {
     TargetReleaseSourceEnum => "target_release_source",
     UpstairsRepairNotificationTypeEnum => "upstairs_repair_notification_type",
     UpstairsRepairTypeEnum => "upstairs_repair_type",
+    UserDataExportResourceTypeEnum => "user_data_export_resource_type",
+    UserDataExportStateEnum => "user_data_export_state",
     UserProvisionTypeEnum => "user_provision_type",
     VmmStateEnum => "vmm_state",
     VolumeResourceUsageTypeEnum => "volume_resource_usage_type",
