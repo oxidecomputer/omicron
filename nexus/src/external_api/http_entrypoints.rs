@@ -39,6 +39,7 @@ use dropshot::{WebsocketChannelResult, WebsocketConnection};
 use dropshot::{http_response_found, http_response_see_other};
 use http::{Response, StatusCode, header};
 use ipnetwork::IpNetwork;
+use nexus_auth::authz::{ApiResource, ApiResourceWithRoles};
 use nexus_db_lookup::lookup::ImageLookup;
 use nexus_db_lookup::lookup::ImageParentLookup;
 use nexus_db_queries::authn::external::session_cookie::{self, SessionStore};
@@ -6942,11 +6943,31 @@ impl NexusExternalApi for NexusExternalApiImpl {
         let handler = async {
             let opctx =
                 crate::context::op_context_for_external_api(&rqctx).await?;
+
             let user = nexus.silo_user_fetch_self(&opctx).await?;
-            let (_, silo) = nexus.current_silo_lookup(&opctx)?.fetch().await?;
+            let (authz_silo, db_silo) =
+                nexus.current_silo_lookup(&opctx)?.fetch().await?;
+
+            let silo_roles = opctx.get_roles(&authz_silo).await;
             Ok(HttpResponseOk(views::CurrentUser {
                 user: user.into(),
-                silo_name: silo.name().clone(),
+                silo_name: db_silo.name().clone(),
+                fleet_role: silo_roles.clone().map_or(None, |roleset| {
+                    roleset.effective_role(
+                        &authz::FLEET.resource_type(),
+                        &authz::FLEET.resource_id(),
+                    )
+                }),
+                // TODO: one weird wrinkle here is that the polar policy gives
+                // every user read perms on their own silo, but that is not
+                // equivalent to viewer because it's not inherited, so we are
+                // probably fine leaving the no-role case as None
+                silo_role: silo_roles.map_or(None, |roleset| {
+                    roleset.effective_role(
+                        &authz_silo.resource_type(),
+                        &authz_silo.resource_id(),
+                    )
+                }),
             }))
         };
         apictx
