@@ -1139,6 +1139,35 @@ impl ZoneKind {
         }
     }
 
+    /// Map an artifact ID name to the corresponding file name in the install
+    /// dataset.
+    ///
+    /// We don't allow mapping artifact ID names to `ZoneKind` because the map
+    /// isn't bijective -- both internal and boundary NTP zones use the same
+    /// `ntp` artifact. But the artifact ID name and the name in the install
+    /// dataset do form a bijective map.
+    pub fn artifact_id_name_to_install_dataset_file(
+        artifact_id_name: &str,
+    ) -> Option<&'static str> {
+        let zone_kind = match artifact_id_name {
+            // We arbitrarily select BoundaryNtp to perform the mapping with.
+            "ntp" => ZoneKind::BoundaryNtp,
+            "clickhouse" => ZoneKind::Clickhouse,
+            "clickhouse_keeper" => ZoneKind::ClickhouseKeeper,
+            "clickhouse_server" => ZoneKind::ClickhouseServer,
+            "cockroachdb" => ZoneKind::CockroachDb,
+            "crucible-zone" => ZoneKind::Crucible,
+            "crucible-pantry-zone" => ZoneKind::CruciblePantry,
+            "external-dns" => ZoneKind::ExternalDns,
+            "internal-dns" => ZoneKind::InternalDns,
+            "nexus" => ZoneKind::Nexus,
+            "oximeter" => ZoneKind::Oximeter,
+            _ => return None,
+        };
+
+        Some(zone_kind.artifact_in_install_dataset())
+    }
+
     /// Return true if an artifact represents a control plane zone image
     /// of this kind.
     pub fn is_control_plane_zone_artifact(
@@ -1235,6 +1264,20 @@ mod tests {
             assert_eq!(
                 expected_artifact,
                 zone_kind.artifact_in_install_dataset()
+            );
+        }
+    }
+
+    #[test]
+    fn test_artifact_id_to_install_dataset_file() {
+        for zone_kind in ZoneKind::iter() {
+            let artifact_id_name = zone_kind.artifact_id_name();
+            let expected_file = zone_kind.artifact_in_install_dataset();
+            assert_eq!(
+                Some(expected_file),
+                ZoneKind::artifact_id_name_to_install_dataset_file(
+                    artifact_id_name
+                )
             );
         }
     }

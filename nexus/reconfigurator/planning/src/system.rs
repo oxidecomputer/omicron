@@ -24,6 +24,7 @@ use nexus_sled_agent_shared::inventory::InventoryZpool;
 use nexus_sled_agent_shared::inventory::OmicronSledConfig;
 use nexus_sled_agent_shared::inventory::SledRole;
 use nexus_sled_agent_shared::inventory::ZoneImageResolverInventory;
+use nexus_sled_agent_shared::inventory::ZoneManifestBootInventory;
 use nexus_types::deployment::ClickhousePolicy;
 use nexus_types::deployment::CockroachDbClusterVersion;
 use nexus_types::deployment::CockroachDbSettings;
@@ -480,6 +481,20 @@ impl SystemDescription {
         })?;
         let sled = Arc::make_mut(sled);
         sled.set_sp_versions(active_version, inactive_version);
+        Ok(self)
+    }
+
+    /// Set the zone manifest for a sled from a provided `TufRepoDescription`.
+    pub fn sled_set_zone_manifest(
+        &mut self,
+        sled_id: SledUuid,
+        boot_inventory: Result<ZoneManifestBootInventory, String>,
+    ) -> anyhow::Result<&mut Self> {
+        let sled = self.sleds.get_mut(&sled_id).with_context(|| {
+            format!("attempted to access sled {} not found in system", sled_id)
+        })?;
+        let sled = Arc::make_mut(sled);
+        sled.set_zone_manifest(boot_inventory);
         Ok(self)
     }
 
@@ -1118,6 +1133,16 @@ impl Sled {
 
     fn sp_inactive_caboose(&self) -> Option<&Caboose> {
         self.sp_inactive_caboose.as_deref()
+    }
+
+    fn set_zone_manifest(
+        &mut self,
+        boot_inventory: Result<ZoneManifestBootInventory, String>,
+    ) {
+        self.inventory_sled_agent
+            .zone_image_resolver
+            .zone_manifest
+            .boot_inventory = boot_inventory;
     }
 
     /// Update the reported SP versions

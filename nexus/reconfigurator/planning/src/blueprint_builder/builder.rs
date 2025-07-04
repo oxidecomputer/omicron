@@ -305,6 +305,10 @@ pub(crate) enum Operation {
         num_datasets_expunged: usize,
         num_zones_expunged: usize,
     },
+    SledNoopZoneImageSourcesUpdated {
+        sled_id: SledUuid,
+        count: usize,
+    },
 }
 
 impl fmt::Display for Operation {
@@ -367,6 +371,13 @@ impl fmt::Display for Operation {
                      (expunged {num_disks_expunged} disks, \
                       {num_datasets_expunged} datasets, \
                       {num_zones_expunged} zones)"
+                )
+            }
+            Self::SledNoopZoneImageSourcesUpdated { sled_id, count } => {
+                write!(
+                    f,
+                    "sled {sled_id}: performed {count} noop \
+                     zone image source updates"
                 )
             }
         }
@@ -1133,6 +1144,20 @@ impl<'a> BlueprintBuilder<'a> {
             "we only edited datasets"
         );
         Ok(datasets.into())
+    }
+
+    /// Returns the remove_mupdate_override field for a sled.
+    pub(crate) fn sled_get_remove_mupdate_override(
+        &self,
+        sled_id: SledUuid,
+    ) -> Result<Option<MupdateOverrideUuid>, Error> {
+        let editor = self.sled_editors.get(&sled_id).ok_or_else(|| {
+            Error::Planner(anyhow!(
+                "tried to get remove_mupdate_override for \
+                 unknown sled {sled_id}"
+            ))
+        })?;
+        Ok(editor.get_remove_mupdate_override())
     }
 
     fn next_internal_dns_gz_address_index(&self, sled_id: SledUuid) -> u32 {
