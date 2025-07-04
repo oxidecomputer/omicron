@@ -6,9 +6,11 @@
 
 use std::collections::BTreeSet;
 
+use anyhow::bail;
 use camino::Utf8Path;
+use itertools::Itertools;
 use nexus_sled_agent_shared::inventory::{
-    ZoneArtifactInventory, ZoneManifestBootInventory,
+    ZoneArtifactInventory, ZoneKind, ZoneManifestBootInventory,
 };
 use omicron_common::{
     api::external::TufRepoDescription, update::OmicronZoneManifestSource,
@@ -61,8 +63,8 @@ pub struct SimTufRepoSource {
     description: TufRepoDescription,
     manifest_source: OmicronZoneManifestSource,
     message: String,
-    known_zone_names: BTreeSet<String>,
-    error_zone_names: BTreeSet<String>,
+    known_artifact_id_names: BTreeSet<String>,
+    error_artifact_id_names: BTreeSet<String>,
 }
 
 impl SimTufRepoSource {
@@ -73,47 +75,71 @@ impl SimTufRepoSource {
         description: TufRepoDescription,
         manifest_source: OmicronZoneManifestSource,
         message: String,
-    ) -> Self {
-        let known_zone_names = description
+    ) -> anyhow::Result<Self> {
+        let mut unknown = BTreeSet::new();
+        let known = description
             .artifacts
             .iter()
-            .filter_map(|x| {
-                (x.id.kind.to_known() == Some(KnownArtifactKind::Zone))
-                    .then(|| x.id.name.clone())
+            .filter_map(|artifact| {
+                if artifact.id.kind.to_known() != Some(KnownArtifactKind::Zone)
+                {
+                    return None;
+                }
+
+                // Check that the zone name is known to ZoneKind.
+                if ZoneKind::artifact_id_name_to_install_dataset_file(
+                    &artifact.id.name,
+                )
+                .is_some()
+                {
+                    Some(artifact.id.name.clone())
+                } else {
+                    unknown.insert(artifact.id.name.clone());
+                    None
+                }
             })
             .collect();
-        Self {
+        if !unknown.is_empty() {
+            bail!(
+                "unknown zone artifact ID names in provided description \
+                 ({message}): {}",
+                unknown.iter().join(", "),
+            );
+        }
+        Ok(Self {
             description,
             manifest_source,
             message,
-            known_zone_names,
-            error_zone_names: BTreeSet::new(),
-        }
+            known_artifact_id_names: known,
+            error_artifact_id_names: BTreeSet::new(),
+        })
     }
 
-    /// Simulates errors validating zones by the given name.
+    /// Simulates errors validating zones by the given artifact ID name.
     ///
     /// Returns an error if any of the provided zone names weren't found in the
     /// description.
     pub fn simulate_zone_errors<I, S>(
         &mut self,
-        zone_names: I,
+        artifact_id_names: I,
     ) -> Result<(), UnknownZoneNamesError>
     where
         I: IntoIterator<Item = S>,
         S: AsRef<str>,
     {
-        let (known, unknown): (Vec<_>, Vec<_>) = zone_names
+        let (known, unknown): (Vec<_>, Vec<_>) = artifact_id_names
             .into_iter()
             .map(|zone_name| zone_name.as_ref().to_owned())
-            .partition(|zone_name| self.known_zone_names.contains(zone_name));
+            .partition(|zone_name| {
+                self.known_artifact_id_names.contains(zone_name)
+            });
         if !unknown.is_empty() {
             return Err(UnknownZoneNamesError::new(
                 unknown,
-                self.known_zone_names.clone(),
+                self.known_artifact_id_names.clone(),
             ));
         }
-        self.error_zone_names.extend(known);
+        self.error_artifact_id_names.extend(known);
         Ok(())
     }
 
@@ -129,11 +155,19 @@ impl SimTufRepoSource {
                     return None;
                 }
 
-                let file_name = format!("{}.tar.gz", artifact.id.name);
+                let file_name =
+                    ZoneKind::artifact_id_name_to_install_dataset_file(
+                        &artifact.id.name,
+                    )
+                    .expect("we checked this was Some at construction time")
+                    .to_owned();
                 let path = Utf8Path::new("/fake/path/install").join(&file_name);
                 let status =
-                    if self.error_zone_names.contains(&artifact.id.name) {
-                        Err("reconfigurator-sim: simulated error validating zone image".to_owned())
+                    if self.error_artifact_id_names.contains(&artifact.id.name)
+                    {
+                        Err("reconfigurator-sim: simulated error \
+                             validating zone image"
+                            .to_owned())
                     } else {
                         Ok(())
                     };
@@ -158,8 +192,12 @@ impl SimTufRepoSource {
             " (system version {}",
             self.description.repo.system_version
         );
-        if !self.error_zone_names.is_empty() {
-            swrite!(message, ", {} zone errors", self.error_zone_names.len());
+        if !self.error_artifact_id_names.is_empty() {
+            swrite!(
+                message,
+                ", {} zone errors",
+                self.error_artifact_id_names.len()
+            );
         }
         message.push(')');
 

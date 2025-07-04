@@ -4,6 +4,7 @@
 
 use std::collections::BTreeSet;
 
+use itertools::Itertools;
 use omicron_common::api::external::{Generation, Name};
 use omicron_uuid_kinds::CollectionUuid;
 use thiserror::Error;
@@ -133,7 +134,11 @@ impl NonEmptySystemError {
 
 /// Unknown zone names were provided to `SimTufRepoSource::simulate_zone_error`.
 #[derive(Clone, Debug, Error)]
-#[error("unknown zone names `{}` (valid zone names: {})", self.unknown.join(", "), join(&self.known, ", "))]
+#[error(
+    "unknown zone names `{}` (valid zone names: {})",
+    self.unknown.join(", "),
+    self.known.iter().join(", "),
+)]
 pub struct UnknownZoneNamesError {
     /// The names of the unknown zones.
     pub unknown: Vec<String>,
@@ -146,20 +151,4 @@ impl UnknownZoneNamesError {
     pub(crate) fn new(unknown: Vec<String>, known: BTreeSet<String>) -> Self {
         Self { unknown, known }
     }
-}
-
-fn join<S: AsRef<str>>(
-    strings: impl IntoIterator<Item = S>,
-    separator: &str,
-) -> String {
-    let mut out = String::new();
-    let mut iter = strings.into_iter();
-    if let Some(first) = iter.next() {
-        out.push_str(first.as_ref());
-    }
-    for s in iter {
-        out.push_str(separator);
-        out.push_str(s.as_ref());
-    }
-    out
 }

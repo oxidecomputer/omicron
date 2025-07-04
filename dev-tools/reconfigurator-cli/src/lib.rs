@@ -424,8 +424,14 @@ struct SledMupdateSource {
     #[clap(long, conflicts_with = "sled-mupdate-valid-source")]
     with_manifest_error: bool,
 
-    /// simulate an error validating zones by this artifact name
-    #[clap(long, requires = "sled-mupdate-valid-source")]
+    /// simulate an error validating zones by this artifact ID name
+    ///
+    /// This uses the `artifact_id_name` representation of a zone kind.
+    #[clap(
+        long,
+        value_name = "ARTIFACT_ID_NAME",
+        requires = "sled-mupdate-valid-source"
+    )]
     with_zone_error: Vec<String>,
 }
 
@@ -2061,7 +2067,7 @@ fn mupdate_source_to_description(
             description,
             manifest_source,
             format!("from repo at {repo_path}"),
-        );
+        )?;
         sim_source.simulate_zone_errors(&source.with_zone_error)?;
         Ok(SimTufRepoDescription::new(sim_source))
     } else if source.valid.to_target_release {
@@ -2083,7 +2089,7 @@ fn mupdate_source_to_description(
                     desc.clone(),
                     manifest_source,
                     "to target release".to_owned(),
-                );
+                )?;
                 sim_source.simulate_zone_errors(&source.with_zone_error)?;
                 Ok(SimTufRepoDescription::new(sim_source))
             }
@@ -2151,6 +2157,10 @@ fn cmd_tuf_assemble(
         // This is relative to the current directory.
         Utf8PathBuf::from(format!("repo-{}.zip", manifest.system_version))
     };
+
+    if output_path.exists() {
+        bail!("output path `{output_path}` already exists");
+    }
 
     // Just use a fixed key for now.
     //

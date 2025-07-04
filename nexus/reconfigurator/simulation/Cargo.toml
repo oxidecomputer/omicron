@@ -11,6 +11,7 @@ anyhow.workspace = true
 camino.workspace = true
 chrono.workspace = true
 indexmap.workspace = true
+itertools.workspace = true
 nexus-inventory.workspace = true
 nexus-reconfigurator-planning.workspace = true
 nexus-sled-agent-shared.workspace = true

@@ -586,10 +586,8 @@ impl<'a> Planner<'a> {
                     install_dataset_zone_count += 1;
                 })
                 .filter_map(|z| {
-                    let file_name =
-                        format!("{}.tar.gz", z.kind().artifact_name());
-                    let Some(artifact) =
-                        zone_manifest.artifacts.get(file_name.as_str())
+                    let file_name = z.kind().artifact_in_install_dataset();
+                    let Some(artifact) = zone_manifest.artifacts.get(file_name)
                     else {
                         // The blueprint indicates that a zone should be present
                         // that isn't in the install dataset. This might be an old
@@ -628,6 +626,15 @@ impl<'a> Planner<'a> {
                     let Some(tuf_artifact) =
                         artifacts_by_hash.get(&artifact.expected_hash)
                     else {
+                        debug!(
+                            self.log,
+                            "install dataset artifact hash not found in TUF repo, \
+                             ignoring for noop checks";
+                            "sled_id" => %sled_id,
+                            "zone_id" => %z.id,
+                            "kind" => z.kind().report_str(),
+                            "file_name" => file_name,
+                        );
                         return None;
                     };
 
@@ -5047,7 +5054,7 @@ pub(crate) mod test {
         ($kind: ident, $version: expr) => {
             TufArtifactMeta {
                 id: ArtifactId {
-                    name: ZoneKind::$kind.artifact_name().to_string(),
+                    name: ZoneKind::$kind.artifact_id_name().to_string(),
                     version: $version,
                     kind: ArtifactKind::from_known(KnownArtifactKind::Zone),
                 },
