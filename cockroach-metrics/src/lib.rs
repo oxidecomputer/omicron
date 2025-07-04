@@ -30,7 +30,22 @@ struct CockroachAdminClient {
 impl CockroachAdminClient {
     /// Create a new CockroachDB HTTP client
     fn new(log: Logger, address: SocketAddr) -> Self {
-        let client = Client::new(&format!("http://{address}"), log);
+        // It's important that we have *some* timeout here - currently,
+        // inventory collection will query all nodes to confirm they're
+        // responding. However, it's very possible that one node is down,
+        // and that should not block collection indefinitely.
+        let timeout_duration = std::time::Duration::from_secs(15);
+        let reqwest_client = reqwest::ClientBuilder::new()
+            .connect_timeout(timeout_duration)
+            .timeout(timeout_duration)
+            .build()
+            .expect("Failed to build HTTP client");
+
+        let client = Client::new_with_client(
+            &format!("http://{address}"),
+            reqwest_client,
+            log,
+        );
 
         Self { client }
     }
@@ -171,7 +186,9 @@ impl CockroachClusterAdminClient {
     }
 
     /// Fetch Prometheus metrics from all backends concurrently, returning the first successful result
-    pub async fn fetch_prometheus_metrics(&self) -> Result<PrometheusMetrics> {
+    pub async fn fetch_prometheus_metrics_from_any_node(
+        &self,
+    ) -> Result<PrometheusMetrics> {
         let clients = self.clients.read().await;
 
         if clients.is_empty() {
@@ -215,7 +232,9 @@ impl CockroachClusterAdminClient {
     }
 
     /// Fetch node status from all backends concurrently, returning the first successful result
-    pub async fn fetch_node_status(&self) -> Result<NodesResponse> {
+    pub async fn fetch_node_status_from_any_node(
+        &self,
+    ) -> Result<NodesResponse> {
         let clients = self.clients.read().await;
 
         if clients.is_empty() {
@@ -262,6 +281,93 @@ impl CockroachClusterAdminClient {
     pub async fn get_cached_addresses(&self) -> Vec<SocketAddr> {
         let clients = self.clients.read().await;
         clients.keys().copied().collect()
+    }
+
+    /// Fetch Prometheus metrics from all backends, returning all successful results
+    pub async fn fetch_prometheus_metrics_from_all_nodes(
+        &self,
+    ) -> Vec<(SocketAddr, PrometheusMetrics)> {
+        let clients = self.clients.read().await;
+
+        if clients.is_empty() {
+            return Vec::new();
+        }
+
+        // Create futures for all requests
+        let mut futures = FuturesUnordered::new();
+        for (&addr, client) in clients.iter() {
+            let future =
+                async move { (addr, client.fetch_prometheus_metrics().await) };
+            futures.push(future);
+        }
+
+        let mut successful_results = Vec::new();
+
+        // Collect all successful results
+        while let Some((addr, result)) = futures.next().await {
+            match result {
+                Ok(metrics) => {
+                    debug!(
+                        self.log,
+                        "Successfully fetched metrics from CockroachDB node";
+                        "address" => %addr
+                    );
+                    successful_results.push((addr, metrics));
+                }
+                Err(e) => {
+                    // Log the error but continue trying other backends
+                    warn!(
+                        self.log,
+                        "Failed to fetch metrics from CockroachDB node";
+                        "address" => %addr,
+                        "error" => %e
+                    );
+                }
+            }
+        }
+
+        successful_results
+    }
+
+    /// Fetch node status from all backends, returning all successful results
+    pub async fn fetch_node_status_from_all_nodes(
+        &self,
+    ) -> Vec<(SocketAddr, NodesResponse)> {
+        let clients = self.clients.read().await;
+
+        if clients.is_empty() {
+            return Vec::new();
+        }
+
+        // Create futures for all requests
+        let mut futures = FuturesUnordered::new();
+        for (&addr, client) in clients.iter() {
+            let future =
+                async move { (addr, client.fetch_node_status().await) };
+            futures.push(future);
+        }
+
+        let mut successful_results = Vec::new();
+
+        // Collect all successful results
+        while let Some((addr, result)) = futures.next().await {
+            match result {
+                Ok(status) => {
+                    successful_results.push((addr, status));
+                }
+                Err(e) => {
+                    // Log the error but continue trying other backends
+                    warn!(
+                        self.log,
+                        "Failed to fetch node status from CockroachDB node";
+                        "address" => %addr,
+                        "error" => %e
+                    );
+                }
+            }
+        }
+
+        successful_results
     }
 }
 
@@ -580,14 +686,14 @@ impl PrometheusMetrics {
     Deserialize,
 )]
 #[serde(transparent)]
-pub struct NodeId(pub u32);
+pub struct NodeId(pub i32);
 
 impl NodeId {
-    pub fn new(id: u32) -> Self {
+    pub fn new(id: i32) -> Self {
         Self(id)
     }
 
-    pub fn as_u32(&self) -> u32 {
+    pub fn as_i32(&self) -> i32 {
         self.0
     }
 }
@@ -989,8 +1095,10 @@ sql_exec_latency_bucket{le="0.01"} 25
         assert_eq!(cluster.get_cached_addresses().await.len(), 0);
 
         // Fetch should fail with no backends configured
-        assert!(cluster.fetch_prometheus_metrics().await.is_err());
-        assert!(cluster.fetch_node_status().await.is_err());
+        assert!(
+            cluster.fetch_prometheus_metrics_from_any_node().await.is_err()
+        );
+        assert!(cluster.fetch_node_status_from_any_node().await.is_err());
 
         // Add some backends
         let addr1: SocketAddr = "127.0.0.1:8080".parse().unwrap();
@@ -1016,8 +1124,10 @@ sql_exec_latency_bucket{le="0.01"} 25
         assert_eq!(cluster.get_cached_addresses().await.len(), 0);
 
         // Fetch should fail again with no backends configured
-        assert!(cluster.fetch_prometheus_metrics().await.is_err());
-        assert!(cluster.fetch_node_status().await.is_err());
+        assert!(
+            cluster.fetch_prometheus_metrics_from_any_node().await.is_err()
+        );
+        assert!(cluster.fetch_node_status_from_any_node().await.is_err());
     }
 
     #[test]

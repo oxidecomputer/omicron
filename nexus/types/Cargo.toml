@@ -27,6 +27,7 @@ id-map.workspace = true
 illumos-utils.workspace = true
 ipnetwork.workspace = true
 newtype_derive.workspace = true
+omicron-cockroach-metrics.workspace = true
 omicron-uuid-kinds.workspace = true
 openssl.workspace = true
 oxql-types.workspace = true

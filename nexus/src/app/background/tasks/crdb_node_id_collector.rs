@@ -128,6 +128,9 @@ impl CockroachNodeIdCollector {
 // This trait exists so we can inject addresses in our unit tests below that
 // aren't required to have admin servers listening on the fixed
 // `COCKROACH_ADMIN_PORT`.
+//
+// TODO(https://github.com/oxidecomputer/omicron/issues/8496): Add the admin
+// service to DNS, remove this?
 trait CockroachAdminFromBlueprint {
     fn cockroach_admin_addrs<'a>(
         &'a self,
