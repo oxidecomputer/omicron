@@ -4055,7 +4055,7 @@ async fn cmd_nexus_support_bundles_delete(
 }
 
 async fn write_stream_to_sink(
-    mut stream: impl futures::Stream<Item = anyhow::Result<bytes::Bytes>>,
+    stream: impl futures::Stream<Item = anyhow::Result<bytes::Bytes>>,
     mut sink: impl std::io::Write,
 ) -> Result<(), anyhow::Error> {
     let mut stream = std::pin::pin!(stream);

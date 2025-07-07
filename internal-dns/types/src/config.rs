@@ -593,8 +593,8 @@ impl DnsConfigBuilder {
             .get(&ServiceName::BoundaryNtp)
             .map(|zone2port| {
                 let records = zone2port
-                    .iter()
-                    .map(|(zone, _port)| {
+                    .keys()
+                    .map(|zone| {
                         let zone_ip = self.zones.get(&zone).expect(
                             "service_backend_zone() ensures zones are defined",
                         );
