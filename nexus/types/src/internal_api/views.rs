@@ -641,7 +641,7 @@ impl UpdateStatus {
         new: &TargetReleaseDescription,
         caboose: &Caboose,
     ) -> TufRepoVersion {
-        let matching_caboose = |a: &&TufArtifactMeta| {
+        let matching_caboose = |a: &TufArtifactMeta| {
             caboose.board == a.id.name
                 && matches!(
                     a.id.kind.to_known(),
@@ -654,14 +654,14 @@ impl UpdateStatus {
                 && caboose.version == a.id.version.to_string()
         };
         if let Some(old) = old.tuf_repo() {
-            if old.artifacts.iter().find(matching_caboose).is_some() {
+            if old.artifacts.iter().any(matching_caboose) {
                 return TufRepoVersion::Version(
                     old.repo.system_version.clone(),
                 );
             }
         }
         if let Some(new) = new.tuf_repo() {
-            if new.artifacts.iter().find(matching_caboose).is_some() {
+            if new.artifacts.iter().any(matching_caboose) {
                 return TufRepoVersion::Version(
                     new.repo.system_version.clone(),
                 );
