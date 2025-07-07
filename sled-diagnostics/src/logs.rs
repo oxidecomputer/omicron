@@ -682,6 +682,27 @@ impl LogsHandle {
                     }
                 }
             }
+
+            // Include the chrony logs found in "/var/log/chrony".
+            // These currently include:
+            // - measurements.log
+            // - statistics.log
+            // - tracking.log
+            //
+            // TODO: Once omicron#4728 is picked up we will need to handle the
+            // rotation and sorting of these files.
+            if service == "ntp" {
+                for log in service_logs.extra {
+                    self.process_logs(
+                        &service,
+                        &mut zip,
+                        &mut log_snapshots,
+                        log.path.as_path(),
+                        LogType::Extra,
+                    )
+                    .await?;
+                }
+            }
         }
 
         zip.finish()?;
