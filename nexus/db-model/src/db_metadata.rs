@@ -18,6 +18,8 @@ pub struct DbMetadata {
     time_modified: DateTime<Utc>,
     version: SemverVersion,
     target_version: Option<SemverVersion>,
+    quiesce_started: bool,
+    quiesce_completed: bool,
 }
 
 impl DbMetadata {
@@ -31,5 +33,13 @@ impl DbMetadata {
 
     pub fn version(&self) -> &SemverVersion {
         &self.version
+    }
+
+    pub fn quiesce_started(&self) -> bool {
+        self.quiesce_started
+    }
+
+    pub fn quiesce_completed(&self) -> bool {
+        self.quiesce_completed
     }
 }

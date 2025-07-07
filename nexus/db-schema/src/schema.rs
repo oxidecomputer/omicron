@@ -2251,6 +2251,8 @@ table! {
         time_modified -> Timestamptz,
         version -> Text,
         target_version -> Nullable<Text>,
+        quiesce_started -> Bool,
+        quiesce_completed -> Bool,
     }
 }
 
