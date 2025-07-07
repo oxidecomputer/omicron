@@ -905,8 +905,8 @@ impl<'a, N: NexusServer> ControlPlaneTestContextBuilder<'a, N> {
             user_password_hash,
         };
 
-        // Construct an initial blueuprint that agrees with the sled-agents'
-        // initial (first generation) configuration.
+        // Construct an initial blueprint that agrees with the sled-agents'
+        // post-initialization configuration (generation 2).
         let sleds = self
             .blueprint_sleds
             .take()
@@ -1084,8 +1084,11 @@ impl<'a, N: NexusServer> ControlPlaneTestContextBuilder<'a, N> {
             .as_ref()
             .expect("should have just made blueprint sled configs");
 
-        // Send the sled-agents their initial (first generation) configurations.
-        let generation = Generation::new();
+        // Send the sled-agents their new configurations.
+        // This generation number should match the one in
+        // `make_sled_configs`.
+        let generation = Generation::from_u32(2);
+
         for (sled_agent, sled_zones) in zip(self.sled_agents.iter(), zones) {
             let sled_id = sled_agent.sled_agent_id();
             let client = sled_agent_client::Client::new(
@@ -1419,10 +1422,9 @@ impl<'a, N: NexusServer> ControlPlaneTestContextBuilder<'a, N> {
         let maybe_zones = once(Some(&self.blueprint_zones)).chain(repeat(None));
 
         // The generation number that the sled-agents' configuration
-        // will have when this blueprint is executed:
-        //   1 = initial config
-        //   2 = config we deploy in `configure_sled_agents`
-        let sled_agent_generation = Generation::from_u32(3);
+        // will have when this blueprint is executed. Should match
+        // the one in `configure_sled_agents`.
+        let sled_agent_generation = Generation::from_u32(2);
 
         for (sled_agent, maybe_zones) in
             zip(self.sled_agents.iter(), maybe_zones)
