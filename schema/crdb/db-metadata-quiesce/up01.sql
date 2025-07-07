@@ -1,0 +1,3 @@
+ALTER TABLE omicron.public.db_metadata
+    ADD COLUMN IF NOT EXISTS quiesce_started BOOL NOT NULL DEFAULT FALSE,
+    ADD COLUMN IF NOT EXISTS quiesce_completed BOOL NOT NULL DEFAULT FALSE;

@@ -119,6 +119,7 @@ pub mod webhook_delivery;
 mod zpool;
 
 pub use address_lot::AddressLotCreateResult;
+pub use db_metadata::UpdateConfiguration;
 pub use dns::DataStoreDnsTest;
 pub use dns::DnsVersionUpdateBuilder;
 pub use ereport::EreportFilters;
@@ -241,20 +242,66 @@ impl DataStore {
             || async {
                 if let Some(try_for) = try_for {
                     if std::time::Instant::now() > start + try_for {
-                        return Err(BackoffError::permanent(()));
+                        return Err(BackoffError::permanent(
+                            format!("Tried to update schema for {} ms; terminating", try_for.as_millis())
+                        ));
                     }
                 }
+
+                let config = if let Some(all_versions) = config {
+                    crate::db::datastore::UpdateConfiguration::Enabled {
+                        all_versions,
+                        ignore_quiesce: false,
+                    }
+                } else {
+                    crate::db::datastore::UpdateConfiguration::Disabled
+                };
 
                 match datastore
                     .ensure_schema(&log, EXPECTED_VERSION, config)
                     .await
                 {
                     Ok(()) => return Ok(()),
+                    Err(db_metadata::EnsureSchemaError::NexusTooOld { handoff }) => {
+                        if handoff {
+                            // We are running an out-of-date schema, but still
+                            // need to participate in handoff.
+                            //
+                            // TODO(https://github.com/oxidecomputer/omicron/issues/8501):
+                            // This should be implemented by contacting other
+                            // Nexus instances, verifying that quiescing has
+                            // completed, and setting "quiesce_complete" once
+                            // that has completed.
+                            //
+                            // NOTE: We shouldn't hit this condition until any
+                            // deployed Nexuses start setting the "quiesce"
+                            // booleans of omicron.public.db_metadata to true.
+                            error!(log, "Schema handoff from old -> new Nexus is not yet implemented");
+                            return Err(BackoffError::permanent(format!(
+                                "Nexus @ schema {EXPECTED_VERSION} needs to \
+                                 handoff, but not it is not implemented"
+                            )));
+                        } else {
+                            // We are running an out-of-date schema, and no
+                            // longer need to participate in handoff (e.g.,
+                            // maybe we participated in handoff, rebooted, and
+                            // the schema has progressed since then).
+                            error!(
+                                log,
+                                "Our database schema appears too old";
+                                "version" => ?EXPECTED_VERSION
+                            );
+                            return Err(BackoffError::permanent(format!(
+                                "Schema {EXPECTED_VERSION:?} is too old"
+                            )));
+                        }
+                    }
                     Err(e) => {
-                        warn!(log, "Failed to ensure schema version"; "error" => #%e);
+                        let err = slog_error_chain::InlineErrorChain::new(&e);
+                        warn!(log, "Failed to ensure schema version"; "error" => &err);
+                        return Err(BackoffError::transient(err.to_string()));
                     }
                 };
-                return Err(BackoffError::transient(()));
             },
             |_, _| {},
         )

@@ -108,8 +108,14 @@ async fn main_impl() -> anyhow::Result<()> {
         }
         Cmd::Upgrade { version } => {
             println!("Upgrading to {version}");
+
+            let config = db::datastore::UpdateConfiguration::Enabled {
+                all_versions: &all_versions,
+                ignore_quiesce: true,
+            };
+
             datastore
-                .ensure_schema(&log, version.clone(), Some(&all_versions))
+                .ensure_schema(&log, version.clone(), config)
                 .await
                 .map_err(|e| anyhow!(e))?;
             println!("Upgrade to {version} complete");

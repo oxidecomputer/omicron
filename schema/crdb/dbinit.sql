@@ -5564,6 +5564,35 @@ CREATE TABLE IF NOT EXISTS omicron.public.db_metadata (
     -- (Optional) Semver representation of the DB version to which we're upgrading
     target_version STRING(64),
 
+    -- During the nexus boot process, it must check this table to understand the
+    -- state of the Schema.
+    --
+    -- There are a handful of states to consider:
+    --
+    -- - "db.version = version in binary" + "quiesce_started = true": An
+    --   upgrade is in-progress, and the underlying database should not be used.
+    --   This Nexus should coordinate with other Nexus instances at this version
+    --   (via internal DNS) to set "quiesce_completed" to true.
+    -- - "db.version = version in binary" + "quiesce_completed = true" OR
+    --   "db.version > version in binary"
+    --   This Nexus should avoid accessing the database, but has no need to coordinate
+    --   with other Nexuses.
+    -- - "db.version < version in binary":
+    --   This Nexus should upgrade to the new schema, but only once "quiesce_completed"
+    --   is set to true.
+    --   Once the upgrade is complete, "quiesce_started" and "quiesce_completed"
+    --   should both be set to false. Note that multiple Nexuses may be attempting this
+    --   schema upgrade operation concurrently.
+
+
+    -- Identifies that a schema migration has started.
+    -- Nexuses with "db.version = version in binary" should not access the database any longer.
+    quiesce_started BOOL NOT NULL,
+
+    -- Identifies that a schema migration is ready to hand-off from Old Nexus versions
+    -- to newer Nexus versions.
+    quiesce_completed BOOL NOT NULL,
+
     CHECK (singleton = true)
 );
 
@@ -6348,9 +6377,11 @@ INSERT INTO omicron.public.db_metadata (
     time_created,
     time_modified,
     version,
-    target_version
+    target_version,
+    quiesce_started,
+    quiesce_completed
 ) VALUES
-    (TRUE, NOW(), NOW(), '174.0.0', NULL)
+    (TRUE, NOW(), NOW(), '175.0.0', NULL, FALSE, FALSE)
 ON CONFLICT DO NOTHING;
 
 COMMIT;
