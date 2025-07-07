@@ -192,6 +192,9 @@ f45ba181-4b56-42cc-a762-874d90184a43 0       <REDACTED_TIMESTAMP>
 
 > # First step: upgrade one SP.
 > blueprint-plan dbcbd3d6-41ff-48ae-ac0b-1becc9b2fd21 f45ba181-4b56-42cc-a762-874d90184a43
+INFO noop converting 0/9 install-dataset zones to artifact store, sled_id: 2b8f0cb3-0295-4b3c-bc58-4fe88b57112c
+INFO noop converting 0/8 install-dataset zones to artifact store, sled_id: 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6
+INFO noop converting 0/8 install-dataset zones to artifact store, sled_id: d81c6a84-79b8-4958-ae41-ea46c9b19763
 INFO sufficient BoundaryNtp zones exist in plan, desired_count: 0, current_count: 0
 INFO sufficient Clickhouse zones exist in plan, desired_count: 1, current_count: 1
 INFO sufficient ClickhouseKeeper zones exist in plan, desired_count: 0, current_count: 0
@@ -374,6 +377,9 @@ external DNS:
 
 > # If we generate another plan, there should be no change.
 > blueprint-plan 8da82a8e-bf97-4fbd-8ddd-9f6462732cf1 f45ba181-4b56-42cc-a762-874d90184a43
+INFO noop converting 0/9 install-dataset zones to artifact store, sled_id: 2b8f0cb3-0295-4b3c-bc58-4fe88b57112c
+INFO noop converting 0/8 install-dataset zones to artifact store, sled_id: 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6
+INFO noop converting 0/8 install-dataset zones to artifact store, sled_id: d81c6a84-79b8-4958-ae41-ea46c9b19763
 INFO sufficient BoundaryNtp zones exist in plan, desired_count: 0, current_count: 0
 INFO sufficient Clickhouse zones exist in plan, desired_count: 1, current_count: 1
 INFO sufficient ClickhouseKeeper zones exist in plan, desired_count: 0, current_count: 0
@@ -557,6 +563,9 @@ set sled 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6 SP versions: active -> 1.0.0
 generated inventory collection eb0796d5-ab8a-4f7b-a884-b4aeacb8ab51 from configured sleds
 
 > blueprint-plan 58d5e830-0884-47d8-a7cd-b2b3751adeb4 eb0796d5-ab8a-4f7b-a884-b4aeacb8ab51
+INFO noop converting 0/9 install-dataset zones to artifact store, sled_id: 2b8f0cb3-0295-4b3c-bc58-4fe88b57112c
+INFO noop converting 0/8 install-dataset zones to artifact store, sled_id: 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6
+INFO noop converting 0/8 install-dataset zones to artifact store, sled_id: d81c6a84-79b8-4958-ae41-ea46c9b19763
 INFO sufficient BoundaryNtp zones exist in plan, desired_count: 0, current_count: 0
 INFO sufficient Clickhouse zones exist in plan, desired_count: 1, current_count: 1
 INFO sufficient ClickhouseKeeper zones exist in plan, desired_count: 0, current_count: 0
@@ -750,6 +759,9 @@ set sled 2b8f0cb3-0295-4b3c-bc58-4fe88b57112c SP versions: inactive -> 0.5.0
 generated inventory collection 61f451b3-2121-4ed6-91c7-a550054f6c21 from configured sleds
 
 > blueprint-plan af934083-59b5-4bf6-8966-6fb5292c29e1 61f451b3-2121-4ed6-91c7-a550054f6c21
+INFO noop converting 0/9 install-dataset zones to artifact store, sled_id: 2b8f0cb3-0295-4b3c-bc58-4fe88b57112c
+INFO noop converting 0/8 install-dataset zones to artifact store, sled_id: 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6
+INFO noop converting 0/8 install-dataset zones to artifact store, sled_id: d81c6a84-79b8-4958-ae41-ea46c9b19763
 INFO sufficient BoundaryNtp zones exist in plan, desired_count: 0, current_count: 0
 INFO sufficient Clickhouse zones exist in plan, desired_count: 1, current_count: 1
 INFO sufficient ClickhouseKeeper zones exist in plan, desired_count: 0, current_count: 0
@@ -941,6 +953,9 @@ set sled 2b8f0cb3-0295-4b3c-bc58-4fe88b57112c SP versions: active -> 1.0.0
 generated inventory collection b1bda47d-2c19-4fba-96e3-d9df28db7436 from configured sleds
 
 > blueprint-plan df06bb57-ad42-4431-9206-abff322896c7 b1bda47d-2c19-4fba-96e3-d9df28db7436
+INFO noop converting 0/9 install-dataset zones to artifact store, sled_id: 2b8f0cb3-0295-4b3c-bc58-4fe88b57112c
+INFO noop converting 0/8 install-dataset zones to artifact store, sled_id: 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6
+INFO noop converting 0/8 install-dataset zones to artifact store, sled_id: d81c6a84-79b8-4958-ae41-ea46c9b19763
 INFO sufficient BoundaryNtp zones exist in plan, desired_count: 0, current_count: 0
 INFO sufficient Clickhouse zones exist in plan, desired_count: 1, current_count: 1
 INFO sufficient ClickhouseKeeper zones exist in plan, desired_count: 0, current_count: 0
@@ -1134,6 +1149,9 @@ set sled d81c6a84-79b8-4958-ae41-ea46c9b19763 SP versions: active -> 1.0.0
 generated inventory collection a71f7a73-35a6-45e8-acbe-f1c5925eed69 from configured sleds
 
 > blueprint-plan 7f976e0d-d2a5-4eeb-9e82-c82bc2824aba a71f7a73-35a6-45e8-acbe-f1c5925eed69
+INFO noop converting 0/9 install-dataset zones to artifact store, sled_id: 2b8f0cb3-0295-4b3c-bc58-4fe88b57112c
+INFO noop converting 0/8 install-dataset zones to artifact store, sled_id: 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6
+INFO noop converting 0/8 install-dataset zones to artifact store, sled_id: d81c6a84-79b8-4958-ae41-ea46c9b19763
 INFO sufficient BoundaryNtp zones exist in plan, desired_count: 0, current_count: 0
 INFO sufficient Clickhouse zones exist in plan, desired_count: 1, current_count: 1
 INFO sufficient ClickhouseKeeper zones exist in plan, desired_count: 0, current_count: 0

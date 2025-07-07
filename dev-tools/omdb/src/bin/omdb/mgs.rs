@@ -195,7 +195,7 @@ fn show_sp_ids(sp_ids: &[SpIdentifier]) -> Result<(), anyhow::Error> {
     struct SpIdRow {
         #[tabled(rename = "TYPE")]
         type_: &'static str,
-        slot: u32,
+        slot: u16,
     }
 
     impl From<&SpIdentifier> for SpIdRow {
@@ -221,7 +221,7 @@ fn show_sps_from_ignition(
     struct IgnitionRow {
         #[tabled(rename = "TYPE")]
         type_: &'static str,
-        slot: u32,
+        slot: u16,
         system_type: String,
     }
 
@@ -269,7 +269,7 @@ fn show_sp_states(
     struct SpStateRow<'a> {
         #[tabled(rename = "TYPE")]
         type_: &'static str,
-        slot: u32,
+        slot: u16,
         model: String,
         serial: String,
         rev: u32,

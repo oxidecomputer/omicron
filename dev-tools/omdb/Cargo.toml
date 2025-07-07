@@ -20,6 +20,7 @@ chrono.workspace = true
 clap.workspace = true
 crossterm.workspace = true
 crucible-agent-client.workspace = true
+crucible-pantry-client.workspace = true
 csv.workspace = true
 diesel.workspace = true
 dropshot.workspace = true
@@ -70,6 +71,7 @@ supports-color.workspace = true
 tabled.workspace = true
 textwrap.workspace = true
 tokio = { workspace = true, features = [ "full" ] }
+tufaceous-artifact.workspace = true
 unicode-width.workspace = true
 update-engine.workspace = true
 url.workspace = true

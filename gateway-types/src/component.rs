@@ -43,8 +43,8 @@ pub enum SpType {
 pub struct SpIdentifier {
     #[serde(rename = "type")]
     pub typ: SpType,
-    #[serde(deserialize_with = "deserializer_u32_from_string")]
-    pub slot: u32,
+    #[serde(deserialize_with = "deserializer_u16_from_string")]
+    pub slot: u16,
 }
 
 impl fmt::Display for SpIdentifier {
@@ -59,12 +59,12 @@ impl fmt::Display for SpIdentifier {
 // trying to deserialize the flattened struct as a map of strings to strings,
 // which breaks on `slot` (but not on `typ` for reasons I don't entirely
 // understand). We can work around by using an enum that allows either `String`
-// or `u32` (which gets us past the serde map of strings), and then parsing the
-// string into a u32 ourselves (which gets us to the `slot` we want). More
+// or `u16` (which gets us past the serde map of strings), and then parsing the
+// string into a u16 ourselves (which gets us to the `slot` we want). More
 // background: https://github.com/serde-rs/serde/issues/1346
-fn deserializer_u32_from_string<'de, D>(
+fn deserializer_u16_from_string<'de, D>(
     deserializer: D,
-) -> Result<u32, D::Error>
+) -> Result<u16, D::Error>
 where
     D: serde::Deserializer<'de>,
 {
@@ -72,16 +72,16 @@ where
 
     #[derive(Debug, Deserialize)]
     #[serde(untagged)]
-    enum StringOrU32 {
+    enum StringOrU16 {
         String(String),
-        U32(u32),
+        U16(u16),
     }
 
-    match StringOrU32::deserialize(deserializer)? {
-        StringOrU32::String(s) => s
+    match StringOrU16::deserialize(deserializer)? {
+        StringOrU16::String(s) => s
             .parse()
-            .map_err(|_| de::Error::invalid_type(Unexpected::Str(&s), &"u32")),
-        StringOrU32::U32(n) => Ok(n),
+            .map_err(|_| de::Error::invalid_type(Unexpected::Str(&s), &"u16")),
+        StringOrU16::U16(n) => Ok(n),
     }
 }
 
