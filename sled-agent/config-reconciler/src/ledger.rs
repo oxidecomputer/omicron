@@ -645,6 +645,7 @@ mod tests {
     use super::legacy_configs::tests::LEGACY_DISKS_PATH;
     use super::legacy_configs::tests::LEGACY_ZONES_PATH;
     use super::*;
+    use crate::internal_disks::InternalDiskDetails;
     use crate::ledger::legacy_configs::tests::test_data_merged_config;
     use anyhow::anyhow;
     use camino::Utf8Path;
@@ -699,14 +700,17 @@ mod tests {
         }
     }
 
-    fn make_fake_disk() -> (DiskIdentity, InternalZpoolUuid) {
-        (
+    fn make_fake_disk() -> InternalDiskDetails {
+        InternalDiskDetails::fake_details(
             DiskIdentity {
                 vendor: "ledger-test".into(),
                 model: "ledger-test".into(),
                 serial: "ledger-test-disk".into(),
             },
             InternalZpoolUuid::new_v4(),
+            true, // is_boot_disk
+            None,
+            None,
         )
     }
 
