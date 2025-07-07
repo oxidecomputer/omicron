@@ -53,6 +53,8 @@ use nexus_db_model::InvRootOfTrust;
 use nexus_db_model::InvRotPage;
 use nexus_db_model::InvServiceProcessor;
 use nexus_db_model::InvSledAgent;
+use nexus_db_model::InvSledBootPartition;
+use nexus_db_model::InvSledConfigReconciler;
 use nexus_db_model::InvZpool;
 use nexus_db_model::RotImageError;
 use nexus_db_model::SledRole;
@@ -76,6 +78,8 @@ use nexus_db_schema::enums::{
     CabooseWhichEnum, InvConfigReconcilerStatusKindEnum,
 };
 use nexus_db_schema::enums::{HwPowerStateEnum, InvZoneManifestSourceEnum};
+use nexus_sled_agent_shared::inventory::BootPartitionContents;
+use nexus_sled_agent_shared::inventory::BootPartitionDetails;
 use nexus_sled_agent_shared::inventory::ConfigReconcilerInventory;
 use nexus_sled_agent_shared::inventory::ConfigReconcilerInventoryResult;
 use nexus_sled_agent_shared::inventory::ConfigReconcilerInventoryStatus;
@@ -95,6 +99,7 @@ use omicron_common::api::external::InternalContext;
 use omicron_common::api::external::LookupType;
 use omicron_common::api::external::ResourceType;
 use omicron_common::bail_unless;
+use omicron_common::disk::M2Slot;
 use omicron_uuid_kinds::CollectionUuid;
 use omicron_uuid_kinds::DatasetUuid;
 use omicron_uuid_kinds::GenericUuid;
@@ -313,6 +318,7 @@ impl DataStore {
         // reconciler properties for each sled. We need all of this to construct
         // `InvSledAgent` instances below.
         let ConfigReconcilerRows {
+            config_reconcilers,
             sled_configs: omicron_sled_configs,
             disks: omicron_sled_config_disks,
             datasets: omicron_sled_config_datasets,
@@ -322,6 +328,7 @@ impl DataStore {
             dataset_results: reconciler_dataset_results,
             orphaned_datasets: reconciler_orphaned_datasets,
             zone_results: reconciler_zone_results,
+            boot_partitions: reconciler_boot_partitions,
             mut config_reconciler_fields_by_sled,
         } = ConfigReconcilerRows::new(collection_id, collection)
             .map_err(|e| Error::internal_error(&format!("{e:#}")))?;
@@ -341,7 +348,6 @@ impl DataStore {
                 assert!(sled_agent.baseboard_id.is_none());
                 let ConfigReconcilerFields {
                     ledgered_sled_config,
-                    last_reconciliation_sled_config,
                     reconciler_status,
                 } = config_reconciler_fields_by_sled
                     .remove(&sled_agent.sled_id)
@@ -352,7 +358,6 @@ impl DataStore {
                     collection_id,
                     sled_agent,
                     ledgered_sled_config,
-                    last_reconciliation_sled_config,
                     reconciler_status,
                     zone_image_resolver,
                 )
@@ -967,6 +972,49 @@ impl DataStore {
                 }
             }
 
+            // Insert rows for all the config reconcilers we found.
+            {
+                use nexus_db_schema::schema::inv_sled_config_reconciler::dsl;
+
+                let batch_size = SQL_BATCH_SIZE.get().try_into().unwrap();
+                let mut reconcilers = config_reconcilers.into_iter();
+                loop {
+                    let some_reconcilers = reconcilers
+                        .by_ref()
+                        .take(batch_size)
+                        .collect::<Vec<_>>();
+                    if some_reconcilers.is_empty() {
+                        break;
+                    }
+                    let _ = diesel::insert_into(dsl::inv_sled_config_reconciler)
+                        .values(some_reconcilers)
+                        .execute_async(&conn)
+                        .await?;
+                }
+            }
+
+            // Insert rows for all the boot partition details we found.
+            {
+                use nexus_db_schema::schema::inv_sled_boot_partition::dsl;
+
+                let batch_size = SQL_BATCH_SIZE.get().try_into().unwrap();
+                let mut boot_partitions = reconciler_boot_partitions
+                    .into_iter();
+                loop {
+                    let some_boot_partitions = boot_partitions
+                        .by_ref()
+                        .take(batch_size)
+                        .collect::<Vec<_>>();
+                    if some_boot_partitions.is_empty() {
+                        break;
+                    }
+                    let _ = diesel::insert_into(dsl::inv_sled_boot_partition)
+                        .values(some_boot_partitions)
+                        .execute_async(&conn)
+                        .await?;
+                }
+            }
+
             // Insert rows for the all the sled configs we found.
             {
                 use nexus_db_schema::schema::inv_omicron_sled_config::dsl;
@@ -1212,7 +1260,6 @@ impl DataStore {
                     );
                     let ConfigReconcilerFields {
                         ledgered_sled_config,
-                        last_reconciliation_sled_config,
                         reconciler_status,
                     } = config_reconciler_fields_by_sled
                         .remove(&sled_agent.sled_id)
@@ -1251,9 +1298,6 @@ impl DataStore {
                             )
                             .into_sql::<diesel::sql_types::Int8>(),
                             ledgered_sled_config
-                                .map(|id| id.into_untyped_uuid())
-                                .into_sql::<Nullable<diesel::sql_types::Uuid>>(),
-                            last_reconciliation_sled_config
                                 .map(|id| id.into_untyped_uuid())
                                 .into_sql::<Nullable<diesel::sql_types::Uuid>>(),
                             reconciler_status.reconciler_status_kind
@@ -1305,7 +1349,6 @@ impl DataStore {
                                 sa_dsl::usable_physical_ram,
                                 sa_dsl::reservoir_size,
                                 sa_dsl::ledgered_sled_config,
-                                sa_dsl::last_reconciliation_sled_config,
                                 sa_dsl::reconciler_status_kind,
                                 sa_dsl::reconciler_status_sled_config,
                                 sa_dsl::reconciler_status_timestamp,
@@ -1337,7 +1380,6 @@ impl DataStore {
                         _usable_physical_ram,
                         _reservoir_size,
                         _ledgered_sled_config,
-                        _last_reconciliation_sled_config,
                         _reconciler_status_kind,
                         _reconciler_status_sled_config,
                         _reconciler_status_timestamp,
@@ -1661,6 +1703,8 @@ impl DataStore {
             nzone_manifest_zones: usize,
             nzone_manifest_non_boot: usize,
             nmupdate_override_non_boot: usize,
+            nconfig_reconcilers: usize,
+            nboot_partitions: usize,
             nomicron_sled_configs: usize,
             nomicron_sled_config_disks: usize,
             nomicron_sled_config_datasets: usize,
@@ -1689,6 +1733,8 @@ impl DataStore {
             nzone_manifest_zones,
             nzone_manifest_non_boot,
             nmupdate_override_non_boot,
+            nconfig_reconcilers,
+            nboot_partitions,
             nomicron_sled_configs,
             nomicron_sled_config_disks,
             nomicron_sled_config_datasets,
@@ -1853,6 +1899,24 @@ impl DataStore {
                         .await?
                     };
 
+                    // Remove rows associated with sled-agent config reconcilers
+                    let nconfig_reconcilers = {
+                        use nexus_db_schema::schema::inv_sled_config_reconciler::dsl;
+                        diesel::delete(dsl::inv_sled_config_reconciler.filter(
+                            dsl::inv_collection_id.eq(db_collection_id),
+                        ))
+                        .execute_async(&conn)
+                        .await?
+                    };
+                    let nboot_partitions = {
+                        use nexus_db_schema::schema::inv_sled_boot_partition::dsl;
+                        diesel::delete(dsl::inv_sled_boot_partition.filter(
+                            dsl::inv_collection_id.eq(db_collection_id),
+                        ))
+                        .execute_async(&conn)
+                        .await?
+                    };
+
                     // Remove rows associated with `OmicronSledConfig`s.
                     let nomicron_sled_configs = {
                         use nexus_db_schema::schema::inv_omicron_sled_config::dsl;
@@ -1954,6 +2018,8 @@ impl DataStore {
                         nzone_manifest_zones,
                         nzone_manifest_non_boot,
                         nmupdate_override_non_boot,
+                        nconfig_reconcilers,
+                        nboot_partitions,
                         nomicron_sled_configs,
                         nomicron_sled_config_disks,
                         nomicron_sled_config_datasets,
@@ -1992,6 +2058,8 @@ impl DataStore {
             "nzone_manifest_zones" => nzone_manifest_zones,
             "nzone_manifest_non_boot" => nzone_manifest_non_boot,
             "nmupdate_override_non_boot" => nmupdate_override_non_boot,
+            "nconfig_reconcilers" => nconfig_reconcilers,
+            "nboot_partitions" => nboot_partitions,
             "nomicron_sled_configs" => nomicron_sled_configs,
             "nomicron_sled_config_disks" => nomicron_sled_config_disks,
             "nomicron_sled_config_datasets" => nomicron_sled_config_datasets,
@@ -2944,6 +3012,82 @@ impl DataStore {
             }
         }
 
+        // Load all the config reconciler top-level rows; build a map keyed by
+        // sled ID.
+        let mut sled_config_reconcilers = {
+            use nexus_db_schema::schema::inv_sled_config_reconciler::dsl;
+
+            let mut results: BTreeMap<SledUuid, _> = BTreeMap::new();
+
+            let mut paginator = Paginator::new(
+                batch_size,
+                dropshot::PaginationOrder::Ascending,
+            );
+            while let Some(p) = paginator.next() {
+                let batch = paginated(
+                    dsl::inv_sled_config_reconciler,
+                    dsl::sled_id,
+                    &p.current_pagparams(),
+                )
+                .filter(dsl::inv_collection_id.eq(db_id))
+                .select(InvSledConfigReconciler::as_select())
+                .load_async(&*conn)
+                .await
+                .map_err(|e| {
+                    public_error_from_diesel(e, ErrorHandler::Server)
+                })?;
+                paginator = p.found_batch(&batch, &|row| row.sled_id);
+
+                for row in batch {
+                    results.insert(row.sled_id.into(), row);
+                }
+            }
+
+            results
+        };
+
+        // Load all the sled boot partition details; build a map of maps keyed
+        // by sled ID -> M2Slot.
+        let mut sled_boot_partition_details = {
+            use nexus_db_schema::schema::inv_sled_boot_partition::dsl;
+
+            let mut results: BTreeMap<SledUuid, BTreeMap<M2Slot, _>> =
+                BTreeMap::new();
+
+            let mut paginator = Paginator::new(
+                batch_size,
+                dropshot::PaginationOrder::Ascending,
+            );
+            while let Some(p) = paginator.next() {
+                let batch = paginated_multicolumn(
+                    dsl::inv_sled_boot_partition,
+                    (dsl::sled_id, dsl::boot_disk_slot),
+                    &p.current_pagparams(),
+                )
+                .filter(dsl::inv_collection_id.eq(db_id))
+                .select(InvSledBootPartition::as_select())
+                .load_async(&*conn)
+                .await
+                .map_err(|e| {
+                    public_error_from_diesel(e, ErrorHandler::Server)
+                })?;
+                paginator = p.found_batch(&batch, &|row| {
+                    (row.sled_id, row.boot_disk_slot)
+                });
+
+                for row in batch {
+                    let sled_map =
+                        results.entry(row.sled_id.into()).or_default();
+                    let slot = row.slot().map_err(|err| {
+                        Error::internal_error(&format!("{err:#}"))
+                    })?;
+                    sled_map.insert(slot, row);
+                }
+            }
+
+            results
+        };
+
         // Load all the config reconciler disk results; build a map of maps
         // keyed by sled ID.
         let mut last_reconciliation_disk_results = {
@@ -3332,11 +3476,11 @@ impl DataStore {
                         .map(|c| c.config.clone())
                 })
                 .map_err(|e| Error::internal_error(&format!("{e:#}")))?;
-            let last_reconciliation = s
-                .last_reconciliation_sled_config
-                .map(|id| {
+            let last_reconciliation = sled_config_reconcilers
+                .remove(&sled_id)
+                .map(|reconciler| {
                     let last_reconciled_config = omicron_sled_configs
-                        .get(&id.into())
+                        .get(&reconciler.last_reconciled_config.into())
                         .as_ref()
                         .ok_or_else(|| {
                             Error::internal_error(
@@ -3346,6 +3490,46 @@ impl DataStore {
                         })?
                         .config
                         .clone();
+
+                    let boot_partitions = {
+                        let boot_disk =
+                            reconciler.boot_disk().map_err(|err| {
+                                Error::internal_error(&format!("{err:#}"))
+                            })?;
+
+                        // Helper to convert our nullable error column into
+                        // either the error message (if present) or, if NULL,
+                        // looking up the `BootPartitionDetails` from the rows
+                        // we loaded above. We have to do this for both slots.
+                        let mut slot_details = |maybe_err, slot| match maybe_err
+                        {
+                            Some(err) => Ok(Err(err)),
+                            None => sled_boot_partition_details
+                                .get_mut(&sled_id)
+                                .and_then(|by_slot| by_slot.remove(&slot))
+                                .map(|details| {
+                                    Ok(BootPartitionDetails::from(details))
+                                })
+                                .ok_or_else(|| {
+                                    Error::internal_error(
+                                        "missing boot partition details that \
+                                         we should have fetched",
+                                    )
+                                }),
+                        };
+
+                        let slot_a = slot_details(
+                            reconciler.boot_partition_a_error,
+                            M2Slot::A,
+                        )?;
+                        let slot_b = slot_details(
+                            reconciler.boot_partition_b_error,
+                            M2Slot::B,
+                        )?;
+
+                        BootPartitionContents { boot_disk, slot_a, slot_b }
+                    };
+
                     Ok::<_, Error>(ConfigReconcilerInventory {
                         last_reconciled_config,
                         external_disks: last_reconciliation_disk_results
@@ -3361,6 +3545,7 @@ impl DataStore {
                         zones: last_reconciliation_zone_results
                             .remove(&sled_id)
                             .unwrap_or_default(),
+                        boot_partitions,
                     })
                 })
                 .transpose()?;
@@ -3423,6 +3608,31 @@ impl DataStore {
 
         // Check that we consumed all the reconciliation results we found in
         // this collection.
+        bail_unless!(
+            sled_config_reconcilers.is_empty(),
+            "found extra sled config reconcilers: {:?}",
+            sled_config_reconcilers.keys(),
+        );
+        {
+            // `sled_boot_partition_details` is a map of maps; we don't prune
+            // the outermost map, but they should all be empty.
+            let sleds_with_leftover_boot_partitions =
+                sled_boot_partition_details
+                    .iter()
+                    .filter_map(|(sled_id, boot_partitions)| {
+                        if boot_partitions.is_empty() {
+                            None
+                        } else {
+                            Some(sled_id)
+                        }
+                    })
+                    .collect::<Vec<_>>();
+            bail_unless!(
+                sleds_with_leftover_boot_partitions.is_empty(),
+                "found extra sled boot partition details: {:?}",
+                sleds_with_leftover_boot_partitions,
+            );
+        }
         bail_unless!(
             last_reconciliation_disk_results.is_empty(),
             "found extra config reconciliation disk results: {:?}",
@@ -3491,7 +3701,6 @@ impl IdMappable for OmicronSledConfigWithId {
 #[derive(Debug)]
 struct ConfigReconcilerFields {
     ledgered_sled_config: Option<OmicronSledConfigUuid>,
-    last_reconciliation_sled_config: Option<OmicronSledConfigUuid>,
     reconciler_status: InvConfigReconcilerStatus,
 }
 
@@ -3499,6 +3708,7 @@ struct ConfigReconcilerFields {
 // per-sled config reconciler status rows for an inventory collection.
 #[derive(Debug, Default)]
 struct ConfigReconcilerRows {
+    config_reconcilers: Vec<InvSledConfigReconciler>,
     sled_configs: Vec<InvOmicronSledConfig>,
     disks: Vec<InvOmicronSledConfigDisk>,
     datasets: Vec<InvOmicronSledConfigDataset>,
@@ -3508,6 +3718,7 @@ struct ConfigReconcilerRows {
     dataset_results: Vec<InvLastReconciliationDatasetResult>,
     orphaned_datasets: Vec<InvLastReconciliationOrphanedDataset>,
     zone_results: Vec<InvLastReconciliationZoneResult>,
+    boot_partitions: Vec<InvSledBootPartition>,
     config_reconciler_fields_by_sled:
         BTreeMap<SledUuid, ConfigReconcilerFields>,
 }
@@ -3536,20 +3747,73 @@ impl ConfigReconcilerRows {
                 Some(self.accumulate_config(collection_id, config)?);
         }
 
-        let mut last_reconciliation_sled_config = None;
+        let mut last_reconciliation_config_id = None;
         if let Some(last_reconciliation) = &sled_agent.last_reconciliation {
             // If this config exactly matches the ledgered sled config, we can
             // reuse the foreign key; otherwise, accumulate the new one.
-            if Some(&last_reconciliation.last_reconciled_config)
-                == sled_agent.ledgered_sled_config.as_ref()
-            {
-                last_reconciliation_sled_config = ledgered_sled_config;
-            } else {
-                last_reconciliation_sled_config =
-                    Some(self.accumulate_config(
+            let last_reconciled_config =
+                if Some(&last_reconciliation.last_reconciled_config)
+                    == sled_agent.ledgered_sled_config.as_ref()
+                {
+                    // We always set this to `Some(_)` above if we have a
+                    // ledgered sled config, which we must to pass this check.
+                    ledgered_sled_config
+                        .expect("always Some(_) if we have a ledgered config")
+                } else {
+                    self.accumulate_config(
                         collection_id,
                         &last_reconciliation.last_reconciled_config,
-                    )?);
+                    )?
+                };
+            last_reconciliation_config_id = Some(last_reconciled_config);
+
+            self.config_reconcilers.push(InvSledConfigReconciler::new(
+                collection_id,
+                sled_id,
+                last_reconciled_config,
+                last_reconciliation.boot_partitions.boot_disk.clone(),
+                last_reconciliation
+                    .boot_partitions
+                    .slot_a
+                    .as_ref()
+                    .err()
+                    .cloned(),
+                last_reconciliation
+                    .boot_partitions
+                    .slot_b
+                    .as_ref()
+                    .err()
+                    .cloned(),
+            ));
+
+            // Boot partition _errors_ are kept in `InvSledConfigReconciler`
+            // above, but non-errors get their own rows; handle those here.
+            //
+            // `.into_iter().flatten()` strips out `None`s (i.e., slots that had
+            // an error, after the conversions we do here).
+            for (slot, details) in [
+                last_reconciliation
+                    .boot_partitions
+                    .slot_a
+                    .as_ref()
+                    .ok()
+                    .map(|details| (M2Slot::A, details.clone())),
+                last_reconciliation
+                    .boot_partitions
+                    .slot_b
+                    .as_ref()
+                    .ok()
+                    .map(|details| (M2Slot::B, details.clone())),
+            ]
+            .into_iter()
+            .flatten()
+            {
+                self.boot_partitions.push(InvSledBootPartition::new(
+                    collection_id,
+                    sled_id,
+                    slot,
+                    details,
+                ));
             }
 
             self.disk_results.extend(
@@ -3625,7 +3889,7 @@ impl ConfigReconcilerRows {
                         .as_ref()
                         .map(|lr| &lr.last_reconciled_config)
                 {
-                    last_reconciliation_sled_config
+                    last_reconciliation_config_id
                 } else {
                     Some(self.accumulate_config(collection_id, config)?)
                 };
@@ -3654,11 +3918,7 @@ impl ConfigReconcilerRows {
 
         self.config_reconciler_fields_by_sled.insert(
             sled_id,
-            ConfigReconcilerFields {
-                ledgered_sled_config,
-                last_reconciliation_sled_config,
-                reconciler_status,
-            },
+            ConfigReconcilerFields { ledgered_sled_config, reconciler_status },
         );
 
         Ok(())
@@ -3771,6 +4031,9 @@ mod test {
     use nexus_inventory::examples::Representative;
     use nexus_inventory::examples::representative;
     use nexus_inventory::now_db_precision;
+    use nexus_sled_agent_shared::inventory::BootImageHeader;
+    use nexus_sled_agent_shared::inventory::BootPartitionContents;
+    use nexus_sled_agent_shared::inventory::BootPartitionDetails;
     use nexus_sled_agent_shared::inventory::OrphanedDataset;
     use nexus_sled_agent_shared::inventory::{
         ConfigReconcilerInventory, ConfigReconcilerInventoryResult,
@@ -3783,6 +4046,7 @@ mod test {
     use omicron_common::api::external::Error;
     use omicron_common::disk::DatasetKind;
     use omicron_common::disk::DatasetName;
+    use omicron_common::disk::M2Slot;
     use omicron_common::zpool_name::ZpoolName;
     use omicron_test_utils::dev;
     use omicron_uuid_kinds::{
@@ -4616,6 +4880,22 @@ mod test {
                             (OmicronZoneUuid::new_v4(), make_result("zone", i))
                         })
                         .collect(),
+                    boot_partitions: BootPartitionContents {
+                        boot_disk: Ok(M2Slot::B),
+                        slot_a: Err("some error".to_string()),
+                        slot_b: Ok(BootPartitionDetails {
+                            header: BootImageHeader {
+                                flags: u64::MAX,
+                                data_size: 123456,
+                                image_size: 234567,
+                                target_size: 345678,
+                                sha256: [1; 32],
+                                image_name: "test image".to_string(),
+                            },
+                            artifact_hash: ArtifactHash([2; 32]),
+                            artifact_size: 456789,
+                        }),
+                    },
                 }
             });
 

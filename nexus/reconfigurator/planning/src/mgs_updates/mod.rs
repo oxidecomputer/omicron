@@ -711,7 +711,7 @@ mod test {
             };
 
             let baseboard_id = builder
-                .found_sp_state("test", sp_type, u32::from(sp_slot), sp_state)
+                .found_sp_state("test", sp_type, sp_slot, sp_state)
                 .unwrap();
             let active_version = active_version_exceptions
                 .get(&(sp_type, sp_slot))

@@ -195,26 +195,9 @@ impl CollectionBuilder {
         &mut self,
         source: &str,
         sp_type: SpType,
-        slot: u32,
+        sp_slot: u16,
         sp_state: SpState,
     ) -> Option<Arc<BaseboardId>> {
-        // Much ado about very little: MGS reports that "slot" is a u32, though
-        // in practice this seems very unlikely to be bigger than a u8.  (How
-        // many slots can there be within one rack?)  The database only supports
-        // signed integers, so if we assumed this really could span the range of
-        // a u32, we'd need to store it in an i64.  Instead, assume here that we
-        // can stick it into a u16 (which still seems generous).  This will
-        // allow us to store it into an Int32 in the database.
-        let Ok(sp_slot) = u16::try_from(slot) else {
-            self.found_error(InventoryError::from(anyhow!(
-                "MGS {:?}: SP {:?} slot {}: slot number did not fit into u16",
-                source,
-                sp_type,
-                slot
-            )));
-            return None;
-        };
-
         // Normalize the baseboard id: i.e., if we've seen this baseboard
         // before, use the same baseboard id record.  Otherwise, make a new one.
         let baseboard = Self::normalize_item(
@@ -601,7 +584,6 @@ mod test {
     use super::now_db_precision;
     use crate::examples::Representative;
     use crate::examples::representative;
-    use crate::examples::sp_state;
     use base64::Engine;
     use base64::engine::general_purpose::STANDARD as BASE64_STANDARD;
     use gateway_client::types::PowerState;
@@ -1110,15 +1092,6 @@ mod test {
             .unwrap();
         assert_eq!(sled1_bb, sled1_bb_dup);
 
-        // report an SP with an impossible slot number
-        let sled2_sp = builder.found_sp_state(
-            "fake MGS 1",
-            SpType::Sled,
-            u32::from(u16::MAX) + 1,
-            sp_state("1"),
-        );
-        assert_eq!(sled2_sp, None);
-
         // report SP caboose for an unknown baseboard
         let bogus_baseboard = BaseboardId {
             part_number: String::from("p1"),
@@ -1330,17 +1303,7 @@ mod test {
                 .is_none()
         );
 
-        // We should see an error.
-        assert_eq!(
-            collection
-                .errors
-                .iter()
-                .map(|e| format!("{:#}", e))
-                .collect::<Vec<_>>(),
-            vec![
-                "MGS \"fake MGS 1\": SP Sled slot 65536: \
-                slot number did not fit into u16"
-            ]
-        );
+        // We should see no errors.
+        assert!(collection.errors.is_empty());
     }
 }
