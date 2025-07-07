@@ -31,7 +31,7 @@ pub struct BootDiskNotFound;
 
 #[derive(Debug, thiserror::Error)]
 pub enum BootPartitionError {
-    #[error("no disk found")]
+    #[error("no disk found in this slot")]
     NoDiskInSlot,
     #[error("could not determine raw devfs path")]
     DetermineDevfsPath(#[source] Arc<PooledDiskError>),
@@ -41,7 +41,7 @@ pub enum BootPartitionError {
         #[source]
         err: io::Error,
     },
-    #[error("failed fetching extended media info at {path}")]
+    #[error("failed fetching disk's extended media info at {path}")]
     MediaInfoExtended {
         path: Utf8PathBuf,
         #[source]
