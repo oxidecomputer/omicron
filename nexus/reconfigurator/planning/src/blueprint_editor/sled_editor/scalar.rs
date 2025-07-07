@@ -16,7 +16,6 @@ impl<T> ScalarEditor<T> {
         ScalarEditor { original, value: EditValue::Original }
     }
 
-    #[expect(dead_code)]
     pub(crate) fn value(&self) -> &T {
         match &self.value {
             EditValue::Original => &self.original,

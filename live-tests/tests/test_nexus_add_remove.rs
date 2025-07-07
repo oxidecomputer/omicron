@@ -18,6 +18,7 @@ use nexus_reconfigurator_planning::blueprint_builder::BlueprintBuilder;
 use nexus_reconfigurator_planning::planner::Planner;
 use nexus_reconfigurator_preparation::PlanningInputFromDb;
 use nexus_sled_agent_shared::inventory::ZoneKind;
+use nexus_types::deployment::BlueprintZoneDisposition;
 use nexus_types::deployment::SledFilter;
 use omicron_common::address::NEXUS_INTERNAL_PORT;
 use omicron_test_utils::dev::poll::CondCheckError;
@@ -54,19 +55,49 @@ async fn test_nexus_add_remove(lc: &LiveTestContext) {
     let nexus = initial_nexus_clients.first().expect("internal Nexus client");
 
     // First, deploy a new Nexus zone to an arbitrary sled.
-    let sled_id = planning_input
+    let commissioned_sled_ids = planning_input
         .all_sled_ids(SledFilter::Commissioned)
-        .next()
-        .expect("any sled id");
+        .collect::<Vec<_>>();
+    let sled_id = *commissioned_sled_ids.first().expect("any sled id");
     let (blueprint1, blueprint2) = blueprint_edit_current_target(
         log,
         &planning_input,
         &collection,
         &nexus,
         &|builder: &mut BlueprintBuilder| {
+            // We have to tell the builder what image source to use for the new
+            // Nexus zone. If we were the planner, we'd check whether we have a
+            // TUF repo (or two) then decide whether to use the image from one
+            // of those or the install dataset. Instead of duplicating all of
+            // that logic, we'll just find an existing Nexus zone and copy its
+            // image source. This should always be right in this context; it
+            // would only be wrong if there are existing Nexus zones with
+            // different image sources, which would only be true in the middle
+            // of an update.
+            let image_source = commissioned_sled_ids
+                .iter()
+                .find_map(|&sled_id| {
+                    builder
+                        .current_sled_zones(
+                            sled_id,
+                            BlueprintZoneDisposition::is_in_service,
+                        )
+                        .find_map(|zone| {
+                            if zone.zone_type.is_nexus() {
+                                Some(zone.image_source.clone())
+                            } else {
+                                None
+                            }
+                        })
+                })
+                .context(
+                    "could not find in-service Nexus in parent blueprint",
+                )?;
+
             builder
-                .sled_add_zone_nexus(sled_id)
+                .sled_add_zone_nexus(sled_id, image_source)
                 .context("adding Nexus zone")?;
+
             Ok(())
         },
     )

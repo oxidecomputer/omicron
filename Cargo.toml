@@ -368,7 +368,7 @@ byteorder = "1.5.0"
 bytes = "1.10.1"
 camino = { version = "1.1", features = ["serde1"] }
 camino-tempfile = "1.4.1"
-camino-tempfile-ext = { version = "0.3.1", features = ["assert-color"] }
+camino-tempfile-ext = { version = "0.3.2", features = ["assert-color"] }
 cancel-safe-futures = "0.1.5"
 cargo_metadata = "0.20.0"
 chacha20poly1305 = "0.10.1"
@@ -404,7 +404,7 @@ crucible-common = { git = "https://github.com/oxidecomputer/crucible", rev = "e1
 # NOTE: See above!
 csv = "1.3.1"
 curve25519-dalek = "4"
-daft = { version = "0.1.3", features = ["derive", "newtype-uuid1", "oxnet01", "uuid1"] }
+daft = { version = "0.1.4", features = ["derive", "newtype-uuid1", "oxnet01", "uuid1"] }
 display-error-chain = "0.2.2"
 omicron-ddm-admin-client = { path = "clients/ddm-admin-client" }
 datatest-stable = "0.3.2"
@@ -482,7 +482,7 @@ id-map = { path = "id-map" }
 illumos-utils = { path = "illumos-utils" }
 iana-time-zone = "0.1.63"
 indent_write = "2.2.0"
-indexmap = "2.9.0"
+indexmap = "2.10.0"
 indicatif = { version = "0.17.11", features = ["rayon"] }
 indoc = "2.0.6"
 installinator = { path = "installinator" }
@@ -567,7 +567,7 @@ omicron-test-utils = { path = "test-utils" }
 omicron-workspace-hack = "0.1.0"
 omicron-zone-package = "0.12.2"
 oxide-client = { path = "clients/oxide-client" }
-oxide-tokio-rt = "0.1.1"
+oxide-tokio-rt = "0.1.2"
 oxide-vpc = { git = "https://github.com/oxidecomputer/opte", rev = "23cebf3b1c911f09c203f7df50cc06bf780338e5", features = [ "api", "std" ] }
 oxlog = { path = "dev-tools/oxlog" }
 oxnet = "0.1.2"
@@ -644,7 +644,7 @@ regex = "1.11.1"
 regress = "0.10.3"
 repo-depot-api = { path = "sled-agent/repo-depot-api" }
 repo-depot-client = { path = "clients/repo-depot-client" }
-reqwest = { version = "0.12.20", default-features = false }
+reqwest = { version = "0.12.22", default-features = false }
 ring = "0.17.14"
 rpassword = "7.4.0"
 rstest = "0.25.0"
