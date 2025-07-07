@@ -6,19 +6,16 @@
 //! partitions.
 
 use crate::InternalDisks;
-use bytes::Buf as _;
 use camino::Utf8PathBuf;
-use illumos_utils::dkio::MediaInfoExtended;
+use nexus_sled_agent_shared::inventory::BootPartitionContents as BootPartitionContentsInventory;
+use nexus_sled_agent_shared::inventory::BootPartitionDetails;
 use omicron_common::disk::M2Slot;
-use sha2::Digest as _;
 use sled_hardware::PooledDiskError;
-use std::cmp;
-use std::fs::File;
+use slog_error_chain::InlineErrorChain;
 use std::io;
 use std::io::BufRead as _;
 use std::io::BufReader;
 use std::io::Read as _;
-use std::os::fd::AsRawFd as _;
 use std::sync::Arc;
 use tufaceous_artifact::ArtifactHash;
 
@@ -77,14 +74,6 @@ pub enum BootPartitionError {
 }
 
 #[derive(Debug)]
-#[allow(unused)] // TODO remove once this is reported in inventory
-pub struct BootPartitionDetails {
-    pub header: BootImageHeader,
-    pub artifact_hash: ArtifactHash,
-    pub artifact_size: usize,
-}
-
-#[derive(Debug)]
 pub struct BootPartitionContents {
     pub boot_disk: Result<M2Slot, BootDiskNotFound>,
     pub slot_a: Result<BootPartitionDetails, BootPartitionError>,
@@ -94,8 +83,8 @@ pub struct BootPartitionContents {
 impl BootPartitionContents {
     pub async fn read(internal_disks: &InternalDisks) -> Self {
         let (slot_a, slot_b) = futures::join!(
-            BootPartitionDetails::read(M2Slot::A, internal_disks),
-            BootPartitionDetails::read(M2Slot::B, internal_disks),
+            boot_partition_details::read(M2Slot::A, internal_disks),
+            boot_partition_details::read(M2Slot::B, internal_disks),
         );
         Self {
             boot_disk: internal_disks.boot_disk_slot().ok_or(BootDiskNotFound),
@@ -103,16 +92,36 @@ impl BootPartitionContents {
             slot_b,
         }
     }
+
+    pub fn into_inventory(self) -> BootPartitionContentsInventory {
+        let err_to_string = |err: &dyn std::error::Error| {
+            InlineErrorChain::new(err).to_string()
+        };
+        BootPartitionContentsInventory {
+            boot_disk: self.boot_disk.map_err(|e| err_to_string(&e)),
+            slot_a: self.slot_a.map_err(|e| err_to_string(&e)),
+            slot_b: self.slot_b.map_err(|e| err_to_string(&e)),
+        }
+    }
 }
 
-impl BootPartitionDetails {
-    async fn read(
+// These would be methods on `BootPartitionDetails` if we defined it,
+// but it's defined in `nexus_sled_agent_shared`. Use a module instead.
+mod boot_partition_details {
+    use super::*;
+    use illumos_utils::dkio::MediaInfoExtended;
+    use sha2::Digest as _;
+    use std::cmp;
+    use std::fs::File;
+    use std::os::fd::AsRawFd as _;
+
+    pub(super) async fn read(
         slot: M2Slot,
         internal_disks: &InternalDisks,
-    ) -> Result<Self, BootPartitionError> {
+    ) -> Result<BootPartitionDetails, BootPartitionError> {
         match internal_disks.image_raw_devfs_path(slot) {
             Some(Ok(path)) => {
-                tokio::task::spawn_blocking(|| Self::read_blocking(path))
+                tokio::task::spawn_blocking(|| read_blocking(path))
                     .await
                     .expect("read_blocking() did not panic")
             }
@@ -121,7 +130,9 @@ impl BootPartitionDetails {
         }
     }
 
-    fn read_blocking(path: Utf8PathBuf) -> Result<Self, BootPartitionError> {
+    fn read_blocking(
+        path: Utf8PathBuf,
+    ) -> Result<BootPartitionDetails, BootPartitionError> {
         const ONE_MIB: usize = 1024 * 1024;
 
         let f = File::open(&path).map_err(|err| {
@@ -152,7 +163,7 @@ impl BootPartitionDetails {
             block_size = 128 * ONE_MIB;
         }
 
-        Self::read_blocking_with_buf_size(
+        read_blocking_with_buf_size(
             &mut BufReaderExactSize::with_capacity(block_size, f),
             path,
         )
@@ -161,10 +172,12 @@ impl BootPartitionDetails {
     // This is separated from `read_blocking()` so we can write unit tests over
     // this function without needing real disks that respond to the
     // `MediaInfoExtended` ioctl.
-    fn read_blocking_with_buf_size<R: io::Read>(
+    //
+    // This is `pub(super)` only so it can be tested.
+    pub(super) fn read_blocking_with_buf_size<R: io::Read>(
         f: &mut BufReaderExactSize<R>,
         path: Utf8PathBuf,
-    ) -> Result<Self, BootPartitionError> {
+    ) -> Result<BootPartitionDetails, BootPartitionError> {
         // Compute two SHA256 hashes as we read the contents of this boot image.
         // The `image_header` contains a sha256 of the data _after_ the header
         // itself, but the artifact hash that lands in the TUF repo depo
@@ -176,11 +189,11 @@ impl BootPartitionDetails {
         // Read the image header and accumulate it into artifact_hasher but not
         // data_hasher.
         let image_header = {
-            let mut buf = [0; BootImageHeader::SIZE];
+            let mut buf = [0; boot_image_header::SIZE];
             f.read_exact(&mut buf).map_err(|err| {
                 BootPartitionError::ReadImageHeader { path: path.clone(), err }
             })?;
-            let header = BootImageHeader::parse(&buf).map_err(|err| {
+            let header = boot_image_header::parse(&buf).map_err(|err| {
                 BootPartitionError::ParseImageHeader { path: path.clone(), err }
             })?;
             artifact_hasher.update(&buf);
@@ -188,7 +201,7 @@ impl BootPartitionDetails {
         };
 
         let mut nleft = image_header.data_size as usize;
-        let mut offset = BootImageHeader::SIZE;
+        let mut offset = boot_image_header::SIZE;
         let artifact_size = nleft + offset;
         while nleft > 0 {
             // Read the rest of the image in block-sized chunks by filling the
@@ -225,7 +238,7 @@ impl BootPartitionDetails {
             });
         }
 
-        Ok(Self {
+        Ok(BootPartitionDetails {
             artifact_hash: ArtifactHash(artifact_hash.into()),
             artifact_size,
             header: image_header,
@@ -247,44 +260,41 @@ pub enum ImageHeaderParseError {
     BadImageTargetSize { image_size: u64, target_size: u64 },
 }
 
-// There are several other fields in the header that we either parse and discard
-// or ignore completely; see https://github.com/oxidecomputer/boot-image-tools
-// for more thorough support.
-#[derive(Debug)]
-#[allow(unused)] // TODO remove once this is reported in inventory
-pub struct BootImageHeader {
-    pub flags: u64,
-    pub data_size: u64,
-    pub image_size: u64,
-    pub target_size: u64,
-    pub sha256: [u8; 32],
-}
+// These would be constants and methods on `BootImageHeader` if we defined it,
+// but it's defined in `nexus_sled_agent_shared`. Use a module instead.
+mod boot_image_header {
+    use super::ImageHeaderParseError;
+    use bytes::Buf as _;
+    use nexus_sled_agent_shared::inventory::BootImageHeader;
 
-impl BootImageHeader {
-    const SIZE: usize = 4096;
-    const MAGIC: u32 = 0x1deb0075;
-    const VERSION: u32 = 2;
+    pub(super) const SIZE: usize = 4096;
+    pub(super) const DATASET_NAME_SIZE: usize = 128;
+    pub(super) const IMAGE_NAME_SIZE: usize = 128;
+    pub(super) const MAGIC: u32 = 0x1deb0075;
+    pub(super) const VERSION: u32 = 2;
 
-    fn parse(mut buf: &[u8]) -> Result<Self, ImageHeaderParseError> {
+    pub(super) fn parse(
+        mut buf: &[u8],
+    ) -> Result<BootImageHeader, ImageHeaderParseError> {
         // The `get_*_le()` methods below (from `bytes::Buf`) panic if the slice
         // isn't long enough. We can check once that we have enough data for a
         // full header, guaranteeing none of the `get_*`s below will panic.
-        if buf.len() < Self::SIZE {
+        if buf.len() < SIZE {
             return Err(ImageHeaderParseError::TooSmall);
         }
 
         let magic = buf.get_u32_le();
-        if magic != Self::MAGIC {
+        if magic != MAGIC {
             return Err(ImageHeaderParseError::BadMagic {
-                expected: Self::MAGIC,
+                expected: MAGIC,
                 got: magic,
             });
         }
 
         let version = buf.get_u32_le();
-        if version != Self::VERSION {
+        if version != VERSION {
             return Err(ImageHeaderParseError::BadVersion {
-                expected: Self::VERSION,
+                expected: VERSION,
                 got: version,
             });
         }
@@ -301,9 +311,30 @@ impl BootImageHeader {
         }
 
         let mut sha256 = [0; 32];
-        sha256.copy_from_slice(&buf[..32]);
+        buf.copy_to_slice(&mut sha256);
 
-        Ok(Self { flags, data_size, image_size, target_size, sha256 })
+        // skip the dataset name field
+        buf.advance(DATASET_NAME_SIZE);
+
+        // read the image name field (this is a 0-terminated string, so trim to
+        // the first 0)
+        let image_name = {
+            let field = &buf[..IMAGE_NAME_SIZE];
+            buf.advance(IMAGE_NAME_SIZE);
+
+            let end = field.iter().position(|&b| b == 0).unwrap_or(field.len());
+
+            String::from_utf8_lossy(&field[..end]).to_string()
+        };
+
+        Ok(BootImageHeader {
+            flags,
+            data_size,
+            image_size,
+            target_size,
+            sha256,
+            image_name,
+        })
     }
 }
 
@@ -360,6 +391,7 @@ mod tests {
     use proptest::collection::vec;
     use proptest::prelude::*;
     use proptest::prop_oneof;
+    use sha2::Digest as _;
     use slog_error_chain::InlineErrorChain;
     use test_strategy::proptest;
 
@@ -403,10 +435,10 @@ mod tests {
 
     fn prepend_valid_image_hader(data: &mut Vec<u8>) -> [u8; 32] {
         let sha256 = sha2::Sha256::digest(&data);
-        let mut header = [0; BootImageHeader::SIZE];
+        let mut header = [0; boot_image_header::SIZE];
         let mut buf = header.as_mut_slice();
-        buf.put_u32_le(BootImageHeader::MAGIC);
-        buf.put_u32_le(BootImageHeader::VERSION);
+        buf.put_u32_le(boot_image_header::MAGIC);
+        buf.put_u32_le(boot_image_header::VERSION);
         buf.put_u64_le(0); // flags
         buf.put_u64_le(data.len() as u64);
         buf.put_u64_le(data.len() as u64);
@@ -449,7 +481,7 @@ mod tests {
             block_size,
             NeverEndingReader::new(&*data),
         );
-        match BootPartitionDetails::read_blocking_with_buf_size(
+        match boot_partition_details::read_blocking_with_buf_size(
             &mut reader,
             "/does-not-matter".into(),
         ) {

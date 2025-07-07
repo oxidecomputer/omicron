@@ -71,6 +71,7 @@ supports-color.workspace = true
 tabled.workspace = true
 textwrap.workspace = true
 tokio = { workspace = true, features = [ "full" ] }
+tufaceous-artifact.workspace = true
 unicode-width.workspace = true
 update-engine.workspace = true
 url.workspace = true

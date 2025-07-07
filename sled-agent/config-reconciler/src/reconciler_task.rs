@@ -12,6 +12,7 @@ use iddqd::IdOrdMap;
 use illumos_utils::zpool::PathInPool;
 use illumos_utils::zpool::ZpoolOrRamdisk;
 use key_manager::StorageKeyRequester;
+use nexus_sled_agent_shared::inventory::BootPartitionContents as BootPartitionContentsInventory;
 use nexus_sled_agent_shared::inventory::ConfigReconcilerInventory;
 use nexus_sled_agent_shared::inventory::ConfigReconcilerInventoryResult;
 use nexus_sled_agent_shared::inventory::ConfigReconcilerInventoryStatus;
@@ -208,6 +209,7 @@ struct LatestReconciliationResult {
     orphaned_datasets: IdOrdMap<OrphanedDataset>,
     zones_inventory: BTreeMap<OmicronZoneUuid, ConfigReconcilerInventoryResult>,
     timesync_status: TimeSyncStatus,
+    boot_partitions: BootPartitionContentsInventory,
 }
 
 impl LatestReconciliationResult {
@@ -218,6 +220,7 @@ impl LatestReconciliationResult {
             datasets: self.datasets.clone(),
             orphaned_datasets: self.orphaned_datasets.clone(),
             zones: self.zones_inventory.clone(),
+            boot_partitions: self.boot_partitions.clone(),
         }
     }
 
@@ -406,7 +409,7 @@ impl ReconcilerTask {
 
         // Concurrently with all the disk / dataset / zone config updates below,
         // we can reconcile our boot partitions. This is mostly I/O.
-        let boot_partition_contents_fut = tokio::spawn({
+        let boot_partitions_fut = tokio::spawn({
             let internal_disks = self.internal_disks_rx.current();
             async move { BootPartitionContents::read(&internal_disks).await }
         });
@@ -527,23 +530,10 @@ impl ReconcilerTask {
             ReconciliationResult::NoRetryNeeded
         };
 
-        let boot_partition_contents = boot_partition_contents_fut
+        // Wait for the task we spawned to handle boot partitions above.
+        let boot_partitions = boot_partitions_fut
             .await
             .expect("reading boot partition details did not panic");
-
-        // TODO These details should go into `LatestReconciliationResult` and be
-        // reported via inventory; that will happen shortly, but for now just
-        // log them.
-        {
-            let BootPartitionContents { boot_disk, slot_a, slot_b } =
-                boot_partition_contents;
-            info!(
-                self.log, "read boot partition details";
-                "boot_disk" => ?boot_disk,
-                "slot_a" => ?slot_a,
-                "slot_b" => ?slot_b,
-            );
-        }
 
         let inner = LatestReconciliationResult {
             sled_config,
@@ -552,6 +542,7 @@ impl ReconcilerTask {
             orphaned_datasets: self.datasets.orphaned_datasets().clone(),
             zones_inventory: self.zones.to_inventory(),
             timesync_status,
+            boot_partitions: boot_partitions.into_inventory(),
         };
         self.reconciler_result_tx.send_modify(|r| {
             r.status = ReconcilerTaskStatus::Idle {
