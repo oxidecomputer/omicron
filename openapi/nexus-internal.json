@@ -7305,23 +7305,15 @@
               }
             ]
           },
-          "slot0_git_commit": {
-            "type": "string"
-          },
           "slot0_version": {
-            "type": "string"
-          },
-          "slot1_git_commit": {
-            "type": "string"
+            "$ref": "#/components/schemas/TufRepoVersion"
           },
           "slot1_version": {
-            "type": "string"
+            "$ref": "#/components/schemas/TufRepoVersion"
           }
         },
         "required": [
-          "slot0_git_commit",
           "slot0_version",
-          "slot1_git_commit",
           "slot1_version"
         ]
       },
@@ -7481,6 +7473,75 @@
       },
       "SwitchPutResponse": {
         "type": "object"
+      },
+      "TufRepoVersion": {
+        "oneOf": [
+          {
+            "type": "object",
+            "properties": {
+              "zone_status_version": {
+                "type": "string",
+                "enum": [
+                  "unknown"
+                ]
+              }
+            },
+            "required": [
+              "zone_status_version"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "zone_status_version": {
+                "type": "string",
+                "enum": [
+                  "install_dataset"
+                ]
+              }
+            },
+            "required": [
+              "zone_status_version"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "details": {
+                "type": "string",
+                "pattern": "^(0|[1-9]\\d*)\\.(0|[1-9]\\d*)\\.(0|[1-9]\\d*)(?:-((?:0|[1-9]\\d*|\\d*[a-zA-Z-][0-9a-zA-Z-]*)(?:\\.(?:0|[1-9]\\d*|\\d*[a-zA-Z-][0-9a-zA-Z-]*))*))?(?:\\+([0-9a-zA-Z-]+(?:\\.[0-9a-zA-Z-]+)*))?$"
+              },
+              "zone_status_version": {
+                "type": "string",
+                "enum": [
+                  "version"
+                ]
+              }
+            },
+            "required": [
+              "details",
+              "zone_status_version"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "details": {
+                "type": "string"
+              },
+              "zone_status_version": {
+                "type": "string",
+                "enum": [
+                  "error"
+                ]
+              }
+            },
+            "required": [
+              "details",
+              "zone_status_version"
+            ]
+          }
+        ]
       },
       "TxEqConfig": {
         "description": "Per-port tx-eq overrides.  This can be used to fine-tune the transceiver equalization settings to improve signal integrity.",
@@ -7837,7 +7898,7 @@
         "type": "object",
         "properties": {
           "version": {
-            "$ref": "#/components/schemas/ZoneStatusVersion"
+            "$ref": "#/components/schemas/TufRepoVersion"
           },
           "zone_id": {
             "$ref": "#/components/schemas/TypedUuidForOmicronZoneKind"
@@ -7850,75 +7911,6 @@
           "version",
           "zone_id",
           "zone_type"
-        ]
-      },
-      "ZoneStatusVersion": {
-        "oneOf": [
-          {
-            "type": "object",
-            "properties": {
-              "zone_status_version": {
-                "type": "string",
-                "enum": [
-                  "unknown"
-                ]
-              }
-            },
-            "required": [
-              "zone_status_version"
-            ]
-          },
-          {
-            "type": "object",
-            "properties": {
-              "zone_status_version": {
-                "type": "string",
-                "enum": [
-                  "install_dataset"
-                ]
-              }
-            },
-            "required": [
-              "zone_status_version"
-            ]
-          },
-          {
-            "type": "object",
-            "properties": {
-              "details": {
-                "type": "string",
-                "pattern": "^(0|[1-9]\\d*)\\.(0|[1-9]\\d*)\\.(0|[1-9]\\d*)(?:-((?:0|[1-9]\\d*|\\d*[a-zA-Z-][0-9a-zA-Z-]*)(?:\\.(?:0|[1-9]\\d*|\\d*[a-zA-Z-][0-9a-zA-Z-]*))*))?(?:\\+([0-9a-zA-Z-]+(?:\\.[0-9a-zA-Z-]+)*))?$"
-              },
-              "zone_status_version": {
-                "type": "string",
-                "enum": [
-                  "version"
-                ]
-              }
-            },
-            "required": [
-              "details",
-              "zone_status_version"
-            ]
-          },
-          {
-            "type": "object",
-            "properties": {
-              "details": {
-                "type": "string"
-              },
-              "zone_status_version": {
-                "type": "string",
-                "enum": [
-                  "error"
-                ]
-              }
-            },
-            "required": [
-              "details",
-              "zone_status_version"
-            ]
-          }
         ]
       },
       "ZpoolName": {

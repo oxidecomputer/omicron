@@ -5,6 +5,7 @@
 use crate::deployment::PendingMgsUpdate;
 use crate::deployment::TargetReleaseDescription;
 use crate::inventory::BaseboardId;
+use crate::inventory::Caboose;
 use crate::inventory::CabooseWhich;
 use crate::inventory::Collection;
 use chrono::DateTime;
@@ -20,6 +21,7 @@ use nexus_sled_agent_shared::inventory::OmicronZoneImageSource;
 use nexus_sled_agent_shared::inventory::OmicronZoneType;
 use omicron_common::api::external::MacAddr;
 use omicron_common::api::external::ObjectStream;
+use omicron_common::api::external::TufArtifactMeta;
 use omicron_common::api::external::Vni;
 use omicron_common::snake_case_result;
 use omicron_common::snake_case_result::SnakeCaseResult;
@@ -39,6 +41,7 @@ use std::time::Duration;
 use std::time::Instant;
 use steno::SagaResultErr;
 use steno::UndoActionError;
+use tufaceous_artifact::KnownArtifactKind;
 use uuid::Uuid;
 
 pub async fn to_list<T, U>(object_stream: ObjectStream<T>) -> Vec<U>
@@ -521,22 +524,24 @@ impl IdOrdItem for WaitingStatus {
     tag = "zone_status_version",
     content = "details"
 )]
-pub enum ZoneStatusVersion {
+pub enum TufRepoVersion {
     Unknown,
     InstallDataset,
     Version(Version),
     Error(String),
 }
 
-impl Display for ZoneStatusVersion {
+impl Display for TufRepoVersion {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            ZoneStatusVersion::Unknown => write!(f, "unknown"),
-            ZoneStatusVersion::InstallDataset => write!(f, "install dataset"),
-            ZoneStatusVersion::Version(version) => {
+            TufRepoVersion::Unknown => write!(f, "unknown"),
+            TufRepoVersion::InstallDataset => {
+                write!(f, "install dataset")
+            }
+            TufRepoVersion::Version(version) => {
                 write!(f, "{}", version)
             }
-            ZoneStatusVersion::Error(s) => {
+            TufRepoVersion::Error(s) => {
                 write!(f, "{}", s)
             }
         }
@@ -547,16 +552,14 @@ impl Display for ZoneStatusVersion {
 pub struct ZoneStatus {
     pub zone_id: OmicronZoneUuid,
     pub zone_type: OmicronZoneType,
-    pub version: ZoneStatusVersion,
+    pub version: TufRepoVersion,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct SpStatus {
     pub sled_id: Option<SledUuid>,
-    pub slot0_version: String,
-    pub slot0_git_commit: String,
-    pub slot1_version: String,
-    pub slot1_git_commit: String,
+    pub slot0_version: TufRepoVersion,
+    pub slot1_version: TufRepoVersion,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
@@ -602,37 +605,19 @@ impl UpdateStatus {
         let mut sps: BTreeMap<BaseboardId, SpStatus> = baseboard_ids
             .into_iter()
             .map(|baseboard_id| {
-                let (slot0_version, slot0_git_commit) = inventory
+                let slot0_version = inventory
                     .caboose_for(CabooseWhich::SpSlot0, &baseboard_id)
-                    .map_or(
-                        ("unknown".to_string(), "unknown".to_string()),
-                        |c| {
-                            (
-                                c.caboose.version.clone(),
-                                c.caboose.git_commit.clone(),
-                            )
-                        },
-                    );
-                let (slot1_version, slot1_git_commit) = inventory
+                    .map_or(TufRepoVersion::Unknown, |c| {
+                        Self::caboose_to_version(old, new, &c.caboose)
+                    });
+                let slot1_version = inventory
                     .caboose_for(CabooseWhich::SpSlot1, &baseboard_id)
-                    .map_or(
-                        ("unknown".to_string(), "unknown".to_string()),
-                        |c| {
-                            (
-                                c.caboose.version.clone(),
-                                c.caboose.git_commit.clone(),
-                            )
-                        },
-                    );
+                    .map_or(TufRepoVersion::Unknown, |c| {
+                        Self::caboose_to_version(old, new, &c.caboose)
+                    });
                 (
                     (*baseboard_id).clone(),
-                    SpStatus {
-                        sled_id: None,
-                        slot0_version,
-                        slot0_git_commit,
-                        slot1_version,
-                        slot1_git_commit,
-                    },
+                    SpStatus { sled_id: None, slot0_version, slot1_version },
                 )
             })
             .collect();
@@ -651,23 +636,58 @@ impl UpdateStatus {
         UpdateStatus { zones, sps }
     }
 
-    pub fn zone_image_source_to_version(
+    fn caboose_to_version(
+        old: &TargetReleaseDescription,
+        new: &TargetReleaseDescription,
+        caboose: &Caboose,
+    ) -> TufRepoVersion {
+        let matching_caboose = |a: &&TufArtifactMeta| {
+            caboose.board == a.id.name
+                && matches!(
+                    a.id.kind.to_known(),
+                    Some(
+                        KnownArtifactKind::GimletSp
+                            | KnownArtifactKind::PscSp
+                            | KnownArtifactKind::SwitchSp
+                    )
+                )
+                && caboose.version == a.id.version.to_string()
+        };
+        if let Some(old) = old.tuf_repo() {
+            if old.artifacts.iter().find(matching_caboose).is_some() {
+                return TufRepoVersion::Version(
+                    old.repo.system_version.clone(),
+                );
+            }
+        }
+        if let Some(new) = new.tuf_repo() {
+            if new.artifacts.iter().find(matching_caboose).is_some() {
+                return TufRepoVersion::Version(
+                    new.repo.system_version.clone(),
+                );
+            }
+        }
+
+        TufRepoVersion::Unknown
+    }
+
+    fn zone_image_source_to_version(
         old: &TargetReleaseDescription,
         new: &TargetReleaseDescription,
         source: &OmicronZoneImageSource,
         res: &ConfigReconcilerInventoryResult,
-    ) -> ZoneStatusVersion {
+    ) -> TufRepoVersion {
         if let ConfigReconcilerInventoryResult::Err { message } = res {
-            return ZoneStatusVersion::Error(message.clone());
+            return TufRepoVersion::Error(message.clone());
         }
 
         let &OmicronZoneImageSource::Artifact { hash } = source else {
-            return ZoneStatusVersion::InstallDataset;
+            return TufRepoVersion::InstallDataset;
         };
 
         if let Some(old) = old.tuf_repo() {
             if old.artifacts.iter().any(|meta| meta.hash == hash) {
-                return ZoneStatusVersion::Version(
+                return TufRepoVersion::Version(
                     old.repo.system_version.clone(),
                 );
             }
@@ -675,13 +695,13 @@ impl UpdateStatus {
 
         if let Some(new) = new.tuf_repo() {
             if new.artifacts.iter().any(|meta| meta.hash == hash) {
-                return ZoneStatusVersion::Version(
+                return TufRepoVersion::Version(
                     new.repo.system_version.clone(),
                 );
             }
         }
 
-        ZoneStatusVersion::Unknown
+        TufRepoVersion::Unknown
     }
 }
 

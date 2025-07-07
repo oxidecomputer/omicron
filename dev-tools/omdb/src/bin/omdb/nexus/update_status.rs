@@ -66,27 +66,17 @@ fn print_sps(sps: impl Iterator<Item = (String, SpStatus)>) {
         baseboard_id: String,
         sled_id: String,
         slot0_version: String,
-        slot0_git_commit: String,
         slot1_version: String,
-        slot1_git_commit: String,
     }
 
     let mut rows = Vec::new();
     for (baseboard_id, status) in sps {
-        let SpStatus {
-            sled_id,
-            slot0_version,
-            slot0_git_commit,
-            slot1_version,
-            slot1_git_commit,
-        } = status;
+        let SpStatus { sled_id, slot0_version, slot1_version } = status;
         rows.push(SpRow {
             baseboard_id,
             sled_id: sled_id.map_or("".to_string(), |id| id.to_string()),
-            slot0_version,
-            slot0_git_commit,
-            slot1_version,
-            slot1_git_commit,
+            slot0_version: slot0_version.to_string(),
+            slot1_version: slot1_version.to_string(),
         });
     }
 
