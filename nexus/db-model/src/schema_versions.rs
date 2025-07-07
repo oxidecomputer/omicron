@@ -28,7 +28,8 @@ static KNOWN_VERSIONS: LazyLock<Vec<KnownVersion>> = LazyLock::new(|| {
         // |  leaving the first copy as an example for the next person.
         // v
         // KnownVersion::new(next_int, "unique-dirname-with-the-sql-files"),
-        KnownVersion::new(157, "inv_cockroachdb_status"),
+        KnownVersion::new(158, "inv_cockroachdb_status"),
+        KnownVersion::new(157, "user-data-export"),
         KnownVersion::new(156, "boot-partitions-inventory"),
         KnownVersion::new(155, "vpc-firewall-icmp"),
         KnownVersion::new(154, "add-pending-mgs-updates"),
