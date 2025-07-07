@@ -107,6 +107,7 @@ mod target_release;
 #[cfg(test)]
 pub(crate) mod test_utils;
 mod update;
+mod user_data_export;
 mod utilization;
 mod v2p_mapping;
 mod virtual_provisioning_collection;
@@ -137,6 +138,7 @@ pub use sled::SledTransition;
 pub use sled::TransitionError;
 pub use support_bundle::SupportBundleExpungementReport;
 pub use switch_port::SwitchPortSettingsCombinedResult;
+pub use user_data_export::*;
 pub use virtual_provisioning_collection::StorageType;
 pub use vmm::VmmStateUpdateResult;
 pub use volume::*;
