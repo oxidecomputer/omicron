@@ -3277,15 +3277,17 @@ impl DataStore {
                         public_error_from_diesel(e, ErrorHandler::Server)
                     })?;
 
-            let mut result = BTreeMap::new();
-            for record in status_records {
-                let node_id = CockroachNodeId::new(record.node_id);
-                let status: nexus_types::inventory::CockroachStatus = record
-                    .try_into()
-                    .map_err(|e| Error::internal_error(&format!("{e:#}")))?;
-                result.insert(node_id, status);
-            }
-            result
+            status_records
+                .into_iter()
+                .map(|record| {
+                    let node_id = CockroachNodeId::new(record.node_id);
+                    let status: nexus_types::inventory::CockroachStatus =
+                        record.try_into().map_err(|e| {
+                            Error::internal_error(&format!("{e:#}"))
+                        })?;
+                    Ok((node_id, status))
+                })
+                .collect::<Result<BTreeMap<_, _>, Error>>()?
         };
 
         // Finally, build up the sled-agent map using the sled agent and

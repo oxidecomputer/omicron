@@ -7351,6 +7351,7 @@ dependencies = [
  "cockroach-admin-client",
  "futures",
  "omicron-workspace-hack",
+ "parallel-task-set",
  "proptest",
  "reqwest",
  "serde",

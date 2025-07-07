@@ -9,6 +9,7 @@ anyhow.workspace = true
 chrono.workspace = true
 cockroach-admin-client.workspace = true
 futures.workspace = true
+parallel-task-set.workspace = true
 reqwest.workspace = true
 serde_json.workspace = true
 slog.workspace = true

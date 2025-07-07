@@ -11,6 +11,7 @@ use anyhow::{Context, Result};
 use chrono::{DateTime, Utc};
 use cockroach_admin_client::Client;
 use futures::stream::{FuturesUnordered, StreamExt};
+use parallel_task_set::ParallelTaskSet;
 use serde::{Deserialize, Serialize};
 use slog::{Logger, debug, warn};
 use std::collections::BTreeMap;
@@ -23,6 +24,7 @@ use tokio::sync::RwLock;
 ///
 /// Only accesses a single client at a time. To query from multiple nodes
 /// in a cluster concurrently, use [CockroachClusterAdminClient].
+#[derive(Clone)]
 struct CockroachAdminClient {
     client: Client,
 }
@@ -293,18 +295,30 @@ impl CockroachClusterAdminClient {
             return Vec::new();
         }
 
-        // Create futures for all requests
-        let mut futures = FuturesUnordered::new();
-        for (&addr, client) in clients.iter() {
-            let future =
-                async move { (addr, client.fetch_prometheus_metrics().await) };
-            futures.push(future);
+        // Collect tasks from all nodes in parallel
+        let mut results = Vec::new();
+        let mut tasks = ParallelTaskSet::new();
+        for (addr, client) in clients.iter() {
+            let addr = *addr;
+            let client = client.clone();
+            if let Some(result) =
+                tasks
+                    .spawn({
+                        async move {
+                            (addr, client.fetch_prometheus_metrics().await)
+                        }
+                    })
+                    .await
+            {
+                results.push(result);
+            }
         }
-
-        let mut successful_results = Vec::new();
+        results.append(&mut tasks.join_all().await);
 
         // Collect all successful results
-        while let Some((addr, result)) = futures.next().await {
+        let mut successful_results = Vec::new();
+        let mut results_iter = results.into_iter();
+        while let Some((addr, result)) = results_iter.next() {
             match result {
                 Ok(metrics) => {
                     debug!(
@@ -340,19 +354,33 @@ impl CockroachClusterAdminClient {
         }
 
         // Create futures for all requests
-        let mut futures = FuturesUnordered::new();
-        for (&addr, client) in clients.iter() {
-            let future =
-                async move { (addr, client.fetch_node_status().await) };
-            futures.push(future);
+        let mut results = Vec::new();
+        let mut tasks = ParallelTaskSet::new();
+        for (addr, client) in clients.iter() {
+            let addr = *addr;
+            let client = client.clone();
+            if let Some(result) = tasks
+                .spawn({
+                    async move { (addr, client.fetch_node_status().await) }
+                })
+                .await
+            {
+                results.push(result);
+            }
         }
-
-        let mut successful_results = Vec::new();
+        results.append(&mut tasks.join_all().await);
 
         // Collect all successful results
-        while let Some((addr, result)) = futures.next().await {
+        let mut successful_results = Vec::new();
+        let mut results_iter = results.into_iter();
+        while let Some((addr, result)) = results_iter.next() {
             match result {
                 Ok(status) => {
+                    debug!(
+                        self.log,
+                        "Successfully fetched node status from CockroachDB node";
+                        "address" => %addr
+                    );
                     successful_results.push((addr, status));
                 }
                 Err(e) => {
