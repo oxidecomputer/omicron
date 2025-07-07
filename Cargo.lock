@@ -13807,7 +13807,7 @@ dependencies = [
 [[package]]
 name = "tufaceous"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/tufaceous?branch=iliana%2Ftuf-trust#1f90448a6e76b965d362182a1afb1cb0d5e6845c"
+source = "git+https://github.com/oxidecomputer/tufaceous?branch=main#3923a4358e8be55fef0f50859e8ea1efa48f00f0"
 dependencies = [
  "anyhow",
  "camino",
@@ -13828,7 +13828,7 @@ dependencies = [
 [[package]]
 name = "tufaceous-artifact"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/tufaceous?branch=iliana%2Ftuf-trust#1f90448a6e76b965d362182a1afb1cb0d5e6845c"
+source = "git+https://github.com/oxidecomputer/tufaceous?branch=main#3923a4358e8be55fef0f50859e8ea1efa48f00f0"
 dependencies = [
  "daft",
  "hex",
@@ -13845,7 +13845,7 @@ dependencies = [
 [[package]]
 name = "tufaceous-brand-metadata"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/tufaceous?branch=iliana%2Ftuf-trust#1f90448a6e76b965d362182a1afb1cb0d5e6845c"
+source = "git+https://github.com/oxidecomputer/tufaceous?branch=main#3923a4358e8be55fef0f50859e8ea1efa48f00f0"
 dependencies = [
  "semver 1.0.26",
  "serde",
@@ -13857,7 +13857,7 @@ dependencies = [
 [[package]]
 name = "tufaceous-lib"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/tufaceous?branch=iliana%2Ftuf-trust#1f90448a6e76b965d362182a1afb1cb0d5e6845c"
+source = "git+https://github.com/oxidecomputer/tufaceous?branch=main#3923a4358e8be55fef0f50859e8ea1efa48f00f0"
 dependencies = [
  "anyhow",
  "async-trait",
