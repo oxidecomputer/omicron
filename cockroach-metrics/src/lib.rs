@@ -123,7 +123,7 @@ impl CockroachAdminClient {
 /// cluster.update_backends(&backends).await;
 ///
 /// // Fetch metrics - will try all backends concurrently, return first success
-/// let metrics = cluster.fetch_prometheus_metrics().await?;
+/// let metrics = cluster.fetch_prometheus_metrics_from_any_node().await?;
 ///
 /// // Later, if backends change, just update the cluster
 /// let new_backends: Vec<SocketAddr> = vec![
@@ -134,7 +134,7 @@ impl CockroachAdminClient {
 /// // Keeps 192.168.1.2, drops 192.168.1.1, adds 192.168.1.3
 /// cluster.update_backends(&new_backends).await;
 ///
-/// let status = cluster.fetch_node_status().await?;
+/// let status = cluster.fetch_node_status_from_any_node().await?;
 /// # Ok(())
 /// # }
 /// ```
