@@ -1980,8 +1980,8 @@ impl From<HostPhase2DesiredSlots> for DbHostPhase2DesiredSlots {
     fn from(value: HostPhase2DesiredSlots) -> Self {
         let remap = |desired| match desired {
             HostPhase2DesiredContents::CurrentContents => None,
-            HostPhase2DesiredContents::Artifact(artifact) => {
-                Some(ArtifactHash(artifact))
+            HostPhase2DesiredContents::Artifact { hash } => {
+                Some(ArtifactHash(hash))
             }
         };
         Self {
@@ -1995,8 +1995,8 @@ impl From<DbHostPhase2DesiredSlots> for HostPhase2DesiredSlots {
     fn from(value: DbHostPhase2DesiredSlots) -> Self {
         let remap = |maybe_artifact| match maybe_artifact {
             None => HostPhase2DesiredContents::CurrentContents,
-            Some(ArtifactHash(artifact)) => {
-                HostPhase2DesiredContents::Artifact(artifact)
+            Some(ArtifactHash(hash)) => {
+                HostPhase2DesiredContents::Artifact { hash }
             }
         };
         Self {

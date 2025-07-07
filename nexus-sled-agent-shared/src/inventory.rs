@@ -581,6 +581,7 @@ pub enum SledRole {
 #[derive(
     Clone, Copy, Debug, Deserialize, Serialize, JsonSchema, PartialEq, Eq,
 )]
+#[serde(tag = "type", rename_all = "snake_case")]
 pub enum HostPhase2DesiredContents {
     /// Do not change the current contents.
     ///
@@ -593,11 +594,12 @@ pub enum HostPhase2DesiredContents {
     /// Set the phase 2 slot to the given artifact.
     ///
     /// The artifact will come from an unpacked and distributed TUF repo.
-    Artifact(ArtifactHash),
+    Artifact { hash: ArtifactHash },
 }
 
 /// Describes the desired contents for both host phase 2 slots.
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
 pub struct HostPhase2DesiredSlots {
     pub slot_a: HostPhase2DesiredContents,
     pub slot_b: HostPhase2DesiredContents,

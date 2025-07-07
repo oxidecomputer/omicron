@@ -7579,8 +7579,8 @@ fn inv_collection_print_sled_config(label: &str, config: &OmicronSledConfig) {
         HostPhase2DesiredContents::CurrentContents => {
             Cow::Borrowed("keep existing current contents")
         }
-        HostPhase2DesiredContents::Artifact(artifact) => {
-            Cow::Owned(format!("artifact {artifact}"))
+        HostPhase2DesiredContents::Artifact { hash } => {
+            Cow::Owned(format!("artifact {hash}"))
         }
     };
     println!(
