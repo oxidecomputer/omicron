@@ -19,6 +19,7 @@
 
 use crate::Omdb;
 use crate::check_allow_destructive::DestructiveOperationToken;
+use crate::db::ereport::cmd_db_ereport;
 use crate::helpers::CONNECTION_OPTIONS_HEADING;
 use crate::helpers::DATABASE_OPTIONS_HEADING;
 use crate::helpers::const_max_len;
@@ -124,6 +125,10 @@ use nexus_db_queries::db::pagination::Paginator;
 use nexus_db_queries::db::pagination::paginated;
 use nexus_db_queries::db::queries::ALLOW_FULL_TABLE_SCAN_SQL;
 use nexus_db_queries::db::queries::region_allocation;
+use nexus_sled_agent_shared::inventory::BootImageHeader;
+use nexus_sled_agent_shared::inventory::BootPartitionContents;
+use nexus_sled_agent_shared::inventory::BootPartitionDetails;
+use nexus_sled_agent_shared::inventory::ConfigReconcilerInventory;
 use nexus_sled_agent_shared::inventory::ConfigReconcilerInventoryResult;
 use nexus_sled_agent_shared::inventory::ConfigReconcilerInventoryStatus;
 use nexus_sled_agent_shared::inventory::OmicronSledConfig;
@@ -177,9 +182,11 @@ use std::sync::Arc;
 use std::sync::LazyLock;
 use strum::IntoEnumIterator;
 use tabled::Tabled;
+use tufaceous_artifact::ArtifactHash;
 use uuid::Uuid;
 
 mod alert;
+mod ereport;
 mod saga;
 
 const NO_ACTIVE_PROPOLIS_MSG: &str = "<no active Propolis>";
@@ -356,6 +363,8 @@ enum DbCommands {
     Disks(DiskArgs),
     /// Print information about internal and external DNS
     Dns(DnsArgs),
+    /// Query and display error reports
+    Ereport(ereport::EreportArgs),
     /// Print information about collected hardware/software inventory
     Inventory(InventoryArgs),
     /// Print information about physical disks
@@ -1494,6 +1503,9 @@ impl DbArgs {
                             &args,
                             token,
                         ).await
+                    },
+                    DbCommands::Ereport(args) => {
+                        cmd_db_ereport(&datastore, &fetch_opts, &args).await
                     }
                 }
             }
@@ -1730,7 +1742,7 @@ async fn get_crucible_dataset_rows(
 
     let mut zpool_total_size: HashMap<Uuid, i64> = HashMap::new();
 
-    for (_, sled_agent) in latest_collection.sled_agents {
+    for sled_agent in latest_collection.sled_agents {
         for zpool in sled_agent.zpools {
             zpool_total_size
                 .insert(zpool.id.into_untyped_uuid(), zpool.total_size.into());
@@ -3263,7 +3275,8 @@ async fn cmd_db_volume_cannot_activate(
 ) -> Result<(), anyhow::Error> {
     let conn = datastore.pool_connection_for_tests().await?;
 
-    let mut paginator = Paginator::new(SQL_BATCH_SIZE);
+    let mut paginator =
+        Paginator::new(SQL_BATCH_SIZE, dropshot::PaginationOrder::Ascending);
     while let Some(p) = paginator.next() {
         use nexus_db_schema::schema::volume::dsl;
         let batch = paginated(dsl::volume, dsl::id, &p.current_pagparams())
@@ -3855,7 +3868,7 @@ async fn cmd_db_dry_run_region_allocation(
 
     let mut zpool_total_size: HashMap<Uuid, i64> = HashMap::new();
 
-    for (_, sled_agent) in latest_collection.sled_agents {
+    for sled_agent in latest_collection.sled_agents {
         for zpool in sled_agent.zpools {
             zpool_total_size
                 .insert(zpool.id.into_untyped_uuid(), zpool.total_size.into());
@@ -7275,7 +7288,7 @@ async fn inv_collection_print_devices(
 
 fn inv_collection_print_sleds(collection: &Collection) {
     println!("SLED AGENTS");
-    for sled in collection.sled_agents.values() {
+    for sled in &collection.sled_agents {
         println!(
             "\nsled {} (role = {:?}, serial {})",
             sled.sled_id,
@@ -7353,34 +7366,41 @@ fn inv_collection_print_sleds(collection: &Collection) {
         }
 
         if let Some(last_reconciliation) = &sled.last_reconciliation {
-            if Some(&last_reconciliation.last_reconciled_config)
+            let ConfigReconcilerInventory {
+                last_reconciled_config,
+                external_disks,
+                datasets,
+                orphaned_datasets,
+                zones,
+                boot_partitions,
+            } = last_reconciliation;
+
+            inv_print_boot_partition_contents("    ", boot_partitions);
+
+            if Some(last_reconciled_config)
                 == sled.ledgered_sled_config.as_ref()
             {
                 println!("    last reconciled config: matches ledgered config");
             } else {
                 inv_collection_print_sled_config(
                     "LAST RECONCILED CONFIG",
-                    &last_reconciliation.last_reconciled_config,
+                    &last_reconciled_config,
                 );
             }
-            if last_reconciliation.orphaned_datasets.is_empty() {
+            if orphaned_datasets.is_empty() {
                 println!("        no orphaned datasets");
             } else {
                 println!(
                     "        {} orphaned dataset(s):",
-                    last_reconciliation.orphaned_datasets.len()
+                    orphaned_datasets.len()
                 );
-                for orphan in &last_reconciliation.orphaned_datasets {
+                for orphan in orphaned_datasets {
                     print_one_orphaned_dataset("            ", orphan);
                 }
             }
-            let disk_errs = collect_config_reconciler_errors(
-                &last_reconciliation.external_disks,
-            );
-            let dataset_errs =
-                collect_config_reconciler_errors(&last_reconciliation.datasets);
-            let zone_errs =
-                collect_config_reconciler_errors(&last_reconciliation.zones);
+            let disk_errs = collect_config_reconciler_errors(&external_disks);
+            let dataset_errs = collect_config_reconciler_errors(&datasets);
+            let zone_errs = collect_config_reconciler_errors(&zones);
             for (label, errs) in [
                 ("disk", disk_errs),
                 ("dataset", dataset_errs),
@@ -7430,13 +7450,64 @@ fn inv_collection_print_sleds(collection: &Collection) {
     }
 }
 
+fn inv_print_boot_partition_contents(
+    indent: &str,
+    boot_partitions: &BootPartitionContents,
+) {
+    let BootPartitionContents { boot_disk, slot_a, slot_b } = &boot_partitions;
+    print!("{indent}boot disk slot: ");
+    match boot_disk {
+        Ok(slot) => println!("{slot:?}"),
+        Err(err) => println!("FAILED TO DETERMINE: {err}"),
+    }
+    match slot_a {
+        Ok(details) => {
+            println!("{indent}slot A details:");
+            inv_print_boot_partition_details(&format!("{indent}    "), details);
+        }
+        Err(err) => {
+            println!("{indent}slot A details UNAVAILABLE: {err}");
+        }
+    }
+    match slot_b {
+        Ok(details) => {
+            println!("{indent}slot B details:");
+            inv_print_boot_partition_details(&format!("{indent}    "), details);
+        }
+        Err(err) => {
+            println!("{indent}slot B details UNAVAILABLE: {err}");
+        }
+    }
+}
+
+fn inv_print_boot_partition_details(
+    indent: &str,
+    details: &BootPartitionDetails,
+) {
+    let BootPartitionDetails { header, artifact_hash, artifact_size } = details;
+
+    // Not sure it's useful to print all the header details? We'll omit for now.
+    let BootImageHeader {
+        flags: _,
+        data_size: _,
+        image_size: _,
+        target_size: _,
+        sha256,
+        image_name,
+    } = header;
+
+    println!("{indent}artifact: {artifact_hash} ({artifact_size} bytes)");
+    println!("{indent}image name: {image_name}");
+    println!("{indent}phase 2 hash: {}", ArtifactHash(*sha256));
+}
+
 fn inv_collection_print_orphaned_datasets(collection: &Collection) {
     // Helper for `unwrap_or()` passing borrow check below
     static EMPTY_SET: LazyLock<IdOrdMap<OrphanedDataset>> =
         LazyLock::new(IdOrdMap::new);
 
     println!("ORPHANED DATASETS");
-    for sled in collection.sled_agents.values() {
+    for sled in &collection.sled_agents {
         println!(
             "\nsled {} (serial {})",
             sled.sled_id,
@@ -8327,7 +8398,7 @@ async fn cmd_db_zpool_list(
 
     let mut zpool_total_size: HashMap<Uuid, i64> = HashMap::new();
 
-    for (_, sled_agent) in latest_collection.sled_agents {
+    for sled_agent in latest_collection.sled_agents {
         for zpool in sled_agent.zpools {
             zpool_total_size
                 .insert(zpool.id.into_untyped_uuid(), zpool.total_size.into());

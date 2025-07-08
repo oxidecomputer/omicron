@@ -54,9 +54,11 @@ mod sim;
 mod state;
 mod system;
 mod utils;
+mod zone_images;
 
 pub use config::*;
 pub use rng::*;
 pub use sim::*;
 pub use state::*;
 pub use system::*;
+pub use zone_images::*;

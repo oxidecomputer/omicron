@@ -727,11 +727,11 @@ async fn finalize_encryption_migration(
 #[cfg(test)]
 mod test {
     use super::*;
-    use omicron_uuid_kinds::ZpoolUuid;
+    use omicron_uuid_kinds::InternalZpoolUuid;
 
     #[test]
     fn serialize_dataset_name() {
-        let pool = ZpoolName::new_internal(ZpoolUuid::new_v4());
+        let pool = ZpoolName::Internal(InternalZpoolUuid::new_v4());
         let kind = DatasetKind::Crucible;
         let name = DatasetName::new(pool, kind);
         serde_json::to_string(&name).unwrap();

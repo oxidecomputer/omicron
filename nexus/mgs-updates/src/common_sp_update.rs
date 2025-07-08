@@ -69,7 +69,7 @@ pub trait SpComponentUpdater {
     fn target_sp_type(&self) -> SpType;
 
     /// The slot number of the target SP.
-    fn target_sp_slot(&self) -> u32;
+    fn target_sp_slot(&self) -> u16;
 
     /// The target firmware slot for the component.
     fn firmware_slot(&self) -> u16;
@@ -298,7 +298,7 @@ pub enum PrecheckError {
     )]
     WrongDevice {
         sp_type: SpType,
-        slot_id: u32,
+        slot_id: u16,
         expected_part: String,
         expected_serial: String,
         found_part: String,

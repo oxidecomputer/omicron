@@ -94,12 +94,15 @@ use super::tasks::alert_dispatcher::AlertDispatcher;
 use super::tasks::bfd;
 use super::tasks::blueprint_execution;
 use super::tasks::blueprint_load;
+use super::tasks::blueprint_planner;
 use super::tasks::blueprint_rendezvous;
+use super::tasks::chicken_switches::ChickenSwitchesLoader;
 use super::tasks::crdb_node_id_collector;
 use super::tasks::decommissioned_disk_cleaner;
 use super::tasks::dns_config;
 use super::tasks::dns_propagation;
 use super::tasks::dns_servers;
+use super::tasks::ereport_ingester;
 use super::tasks::external_endpoints;
 use super::tasks::instance_reincarnation;
 use super::tasks::instance_updater;
@@ -201,6 +204,7 @@ impl BackgroundTasksInitializer {
             task_decommissioned_disk_cleaner: Activator::new(),
             task_phantom_disks: Activator::new(),
             task_blueprint_loader: Activator::new(),
+            task_blueprint_planner: Activator::new(),
             task_blueprint_executor: Activator::new(),
             task_blueprint_rendezvous: Activator::new(),
             task_crdb_node_id_collector: Activator::new(),
@@ -226,6 +230,8 @@ impl BackgroundTasksInitializer {
             task_read_only_region_replacement_start: Activator::new(),
             task_alert_dispatcher: Activator::new(),
             task_webhook_deliverator: Activator::new(),
+            task_sp_ereport_ingester: Activator::new(),
+            task_chicken_switches_loader: Activator::new(),
 
             task_internal_dns_propagation: Activator::new(),
             task_external_dns_propagation: Activator::new(),
@@ -276,6 +282,7 @@ impl BackgroundTasksInitializer {
             task_decommissioned_disk_cleaner,
             task_phantom_disks,
             task_blueprint_loader,
+            task_blueprint_planner,
             task_blueprint_executor,
             task_blueprint_rendezvous,
             task_crdb_node_id_collector,
@@ -300,6 +307,8 @@ impl BackgroundTasksInitializer {
             task_read_only_region_replacement_start,
             task_alert_dispatcher,
             task_webhook_deliverator,
+            task_sp_ereport_ingester,
+            task_chicken_switches_loader,
             // Add new background tasks here.  Be sure to use this binding in a
             // call to `Driver::register()` below.  That's what actually wires
             // up the Activator to the corresponding background task.
@@ -415,18 +424,11 @@ impl BackgroundTasksInitializer {
         };
 
         // Background task: blueprint loader
+        //
+        // Registration is below so that it can watch the planner.
         let blueprint_loader =
             blueprint_load::TargetBlueprintLoader::new(datastore.clone());
         let rx_blueprint = blueprint_loader.watcher();
-        driver.register(TaskDefinition {
-            name: "blueprint_loader",
-            description: "Loads the current target blueprint from the DB",
-            period: config.blueprints.period_secs_load,
-            task_impl: Box::new(blueprint_loader),
-            opctx: opctx.child(BTreeMap::new()),
-            watchers: vec![],
-            activator: task_blueprint_loader,
-        });
 
         // Background task: blueprint executor
         let blueprint_executor = blueprint_execution::BlueprintExecutor::new(
@@ -446,22 +448,6 @@ impl BackgroundTasksInitializer {
             opctx: opctx.child(BTreeMap::new()),
             watchers: vec![Box::new(rx_blueprint.clone())],
             activator: task_blueprint_executor,
-        });
-
-        // Background task: CockroachDB node ID collector
-        let crdb_node_id_collector =
-            crdb_node_id_collector::CockroachNodeIdCollector::new(
-                datastore.clone(),
-                rx_blueprint.clone(),
-            );
-        driver.register(TaskDefinition {
-            name: "crdb_node_id_collector",
-            description: "Collects node IDs of running CockroachDB zones",
-            period: config.blueprints.period_secs_collect_crdb_node_ids,
-            task_impl: Box::new(crdb_node_id_collector),
-            opctx: opctx.child(BTreeMap::new()),
-            watchers: vec![Box::new(rx_blueprint.clone())],
-            activator: task_crdb_node_id_collector,
         });
 
         // Background task: inventory collector
@@ -492,6 +478,72 @@ impl BackgroundTasksInitializer {
 
             inventory_watcher
         };
+
+        let chicken_switches_loader =
+            ChickenSwitchesLoader::new(datastore.clone());
+        let chicken_switches_watcher = chicken_switches_loader.watcher();
+        driver.register(TaskDefinition {
+            name: "chicken_switches_watcher",
+            description: "watch db for chicken switch changes",
+            period: config.blueprints.period_secs_load_chicken_switches,
+            task_impl: Box::new(chicken_switches_loader),
+            opctx: opctx.child(BTreeMap::new()),
+            watchers: vec![],
+            activator: task_chicken_switches_loader,
+        });
+
+        // Background task: blueprint planner
+        //
+        // Replans on inventory collection and changes to the current
+        // target blueprint.
+        let blueprint_planner = blueprint_planner::BlueprintPlanner::new(
+            datastore.clone(),
+            chicken_switches_watcher.clone(),
+            inventory_watcher.clone(),
+            rx_blueprint.clone(),
+        );
+        let rx_planner = blueprint_planner.watcher();
+        driver.register(TaskDefinition {
+            name: "blueprint_planner",
+            description: "Updates the target blueprint",
+            period: config.blueprints.period_secs_plan,
+            task_impl: Box::new(blueprint_planner),
+            opctx: opctx.child(BTreeMap::new()),
+            watchers: vec![
+                Box::new(inventory_watcher.clone()),
+                Box::new(rx_blueprint.clone()),
+                Box::new(chicken_switches_watcher),
+            ],
+            activator: task_blueprint_planner,
+        });
+
+        // The loader watches the planner so that it can immediately load
+        // a new target blueprint.
+        driver.register(TaskDefinition {
+            name: "blueprint_loader",
+            description: "Loads the current target blueprint from the DB",
+            period: config.blueprints.period_secs_load,
+            task_impl: Box::new(blueprint_loader),
+            opctx: opctx.child(BTreeMap::new()),
+            watchers: vec![Box::new(rx_planner.clone())],
+            activator: task_blueprint_loader,
+        });
+
+        // Background task: CockroachDB node ID collector
+        let crdb_node_id_collector =
+            crdb_node_id_collector::CockroachNodeIdCollector::new(
+                datastore.clone(),
+                rx_blueprint.clone(),
+            );
+        driver.register(TaskDefinition {
+            name: "crdb_node_id_collector",
+            description: "Collects node IDs of running CockroachDB zones",
+            period: config.blueprints.period_secs_collect_crdb_node_ids,
+            task_impl: Box::new(crdb_node_id_collector),
+            opctx: opctx.child(BTreeMap::new()),
+            watchers: vec![Box::new(rx_blueprint.clone())],
+            activator: task_crdb_node_id_collector,
+        });
 
         // Cleans up and collects support bundles.
         //
@@ -915,7 +967,7 @@ impl BackgroundTasksInitializer {
                 period: period_secs,
                 task_impl: Box::new(
                     webhook_deliverator::WebhookDeliverator::new(
-                        datastore,
+                        datastore.clone(),
                         cfg,
                         nexus_id,
                         args.webhook_delivery_client,
@@ -925,6 +977,18 @@ impl BackgroundTasksInitializer {
                 watchers: vec![],
                 activator: task_webhook_deliverator,
             }
+        });
+
+        driver.register(TaskDefinition {
+            name: "sp_ereport_ingester",
+            description: "collects error reports from service processors",
+            period: config.sp_ereport_ingester.period_secs,
+            task_impl: Box::new(ereport_ingester::SpEreportIngester::new(
+                datastore, resolver, nexus_id,
+            )),
+            opctx: opctx.child(BTreeMap::new()),
+            watchers: vec![],
+            activator: task_sp_ereport_ingester,
         });
 
         driver

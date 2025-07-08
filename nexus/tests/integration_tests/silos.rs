@@ -38,7 +38,8 @@ use std::fmt::Write;
 use std::str::FromStr;
 
 use base64::Engine;
-use hickory_resolver::error::ResolveErrorKind;
+use hickory_resolver::ResolveErrorKind;
+use hickory_resolver::proto::ProtoErrorKind;
 use http::StatusCode;
 use http::method::Method;
 use httptest::{Expectation, Server, matchers::*, responders::*};
@@ -2165,8 +2166,8 @@ pub async fn verify_silo_dns_name(
                         true
                     }
                 }
-                Err(error) => match error.kind() {
-                    ResolveErrorKind::NoRecordsFound { .. } => false,
+                Err(error) => match resolve_error_proto_kind(&error) {
+                    Some(ProtoErrorKind::NoRecordsFound { .. }) => false,
                     _ => panic!(
                         "unexpected error querying external \
                             DNS server for Silo DNS name {:?}: {:#}",
@@ -2186,6 +2187,13 @@ pub async fn verify_silo_dns_name(
     )
     .await
     .expect("failed to verify external DNS configuration");
+}
+
+fn resolve_error_proto_kind(
+    e: &hickory_resolver::ResolveError,
+) -> Option<&ProtoErrorKind> {
+    let ResolveErrorKind::Proto(proto_error) = e.kind() else { return None };
+    Some(proto_error.kind())
 }
 
 // Test the basic behavior of the Silo-level IAM policy that supports

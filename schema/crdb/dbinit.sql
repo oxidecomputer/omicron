@@ -1868,12 +1868,6 @@ CREATE TYPE IF NOT EXISTS omicron.public.vpc_firewall_rule_action AS ENUM (
     'deny'
 );
 
-CREATE TYPE IF NOT EXISTS omicron.public.vpc_firewall_rule_protocol AS ENUM (
-    'TCP',
-    'UDP',
-    'ICMP'
-);
-
 CREATE TABLE IF NOT EXISTS omicron.public.vpc_firewall_rule (
     /* Identity metadata (resource) */
     id UUID PRIMARY KEY,
@@ -1893,9 +1887,9 @@ CREATE TABLE IF NOT EXISTS omicron.public.vpc_firewall_rule (
     /* Also an array of targets */
     filter_hosts STRING(128)[],
     filter_ports STRING(11)[],
-    filter_protocols omicron.public.vpc_firewall_rule_protocol[],
     action omicron.public.vpc_firewall_rule_action NOT NULL,
-    priority INT4 CHECK (priority BETWEEN 0 AND 65535) NOT NULL
+    priority INT4 CHECK (priority BETWEEN 0 AND 65535) NOT NULL,
+    filter_protocols STRING(32)[]
 );
 
 CREATE UNIQUE INDEX IF NOT EXISTS lookup_firewall_by_vpc ON omicron.public.vpc_firewall_rule (
@@ -3611,6 +3605,11 @@ AS ENUM (
     'idle'
 );
 
+CREATE TYPE IF NOT EXISTS omicron.public.inv_zone_manifest_source AS ENUM (
+    'installinator',
+    'sled-agent'
+);
+
 -- observations from and about sled agents
 CREATE TABLE IF NOT EXISTS omicron.public.inv_sled_agent (
     -- where this observation came from
@@ -3646,11 +3645,6 @@ CREATE TABLE IF NOT EXISTS omicron.public.inv_sled_agent (
     -- This is optional because newly-added sleds don't yet have a config.
     ledgered_sled_config UUID,
 
-    -- Most-recently-reconciled `OmicronSledConfig`
-    -- (foreign key into `inv_omicron_sled_config` table)
-    -- This is optional because the reconciler may not have run yet
-    last_reconciliation_sled_config UUID,
-
     -- Columns making up the status of the config reconciler.
     reconciler_status_kind omicron.public.inv_config_reconciler_status_kind NOT NULL,
     -- (foreign key into `inv_omicron_sled_config` table)
@@ -3660,6 +3654,35 @@ CREATE TABLE IF NOT EXISTS omicron.public.inv_sled_agent (
     reconciler_status_timestamp TIMESTAMPTZ,
     -- only present if `reconciler_status_kind != 'not-yet-run'`
     reconciler_status_duration_secs FLOAT,
+
+    -- Columns making up the zone image resolver's zone manifest description:
+    --
+    -- The path to the boot disk image file.
+    zone_manifest_boot_disk_path TEXT NOT NULL,
+    -- The source of the zone manifest on the boot disk: from installinator or
+    -- sled-agent (synthetic). NULL means there is an error reading the zone manifest.
+    zone_manifest_source omicron.public.inv_zone_manifest_source,
+    -- The mupdate ID that created the zone manifest if this is from installinator. If
+    -- this is NULL, then either the zone manifest is synthetic or there was an
+    -- error reading the zone manifest.
+    zone_manifest_mupdate_id UUID,
+    -- Message describing the status of the zone manifest on the boot disk. If
+    -- this is NULL, then the zone manifest was successfully read, and the
+    -- inv_zone_manifest_zone table has entries corresponding to the zone
+    -- manifest.
+    zone_manifest_boot_disk_error TEXT,
+
+    -- Columns making up the zone image resolver's mupdate override description.
+    mupdate_override_boot_disk_path TEXT NOT NULL,
+    -- The ID of the mupdate override. NULL means either that the mupdate
+    -- override was not found or that we failed to read it -- the two cases are
+    -- differentiated by the presence of a non-NULL value in the
+    -- mupdate_override_boot_disk_error column.
+    mupdate_override_id UUID,
+    -- Error reading the mupdate override, if any. If this is NULL then
+    -- the mupdate override was either successfully read or is not
+    -- present.
+    mupdate_override_boot_disk_error TEXT,
 
     CONSTRAINT reconciler_status_sled_config_present_if_running CHECK (
         (reconciler_status_kind = 'running'
@@ -3678,7 +3701,109 @@ CREATE TABLE IF NOT EXISTS omicron.public.inv_sled_agent (
             AND reconciler_status_duration_secs IS NOT NULL)
     ),
 
+    -- For the zone manifest, there are three valid states:
+    -- 1. Successfully read from installinator (has mupdate_id, no error)
+    -- 2. Synthetic from sled-agent (no mupdate_id, no error)
+    -- 3. Error reading (no mupdate_id, has error)
+    --
+    -- This is equivalent to Result<OmicronZoneManifestSource, String>.
+    CONSTRAINT zone_manifest_consistency CHECK (
+        (zone_manifest_source = 'installinator'
+            AND zone_manifest_mupdate_id IS NOT NULL
+            AND zone_manifest_boot_disk_error IS NULL)
+        OR (zone_manifest_source = 'sled-agent'
+            AND zone_manifest_mupdate_id IS NULL
+            AND zone_manifest_boot_disk_error IS NULL)
+        OR (
+            zone_manifest_source IS NULL
+            AND zone_manifest_mupdate_id IS NULL
+            AND zone_manifest_boot_disk_error IS NOT NULL
+        )
+    ),
+
+    -- For the mupdate override, three states are valid:
+    -- 1. No override, no error
+    -- 2. Override, no error
+    -- 3. No override, error
+    --
+    -- This is equivalent to Result<Option<T>, String>.
+    CONSTRAINT mupdate_override_consistency CHECK (
+        (mupdate_override_id IS NULL
+            AND mupdate_override_boot_disk_error IS NOT NULL)
+        OR mupdate_override_boot_disk_error IS NULL
+    ),
+
     PRIMARY KEY (inv_collection_id, sled_id)
+);
+
+CREATE TABLE IF NOT EXISTS omicron.public.inv_sled_config_reconciler (
+    -- where this observation came from
+    -- (foreign key into `inv_collection` table)
+    inv_collection_id UUID NOT NULL,
+
+    -- unique id for this sled (should be foreign keys into `sled` table, though
+    -- it's conceivable a sled will report an id that we don't know about);
+    -- guaranteed to match a row in this collection's `inv_sled_agent`
+    sled_id UUID NOT NULL,
+
+    -- Most-recently-reconciled `OmicronSledConfig`
+    -- (foreign key into `inv_omicron_sled_config` table)
+    last_reconciled_config UUID NOT NULL,
+
+    -- Which internal disk slot did we use at boot?
+    --
+    -- If not NULL, `boot_disk_slot` must be 0 or 1 (corresponding to M2Slot::A
+    -- and M2Slot::B, respectively). The column pair `boot_disk_slot` /
+    -- `boot_disk_error` represents a Rust `Result`; one or the other must be
+    -- non-NULL, but not both.
+    boot_disk_slot INT2 CHECK (boot_disk_slot >= 0 AND boot_disk_slot <= 1),
+    boot_disk_error TEXT,
+    CONSTRAINT boot_disk_slot_or_error CHECK (
+        (boot_disk_slot IS NULL AND boot_disk_error IS NOT NULL)
+        OR
+        (boot_disk_slot IS NOT NULL AND boot_disk_error IS NULL)
+    ),
+
+    -- If either error string is present, there was an error reading the boot
+    -- partition for the corresponding M2Slot.
+    --
+    -- For either or both columns if NULL, there will be a row in
+    -- `inv_sled_boot_partition` describing the contents of the boot partition
+    -- for the given slot. As above 0=a and 1=b.
+    boot_partition_a_error TEXT,
+    boot_partition_b_error TEXT,
+
+    PRIMARY KEY (inv_collection_id, sled_id)
+);
+
+CREATE TABLE IF NOT EXISTS omicron.public.inv_sled_boot_partition (
+    -- where this observation came from
+    -- (foreign key into `inv_collection` table)
+    inv_collection_id UUID NOT NULL,
+
+    -- unique id for this sled (should be foreign keys into `sled` table, though
+    -- it's conceivable a sled will report an id that we don't know about)
+    sled_id UUID NOT NULL,
+
+    -- the boot disk slot (0=M2Slot::A, 1=M2Slot::B)
+    boot_disk_slot INT2
+        CHECK (boot_disk_slot >= 0 AND boot_disk_slot <= 1) NOT NULL,
+
+    -- SHA256 hash of the artifact; if we have a TUF repo containing this OS
+    -- image, this will match the artifact hash of the phase 2 image
+    artifact_hash STRING(64) NOT NULL,
+    -- The length of the artifact in bytes
+    artifact_size INT8 NOT NULL,
+
+    -- Fields comprising the header of the phase 2 image
+    header_flags INT8 NOT NULL,
+    header_data_size INT8 NOT NULL,
+    header_image_size INT8 NOT NULL,
+    header_target_size INT8 NOT NULL,
+    header_sha256 STRING(64) NOT NULL,
+    header_image_name TEXT NOT NULL,
+
+    PRIMARY KEY (inv_collection_id, sled_id, boot_disk_slot)
 );
 
 CREATE TABLE IF NOT EXISTS omicron.public.inv_physical_disk (
@@ -3892,6 +4017,87 @@ CREATE TABLE IF NOT EXISTS omicron.public.inv_last_reconciliation_zone_result (
     PRIMARY KEY (inv_collection_id, sled_id, zone_id)
 );
 
+-- A table describing a single zone within a zone manifest collected by inventory.
+CREATE TABLE IF NOT EXISTS omicron.public.inv_zone_manifest_zone (
+    -- where this observation came from
+    -- (foreign key into `inv_collection` table)
+    inv_collection_id UUID NOT NULL,
+
+    -- unique id for this sled (should be foreign keys into `sled` table, though
+    -- it's conceivable a sled will report an id that we don't know about)
+    sled_id UUID NOT NULL,
+
+    -- Zone file name, part of the primary key within this table.
+    zone_file_name TEXT NOT NULL,
+
+    -- The full path to the file.
+    path TEXT NOT NULL,
+
+    -- The expected file size.
+    expected_size INT8 NOT NULL,
+
+    -- The expected hash.
+    expected_sha256 STRING(64) NOT NULL,
+
+    -- The error while reading the zone or matching it to the manifest, if any.
+    -- NULL indicates success.
+    error TEXT,
+
+    PRIMARY KEY (inv_collection_id, sled_id, zone_file_name)
+);
+
+-- A table describing status for a single zone manifest on a non-boot disk
+-- collected by inventory.
+CREATE TABLE IF NOT EXISTS omicron.public.inv_zone_manifest_non_boot (
+    -- where this observation came from
+    -- (foreign key into `inv_collection` table)
+    inv_collection_id UUID NOT NULL,
+
+    -- unique id for this sled (should be foreign keys into `sled` table, though
+    -- it's conceivable a sled will report an id that we don't know about)
+    sled_id UUID NOT NULL,
+
+    -- unique ID for this non-boot disk
+    non_boot_zpool_id UUID NOT NULL,
+
+    -- The full path to the zone manifest.
+    path TEXT NOT NULL,
+
+    -- Whether the non-boot disk is in a valid state.
+    is_valid BOOLEAN NOT NULL,
+
+    -- A message attached to this disk.
+    message TEXT NOT NULL,
+
+    PRIMARY KEY (inv_collection_id, sled_id, non_boot_zpool_id)
+);
+
+-- A table describing status for a single mupdate override on a non-boot disk
+-- collected by inventory.
+CREATE TABLE IF NOT EXISTS omicron.public.inv_mupdate_override_non_boot (
+    -- where this observation came from
+    -- (foreign key into `inv_collection` table)
+    inv_collection_id UUID NOT NULL,
+
+    -- unique id for this sled (should be foreign keys into `sled` table, though
+    -- it's conceivable a sled will report an id that we don't know about)
+    sled_id UUID NOT NULL,
+
+    -- unique id for this non-boot disk
+    non_boot_zpool_id UUID NOT NULL,
+
+    -- The full path to the mupdate override file.
+    path TEXT NOT NULL,
+
+    -- Whether the non-boot disk is in a valid state.
+    is_valid BOOLEAN NOT NULL,
+
+    -- A message attached to this disk.
+    message TEXT NOT NULL,
+
+    PRIMARY KEY (inv_collection_id, sled_id, non_boot_zpool_id)
+);
+
 CREATE TYPE IF NOT EXISTS omicron.public.zone_type AS ENUM (
   'boundary_ntp',
   'clickhouse',
@@ -4068,6 +4274,26 @@ CREATE TABLE IF NOT EXISTS omicron.public.inv_clickhouse_keeper_membership (
     raft_config INT8[] NOT NULL,
 
     PRIMARY KEY (inv_collection_id, queried_keeper_id)
+);
+
+/*
+ * Various runtime configuration switches for reconfigurator
+ *
+ * Each configuration option is a single column in a row, and the whole row
+ * of configurations is updated atomically. The latest `version` is the active
+ * configuration.
+ *
+ * See https://github.com/oxidecomputer/omicron/issues/8253 for more details.
+ */
+CREATE TABLE IF NOT EXISTS omicron.public.reconfigurator_chicken_switches (
+    -- Monotonically increasing version for all bp_targets
+    version INT8 PRIMARY KEY,
+
+    -- Enable the planner background task
+    planner_enabled BOOL NOT NULL DEFAULT FALSE,
+
+    -- The time at which the configuration for a version was set
+    time_modified TIMESTAMPTZ NOT NULL
 );
 
 /*
@@ -4466,6 +4692,27 @@ CREATE TABLE IF NOT EXISTS omicron.public.bp_oximeter_read_policy (
 
     -- Which clickhouse installation should oximeter read from.
     oximeter_read_mode omicron.public.oximeter_read_mode NOT NULL
+);
+
+-- Blueprint information related to pending SP upgrades.
+CREATE TABLE IF NOT EXISTS omicron.public.bp_pending_mgs_update_sp (
+    -- Foreign key into the `blueprint` table
+    blueprint_id UUID,
+    -- identify of the device to be updated
+    -- (foreign key into the `hw_baseboard_id` table)
+    hw_baseboard_id UUID NOT NULL,
+    -- location of this device according to MGS
+    sp_type omicron.public.sp_type NOT NULL,
+    sp_slot INT4 NOT NULL,
+    -- artifact to be deployed to this device
+    artifact_sha256 STRING(64) NOT NULL,
+    artifact_version STRING(64) NOT NULL,
+
+    -- SP-specific details
+    expected_active_version STRING NOT NULL,
+    expected_inactive_version STRING, -- NULL means invalid (no version expected)
+
+    PRIMARY KEY(blueprint_id, hw_baseboard_id)
 );
 
 -- Mapping of Omicron zone ID to CockroachDB node ID. This isn't directly used
@@ -5749,6 +5996,219 @@ ON omicron.public.webhook_delivery_attempt (
     rx_id
 );
 
+CREATE TYPE IF NOT EXISTS omicron.public.user_data_export_resource_type AS ENUM (
+  'snapshot',
+  'image'
+);
+
+CREATE TYPE IF NOT EXISTS omicron.public.user_data_export_state AS ENUM (
+  'requested',
+  'assigning',
+  'live',
+  'deleting',
+  'deleted'
+);
+
+/*
+ * This table contains a record when a snapshot is being exported.
+ */
+CREATE TABLE IF NOT EXISTS omicron.public.user_data_export (
+    id UUID PRIMARY KEY,
+
+    state omicron.public.user_data_export_state NOT NULL,
+    operating_saga_id UUID,
+    generation INT8 NOT NULL,
+
+    resource_id UUID NOT NULL,
+    resource_type omicron.public.user_data_export_resource_type NOT NULL,
+    resource_deleted BOOL NOT NULL,
+
+    pantry_ip INET,
+    pantry_port INT4 CHECK (pantry_port BETWEEN 0 AND 65535),
+    volume_id UUID
+);
+
+CREATE INDEX IF NOT EXISTS lookup_export_by_resource_type
+ON omicron.public.user_data_export (resource_type);
+
+CREATE UNIQUE INDEX IF NOT EXISTS one_export_record_per_resource
+ON omicron.public.user_data_export (resource_id)
+WHERE state != 'deleted';
+
+CREATE INDEX IF NOT EXISTS lookup_export_by_volume
+ON omicron.public.user_data_export (volume_id);
+
+CREATE INDEX IF NOT EXISTS lookup_export_by_state
+ON omicron.public.user_data_export (state);
+
+/*
+ * Ereports
+ *
+ * See RFD 520 for details:
+ * https://rfd.shared.oxide.computer/rfd/520
+ */
+
+/* Ereports from service processors */
+CREATE TABLE IF NOT EXISTS omicron.public.sp_ereport (
+    /*
+     * the primary key for an ereport is formed from the tuple of the
+     * reporter's restart ID (a randomly generated UUID) and the ereport's ENA
+     * (a 64-bit integer that uniquely identifies the ereport within that
+     * restart of the reporter).
+     *
+     * see: https://rfd.shared.oxide.computer/rfd/520#ereport-metadata
+     */
+    restart_id UUID NOT NULL,
+    ena INT8 NOT NULL,
+    time_deleted TIMESTAMPTZ,
+
+    /* time at which the ereport was collected */
+    time_collected TIMESTAMPTZ NOT NULL,
+    /* UUID of the Nexus instance that collected the ereport */
+    collector_id UUID NOT NULL,
+
+    /*
+     * physical location of the reporting SP
+     *
+     * these fields are always present, as they are how requests to collect
+     * ereports are indexed by MGS.
+     */
+    sp_type omicron.public.sp_type NOT NULL,
+    sp_slot INT4 NOT NULL,
+
+    /*
+     * VPD identity of the reporting SP.
+     *
+     * unlike the physical location, these fields are nullable, as an ereport
+     * may be generated in a state where the SP doesn't know who or what it is.
+     * consider that "i don't know my own identity" is a reasonable condition
+     * to want to generate an ereport about!
+     */
+    serial_number STRING,
+    part_number STRING,
+
+    /*
+     * The ereport class, which indicates the category of event reported.
+     *
+     * This is nullable, as it is extracted from the report JSON, and reports
+     * missing class information must still be ingested.
+     */
+    class STRING,
+
+    /*
+     * JSON representation of the ereport as received from the SP.
+     *
+     * the raw JSON representation of the ereport is always stored, alongside
+     * any more structured data that we extract from it, as extracting data
+     * from the received ereport requires additional knowledge of the ereport
+     * formats generated by the SP and its various tasks. as these may change,
+     * and new ereports may be added which Nexus may not yet be aware of,
+     * we always store the raw JSON representation of the ereport. as Nexus
+     * becomes aware of new ereport schemas, it can go back and extract
+     * structured data from previously collected ereports with those schemas,
+     * but this is only possible if the JSON blob is persisted.
+     *
+     * see also: https://rfd.shared.oxide.computer/rfd/520#data-model
+     */
+    report JSONB NOT NULL,
+
+    PRIMARY KEY (restart_id, ena)
+);
+
+CREATE INDEX IF NOT EXISTS lookup_sp_ereports_by_slot
+ON omicron.public.sp_ereport (
+    sp_type,
+    sp_slot,
+    time_collected
+)
+where
+    time_deleted IS NULL;
+
+CREATE INDEX IF NOT EXISTS order_sp_ereports_by_timestamp
+ON omicron.public.sp_ereport(
+    time_collected
+)
+WHERE
+    time_deleted IS NULL;
+
+CREATE INDEX IF NOT EXISTS lookup_sp_ereports_by_serial
+ON omicron.public.sp_ereport (
+    serial_number
+) WHERE
+    time_deleted IS NULL;
+
+/* Ereports from the host operating system */
+CREATE TABLE IF NOT EXISTS omicron.public.host_ereport (
+    /*
+    * the primary key for an ereport is formed from the tuple of the
+    * reporter's restart ID (a randomly generated UUID) and the ereport's ENA
+    * (a 64-bit integer that uniquely identifies the ereport within that
+    * restart of the reporter).
+    *
+    * see: https://rfd.shared.oxide.computer/rfd/520#ereport-metadata
+    */
+    restart_id UUID NOT NULL,
+    ena INT8 NOT NULL,
+    time_deleted TIMESTAMPTZ,
+
+    /* time at which the ereport was collected */
+    time_collected TIMESTAMPTZ NOT NULL,
+    /* UUID of the Nexus instance that collected the ereport */
+    collector_id UUID NOT NULL,
+
+    /* identity of the reporting sled */
+    sled_id UUID NOT NULL,
+    sled_serial TEXT NOT NULL,
+
+    /*
+     * The ereport class, which indicates the category of event reported.
+     *
+     * This is nullable, as it is extracted from the report JSON, and reports
+     * missing class information must still be ingested.
+     */
+    class STRING,
+
+    /*
+     * JSON representation of the ereport as received from the sled-agent.
+     *
+     * the raw JSON representation of the ereport is always stored, alongside
+     * any more structured data that we extract from it, as extracting data
+     * from the received ereport requires additional knowledge of the ereport
+     * formats generated by the host OS' fault management system. as these may
+     * change, and new ereports may be added which Nexus may not yet be aware
+     * of, we always store the raw JSON representation of the ereport. as Nexus
+     * becomes aware of new ereport schemas, it can go back and extract
+     * structured data from previously collected ereports with those schemas,
+     * but this is only possible if the JSON blob is persisted.
+     *
+     * see also: https://rfd.shared.oxide.computer/rfd/520#data-model
+     */
+    report JSONB NOT NULL,
+
+    PRIMARY KEY (restart_id, ena)
+);
+
+CREATE INDEX IF NOT EXISTS lookup_host_ereports_by_sled
+ON omicron.public.host_ereport (
+    sled_id,
+    time_collected
+)
+WHERE
+    time_deleted IS NULL;
+
+CREATE INDEX IF NOT EXISTS order_host_ereports_by_timestamp
+ON omicron.public.host_ereport (
+    time_collected
+)
+WHERE
+    time_deleted IS NULL;
+
+CREATE INDEX IF NOT EXISTS lookup_host_ereports_by_serial
+ON omicron.public.host_ereport (
+    sled_serial
+) WHERE
+    time_deleted IS NULL;
+
 /*
  * Keep this at the end of file so that the database does not contain a version
  * until it is fully populated.
@@ -5760,7 +6220,7 @@ INSERT INTO omicron.public.db_metadata (
     version,
     target_version
 ) VALUES
-    (TRUE, NOW(), NOW(), '150.0.0', NULL)
+    (TRUE, NOW(), NOW(), '157.0.0', NULL)
 ON CONFLICT DO NOTHING;
 
 COMMIT;

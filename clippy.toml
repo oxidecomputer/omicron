@@ -26,5 +26,14 @@ disallowed-methods = [
 ]
 disallowed-types = [
     { path = "once_cell::unsync::Lazy", reason = "use `std::cell::LazyCell` instead" },
-    { path = "once_cell::unsync::LazyCell", reason = "use `std::cell::LazyCell` instead" },
+    { path = "once_cell::sync::Lazy", reason = "use `std::sync::LazyLock` instead" },
 ]
+
+[[disallowed-macros]]
+path = "tokio::main"
+reason = """\
+    Binaries deployed in production should use the `oxide_tokio_rt` \
+    crate, as it enables DTrace probes and runtime configuration. \
+    dev-tools, xtasks, and examples may use `#[tokio::main]` when \
+    necessary to avoid an `omicron-runtime` dependency.\
+"""

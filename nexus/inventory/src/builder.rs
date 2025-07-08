@@ -8,6 +8,7 @@
 //! from sources like MGS) from assembling a representation of what was
 //! collected.
 
+use anyhow::Context;
 use anyhow::anyhow;
 use chrono::DateTime;
 use chrono::Utc;
@@ -15,6 +16,7 @@ use clickhouse_admin_types::ClickhouseKeeperClusterMembership;
 use gateway_client::types::SpComponentCaboose;
 use gateway_client::types::SpState;
 use gateway_client::types::SpType;
+use iddqd::IdOrdMap;
 use nexus_sled_agent_shared::inventory::Baseboard;
 use nexus_sled_agent_shared::inventory::Inventory;
 use nexus_types::inventory::BaseboardId;
@@ -30,7 +32,6 @@ use nexus_types::inventory::ServiceProcessor;
 use nexus_types::inventory::SledAgent;
 use nexus_types::inventory::Zpool;
 use omicron_uuid_kinds::CollectionKind;
-use omicron_uuid_kinds::SledUuid;
 use std::collections::BTreeMap;
 use std::collections::BTreeSet;
 use std::hash::Hash;
@@ -111,7 +112,7 @@ pub struct CollectionBuilder {
         BTreeMap<CabooseWhich, BTreeMap<Arc<BaseboardId>, CabooseFound>>,
     rot_pages_found:
         BTreeMap<RotPageWhich, BTreeMap<Arc<BaseboardId>, RotPageFound>>,
-    sleds: BTreeMap<SledUuid, SledAgent>,
+    sleds: IdOrdMap<SledAgent>,
     clickhouse_keeper_cluster_membership:
         BTreeSet<ClickhouseKeeperClusterMembership>,
     // CollectionBuilderRng is taken by value, rather than passed in as a
@@ -141,7 +142,7 @@ impl CollectionBuilder {
             rots: BTreeMap::new(),
             cabooses_found: BTreeMap::new(),
             rot_pages_found: BTreeMap::new(),
-            sleds: BTreeMap::new(),
+            sleds: IdOrdMap::new(),
             clickhouse_keeper_cluster_membership: BTreeSet::new(),
             rng: CollectionBuilderRng::from_entropy(),
         }
@@ -187,26 +188,9 @@ impl CollectionBuilder {
         &mut self,
         source: &str,
         sp_type: SpType,
-        slot: u32,
+        sp_slot: u16,
         sp_state: SpState,
     ) -> Option<Arc<BaseboardId>> {
-        // Much ado about very little: MGS reports that "slot" is a u32, though
-        // in practice this seems very unlikely to be bigger than a u8.  (How
-        // many slots can there be within one rack?)  The database only supports
-        // signed integers, so if we assumed this really could span the range of
-        // a u32, we'd need to store it in an i64.  Instead, assume here that we
-        // can stick it into a u16 (which still seems generous).  This will
-        // allow us to store it into an Int32 in the database.
-        let Ok(sp_slot) = u16::try_from(slot) else {
-            self.found_error(InventoryError::from(anyhow!(
-                "MGS {:?}: SP {:?} slot {}: slot number did not fit into u16",
-                source,
-                sp_type,
-                slot
-            )));
-            return None;
-        };
-
         // Normalize the baseboard id: i.e., if we've seen this baseboard
         // before, use the same baseboard id record.  Otherwise, make a new one.
         let baseboard = Self::normalize_item(
@@ -539,17 +523,15 @@ impl CollectionBuilder {
             ledgered_sled_config: inventory.ledgered_sled_config,
             reconciler_status: inventory.reconciler_status,
             last_reconciliation: inventory.last_reconciliation,
+            zone_image_resolver: inventory.zone_image_resolver,
         };
 
-        if let Some(previous) = self.sleds.get(&sled_id) {
-            Err(anyhow!(
-                "sled {sled_id}: reported sled multiple times \
-                (previously {previous:?}, now {sled:?})",
-            ))
-        } else {
-            self.sleds.insert(sled_id, sled);
-            Ok(())
-        }
+        self.sleds
+            .insert_unique(sled)
+            .map_err(|error| error.into_owned())
+            .with_context(|| {
+                anyhow!("sled {sled_id}: reported sled multiple times")
+            })
     }
 
     /// Record information about Keeper cluster membership learned from the
@@ -581,7 +563,6 @@ mod test {
     use super::now_db_precision;
     use crate::examples::Representative;
     use crate::examples::representative;
-    use crate::examples::sp_state;
     use base64::Engine;
     use base64::engine::general_purpose::STANDARD as BASE64_STANDARD;
     use gateway_client::types::PowerState;
@@ -956,9 +937,8 @@ mod test {
 
         // Verify that we found the sled agents.
         assert_eq!(collection.sled_agents.len(), 4);
-        for (sled_id, sled_agent) in &collection.sled_agents {
-            assert_eq!(*sled_id, sled_agent.sled_id);
-            if *sled_id == sled_agent_id_extra {
+        for sled_agent in &collection.sled_agents {
+            if sled_agent.sled_id == sled_agent_id_extra {
                 assert_eq!(sled_agent.sled_role, SledRole::Scrimlet);
             } else {
                 assert_eq!(sled_agent.sled_role, SledRole::Gimlet);
@@ -976,7 +956,8 @@ mod test {
             assert_eq!(sled_agent.reservoir_size, ByteCount::from(1024));
         }
 
-        let sled1_agent = &collection.sled_agents[&sled_agent_id_basic];
+        let sled1_agent =
+            collection.sled_agents.get(&sled_agent_id_basic).unwrap();
         let sled1_bb = sled1_agent.baseboard_id.as_ref().unwrap();
         assert_eq!(sled1_bb.part_number, "model1");
         assert_eq!(sled1_bb.serial_number, "s1");
@@ -985,14 +966,23 @@ mod test {
         assert_eq!(sled1_agent.disks[0].identity.model, "box");
         assert_eq!(sled1_agent.disks[0].identity.serial, "XXIV");
 
-        let sled4_agent = &collection.sled_agents[&sled_agent_id_extra];
+        let sled4_agent =
+            collection.sled_agents.get(&sled_agent_id_extra).unwrap();
         let sled4_bb = sled4_agent.baseboard_id.as_ref().unwrap();
         assert_eq!(sled4_bb.serial_number, "s4");
         assert!(
-            collection.sled_agents[&sled_agent_id_pc].baseboard_id.is_none()
+            collection
+                .sled_agents
+                .get(&sled_agent_id_pc)
+                .unwrap()
+                .baseboard_id
+                .is_none()
         );
         assert!(
-            collection.sled_agents[&sled_agent_id_unknown]
+            collection
+                .sled_agents
+                .get(&sled_agent_id_unknown)
+                .unwrap()
                 .baseboard_id
                 .is_none()
         );
@@ -1080,15 +1070,6 @@ mod test {
             )
             .unwrap();
         assert_eq!(sled1_bb, sled1_bb_dup);
-
-        // report an SP with an impossible slot number
-        let sled2_sp = builder.found_sp_state(
-            "fake MGS 1",
-            SpType::Sled,
-            u32::from(u16::MAX) + 1,
-            sp_state("1"),
-        );
-        assert_eq!(sled2_sp, None);
 
         // report SP caboose for an unknown baseboard
         let bogus_baseboard = BaseboardId {
@@ -1301,17 +1282,7 @@ mod test {
                 .is_none()
         );
 
-        // We should see an error.
-        assert_eq!(
-            collection
-                .errors
-                .iter()
-                .map(|e| format!("{:#}", e))
-                .collect::<Vec<_>>(),
-            vec![
-                "MGS \"fake MGS 1\": SP Sled slot 65536: \
-                slot number did not fit into u16"
-            ]
-        );
+        // We should see no errors.
+        assert!(collection.errors.is_empty());
     }
 }

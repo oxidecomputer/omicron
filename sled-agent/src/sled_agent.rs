@@ -69,6 +69,7 @@ use sled_agent_types::zone_bundle::{
     BundleUtilization, CleanupContext, CleanupCount, CleanupPeriod,
     PriorityOrder, StorageLimit, ZoneBundleCause, ZoneBundleMetadata,
 };
+use sled_agent_types::zone_images::ResolverStatus;
 use sled_diagnostics::SledDiagnosticsCmdError;
 use sled_diagnostics::SledDiagnosticsCmdOutput;
 use sled_hardware::{
@@ -426,7 +427,7 @@ impl SledAgent {
         let boot_disk_zpool = config_reconciler
             .internal_disks_rx()
             .current()
-            .boot_disk_zpool()
+            .boot_disk_zpool_name()
             .ok_or_else(|| Error::BootDiskNotFound)?;
 
         // Configure a swap device of the configured size before other system setup.
@@ -703,7 +704,7 @@ impl SledAgent {
     pub(crate) fn as_support_bundle_logs(&self) -> SupportBundleLogs<'_> {
         SupportBundleLogs::new(
             &self.log,
-            self.inner.config_reconciler.internal_disks_rx(),
+            self.inner.config_reconciler.available_datasets_rx(),
         )
     }
 
@@ -1135,6 +1136,8 @@ impl SledAgent {
         let reservoir_size = self.inner.instances.reservoir_size();
         let sled_role =
             if is_scrimlet { SledRole::Scrimlet } else { SledRole::Gimlet };
+        let zone_image_resolver =
+            self.inner.services.zone_image_resolver().status().to_inventory();
 
         let ReconcilerInventory {
             disks,
@@ -1159,6 +1162,7 @@ impl SledAgent {
             ledgered_sled_config,
             reconciler_status,
             last_reconciliation,
+            zone_image_resolver,
         })
     }
 
@@ -1333,8 +1337,8 @@ impl SledAgentFacilities for ReconcilerFacilities {
         &self.etherstub_vnic
     }
 
-    async fn on_time_sync(&self) {
-        self.service_manager.on_time_sync().await
+    fn on_time_sync(&self) {
+        self.service_manager.on_time_sync();
     }
 
     async fn start_omicron_zone(
@@ -1347,6 +1351,10 @@ impl SledAgentFacilities for ReconcilerFacilities {
             .start_omicron_zone(zone_config, zone_root_path)
             .await?;
         Ok(zone)
+    }
+
+    fn zone_image_resolver_status(&self) -> ResolverStatus {
+        self.service_manager.zone_image_resolver().status()
     }
 
     fn metrics_untrack_zone_links(

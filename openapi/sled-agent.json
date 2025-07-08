@@ -2854,6 +2854,52 @@
           }
         ]
       },
+      "BootImageHeader": {
+        "type": "object",
+        "properties": {
+          "data_size": {
+            "type": "integer",
+            "format": "uint64",
+            "minimum": 0
+          },
+          "flags": {
+            "type": "integer",
+            "format": "uint64",
+            "minimum": 0
+          },
+          "image_name": {
+            "type": "string"
+          },
+          "image_size": {
+            "type": "integer",
+            "format": "uint64",
+            "minimum": 0
+          },
+          "sha256": {
+            "type": "array",
+            "items": {
+              "type": "integer",
+              "format": "uint8",
+              "minimum": 0
+            },
+            "minItems": 32,
+            "maxItems": 32
+          },
+          "target_size": {
+            "type": "integer",
+            "format": "uint64",
+            "minimum": 0
+          }
+        },
+        "required": [
+          "data_size",
+          "flags",
+          "image_name",
+          "image_size",
+          "sha256",
+          "target_size"
+        ]
+      },
       "BootOrderEntry": {
         "description": "An entry in the boot order stored in a [`BootSettings`] component.",
         "type": "object",
@@ -2869,6 +2915,155 @@
         },
         "required": [
           "id"
+        ]
+      },
+      "BootPartitionContents": {
+        "type": "object",
+        "properties": {
+          "boot_disk": {
+            "x-rust-type": {
+              "crate": "std",
+              "parameters": [
+                {
+                  "$ref": "#/components/schemas/M2Slot"
+                },
+                {
+                  "type": "string"
+                }
+              ],
+              "path": "::std::result::Result",
+              "version": "*"
+            },
+            "oneOf": [
+              {
+                "type": "object",
+                "properties": {
+                  "ok": {
+                    "$ref": "#/components/schemas/M2Slot"
+                  }
+                },
+                "required": [
+                  "ok"
+                ]
+              },
+              {
+                "type": "object",
+                "properties": {
+                  "err": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "err"
+                ]
+              }
+            ]
+          },
+          "slot_a": {
+            "x-rust-type": {
+              "crate": "std",
+              "parameters": [
+                {
+                  "$ref": "#/components/schemas/BootPartitionDetails"
+                },
+                {
+                  "type": "string"
+                }
+              ],
+              "path": "::std::result::Result",
+              "version": "*"
+            },
+            "oneOf": [
+              {
+                "type": "object",
+                "properties": {
+                  "ok": {
+                    "$ref": "#/components/schemas/BootPartitionDetails"
+                  }
+                },
+                "required": [
+                  "ok"
+                ]
+              },
+              {
+                "type": "object",
+                "properties": {
+                  "err": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "err"
+                ]
+              }
+            ]
+          },
+          "slot_b": {
+            "x-rust-type": {
+              "crate": "std",
+              "parameters": [
+                {
+                  "$ref": "#/components/schemas/BootPartitionDetails"
+                },
+                {
+                  "type": "string"
+                }
+              ],
+              "path": "::std::result::Result",
+              "version": "*"
+            },
+            "oneOf": [
+              {
+                "type": "object",
+                "properties": {
+                  "ok": {
+                    "$ref": "#/components/schemas/BootPartitionDetails"
+                  }
+                },
+                "required": [
+                  "ok"
+                ]
+              },
+              {
+                "type": "object",
+                "properties": {
+                  "err": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "err"
+                ]
+              }
+            ]
+          }
+        },
+        "required": [
+          "boot_disk",
+          "slot_a",
+          "slot_b"
+        ]
+      },
+      "BootPartitionDetails": {
+        "type": "object",
+        "properties": {
+          "artifact_hash": {
+            "type": "string",
+            "format": "hex string (32 bytes)"
+          },
+          "artifact_size": {
+            "type": "integer",
+            "format": "uint",
+            "minimum": 0
+          },
+          "header": {
+            "$ref": "#/components/schemas/BootImageHeader"
+          }
+        },
+        "required": [
+          "artifact_hash",
+          "artifact_size",
+          "header"
         ]
       },
       "BootSettings": {
@@ -3547,6 +3742,9 @@
         "description": "Describes the last attempt made by the sled-agent-config-reconciler to reconcile the current sled config against the actual state of the sled.",
         "type": "object",
         "properties": {
+          "boot_partitions": {
+            "$ref": "#/components/schemas/BootPartitionContents"
+          },
           "datasets": {
             "type": "object",
             "additionalProperties": {
@@ -3588,6 +3786,7 @@
           }
         },
         "required": [
+          "boot_partitions",
           "datasets",
           "external_disks",
           "last_reconciled_config",
@@ -4588,6 +4787,15 @@
         ],
         "additionalProperties": false
       },
+      "IcmpParamRange": {
+        "example": "3",
+        "title": "A range of ICMP(v6) types or codes",
+        "description": "An inclusive-inclusive range of ICMP(v6) types or codes. The second value may be omitted to represent a single parameter.",
+        "type": "string",
+        "pattern": "^[0-9]{1,3}(-[0-9]{1,3})?$",
+        "minLength": 1,
+        "maxLength": 7
+      },
       "IdMapDatasetConfig": {
         "type": "object",
         "additionalProperties": {
@@ -4950,6 +5158,9 @@
           "usable_physical_ram": {
             "$ref": "#/components/schemas/ByteCount"
           },
+          "zone_image_resolver": {
+            "$ref": "#/components/schemas/ZoneImageResolverInventory"
+          },
           "zpools": {
             "type": "array",
             "items": {
@@ -4968,6 +5179,7 @@
           "sled_role",
           "usable_hardware_threads",
           "usable_physical_ram",
+          "zone_image_resolver",
           "zpools"
         ]
       },
@@ -5232,6 +5444,14 @@
           "status"
         ]
       },
+      "M2Slot": {
+        "description": "Describes an M.2 slot, often in the context of writing a system image to it.",
+        "type": "string",
+        "enum": [
+          "A",
+          "B"
+        ]
+      },
       "MacAddr": {
         "example": "ff:ff:ff:ff:ff:ff",
         "title": "A MAC address",
@@ -5322,6 +5542,137 @@
               "completed"
             ]
           }
+        ]
+      },
+      "MupdateOverrideBootInventory": {
+        "description": "Inventory representation of the MUPdate override on the boot disk.",
+        "type": "object",
+        "properties": {
+          "mupdate_override_id": {
+            "description": "The ID of the MUPdate override.\n\nThis is unique and generated by Installinator each time it is run. During a MUPdate, each sled gets a MUPdate override ID. (The ID is shared across boot disks and non-boot disks, though.)",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/TypedUuidForMupdateOverrideKind"
+              }
+            ]
+          }
+        },
+        "required": [
+          "mupdate_override_id"
+        ]
+      },
+      "MupdateOverrideInventory": {
+        "description": "Inventory representation of MUPdate override status.\n\nPart of [`ZoneImageResolverInventory`].\n\nThis is used by Reconfigurator to determine if a MUPdate override has occurred. For more about mixing MUPdate and updates, see RFD 556.",
+        "type": "object",
+        "properties": {
+          "boot_disk_path": {
+            "description": "The full path to the mupdate override JSON on the boot disk.",
+            "type": "string",
+            "format": "Utf8PathBuf"
+          },
+          "boot_override": {
+            "description": "The boot disk override, or an error if it could not be parsed.\n\nThis is `None` if the override is not present.",
+            "x-rust-type": {
+              "crate": "std",
+              "parameters": [
+                {
+                  "$ref": "#/components/schemas/MupdateOverrideBootInventory",
+                  "nullable": true
+                },
+                {
+                  "type": "string"
+                }
+              ],
+              "path": "::std::result::Result",
+              "version": "*"
+            },
+            "oneOf": [
+              {
+                "type": "object",
+                "properties": {
+                  "ok": {
+                    "nullable": true,
+                    "allOf": [
+                      {
+                        "$ref": "#/components/schemas/MupdateOverrideBootInventory"
+                      }
+                    ]
+                  }
+                },
+                "required": [
+                  "ok"
+                ]
+              },
+              {
+                "type": "object",
+                "properties": {
+                  "err": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "err"
+                ]
+              }
+            ]
+          },
+          "non_boot_status": {
+            "title": "IdOrdMap",
+            "description": "Information about the MUPdate override on non-boot disks.",
+            "x-rust-type": {
+              "crate": "iddqd",
+              "parameters": [
+                {
+                  "$ref": "#/components/schemas/MupdateOverrideNonBootInventory"
+                }
+              ],
+              "path": "iddqd::IdOrdMap",
+              "version": "*"
+            },
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/MupdateOverrideNonBootInventory"
+            },
+            "uniqueItems": true
+          }
+        },
+        "required": [
+          "boot_disk_path",
+          "boot_override",
+          "non_boot_status"
+        ]
+      },
+      "MupdateOverrideNonBootInventory": {
+        "description": "Inventory representation of the MUPdate override on a non-boot disk.\n\nUnlike [`MupdateOverrideBootInventory`] which is structured since Reconfigurator makes decisions based on it, information about non-boot disks is purely advisory. For simplicity, we store information in an unstructured format.",
+        "type": "object",
+        "properties": {
+          "is_valid": {
+            "description": "Whether the status is valid.",
+            "type": "boolean"
+          },
+          "message": {
+            "description": "A message describing the status.\n\nIf `is_valid` is true, then the message is a short description saying that it matches the boot disk, and whether the MUPdate override is present.\n\nIf `is_valid` is false, then this message describes the reason for the invalid status. This could include errors reading the MUPdate override JSON, or a mismatch between the boot and non-boot disks.",
+            "type": "string"
+          },
+          "path": {
+            "description": "The path to the mupdate override JSON on the non-boot disk.",
+            "type": "string",
+            "format": "Utf8PathBuf"
+          },
+          "zpool_id": {
+            "description": "The non-boot zpool ID.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/TypedUuidForInternalZpoolKind"
+              }
+            ]
+          }
+        },
+        "required": [
+          "is_valid",
+          "message",
+          "path",
+          "zpool_id"
         ]
       },
       "Name": {
@@ -5625,6 +5976,50 @@
             "required": [
               "hash",
               "type"
+            ]
+          }
+        ]
+      },
+      "OmicronZoneManifestSource": {
+        "description": "The source of truth for an Omicron zone manifest.",
+        "oneOf": [
+          {
+            "description": "The manifest was written out by installinator and the mupdate process.",
+            "type": "object",
+            "properties": {
+              "mupdate_id": {
+                "description": "The UUID of the mupdate.",
+                "allOf": [
+                  {
+                    "$ref": "#/components/schemas/TypedUuidForMupdateKind"
+                  }
+                ]
+              },
+              "source": {
+                "type": "string",
+                "enum": [
+                  "installinator"
+                ]
+              }
+            },
+            "required": [
+              "mupdate_id",
+              "source"
+            ]
+          },
+          {
+            "description": "The zone manifest was not found during the install process. A synthetic zone manifest was generated by Sled Agent by looking at all the `.tar.gz` files in the install dataset.",
+            "type": "object",
+            "properties": {
+              "source": {
+                "type": "string",
+                "enum": [
+                  "sled_agent"
+                ]
+              }
+            },
+            "required": [
+              "source"
             ]
           }
         ]
@@ -7110,6 +7505,14 @@
         "type": "string",
         "format": "uuid"
       },
+      "TypedUuidForInternalZpoolKind": {
+        "type": "string",
+        "format": "uuid"
+      },
+      "TypedUuidForMupdateKind": {
+        "type": "string",
+        "format": "uuid"
+      },
       "TypedUuidForMupdateOverrideKind": {
         "type": "string",
         "format": "uuid"
@@ -7500,6 +7903,27 @@
         "format": "uint32",
         "minimum": 0
       },
+      "VpcFirewallIcmpFilter": {
+        "type": "object",
+        "properties": {
+          "code": {
+            "nullable": true,
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/IcmpParamRange"
+              }
+            ]
+          },
+          "icmp_type": {
+            "type": "integer",
+            "format": "uint8",
+            "minimum": 0
+          }
+        },
+        "required": [
+          "icmp_type"
+        ]
+      },
       "VpcFirewallRuleAction": {
         "type": "string",
         "enum": [
@@ -7516,11 +7940,58 @@
       },
       "VpcFirewallRuleProtocol": {
         "description": "The protocols that may be specified in a firewall rule's filter",
-        "type": "string",
-        "enum": [
-          "TCP",
-          "UDP",
-          "ICMP"
+        "oneOf": [
+          {
+            "type": "object",
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "tcp"
+                ]
+              }
+            },
+            "required": [
+              "type"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "udp"
+                ]
+              }
+            },
+            "required": [
+              "type"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "icmp"
+                ]
+              },
+              "value": {
+                "nullable": true,
+                "allOf": [
+                  {
+                    "$ref": "#/components/schemas/VpcFirewallIcmpFilter"
+                  }
+                ]
+              }
+            },
+            "required": [
+              "type",
+              "value"
+            ]
+          }
         ]
       },
       "VpcFirewallRuleStatus": {
@@ -7547,6 +8018,82 @@
         "required": [
           "rules",
           "vni"
+        ]
+      },
+      "ZoneArtifactInventory": {
+        "description": "Inventory representation of a single zone artifact on a boot disk.\n\nPart of [`ZoneManifestBootInventory`].",
+        "type": "object",
+        "properties": {
+          "expected_hash": {
+            "description": "The expected digest of the file's contents.",
+            "type": "string",
+            "format": "hex string (32 bytes)"
+          },
+          "expected_size": {
+            "description": "The expected size of the file, in bytes.",
+            "type": "integer",
+            "format": "uint64",
+            "minimum": 0
+          },
+          "file_name": {
+            "description": "The name of the zone file on disk, for example `nexus.tar.gz`. Zone files are always \".tar.gz\".",
+            "type": "string"
+          },
+          "path": {
+            "description": "The full path to the zone file.",
+            "type": "string",
+            "format": "Utf8PathBuf"
+          },
+          "status": {
+            "description": "The status of the artifact.\n\nThis is `Ok(())` if the artifact is present and matches the expected size and digest, or an error message if it is missing or does not match.",
+            "x-rust-type": {
+              "crate": "std",
+              "parameters": [
+                {
+                  "type": "null"
+                },
+                {
+                  "type": "string"
+                }
+              ],
+              "path": "::std::result::Result",
+              "version": "*"
+            },
+            "oneOf": [
+              {
+                "type": "object",
+                "properties": {
+                  "ok": {
+                    "type": "string",
+                    "enum": [
+                      null
+                    ]
+                  }
+                },
+                "required": [
+                  "ok"
+                ]
+              },
+              {
+                "type": "object",
+                "properties": {
+                  "err": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "err"
+                ]
+              }
+            ]
+          }
+        },
+        "required": [
+          "expected_hash",
+          "expected_size",
+          "file_name",
+          "path",
+          "status"
         ]
       },
       "ZoneBundleCause": {
@@ -7633,19 +8180,182 @@
           "version"
         ]
       },
+      "ZoneImageResolverInventory": {
+        "description": "Inventory representation of zone image resolver status and health.",
+        "type": "object",
+        "properties": {
+          "mupdate_override": {
+            "description": "The mupdate override status.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/MupdateOverrideInventory"
+              }
+            ]
+          },
+          "zone_manifest": {
+            "description": "The zone manifest status.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/ZoneManifestInventory"
+              }
+            ]
+          }
+        },
+        "required": [
+          "mupdate_override",
+          "zone_manifest"
+        ]
+      },
+      "ZoneManifestBootInventory": {
+        "description": "Inventory representation of zone artifacts on the boot disk.\n\nPart of [`ZoneManifestInventory`].",
+        "type": "object",
+        "properties": {
+          "artifacts": {
+            "title": "IdOrdMap",
+            "description": "The artifacts on disk.",
+            "x-rust-type": {
+              "crate": "iddqd",
+              "parameters": [
+                {
+                  "$ref": "#/components/schemas/ZoneArtifactInventory"
+                }
+              ],
+              "path": "iddqd::IdOrdMap",
+              "version": "*"
+            },
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ZoneArtifactInventory"
+            },
+            "uniqueItems": true
+          },
+          "source": {
+            "description": "The manifest source.\n\nIn production this is [`OmicronZoneManifestSource::Installinator`], but in some development and testing flows Sled Agent synthesizes zone manifests. In those cases, the source is [`OmicronZoneManifestSource::SledAgent`].",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/OmicronZoneManifestSource"
+              }
+            ]
+          }
+        },
+        "required": [
+          "artifacts",
+          "source"
+        ]
+      },
+      "ZoneManifestInventory": {
+        "description": "Inventory representation of a zone manifest.\n\nPart of [`ZoneImageResolverInventory`].\n\nA zone manifest is a listing of all the zones present in a system's install dataset. This struct contains information about the install dataset gathered from a system.",
+        "type": "object",
+        "properties": {
+          "boot_disk_path": {
+            "description": "The full path to the zone manifest file on the boot disk.",
+            "type": "string",
+            "format": "Utf8PathBuf"
+          },
+          "boot_inventory": {
+            "description": "The manifest read from the boot disk, and whether the manifest is valid.",
+            "x-rust-type": {
+              "crate": "std",
+              "parameters": [
+                {
+                  "$ref": "#/components/schemas/ZoneManifestBootInventory"
+                },
+                {
+                  "type": "string"
+                }
+              ],
+              "path": "::std::result::Result",
+              "version": "*"
+            },
+            "oneOf": [
+              {
+                "type": "object",
+                "properties": {
+                  "ok": {
+                    "$ref": "#/components/schemas/ZoneManifestBootInventory"
+                  }
+                },
+                "required": [
+                  "ok"
+                ]
+              },
+              {
+                "type": "object",
+                "properties": {
+                  "err": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "err"
+                ]
+              }
+            ]
+          },
+          "non_boot_status": {
+            "title": "IdOrdMap",
+            "description": "Information about the install dataset on non-boot disks.",
+            "x-rust-type": {
+              "crate": "iddqd",
+              "parameters": [
+                {
+                  "$ref": "#/components/schemas/ZoneManifestNonBootInventory"
+                }
+              ],
+              "path": "iddqd::IdOrdMap",
+              "version": "*"
+            },
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ZoneManifestNonBootInventory"
+            },
+            "uniqueItems": true
+          }
+        },
+        "required": [
+          "boot_disk_path",
+          "boot_inventory",
+          "non_boot_status"
+        ]
+      },
+      "ZoneManifestNonBootInventory": {
+        "description": "Inventory representation of a zone manifest on a non-boot disk.\n\nUnlike [`ZoneManifestBootInventory`] which is structured since Reconfigurator makes decisions based on it, information about non-boot disks is purely advisory. For simplicity, we store information in an unstructured format.",
+        "type": "object",
+        "properties": {
+          "is_valid": {
+            "description": "Whether the status is valid.",
+            "type": "boolean"
+          },
+          "message": {
+            "description": "A message describing the status.\n\nIf `is_valid` is true, then the message describes the list of artifacts found and their hashes.\n\nIf `is_valid` is false, then this message describes the reason for the invalid status. This could include errors reading the zone manifest, or zone file mismatches.",
+            "type": "string"
+          },
+          "path": {
+            "description": "The full path to the zone manifest JSON on the non-boot disk.",
+            "type": "string",
+            "format": "Utf8PathBuf"
+          },
+          "zpool_id": {
+            "description": "The ID of the non-boot zpool.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/TypedUuidForInternalZpoolKind"
+              }
+            ]
+          }
+        },
+        "required": [
+          "is_valid",
+          "message",
+          "path",
+          "zpool_id"
+        ]
+      },
       "ZpoolName": {
         "title": "The name of a Zpool",
         "description": "Zpool names are of the format ox{i,p}_<UUID>. They are either Internal or External, and should be unique",
         "type": "string",
         "pattern": "^ox[ip]_[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
-      },
-      "M2Slot": {
-        "description": "Describes an M.2 slot, often in the context of writing a system image to it.",
-        "type": "string",
-        "enum": [
-          "A",
-          "B"
-        ]
       },
       "TypedUuidForPropolisKind": {
         "type": "string",

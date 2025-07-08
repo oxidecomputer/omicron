@@ -11,6 +11,7 @@ workspace = true
 base64.workspace = true
 chrono.workspace = true
 daft.workspace = true
+ereport-types.workspace = true
 gateway-messages.workspace = true
 gateway-types.workspace = true
 omicron-uuid-kinds.workspace = true

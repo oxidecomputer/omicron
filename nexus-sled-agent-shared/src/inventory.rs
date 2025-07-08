@@ -8,6 +8,7 @@ use std::collections::BTreeMap;
 use std::net::{IpAddr, Ipv6Addr, SocketAddr, SocketAddrV6};
 use std::time::Duration;
 
+use camino::Utf8PathBuf;
 use chrono::{DateTime, Utc};
 use daft::Diffable;
 use id_map::IdMap;
@@ -15,8 +16,11 @@ use id_map::IdMappable;
 use iddqd::IdOrdItem;
 use iddqd::IdOrdMap;
 use iddqd::id_upcast;
-use omicron_common::disk::{DatasetKind, DatasetName};
+use omicron_common::disk::{DatasetKind, DatasetName, M2Slot};
 use omicron_common::ledger::Ledgerable;
+use omicron_common::snake_case_result;
+use omicron_common::snake_case_result::SnakeCaseResult;
+use omicron_common::update::OmicronZoneManifestSource;
 use omicron_common::{
     api::{
         external::{ByteCount, Generation},
@@ -26,10 +30,13 @@ use omicron_common::{
     update::ArtifactId,
     zpool_name::ZpoolName,
 };
-use omicron_uuid_kinds::{DatasetUuid, OmicronZoneUuid};
+use omicron_uuid_kinds::{
+    DatasetUuid, InternalZpoolUuid, MupdateUuid, OmicronZoneUuid,
+};
 use omicron_uuid_kinds::{MupdateOverrideUuid, PhysicalDiskUuid};
 use omicron_uuid_kinds::{SledUuid, ZpoolUuid};
-use schemars::JsonSchema;
+use schemars::schema::{Schema, SchemaObject};
+use schemars::{JsonSchema, SchemaGenerator};
 use serde::{Deserialize, Serialize};
 // Export this type for convenience -- this way, dependents don't have to
 // depend on sled-hardware-types.
@@ -119,6 +126,7 @@ pub struct Inventory {
     pub ledgered_sled_config: Option<OmicronSledConfig>,
     pub reconciler_status: ConfigReconcilerInventoryStatus,
     pub last_reconciliation: Option<ConfigReconcilerInventory>,
+    pub zone_image_resolver: ZoneImageResolverInventory,
 }
 
 /// Describes the last attempt made by the sled-agent-config-reconciler to
@@ -132,6 +140,7 @@ pub struct ConfigReconcilerInventory {
     pub datasets: BTreeMap<DatasetUuid, ConfigReconcilerInventoryResult>,
     pub orphaned_datasets: IdOrdMap<OrphanedDataset>,
     pub zones: BTreeMap<OmicronZoneUuid, ConfigReconcilerInventoryResult>,
+    pub boot_partitions: BootPartitionContents,
 }
 
 impl ConfigReconcilerInventory {
@@ -195,8 +204,55 @@ impl ConfigReconcilerInventory {
             datasets,
             orphaned_datasets: IdOrdMap::new(),
             zones,
+            boot_partitions: {
+                // None of our callers care about this; if that changes, we
+                // could pass in boot partition contents.
+                let err = "constructed via debug_assume_success()".to_string();
+                BootPartitionContents {
+                    boot_disk: Err(err.clone()),
+                    slot_a: Err(err.clone()),
+                    slot_b: Err(err),
+                }
+            },
         }
     }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Deserialize, JsonSchema, Serialize)]
+pub struct BootPartitionContents {
+    #[serde(with = "snake_case_result")]
+    #[schemars(schema_with = "SnakeCaseResult::<M2Slot, String>::json_schema")]
+    pub boot_disk: Result<M2Slot, String>,
+    #[serde(with = "snake_case_result")]
+    #[schemars(
+        schema_with = "SnakeCaseResult::<BootPartitionDetails, String>::json_schema"
+    )]
+    pub slot_a: Result<BootPartitionDetails, String>,
+    #[serde(with = "snake_case_result")]
+    #[schemars(
+        schema_with = "SnakeCaseResult::<BootPartitionDetails, String>::json_schema"
+    )]
+    pub slot_b: Result<BootPartitionDetails, String>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Deserialize, JsonSchema, Serialize)]
+pub struct BootPartitionDetails {
+    pub header: BootImageHeader,
+    pub artifact_hash: ArtifactHash,
+    pub artifact_size: usize,
+}
+
+// There are several other fields in the header that we either parse and discard
+// or ignore completely; see https://github.com/oxidecomputer/boot-image-tools
+// for more thorough support.
+#[derive(Clone, Debug, PartialEq, Eq, Deserialize, JsonSchema, Serialize)]
+pub struct BootImageHeader {
+    pub flags: u64,
+    pub data_size: u64,
+    pub image_size: u64,
+    pub target_size: u64,
+    pub sha256: [u8; 32],
+    pub image_name: String,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Deserialize, JsonSchema, Serialize)]
@@ -255,6 +311,253 @@ pub enum ConfigReconcilerInventoryStatus {
     /// attempt, because that's always available via
     /// [`ConfigReconcilerInventory::last_reconciled_config`].
     Idle { completed_at: DateTime<Utc>, ran_for: Duration },
+}
+
+/// Inventory representation of zone image resolver status and health.
+#[derive(Clone, Debug, PartialEq, Eq, Deserialize, JsonSchema, Serialize)]
+pub struct ZoneImageResolverInventory {
+    /// The zone manifest status.
+    pub zone_manifest: ZoneManifestInventory,
+
+    /// The mupdate override status.
+    pub mupdate_override: MupdateOverrideInventory,
+}
+
+impl ZoneImageResolverInventory {
+    /// Returns a new, fake inventory for tests.
+    pub fn new_fake() -> Self {
+        Self {
+            zone_manifest: ZoneManifestInventory::new_fake(),
+            mupdate_override: MupdateOverrideInventory::new_fake(),
+        }
+    }
+}
+
+/// Inventory representation of a zone manifest.
+///
+/// Part of [`ZoneImageResolverInventory`].
+///
+/// A zone manifest is a listing of all the zones present in a system's install
+/// dataset. This struct contains information about the install dataset gathered
+/// from a system.
+#[derive(Clone, Debug, PartialEq, Eq, Deserialize, JsonSchema, Serialize)]
+pub struct ZoneManifestInventory {
+    /// The full path to the zone manifest file on the boot disk.
+    #[schemars(schema_with = "path_schema")]
+    pub boot_disk_path: Utf8PathBuf,
+
+    /// The manifest read from the boot disk, and whether the manifest is valid.
+    #[serde(with = "snake_case_result")]
+    #[schemars(
+        schema_with = "SnakeCaseResult::<ZoneManifestBootInventory, String>::json_schema"
+    )]
+    pub boot_inventory: Result<ZoneManifestBootInventory, String>,
+
+    /// Information about the install dataset on non-boot disks.
+    pub non_boot_status: IdOrdMap<ZoneManifestNonBootInventory>,
+}
+
+impl ZoneManifestInventory {
+    /// Returns a new, empty inventory for tests.
+    pub fn new_fake() -> Self {
+        Self {
+            boot_disk_path: Utf8PathBuf::from("/fake/path/install/zones.json"),
+            boot_inventory: Ok(ZoneManifestBootInventory::new_fake()),
+            non_boot_status: IdOrdMap::new(),
+        }
+    }
+}
+
+/// Inventory representation of zone artifacts on the boot disk.
+///
+/// Part of [`ZoneManifestInventory`].
+#[derive(Clone, Debug, PartialEq, Eq, Deserialize, JsonSchema, Serialize)]
+pub struct ZoneManifestBootInventory {
+    /// The manifest source.
+    ///
+    /// In production this is [`OmicronZoneManifestSource::Installinator`], but
+    /// in some development and testing flows Sled Agent synthesizes zone
+    /// manifests. In those cases, the source is
+    /// [`OmicronZoneManifestSource::SledAgent`].
+    pub source: OmicronZoneManifestSource,
+
+    /// The artifacts on disk.
+    pub artifacts: IdOrdMap<ZoneArtifactInventory>,
+}
+
+impl ZoneManifestBootInventory {
+    /// Returns a new, empty inventory for tests.
+    ///
+    /// For a more representative selection of real zones, see `representative`
+    /// in `nexus-inventory`.
+    pub fn new_fake() -> Self {
+        Self {
+            source: OmicronZoneManifestSource::Installinator {
+                mupdate_id: MupdateUuid::nil(),
+            },
+            artifacts: IdOrdMap::new(),
+        }
+    }
+}
+
+/// Inventory representation of a single zone artifact on a boot disk.
+///
+/// Part of [`ZoneManifestBootInventory`].
+#[derive(Clone, Debug, PartialEq, Eq, Deserialize, JsonSchema, Serialize)]
+pub struct ZoneArtifactInventory {
+    /// The name of the zone file on disk, for example `nexus.tar.gz`. Zone
+    /// files are always ".tar.gz".
+    pub file_name: String,
+
+    /// The full path to the zone file.
+    #[schemars(schema_with = "path_schema")]
+    pub path: Utf8PathBuf,
+
+    /// The expected size of the file, in bytes.
+    pub expected_size: u64,
+
+    /// The expected digest of the file's contents.
+    pub expected_hash: ArtifactHash,
+
+    /// The status of the artifact.
+    ///
+    /// This is `Ok(())` if the artifact is present and matches the expected
+    /// size and digest, or an error message if it is missing or does not match.
+    #[serde(with = "snake_case_result")]
+    #[schemars(schema_with = "SnakeCaseResult::<(), String>::json_schema")]
+    pub status: Result<(), String>,
+}
+
+impl IdOrdItem for ZoneArtifactInventory {
+    type Key<'a> = &'a str;
+    fn key(&self) -> Self::Key<'_> {
+        &self.file_name
+    }
+    id_upcast!();
+}
+
+/// Inventory representation of a zone manifest on a non-boot disk.
+///
+/// Unlike [`ZoneManifestBootInventory`] which is structured since
+/// Reconfigurator makes decisions based on it, information about non-boot disks
+/// is purely advisory. For simplicity, we store information in an unstructured
+/// format.
+#[derive(Clone, Debug, PartialEq, Eq, Deserialize, JsonSchema, Serialize)]
+pub struct ZoneManifestNonBootInventory {
+    /// The ID of the non-boot zpool.
+    pub zpool_id: InternalZpoolUuid,
+
+    /// The full path to the zone manifest JSON on the non-boot disk.
+    #[schemars(schema_with = "path_schema")]
+    pub path: Utf8PathBuf,
+
+    /// Whether the status is valid.
+    pub is_valid: bool,
+
+    /// A message describing the status.
+    ///
+    /// If `is_valid` is true, then the message describes the list of artifacts
+    /// found and their hashes.
+    ///
+    /// If `is_valid` is false, then this message describes the reason for the
+    /// invalid status. This could include errors reading the zone manifest, or
+    /// zone file mismatches.
+    pub message: String,
+}
+
+impl IdOrdItem for ZoneManifestNonBootInventory {
+    type Key<'a> = InternalZpoolUuid;
+    fn key(&self) -> Self::Key<'_> {
+        self.zpool_id
+    }
+    id_upcast!();
+}
+
+/// Inventory representation of MUPdate override status.
+///
+/// Part of [`ZoneImageResolverInventory`].
+///
+/// This is used by Reconfigurator to determine if a MUPdate override has
+/// occurred. For more about mixing MUPdate and updates, see RFD 556.
+#[derive(Clone, Debug, PartialEq, Eq, Deserialize, JsonSchema, Serialize)]
+pub struct MupdateOverrideInventory {
+    /// The full path to the mupdate override JSON on the boot disk.
+    #[schemars(schema_with = "path_schema")]
+    pub boot_disk_path: Utf8PathBuf,
+
+    /// The boot disk override, or an error if it could not be parsed.
+    ///
+    /// This is `None` if the override is not present.
+    #[serde(with = "snake_case_result")]
+    #[schemars(
+        schema_with = "SnakeCaseResult::<Option<MupdateOverrideBootInventory>, String>::json_schema"
+    )]
+    pub boot_override: Result<Option<MupdateOverrideBootInventory>, String>,
+
+    /// Information about the MUPdate override on non-boot disks.
+    pub non_boot_status: IdOrdMap<MupdateOverrideNonBootInventory>,
+}
+
+impl MupdateOverrideInventory {
+    /// Returns a new, empty inventory for tests.
+    pub fn new_fake() -> Self {
+        Self {
+            boot_disk_path: Utf8PathBuf::from(
+                "/fake/path/install/mupdate_override.json",
+            ),
+            boot_override: Ok(None),
+            non_boot_status: IdOrdMap::new(),
+        }
+    }
+}
+
+/// Inventory representation of the MUPdate override on the boot disk.
+#[derive(Clone, Debug, PartialEq, Eq, Deserialize, JsonSchema, Serialize)]
+pub struct MupdateOverrideBootInventory {
+    /// The ID of the MUPdate override.
+    ///
+    /// This is unique and generated by Installinator each time it is run.
+    /// During a MUPdate, each sled gets a MUPdate override ID. (The ID is
+    /// shared across boot disks and non-boot disks, though.)
+    pub mupdate_override_id: MupdateOverrideUuid,
+}
+
+/// Inventory representation of the MUPdate override on a non-boot disk.
+///
+/// Unlike [`MupdateOverrideBootInventory`] which is structured since
+/// Reconfigurator makes decisions based on it, information about non-boot disks
+/// is purely advisory. For simplicity, we store information in an unstructured
+/// format.
+#[derive(Clone, Debug, PartialEq, Eq, Deserialize, JsonSchema, Serialize)]
+pub struct MupdateOverrideNonBootInventory {
+    /// The non-boot zpool ID.
+    pub zpool_id: InternalZpoolUuid,
+
+    /// The path to the mupdate override JSON on the non-boot disk.
+    #[schemars(schema_with = "path_schema")]
+    pub path: Utf8PathBuf,
+
+    /// Whether the status is valid.
+    pub is_valid: bool,
+
+    /// A message describing the status.
+    ///
+    /// If `is_valid` is true, then the message is a short description saying
+    /// that it matches the boot disk, and whether the MUPdate override is
+    /// present.
+    ///
+    /// If `is_valid` is false, then this message describes the reason for the
+    /// invalid status. This could include errors reading the MUPdate override
+    /// JSON, or a mismatch between the boot and non-boot disks.
+    pub message: String,
+}
+
+impl IdOrdItem for MupdateOverrideNonBootInventory {
+    type Key<'a> = InternalZpoolUuid;
+    fn key(&self) -> Self::Key<'_> {
+        self.zpool_id
+    }
+    id_upcast!();
 }
 
 /// Describes the role of the sled within the rack.
@@ -707,14 +1010,17 @@ impl OmicronZoneType {
 ///
 /// # String representations of this type
 ///
-/// There are no fewer than five string representations for this type, all
+/// There are no fewer than six string representations for this type, all
 /// slightly different from each other.
 ///
 /// 1. [`Self::zone_prefix`]: Used to construct zone names.
 /// 2. [`Self::service_prefix`]: Used to construct SMF service names.
 /// 3. [`Self::name_prefix`]: Used to construct `Name` instances.
 /// 4. [`Self::report_str`]: Used for reporting and testing.
-/// 5. [`Self::artifact_name`]: Used to match TUF artifact names.
+/// 5. [`Self::artifact_id_name`]: Used to match TUF artifact IDs.
+/// 6. [`Self::artifact_in_install_dataset`]: Used to match zone image tarballs
+///    in the install dataset. (This method is equivalent to appending `.tar.gz`
+///    to the result of [`Self::zone_prefix`].)
 ///
 /// There is no `Display` impl to ensure that users explicitly choose the
 /// representation they want. (Please play close attention to this! The
@@ -724,7 +1030,7 @@ impl OmicronZoneType {
 /// ## Adding new representations
 ///
 /// If you have a new use case for a string representation, please reuse one of
-/// the four representations if at all possible. If you must add a new one,
+/// the six representations if at all possible. If you must add a new one,
 /// please add it here rather than doing something ad-hoc in the calling code
 /// so it's more legible.
 #[derive(
@@ -767,6 +1073,30 @@ impl ZoneKind {
             ZoneKind::InternalDns => "internal_dns",
             ZoneKind::Nexus => "nexus",
             ZoneKind::Oximeter => "oximeter",
+        }
+    }
+
+    /// Return a string that identifies **zone image filenames** in the install
+    /// dataset.
+    ///
+    /// This method is exactly equivalent to `format!("{}.tar.gz",
+    /// self.zone_prefix())`, but returns `&'static str`s. A unit test ensures
+    /// they stay consistent.
+    pub fn artifact_in_install_dataset(self) -> &'static str {
+        match self {
+            // BoundaryNtp and InternalNtp both use "ntp".
+            ZoneKind::BoundaryNtp | ZoneKind::InternalNtp => "ntp.tar.gz",
+            ZoneKind::Clickhouse => "clickhouse.tar.gz",
+            ZoneKind::ClickhouseKeeper => "clickhouse_keeper.tar.gz",
+            ZoneKind::ClickhouseServer => "clickhouse_server.tar.gz",
+            // Note "cockroachdb" for historical reasons.
+            ZoneKind::CockroachDb => "cockroachdb.tar.gz",
+            ZoneKind::Crucible => "crucible.tar.gz",
+            ZoneKind::CruciblePantry => "crucible_pantry.tar.gz",
+            ZoneKind::ExternalDns => "external_dns.tar.gz",
+            ZoneKind::InternalDns => "internal_dns.tar.gz",
+            ZoneKind::Nexus => "nexus.tar.gz",
+            ZoneKind::Oximeter => "oximeter.tar.gz",
         }
     }
 
@@ -836,12 +1166,17 @@ impl ZoneKind {
 
     /// Return a string used as an artifact name for control-plane zones.
     /// This is **not guaranteed** to be stable.
-    pub fn artifact_name(self) -> &'static str {
+    ///
+    /// These strings match the `ArtifactId::name`s Nexus constructs when
+    /// unpacking the composite control-plane artifact in a TUF repo. Currently,
+    /// these are chosen by reading the `pkg` value of the `oxide.json` object
+    /// inside each zone image tarball.
+    pub fn artifact_id_name(self) -> &'static str {
         match self {
             ZoneKind::BoundaryNtp => "ntp",
             ZoneKind::Clickhouse => "clickhouse",
             ZoneKind::ClickhouseKeeper => "clickhouse_keeper",
-            ZoneKind::ClickhouseServer => "clickhouse",
+            ZoneKind::ClickhouseServer => "clickhouse_server",
             ZoneKind::CockroachDb => "cockroachdb",
             ZoneKind::Crucible => "crucible-zone",
             ZoneKind::CruciblePantry => "crucible-pantry-zone",
@@ -851,6 +1186,35 @@ impl ZoneKind {
             ZoneKind::Nexus => "nexus",
             ZoneKind::Oximeter => "oximeter",
         }
+    }
+
+    /// Map an artifact ID name to the corresponding file name in the install
+    /// dataset.
+    ///
+    /// We don't allow mapping artifact ID names to `ZoneKind` because the map
+    /// isn't bijective -- both internal and boundary NTP zones use the same
+    /// `ntp` artifact. But the artifact ID name and the name in the install
+    /// dataset do form a bijective map.
+    pub fn artifact_id_name_to_install_dataset_file(
+        artifact_id_name: &str,
+    ) -> Option<&'static str> {
+        let zone_kind = match artifact_id_name {
+            // We arbitrarily select BoundaryNtp to perform the mapping with.
+            "ntp" => ZoneKind::BoundaryNtp,
+            "clickhouse" => ZoneKind::Clickhouse,
+            "clickhouse_keeper" => ZoneKind::ClickhouseKeeper,
+            "clickhouse_server" => ZoneKind::ClickhouseServer,
+            "cockroachdb" => ZoneKind::CockroachDb,
+            "crucible-zone" => ZoneKind::Crucible,
+            "crucible-pantry-zone" => ZoneKind::CruciblePantry,
+            "external-dns" => ZoneKind::ExternalDns,
+            "internal-dns" => ZoneKind::InternalDns,
+            "nexus" => ZoneKind::Nexus,
+            "oximeter" => ZoneKind::Oximeter,
+            _ => return None,
+        };
+
+        Some(zone_kind.artifact_in_install_dataset())
     }
 
     /// Return true if an artifact represents a control plane zone image
@@ -864,7 +1228,7 @@ impl ZoneKind {
             .to_known()
             .map(|kind| matches!(kind, KnownArtifactKind::Zone))
             .unwrap_or(false)
-            && artifact_id.name == self.artifact_name()
+            && artifact_id.name == self.artifact_id_name()
     }
 }
 
@@ -940,4 +1304,38 @@ mod tests {
             });
         }
     }
+
+    #[test]
+    fn test_zone_prefix_matches_artifact_in_install_dataset() {
+        for zone_kind in ZoneKind::iter() {
+            let zone_prefix = zone_kind.zone_prefix();
+            let expected_artifact = format!("{zone_prefix}.tar.gz");
+            assert_eq!(
+                expected_artifact,
+                zone_kind.artifact_in_install_dataset()
+            );
+        }
+    }
+
+    #[test]
+    fn test_artifact_id_to_install_dataset_file() {
+        for zone_kind in ZoneKind::iter() {
+            let artifact_id_name = zone_kind.artifact_id_name();
+            let expected_file = zone_kind.artifact_in_install_dataset();
+            assert_eq!(
+                Some(expected_file),
+                ZoneKind::artifact_id_name_to_install_dataset_file(
+                    artifact_id_name
+                )
+            );
+        }
+    }
+}
+
+// Used for schemars to be able to be used with camino:
+// See https://github.com/camino-rs/camino/issues/91#issuecomment-2027908513
+fn path_schema(generator: &mut SchemaGenerator) -> Schema {
+    let mut schema: SchemaObject = <String>::json_schema(generator).into();
+    schema.format = Some("Utf8PathBuf".to_owned());
+    schema.into()
 }

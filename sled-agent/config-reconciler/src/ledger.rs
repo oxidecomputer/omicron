@@ -656,6 +656,7 @@ mod tests {
     use omicron_test_utils::dev;
     use omicron_test_utils::dev::poll::CondCheckError;
     use omicron_test_utils::dev::poll::wait_for_watch_channel_condition;
+    use omicron_uuid_kinds::InternalZpoolUuid;
     use omicron_uuid_kinds::OmicronZoneUuid;
     use omicron_uuid_kinds::PhysicalDiskUuid;
     use omicron_uuid_kinds::ZpoolUuid;
@@ -684,21 +685,21 @@ mod tests {
         }
     }
 
-    fn make_fake_disk() -> (DiskIdentity, ZpoolName) {
+    fn make_fake_disk() -> (DiskIdentity, InternalZpoolUuid) {
         (
             DiskIdentity {
                 vendor: "ledger-test".into(),
                 model: "ledger-test".into(),
                 serial: "ledger-test-disk".into(),
             },
-            ZpoolName::new_internal(ZpoolUuid::new_v4()),
+            InternalZpoolUuid::new_v4(),
         )
     }
 
     // Helper for constructing a LedgerTask backed by a fake internal disk that
     // points to a temporary directory.
     struct TestHarness {
-        tempdir: Utf8TempDir,
+        _tempdir: Utf8TempDir,
         task_handle: LedgerTaskHandle,
         internal_disks_rx: InternalDisksReceiver,
         current_config_rx: watch::Receiver<CurrentSledConfig>,
@@ -815,7 +816,12 @@ mod tests {
             .await
             .expect("ledger task loaded config from disk");
 
-            Self { tempdir, task_handle, internal_disks_rx, current_config_rx }
+            Self {
+                _tempdir: tempdir,
+                task_handle,
+                internal_disks_rx,
+                current_config_rx,
+            }
         }
     }
 

@@ -459,6 +459,29 @@ impl slog::KV for DebugDatasetsRendezvousStats {
     }
 }
 
+/// The status of a `blueprint_planner` background task activation.
+#[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
+pub enum BlueprintPlannerStatus {
+    /// Automatic blueprint planning has been explicitly disabled
+    /// by the config file.
+    Disabled,
+
+    /// An error occurred during planning or blueprint insertion.
+    Error(String),
+
+    /// Planning produced a blueprint identital to the current target,
+    /// so we threw it away and did nothing.
+    Unchanged { parent_blueprint_id: BlueprintUuid },
+
+    /// Planning produced a new blueprint, but we failed to make it
+    /// the current target and so deleted it.
+    Planned { parent_blueprint_id: BlueprintUuid, error: String },
+
+    /// Planing succeeded, and we saved and made the new blueprint the
+    /// current target.
+    Targeted { parent_blueprint_id: BlueprintUuid, blueprint_id: BlueprintUuid },
+}
+
 /// The status of a `alert_dispatcher` background task activation.
 #[derive(Debug, Clone, Eq, PartialEq, Serialize, Deserialize)]
 pub struct AlertDispatcherStatus {
@@ -527,5 +550,32 @@ pub struct WebhookDeliveryFailure {
 #[derive(Serialize, Deserialize, Default, Debug, PartialEq, Eq)]
 pub struct ReadOnlyRegionReplacementStartStatus {
     pub requests_created_ok: Vec<String>,
+    pub errors: Vec<String>,
+}
+
+#[derive(Serialize, Deserialize, Default, Debug, PartialEq, Eq)]
+pub struct SpEreportIngesterStatus {
+    pub sps: Vec<SpEreporterStatus>,
+    pub errors: Vec<String>,
+}
+
+#[derive(Serialize, Deserialize, Debug, PartialEq, Eq)]
+pub struct SpEreporterStatus {
+    pub sp_type: crate::inventory::SpType,
+    pub slot: u16,
+    #[serde(flatten)]
+    pub status: EreporterStatus,
+}
+
+#[derive(Serialize, Deserialize, Default, Debug, PartialEq, Eq)]
+pub struct EreporterStatus {
+    /// total number of ereports received from this reporter
+    pub ereports_received: usize,
+    /// number of new ereports ingested from this reporter (this may be less
+    /// than `ereports_received` if some ereports were collected by another
+    /// Nexus)
+    pub new_ereports: usize,
+    /// total number of HTTP requests sent.
+    pub requests: usize,
     pub errors: Vec<String>,
 }

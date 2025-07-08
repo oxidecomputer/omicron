@@ -235,11 +235,11 @@ impl Sidecar {
                 if cfg.restart.metadata.is_empty() {
                     let map = &mut cfg.restart.metadata;
                     map.insert(
-                        "chassis_model".to_string(),
+                        "baseboard_part_number".to_string(),
                         SIM_SIDECAR_BOARD.into(),
                     );
                     map.insert(
-                        "chassis_serial".to_string(),
+                        "baseboard_serial_number".to_string(),
                         sidecar.common.serial_number.clone().into(),
                     );
                     map.insert(

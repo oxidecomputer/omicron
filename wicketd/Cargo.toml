@@ -35,6 +35,7 @@ internal-dns-resolver.workspace = true
 internal-dns-types.workspace = true
 itertools.workspace = true
 oxnet.workspace = true
+oxide-tokio-rt.workspace = true
 reqwest.workspace = true
 schemars.workspace = true
 serde.workspace = true
@@ -89,6 +90,11 @@ openapi-lint.workspace = true
 openapiv3.workspace = true
 rand.workspace = true
 serde_json.workspace = true
+sled-agent-config-reconciler = { workspace = true, features = ["testing"] }
+sled-agent-types.workspace = true
+sled-agent-zone-images.workspace = true
+sled-agent-zone-images-examples.workspace = true
+sled-storage.workspace = true
 subprocess.workspace = true
 tar.workspace = true
 tokio = { workspace = true, features = ["test-util"] }

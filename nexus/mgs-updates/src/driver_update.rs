@@ -49,7 +49,9 @@ const PROGRESS_POLL_INTERVAL: Duration = Duration::from_secs(10);
 pub const DEFAULT_RETRY_TIMEOUT: Duration = Duration::from_secs(60);
 
 /// How long to wait after resetting the device before expecting it to come up
-const RESET_TIMEOUT: Duration = Duration::from_secs(60);
+// 120 seconds is chosen as a generous overestimate, based on reports that
+// Sidecar SPs have been observed to take as many as 30 seconds to reset.
+const RESET_TIMEOUT: Duration = Duration::from_secs(120);
 
 /// Parameters describing a request to update one SP-managed component
 ///
@@ -59,7 +61,7 @@ pub(crate) struct SpComponentUpdate {
     pub log: slog::Logger,
     pub component: SpComponent,
     pub target_sp_type: SpType,
-    pub target_sp_slot: u32,
+    pub target_sp_slot: u16,
     pub firmware_slot: u16,
     pub update_id: SpUpdateUuid,
 }
@@ -134,10 +136,10 @@ pub enum ApplyUpdateError {
     #[error("SP reports not knowing about our update attempt")]
     SpUpdateLost,
     #[error(
-        "gave up after {}ms waiting for update {0} to finish",
-        .1.as_millis())
+        "gave up after {}ms waiting for update {update_id} to finish",
+        timeout.as_millis())
     ]
-    StuckUpdating(Uuid, Duration),
+    StuckUpdating { update_id: Uuid, timeout: Duration },
     #[error("failed to abort in-progress SP update")]
     SpUpdateAbortFailed(#[from] AbortError),
     #[error("SP reports that reset failed: {0:?}")]
@@ -322,7 +324,10 @@ pub(crate) async fn apply_update(
             // error.  The caller will have to do the retry if they want it.
             DeliveryWaitStatus::StuckUpdating(id, timeout) => {
                 abort_update(&mut mgs_clients, sp_update, id, "stuck").await?;
-                return Err(ApplyUpdateError::StuckUpdating(id, timeout));
+                return Err(ApplyUpdateError::StuckUpdating {
+                    update_id: id,
+                    timeout,
+                });
             }
 
             DeliveryWaitStatus::Failed(id, message) => {
@@ -728,7 +733,7 @@ mod test {
         gwtestctx: &GatewayTestContext,
         artifacts: &TestArtifacts,
         sp_type: SpType,
-        slot_id: u32,
+        slot_id: u16,
         artifact_hash: &ArtifactHash,
         expected_result: UpdateCompletedHow,
     ) {
@@ -897,7 +902,7 @@ mod test {
         gwtestctx: &GatewayTestContext,
         artifacts: &TestArtifacts,
         sp_type: SpType,
-        slot_id: u32,
+        slot_id: u16,
         artifact_hash: &ArtifactHash,
         expected_result: UpdateCompletedHow,
     ) {

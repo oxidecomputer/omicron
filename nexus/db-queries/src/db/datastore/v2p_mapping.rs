@@ -36,7 +36,10 @@ impl DataStore {
 
         // Query for instance v2p mappings
         let mut mappings = Vec::new();
-        let mut paginator = Paginator::new(SQL_BATCH_SIZE);
+        let mut paginator = Paginator::new(
+            SQL_BATCH_SIZE,
+            dropshot::PaginationOrder::Ascending,
+        );
         while let Some(p) = paginator.next() {
             let batch: Vec<_> =
                 paginated(
@@ -93,7 +96,10 @@ impl DataStore {
         }
 
         // Query for probe v2p mappings
-        let mut paginator = Paginator::new(SQL_BATCH_SIZE);
+        let mut paginator = Paginator::new(
+            SQL_BATCH_SIZE,
+            dropshot::PaginationOrder::Ascending,
+        );
         while let Some(p) = paginator.next() {
             let batch: Vec<_> =
                 paginated(

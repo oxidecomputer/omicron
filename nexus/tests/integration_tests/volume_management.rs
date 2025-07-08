@@ -5175,7 +5175,8 @@ async fn get_volume_resource_usage_records(
     use nexus_db_schema::schema::volume_resource_usage::dsl;
 
     let mut records: Vec<VolumeResourceUsageRecord> = Vec::new();
-    let mut paginator = Paginator::new(SQL_BATCH_SIZE);
+    let mut paginator =
+        Paginator::new(SQL_BATCH_SIZE, dropshot::PaginationOrder::Ascending);
     let conn = datastore.pool_connection_for_tests().await.unwrap();
 
     while let Some(p) = paginator.next() {
