@@ -76,6 +76,12 @@ impl<'a> Collector<'a> {
         self.collect_all_keepers().await;
         self.collect_all_cockroach().await;
 
+        // TODO(https://github.com/oxidecomputer/omicron/issues/8546): Collect
+        // NTP timesync statuses
+
+        // TODO(https://github.com/oxidecomputer/omicron/issues/8544): Collect
+        // DNS generations
+
         debug!(&self.log, "finished collection");
 
         Ok(self.in_progress.build())

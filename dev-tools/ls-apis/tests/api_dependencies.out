@@ -70,6 +70,8 @@ Nexus Internal API (client: nexus-client)
     consumed by: oximeter-collector (omicron/oximeter/collector) via 1 path
     consumed by: propolis-server (propolis/bin/propolis-server) via 3 paths
 
+NTP Admin (client: ntp-admin-client)
+
 External API (client: oxide-client)
 
 Oximeter (client: oximeter-client)
