@@ -410,6 +410,7 @@ mod test {
     use gateway_messages::SpPort;
     use id_map::IdMap;
     use nexus_sled_agent_shared::inventory::ConfigReconcilerInventoryStatus;
+    use nexus_sled_agent_shared::inventory::HostPhase2DesiredSlots;
     use nexus_sled_agent_shared::inventory::OmicronSledConfig;
     use nexus_sled_agent_shared::inventory::OmicronZoneConfig;
     use nexus_sled_agent_shared::inventory::OmicronZoneImageSource;
@@ -434,6 +435,7 @@ mod test {
             datasets,
             zones,
             remove_mupdate_override,
+            host_phase_2,
         } = config;
 
         writeln!(s, "        generation: {generation}").unwrap();
@@ -442,6 +444,11 @@ mod test {
             "        remove_mupdate_override: {remove_mupdate_override:?}"
         )
         .unwrap();
+        {
+            let HostPhase2DesiredSlots { slot_a, slot_b } = host_phase_2;
+            writeln!(s, "        host_phase_2.slot_a: {slot_a:?}").unwrap();
+            writeln!(s, "        host_phase_2.slot_b: {slot_b:?}").unwrap();
+        }
         for disk in disks {
             writeln!(
                 s,
@@ -687,6 +694,7 @@ mod test {
                 .into_iter()
                 .collect(),
                 remove_mupdate_override: None,
+                host_phase_2: HostPhase2DesiredSlots::current_contents(),
             })
             .await
             .expect("failed to write initial zone version to fake sled agent");

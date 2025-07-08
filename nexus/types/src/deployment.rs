@@ -20,6 +20,7 @@ pub use crate::inventory::ZpoolName;
 use blueprint_diff::ClickhouseClusterConfigDiffTablesForSingleBlueprint;
 use blueprint_display::BpDatasetsTableSchema;
 use daft::Diffable;
+use nexus_sled_agent_shared::inventory::HostPhase2DesiredSlots;
 use nexus_sled_agent_shared::inventory::OmicronSledConfig;
 use nexus_sled_agent_shared::inventory::OmicronZoneConfig;
 use nexus_sled_agent_shared::inventory::OmicronZoneImageSource;
@@ -743,6 +744,8 @@ impl BlueprintSledConfig {
                 })
                 .collect(),
             remove_mupdate_override: self.remove_mupdate_override,
+            // TODO-john Open issue to add this to the blueprint
+            host_phase_2: HostPhase2DesiredSlots::current_contents(),
         }
     }
 

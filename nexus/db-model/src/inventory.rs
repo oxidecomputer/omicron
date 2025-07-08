@@ -44,6 +44,8 @@ use nexus_db_schema::schema::{
 use nexus_sled_agent_shared::inventory::BootImageHeader;
 use nexus_sled_agent_shared::inventory::BootPartitionDetails;
 use nexus_sled_agent_shared::inventory::ConfigReconcilerInventoryStatus;
+use nexus_sled_agent_shared::inventory::HostPhase2DesiredContents;
+use nexus_sled_agent_shared::inventory::HostPhase2DesiredSlots;
 use nexus_sled_agent_shared::inventory::MupdateOverrideBootInventory;
 use nexus_sled_agent_shared::inventory::MupdateOverrideInventory;
 use nexus_sled_agent_shared::inventory::MupdateOverrideNonBootInventory;
@@ -1944,6 +1946,9 @@ pub struct InvOmicronSledConfig {
     pub id: DbTypedUuid<OmicronSledConfigKind>,
     pub generation: Generation,
     pub remove_mupdate_override: Option<DbTypedUuid<MupdateOverrideKind>>,
+
+    #[diesel(embed)]
+    pub host_phase_2: DbHostPhase2DesiredSlots,
 }
 
 impl InvOmicronSledConfig {
@@ -1952,12 +1957,51 @@ impl InvOmicronSledConfig {
         id: OmicronSledConfigUuid,
         generation: external::Generation,
         remove_mupdate_override: Option<MupdateOverrideUuid>,
+        host_phase_2: HostPhase2DesiredSlots,
     ) -> Self {
         Self {
             inv_collection_id: inv_collection_id.into(),
             id: id.into(),
             generation: Generation(generation),
             remove_mupdate_override: remove_mupdate_override.map(From::from),
+            host_phase_2: host_phase_2.into(),
+        }
+    }
+}
+
+#[derive(Queryable, Clone, Debug, Selectable, Insertable)]
+#[diesel(table_name = inv_omicron_sled_config)]
+pub struct DbHostPhase2DesiredSlots {
+    pub host_phase_2_desired_slot_a: Option<ArtifactHash>,
+    pub host_phase_2_desired_slot_b: Option<ArtifactHash>,
+}
+
+impl From<HostPhase2DesiredSlots> for DbHostPhase2DesiredSlots {
+    fn from(value: HostPhase2DesiredSlots) -> Self {
+        let remap = |desired| match desired {
+            HostPhase2DesiredContents::CurrentContents => None,
+            HostPhase2DesiredContents::Artifact(artifact) => {
+                Some(ArtifactHash(artifact))
+            }
+        };
+        Self {
+            host_phase_2_desired_slot_a: remap(value.slot_a),
+            host_phase_2_desired_slot_b: remap(value.slot_b),
+        }
+    }
+}
+
+impl From<DbHostPhase2DesiredSlots> for HostPhase2DesiredSlots {
+    fn from(value: DbHostPhase2DesiredSlots) -> Self {
+        let remap = |maybe_artifact| match maybe_artifact {
+            None => HostPhase2DesiredContents::CurrentContents,
+            Some(ArtifactHash(artifact)) => {
+                HostPhase2DesiredContents::Artifact(artifact)
+            }
+        };
+        Self {
+            slot_a: remap(value.host_phase_2_desired_slot_a),
+            slot_b: remap(value.host_phase_2_desired_slot_b),
         }
     }
 }

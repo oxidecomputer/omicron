@@ -131,6 +131,7 @@ use nexus_sled_agent_shared::inventory::BootPartitionDetails;
 use nexus_sled_agent_shared::inventory::ConfigReconcilerInventory;
 use nexus_sled_agent_shared::inventory::ConfigReconcilerInventoryResult;
 use nexus_sled_agent_shared::inventory::ConfigReconcilerInventoryStatus;
+use nexus_sled_agent_shared::inventory::HostPhase2DesiredContents;
 use nexus_sled_agent_shared::inventory::OmicronSledConfig;
 use nexus_sled_agent_shared::inventory::OmicronZoneImageSource;
 use nexus_sled_agent_shared::inventory::OrphanedDataset;
@@ -7567,11 +7568,29 @@ fn inv_collection_print_sled_config(label: &str, config: &OmicronSledConfig) {
         datasets,
         zones,
         remove_mupdate_override,
+        host_phase_2,
     } = config;
 
     println!("\n{label} SLED CONFIG");
     println!("    generation: {}", generation);
     println!("    remove_mupdate_override: {remove_mupdate_override:?}");
+
+    let display_host_phase_2_desired = |desired| match desired {
+        HostPhase2DesiredContents::CurrentContents => {
+            Cow::Borrowed("keep existing current contents")
+        }
+        HostPhase2DesiredContents::Artifact(artifact) => {
+            Cow::Owned(format!("artifact {artifact}"))
+        }
+    };
+    println!(
+        "    desired host phase 2 slot a: {}",
+        display_host_phase_2_desired(host_phase_2.slot_a)
+    );
+    println!(
+        "    desired host phase 2 slot b: {}",
+        display_host_phase_2_desired(host_phase_2.slot_b)
+    );
 
     if disks.is_empty() {
         println!("    disk config empty");
