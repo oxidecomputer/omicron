@@ -744,7 +744,8 @@ impl BlueprintSledConfig {
                 })
                 .collect(),
             remove_mupdate_override: self.remove_mupdate_override,
-            // TODO-john Open issue to add this to the blueprint
+            // TODO BlueprintSledConfig should have a corresponding field.
+            // https://github.com/oxidecomputer/omicron/issues/8542
             host_phase_2: HostPhase2DesiredSlots::current_contents(),
         }
     }
