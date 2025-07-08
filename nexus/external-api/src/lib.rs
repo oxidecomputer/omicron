@@ -2959,9 +2959,9 @@ pub trait NexusExternalApi {
 
     // Updates
 
-    /// Upload update repository
+    /// Upload system release repository
     ///
-    /// Update repositories are verified by the update system trust store.
+    /// System release repositories are verified by the updates trust store.
     #[endpoint {
         method = PUT,
         path = "/v1/system/update/repository",
@@ -2974,9 +2974,7 @@ pub trait NexusExternalApi {
         body: StreamingBody,
     ) -> Result<HttpResponseOk<TufRepoInsertResponse>, HttpError>;
 
-    /// Fetch update repository description
-    ///
-    /// Fetch description of update repository by system version.
+    /// Fetch system release repository description by version
     #[endpoint {
         method = GET,
         path = "/v1/system/update/repository/{system_version}",
@@ -2987,12 +2985,12 @@ pub trait NexusExternalApi {
         path_params: Path<params::UpdatesGetRepositoryParams>,
     ) -> Result<HttpResponseOk<TufRepoGetResponse>, HttpError>;
 
-    /// List root roles in the update system trust store
+    /// List root roles in the updates trust store
     ///
-    /// Root roles are a JSON document describing the keys trusted to sign
-    /// update repositories, as described by The Update Framework. Uploading an
-    /// update repository requires its metadata to be signed by keys trusted by
-    /// the trust store.
+    /// Root roles are JSON documents describing the cryptographic keys
+    /// trusted to sign system release repositories, as described by The Update
+    /// Framework. Uploading a repository requires its metadata to be signed by
+    /// keys trusted by the trust store.
     #[endpoint {
         method = GET,
         path = "/v1/system/update/trust-roots",
@@ -3003,7 +3001,7 @@ pub trait NexusExternalApi {
         query_params: Query<PaginatedById>,
     ) -> Result<HttpResponseOk<ResultsPage<views::UpdatesTrustRoot>>, HttpError>;
 
-    /// Add trusted root role to update system trust store
+    /// Add trusted root role to updates trust store
     #[endpoint {
         method = POST,
         path = "/v1/system/update/trust-roots",
@@ -3027,8 +3025,9 @@ pub trait NexusExternalApi {
 
     /// Delete trusted root role
     ///
-    /// Note that this method does not currently check for any uploaded update
-    /// repositories that would become untrusted after deleting the root role.
+    /// Note that this method does not currently check for any uploaded system
+    /// release repositories that would become untrusted after deleting the
+    /// root role.
     #[endpoint {
         method = DELETE,
         path = "/v1/system/update/trust-roots/{trust_root}",

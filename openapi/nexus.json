@@ -10929,8 +10929,8 @@
         "tags": [
           "experimental"
         ],
-        "summary": "Upload update repository",
-        "description": "Update repositories are verified by the update system trust store.",
+        "summary": "Upload system release repository",
+        "description": "System release repositories are verified by the updates trust store.",
         "operationId": "system_update_put_repository",
         "parameters": [
           {
@@ -10979,8 +10979,7 @@
         "tags": [
           "experimental"
         ],
-        "summary": "Fetch update repository description",
-        "description": "Fetch description of update repository by system version.",
+        "summary": "Fetch system release repository description by version",
         "operationId": "system_update_get_repository",
         "parameters": [
           {
@@ -11083,8 +11082,8 @@
         "tags": [
           "experimental"
         ],
-        "summary": "List root roles in the update system trust store",
-        "description": "Root roles are a JSON document describing the keys trusted to sign update repositories, as described by The Update Framework. Uploading an update repository requires its metadata to be signed by keys trusted by the trust store.",
+        "summary": "List root roles in the updates trust store",
+        "description": "Root roles are JSON documents describing the cryptographic keys trusted to sign system release repositories, as described by The Update Framework. Uploading a repository requires its metadata to be signed by keys trusted by the trust store.",
         "operationId": "system_update_trust_root_list",
         "parameters": [
           {
@@ -11141,7 +11140,7 @@
         "tags": [
           "experimental"
         ],
-        "summary": "Add trusted root role to update system trust store",
+        "summary": "Add trusted root role to updates trust store",
         "operationId": "system_update_trust_root_create",
         "requestBody": {
           "content": {
@@ -11213,7 +11212,7 @@
           "experimental"
         ],
         "summary": "Delete trusted root role",
-        "description": "Note that this method does not currently check for any uploaded update repositories that would become untrusted after deleting the root role.",
+        "description": "Note that this method does not currently check for any uploaded system release repositories that would become untrusted after deleting the root role.",
         "operationId": "system_update_trust_root_delete",
         "parameters": [
           {
