@@ -27,7 +27,6 @@ use omicron_common::api::external::{
 };
 use omicron_uuid_kinds::GenericUuid;
 use omicron_uuid_kinds::TufRepoKind;
-use omicron_uuid_kinds::TufTrustRootUuid;
 use omicron_uuid_kinds::TypedUuid;
 use swrite::{SWrite, swrite};
 use tufaceous_artifact::ArtifactVersion;
@@ -257,13 +256,12 @@ impl DataStore {
         &self,
         opctx: &OpContext,
         authz_trust_root: &authz::TufTrustRoot,
-        trust_root_id: TufTrustRootUuid,
     ) -> DeleteResult {
         use nexus_db_schema::schema::tuf_trust_root::dsl;
 
         opctx.authorize(authz::Action::Delete, authz_trust_root).await?;
         diesel::update(dsl::tuf_trust_root)
-            .filter(dsl::id.eq(to_db_typed_uuid(trust_root_id)))
+            .filter(dsl::id.eq(to_db_typed_uuid(authz_trust_root.id())))
             .filter(dsl::time_deleted.is_null())
             .set(dsl::time_deleted.eq(chrono::Utc::now()))
             .execute_async(&*self.pool_connection_authorized(opctx).await?)

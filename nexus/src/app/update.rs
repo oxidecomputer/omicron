@@ -145,7 +145,7 @@ impl super::Nexus {
             .fetch_for(authz::Action::Delete)
             .await?;
         self.db_datastore
-            .tuf_trust_root_delete(opctx, &authz, id)
+            .tuf_trust_root_delete(opctx, &authz)
             .await
             .map_err(HttpError::from)
     }
