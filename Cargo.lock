@@ -12549,7 +12549,7 @@ dependencies = [
 [[package]]
 name = "sprockets-tls"
 version = "0.1.0"
-source = "git+https://github.com/flihp/sprockets.git?branch=attest#79142007d738bd42039efce6b736a1d9a824fc1d"
+source = "git+https://github.com/oxidecomputer/sprockets.git?branch=main#f16e6ab9ccaca3b9d826fa078b5b1bbea5987b44"
 dependencies = [
  "anyhow",
  "attest-data",
