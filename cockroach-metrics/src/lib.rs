@@ -328,12 +328,8 @@ impl CockroachClusterAdminClient {
                         let node_id_string = client
                             .fetch_local_node_id()
                             .await
-                            .map_err(|e| {
-                                anyhow::anyhow!(
-                                    "Failed to get node ID from {}: {}",
-                                    addr,
-                                    e
-                                )
+                            .with_context(|| {
+                                format!("Failed to get node ID from {}", addr,)
                             })?;
                         let node_id = NodeId::new(node_id_string);
 
@@ -410,12 +406,8 @@ impl CockroachClusterAdminClient {
                         let node_id_string = client
                             .fetch_local_node_id()
                             .await
-                            .map_err(|e| {
-                                anyhow::anyhow!(
-                                    "Failed to get node ID from {}: {}",
-                                    addr,
-                                    e
-                                )
+                            .with_context(|| {
+                                format!("Failed to get node ID from {}", addr,)
                             })?;
                         let node_id = NodeId::new(node_id_string);
 
