@@ -1,0 +1,10 @@
+[dropshot]
+# 1 MiB; we don't expect any requests of more than nominal size.
+default_request_body_max_bytes = 1048576
+
+[log]
+# Show log messages of this level and more severe
+level = "info"
+mode = "file"
+path = "/dev/stdout"
+if_exists = "append"
