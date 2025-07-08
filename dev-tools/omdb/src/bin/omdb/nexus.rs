@@ -4,6 +4,8 @@
 
 //! omdb commands that query or update specific Nexus instances
 
+mod chicken_switches;
+
 use crate::Omdb;
 use crate::check_allow_destructive::DestructiveOperationToken;
 use crate::db::DbUrlOptions;
@@ -15,6 +17,8 @@ use crate::helpers::should_colorize;
 use anyhow::Context as _;
 use anyhow::bail;
 use camino::Utf8PathBuf;
+use chicken_switches::ChickenSwitchesArgs;
+use chicken_switches::cmd_nexus_chicken_switches;
 use chrono::DateTime;
 use chrono::SecondsFormat;
 use chrono::Utc;
@@ -123,6 +127,8 @@ enum NexusCommands {
     BackgroundTasks(BackgroundTasksArgs),
     /// interact with blueprints
     Blueprints(BlueprintsArgs),
+    /// interact with reconfigurator chicken switches
+    ChickenSwitches(ChickenSwitchesArgs),
     /// interact with clickhouse policy
     ClickhousePolicy(ClickhousePolicyArgs),
     /// print information about pending MGS updates
@@ -676,6 +682,10 @@ impl NexusArgs {
             }) => {
                 let token = omdb.check_allow_destructive()?;
                 cmd_nexus_blueprints_import(&client, token, args).await
+            }
+
+            NexusCommands::ChickenSwitches(args) => {
+                cmd_nexus_chicken_switches(&omdb, &client, args).await
             }
 
             NexusCommands::ClickhousePolicy(ClickhousePolicyArgs {
@@ -4045,7 +4055,7 @@ async fn cmd_nexus_support_bundles_delete(
 }
 
 async fn write_stream_to_sink(
-    mut stream: impl futures::Stream<Item = anyhow::Result<bytes::Bytes>>,
+    stream: impl futures::Stream<Item = anyhow::Result<bytes::Bytes>>,
     mut sink: impl std::io::Write,
 ) -> Result<(), anyhow::Error> {
     let mut stream = std::pin::pin!(stream);

@@ -214,7 +214,10 @@ impl DataStore {
         opctx.check_complex_operations_allowed()?;
 
         let mut all_ips = Vec::new();
-        let mut paginator = Paginator::new(SQL_BATCH_SIZE);
+        let mut paginator = Paginator::new(
+            SQL_BATCH_SIZE,
+            dropshot::PaginationOrder::Ascending,
+        );
         while let Some(p) = paginator.next() {
             let batch = self
                 .service_network_interfaces_all_list(
@@ -854,7 +857,10 @@ impl DataStore {
         opctx.check_complex_operations_allowed()?;
 
         let mut all_interfaces = Vec::new();
-        let mut paginator = Paginator::new(SQL_BATCH_SIZE);
+        let mut paginator = Paginator::new(
+            SQL_BATCH_SIZE,
+            dropshot::PaginationOrder::Ascending,
+        );
         while let Some(p) = paginator.next() {
             let batch = self
                 .instance_network_interfaces_all_list(

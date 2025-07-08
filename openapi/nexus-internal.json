@@ -677,6 +677,91 @@
         }
       }
     },
+    "/deployment/chicken-switches": {
+      "get": {
+        "summary": "Get the current set of chicken switches",
+        "operationId": "reconfigurator_chicken_switches_show_current",
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ReconfiguratorChickenSwitches"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      },
+      "post": {
+        "summary": "Update the chicken switches at the latest versions",
+        "operationId": "reconfigurator_chicken_switches_set",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ReconfiguratorChickenSwitchesParam"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "204": {
+            "description": "resource updated"
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/deployment/chicken-switches/{version}": {
+      "get": {
+        "summary": "Get the chicken switches at `version` if it exists",
+        "operationId": "reconfigurator_chicken_switches_show",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "version",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "format": "uint32",
+              "minimum": 0
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ReconfiguratorChickenSwitches"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
     "/deployment/update-status": {
       "get": {
         "summary": "Show deployed versions of artifacts",
@@ -4522,6 +4607,9 @@
         "description": "externally-exposed status for each in-progress update",
         "type": "object",
         "properties": {
+          "baseboard_id": {
+            "$ref": "#/components/schemas/BaseboardId"
+          },
           "nattempts_done": {
             "type": "integer",
             "format": "uint32",
@@ -4536,6 +4624,7 @@
           }
         },
         "required": [
+          "baseboard_id",
           "nattempts_done",
           "status",
           "time_started"
@@ -5078,10 +5167,22 @@
         "type": "object",
         "properties": {
           "in_progress": {
-            "type": "object",
-            "additionalProperties": {
+            "title": "IdOrdMap",
+            "x-rust-type": {
+              "crate": "iddqd",
+              "parameters": [
+                {
+                  "$ref": "#/components/schemas/InProgressUpdateStatus"
+                }
+              ],
+              "path": "iddqd::IdOrdMap",
+              "version": "*"
+            },
+            "type": "array",
+            "items": {
               "$ref": "#/components/schemas/InProgressUpdateStatus"
-            }
+            },
+            "uniqueItems": true
           },
           "recent": {
             "type": "array",
@@ -5090,10 +5191,22 @@
             }
           },
           "waiting": {
-            "type": "object",
-            "additionalProperties": {
+            "title": "IdOrdMap",
+            "x-rust-type": {
+              "crate": "iddqd",
+              "parameters": [
+                {
+                  "$ref": "#/components/schemas/WaitingStatus"
+                }
+              ],
+              "path": "iddqd::IdOrdMap",
+              "version": "*"
+            },
+            "type": "array",
+            "items": {
               "$ref": "#/components/schemas/WaitingStatus"
-            }
+            },
+            "uniqueItems": true
           }
         },
         "required": [
@@ -5815,7 +5928,7 @@
           "slot_id": {
             "description": "last known MGS slot (cubby number) of the baseboard",
             "type": "integer",
-            "format": "uint32",
+            "format": "uint16",
             "minimum": 0
           },
           "sp_type": {
@@ -6480,6 +6593,45 @@
           "infra_ip_last",
           "ports",
           "rack_subnet"
+        ]
+      },
+      "ReconfiguratorChickenSwitches": {
+        "type": "object",
+        "properties": {
+          "planner_enabled": {
+            "type": "boolean"
+          },
+          "time_modified": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "version": {
+            "type": "integer",
+            "format": "uint32",
+            "minimum": 0
+          }
+        },
+        "required": [
+          "planner_enabled",
+          "time_modified",
+          "version"
+        ]
+      },
+      "ReconfiguratorChickenSwitchesParam": {
+        "type": "object",
+        "properties": {
+          "planner_enabled": {
+            "type": "boolean"
+          },
+          "version": {
+            "type": "integer",
+            "format": "uint32",
+            "minimum": 0
+          }
+        },
+        "required": [
+          "planner_enabled",
+          "version"
         ]
       },
       "RecoverySiloConfig": {
@@ -7624,6 +7776,9 @@
         "description": "externally-exposed status for waiting updates",
         "type": "object",
         "properties": {
+          "baseboard_id": {
+            "$ref": "#/components/schemas/BaseboardId"
+          },
           "nattempts_done": {
             "type": "integer",
             "format": "uint32",
@@ -7635,6 +7790,7 @@
           }
         },
         "required": [
+          "baseboard_id",
           "nattempts_done",
           "next_attempt_time"
         ]

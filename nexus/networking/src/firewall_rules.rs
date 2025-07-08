@@ -316,6 +316,11 @@ pub async fn resolve_firewall_rules_for_sled_agent(
             // `nexus_db_queries::fixed_data::vpc_firewall_rule` for those
             // rules.) If those rules change to include any filter hosts, this
             // logic needs to change as well.
+            //
+            // Note that inbound ICMP is not currently governed by this filter,
+            // as error-type ICMP messages can arrive from any host which a
+            // Nexus/DNS zone reaches out to *or* a gateway/router on the path to
+            // that destination.
             (None, Some(allowed_ips)) => {
                 if allowlist_applies_to_firewall_rule(rule) {
                     match allowed_ips {

@@ -72,7 +72,7 @@ impl State {
                 // Do we know the wicketd sled ID? If so, we can compare
                 // directly. (We will almost always know this.)
                 if let Some(wicketd_sled_id) = self.wicketd_location.sled_id {
-                    wicketd_sled_id.slot == u32::from(i)
+                    wicketd_sled_id.slot == u16::from(i)
                 } else {
                     // We _could_ check and see if wicketd knows its sled's
                     // baseboard (even though it didn't know the sled) and then
@@ -88,7 +88,7 @@ impl State {
                 // thing here for the switch.
                 if let Some(wicketd_switch_id) = self.wicketd_location.switch_id
                 {
-                    wicketd_switch_id.slot == u32::from(i)
+                    wicketd_switch_id.slot == u16::from(i)
                 } else {
                     false
                 }

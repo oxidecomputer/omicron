@@ -13,7 +13,8 @@ use http::Response;
 use nexus_types::{
     deployment::{
         Blueprint, BlueprintMetadata, BlueprintTarget, BlueprintTargetSet,
-        ClickhousePolicy, OximeterReadPolicy,
+        ClickhousePolicy, OximeterReadPolicy, ReconfiguratorChickenSwitches,
+        ReconfiguratorChickenSwitchesParam,
     },
     external_api::{
         headers::RangeRequest,
@@ -485,6 +486,35 @@ pub trait NexusInternalApi {
         blueprint: TypedBody<Blueprint>,
     ) -> Result<HttpResponseUpdatedNoContent, HttpError>;
 
+    /// Get the current set of chicken switches
+    #[endpoint {
+        method = GET,
+        path = "/deployment/chicken-switches"
+    }]
+    async fn reconfigurator_chicken_switches_show_current(
+        rqctx: RequestContext<Self::Context>,
+    ) -> Result<HttpResponseOk<ReconfiguratorChickenSwitches>, HttpError>;
+
+    /// Get the chicken switches at `version` if it exists
+    #[endpoint {
+        method = GET,
+        path = "/deployment/chicken-switches/{version}"
+    }]
+    async fn reconfigurator_chicken_switches_show(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<VersionPathParam>,
+    ) -> Result<HttpResponseOk<ReconfiguratorChickenSwitches>, HttpError>;
+
+    /// Update the chicken switches at the latest versions
+    #[endpoint {
+        method = POST,
+        path = "/deployment/chicken-switches"
+    }]
+    async fn reconfigurator_chicken_switches_set(
+        rqctx: RequestContext<Self::Context>,
+        switches: TypedBody<ReconfiguratorChickenSwitchesParam>,
+    ) -> Result<HttpResponseUpdatedNoContent, HttpError>;
+
     /// Show deployed versions of artifacts
     #[endpoint {
         method = GET,
@@ -813,4 +843,9 @@ pub struct SledId {
 #[derive(Deserialize, JsonSchema)]
 pub struct ProbePathParam {
     pub sled: Uuid,
+}
+
+#[derive(Deserialize, JsonSchema)]
+pub struct VersionPathParam {
+    pub version: u32,
 }
