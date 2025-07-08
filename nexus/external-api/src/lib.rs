@@ -150,12 +150,6 @@ const PUT_UPDATE_REPOSITORY_MAX_BYTES: usize = 4 * GIB;
                     url = "http://docs.oxide.computer/api/projects"
                 }
             },
-            "roles" = {
-                description = "Roles are a component of Identity and Access Management (IAM) that allow a user or agent account access to additional permissions.",
-                external_docs = {
-                    url = "http://docs.oxide.computer/api/roles"
-                }
-            },
             "silos" = {
                 description = "Silos represent a logical partition of users and resources.",
                 external_docs = {

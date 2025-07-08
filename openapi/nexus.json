@@ -27104,13 +27104,6 @@
       }
     },
     {
-      "name": "roles",
-      "description": "Roles are a component of Identity and Access Management (IAM) that allow a user or agent account access to additional permissions.",
-      "externalDocs": {
-        "url": "http://docs.oxide.computer/api/roles"
-      }
-    },
-    {
       "name": "silos",
       "description": "Silos represent a logical partition of users and resources.",
       "externalDocs": {
