@@ -190,7 +190,7 @@ impl BootPartitionReconciler {
                         HostPhase2DesiredContents::CurrentContents => {
                             return Err(err);
                         }
-                        HostPhase2DesiredContents::Artifact(_) => (),
+                        HostPhase2DesiredContents::Artifact { .. } => (),
                     }
                 }
             }
@@ -205,8 +205,8 @@ impl BootPartitionReconciler {
             (Some(details), HostPhase2DesiredContents::CurrentContents) => {
                 Ok(details.clone())
             }
-            (Some(details), HostPhase2DesiredContents::Artifact(artifact))
-                if details.artifact_hash == *artifact =>
+            (Some(details), HostPhase2DesiredContents::Artifact { hash })
+                if details.artifact_hash == *hash =>
             {
                 Ok(details.clone())
             }
@@ -215,12 +215,12 @@ impl BootPartitionReconciler {
             // because it doesn't have an image - if read failed due to I/O
             // problems, our write will probably fail too, but we can at least
             // try) or whether we read the slot and the contents don't match.
-            (_, HostPhase2DesiredContents::Artifact(artifact)) => {
+            (_, HostPhase2DesiredContents::Artifact { hash }) => {
                 Self::write_artifact::<_, R, W>(
                     slot,
                     internal_disks,
                     cache,
-                    *artifact,
+                    *hash,
                     artifact_store,
                 )
                 .await
@@ -1003,7 +1003,7 @@ mod tests {
             slot,
             &harness.internal_disks(),
             &mut cache,
-            &HostPhase2DesiredContents::Artifact(artifact),
+            &HostPhase2DesiredContents::Artifact { hash: artifact },
             &artifact_store,
         )
         .await
@@ -1043,7 +1043,7 @@ mod tests {
             slot,
             &harness.internal_disks(),
             &mut cache,
-            &HostPhase2DesiredContents::Artifact(artifact),
+            &HostPhase2DesiredContents::Artifact { hash: artifact },
             &artifact_store,
         )
         .await
@@ -1096,7 +1096,7 @@ mod tests {
             M2Slot::B,
             &harness.internal_disks(),
             &mut cache,
-            &HostPhase2DesiredContents::Artifact(artifact),
+            &HostPhase2DesiredContents::Artifact { hash: artifact },
             &artifact_store,
         )
         .await
@@ -1116,7 +1116,7 @@ mod tests {
             M2Slot::B,
             &harness.internal_disks(),
             &mut cache,
-            &HostPhase2DesiredContents::Artifact(artifact),
+            &HostPhase2DesiredContents::Artifact { hash: artifact },
             &artifact_store,
         )
         .await
@@ -1147,7 +1147,9 @@ mod tests {
             M2Slot::A,
             &harness.internal_disks(),
             &mut cache,
-            &HostPhase2DesiredContents::Artifact(slot_b_details.artifact_hash),
+            &HostPhase2DesiredContents::Artifact {
+                hash: slot_b_details.artifact_hash,
+            },
             &artifact_store,
         )
         .await
