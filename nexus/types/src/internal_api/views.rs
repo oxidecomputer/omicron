@@ -653,17 +653,17 @@ impl UpdateStatus {
                 )
                 && caboose.version == a.id.version.to_string()
         };
-        if let Some(old) = old.tuf_repo() {
-            if old.artifacts.iter().any(matching_caboose) {
-                return TufRepoVersion::Version(
-                    old.repo.system_version.clone(),
-                );
-            }
-        }
         if let Some(new) = new.tuf_repo() {
             if new.artifacts.iter().any(matching_caboose) {
                 return TufRepoVersion::Version(
                     new.repo.system_version.clone(),
+                );
+            }
+        }
+        if let Some(old) = old.tuf_repo() {
+            if old.artifacts.iter().any(matching_caboose) {
+                return TufRepoVersion::Version(
+                    old.repo.system_version.clone(),
                 );
             }
         }
