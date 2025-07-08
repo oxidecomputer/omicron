@@ -362,8 +362,6 @@ impl SledEditor {
     }
 
     /// Sets the image source for a zone.
-    ///
-    /// Currently only used by test code.
     pub fn set_zone_image_source(
         &mut self,
         zone_id: &OmicronZoneUuid,
@@ -785,7 +783,6 @@ impl ActiveSledEditor {
                 // override that was set in the above branch. We can remove the
                 // override from the blueprint.
                 self.set_remove_mupdate_override(None);
-                // TODO: change zone sources from InstallDataset to Artifact
                 Ok(EnsureMupdateOverrideAction::BpClearOverride {
                     prev_bp_override,
                 })

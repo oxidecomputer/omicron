@@ -2,35 +2,109 @@
 
 load-example --nsleds 3 --ndisks-per-sled 1
 
-# Set one of the sled's zone's image sources to a specific artifact.
-blueprint-edit latest set-zone-image 466a9f29-62bf-4e63-924a-b9efdb86afec artifact 1.2.3 e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855
+# Create a TUF repository from a fake manifest. We're going to use this
+# repository to test out the minimum release generation flow.
+tuf-assemble ../../update-common/manifests/fake.toml
+set target-release repo-1.0.0.zip
+
+# Update the install dataset on this sled to the target release.
+# (This populates the zone manifest, used for no-op conversions from
+# install dataset to artifact down the road.)
+sled-update-install-dataset serial0 --to-target-release
+
+# Set one of sled 0's zone's image sources to a specific artifact.
+blueprint-edit latest set-zone-image 0c71b3b2-6ceb-4e8f-b020-b08675e83038 artifact 1.2.3 e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855
 
 # Simulate a mupdate on sled 0 by setting the mupdate override field to a
 # new UUID (generated using uuidgen).
-sled-set-mupdate-override 2b8f0cb3-0295-4b3c-bc58-4fe88b57112c 6123eac1-ec5b-42ba-b73f-9845105a9971
+sled-set serial0 mupdate-override 6123eac1-ec5b-42ba-b73f-9845105a9971
+
+# On sled 1, simulate an error obtaining the mupdate override.
+sled-set serial1 mupdate-override --with-error
+
+# Simulate a mupdate on sled 2 as well.
+sled-set serial2 mupdate-override 203fa72c-85c1-466a-8ed3-338ee029530d
 
 # Generate a new inventory and plan against that.
 inventory-generate
-blueprint-plan latest eb0796d5-ab8a-4f7b-a884-b4aeacb8ab51
+blueprint-plan latest latest
 
 # Diff the blueprints. This diff should show:
 #
-# * for sled 2b8f0cb3-0295-4b3c-bc58-4fe88b57112c, "+ will remove mupdate override"
-# * for zone 466a9f29-62bf-4e63-924a-b9efdb86afec, a change from artifact to install-dataset
-blueprint-diff 8da82a8e-bf97-4fbd-8ddd-9f6462732cf1 latest
+# * for sled 0:
+#   * "+ will remove mupdate override"
+#   * for zone 0c71b3b2-6ceb-4e8f-b020-b08675e83038, a change from artifact to install-dataset
+# * for sled 1, no change, because the mupdate override field had an error
+# * for sled 2, "+ will remove mupdate override"
+# * the target release's minimum generation bumped from 1 to 3
+#   (the 3 is because generation 2 is repo-1.0.0.zip)
+blueprint-diff latest
 
-# Now simulate the new config being applied to the sled, which would
+# Hide sled 0 from inventory temporarily -- this does two things:
+# 1. Tests that mupdate/update state transitions don't happen when
+#    the sled isn't present in inventory.
+# 2. We don't want sled 0 to participate in the next few operations
+#    below.
+sled-set serial0 inventory-hidden
+
+# Set the target release to a new repo, causing a generation number bump
+# to 3.
+set target-release repo-1.0.0.zip
+
+# Invoke the planner -- should not proceed with adding or updating zones
+# because sled 0 has a remove-mupdate-override set in the blueprint.
+inventory-generate
+blueprint-plan latest latest
+blueprint-diff latest
+
+# Now simulate the new config being applied to sled 0, which would
 # cause the mupdate override to be removed.
-sled-set-mupdate-override 2b8f0cb3-0295-4b3c-bc58-4fe88b57112c unset
+sled-set serial0 mupdate-override unset
+sled-set serial0 inventory-visible
+
+# But simulate a second mupdate on sled 2. This should invalidate the existing
+# mupdate override on sled 2 and cause another target release minimum
+# generation bump.
+tuf-assemble ../../update-common/manifests/fake-non-semver.toml --allow-non-semver
+sled-update-install-dataset serial2 --from-repo repo-2.0.0.zip
+sled-set serial2 mupdate-override 1c0ce176-6dc8-4a90-adea-d4a8000751da
 
 # Generate a new inventory and plan against that.
 inventory-generate
-blueprint-plan latest 61f451b3-2121-4ed6-91c7-a550054f6c21
+blueprint-plan latest latest
 
-# Diff the blueprints. This diff should show the "remove mupdate
-# override" line going away.
-# TODO: we do not yet reset the install dataset image back to
-# the desired artifact version -- we should do that in the future.
-blueprint-diff 58d5e830-0884-47d8-a7cd-b2b3751adeb4 latest
+# Diff the blueprints. This diff should show:
+# * on sled 0:
+#   * the "remove mupdate override" line going away
+#   * no-op image source switches from install dataset to artifact
+# * on sled 1, no changes
+# * on sled 2, a _change_ in the will-remove-mupdate-override field
+# * another bump to the target release minimum generation, this time to 4.
+blueprint-diff latest
 
-# TODO: set target release
+# Clear the mupdate override on sled 2, signifying that the config has been
+# applied.
+sled-set serial2 mupdate-override unset
+
+# Run the planner again. This should cause sled 2's mupdate override field
+# to be unset, but no further planning steps to happen because the
+# target release generation is not new enough.
+inventory-generate
+blueprint-plan latest latest
+blueprint-show latest
+blueprint-diff latest
+
+# Now set the target release -- with this, the rest of the planner starts
+# working again.
+set target-release repo-2.0.0.zip
+blueprint-plan latest latest
+blueprint-show latest
+blueprint-diff latest
+
+# Set the target release minimum generation to a large value -- we're going to
+# test that the planner bails if it attempts a rollback of the target release
+# minimum generation.
+blueprint-edit latest set-target-release-min-gen 1000
+sled-set serial1 mupdate-override cc724abe-80c1-47e6-9771-19e6540531a9
+inventory-generate
+blueprint-plan latest latest

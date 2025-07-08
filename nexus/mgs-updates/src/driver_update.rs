@@ -44,7 +44,9 @@ const PROGRESS_POLL_INTERVAL: Duration = Duration::from_secs(10);
 pub const DEFAULT_RETRY_TIMEOUT: Duration = Duration::from_secs(60);
 
 /// How long to wait after resetting the device before expecting it to come up
-const RESET_TIMEOUT: Duration = Duration::from_secs(60);
+// 120 seconds is chosen as a generous overestimate, based on reports that
+// Sidecar SPs have been observed to take as many as 30 seconds to reset.
+const RESET_TIMEOUT: Duration = Duration::from_secs(120);
 
 /// Parameters describing a request to update one SP-managed component
 ///
@@ -54,7 +56,7 @@ pub(crate) struct SpComponentUpdate {
     pub log: slog::Logger,
     pub component: SpComponent,
     pub target_sp_type: SpType,
-    pub target_sp_slot: u32,
+    pub target_sp_slot: u16,
     pub firmware_slot: u16,
     pub update_id: SpUpdateUuid,
 }
@@ -710,7 +712,7 @@ mod test {
         gwtestctx: &GatewayTestContext,
         artifacts: &TestArtifacts,
         sp_type: SpType,
-        slot_id: u32,
+        slot_id: u16,
         artifact_hash: &ArtifactHash,
         expected_result: UpdateCompletedHow,
     ) {
@@ -794,7 +796,7 @@ mod test {
         gwtestctx: &GatewayTestContext,
         artifacts: &TestArtifacts,
         sp_type: SpType,
-        slot_id: u32,
+        slot_id: u16,
         artifact_hash: &ArtifactHash,
         expected_result: UpdateCompletedHow,
     ) {

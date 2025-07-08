@@ -3118,14 +3118,14 @@ impl ServiceManager {
     ///
     /// This function only executes the out-of-band actions once, once the
     /// synchronization state has shifted to true.
-    pub(crate) async fn on_time_sync(&self) {
+    pub(crate) fn on_time_sync(&self) {
         if self
             .inner
             .time_synced
             .compare_exchange(false, true, Ordering::Acquire, Ordering::Relaxed)
             .is_ok()
         {
-            debug!(self.inner.log, "Time is now synchronized");
+            info!(self.inner.log, "Time is now synchronized");
             // We only want to rewrite the boot time once, so we do it here
             // when we know the time is synchronized.
             self.boottime_rewrite();
@@ -3138,11 +3138,11 @@ impl ServiceManager {
             // https://github.com/oxidecomputer/omicron/issues/8022.
             let queue = self.metrics_queue();
             match queue.notify_time_synced_sled(self.sled_id()) {
-                Ok(_) => debug!(
+                Ok(_) => info!(
                     self.inner.log,
                     "Notified metrics task that time is now synced",
                 ),
-                Err(e) => error!(
+                Err(e) => warn!(
                     self.inner.log,
                     "Failed to notify metrics task that \
                      time is now synced, metrics may not be produced.";

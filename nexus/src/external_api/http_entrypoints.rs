@@ -80,6 +80,7 @@ use omicron_common::api::external::NameOrId;
 use omicron_common::api::external::Probe;
 use omicron_common::api::external::RouterRoute;
 use omicron_common::api::external::RouterRouteKind;
+use omicron_common::api::external::ServiceIcmpConfig;
 use omicron_common::api::external::SwitchPort;
 use omicron_common::api::external::SwitchPortSettings;
 use omicron_common::api::external::SwitchPortSettingsIdentity;
@@ -4294,6 +4295,50 @@ impl NexusExternalApi for NexusExternalApiImpl {
                 .allow_list_upsert(&opctx, remote_addr, server_kind, params)
                 .await
                 .map(HttpResponseOk)
+                .map_err(HttpError::from)
+        };
+        apictx
+            .context
+            .external_latencies
+            .instrument_dropshot_handler(&rqctx, handler)
+            .await
+    }
+
+    async fn networking_inbound_icmp_view(
+        rqctx: RequestContext<Self::Context>,
+    ) -> Result<HttpResponseOk<ServiceIcmpConfig>, HttpError> {
+        let apictx = rqctx.context();
+        let handler = async {
+            let nexus = &apictx.context.nexus;
+            let opctx =
+                crate::context::op_context_for_external_api(&rqctx).await?;
+            nexus
+                .nexus_firewall_inbound_icmp_view(&opctx)
+                .await
+                .map(HttpResponseOk)
+                .map_err(HttpError::from)
+        };
+        apictx
+            .context
+            .external_latencies
+            .instrument_dropshot_handler(&rqctx, handler)
+            .await
+    }
+
+    async fn networking_inbound_icmp_update(
+        rqctx: RequestContext<Self::Context>,
+        params: TypedBody<ServiceIcmpConfig>,
+    ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
+        let apictx = rqctx.context();
+        let handler = async {
+            let nexus = &apictx.context.nexus;
+            let params = params.into_inner();
+            let opctx =
+                crate::context::op_context_for_external_api(&rqctx).await?;
+            nexus
+                .nexus_firewall_inbound_icmp_update(&opctx, params)
+                .await
+                .map(|_| HttpResponseUpdatedNoContent())
                 .map_err(HttpError::from)
         };
         apictx

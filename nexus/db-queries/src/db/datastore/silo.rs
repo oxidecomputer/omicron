@@ -381,7 +381,10 @@ impl DataStore {
     ) -> ListResultVec<Silo> {
         opctx.check_complex_operations_allowed()?;
         let mut all_silos = Vec::new();
-        let mut paginator = Paginator::new(SQL_BATCH_SIZE);
+        let mut paginator = Paginator::new(
+            SQL_BATCH_SIZE,
+            dropshot::PaginationOrder::Ascending,
+        );
         while let Some(p) = paginator.next() {
             let batch = self
                 .silos_list(

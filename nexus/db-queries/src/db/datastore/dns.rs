@@ -245,7 +245,10 @@ impl DataStore {
         let mut zones = Vec::with_capacity(dns_zones.len());
         for zone in dns_zones {
             let mut zone_records = Vec::new();
-            let mut paginator = Paginator::new(batch_size);
+            let mut paginator = Paginator::new(
+                batch_size,
+                dropshot::PaginationOrder::Ascending,
+            );
             while let Some(p) = paginator.next() {
                 debug!(log, "listing DNS names for zone";
                     "dns_zone_id" => zone.id.to_string(),

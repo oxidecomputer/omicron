@@ -42,8 +42,10 @@ use std::fmt::Formatter;
 use std::fmt::Result as FormatResult;
 use std::net::IpAddr;
 use std::net::Ipv4Addr;
+use std::num::ParseIntError;
 use std::num::{NonZeroU16, NonZeroU32};
 use std::ops::Deref;
+use std::ops::RangeInclusive;
 use std::str::FromStr;
 use tufaceous_artifact::ArtifactHash;
 use uuid::Uuid;
@@ -1842,11 +1844,129 @@ pub struct VpcFirewallRuleFilter {
 
 /// The protocols that may be specified in a firewall rule's filter
 #[derive(Clone, Copy, Debug, PartialEq, Deserialize, Serialize, JsonSchema)]
-#[serde(rename_all = "UPPERCASE")]
+#[serde(rename_all = "snake_case")]
+#[serde(tag = "type", content = "value")]
 pub enum VpcFirewallRuleProtocol {
     Tcp,
     Udp,
-    Icmp,
+    Icmp(Option<VpcFirewallIcmpFilter>),
+    // TODO: IPv6 not supported by instances.
+    // Icmpv6(Option<VpcFirewallIcmpFilter>),
+    // TODO: OPTE does not yet permit further L4 protocols. (opte#609)
+    // Other(u16),
+}
+
+impl FromStr for VpcFirewallRuleProtocol {
+    type Err = Error;
+
+    fn from_str(proto: &str) -> Result<Self, Self::Err> {
+        let (ty_str, content_str) = match proto.split_once(':') {
+            None => (proto, None),
+            Some((lhs, rhs)) => (lhs, Some(rhs)),
+        };
+
+        match (ty_str, content_str) {
+            (lhs, None) if lhs.eq_ignore_ascii_case("tcp") => Ok(Self::Tcp),
+            (lhs, None) if lhs.eq_ignore_ascii_case("udp") => Ok(Self::Udp),
+            (lhs, None) if lhs.eq_ignore_ascii_case("icmp") => {
+                Ok(Self::Icmp(None))
+            }
+            (lhs, Some(rhs)) if lhs.eq_ignore_ascii_case("icmp") => {
+                Ok(Self::Icmp(Some(rhs.parse()?)))
+            }
+            (lhs, None) => Err(Error::invalid_value(
+                "vpc_firewall_rule_protocol",
+                format!("unrecognized protocol: {lhs}"),
+            )),
+            (lhs, Some(rhs)) => Err(Error::invalid_value(
+                "vpc_firewall_rule_protocol",
+                format!(
+                    "cannot specify extra filters ({rhs}) for protocol \"{lhs}\""
+                ),
+            )),
+        }
+    }
+}
+
+impl TryFrom<String> for VpcFirewallRuleProtocol {
+    type Error = <VpcFirewallRuleProtocol as FromStr>::Err;
+
+    fn try_from(proto: String) -> Result<Self, Self::Error> {
+        proto.parse()
+    }
+}
+
+impl Display for VpcFirewallRuleProtocol {
+    fn fmt(&self, f: &mut Formatter<'_>) -> FormatResult {
+        match self {
+            VpcFirewallRuleProtocol::Tcp => write!(f, "tcp"),
+            VpcFirewallRuleProtocol::Udp => write!(f, "udp"),
+            VpcFirewallRuleProtocol::Icmp(None) => write!(f, "icmp"),
+            VpcFirewallRuleProtocol::Icmp(Some(v)) => write!(f, "icmp:{v}"),
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Deserialize, Serialize, JsonSchema)]
+pub struct VpcFirewallIcmpFilter {
+    pub icmp_type: u8,
+    pub code: Option<IcmpParamRange>,
+}
+
+impl Display for VpcFirewallIcmpFilter {
+    fn fmt(&self, f: &mut Formatter<'_>) -> FormatResult {
+        write!(f, "{}", self.icmp_type)?;
+        if let Some(code) = self.code {
+            write!(f, ",{code}")?;
+        }
+        Ok(())
+    }
+}
+
+impl FromStr for VpcFirewallIcmpFilter {
+    type Err = Error;
+
+    fn from_str(filter: &str) -> Result<Self, Self::Err> {
+        let (ty_str, code_str) = match filter.split_once(',') {
+            None => (filter, None),
+            Some((lhs, rhs)) => (lhs, Some(rhs)),
+        };
+
+        Ok(Self {
+            icmp_type: ty_str.parse::<u8>().map_err(|e| {
+                Error::invalid_value(
+                    "icmp_type",
+                    format!("{ty_str:?} unparsable for type: {e}"),
+                )
+            })?,
+            code: code_str
+                .map(|v| {
+                    v.parse::<IcmpParamRange>().map_err(|e| {
+                        Error::invalid_value("code", e.to_string())
+                    })
+                })
+                .transpose()?,
+        })
+    }
+}
+
+impl From<u8> for IcmpParamRange {
+    fn from(value: u8) -> Self {
+        Self { first: value, last: value }
+    }
+}
+
+impl From<RangeInclusive<u8>> for IcmpParamRange {
+    fn from(value: RangeInclusive<u8>) -> Self {
+        let (first, last) = value.into_inner();
+        Self { first, last }
+    }
+}
+
+impl From<IcmpParamRange> for RangeInclusive<u8> {
+    fn from(value: IcmpParamRange) -> Self {
+        value.first..=value.last
+    }
 }
 
 #[derive(Clone, Copy, Debug, Deserialize, Serialize, PartialEq, JsonSchema)]
@@ -1976,30 +2096,46 @@ pub struct L4PortRange {
 }
 
 impl FromStr for L4PortRange {
-    type Err = String;
+    type Err = L4PortRangeError;
     fn from_str(range: &str) -> Result<Self, Self::Err> {
-        const INVALID_PORT_NUMBER_MSG: &str = "invalid port number";
-
         match range.split_once('-') {
             None => {
                 let port = range
                     .parse::<NonZeroU16>()
-                    .map_err(|_| INVALID_PORT_NUMBER_MSG.to_string())?
+                    .map_err(|e| L4PortRangeError::Value(range.into(), e))?
                     .into();
                 Ok(L4PortRange { first: port, last: port })
             }
+            Some(("", _)) => Err(L4PortRangeError::MissingStart),
+            Some((_, "")) => Err(L4PortRangeError::MissingEnd),
             Some((left, right)) => {
                 let first = left
                     .parse::<NonZeroU16>()
-                    .map_err(|_| INVALID_PORT_NUMBER_MSG.to_string())?
+                    .map_err(|e| L4PortRangeError::Value(left.into(), e))?
                     .into();
                 let last = right
                     .parse::<NonZeroU16>()
-                    .map_err(|_| INVALID_PORT_NUMBER_MSG.to_string())?
+                    .map_err(|e| L4PortRangeError::Value(right.into(), e))?
                     .into();
                 Ok(L4PortRange { first, last })
             }
         }
+    }
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, thiserror::Error)]
+pub enum L4PortRangeError {
+    #[error("range has no start value")]
+    MissingStart,
+    #[error("range has no end value")]
+    MissingEnd,
+    #[error("{0:?} unparsable for type: {1}")]
+    Value(String, ParseIntError),
+}
+
+impl From<L4PortRangeError> for Error {
+    fn from(value: L4PortRangeError) -> Self {
+        Error::invalid_value("l4_port_range", value.to_string())
     }
 }
 
@@ -2048,6 +2184,117 @@ impl JsonSchema for L4PortRange {
                 min_length: Some(1),
                 pattern: Some(
                     r#"^[0-9]{1,5}(-[0-9]{1,5})?$"#.to_string(),
+                ),
+            })),
+            ..Default::default()
+        }.into()
+    }
+}
+
+impl From<L4Port> for L4PortRange {
+    fn from(value: L4Port) -> Self {
+        Self { first: value, last: value }
+    }
+}
+
+impl From<RangeInclusive<L4Port>> for L4PortRange {
+    fn from(value: RangeInclusive<L4Port>) -> Self {
+        let (first, last) = value.into_inner();
+        Self { first, last }
+    }
+}
+
+/// A range of ICMP(v6) types or codes. This range is inclusive on both ends.
+#[derive(
+    Clone, Copy, Debug, DeserializeFromStr, SerializeDisplay, PartialEq,
+)]
+pub struct IcmpParamRange {
+    /// The first number in the range
+    pub first: u8,
+    /// The last number in the range
+    pub last: u8,
+}
+
+impl FromStr for IcmpParamRange {
+    type Err = IcmpParamRangeError;
+    fn from_str(range: &str) -> Result<Self, Self::Err> {
+        match range.split_once('-') {
+            None => {
+                let param = range
+                    .parse::<u8>()
+                    .map_err(|e| IcmpParamRangeError::Value(range.into(), e))?;
+                Ok(IcmpParamRange { first: param, last: param })
+            }
+            Some(("", _)) => Err(IcmpParamRangeError::MissingStart),
+            Some((_, "")) => Err(IcmpParamRangeError::MissingEnd),
+            Some((left, right)) => {
+                let first = left
+                    .parse::<u8>()
+                    .map_err(|e| IcmpParamRangeError::Value(left.into(), e))?;
+                let last = right
+                    .parse::<u8>()
+                    .map_err(|e| IcmpParamRangeError::Value(right.into(), e))?;
+                Ok(IcmpParamRange { first, last })
+            }
+        }
+    }
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, thiserror::Error)]
+pub enum IcmpParamRangeError {
+    #[error("range has no start value")]
+    MissingStart,
+    #[error("range has no end value")]
+    MissingEnd,
+    #[error("{0:?} unparsable for type: {1}")]
+    Value(String, ParseIntError),
+}
+
+impl TryFrom<String> for IcmpParamRange {
+    type Error = <IcmpParamRange as FromStr>::Err;
+
+    fn try_from(range: String) -> Result<Self, Self::Error> {
+        range.parse()
+    }
+}
+
+impl Display for IcmpParamRange {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        if self.first == self.last {
+            write!(f, "{}", self.first)
+        } else {
+            write!(f, "{}-{}", self.first, self.last)
+        }
+    }
+}
+
+impl JsonSchema for IcmpParamRange {
+    fn schema_name() -> String {
+        "IcmpParamRange".to_string()
+    }
+
+    fn json_schema(
+        _: &mut schemars::gen::SchemaGenerator,
+    ) -> schemars::schema::Schema {
+        schemars::schema::SchemaObject {
+            metadata: Some(Box::new(schemars::schema::Metadata {
+                title: Some("A range of ICMP(v6) types or codes".to_string()),
+                description: Some(
+                    "An inclusive-inclusive range of ICMP(v6) types or codes. \
+                    The second value may be omitted to represent a single parameter."
+                        .to_string(),
+                ),
+                examples: vec!["3".into(), "20-120".into()],
+                ..Default::default()
+            })),
+            instance_type: Some(
+                schemars::schema::InstanceType::String.into()
+            ),
+            string: Some(Box::new(schemars::schema::StringValidation {
+                max_length: Some(7),  // 3 digits for each value and the dash
+                min_length: Some(1),
+                pattern: Some(
+                    r#"^[0-9]{1,3}(-[0-9]{1,3})?$"#.to_string(),
                 ),
             })),
             ..Default::default()
@@ -3127,6 +3374,28 @@ pub enum BfdMode {
     MultiHop,
 }
 
+/// Configuration of inbound ICMP allowed by API services.
+#[derive(
+    Clone,
+    Copy,
+    Debug,
+    Deserialize,
+    Serialize,
+    JsonSchema,
+    PartialEq,
+    Eq,
+    Ord,
+    PartialOrd,
+)]
+pub struct ServiceIcmpConfig {
+    /// When enabled, Nexus is able to receive ICMP Destination Unreachable
+    /// type 3 (port unreachable) and type 4 (fragmentation needed),
+    /// Redirect, and Time Exceeded messages. These enable Nexus to perform Path
+    /// MTU discovery and better cope with fragmentation issues. Otherwise all
+    /// inbound ICMP traffic will be dropped.
+    pub enabled: bool,
+}
+
 /// A description of an uploaded TUF repository.
 #[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize, JsonSchema)]
 pub struct TufRepoDescription {
@@ -3322,6 +3591,7 @@ mod test {
     use super::Generation;
     use super::RouteDestination;
     use super::RouteTarget;
+    use super::VpcFirewallIcmpFilter;
     use super::VpcFirewallRuleHostFilter;
     use super::VpcFirewallRuleTarget;
     use super::{
@@ -3664,32 +3934,54 @@ mod test {
         );
 
         assert_eq!(
-            L4PortRange::try_from("".to_string()),
-            Err("invalid port number".to_string())
+            L4PortRange::try_from("".to_string()).map_err(Into::into),
+            Err(Error::invalid_value(
+                "l4_port_range",
+                "\"\" unparsable for type: cannot parse integer from empty string"
+            ))
         );
         assert_eq!(
-            L4PortRange::try_from("65536".to_string()),
-            Err("invalid port number".to_string())
+            L4PortRange::try_from("65536".to_string()).map_err(Into::into),
+            Err(Error::invalid_value(
+                "l4_port_range",
+                "\"65536\" unparsable for type: number too large to fit in target type"
+            ))
         );
         assert_eq!(
-            L4PortRange::try_from("65535-65536".to_string()),
-            Err("invalid port number".to_string())
+            L4PortRange::try_from("65535-65536".to_string())
+                .map_err(Into::into),
+            Err(Error::invalid_value(
+                "l4_port_range",
+                "\"65536\" unparsable for type: number too large to fit in target type"
+            ))
         );
         assert_eq!(
-            L4PortRange::try_from("0x23".to_string()),
-            Err("invalid port number".to_string())
+            L4PortRange::try_from("0x23".to_string()).map_err(Into::into),
+            Err(Error::invalid_value(
+                "l4_port_range",
+                "\"0x23\" unparsable for type: invalid digit found in string"
+            ))
         );
         assert_eq!(
-            L4PortRange::try_from("0".to_string()),
-            Err("invalid port number".to_string())
+            L4PortRange::try_from("0".to_string()).map_err(Into::into),
+            Err(Error::invalid_value(
+                "l4_port_range",
+                "\"0\" unparsable for type: number would be zero for non-zero type"
+            ))
         );
         assert_eq!(
-            L4PortRange::try_from("0-20".to_string()),
-            Err("invalid port number".to_string())
+            L4PortRange::try_from("0-20".to_string()).map_err(Into::into),
+            Err(Error::invalid_value(
+                "l4_port_range",
+                "\"0\" unparsable for type: number would be zero for non-zero type"
+            ))
         );
         assert_eq!(
-            L4PortRange::try_from("-20".to_string()),
-            Err("invalid port number".to_string())
+            L4PortRange::try_from("-20".to_string()).map_err(Into::into),
+            Err(Error::invalid_value(
+                "l4_port_range",
+                "range has no start value"
+            ))
         );
     }
 
@@ -3729,7 +4021,7 @@ mod test {
                 "status": "disabled",
                 "direction": "outbound",
                 "targets": [ { "type": "vpc", "value": "default" } ],
-                "filters": {"ports": [ "22-25", "27" ], "protocols": [ "UDP" ]},
+                "filters": {"ports": [ "22-25", "27" ], "protocols": [ { "type": "udp" } ]},
                 "action": "deny",
                 "priority": 65533,
                 "description": "second rule"
@@ -3918,6 +4210,77 @@ mod test {
         );
         assert!("foo:foo".parse::<VpcFirewallRuleHostFilter>().is_err());
         assert!("foo".parse::<VpcFirewallRuleHostFilter>().is_err());
+    }
+
+    #[test]
+    fn test_firewall_rule_proto_filter_parse() {
+        assert_eq!(VpcFirewallRuleProtocol::Tcp, "tcp".parse().unwrap());
+        assert_eq!(VpcFirewallRuleProtocol::Udp, "udp".parse().unwrap());
+
+        assert_eq!(
+            VpcFirewallRuleProtocol::Icmp(None),
+            "icmp".parse().unwrap()
+        );
+        assert_eq!(
+            VpcFirewallRuleProtocol::Icmp(Some(VpcFirewallIcmpFilter {
+                icmp_type: 4,
+                code: None
+            })),
+            "icmp:4".parse().unwrap()
+        );
+        assert_eq!(
+            VpcFirewallRuleProtocol::Icmp(Some(VpcFirewallIcmpFilter {
+                icmp_type: 60,
+                code: Some(0.into())
+            })),
+            "icmp:60,0".parse().unwrap()
+        );
+        assert_eq!(
+            VpcFirewallRuleProtocol::Icmp(Some(VpcFirewallIcmpFilter {
+                icmp_type: 60,
+                code: Some((0..=10).into())
+            })),
+            "icmp:60,0-10".parse().unwrap()
+        );
+        assert_eq!(
+            "icmp:".parse::<VpcFirewallRuleProtocol>(),
+            Err(Error::invalid_value(
+                "icmp_type",
+                "\"\" unparsable for type: cannot parse integer from empty string"
+            ))
+        );
+        assert_eq!(
+            "icmp:20-30".parse::<VpcFirewallRuleProtocol>(),
+            Err(Error::invalid_value(
+                "icmp_type",
+                "\"20-30\" unparsable for type: invalid digit found in string"
+            ))
+        );
+        assert_eq!(
+            "icmp:10,".parse::<VpcFirewallRuleProtocol>(),
+            Err(Error::invalid_value(
+                "code",
+                "\"\" unparsable for type: cannot parse integer from empty string"
+            ))
+        );
+        assert_eq!(
+            "icmp:257,".parse::<VpcFirewallRuleProtocol>(),
+            Err(Error::invalid_value(
+                "icmp_type",
+                "\"257\" unparsable for type: number too large to fit in target type"
+            ))
+        );
+        assert_eq!(
+            "icmp:0,1000-1001".parse::<VpcFirewallRuleProtocol>(),
+            Err(Error::invalid_value(
+                "code",
+                "\"1000\" unparsable for type: number too large to fit in target type"
+            ))
+        );
+        assert_eq!(
+            "icmp:0,30-".parse::<VpcFirewallRuleProtocol>(),
+            Err(Error::invalid_value("code", "range has no end value"))
+        );
     }
 
     #[test]
