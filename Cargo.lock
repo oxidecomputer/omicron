@@ -6436,6 +6436,7 @@ dependencies = [
  "sled-agent-zone-images-examples",
  "slog",
  "strum",
+ "swrite",
  "thiserror 2.0.12",
  "tokio",
  "tufaceous-artifact",
