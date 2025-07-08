@@ -245,24 +245,25 @@ impl SpComponentUpdateHelper for ReconfiguratorRotBootloaderUpdater {
                 });
             }
 
-            // This operation is very delicate.  Here, we're overwriting the device
-            // bootloader with the one that we've written to the stage0next slot.
-            // The hardware has no fallback slot for the bootloader.  So if the
-            // device resets or loses power while we're copying stage0next to the
-            // stage0 slot, it could still become bricked.
+            // This operation is very delicate. Here, we're overwriting the
+            // device bootloader with the one that we've written to the
+            // stage0next slot.
+            // The hardware has no fallback slot for the bootloader. So if the
+            // device resets or loses power while we're copying stage0next to
+            // the stage0 slot, it could still become bricked.
             //
             // We've already done everything we can to mitigate this:
             //
-            // - The data is already on the device, minimizing the time to copy it
-            //    to where it needs to go.
-            // - The image has already been verified by the device (and the device
-            //    validates _that_ before starting this operation), so it won't fail
-            //    at boot for that reason.
-            // - The device can't be externally reset _during_ this operation because
-            //    the same code responsible for processing the reset request will be
-            //    busy doing the copy.
-            // - We only ever update one RoT stage0 at a time in a rack, so if we brick
-            //    one, only one sled would be affected (still bad).
+            // - The data is already on the device, minimizing the time to copy
+            //    it to where it needs to go.
+            // - The image has already been verified by the device (and the
+            //    device validates _that_ before starting this operation), so it
+            //    won't fail at boot for that reason.
+            // - The device can't be externally reset _during_ this operation
+            //    because the same code responsible for processing the reset
+            //    request will be busy doing the copy.
+            // - We only ever update one RoT stage0 at a time in a rack, so if
+            //    we brick one, only one sled would be affected (still bad).
             //
             // So we're ready to roll!
             debug!(log, "attempting to set RoT bootloader active slot");
@@ -308,7 +309,7 @@ async fn wait_for_stage0_next_image_check(
     log: &Logger,
     mgs_clients: &mut MgsClients,
     sp_type: SpType,
-    sp_slot: u32,
+    sp_slot: u16,
     timeout: Duration,
 ) -> Result<Option<RotImageError>, PostUpdateError> {
     let before = Instant::now();
