@@ -70,9 +70,7 @@ use sled_agent_types::zone_bundle::{
 use sled_agent_types::zone_images::ResolverStatus;
 use sled_diagnostics::SledDiagnosticsCmdError;
 use sled_diagnostics::SledDiagnosticsCmdOutput;
-use sled_hardware::{
-    HardwareManager, MemoryReservations, underlay,
-};
+use sled_hardware::{HardwareManager, MemoryReservations, underlay};
 use sled_hardware_types::Baseboard;
 use sled_hardware_types::underlay::BootstrapInterface;
 use slog::Logger;
