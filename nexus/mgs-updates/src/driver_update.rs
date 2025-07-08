@@ -248,30 +248,15 @@ pub(crate) async fn apply_update(
     // - we should wait a bit because an update may be in-progress, or
     // - if not, then if our required preconditions are met
     status.update(UpdateAttemptStatus::Precheck);
-    let before = Instant::now();
-    loop {
-        match update_helper.precheck(log, &mut mgs_clients, update).await {
-            Ok(PrecheckStatus::ReadyForUpdate) => break,
-            Ok(PrecheckStatus::WaitingForOngoingUpdate) => {
-                if before.elapsed() >= progress_timeout {
-                    warn!(
-                        log,
-                        "update takeover: timed out while waiting for ongoing update"
-                    );
-                    break;
-                }
-
-                tokio::time::sleep(PROGRESS_POLL_INTERVAL).await;
-                continue;
-            }
-            Ok(PrecheckStatus::UpdateComplete) => {
-                return Ok(UpdateCompletedHow::FoundNoChangesNeeded);
-            }
-            Err(error) => {
-                return Err(ApplyUpdateError::PreconditionFailed(error));
-            }
-        };
-    }
+    match update_helper.precheck(log, &mut mgs_clients, update).await {
+        Ok(PrecheckStatus::ReadyForUpdate) => (),
+        Ok(PrecheckStatus::UpdateComplete) => {
+            return Ok(UpdateCompletedHow::FoundNoChangesNeeded);
+        }
+        Err(error) => {
+            return Err(ApplyUpdateError::PreconditionFailed(error));
+        }
+    };
     // Start the update.
     debug!(log, "ready to start update");
     status.update(UpdateAttemptStatus::Updating);
@@ -656,7 +641,6 @@ async fn wait_for_update_done(
             | Err(PrecheckError::WrongInactiveVersion { .. })
             | Err(PrecheckError::WrongActiveSlot { .. })
             | Err(PrecheckError::EphemeralRotBootPreferenceSet)
-            | Ok(PrecheckStatus::WaitingForOngoingUpdate)
             | Ok(PrecheckStatus::ReadyForUpdate) => {
                 if before.elapsed() >= timeout {
                     return Err(UpdateWaitError::Timeout(timeout));

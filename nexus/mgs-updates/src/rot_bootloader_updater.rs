@@ -153,22 +153,7 @@ impl SpComponentUpdateHelper for ReconfiguratorRotBootloaderUpdater {
                 .clone()
                 .matches(&expected_stage0_next_version)?;
 
-            // The status is only considered ready for update if the stage0_next
-            // version found in the caboose is valid, and it matches what we
-            // found in the stage_0 caboose. Otherwise, we are waiting for an
-            // ongoing update.
-            match found_stage0_next_version {
-                FoundVersion::Version(v) => {
-                    if v == found_stage0_version {
-                        Ok(PrecheckStatus::ReadyForUpdate)
-                    } else {
-                        Ok(PrecheckStatus::WaitingForOngoingUpdate)
-                    }
-                }
-                FoundVersion::MissingVersion => {
-                    Ok(PrecheckStatus::WaitingForOngoingUpdate)
-                }
-            }
+            Ok(PrecheckStatus::ReadyForUpdate)
         }
         .boxed()
     }
