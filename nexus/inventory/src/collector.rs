@@ -504,6 +504,7 @@ mod test {
     use std::net::Ipv6Addr;
     use std::net::SocketAddrV6;
     use std::sync::Arc;
+    use std::time::Duration;
 
     fn dump_sled_config(s: &mut String, config: &OmicronSledConfig) {
         let OmicronSledConfig {
@@ -865,7 +866,9 @@ mod test {
         // there would be in providing them at this juncture.
         let keeper_clients = Vec::new();
         // Configure the mock server as a backend for the CockroachDB client
-        let crdb_cluster = CockroachClusterAdminClient::new(log.clone());
+        let timeout = Duration::from_secs(15);
+        let crdb_cluster =
+            CockroachClusterAdminClient::new(log.clone(), timeout);
         let crdb_admin_server = mock_crdb_admin_server();
         crdb_cluster.update_backends(&[*crdb_admin_server.address()]).await;
         let collector = Collector::new(
@@ -945,7 +948,9 @@ mod test {
         // We don't have any mocks for this, and it's unclear how much value
         // there would be in providing them at this juncture.
         let keeper_clients = Vec::new();
-        let crdb_cluster = CockroachClusterAdminClient::new(log.clone());
+        let timeout = Duration::from_secs(15);
+        let crdb_cluster =
+            CockroachClusterAdminClient::new(log.clone(), timeout);
         let crdb_admin_server = mock_crdb_admin_server();
         crdb_cluster.update_backends(&[*crdb_admin_server.address()]).await;
         let collector = Collector::new(
@@ -996,7 +1001,9 @@ mod test {
         // We don't have any mocks for this, and it's unclear how much value
         // there would be in providing them at this juncture.
         let keeper_clients = Vec::new();
-        let crdb_cluster = CockroachClusterAdminClient::new(log.clone());
+        let timeout = Duration::from_secs(15);
+        let crdb_cluster =
+            CockroachClusterAdminClient::new(log.clone(), timeout);
         let crdb_admin_server = mock_crdb_admin_server();
         crdb_cluster.update_backends(&[*crdb_admin_server.address()]).await;
         let collector = Collector::new(
@@ -1052,7 +1059,9 @@ mod test {
         // We don't have any mocks for this, and it's unclear how much value
         // there would be in providing them at this juncture.
         let keeper_clients = Vec::new();
-        let crdb_cluster = CockroachClusterAdminClient::new(log.clone());
+        let timeout = Duration::from_secs(15);
+        let crdb_cluster =
+            CockroachClusterAdminClient::new(log.clone(), timeout);
         let crdb_admin_server = mock_crdb_admin_server();
         crdb_cluster.update_backends(&[*crdb_admin_server.address()]).await;
         let collector = Collector::new(

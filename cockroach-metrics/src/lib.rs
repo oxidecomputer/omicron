@@ -17,6 +17,7 @@ use slog::{Logger, debug, warn};
 use std::collections::BTreeMap;
 use std::net::SocketAddr;
 use std::sync::Arc;
+use std::time::Duration;
 use strum::{Display, EnumIter, EnumString, IntoStaticStr};
 use tokio::sync::RwLock;
 
@@ -31,15 +32,12 @@ struct CockroachAdminClient {
 
 impl CockroachAdminClient {
     /// Create a new CockroachDB HTTP client
-    fn new(log: Logger, address: SocketAddr) -> Self {
-        // It's important that we have *some* timeout here - currently,
-        // inventory collection will query all nodes to confirm they're
-        // responding. However, it's very possible that one node is down,
-        // and that should not block collection indefinitely.
-        let timeout_duration = std::time::Duration::from_secs(15);
+    ///
+    /// "timeout" is used as both a connection and request timeout duration.
+    fn new(log: Logger, address: SocketAddr, timeout: Duration) -> Self {
         let reqwest_client = reqwest::ClientBuilder::new()
-            .connect_timeout(timeout_duration)
-            .timeout(timeout_duration)
+            .connect_timeout(timeout)
+            .timeout(timeout)
             .build()
             .expect("Failed to build HTTP client");
 
@@ -142,14 +140,16 @@ impl CockroachAdminClient {
 pub struct CockroachClusterAdminClient {
     /// Cached clients for each backend address
     clients: Arc<RwLock<BTreeMap<SocketAddr, CockroachAdminClient>>>,
+    timeout: Duration,
     log: Logger,
 }
 
 impl CockroachClusterAdminClient {
     /// Create a new cluster client
-    pub fn new(log: Logger) -> Self {
+    pub fn new(log: Logger, timeout: Duration) -> Self {
         Self {
             clients: Arc::new(RwLock::new(BTreeMap::new())),
+            timeout,
             log: log
                 .new(slog::o!("component" => "CockroachClusterAdminClient")),
         }
@@ -170,7 +170,11 @@ impl CockroachClusterAdminClient {
             if let std::collections::btree_map::Entry::Vacant(e) =
                 clients.entry(addr)
             {
-                e.insert(CockroachAdminClient::new(self.log.clone(), addr));
+                e.insert(CockroachAdminClient::new(
+                    self.log.clone(),
+                    addr,
+                    self.timeout,
+                ));
                 added_count += 1;
             }
         }
@@ -1117,7 +1121,8 @@ sql_exec_latency_bucket{le="0.01"} 25
     #[tokio::test]
     async fn test_cluster_client_caching() {
         let log = slog::Logger::root(slog::Discard, slog::o!());
-        let cluster = CockroachClusterAdminClient::new(log);
+        let timeout = Duration::from_secs(15);
+        let cluster = CockroachClusterAdminClient::new(log, timeout);
 
         // Initially no cached clients
         assert_eq!(cluster.get_cached_addresses().await.len(), 0);
