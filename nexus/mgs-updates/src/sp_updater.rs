@@ -19,7 +19,6 @@ use futures::FutureExt;
 use futures::future::BoxFuture;
 use gateway_client::SpComponent;
 use gateway_client::types::SpType;
-use nexus_types::deployment::ExpectedVersion;
 use nexus_types::deployment::PendingMgsUpdate;
 use nexus_types::deployment::PendingMgsUpdateDetails;
 use slog::Logger;
@@ -260,27 +259,7 @@ impl SpComponentUpdateHelper for ReconfiguratorSpUpdater {
                     }
                 }
             };
-            match (&expected_inactive_version, &found_version) {
-                // expected garbage, found garbage
-                (
-                    ExpectedVersion::NoValidVersion,
-                    FoundVersion::MissingVersion,
-                ) => (),
-                // expected a specific version and found it
-                (
-                    ExpectedVersion::Version(artifact_version),
-                    FoundVersion::Version(found_version),
-                ) if artifact_version.to_string() == *found_version => (),
-                // anything else is a mismatch
-                (ExpectedVersion::NoValidVersion, FoundVersion::Version(_))
-                | (ExpectedVersion::Version(_), FoundVersion::MissingVersion)
-                | (ExpectedVersion::Version(_), FoundVersion::Version(_)) => {
-                    return Err(PrecheckError::WrongInactiveVersion {
-                        expected: expected_inactive_version.clone(),
-                        found: found_version,
-                    });
-                }
-            };
+            found_version.matches(expected_inactive_version)?;
 
             Ok(PrecheckStatus::ReadyForUpdate)
         }

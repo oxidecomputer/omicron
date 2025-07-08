@@ -20,7 +20,6 @@ use gateway_client::types::RotState;
 use gateway_client::types::SpComponentFirmwareSlot;
 use gateway_client::types::SpType;
 use gateway_messages::RotBootInfo;
-use nexus_types::deployment::ExpectedVersion;
 use nexus_types::deployment::PendingMgsUpdate;
 use nexus_types::deployment::PendingMgsUpdateDetails;
 use slog::Logger;
@@ -150,31 +149,9 @@ impl SpComponentUpdateHelper for ReconfiguratorRotBootloaderUpdater {
                         }
                     }
                 };
-            match (&expected_stage0_next_version, &found_stage0_next_version) {
-                // expected garbage, found garbage
-                (
-                    ExpectedVersion::NoValidVersion,
-                    FoundVersion::MissingVersion,
-                ) => (),
-                // expected a specific version and found it
-                (
-                    ExpectedVersion::Version(artifact_version),
-                    FoundVersion::Version(found_stage0_next_version),
-                ) if artifact_version.to_string()
-                    == *found_stage0_next_version =>
-                {
-                    ()
-                }
-                // anything else is a mismatch
-                (ExpectedVersion::NoValidVersion, FoundVersion::Version(_))
-                | (ExpectedVersion::Version(_), FoundVersion::MissingVersion)
-                | (ExpectedVersion::Version(_), FoundVersion::Version(_)) => {
-                    return Err(PrecheckError::WrongInactiveVersion {
-                        expected: expected_stage0_next_version.clone(),
-                        found: found_stage0_next_version,
-                    });
-                }
-            };
+            found_stage0_next_version
+                .clone()
+                .matches(&expected_stage0_next_version)?;
 
             // The status is only considered ready for update if the stage0_next
             // version found in the caboose is valid, and it matches what we

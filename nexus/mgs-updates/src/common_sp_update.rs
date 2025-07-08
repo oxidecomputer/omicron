@@ -344,10 +344,40 @@ impl PostUpdateError {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub enum FoundVersion {
     MissingVersion,
     Version(String),
+}
+
+impl FoundVersion {
+    pub fn matches(
+        self,
+        expected: &ExpectedVersion,
+    ) -> Result<(), PrecheckError> {
+        match (expected, &self) {
+            // expected garbage, found garbage
+            (ExpectedVersion::NoValidVersion, FoundVersion::MissingVersion) => {
+                ()
+            }
+            // expected a specific version and found it
+            (
+                ExpectedVersion::Version(artifact_version),
+                FoundVersion::Version(found_version),
+            ) if artifact_version.to_string() == *found_version => (),
+            // anything else is a mismatch
+            (ExpectedVersion::NoValidVersion, FoundVersion::Version(_))
+            | (ExpectedVersion::Version(_), FoundVersion::MissingVersion)
+            | (ExpectedVersion::Version(_), FoundVersion::Version(_)) => {
+                return Err(PrecheckError::WrongInactiveVersion {
+                    expected: expected.clone(),
+                    found: self,
+                });
+            }
+        };
+
+        Ok(())
+    }
 }
 
 pub(crate) fn error_means_caboose_is_invalid(
