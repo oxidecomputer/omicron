@@ -224,32 +224,6 @@ impl DataStore {
             .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))
     }
 
-    /// Returns a trusted TUF root role.
-    pub async fn tuf_trust_root_get_by_id(
-        &self,
-        opctx: &OpContext,
-        trust_root_id: TufTrustRootUuid,
-    ) -> LookupResult<TufTrustRoot> {
-        use nexus_db_schema::schema::tuf_trust_root::dsl;
-
-        opctx.authorize(authz::Action::Read, &authz::FLEET).await?;
-        dsl::tuf_trust_root
-            .filter(dsl::id.eq(to_db_typed_uuid(trust_root_id)))
-            .filter(dsl::time_deleted.is_null())
-            .select(TufTrustRoot::as_select())
-            .first_async(&*self.pool_connection_authorized(opctx).await?)
-            .await
-            .map_err(|e| {
-                public_error_from_diesel(
-                    e,
-                    ErrorHandler::NotFoundByLookup(
-                        ResourceType::TufTrustRoot,
-                        LookupType::ById(trust_root_id.into_untyped_uuid()),
-                    ),
-                )
-            })
-    }
-
     /// Insert a trusted TUF root role into the trust store.
     pub async fn tuf_trust_root_insert(
         &self,
@@ -272,11 +246,12 @@ impl DataStore {
     pub async fn tuf_trust_root_delete(
         &self,
         opctx: &OpContext,
+        authz_trust_root: &authz::TufTrustRoot,
         trust_root_id: TufTrustRootUuid,
     ) -> DeleteResult {
         use nexus_db_schema::schema::tuf_trust_root::dsl;
 
-        opctx.authorize(authz::Action::Modify, &authz::FLEET).await?;
+        opctx.authorize(authz::Action::Delete, authz_trust_root).await?;
         diesel::update(dsl::tuf_trust_root)
             .filter(dsl::id.eq(to_db_typed_uuid(trust_root_id)))
             .filter(dsl::time_deleted.is_null())

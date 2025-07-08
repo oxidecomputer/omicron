@@ -1126,6 +1126,14 @@ authz_resource! {
 }
 
 authz_resource! {
+    name = "TufTrustRoot",
+    parent = "Fleet",
+    primary_key = { uuid_kind = TufTrustRootKind },
+    roles_allowed = false,
+    polar_snippet = FleetChild,
+}
+
+authz_resource! {
     name = "Certificate",
     parent = "Silo",
     primary_key = Uuid,

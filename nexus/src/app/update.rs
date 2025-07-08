@@ -7,6 +7,8 @@
 use bytes::Bytes;
 use dropshot::HttpError;
 use futures::Stream;
+use nexus_auth::authz;
+use nexus_db_lookup::LookupPath;
 use nexus_db_model::{TufRepoDescription, TufTrustRoot};
 use nexus_db_queries::context::OpContext;
 use nexus_db_queries::db::{datastore::SQL_BATCH_SIZE, pagination::Paginator};
@@ -115,10 +117,11 @@ impl super::Nexus {
         opctx: &OpContext,
         id: TufTrustRootUuid,
     ) -> Result<TufTrustRoot, HttpError> {
-        self.db_datastore
-            .tuf_trust_root_get_by_id(opctx, id)
-            .await
-            .map_err(HttpError::from)
+        let (.., trust_root) = LookupPath::new(opctx, &self.db_datastore)
+            .tuf_trust_root(id)
+            .fetch()
+            .await?;
+        Ok(trust_root)
     }
 
     pub(crate) async fn updates_list_trust_roots(
@@ -137,8 +140,12 @@ impl super::Nexus {
         opctx: &OpContext,
         id: TufTrustRootUuid,
     ) -> Result<(), HttpError> {
+        let (authz, ..) = LookupPath::new(opctx, &self.db_datastore)
+            .tuf_trust_root(id)
+            .fetch_for(authz::Action::Delete)
+            .await?;
         self.db_datastore
-            .tuf_trust_root_delete(opctx, id)
+            .tuf_trust_root_delete(opctx, &authz, id)
             .await
             .map_err(HttpError::from)
     }

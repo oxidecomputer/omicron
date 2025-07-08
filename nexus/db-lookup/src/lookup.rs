@@ -34,6 +34,7 @@ use omicron_uuid_kinds::PhysicalDiskUuid;
 use omicron_uuid_kinds::SupportBundleUuid;
 use omicron_uuid_kinds::TufArtifactKind;
 use omicron_uuid_kinds::TufRepoKind;
+use omicron_uuid_kinds::TufTrustRootUuid;
 use omicron_uuid_kinds::TypedUuid;
 use omicron_uuid_kinds::WebhookSecretUuid;
 use slog::{error, trace};
@@ -319,6 +320,10 @@ impl<'a> LookupPath<'a> {
     /// Select a resource of type SupportBundle, identified by its id
     pub fn support_bundle(self, id: SupportBundleUuid) -> SupportBundle<'a> {
         SupportBundle::PrimaryKey(Root { lookup_root: self }, id)
+    }
+
+    pub fn tuf_trust_root(self, id: TufTrustRootUuid) -> TufTrustRoot<'a> {
+        TufTrustRoot::PrimaryKey(Root { lookup_root: self }, id)
     }
 
     pub fn silo_image_id(self, id: Uuid) -> SiloImage<'a> {
@@ -853,6 +858,14 @@ lookup_resource! {
     lookup_by_name = false,
     soft_deletes = false,
     primary_key_columns = [ { column_name = "id", uuid_kind = TufArtifactKind } ]
+}
+
+lookup_resource! {
+    name = "TufTrustRoot",
+    ancestors = [],
+    lookup_by_name = false,
+    soft_deletes = true,
+    primary_key_columns = [ { column_name = "id", uuid_kind = TufTrustRootKind } ]
 }
 
 lookup_resource! {

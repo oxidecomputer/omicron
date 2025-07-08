@@ -355,6 +355,10 @@ impl TufTrustRoot {
             root_role: DbTufSignedRootRole(root_role),
         }
     }
+
+    pub fn id(&self) -> TufTrustRootUuid {
+        self.id.into()
+    }
 }
 
 impl From<TufTrustRoot> for views::UpdatesTrustRoot {
