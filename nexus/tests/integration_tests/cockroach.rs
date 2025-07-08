@@ -10,6 +10,7 @@ use omicron_cockroach_metrics::CockroachClusterAdminClient;
 use omicron_cockroach_metrics::CockroachMetric;
 use omicron_cockroach_metrics::MetricValue;
 use omicron_cockroach_metrics::NodeLiveness;
+use std::time::Duration;
 
 type ControlPlaneTestContext =
     nexus_test_utils::ControlPlaneTestContext<omicron_nexus::Server>;
@@ -65,7 +66,9 @@ async fn test_cockroach_http_prometheus_metrics(
 ) {
     let admin_addr = cptestctx.database_admin.local_addr();
 
-    let client = CockroachClusterAdminClient::new(cptestctx.logctx.log.clone());
+    let timeout = Duration::from_secs(15);
+    let client =
+        CockroachClusterAdminClient::new(cptestctx.logctx.log.clone(), timeout);
     client.update_backends(&[admin_addr]).await;
 
     let metrics = client
@@ -199,7 +202,9 @@ async fn test_cockroach_http_prometheus_metrics(
 async fn test_cockroach_http_node_status(cptestctx: &ControlPlaneTestContext) {
     let admin_addr = cptestctx.database_admin.local_addr();
 
-    let client = CockroachClusterAdminClient::new(cptestctx.logctx.log.clone());
+    let timeout = Duration::from_secs(15);
+    let client =
+        CockroachClusterAdminClient::new(cptestctx.logctx.log.clone(), timeout);
     client.update_backends(&[admin_addr]).await;
 
     let nodes_response = client
@@ -221,7 +226,7 @@ async fn test_cockroach_http_node_status(cptestctx: &ControlPlaneTestContext) {
         &NodeLiveness::Live
     );
 
-    assert_eq!(first_node.desc.node_id.as_i32(), 1);
+    assert_eq!(first_node.desc.node_id.as_str(), "1");
     assert!(
         !first_node.build_info.tag.is_empty(),
         "Build tag should not be empty"

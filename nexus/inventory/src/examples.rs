@@ -610,7 +610,7 @@ pub fn representative() -> Representative {
     );
 
     builder.found_cockroach_metrics(
-        omicron_cockroach_metrics::NodeId::new(1),
+        omicron_cockroach_metrics::NodeId::new("1".to_string()),
         PrometheusMetrics {
             metrics: BTreeMap::from([(
                 "ranges_underreplicated".to_string(),

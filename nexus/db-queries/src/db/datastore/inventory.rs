@@ -380,7 +380,7 @@ impl DataStore {
             .cockroach_status
             .iter()
             .map(|(node_id, status)| {
-                InvCockroachStatus::new(collection_id, *node_id, status)
+                InvCockroachStatus::new(collection_id, node_id.clone(), status)
             })
             .collect::<Result<Vec<_>, _>>()
             .map_err(|e| Error::internal_error(&e.to_string()))?;
@@ -3424,7 +3424,7 @@ impl DataStore {
             status_records
                 .into_iter()
                 .map(|record| {
-                    let node_id = CockroachNodeId::new(record.node_id);
+                    let node_id = CockroachNodeId::new(record.node_id.clone());
                     let status: nexus_types::inventory::CockroachStatus =
                         record.try_into().map_err(|e| {
                             Error::internal_error(&format!("{e:#}"))

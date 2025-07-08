@@ -17,6 +17,7 @@ use slog::{Logger, debug, warn};
 use std::collections::BTreeMap;
 use std::net::SocketAddr;
 use std::sync::Arc;
+use std::time::Duration;
 use strum::{Display, EnumIter, EnumString, IntoStaticStr};
 use tokio::sync::RwLock;
 
@@ -31,15 +32,12 @@ struct CockroachAdminClient {
 
 impl CockroachAdminClient {
     /// Create a new CockroachDB HTTP client
-    fn new(log: Logger, address: SocketAddr) -> Self {
-        // It's important that we have *some* timeout here - currently,
-        // inventory collection will query all nodes to confirm they're
-        // responding. However, it's very possible that one node is down,
-        // and that should not block collection indefinitely.
-        let timeout_duration = std::time::Duration::from_secs(15);
+    ///
+    /// "timeout" is used as both a connection and request timeout duration.
+    fn new(log: Logger, address: SocketAddr, timeout: Duration) -> Self {
         let reqwest_client = reqwest::ClientBuilder::new()
-            .connect_timeout(timeout_duration)
-            .timeout(timeout_duration)
+            .connect_timeout(timeout)
+            .timeout(timeout)
             .build()
             .expect("Failed to build HTTP client");
 
@@ -72,6 +70,19 @@ impl CockroachAdminClient {
         let text = response.into_inner();
         PrometheusMetrics::parse(&text)
             .with_context(|| "Failed to parse Prometheus metrics")
+    }
+
+    /// Fetch the local node ID from the cockroach-admin service
+    ///
+    /// This API is (and must remain) cancel-safe
+    async fn fetch_local_node_id(&self) -> Result<String> {
+        let response = self
+            .client
+            .local_node_id()
+            .await
+            .with_context(|| "Failed to get local node ID")?;
+
+        Ok(response.into_inner().node_id)
     }
 
     /// Fetch node status information for all nodes
@@ -111,9 +122,10 @@ impl CockroachAdminClient {
 /// ```rust,no_run
 /// # use omicron_cockroach_metrics::CockroachClusterAdminClient;
 /// # use std::net::SocketAddr;
+/// # use std::time::Duration;
 /// # use slog::Logger;
 /// # async fn example(log: Logger) -> anyhow::Result<()> {
-/// let cluster = CockroachClusterAdminClient::new(log);
+/// let cluster = CockroachClusterAdminClient::new(log, Duration::from_secs(15));
 ///
 /// // Update backends when addresses change (e.g., from DNS resolution)
 /// let backends: Vec<SocketAddr> = vec![
@@ -142,14 +154,16 @@ impl CockroachAdminClient {
 pub struct CockroachClusterAdminClient {
     /// Cached clients for each backend address
     clients: Arc<RwLock<BTreeMap<SocketAddr, CockroachAdminClient>>>,
+    timeout: Duration,
     log: Logger,
 }
 
 impl CockroachClusterAdminClient {
     /// Create a new cluster client
-    pub fn new(log: Logger) -> Self {
+    pub fn new(log: Logger, timeout: Duration) -> Self {
         Self {
             clients: Arc::new(RwLock::new(BTreeMap::new())),
+            timeout,
             log: log
                 .new(slog::o!("component" => "CockroachClusterAdminClient")),
         }
@@ -170,7 +184,11 @@ impl CockroachClusterAdminClient {
             if let std::collections::btree_map::Entry::Vacant(e) =
                 clients.entry(addr)
             {
-                e.insert(CockroachAdminClient::new(self.log.clone(), addr));
+                e.insert(CockroachAdminClient::new(
+                    self.log.clone(),
+                    addr,
+                    self.timeout,
+                ));
                 added_count += 1;
             }
         }
@@ -288,7 +306,7 @@ impl CockroachClusterAdminClient {
     /// Fetch Prometheus metrics from all backends, returning all successful results
     pub async fn fetch_prometheus_metrics_from_all_nodes(
         &self,
-    ) -> Vec<(SocketAddr, PrometheusMetrics)> {
+    ) -> Vec<(NodeId, PrometheusMetrics)> {
         let clients = self.clients.read().await;
 
         if clients.is_empty() {
@@ -296,19 +314,41 @@ impl CockroachClusterAdminClient {
         }
 
         // Collect tasks from all nodes in parallel
-        let mut results = Vec::new();
+        let mut results: Vec<
+            Result<(NodeId, PrometheusMetrics), anyhow::Error>,
+        > = Vec::new();
         let mut tasks = ParallelTaskSet::new();
         for (addr, client) in clients.iter() {
             let addr = *addr;
             let client = client.clone();
-            if let Some(result) =
-                tasks
-                    .spawn({
-                        async move {
-                            (addr, client.fetch_prometheus_metrics().await)
-                        }
-                    })
-                    .await
+            if let Some(result) = tasks
+                .spawn({
+                    async move {
+                        // First get the local node ID - early exit if this fails
+                        let node_id_string = client
+                            .fetch_local_node_id()
+                            .await
+                            .with_context(|| {
+                                format!("Failed to get node ID from {}", addr,)
+                            })?;
+                        let node_id = NodeId::new(node_id_string);
+
+                        // Then fetch the metrics
+                        let metrics = client
+                            .fetch_prometheus_metrics()
+                            .await
+                            .map_err(|e| {
+                            anyhow::anyhow!(
+                                "Failed to get metrics from {}: {}",
+                                addr,
+                                e
+                            )
+                        })?;
+
+                        Ok((node_id, metrics))
+                    }
+                })
+                .await
             {
                 results.push(result);
             }
@@ -318,22 +358,21 @@ impl CockroachClusterAdminClient {
         // Collect all successful results
         let mut successful_results = Vec::new();
         let mut results_iter = results.into_iter();
-        while let Some((addr, result)) = results_iter.next() {
+        while let Some(result) = results_iter.next() {
             match result {
-                Ok(metrics) => {
+                Ok((node_id, metrics)) => {
                     debug!(
                         self.log,
                         "Successfully fetched metrics from CockroachDB node";
-                        "address" => %addr
+                        "node_id" => %node_id
                     );
-                    successful_results.push((addr, metrics));
+                    successful_results.push((node_id, metrics));
                 }
                 Err(e) => {
                     // Log the error but continue trying other backends
                     warn!(
                         self.log,
                         "Failed to fetch metrics from CockroachDB node";
-                        "address" => %addr,
                         "error" => %e
                     );
                 }
@@ -346,7 +385,7 @@ impl CockroachClusterAdminClient {
     /// Fetch node status from all backends, returning all successful results
     pub async fn fetch_node_status_from_all_nodes(
         &self,
-    ) -> Vec<(SocketAddr, NodesResponse)> {
+    ) -> Vec<(NodeId, NodesResponse)> {
         let clients = self.clients.read().await;
 
         if clients.is_empty() {
@@ -354,14 +393,36 @@ impl CockroachClusterAdminClient {
         }
 
         // Create futures for all requests
-        let mut results = Vec::new();
+        let mut results: Vec<Result<(NodeId, NodesResponse), anyhow::Error>> =
+            Vec::new();
         let mut tasks = ParallelTaskSet::new();
         for (addr, client) in clients.iter() {
             let addr = *addr;
             let client = client.clone();
             if let Some(result) = tasks
                 .spawn({
-                    async move { (addr, client.fetch_node_status().await) }
+                    async move {
+                        // First get the local node ID - early exit if this fails
+                        let node_id_string = client
+                            .fetch_local_node_id()
+                            .await
+                            .with_context(|| {
+                                format!("Failed to get node ID from {}", addr,)
+                            })?;
+                        let node_id = NodeId::new(node_id_string);
+
+                        // Then fetch the node status
+                        let status =
+                            client.fetch_node_status().await.map_err(|e| {
+                                anyhow::anyhow!(
+                                    "Failed to get node status from {}: {}",
+                                    addr,
+                                    e
+                                )
+                            })?;
+
+                        Ok((node_id, status))
+                    }
                 })
                 .await
             {
@@ -373,22 +434,21 @@ impl CockroachClusterAdminClient {
         // Collect all successful results
         let mut successful_results = Vec::new();
         let mut results_iter = results.into_iter();
-        while let Some((addr, result)) = results_iter.next() {
+        while let Some(result) = results_iter.next() {
             match result {
-                Ok(status) => {
+                Ok((node_id, status)) => {
                     debug!(
                         self.log,
                         "Successfully fetched node status from CockroachDB node";
-                        "address" => %addr
+                        "node_id" => %node_id
                     );
-                    successful_results.push((addr, status));
+                    successful_results.push((node_id, status));
                 }
                 Err(e) => {
                     // Log the error but continue trying other backends
                     warn!(
                         self.log,
                         "Failed to fetch node status from CockroachDB node";
-                        "address" => %addr,
                         "error" => %e
                     );
                 }
@@ -701,28 +761,20 @@ impl PrometheusMetrics {
 }
 
 /// CockroachDB Node ID
-#[derive(
-    Debug,
-    Clone,
-    Copy,
-    PartialEq,
-    Eq,
-    Hash,
-    PartialOrd,
-    Ord,
-    Serialize,
-    Deserialize,
-)]
-#[serde(transparent)]
-pub struct NodeId(pub i32);
+///
+/// This field is stored internally as a String to avoid questions
+/// about size, signedness, etc - it can be treated as an arbitrary
+/// unique identifier.
+#[derive(Debug, Clone, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize)]
+pub struct NodeId(pub String);
 
 impl NodeId {
-    pub fn new(id: i32) -> Self {
+    pub fn new(id: String) -> Self {
         Self(id)
     }
 
-    pub fn as_i32(&self) -> i32 {
-        self.0
+    pub fn as_str(&self) -> &str {
+        &self.0
     }
 }
 
@@ -733,10 +785,65 @@ impl std::fmt::Display for NodeId {
 }
 
 impl std::str::FromStr for NodeId {
-    type Err = std::num::ParseIntError;
+    type Err = std::convert::Infallible;
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
-        Ok(Self(s.parse()?))
+        Ok(Self(s.to_string()))
+    }
+}
+
+// When parsing the underlying NodeId, we force it to be interpreted
+// as a String. Without this custom Deserialize implementation, we
+// encounter parsing errors when querying endpoints which return the
+// NodeId as an integer.
+impl<'de> serde::Deserialize<'de> for NodeId {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        use serde::de::{Error, Visitor};
+        use std::fmt;
+
+        struct NodeIdVisitor;
+
+        impl<'de> Visitor<'de> for NodeIdVisitor {
+            type Value = NodeId;
+
+            fn expecting(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
+                formatter
+                    .write_str("a string or integer representing a node ID")
+            }
+
+            fn visit_str<E>(self, value: &str) -> Result<Self::Value, E>
+            where
+                E: Error,
+            {
+                Ok(NodeId(value.to_string()))
+            }
+
+            fn visit_string<E>(self, value: String) -> Result<Self::Value, E>
+            where
+                E: Error,
+            {
+                Ok(NodeId(value))
+            }
+
+            fn visit_i64<E>(self, value: i64) -> Result<Self::Value, E>
+            where
+                E: Error,
+            {
+                Ok(NodeId(value.to_string()))
+            }
+
+            fn visit_u64<E>(self, value: u64) -> Result<Self::Value, E>
+            where
+                E: Error,
+            {
+                Ok(NodeId(value.to_string()))
+            }
+        }
+
+        deserializer.deserialize_any(NodeIdVisitor)
     }
 }
 
@@ -1117,7 +1224,8 @@ sql_exec_latency_bucket{le="0.01"} 25
     #[tokio::test]
     async fn test_cluster_client_caching() {
         let log = slog::Logger::root(slog::Discard, slog::o!());
-        let cluster = CockroachClusterAdminClient::new(log);
+        let timeout = Duration::from_secs(15);
+        let cluster = CockroachClusterAdminClient::new(log, timeout);
 
         // Initially no cached clients
         assert_eq!(cluster.get_cached_addresses().await.len(), 0);

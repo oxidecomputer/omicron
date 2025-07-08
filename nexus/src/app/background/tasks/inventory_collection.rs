@@ -22,6 +22,7 @@ use serde_json::json;
 use slog::{debug, o, warn};
 use std::net::SocketAddr;
 use std::sync::Arc;
+use std::time::Duration;
 use tokio::sync::watch;
 
 /// Background task that reads inventory for the rack
@@ -45,10 +46,12 @@ impl InventoryCollector {
         disable: bool,
     ) -> InventoryCollector {
         let (tx, _) = watch::channel(None);
+        let timeout = Duration::from_secs(15);
         let cockroach_admin_client = CockroachClusterAdminClient::new(
             opctx
                 .log
                 .new(slog::o!("component" => "inventory_cockroach_client")),
+            timeout,
         );
         InventoryCollector {
             datastore,
