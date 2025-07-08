@@ -45,23 +45,17 @@
 //!   [`ConfigReconcilerHandle::timesync_status()`] and
 //!   [`ConfigReconcilerHandle::inventory()`].
 
-// TODO-cleanup Remove once we've filled in all the `unimplemented!()`s that
-// will make use of various arguments and fields.
-#![allow(dead_code)]
-
 mod dataset_serialization_task;
 mod disks_common;
+mod dump_setup;
 mod dump_setup_task;
 mod handle;
+mod host_phase_2;
 mod internal_disks;
 mod ledger;
 mod raw_disks;
 mod reconciler_task;
 mod sled_agent_facilities;
-
-// TODO-cleanup Make this private once the reconciler uses it instead of
-// sled-agent proper.
-pub mod dump_setup;
 
 pub use dataset_serialization_task::DatasetTaskError;
 pub use dataset_serialization_task::NestedDatasetDestroyError;

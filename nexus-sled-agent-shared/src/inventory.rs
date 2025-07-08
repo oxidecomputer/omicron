@@ -16,8 +16,10 @@ use id_map::IdMappable;
 use iddqd::IdOrdItem;
 use iddqd::IdOrdMap;
 use iddqd::id_upcast;
-use omicron_common::disk::{DatasetKind, DatasetName};
+use omicron_common::disk::{DatasetKind, DatasetName, M2Slot};
 use omicron_common::ledger::Ledgerable;
+use omicron_common::snake_case_result;
+use omicron_common::snake_case_result::SnakeCaseResult;
 use omicron_common::update::OmicronZoneManifestSource;
 use omicron_common::{
     api::{
@@ -25,7 +27,6 @@ use omicron_common::{
         internal::shared::{NetworkInterface, SourceNatConfig},
     },
     disk::{DatasetConfig, DiskVariant, OmicronPhysicalDiskConfig},
-    snake_case_result::{self, SnakeCaseResult},
     update::ArtifactId,
     zpool_name::ZpoolName,
 };
@@ -139,6 +140,7 @@ pub struct ConfigReconcilerInventory {
     pub datasets: BTreeMap<DatasetUuid, ConfigReconcilerInventoryResult>,
     pub orphaned_datasets: IdOrdMap<OrphanedDataset>,
     pub zones: BTreeMap<OmicronZoneUuid, ConfigReconcilerInventoryResult>,
+    pub boot_partitions: BootPartitionContents,
 }
 
 impl ConfigReconcilerInventory {
@@ -202,8 +204,55 @@ impl ConfigReconcilerInventory {
             datasets,
             orphaned_datasets: IdOrdMap::new(),
             zones,
+            boot_partitions: {
+                // None of our callers care about this; if that changes, we
+                // could pass in boot partition contents.
+                let err = "constructed via debug_assume_success()".to_string();
+                BootPartitionContents {
+                    boot_disk: Err(err.clone()),
+                    slot_a: Err(err.clone()),
+                    slot_b: Err(err),
+                }
+            },
         }
     }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Deserialize, JsonSchema, Serialize)]
+pub struct BootPartitionContents {
+    #[serde(with = "snake_case_result")]
+    #[schemars(schema_with = "SnakeCaseResult::<M2Slot, String>::json_schema")]
+    pub boot_disk: Result<M2Slot, String>,
+    #[serde(with = "snake_case_result")]
+    #[schemars(
+        schema_with = "SnakeCaseResult::<BootPartitionDetails, String>::json_schema"
+    )]
+    pub slot_a: Result<BootPartitionDetails, String>,
+    #[serde(with = "snake_case_result")]
+    #[schemars(
+        schema_with = "SnakeCaseResult::<BootPartitionDetails, String>::json_schema"
+    )]
+    pub slot_b: Result<BootPartitionDetails, String>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Deserialize, JsonSchema, Serialize)]
+pub struct BootPartitionDetails {
+    pub header: BootImageHeader,
+    pub artifact_hash: ArtifactHash,
+    pub artifact_size: usize,
+}
+
+// There are several other fields in the header that we either parse and discard
+// or ignore completely; see https://github.com/oxidecomputer/boot-image-tools
+// for more thorough support.
+#[derive(Clone, Debug, PartialEq, Eq, Deserialize, JsonSchema, Serialize)]
+pub struct BootImageHeader {
+    pub flags: u64,
+    pub data_size: u64,
+    pub image_size: u64,
+    pub target_size: u64,
+    pub sha256: [u8; 32],
+    pub image_name: String,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Deserialize, JsonSchema, Serialize)]
@@ -961,14 +1010,17 @@ impl OmicronZoneType {
 ///
 /// # String representations of this type
 ///
-/// There are no fewer than five string representations for this type, all
+/// There are no fewer than six string representations for this type, all
 /// slightly different from each other.
 ///
 /// 1. [`Self::zone_prefix`]: Used to construct zone names.
 /// 2. [`Self::service_prefix`]: Used to construct SMF service names.
 /// 3. [`Self::name_prefix`]: Used to construct `Name` instances.
 /// 4. [`Self::report_str`]: Used for reporting and testing.
-/// 5. [`Self::artifact_name`]: Used to match TUF artifact names.
+/// 5. [`Self::artifact_id_name`]: Used to match TUF artifact IDs.
+/// 6. [`Self::artifact_in_install_dataset`]: Used to match zone image tarballs
+///    in the install dataset. (This method is equivalent to appending `.tar.gz`
+///    to the result of [`Self::zone_prefix`].)
 ///
 /// There is no `Display` impl to ensure that users explicitly choose the
 /// representation they want. (Please play close attention to this! The
@@ -978,7 +1030,7 @@ impl OmicronZoneType {
 /// ## Adding new representations
 ///
 /// If you have a new use case for a string representation, please reuse one of
-/// the four representations if at all possible. If you must add a new one,
+/// the six representations if at all possible. If you must add a new one,
 /// please add it here rather than doing something ad-hoc in the calling code
 /// so it's more legible.
 #[derive(
@@ -1021,6 +1073,30 @@ impl ZoneKind {
             ZoneKind::InternalDns => "internal_dns",
             ZoneKind::Nexus => "nexus",
             ZoneKind::Oximeter => "oximeter",
+        }
+    }
+
+    /// Return a string that identifies **zone image filenames** in the install
+    /// dataset.
+    ///
+    /// This method is exactly equivalent to `format!("{}.tar.gz",
+    /// self.zone_prefix())`, but returns `&'static str`s. A unit test ensures
+    /// they stay consistent.
+    pub fn artifact_in_install_dataset(self) -> &'static str {
+        match self {
+            // BoundaryNtp and InternalNtp both use "ntp".
+            ZoneKind::BoundaryNtp | ZoneKind::InternalNtp => "ntp.tar.gz",
+            ZoneKind::Clickhouse => "clickhouse.tar.gz",
+            ZoneKind::ClickhouseKeeper => "clickhouse_keeper.tar.gz",
+            ZoneKind::ClickhouseServer => "clickhouse_server.tar.gz",
+            // Note "cockroachdb" for historical reasons.
+            ZoneKind::CockroachDb => "cockroachdb.tar.gz",
+            ZoneKind::Crucible => "crucible.tar.gz",
+            ZoneKind::CruciblePantry => "crucible_pantry.tar.gz",
+            ZoneKind::ExternalDns => "external_dns.tar.gz",
+            ZoneKind::InternalDns => "internal_dns.tar.gz",
+            ZoneKind::Nexus => "nexus.tar.gz",
+            ZoneKind::Oximeter => "oximeter.tar.gz",
         }
     }
 
@@ -1090,7 +1166,12 @@ impl ZoneKind {
 
     /// Return a string used as an artifact name for control-plane zones.
     /// This is **not guaranteed** to be stable.
-    pub fn artifact_name(self) -> &'static str {
+    ///
+    /// These strings match the `ArtifactId::name`s Nexus constructs when
+    /// unpacking the composite control-plane artifact in a TUF repo. Currently,
+    /// these are chosen by reading the `pkg` value of the `oxide.json` object
+    /// inside each zone image tarball.
+    pub fn artifact_id_name(self) -> &'static str {
         match self {
             ZoneKind::BoundaryNtp => "ntp",
             ZoneKind::Clickhouse => "clickhouse",
@@ -1107,6 +1188,35 @@ impl ZoneKind {
         }
     }
 
+    /// Map an artifact ID name to the corresponding file name in the install
+    /// dataset.
+    ///
+    /// We don't allow mapping artifact ID names to `ZoneKind` because the map
+    /// isn't bijective -- both internal and boundary NTP zones use the same
+    /// `ntp` artifact. But the artifact ID name and the name in the install
+    /// dataset do form a bijective map.
+    pub fn artifact_id_name_to_install_dataset_file(
+        artifact_id_name: &str,
+    ) -> Option<&'static str> {
+        let zone_kind = match artifact_id_name {
+            // We arbitrarily select BoundaryNtp to perform the mapping with.
+            "ntp" => ZoneKind::BoundaryNtp,
+            "clickhouse" => ZoneKind::Clickhouse,
+            "clickhouse_keeper" => ZoneKind::ClickhouseKeeper,
+            "clickhouse_server" => ZoneKind::ClickhouseServer,
+            "cockroachdb" => ZoneKind::CockroachDb,
+            "crucible-zone" => ZoneKind::Crucible,
+            "crucible-pantry-zone" => ZoneKind::CruciblePantry,
+            "external-dns" => ZoneKind::ExternalDns,
+            "internal-dns" => ZoneKind::InternalDns,
+            "nexus" => ZoneKind::Nexus,
+            "oximeter" => ZoneKind::Oximeter,
+            _ => return None,
+        };
+
+        Some(zone_kind.artifact_in_install_dataset())
+    }
+
     /// Return true if an artifact represents a control plane zone image
     /// of this kind.
     pub fn is_control_plane_zone_artifact(
@@ -1118,7 +1228,7 @@ impl ZoneKind {
             .to_known()
             .map(|kind| matches!(kind, KnownArtifactKind::Zone))
             .unwrap_or(false)
-            && artifact_id.name == self.artifact_name()
+            && artifact_id.name == self.artifact_id_name()
     }
 }
 
@@ -1192,6 +1302,32 @@ mod tests {
                     name_prefix, zone_kind, e
                 );
             });
+        }
+    }
+
+    #[test]
+    fn test_zone_prefix_matches_artifact_in_install_dataset() {
+        for zone_kind in ZoneKind::iter() {
+            let zone_prefix = zone_kind.zone_prefix();
+            let expected_artifact = format!("{zone_prefix}.tar.gz");
+            assert_eq!(
+                expected_artifact,
+                zone_kind.artifact_in_install_dataset()
+            );
+        }
+    }
+
+    #[test]
+    fn test_artifact_id_to_install_dataset_file() {
+        for zone_kind in ZoneKind::iter() {
+            let artifact_id_name = zone_kind.artifact_id_name();
+            let expected_file = zone_kind.artifact_in_install_dataset();
+            assert_eq!(
+                Some(expected_file),
+                ZoneKind::artifact_id_name_to_install_dataset_file(
+                    artifact_id_name
+                )
+            );
         }
     }
 }

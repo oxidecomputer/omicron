@@ -140,9 +140,8 @@ pub const MIN_MEMORY_BYTES_PER_INSTANCE: u32 = 1 << 30; // 1 GiB
 // Before raising or removing this limit, testing has been valuable. See:
 // * illumos bug #17403
 // * Propolis issue #903
-// There are known issues setting this above 1028 GiB. See:
 // * Propolis issue #907
-pub const MAX_MEMORY_BYTES_PER_INSTANCE: u64 = 1024 * (1 << 30); // 1 TiB
+pub const MAX_MEMORY_BYTES_PER_INSTANCE: u64 = 1536 * (1 << 30); // 1.5 TiB
 
 pub const MIN_DISK_SIZE_BYTES: u32 = 1 << 30; // 1 GiB
 pub const MAX_DISK_SIZE_BYTES: u64 = 1023 * (1 << 30); // 1023 GiB
