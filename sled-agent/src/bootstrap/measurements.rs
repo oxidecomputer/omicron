@@ -3,7 +3,7 @@
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 //! Functions related to management of measurement corpus
-use camino::Utf8PathBuf;
+use camino::{Utf8Path, Utf8PathBuf};
 //use sled_storage::dataset::INSTALL_DATASET;
 //use sled_storage::manager::StorageHandle;
 use sled_agent_config_reconciler::InternalDisksReceiver;
@@ -15,6 +15,8 @@ pub enum MeasurementError {
     MissingInstallSet,
     #[error("io: {0}")]
     Io(std::io::Error),
+    #[error("Missing boot disk")]
+    MissingBootDisk,
 }
 
 /// Access the measurements in the install directory
@@ -27,22 +29,23 @@ pub async fn sled_new_measurement_paths(
     let current = receiver.current();
 
     dirs.push(
-        current.boot_disk_install_dataset().unwrap().join("measurements"),
+        current
+            .boot_disk_install_dataset()
+            .ok_or(MeasurementError::MissingBootDisk)?
+            .join("measurements"),
     );
-
-    //for (_, d) in current.non_boot_disk_install_datasets() {
-    //    dirs.push(d.join("measurements"));
-    //}
-
-    //let resources = storage.get_latest_disks().await;
-    //let dirs: Vec<_> = resources
-    //     .all_m2_mountpoints(INSTALL_DATASET)
-    //     .into_iter()
-    //     .map(|p| p.join("measurements"))
-    //     .collect();
 
     if dirs.is_empty() {
         return Err(MeasurementError::MissingInstallSet);
+    }
+
+    // We don't have an install dataset for our automated deployment
+    // testing. Instead, rely on the files getting copied/packaged.
+    let testing_corpus_path =
+        Utf8Path::new("/opt/oxide/sled-agent/pkg/testing-measurements");
+
+    if testing_corpus_path.is_dir() {
+        dirs.push(testing_corpus_path.into());
     }
 
     for dir in dirs {
