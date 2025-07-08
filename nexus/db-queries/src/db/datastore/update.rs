@@ -215,7 +215,12 @@ impl DataStore {
     ) -> ListResultVec<TufTrustRoot> {
         use nexus_db_schema::schema::tuf_trust_root::dsl;
 
-        opctx.authorize(authz::Action::Read, &authz::FLEET).await?;
+        opctx
+            .authorize(
+                authz::Action::ListChildren,
+                &authz::UPDATE_TRUST_ROOT_LIST,
+            )
+            .await?;
         paginated(dsl::tuf_trust_root, dsl::id, pagparams)
             .select(TufTrustRoot::as_select())
             .filter(dsl::time_deleted.is_null())
@@ -232,7 +237,12 @@ impl DataStore {
     ) -> CreateResult<TufTrustRoot> {
         use nexus_db_schema::schema::tuf_trust_root::dsl;
 
-        opctx.authorize(authz::Action::Modify, &authz::FLEET).await?;
+        opctx
+            .authorize(
+                authz::Action::CreateChild,
+                &authz::UPDATE_TRUST_ROOT_LIST,
+            )
+            .await?;
         diesel::insert_into(dsl::tuf_trust_root)
             .values(trust_root)
             .returning(TufTrustRoot::as_returning())

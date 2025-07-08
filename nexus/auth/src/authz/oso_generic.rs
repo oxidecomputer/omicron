@@ -114,6 +114,7 @@ pub fn make_omicron_oso(log: &slog::Logger) -> Result<OsoInit, anyhow::Error> {
         SiloCertificateList::get_polar_class(),
         SiloIdentityProviderList::get_polar_class(),
         SiloUserList::get_polar_class(),
+        UpdateTrustRootList::get_polar_class(),
         TargetReleaseConfig::get_polar_class(),
         AlertClassList::get_polar_class(),
     ];

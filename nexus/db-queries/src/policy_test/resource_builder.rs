@@ -290,6 +290,7 @@ impl_dyn_authorized_resource_for_global!(authz::DeviceAuthRequestList);
 impl_dyn_authorized_resource_for_global!(authz::DnsConfig);
 impl_dyn_authorized_resource_for_global!(authz::IpPoolList);
 impl_dyn_authorized_resource_for_global!(authz::Inventory);
+impl_dyn_authorized_resource_for_global!(authz::UpdateTrustRootList);
 impl_dyn_authorized_resource_for_global!(authz::TargetReleaseConfig);
 impl_dyn_authorized_resource_for_global!(authz::AlertClassList);
 
