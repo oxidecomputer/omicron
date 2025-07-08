@@ -411,46 +411,6 @@ impl<'a> Collector<'a> {
     async fn collect_all_cockroach(&mut self) {
         debug!(&self.log, "begin collection from CockroachDB nodes");
 
-        // First, try to get node status to determine actual node IDs
-        let node_status_results = self
-            .cockroach_admin_client
-            .fetch_node_status_from_all_nodes()
-            .await;
-
-        // When we receive these responses, they return:
-        //
-        // - A Vec of "Nodes", each of which includes a "node ID" and
-        // addresses of the HTTP and SQL servers.
-        // - Additionally, the response of "fetch_node_status_from_all_nodes"
-        // returns the SocketAddr we queried.
-        //
-        // However, we're querying the "cockroach admin" server, not the
-        // cockroach HTTP server directly. We would ideally like to know:
-        // "for each response, what node ID returned this data"?
-        //
-        // To access this data, we:
-        //
-        // 1. Make the assumption that the IP address of the Cockroach Admin
-        // server is the same as the Cockroach SQL server.
-        // 2. Create the mapping of "IP -> Response"
-        //
-        // If we find any responses that are in disagreement with each other,
-        // flag an error and stop the collection.
-
-        let mut ip_to_node_id = std::collections::HashMap::new();
-        for (_addr, nodes_response) in node_status_results {
-            for node in nodes_response.nodes {
-                let ip = node.desc.sql_address.address_field.ip();
-                let id = node.desc.node_id;
-                if let Some(old_id) = ip_to_node_id.insert(ip, id) {
-                    self.in_progress.found_error(InventoryError::from(
-                        anyhow::anyhow!("Found conflicting node IDs ({old_id} vs {id}) for {ip}")
-                    ));
-                    return;
-                }
-            }
-        }
-
         // Fetch metrics from all nodes
         let metrics_results = self
             .cockroach_admin_client
@@ -464,18 +424,9 @@ impl<'a> Collector<'a> {
             return;
         }
 
-        // Store results for each successful node using observed node IDs
-        for (addr, metrics) in metrics_results {
-            let Some(node_id) = ip_to_node_id.get(&addr.ip()) else {
-                self.in_progress.found_error(InventoryError::from(
-                    anyhow::anyhow!(
-                        "Could not determine CockroachDB node ID for address: {}",
-                        addr
-                    )
-                ));
-                continue;
-            };
-            self.in_progress.found_cockroach_metrics(*node_id, metrics);
+        // Store results for each successful node using the node ID returned by each node
+        for (node_id, metrics) in metrics_results {
+            self.in_progress.found_cockroach_metrics(node_id, metrics);
         }
     }
 }
@@ -789,7 +740,7 @@ mod test {
                     &serde_json::json!({
                         "nodes": [{
                             "desc": {
-                                "nodeId": 1,
+                                "nodeId": "1",
                                 "address": {
                                     "networkField": "tcp",
                                     "addressField": "127.0.0.1:26257"
@@ -821,6 +772,16 @@ mod test {
                     })
                     .to_string(),
                 )
+                .unwrap(),
+            );
+        });
+        mock_server.mock(|when, then| {
+            when.method(httpmock::Method::GET).path("/node/id");
+            then.status(200).header("content-type", "application/json").body(
+                serde_json::to_string(&serde_json::json!({
+                    "zone_id": "12345678-1234-1234-1234-123456789012",
+                    "node_id": "1"
+                }))
                 .unwrap(),
             );
         });

@@ -226,7 +226,7 @@ async fn test_cockroach_http_node_status(cptestctx: &ControlPlaneTestContext) {
         &NodeLiveness::Live
     );
 
-    assert_eq!(first_node.desc.node_id.as_i32(), 1);
+    assert_eq!(first_node.desc.node_id.as_str(), "1");
     assert!(
         !first_node.build_info.tag.is_empty(),
         "Build tag should not be empty"
