@@ -276,6 +276,7 @@ impl_dyn_authorized_resource_for_resource!(authz::SshKey);
 impl_dyn_authorized_resource_for_resource!(authz::SupportBundle);
 impl_dyn_authorized_resource_for_resource!(authz::TufArtifact);
 impl_dyn_authorized_resource_for_resource!(authz::TufRepo);
+impl_dyn_authorized_resource_for_resource!(authz::TufTrustRoot);
 impl_dyn_authorized_resource_for_resource!(authz::Vpc);
 impl_dyn_authorized_resource_for_resource!(authz::VpcSubnet);
 impl_dyn_authorized_resource_for_resource!(authz::Alert);
