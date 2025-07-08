@@ -25,10 +25,11 @@ use nexus_types::deployment::PendingMgsUpdate;
 use nexus_types::deployment::PendingMgsUpdateDetails;
 use slog::Logger;
 use slog::{debug, error, info};
+use slog_error_chain::InlineErrorChain;
 use std::time::Duration;
 use std::time::Instant;
 
-const WAIT_FOR_BOOT_INFO_TIMEOUT: Duration = Duration::from_secs(30);
+const WAIT_FOR_BOOT_INFO_TIMEOUT: Duration = Duration::from_secs(120);
 
 const WAIT_FOR_BOOT_INFO_INTERVAL: Duration = Duration::from_secs(10);
 
@@ -99,8 +100,9 @@ impl SpComponentUpdateHelper for ReconfiguratorRotBootloaderUpdater {
             } = &update.details
             else {
                 unreachable!(
-                    "pending MGS update details within ReconfiguratorSpUpdater \
-                    will always be for the RoT bootloader"
+                    "pending MGS update details within \
+                    ReconfiguratorRotBootloaderUpdater will always be for the \
+                    RoT bootloader"
                 );
             };
             if found_stage0_version != expected_stage0_version.to_string() {
@@ -203,11 +205,11 @@ impl SpComponentUpdateHelper for ReconfiguratorRotBootloaderUpdater {
         update: &'a PendingMgsUpdate,
     ) -> BoxFuture<'a, Result<(), PostUpdateError>> {
         async move {
-            // Before setting stage0 to the new version we want to ensure
-            // the image is good and we're not going to brick the device.
-            // We'll reset the device, causing it to check the signature.
-            // Then we'll validate that signature before we activate the
-            // new stage0.
+            // To protect against bricking itself, the device will only activate
+            // a new image after it's been verified. Images are only verified at
+            // device boot time. Thus, we'll reset the device once to cause the
+            // signature to be verified. Then we can activate the new image and
+            // reset the device again.
             debug!(
                 log,
                 "attempting to reset device to do bootloader signature check"
@@ -238,10 +240,12 @@ impl SpComponentUpdateHelper for ReconfiguratorRotBootloaderUpdater {
                 WAIT_FOR_BOOT_INFO_TIMEOUT,
             )
             .await?;
-            // If the image is not valid we bail
+            // If boot info contains any error with the image loaded onto
+            // stage0_next, we run the risk of bricking the device if this image
+            // is loaded onto stage0. We return a fatal error.
             if let Some(e) = stage0next_error {
                 return Err(PostUpdateError::FatalError {
-                    error: e.to_string(),
+                    error: InlineErrorChain::new(&e).to_string(),
                 });
             }
 
@@ -330,10 +334,18 @@ async fn wait_for_stage0_next_image_check(
             .await
         {
             Ok(state) => match state.into_inner() {
-                // The minimum we will ever return is 3.
+                // The minimum we will ever return is v3.
                 // Additionally, V2 does not report image errors, so we cannot
                 // know with certainty if a signature check came back with errors
-                RotState::V2 { .. } => unreachable!(),
+                RotState::V2 { .. } => {
+                    let error = "unexpected RoT version: 2".to_string();
+                    error!(
+                        log,
+                        "failed to get RoT boot info";
+                        "error" => &error
+                    );
+                    return Err(PostUpdateError::FatalError { error });
+                }
                 RotState::V3 { stage0next_error, .. } => {
                     return Ok(stage0next_error);
                 }
@@ -345,8 +357,8 @@ async fn wait_for_stage0_next_image_check(
                             "failed to get RoT boot info";
                             "error" => %message
                         );
-                        return Err(PostUpdateError::TransientError {
-                            message,
+                        return Err(PostUpdateError::FatalError {
+                            error: message,
                         });
                     }
 
@@ -360,19 +372,22 @@ async fn wait_for_stage0_next_image_check(
             },
             // The RoT might still be booting
             Err(error) => {
+                let e = InlineErrorChain::new(&error);
                 if before.elapsed() >= timeout {
                     error!(
                         log,
                         "failed to get RoT boot info";
-                        "error" => %error
+                        &e,
                     );
-                    return Err(PostUpdateError::GatewayClientError(error));
+                    return Err(PostUpdateError::FatalError {
+                        error: e.to_string(),
+                    });
                 }
 
                 info!(
                     log,
                     "failed getting RoT boot info (will retry)";
-                    "error" => %error,
+                    e,
                 );
                 tokio::time::sleep(WAIT_FOR_BOOT_INFO_INTERVAL).await;
             }

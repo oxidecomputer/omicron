@@ -32,11 +32,36 @@ use uuid::Uuid;
 
 /// How long may the status remain unchanged without us treating this as a
 /// problem?
-///
-/// With the RoT bootloader need to wait for 2 resets which have a timeout
-/// of 60 seconds each, and an attempt to retrieve boot info, which has a
-/// time out of 30 seconds. We then give ourselves a few more minutes to act
-/// as a buffer for other pending actions.
+//
+// Generally, this value covers two different things:
+//
+// 1. While we're uploading an image to the SP or it's being prepared, how long
+//     can the status stay the same before we give up altogether and try again?
+//     In practice, this would rarely pause for more than a few seconds.
+// 2. The period where we might wait for an update to complete -- either our own
+//     update (in which case this is the period after the final device reset
+//     until the device comes up reporting the new version) or another instance's
+//     update (in which case this could cover almost the _entire_ update
+//     process).
+//
+// In both cases, if the timeout is reached, the whole update attempt will fail.
+// This behavior is only intended to deal with pathological cases, like an MGS
+// crash (which could cause an upload to hang indefinitely) or a Nexus crash
+// (which could cause any update to hang indefinitely at any point). So we can
+// afford to be generous here. Further, we really don't want to trip this
+// erroneously in a working system because we're likely to get stuck continuing
+// to retry and give up before each attempt finishes.
+//
+// In terms of sizing this timeout:
+// - For all updates, the upload phase generally takes 10-20 seconds.
+// - For SP updates, the post-reset phase can take about 30s (with Sidecar SPs
+//    being the longest).
+// - For RoT and RoT bootloader updates, two resets and an intervening "set
+//    active slot" operation are required. Together, these could take just a
+//    few seconds.
+//
+// Adding all the above together, and giving ourselves plenty of margin, we
+// choose 10 minutes.
 pub const PROGRESS_TIMEOUT: Duration = Duration::from_secs(600);
 
 /// How long to wait between failed attempts to reset the device
@@ -220,7 +245,7 @@ pub(crate) async fn apply_update(
 
     // Check the live state first to see if:
     // - this update has already been completed,
-    // - we are waiting for an ongoing update, or
+    // - we should wait a bit because an update may be in-progress, or
     // - if not, then if our required preconditions are met
     status.update(UpdateAttemptStatus::Precheck);
     let before = Instant::now();
@@ -374,7 +399,7 @@ pub(crate) async fn apply_update(
 
     if try_reset {
         // We retry this until we get some error *other* than a communication
-        // error or an RoT bootloader image error.  There is intentionally no
+        // error or some other transient error.  There is intentionally no
         // timeout here.  If we've staged an update but not managed to reset
         // the device, there's no point where we'd want to stop trying to do so.
         while let Err(error) =
