@@ -100,8 +100,6 @@ pub(crate) async fn build_tuf_repo(
         });
     }
 
-
-
     // Add the OS images.
     manifest.artifacts.insert(
         KnownArtifactKind::Host,
