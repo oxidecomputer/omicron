@@ -20,6 +20,7 @@ pub use crate::inventory::ZpoolName;
 use blueprint_diff::ClickhouseClusterConfigDiffTablesForSingleBlueprint;
 use blueprint_display::BpDatasetsTableSchema;
 use daft::Diffable;
+use nexus_sled_agent_shared::inventory::HostPhase2DesiredContents;
 use nexus_sled_agent_shared::inventory::HostPhase2DesiredSlots;
 use nexus_sled_agent_shared::inventory::OmicronSledConfig;
 use nexus_sled_agent_shared::inventory::OmicronZoneConfig;
@@ -699,6 +700,7 @@ pub struct BlueprintSledConfig {
     pub datasets: IdMap<BlueprintDatasetConfig>,
     pub zones: IdMap<BlueprintZoneConfig>,
     pub remove_mupdate_override: Option<MupdateOverrideUuid>,
+    pub host_phase_2: BlueprintHostPhase2DesiredSlots,
 }
 
 impl BlueprintSledConfig {
@@ -744,9 +746,7 @@ impl BlueprintSledConfig {
                 })
                 .collect(),
             remove_mupdate_override: self.remove_mupdate_override,
-            // TODO BlueprintSledConfig should have a corresponding field.
-            // https://github.com/oxidecomputer/omicron/issues/8542
-            host_phase_2: HostPhase2DesiredSlots::current_contents(),
+            host_phase_2: self.host_phase_2.into(),
         }
     }
 
@@ -1028,13 +1028,13 @@ pub enum BlueprintZoneImageSource {
     /// This originates from TUF repos uploaded to Nexus which are then
     /// replicated out to all sleds.
     #[serde(rename_all = "snake_case")]
-    Artifact { version: BlueprintZoneImageVersion, hash: ArtifactHash },
+    Artifact { version: BlueprintArtifactVersion, hash: ArtifactHash },
 }
 
 impl BlueprintZoneImageSource {
     pub fn from_available_artifact(artifact: &TufArtifactMeta) -> Self {
         BlueprintZoneImageSource::Artifact {
-            version: BlueprintZoneImageVersion::Available {
+            version: BlueprintArtifactVersion::Available {
                 version: artifact.id.version.clone(),
             },
             hash: artifact.hash,
@@ -1068,7 +1068,7 @@ impl fmt::Display for BlueprintZoneImageSource {
     }
 }
 
-/// The version of a blueprint zone image in use.
+/// The version of an artifact in a blueprint.
 ///
 /// This is used for debugging output.
 #[derive(
@@ -1084,8 +1084,8 @@ impl fmt::Display for BlueprintZoneImageSource {
     Serialize,
     Diffable,
 )]
-#[serde(tag = "image_version", rename_all = "snake_case")]
-pub enum BlueprintZoneImageVersion {
+#[serde(tag = "artifact_version", rename_all = "snake_case")]
+pub enum BlueprintArtifactVersion {
     /// A specific version of the image is available.
     Available { version: ArtifactVersion },
 
@@ -1093,15 +1093,90 @@ pub enum BlueprintZoneImageVersion {
     Unknown,
 }
 
-impl fmt::Display for BlueprintZoneImageVersion {
+impl fmt::Display for BlueprintArtifactVersion {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            BlueprintZoneImageVersion::Available { version } => {
+            BlueprintArtifactVersion::Available { version } => {
                 write!(f, "version {version}")
             }
-            BlueprintZoneImageVersion::Unknown => {
+            BlueprintArtifactVersion::Unknown => {
                 write!(f, "(unknown version)")
             }
+        }
+    }
+}
+
+/// Describes the desired contents for both host phase 2 slots.
+///
+/// This is the blueprint version of [`HostPhase2DesiredSlots`].
+#[derive(
+    Clone, Debug, Deserialize, Serialize, JsonSchema, PartialEq, Eq, Diffable,
+)]
+#[serde(rename_all = "snake_case")]
+pub struct BlueprintHostPhase2DesiredSlots {
+    pub slot_a: BlueprintHostPhase2DesiredContents,
+    pub slot_b: BlueprintHostPhase2DesiredContents,
+}
+
+impl From<BlueprintHostPhase2DesiredSlots> for HostPhase2DesiredSlots {
+    fn from(value: BlueprintHostPhase2DesiredSlots) -> Self {
+        Self { slot_a: value.slot_a.into(), slot_b: value.slot_b.into() }
+    }
+}
+
+impl BlueprintHostPhase2DesiredSlots {
+    /// Return a `BlueprintHostPhase2DesiredSlots` with both slots set to
+    /// [`BlueprintHostPhase2DesiredContents::CurrentContents`]; i.e., "make no
+    /// changes to the current contents of either slot".
+    pub const fn current_contents() -> Self {
+        Self {
+            slot_a: BlueprintHostPhase2DesiredContents::CurrentContents,
+            slot_b: BlueprintHostPhase2DesiredContents::CurrentContents,
+        }
+    }
+}
+
+/// Describes the desired contents of a host phase 2 slot (i.e., the boot
+/// partition on one of the internal M.2 drives).
+///
+/// This is the blueprint version of [`HostPhase2DesiredContents`].
+#[derive(
+    Clone, Debug, Deserialize, Serialize, JsonSchema, PartialEq, Eq, Diffable,
+)]
+#[serde(tag = "type", rename_all = "snake_case")]
+pub enum BlueprintHostPhase2DesiredContents {
+    /// Do not change the current contents.
+    ///
+    /// We use this value when we've detected a sled has been mupdated (and we
+    /// don't want to overwrite phase 2 images until we understand how to
+    /// recover from that mupdate) and as the default value when reading a
+    /// blueprint that was ledgered before this concept existed.
+    CurrentContents,
+
+    /// Set the phase 2 slot to the given artifact.
+    ///
+    /// The artifact will come from an unpacked and distributed TUF repo.
+    Artifact { version: BlueprintArtifactVersion, hash: ArtifactHash },
+}
+
+impl From<BlueprintHostPhase2DesiredContents> for HostPhase2DesiredContents {
+    fn from(value: BlueprintHostPhase2DesiredContents) -> Self {
+        match value {
+            BlueprintHostPhase2DesiredContents::CurrentContents => {
+                Self::CurrentContents
+            }
+            BlueprintHostPhase2DesiredContents::Artifact { hash, .. } => {
+                Self::Artifact { hash }
+            }
+        }
+    }
+}
+
+impl BlueprintHostPhase2DesiredContents {
+    pub fn artifact_hash(&self) -> Option<ArtifactHash> {
+        match self {
+            Self::CurrentContents => None,
+            Self::Artifact { hash, .. } => Some(*hash),
         }
     }
 }

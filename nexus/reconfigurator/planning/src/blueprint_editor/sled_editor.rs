@@ -11,6 +11,7 @@ use itertools::Either;
 use nexus_sled_agent_shared::inventory::ZoneKind;
 use nexus_types::deployment::BlueprintDatasetConfig;
 use nexus_types::deployment::BlueprintDatasetDisposition;
+use nexus_types::deployment::BlueprintHostPhase2DesiredSlots;
 use nexus_types::deployment::BlueprintPhysicalDiskConfig;
 use nexus_types::deployment::BlueprintPhysicalDiskDisposition;
 use nexus_types::deployment::BlueprintSledConfig;
@@ -404,6 +405,8 @@ struct ActiveSledEditor {
     disks: DisksEditor,
     datasets: DatasetsEditor,
     remove_mupdate_override: ScalarEditor<Option<MupdateOverrideUuid>>,
+    // TODO-john make a host phase 2 editor type
+    host_phase_2: BlueprintHostPhase2DesiredSlots,
     debug_force_generation_bump: bool,
 }
 
@@ -439,6 +442,7 @@ impl ActiveSledEditor {
             remove_mupdate_override: ScalarEditor::new(
                 config.remove_mupdate_override,
             ),
+            host_phase_2: config.host_phase_2,
             debug_force_generation_bump: false,
         })
     }
@@ -458,6 +462,7 @@ impl ActiveSledEditor {
             disks: DisksEditor::empty(),
             datasets: DatasetsEditor::empty(),
             remove_mupdate_override: ScalarEditor::new(None),
+            host_phase_2: BlueprintHostPhase2DesiredSlots::current_contents(),
             debug_force_generation_bump: false,
         }
     }
@@ -490,6 +495,7 @@ impl ActiveSledEditor {
                 remove_mupdate_override: self
                     .remove_mupdate_override
                     .finalize(),
+                host_phase_2: self.host_phase_2,
             },
             edit_counts: SledEditCounts {
                 disks: disks_counts,

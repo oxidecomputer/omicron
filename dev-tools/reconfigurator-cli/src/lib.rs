@@ -32,11 +32,11 @@ use nexus_types::deployment::execution;
 use nexus_types::deployment::execution::blueprint_external_dns_config;
 use nexus_types::deployment::execution::blueprint_internal_dns_config;
 use nexus_types::deployment::{Blueprint, UnstableReconfiguratorState};
+use nexus_types::deployment::{BlueprintArtifactVersion, PendingMgsUpdate};
 use nexus_types::deployment::{BlueprintZoneDisposition, ExpectedVersion};
 use nexus_types::deployment::{
     BlueprintZoneImageSource, PendingMgsUpdateDetails,
 };
-use nexus_types::deployment::{BlueprintZoneImageVersion, PendingMgsUpdate};
 use nexus_types::deployment::{OmicronZoneNic, TargetReleaseDescription};
 use nexus_types::external_api::views::SledPolicy;
 use nexus_types::external_api::views::SledProvisionPolicy;
@@ -841,8 +841,8 @@ enum ImageSourceArgs {
     InstallDataset,
     /// the zone image comes from a specific TUF repo artifact
     Artifact {
-        #[clap(value_parser = parse_blueprint_zone_image_version)]
-        version: BlueprintZoneImageVersion,
+        #[clap(value_parser = parse_blueprint_artifact_version)]
+        version: BlueprintArtifactVersion,
         hash: ArtifactHash,
     },
 }
@@ -881,10 +881,10 @@ fn image_source_unwrap_or(
                 Ok(BlueprintZoneImageSource::InstallDataset) | Err(_) => (),
                 Ok(BlueprintZoneImageSource::Artifact { version, hash }) => {
                     let version = match version {
-                        BlueprintZoneImageVersion::Available { version } => {
+                        BlueprintArtifactVersion::Available { version } => {
                             version.to_string()
                         }
-                        BlueprintZoneImageVersion::Unknown => {
+                        BlueprintArtifactVersion::Unknown => {
                             "unknown".to_string()
                         }
                     };
@@ -914,15 +914,15 @@ impl From<ImageSourceArgs> for BlueprintZoneImageSource {
     }
 }
 
-fn parse_blueprint_zone_image_version(
+fn parse_blueprint_artifact_version(
     version: &str,
-) -> Result<BlueprintZoneImageVersion, ArtifactVersionError> {
+) -> Result<BlueprintArtifactVersion, ArtifactVersionError> {
     // Treat the literal string "unknown" as an unknown version.
     if version == "unknown" {
-        return Ok(BlueprintZoneImageVersion::Unknown);
+        return Ok(BlueprintArtifactVersion::Unknown);
     }
 
-    Ok(BlueprintZoneImageVersion::Available {
+    Ok(BlueprintArtifactVersion::Available {
         version: version.parse::<ArtifactVersion>()?,
     })
 }

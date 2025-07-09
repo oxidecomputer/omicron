@@ -91,6 +91,7 @@ use std::collections::BTreeMap;
 use std::collections::BTreeSet;
 use std::sync::Arc;
 use thiserror::Error;
+use tufaceous_artifact::ArtifactKind;
 use tufaceous_artifact::KnownArtifactKind;
 use uuid::Uuid;
 
@@ -228,6 +229,16 @@ impl DataStore {
                 remove_mupdate_override: sled
                     .remove_mupdate_override
                     .map(|id| id.into()),
+                host_phase_2_desired_slot_a: sled
+                    .host_phase_2
+                    .slot_a
+                    .artifact_hash()
+                    .map(ArtifactHash),
+                host_phase_2_desired_slot_b: sled
+                    .host_phase_2
+                    .slot_b
+                    .artifact_hash()
+                    .map(ArtifactHash),
             })
             .collect::<Vec<_>>();
 
@@ -735,6 +746,12 @@ impl DataStore {
         // below).
         let mut sled_configs: BTreeMap<SledUuid, BlueprintSledConfig> = {
             use nexus_db_schema::schema::bp_sled_metadata::dsl;
+            use nexus_db_schema::schema::tuf_artifact::dsl as tuf_artifact_dsl;
+
+            let (tuf1, tuf2) = diesel::alias!(
+                nexus_db_schema::schema::tuf_artifact as tuf_artifact_1,
+                nexus_db_schema::schema::tuf_artifact as tuf_artifact_2,
+            );
 
             let mut sled_configs = BTreeMap::new();
             let mut paginator = Paginator::new(
@@ -748,16 +765,47 @@ impl DataStore {
                     &p.current_pagparams(),
                 )
                 .filter(dsl::blueprint_id.eq(to_db_typed_uuid(blueprint_id)))
-                .select(BpSledMetadata::as_select())
-                .load_async(&*conn)
+                // Left join against the tuf_artifact table twice (once for each
+                // host slot) in case the artifact is missing from the table,
+                // which is non-fatal.
+                .left_join(
+                    tuf1.on(tuf1
+                        .field(tuf_artifact_dsl::kind)
+                        .eq(ArtifactKind::HOST_PHASE_2.to_string())
+                        .and(
+                            tuf1.field(tuf_artifact_dsl::sha256)
+                                .nullable()
+                                .eq(dsl::host_phase_2_desired_slot_a),
+                        )),
+                )
+                .left_join(
+                    tuf2.on(tuf2
+                        .field(tuf_artifact_dsl::kind)
+                        .eq(ArtifactKind::HOST_PHASE_2.to_string())
+                        .and(
+                            tuf2.field(tuf_artifact_dsl::sha256)
+                                .nullable()
+                                .eq(dsl::host_phase_2_desired_slot_b),
+                        )),
+                )
+                .select((
+                    BpSledMetadata::as_select(),
+                    tuf1.fields(tuf_artifact_dsl::version).nullable(),
+                    tuf2.fields(tuf_artifact_dsl::version).nullable(),
+                ))
+                .load_async::<(
+                    BpSledMetadata,
+                    Option<DbArtifactVersion>,
+                    Option<DbArtifactVersion>,
+                )>(&*conn)
                 .await
                 .map_err(|e| {
                     public_error_from_diesel(e, ErrorHandler::Server)
                 })?;
 
-                paginator = p.found_batch(&batch, &|s| s.sled_id);
+                paginator = p.found_batch(&batch, &|(s, _, _)| s.sled_id);
 
-                for s in batch {
+                for (s, slot_a_version, slot_b_version) in batch {
                     let config = BlueprintSledConfig {
                         state: s.sled_state.into(),
                         sled_agent_generation: *s.sled_agent_generation,
@@ -767,6 +815,8 @@ impl DataStore {
                         remove_mupdate_override: s
                             .remove_mupdate_override
                             .map(|id| id.into()),
+                        host_phase_2: s
+                            .host_phase_2(slot_a_version, slot_b_version),
                     };
                     let old = sled_configs.insert(s.sled_id.into(), config);
                     bail_unless!(
@@ -2304,11 +2354,11 @@ mod tests {
     use nexus_reconfigurator_planning::blueprint_builder::EnsureMultiple;
     use nexus_reconfigurator_planning::example::ExampleSystemBuilder;
     use nexus_reconfigurator_planning::example::example;
+    use nexus_types::deployment::BlueprintArtifactVersion;
     use nexus_types::deployment::BlueprintPhysicalDiskDisposition;
     use nexus_types::deployment::BlueprintZoneConfig;
     use nexus_types::deployment::BlueprintZoneDisposition;
     use nexus_types::deployment::BlueprintZoneImageSource;
-    use nexus_types::deployment::BlueprintZoneImageVersion;
     use nexus_types::deployment::BlueprintZoneType;
     use nexus_types::deployment::OmicronZoneExternalFloatingIp;
     use nexus_types::deployment::PendingMgsUpdate;
@@ -2797,7 +2847,7 @@ mod tests {
                     new_sled_id,
                     zone_ids[0],
                     BlueprintZoneImageSource::Artifact {
-                        version: BlueprintZoneImageVersion::Available {
+                        version: BlueprintArtifactVersion::Available {
                             version: ARTIFACT_VERSION_1,
                         },
                         hash: ARTIFACT_HASH_1,
@@ -2809,7 +2859,7 @@ mod tests {
                     new_sled_id,
                     zone_ids[1],
                     BlueprintZoneImageSource::Artifact {
-                        version: BlueprintZoneImageVersion::Unknown,
+                        version: BlueprintArtifactVersion::Unknown,
                         hash: ARTIFACT_HASH_2,
                     },
                 )

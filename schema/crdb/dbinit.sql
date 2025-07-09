@@ -4404,6 +4404,13 @@ CREATE TABLE IF NOT EXISTS omicron.public.bp_sled_metadata (
     sled_agent_generation INT8 NOT NULL,
     -- NULL means do not remove any overrides
     remove_mupdate_override UUID,
+
+    -- desired artifact hash for internal disk slots' boot partitions
+    -- NULL is translated to
+    -- `BlueprintHostPhase2DesiredContents::CurrentContents`
+    host_phase_2_desired_slot_a STRING(64),
+    host_phase_2_desired_slot_b STRING(64),
+
     PRIMARY KEY (blueprint_id, sled_id)
 );
 
