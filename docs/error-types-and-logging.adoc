@@ -2,7 +2,9 @@
 :numbered:
 :toc: left
 
-= Background
+= Defining Error Types and Logging Errors
+
+== Background
 
 We rely on the Rust standard library
 https://doc.rust-lang.org/std/error/trait.Error.html[`std::error::Error`] trait
@@ -67,7 +69,7 @@ clarify the operation that failed. However, there are several ways to do this
 incorrectly (particularly: in ways that can lose information), which is what
 this document attempts to cover.
 
-= Defining Error enums with `thiserror`
+== Defining Error enums with `thiserror`
 
 In omicron we primarily use
 https://docs.rs/thiserror/latest/thiserror/[`thiserror`] to define types that
@@ -144,7 +146,7 @@ omicron in various places; we should try to fix them as we can!). I think it's
 too easy to do the wrong thing in these cases, but I don't know that there's a
 good way to address that other than documenting them as we do here.
 
-== Pitfall 1: Not Logging the Full Error Chain
+=== Pitfall 1: Not Logging the Full Error Chain
 
 Continuing with the example above, if the caller of `read_file_with_context()`
 tries to print the error as a string or log it using its `Display`
@@ -235,7 +237,7 @@ if let Err(err) = read_file_with_context(path) {
 }
 ----
 
-== Pitfall 2: Including Inner Error in Outer Error's `Display` Implementation
+=== Pitfall 2: Including Inner Error in Outer Error's `Display` Implementation
 
 A ``std::error::Error``'s `Display` implementation should _not_ recurse into its
 source's `Display` implementation. As noted in "Pitfall 1", this is a very easy
@@ -426,7 +428,7 @@ this guidance to the Rust API guidelines. This links to a discussion including
 https://users.rust-lang.org/t/do-people-not-care-about-printable-error-chains-a-k-a-how-to-nicely-implement-display-for-an-error/35362/2[comments
 from the `thiserror` author] confirming this point.
 
-== Pitfall 3: Overusing ``#[from]``
+=== Pitfall 3: Overusing ``#[from]``
 
 Pitfall 1 and 2 lead to _incorrect_ error definitions and lost error causes.
 This pitfall is more of a judgment call / recommendation. `thiserror` allows an
@@ -482,7 +484,7 @@ an inner error that already includes all relevant context), consider using
 ``\#[error(transparent)]`` with ``#[from]``; this will delegate the `Display`
 impl for this variant directly to the inner error.
 
-= Using `anyhow`
+== Using `anyhow`
 
 General guidance is "use `thiserror` for libraries and `anyhow` for
 applications". `thiserror` allows callers to programmatically inspect error
