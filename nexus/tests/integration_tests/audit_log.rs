@@ -91,8 +91,13 @@ async fn test_audit_log_list(ctx: &ControlPlaneTestContext) {
     assert_eq!(e1.access_method, Some("spoof".to_string()));
     assert!(e1.timestamp >= t1 && e1.timestamp <= t2);
     assert!(e1.time_completed > e1.timestamp);
-    assert_eq!(e1.actor_id, Some(USER_TEST_PRIVILEGED.id()));
-    assert_eq!(e1.actor_silo_id, Some(DEFAULT_SILO_ID));
+    assert_eq!(
+        e1.actor,
+        views::AuditLogEntryActor::SiloUser {
+            silo_user_id: USER_TEST_PRIVILEGED.id(),
+            silo_id: DEFAULT_SILO_ID,
+        }
+    );
 
     assert_eq!(e2.request_uri, "/v1/projects");
     assert_eq!(e2.operation_id, "project_create");
@@ -101,8 +106,13 @@ async fn test_audit_log_list(ctx: &ControlPlaneTestContext) {
     assert_eq!(e2.access_method, Some("spoof".to_string()));
     assert!(e2.timestamp >= t2 && e2.timestamp <= t3);
     assert!(e2.time_completed > e2.timestamp);
-    assert_eq!(e2.actor_id, Some(USER_TEST_PRIVILEGED.id()));
-    assert_eq!(e2.actor_silo_id, Some(DEFAULT_SILO_ID));
+    assert_eq!(
+        e2.actor,
+        views::AuditLogEntryActor::SiloUser {
+            silo_user_id: USER_TEST_PRIVILEGED.id(),
+            silo_id: DEFAULT_SILO_ID,
+        }
+    );
 
     // we can exclude the entry by timestamp
     let audit_log = fetch_log(client, t2, Some(t2)).await;
