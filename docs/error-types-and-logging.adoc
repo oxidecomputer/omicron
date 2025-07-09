@@ -237,7 +237,7 @@ if let Err(err) = read_file_with_context(path) {
 
 == Pitfall 2: Including Inner Error in Outer Error's `Display` Implementation
 
-A `std::error::Error`'s `Display` implementation should _not_ recurse into its
+A +std::error::Error+'s `Display` implementation should _not_ recurse into its
 source's `Display` implementation. As noted in "Pitfall 1", this is a very easy
 mistake to make, because it appears to fix a real problem. Continuing with the
 example, if we change the error definition to include the source's `Display`
@@ -377,7 +377,7 @@ enum OuterError {
 // Prints the full error chain with no doublespeak:
 //
 // ```
-// middle operation failed:  inner operation failed: lowest-level error
+// middle operation failed: inner operation failed: lowest-level error
 // ```
 if let Err(outer_err) = some_function() {
     println!("{}", InlineErrorChain::new(&outer_err));
@@ -426,11 +426,11 @@ this guidance to the Rust API guidelines. This links to a discussion including
 https://users.rust-lang.org/t/do-people-not-care-about-printable-error-chains-a-k-a-how-to-nicely-implement-display-for-an-error/35362/2[comments
 from the `thiserror` author] confirming this point.
 
-== Pitfall 3: Overusing +#[from]+
+== Pitfall 3: Overusing +#+[from]+
 
 Pitfall 1 and 2 lead to _incorrect_ error definitions and lost error causes.
 This pitfall is more of a judgment call / recommendation. `thiserror` allows an
-inner error to be specified as +#[from]+ instead of +#[source]+; e.g.,
+inner error to be specified as +#+[from]+ instead of +#[source]+; e.g.,
 
 [source,rust]
 ----
