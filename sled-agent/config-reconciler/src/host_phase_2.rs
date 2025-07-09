@@ -1128,6 +1128,8 @@ mod tests {
         .expect_err("failed to reconcile slot");
         assert_eq!(None, cache.as_ref());
         assert_matches!(err, BootPartitionError::OpenDevfs { .. });
+
+        logctx.cleanup_successful();
     }
 
     #[tokio::test]
@@ -1227,5 +1229,7 @@ mod tests {
         let slot_a_data =
             std::fs::read(harness.path(M2Slot::A)).expect("read slot A");
         assert_eq!(slot_a_data, slot_b_data);
+
+        logctx.cleanup_successful();
     }
 }
