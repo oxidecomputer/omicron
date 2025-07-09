@@ -760,6 +760,9 @@ set sled 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6 SP versions: active -> 1.0.0
 generated inventory collection 61f451b3-2121-4ed6-91c7-a550054f6c21 from configured sleds
 
 > blueprint-plan af934083-59b5-4bf6-8966-6fb5292c29e1 61f451b3-2121-4ed6-91c7-a550054f6c21
+INFO noop converting 0/9 install-dataset zones to artifact store, sled_id: 2b8f0cb3-0295-4b3c-bc58-4fe88b57112c
+INFO noop converting 0/8 install-dataset zones to artifact store, sled_id: 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6
+INFO noop converting 0/8 install-dataset zones to artifact store, sled_id: d81c6a84-79b8-4958-ae41-ea46c9b19763
 INFO sufficient BoundaryNtp zones exist in plan, desired_count: 0, current_count: 0
 INFO sufficient Clickhouse zones exist in plan, desired_count: 1, current_count: 1
 INFO sufficient ClickhouseKeeper zones exist in plan, desired_count: 0, current_count: 0
@@ -1341,6 +1344,9 @@ set sled 2b8f0cb3-0295-4b3c-bc58-4fe88b57112c SP versions: active -> 1.0.0
 generated inventory collection 0b5efbb3-0b1b-4bbf-b7d8-a2d6fca074c6 from configured sleds
 
 > blueprint-plan 9034c710-3e57-45f3-99e5-4316145e87ac 0b5efbb3-0b1b-4bbf-b7d8-a2d6fca074c6
+INFO noop converting 0/9 install-dataset zones to artifact store, sled_id: 2b8f0cb3-0295-4b3c-bc58-4fe88b57112c
+INFO noop converting 0/8 install-dataset zones to artifact store, sled_id: 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6
+INFO noop converting 0/8 install-dataset zones to artifact store, sled_id: d81c6a84-79b8-4958-ae41-ea46c9b19763
 INFO sufficient BoundaryNtp zones exist in plan, desired_count: 0, current_count: 0
 INFO sufficient Clickhouse zones exist in plan, desired_count: 1, current_count: 1
 INFO sufficient ClickhouseKeeper zones exist in plan, desired_count: 0, current_count: 0
@@ -1534,6 +1540,9 @@ set sled d81c6a84-79b8-4958-ae41-ea46c9b19763 RoT settings: slot a -> 1.0.0
 generated inventory collection 78f72e8d-46a9-40a9-8618-602f54454d80 from configured sleds
 
 > blueprint-plan d60afc57-f15d-476c-bd0f-b1071e2bb976 78f72e8d-46a9-40a9-8618-602f54454d80
+INFO noop converting 0/9 install-dataset zones to artifact store, sled_id: 2b8f0cb3-0295-4b3c-bc58-4fe88b57112c
+INFO noop converting 0/8 install-dataset zones to artifact store, sled_id: 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6
+INFO noop converting 0/8 install-dataset zones to artifact store, sled_id: d81c6a84-79b8-4958-ae41-ea46c9b19763
 INFO sufficient BoundaryNtp zones exist in plan, desired_count: 0, current_count: 0
 INFO sufficient Clickhouse zones exist in plan, desired_count: 1, current_count: 1
 INFO sufficient ClickhouseKeeper zones exist in plan, desired_count: 0, current_count: 0

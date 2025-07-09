@@ -813,7 +813,7 @@ fn try_make_update_rot(
     Some(PendingMgsUpdate {
         baseboard_id: baseboard_id.clone(),
         sp_type: sp_info.sp_type,
-        slot_id: u32::from(sp_info.sp_slot),
+        slot_id: sp_info.sp_slot,
         details: PendingMgsUpdateDetails::Rot {
             expected_active_slot,
             expected_inactive_version,
