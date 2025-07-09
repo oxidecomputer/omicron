@@ -2981,10 +2981,10 @@ pub trait NexusExternalApi {
 
     /// List root roles in the updates trust store
     ///
-    /// Root roles are JSON documents describing the cryptographic keys
-    /// trusted to sign system release repositories, as described by The Update
-    /// Framework. Uploading a repository requires its metadata to be signed by
-    /// keys trusted by the trust store.
+    /// A root role is a JSON document describing the cryptographic keys that
+    /// are trusted to sign system release repositories, as described by The
+    /// Update Framework. Uploading a repository requires its metadata to be
+    /// signed by keys trusted by the trust store.
     #[endpoint {
         method = GET,
         path = "/v1/system/update/trust-roots",
