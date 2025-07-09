@@ -148,6 +148,8 @@ async fn test_unauthorized() {
         let setup_response = setup_results.get(&endpoint.url);
         verify_endpoint(&log, client, endpoint, setup_response).await;
     }
+
+    cptestctx.teardown().await;
 }
 
 const VERIFY_HEADER: &str = r#"
