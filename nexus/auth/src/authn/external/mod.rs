@@ -7,6 +7,7 @@
 use super::Details;
 use super::SiloAuthnPolicy;
 use crate::authn;
+use crate::probes;
 use async_trait::async_trait;
 use authn::Reason;
 use slog::trace;
@@ -72,8 +73,18 @@ where
         for scheme_impl in &self.allowed_schemes {
             let scheme_name = scheme_impl.name();
             trace!(log, "authn: trying {:?}", scheme_name);
+            let id = usdt::UniqueId::new();
+            probes::authn__start!(|| {
+                (
+                    &id,
+                    scheme_name.to_string(),
+                    request.method().to_string(),
+                    request.uri().to_string(),
+                )
+            });
             schemes_tried.push(scheme_name);
             let result = scheme_impl.authn(ctx, log, request).await;
+            probes::authn__done!(|| (id, format!("{result:?}")));
             match result {
                 // TODO-security If the user explicitly failed one
                 // authentication scheme (i.e., a signature that didn't match,
