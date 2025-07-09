@@ -17,7 +17,7 @@ The documentation notes this about `source()`:
 > `Error::source()` is generally used when errors cross "abstraction
 > boundaries". If one module must report an error that is caused by an error
 > from a lower-level module, it can allow accessing that error via
-> Error::source().
+> `Error::source()`.
 
 Wrapping inner errors is critical for attaching additional context. For example,
 a function that attempts to open and read a file in a couple of parts could
@@ -99,6 +99,7 @@ enum ReadFileError {
         #[source]
         err: io::Error,
     },
+    // ... more error variants ...
 }
 
 fn read_file_with_context(path: &Utf8Path) -> Result<(), ReadFileError> {
@@ -126,11 +127,6 @@ fn read_file_with_context(path: &Utf8Path) -> Result<(), ReadFileError> {
     Ok(())
 }
 ----
-
-(In this example, every variant happens to carry the same fields, so we could
-consider different styles of writing this that avoided this duplication. But
-usually different variants have different types of fields or different types of
-inner errors, so we'll live with the duplication for simplicity.)
 
 Using this error type _and a method of logging errors that includes the chain of
 error sources_, we will get the error messages we wanted:
@@ -205,10 +201,10 @@ Instead, use an adapter that knows how to walk the full chain of errors. Many
 crates (including `anyhow`, discussed below) provide this functionality. Because
 we make heavy use of `slog`, we have
 https://github.com/oxidecomputer/slog-error-chain[`slog-error-chain`], which
-provides the `InlineErrorChain` type that:
+provides the `InlineErrorChain` adapter that:
 
-* Includes the full error chain, separated by `: `, in its `Display` impl
-* Implements `slog::KV` and `slog::Value` for easy inclusion in `slog` logs
+* includes the full error chain, separated by colons in its `Display` impl
+* implements `slog::KV` and `slog::Value` for easy inclusion in `slog` logs
 
 Example usage:
 
@@ -305,10 +301,10 @@ The more subtle error is that if there are at least three errors in the chain
 and any of the intermediate errors are correctly defined (i.e., their `Display`
 implementation does not recurse to their source), then printing the error
 without an `InlineErrorChain`-like adapter will _lose_ information; any errors
-in the chain later than the correctly-defined one will be lost.
+in the chain later than the correctly-defined one will be omitted.
 
 For example, consider a three deep error chain where the middle error does not
-include its source but the outermost error does:
+recurse to its source's `Display` impl but the outermost error does:
 
 [source,rust]
 ----
@@ -391,7 +387,7 @@ if let Err(outer_err) = some_function() {
 This property that `std::error::Error` display implementations should not
 recurse to their source errors is not currently well-documented (to the best of
 my knowledge!). It matches the example from the standard library documentation
-on `Error::source()`, where `SuperError`'s display implementation only displays
+on `Error::source()`, where +SuperError+'s display implementation only displays
 itself:
 
 [source,rust]
@@ -430,11 +426,11 @@ this guidance to the Rust API guidelines. This links to a discussion including
 https://users.rust-lang.org/t/do-people-not-care-about-printable-error-chains-a-k-a-how-to-nicely-implement-display-for-an-error/35362/2[comments
 from the `thiserror` author] confirming this point.
 
-== Pitfall 3: Overusing `#[from]`
+== Pitfall 3: Overusing +#[from]+
 
 Pitfall 1 and 2 lead to _incorrect_ error definitions and lost error causes.
 This pitfall is more of a judgment call / recommendation. `thiserror` allows an
-inner error to be specified as `#[from]` instead of `#[source]`; e.g.,
+inner error to be specified as +#[from]+ instead of +#[source]+; e.g.,
 
 [source,rust]
 ----
@@ -445,7 +441,7 @@ enum WorseReadFileError {
 }
 ----
 
-`#[from]` implies `#[source]` and also provides a `From<InnerError> for
++#[from]+ implies +#[source]+ and also provides a `From<InnerError> for
 YourError` implementation. The upside of this is that the producer of
 `YourError` can now use `?` when calling a function that emits the inner error
 type, which can be much shorter than using `.map_err()` to attach context:
@@ -480,10 +476,10 @@ an I/O error occurred: failed to fill whole buffer
 ----
 
 This pitfall isn't a hard and fast rule. There are occasionally times where an
-error variant can attach meaningful context even without other fields. In cases
-where there is truly no meaningful context to attach (e.g., if wrapping an inner
-error that already includes all relevant context), consider using
-`#[error(transparent)]` with `#[from]`; this will delegate the `Display` impl
+error variant can attach meaningful context even without including other data.
+In cases where there is truly no meaningful context to attach (e.g., if wrapping
+an inner error that already includes all relevant context), consider using
++#[error(transparent)]+ with +#[from]+; this will delegate the `Display` impl
 for this variant directly to the inner error.
 
 = Using `anyhow`
@@ -495,10 +491,11 @@ it doesn't require defining explicit error types, but removes the ability for
 the caller to programmatically reason about the error details.
 
 Most omicron code should default to using `thiserror`; we often want
-strongly-typed error types that can be acted on by callers. If using anyhow, the
-above guidance about "attach meaningful context to errors" still applies, but is
-easier to do at call sites. Continuing the example from above, we could rewrite
-our function to use `anyhow`'s `Context` extension to `Result` and `Option`:
+strongly-typed error types that can be acted on by callers. If using `anyhow`,
+the above guidance about "attach meaningful context to errors" still applies,
+but is easier to do at call sites. Continuing the example from above, we could
+rewrite our function to use +anyhow+'s `Context` extension to `Result` and
+`Option`:
 
 [source,rust]
 ----
@@ -538,7 +535,7 @@ if let Err(err) = read_file_with_anyhow(path) {
 }
 ----
 
-`anyhow::Error`'s `Debug` implementation will print the full error chain spread
++anyhow::Error+'s `Debug` implementation will print the full error chain spread
 out across multiple lines; e.g.,
 
 [source,rust]
@@ -557,7 +554,7 @@ if let Err(err) = read_file_with_anyhow(path) {
 ----
 
 It also supports the "alternate" format specifier, `#`, to print the full error
-chain in a `: `-separated single line (just like `InlineErrorChain`):
+chain in a colon-separated single line (just like `InlineErrorChain`):
 
 [source,rust]
 ----
