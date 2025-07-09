@@ -721,7 +721,7 @@ dependencies = [
  "bitflags 2.9.0",
  "cexpr",
  "clang-sys",
- "itertools 0.12.1",
+ "itertools 0.10.5",
  "lazy_static",
  "lazycell",
  "log",
@@ -744,7 +744,7 @@ dependencies = [
  "bitflags 2.9.0",
  "cexpr",
  "clang-sys",
- "itertools 0.12.1",
+ "itertools 0.10.5",
  "log",
  "prettyplease",
  "proc-macro2",
@@ -5506,7 +5506,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "4979f22fdb869068da03c9f7528f8297c6fd2606bc3a4affe42e6a823fdb8da4"
 dependencies = [
  "cfg-if",
- "windows-targets 0.48.5",
+ "windows-targets 0.52.6",
 ]
 
 [[package]]
@@ -12582,7 +12582,7 @@ dependencies = [
 [[package]]
 name = "sprockets-tls"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/sprockets.git?branch=main#f16e6ab9ccaca3b9d826fa078b5b1bbea5987b44"
+source = "git+https://github.com/oxidecomputer/sprockets.git?rev=f16e6ab9ccaca3b9d826fa078b5b1bbea5987b44#f16e6ab9ccaca3b9d826fa078b5b1bbea5987b44"
 dependencies = [
  "anyhow",
  "attest-data",
