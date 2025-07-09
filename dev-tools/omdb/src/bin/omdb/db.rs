@@ -103,6 +103,8 @@ use nexus_db_model::SwCaboose;
 use nexus_db_model::SwRotPage;
 use nexus_db_model::UpstairsRepairNotification;
 use nexus_db_model::UpstairsRepairProgress;
+use nexus_db_model::UserDataExportRecord;
+use nexus_db_model::UserDataExportResource;
 use nexus_db_model::Vmm;
 use nexus_db_model::Volume;
 use nexus_db_model::VolumeRepair;
@@ -189,6 +191,7 @@ use uuid::Uuid;
 mod alert;
 mod ereport;
 mod saga;
+mod user_data_export;
 
 const NO_ACTIVE_PROPOLIS_MSG: &str = "<no active Propolis>";
 const NOT_ON_SLED_MSG: &str = "<not on any sled>";
@@ -408,6 +411,8 @@ enum DbCommands {
     Alert(AlertArgs),
     /// Commands for querying and interacting with pools
     Zpool(ZpoolArgs),
+    /// Commands for querying and interacting with user data export objects
+    UserDataExport(user_data_export::UserDataExportArgs),
 }
 
 #[derive(Debug, Args, Clone)]
@@ -1507,6 +1512,9 @@ impl DbArgs {
                     },
                     DbCommands::Ereport(args) => {
                         cmd_db_ereport(&datastore, &fetch_opts, &args).await
+                    }
+                    DbCommands::UserDataExport(args) => {
+                        args.exec(&omdb, &opctx, &datastore).await
                     }
                 }
             }
@@ -3576,6 +3584,33 @@ async fn volume_used_by(
         String::from("listing images used")
     });
 
+    let export_used: Vec<UserDataExportRecord> = {
+        let volumes = volumes.to_vec();
+        datastore
+            .pool_connection_for_tests()
+            .await?
+            .transaction_async(async move |conn| {
+                use nexus_db_schema::schema::user_data_export::dsl;
+
+                conn.batch_execute_async(ALLOW_FULL_TABLE_SCAN_SQL).await?;
+
+                paginated(
+                    dsl::user_data_export,
+                    dsl::id,
+                    &first_page::<dsl::id>(fetch_opts.fetch_limit),
+                )
+                .filter(dsl::volume_id.eq_any(volumes))
+                .select(UserDataExportRecord::as_select())
+                .load_async(&conn)
+                .await
+            })
+            .await?
+    };
+
+    check_limit(&export_used, fetch_opts.fetch_limit, || {
+        String::from("listing user data export used")
+    });
+
     Ok(volumes
         .iter()
         .map(|volume_id| {
@@ -3593,6 +3628,9 @@ async fn volume_used_by(
 
             let maybe_disk =
                 disks_used.iter().find(|x| x.volume_id() == volume_id);
+
+            let maybe_export =
+                export_used.iter().find(|x| x.volume_id() == Some(volume_id));
 
             if let Some(image) = maybe_image {
                 VolumeUsedBy {
@@ -3625,6 +3663,23 @@ async fn volume_used_by(
                     usage_id: disk.id().to_string(),
                     usage_name: disk.name().to_string(),
                     deleted: disk.time_deleted().is_some(),
+                }
+            } else if let Some(export) = maybe_export {
+                match export.resource() {
+                    UserDataExportResource::Snapshot { id } => VolumeUsedBy {
+                        volume_id,
+                        usage_type: String::from("export"),
+                        usage_id: id.to_string(),
+                        usage_name: String::from("snapshot"),
+                        deleted: export.deleted(),
+                    },
+                    UserDataExportResource::Image { id } => VolumeUsedBy {
+                        volume_id,
+                        usage_type: String::from("export"),
+                        usage_id: id.to_string(),
+                        usage_name: String::from("image"),
+                        deleted: export.deleted(),
+                    },
                 }
             } else {
                 VolumeUsedBy {
