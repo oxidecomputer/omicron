@@ -427,6 +427,9 @@ fn mgs_update_status_rot(
     // preference, pending persistent boot preference, and transient boot
     // preference are still what they were when we configured this update.
     // If not, then this update cannot proceed as currently configured.
+    // If there is a mismatch between the found persistent boot preference
+    // and the found active slot then this means a failed update. We cannot
+    // proceed.
     // It will fail its precondition check.
     if found.active_slot.version() != expected.active_slot.version()
         || found.persistent_boot_preference
@@ -434,27 +437,27 @@ fn mgs_update_status_rot(
         || found.pending_persistent_boot_preference
             != expected.pending_persistent_boot_preference
         || found.transient_boot_preference != expected.transient_boot_preference
+        || found.persistent_boot_preference != found.active_slot.slot
     {
         return MgsUpdateStatus::Impossible;
     }
 
     // If either found pending persistent boot preference or found transient
     // boot preference are not empty, then an update is not done
+    //
+    // TODO: Alternatively, this could also mean a failed update. See
+    // https://github.com/oxidecomputer/omicron/issues/8414 for context
+    // about when we'll be able to know whether an it's an ongoing update
+    // or an RoT in a failed state.
     if found.pending_persistent_boot_preference.is_some()
         || found.transient_boot_preference.is_some()
     {
         return MgsUpdateStatus::NotDone;
     }
 
-    // If there is a mismatch between the found persistent boot preference
-    // and the found active slot then the update is not done.
-    //
-    // TODO: Alternatively, this could also mean a failed update. See
-    // https://github.com/oxidecomputer/omicron/issues/8414 for context
-    // about when we'll be able to know whether an it's an ongoing update
-    // or an RoT in a failed state.
-    if found.persistent_boot_preference != found.active_slot.slot {
-        // TODO-K: I am not 100% sure on this one. It may be impossible?
+    // If there is a mismatch between the expected active slot and the found
+    // active slot then the update is not done.
+    if found.active_slot.slot != expected.active_slot.slot {
         return MgsUpdateStatus::NotDone;
     }
 
