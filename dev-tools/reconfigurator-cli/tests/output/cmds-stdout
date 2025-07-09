@@ -18,14 +18,14 @@ T ENA ID PARENT TIME_CREATED
 error: attempted to access sled dde1c0e2-b10d-4621-b420-f179f7a7a00a not found in system
 
 > sled-add dde1c0e2-b10d-4621-b420-f179f7a7a00a
-added sled dde1c0e2-b10d-4621-b420-f179f7a7a00a
+added sled dde1c0e2-b10d-4621-b420-f179f7a7a00a (serial: serial0)
 
 > sled-list
 ID                                   SERIAL  NZPOOLS SUBNET                  
 dde1c0e2-b10d-4621-b420-f179f7a7a00a serial0 10      fd00:1122:3344:101::/64 
 
 > sled-show dde1c0e2-b10d-4621-b420-f179f7a7a00a
-sled dde1c0e2-b10d-4621-b420-f179f7a7a00a
+sled dde1c0e2-b10d-4621-b420-f179f7a7a00a (in service, active)
 serial serial0
 subnet fd00:1122:3344:101::/64
 SP active version:   Some("0.0.1")
@@ -60,10 +60,10 @@ zpools (10):
 
 
 > sled-add 90c1102a-b9f5-4d88-92a2-60d54a2d98cc
-added sled 90c1102a-b9f5-4d88-92a2-60d54a2d98cc
+added sled 90c1102a-b9f5-4d88-92a2-60d54a2d98cc (serial: serial1)
 
-> sled-add 04ef3330-c682-4a08-8def-fcc4bef31bcd
-added sled 04ef3330-c682-4a08-8def-fcc4bef31bcd
+> sled-add 04ef3330-c682-4a08-8def-fcc4bef31bcd --policy non-provisionable
+added sled 04ef3330-c682-4a08-8def-fcc4bef31bcd (serial: serial2)
 
 > sled-list
 ID                                   SERIAL  NZPOOLS SUBNET                  
@@ -78,7 +78,7 @@ dde1c0e2-b10d-4621-b420-f179f7a7a00a serial0 10      fd00:1122:3344:101::/64
 set sled dde1c0e2-b10d-4621-b420-f179f7a7a00a SP versions: active -> 1.0.0
 
 > sled-show dde1c0e2-b10d-4621-b420-f179f7a7a00a
-sled dde1c0e2-b10d-4621-b420-f179f7a7a00a
+sled dde1c0e2-b10d-4621-b420-f179f7a7a00a (in service, active)
 serial serial0
 subnet fd00:1122:3344:101::/64
 SP active version:   Some("1.0.0")
@@ -116,7 +116,7 @@ zpools (10):
 set sled dde1c0e2-b10d-4621-b420-f179f7a7a00a SP versions: inactive -> 2.0.0
 
 > sled-show dde1c0e2-b10d-4621-b420-f179f7a7a00a
-sled dde1c0e2-b10d-4621-b420-f179f7a7a00a
+sled dde1c0e2-b10d-4621-b420-f179f7a7a00a (in service, active)
 serial serial0
 subnet fd00:1122:3344:101::/64
 SP active version:   Some("1.0.0")
@@ -154,7 +154,7 @@ zpools (10):
 set sled dde1c0e2-b10d-4621-b420-f179f7a7a00a SP versions: active -> 3.0.0
 
 > sled-show dde1c0e2-b10d-4621-b420-f179f7a7a00a
-sled dde1c0e2-b10d-4621-b420-f179f7a7a00a
+sled dde1c0e2-b10d-4621-b420-f179f7a7a00a (in service, active)
 serial serial0
 subnet fd00:1122:3344:101::/64
 SP active version:   Some("3.0.0")
@@ -192,7 +192,7 @@ zpools (10):
 set sled dde1c0e2-b10d-4621-b420-f179f7a7a00a SP versions: active -> 4.0.0, inactive -> invalid
 
 > sled-show dde1c0e2-b10d-4621-b420-f179f7a7a00a
-sled dde1c0e2-b10d-4621-b420-f179f7a7a00a
+sled dde1c0e2-b10d-4621-b420-f179f7a7a00a (in service, active)
 serial serial0
 subnet fd00:1122:3344:101::/64
 SP active version:   Some("4.0.0")
@@ -230,7 +230,7 @@ zpools (10):
 set sled dde1c0e2-b10d-4621-b420-f179f7a7a00a SP versions: active -> 4.0.0, inactive -> 5.0.0
 
 > sled-show dde1c0e2-b10d-4621-b420-f179f7a7a00a
-sled dde1c0e2-b10d-4621-b420-f179f7a7a00a
+sled dde1c0e2-b10d-4621-b420-f179f7a7a00a (in service, active)
 serial serial0
 subnet fd00:1122:3344:101::/64
 SP active version:   Some("4.0.0")
@@ -300,7 +300,7 @@ result:
 
 
 > sled-show dde1c0e2-b10d-4621-b420-f179f7a7a00a
-sled dde1c0e2-b10d-4621-b420-f179f7a7a00a
+sled dde1c0e2-b10d-4621-b420-f179f7a7a00a (in service, active)
 serial serial0
 subnet fd00:1122:3344:101::/64
 SP active version:   Some("4.0.0")

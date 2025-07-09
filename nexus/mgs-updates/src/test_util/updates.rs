@@ -67,7 +67,7 @@ pub struct UpdateDescription<'a> {
 
     // Update parameters
     pub sp_type: SpType,
-    pub slot_id: u32,
+    pub slot_id: u16,
     pub artifact_hash: &'a ArtifactHash,
 
     // Overrides
@@ -190,14 +190,15 @@ impl UpdateDescription<'_> {
         let (status_tx, status_rx) =
             watch::channel(MgsUpdateDriverStatus::default());
         status_tx.send_modify(|status| {
-            status.in_progress.insert(
-                baseboard_id.clone(),
-                InProgressUpdateStatus {
+            status
+                .in_progress
+                .insert_unique(InProgressUpdateStatus {
+                    baseboard_id: baseboard_id.clone(),
                     time_started: chrono::Utc::now(),
                     status: UpdateAttemptStatus::NotStarted,
                     nattempts_done: 0,
-                },
-            );
+                })
+                .expect("no value present in object we just created");
         });
         let status_updater =
             UpdateAttemptStatusUpdater::new(status_tx.clone(), baseboard_id);
@@ -265,7 +266,7 @@ pub struct InProgressAttempt {
 
     // Parameters of the update itself
     sp_type: SpType,
-    slot_id: u32,
+    slot_id: u16,
     deployed_caboose: hubtools::Caboose,
 
     // Status of the driver
@@ -316,8 +317,7 @@ impl InProgressAttempt {
             // future itself to finish and then return indicating that it's
             // done.
             let overall_status = self.status_rx.borrow();
-            let maybe_current_status =
-                overall_status.in_progress.values().next();
+            let maybe_current_status = overall_status.in_progress.iter().next();
             if let Some(current_status) = maybe_current_status {
                 if current_status.status == status {
                     debug!(
@@ -385,7 +385,7 @@ pub struct FinishedUpdateAttempt {
 impl FinishedUpdateAttempt {
     async fn new(
         sp_type: SpType,
-        slot_id: u32,
+        slot_id: u16,
         sp1: SpTestState,
         deployed_caboose: hubtools::Caboose,
         result: Result<UpdateCompletedHow, ApplyUpdateError>,

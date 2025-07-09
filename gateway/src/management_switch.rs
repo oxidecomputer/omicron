@@ -89,34 +89,24 @@ fn default_ereport_listen_port() -> u16 {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Deserialize, Serialize)]
 pub struct SpIdentifier {
     pub typ: SpType,
-    pub slot: usize,
+    pub slot: u16,
 }
 
 impl SpIdentifier {
-    pub fn new(typ: SpType, slot: usize) -> Self {
+    pub fn new(typ: SpType, slot: u16) -> Self {
         Self { typ, slot }
     }
 }
 
 impl From<gateway_types::component::SpIdentifier> for SpIdentifier {
     fn from(id: gateway_types::component::SpIdentifier) -> Self {
-        Self {
-            typ: id.typ.into(),
-            // id.slot may come from an untrusted source, but usize >= 32 bits
-            // on any platform that will run this code, so unwrap is fine
-            slot: usize::try_from(id.slot).unwrap(),
-        }
+        Self { typ: id.typ.into(), slot: id.slot }
     }
 }
 
 impl From<SpIdentifier> for gateway_types::component::SpIdentifier {
     fn from(id: SpIdentifier) -> Self {
-        Self {
-            typ: id.typ.into(),
-            // id.slot comes from a trusted source (crate::management_switch)
-            // and will not exceed u32::MAX
-            slot: u32::try_from(id.slot).unwrap(),
-        }
+        Self { typ: id.typ.into(), slot: id.slot }
     }
 }
 

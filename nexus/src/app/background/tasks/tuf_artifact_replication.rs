@@ -593,7 +593,10 @@ impl ArtifactReplication {
     ) -> Result<(ArtifactConfig, Inventory)> {
         let generation = self.datastore.tuf_get_generation(opctx).await?;
         let mut inventory = Inventory::default();
-        let mut paginator = Paginator::new(SQL_BATCH_SIZE);
+        let mut paginator = Paginator::new(
+            SQL_BATCH_SIZE,
+            dropshot::PaginationOrder::Ascending,
+        );
         while let Some(p) = paginator.next() {
             let batch = self
                 .datastore

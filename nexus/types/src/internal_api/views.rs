@@ -3,19 +3,25 @@
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 use crate::deployment::PendingMgsUpdate;
+use crate::deployment::TargetReleaseDescription;
 use crate::inventory::BaseboardId;
+use crate::inventory::Caboose;
+use crate::inventory::CabooseWhich;
+use crate::inventory::Collection;
 use chrono::DateTime;
 use chrono::SecondsFormat;
 use chrono::Utc;
 use futures::future::ready;
 use futures::stream::StreamExt;
-use nexus_sled_agent_shared::inventory::ConfigReconcilerInventory;
+use iddqd::IdOrdItem;
+use iddqd::IdOrdMap;
+use iddqd::id_upcast;
 use nexus_sled_agent_shared::inventory::ConfigReconcilerInventoryResult;
 use nexus_sled_agent_shared::inventory::OmicronZoneImageSource;
 use nexus_sled_agent_shared::inventory::OmicronZoneType;
 use omicron_common::api::external::MacAddr;
 use omicron_common::api::external::ObjectStream;
-use omicron_common::api::external::TufRepoDescription;
+use omicron_common::api::external::TufArtifactMeta;
 use omicron_common::api::external::Vni;
 use omicron_common::snake_case_result;
 use omicron_common::snake_case_result::SnakeCaseResult;
@@ -35,6 +41,7 @@ use std::time::Duration;
 use std::time::Instant;
 use steno::SagaResultErr;
 use steno::UndoActionError;
+use tufaceous_artifact::KnownArtifactKind;
 use uuid::Uuid;
 
 pub async fn to_list<T, U>(object_stream: ObjectStream<T>) -> Vec<U>
@@ -343,11 +350,13 @@ pub struct Ipv4NatEntryView {
 
 /// Status of ongoing update attempts, recently completed attempts, and update
 /// requests that are waiting for retry.
-#[derive(Clone, Debug, Default, Deserialize, Serialize, JsonSchema)]
+#[derive(
+    Clone, Debug, Default, Eq, PartialEq, Deserialize, Serialize, JsonSchema,
+)]
 pub struct MgsUpdateDriverStatus {
     pub recent: VecDeque<CompletedAttempt>,
-    pub in_progress: BTreeMap<Arc<BaseboardId>, InProgressUpdateStatus>,
-    pub waiting: BTreeMap<Arc<BaseboardId>, WaitingStatus>,
+    pub in_progress: IdOrdMap<InProgressUpdateStatus>,
+    pub waiting: IdOrdMap<WaitingStatus>,
 }
 
 impl MgsUpdateDriverStatus {
@@ -384,7 +393,7 @@ impl Display for MgsUpdateDriverStatusDisplay<'_> {
         }
 
         writeln!(f, "\ncurrently in progress:")?;
-        for (baseboard_id, status) in &status.in_progress {
+        for status in &status.in_progress {
             // Ignore units smaller than a millisecond.
             let elapsed = Duration::from_millis(
                 u64::try_from(
@@ -398,7 +407,7 @@ impl Display for MgsUpdateDriverStatusDisplay<'_> {
                 status
                     .time_started
                     .to_rfc3339_opts(SecondsFormat::Millis, true),
-                baseboard_id.serial_number,
+                status.baseboard_id.serial_number,
                 status.status,
                 status.nattempts_done + 1,
                 humantime::format_duration(elapsed),
@@ -406,11 +415,11 @@ impl Display for MgsUpdateDriverStatusDisplay<'_> {
         }
 
         writeln!(f, "\nwaiting for retry:")?;
-        for (baseboard_id, wait_info) in &status.waiting {
+        for wait_info in &status.waiting {
             writeln!(
                 f,
                 "    serial {}: will try again at {} (attempt {})",
-                baseboard_id.serial_number,
+                wait_info.baseboard_id.serial_number,
                 wait_info.next_attempt_time,
                 wait_info.nattempts_done + 1,
             )?;
@@ -421,13 +430,13 @@ impl Display for MgsUpdateDriverStatusDisplay<'_> {
 }
 
 /// externally-exposed status for a completed attempt
-#[derive(Debug, Clone, Deserialize, Serialize, JsonSchema)]
+#[derive(Debug, Clone, Deserialize, Eq, PartialEq, Serialize, JsonSchema)]
 pub struct CompletedAttempt {
     pub time_started: DateTime<Utc>,
     pub time_done: DateTime<Utc>,
     pub elapsed: Duration,
     pub request: PendingMgsUpdate,
-    #[serde(serialize_with = "snake_case_result::serialize")]
+    #[serde(with = "snake_case_result")]
     #[schemars(
         schema_with = "SnakeCaseResult::<UpdateCompletedHow, String>::json_schema"
     )]
@@ -447,11 +456,22 @@ pub enum UpdateCompletedHow {
 }
 
 /// externally-exposed status for each in-progress update
-#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize, JsonSchema)]
 pub struct InProgressUpdateStatus {
+    pub baseboard_id: Arc<BaseboardId>,
     pub time_started: DateTime<Utc>,
     pub status: UpdateAttemptStatus,
     pub nattempts_done: u32,
+}
+
+impl IdOrdItem for InProgressUpdateStatus {
+    type Key<'a> = &'a BaseboardId;
+
+    fn key(&self) -> Self::Key<'_> {
+        &self.baseboard_id
+    }
+
+    id_upcast!();
 }
 
 /// status of a single update attempt
@@ -471,10 +491,21 @@ pub enum UpdateAttemptStatus {
 }
 
 /// externally-exposed status for waiting updates
-#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize, JsonSchema)]
 pub struct WaitingStatus {
+    pub baseboard_id: Arc<BaseboardId>,
     pub next_attempt_time: DateTime<Utc>,
     pub nattempts_done: u32,
+}
+
+impl IdOrdItem for WaitingStatus {
+    type Key<'a> = &'a BaseboardId;
+
+    fn key(&self) -> Self::Key<'_> {
+        &self.baseboard_id
+    }
+
+    id_upcast!();
 }
 
 #[derive(
@@ -493,22 +524,24 @@ pub struct WaitingStatus {
     tag = "zone_status_version",
     content = "details"
 )]
-pub enum ZoneStatusVersion {
+pub enum TufRepoVersion {
     Unknown,
     InstallDataset,
     Version(Version),
     Error(String),
 }
 
-impl Display for ZoneStatusVersion {
+impl Display for TufRepoVersion {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            ZoneStatusVersion::Unknown => write!(f, "unknown"),
-            ZoneStatusVersion::InstallDataset => write!(f, "install dataset"),
-            ZoneStatusVersion::Version(version) => {
+            TufRepoVersion::Unknown => write!(f, "unknown"),
+            TufRepoVersion::InstallDataset => {
+                write!(f, "install dataset")
+            }
+            TufRepoVersion::Version(version) => {
                 write!(f, "{}", version)
             }
-            ZoneStatusVersion::Error(s) => {
+            TufRepoVersion::Error(s) => {
                 write!(f, "{}", s)
             }
         }
@@ -519,22 +552,32 @@ impl Display for ZoneStatusVersion {
 pub struct ZoneStatus {
     pub zone_id: OmicronZoneUuid,
     pub zone_type: OmicronZoneType,
-    pub version: ZoneStatusVersion,
+    pub version: TufRepoVersion,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+pub struct SpStatus {
+    pub sled_id: Option<SledUuid>,
+    pub slot0_version: TufRepoVersion,
+    pub slot1_version: TufRepoVersion,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 pub struct UpdateStatus {
     pub zones: BTreeMap<SledUuid, Vec<ZoneStatus>>,
+    pub sps: BTreeMap<String, SpStatus>,
 }
 
 impl UpdateStatus {
-    pub fn new<'a>(
-        old: Option<&TufRepoDescription>,
-        new: Option<&TufRepoDescription>,
-        sleds: impl Iterator<
-            Item = (&'a SledUuid, &'a Option<ConfigReconcilerInventory>),
-        >,
+    pub fn new(
+        old: &TargetReleaseDescription,
+        new: &TargetReleaseDescription,
+        inventory: &Collection,
     ) -> UpdateStatus {
+        let sleds = inventory
+            .sled_agents
+            .iter()
+            .map(|agent| (&agent.sled_id, &agent.last_reconciliation));
         let zones = sleds
             .map(|(sled_id, inv)| {
                 (
@@ -556,41 +599,183 @@ impl UpdateStatus {
                 )
             })
             .collect();
-        UpdateStatus { zones }
-    }
+        let baseboard_ids: Vec<_> = inventory.sps.keys().cloned().collect();
 
-    pub fn zone_image_source_to_version(
-        old: Option<&TufRepoDescription>,
-        new: Option<&TufRepoDescription>,
-        source: &OmicronZoneImageSource,
-        res: &ConfigReconcilerInventoryResult,
-    ) -> ZoneStatusVersion {
-        if let ConfigReconcilerInventoryResult::Err { message } = res {
-            return ZoneStatusVersion::Error(message.clone());
+        // Find all SP versions and git commits via cabooses
+        let mut sps: BTreeMap<BaseboardId, SpStatus> = baseboard_ids
+            .into_iter()
+            .map(|baseboard_id| {
+                let slot0_version = inventory
+                    .caboose_for(CabooseWhich::SpSlot0, &baseboard_id)
+                    .map_or(TufRepoVersion::Unknown, |c| {
+                        Self::caboose_to_version(old, new, &c.caboose)
+                    });
+                let slot1_version = inventory
+                    .caboose_for(CabooseWhich::SpSlot1, &baseboard_id)
+                    .map_or(TufRepoVersion::Unknown, |c| {
+                        Self::caboose_to_version(old, new, &c.caboose)
+                    });
+                (
+                    (*baseboard_id).clone(),
+                    SpStatus { sled_id: None, slot0_version, slot1_version },
+                )
+            })
+            .collect();
+
+        // Fill in the sled_id for the sp if known
+        for sa in inventory.sled_agents.iter() {
+            if let Some(baseboard_id) = &sa.baseboard_id {
+                if let Some(sp) = sps.get_mut(baseboard_id) {
+                    sp.sled_id = Some(sa.sled_id);
+                }
+            }
         }
 
-        let &OmicronZoneImageSource::Artifact { hash } = source else {
-            return ZoneStatusVersion::InstallDataset;
-        };
+        let sps = sps.into_iter().map(|(k, v)| (k.to_string(), v)).collect();
 
-        if let Some(old) = old {
-            if let Some(_) = old.artifacts.iter().find(|meta| meta.hash == hash)
-            {
-                return ZoneStatusVersion::Version(
+        UpdateStatus { zones, sps }
+    }
+
+    fn caboose_to_version(
+        old: &TargetReleaseDescription,
+        new: &TargetReleaseDescription,
+        caboose: &Caboose,
+    ) -> TufRepoVersion {
+        let matching_caboose = |a: &TufArtifactMeta| {
+            caboose.board == a.id.name
+                && matches!(
+                    a.id.kind.to_known(),
+                    Some(
+                        KnownArtifactKind::GimletSp
+                            | KnownArtifactKind::PscSp
+                            | KnownArtifactKind::SwitchSp
+                    )
+                )
+                && caboose.version == a.id.version.to_string()
+        };
+        if let Some(new) = new.tuf_repo() {
+            if new.artifacts.iter().any(matching_caboose) {
+                return TufRepoVersion::Version(
+                    new.repo.system_version.clone(),
+                );
+            }
+        }
+        if let Some(old) = old.tuf_repo() {
+            if old.artifacts.iter().any(matching_caboose) {
+                return TufRepoVersion::Version(
                     old.repo.system_version.clone(),
                 );
             }
         }
 
-        if let Some(new) = new {
-            if let Some(_) = new.artifacts.iter().find(|meta| meta.hash == hash)
-            {
-                return ZoneStatusVersion::Version(
+        TufRepoVersion::Unknown
+    }
+
+    fn zone_image_source_to_version(
+        old: &TargetReleaseDescription,
+        new: &TargetReleaseDescription,
+        source: &OmicronZoneImageSource,
+        res: &ConfigReconcilerInventoryResult,
+    ) -> TufRepoVersion {
+        if let ConfigReconcilerInventoryResult::Err { message } = res {
+            return TufRepoVersion::Error(message.clone());
+        }
+
+        let &OmicronZoneImageSource::Artifact { hash } = source else {
+            return TufRepoVersion::InstallDataset;
+        };
+
+        if let Some(old) = old.tuf_repo() {
+            if old.artifacts.iter().any(|meta| meta.hash == hash) {
+                return TufRepoVersion::Version(
+                    old.repo.system_version.clone(),
+                );
+            }
+        }
+
+        if let Some(new) = new.tuf_repo() {
+            if new.artifacts.iter().any(|meta| meta.hash == hash) {
+                return TufRepoVersion::Version(
                     new.repo.system_version.clone(),
                 );
             }
         }
 
-        ZoneStatusVersion::Unknown
+        TufRepoVersion::Unknown
+    }
+}
+
+#[cfg(test)]
+mod test {
+    use super::CompletedAttempt;
+    use super::InProgressUpdateStatus;
+    use super::MgsUpdateDriverStatus;
+    use super::UpdateCompletedHow;
+    use super::WaitingStatus;
+    use crate::deployment::ExpectedVersion;
+    use crate::deployment::PendingMgsUpdate;
+    use crate::deployment::PendingMgsUpdateDetails;
+    use crate::internal_api::views::UpdateAttemptStatus;
+    use crate::inventory::BaseboardId;
+    use chrono::Utc;
+    use gateway_client::types::SpType;
+    use std::collections::VecDeque;
+    use std::sync::Arc;
+    use std::time::Instant;
+    use tufaceous_artifact::ArtifactHash;
+
+    #[test]
+    fn test_can_serialize_mgs_updates() {
+        let start = Instant::now();
+        let artifact_hash: ArtifactHash =
+            "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+                .parse()
+                .unwrap();
+        let baseboard_id = Arc::new(BaseboardId {
+            part_number: String::from("a_port"),
+            serial_number: String::from("a_serial"),
+        });
+        let waiting = WaitingStatus {
+            baseboard_id: baseboard_id.clone(),
+            next_attempt_time: Utc::now(),
+            nattempts_done: 2,
+        };
+        let in_progress = InProgressUpdateStatus {
+            baseboard_id: baseboard_id.clone(),
+            time_started: Utc::now(),
+            status: UpdateAttemptStatus::Updating,
+            nattempts_done: 3,
+        };
+        let completed = CompletedAttempt {
+            time_started: Utc::now(),
+            time_done: Utc::now(),
+            elapsed: start.elapsed(),
+            request: PendingMgsUpdate {
+                baseboard_id: baseboard_id.clone(),
+                sp_type: SpType::Sled,
+                slot_id: 12,
+                details: PendingMgsUpdateDetails::Sp {
+                    expected_active_version: "1.0.0".parse().unwrap(),
+                    expected_inactive_version: ExpectedVersion::NoValidVersion,
+                },
+                artifact_hash,
+                artifact_version: "2.0.0".parse().unwrap(),
+            },
+            result: Ok(UpdateCompletedHow::FoundNoChangesNeeded),
+            nattempts_done: 8,
+        };
+
+        let status = MgsUpdateDriverStatus {
+            recent: VecDeque::from([completed]),
+            in_progress: std::iter::once(in_progress).collect(),
+            waiting: std::iter::once(waiting).collect(),
+        };
+
+        let serialized =
+            serde_json::to_string(&status).expect("failed to serialize value");
+        let deserialized: MgsUpdateDriverStatus =
+            serde_json::from_str(&serialized)
+                .expect("failed to deserialize value");
+        assert_eq!(deserialized, status);
     }
 }

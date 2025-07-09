@@ -55,6 +55,7 @@ use nexus_db_fixed_data::vpc::SERVICES_INTERNET_GATEWAY_DEFAULT_ROUTE_V4;
 use nexus_db_fixed_data::vpc::SERVICES_INTERNET_GATEWAY_DEFAULT_ROUTE_V6;
 use nexus_db_fixed_data::vpc::SERVICES_INTERNET_GATEWAY_ID;
 use nexus_db_fixed_data::vpc::SERVICES_VPC_ID;
+use nexus_db_fixed_data::vpc_firewall_rule::NEXUS_ICMP_FW_RULE_NAME;
 use nexus_db_lookup::DbConnection;
 use nexus_db_model::DbBpZoneDisposition;
 use nexus_db_model::ExternalIp;
@@ -76,8 +77,10 @@ use omicron_common::api::external::ResourceType;
 use omicron_common::api::external::RouteDestination;
 use omicron_common::api::external::RouteTarget;
 use omicron_common::api::external::RouterRouteKind as ExternalRouteKind;
+use omicron_common::api::external::ServiceIcmpConfig;
 use omicron_common::api::external::UpdateResult;
 use omicron_common::api::external::Vni as ExternalVni;
+use omicron_common::api::external::VpcFirewallRuleStatus;
 use omicron_common::api::external::http_pagination::PaginatedBy;
 use omicron_common::api::internal::shared::InternetGatewayRouterTarget;
 use omicron_common::api::internal::shared::ResolvedVpcRoute;
@@ -235,6 +238,7 @@ impl DataStore {
         opctx: &OpContext,
     ) -> Result<(), Error> {
         use nexus_db_fixed_data::vpc_firewall_rule::DNS_VPC_FW_RULE;
+        use nexus_db_fixed_data::vpc_firewall_rule::NEXUS_ICMP_FW_RULE;
         use nexus_db_fixed_data::vpc_firewall_rule::NEXUS_VPC_FW_RULE;
 
         debug!(opctx.log, "attempting to create built-in VPC firewall rules");
@@ -271,6 +275,15 @@ impl DataStore {
                 &NEXUS_VPC_FW_RULE,
             )?;
             fw_rules.insert(NEXUS_VPC_FW_RULE.name.clone(), rule);
+        }
+
+        if !fw_rules.contains_key(&NEXUS_ICMP_FW_RULE.name) {
+            let rule = VpcFirewallRule::new(
+                Uuid::new_v4(),
+                *SERVICES_VPC_ID,
+                &NEXUS_ICMP_FW_RULE,
+            )?;
+            fw_rules.insert(NEXUS_ICMP_FW_RULE.name.clone(), rule);
         }
 
         let rules = fw_rules
@@ -738,6 +751,80 @@ impl DataStore {
                     )
                 }
             })
+    }
+
+    pub async fn nexus_inbound_icmp_view(
+        &self,
+        opctx: &OpContext,
+    ) -> Result<ServiceIcmpConfig, Error> {
+        opctx.authorize(authz::Action::Read, &authz::FLEET).await?;
+        use nexus_db_schema::schema::vpc_firewall_rule::dsl;
+
+        let conn = self.pool_connection_authorized(opctx).await?;
+
+        let rule = dsl::vpc_firewall_rule
+            .filter(dsl::time_deleted.is_null())
+            .filter(dsl::vpc_id.eq(*SERVICES_VPC_ID))
+            .filter(dsl::name.eq(NEXUS_ICMP_FW_RULE_NAME))
+            .limit(1)
+            .select(VpcFirewallRule::as_select())
+            .get_result_async::<VpcFirewallRule>(&*conn)
+            .await
+            .optional()
+            .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))?;
+
+        if let Some(rule) = rule {
+            Ok(ServiceIcmpConfig {
+                enabled: rule.status.0 == VpcFirewallRuleStatus::Enabled,
+            })
+        } else {
+            Err(Error::internal_error(&format!(
+                "services VPC is missing the builtin firewall rule \
+                {NEXUS_ICMP_FW_RULE_NAME}"
+            )))
+        }
+    }
+
+    pub async fn nexus_inbound_icmp_update(
+        &self,
+        opctx: &OpContext,
+        config: ServiceIcmpConfig,
+    ) -> Result<ServiceIcmpConfig, Error> {
+        opctx.authorize(authz::Action::Modify, &authz::FLEET).await?;
+        use nexus_db_schema::schema::vpc_firewall_rule::dsl;
+
+        let ServiceIcmpConfig { enabled } = config;
+
+        let conn = self.pool_connection_authorized(opctx).await?;
+
+        let status = nexus_db_model::VpcFirewallRuleStatus(if enabled {
+            VpcFirewallRuleStatus::Enabled
+        } else {
+            VpcFirewallRuleStatus::Disabled
+        });
+
+        let now = Utc::now();
+        let rule = diesel::update(dsl::vpc_firewall_rule)
+            .filter(dsl::time_deleted.is_null())
+            .filter(dsl::vpc_id.eq(*SERVICES_VPC_ID))
+            .filter(dsl::name.eq(NEXUS_ICMP_FW_RULE_NAME))
+            .set((dsl::time_modified.eq(now), dsl::status.eq(status)))
+            .returning(VpcFirewallRule::as_returning())
+            .get_result_async(&*conn)
+            .await
+            .optional()
+            .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))?;
+
+        if let Some(rule) = rule {
+            Ok(ServiceIcmpConfig {
+                enabled: rule.status.0 == VpcFirewallRuleStatus::Enabled,
+            })
+        } else {
+            Err(Error::internal_error(&format!(
+                "services VPC is missing the builtin firewall rule \
+                {NEXUS_ICMP_FW_RULE_NAME}"
+            )))
+        }
     }
 
     /// Return the list of `Sled`s hosting instances or control plane services
@@ -2505,7 +2592,10 @@ impl DataStore {
                 .internal_context("lookup router by id for rules")?;
         let vpc_id = authz_vpc.id();
 
-        let mut paginator = Paginator::new(SQL_BATCH_SIZE);
+        let mut paginator = Paginator::new(
+            SQL_BATCH_SIZE,
+            dropshot::PaginationOrder::Ascending,
+        );
         let mut all_rules = vec![];
         while let Some(p) = paginator.next() {
             let batch = self
@@ -2883,6 +2973,7 @@ mod tests {
     use nexus_types::deployment::BlueprintTarget;
     use nexus_types::deployment::BlueprintZoneConfig;
     use nexus_types::deployment::BlueprintZoneDisposition;
+    use nexus_types::deployment::BlueprintZoneImageSource;
     use nexus_types::external_api::params;
     use nexus_types::identity::Asset;
     use omicron_common::api::external;
@@ -3238,7 +3329,12 @@ mod tests {
                     .expect("ensured disks");
             }
             builder
-                .sled_add_zone_nexus_with_config(sled_ids[2], false, Vec::new())
+                .sled_add_zone_nexus_with_config(
+                    sled_ids[2],
+                    false,
+                    Vec::new(),
+                    BlueprintZoneImageSource::InstallDataset,
+                )
                 .expect("added nexus to third sled");
             builder.build()
         };
@@ -3307,7 +3403,12 @@ mod tests {
             .expect("created blueprint builder");
             for &sled_id in &sled_ids {
                 builder
-                    .sled_add_zone_nexus_with_config(sled_id, false, Vec::new())
+                    .sled_add_zone_nexus_with_config(
+                        sled_id,
+                        false,
+                        Vec::new(),
+                        BlueprintZoneImageSource::InstallDataset,
+                    )
                     .expect("added nexus to third sled");
             }
             builder.build()

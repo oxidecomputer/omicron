@@ -35,7 +35,7 @@ pub struct RotUpdater {
     log: Logger,
     progress: watch::Sender<Option<UpdateProgress>>,
     sp_type: SpType,
-    sp_slot: u32,
+    sp_slot: u16,
     target_rot_slot: RotSlot,
     update_id: Uuid,
     // TODO-clarity maybe a newtype for this? TBD how we get this from
@@ -46,7 +46,7 @@ pub struct RotUpdater {
 impl RotUpdater {
     pub fn new(
         sp_type: SpType,
-        sp_slot: u32,
+        sp_slot: u16,
         target_rot_slot: RotSlot,
         update_id: Uuid,
         rot_hubris_archive: Vec<u8>,
@@ -176,7 +176,7 @@ impl SpComponentUpdater for RotUpdater {
         self.sp_type
     }
 
-    fn target_sp_slot(&self) -> u32 {
+    fn target_sp_slot(&self) -> u16 {
         self.sp_slot
     }
 

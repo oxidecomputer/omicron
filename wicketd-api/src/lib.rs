@@ -487,7 +487,7 @@ pub struct GetArtifactsAndEventReportsResponse {
     /// instead.
     pub artifacts: Vec<InstallableArtifacts>,
 
-    pub event_reports: BTreeMap<SpType, BTreeMap<u32, EventReport>>,
+    pub event_reports: BTreeMap<SpType, BTreeMap<u16, EventReport>>,
 }
 
 #[derive(Clone, Debug, JsonSchema, Deserialize)]
@@ -535,7 +535,7 @@ pub struct GetLocationResponse {
 pub struct PathSpIgnitionCommand {
     #[serde(rename = "type")]
     pub type_: SpType,
-    pub slot: u32,
+    pub slot: u16,
     pub command: IgnitionCommand,
 }
 

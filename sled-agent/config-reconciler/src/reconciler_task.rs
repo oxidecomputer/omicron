@@ -12,6 +12,7 @@ use iddqd::IdOrdMap;
 use illumos_utils::zpool::PathInPool;
 use illumos_utils::zpool::ZpoolOrRamdisk;
 use key_manager::StorageKeyRequester;
+use nexus_sled_agent_shared::inventory::BootPartitionContents as BootPartitionContentsInventory;
 use nexus_sled_agent_shared::inventory::ConfigReconcilerInventory;
 use nexus_sled_agent_shared::inventory::ConfigReconcilerInventoryResult;
 use nexus_sled_agent_shared::inventory::ConfigReconcilerInventoryStatus;
@@ -36,8 +37,10 @@ use std::time::Duration;
 use std::time::Instant;
 use tokio::sync::watch;
 
+use crate::InternalDisksReceiver;
 use crate::TimeSyncConfig;
 use crate::dataset_serialization_task::DatasetTaskHandle;
+use crate::host_phase_2::BootPartitionContents;
 use crate::ledger::CurrentSledConfig;
 use crate::raw_disks::RawDisksReceiver;
 use crate::sled_agent_facilities::SledAgentFacilities;
@@ -64,6 +67,7 @@ pub(crate) fn spawn<T: SledAgentFacilities>(
     current_config_rx: watch::Receiver<CurrentSledConfig>,
     reconciler_result_tx: watch::Sender<ReconcilerResult>,
     currently_managed_zpools_tx: watch::Sender<Arc<CurrentlyManagedZpools>>,
+    internal_disks_rx: InternalDisksReceiver,
     external_disks_tx: watch::Sender<HashSet<Disk>>,
     raw_disks_rx: RawDisksReceiver,
     destroy_orphans: Arc<AtomicBool>,
@@ -85,6 +89,7 @@ pub(crate) fn spawn<T: SledAgentFacilities>(
             current_config_rx,
             reconciler_result_tx,
             raw_disks_rx,
+            internal_disks_rx,
             external_disks,
             datasets,
             zones,
@@ -204,6 +209,7 @@ struct LatestReconciliationResult {
     orphaned_datasets: IdOrdMap<OrphanedDataset>,
     zones_inventory: BTreeMap<OmicronZoneUuid, ConfigReconcilerInventoryResult>,
     timesync_status: TimeSyncStatus,
+    boot_partitions: BootPartitionContentsInventory,
 }
 
 impl LatestReconciliationResult {
@@ -214,6 +220,7 @@ impl LatestReconciliationResult {
             datasets: self.datasets.clone(),
             orphaned_datasets: self.orphaned_datasets.clone(),
             zones: self.zones_inventory.clone(),
+            boot_partitions: self.boot_partitions.clone(),
         }
     }
 
@@ -258,6 +265,7 @@ struct ReconcilerTask {
     current_config_rx: watch::Receiver<CurrentSledConfig>,
     reconciler_result_tx: watch::Sender<ReconcilerResult>,
     raw_disks_rx: RawDisksReceiver,
+    internal_disks_rx: InternalDisksReceiver,
     external_disks: ExternalDisks,
     datasets: OmicronDatasets,
     zones: OmicronZones,
@@ -399,6 +407,13 @@ impl ReconcilerTask {
             }
         };
 
+        // Concurrently with all the disk / dataset / zone config updates below,
+        // we can reconcile our boot partitions. This is mostly I/O.
+        let boot_partitions_fut = tokio::spawn({
+            let internal_disks = self.internal_disks_rx.current();
+            async move { BootPartitionContents::read(&internal_disks).await }
+        });
+
         // ---
         // We go through the removal process first: shut down zones, then stop
         // managing disks, then remove any orphaned datasets.
@@ -466,6 +481,12 @@ impl ReconcilerTask {
         // and also we want to report it as part of each reconciler result).
         let timesync_status = self.zones.check_timesync().await;
 
+        // Call back into sled-agent and let it do any work that needs to happen
+        // once time is sync'd (e.g., rewrite `uptime`).
+        if timesync_status.is_synchronized() {
+            sled_agent_facilities.on_time_sync();
+        }
+
         // We conservatively refuse to start any new zones if any zones have
         // failed to shut down cleanly. This could be more precise, but we want
         // to avoid wandering into some really weird cases, such as:
@@ -509,6 +530,11 @@ impl ReconcilerTask {
             ReconciliationResult::NoRetryNeeded
         };
 
+        // Wait for the task we spawned to handle boot partitions above.
+        let boot_partitions = boot_partitions_fut
+            .await
+            .expect("reading boot partition details did not panic");
+
         let inner = LatestReconciliationResult {
             sled_config,
             external_disks_inventory: self.external_disks.to_inventory(),
@@ -516,6 +542,7 @@ impl ReconcilerTask {
             orphaned_datasets: self.datasets.orphaned_datasets().clone(),
             zones_inventory: self.zones.to_inventory(),
             timesync_status,
+            boot_partitions: boot_partitions.into_inventory(),
         };
         self.reconciler_result_tx.send_modify(|r| {
             r.status = ReconcilerTaskStatus::Idle {

@@ -24,6 +24,7 @@ use nexus_sled_agent_shared::inventory::InventoryZpool;
 use nexus_sled_agent_shared::inventory::OmicronSledConfig;
 use nexus_sled_agent_shared::inventory::SledRole;
 use nexus_sled_agent_shared::inventory::ZoneImageResolverInventory;
+use nexus_sled_agent_shared::inventory::ZoneManifestBootInventory;
 use nexus_types::deployment::ClickhousePolicy;
 use nexus_types::deployment::CockroachDbClusterVersion;
 use nexus_types::deployment::CockroachDbSettings;
@@ -34,6 +35,7 @@ use nexus_types::deployment::Policy;
 use nexus_types::deployment::SledDetails;
 use nexus_types::deployment::SledDisk;
 use nexus_types::deployment::SledResources;
+use nexus_types::deployment::TargetReleaseDescription;
 use nexus_types::deployment::TufRepoPolicy;
 use nexus_types::external_api::views::PhysicalDiskPolicy;
 use nexus_types::external_api::views::PhysicalDiskState;
@@ -53,7 +55,6 @@ use omicron_common::address::SLED_PREFIX;
 use omicron_common::address::get_sled_address;
 use omicron_common::api::external::ByteCount;
 use omicron_common::api::external::Generation;
-use omicron_common::api::external::TufRepoDescription;
 use omicron_common::disk::DiskIdentity;
 use omicron_common::disk::DiskVariant;
 use omicron_common::policy::INTERNAL_DNS_REDUNDANCY;
@@ -62,6 +63,7 @@ use omicron_uuid_kinds::SledUuid;
 use omicron_uuid_kinds::ZpoolUuid;
 use std::collections::BTreeMap;
 use std::collections::BTreeSet;
+use std::fmt;
 use std::fmt::Debug;
 use std::net::Ipv4Addr;
 use std::net::Ipv6Addr;
@@ -109,7 +111,7 @@ pub struct SystemDescription {
     clickhouse_policy: Option<ClickhousePolicy>,
     oximeter_read_policy: OximeterReadPolicy,
     tuf_repo: TufRepoPolicy,
-    old_repo: Option<TufRepoPolicy>,
+    old_repo: TufRepoPolicy,
 }
 
 impl SystemDescription {
@@ -190,7 +192,7 @@ impl SystemDescription {
             clickhouse_policy: None,
             oximeter_read_policy: OximeterReadPolicy::new(1),
             tuf_repo: TufRepoPolicy::initial(),
-            old_repo: None,
+            old_repo: TufRepoPolicy::initial(),
         }
     }
 
@@ -270,6 +272,39 @@ impl SystemDescription {
         self
     }
 
+    /// Resolve a serial number into a sled ID.
+    pub fn serial_to_sled_id(&self, serial: &str) -> anyhow::Result<SledUuid> {
+        let sled_id = self.sleds.values().find_map(|sled| {
+            if let Some((_, sp_state)) = sled.sp_state() {
+                if sp_state.serial_number == serial {
+                    return Some(sled.sled_id);
+                }
+            }
+            None
+        });
+        sled_id.with_context(|| {
+            let known_serials = self
+                .sleds
+                .values()
+                .filter_map(|sled| {
+                    sled.sp_state()
+                        .map(|(_, sp_state)| sp_state.serial_number.as_str())
+                })
+                .collect::<Vec<_>>();
+            format!(
+                "sled not found with serial {serial} (known serials: {})",
+                known_serials.join(", "),
+            )
+        })
+    }
+
+    pub fn get_sled(&self, sled_id: SledUuid) -> anyhow::Result<&Sled> {
+        let Some(sled) = self.sleds.get(&sled_id) else {
+            bail!("Sled not found with id {sled_id}");
+        };
+        Ok(sled)
+    }
+
     pub fn get_sled_mut(
         &mut self,
         sled_id: SledUuid,
@@ -323,6 +358,7 @@ impl SystemDescription {
             sled.unique,
             sled.hardware,
             hardware_slot,
+            sled.policy,
             sled.sled_config,
             sled.npools,
         );
@@ -432,6 +468,22 @@ impl SystemDescription {
         Ok(self)
     }
 
+    /// Set whether a sled is visible in the inventory.
+    ///
+    /// Returns the previous visibility setting.
+    pub fn sled_set_inventory_visibility(
+        &mut self,
+        sled_id: SledUuid,
+        visibility: SledInventoryVisibility,
+    ) -> anyhow::Result<SledInventoryVisibility> {
+        let sled = self.sleds.get_mut(&sled_id).with_context(|| {
+            format!("attempted to access sled {} not found in system", sled_id)
+        })?;
+        let prev = Arc::make_mut(sled).inventory_visibility;
+        Arc::make_mut(sled).inventory_visibility = visibility;
+        Ok(prev)
+    }
+
     /// Update the SP versions reported for a sled.
     ///
     /// Where `None` is provided, no changes are made.
@@ -446,6 +498,20 @@ impl SystemDescription {
         })?;
         let sled = Arc::make_mut(sled);
         sled.set_sp_versions(active_version, inactive_version);
+        Ok(self)
+    }
+
+    /// Set the zone manifest for a sled from a provided `TufRepoDescription`.
+    pub fn sled_set_zone_manifest(
+        &mut self,
+        sled_id: SledUuid,
+        boot_inventory: Result<ZoneManifestBootInventory, String>,
+    ) -> anyhow::Result<&mut Self> {
+        let sled = self.sleds.get_mut(&sled_id).with_context(|| {
+            format!("attempted to access sled {} not found in system", sled_id)
+        })?;
+        let sled = Arc::make_mut(sled);
+        sled.set_zone_manifest(boot_inventory);
         Ok(self)
     }
 
@@ -605,7 +671,7 @@ impl SystemDescription {
 
     pub fn set_target_release(
         &mut self,
-        tuf_repo: Option<TufRepoDescription>,
+        description: TargetReleaseDescription,
     ) -> &mut Self {
         // Create a new TufRepoPolicy by bumping the generation.
         let new_repo = TufRepoPolicy {
@@ -613,7 +679,7 @@ impl SystemDescription {
                 .tuf_repo
                 .target_release_generation
                 .next(),
-            description: tuf_repo,
+            description,
         };
 
         self.tuf_repo = new_repo;
@@ -642,12 +708,16 @@ impl SystemDescription {
         let mut builder = CollectionBuilder::new(collector_label);
 
         for s in self.sleds.values() {
+            if s.inventory_visibility == SledInventoryVisibility::Hidden {
+                // Don't return this sled as part of the inventory collection.
+                continue;
+            }
             if let Some((slot, sp_state)) = s.sp_state() {
                 builder
                     .found_sp_state(
                         "fake MGS 1",
                         SpType::Sled,
-                        u32::from(*slot),
+                        *slot,
                         sp_state.clone(),
                     )
                     .context("recording SP state")?;
@@ -810,6 +880,7 @@ pub struct SledBuilder {
     hardware: SledHardware,
     hardware_slot: Option<u16>,
     sled_role: SledRole,
+    policy: SledPolicy,
     sled_config: OmicronSledConfig,
     npools: u8,
 }
@@ -829,6 +900,9 @@ impl SledBuilder {
             hardware_slot: None,
             sled_role: SledRole::Gimlet,
             sled_config: OmicronSledConfig::default(),
+            policy: SledPolicy::InService {
+                provision_policy: SledProvisionPolicy::Provisionable,
+            },
             npools: Self::DEFAULT_NPOOLS,
         }
     }
@@ -883,6 +957,12 @@ impl SledBuilder {
         self.sled_role = sled_role;
         self
     }
+
+    /// Sets this sled's policy.
+    pub fn policy(mut self, policy: SledPolicy) -> Self {
+        self.policy = policy;
+        self
+    }
 }
 
 /// Convenience structure summarizing `Sled` inputs that come from inventory
@@ -906,6 +986,7 @@ pub struct Sled {
     sled_id: SledUuid,
     inventory_sp: Option<(u16, SpState)>,
     inventory_sled_agent: Inventory,
+    inventory_visibility: SledInventoryVisibility,
     policy: SledPolicy,
     state: SledState,
     resources: SledResources,
@@ -925,6 +1006,7 @@ impl Sled {
         unique: Option<String>,
         hardware: SledHardware,
         hardware_slot: u16,
+        policy: SledPolicy,
         sled_config: OmicronSledConfig,
         nzpools: u8,
     ) -> Sled {
@@ -1056,9 +1138,8 @@ impl Sled {
             sled_id,
             inventory_sp,
             inventory_sled_agent,
-            policy: SledPolicy::InService {
-                provision_policy: SledProvisionPolicy::Provisionable,
-            },
+            inventory_visibility: SledInventoryVisibility::Visible,
+            policy,
             state: SledState::Active,
             resources: SledResources { subnet: sled_subnet, zpools },
             sp_active_caboose: Some(Arc::new(
@@ -1212,6 +1293,7 @@ impl Sled {
             sled_id,
             inventory_sp,
             inventory_sled_agent,
+            inventory_visibility: SledInventoryVisibility::Visible,
             policy: sled_policy,
             state: sled_state,
             resources: sled_resources,
@@ -1241,7 +1323,7 @@ impl Sled {
         });
     }
 
-    fn sp_state(&self) -> Option<&(u16, SpState)> {
+    pub fn sp_state(&self) -> Option<&(u16, SpState)> {
         self.inventory_sp.as_ref()
     }
 
@@ -1263,6 +1345,16 @@ impl Sled {
 
     fn sp_inactive_caboose(&self) -> Option<&Caboose> {
         self.sp_inactive_caboose.as_deref()
+    }
+
+    fn set_zone_manifest(
+        &mut self,
+        boot_inventory: Result<ZoneManifestBootInventory, String>,
+    ) {
+        self.inventory_sled_agent
+            .zone_image_resolver
+            .zone_manifest
+            .boot_inventory = boot_inventory;
     }
 
     /// Update the reported SP versions
@@ -1383,6 +1475,25 @@ impl Sled {
             name: board,
             version: version.to_string(),
             sign: None,
+        }
+    }
+}
+
+/// The visibility of a sled in the inventory.
+///
+/// This enum can be used to simulate a sled temporarily dropping out and it not
+/// being reported in the inventory.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum SledInventoryVisibility {
+    Visible,
+    Hidden,
+}
+
+impl fmt::Display for SledInventoryVisibility {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            SledInventoryVisibility::Visible => write!(f, "visible"),
+            SledInventoryVisibility::Hidden => write!(f, "hidden"),
         }
     }
 }

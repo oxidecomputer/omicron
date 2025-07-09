@@ -286,6 +286,18 @@ impl SledEditor {
         }
     }
 
+    /// Returns the remove_mupdate_override field for this sled.
+    pub fn get_remove_mupdate_override(&self) -> Option<MupdateOverrideUuid> {
+        match &self.0 {
+            InnerSledEditor::Active(editor) => {
+                *editor.remove_mupdate_override.value()
+            }
+            InnerSledEditor::Decommissioned(sled) => {
+                sled.config.remove_mupdate_override
+            }
+        }
+    }
+
     fn as_active_mut(
         &mut self,
     ) -> Result<&mut ActiveSledEditor, SledEditError> {
@@ -343,8 +355,6 @@ impl SledEditor {
     }
 
     /// Sets the image source for a zone.
-    ///
-    /// Currently only used by test code.
     pub fn set_zone_image_source(
         &mut self,
         zone_id: &OmicronZoneUuid,

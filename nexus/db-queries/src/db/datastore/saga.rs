@@ -138,7 +138,10 @@ impl DataStore {
         sec_id: db::saga_types::SecId,
     ) -> Result<Vec<db::saga_types::Saga>, Error> {
         let mut sagas = vec![];
-        let mut paginator = Paginator::new(SQL_BATCH_SIZE);
+        let mut paginator = Paginator::new(
+            SQL_BATCH_SIZE,
+            dropshot::PaginationOrder::Ascending,
+        );
         let conn = self.pool_connection_authorized(opctx).await?;
         while let Some(p) = paginator.next() {
             use nexus_db_schema::schema::saga::dsl;
@@ -171,7 +174,10 @@ impl DataStore {
         saga_id: db::saga_types::SagaId,
     ) -> Result<Vec<steno::SagaNodeEvent>, Error> {
         let mut events = vec![];
-        let mut paginator = Paginator::new(SQL_BATCH_SIZE);
+        let mut paginator = Paginator::new(
+            SQL_BATCH_SIZE,
+            dropshot::PaginationOrder::Ascending,
+        );
         let conn = self.pool_connection_authorized(opctx).await?;
         while let Some(p) = paginator.next() {
             use nexus_db_schema::schema::saga_node_event::dsl;

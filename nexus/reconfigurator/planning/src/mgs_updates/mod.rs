@@ -10,6 +10,7 @@ use nexus_types::deployment::ExpectedVersion;
 use nexus_types::deployment::PendingMgsUpdate;
 use nexus_types::deployment::PendingMgsUpdateDetails;
 use nexus_types::deployment::PendingMgsUpdates;
+use nexus_types::deployment::TargetReleaseDescription;
 use nexus_types::inventory::BaseboardId;
 use nexus_types::inventory::CabooseWhich;
 use nexus_types::inventory::Collection;
@@ -42,7 +43,7 @@ pub fn plan_mgs_updates(
     inventory: &Collection,
     current_boards: &BTreeSet<Arc<BaseboardId>>,
     current_updates: &PendingMgsUpdates,
-    current_artifacts: Option<&TufRepoDescription>,
+    current_artifacts: &TargetReleaseDescription,
     nmax_updates: usize,
 ) -> PendingMgsUpdates {
     let mut rv = PendingMgsUpdates::new();
@@ -101,11 +102,14 @@ pub fn plan_mgs_updates(
         }
     }
 
-    // If we don't have any current artifacts (i.e., there is no target release
-    // set), then we cannot configure more updates.
-    let Some(current_artifacts) = &current_artifacts else {
-        warn!(log, "cannot issue more SP updates (no current artifacts)");
-        return rv;
+    // If we don't have a "real" target release (i.e., an uploaded TUF repo
+    // containing artifacts), then we cannot configure more updates.
+    let current_artifacts = match current_artifacts {
+        TargetReleaseDescription::Initial => {
+            warn!(log, "cannot issue more SP updates (no current artifacts)");
+            return rv;
+        }
+        TargetReleaseDescription::TufRepo(description) => description,
     };
 
     // Next, configure new updates for any boards that need an update, up to
@@ -300,7 +304,7 @@ fn mgs_update_status(
             update,
         );
         Ok(MgsUpdateStatus::Impossible)
-    } else if u32::from(sp_info.sp_slot) != update.slot_id {
+    } else if sp_info.sp_slot != update.slot_id {
         warn!(
             log,
             "baseboard with in-progress SP update has moved";
@@ -642,7 +646,7 @@ fn try_make_update_sp(
     Some(PendingMgsUpdate {
         baseboard_id: baseboard_id.clone(),
         sp_type: sp_info.sp_type,
-        slot_id: u32::from(sp_info.sp_slot),
+        slot_id: sp_info.sp_slot,
         details: PendingMgsUpdateDetails::Sp {
             expected_active_version,
             expected_inactive_version,
@@ -840,6 +844,7 @@ mod test {
     use nexus_types::deployment::PendingMgsUpdate;
     use nexus_types::deployment::PendingMgsUpdateDetails;
     use nexus_types::deployment::PendingMgsUpdates;
+    use nexus_types::deployment::TargetReleaseDescription;
     use nexus_types::inventory::CabooseWhich;
     use nexus_types::inventory::Collection;
     use nexus_types::inventory::RotSlot;
@@ -911,7 +916,7 @@ mod test {
     /// - switch 1: sidecar-c
     /// - psc 0: psc-b
     /// - psc 1: psc-c
-    fn test_config() -> BTreeMap<(SpType, u32), (&'static str, &'static str)> {
+    fn test_config() -> BTreeMap<(SpType, u16), (&'static str, &'static str)> {
         BTreeMap::from([
             ((SpType::Sled, 0), ("sled_0", "gimlet-d")),
             ((SpType::Sled, 1), ("sled_1", "gimlet-e")),
@@ -1016,7 +1021,7 @@ mod test {
     // `inactive_version` in the inactive slot.
     fn make_collection(
         active_version: ArtifactVersion,
-        active_version_exceptions: &BTreeMap<(SpType, u32), ArtifactVersion>,
+        active_version_exceptions: &BTreeMap<(SpType, u16), ArtifactVersion>,
         inactive_version: ExpectedVersion,
     ) -> Collection {
         let mut builder = nexus_inventory::CollectionBuilder::new(
@@ -1125,7 +1130,7 @@ mod test {
             &collection,
             current_boards,
             &initial_updates,
-            None,
+            &TargetReleaseDescription::Initial,
             nmax_updates,
         );
         assert!(updates.is_empty());
@@ -1138,7 +1143,7 @@ mod test {
             &collection,
             current_boards,
             &initial_updates,
-            Some(&repo),
+            &TargetReleaseDescription::TufRepo(repo.clone()),
             nmax_updates,
         );
         assert_eq!(updates.len(), 1);
@@ -1157,7 +1162,7 @@ mod test {
             &collection,
             current_boards,
             &updates,
-            Some(&repo),
+            &TargetReleaseDescription::TufRepo(repo.clone()),
             nmax_updates,
         );
         assert_eq!(updates, later_updates);
@@ -1178,7 +1183,7 @@ mod test {
             &later_collection,
             current_boards,
             &updates,
-            Some(&repo),
+            &TargetReleaseDescription::TufRepo(repo.clone()),
             nmax_updates,
         );
         assert_eq!(updates, later_updates);
@@ -1197,7 +1202,7 @@ mod test {
             &later_collection,
             current_boards,
             &updates,
-            Some(&repo),
+            &TargetReleaseDescription::TufRepo(repo.clone()),
             nmax_updates,
         );
         assert_eq!(later_updates.len(), 1);
@@ -1222,7 +1227,7 @@ mod test {
             &updated_collection,
             current_boards,
             &later_updates,
-            Some(&repo),
+            &TargetReleaseDescription::TufRepo(repo.clone()),
             nmax_updates,
         );
         assert!(later_updates.is_empty());
@@ -1239,7 +1244,7 @@ mod test {
             &collection,
             &BTreeSet::new(),
             &PendingMgsUpdates::new(),
-            Some(&repo),
+            &TargetReleaseDescription::TufRepo(repo.clone()),
             nmax_updates,
         );
         assert!(updates.is_empty());
@@ -1248,7 +1253,7 @@ mod test {
             &collection,
             &collection.baseboards,
             &PendingMgsUpdates::new(),
-            Some(&repo),
+            &TargetReleaseDescription::TufRepo(repo.clone()),
             nmax_updates,
         );
         // We verified most of the details above.  Here we're just double
@@ -1284,7 +1289,7 @@ mod test {
             &collection,
             &collection.baseboards,
             &updates,
-            Some(&repo),
+            &TargetReleaseDescription::TufRepo(repo.clone()),
             nmax_updates,
         );
         assert_ne!(updates, new_updates);
@@ -1322,7 +1327,7 @@ mod test {
             &collection,
             &collection.baseboards,
             &updates,
-            Some(&repo),
+            &TargetReleaseDescription::TufRepo(repo.clone()),
             nmax_updates,
         );
         assert_ne!(updates, new_updates);
@@ -1396,7 +1401,7 @@ mod test {
                 &collection,
                 current_boards,
                 &latest_updates,
-                Some(&repo),
+                &TargetReleaseDescription::TufRepo(repo.clone()),
                 nmax_updates,
             );
             assert_eq!(new_updates.len(), 1);
@@ -1426,7 +1431,7 @@ mod test {
             &collection,
             &collection.baseboards,
             &latest_updates,
-            Some(&repo),
+            &TargetReleaseDescription::TufRepo(repo.clone()),
             nmax_updates,
         );
         assert!(last_updates.is_empty());
@@ -1462,7 +1467,7 @@ mod test {
             &collection,
             &collection.baseboards,
             &PendingMgsUpdates::new(),
-            Some(&repo),
+            &TargetReleaseDescription::TufRepo(repo.clone()),
             usize::MAX,
         );
         assert_eq!(all_updates.len(), expected_updates.len());
@@ -1482,7 +1487,7 @@ mod test {
             &collection,
             &collection.baseboards,
             &all_updates,
-            Some(&repo),
+            &TargetReleaseDescription::TufRepo(repo.clone()),
             1,
         );
         assert!(all_updates_done.is_empty());
@@ -1491,7 +1496,7 @@ mod test {
     }
 
     fn verify_one_sp_update(
-        expected_updates: &mut BTreeMap<(SpType, u32), (&str, ArtifactHash)>,
+        expected_updates: &mut BTreeMap<(SpType, u16), (&str, ArtifactHash)>,
         update: &PendingMgsUpdate,
     ) {
         let sp_type = update.sp_type;
@@ -1535,7 +1540,7 @@ mod test {
             &collection,
             &collection.baseboards,
             &PendingMgsUpdates::new(),
-            Some(&repo),
+            &TargetReleaseDescription::TufRepo(repo.clone()),
             1,
         );
         assert!(!updates.is_empty());
@@ -1557,7 +1562,7 @@ mod test {
             &collection,
             &collection.baseboards,
             &updates,
-            Some(&repo),
+            &TargetReleaseDescription::TufRepo(repo.clone()),
             1,
         );
         assert!(!new_updates.is_empty());
