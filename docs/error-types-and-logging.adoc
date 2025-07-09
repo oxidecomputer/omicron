@@ -430,7 +430,7 @@ from the `thiserror` author] confirming this point.
 
 Pitfall 1 and 2 lead to _incorrect_ error definitions and lost error causes.
 This pitfall is more of a judgment call / recommendation. `thiserror` allows an
-inner error to be specified as ``#[from]`` instead of ``#[source]``; e.g.,
+inner error to be specified as ``\#[from]`` instead of ``\#[source]``; e.g.,
 
 [source,rust]
 ----
@@ -441,7 +441,7 @@ enum WorseReadFileError {
 }
 ----
 
-``#[from]`` implies ``#[source]`` and also provides a `From<InnerError> for
+``\#[from]`` implies ``\#[source]`` and also provides a `From<InnerError> for
 YourError` implementation. The upside of this is that the producer of
 `YourError` can now use `?` when calling a function that emits the inner error
 type, which can be much shorter than using `.map_err()` to attach context:
@@ -479,7 +479,7 @@ This pitfall isn't a hard and fast rule. There are occasionally times where an
 error variant can attach meaningful context even without including other data.
 In cases where there is truly no meaningful context to attach (e.g., if wrapping
 an inner error that already includes all relevant context), consider using
-``#[error(transparent)]`` with ``#[from]``; this will delegate the `Display`
+``\#[error(transparent)]`` with ``\#[from]``; this will delegate the `Display`
 impl for this variant directly to the inner error.
 
 = Using `anyhow`
