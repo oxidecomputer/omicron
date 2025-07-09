@@ -494,8 +494,12 @@ impl BundleCollection {
 
         // Create the zipfile as a temporary file
         let mut zipfile = tokio::fs::File::from_std(bundle_to_zipfile(&dir)?);
+        let total_len = zipfile.metadata().await?.len();
 
-        // Verify the hash locally before we send it over the network
+        // Collect the hash locally before we send it over the network
+        //
+        // We'll use this later during finalization to confirm the bundle
+        // has been stored successfully.
         zipfile.seek(SeekFrom::Start(0)).await?;
         let hash = sha2_hash(&mut zipfile).await?;
 
@@ -515,23 +519,65 @@ impl BundleCollection {
         )
         .await?;
 
-        // Stream the zipfile to the sled where it should be kept
-        zipfile.seek(SeekFrom::Start(0)).await?;
-        let file_access = hyper_staticfile::vfs::TokioFileAccess::new(zipfile);
-        let file_stream =
-            hyper_staticfile::util::FileBytesStream::new(file_access);
-        let body =
-            reqwest::Body::wrap(hyper_staticfile::Body::Full(file_stream));
+        let zpool = ZpoolUuid::from(self.bundle.zpool_id);
+        let dataset = DatasetUuid::from(self.bundle.dataset_id);
+        let support_bundle = SupportBundleUuid::from(self.bundle.id);
+
+        // Tell this sled to create the bundle.
+        let creation_result = sled_client
+            .support_bundle_start_creation(&zpool, &dataset, &support_bundle)
+            .await
+            .with_context(|| "Support bundle failed to start creation")?;
+
+        if matches!(
+            creation_result.state,
+            sled_agent_client::types::SupportBundleState::Complete
+        ) {
+            // Early exit case: the bundle was already created -- we must have either
+            // crashed or failed between "finalizing" and "writing to the database that we
+            // finished".
+            info!(&self.log, "Support bundle was already collected"; "bundle" => %self.bundle.id);
+            return Ok(report);
+        }
+        info!(&self.log, "Support bundle creation started"; "bundle" => %self.bundle.id);
+
+        const CHUNK_SIZE: u64 = 1024 * 1024 * 1024;
+
+        let mut offset = 0;
+        while offset < total_len {
+            // Stream the zipfile to the sled where it should be kept
+            let mut file = zipfile
+                .try_clone()
+                .await
+                .with_context(|| "Failed to clone zipfile")?;
+            file.seek(SeekFrom::Start(offset)).await.with_context(|| {
+                format!("Failed to seek to offset {offset} / {total_len} within zipfile")
+            })?;
+
+            // Only stream at most CHUNK_SIZE bytes at once
+            let remaining = std::cmp::min(CHUNK_SIZE, total_len - offset);
+            let limited_file = file.take(remaining);
+            let stream = tokio_util::io::ReaderStream::new(limited_file);
+            let body = reqwest::Body::wrap_stream(stream);
+
+            sled_client.support_bundle_transfer(
+                &zpool, &dataset, &support_bundle, offset, body
+            ).await.with_context(|| {
+                format!("Failed to transfer bundle: {remaining}@{offset} of {total_len} to sled")
+            })?;
+
+            offset += CHUNK_SIZE;
+        }
 
         sled_client
-            .support_bundle_create(
-                &ZpoolUuid::from(self.bundle.zpool_id),
-                &DatasetUuid::from(self.bundle.dataset_id),
-                &SupportBundleUuid::from(self.bundle.id),
+            .support_bundle_finalize(
+                &zpool,
+                &dataset,
+                &support_bundle,
                 &hash.to_string(),
-                body,
             )
-            .await?;
+            .await
+            .with_context(|| "Failed to finalize bundle")?;
 
         // Returning from this method should drop all temporary storage
         // allocated locally for this support bundle.
@@ -795,7 +841,7 @@ impl BackgroundTask for SupportBundleCollector {
                 Ok(report) => collection_report = Some(report),
                 Err(err) => {
                     collection_err =
-                        Some(json!({ "collect_error": err.to_string() }))
+                        Some(json!({ "collect_error": InlineErrorChain::new(err.as_ref()).to_string() }))
                 }
             };
 
