@@ -4,8 +4,6 @@
 
 //! Functions related to management of measurement corpus
 use camino::{Utf8Path, Utf8PathBuf};
-//use sled_storage::dataset::INSTALL_DATASET;
-//use sled_storage::manager::StorageHandle;
 use sled_agent_config_reconciler::InternalDisksReceiver;
 use thiserror::Error;
 

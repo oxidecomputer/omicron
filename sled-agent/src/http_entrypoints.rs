@@ -774,7 +774,6 @@ impl SledAgentApi for SledAgentImpl {
             sa.logger().clone(),
             sa.sprockets().clone(),
             corpus,
-            //&sa.storage().clone(),
             request.sled_id,
             request.start_request,
         )

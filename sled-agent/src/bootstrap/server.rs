@@ -211,7 +211,6 @@ impl Server {
         let all_measurements =
             crate::bootstrap::measurements::sled_new_measurement_paths(
                 &internal_disks_rx,
-                //&long_running_task_handles.storage_manager,
             )
             .await
             .map_err(StartError::MeasurementError)?;

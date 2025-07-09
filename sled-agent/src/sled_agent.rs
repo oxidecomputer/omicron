@@ -1261,7 +1261,6 @@ pub async fn sled_add(
     log: Logger,
     sprockets_config: SprocketsConfig,
     corpus: Vec<Utf8PathBuf>,
-    //internal_disks_rx: InternalDisksReceiver,
     sled_id: BaseboardId,
     request: StartSledAgentRequest,
 ) -> Result<(), AddSledError> {
