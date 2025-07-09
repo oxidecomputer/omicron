@@ -237,7 +237,7 @@ if let Err(err) = read_file_with_context(path) {
 
 == Pitfall 2: Including Inner Error in Outer Error's `Display` Implementation
 
-A +std::error::Error+'s `Display` implementation should _not_ recurse into its
+A ``std::error::Error``'s `Display` implementation should _not_ recurse into its
 source's `Display` implementation. As noted in "Pitfall 1", this is a very easy
 mistake to make, because it appears to fix a real problem. Continuing with the
 example, if we change the error definition to include the source's `Display`
@@ -387,8 +387,8 @@ if let Err(outer_err) = some_function() {
 This property that `std::error::Error` display implementations should not
 recurse to their source errors is not currently well-documented (to the best of
 my knowledge!). It matches the example from the standard library documentation
-on `Error::source()`, where +SuperError+'s display implementation only displays
-itself:
+on `Error::source()`, where ``SuperError``'s display implementation only
+displays itself:
 
 [source,rust]
 ----
@@ -426,11 +426,11 @@ this guidance to the Rust API guidelines. This links to a discussion including
 https://users.rust-lang.org/t/do-people-not-care-about-printable-error-chains-a-k-a-how-to-nicely-implement-display-for-an-error/35362/2[comments
 from the `thiserror` author] confirming this point.
 
-== Pitfall 3: Overusing +#+[from]+
+== Pitfall 3: Overusing ``#[from]``
 
 Pitfall 1 and 2 lead to _incorrect_ error definitions and lost error causes.
 This pitfall is more of a judgment call / recommendation. `thiserror` allows an
-inner error to be specified as +#+[from]+ instead of +#[source]+; e.g.,
+inner error to be specified as ``#[from]`` instead of ``#[source]``; e.g.,
 
 [source,rust]
 ----
@@ -441,7 +441,7 @@ enum WorseReadFileError {
 }
 ----
 
-+#[from]+ implies +#[source]+ and also provides a `From<InnerError> for
+``#[from]`` implies ``#[source]`` and also provides a `From<InnerError> for
 YourError` implementation. The upside of this is that the producer of
 `YourError` can now use `?` when calling a function that emits the inner error
 type, which can be much shorter than using `.map_err()` to attach context:
@@ -479,8 +479,8 @@ This pitfall isn't a hard and fast rule. There are occasionally times where an
 error variant can attach meaningful context even without including other data.
 In cases where there is truly no meaningful context to attach (e.g., if wrapping
 an inner error that already includes all relevant context), consider using
-+#[error(transparent)]+ with +#[from]+; this will delegate the `Display` impl
-for this variant directly to the inner error.
+``#[error(transparent)]`` with ``#[from]``; this will delegate the `Display`
+impl for this variant directly to the inner error.
 
 = Using `anyhow`
 
@@ -494,7 +494,7 @@ Most omicron code should default to using `thiserror`; we often want
 strongly-typed error types that can be acted on by callers. If using `anyhow`,
 the above guidance about "attach meaningful context to errors" still applies,
 but is easier to do at call sites. Continuing the example from above, we could
-rewrite our function to use +anyhow+'s `Context` extension to `Result` and
+rewrite our function to use ``anyhow``'s `Context` extension to `Result` and
 `Option`:
 
 [source,rust]
@@ -535,7 +535,7 @@ if let Err(err) = read_file_with_anyhow(path) {
 }
 ----
 
-+anyhow::Error+'s `Debug` implementation will print the full error chain spread
+``anyhow::Error``'s `Debug` implementation will print the full error chain spread
 out across multiple lines; e.g.,
 
 [source,rust]
