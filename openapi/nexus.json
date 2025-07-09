@@ -11080,7 +11080,7 @@
         }
       }
     },
-    "/v1/system/update/trust-roots/{trust_root}": {
+    "/v1/system/update/trust-roots/{trust_root_id}": {
       "get": {
         "tags": [
           "experimental"
@@ -11090,11 +11090,12 @@
         "parameters": [
           {
             "in": "path",
-            "name": "trust_root",
-            "description": "Trust root ID.",
+            "name": "trust_root_id",
+            "description": "ID of the trust root",
             "required": true,
             "schema": {
-              "$ref": "#/components/schemas/TypedUuidForTufTrustRootKind"
+              "type": "string",
+              "format": "uuid"
             }
           }
         ],
@@ -11127,11 +11128,12 @@
         "parameters": [
           {
             "in": "path",
-            "name": "trust_root",
-            "description": "Trust root ID.",
+            "name": "trust_root_id",
+            "description": "ID of the trust root",
             "required": true,
             "schema": {
-              "$ref": "#/components/schemas/TypedUuidForTufTrustRootKind"
+              "type": "string",
+              "format": "uuid"
             }
           }
         ],
@@ -25331,10 +25333,6 @@
         "type": "string",
         "format": "uuid"
       },
-      "TypedUuidForTufTrustRootKind": {
-        "type": "string",
-        "format": "uuid"
-      },
       "UninitializedSled": {
         "description": "A sled that has not been added to an initialized rack yet",
         "type": "object",
@@ -25433,11 +25431,8 @@
         "properties": {
           "id": {
             "description": "The UUID of this trusted root role.",
-            "allOf": [
-              {
-                "$ref": "#/components/schemas/TypedUuidForTufTrustRootKind"
-              }
-            ]
+            "type": "string",
+            "format": "uuid"
           },
           "root_role": {
             "description": "The trusted root role itself, a JSON document as described by The Update Framework."

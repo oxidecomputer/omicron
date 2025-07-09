@@ -18,7 +18,7 @@ use omicron_common::api::external::{
     Digest, Error, FailureDomain, IdentityMetadata, InstanceState, Name,
     ObjectIdentity, SimpleIdentity, SimpleIdentityOrName,
 };
-use omicron_uuid_kinds::{AlertReceiverUuid, AlertUuid, TufTrustRootUuid};
+use omicron_uuid_kinds::{AlertReceiverUuid, AlertUuid};
 use oxnet::{Ipv4Net, Ipv6Net};
 use schemars::JsonSchema;
 use semver::Version;
@@ -1486,7 +1486,7 @@ pub struct TargetRelease {
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize, JsonSchema)]
 pub struct UpdatesTrustRoot {
     /// The UUID of this trusted root role.
-    pub id: TufTrustRootUuid,
+    pub id: Uuid,
     /// Time the trusted root role was added.
     pub time_created: DateTime<Utc>,
     /// The trusted root role itself, a JSON document as described by The Update

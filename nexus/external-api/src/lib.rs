@@ -3009,12 +3009,12 @@ pub trait NexusExternalApi {
     /// Fetch trusted root role
     #[endpoint {
         method = GET,
-        path = "/v1/system/update/trust-roots/{trust_root}",
+        path = "/v1/system/update/trust-roots/{trust_root_id}",
         tags = ["experimental"], // ["system/update"],
     }]
     async fn system_update_trust_root_view(
         rqctx: RequestContext<Self::Context>,
-        path_params: Path<params::UpdatesTrustRoot>,
+        path_params: Path<params::TufTrustRootPath>,
     ) -> Result<HttpResponseOk<views::UpdatesTrustRoot>, HttpError>;
 
     /// Delete trusted root role
@@ -3024,12 +3024,12 @@ pub trait NexusExternalApi {
     /// root role.
     #[endpoint {
         method = DELETE,
-        path = "/v1/system/update/trust-roots/{trust_root}",
+        path = "/v1/system/update/trust-roots/{trust_root_id}",
         tags = ["experimental"], // ["system/update"],
     }]
     async fn system_update_trust_root_delete(
         rqctx: RequestContext<Self::Context>,
-        path_params: Path<params::UpdatesTrustRoot>,
+        path_params: Path<params::TufTrustRootPath>,
     ) -> Result<HttpResponseDeleted, HttpError>;
 
     /// Get the current target release of the rack's system software

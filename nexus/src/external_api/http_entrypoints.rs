@@ -106,6 +106,7 @@ use omicron_common::api::external::http_pagination::name_or_id_pagination;
 use omicron_common::bail_unless;
 use omicron_uuid_kinds::GenericUuid;
 use omicron_uuid_kinds::SupportBundleUuid;
+use omicron_uuid_kinds::TufTrustRootUuid;
 use propolis_client::support::WebSocketStream;
 use propolis_client::support::tungstenite::protocol::frame::coding::CloseCode;
 use propolis_client::support::tungstenite::protocol::{
@@ -6673,7 +6674,7 @@ impl NexusExternalApi for NexusExternalApiImpl {
 
     async fn system_update_trust_root_view(
         rqctx: RequestContext<Self::Context>,
-        path_params: Path<params::UpdatesTrustRoot>,
+        path_params: Path<params::TufTrustRootPath>,
     ) -> Result<HttpResponseOk<views::UpdatesTrustRoot>, HttpError> {
         let apictx = rqctx.context();
         let handler = async {
@@ -6681,7 +6682,9 @@ impl NexusExternalApi for NexusExternalApiImpl {
                 crate::context::op_context_for_external_api(&rqctx).await?;
             let nexus = &apictx.context.nexus;
 
-            let id = path_params.into_inner().trust_root;
+            let id = TufTrustRootUuid::from_untyped_uuid(
+                path_params.into_inner().trust_root_id,
+            );
 
             Ok(HttpResponseOk(
                 nexus.updates_get_trust_root(&opctx, id).await?.into(),
@@ -6696,7 +6699,7 @@ impl NexusExternalApi for NexusExternalApiImpl {
 
     async fn system_update_trust_root_delete(
         rqctx: RequestContext<Self::Context>,
-        path_params: Path<params::UpdatesTrustRoot>,
+        path_params: Path<params::TufTrustRootPath>,
     ) -> Result<HttpResponseDeleted, HttpError> {
         let apictx = rqctx.context();
         let handler = async {
@@ -6704,7 +6707,9 @@ impl NexusExternalApi for NexusExternalApiImpl {
                 crate::context::op_context_for_external_api(&rqctx).await?;
             let nexus = &apictx.context.nexus;
 
-            let id = path_params.into_inner().trust_root;
+            let id = TufTrustRootUuid::from_untyped_uuid(
+                path_params.into_inner().trust_root_id,
+            );
             nexus.updates_delete_trust_root(&opctx, id).await?;
 
             Ok(HttpResponseDeleted())

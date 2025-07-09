@@ -14,6 +14,7 @@ use nexus_db_schema::schema::{
 use nexus_types::external_api::shared::TufSignedRootRole;
 use nexus_types::external_api::views;
 use omicron_common::{api::external, update::ArtifactId};
+use omicron_uuid_kinds::GenericUuid;
 use omicron_uuid_kinds::TufArtifactKind;
 use omicron_uuid_kinds::TufRepoKind;
 use omicron_uuid_kinds::TufTrustRootKind;
@@ -364,7 +365,7 @@ impl TufTrustRoot {
 impl From<TufTrustRoot> for views::UpdatesTrustRoot {
     fn from(trust_root: TufTrustRoot) -> views::UpdatesTrustRoot {
         views::UpdatesTrustRoot {
-            id: trust_root.id.into(),
+            id: trust_root.id.into_untyped_uuid(),
             time_created: trust_root.time_created,
             root_role: trust_root.root_role.0,
         }

@@ -66,9 +66,9 @@ support_bundle_view                      GET      /experimental/v1/system/suppor
 system_update_get_repository             GET      /v1/system/update/repository/{system_version}
 system_update_put_repository             PUT      /v1/system/update/repository
 system_update_trust_root_create          POST     /v1/system/update/trust-roots
-system_update_trust_root_delete          DELETE   /v1/system/update/trust-roots/{trust_root}
+system_update_trust_root_delete          DELETE   /v1/system/update/trust-roots/{trust_root_id}
 system_update_trust_root_list            GET      /v1/system/update/trust-roots
-system_update_trust_root_view            GET      /v1/system/update/trust-roots/{trust_root}
+system_update_trust_root_view            GET      /v1/system/update/trust-roots/{trust_root_id}
 target_release_update                    PUT      /v1/system/update/target-release
 target_release_view                      GET      /v1/system/update/target-release
 timeseries_query                         POST     /v1/timeseries/query

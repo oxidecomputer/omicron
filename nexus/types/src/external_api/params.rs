@@ -17,7 +17,6 @@ use omicron_common::api::external::{
     RouteDestination, RouteTarget, UserId,
 };
 use omicron_common::disk::DiskVariant;
-use omicron_uuid_kinds::TufTrustRootUuid;
 use oxnet::{IpNet, Ipv4Net, Ipv6Net};
 use parse_display::Display;
 use schemars::JsonSchema;
@@ -98,6 +97,7 @@ path_param!(CertificatePath, certificate, "certificate");
 id_path_param!(SupportBundlePath, bundle_id, "support bundle");
 id_path_param!(GroupPath, group_id, "group");
 id_path_param!(TokenPath, token_id, "token");
+id_path_param!(TufTrustRootPath, trust_root_id, "trust root");
 
 // TODO: The hardware resources should be represented by its UUID or a hardware
 // ID that can be used to deterministically generate the UUID.
@@ -2363,14 +2363,6 @@ pub struct UpdatesGetRepositoryParams {
 pub struct SetTargetReleaseParams {
     /// Version of the system software to make the target release.
     pub system_version: Version,
-}
-
-/// Path parameters for GET/DELETE requests to
-/// `/v1/system/update/trust-roots/{trust_root}`.
-#[derive(Clone, Debug, Deserialize, JsonSchema)]
-pub struct UpdatesTrustRoot {
-    /// Trust root ID.
-    pub trust_root: TufTrustRootUuid,
 }
 
 // Probes
