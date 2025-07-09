@@ -21,6 +21,7 @@ use nexus_sled_agent_shared::inventory::BootImageHeader;
 use nexus_sled_agent_shared::inventory::BootPartitionDetails;
 use nexus_sled_agent_shared::inventory::ConfigReconcilerInventory;
 use nexus_sled_agent_shared::inventory::ConfigReconcilerInventoryStatus;
+use nexus_sled_agent_shared::inventory::HostPhase2DesiredSlots;
 use nexus_sled_agent_shared::inventory::Inventory;
 use nexus_sled_agent_shared::inventory::InventoryDataset;
 use nexus_sled_agent_shared::inventory::InventoryDisk;
@@ -345,6 +346,7 @@ pub fn representative() -> Representative {
         datasets: Default::default(),
         zones: sled14.zones.into_iter().collect(),
         remove_mupdate_override: None,
+        host_phase_2: HostPhase2DesiredSlots::current_contents(),
     };
     let sled16 = OmicronSledConfig {
         generation: sled16.generation,
@@ -352,6 +354,7 @@ pub fn representative() -> Representative {
         datasets: Default::default(),
         zones: sled16.zones.into_iter().collect(),
         remove_mupdate_override: None,
+        host_phase_2: HostPhase2DesiredSlots::current_contents(),
     };
     let sled17 = OmicronSledConfig {
         generation: sled17.generation,
@@ -359,6 +362,7 @@ pub fn representative() -> Representative {
         datasets: Default::default(),
         zones: sled17.zones.into_iter().collect(),
         remove_mupdate_override: None,
+        host_phase_2: HostPhase2DesiredSlots::current_contents(),
     };
 
     // Create iterator producing fixed IDs.

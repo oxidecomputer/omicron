@@ -474,7 +474,6 @@ pub fn exempted_authz_classes() -> BTreeSet<String> {
         authz::VpcRouter::get_polar_class(),
         authz::RouterRoute::get_polar_class(),
         authz::ConsoleSession::get_polar_class(),
-        authz::RoleBuiltin::get_polar_class(),
         authz::UserBuiltin::get_polar_class(),
     ]
     .into_iter()

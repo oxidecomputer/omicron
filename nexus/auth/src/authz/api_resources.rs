@@ -1012,14 +1012,6 @@ authz_resource! {
 }
 
 authz_resource! {
-    name = "RoleBuiltin",
-    parent = "Fleet",
-    primary_key = (String, String),
-    roles_allowed = false,
-    polar_snippet = FleetChild,
-}
-
-authz_resource! {
     name = "UserBuiltin",
     parent = "Fleet",
     primary_key = Uuid,

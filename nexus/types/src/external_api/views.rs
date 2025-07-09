@@ -16,7 +16,7 @@ use daft::Diffable;
 use omicron_common::api::external::{
     AffinityPolicy, AllowedSourceIps as ExternalAllowedSourceIps, ByteCount,
     Digest, Error, FailureDomain, IdentityMetadata, InstanceState, Name,
-    ObjectIdentity, RoleName, SimpleIdentity, SimpleIdentityOrName,
+    ObjectIdentity, SimpleIdentity, SimpleIdentityOrName,
 };
 use omicron_uuid_kinds::{AlertReceiverUuid, AlertUuid, TufTrustRootUuid};
 use oxnet::{Ipv4Net, Ipv6Net};
@@ -962,15 +962,6 @@ pub struct UserBuiltin {
     // intent in RFD 4?
     #[serde(flatten)]
     pub identity: IdentityMetadata,
-}
-
-// ROLES
-
-/// View of a Role
-#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize, JsonSchema)]
-pub struct Role {
-    pub name: RoleName,
-    pub description: String,
 }
 
 // SSH KEYS

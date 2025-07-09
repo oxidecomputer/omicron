@@ -121,13 +121,32 @@ impl SimSystem {
         &self.description
     }
 
+    pub fn resolve_collection_id(
+        &self,
+        original: CollectionId,
+    ) -> Result<ResolvedCollectionId, KeyError> {
+        let resolved = match original {
+            CollectionId::Latest => {
+                // The invariant of self.collections is that the last element is
+                // the latest.
+                let (id, _) = self
+                    .collections
+                    .last()
+                    .ok_or(KeyError::collection(original))?;
+                *id
+            }
+            CollectionId::Id(id) => id,
+        };
+        Ok(ResolvedCollectionId { original, resolved })
+    }
+
     pub fn get_collection(
         &self,
-        id: CollectionUuid,
+        id: &ResolvedCollectionId,
     ) -> Result<&Collection, KeyError> {
-        match self.collections.get(&id) {
+        match self.collections.get(&id.resolved()) {
             Some(c) => Ok(&**c),
-            None => Err(KeyError::collection(id)),
+            None => Err(KeyError::resolved_collection(id.clone())),
         }
     }
 
@@ -262,9 +281,17 @@ impl SimSystemBuilder {
     }
 
     #[inline]
+    pub fn resolve_collection_id(
+        &self,
+        original: CollectionId,
+    ) -> Result<ResolvedCollectionId, KeyError> {
+        self.inner.system.resolve_collection_id(original)
+    }
+
+    #[inline]
     pub fn get_collection(
         &self,
-        id: CollectionUuid,
+        id: &ResolvedCollectionId,
     ) -> Result<&Collection, KeyError> {
         self.inner.system.get_collection(id)
     }
@@ -485,6 +512,49 @@ impl fmt::Display for ResolvedBlueprintId {
                 write!(f, "latest blueprint ({})", self.resolved)
             }
             BlueprintId::Id(id) => write!(f, "blueprint {id}"),
+        }
+    }
+}
+
+/// An identifier for an inventory collection.
+#[derive(Clone, Copy, Debug)]
+pub enum CollectionId {
+    /// The latest inventory collection added to the system.
+    Latest,
+
+    /// The specified inventory collection.
+    Id(CollectionUuid),
+}
+
+/// An identifier for a blueprint after it has been resolved.
+#[derive(Clone, Debug)]
+pub struct ResolvedCollectionId {
+    /// The original collection ID.
+    original: CollectionId,
+
+    /// The resolved collection ID.
+    resolved: CollectionUuid,
+}
+
+impl ResolvedCollectionId {
+    /// Return the original collection ID.
+    pub fn original(&self) -> CollectionId {
+        self.original
+    }
+
+    /// Return the resolved collection ID.
+    pub fn resolved(&self) -> CollectionUuid {
+        self.resolved
+    }
+}
+
+impl fmt::Display for ResolvedCollectionId {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self.original {
+            CollectionId::Latest => {
+                write!(f, "latest collection ({})", self.resolved)
+            }
+            CollectionId::Id(id) => write!(f, "collection {id}"),
         }
     }
 }
@@ -808,7 +878,9 @@ impl SimSystemBuilderInner {
             |_, other| other.time_started <= time_started,
         ) {
             Ok(()) => Ok(()),
-            Err(_) => Err(DuplicateError::collection(collection_id)),
+            Err(_) => {
+                Err(DuplicateError::collection(CollectionId::Id(collection_id)))
+            }
         }
     }
 

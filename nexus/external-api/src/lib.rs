@@ -150,12 +150,6 @@ const PUT_UPDATE_REPOSITORY_MAX_BYTES: usize = 4 * GIB;
                     url = "http://docs.oxide.computer/api/projects"
                 }
             },
-            "roles" = {
-                description = "Roles are a component of Identity and Access Management (IAM) that allow a user or agent account access to additional permissions.",
-                external_docs = {
-                    url = "http://docs.oxide.computer/api/roles"
-                }
-            },
             "silos" = {
                 description = "Silos represent a logical partition of users and resources.",
                 external_docs = {
@@ -3129,32 +3123,6 @@ pub trait NexusExternalApi {
         rqctx: RequestContext<Self::Context>,
         path_params: Path<params::UserBuiltinSelector>,
     ) -> Result<HttpResponseOk<views::UserBuiltin>, HttpError>;
-
-    // Built-in roles
-
-    /// List built-in roles
-    #[endpoint {
-        method = GET,
-        path = "/v1/system/roles",
-        tags = ["roles"],
-    }]
-    async fn role_list(
-        rqctx: RequestContext<Self::Context>,
-        query_params: Query<
-            PaginationParams<EmptyScanParams, params::RolePage>,
-        >,
-    ) -> Result<HttpResponseOk<ResultsPage<views::Role>>, HttpError>;
-
-    /// Fetch built-in role
-    #[endpoint {
-        method = GET,
-        path = "/v1/system/roles/{role_name}",
-        tags = ["roles"],
-    }]
-    async fn role_view(
-        rqctx: RequestContext<Self::Context>,
-        path_params: Path<params::RolePath>,
-    ) -> Result<HttpResponseOk<views::Role>, HttpError>;
 
     // Current user
 

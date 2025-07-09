@@ -154,7 +154,7 @@ set sled e96e226f-4ed9-4c01-91b9-69a9cd076c9e inventory visibility: visible -> h
 > inventory-generate
 generated inventory collection eb0796d5-ab8a-4f7b-a884-b4aeacb8ab51 from configured sleds
 
-> blueprint-plan latest eb0796d5-ab8a-4f7b-a884-b4aeacb8ab51
+> blueprint-plan latest latest
 WARN skipping zones eligible for cleanup check (sled not present in latest inventory collection), sled_id: e96e226f-4ed9-4c01-91b9-69a9cd076c9e
 WARN skipping noop image source check since sled-agent encountered error retrieving zone manifest (this is abnormal), sled_id: 2b8f0cb3-0295-4b3c-bc58-4fe88b57112c, error: reconfigurator-sim simulated error: simulated error obtaining zone manifest
 INFO install dataset artifact hash matches TUF repo, switching out the zone image source to Artifact, sled_id: 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6, tuf_artifact_id: nexus v1.0.0 (zone)
@@ -192,7 +192,7 @@ generated blueprint 58d5e830-0884-47d8-a7cd-b2b3751adeb4 based on parent bluepri
 
 
 > # This diff should show expected changes to the blueprint.
-> blueprint-diff 8da82a8e-bf97-4fbd-8ddd-9f6462732cf1 latest
+> blueprint-diff latest
 from: blueprint 8da82a8e-bf97-4fbd-8ddd-9f6462732cf1
 to:   blueprint 58d5e830-0884-47d8-a7cd-b2b3751adeb4
 
@@ -510,7 +510,7 @@ set sled e96e226f-4ed9-4c01-91b9-69a9cd076c9e inventory visibility: hidden -> vi
 > inventory-generate
 generated inventory collection 61f451b3-2121-4ed6-91c7-a550054f6c21 from configured sleds
 
-> blueprint-plan latest 61f451b3-2121-4ed6-91c7-a550054f6c21
+> blueprint-plan latest latest
 WARN skipping noop image source check since sled-agent encountered error retrieving zone manifest (this is abnormal), sled_id: 2b8f0cb3-0295-4b3c-bc58-4fe88b57112c, error: reconfigurator-sim simulated error: simulated error obtaining zone manifest
 INFO noop converting 0/0 install-dataset zones to artifact store, sled_id: 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6
 WARN zone manifest inventory indicated install dataset artifact is invalid, not using artifact (this is abnormal), sled_id: aff6c093-197d-42c5-ad80-9f10ba051a34, zone_id: e8fe709c-725f-4bb2-b714-ffcda13a9e54, kind: internal_ntp, file_name: ntp.tar.gz, error: reconfigurator-sim: simulated error validating zone image
@@ -537,7 +537,7 @@ generated blueprint af934083-59b5-4bf6-8966-6fb5292c29e1 based on parent bluepri
 
 
 > # This diff should show changes to the sled that's back in inventory.
-> blueprint-diff 58d5e830-0884-47d8-a7cd-b2b3751adeb4 latest
+> blueprint-diff latest
 from: blueprint 58d5e830-0884-47d8-a7cd-b2b3751adeb4
 to:   blueprint af934083-59b5-4bf6-8966-6fb5292c29e1
 

@@ -1378,14 +1378,6 @@ table! {
 }
 
 table! {
-    role_builtin (resource_type, role_name) {
-        resource_type -> Text,
-        role_name -> Text,
-        description -> Text,
-    }
-}
-
-table! {
     role_assignment (
         identity_type,
         identity_id,
@@ -1798,6 +1790,8 @@ table! {
 
         generation -> Int8,
         remove_mupdate_override -> Nullable<Uuid>,
+        host_phase_2_desired_slot_a -> Nullable<Text>,
+        host_phase_2_desired_slot_b -> Nullable<Text>,
     }
 }
 
@@ -2346,7 +2340,6 @@ allow_tables_to_appear_in_same_query!(
     vpc_router,
     vpc_firewall_rule,
     user_builtin,
-    role_builtin,
     role_assignment,
     probe,
     internet_gateway,
