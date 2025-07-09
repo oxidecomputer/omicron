@@ -2850,55 +2850,6 @@ CREATE UNIQUE INDEX IF NOT EXISTS device_access_token_unique
 CREATE INDEX IF NOT EXISTS lookup_device_access_token_by_silo_user
     ON omicron.public.device_access_token (silo_user_id);
 
-/*
- * Roles built into the system
- *
- * You can think of a built-in role as an opaque token to which we assign a
- * hardcoded set of permissions.  The role that we call "project.viewer"
- * corresponds to the "viewer" role on the "project" resource.  A user that has
- * this role on a particular Project is granted various read-only permissions on
- * that Project.  The specific permissions associated with the role are defined
- * in Omicron's Polar (Oso) policy file.
- *
- * A built-in role like "project.viewer" has four parts:
- *
- * * resource type: "project"
- * * role name: "viewer"
- * * full name: "project.viewer"
- * * description: "Project Viewer"
- *
- * Internally, we can treat the tuple (resource type, role name) as a composite
- * primary key.  Externally, we expose this as the full name.  This is
- * consistent with RFD 43 and other IAM systems.
- *
- * These fields look awfully close to the identity metadata that we use for most
- * other tables.  But they're just different enough that we can't use most of
- * the same abstractions:
- *
- * * "id": We have no need for a uuid because the (resource_type, role_name) is
- *   already unique and immutable.
- * * "name": What we call "full name" above could instead be called "name",
- *   which would be consistent with other identity metadata.  But it's not a
- *   legal "name" because of the period, and it would be confusing to have
- *   "resource type", "role name", and "name".
- * * "time_created": not that useful because it's whenever the system was
- *   initialized, and we have plenty of other timestamps for that
- * * "time_modified": does not apply because the role cannot be changed
- * * "time_deleted" does not apply because the role cannot be deleted
- *
- * If the set of roles and their permissions are fixed, why store them in the
- * database at all?  Because what's dynamic is the assignment of roles to users.
- * We have a separate table that says "user U has role ROLE on resource
- * RESOURCE".  How do we represent the ROLE part of this association?  We use a
- * foreign key into this "role_builtin" table.
- */
-CREATE TABLE IF NOT EXISTS omicron.public.role_builtin (
-    resource_type STRING(63),
-    role_name STRING(63),
-    description STRING(512),
-
-    PRIMARY KEY(resource_type, role_name)
-);
 
 /*
  * Assignments between users, roles, and resources
@@ -2917,7 +2868,6 @@ CREATE TYPE IF NOT EXISTS omicron.public.identity_type AS ENUM (
 );
 
 CREATE TABLE IF NOT EXISTS omicron.public.role_assignment (
-    /* Composite foreign key into "role_builtin" table */
     resource_type STRING(63) NOT NULL,
     role_name STRING(63) NOT NULL,
 
@@ -6220,7 +6170,7 @@ INSERT INTO omicron.public.db_metadata (
     version,
     target_version
 ) VALUES
-    (TRUE, NOW(), NOW(), '157.0.0', NULL)
+    (TRUE, NOW(), NOW(), '158.0.0', NULL)
 ON CONFLICT DO NOTHING;
 
 COMMIT;
