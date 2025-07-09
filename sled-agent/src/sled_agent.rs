@@ -1093,7 +1093,7 @@ impl SledAgent {
             .config_reconciler
             .internal_disks_rx()
             .current()
-            .image_raw_devfs_path(slot)
+            .boot_image_raw_devfs_path(slot)
     }
 
     pub(crate) fn boot_disk_os_writer(&self) -> &BootDiskOsWriter {
@@ -1392,14 +1392,15 @@ impl SledAgentFacilities for ReconcilerFacilities {
 }
 
 // Workaround wrapper for orphan rules.
+#[derive(Clone)]
 struct SledAgentArtifactStoreWrapper(Arc<ArtifactStore<InternalDisksReceiver>>);
 
 impl SledAgentArtifactStore for SledAgentArtifactStoreWrapper {
-    async fn validate_artifact_exists_in_storage(
+    async fn get_artifact(
         &self,
         artifact: ArtifactHash,
-    ) -> anyhow::Result<()> {
-        self.0.get(artifact).await?;
-        Ok(())
+    ) -> anyhow::Result<tokio::fs::File> {
+        let file = self.0.get(artifact).await?;
+        Ok(file)
     }
 }

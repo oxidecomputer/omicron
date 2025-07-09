@@ -12013,6 +12013,7 @@ dependencies = [
  "id-map",
  "iddqd",
  "illumos-utils",
+ "installinator-common",
  "key-manager",
  "nexus-sled-agent-shared",
  "omicron-common",
