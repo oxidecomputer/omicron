@@ -351,7 +351,7 @@ pub enum FoundVersion {
 
 impl FoundVersion {
     pub fn matches(
-        self,
+        &self,
         expected: &ExpectedVersion,
     ) -> Result<(), PrecheckError> {
         match (expected, &self) {
@@ -370,7 +370,7 @@ impl FoundVersion {
             | (ExpectedVersion::Version(_), FoundVersion::Version(_)) => {
                 return Err(PrecheckError::WrongInactiveVersion {
                     expected: expected.clone(),
-                    found: self,
+                    found: self.clone(),
                 });
             }
         };

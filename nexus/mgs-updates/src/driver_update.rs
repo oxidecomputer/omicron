@@ -245,7 +245,6 @@ pub(crate) async fn apply_update(
 
     // Check the live state first to see if:
     // - this update has already been completed,
-    // - we should wait a bit because an update may be in-progress, or
     // - if not, then if our required preconditions are met
     status.update(UpdateAttemptStatus::Precheck);
     match update_helper.precheck(log, &mut mgs_clients, update).await {

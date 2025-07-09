@@ -203,8 +203,8 @@ impl SpComponentUpdateHelper for ReconfiguratorRotBootloaderUpdater {
             )
             .await?;
             // If boot info contains any error with the image loaded onto
-            // stage0_next, we run the risk of bricking the device if this image
-            // is loaded onto stage0. We return a fatal error.
+            // stage0_next, the device won't let us load this image onto stage0.
+            // We return a fatal error.
             if let Some(e) = stage0next_error {
                 return Err(PostUpdateError::FatalError {
                     error: InlineErrorChain::new(&e).to_string(),
