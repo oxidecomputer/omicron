@@ -77,7 +77,7 @@ pub enum BootPartitionError {
         expected: ArtifactHash,
         got: ArtifactHash,
     },
-    #[error("failed to {path} for writing")]
+    #[error("failed to open {path} for writing")]
     OpenForWriting {
         path: Utf8PathBuf,
         #[source]
