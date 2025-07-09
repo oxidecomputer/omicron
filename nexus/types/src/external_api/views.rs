@@ -1537,6 +1537,14 @@ mod test {
     }
 }
 
+#[derive(Debug, Deserialize, Serialize, JsonSchema, PartialEq, Eq)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum AuditLogEntryActor {
+    UserBuiltin { user_builtin_id: Uuid },
+    SiloUser { silo_user_id: Uuid, silo_id: Uuid },
+    Unauthenticated,
+}
+
 /// Audit log entry
 #[derive(Debug, Deserialize, Serialize, JsonSchema)]
 pub struct AuditLogEntry {
@@ -1557,9 +1565,7 @@ pub struct AuditLogEntry {
     /// User agent string from the request
     pub user_agent: Option<String>,
 
-    /// User ID of the actor who performed the action
-    pub actor_id: Option<Uuid>,
-    pub actor_silo_id: Option<Uuid>,
+    pub actor: AuditLogEntryActor,
 
     /// API token or session cookie. Optional because it will not be defined on
     /// unauthenticated requests like login attempts.

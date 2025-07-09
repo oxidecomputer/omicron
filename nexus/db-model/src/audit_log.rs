@@ -129,14 +129,6 @@ impl AuditLogCompletion {
     }
 }
 
-// TODO: AuditLogActor
-// pub enum AuditLogActor {
-//     UserBuiltin { user_builtin_id: Uuid },
-//     TODO: include info about computed roles at runtime?
-//     SiloUser { silo_user_id: Uuid, silo_id: Uuid },
-//     Unauthenticated,
-// }
-
 impl From<AuditLogEntry> for views::AuditLogEntry {
     fn from(entry: AuditLogEntry) -> Self {
         Self {
@@ -148,8 +140,24 @@ impl From<AuditLogEntry> for views::AuditLogEntry {
             source_ip: entry.source_ip.ip(),
             user_agent: entry.user_agent,
             resource_id: entry.resource_id,
-            actor_id: entry.actor_id,
-            actor_silo_id: entry.actor_silo_id,
+            // TODO: make robust by writing down actor type at DB write time
+            // rather than assuming it based on the presence or absence of user
+            // and silo IDs
+            actor: match (entry.actor_id, entry.actor_silo_id) {
+                (Some(silo_user_id), Some(silo_id)) => {
+                    views::AuditLogEntryActor::SiloUser {
+                        silo_user_id,
+                        silo_id,
+                    }
+                }
+                (Some(user_builtin_id), None) => {
+                    views::AuditLogEntryActor::UserBuiltin { user_builtin_id }
+                }
+                (None, None) => views::AuditLogEntryActor::Unauthenticated,
+                (None, Some(_)) => {
+                    unreachable!("Can't have a silo ID without an actor ID");
+                }
+            },
             access_method: entry.access_method,
             time_completed: entry.time_completed,
             http_status_code: entry.http_status_code.0,

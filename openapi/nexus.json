@@ -14405,16 +14405,8 @@
             "description": "API token or session cookie. Optional because it will not be defined on unauthenticated requests like login attempts.",
             "type": "string"
           },
-          "actor_id": {
-            "nullable": true,
-            "description": "User ID of the actor who performed the action",
-            "type": "string",
-            "format": "uuid"
-          },
-          "actor_silo_id": {
-            "nullable": true,
-            "type": "string",
-            "format": "uuid"
+          "actor": {
+            "$ref": "#/components/schemas/AuditLogEntryActor"
           },
           "error_code": {
             "nullable": true,
@@ -14476,6 +14468,7 @@
           }
         },
         "required": [
+          "actor",
           "http_status_code",
           "id",
           "operation_id",
@@ -14484,6 +14477,67 @@
           "source_ip",
           "time_completed",
           "timestamp"
+        ]
+      },
+      "AuditLogEntryActor": {
+        "oneOf": [
+          {
+            "type": "object",
+            "properties": {
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "user_builtin"
+                ]
+              },
+              "user_builtin_id": {
+                "type": "string",
+                "format": "uuid"
+              }
+            },
+            "required": [
+              "kind",
+              "user_builtin_id"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "silo_user"
+                ]
+              },
+              "silo_id": {
+                "type": "string",
+                "format": "uuid"
+              },
+              "silo_user_id": {
+                "type": "string",
+                "format": "uuid"
+              }
+            },
+            "required": [
+              "kind",
+              "silo_id",
+              "silo_user_id"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "unauthenticated"
+                ]
+              }
+            },
+            "required": [
+              "kind"
+            ]
+          }
         ]
       },
       "AuditLogEntryResultsPage": {
