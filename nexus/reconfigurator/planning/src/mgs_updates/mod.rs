@@ -258,18 +258,30 @@ fn mgs_update_status(
                 version: found_active_version,
             };
 
+            let expected = RotUpdateState {
+                active_slot: expected_active_slot.clone(),
+                persistent_boot_preference:
+                    *expected_persistent_boot_preference,
+                pending_persistent_boot_preference:
+                    *expected_pending_persistent_boot_preference,
+                transient_boot_preference: *expected_transient_boot_preference,
+            };
+
+            let found = RotUpdateState {
+                active_slot: found_active_slot,
+                persistent_boot_preference: rot_state
+                    .persistent_boot_preference,
+                pending_persistent_boot_preference: rot_state
+                    .pending_persistent_boot_preference,
+                transient_boot_preference: rot_state.transient_boot_preference,
+            };
+
             Ok(mgs_update_status_rot(
                 desired_version,
-                &expected_active_slot,
+                expected,
+                found,
                 expected_inactive_version,
-                expected_persistent_boot_preference,
-                expected_pending_persistent_boot_preference,
-                expected_transient_boot_preference,
-                &found_active_slot,
                 found_inactive_version,
-                &rot_state.persistent_boot_preference,
-                &rot_state.pending_persistent_boot_preference,
-                &rot_state.transient_boot_preference,
             ))
         }
         PendingMgsUpdateDetails::RotBootloader { .. } => {
@@ -390,21 +402,21 @@ fn mgs_update_status_sp(
     }
 }
 
-#[allow(clippy::too_many_arguments)]
+struct RotUpdateState {
+    active_slot: ExpectedActiveRotSlot,
+    persistent_boot_preference: RotSlot,
+    pending_persistent_boot_preference: Option<RotSlot>,
+    transient_boot_preference: Option<RotSlot>,
+}
+
 fn mgs_update_status_rot(
     desired_version: &ArtifactVersion,
-    expected_active_slot: &ExpectedActiveRotSlot,
+    expected: RotUpdateState,
+    found: RotUpdateState,
     expected_inactive_version: &ExpectedVersion,
-    expected_persistent_boot_preference: &RotSlot,
-    expected_pending_persistent_boot_preference: &Option<RotSlot>,
-    expected_transient_boot_preference: &Option<RotSlot>,
-    found_active_slot: &ExpectedActiveRotSlot,
     found_inactive_version: Option<&str>,
-    found_persistent_boot_preference: &RotSlot,
-    found_pending_persistent_boot_preference: &Option<RotSlot>,
-    found_transient_boot_preference: &Option<RotSlot>,
 ) -> MgsUpdateStatus {
-    if &found_active_slot.version() == desired_version {
+    if &found.active_slot.version() == desired_version {
         // If we find the desired version in the active slot, we're done.
         return MgsUpdateStatus::Done;
     }
@@ -416,28 +428,20 @@ fn mgs_update_status_rot(
     // preference are still what they were when we configured this update.
     // If not, then this update cannot proceed as currently configured.
     // It will fail its precondition check.
-    if found_active_slot.version() != expected_active_slot.version() {
-        return MgsUpdateStatus::Impossible;
-    }
-
-    if found_persistent_boot_preference != expected_persistent_boot_preference {
-        return MgsUpdateStatus::Impossible;
-    }
-
-    if found_pending_persistent_boot_preference
-        != expected_pending_persistent_boot_preference
+    if found.active_slot.version() != expected.active_slot.version()
+        || found.persistent_boot_preference
+            != expected.persistent_boot_preference
+        || found.pending_persistent_boot_preference
+            != expected.pending_persistent_boot_preference
+        || found.transient_boot_preference != expected.transient_boot_preference
     {
-        return MgsUpdateStatus::Impossible;
-    }
-
-    if found_transient_boot_preference != expected_transient_boot_preference {
         return MgsUpdateStatus::Impossible;
     }
 
     // If either found pending persistent boot preference or found transient
     // boot preference are not empty, then an update is not done
-    if found_pending_persistent_boot_preference.is_some()
-        || found_transient_boot_preference.is_some()
+    if found.pending_persistent_boot_preference.is_some()
+        || found.transient_boot_preference.is_some()
     {
         return MgsUpdateStatus::NotDone;
     }
@@ -449,7 +453,7 @@ fn mgs_update_status_rot(
     // https://github.com/oxidecomputer/omicron/issues/8414 for context
     // about when we'll be able to know whether an it's an ongoing update
     // or an RoT in a failed state.
-    if found_persistent_boot_preference != &found_active_slot.slot {
+    if found.persistent_boot_preference != found.active_slot.slot {
         // TODO-K: I am not 100% sure on this one. It may be impossible?
         return MgsUpdateStatus::NotDone;
     }

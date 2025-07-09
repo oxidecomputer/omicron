@@ -509,10 +509,6 @@ struct SledUpdateRotArgs {
     /// sets the version reported for the RoT slot b
     #[clap(long, required_unless_present_any = &["slot_a"])]
     slot_b: Option<ExpectedVersion>,
-    // TODO: In a follow up PR we could set other fields as well.
-    // They would be useful to simulate failures.
-    // These would be: active_slot, persistent_boot_preference,
-    // transient_boot_preference and pending_persistent_boot_preference.
 }
 
 #[derive(Debug, Args)]

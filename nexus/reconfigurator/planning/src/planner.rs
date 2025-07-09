@@ -36,7 +36,6 @@ use nexus_types::deployment::ZpoolFilter;
 use nexus_types::external_api::views::PhysicalDiskPolicy;
 use nexus_types::external_api::views::SledPolicy;
 use nexus_types::external_api::views::SledState;
-use nexus_types::inventory::BaseboardId;
 use nexus_types::inventory::Collection;
 use omicron_common::policy::INTERNAL_DNS_REDUNDANCY;
 use omicron_uuid_kinds::PhysicalDiskUuid;
@@ -1175,7 +1174,7 @@ impl<'a> Planner<'a> {
             .map(|(_sled_id, details)| &details.baseboard_id)
             .collect();
 
-        let included_baseboards: BTreeSet<std::sync::Arc<BaseboardId>> =
+        let included_baseboards =
             self.inventory
                 .sps
                 .iter()
