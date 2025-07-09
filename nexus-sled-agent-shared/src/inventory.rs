@@ -576,6 +576,47 @@ pub enum SledRole {
     Scrimlet,
 }
 
+/// Describes the desired contents of a host phase 2 slot (i.e., the boot
+/// partition on one of the internal M.2 drives).
+#[derive(
+    Clone, Copy, Debug, Deserialize, Serialize, JsonSchema, PartialEq, Eq,
+)]
+#[serde(tag = "type", rename_all = "snake_case")]
+pub enum HostPhase2DesiredContents {
+    /// Do not change the current contents.
+    ///
+    /// We use this value when we've detected a sled has been mupdated (and we
+    /// don't want to overwrite phase 2 images until we understand how to
+    /// recover from that mupdate) and as the default value when reading an
+    /// [`OmicronSledConfig`] that was ledgered before this concept existed.
+    CurrentContents,
+
+    /// Set the phase 2 slot to the given artifact.
+    ///
+    /// The artifact will come from an unpacked and distributed TUF repo.
+    Artifact { hash: ArtifactHash },
+}
+
+/// Describes the desired contents for both host phase 2 slots.
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub struct HostPhase2DesiredSlots {
+    pub slot_a: HostPhase2DesiredContents,
+    pub slot_b: HostPhase2DesiredContents,
+}
+
+impl HostPhase2DesiredSlots {
+    /// Return a `HostPhase2DesiredSlots` with both slots set to
+    /// [`HostPhase2DesiredContents::CurrentContents`]; i.e., "make no changes
+    /// to the current contents of either slot".
+    pub const fn current_contents() -> Self {
+        Self {
+            slot_a: HostPhase2DesiredContents::CurrentContents,
+            slot_b: HostPhase2DesiredContents::CurrentContents,
+        }
+    }
+}
+
 /// Describes the set of Reconfigurator-managed configuration elements of a sled
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema, PartialEq, Eq)]
 pub struct OmicronSledConfig {
@@ -584,6 +625,8 @@ pub struct OmicronSledConfig {
     pub datasets: IdMap<DatasetConfig>,
     pub zones: IdMap<OmicronZoneConfig>,
     pub remove_mupdate_override: Option<MupdateOverrideUuid>,
+    #[serde(default = "HostPhase2DesiredSlots::current_contents")]
+    pub host_phase_2: HostPhase2DesiredSlots,
 }
 
 impl Default for OmicronSledConfig {
@@ -594,6 +637,7 @@ impl Default for OmicronSledConfig {
             datasets: IdMap::default(),
             zones: IdMap::default(),
             remove_mupdate_override: None,
+            host_phase_2: HostPhase2DesiredSlots::current_contents(),
         }
     }
 }

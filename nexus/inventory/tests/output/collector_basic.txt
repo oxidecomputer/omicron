@@ -92,6 +92,8 @@ sled agents found:
     ledgered sled config:
         generation: 3
         remove_mupdate_override: None
+        host_phase_2.slot_a: CurrentContents
+        host_phase_2.slot_b: CurrentContents
         zone 8b88a56f-3eb6-4d80-ba42-75d867bc427d type oximeter
     no completed reconciliation
     reconciler task not yet run
@@ -100,6 +102,8 @@ sled agents found:
     ledgered sled config:
         generation: 3
         remove_mupdate_override: None
+        host_phase_2.slot_a: CurrentContents
+        host_phase_2.slot_b: CurrentContents
         zone 5125277f-0988-490b-ac01-3bba20cc8f07 type oximeter
     no completed reconciliation
     reconciler task not yet run

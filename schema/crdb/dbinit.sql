@@ -3872,6 +3872,11 @@ CREATE TABLE IF NOT EXISTS omicron.public.inv_omicron_sled_config (
     -- remove mupdate override ID, if set
     remove_mupdate_override UUID,
 
+    -- desired artifact hash for internal disk slots' boot partitions
+    -- NULL is translated to `HostPhase2DesiredContents::CurrentContents`
+    host_phase_2_desired_slot_a STRING(64),
+    host_phase_2_desired_slot_b STRING(64),
+
     PRIMARY KEY (inv_collection_id, id)
 );
 
@@ -6170,7 +6175,7 @@ INSERT INTO omicron.public.db_metadata (
     version,
     target_version
 ) VALUES
-    (TRUE, NOW(), NOW(), '158.0.0', NULL)
+    (TRUE, NOW(), NOW(), '159.0.0', NULL)
 ON CONFLICT DO NOTHING;
 
 COMMIT;

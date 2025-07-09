@@ -648,6 +648,7 @@ mod tests {
     use camino_tempfile::Utf8TempDir;
     use id_map::IdMap;
     use illumos_utils::zpool::ZpoolName;
+    use nexus_sled_agent_shared::inventory::HostPhase2DesiredSlots;
     use nexus_sled_agent_shared::inventory::OmicronZoneConfig;
     use nexus_sled_agent_shared::inventory::OmicronZoneImageSource;
     use nexus_sled_agent_shared::inventory::OmicronZoneType;
@@ -861,6 +862,7 @@ mod tests {
             datasets: IdMap::default(),
             zones: IdMap::default(),
             remove_mupdate_override: None,
+            host_phase_2: HostPhase2DesiredSlots::current_contents(),
         }
     }
 
@@ -1062,6 +1064,7 @@ mod tests {
             .into_iter()
             .collect(),
             remove_mupdate_override: None,
+            host_phase_2: HostPhase2DesiredSlots::current_contents(),
         };
 
         // The ledger task should reject this config due to a missing artifact.
@@ -1088,7 +1091,10 @@ mod tests {
             .into_iter()
             .collect(),
             remove_mupdate_override: None,
+            host_phase_2: HostPhase2DesiredSlots::current_contents(),
         };
+
+        // TODO-john also test host phase 2 artifacts!
 
         test_harness
             .task_handle
@@ -1151,6 +1157,8 @@ mod tests {
             .await
             .expect("no ledger task error")
             .expect("config is valid");
+
+        // TODO-john also test host phase 2 artifacts!
 
         logctx.cleanup_successful();
     }
