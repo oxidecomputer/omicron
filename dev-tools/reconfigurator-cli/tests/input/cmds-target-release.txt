@@ -73,26 +73,33 @@ inventory-generate
 blueprint-plan 7f976e0d-d2a5-4eeb-9e82-c82bc2824aba a71f7a73-35a6-45e8-acbe-f1c5925eed69
 blueprint-diff 7f976e0d-d2a5-4eeb-9e82-c82bc2824aba 9034c710-3e57-45f3-99e5-4316145e87ac
 
+# Now we'll change the inactive slot contents of the simulated SP. Like with the
+# RoT, this should make the update impossible and cause the planner to fix it.
+sled-update-sp 2b8f0cb3-0295-4b3c-bc58-4fe88b57112c --inactive 0.5.0
+inventory-generate
+blueprint-plan 9034c710-3e57-45f3-99e5-4316145e87ac 0b5efbb3-0b1b-4bbf-b7d8-a2d6fca074c6
+blueprint-diff 9034c710-3e57-45f3-99e5-4316145e87ac d60afc57-f15d-476c-bd0f-b1071e2bb976
+
 # Let's simulate the successful SP update as well.
 # Another couple of planning steps should try to update the last sled.
 sled-update-sp 2b8f0cb3-0295-4b3c-bc58-4fe88b57112c --active 1.0.0
 inventory-generate
-blueprint-plan 9034c710-3e57-45f3-99e5-4316145e87ac 0b5efbb3-0b1b-4bbf-b7d8-a2d6fca074c6
-blueprint-diff 9034c710-3e57-45f3-99e5-4316145e87ac d60afc57-f15d-476c-bd0f-b1071e2bb976
+blueprint-plan d60afc57-f15d-476c-bd0f-b1071e2bb976 78f72e8d-46a9-40a9-8618-602f54454d80
+blueprint-diff d60afc57-f15d-476c-bd0f-b1071e2bb976 a5a8f242-ffa5-473c-8efd-2acf2dc0b736
 
 # Update the RoT on the last sled.
 # There should be one last pending SP update.
 sled-update-rot d81c6a84-79b8-4958-ae41-ea46c9b19763 --slot-a 1.0.0
 inventory-generate
-blueprint-plan d60afc57-f15d-476c-bd0f-b1071e2bb976 78f72e8d-46a9-40a9-8618-602f54454d80
-blueprint-diff d60afc57-f15d-476c-bd0f-b1071e2bb976 a5a8f242-ffa5-473c-8efd-2acf2dc0b736
+blueprint-plan a5a8f242-ffa5-473c-8efd-2acf2dc0b736 39363465-89ae-4ac2-9be1-099068da9d45
+blueprint-diff a5a8f242-ffa5-473c-8efd-2acf2dc0b736 626487fa-7139-45ec-8416-902271fc730b
 
 # Finish updating the last sled and do one more planning run.
 # This should update one control plane zone.
 sled-update-sp d81c6a84-79b8-4958-ae41-ea46c9b19763 --active 1.0.0
 inventory-generate
-blueprint-plan a5a8f242-ffa5-473c-8efd-2acf2dc0b736 39363465-89ae-4ac2-9be1-099068da9d45
-blueprint-diff a5a8f242-ffa5-473c-8efd-2acf2dc0b736 626487fa-7139-45ec-8416-902271fc730b
+blueprint-plan 626487fa-7139-45ec-8416-902271fc730b 04bc9001-0836-4fec-b9cb-9d4760caf8b4
+blueprint-diff 626487fa-7139-45ec-8416-902271fc730b c1a0d242-9160-40f4-96ae-61f8f40a0b1b
 
 # We should continue walking through the update. We need to build out a
 # reconfigurator-cli subcommand to simulate updated zone image sources (just
