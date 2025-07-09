@@ -16,6 +16,9 @@ use nexus_sled_agent_shared::inventory::HostPhase2DesiredContents;
 use nexus_sled_agent_shared::inventory::HostPhase2DesiredSlots;
 use omicron_common::disk::M2Slot;
 use sled_hardware::PooledDiskError;
+use slog::Logger;
+use slog::info;
+use slog::warn;
 use slog_error_chain::InlineErrorChain;
 use std::io;
 use std::io::BufRead as _;
@@ -130,6 +133,7 @@ impl BootPartitionReconciler {
         artifact_store: &T,
         // TODO We should also consider the mupdate override, once that work
         // lands. Never overwrite the boot partitions while we're in that state.
+        log: &Logger,
     ) -> BootPartitionContents {
         let (slot_a, slot_b) = futures::join!(
             Self::reconcile_slot::<_, RawDiskReader, RawDiskWriter>(
@@ -138,6 +142,7 @@ impl BootPartitionReconciler {
                 &mut self.cached_slot_a,
                 &desired.slot_a,
                 artifact_store,
+                log,
             ),
             Self::reconcile_slot::<_, RawDiskReader, RawDiskWriter>(
                 M2Slot::B,
@@ -145,6 +150,7 @@ impl BootPartitionReconciler {
                 &mut self.cached_slot_b,
                 &desired.slot_b,
                 artifact_store,
+                log,
             ),
         );
         BootPartitionContents {
@@ -175,9 +181,15 @@ impl BootPartitionReconciler {
         cache: &mut Option<BootPartitionDetails>,
         desired: &HostPhase2DesiredContents,
         artifact_store: &T,
+        log: &Logger,
     ) -> Result<BootPartitionDetails, BootPartitionError> {
         // If we don't know what's there, try to read it first.
         if cache.is_none() {
+            info!(
+                log,
+                "reading M.2 slot to determine current contents";
+                "slot" => ?slot,
+            );
             match R::read(slot, internal_disks).await {
                 Ok(details) => {
                     *cache = Some(details);
@@ -186,6 +198,12 @@ impl BootPartitionReconciler {
                     // We couldn't read this slot; if we have a target we want
                     // to write, that's okay and we'll fall through. If we
                     // don't, there's nothing else we can do here.
+                    warn!(
+                        log,
+                        "failed to read M.2 slot contents";
+                        "slot" => ?slot,
+                        InlineErrorChain::new(&err),
+                    );
                     match desired {
                         HostPhase2DesiredContents::CurrentContents => {
                             return Err(err);
@@ -222,6 +240,7 @@ impl BootPartitionReconciler {
                     cache,
                     *hash,
                     artifact_store,
+                    log,
                 )
                 .await
             }
@@ -245,7 +264,14 @@ impl BootPartitionReconciler {
         cache: &mut Option<BootPartitionDetails>,
         desired: ArtifactHash,
         artifact_store: &T,
+        log: &Logger,
     ) -> Result<BootPartitionDetails, BootPartitionError> {
+        info!(
+            log,
+            "attempting to write artifact to M.2 slot";
+            "slot" => ?slot,
+            "artifact" => %desired,
+        );
         let artifact =
             artifact_store.get_artifact(desired).await.map_err(|err| {
                 BootPartitionError::MissingDesiredArtifact { desired, err }
@@ -280,16 +306,40 @@ impl BootPartitionReconciler {
 
         // Re-read the disk we just wrote; this both gets us the metadata
         // describing it and confirms we wrote a valid image.
+        info!(
+            log,
+            "re-reading M.2 slot we just successfully wrote";
+            "slot" => ?slot,
+        );
         let details = R::read(slot, internal_disks).await?;
-        *cache = Some(details.clone());
 
+        // Check whether the artifact we just wrote is the one we think we
+        // should have. This failing would be _extremely_ strange. If we have
+        // `details`, we successfully read and parsed a disk image, and we just
+        // wrote a disk image we got from the artifact store with the hash
+        // `desired`. We don't need to fail here, though; if we have a mismatch
+        // but have a valid boot image, we can still report that valid disk
+        // image, and upstack software will recognize that it doesn't match what
+        // it wanted.
+        if details.artifact_hash != desired {
+            warn!(
+                log,
+                "successfully wrote and reread boot image, but got unexpected \
+                 artifact hash during reread";
+                "slot" => ?slot,
+                "expected-hash" => %desired,
+                "computed-hash" => %details.artifact_hash,
+            );
+        }
+
+        *cache = Some(details.clone());
         Ok(details)
     }
 }
 
-/// Traits to allow unit tests to run without accessing real raw disks; these are
-/// trivially implemented by the real types below and by unit tests inside the
-/// test module.
+/// Traits to allow unit tests to run without accessing real raw disks; these
+/// are trivially implemented by the real types below and by unit tests inside
+/// the test module.
 trait DiskWriter {
     type F: DiskWriterFile + Unpin;
 
@@ -641,6 +691,7 @@ mod tests {
     use bytes::BufMut as _;
     use camino_tempfile::Utf8TempDir;
     use omicron_common::disk::DiskIdentity;
+    use omicron_test_utils::dev;
     use omicron_uuid_kinds::InternalZpoolUuid;
     use proptest::collection::vec;
     use proptest::prelude::*;
@@ -959,6 +1010,9 @@ mod tests {
 
     #[tokio::test]
     async fn reconcile_slot_reads_disk_as_needed() {
+        let logctx = dev::test_setup_log("reconcile_slot_reads_disk_as_needed");
+        let log = &logctx.log;
+
         // We don't use any artifacts in this test, but still need an artifact
         // store.
         let artifact_store = FakeArtifactStore::new();
@@ -983,6 +1037,7 @@ mod tests {
             &mut cache,
             &HostPhase2DesiredContents::CurrentContents,
             &artifact_store,
+            log,
         )
         .await
         .expect("reconciled slot");
@@ -1005,6 +1060,7 @@ mod tests {
             &mut cache,
             &HostPhase2DesiredContents::Artifact { hash: artifact },
             &artifact_store,
+            log,
         )
         .await
         .expect("reconciled slot");
@@ -1029,6 +1085,7 @@ mod tests {
             &mut cache,
             &HostPhase2DesiredContents::CurrentContents,
             &artifact_store,
+            log,
         )
         .await
         .expect("reconciled slot");
@@ -1045,6 +1102,7 @@ mod tests {
             &mut cache,
             &HostPhase2DesiredContents::Artifact { hash: artifact },
             &artifact_store,
+            log,
         )
         .await
         .expect("reconciled slot");
@@ -1064,6 +1122,7 @@ mod tests {
             &mut cache,
             &HostPhase2DesiredContents::CurrentContents,
             &artifact_store,
+            log,
         )
         .await
         .expect_err("failed to reconcile slot");
@@ -1073,6 +1132,10 @@ mod tests {
 
     #[tokio::test]
     async fn reconcile_slot_writes_disk_as_needed() {
+        let logctx =
+            dev::test_setup_log("reconcile_slot_writes_disk_as_needed");
+        let log = &logctx.log;
+
         // Start with an empty artifact store.
         let artifact_store = FakeArtifactStore::new();
 
@@ -1098,6 +1161,7 @@ mod tests {
             &mut cache,
             &HostPhase2DesiredContents::Artifact { hash: artifact },
             &artifact_store,
+            log,
         )
         .await
         .expect_err("failed to reconcile slot");
@@ -1118,6 +1182,7 @@ mod tests {
             &mut cache,
             &HostPhase2DesiredContents::Artifact { hash: artifact },
             &artifact_store,
+            log,
         )
         .await
         .expect("reconciled slot");
@@ -1151,6 +1216,7 @@ mod tests {
                 hash: slot_b_details.artifact_hash,
             },
             &artifact_store,
+            log,
         )
         .await
         .expect("reconciled slot");

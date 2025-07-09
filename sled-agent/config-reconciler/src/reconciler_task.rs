@@ -434,6 +434,7 @@ impl ReconcilerTask {
                 &self.internal_disks_rx.current(),
                 &sled_config.host_phase_2,
                 sled_agent_artifact_store,
+                &self.log,
             )
             .await;
 
