@@ -6550,6 +6550,7 @@ dependencies = [
  "omicron-test-utils",
  "omicron-uuid-kinds",
  "omicron-workspace-hack",
+ "tufaceous-artifact",
 ]
 
 [[package]]
@@ -6648,6 +6649,7 @@ dependencies = [
  "expectorate",
  "gateway-client",
  "id-map",
+ "iddqd",
  "illumos-utils",
  "indexmap 2.10.0",
  "internal-dns-resolver",
@@ -6674,6 +6676,7 @@ dependencies = [
  "sp-sim",
  "static_assertions",
  "strum",
+ "swrite",
  "test-strategy",
  "thiserror 2.0.12",
  "tufaceous-artifact",
