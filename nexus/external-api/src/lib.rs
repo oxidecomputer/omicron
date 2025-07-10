@@ -3237,7 +3237,7 @@ pub trait NexusExternalApi {
     }]
     async fn support_bundle_list(
         rqctx: RequestContext<Self::Context>,
-        query_params: Query<PaginatedById>,
+        query_params: Query<PaginatedByTimeAndId>,
     ) -> Result<HttpResponseOk<ResultsPage<shared::SupportBundleInfo>>, HttpError>;
 
     /// View a support bundle
