@@ -442,6 +442,30 @@ async fn test_repo_upload() -> Result<()> {
             serde_json::from_slice::<TufRepoInsertResponse>(&response.body)
                 .context("error deserializing response body")?;
         assert_eq!(response.status, TufRepoInsertStatus::Inserted);
+        let mut description = response.recorded;
+        description.sort_artifacts();
+
+        // The artifacts should be exactly the same as the 1.0.0 repo we uploaded.
+        assert_eq!(
+            initial_description.artifacts, description.artifacts,
+            "artifacts for 1.0.0 and 2.0.0 should match"
+        );
+
+        // Now get the repository that was just uploaded and make sure the
+        // artifact list is the same.
+        let response: TufRepoGetResponse =
+            make_get_request(client, "2.0.0".parse().unwrap(), StatusCode::OK)
+                .execute()
+                .await
+                .context("error fetching repository")?
+                .parsed_body()?;
+        let mut get_description = response.description;
+        get_description.sort_artifacts();
+
+        assert_eq!(
+            description, get_description,
+            "initial description matches fetched description"
+        );
     }
     // No artifacts changed, so the generation number should still be 2...
     assert_eq!(
