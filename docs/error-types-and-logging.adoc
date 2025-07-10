@@ -386,6 +386,27 @@ if let Err(outer_err) = some_function() {
 }
 ----
 
+[NOTE]
+====
+If you have control over the entire chain of errors, you might ask if it would
+be safer to define _all_ the `Display` impls incorrectly, hoping that would
+result in doublespeak, but at least it wouldn't lose information! However, this
+only works if you maintain control over the entire chain of errors (unlikely in
+practice), and as logging sites are updated to use an adapter like
+`InlineErrorChain`, the doublespeak gets silly and confusing.
+
+In the above example, if `MiddleError` also had an incorrect `Display` impl,
+printing an `OuterError` via `InlineErrorChain` would result in:
+
+```
+middle operation failed: inner operation failed: lowest-level error: inner operation failed: lowest-level error: lowest-level error
+```
+
+and this problem only gets worse as more errors are added to the chain. All the
+information is present, but understanding it gets difficult due to the
+nonsensical repeats.
+====
+
 This property that `std::error::Error` display implementations should not
 recurse to their source errors is not currently well-documented (to the best of
 my knowledge!). It matches the example from the standard library documentation
