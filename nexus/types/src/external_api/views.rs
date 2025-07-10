@@ -6,6 +6,7 @@
 
 use crate::external_api::shared::{
     self, Baseboard, IpKind, IpRange, ServiceUsingCertificate,
+    TufSignedRootRole,
 };
 use crate::identity::AssetIdentityMetadata;
 use api_identity::ObjectIdentity;
@@ -1479,6 +1480,18 @@ pub struct TargetRelease {
 
     /// The source of the target release.
     pub release_source: TargetReleaseSource,
+}
+
+/// Trusted root role used by the update system to verify update repositories.
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize, JsonSchema)]
+pub struct UpdatesTrustRoot {
+    /// The UUID of this trusted root role.
+    pub id: Uuid,
+    /// Time the trusted root role was added.
+    pub time_created: DateTime<Utc>,
+    /// The trusted root role itself, a JSON document as described by The Update
+    /// Framework.
+    pub root_role: TufSignedRootRole,
 }
 
 fn expected_one_of<T: strum::VariantArray + fmt::Display>() -> String {

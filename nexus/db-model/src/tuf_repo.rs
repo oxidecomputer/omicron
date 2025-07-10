@@ -6,11 +6,19 @@ use std::str::FromStr;
 
 use crate::{Generation, SemverVersion, typed_uuid::DbTypedUuid};
 use chrono::{DateTime, Utc};
-use diesel::{deserialize::FromSql, serialize::ToSql, sql_types::Text};
-use nexus_db_schema::schema::{tuf_artifact, tuf_repo, tuf_repo_artifact};
+use diesel::sql_types::{Jsonb, Text};
+use diesel::{deserialize::FromSql, serialize::ToSql};
+use nexus_db_schema::schema::{
+    tuf_artifact, tuf_repo, tuf_repo_artifact, tuf_trust_root,
+};
+use nexus_types::external_api::shared::TufSignedRootRole;
+use nexus_types::external_api::views;
 use omicron_common::{api::external, update::ArtifactId};
+use omicron_uuid_kinds::GenericUuid;
 use omicron_uuid_kinds::TufArtifactKind;
 use omicron_uuid_kinds::TufRepoKind;
+use omicron_uuid_kinds::TufTrustRootKind;
+use omicron_uuid_kinds::TufTrustRootUuid;
 use omicron_uuid_kinds::TypedUuid;
 use parse_display::Display;
 use serde::{Deserialize, Serialize};
@@ -306,28 +314,90 @@ impl fmt::Display for ArtifactHash {
     }
 }
 
-impl ToSql<diesel::sql_types::Text, diesel::pg::Pg> for ArtifactHash {
+impl ToSql<Text, diesel::pg::Pg> for ArtifactHash {
     fn to_sql<'a>(
         &'a self,
         out: &mut diesel::serialize::Output<'a, '_, diesel::pg::Pg>,
     ) -> diesel::serialize::Result {
-        <String as ToSql<diesel::sql_types::Text, diesel::pg::Pg>>::to_sql(
+        <String as ToSql<Text, diesel::pg::Pg>>::to_sql(
             &self.0.to_string(),
             &mut out.reborrow(),
         )
     }
 }
 
-impl FromSql<diesel::sql_types::Text, diesel::pg::Pg> for ArtifactHash {
+impl FromSql<Text, diesel::pg::Pg> for ArtifactHash {
     fn from_sql(
         bytes: diesel::pg::PgValue<'_>,
     ) -> diesel::deserialize::Result<Self> {
-        let s =
-            <String as FromSql<diesel::sql_types::Text, diesel::pg::Pg>>::from_sql(
-                bytes,
-            )?;
+        let s = <String as FromSql<Text, diesel::pg::Pg>>::from_sql(bytes)?;
         ExternalArtifactHash::from_str(&s)
             .map(ArtifactHash)
+            .map_err(|e| e.into())
+    }
+}
+
+/// A trusted TUF root roles, used to verify TUF repo signatures.
+#[derive(Clone, Debug, Queryable, Insertable, Selectable)]
+#[diesel(table_name = tuf_trust_root)]
+pub struct TufTrustRoot {
+    pub id: DbTypedUuid<TufTrustRootKind>,
+    pub time_created: DateTime<Utc>,
+    pub time_deleted: Option<DateTime<Utc>>,
+    pub root_role: DbTufSignedRootRole,
+}
+
+impl TufTrustRoot {
+    pub fn new(root_role: TufSignedRootRole) -> TufTrustRoot {
+        TufTrustRoot {
+            id: TufTrustRootUuid::new_v4().into(),
+            time_created: Utc::now(),
+            time_deleted: None,
+            root_role: DbTufSignedRootRole(root_role),
+        }
+    }
+
+    pub fn id(&self) -> TufTrustRootUuid {
+        self.id.into()
+    }
+}
+
+impl From<TufTrustRoot> for views::UpdatesTrustRoot {
+    fn from(trust_root: TufTrustRoot) -> views::UpdatesTrustRoot {
+        views::UpdatesTrustRoot {
+            id: trust_root.id.into_untyped_uuid(),
+            time_created: trust_root.time_created,
+            root_role: trust_root.root_role.0,
+        }
+    }
+}
+
+#[derive(Debug, Clone, AsExpression, FromSqlRow)]
+#[diesel(sql_type = Jsonb)]
+pub struct DbTufSignedRootRole(pub TufSignedRootRole);
+
+impl ToSql<Jsonb, diesel::pg::Pg> for DbTufSignedRootRole {
+    fn to_sql<'a>(
+        &'a self,
+        out: &mut diesel::serialize::Output<'a, '_, diesel::pg::Pg>,
+    ) -> diesel::serialize::Result {
+        <serde_json::Value as ToSql<Jsonb, diesel::pg::Pg>>::to_sql(
+            &serde_json::to_value(self.0.clone())?,
+            &mut out.reborrow(),
+        )
+    }
+}
+
+impl FromSql<Jsonb, diesel::pg::Pg> for DbTufSignedRootRole {
+    fn from_sql(
+        bytes: diesel::pg::PgValue<'_>,
+    ) -> diesel::deserialize::Result<Self> {
+        let value =
+            <serde_json::Value as FromSql<Jsonb, diesel::pg::Pg>>::from_sql(
+                bytes,
+            )?;
+        serde_json::from_value(value)
+            .map(DbTufSignedRootRole)
             .map_err(|e| e.into())
     }
 }
