@@ -11,7 +11,7 @@ nexus*:::background-task-activate-start
 nexus*:::background-task-activate-done
 /iters[this->task_name]/
 {
-        this->task_Name = copyinstr(arg0);
+        this->task_name = copyinstr(arg0);
         this->duration = timestamp - ts[this->task_name];
         printf(
             "task_name=\"%s\" iteration=%d reason=%s details=%s duration=%dus\n",
