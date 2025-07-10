@@ -454,8 +454,7 @@ fn mgs_update_status_rot(
     // https://github.com/oxidecomputer/omicron/issues/8414 for context
     // about when we'll be able to know whether an it's an ongoing update
     // or an RoT in a failed state.
-    if found.pending_persistent_boot_preference.is_some()
-    {
+    if found.pending_persistent_boot_preference.is_some() {
         return MgsUpdateStatus::NotDone;
     }
 
