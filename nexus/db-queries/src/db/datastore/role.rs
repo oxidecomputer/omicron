@@ -14,77 +14,19 @@ use crate::db::datastore::RunnableQueryNoReturn;
 use crate::db::model::DatabaseString;
 use crate::db::model::IdentityType;
 use crate::db::model::RoleAssignment;
-use crate::db::model::RoleBuiltin;
-use crate::db::pagination::paginated_multicolumn;
 use async_bb8_diesel::AsyncRunQueryDsl;
 use diesel::prelude::*;
 use nexus_db_errors::ErrorHandler;
 use nexus_db_errors::TransactionError;
 use nexus_db_errors::public_error_from_diesel;
 use nexus_db_fixed_data::role_assignment::BUILTIN_ROLE_ASSIGNMENTS;
-use nexus_db_fixed_data::role_builtin::BUILTIN_ROLES;
 use nexus_db_lookup::DbConnection;
 use nexus_types::external_api::shared;
-use omicron_common::api::external::DataPageParams;
 use omicron_common::api::external::Error;
 use omicron_common::api::external::ListResultVec;
 use omicron_common::bail_unless;
 
 impl DataStore {
-    /// List built-in roles
-    pub async fn roles_builtin_list_by_name(
-        &self,
-        opctx: &OpContext,
-        pagparams: &DataPageParams<'_, (String, String)>,
-    ) -> ListResultVec<RoleBuiltin> {
-        use nexus_db_schema::schema::role_builtin::dsl;
-        opctx.authorize(authz::Action::ListChildren, &authz::FLEET).await?;
-
-        let conn = self.pool_connection_authorized(opctx).await?;
-        paginated_multicolumn(
-            dsl::role_builtin,
-            (dsl::resource_type, dsl::role_name),
-            pagparams,
-        )
-        .select(RoleBuiltin::as_select())
-        .load_async::<RoleBuiltin>(&*conn)
-        .await
-        .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))
-    }
-
-    /// Load built-in roles into the database
-    pub async fn load_builtin_roles(
-        &self,
-        opctx: &OpContext,
-    ) -> Result<(), Error> {
-        use nexus_db_schema::schema::role_builtin::dsl;
-
-        opctx.authorize(authz::Action::Modify, &authz::DATABASE).await?;
-
-        let builtin_roles = BUILTIN_ROLES
-            .iter()
-            .map(|role_config| {
-                RoleBuiltin::new(
-                    role_config.resource_type,
-                    &role_config.role_name,
-                    &role_config.description,
-                )
-            })
-            .collect::<Vec<RoleBuiltin>>();
-
-        debug!(opctx.log, "attempting to create built-in roles");
-        let conn = self.pool_connection_authorized(opctx).await?;
-        let count = diesel::insert_into(dsl::role_builtin)
-            .values(builtin_roles)
-            .on_conflict((dsl::resource_type, dsl::role_name))
-            .do_nothing()
-            .execute_async(&*conn)
-            .await
-            .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))?;
-        info!(opctx.log, "created {} built-in roles", count);
-        Ok(())
-    }
-
     /// Load role assignments for built-in users and built-in roles into the
     /// database
     pub async fn load_builtin_role_asgns(

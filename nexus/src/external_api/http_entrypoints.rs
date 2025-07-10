@@ -8,7 +8,7 @@ use super::{
     console_api, params,
     views::{
         self, Certificate, FloatingIp, Group, IdentityProvider, Image, IpPool,
-        IpPoolRange, PhysicalDisk, Project, Rack, Role, Silo, SiloQuotas,
+        IpPoolRange, PhysicalDisk, Project, Rack, Silo, SiloQuotas,
         SiloUtilization, Sled, Snapshot, SshKey, User, UserBuiltin,
         Utilization, Vpc, VpcRouter, VpcSubnet,
     },
@@ -6851,79 +6851,6 @@ impl NexusExternalApi for NexusExternalApiImpl {
                 .fetch()
                 .await?;
             Ok(HttpResponseOk(user.into()))
-        };
-        apictx
-            .context
-            .external_latencies
-            .instrument_dropshot_handler(&rqctx, handler)
-            .await
-    }
-
-    // Built-in roles
-
-    async fn role_list(
-        rqctx: RequestContext<ApiContext>,
-        query_params: Query<
-            PaginationParams<EmptyScanParams, params::RolePage>,
-        >,
-    ) -> Result<HttpResponseOk<ResultsPage<Role>>, HttpError> {
-        let apictx = rqctx.context();
-        let nexus = &apictx.context.nexus;
-        let query = query_params.into_inner();
-        let handler = async {
-            let opctx =
-                crate::context::op_context_for_external_api(&rqctx).await?;
-            let marker = match &query.page {
-                WhichPage::First(..) => None,
-                WhichPage::Next(params::RolePage { last_seen }) => {
-                    Some(last_seen.split_once('.').ok_or_else(|| {
-                        Error::invalid_value(
-                            last_seen.clone(),
-                            "bad page token",
-                        )
-                    })?)
-                    .map(|(s1, s2)| (s1.to_string(), s2.to_string()))
-                }
-            };
-            let pagparams = DataPageParams {
-                limit: rqctx.page_limit(&query)?,
-                direction: PaginationOrder::Ascending,
-                marker: marker.as_ref(),
-            };
-            let roles = nexus
-                .roles_builtin_list(&opctx, &pagparams)
-                .await?
-                .into_iter()
-                .map(|i| i.into())
-                .collect();
-            Ok(HttpResponseOk(dropshot::ResultsPage::new(
-                roles,
-                &EmptyScanParams {},
-                |role: &Role, _| params::RolePage {
-                    last_seen: role.name.to_string(),
-                },
-            )?))
-        };
-        apictx
-            .context
-            .external_latencies
-            .instrument_dropshot_handler(&rqctx, handler)
-            .await
-    }
-
-    async fn role_view(
-        rqctx: RequestContext<ApiContext>,
-        path_params: Path<params::RolePath>,
-    ) -> Result<HttpResponseOk<Role>, HttpError> {
-        let apictx = rqctx.context();
-        let nexus = &apictx.context.nexus;
-        let path = path_params.into_inner();
-        let role_name = &path.role_name;
-        let handler = async {
-            let opctx =
-                crate::context::op_context_for_external_api(&rqctx).await?;
-            let role = nexus.role_builtin_fetch(&opctx, &role_name).await?;
-            Ok(HttpResponseOk(role.into()))
         };
         apictx
             .context

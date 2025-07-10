@@ -810,5 +810,13 @@
       }
     }
   },
-  "remove_mupdate_override": null
+  "remove_mupdate_override": null,
+  "host_phase_2": {
+    "slot_a": {
+      "type": "current_contents"
+    },
+    "slot_b": {
+      "type": "current_contents"
+    }
+  }
 }

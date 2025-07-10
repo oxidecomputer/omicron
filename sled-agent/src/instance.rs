@@ -2278,7 +2278,8 @@ mod tests {
         InstanceMigrateStatusResponse, InstanceStateMonitorResponse,
     };
     use sled_agent_config_reconciler::{
-        CurrentlyManagedZpoolsReceiver, InternalDisksReceiver,
+        CurrentlyManagedZpoolsReceiver, InternalDiskDetails,
+        InternalDisksReceiver,
     };
     use sled_agent_types::zone_bundle::CleanupContext;
     use sled_storage::config::MountConfig;
@@ -2530,13 +2531,16 @@ mod tests {
             log.new(o!("component" => "ZoneBundler")),
             InternalDisksReceiver::fake_static(
                 Arc::new(MountConfig::default()),
-                [(
+                [InternalDiskDetails::fake_details(
                     DiskIdentity {
                         vendor: "test-vendor".to_string(),
                         model: "test-model".to_string(),
                         serial: "test-serial".to_string(),
                     },
                     InternalZpoolUuid::new_v4(),
+                    true, // is_boot_disk
+                    None,
+                    None,
                 )]
                 .into_iter(),
             ),

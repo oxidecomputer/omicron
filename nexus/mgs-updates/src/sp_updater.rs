@@ -9,6 +9,7 @@ use crate::SpComponentUpdateError;
 use crate::SpComponentUpdateHelper;
 use crate::UpdateProgress;
 use crate::common_sp_update::FoundVersion;
+use crate::common_sp_update::PostUpdateError;
 use crate::common_sp_update::PrecheckError;
 use crate::common_sp_update::PrecheckStatus;
 use crate::common_sp_update::SpComponentUpdater;
@@ -18,7 +19,6 @@ use futures::FutureExt;
 use futures::future::BoxFuture;
 use gateway_client::SpComponent;
 use gateway_client::types::SpType;
-use nexus_types::deployment::ExpectedVersion;
 use nexus_types::deployment::PendingMgsUpdate;
 use nexus_types::deployment::PendingMgsUpdateDetails;
 use slog::Logger;
@@ -259,27 +259,7 @@ impl SpComponentUpdateHelper for ReconfiguratorSpUpdater {
                     }
                 }
             };
-            match (&expected_inactive_version, &found_version) {
-                // expected garbage, found garbage
-                (
-                    ExpectedVersion::NoValidVersion,
-                    FoundVersion::MissingVersion,
-                ) => (),
-                // expected a specific version and found it
-                (
-                    ExpectedVersion::Version(artifact_version),
-                    FoundVersion::Version(found_version),
-                ) if artifact_version.to_string() == *found_version => (),
-                // anything else is a mismatch
-                (ExpectedVersion::NoValidVersion, FoundVersion::Version(_))
-                | (ExpectedVersion::Version(_), FoundVersion::MissingVersion)
-                | (ExpectedVersion::Version(_), FoundVersion::Version(_)) => {
-                    return Err(PrecheckError::WrongInactiveVersion {
-                        expected: expected_inactive_version.clone(),
-                        found: found_version,
-                    });
-                }
-            };
+            found_version.matches(expected_inactive_version)?;
 
             Ok(PrecheckStatus::ReadyForUpdate)
         }
@@ -293,19 +273,23 @@ impl SpComponentUpdateHelper for ReconfiguratorSpUpdater {
         log: &'a slog::Logger,
         mgs_clients: &'a mut MgsClients,
         update: &'a PendingMgsUpdate,
-    ) -> BoxFuture<'a, Result<(), GatewayClientError>> {
-        mgs_clients
-            .try_all_serially(log, move |mgs_client| async move {
-                debug!(log, "attempting to reset device");
-                mgs_client
-                    .sp_component_reset(
-                        update.sp_type,
-                        update.slot_id,
-                        &SpComponent::SP_ITSELF.to_string(),
-                    )
-                    .await?;
-                Ok(())
-            })
-            .boxed()
+    ) -> BoxFuture<'a, Result<(), PostUpdateError>> {
+        async move {
+            mgs_clients
+                .try_all_serially(log, move |mgs_client| async move {
+                    debug!(log, "attempting to reset device");
+                    mgs_client
+                        .sp_component_reset(
+                            update.sp_type,
+                            update.slot_id,
+                            &SpComponent::SP_ITSELF.to_string(),
+                        )
+                        .await?;
+                    Ok(())
+                })
+                .await?;
+            Ok(())
+        }
+        .boxed()
     }
 }

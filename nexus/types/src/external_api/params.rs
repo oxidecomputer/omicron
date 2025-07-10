@@ -2398,22 +2398,6 @@ pub struct AllowListUpdate {
     pub allowed_ips: AllowedSourceIps,
 }
 
-// Roles
-
-// Roles have their own pagination scheme because they do not use the usual "id"
-// or "name" types.  For more, see the comment in dbinit.sql.
-#[derive(Deserialize, JsonSchema, Serialize)]
-pub struct RolePage {
-    pub last_seen: String,
-}
-
-/// Path parameters for global (system) role requests
-#[derive(Deserialize, JsonSchema)]
-pub struct RolePath {
-    /// The built-in role's unique name.
-    pub role_name: String,
-}
-
 // Console API
 
 #[derive(Deserialize, JsonSchema)]

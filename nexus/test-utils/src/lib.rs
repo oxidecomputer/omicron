@@ -34,6 +34,7 @@ use nexus_config::MgdConfig;
 use nexus_config::NUM_INITIAL_RESERVED_IP_ADDRESSES;
 use nexus_config::NexusConfig;
 use nexus_db_queries::db::pub_test_utils::crdb;
+use nexus_sled_agent_shared::inventory::HostPhase2DesiredSlots;
 use nexus_sled_agent_shared::inventory::OmicronSledConfig;
 use nexus_sled_agent_shared::inventory::OmicronZoneDataset;
 use nexus_sled_agent_shared::recovery_silo::RecoverySiloConfig;
@@ -1147,6 +1148,7 @@ impl<'a, N: NexusServer> ControlPlaneTestContextBuilder<'a, N> {
                     .map(From::from)
                     .collect(),
                 remove_mupdate_override: None,
+                host_phase_2: HostPhase2DesiredSlots::current_contents(),
             })
             .await
             .expect("Failed to configure sled agent with our zones");
@@ -1186,6 +1188,7 @@ impl<'a, N: NexusServer> ControlPlaneTestContextBuilder<'a, N> {
                     datasets: IdMap::default(),
                     zones: IdMap::default(),
                     remove_mupdate_override: None,
+                    host_phase_2: HostPhase2DesiredSlots::current_contents(),
                 })
                 .await
                 .expect("Failed to configure sled agent with our zones");

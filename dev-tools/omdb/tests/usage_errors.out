@@ -144,6 +144,7 @@ Commands:
   oximeter                     Print information about the oximeter collector
   alert                        Print information about alerts
   zpool                        Commands for querying and interacting with pools
+  user-data-export             Commands for querying and interacting with user data export objects
   help                         Print this message or the help of the given subcommand(s)
 
 Options:
@@ -202,6 +203,7 @@ Commands:
   oximeter                     Print information about the oximeter collector
   alert                        Print information about alerts
   zpool                        Commands for querying and interacting with pools
+  user-data-export             Commands for querying and interacting with user data export objects
   help                         Print this message or the help of the given subcommand(s)
 
 Options:

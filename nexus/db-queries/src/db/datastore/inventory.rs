@@ -2774,6 +2774,7 @@ impl DataStore {
                             disks: IdMap::default(),
                             datasets: IdMap::default(),
                             zones: IdMap::default(),
+                            host_phase_2: sled_config.host_phase_2.into(),
                         },
                     });
                 }
@@ -3871,6 +3872,7 @@ impl ConfigReconcilerRows {
             sled_config_id,
             config.generation,
             config.remove_mupdate_override,
+            config.host_phase_2.clone(),
         ));
         self.disks.extend(config.disks.iter().map(|disk| {
             InvOmicronSledConfigDisk::new(
