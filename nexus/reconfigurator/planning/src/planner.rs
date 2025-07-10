@@ -1565,15 +1565,15 @@ impl<'a> Planner<'a> {
         //    don't want to add zones on *any* sled.
         //
         //    This might seem overly conservative (why block zone additions on
-        //    *any* sled currently recovering from a MUPdate?), but is probably
-        //    correct for the medium term: we want to minimize the number of
-        //    different versions of services running at any time.
+        //    *all* sleds if *any* are currently recovering from a MUPdate?),
+        //    but is probably correct for the medium term: we want to minimize
+        //    the number of different versions of services running at any time.
         //
         //    There's some potential to relax this in the future (e.g. by
         //    matching up the zone manifest with the target release to compute
         //    the number of versions running at a given time), but that's a
-        //    non-trivial optimization that we should probably defer until we see
-        //    its necessity.
+        //    non-trivial optimization that we should probably defer until we
+        //    see its necessity.
         //
         // What does "any sleds" mean in this context? We don't need to care
         // about decommissioned or expunged sleds, so we consider in-service
