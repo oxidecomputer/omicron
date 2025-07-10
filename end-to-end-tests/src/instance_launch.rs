@@ -95,7 +95,7 @@ async fn instance_launch() -> Result<()> {
         .context("no external IPs")?
         .clone();
 
-    let ExternalIp::Ephemeral { ip: ip_addr } = ip_addr else {
+    let ExternalIp::Ephemeral { ip: ip_addr, .. } = ip_addr else {
         anyhow::bail!("IP bound to instance was not ephemeral as required.")
     };
     eprintln!("instance external IP: {}", ip_addr);
