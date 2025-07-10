@@ -44,6 +44,7 @@ use nexus_types::deployment::OmicronZoneExternalFloatingAddr;
 use nexus_types::deployment::OmicronZoneExternalFloatingIp;
 use nexus_types::deployment::OmicronZoneExternalSnatIp;
 use nexus_types::deployment::OximeterReadMode;
+use nexus_types::deployment::PendingMgsUpdate;
 use nexus_types::deployment::PendingMgsUpdates;
 use nexus_types::deployment::PlanningInput;
 use nexus_types::deployment::SledFilter;
@@ -1231,8 +1232,20 @@ impl<'a> BlueprintBuilder<'a> {
             ))
         })?;
 
+        // Also map the editor to the corresponding PendingMgsUpdates.
+        let sled_details = self
+            .input
+            .sled_lookup(SledFilter::InService, sled_id)
+            .map_err(|error| Error::Planner(anyhow!(error)))?;
+        // TODO: simplify down to &BaseboardId
+        let baseboard_id = Arc::new(sled_details.baseboard_id.clone());
+        let pending_mgs_update = self.pending_mgs_updates.entry(baseboard_id);
+
         editor
-            .ensure_mupdate_override(inv_mupdate_override_id)
+            .ensure_mupdate_override(
+                inv_mupdate_override_id,
+                pending_mgs_update,
+            )
             .map_err(|err| Error::SledEditError { sled_id, err })
     }
 
@@ -2311,6 +2324,8 @@ pub enum EnsureMupdateOverrideAction {
         /// The zones which were updated to the install dataset, along with
         /// their old values.
         zones: IdOrdMap<EnsureMupdateOverrideUpdatedZone>,
+        /// The pending MGS update that was cleared, if any.
+        prev_mgs_update: Option<PendingMgsUpdate>,
     },
     /// The inventory did not have an override but the blueprint did, so the
     /// blueprint's override was cleared.
@@ -2340,6 +2355,7 @@ impl EnsureMupdateOverrideAction {
                 inv_override,
                 prev_bp_override,
                 zones,
+                prev_mgs_update,
             } => {
                 let mut zones_desc = String::new();
                 if zones.is_empty() {
@@ -2357,8 +2373,22 @@ impl EnsureMupdateOverrideAction {
                     "blueprint mupdate override updated to match inventory";
                     "new_bp_override" => %inv_override,
                     "prev_bp_override" => ?prev_bp_override,
-                    "zones" => %zones_desc,
+                    "zones" => zones_desc,
                 );
+                if let Some(prev_mgs_update) = prev_mgs_update {
+                    info!(
+                        log,
+                        "previous MGS update cleared as part of updating \
+                         blueprint mupdate override to match inventory";
+                        prev_mgs_update,
+                    );
+                } else {
+                    info!(
+                        log,
+                        "no previous MGS update found as part of updating \
+                         blueprint mupdate override to match inventory",
+                    );
+                }
             }
             EnsureMupdateOverrideAction::BpClearOverride {
                 prev_bp_override,

@@ -23,6 +23,7 @@ glob.workspace = true
 id-map.workspace = true
 iddqd.workspace = true
 illumos-utils.workspace = true
+installinator-common.workspace = true
 key-manager.workspace = true
 nexus-sled-agent-shared.workspace = true
 omicron-common.workspace = true

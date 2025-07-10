@@ -54,10 +54,16 @@ set target release based on repo-1.0.0.zip
 sled 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6: install dataset updated: to target release (system version 1.0.0)
 
 
-> # Set one of sled 0's zone's image sources to a specific artifact.
+> # Set one of sled 0's zone's image sources to a specific artifact, and
+> # also set an MGS update on the sled. Both should be reset as part of
+> # this process.
 > blueprint-edit latest set-zone-image 0c71b3b2-6ceb-4e8f-b020-b08675e83038 artifact 1.2.3 e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855
 blueprint 8da82a8e-bf97-4fbd-8ddd-9f6462732cf1 created from latest blueprint (dbcbd3d6-41ff-48ae-ac0b-1becc9b2fd21): set sled 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6 zone 0c71b3b2-6ceb-4e8f-b020-b08675e83038 image source to artifact: version 1.2.3
 warn: no validation is done on the requested image source
+
+> blueprint-edit latest set-sp-update serial0 e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855 1.1.0 sp 1.0.0 1.0.1
+blueprint 58d5e830-0884-47d8-a7cd-b2b3751adeb4 created from latest blueprint (8da82a8e-bf97-4fbd-8ddd-9f6462732cf1): configured update for serial serial0
+warn: no validation is done on the requested artifact hash or version
 
 
 > # Simulate a mupdate on sled 0 by setting the mupdate override field to a
@@ -69,6 +75,12 @@ set sled 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6 mupdate override: unset -> 6123eac
 > # On sled 1, simulate an error obtaining the mupdate override.
 > sled-set serial1 mupdate-override --with-error
 set sled 2b8f0cb3-0295-4b3c-bc58-4fe88b57112c mupdate override: unset -> error
+
+
+> # Also set its SP update, which will not be cleared.
+> blueprint-edit latest set-sp-update serial1 e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855 newest sp newer older
+blueprint af934083-59b5-4bf6-8966-6fb5292c29e1 created from latest blueprint (58d5e830-0884-47d8-a7cd-b2b3751adeb4): configured update for serial serial1
+warn: no validation is done on the requested artifact hash or version
 
 
 > # Simulate a mupdate on sled 2 as well.
@@ -90,6 +102,7 @@ INFO blueprint mupdate override updated to match inventory, phase: do_plan_mupda
   - zone 803bfb63-c246-41db-b0da-d3b87ddfc63d (ExternalDns) left unchanged, image source: install dataset
   - zone ba4994a8-23f9-4b1a-a84f-a08d74591389 (CruciblePantry) left unchanged, image source: install dataset
 
+INFO previous MGS update cleared as part of updating blueprint mupdate override to match inventory, phase: do_plan_mupdate_override, sled_id: 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6, artifact_version: 1.1.0, artifact_hash: e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855, expected_inactive_version: Version(ArtifactVersion("1.0.1")), expected_active_version: 1.0.0, component: sp, sp_slot: 0, sp_type: Sled, serial_number: serial0, part_number: model0
 INFO blueprint mupdate override updated to match inventory, phase: do_plan_mupdate_override, sled_id: d81c6a84-79b8-4958-ae41-ea46c9b19763, new_bp_override: 203fa72c-85c1-466a-8ed3-338ee029530d, prev_bp_override: None, zones: 
   - zone 3eeb8d49-eb1a-43f8-bb64-c2338421c2c6 (Nexus) left unchanged, image source: install dataset
   - zone 75b220ba-a0f4-4872-8202-dc7c87f062d0 (CruciblePantry) left unchanged, image source: install dataset
@@ -98,13 +111,14 @@ INFO blueprint mupdate override updated to match inventory, phase: do_plan_mupda
   - zone f55647d4-5500-4ad3-893a-df45bd50d622 (Crucible) left unchanged, image source: install dataset
   - zone f6ec9c67-946a-4da3-98d5-581f72ce8bf0 (ExternalDns) left unchanged, image source: install dataset
 
+INFO no previous MGS update found as part of updating blueprint mupdate override to match inventory, phase: do_plan_mupdate_override, sled_id: d81c6a84-79b8-4958-ae41-ea46c9b19763
 INFO updating target release minimum generation based on new set-override actions, phase: do_plan_mupdate_override, current_generation: 1, new_generation: 3
-INFO not ready to add or update new zones yet, phase: do_plan_mupdate_override, reasons: sleds have remove mupdate override set in blueprint: 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6, d81c6a84-79b8-4958-ae41-ea46c9b19763; current target release generation (2) is lower than minimum required by blueprint (3)
+INFO not ready to add or update new zones yet, phase: do_plan_mupdate_override, reasons: current target release generation (2) is lower than minimum required by blueprint (3); sleds have remove mupdate override set in blueprint: 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6, d81c6a84-79b8-4958-ae41-ea46c9b19763
 INFO noop converting 0/7 install-dataset zones to artifact store, sled_id: 2b8f0cb3-0295-4b3c-bc58-4fe88b57112c
 INFO skipping noop image source check on sled (blueprint has get_remove_mupdate_override set for sled), sled_id: 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6, bp_remove_mupdate_override_id: 6123eac1-ec5b-42ba-b73f-9845105a9971
 INFO skipping noop image source check on sled (blueprint has get_remove_mupdate_override set for sled), sled_id: d81c6a84-79b8-4958-ae41-ea46c9b19763, bp_remove_mupdate_override_id: 203fa72c-85c1-466a-8ed3-338ee029530d
 INFO will ensure cockroachdb setting, setting: cluster.preserve_downgrade_option, value: DoNotModify
-generated blueprint 58d5e830-0884-47d8-a7cd-b2b3751adeb4 based on parent blueprint 8da82a8e-bf97-4fbd-8ddd-9f6462732cf1
+generated blueprint df06bb57-ad42-4431-9206-abff322896c7 based on parent blueprint af934083-59b5-4bf6-8966-6fb5292c29e1
 
 
 > # Diff the blueprints. This diff should show:
@@ -112,13 +126,14 @@ generated blueprint 58d5e830-0884-47d8-a7cd-b2b3751adeb4 based on parent bluepri
 > # * for sled 0:
 > #   * "+ will remove mupdate override"
 > #   * for zone 0c71b3b2-6ceb-4e8f-b020-b08675e83038, a change from artifact to install-dataset
+> #   * the pending MGS update cleared
 > # * for sled 1, no change, because the mupdate override field had an error
 > # * for sled 2, "+ will remove mupdate override"
 > # * the target release's minimum generation bumped from 1 to 3
 > #   (the 3 is because generation 2 is repo-1.0.0.zip)
 > blueprint-diff latest
-from: blueprint 8da82a8e-bf97-4fbd-8ddd-9f6462732cf1
-to:   blueprint 58d5e830-0884-47d8-a7cd-b2b3751adeb4
+from: blueprint af934083-59b5-4bf6-8966-6fb5292c29e1
+to:   blueprint df06bb57-ad42-4431-9206-abff322896c7
 
  MODIFIED SLEDS:
 
@@ -213,6 +228,15 @@ to:   blueprint 58d5e830-0884-47d8-a7cd-b2b3751adeb4
  OXIMETER SETTINGS:
     generation:   1 (unchanged)
     read from::   SingleNode (unchanged)
+
+ PENDING MGS UPDATES:
+
+    Pending MGS-managed updates (all baseboards):
+    -----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+    sp_type   slot   part_number   serial_number   artifact_hash                                                      artifact_version   details                                                                                                               
+    -----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+    sled      1      model1        serial1         e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855   newest             Sp { expected_active_version: ArtifactVersion("newer"), expected_inactive_version: Version(ArtifactVersion("older")) }
+-   sled      0      model0        serial0         e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855   1.1.0              Sp { expected_active_version: ArtifactVersion("1.0.0"), expected_inactive_version: Version(ArtifactVersion("1.0.1")) }
 
 
 internal DNS:
@@ -388,11 +412,11 @@ INFO noop converting 0/7 install-dataset zones to artifact store, sled_id: 2b8f0
 INFO skipping noop image source check (sled not present in latest inventory collection), sled_id: 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6
 INFO skipping noop image source check on sled (blueprint has get_remove_mupdate_override set for sled), sled_id: d81c6a84-79b8-4958-ae41-ea46c9b19763, bp_remove_mupdate_override_id: 203fa72c-85c1-466a-8ed3-338ee029530d
 INFO will ensure cockroachdb setting, setting: cluster.preserve_downgrade_option, value: DoNotModify
-generated blueprint af934083-59b5-4bf6-8966-6fb5292c29e1 based on parent blueprint 58d5e830-0884-47d8-a7cd-b2b3751adeb4
+generated blueprint 7f976e0d-d2a5-4eeb-9e82-c82bc2824aba based on parent blueprint df06bb57-ad42-4431-9206-abff322896c7
 
 > blueprint-diff latest
-from: blueprint 58d5e830-0884-47d8-a7cd-b2b3751adeb4
-to:   blueprint af934083-59b5-4bf6-8966-6fb5292c29e1
+from: blueprint df06bb57-ad42-4431-9206-abff322896c7
+to:   blueprint 7f976e0d-d2a5-4eeb-9e82-c82bc2824aba
 
  COCKROACHDB SETTINGS:
     state fingerprint:::::::::::::::::   (none) (unchanged)
@@ -588,8 +612,9 @@ INFO blueprint mupdate override updated to match inventory, phase: do_plan_mupda
   - zone f55647d4-5500-4ad3-893a-df45bd50d622 (Crucible) left unchanged, image source: install dataset
   - zone f6ec9c67-946a-4da3-98d5-581f72ce8bf0 (ExternalDns) left unchanged, image source: install dataset
 
+INFO no previous MGS update found as part of updating blueprint mupdate override to match inventory, phase: do_plan_mupdate_override, sled_id: d81c6a84-79b8-4958-ae41-ea46c9b19763
 INFO updating target release minimum generation based on new set-override actions, phase: do_plan_mupdate_override, current_generation: 3, new_generation: 4
-INFO not ready to add or update new zones yet, phase: do_plan_mupdate_override, reasons: sleds have remove mupdate override set in blueprint: d81c6a84-79b8-4958-ae41-ea46c9b19763; current target release generation (3) is lower than minimum required by blueprint (4)
+INFO not ready to add or update new zones yet, phase: do_plan_mupdate_override, reasons: current target release generation (3) is lower than minimum required by blueprint (4); sleds have remove mupdate override set in blueprint: d81c6a84-79b8-4958-ae41-ea46c9b19763
 INFO noop converting 0/7 install-dataset zones to artifact store, sled_id: 2b8f0cb3-0295-4b3c-bc58-4fe88b57112c
 INFO install dataset artifact hash matches TUF repo, switching out the zone image source to Artifact, sled_id: 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6, tuf_artifact_id: nexus v1.0.0 (zone)
 INFO install dataset artifact hash matches TUF repo, switching out the zone image source to Artifact, sled_id: 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6, tuf_artifact_id: internal-dns v1.0.0 (zone)
@@ -600,7 +625,7 @@ INFO install dataset artifact hash matches TUF repo, switching out the zone imag
 INFO noop converting 6/6 install-dataset zones to artifact store, sled_id: 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6
 INFO skipping noop image source check on sled (blueprint has get_remove_mupdate_override set for sled), sled_id: d81c6a84-79b8-4958-ae41-ea46c9b19763, bp_remove_mupdate_override_id: 1c0ce176-6dc8-4a90-adea-d4a8000751da
 INFO will ensure cockroachdb setting, setting: cluster.preserve_downgrade_option, value: DoNotModify
-generated blueprint df06bb57-ad42-4431-9206-abff322896c7 based on parent blueprint af934083-59b5-4bf6-8966-6fb5292c29e1
+generated blueprint 9034c710-3e57-45f3-99e5-4316145e87ac based on parent blueprint 7f976e0d-d2a5-4eeb-9e82-c82bc2824aba
 
 
 > # Diff the blueprints. This diff should show:
@@ -611,8 +636,8 @@ generated blueprint df06bb57-ad42-4431-9206-abff322896c7 based on parent bluepri
 > # * on sled 2, a _change_ in the will-remove-mupdate-override field
 > # * another bump to the target release minimum generation, this time to 4.
 > blueprint-diff latest
-from: blueprint af934083-59b5-4bf6-8966-6fb5292c29e1
-to:   blueprint df06bb57-ad42-4431-9206-abff322896c7
+from: blueprint 7f976e0d-d2a5-4eeb-9e82-c82bc2824aba
+to:   blueprint 9034c710-3e57-45f3-99e5-4316145e87ac
 
  MODIFIED SLEDS:
 
@@ -849,11 +874,11 @@ INFO noop converting 0/7 install-dataset zones to artifact store, sled_id: 2b8f0
 INFO noop converting 0/0 install-dataset zones to artifact store, sled_id: 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6
 INFO noop converting 0/6 install-dataset zones to artifact store, sled_id: d81c6a84-79b8-4958-ae41-ea46c9b19763
 INFO will ensure cockroachdb setting, setting: cluster.preserve_downgrade_option, value: DoNotModify
-generated blueprint 7f976e0d-d2a5-4eeb-9e82-c82bc2824aba based on parent blueprint df06bb57-ad42-4431-9206-abff322896c7
+generated blueprint d60afc57-f15d-476c-bd0f-b1071e2bb976 based on parent blueprint 9034c710-3e57-45f3-99e5-4316145e87ac
 
 > blueprint-show latest
-blueprint  7f976e0d-d2a5-4eeb-9e82-c82bc2824aba
-parent:    df06bb57-ad42-4431-9206-abff322896c7
+blueprint  d60afc57-f15d-476c-bd0f-b1071e2bb976
+parent:    9034c710-3e57-45f3-99e5-4316145e87ac
 
   sled: 2b8f0cb3-0295-4b3c-bc58-4fe88b57112c (active, config generation 2)
 
@@ -990,12 +1015,18 @@ parent:    df06bb57-ad42-4431-9206-abff322896c7
     external DNS version:::   1
     target release min gen:   4
 
- PENDING MGS-MANAGED UPDATES: 0
+ PENDING MGS-MANAGED UPDATES: 1
+    Pending MGS-managed updates (all baseboards):
+    -----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+    sp_type   slot   part_number   serial_number   artifact_hash                                                      artifact_version   details                                                                                                               
+    -----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+    sled      1      model1        serial1         e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855   newest             Sp { expected_active_version: ArtifactVersion("newer"), expected_inactive_version: Version(ArtifactVersion("older")) }
+
 
 
 > blueprint-diff latest
-from: blueprint df06bb57-ad42-4431-9206-abff322896c7
-to:   blueprint 7f976e0d-d2a5-4eeb-9e82-c82bc2824aba
+from: blueprint 9034c710-3e57-45f3-99e5-4316145e87ac
+to:   blueprint d60afc57-f15d-476c-bd0f-b1071e2bb976
 
  MODIFIED SLEDS:
 
@@ -1222,20 +1253,21 @@ INFO sufficient InternalDns zones exist in plan, desired_count: 3, current_count
 INFO sufficient ExternalDns zones exist in plan, desired_count: 3, current_count: 3
 INFO sufficient Nexus zones exist in plan, desired_count: 3, current_count: 3
 INFO sufficient Oximeter zones exist in plan, desired_count: 0, current_count: 0
-WARN cannot configure SP update for board (no matching artifact), serial_number: serial0, part_number: model0
-INFO skipping board for SP update, serial_number: serial0, part_number: model0
+INFO SP update impossible (will remove it and re-evaluate board), artifact_version: newest, artifact_hash: e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855, expected_inactive_version: Version(ArtifactVersion("older")), expected_active_version: newer, component: sp, sp_slot: 1, sp_type: Sled, serial_number: serial1, part_number: model1
 WARN cannot configure SP update for board (no matching artifact), serial_number: serial1, part_number: model1
 INFO skipping board for SP update, serial_number: serial1, part_number: model1
+WARN cannot configure SP update for board (no matching artifact), serial_number: serial0, part_number: model0
+INFO skipping board for SP update, serial_number: serial0, part_number: model0
 WARN cannot configure SP update for board (no matching artifact), serial_number: serial2, part_number: model2
 INFO skipping board for SP update, serial_number: serial2, part_number: model2
 INFO ran out of boards for SP update
 INFO some zones not yet up-to-date, sled_id: 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6
 INFO will ensure cockroachdb setting, setting: cluster.preserve_downgrade_option, value: DoNotModify
-generated blueprint 9034c710-3e57-45f3-99e5-4316145e87ac based on parent blueprint 7f976e0d-d2a5-4eeb-9e82-c82bc2824aba
+generated blueprint a5a8f242-ffa5-473c-8efd-2acf2dc0b736 based on parent blueprint d60afc57-f15d-476c-bd0f-b1071e2bb976
 
 > blueprint-show latest
-blueprint  9034c710-3e57-45f3-99e5-4316145e87ac
-parent:    7f976e0d-d2a5-4eeb-9e82-c82bc2824aba
+blueprint  a5a8f242-ffa5-473c-8efd-2acf2dc0b736
+parent:    d60afc57-f15d-476c-bd0f-b1071e2bb976
 
   sled: 2b8f0cb3-0295-4b3c-bc58-4fe88b57112c (active, config generation 2)
 
@@ -1376,8 +1408,8 @@ parent:    7f976e0d-d2a5-4eeb-9e82-c82bc2824aba
 
 
 > blueprint-diff latest
-from: blueprint 7f976e0d-d2a5-4eeb-9e82-c82bc2824aba
-to:   blueprint 9034c710-3e57-45f3-99e5-4316145e87ac
+from: blueprint d60afc57-f15d-476c-bd0f-b1071e2bb976
+to:   blueprint a5a8f242-ffa5-473c-8efd-2acf2dc0b736
 
  MODIFIED SLEDS:
 
@@ -1437,6 +1469,14 @@ to:   blueprint 9034c710-3e57-45f3-99e5-4316145e87ac
  OXIMETER SETTINGS:
     generation:   1 (unchanged)
     read from::   SingleNode (unchanged)
+
+ PENDING MGS UPDATES:
+
+    Pending MGS-managed updates (all baseboards):
+    -----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+    sp_type   slot   part_number   serial_number   artifact_hash                                                      artifact_version   details                                                                                                               
+    -----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+-   sled      1      model1        serial1         e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855   newest             Sp { expected_active_version: ArtifactVersion("newer"), expected_inactive_version: Version(ArtifactVersion("older")) }
 
 
 internal DNS:
@@ -1558,7 +1598,7 @@ external DNS:
 > # test that the planner bails if it attempts a rollback of the target release
 > # minimum generation.
 > blueprint-edit latest set-target-release-min-gen 1000
-blueprint d60afc57-f15d-476c-bd0f-b1071e2bb976 created from latest blueprint (9034c710-3e57-45f3-99e5-4316145e87ac): set target release minimum generation to 1000
+blueprint 626487fa-7139-45ec-8416-902271fc730b created from latest blueprint (a5a8f242-ffa5-473c-8efd-2acf2dc0b736): set target release minimum generation to 1000
 
 > sled-set serial1 mupdate-override cc724abe-80c1-47e6-9771-19e6540531a9
 set sled 2b8f0cb3-0295-4b3c-bc58-4fe88b57112c mupdate override: error -> cc724abe-80c1-47e6-9771-19e6540531a9
@@ -1576,5 +1616,6 @@ INFO blueprint mupdate override updated to match inventory, phase: do_plan_mupda
   - zone ad6a3a03-8d0f-4504-99a4-cbf73d69b973 (CruciblePantry) left unchanged, image source: install dataset
   - zone bd354eef-d8a6-4165-9124-283fb5e46d77 (Crucible) left unchanged, image source: install dataset
 
-error: generating blueprint: target release minimum generation was set to current 1000, but we tried to set it to an older generation 5, indicating a possible table rollback which should not happen
+INFO no previous MGS update found as part of updating blueprint mupdate override to match inventory, phase: do_plan_mupdate_override, sled_id: 2b8f0cb3-0295-4b3c-bc58-4fe88b57112c
+error: generating blueprint: target release minimum generation was set to 1000, but we tried to set it to the older generation 5, indicating a possible table rollback which should not happen
 

@@ -197,7 +197,7 @@ impl ConfigReconcilerHandle {
     /// shenanigans to get a second [`ConfigReconcilerSpawnToken`].
     pub fn spawn_reconciliation_task<
         T: SledAgentFacilities,
-        U: SledAgentArtifactStore,
+        U: SledAgentArtifactStore + Clone,
     >(
         &self,
         sled_agent_facilities: T,
@@ -219,7 +219,7 @@ impl ConfigReconcilerHandle {
         let (ledger_task, current_config_rx) =
             LedgerTaskHandle::spawn_ledger_task(
                 self.internal_disks_rx.clone(),
-                sled_agent_artifact_store,
+                sled_agent_artifact_store.clone(),
                 ledger_task_log,
             );
         match self.ledger_task.set(ledger_task) {
@@ -247,6 +247,7 @@ impl ConfigReconcilerHandle {
             raw_disks_rx,
             Arc::clone(&self.destroy_orphans),
             sled_agent_facilities,
+            sled_agent_artifact_store,
             reconciler_task_log,
         );
     }

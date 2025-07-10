@@ -20,6 +20,9 @@ pub use crate::inventory::ZpoolName;
 use blueprint_diff::ClickhouseClusterConfigDiffTablesForSingleBlueprint;
 use blueprint_display::BpDatasetsTableSchema;
 use daft::Diffable;
+use id_map::Entry;
+use id_map::RefMut;
+use nexus_sled_agent_shared::inventory::HostPhase2DesiredSlots;
 use nexus_sled_agent_shared::inventory::OmicronSledConfig;
 use nexus_sled_agent_shared::inventory::OmicronZoneConfig;
 use nexus_sled_agent_shared::inventory::OmicronZoneImageSource;
@@ -743,6 +746,9 @@ impl BlueprintSledConfig {
                 })
                 .collect(),
             remove_mupdate_override: self.remove_mupdate_override,
+            // TODO BlueprintSledConfig should have a corresponding field.
+            // https://github.com/oxidecomputer/omicron/issues/8542
+            host_phase_2: HostPhase2DesiredSlots::current_contents(),
         }
     }
 
@@ -1126,20 +1132,32 @@ impl PendingMgsUpdates {
         self.by_baseboard.is_empty()
     }
 
-    pub fn contains_key(&self, key: &Arc<BaseboardId>) -> bool {
+    pub fn contains_key(&self, key: &BaseboardId) -> bool {
         self.by_baseboard.contains_key(key)
     }
 
-    pub fn get(
-        &self,
-        baseboard_id: &Arc<BaseboardId>,
-    ) -> Option<&PendingMgsUpdate> {
+    pub fn get(&self, baseboard_id: &BaseboardId) -> Option<&PendingMgsUpdate> {
         self.by_baseboard.get(baseboard_id)
+    }
+
+    pub fn get_mut(
+        &mut self,
+        baseboard_id: &BaseboardId,
+    ) -> Option<RefMut<'_, PendingMgsUpdate>> {
+        self.by_baseboard.get_mut(baseboard_id)
+    }
+
+    pub fn entry(
+        &mut self,
+        // TODO: simplify down to &BaseboardId
+        baseboard_id: Arc<BaseboardId>,
+    ) -> Entry<'_, PendingMgsUpdate> {
+        self.by_baseboard.entry(baseboard_id)
     }
 
     pub fn remove(
         &mut self,
-        baseboard_id: &Arc<BaseboardId>,
+        baseboard_id: &BaseboardId,
     ) -> Option<PendingMgsUpdate> {
         self.by_baseboard.remove(baseboard_id)
     }

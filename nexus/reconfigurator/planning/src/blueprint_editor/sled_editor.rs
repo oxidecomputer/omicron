@@ -9,6 +9,7 @@ use crate::blueprint_builder::EnsureMupdateOverrideAction;
 use crate::blueprint_builder::EnsureMupdateOverrideUpdatedZone;
 use crate::blueprint_builder::SledEditCounts;
 use crate::planner::SledPlannerRng;
+use id_map::Entry;
 use iddqd::IdOrdMap;
 use illumos_utils::zpool::ZpoolName;
 use itertools::Either;
@@ -22,6 +23,7 @@ use nexus_types::deployment::BlueprintZoneConfig;
 use nexus_types::deployment::BlueprintZoneDisposition;
 use nexus_types::deployment::BlueprintZoneImageSource;
 use nexus_types::deployment::BlueprintZoneType;
+use nexus_types::deployment::PendingMgsUpdate;
 use nexus_types::deployment::blueprint_zone_type;
 use nexus_types::external_api::views::SledState;
 use omicron_common::address::Ipv6Subnet;
@@ -375,8 +377,12 @@ impl SledEditor {
     pub fn ensure_mupdate_override(
         &mut self,
         inv_mupdate_override_id: Option<MupdateOverrideUuid>,
+        pending_mgs_update: Entry<'_, PendingMgsUpdate>,
     ) -> Result<EnsureMupdateOverrideAction, SledEditError> {
-        self.as_active_mut()?.ensure_mupdate_override(inv_mupdate_override_id)
+        self.as_active_mut()?.ensure_mupdate_override(
+            inv_mupdate_override_id,
+            pending_mgs_update,
+        )
     }
 
     /// Sets remove-mupdate-override configuration for this sled.
@@ -724,6 +730,7 @@ impl ActiveSledEditor {
     pub fn ensure_mupdate_override(
         &mut self,
         inv_mupdate_override_id: Option<MupdateOverrideUuid>,
+        pending_mgs_update: Entry<'_, PendingMgsUpdate>,
     ) -> Result<EnsureMupdateOverrideAction, SledEditError> {
         match (inv_mupdate_override_id, *self.remove_mupdate_override.value()) {
             (Some(inv_override), Some(bp_override))
@@ -769,12 +776,19 @@ impl ActiveSledEditor {
                     );
                 }
 
-                // TODO: Do the same for RoT/SP/host OS.
+                // Clear out the pending MGS update for this sled.
+                let prev_mgs_update = match pending_mgs_update {
+                    Entry::Vacant(_) => None,
+                    Entry::Occupied(entry) => Some(entry.remove()),
+                };
+
+                // TODO: Do the same for host OS.
 
                 Ok(EnsureMupdateOverrideAction::BpSetOverride {
                     inv_override,
                     prev_bp_override: bp_override,
                     zones,
+                    prev_mgs_update,
                 })
             }
             (None, Some(prev_bp_override)) => {

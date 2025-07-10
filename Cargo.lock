@@ -3569,6 +3569,7 @@ dependencies = [
  "serde",
  "serde_json",
  "slog",
+ "thiserror 2.0.12",
  "uuid",
 ]
 
@@ -6436,6 +6437,7 @@ dependencies = [
  "sled-agent-zone-images-examples",
  "slog",
  "strum",
+ "swrite",
  "thiserror 2.0.12",
  "tokio",
  "tufaceous-artifact",
@@ -6548,6 +6550,7 @@ dependencies = [
  "omicron-test-utils",
  "omicron-uuid-kinds",
  "omicron-workspace-hack",
+ "tufaceous-artifact",
 ]
 
 [[package]]
@@ -12014,6 +12017,7 @@ dependencies = [
  "id-map",
  "iddqd",
  "illumos-utils",
+ "installinator-common",
  "key-manager",
  "nexus-sled-agent-shared",
  "omicron-common",

@@ -1481,22 +1481,22 @@ impl<'a> Planner<'a> {
         //
         // Some notes:
         //
-        // * We only process sleds that are in the inventory. This means that
-        //   if some sleds take longer to come back up than others and the target
-        //   release is updated in the middle, we'll potentially bump the minimum
-        //   generation multiple times, asking the operator to intervene each
-        //   time.
+        // * We only process sleds that are currently in the inventory. This
+        //   means that if some sleds take longer to come back up than others
+        //   and the target release is updated in the middle, we'll potentially
+        //   bump the minimum generation multiple times, asking the operator to
+        //   intervene each time.
         //
         //   It's worth considering ways to mitigate this in the future: for
         //   example, we could ensure that for a particular TUF repo a shared
         //   mupdate override ID is assigned by wicketd, and track the override
         //   IDs that are currently in flight.
         //
-        // * We aren't handling the error case here. We don't have a
-        //   history of state transitions for the mupdate override, so we can't
-        //   do edge-triggered logic. We probably need another channel to
-        //   report errors in this case. (But in general, errors should
-        //   be rare.)
+        // * We aren't handling errors while fetching the mupdate override here.
+        //   We don't have a history of state transitions for the mupdate
+        //   override, so we can't do edge-triggered logic. We probably need
+        //   another channel to report errors. (But in general, errors should be
+        //   rare.)
         if actions_by_sled.values().any(|action| {
             matches!(action, EnsureMupdateOverrideAction::BpSetOverride { .. })
         }) {
@@ -1545,46 +1545,42 @@ impl<'a> Planner<'a> {
         // updating or adding zones. We have to be careful here:
         //
         // * We may have moved existing zones with an Artifact source to using
-        //   the install dataset via the BpSetOverride action, but we don't
-        //   want to use the install dataset on sleds that weren't mupdated
-        //   (because the mupdate might be ancient).
+        //   the install dataset via the BpSetOverride action, but we don't want
+        //   to use the install dataset on sleds that weren't MUPdated (because
+        //   the install dataset might be ancient).
         //
-        // * To be conservative, we don't want to start new zones on sleds
-        //   where any overrides are in place (XXX is this true? feels like we
-        //   may be able to get away with adding new zones on mupdated sleds?).
+        // * While any overrides are in place according to inventory, we wait
+        //   for the system to recover and don't start new zones on *any* sleds,
+        //   or perform any further updates.
         //
-        // This condition is level-triggered:
+        // This condition is level-triggered on the following conditions:
         //
-        // * If any sleds have a mupdate override set in the blueprint,
-        //   then we're still recovering from a mupdate. If that is the case,
-        //   we don't want to perform further zone update actions.
-        // * If the planning input's target release generation is less than
-        //   the minimum generation set in the blueprint, the operator hasn't
-        //   set a new generation in the blueprint -- we should wait until they
-        //   do that.
+        // 1. If the planning input's target release generation is less than the
+        //    minimum generation set in the blueprint, the operator hasn't set a
+        //    new generation in the blueprint -- we should wait to decide what
+        //    to do until the operator provides an indication.
+        //
+        // 2. If any sleds have a mupdate override set in the blueprint, then
+        //    we're still recovering from a MUPdate. If that is the case, we
+        //    don't want to add zones on *any* sled.
+        //
+        //    This might seem overly conservative (why block zone additions on
+        //    *any* sled currently recovering from a MUPdate?), but is probably
+        //    correct for the medium term: we want to minimize the number of
+        //    different versions of services running at any time.
+        //
+        //    There's some potential to relax this in the future (e.g. by
+        //    matching up the zone manifest with the target release to compute
+        //    the number of versions running at a given time), but that's a
+        //    non-trivial optimization that we should probably defer until we see
+        //    its necessity.
         //
         // What does "any sleds" mean in this context? We don't need to care
         // about decommissioned or expunged sleds, so we consider in-service
         // sleds.
-
         let mut reasons = Vec::new();
-        let mut sleds_with_override = BTreeSet::new();
-        for sled_id in self.input.all_sled_ids(SledFilter::InService) {
-            if self
-                .blueprint
-                .sled_get_remove_mupdate_override(sled_id)?
-                .is_some()
-            {
-                sleds_with_override.insert(sled_id);
-            }
-        }
 
-        if !sleds_with_override.is_empty() {
-            reasons.push(format!(
-                "sleds have remove mupdate override set in blueprint: {}",
-                sleds_with_override.iter().join(", ")
-            ));
-        }
+        // Condition 1 above.
         if self.blueprint.target_release_minimum_generation()
             > self.input.tuf_repo().target_release_generation
         {
@@ -1594,6 +1590,27 @@ impl<'a> Planner<'a> {
                 self.input.tuf_repo().target_release_generation,
                 self.blueprint.target_release_minimum_generation(),
             ));
+        }
+
+        // Condition 2 above.
+        {
+            let mut sleds_with_override = BTreeSet::new();
+            for sled_id in self.input.all_sled_ids(SledFilter::InService) {
+                if self
+                    .blueprint
+                    .sled_get_remove_mupdate_override(sled_id)?
+                    .is_some()
+                {
+                    sleds_with_override.insert(sled_id);
+                }
+            }
+
+            if !sleds_with_override.is_empty() {
+                reasons.push(format!(
+                    "sleds have remove mupdate override set in blueprint: {}",
+                    sleds_with_override.iter().join(", ")
+                ));
+            }
         }
 
         if !reasons.is_empty() {

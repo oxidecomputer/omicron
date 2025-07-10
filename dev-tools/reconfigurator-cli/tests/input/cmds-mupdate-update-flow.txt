@@ -12,8 +12,11 @@ set target-release repo-1.0.0.zip
 # install dataset to artifact down the road.)
 sled-update-install-dataset serial0 --to-target-release
 
-# Set one of sled 0's zone's image sources to a specific artifact.
+# Set one of sled 0's zone's image sources to a specific artifact, and
+# also set an MGS update on the sled. Both should be reset as part of
+# this process.
 blueprint-edit latest set-zone-image 0c71b3b2-6ceb-4e8f-b020-b08675e83038 artifact 1.2.3 e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855
+blueprint-edit latest set-sp-update serial0 e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855 1.1.0 sp 1.0.0 1.0.1
 
 # Simulate a mupdate on sled 0 by setting the mupdate override field to a
 # new UUID (generated using uuidgen).
@@ -21,6 +24,9 @@ sled-set serial0 mupdate-override 6123eac1-ec5b-42ba-b73f-9845105a9971
 
 # On sled 1, simulate an error obtaining the mupdate override.
 sled-set serial1 mupdate-override --with-error
+
+# Also set its SP update, which will not be cleared.
+blueprint-edit latest set-sp-update serial1 e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855 newest sp newer older
 
 # Simulate a mupdate on sled 2 as well.
 sled-set serial2 mupdate-override 203fa72c-85c1-466a-8ed3-338ee029530d
@@ -34,6 +40,7 @@ blueprint-plan latest latest
 # * for sled 0:
 #   * "+ will remove mupdate override"
 #   * for zone 0c71b3b2-6ceb-4e8f-b020-b08675e83038, a change from artifact to install-dataset
+#   * the pending MGS update cleared
 # * for sled 1, no change, because the mupdate override field had an error
 # * for sled 2, "+ will remove mupdate override"
 # * the target release's minimum generation bumped from 1 to 3

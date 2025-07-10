@@ -3,9 +3,9 @@
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 //! Built-in Silo Users
 
-use super::role_builtin;
 use nexus_db_model as model;
 use nexus_types::{identity::Asset, silo::DEFAULT_SILO_ID};
+use omicron_common::api::external::ResourceType;
 use std::sync::LazyLock;
 
 /// Test user that's granted all privileges, used for automated testing and
@@ -32,16 +32,16 @@ pub static ROLE_ASSIGNMENTS_PRIVILEGED: LazyLock<Vec<model::RoleAssignment>> =
             model::RoleAssignment::new(
                 model::IdentityType::SiloUser,
                 USER_TEST_PRIVILEGED.id(),
-                role_builtin::FLEET_ADMIN.resource_type,
+                ResourceType::Fleet,
                 *crate::FLEET_ID,
-                role_builtin::FLEET_ADMIN.role_name,
+                "admin",
             ),
             model::RoleAssignment::new(
                 model::IdentityType::SiloUser,
                 USER_TEST_PRIVILEGED.id(),
-                role_builtin::SILO_ADMIN.resource_type,
+                ResourceType::Silo,
                 DEFAULT_SILO_ID,
-                role_builtin::SILO_ADMIN.role_name,
+                "admin",
             ),
         ]
     });
