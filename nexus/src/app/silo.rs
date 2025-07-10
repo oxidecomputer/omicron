@@ -313,6 +313,86 @@ impl super::Nexus {
         Ok(db_silo_user)
     }
 
+    /// Delete all of user's tokens and sessions
+    pub(crate) async fn current_silo_user_logout(
+        &self,
+        opctx: &OpContext,
+        silo_user_id: Uuid,
+    ) -> UpdateResult<()> {
+        let (_, authz_silo_user, _) = LookupPath::new(opctx, self.datastore())
+            .silo_user_id(silo_user_id)
+            .fetch()
+            .await?;
+
+        let authz_authn_list =
+            authz::SiloUserAuthnList::new(authz_silo_user.clone());
+
+        self.datastore()
+            .silo_user_tokens_delete(opctx, &authz_authn_list)
+            .await?;
+
+        self.datastore()
+            .silo_user_sessions_delete(opctx, &authz_authn_list)
+            .await?;
+
+        Ok(())
+    }
+
+    /// Fetch a user in a Silo
+    pub(crate) async fn current_silo_user_lookup(
+        &self,
+        opctx: &OpContext,
+        silo_user_id: Uuid,
+    ) -> LookupResult<(authz::SiloUser, db::model::SiloUser)> {
+        let (_, authz_silo_user, db_silo_user) =
+            LookupPath::new(opctx, self.datastore())
+                .silo_user_id(silo_user_id)
+                .fetch()
+                .await?;
+
+        Ok((authz_silo_user, db_silo_user))
+    }
+
+    /// List device access tokens for a user in a Silo
+    pub(crate) async fn silo_user_token_list(
+        &self,
+        opctx: &OpContext,
+        silo_user_id: Uuid,
+        pagparams: &DataPageParams<'_, Uuid>,
+    ) -> ListResultVec<db::model::DeviceAccessToken> {
+        let (_, authz_silo_user, _db_silo_user) =
+            LookupPath::new(opctx, self.datastore())
+                .silo_user_id(silo_user_id)
+                .fetch()
+                .await?;
+
+        let user_authn_list = authz::SiloUserAuthnList::new(authz_silo_user);
+
+        self.datastore()
+            .silo_user_token_list(opctx, user_authn_list, pagparams)
+            .await
+    }
+
+    /// List console sessions for a user in a Silo
+    pub(crate) async fn silo_user_session_list(
+        &self,
+        opctx: &OpContext,
+        silo_user_id: Uuid,
+        pagparams: &DataPageParams<'_, Uuid>,
+    ) -> ListResultVec<db::model::ConsoleSession> {
+        let (_, authz_silo_user, _db_silo_user) =
+            LookupPath::new(opctx, self.datastore())
+                .silo_user_id(silo_user_id)
+                .fetch()
+                .await?;
+
+        let user_authn_list = authz::SiloUserAuthnList::new(authz_silo_user);
+
+        self.datastore()
+            .silo_user_session_list(opctx, user_authn_list, pagparams)
+            .await
+    }
+
     // The "local" identity provider (available only in `LocalOnly` Silos)
 
     /// Helper function for looking up a LocalOnly Silo by name
