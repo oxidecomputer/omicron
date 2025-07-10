@@ -231,6 +231,7 @@ impl Collection {
     Diffable,
     Ord,
     Eq,
+    Hash,
     PartialOrd,
     PartialEq,
     Deserialize,
@@ -242,6 +243,12 @@ pub struct BaseboardId {
     pub part_number: String,
     /// Serial number (unique for a given part number)
     pub serial_number: String,
+}
+
+impl std::fmt::Display for BaseboardId {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}:{}", self.part_number, self.serial_number)
+    }
 }
 
 impl From<crate::external_api::shared::Baseboard> for BaseboardId {

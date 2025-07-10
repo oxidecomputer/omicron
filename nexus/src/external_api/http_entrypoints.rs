@@ -8,7 +8,7 @@ use super::{
     console_api, params,
     views::{
         self, Certificate, FloatingIp, Group, IdentityProvider, Image, IpPool,
-        IpPoolRange, PhysicalDisk, Project, Rack, Role, Silo, SiloQuotas,
+        IpPoolRange, PhysicalDisk, Project, Rack, Silo, SiloQuotas,
         SiloUtilization, Sled, Snapshot, SshKey, User, UserBuiltin,
         Utilization, Vpc, VpcRouter, VpcSubnet,
     },
@@ -80,6 +80,7 @@ use omicron_common::api::external::NameOrId;
 use omicron_common::api::external::Probe;
 use omicron_common::api::external::RouterRoute;
 use omicron_common::api::external::RouterRouteKind;
+use omicron_common::api::external::ServiceIcmpConfig;
 use omicron_common::api::external::SwitchPort;
 use omicron_common::api::external::SwitchPortSettings;
 use omicron_common::api::external::SwitchPortSettingsIdentity;
@@ -105,6 +106,7 @@ use omicron_common::api::external::http_pagination::name_or_id_pagination;
 use omicron_common::bail_unless;
 use omicron_uuid_kinds::GenericUuid;
 use omicron_uuid_kinds::SupportBundleUuid;
+use omicron_uuid_kinds::TufTrustRootUuid;
 use propolis_client::support::WebSocketStream;
 use propolis_client::support::tungstenite::protocol::frame::coding::CloseCode;
 use propolis_client::support::tungstenite::protocol::{
@@ -4303,6 +4305,50 @@ impl NexusExternalApi for NexusExternalApiImpl {
             .await
     }
 
+    async fn networking_inbound_icmp_view(
+        rqctx: RequestContext<Self::Context>,
+    ) -> Result<HttpResponseOk<ServiceIcmpConfig>, HttpError> {
+        let apictx = rqctx.context();
+        let handler = async {
+            let nexus = &apictx.context.nexus;
+            let opctx =
+                crate::context::op_context_for_external_api(&rqctx).await?;
+            nexus
+                .nexus_firewall_inbound_icmp_view(&opctx)
+                .await
+                .map(HttpResponseOk)
+                .map_err(HttpError::from)
+        };
+        apictx
+            .context
+            .external_latencies
+            .instrument_dropshot_handler(&rqctx, handler)
+            .await
+    }
+
+    async fn networking_inbound_icmp_update(
+        rqctx: RequestContext<Self::Context>,
+        params: TypedBody<ServiceIcmpConfig>,
+    ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
+        let apictx = rqctx.context();
+        let handler = async {
+            let nexus = &apictx.context.nexus;
+            let params = params.into_inner();
+            let opctx =
+                crate::context::op_context_for_external_api(&rqctx).await?;
+            nexus
+                .nexus_firewall_inbound_icmp_update(&opctx, params)
+                .await
+                .map(|_| HttpResponseUpdatedNoContent())
+                .map_err(HttpError::from)
+        };
+        apictx
+            .context
+            .external_latencies
+            .instrument_dropshot_handler(&rqctx, handler)
+            .await
+    }
+
     // Images
 
     async fn image_list(
@@ -6566,6 +6612,115 @@ impl NexusExternalApi for NexusExternalApiImpl {
             .await
     }
 
+    async fn system_update_trust_root_list(
+        rqctx: RequestContext<Self::Context>,
+        query_params: Query<PaginatedById>,
+    ) -> Result<HttpResponseOk<ResultsPage<views::UpdatesTrustRoot>>, HttpError>
+    {
+        let apictx = rqctx.context();
+        let handler = async {
+            let opctx =
+                crate::context::op_context_for_external_api(&rqctx).await?;
+            let nexus = &apictx.context.nexus;
+
+            let query = query_params.into_inner();
+            let pagparams = data_page_params_for(&rqctx, &query)?;
+
+            let trust_roots = nexus
+                .updates_list_trust_roots(&opctx, &pagparams)
+                .await?
+                .into_iter()
+                .map(|p| p.into())
+                .collect();
+
+            Ok(HttpResponseOk(ScanById::results_page(
+                &query,
+                trust_roots,
+                &|_, trust_root: &views::UpdatesTrustRoot| {
+                    trust_root.id.into_untyped_uuid()
+                },
+            )?))
+        };
+        apictx
+            .context
+            .external_latencies
+            .instrument_dropshot_handler(&rqctx, handler)
+            .await
+    }
+
+    async fn system_update_trust_root_create(
+        rqctx: RequestContext<Self::Context>,
+        body: TypedBody<shared::TufSignedRootRole>,
+    ) -> Result<HttpResponseCreated<views::UpdatesTrustRoot>, HttpError> {
+        let apictx = rqctx.context();
+        let handler = async {
+            let opctx =
+                crate::context::op_context_for_external_api(&rqctx).await?;
+            let nexus = &apictx.context.nexus;
+
+            Ok(HttpResponseCreated(
+                nexus
+                    .updates_add_trust_root(&opctx, body.into_inner())
+                    .await?
+                    .into(),
+            ))
+        };
+        apictx
+            .context
+            .external_latencies
+            .instrument_dropshot_handler(&rqctx, handler)
+            .await
+    }
+
+    async fn system_update_trust_root_view(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<params::TufTrustRootPath>,
+    ) -> Result<HttpResponseOk<views::UpdatesTrustRoot>, HttpError> {
+        let apictx = rqctx.context();
+        let handler = async {
+            let opctx =
+                crate::context::op_context_for_external_api(&rqctx).await?;
+            let nexus = &apictx.context.nexus;
+
+            let id = TufTrustRootUuid::from_untyped_uuid(
+                path_params.into_inner().trust_root_id,
+            );
+
+            Ok(HttpResponseOk(
+                nexus.updates_get_trust_root(&opctx, id).await?.into(),
+            ))
+        };
+        apictx
+            .context
+            .external_latencies
+            .instrument_dropshot_handler(&rqctx, handler)
+            .await
+    }
+
+    async fn system_update_trust_root_delete(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<params::TufTrustRootPath>,
+    ) -> Result<HttpResponseDeleted, HttpError> {
+        let apictx = rqctx.context();
+        let handler = async {
+            let opctx =
+                crate::context::op_context_for_external_api(&rqctx).await?;
+            let nexus = &apictx.context.nexus;
+
+            let id = TufTrustRootUuid::from_untyped_uuid(
+                path_params.into_inner().trust_root_id,
+            );
+            nexus.updates_delete_trust_root(&opctx, id).await?;
+
+            Ok(HttpResponseDeleted())
+        };
+        apictx
+            .context
+            .external_latencies
+            .instrument_dropshot_handler(&rqctx, handler)
+            .await
+    }
+
     async fn target_release_view(
         rqctx: RequestContext<ApiContext>,
     ) -> Result<HttpResponseOk<views::TargetRelease>, HttpError> {
@@ -6806,79 +6961,6 @@ impl NexusExternalApi for NexusExternalApiImpl {
                 .fetch()
                 .await?;
             Ok(HttpResponseOk(user.into()))
-        };
-        apictx
-            .context
-            .external_latencies
-            .instrument_dropshot_handler(&rqctx, handler)
-            .await
-    }
-
-    // Built-in roles
-
-    async fn role_list(
-        rqctx: RequestContext<ApiContext>,
-        query_params: Query<
-            PaginationParams<EmptyScanParams, params::RolePage>,
-        >,
-    ) -> Result<HttpResponseOk<ResultsPage<Role>>, HttpError> {
-        let apictx = rqctx.context();
-        let nexus = &apictx.context.nexus;
-        let query = query_params.into_inner();
-        let handler = async {
-            let opctx =
-                crate::context::op_context_for_external_api(&rqctx).await?;
-            let marker = match &query.page {
-                WhichPage::First(..) => None,
-                WhichPage::Next(params::RolePage { last_seen }) => {
-                    Some(last_seen.split_once('.').ok_or_else(|| {
-                        Error::invalid_value(
-                            last_seen.clone(),
-                            "bad page token",
-                        )
-                    })?)
-                    .map(|(s1, s2)| (s1.to_string(), s2.to_string()))
-                }
-            };
-            let pagparams = DataPageParams {
-                limit: rqctx.page_limit(&query)?,
-                direction: PaginationOrder::Ascending,
-                marker: marker.as_ref(),
-            };
-            let roles = nexus
-                .roles_builtin_list(&opctx, &pagparams)
-                .await?
-                .into_iter()
-                .map(|i| i.into())
-                .collect();
-            Ok(HttpResponseOk(dropshot::ResultsPage::new(
-                roles,
-                &EmptyScanParams {},
-                |role: &Role, _| params::RolePage {
-                    last_seen: role.name.to_string(),
-                },
-            )?))
-        };
-        apictx
-            .context
-            .external_latencies
-            .instrument_dropshot_handler(&rqctx, handler)
-            .await
-    }
-
-    async fn role_view(
-        rqctx: RequestContext<ApiContext>,
-        path_params: Path<params::RolePath>,
-    ) -> Result<HttpResponseOk<Role>, HttpError> {
-        let apictx = rqctx.context();
-        let nexus = &apictx.context.nexus;
-        let path = path_params.into_inner();
-        let role_name = &path.role_name;
-        let handler = async {
-            let opctx =
-                crate::context::op_context_for_external_api(&rqctx).await?;
-            let role = nexus.role_builtin_fetch(&opctx, &role_name).await?;
-            Ok(HttpResponseOk(role.into()))
         };
         apictx
             .context

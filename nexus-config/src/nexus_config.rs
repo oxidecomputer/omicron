@@ -238,12 +238,6 @@ pub struct ConsoleConfig {
     pub session_absolute_timeout_minutes: u32,
 }
 
-#[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
-pub struct UpdatesConfig {
-    /// Trusted root.json role for the TUF updates repository.
-    pub trusted_root: Utf8PathBuf,
-}
-
 /// Options to tweak database schema changes.
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
 pub struct SchemaConfig {
@@ -594,9 +588,6 @@ pub struct PhantomDiskConfig {
 #[serde_as]
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 pub struct BlueprintTasksConfig {
-    /// background planner chicken switch
-    pub disable_planner: bool,
-
     /// period (in seconds) for periodic activations of the background task that
     /// reads the latest target blueprint from the database
     #[serde_as(as = "DurationSeconds<u64>")]
@@ -622,6 +613,11 @@ pub struct BlueprintTasksConfig {
     /// collects the node IDs of CockroachDB zones
     #[serde_as(as = "DurationSeconds<u64>")]
     pub period_secs_collect_crdb_node_ids: Duration,
+
+    /// period (in seconds) for periodic activations of the background task that
+    /// reads chicken switches from the database
+    #[serde_as(as = "DurationSeconds<u64>")]
+    pub period_secs_load_chicken_switches: Duration,
 }
 
 #[serde_as]
@@ -839,10 +835,6 @@ pub struct PackageConfig {
     /// Timeseries database configuration.
     #[serde(default)]
     pub timeseries_db: TimeseriesDbConfig,
-    /// Updates-related configuration. Updates APIs return 400 Bad Request when
-    /// this is unconfigured.
-    #[serde(default)]
-    pub updates: Option<UpdatesConfig>,
     /// Describes how to handle and perform schema changes.
     #[serde(default)]
     pub schema: Option<SchemaConfig>,
@@ -1034,8 +1026,6 @@ mod test {
             if_exists = "fail"
             [timeseries_db]
             address = "[::1]:9000"
-            [updates]
-            trusted_root = "/path/to/root.json"
             [tunables]
             max_vpc_ipv4_subnet_prefix = 27
             [deployment]
@@ -1079,12 +1069,12 @@ mod test {
             physical_disk_adoption.period_secs = 30
             decommissioned_disk_cleaner.period_secs = 30
             phantom_disks.period_secs = 30
-            blueprints.disable_planner = true
             blueprints.period_secs_load = 10
             blueprints.period_secs_plan = 60
             blueprints.period_secs_execute = 60
             blueprints.period_secs_rendezvous = 300
             blueprints.period_secs_collect_crdb_node_ids = 180
+            blueprints.period_secs_load_chicken_switches= 5
             sync_service_zone_nat.period_secs = 30
             switch_port_settings_manager.period_secs = 30
             region_replacement.period_secs = 30
@@ -1177,9 +1167,6 @@ mod test {
                             0,
                         ))),
                     },
-                    updates: Some(UpdatesConfig {
-                        trusted_root: Utf8PathBuf::from("/path/to/root.json"),
-                    }),
                     schema: None,
                     tunables: Tunables {
                         max_vpc_ipv4_subnet_prefix: 27,
@@ -1247,13 +1234,14 @@ mod test {
                             period_secs: Duration::from_secs(30),
                         },
                         blueprints: BlueprintTasksConfig {
-                            disable_planner: true,
                             period_secs_load: Duration::from_secs(10),
                             period_secs_plan: Duration::from_secs(60),
                             period_secs_execute: Duration::from_secs(60),
                             period_secs_collect_crdb_node_ids:
                                 Duration::from_secs(180),
                             period_secs_rendezvous: Duration::from_secs(300),
+                            period_secs_load_chicken_switches:
+                                Duration::from_secs(5)
                         },
                         sync_service_zone_nat: SyncServiceZoneNatConfig {
                             period_secs: Duration::from_secs(30)
@@ -1396,12 +1384,12 @@ mod test {
             physical_disk_adoption.period_secs = 30
             decommissioned_disk_cleaner.period_secs = 30
             phantom_disks.period_secs = 30
-            blueprints.disable_planner = true
             blueprints.period_secs_load = 10
             blueprints.period_secs_plan = 60
             blueprints.period_secs_execute = 60
             blueprints.period_secs_rendezvous = 300
             blueprints.period_secs_collect_crdb_node_ids = 180
+            blueprints.period_secs_load_chicken_switches= 5
             sync_service_zone_nat.period_secs = 30
             switch_port_settings_manager.period_secs = 30
             region_replacement.period_secs = 30
@@ -1424,6 +1412,7 @@ mod test {
             alert_dispatcher.period_secs = 42
             webhook_deliverator.period_secs = 43
             sp_ereport_ingester.period_secs = 44
+
             [default_region_allocation_strategy]
             type = "random"
             "##,
@@ -1507,9 +1496,6 @@ mod test {
             if_exists = "fail"
             [timeseries_db]
             address = "[::1]:9000"
-            [updates]
-            trusted_root = "/path/to/root.json"
-            default_base_url = "http://example.invalid/"
             [tunables]
             max_vpc_ipv4_subnet_prefix = 100
             [deployment]

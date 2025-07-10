@@ -17,8 +17,11 @@ use gateway_client::types::SpType;
 use gateway_types::rot::RotSlot;
 use iddqd::id_ord_map;
 use nexus_sled_agent_shared::inventory::Baseboard;
+use nexus_sled_agent_shared::inventory::BootImageHeader;
+use nexus_sled_agent_shared::inventory::BootPartitionDetails;
 use nexus_sled_agent_shared::inventory::ConfigReconcilerInventory;
 use nexus_sled_agent_shared::inventory::ConfigReconcilerInventoryStatus;
+use nexus_sled_agent_shared::inventory::HostPhase2DesiredSlots;
 use nexus_sled_agent_shared::inventory::Inventory;
 use nexus_sled_agent_shared::inventory::InventoryDataset;
 use nexus_sled_agent_shared::inventory::InventoryDisk;
@@ -38,6 +41,7 @@ use omicron_common::disk::DatasetConfig;
 use omicron_common::disk::DatasetKind;
 use omicron_common::disk::DatasetName;
 use omicron_common::disk::DiskVariant;
+use omicron_common::disk::M2Slot;
 use omicron_common::disk::OmicronPhysicalDiskConfig;
 use omicron_common::disk::SharedDatasetConfig;
 use omicron_uuid_kinds::DatasetUuid;
@@ -67,6 +71,7 @@ use sled_agent_zone_images_examples::dataset_missing_error;
 use std::sync::Arc;
 use std::time::Duration;
 use strum::IntoEnumIterator;
+use tufaceous_artifact::ArtifactHash;
 use uuid::Uuid;
 
 /// Returns an example Collection used for testing
@@ -341,6 +346,7 @@ pub fn representative() -> Representative {
         datasets: Default::default(),
         zones: sled14.zones.into_iter().collect(),
         remove_mupdate_override: None,
+        host_phase_2: HostPhase2DesiredSlots::current_contents(),
     };
     let sled16 = OmicronSledConfig {
         generation: sled16.generation,
@@ -348,6 +354,7 @@ pub fn representative() -> Representative {
         datasets: Default::default(),
         zones: sled16.zones.into_iter().collect(),
         remove_mupdate_override: None,
+        host_phase_2: HostPhase2DesiredSlots::current_contents(),
     };
     let sled17 = OmicronSledConfig {
         generation: sled17.generation,
@@ -355,6 +362,7 @@ pub fn representative() -> Representative {
         datasets: Default::default(),
         zones: sled17.zones.into_iter().collect(),
         remove_mupdate_override: None,
+        host_phase_2: HostPhase2DesiredSlots::current_contents(),
     };
 
     // Create iterator producing fixed IDs.
@@ -843,6 +851,7 @@ pub fn sled_agent(
     // Assume the `ledgered_sled_config` was reconciled successfully.
     let last_reconciliation = ledgered_sled_config.clone().map(|config| {
         let mut inv = ConfigReconcilerInventory::debug_assume_success(config);
+
         // Add an orphaned dataset with no tie to other pools/datasets.
         inv.orphaned_datasets.insert_overwrite(OrphanedDataset {
             name: DatasetName::new(
@@ -855,6 +864,22 @@ pub fn sled_agent(
             available: 0.into(),
             used: 0.into(),
         });
+
+        // Fill in some fake boot partition details.
+        inv.boot_partitions.boot_disk = Ok(M2Slot::A);
+        inv.boot_partitions.slot_a = Ok(BootPartitionDetails {
+            header: BootImageHeader {
+                flags: 0,
+                data_size: 10_000,
+                image_size: 10_000,
+                target_size: 10_000,
+                sha256: [0; 32],
+                image_name: "fake image for tests".to_string(),
+            },
+            artifact_hash: ArtifactHash([1; 32]),
+            artifact_size: 10_000 + 4096,
+        });
+
         inv
     });
 

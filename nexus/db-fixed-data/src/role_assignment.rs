@@ -4,10 +4,10 @@
 //! Built-in assignments for built-in users and built-in roles
 
 use super::FLEET_ID;
-use super::role_builtin;
 use super::user_builtin;
 use nexus_db_model::IdentityType;
 use nexus_db_model::RoleAssignment;
+use omicron_common::api::external::ResourceType;
 use std::sync::LazyLock;
 
 pub static BUILTIN_ROLE_ASSIGNMENTS: LazyLock<Vec<RoleAssignment>> =
@@ -20,9 +20,9 @@ pub static BUILTIN_ROLE_ASSIGNMENTS: LazyLock<Vec<RoleAssignment>> =
             RoleAssignment::new(
                 IdentityType::UserBuiltin,
                 user_builtin::USER_INTERNAL_API.id,
-                role_builtin::FLEET_ADMIN.resource_type,
+                ResourceType::Fleet,
                 *FLEET_ID,
-                role_builtin::FLEET_ADMIN.role_name,
+                "admin",
             ),
             // The "USER_SERVICE_BALANCER" user gets the "admin" role on the
             // Fleet.
@@ -33,9 +33,9 @@ pub static BUILTIN_ROLE_ASSIGNMENTS: LazyLock<Vec<RoleAssignment>> =
             RoleAssignment::new(
                 IdentityType::UserBuiltin,
                 user_builtin::USER_SERVICE_BALANCER.id,
-                role_builtin::FLEET_ADMIN.resource_type,
+                ResourceType::Fleet,
                 *FLEET_ID,
-                role_builtin::FLEET_ADMIN.role_name,
+                "admin",
             ),
             // The "internal-read" user gets the "viewer" role on the sole
             // Fleet.  This will grant them the ability to read various control
@@ -44,19 +44,19 @@ pub static BUILTIN_ROLE_ASSIGNMENTS: LazyLock<Vec<RoleAssignment>> =
             RoleAssignment::new(
                 IdentityType::UserBuiltin,
                 user_builtin::USER_INTERNAL_READ.id,
-                role_builtin::FLEET_VIEWER.resource_type,
+                ResourceType::Fleet,
                 *FLEET_ID,
-                role_builtin::FLEET_VIEWER.role_name,
+                "viewer",
             ),
-            // The "external-authenticator" user gets the "authenticator" role
-            // on the sole fleet.  This grants them the ability to create
-            // sessions.
+            // The "external-authenticator" user gets the
+            // "external-authenticator" role on the sole fleet.  This grants
+            // them the ability to create sessions.
             RoleAssignment::new(
                 IdentityType::UserBuiltin,
                 user_builtin::USER_EXTERNAL_AUTHN.id,
-                role_builtin::FLEET_AUTHENTICATOR.resource_type,
+                ResourceType::Fleet,
                 *FLEET_ID,
-                role_builtin::FLEET_AUTHENTICATOR.role_name,
+                "external-authenticator",
             ),
         ]
     });

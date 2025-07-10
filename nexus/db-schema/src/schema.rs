@@ -1307,9 +1307,9 @@ table! {
         targets -> Array<Text>,
         filter_hosts -> Nullable<Array<Text>>,
         filter_ports -> Nullable<Array<Text>>,
-        filter_protocols -> Nullable<Array<crate::enums::VpcFirewallRuleProtocolEnum>>,
         action -> crate::enums::VpcFirewallRuleActionEnum,
         priority -> Int4,
+        filter_protocols -> Nullable<Array<Text>>,
     }
 }
 
@@ -1378,14 +1378,6 @@ table! {
 }
 
 table! {
-    role_builtin (resource_type, role_name) {
-        resource_type -> Text,
-        role_name -> Text,
-        description -> Text,
-    }
-}
-
-table! {
     role_assignment (
         identity_type,
         identity_id,
@@ -1445,6 +1437,16 @@ table! {
     tuf_generation (singleton) {
         singleton -> Bool,
         generation -> Int8,
+    }
+}
+
+table! {
+    tuf_trust_root (id) {
+        id -> Uuid,
+        time_created -> Timestamptz,
+        time_modified -> Timestamptz,
+        time_deleted -> Nullable<Timestamptz>,
+        root_role -> Jsonb,
     }
 }
 
@@ -1596,7 +1598,6 @@ table! {
         reservoir_size -> Int8,
 
         ledgered_sled_config -> Nullable<Uuid>,
-        last_reconciliation_sled_config -> Nullable<Uuid>,
         reconciler_status_kind -> crate::enums::InvConfigReconcilerStatusKindEnum,
         reconciler_status_sled_config -> Nullable<Uuid>,
         reconciler_status_timestamp -> Nullable<Timestamptz>,
@@ -1610,6 +1611,39 @@ table! {
         mupdate_override_boot_disk_path -> Text,
         mupdate_override_id -> Nullable<Uuid>,
         mupdate_override_boot_disk_error -> Nullable<Text>,
+    }
+}
+
+table! {
+    inv_sled_config_reconciler (inv_collection_id, sled_id) {
+        inv_collection_id -> Uuid,
+        sled_id -> Uuid,
+
+        last_reconciled_config -> Uuid,
+
+        boot_disk_slot -> Nullable<Int2>,
+        boot_disk_error -> Nullable<Text>,
+
+        boot_partition_a_error -> Nullable<Text>,
+        boot_partition_b_error -> Nullable<Text>,
+    }
+}
+
+table! {
+    inv_sled_boot_partition (inv_collection_id, sled_id, boot_disk_slot) {
+        inv_collection_id -> Uuid,
+        sled_id -> Uuid,
+        boot_disk_slot -> Int2,
+
+        artifact_hash -> Text,
+        artifact_size -> Int8,
+
+        header_flags -> Int8,
+        header_data_size -> Int8,
+        header_image_size -> Int8,
+        header_target_size -> Int8,
+        header_sha256 -> Text,
+        header_image_name -> Text,
     }
 }
 
@@ -1756,6 +1790,8 @@ table! {
 
         generation -> Int8,
         remove_mupdate_override -> Nullable<Uuid>,
+        host_phase_2_desired_slot_a -> Nullable<Text>,
+        host_phase_2_desired_slot_b -> Nullable<Text>,
     }
 }
 
@@ -2031,6 +2067,19 @@ table! {
 }
 
 table! {
+    bp_pending_mgs_update_sp (blueprint_id, hw_baseboard_id) {
+        blueprint_id -> Uuid,
+        hw_baseboard_id -> Uuid,
+        sp_type -> crate::enums::SpTypeEnum,
+        sp_slot -> Int4,
+        artifact_sha256 -> Text,
+        artifact_version -> Text,
+        expected_active_version -> Text,
+        expected_inactive_version -> Nullable<Text>,
+    }
+}
+
+table! {
     bootstore_keys (key, generation) {
         key -> Text,
         generation -> Int8,
@@ -2291,7 +2340,6 @@ allow_tables_to_appear_in_same_query!(
     vpc_router,
     vpc_firewall_rule,
     user_builtin,
-    role_builtin,
     role_assignment,
     probe,
     internet_gateway,
@@ -2528,3 +2576,22 @@ table! {
         report -> Jsonb,
     }
 }
+
+table! {
+    user_data_export (id) {
+        id -> Uuid,
+
+        state -> crate::enums::UserDataExportStateEnum,
+        operating_saga_id -> Nullable<Uuid>,
+        generation -> Int8,
+
+        resource_id -> Uuid,
+        resource_type -> crate::enums::UserDataExportResourceTypeEnum,
+        resource_deleted -> Bool,
+
+        pantry_ip -> Nullable<Inet>,
+        pantry_port -> Nullable<Int4>,
+        volume_id -> Nullable<Uuid>,
+    }
+}
+allow_tables_to_appear_in_same_query!(user_data_export, snapshot, image);

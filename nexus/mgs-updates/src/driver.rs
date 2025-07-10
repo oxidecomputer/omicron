@@ -18,6 +18,7 @@ use futures::future::BoxFuture;
 use futures::stream::FuturesUnordered;
 use id_map::IdMap;
 use id_map::IdMappable;
+use iddqd::IdOrdMap;
 use nexus_types::deployment::PendingMgsUpdate;
 use nexus_types::deployment::PendingMgsUpdates;
 use nexus_types::internal_api::views::CompletedAttempt;
@@ -31,7 +32,6 @@ use omicron_uuid_kinds::SpUpdateUuid;
 use qorb::resolver::AllBackends;
 use slog::{error, info, o, warn};
 use slog_error_chain::InlineErrorChain;
-use std::collections::BTreeMap;
 use std::collections::VecDeque;
 use std::sync::Arc;
 use std::time::Duration;
@@ -117,8 +117,8 @@ impl MgsUpdateDriver {
     ) -> MgsUpdateDriver {
         let (status_tx, _) = watch::channel(MgsUpdateDriverStatus {
             recent: VecDeque::with_capacity(N_RECENT_COMPLETIONS),
-            in_progress: BTreeMap::new(),
-            waiting: BTreeMap::new(),
+            in_progress: IdOrdMap::new(),
+            waiting: IdOrdMap::new(),
         });
 
         MgsUpdateDriver {
@@ -283,7 +283,7 @@ impl MgsUpdateDriver {
         // Update the status to reflect that.
         self.status_tx.send_modify(|driver_status| {
             for baseboard_id in &to_stop_waiting {
-                driver_status.waiting.remove(baseboard_id);
+                driver_status.waiting.remove(&**baseboard_id);
             }
         });
 
@@ -346,14 +346,15 @@ impl MgsUpdateDriver {
         // Update status.  We do this before starting the future because it will
         // update this status and expects to find it.
         self.status_tx.send_modify(|driver_status| {
-            driver_status.in_progress.insert(
-                baseboard_id.clone(),
-                InProgressUpdateStatus {
+            driver_status
+                .in_progress
+                .insert_unique(InProgressUpdateStatus {
+                    baseboard_id: baseboard_id.clone(),
                     time_started: in_progress.time_started,
                     status: UpdateAttemptStatus::NotStarted,
                     nattempts_done,
-                },
-            );
+                })
+                .expect("no previous update for this baseboard");
         });
 
         let status_updater = UpdateAttemptStatusUpdater::new(
@@ -440,17 +441,18 @@ impl MgsUpdateDriver {
         // Update the overall status to reflect all these changes.
         self.status_tx.send_modify(|driver_status| {
             // Remove this item from the list of in-progress attempts.
-            let found = driver_status.in_progress.remove(&baseboard_id);
+            let found = driver_status.in_progress.remove(&*baseboard_id);
             assert!(found.is_some());
 
             // Add this item to the list of requests waiting to be retried.
-            driver_status.waiting.insert(
-                baseboard_id.clone(),
-                WaitingStatus {
+            driver_status
+                .waiting
+                .insert_unique(WaitingStatus {
+                    baseboard_id: baseboard_id.clone(),
                     next_attempt_time: status_time_next,
                     nattempts_done,
-                },
-            );
+                })
+                .expect("no previous waiting update for this baseboard");
 
             // Report this recently-completed attempt.
             // This is a ringbuffer of recent attempts.  Make space if we're
@@ -472,7 +474,7 @@ impl MgsUpdateDriver {
             .expect("waiting request for expired retry timer");
         // Update the external status to reflect that.
         self.status_tx.send_modify(|driver_status| {
-            driver_status.waiting.remove(&baseboard_id);
+            driver_status.waiting.remove(&*baseboard_id);
         });
 
         // Find the current configuration for this request.
@@ -577,8 +579,8 @@ impl UpdateAttemptStatusUpdater {
             // the future that owns it.  The status entry for this future lives
             // in the `in_progress` struct until it completes.  Thus, we should
             // always have a value here.
-            let my_status =
-                driver_status.in_progress.get_mut(&self.baseboard_id).unwrap();
+            let mut my_status =
+                driver_status.in_progress.get_mut(&*self.baseboard_id).unwrap();
             my_status.status = new_status;
         });
     }

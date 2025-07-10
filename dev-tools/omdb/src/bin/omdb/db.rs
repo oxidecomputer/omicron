@@ -103,6 +103,8 @@ use nexus_db_model::SwCaboose;
 use nexus_db_model::SwRotPage;
 use nexus_db_model::UpstairsRepairNotification;
 use nexus_db_model::UpstairsRepairProgress;
+use nexus_db_model::UserDataExportRecord;
+use nexus_db_model::UserDataExportResource;
 use nexus_db_model::Vmm;
 use nexus_db_model::Volume;
 use nexus_db_model::VolumeRepair;
@@ -125,8 +127,13 @@ use nexus_db_queries::db::pagination::Paginator;
 use nexus_db_queries::db::pagination::paginated;
 use nexus_db_queries::db::queries::ALLOW_FULL_TABLE_SCAN_SQL;
 use nexus_db_queries::db::queries::region_allocation;
+use nexus_sled_agent_shared::inventory::BootImageHeader;
+use nexus_sled_agent_shared::inventory::BootPartitionContents;
+use nexus_sled_agent_shared::inventory::BootPartitionDetails;
+use nexus_sled_agent_shared::inventory::ConfigReconcilerInventory;
 use nexus_sled_agent_shared::inventory::ConfigReconcilerInventoryResult;
 use nexus_sled_agent_shared::inventory::ConfigReconcilerInventoryStatus;
+use nexus_sled_agent_shared::inventory::HostPhase2DesiredContents;
 use nexus_sled_agent_shared::inventory::OmicronSledConfig;
 use nexus_sled_agent_shared::inventory::OmicronZoneImageSource;
 use nexus_sled_agent_shared::inventory::OrphanedDataset;
@@ -178,11 +185,13 @@ use std::sync::Arc;
 use std::sync::LazyLock;
 use strum::IntoEnumIterator;
 use tabled::Tabled;
+use tufaceous_artifact::ArtifactHash;
 use uuid::Uuid;
 
 mod alert;
 mod ereport;
 mod saga;
+mod user_data_export;
 
 const NO_ACTIVE_PROPOLIS_MSG: &str = "<no active Propolis>";
 const NOT_ON_SLED_MSG: &str = "<not on any sled>";
@@ -402,6 +411,8 @@ enum DbCommands {
     Alert(AlertArgs),
     /// Commands for querying and interacting with pools
     Zpool(ZpoolArgs),
+    /// Commands for querying and interacting with user data export objects
+    UserDataExport(user_data_export::UserDataExportArgs),
 }
 
 #[derive(Debug, Args, Clone)]
@@ -1501,6 +1512,9 @@ impl DbArgs {
                     },
                     DbCommands::Ereport(args) => {
                         cmd_db_ereport(&datastore, &fetch_opts, &args).await
+                    }
+                    DbCommands::UserDataExport(args) => {
+                        args.exec(&omdb, &opctx, &datastore).await
                     }
                 }
             }
@@ -3270,7 +3284,8 @@ async fn cmd_db_volume_cannot_activate(
 ) -> Result<(), anyhow::Error> {
     let conn = datastore.pool_connection_for_tests().await?;
 
-    let mut paginator = Paginator::new(SQL_BATCH_SIZE);
+    let mut paginator =
+        Paginator::new(SQL_BATCH_SIZE, dropshot::PaginationOrder::Ascending);
     while let Some(p) = paginator.next() {
         use nexus_db_schema::schema::volume::dsl;
         let batch = paginated(dsl::volume, dsl::id, &p.current_pagparams())
@@ -3569,6 +3584,33 @@ async fn volume_used_by(
         String::from("listing images used")
     });
 
+    let export_used: Vec<UserDataExportRecord> = {
+        let volumes = volumes.to_vec();
+        datastore
+            .pool_connection_for_tests()
+            .await?
+            .transaction_async(async move |conn| {
+                use nexus_db_schema::schema::user_data_export::dsl;
+
+                conn.batch_execute_async(ALLOW_FULL_TABLE_SCAN_SQL).await?;
+
+                paginated(
+                    dsl::user_data_export,
+                    dsl::id,
+                    &first_page::<dsl::id>(fetch_opts.fetch_limit),
+                )
+                .filter(dsl::volume_id.eq_any(volumes))
+                .select(UserDataExportRecord::as_select())
+                .load_async(&conn)
+                .await
+            })
+            .await?
+    };
+
+    check_limit(&export_used, fetch_opts.fetch_limit, || {
+        String::from("listing user data export used")
+    });
+
     Ok(volumes
         .iter()
         .map(|volume_id| {
@@ -3586,6 +3628,9 @@ async fn volume_used_by(
 
             let maybe_disk =
                 disks_used.iter().find(|x| x.volume_id() == volume_id);
+
+            let maybe_export =
+                export_used.iter().find(|x| x.volume_id() == Some(volume_id));
 
             if let Some(image) = maybe_image {
                 VolumeUsedBy {
@@ -3618,6 +3663,23 @@ async fn volume_used_by(
                     usage_id: disk.id().to_string(),
                     usage_name: disk.name().to_string(),
                     deleted: disk.time_deleted().is_some(),
+                }
+            } else if let Some(export) = maybe_export {
+                match export.resource() {
+                    UserDataExportResource::Snapshot { id } => VolumeUsedBy {
+                        volume_id,
+                        usage_type: String::from("export"),
+                        usage_id: id.to_string(),
+                        usage_name: String::from("snapshot"),
+                        deleted: export.deleted(),
+                    },
+                    UserDataExportResource::Image { id } => VolumeUsedBy {
+                        volume_id,
+                        usage_type: String::from("export"),
+                        usage_id: id.to_string(),
+                        usage_name: String::from("image"),
+                        deleted: export.deleted(),
+                    },
                 }
             } else {
                 VolumeUsedBy {
@@ -7360,34 +7422,41 @@ fn inv_collection_print_sleds(collection: &Collection) {
         }
 
         if let Some(last_reconciliation) = &sled.last_reconciliation {
-            if Some(&last_reconciliation.last_reconciled_config)
+            let ConfigReconcilerInventory {
+                last_reconciled_config,
+                external_disks,
+                datasets,
+                orphaned_datasets,
+                zones,
+                boot_partitions,
+            } = last_reconciliation;
+
+            inv_print_boot_partition_contents("    ", boot_partitions);
+
+            if Some(last_reconciled_config)
                 == sled.ledgered_sled_config.as_ref()
             {
                 println!("    last reconciled config: matches ledgered config");
             } else {
                 inv_collection_print_sled_config(
                     "LAST RECONCILED CONFIG",
-                    &last_reconciliation.last_reconciled_config,
+                    &last_reconciled_config,
                 );
             }
-            if last_reconciliation.orphaned_datasets.is_empty() {
+            if orphaned_datasets.is_empty() {
                 println!("        no orphaned datasets");
             } else {
                 println!(
                     "        {} orphaned dataset(s):",
-                    last_reconciliation.orphaned_datasets.len()
+                    orphaned_datasets.len()
                 );
-                for orphan in &last_reconciliation.orphaned_datasets {
+                for orphan in orphaned_datasets {
                     print_one_orphaned_dataset("            ", orphan);
                 }
             }
-            let disk_errs = collect_config_reconciler_errors(
-                &last_reconciliation.external_disks,
-            );
-            let dataset_errs =
-                collect_config_reconciler_errors(&last_reconciliation.datasets);
-            let zone_errs =
-                collect_config_reconciler_errors(&last_reconciliation.zones);
+            let disk_errs = collect_config_reconciler_errors(&external_disks);
+            let dataset_errs = collect_config_reconciler_errors(&datasets);
+            let zone_errs = collect_config_reconciler_errors(&zones);
             for (label, errs) in [
                 ("disk", disk_errs),
                 ("dataset", dataset_errs),
@@ -7435,6 +7504,57 @@ fn inv_collection_print_sleds(collection: &Collection) {
             }
         }
     }
+}
+
+fn inv_print_boot_partition_contents(
+    indent: &str,
+    boot_partitions: &BootPartitionContents,
+) {
+    let BootPartitionContents { boot_disk, slot_a, slot_b } = &boot_partitions;
+    print!("{indent}boot disk slot: ");
+    match boot_disk {
+        Ok(slot) => println!("{slot:?}"),
+        Err(err) => println!("FAILED TO DETERMINE: {err}"),
+    }
+    match slot_a {
+        Ok(details) => {
+            println!("{indent}slot A details:");
+            inv_print_boot_partition_details(&format!("{indent}    "), details);
+        }
+        Err(err) => {
+            println!("{indent}slot A details UNAVAILABLE: {err}");
+        }
+    }
+    match slot_b {
+        Ok(details) => {
+            println!("{indent}slot B details:");
+            inv_print_boot_partition_details(&format!("{indent}    "), details);
+        }
+        Err(err) => {
+            println!("{indent}slot B details UNAVAILABLE: {err}");
+        }
+    }
+}
+
+fn inv_print_boot_partition_details(
+    indent: &str,
+    details: &BootPartitionDetails,
+) {
+    let BootPartitionDetails { header, artifact_hash, artifact_size } = details;
+
+    // Not sure it's useful to print all the header details? We'll omit for now.
+    let BootImageHeader {
+        flags: _,
+        data_size: _,
+        image_size: _,
+        target_size: _,
+        sha256,
+        image_name,
+    } = header;
+
+    println!("{indent}artifact: {artifact_hash} ({artifact_size} bytes)");
+    println!("{indent}image name: {image_name}");
+    println!("{indent}phase 2 hash: {}", ArtifactHash(*sha256));
 }
 
 fn inv_collection_print_orphaned_datasets(collection: &Collection) {
@@ -7503,11 +7623,29 @@ fn inv_collection_print_sled_config(label: &str, config: &OmicronSledConfig) {
         datasets,
         zones,
         remove_mupdate_override,
+        host_phase_2,
     } = config;
 
     println!("\n{label} SLED CONFIG");
     println!("    generation: {}", generation);
     println!("    remove_mupdate_override: {remove_mupdate_override:?}");
+
+    let display_host_phase_2_desired = |desired| match desired {
+        HostPhase2DesiredContents::CurrentContents => {
+            Cow::Borrowed("keep current contents")
+        }
+        HostPhase2DesiredContents::Artifact { hash } => {
+            Cow::Owned(format!("artifact {hash}"))
+        }
+    };
+    println!(
+        "    desired host phase 2 slot a: {}",
+        display_host_phase_2_desired(host_phase_2.slot_a)
+    );
+    println!(
+        "    desired host phase 2 slot b: {}",
+        display_host_phase_2_desired(host_phase_2.slot_b)
+    );
 
     if disks.is_empty() {
         println!("    disk config empty");

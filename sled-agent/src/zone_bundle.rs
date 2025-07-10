@@ -1772,6 +1772,7 @@ mod illumos_tests {
     use omicron_common::disk::DiskIdentity;
     use rand::RngCore;
     use sled_agent_config_reconciler::AvailableDatasetsReceiver;
+    use sled_agent_config_reconciler::InternalDiskDetails;
     use sled_agent_config_reconciler::InternalDisksReceiver;
     use sled_storage::manager_test_harness::StorageManagerTestHarness;
     use slog::Drain;
@@ -1907,13 +1908,16 @@ mod illumos_tests {
             Arc::new(all_disks.mount_config().clone()),
             all_disks.all_m2_zpool_ids().into_iter().enumerate().map(
                 |(i, zpool_id)| {
-                    (
+                    InternalDiskDetails::fake_details(
                         DiskIdentity {
                             vendor: format!("test-vendor-{i}"),
                             model: format!("test-model-{i}"),
                             serial: format!("test-serial-{i}"),
                         },
                         zpool_id,
+                        i == 0, // is_boot_disk
+                        None,
+                        None,
                     )
                 },
             ),

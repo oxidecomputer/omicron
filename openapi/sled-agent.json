@@ -185,131 +185,6 @@
         }
       }
     },
-    "/boot-disk/{boot_disk}/os/write": {
-      "post": {
-        "summary": "Write a new host OS image to the specified boot disk",
-        "operationId": "host_os_write_start",
-        "parameters": [
-          {
-            "in": "path",
-            "name": "boot_disk",
-            "required": true,
-            "schema": {
-              "$ref": "#/components/schemas/M2Slot"
-            }
-          },
-          {
-            "in": "query",
-            "name": "sha3_256_digest",
-            "required": true,
-            "schema": {
-              "type": "string",
-              "format": "hex string (32 bytes)"
-            }
-          },
-          {
-            "in": "query",
-            "name": "update_id",
-            "required": true,
-            "schema": {
-              "type": "string",
-              "format": "uuid"
-            }
-          }
-        ],
-        "requestBody": {
-          "content": {
-            "application/octet-stream": {
-              "schema": {
-                "type": "string",
-                "format": "binary"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "204": {
-            "description": "resource updated"
-          },
-          "4XX": {
-            "$ref": "#/components/responses/Error"
-          },
-          "5XX": {
-            "$ref": "#/components/responses/Error"
-          }
-        }
-      }
-    },
-    "/boot-disk/{boot_disk}/os/write/status": {
-      "get": {
-        "operationId": "host_os_write_status_get",
-        "parameters": [
-          {
-            "in": "path",
-            "name": "boot_disk",
-            "required": true,
-            "schema": {
-              "$ref": "#/components/schemas/M2Slot"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "successful operation",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/BootDiskOsWriteStatus"
-                }
-              }
-            }
-          },
-          "4XX": {
-            "$ref": "#/components/responses/Error"
-          },
-          "5XX": {
-            "$ref": "#/components/responses/Error"
-          }
-        }
-      }
-    },
-    "/boot-disk/{boot_disk}/os/write/status/{update_id}": {
-      "delete": {
-        "summary": "Clear the status of a completed write of a new host OS",
-        "operationId": "host_os_write_status_delete",
-        "parameters": [
-          {
-            "in": "path",
-            "name": "boot_disk",
-            "required": true,
-            "schema": {
-              "$ref": "#/components/schemas/M2Slot"
-            }
-          },
-          {
-            "in": "path",
-            "name": "update_id",
-            "required": true,
-            "schema": {
-              "type": "string",
-              "format": "uuid"
-            }
-          }
-        ],
-        "responses": {
-          "204": {
-            "description": "resource updated"
-          },
-          "4XX": {
-            "$ref": "#/components/responses/Error"
-          },
-          "5XX": {
-            "$ref": "#/components/responses/Error"
-          }
-        }
-      }
-    },
     "/bootstore/status": {
       "get": {
         "summary": "Get the internal state of the local bootstore node",
@@ -2698,160 +2573,50 @@
         ],
         "additionalProperties": false
       },
-      "BootDiskOsWriteProgress": {
-        "description": "Current progress of an OS image being written to disk.",
-        "oneOf": [
-          {
-            "description": "The image is still being uploaded.",
-            "type": "object",
-            "properties": {
-              "bytes_received": {
-                "type": "integer",
-                "format": "uint",
-                "minimum": 0
-              },
-              "state": {
-                "type": "string",
-                "enum": [
-                  "receiving_uploaded_image"
-                ]
-              }
-            },
-            "required": [
-              "bytes_received",
-              "state"
-            ]
+      "BootImageHeader": {
+        "type": "object",
+        "properties": {
+          "data_size": {
+            "type": "integer",
+            "format": "uint64",
+            "minimum": 0
           },
-          {
-            "description": "The image is being written to disk.",
-            "type": "object",
-            "properties": {
-              "bytes_written": {
-                "type": "integer",
-                "format": "uint",
-                "minimum": 0
-              },
-              "state": {
-                "type": "string",
-                "enum": [
-                  "writing_image_to_disk"
-                ]
-              }
-            },
-            "required": [
-              "bytes_written",
-              "state"
-            ]
+          "flags": {
+            "type": "integer",
+            "format": "uint64",
+            "minimum": 0
           },
-          {
-            "description": "The image is being read back from disk for validation.",
-            "type": "object",
-            "properties": {
-              "bytes_read": {
-                "type": "integer",
-                "format": "uint",
-                "minimum": 0
-              },
-              "state": {
-                "type": "string",
-                "enum": [
-                  "validating_written_image"
-                ]
-              }
+          "image_name": {
+            "type": "string"
+          },
+          "image_size": {
+            "type": "integer",
+            "format": "uint64",
+            "minimum": 0
+          },
+          "sha256": {
+            "type": "array",
+            "items": {
+              "type": "integer",
+              "format": "uint8",
+              "minimum": 0
             },
-            "required": [
-              "bytes_read",
-              "state"
-            ]
+            "minItems": 32,
+            "maxItems": 32
+          },
+          "target_size": {
+            "type": "integer",
+            "format": "uint64",
+            "minimum": 0
           }
-        ]
-      },
-      "BootDiskOsWriteStatus": {
-        "description": "Status of an update to a boot disk OS.",
-        "oneOf": [
-          {
-            "description": "No update has been started for this disk, or any previously-started update has completed and had its status cleared.",
-            "type": "object",
-            "properties": {
-              "status": {
-                "type": "string",
-                "enum": [
-                  "no_update_started"
-                ]
-              }
-            },
-            "required": [
-              "status"
-            ]
-          },
-          {
-            "description": "An update is currently running.",
-            "type": "object",
-            "properties": {
-              "progress": {
-                "$ref": "#/components/schemas/BootDiskOsWriteProgress"
-              },
-              "status": {
-                "type": "string",
-                "enum": [
-                  "in_progress"
-                ]
-              },
-              "update_id": {
-                "type": "string",
-                "format": "uuid"
-              }
-            },
-            "required": [
-              "progress",
-              "status",
-              "update_id"
-            ]
-          },
-          {
-            "description": "The most recent update completed successfully.",
-            "type": "object",
-            "properties": {
-              "status": {
-                "type": "string",
-                "enum": [
-                  "complete"
-                ]
-              },
-              "update_id": {
-                "type": "string",
-                "format": "uuid"
-              }
-            },
-            "required": [
-              "status",
-              "update_id"
-            ]
-          },
-          {
-            "description": "The most recent update failed.",
-            "type": "object",
-            "properties": {
-              "message": {
-                "type": "string"
-              },
-              "status": {
-                "type": "string",
-                "enum": [
-                  "failed"
-                ]
-              },
-              "update_id": {
-                "type": "string",
-                "format": "uuid"
-              }
-            },
-            "required": [
-              "message",
-              "status",
-              "update_id"
-            ]
-          }
+        },
+        "required": [
+          "data_size",
+          "flags",
+          "image_name",
+          "image_size",
+          "sha256",
+          "target_size"
         ]
       },
       "BootOrderEntry": {
@@ -2869,6 +2634,155 @@
         },
         "required": [
           "id"
+        ]
+      },
+      "BootPartitionContents": {
+        "type": "object",
+        "properties": {
+          "boot_disk": {
+            "x-rust-type": {
+              "crate": "std",
+              "parameters": [
+                {
+                  "$ref": "#/components/schemas/M2Slot"
+                },
+                {
+                  "type": "string"
+                }
+              ],
+              "path": "::std::result::Result",
+              "version": "*"
+            },
+            "oneOf": [
+              {
+                "type": "object",
+                "properties": {
+                  "ok": {
+                    "$ref": "#/components/schemas/M2Slot"
+                  }
+                },
+                "required": [
+                  "ok"
+                ]
+              },
+              {
+                "type": "object",
+                "properties": {
+                  "err": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "err"
+                ]
+              }
+            ]
+          },
+          "slot_a": {
+            "x-rust-type": {
+              "crate": "std",
+              "parameters": [
+                {
+                  "$ref": "#/components/schemas/BootPartitionDetails"
+                },
+                {
+                  "type": "string"
+                }
+              ],
+              "path": "::std::result::Result",
+              "version": "*"
+            },
+            "oneOf": [
+              {
+                "type": "object",
+                "properties": {
+                  "ok": {
+                    "$ref": "#/components/schemas/BootPartitionDetails"
+                  }
+                },
+                "required": [
+                  "ok"
+                ]
+              },
+              {
+                "type": "object",
+                "properties": {
+                  "err": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "err"
+                ]
+              }
+            ]
+          },
+          "slot_b": {
+            "x-rust-type": {
+              "crate": "std",
+              "parameters": [
+                {
+                  "$ref": "#/components/schemas/BootPartitionDetails"
+                },
+                {
+                  "type": "string"
+                }
+              ],
+              "path": "::std::result::Result",
+              "version": "*"
+            },
+            "oneOf": [
+              {
+                "type": "object",
+                "properties": {
+                  "ok": {
+                    "$ref": "#/components/schemas/BootPartitionDetails"
+                  }
+                },
+                "required": [
+                  "ok"
+                ]
+              },
+              {
+                "type": "object",
+                "properties": {
+                  "err": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "err"
+                ]
+              }
+            ]
+          }
+        },
+        "required": [
+          "boot_disk",
+          "slot_a",
+          "slot_b"
+        ]
+      },
+      "BootPartitionDetails": {
+        "type": "object",
+        "properties": {
+          "artifact_hash": {
+            "type": "string",
+            "format": "hex string (32 bytes)"
+          },
+          "artifact_size": {
+            "type": "integer",
+            "format": "uint",
+            "minimum": 0
+          },
+          "header": {
+            "$ref": "#/components/schemas/BootImageHeader"
+          }
+        },
+        "required": [
+          "artifact_hash",
+          "artifact_size",
+          "header"
         ]
       },
       "BootSettings": {
@@ -3547,6 +3461,9 @@
         "description": "Describes the last attempt made by the sled-agent-config-reconciler to reconcile the current sled config against the actual state of the sled.",
         "type": "object",
         "properties": {
+          "boot_partitions": {
+            "$ref": "#/components/schemas/BootPartitionContents"
+          },
           "datasets": {
             "type": "object",
             "additionalProperties": {
@@ -3588,6 +3505,7 @@
           }
         },
         "required": [
+          "boot_partitions",
           "datasets",
           "external_disks",
           "last_reconciled_config",
@@ -4523,6 +4441,62 @@
           }
         ]
       },
+      "HostPhase2DesiredContents": {
+        "description": "Describes the desired contents of a host phase 2 slot (i.e., the boot partition on one of the internal M.2 drives).",
+        "oneOf": [
+          {
+            "description": "Do not change the current contents.\n\nWe use this value when we've detected a sled has been mupdated (and we don't want to overwrite phase 2 images until we understand how to recover from that mupdate) and as the default value when reading an [`OmicronSledConfig`] that was ledgered before this concept existed.",
+            "type": "object",
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "current_contents"
+                ]
+              }
+            },
+            "required": [
+              "type"
+            ]
+          },
+          {
+            "description": "Set the phase 2 slot to the given artifact.\n\nThe artifact will come from an unpacked and distributed TUF repo.",
+            "type": "object",
+            "properties": {
+              "hash": {
+                "type": "string",
+                "format": "hex string (32 bytes)"
+              },
+              "type": {
+                "type": "string",
+                "enum": [
+                  "artifact"
+                ]
+              }
+            },
+            "required": [
+              "hash",
+              "type"
+            ]
+          }
+        ]
+      },
+      "HostPhase2DesiredSlots": {
+        "description": "Describes the desired contents for both host phase 2 slots.",
+        "type": "object",
+        "properties": {
+          "slot_a": {
+            "$ref": "#/components/schemas/HostPhase2DesiredContents"
+          },
+          "slot_b": {
+            "$ref": "#/components/schemas/HostPhase2DesiredContents"
+          }
+        },
+        "required": [
+          "slot_a",
+          "slot_b"
+        ]
+      },
       "HostPortConfig": {
         "type": "object",
         "properties": {
@@ -4587,6 +4561,15 @@
           "enable_pcie"
         ],
         "additionalProperties": false
+      },
+      "IcmpParamRange": {
+        "example": "3",
+        "title": "A range of ICMP(v6) types or codes",
+        "description": "An inclusive-inclusive range of ICMP(v6) types or codes. The second value may be omitted to represent a single parameter.",
+        "type": "string",
+        "pattern": "^[0-9]{1,3}(-[0-9]{1,3})?$",
+        "minLength": 1,
+        "maxLength": 7
       },
       "IdMapDatasetConfig": {
         "type": "object",
@@ -5236,6 +5219,14 @@
           "status"
         ]
       },
+      "M2Slot": {
+        "description": "Describes an M.2 slot, often in the context of writing a system image to it.",
+        "type": "string",
+        "enum": [
+          "A",
+          "B"
+        ]
+      },
       "MacAddr": {
         "example": "ff:ff:ff:ff:ff:ff",
         "title": "A MAC address",
@@ -5657,6 +5648,21 @@
           },
           "generation": {
             "$ref": "#/components/schemas/Generation"
+          },
+          "host_phase_2": {
+            "default": {
+              "slot_a": {
+                "type": "current_contents"
+              },
+              "slot_b": {
+                "type": "current_contents"
+              }
+            },
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/HostPhase2DesiredSlots"
+              }
+            ]
           },
           "remove_mupdate_override": {
             "nullable": true,
@@ -7687,6 +7693,27 @@
         "format": "uint32",
         "minimum": 0
       },
+      "VpcFirewallIcmpFilter": {
+        "type": "object",
+        "properties": {
+          "code": {
+            "nullable": true,
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/IcmpParamRange"
+              }
+            ]
+          },
+          "icmp_type": {
+            "type": "integer",
+            "format": "uint8",
+            "minimum": 0
+          }
+        },
+        "required": [
+          "icmp_type"
+        ]
+      },
       "VpcFirewallRuleAction": {
         "type": "string",
         "enum": [
@@ -7703,11 +7730,58 @@
       },
       "VpcFirewallRuleProtocol": {
         "description": "The protocols that may be specified in a firewall rule's filter",
-        "type": "string",
-        "enum": [
-          "TCP",
-          "UDP",
-          "ICMP"
+        "oneOf": [
+          {
+            "type": "object",
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "tcp"
+                ]
+              }
+            },
+            "required": [
+              "type"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "udp"
+                ]
+              }
+            },
+            "required": [
+              "type"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "icmp"
+                ]
+              },
+              "value": {
+                "nullable": true,
+                "allOf": [
+                  {
+                    "$ref": "#/components/schemas/VpcFirewallIcmpFilter"
+                  }
+                ]
+              }
+            },
+            "required": [
+              "type",
+              "value"
+            ]
+          }
         ]
       },
       "VpcFirewallRuleStatus": {
@@ -8072,14 +8146,6 @@
         "description": "Zpool names are of the format ox{i,p}_<UUID>. They are either Internal or External, and should be unique",
         "type": "string",
         "pattern": "^ox[ip]_[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
-      },
-      "M2Slot": {
-        "description": "Describes an M.2 slot, often in the context of writing a system image to it.",
-        "type": "string",
-        "enum": [
-          "A",
-          "B"
-        ]
       },
       "TypedUuidForPropolisKind": {
         "type": "string",

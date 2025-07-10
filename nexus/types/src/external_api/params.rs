@@ -97,6 +97,7 @@ path_param!(CertificatePath, certificate, "certificate");
 id_path_param!(SupportBundlePath, bundle_id, "support bundle");
 id_path_param!(GroupPath, group_id, "group");
 id_path_param!(TokenPath, token_id, "token");
+id_path_param!(TufTrustRootPath, trust_root_id, "trust root");
 
 // TODO: The hardware resources should be represented by its UUID or a hardware
 // ID that can be used to deterministically generate the UUID.
@@ -2396,22 +2397,6 @@ pub struct TimeseriesQuery {
 pub struct AllowListUpdate {
     /// The new list of allowed source IPs.
     pub allowed_ips: AllowedSourceIps,
-}
-
-// Roles
-
-// Roles have their own pagination scheme because they do not use the usual "id"
-// or "name" types.  For more, see the comment in dbinit.sql.
-#[derive(Deserialize, JsonSchema, Serialize)]
-pub struct RolePage {
-    pub last_seen: String,
-}
-
-/// Path parameters for global (system) role requests
-#[derive(Deserialize, JsonSchema)]
-pub struct RolePath {
-    /// The built-in role's unique name.
-    pub role_name: String,
 }
 
 // Console API

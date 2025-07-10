@@ -39,8 +39,17 @@ version = "1.0.0"
 [artifact.control_plane.source]
 kind = "composite-control-plane"
 zones = [
-    { kind = "fake", name = "zone1", size = "1MiB" },
-    { kind = "fake", name = "zone2", size = "1MiB" },
+    { kind = "fake", artifact_name = "clickhouse",           file_name = "clickhouse.tar.gz",        size = "128KiB" },
+    { kind = "fake", artifact_name = "clickhouse_keeper",    file_name = "clickhouse_keeper.tar.gz", size = "128KiB" },
+    { kind = "fake", artifact_name = "clickhouse_server",    file_name = "clickhouse_server.tar.gz", size = "128KiB" },
+    { kind = "fake", artifact_name = "cockroachdb",          file_name = "cockroachdb.tar.gz",       size = "128KiB" },
+    { kind = "fake", artifact_name = "crucible-zone",        file_name = "crucible.tar.gz",          size = "128KiB" },
+    { kind = "fake", artifact_name = "crucible-pantry-zone", file_name = "crucible_pantry.tar.gz",   size = "128KiB" },
+    { kind = "fake", artifact_name = "external-dns",         file_name = "external_dns.tar.gz",      size = "128KiB" },
+    { kind = "fake", artifact_name = "internal-dns",         file_name = "internal_dns.tar.gz",      size = "128KiB" },
+    { kind = "fake", artifact_name = "ntp",                  file_name = "ntp.tar.gz",               size = "128KiB" },
+    { kind = "fake", artifact_name = "nexus",                file_name = "nexus.tar.gz",             size = "128KiB" },
+    { kind = "fake", artifact_name = "oximeter",             file_name = "oximeter.tar.gz",          size = "128KiB" },
 ]
 
 [[artifact.psc_sp]]

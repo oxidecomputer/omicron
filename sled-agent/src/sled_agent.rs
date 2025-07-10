@@ -5,7 +5,6 @@
 //! Sled agent implementation
 
 use crate::artifact_store::ArtifactStore;
-use crate::boot_disk_os_writer::BootDiskOsWriter;
 use crate::bootstrap::config::BOOTSTRAP_AGENT_RACK_INIT_PORT;
 use crate::bootstrap::early_networking::EarlyNetworkSetupError;
 use crate::config::Config;
@@ -49,7 +48,6 @@ use omicron_common::api::internal::shared::{
 use omicron_common::backoff::{
     BackoffError, retry_notify, retry_policy_internal_service_aggressive,
 };
-use omicron_common::disk::M2Slot;
 use omicron_ddm_admin_client::Client as DdmAdminClient;
 use omicron_uuid_kinds::{GenericUuid, PropolisUuid, SledUuid};
 use sled_agent_config_reconciler::{
@@ -69,11 +67,10 @@ use sled_agent_types::zone_bundle::{
     BundleUtilization, CleanupContext, CleanupCount, CleanupPeriod,
     PriorityOrder, StorageLimit, ZoneBundleCause, ZoneBundleMetadata,
 };
+use sled_agent_types::zone_images::ResolverStatus;
 use sled_diagnostics::SledDiagnosticsCmdError;
 use sled_diagnostics::SledDiagnosticsCmdOutput;
-use sled_hardware::{
-    HardwareManager, MemoryReservations, PooledDiskError, underlay,
-};
+use sled_hardware::{HardwareManager, MemoryReservations, underlay};
 use sled_hardware_types::Baseboard;
 use sled_hardware_types::underlay::BootstrapInterface;
 use slog::Logger;
@@ -364,9 +361,6 @@ struct SledAgentInner {
 
     // Object handling production of metrics for oximeter.
     _metrics_manager: MetricsManager,
-
-    // Handle to the traffic manager for writing OS updates to our boot disks.
-    boot_disk_os_writer: BootDiskOsWriter,
 
     // Component of Sled Agent responsible for managing instrumentation probes.
     probes: ProbeManager,
@@ -676,7 +670,6 @@ impl SledAgent {
                 zone_bundler: long_running_task_handles.zone_bundler.clone(),
                 bootstore: long_running_task_handles.bootstore.clone(),
                 _metrics_manager: metrics_manager,
-                boot_disk_os_writer: BootDiskOsWriter::new(&parent_log),
                 repo_depot,
             }),
             log: log.clone(),
@@ -1084,21 +1077,6 @@ impl SledAgent {
         Ok(())
     }
 
-    pub(crate) fn boot_image_raw_devfs_path(
-        &self,
-        slot: M2Slot,
-    ) -> Option<Result<Utf8PathBuf, Arc<PooledDiskError>>> {
-        self.inner
-            .config_reconciler
-            .internal_disks_rx()
-            .current()
-            .image_raw_devfs_path(slot)
-    }
-
-    pub(crate) fn boot_disk_os_writer(&self) -> &BootDiskOsWriter {
-        &self.inner.boot_disk_os_writer
-    }
-
     /// Return identifiers for this sled.
     ///
     /// This is mostly used to identify timeseries data with the originating
@@ -1336,8 +1314,8 @@ impl SledAgentFacilities for ReconcilerFacilities {
         &self.etherstub_vnic
     }
 
-    async fn on_time_sync(&self) {
-        self.service_manager.on_time_sync().await
+    fn on_time_sync(&self) {
+        self.service_manager.on_time_sync();
     }
 
     async fn start_omicron_zone(
@@ -1350,6 +1328,10 @@ impl SledAgentFacilities for ReconcilerFacilities {
             .start_omicron_zone(zone_config, zone_root_path)
             .await?;
         Ok(zone)
+    }
+
+    fn zone_image_resolver_status(&self) -> ResolverStatus {
+        self.service_manager.zone_image_resolver().status()
     }
 
     fn metrics_untrack_zone_links(
@@ -1387,14 +1369,15 @@ impl SledAgentFacilities for ReconcilerFacilities {
 }
 
 // Workaround wrapper for orphan rules.
+#[derive(Clone)]
 struct SledAgentArtifactStoreWrapper(Arc<ArtifactStore<InternalDisksReceiver>>);
 
 impl SledAgentArtifactStore for SledAgentArtifactStoreWrapper {
-    async fn validate_artifact_exists_in_storage(
+    async fn get_artifact(
         &self,
         artifact: ArtifactHash,
-    ) -> anyhow::Result<()> {
-        self.0.get(artifact).await?;
-        Ok(())
+    ) -> anyhow::Result<tokio::fs::File> {
+        let file = self.0.get(artifact).await?;
+        Ok(file)
     }
 }

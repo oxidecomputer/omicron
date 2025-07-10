@@ -4,7 +4,7 @@
 
 //! Runtime configuration for reconfigurator
 //!
-use chrono::{DateTime, Utc};
+use chrono::{DateTime, TimeZone, Utc};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
@@ -21,4 +21,14 @@ pub struct ReconfiguratorChickenSwitches {
     pub version: u32,
     pub planner_enabled: bool,
     pub time_modified: DateTime<Utc>,
+}
+
+impl Default for ReconfiguratorChickenSwitches {
+    fn default() -> Self {
+        Self {
+            version: 0,
+            planner_enabled: false,
+            time_modified: Utc.with_ymd_and_hms(1970, 1, 1, 0, 1, 1).unwrap(),
+        }
+    }
 }

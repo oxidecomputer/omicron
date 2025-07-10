@@ -1868,12 +1868,6 @@ CREATE TYPE IF NOT EXISTS omicron.public.vpc_firewall_rule_action AS ENUM (
     'deny'
 );
 
-CREATE TYPE IF NOT EXISTS omicron.public.vpc_firewall_rule_protocol AS ENUM (
-    'TCP',
-    'UDP',
-    'ICMP'
-);
-
 CREATE TABLE IF NOT EXISTS omicron.public.vpc_firewall_rule (
     /* Identity metadata (resource) */
     id UUID PRIMARY KEY,
@@ -1893,9 +1887,9 @@ CREATE TABLE IF NOT EXISTS omicron.public.vpc_firewall_rule (
     /* Also an array of targets */
     filter_hosts STRING(128)[],
     filter_ports STRING(11)[],
-    filter_protocols omicron.public.vpc_firewall_rule_protocol[],
     action omicron.public.vpc_firewall_rule_action NOT NULL,
-    priority INT4 CHECK (priority BETWEEN 0 AND 65535) NOT NULL
+    priority INT4 CHECK (priority BETWEEN 0 AND 65535) NOT NULL,
+    filter_protocols STRING(32)[]
 );
 
 CREATE UNIQUE INDEX IF NOT EXISTS lookup_firewall_by_vpc ON omicron.public.vpc_firewall_rule (
@@ -2562,6 +2556,20 @@ INSERT INTO omicron.public.tuf_generation (
     (TRUE, 1)
 ON CONFLICT DO NOTHING;
 
+-- Trusted TUF root roles, used to verify TUF repo signatures
+CREATE TABLE IF NOT EXISTS omicron.public.tuf_trust_root (
+    id UUID PRIMARY KEY,
+    time_created TIMESTAMPTZ NOT NULL,
+    time_deleted TIMESTAMPTZ,
+    root_role JSONB NOT NULL
+);
+
+-- This index is used for paginating through non-deleted roots.
+CREATE UNIQUE INDEX IF NOT EXISTS tuf_trust_root_by_id
+ON omicron.public.tuf_trust_root (id)
+WHERE
+    time_deleted IS NULL;
+
 /*******************************************************************/
 
 -- The source of the software release that should be deployed to the rack.
@@ -2856,55 +2864,6 @@ CREATE UNIQUE INDEX IF NOT EXISTS device_access_token_unique
 CREATE INDEX IF NOT EXISTS lookup_device_access_token_by_silo_user
     ON omicron.public.device_access_token (silo_user_id);
 
-/*
- * Roles built into the system
- *
- * You can think of a built-in role as an opaque token to which we assign a
- * hardcoded set of permissions.  The role that we call "project.viewer"
- * corresponds to the "viewer" role on the "project" resource.  A user that has
- * this role on a particular Project is granted various read-only permissions on
- * that Project.  The specific permissions associated with the role are defined
- * in Omicron's Polar (Oso) policy file.
- *
- * A built-in role like "project.viewer" has four parts:
- *
- * * resource type: "project"
- * * role name: "viewer"
- * * full name: "project.viewer"
- * * description: "Project Viewer"
- *
- * Internally, we can treat the tuple (resource type, role name) as a composite
- * primary key.  Externally, we expose this as the full name.  This is
- * consistent with RFD 43 and other IAM systems.
- *
- * These fields look awfully close to the identity metadata that we use for most
- * other tables.  But they're just different enough that we can't use most of
- * the same abstractions:
- *
- * * "id": We have no need for a uuid because the (resource_type, role_name) is
- *   already unique and immutable.
- * * "name": What we call "full name" above could instead be called "name",
- *   which would be consistent with other identity metadata.  But it's not a
- *   legal "name" because of the period, and it would be confusing to have
- *   "resource type", "role name", and "name".
- * * "time_created": not that useful because it's whenever the system was
- *   initialized, and we have plenty of other timestamps for that
- * * "time_modified": does not apply because the role cannot be changed
- * * "time_deleted" does not apply because the role cannot be deleted
- *
- * If the set of roles and their permissions are fixed, why store them in the
- * database at all?  Because what's dynamic is the assignment of roles to users.
- * We have a separate table that says "user U has role ROLE on resource
- * RESOURCE".  How do we represent the ROLE part of this association?  We use a
- * foreign key into this "role_builtin" table.
- */
-CREATE TABLE IF NOT EXISTS omicron.public.role_builtin (
-    resource_type STRING(63),
-    role_name STRING(63),
-    description STRING(512),
-
-    PRIMARY KEY(resource_type, role_name)
-);
 
 /*
  * Assignments between users, roles, and resources
@@ -2923,7 +2882,6 @@ CREATE TYPE IF NOT EXISTS omicron.public.identity_type AS ENUM (
 );
 
 CREATE TABLE IF NOT EXISTS omicron.public.role_assignment (
-    /* Composite foreign key into "role_builtin" table */
     resource_type STRING(63) NOT NULL,
     role_name STRING(63) NOT NULL,
 
@@ -3651,11 +3609,6 @@ CREATE TABLE IF NOT EXISTS omicron.public.inv_sled_agent (
     -- This is optional because newly-added sleds don't yet have a config.
     ledgered_sled_config UUID,
 
-    -- Most-recently-reconciled `OmicronSledConfig`
-    -- (foreign key into `inv_omicron_sled_config` table)
-    -- This is optional because the reconciler may not have run yet
-    last_reconciliation_sled_config UUID,
-
     -- Columns making up the status of the config reconciler.
     reconciler_status_kind omicron.public.inv_config_reconciler_status_kind NOT NULL,
     -- (foreign key into `inv_omicron_sled_config` table)
@@ -3745,6 +3698,76 @@ CREATE TABLE IF NOT EXISTS omicron.public.inv_sled_agent (
     ),
 
     PRIMARY KEY (inv_collection_id, sled_id)
+);
+
+CREATE TABLE IF NOT EXISTS omicron.public.inv_sled_config_reconciler (
+    -- where this observation came from
+    -- (foreign key into `inv_collection` table)
+    inv_collection_id UUID NOT NULL,
+
+    -- unique id for this sled (should be foreign keys into `sled` table, though
+    -- it's conceivable a sled will report an id that we don't know about);
+    -- guaranteed to match a row in this collection's `inv_sled_agent`
+    sled_id UUID NOT NULL,
+
+    -- Most-recently-reconciled `OmicronSledConfig`
+    -- (foreign key into `inv_omicron_sled_config` table)
+    last_reconciled_config UUID NOT NULL,
+
+    -- Which internal disk slot did we use at boot?
+    --
+    -- If not NULL, `boot_disk_slot` must be 0 or 1 (corresponding to M2Slot::A
+    -- and M2Slot::B, respectively). The column pair `boot_disk_slot` /
+    -- `boot_disk_error` represents a Rust `Result`; one or the other must be
+    -- non-NULL, but not both.
+    boot_disk_slot INT2 CHECK (boot_disk_slot >= 0 AND boot_disk_slot <= 1),
+    boot_disk_error TEXT,
+    CONSTRAINT boot_disk_slot_or_error CHECK (
+        (boot_disk_slot IS NULL AND boot_disk_error IS NOT NULL)
+        OR
+        (boot_disk_slot IS NOT NULL AND boot_disk_error IS NULL)
+    ),
+
+    -- If either error string is present, there was an error reading the boot
+    -- partition for the corresponding M2Slot.
+    --
+    -- For either or both columns if NULL, there will be a row in
+    -- `inv_sled_boot_partition` describing the contents of the boot partition
+    -- for the given slot. As above 0=a and 1=b.
+    boot_partition_a_error TEXT,
+    boot_partition_b_error TEXT,
+
+    PRIMARY KEY (inv_collection_id, sled_id)
+);
+
+CREATE TABLE IF NOT EXISTS omicron.public.inv_sled_boot_partition (
+    -- where this observation came from
+    -- (foreign key into `inv_collection` table)
+    inv_collection_id UUID NOT NULL,
+
+    -- unique id for this sled (should be foreign keys into `sled` table, though
+    -- it's conceivable a sled will report an id that we don't know about)
+    sled_id UUID NOT NULL,
+
+    -- the boot disk slot (0=M2Slot::A, 1=M2Slot::B)
+    boot_disk_slot INT2
+        CHECK (boot_disk_slot >= 0 AND boot_disk_slot <= 1) NOT NULL,
+
+    -- SHA256 hash of the artifact; if we have a TUF repo containing this OS
+    -- image, this will match the artifact hash of the phase 2 image
+    artifact_hash STRING(64) NOT NULL,
+    -- The length of the artifact in bytes
+    artifact_size INT8 NOT NULL,
+
+    -- Fields comprising the header of the phase 2 image
+    header_flags INT8 NOT NULL,
+    header_data_size INT8 NOT NULL,
+    header_image_size INT8 NOT NULL,
+    header_target_size INT8 NOT NULL,
+    header_sha256 STRING(64) NOT NULL,
+    header_image_name TEXT NOT NULL,
+
+    PRIMARY KEY (inv_collection_id, sled_id, boot_disk_slot)
 );
 
 CREATE TABLE IF NOT EXISTS omicron.public.inv_physical_disk (
@@ -3862,6 +3885,11 @@ CREATE TABLE IF NOT EXISTS omicron.public.inv_omicron_sled_config (
 
     -- remove mupdate override ID, if set
     remove_mupdate_override UUID,
+
+    -- desired artifact hash for internal disk slots' boot partitions
+    -- NULL is translated to `HostPhase2DesiredContents::CurrentContents`
+    host_phase_2_desired_slot_a STRING(64),
+    host_phase_2_desired_slot_b STRING(64),
 
     PRIMARY KEY (inv_collection_id, id)
 );
@@ -4633,6 +4661,27 @@ CREATE TABLE IF NOT EXISTS omicron.public.bp_oximeter_read_policy (
 
     -- Which clickhouse installation should oximeter read from.
     oximeter_read_mode omicron.public.oximeter_read_mode NOT NULL
+);
+
+-- Blueprint information related to pending SP upgrades.
+CREATE TABLE IF NOT EXISTS omicron.public.bp_pending_mgs_update_sp (
+    -- Foreign key into the `blueprint` table
+    blueprint_id UUID,
+    -- identify of the device to be updated
+    -- (foreign key into the `hw_baseboard_id` table)
+    hw_baseboard_id UUID NOT NULL,
+    -- location of this device according to MGS
+    sp_type omicron.public.sp_type NOT NULL,
+    sp_slot INT4 NOT NULL,
+    -- artifact to be deployed to this device
+    artifact_sha256 STRING(64) NOT NULL,
+    artifact_version STRING(64) NOT NULL,
+
+    -- SP-specific details
+    expected_active_version STRING NOT NULL,
+    expected_inactive_version STRING, -- NULL means invalid (no version expected)
+
+    PRIMARY KEY(blueprint_id, hw_baseboard_id)
 );
 
 -- Mapping of Omicron zone ID to CockroachDB node ID. This isn't directly used
@@ -5916,6 +5965,51 @@ ON omicron.public.webhook_delivery_attempt (
     rx_id
 );
 
+CREATE TYPE IF NOT EXISTS omicron.public.user_data_export_resource_type AS ENUM (
+  'snapshot',
+  'image'
+);
+
+CREATE TYPE IF NOT EXISTS omicron.public.user_data_export_state AS ENUM (
+  'requested',
+  'assigning',
+  'live',
+  'deleting',
+  'deleted'
+);
+
+/*
+ * This table contains a record when a snapshot is being exported.
+ */
+CREATE TABLE IF NOT EXISTS omicron.public.user_data_export (
+    id UUID PRIMARY KEY,
+
+    state omicron.public.user_data_export_state NOT NULL,
+    operating_saga_id UUID,
+    generation INT8 NOT NULL,
+
+    resource_id UUID NOT NULL,
+    resource_type omicron.public.user_data_export_resource_type NOT NULL,
+    resource_deleted BOOL NOT NULL,
+
+    pantry_ip INET,
+    pantry_port INT4 CHECK (pantry_port BETWEEN 0 AND 65535),
+    volume_id UUID
+);
+
+CREATE INDEX IF NOT EXISTS lookup_export_by_resource_type
+ON omicron.public.user_data_export (resource_type);
+
+CREATE UNIQUE INDEX IF NOT EXISTS one_export_record_per_resource
+ON omicron.public.user_data_export (resource_id)
+WHERE state != 'deleted';
+
+CREATE INDEX IF NOT EXISTS lookup_export_by_volume
+ON omicron.public.user_data_export (volume_id);
+
+CREATE INDEX IF NOT EXISTS lookup_export_by_state
+ON omicron.public.user_data_export (state);
+
 /*
  * Ereports
  *
@@ -6095,7 +6189,7 @@ INSERT INTO omicron.public.db_metadata (
     version,
     target_version
 ) VALUES
-    (TRUE, NOW(), NOW(), '153.0.0', NULL)
+    (TRUE, NOW(), NOW(), '160.0.0', NULL)
 ON CONFLICT DO NOTHING;
 
 COMMIT;

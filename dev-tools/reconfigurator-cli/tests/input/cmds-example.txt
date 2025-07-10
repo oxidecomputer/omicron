@@ -45,3 +45,19 @@ blueprint-diff 86db3308-f817-4626-8838-4085949a6a41
 blueprint-diff 02697f74-b14a-4418-90f0-c28b2a3a6aa9 86db3308-f817-4626-8838-4085949a6a41
 # You can specify them in the reverse order and see the opposite changes.
 blueprint-diff 86db3308-f817-4626-8838-4085949a6a41 02697f74-b14a-4418-90f0-c28b2a3a6aa9
+
+# Load an example with a non-provisionable and an expunged sled.
+wipe all
+load-example --seed test-basic --nsleds 3 --sled-policy 1:non-provisionable --sled-policy 2:expunged --ndisks-per-sled 3
+
+blueprint-list
+blueprint-show latest
+
+# Plan a blueprint run -- this will cause zones and disks on the expunged
+# sled to be expunged.
+blueprint-plan latest
+blueprint-diff ade5749d-bdf3-4fab-a8ae-00bea01b3a5a latest
+
+# Sled index out of bounds, will error out.
+wipe all
+load-example --seed test-basic --nsleds 3 --sled-policy 3:non-provisionable

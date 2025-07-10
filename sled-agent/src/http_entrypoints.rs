@@ -10,7 +10,6 @@ use crate::support_bundle::storage::SupportBundleQueryType;
 use crate::zone_bundle::BundleError;
 use bootstore::schemes::v0::NetworkConfig;
 use camino::Utf8PathBuf;
-use display_error_chain::DisplayErrorChain;
 use dropshot::{
     ApiDescription, Body, ErrorStatusCode, FreeformBody, Header, HttpError,
     HttpResponseAccepted, HttpResponseCreated, HttpResponseDeleted,
@@ -28,10 +27,6 @@ use omicron_common::api::internal::shared::{
 };
 use range_requests::PotentialRange;
 use sled_agent_api::*;
-use sled_agent_types::boot_disk::{
-    BootDiskOsWriteStatus, BootDiskPathParams, BootDiskUpdatePathParams,
-    BootDiskWriteStartQueryParams,
-};
 use sled_agent_types::bootstore::BootstoreStatus;
 use sled_agent_types::disk::DiskEnsureBody;
 use sled_agent_types::early_networking::EarlyNetworkConfig;
@@ -777,83 +772,6 @@ impl SledAgentApi for SledAgentImpl {
                 headers: None,
             }
         })?;
-        Ok(HttpResponseUpdatedNoContent())
-    }
-
-    async fn host_os_write_start(
-        request_context: RequestContext<Self::Context>,
-        path_params: Path<BootDiskPathParams>,
-        query_params: Query<BootDiskWriteStartQueryParams>,
-        body: StreamingBody,
-    ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
-        let sa = request_context.context();
-        let boot_disk = path_params.into_inner().boot_disk;
-
-        // Find our corresponding disk.
-        let maybe_disk_path = sa.boot_image_raw_devfs_path(boot_disk);
-
-        let disk_path = match maybe_disk_path {
-            Some(Ok(path)) => path,
-            Some(Err(err)) => {
-                let message = format!(
-                    "failed to find devfs path for {boot_disk:?}: {}",
-                    DisplayErrorChain::new(&err)
-                );
-                return Err(HttpError {
-                    status_code: ErrorStatusCode::SERVICE_UNAVAILABLE,
-                    error_code: None,
-                    external_message: message.clone(),
-                    internal_message: message,
-                    headers: None,
-                });
-            }
-            None => {
-                let message = format!("no disk found for slot {boot_disk:?}",);
-                return Err(HttpError {
-                    status_code: ErrorStatusCode::SERVICE_UNAVAILABLE,
-                    error_code: None,
-                    external_message: message.clone(),
-                    internal_message: message,
-                    headers: None,
-                });
-            }
-        };
-
-        let BootDiskWriteStartQueryParams { update_id, sha3_256_digest } =
-            query_params.into_inner();
-        sa.boot_disk_os_writer()
-            .start_update(
-                boot_disk,
-                disk_path,
-                update_id,
-                sha3_256_digest,
-                body.into_stream(),
-            )
-            .await
-            .map_err(|err| HttpError::from(&*err))?;
-        Ok(HttpResponseUpdatedNoContent())
-    }
-
-    async fn host_os_write_status_get(
-        request_context: RequestContext<Self::Context>,
-        path_params: Path<BootDiskPathParams>,
-    ) -> Result<HttpResponseOk<BootDiskOsWriteStatus>, HttpError> {
-        let sa = request_context.context();
-        let boot_disk = path_params.into_inner().boot_disk;
-        let status = sa.boot_disk_os_writer().status(boot_disk);
-        Ok(HttpResponseOk(status))
-    }
-
-    async fn host_os_write_status_delete(
-        request_context: RequestContext<Self::Context>,
-        path_params: Path<BootDiskUpdatePathParams>,
-    ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
-        let sa = request_context.context();
-        let BootDiskUpdatePathParams { boot_disk, update_id } =
-            path_params.into_inner();
-        sa.boot_disk_os_writer()
-            .clear_terminal_status(boot_disk, update_id)
-            .map_err(|err| HttpError::from(&err))?;
         Ok(HttpResponseUpdatedNoContent())
     }
 

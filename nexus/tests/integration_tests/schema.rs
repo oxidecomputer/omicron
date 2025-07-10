@@ -918,6 +918,12 @@ const VOLUME2: Uuid = Uuid::from_u128(0x2222566f_5c3d_4647_83b0_8f3515da7be1);
 const VOLUME3: Uuid = Uuid::from_u128(0x3333566f_5c3d_4647_83b0_8f3515da7be1);
 const VOLUME4: Uuid = Uuid::from_u128(0x4444566f_5c3d_4647_83b0_8f3515da7be1);
 
+// "566C" -> "VPC". See above on "V".
+const VPC: Uuid = Uuid::from_u128(0x1111566c_5c3d_4647_83b0_8f3515da7be1);
+
+// "7213" -> Firewall "Rule"
+const FW_RULE: Uuid = Uuid::from_u128(0x11117213_5c3d_4647_83b0_8f3515da7be1);
+
 fn before_23_0_0<'a>(ctx: &'a MigrationContext<'a>) -> BoxFuture<'a, ()> {
     Box::pin(async move {
         // Create two silos
@@ -2361,7 +2367,7 @@ fn after_151_0_0<'a>(ctx: &'a MigrationContext<'a>) -> BoxFuture<'a, ()> {
                 &[],
             )
             .await
-            .expect("inserted post-migration inv_sled_agent data");
+            .expect("queried post-migration inv_sled_agent data");
 
         assert_eq!(rows.len(), 1);
         let row = &rows[0];
@@ -2393,6 +2399,255 @@ fn after_151_0_0<'a>(ctx: &'a MigrationContext<'a>) -> BoxFuture<'a, ()> {
         assert_eq!(zone_manifest_error, "old collection, data missing");
         assert_eq!(mupdate_override_error, "old collection, data missing");
     })
+}
+
+fn before_155_0_0<'a>(ctx: &'a MigrationContext<'a>) -> BoxFuture<'a, ()> {
+    Box::pin(async {
+        use nexus_db_queries::db::fixed_data::project::*;
+        use nexus_db_queries::db::fixed_data::vpc::*;
+        use omicron_common::address::SERVICE_VPC_IPV6_PREFIX;
+
+        // First, create the oxide-services vpc. The migration will only add
+        // a new rule if it detects the presence of *this* VPC entry (i.e.,
+        // RSS has run before).
+        let svc_vpc = *SERVICES_VPC_ID;
+        let svc_proj = *SERVICES_PROJECT_ID;
+        let svc_router = *SERVICES_VPC_ROUTER_ID;
+        let svc_vpc_name = &SERVICES_DB_NAME;
+        ctx.client
+            .batch_execute(&format!(
+                "INSERT INTO vpc (
+                    id, name, description, time_created, time_modified,
+                    project_id, system_router_id, dns_name,
+                    vni, ipv6_prefix, firewall_gen, subnet_gen
+                )
+                VALUES (
+                    '{svc_vpc}', '{svc_vpc_name}', '', now(), now(),
+                    '{svc_proj}', '{svc_router}', '{svc_vpc_name}',
+                    100, '{}', 0, 0
+                );",
+                *SERVICE_VPC_IPV6_PREFIX
+            ))
+            .await
+            .expect("failed to create services vpc record");
+
+        // Second, create a firewall rule in a dummied-out VPC to validate
+        // that we correctly convert from ENUM[] to STRING[].
+        ctx.client
+            .batch_execute(&format!(
+                "INSERT INTO vpc_firewall_rule (
+                    id,
+                    name, description,
+                    time_created, time_modified, vpc_id, status, direction,
+                    targets, filter_protocols,
+                    action, priority
+                )
+                VALUES (
+                    '{FW_RULE}',
+                    'test-fw', '',
+                    now(), now(), '{VPC}', 'enabled', 'outbound',
+                    ARRAY['vpc:fiction'], ARRAY['ICMP', 'TCP', 'UDP'],
+                    'allow', 1234
+                );"
+            ))
+            .await
+            .expect("failed to create firewall rule");
+    })
+}
+
+fn after_155_0_0<'a>(ctx: &'a MigrationContext<'a>) -> BoxFuture<'a, ()> {
+    Box::pin(async {
+        use nexus_db_queries::db::fixed_data::vpc::*;
+        // Firstly -- has the new firewall rule been added?
+        let rows = ctx
+            .client
+            .query(
+                &format!(
+                    "SELECT id, description
+                    FROM vpc_firewall_rule
+                    WHERE name = 'nexus-icmp' and vpc_id = '{}'",
+                    *SERVICES_VPC_ID
+                ),
+                &[],
+            )
+            .await
+            .expect("failed to load instance auto-restart policies");
+        let records = process_rows(&rows);
+
+        assert_eq!(records.len(), 1);
+
+        // Secondly, have FW_RULE's filter_protocols been correctly stringified?
+        let rows = ctx
+            .client
+            .query(
+                &format!(
+                    "SELECT filter_protocols
+                    FROM vpc_firewall_rule
+                    WHERE id = '{FW_RULE}'"
+                ),
+                &[],
+            )
+            .await
+            .expect("failed to load instance auto-restart policies");
+        let records = process_rows(&rows);
+        assert_eq!(records.len(), 1);
+        assert_eq!(
+            records[0].values,
+            vec![ColumnValue::new(
+                "filter_protocols",
+                AnySqlType::TextArray(vec![
+                    "icmp".into(),
+                    "tcp".into(),
+                    "udp".into(),
+                ])
+            )],
+        );
+    })
+}
+
+mod migration_156 {
+    use super::*;
+    use pretty_assertions::assert_eq;
+    use std::collections::BTreeSet;
+
+    const INV_COLLECTION_ID_1: &str = "5cb42909-d94a-4903-be72-330eea0325d9";
+    const INV_COLLECTION_ID_2: &str = "142b62c2-9348-4530-9eed-7077351fb94b";
+    const SLED_ID_1: &str = "3b5b7861-03aa-420a-a057-0a14347dc4c0";
+    const SLED_ID_2: &str = "de7ab4c0-30d4-4e9e-b620-3a959a9d59dd";
+    const SLED_CONFIG_ID_1: &str = "a1637607-c49e-4658-b637-96473a72bb32";
+    const SLED_CONFIG_ID_2: &str = "695de2f0-9c09-42b0-a22a-1e5b783a38c0";
+    const SLED_CONFIG_ID_3: &str = "50a8d074-879b-4c59-a2ef-700156e49a97";
+
+    pub(super) fn before<'a>(
+        ctx: &'a MigrationContext<'a>,
+    ) -> BoxFuture<'a, ()> {
+        Box::pin(async move {
+            // Insert these tuples:
+            //
+            // (collection 1, sled 1, sled config ID 1)
+            // (collection 1, sled 2, NULL)
+            // (collection 2, sled 1, sled config ID 2)
+            // (collection 2, sled 2, sled config ID 3)
+            ctx.client
+                .batch_execute(&format!(
+                    "
+                    INSERT INTO omicron.public.inv_sled_agent (
+                        inv_collection_id, time_collected, source, sled_id,
+                        sled_agent_ip, sled_agent_port, sled_role,
+                        usable_hardware_threads, usable_physical_ram,
+                        reservoir_size, last_reconciliation_sled_config,
+                        reconciler_status_kind, zone_manifest_boot_disk_path,
+                        zone_manifest_source, mupdate_override_boot_disk_path
+                    )
+                    VALUES (
+                        '{INV_COLLECTION_ID_1}', now(), 'test-source',
+                        '{SLED_ID_1}', '192.168.1.1', 0, 'gimlet',
+                        32, 68719476736, 1073741824, '{SLED_CONFIG_ID_1}',
+                        'not-yet-run', '/tmp', 'sled-agent', '/tmp'
+                    ), (
+                        '{INV_COLLECTION_ID_1}', now(), 'test-source',
+                        '{SLED_ID_2}', '192.168.1.1', 0, 'gimlet',
+                        32, 68719476736, 1073741824, NULL,
+                        'not-yet-run', '/tmp', 'sled-agent', '/tmp'
+                    ), (
+                        '{INV_COLLECTION_ID_2}', now(), 'test-source',
+                        '{SLED_ID_1}', '192.168.1.1', 0, 'gimlet',
+                        32, 68719476736, 1073741824, '{SLED_CONFIG_ID_2}',
+                        'not-yet-run', '/tmp', 'sled-agent', '/tmp'
+                    ), (
+                        '{INV_COLLECTION_ID_2}', now(), 'test-source',
+                        '{SLED_ID_2}', '192.168.1.1', 0, 'gimlet',
+                        32, 68719476736, 1073741824, '{SLED_CONFIG_ID_3}',
+                        'not-yet-run', '/tmp', 'sled-agent', '/tmp'
+                    );
+                    "
+                ))
+                .await
+                .expect("inserted pre-migration data");
+        })
+    }
+
+    pub(super) fn after<'a>(
+        ctx: &'a MigrationContext<'a>,
+    ) -> BoxFuture<'a, ()> {
+        Box::pin(async move {
+            // Verify that the new inv_sled_config_reconciler table has 3 rows
+            // corresponding to the three inv_sled_agent rows that had a
+            // non-NULL last_reconciliation_sled_config inserted in `before()`.
+            let expected = {
+                let mut expected = BTreeSet::<(Uuid, Uuid, Uuid)>::new();
+                expected.insert((
+                    INV_COLLECTION_ID_1.parse().unwrap(),
+                    SLED_ID_1.parse().unwrap(),
+                    SLED_CONFIG_ID_1.parse().unwrap(),
+                ));
+                expected.insert((
+                    INV_COLLECTION_ID_2.parse().unwrap(),
+                    SLED_ID_1.parse().unwrap(),
+                    SLED_CONFIG_ID_2.parse().unwrap(),
+                ));
+                expected.insert((
+                    INV_COLLECTION_ID_2.parse().unwrap(),
+                    SLED_ID_2.parse().unwrap(),
+                    SLED_CONFIG_ID_3.parse().unwrap(),
+                ));
+                expected
+            };
+
+            let rows = ctx
+                .client
+                .query(
+                    "
+                    SELECT
+                    inv_collection_id, sled_id, last_reconciled_config,
+                    boot_disk_slot, boot_disk_error, boot_partition_a_error,
+                    boot_partition_b_error
+                    FROM omicron.public.inv_sled_config_reconciler
+                    ",
+                    &[],
+                )
+                .await
+                .expect("queried post-migration data");
+
+            let mut seen = BTreeSet::new();
+            for row in rows {
+                let inv_collection_id: Uuid = row.get("inv_collection_id");
+                let sled_id: Uuid = row.get("sled_id");
+                let last_reconciled_config: Uuid =
+                    row.get("last_reconciled_config");
+                let boot_disk_slot: Option<i16> = row.get("boot_disk_slot");
+                let boot_disk_error: Option<String> =
+                    row.get("boot_disk_error");
+                let boot_partition_a_error: Option<String> =
+                    row.get("boot_partition_a_error");
+                let boot_partition_b_error: Option<String> =
+                    row.get("boot_partition_b_error");
+
+                seen.insert((
+                    inv_collection_id,
+                    sled_id,
+                    last_reconciled_config,
+                ));
+
+                // Migration should have populated all the error fields.
+                assert_eq!(boot_disk_slot, None);
+                assert_eq!(
+                    boot_disk_error.as_deref(),
+                    Some("old collection, data missing")
+                );
+                assert_eq!(
+                    boot_partition_a_error.as_deref(),
+                    Some("old collection, data missing")
+                );
+                assert_eq!(
+                    boot_partition_b_error.as_deref(),
+                    Some("old collection, data missing")
+                );
+            }
+
+            assert_eq!(seen, expected);
+        })
+    }
 }
 
 // Lazily initializes all migration checks. The combination of Rust function
@@ -2470,6 +2725,16 @@ fn get_migration_checks() -> BTreeMap<Version, DataMigrationFns> {
     map.insert(
         Version::new(151, 0, 0),
         DataMigrationFns::new().before(before_151_0_0).after(after_151_0_0),
+    );
+    map.insert(
+        Version::new(155, 0, 0),
+        DataMigrationFns::new().before(before_155_0_0).after(after_155_0_0),
+    );
+    map.insert(
+        Version::new(156, 0, 0),
+        DataMigrationFns::new()
+            .before(migration_156::before)
+            .after(migration_156::after),
     );
 
     map

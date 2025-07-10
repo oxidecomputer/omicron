@@ -1497,7 +1497,7 @@ mod test {
                 clickhouse_policy: None,
                 oximeter_read_policy: OximeterReadPolicy::new(1),
                 tuf_repo: TufRepoPolicy::initial(),
-                old_repo: None,
+                old_repo: TufRepoPolicy::initial(),
                 log,
             }
             .build()
@@ -1523,7 +1523,12 @@ mod test {
         .unwrap();
         let sled_id =
             blueprint.sleds().next().expect("expected at least one sled");
-        builder.sled_add_zone_nexus(sled_id).unwrap();
+        builder
+            .sled_add_zone_nexus(
+                sled_id,
+                BlueprintZoneImageSource::InstallDataset,
+            )
+            .unwrap();
         let blueprint2 = builder.build();
         eprintln!("blueprint2: {}", blueprint2.display());
         // Figure out the id of the new zone.

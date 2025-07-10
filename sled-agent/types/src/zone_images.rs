@@ -11,6 +11,7 @@ use nexus_sled_agent_shared::inventory::MupdateOverrideInventory;
 use nexus_sled_agent_shared::inventory::MupdateOverrideNonBootInventory;
 use nexus_sled_agent_shared::inventory::ZoneArtifactInventory;
 use nexus_sled_agent_shared::inventory::ZoneImageResolverInventory;
+use nexus_sled_agent_shared::inventory::ZoneKind;
 use nexus_sled_agent_shared::inventory::ZoneManifestBootInventory;
 use nexus_sled_agent_shared::inventory::ZoneManifestInventory;
 use nexus_sled_agent_shared::inventory::ZoneManifestNonBootInventory;
@@ -83,6 +84,63 @@ impl ZoneManifestStatus {
             non_boot_status,
         }
     }
+
+    /// Return the validated artifact hash for a given [`ZoneKind`].
+    ///
+    /// Only considers [`Self::boot_disk_result`].
+    pub fn zone_hash(
+        &self,
+        kind: ZoneKind,
+    ) -> Result<ArtifactHash, ZoneManifestZoneHashError> {
+        let artifacts_result =
+            self.boot_disk_result.as_ref().map_err(|err| {
+                ZoneManifestZoneHashError::ReadBootDisk(err.clone())
+            })?;
+
+        let file_name = kind.artifact_in_install_dataset();
+        let artifact = &artifacts_result
+            .data
+            .get(file_name)
+            .ok_or(ZoneManifestZoneHashError::NoArtifactForZoneKind(kind))?;
+
+        match &artifact.status {
+            ArtifactReadResult::Valid => Ok(artifact.expected_hash),
+            ArtifactReadResult::Mismatch { actual_size, actual_hash } => {
+                Err(ZoneManifestZoneHashError::SizeHashMismatch {
+                    expected_size: artifact.expected_size,
+                    expected_hash: artifact.expected_hash,
+                    actual_size: *actual_size,
+                    actual_hash: *actual_hash,
+                })
+            }
+            ArtifactReadResult::Error(err) => {
+                Err(ZoneManifestZoneHashError::ReadArtifact(err.clone()))
+            }
+        }
+    }
+}
+
+#[derive(Debug, thiserror::Error)]
+pub enum ZoneManifestZoneHashError {
+    #[error("error reading boot disk")]
+    ReadBootDisk(#[source] ZoneManifestReadError),
+    #[error("no artifact found for zone kind {0:?}")]
+    NoArtifactForZoneKind(ZoneKind),
+    #[error(
+        "size/hash mismatch: expected {} bytes/{}, got {} bytes/{}",
+        .expected_size,
+        .expected_hash,
+        .actual_size,
+        .actual_hash,
+    )]
+    SizeHashMismatch {
+        expected_size: u64,
+        expected_hash: ArtifactHash,
+        actual_size: u64,
+        actual_hash: ArtifactHash,
+    },
+    #[error("error reading artifact")]
+    ReadArtifact(#[source] ArcIoError),
 }
 
 /// The result of reading artifacts from an install dataset.

@@ -44,6 +44,16 @@ pub struct SpTestState {
     /// This can be None if the caboose contents were not valid.
     pub caboose_rot_b: Option<SpComponentCaboose>,
 
+    /// caboose read from stage 0 (active slot for the RoT bootloader)
+    ///
+    /// This is not an `Option` because we never expect to fail to read this.
+    pub caboose_stage0: SpComponentCaboose,
+
+    /// caboose read from stage 0 next (inactive slot for the RoT bootloader)
+    ///
+    /// This can be None if the caboose contents were not valid.
+    pub caboose_stage0_next: Option<SpComponentCaboose>,
+
     /// Overall SP state
     pub sp_state: SpState,
 
@@ -56,7 +66,7 @@ impl SpTestState {
     pub async fn load(
         mgs_client: &gateway_client::Client,
         sp_type: SpType,
-        sp_slot: u32,
+        sp_slot: u16,
     ) -> Result<SpTestState, GatewayClientError> {
         let caboose_sp_active = mgs_client
             .sp_component_caboose_get(
@@ -94,6 +104,24 @@ impl SpTestState {
             )
             .await
             .map(|c| c.into_inner());
+        let caboose_stage0 = mgs_client
+            .sp_component_caboose_get(
+                sp_type,
+                sp_slot,
+                SpComponent::STAGE0.const_as_str(),
+                0,
+            )
+            .await?
+            .into_inner();
+        let caboose_stage0_next = mgs_client
+            .sp_component_caboose_get(
+                sp_type,
+                sp_slot,
+                SpComponent::STAGE0.const_as_str(),
+                1,
+            )
+            .await
+            .map(|c| c.into_inner());
         let sp_info = mgs_client.sp_get(sp_type, sp_slot).await?.into_inner();
         let sp_boot_info = mgs_client
             .sp_rot_boot_info(
@@ -113,6 +141,10 @@ impl SpTestState {
             ),
             caboose_rot_a: ignore_invalid_caboose_error(caboose_rot_a),
             caboose_rot_b: ignore_invalid_caboose_error(caboose_rot_b),
+            caboose_stage0,
+            caboose_stage0_next: ignore_invalid_caboose_error(
+                caboose_stage0_next,
+            ),
             sp_state: sp_info,
             sp_boot_info,
         })
@@ -139,6 +171,14 @@ impl SpTestState {
             RotSlot::A => self.expect_caboose_rot_a(),
             RotSlot::B => self.expect_caboose_rot_b(),
         }
+    }
+
+    pub fn expect_caboose_stage0(&self) -> &SpComponentCaboose {
+        &self.caboose_stage0
+    }
+
+    pub fn expect_caboose_stage0_next(&self) -> &SpComponentCaboose {
+        self.caboose_stage0_next.as_ref().expect("stage0 next caboose")
     }
 
     pub fn expect_caboose_rot_inactive(&self) -> &SpComponentCaboose {
@@ -253,6 +293,22 @@ impl SpTestState {
                 ),
                 None => ExpectedVersion::NoValidVersion,
             },
+        }
+    }
+
+    pub fn expect_stage0_version(&self) -> ArtifactVersion {
+        self.expect_caboose_stage0()
+            .version
+            .parse()
+            .expect("valid artifact version")
+    }
+
+    pub fn expect_stage0_next_version(&self) -> ExpectedVersion {
+        match &self.caboose_stage0_next {
+            Some(v) => ExpectedVersion::Version(
+                v.version.parse().expect("valid stage0 next version"),
+            ),
+            None => ExpectedVersion::NoValidVersion,
         }
     }
 }

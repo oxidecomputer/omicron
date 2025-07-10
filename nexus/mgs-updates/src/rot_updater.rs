@@ -11,6 +11,7 @@ use super::common_sp_update::SpComponentUpdater;
 use super::common_sp_update::deliver_update;
 use crate::SpComponentUpdateHelper;
 use crate::common_sp_update::FoundVersion;
+use crate::common_sp_update::PostUpdateError;
 use crate::common_sp_update::PrecheckError;
 use crate::common_sp_update::PrecheckStatus;
 use crate::common_sp_update::error_means_caboose_is_invalid;
@@ -21,7 +22,6 @@ use gateway_client::types::RotState;
 use gateway_client::types::SpComponentFirmwareSlot;
 use gateway_client::types::SpType;
 use gateway_types::rot::RotSlot;
-use nexus_types::deployment::ExpectedVersion;
 use nexus_types::deployment::PendingMgsUpdate;
 use nexus_types::deployment::PendingMgsUpdateDetails;
 use slog::Logger;
@@ -35,7 +35,7 @@ pub struct RotUpdater {
     log: Logger,
     progress: watch::Sender<Option<UpdateProgress>>,
     sp_type: SpType,
-    sp_slot: u32,
+    sp_slot: u16,
     target_rot_slot: RotSlot,
     update_id: Uuid,
     // TODO-clarity maybe a newtype for this? TBD how we get this from
@@ -46,7 +46,7 @@ pub struct RotUpdater {
 impl RotUpdater {
     pub fn new(
         sp_type: SpType,
-        sp_slot: u32,
+        sp_slot: u16,
         target_rot_slot: RotSlot,
         update_id: Uuid,
         rot_hubris_archive: Vec<u8>,
@@ -176,7 +176,7 @@ impl SpComponentUpdater for RotUpdater {
         self.sp_type
     }
 
-    fn target_sp_slot(&self) -> u32 {
+    fn target_sp_slot(&self) -> u16 {
         self.sp_slot
     }
 
@@ -345,27 +345,7 @@ impl SpComponentUpdateHelper for ReconfiguratorRotUpdater {
                     }
                 }
             };
-            match (&expected_inactive_version, &found_version) {
-                // expected garbage, found garbage
-                (
-                    ExpectedVersion::NoValidVersion,
-                    FoundVersion::MissingVersion,
-                ) => (),
-                // expected a specific version and found it
-                (
-                    ExpectedVersion::Version(artifact_version),
-                    FoundVersion::Version(found_version),
-                ) if artifact_version.to_string() == *found_version => (),
-                // anything else is a mismatch
-                (ExpectedVersion::NoValidVersion, FoundVersion::Version(_))
-                | (ExpectedVersion::Version(_), FoundVersion::MissingVersion)
-                | (ExpectedVersion::Version(_), FoundVersion::Version(_)) => {
-                    return Err(PrecheckError::WrongInactiveVersion {
-                        expected: expected_inactive_version.clone(),
-                        found: found_version,
-                    });
-                }
-            };
+            found_version.matches(expected_inactive_version)?;
 
             // If transient boot is being used, the persistent preference is not going to match 
             // the active slot. At the moment, this mismatch can also mean one of the partitions
@@ -396,33 +376,39 @@ impl SpComponentUpdateHelper for ReconfiguratorRotUpdater {
         log: &'a slog::Logger,
         mgs_clients: &'a mut MgsClients,
         update: &'a PendingMgsUpdate,
-    ) -> BoxFuture<'a, Result<(), GatewayClientError>> {
-        mgs_clients
-            .try_all_serially(log, move |mgs_client| async move {
-                // We want to set the slot we've just updated as the active one
-                debug!(log, "attempting to set active slot");
-                let inactive_slot = match &update.details {
-                    PendingMgsUpdateDetails::Rot { expected_active_slot, .. } => {
-                        expected_active_slot.slot().toggled().to_u16()
-                    },
-                    PendingMgsUpdateDetails::Sp { .. }
-                    | PendingMgsUpdateDetails::RotBootloader { .. } => unreachable!(
-                        "pending MGS update details within ReconfiguratorRotUpdater \
-                        will always be for the RoT"
-                    )
-                };
-                let persist = true;
-                mgs_client
-                    .sp_component_active_slot_set(
-                        update.sp_type,
-                        update.slot_id,
-                        &SpComponent::ROT.to_string(),
-                        persist,
-                        &SpComponentFirmwareSlot { slot: inactive_slot }
-                    )
-                    .await?;
+    ) -> BoxFuture<'a, Result<(), PostUpdateError>> {
+        async move {
+            // We want to set the slot we've just updated as the active one
+            debug!(log, "attempting to set active slot");
+            mgs_clients
+                .try_all_serially(log, move |mgs_client| async move {
+                    let inactive_slot = match &update.details {
+                        PendingMgsUpdateDetails::Rot { expected_active_slot, .. } => {
+                            expected_active_slot.slot().toggled().to_u16()
+                        },
+                        PendingMgsUpdateDetails::Sp { .. }
+                        | PendingMgsUpdateDetails::RotBootloader { .. } => unreachable!(
+                            "pending MGS update details within ReconfiguratorRotUpdater \
+                            will always be for the RoT"
+                        )
+                    };
+                    let persist = true;
+                    mgs_client
+                        .sp_component_active_slot_set(
+                            update.sp_type,
+                            update.slot_id,
+                            &SpComponent::ROT.to_string(),
+                            persist,
+                            &SpComponentFirmwareSlot { slot: inactive_slot }
+                        )
+                        .await?;
+                    Ok(())
+                })
+                .await?;
 
-                debug!(log, "attempting to reset device");
+            debug!(log, "attempting to reset device");
+            mgs_clients
+            .try_all_serially(log, move |mgs_client| async move {
                 mgs_client
                     .sp_component_reset(
                         update.sp_type,
@@ -431,7 +417,8 @@ impl SpComponentUpdateHelper for ReconfiguratorRotUpdater {
                     )
                     .await?;
                 Ok(())
-            })
-            .boxed()
+            }).await?;
+            Ok(())
+        }.boxed()
     }
 }

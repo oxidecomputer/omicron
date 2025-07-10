@@ -19,7 +19,6 @@ use nexus_background_task_interface::BackgroundTasks;
 use nexus_config::NexusConfig;
 use nexus_config::RegionAllocationStrategy;
 use nexus_config::Tunables;
-use nexus_config::UpdatesConfig;
 use nexus_db_model::AllSchemaVersions;
 use nexus_db_queries::authn;
 use nexus_db_queries::authz;
@@ -141,9 +140,8 @@ pub const MIN_MEMORY_BYTES_PER_INSTANCE: u32 = 1 << 30; // 1 GiB
 // Before raising or removing this limit, testing has been valuable. See:
 // * illumos bug #17403
 // * Propolis issue #903
-// There are known issues setting this above 1028 GiB. See:
 // * Propolis issue #907
-pub const MAX_MEMORY_BYTES_PER_INSTANCE: u64 = 1024 * (1 << 30); // 1 TiB
+pub const MAX_MEMORY_BYTES_PER_INSTANCE: u64 = 1536 * (1 << 30); // 1.5 TiB
 
 pub const MIN_DISK_SIZE_BYTES: u32 = 1 << 30; // 1 GiB
 pub const MAX_DISK_SIZE_BYTES: u64 = 1023 * (1 << 30); // 1023 GiB
@@ -212,10 +210,6 @@ pub struct Nexus {
     /// API.
     webhook_delivery_client: reqwest::Client,
 
-    /// Contents of the trusted root role for the TUF repository.
-    #[allow(dead_code)]
-    updates_config: Option<UpdatesConfig>,
-
     /// The tunable parameters from a configuration file
     tunables: Tunables,
 
@@ -269,6 +263,18 @@ pub struct Nexus {
 
     /// reports status of pending MGS-managed updates
     mgs_update_status_rx: watch::Receiver<MgsUpdateDriverStatus>,
+
+    /// DNS resolver used by MgsUpdateDriver for MGS
+    // We don't need to do anything with this, but we can't let it be dropped
+    // while Nexus is running.
+    #[allow(dead_code)]
+    mgs_resolver: Box<dyn qorb::resolver::Resolver>,
+
+    /// DNS resolver used by MgsUpdateDriver for Repo Depot
+    // We don't need to do anything with this, but we can't let it be dropped
+    // while Nexus is running.
+    #[allow(dead_code)]
+    repo_depot_resolver: Box<dyn qorb::resolver::Resolver>,
 }
 
 impl Nexus {
@@ -460,7 +466,6 @@ impl Nexus {
             reqwest_client,
             timeseries_client,
             webhook_delivery_client,
-            updates_config: config.pkg.updates.clone(),
             tunables: config.pkg.tunables.clone(),
             opctx_alloc: OpContext::for_background(
                 log.new(o!("component" => "InstanceAllocator")),
@@ -496,6 +501,8 @@ impl Nexus {
             )),
             tuf_artifact_replication_tx,
             mgs_update_status_rx,
+            mgs_resolver,
+            repo_depot_resolver,
         };
 
         // TODO-cleanup all the extra Arcs here seems wrong
