@@ -529,9 +529,10 @@ impl TryFrom<ExternalIp> for views::ExternalIp {
         }
         match ip.kind {
             IpKind::Floating => Ok(views::ExternalIp::Floating(ip.try_into()?)),
-            IpKind::Ephemeral => {
-                Ok(views::ExternalIp::Ephemeral { ip: ip.ip.ip() })
-            }
+            IpKind::Ephemeral => Ok(views::ExternalIp::Ephemeral {
+                ip: ip.ip.ip(),
+                ip_pool_id: ip.ip_pool_id,
+            }),
             IpKind::SNat => Err(Error::internal_error(
                 "SNAT IP addresses should not be exposed in the API",
             )),

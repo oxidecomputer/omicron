@@ -501,14 +501,14 @@ pub struct IpPoolRange {
 #[derive(Debug, Clone, Deserialize, PartialEq, Serialize, JsonSchema)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum ExternalIp {
-    Ephemeral { ip: IpAddr },
+    Ephemeral { ip: IpAddr, ip_pool_id: Uuid },
     Floating(FloatingIp),
 }
 
 impl ExternalIp {
     pub fn ip(&self) -> IpAddr {
         match self {
-            Self::Ephemeral { ip } => *ip,
+            Self::Ephemeral { ip, .. } => *ip,
             Self::Floating(float) => float.ip,
         }
     }
