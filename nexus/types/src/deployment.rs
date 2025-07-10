@@ -19,6 +19,8 @@ pub use crate::inventory::SourceNatConfig;
 pub use crate::inventory::ZpoolName;
 use blueprint_diff::ClickhouseClusterConfigDiffTablesForSingleBlueprint;
 use blueprint_display::BpDatasetsTableSchema;
+use blueprint_display::BpHostPhase2TableSchema;
+use blueprint_display::BpTableColumn;
 use daft::Diffable;
 use nexus_sled_agent_shared::inventory::HostPhase2DesiredContents;
 use nexus_sled_agent_shared::inventory::HostPhase2DesiredSlots;
@@ -34,6 +36,7 @@ use omicron_common::disk::CompressionAlgorithm;
 use omicron_common::disk::DatasetConfig;
 use omicron_common::disk::DatasetName;
 use omicron_common::disk::DiskIdentity;
+use omicron_common::disk::M2Slot;
 use omicron_common::disk::OmicronPhysicalDiskConfig;
 use omicron_common::disk::SharedDatasetConfig;
 use omicron_uuid_kinds::BlueprintUuid;
@@ -49,7 +52,6 @@ use serde::Serialize;
 use serde::ser::SerializeSeq;
 use slog::Key;
 use std::collections::BTreeMap;
-use std::collections::BTreeSet;
 use std::fmt;
 use std::net::Ipv6Addr;
 use std::net::SocketAddrV6;
@@ -343,6 +345,57 @@ impl Blueprint {
     }
 }
 
+/// Wrapper to display a table of a `BlueprintSledConfig`'s host phase 2
+/// contents.
+#[derive(Clone, Debug)]
+struct BlueprintHostPhase2TableData<'a> {
+    host_phase_2: &'a BlueprintHostPhase2DesiredSlots,
+}
+
+impl<'a> BlueprintHostPhase2TableData<'a> {
+    fn new(host_phase_2: &'a BlueprintHostPhase2DesiredSlots) -> Self {
+        Self { host_phase_2 }
+    }
+
+    fn diff_rows<'b>(
+        diffs: &'b BlueprintHostPhase2DesiredSlotsDiff<'_>,
+    ) -> impl Iterator<Item = BpTableRow> + 'b {
+        [(M2Slot::A, &diffs.slot_a), (M2Slot::B, &diffs.slot_b)]
+            .into_iter()
+            .map(|(slot, diff)| {
+                let mut cols = vec![BpTableColumn::value(format!("{slot:?}"))];
+                let state;
+                if diff.is_modified() {
+                    state = BpDiffState::Modified;
+                    cols.push(BpTableColumn::new(
+                        diff.before.to_string(),
+                        diff.after.to_string(),
+                    ));
+                } else {
+                    state = BpDiffState::Unchanged;
+                    cols.push(BpTableColumn::value(diff.before.to_string()));
+                }
+                BpTableRow::new(state, cols)
+            })
+    }
+}
+
+impl BpTableData for BlueprintHostPhase2TableData<'_> {
+    fn rows(&self, state: BpDiffState) -> impl Iterator<Item = BpTableRow> {
+        [
+            (M2Slot::A, &self.host_phase_2.slot_a),
+            (M2Slot::B, &self.host_phase_2.slot_b),
+        ]
+        .into_iter()
+        .map(move |(slot, contents)| {
+            BpTableRow::from_strings(
+                state,
+                vec![format!("{slot:?}"), contents.to_string()],
+            )
+        })
+    }
+}
+
 /// Wrapper to display a table of a `BlueprintSledConfig`'s disks.
 #[derive(Clone, Debug)]
 struct BlueprintPhysicalDisksTableData<'a> {
@@ -582,44 +635,57 @@ impl fmt::Display for BlueprintDisplay<'_> {
                 .unwrap_or_else(|| String::from("<none>"))
         )?;
 
-        // Keep track of any sled_ids that have been seen in the first loop.
-        let mut seen_sleds = BTreeSet::new();
-
-        // Loop through all sleds and print tables for their disks, datasets,
-        // and zones.
+        // Loop through all sleds and print details of their configs.
         for (sled_id, config) in sleds {
-            // Construct the disks subtable
-            let disks_table = BpTable::new(
-                BpPhysicalDisksTableSchema {},
-                None,
-                BlueprintPhysicalDisksTableData::new(&config.disks)
-                    .rows(BpDiffState::Unchanged)
-                    .collect(),
-            );
+            let BlueprintSledConfig {
+                state,
+                sled_agent_generation,
+                disks,
+                datasets,
+                zones,
+                remove_mupdate_override,
+                host_phase_2,
+            } = config;
 
-            // Look up the sled state
-            let sled_state = config.state;
-            let generation = config.sled_agent_generation;
+            // Report the sled state
             writeln!(
                 f,
-                "\n  sled: {sled_id} ({sled_state}, config generation \
-                 {generation})",
+                "\n  sled: {sled_id} ({state}, config generation \
+                 {sled_agent_generation})",
             )?;
 
             let mut rows = Vec::new();
-            if let Some(id) = config.remove_mupdate_override {
+            if let Some(id) = remove_mupdate_override {
                 rows.push((WILL_REMOVE_MUPDATE_OVERRIDE, id.to_string()));
             }
             let list = KvList::new_unchanged(None, rows);
             writeln!(f, "{list}")?;
 
+            // Construct the desired host phase 2 contents table
+            let host_phase_2_table = BpTable::new(
+                BpHostPhase2TableSchema {},
+                None,
+                BlueprintHostPhase2TableData::new(host_phase_2)
+                    .rows(BpDiffState::Unchanged)
+                    .collect(),
+            );
+            writeln!(f, "{host_phase_2_table}\n")?;
+
+            // Construct the disks subtable
+            let disks_table = BpTable::new(
+                BpPhysicalDisksTableSchema {},
+                None,
+                BlueprintPhysicalDisksTableData::new(&disks)
+                    .rows(BpDiffState::Unchanged)
+                    .collect(),
+            );
             writeln!(f, "{disks_table}\n")?;
 
             // Construct the datasets subtable
             let datasets_tab = BpTable::new(
                 BpDatasetsTableSchema {},
                 None,
-                BlueprintDatasetsTableData::new(&config.datasets)
+                BlueprintDatasetsTableData::new(&datasets)
                     .rows(BpDiffState::Unchanged)
                     .collect(),
             );
@@ -629,13 +695,11 @@ impl fmt::Display for BlueprintDisplay<'_> {
             let zones_tab = BpTable::new(
                 BpOmicronZonesTableSchema {},
                 None,
-                BlueprintZonesTableData::new(&config.zones)
+                BlueprintZonesTableData::new(&zones)
                     .rows(BpDiffState::Unchanged)
                     .collect(),
             );
             writeln!(f, "{zones_tab}\n")?;
-
-            seen_sleds.insert(sled_id);
         }
 
         if let Some((t1, t2, t3)) = self.make_clickhouse_cluster_config_tables()

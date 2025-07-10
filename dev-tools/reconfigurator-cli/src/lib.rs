@@ -964,9 +964,9 @@ fn parse_blueprint_artifact_version(
 
 fn parse_m2_slot(slot: &str) -> anyhow::Result<M2Slot> {
     match slot {
-        "a" | "A" | "0" => Ok(M2Slot::A),
-        "b" | "B" | "1" => Ok(M2Slot::B),
-        _ => bail!("invalid slot `{slot}` (expected `a` or `b`)"),
+        "A" | "a" | "0" => Ok(M2Slot::A),
+        "B" | "b" | "1" => Ok(M2Slot::B),
+        _ => bail!("invalid slot `{slot}` (expected `A` or `B`)"),
     }
 }
 
