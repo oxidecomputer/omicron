@@ -411,10 +411,13 @@ impl PortManager {
         ] {
             for route in &routes.routes {
                 let route = AddRouterEntryReq {
-                    class,
+                    route: oxide_vpc::api::Route {
+                        dest: super::net_to_cidr(route.dest),
+                        target: super::router_target_opte(&route.target),
+                        class,
+                        stat_id: Some(Uuid::new_v4()),
+                    },
                     port_name: port_name.clone(),
-                    dest: super::net_to_cidr(route.dest),
-                    target: super::router_target_opte(&route.target),
                 };
 
                 hdl.add_router_entry(&route)?;
@@ -555,10 +558,13 @@ impl PortManager {
 
                 for route in to_delete {
                     let route = DelRouterEntryReq {
-                        class,
+                        route: oxide_vpc::api::Route {
+                            dest: super::net_to_cidr(route.dest),
+                            target: super::router_target_opte(&route.target),
+                            class,
+                            stat_id: None,
+                        },
                         port_name: port.name().into(),
-                        dest: super::net_to_cidr(route.dest),
-                        target: super::router_target_opte(&route.target),
                     };
 
                     hdl.del_router_entry(&route)?;
@@ -573,10 +579,13 @@ impl PortManager {
 
                 for route in to_add {
                     let route = AddRouterEntryReq {
-                        class,
+                        route: oxide_vpc::api::Route {
+                            dest: super::net_to_cidr(route.dest),
+                            target: super::router_target_opte(&route.target),
+                            class,
+                            stat_id: Some(Uuid::new_v4()),
+                        },
                         port_name: port.name().into(),
-                        dest: super::net_to_cidr(route.dest),
-                        target: super::router_target_opte(&route.target),
                     };
 
                     hdl.add_router_entry(&route)?;
@@ -966,7 +975,7 @@ impl Drop for PortTicket {
 
 #[cfg(test)]
 mod tests {
-    use crate::opte::Handle;
+    use crate::opte::{Handle, is_system_default_ipv4_route};
 
     use super::{PortCreateParams, PortManager};
     use macaddr::MacAddr6;
@@ -1107,7 +1116,7 @@ mod tests {
                 .unwrap()
                 .routes
                 .iter()
-                .filter(|rt| rt.is_system_default_ipv4_route())
+                .filter(|rt| is_system_default_ipv4_route(&rt))
                 .collect::<Vec<_>>();
             assert_eq!(
                 rt.len(),
@@ -1179,7 +1188,7 @@ mod tests {
                 .unwrap()
                 .routes
                 .iter()
-                .filter(|rt| rt.is_system_default_ipv4_route())
+                .filter(|rt| is_system_default_ipv4_route(&rt))
                 .collect::<Vec<_>>();
             assert_eq!(
                 rt.len(),
@@ -1276,7 +1285,7 @@ mod tests {
                     .unwrap()
                     .routes
                     .iter()
-                    .filter(|rt| rt.is_system_default_ipv4_route())
+                    .filter(|rt| is_system_default_ipv4_route(&rt))
                     .collect::<Vec<_>>();
                 assert_eq!(
                     rt.len(),
@@ -1345,7 +1354,7 @@ mod tests {
                     .unwrap()
                     .routes
                     .iter()
-                    .filter(|rt| rt.is_system_default_ipv4_route())
+                    .filter(|rt| is_system_default_ipv4_route(&rt))
                     .collect::<Vec<_>>();
                 assert_eq!(
                     rt.len(),

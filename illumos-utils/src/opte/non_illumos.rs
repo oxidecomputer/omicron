@@ -17,6 +17,7 @@ use oxide_vpc::api::IpCidr;
 use oxide_vpc::api::ListPortsResp;
 use oxide_vpc::api::NoResp;
 use oxide_vpc::api::PortInfo;
+use oxide_vpc::api::Route;
 use oxide_vpc::api::RouterClass;
 use oxide_vpc::api::RouterTarget;
 use oxide_vpc::api::SetExternalIpsReq;
@@ -69,75 +70,29 @@ pub fn delete_all_xde_devices(log: &Logger) -> Result<(), Error> {
     Ok(())
 }
 
-#[derive(Debug)]
+// Removes the stat ID from the Route payload.
+#[derive(Debug, Eq, PartialEq)]
 pub(crate) struct RouteInfo {
     pub dest: IpCidr,
     pub target: RouterTarget,
     pub class: RouterClass,
 }
 
-// NOTE: It would be nice to derive this, but `RouterTarget` and `RouterClass`
-// are in OPTE, and they don't currently implement this trait.
-impl PartialEq for RouteInfo {
-    fn eq(&self, other: &Self) -> bool {
-        if self.dest != other.dest {
-            return false;
-        }
-        match (self.class, other.class) {
-            (RouterClass::System, RouterClass::Custom) => return false,
-            (RouterClass::Custom, RouterClass::System) => return false,
-            (RouterClass::System, RouterClass::System)
-            | (RouterClass::Custom, RouterClass::Custom) => {}
-        }
-        match (self.target, other.target) {
-            (RouterTarget::Drop, RouterTarget::Drop) => true,
-            (
-                RouterTarget::InternetGateway(id0),
-                RouterTarget::InternetGateway(id1),
-            ) => id0 == id1,
-            (RouterTarget::Ip(ip0), RouterTarget::Ip(ip1)) => ip0 == ip1,
-            (
-                RouterTarget::VpcSubnet(cidr0),
-                RouterTarget::VpcSubnet(cidr1),
-            ) => cidr0 == cidr1,
-            (RouterTarget::Drop, RouterTarget::InternetGateway(_))
-            | (RouterTarget::Drop, RouterTarget::Ip(_))
-            | (RouterTarget::Drop, RouterTarget::VpcSubnet(_))
-            | (RouterTarget::InternetGateway(_), RouterTarget::Drop)
-            | (RouterTarget::InternetGateway(_), RouterTarget::Ip(_))
-            | (RouterTarget::InternetGateway(_), RouterTarget::VpcSubnet(_))
-            | (RouterTarget::Ip(_), RouterTarget::Drop)
-            | (RouterTarget::Ip(_), RouterTarget::InternetGateway(_))
-            | (RouterTarget::Ip(_), RouterTarget::VpcSubnet(_))
-            | (RouterTarget::VpcSubnet(_), RouterTarget::Drop)
-            | (RouterTarget::VpcSubnet(_), RouterTarget::InternetGateway(_))
-            | (RouterTarget::VpcSubnet(_), RouterTarget::Ip(_)) => false,
-        }
-    }
-}
-
-impl RouteInfo {
-    #[cfg(test)]
-    pub fn is_system_default_ipv4_route(&self) -> bool {
-        let system_default_route = RouteInfo {
-            dest: IpCidr::Ip4(oxide_vpc::api::Ipv4Cidr::new(
+#[cfg(test)]
+pub(crate) fn is_system_default_ipv4_route(route: &RouteInfo) -> bool {
+    (route.dest, route.target, route.class)
+        == (
+            IpCidr::Ip4(oxide_vpc::api::Ipv4Cidr::new(
                 oxide_vpc::api::Ipv4Addr::ANY_ADDR,
                 0.try_into().unwrap(),
             )),
-            target: RouterTarget::InternetGateway(None),
-            class: RouterClass::System,
-        };
-        *self == system_default_route
-    }
+            RouterTarget::InternetGateway(None),
+            RouterClass::System,
+        )
 }
 
-impl From<&AddRouterEntryReq> for RouteInfo {
-    fn from(value: &AddRouterEntryReq) -> Self {
-        Self { dest: value.dest, target: value.target, class: value.class }
-    }
-}
-impl From<&DelRouterEntryReq> for RouteInfo {
-    fn from(value: &DelRouterEntryReq) -> Self {
+impl From<&Route> for RouteInfo {
+    fn from(value: &Route) -> Self {
         Self { dest: value.dest, target: value.target, class: value.class }
     }
 }
@@ -246,7 +201,7 @@ impl Handle {
         else {
             anyhow::bail!("No such port '{}'", req.port_name);
         };
-        routes.push(req.into());
+        routes.push((&req.route).into());
         Ok(NO_RESPONSE)
     }
 
@@ -270,7 +225,7 @@ impl Handle {
         else {
             anyhow::bail!("No such port '{}'", req.port_name);
         };
-        let req = RouteInfo::from(req);
+        let req = RouteInfo::from(&req.route);
         if let Some(index) = routes.iter().position(|rt| rt == &req) {
             routes.remove(index);
         }
