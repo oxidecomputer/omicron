@@ -869,6 +869,7 @@ mod test {
     use std::collections::BTreeMap;
     use std::collections::BTreeSet;
     use tufaceous_artifact::ArtifactHash;
+    use tufaceous_artifact::ArtifactKind;
     use tufaceous_artifact::ArtifactVersion;
     use tufaceous_artifact::KnownArtifactKind;
 
@@ -894,6 +895,8 @@ mod test {
     const ARTIFACT_HASH_SP_PSC_B: ArtifactHash = ArtifactHash([9; 32]);
     /// Hash of fake artifact for fake psc-c SP
     const ARTIFACT_HASH_SP_PSC_C: ArtifactHash = ArtifactHash([10; 32]);
+    /// Hash of fake artifact for fake oxide-rot-1 RoT
+    const ARTIFACT_HASH_OXIDE_ROT_1: ArtifactHash = ArtifactHash([13; 32]);
 
     // unused artifact hashes
 
@@ -901,6 +904,13 @@ mod test {
     const ARTIFACT_HASH_NEXUS: ArtifactHash = ArtifactHash([34; 32]);
     const ARTIFACT_HASH_HOST_OS: ArtifactHash = ArtifactHash([35; 32]);
 
+    /// Hash of the RoT development signing key
+    // TODO-K: This sign only makes sense for one kind of artifact, we want to
+    // have different ones for switch and power
+    const ROT_STAGING_DEVEL_SIGN: &str =
+        "11594bb5548a757e918e6fe056e2ad9e084297c9555417a025d8788eacf55daf";
+
+        
     fn test_artifact_for_board(board: &str) -> ArtifactHash {
         match board {
             "gimlet-d" => ARTIFACT_HASH_SP_GIMLET_D,
@@ -909,11 +919,14 @@ mod test {
             "sidecar-c" => ARTIFACT_HASH_SP_SIDECAR_C,
             "psc-b" => ARTIFACT_HASH_SP_PSC_B,
             "psc-c" => ARTIFACT_HASH_SP_PSC_C,
+            "oxide-rot-1" => ARTIFACT_HASH_OXIDE_ROT_1,
+            // TODO-K: figure out how to have artifacts for different RoTs and
+            // bootloaders which have the same board name.
             _ => panic!("test bug: no artifact for board {board:?}"),
         }
     }
 
-    /// Describes the SPs in the environment used in these tests
+    /// Describes the SPs and RoTs in the environment used in these tests
     ///
     /// There will be:
     ///
@@ -923,22 +936,23 @@ mod test {
     ///
     /// The specific set of hardware (boards) vary and are hardcoded:
     ///
-    /// - sled 0: gimlet-d
-    /// - other sleds: gimlet-e
-    /// - switch 0: sidecar-b
-    /// - switch 1: sidecar-c
-    /// - psc 0: psc-b
-    /// - psc 1: psc-c
-    fn test_config() -> BTreeMap<(SpType, u16), (&'static str, &'static str)> {
+    /// - sled 0: gimlet-d, oxide-rot-1
+    /// - other sleds: gimlet-e, oxide-rot-1
+    /// - switch 0: sidecar-b, oxide-rot-1
+    /// - switch 1: sidecar-c, oxide-rot-1
+    /// - psc 0: psc-b, oxide-rot-1
+    /// - psc 1: psc-c, oxide-rot-1
+    fn test_config()
+    -> BTreeMap<(SpType, u16, ), (&'static str, &'static str, &'static str)> {
         BTreeMap::from([
-            ((SpType::Sled, 0), ("sled_0", "gimlet-d")),
-            ((SpType::Sled, 1), ("sled_1", "gimlet-e")),
-            ((SpType::Sled, 2), ("sled_2", "gimlet-e")),
-            ((SpType::Sled, 3), ("sled_3", "gimlet-e")),
-            ((SpType::Switch, 0), ("switch_0", "sidecar-b")),
-            ((SpType::Switch, 1), ("switch_1", "sidecar-c")),
-            ((SpType::Power, 0), ("power_0", "psc-b")),
-            ((SpType::Power, 1), ("power_1", "psc-c")),
+            ((SpType::Sled, 0), ("sled_0", "gimlet-d", "oxide-rot-1")),
+            ((SpType::Sled, 1), ("sled_1", "gimlet-e", "oxide-rot-1")),
+            ((SpType::Sled, 2), ("sled_2", "gimlet-e", "oxide-rot-1")),
+            ((SpType::Sled, 3), ("sled_3", "gimlet-e", "oxide-rot-1")),
+            ((SpType::Switch, 0), ("switch_0", "sidecar-b", "oxide-rot-1")),
+            ((SpType::Switch, 1), ("switch_1", "sidecar-c", "oxide-rot-1")),
+            ((SpType::Power, 0), ("power_0", "psc-b", "oxide-rot-1")),
+            ((SpType::Power, 1), ("power_1", "psc-c", "oxide-rot-1")),
         ])
     }
 
@@ -953,49 +967,61 @@ mod test {
         let artifacts = vec![
             make_artifact(
                 "control-plane",
-                KnownArtifactKind::ControlPlane,
+                KnownArtifactKind::ControlPlane.into(),
                 ARTIFACT_HASH_CONTROL_PLANE,
             ),
             make_artifact(
                 "nexus",
-                KnownArtifactKind::Zone,
+                KnownArtifactKind::Zone.into(),
                 ARTIFACT_HASH_NEXUS,
             ),
             make_artifact(
                 "host-os",
-                KnownArtifactKind::Host,
+                KnownArtifactKind::Host.into(),
                 ARTIFACT_HASH_HOST_OS,
             ),
             make_artifact(
                 "gimlet-d",
-                KnownArtifactKind::GimletSp,
+                KnownArtifactKind::GimletSp.into(),
                 test_artifact_for_board("gimlet-d"),
             ),
             make_artifact(
                 "gimlet-e",
-                KnownArtifactKind::GimletSp,
+                KnownArtifactKind::GimletSp.into(),
                 test_artifact_for_board("gimlet-e"),
             ),
             make_artifact(
                 "sidecar-b",
-                KnownArtifactKind::SwitchSp,
+                KnownArtifactKind::SwitchSp.into(),
                 test_artifact_for_board("sidecar-b"),
             ),
             make_artifact(
                 "sidecar-c",
-                KnownArtifactKind::SwitchSp,
+                KnownArtifactKind::SwitchSp.into(),
                 test_artifact_for_board("sidecar-c"),
             ),
             make_artifact(
                 "psc-b",
-                KnownArtifactKind::PscSp,
+                KnownArtifactKind::PscSp.into(),
                 test_artifact_for_board("psc-b"),
             ),
             make_artifact(
                 "psc-c",
-                KnownArtifactKind::PscSp,
+                KnownArtifactKind::PscSp.into(),
                 test_artifact_for_board("psc-c"),
             ),
+            make_artifact(
+                "oxide-rot-1",
+                ArtifactKind::GIMLET_ROT_IMAGE_A,
+                test_artifact_for_board("oxide-rot-1"),
+            ),
+            // TODO-K: Does this work as expected?
+            make_artifact(
+                "oxide-rot-1",
+                ArtifactKind::GIMLET_ROT_IMAGE_B,
+                test_artifact_for_board("oxide-rot-1"),
+            ),
+            // Make more artifacts for other artifact kinds and for other slots?
         ];
 
         TufRepoDescription {
@@ -1012,14 +1038,14 @@ mod test {
 
     fn make_artifact(
         name: &str,
-        kind: KnownArtifactKind,
+        kind: ArtifactKind,
         hash: ArtifactHash,
     ) -> TufArtifactMeta {
         TufArtifactMeta {
             id: ArtifactId {
                 name: name.to_string(),
                 version: ARTIFACT_VERSION_2,
-                kind: kind.into(),
+                kind: kind,
             },
             hash,
             size: 0, // unused here
@@ -1028,12 +1054,13 @@ mod test {
 
     // Construct inventory for an environment suitable for our testing.
     //
-    // See test_config() for information about the hardware.  All SPs will
-    // appear to be running version `active_version` except those identified in
-    // `active_version_exceptions`.  All SPs will appear to have
-    // `inactive_version` in the inactive slot.
+    // See test_config() for information about the hardware.  All SPs and RoTs
+    // will appear to be running version `active_version` except those
+    // identified in `active_version_exceptions`.  All SPs and RoTs will appear
+    // to have `inactive_version` in the inactive slot.
     fn make_collection(
         active_version: ArtifactVersion,
+        // TODO-K: Use board as well to filter whether we want the SP ort RoT?
         active_version_exceptions: &BTreeMap<(SpType, u16), ArtifactVersion>,
         inactive_version: ExpectedVersion,
     ) -> Collection {
@@ -1065,7 +1092,11 @@ mod test {
         };
 
         let test_config = test_config();
-        for ((sp_type, sp_slot), (serial, caboose_board)) in test_config {
+        for (
+            (sp_type, sp_slot),
+            (serial, caboose_sp_board, caboose_rot_board),
+        ) in test_config
+        {
             let sp_state = SpState {
                 model: format!("dummy_{}", sp_type),
                 serial_number: serial.to_string(),
@@ -1085,11 +1116,27 @@ mod test {
                     CabooseWhich::SpSlot0,
                     "test",
                     SpComponentCaboose {
-                        board: caboose_board.to_string(),
+                        board: caboose_sp_board.to_string(),
                         epoch: None,
                         git_commit: String::from("unused"),
-                        name: caboose_board.to_string(),
+                        name: caboose_sp_board.to_string(),
                         sign: None,
+                        version: active_version.as_str().to_string(),
+                    },
+                )
+                .unwrap();
+
+            builder
+                .found_caboose(
+                    &baseboard_id,
+                    CabooseWhich::RotSlotA,
+                    "test",
+                    SpComponentCaboose {
+                        board: caboose_rot_board.to_string(),
+                        epoch: None,
+                        git_commit: String::from("unused"),
+                        name: caboose_rot_board.to_string(),
+                        sign: Some(ROT_STAGING_DEVEL_SIGN.to_string()),
                         version: active_version.as_str().to_string(),
                     },
                 )
@@ -1104,11 +1151,27 @@ mod test {
                         CabooseWhich::SpSlot1,
                         "test",
                         SpComponentCaboose {
-                            board: caboose_board.to_string(),
+                            board: caboose_sp_board.to_string(),
                             epoch: None,
                             git_commit: String::from("unused"),
-                            name: caboose_board.to_string(),
+                            name: caboose_sp_board.to_string(),
                             sign: None,
+                            version: inactive_version.as_str().to_string(),
+                        },
+                    )
+                    .unwrap();
+
+                builder
+                    .found_caboose(
+                        &baseboard_id,
+                        CabooseWhich::RotSlotB,
+                        "test",
+                        SpComponentCaboose {
+                            board: caboose_rot_board.to_string(),
+                            epoch: None,
+                            git_commit: String::from("unused"),
+                            name: caboose_rot_board.to_string(),
+                            sign: Some(ROT_STAGING_DEVEL_SIGN.to_string()),
                             version: inactive_version.as_str().to_string(),
                         },
                     )
@@ -1148,7 +1211,7 @@ mod test {
         );
         assert!(updates.is_empty());
 
-        // Test that when a TUF repo is specified and one SP is outdated, then
+        // Test that when a TUF repo is specified and one RoT is outdated, then
         // it's configured with an update (and the update looks correct).
         let repo = make_tuf_repo();
         let updates = plan_mgs_updates(
@@ -1164,7 +1227,8 @@ mod test {
         assert_eq!(first_update.baseboard_id.serial_number, "sled_0");
         assert_eq!(first_update.sp_type, SpType::Sled);
         assert_eq!(first_update.slot_id, 0);
-        assert_eq!(first_update.artifact_hash, ARTIFACT_HASH_SP_GIMLET_D);
+        // assert_eq!(first_update.artifact_hash, ARTIFACT_HASH_SP_GIMLET_D);
+        assert_eq!(first_update.artifact_hash, ARTIFACT_HASH_OXIDE_ROT_1);
         assert_eq!(first_update.artifact_version, ARTIFACT_VERSION_2);
 
         // Test that when an update is already pending, and nothing changes
@@ -1225,11 +1289,14 @@ mod test {
         assert_eq!(next_update.baseboard_id.serial_number, "switch_1");
         assert_eq!(next_update.sp_type, SpType::Switch);
         assert_eq!(next_update.slot_id, 1);
-        assert_eq!(next_update.artifact_hash, ARTIFACT_HASH_SP_SIDECAR_C);
+        assert_eq!(next_update.artifact_hash, ARTIFACT_HASH_OXIDE_ROT_1);
+        //assert_eq!(next_update.artifact_hash, ARTIFACT_HASH_SP_SIDECAR_C);
         assert_eq!(next_update.artifact_version, ARTIFACT_VERSION_2);
 
-        // Finally, test that when all SPs are in spec, then no updates are
-        // configured.
+
+
+        // Finally, test that when all RoTs and SPs are in spec, then no updates
+        // are configured.
         let updated_collection = make_collection(
             ARTIFACT_VERSION_2,
             &BTreeMap::new(),
@@ -1277,14 +1344,19 @@ mod test {
         // Verify the precondition details of an ordinary update.
         let old_update =
             updates.into_iter().next().expect("at least one update");
-        let PendingMgsUpdateDetails::Sp {
-            expected_active_version: old_expected_active_version,
+        //let PendingMgsUpdateDetails::Sp {
+        //    expected_active_version: old_expected_active_version,
+        //    expected_inactive_version: old_expected_inactive_version,
+        //} = &old_update.details
+        let PendingMgsUpdateDetails::Rot {
+            expected_active_slot: old_expected_active_slot,
             expected_inactive_version: old_expected_inactive_version,
+            ..
         } = &old_update.details
         else {
-            panic!("expected SP update");
+            panic!("expected RoT update");
         };
-        assert_eq!(ARTIFACT_VERSION_1, *old_expected_active_version);
+        assert_eq!(ARTIFACT_VERSION_1, old_expected_active_slot.version());
         assert_eq!(
             ExpectedVersion::NoValidVersion,
             *old_expected_inactive_version
@@ -1314,14 +1386,19 @@ mod test {
         assert_eq!(old_update.slot_id, new_update.slot_id);
         assert_eq!(old_update.artifact_hash, new_update.artifact_hash);
         assert_eq!(old_update.artifact_version, new_update.artifact_version);
-        let PendingMgsUpdateDetails::Sp {
-            expected_active_version: new_expected_active_version,
+        // let PendingMgsUpdateDetails::Sp {
+        //     expected_active_version: new_expected_active_version,
+        //     expected_inactive_version: new_expected_inactive_version,
+        // } = &new_update.details
+        let PendingMgsUpdateDetails::Rot {
+            expected_active_slot: new_expected_active_slot,
             expected_inactive_version: new_expected_inactive_version,
+            ..
         } = &new_update.details
         else {
-            panic!("expected SP update");
+            panic!("expected RoT update");
         };
-        assert_eq!(ARTIFACT_VERSION_1, *new_expected_active_version);
+        assert_eq!(ARTIFACT_VERSION_1, new_expected_active_slot.version());
         assert_eq!(
             ExpectedVersion::Version(ARTIFACT_VERSION_1),
             *new_expected_inactive_version
@@ -1352,14 +1429,19 @@ mod test {
         assert_eq!(old_update.slot_id, new_update.slot_id);
         assert_eq!(old_update.artifact_hash, new_update.artifact_hash);
         assert_eq!(old_update.artifact_version, new_update.artifact_version);
-        let PendingMgsUpdateDetails::Sp {
-            expected_active_version: new_expected_active_version,
+        //let PendingMgsUpdateDetails::Sp {
+        //    expected_active_version: new_expected_active_version,
+        //    expected_inactive_version: new_expected_inactive_version,
+        //} = &new_update.details
+        let PendingMgsUpdateDetails::Rot {
+            expected_active_slot: new_expected_active_slot,
             expected_inactive_version: new_expected_inactive_version,
+            ..
         } = &new_update.details
         else {
-            panic!("expected SP update");
+            panic!("expected RoT update");
         };
-        assert_eq!(ARTIFACT_VERSION_1_5, *new_expected_active_version);
+        assert_eq!(ARTIFACT_VERSION_1_5, new_expected_active_slot.version());
         assert_eq!(
             ExpectedVersion::NoValidVersion,
             *new_expected_inactive_version
@@ -1389,10 +1471,20 @@ mod test {
         // artifact.
         let mut expected_updates: BTreeMap<_, _> = test_config()
             .into_iter()
-            .map(|(k, (serial, board_name))| {
-                (k, (serial, test_artifact_for_board(board_name)))
+            // TODO-K: Test RoT too?
+            .flat_map(|(k, (serial, board_name, rot_board_name))| {
+                [
+                    (k, (serial, test_artifact_for_board(board_name))),
+                    // TODO-K: Panics here I need to define the board name without slot I guess?
+                    (k, (serial, test_artifact_for_board(rot_board_name)))
+                ]
             })
             .collect();
+
+            //debug
+            if expected_updates.len() != 10000 {
+            panic!("num of expected updates:{} {expected_updates:?}", expected_updates.len());
+            }
 
         for _ in 0..expected_updates.len() {
             // Generate an inventory collection reflecting that everything is at
@@ -1464,7 +1556,8 @@ mod test {
 
         let mut expected_updates: BTreeMap<_, _> = test_config()
             .into_iter()
-            .map(|(k, (serial, board_name))| {
+            // TODO-K: Test RoT too?
+            .map(|(k, (serial, board_name, ..))| {
                 (k, (serial, test_artifact_for_board(board_name)))
             })
             .collect();
