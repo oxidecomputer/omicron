@@ -58,6 +58,8 @@ INFO added artifact, name: internal-dns, kind: zone, version: 1.0.0, hash: ffbf1
 INFO added artifact, name: ntp, kind: zone, version: 1.0.0, hash: 67593d686ed04a1709f93972b71f4ebc148a9362120f65d239943e814a9a7439, length: 1681
 INFO added artifact, name: nexus, kind: zone, version: 1.0.0, hash: 0e32b4a3e5d3668bb1d6a16fb06b74dc60b973fa479dcee0aae3adbb52bf1388, length: 1682
 INFO added artifact, name: oximeter, kind: zone, version: 1.0.0, hash: 048d8fe8cdef5b175aad714d0f148aa80ce36c9114ac15ce9d02ed3d37877a77, length: 1682
+INFO added artifact, name: sp_corpus, kind: measurement_corpus, version: 1.0.0, hash: ac95be27f1d2ef747290b76b83a1e6b162f344451387477b04a0e74bc7be17a6, length: 11913
+INFO added artifact, name: rot_corpus, kind: measurement_corpus, version: 1.0.0, hash: 8a354560e17a992a46bc73a37556f0f9c090c570adaa85537ae5994b1986fd50, length: 11913
 INFO added artifact, name: fake-psc-sp, kind: psc_sp, version: 1.0.0, hash: f896cf5b19ca85864d470ad8587f980218bff3954e7f52bbd999699cd0f9635b, length: 744
 INFO added artifact, name: fake-psc-rot, kind: psc_rot_image_a, version: 1.0.0, hash: 179eb660ebc92e28b6748b6af03d9f998d6131319edd4654a1e948454c62551b, length: 750
 INFO added artifact, name: fake-psc-rot, kind: psc_rot_image_b, version: 1.0.0, hash: 179eb660ebc92e28b6748b6af03d9f998d6131319edd4654a1e948454c62551b, length: 750
@@ -120,6 +122,8 @@ INFO added artifact, name: internal-dns, kind: zone, version: 2.0.0, hash: de306
 INFO added artifact, name: ntp, kind: zone, version: 2.0.0, hash: d76e26198daed69cdae04490d7477f8c842e0dbe37d463eac0d0a8d3fb803095, length: 1682
 INFO added artifact, name: nexus, kind: zone, version: 2.0.0, hash: e9b7035f41848a987a798c15ac424cc91dd662b1af0920d58d8aa1ebad7467b6, length: 1683
 INFO added artifact, name: oximeter, kind: zone, version: 2.0.0, hash: 9f4bc56a15d5fd943fdac94309994b8fd73aa2be1ec61faf44bfcf2356c9dc23, length: 1683
+INFO added artifact, name: sp_corpus, kind: measurement_corpus, version: 2.0.0, hash: aa21cbeece8fa0097024edc347bc85bf2bc4b6cf0cc83eefd1a269856b3e10d1, length: 11914
+INFO added artifact, name: rot_corpus, kind: measurement_corpus, version: 2.0.0, hash: 79b9888b01b0cd1110f8733fc85f389c7cf64805c1342b960eb977747c21e016, length: 11914
 INFO added artifact, name: fake-psc-sp, kind: psc_sp, version: 2.0.0, hash: 7adf04de523865003dbf120cebddd5fcf5bad650640281b294197e6ca7016e47, length: 748
 INFO added artifact, name: fake-psc-rot, kind: psc_rot_image_a, version: 2.0.0, hash: 6d1c432647e9b9e4cf846ff5d17932d75cba49c0d3f23d24243238bc40bcfef5, length: 746
 INFO added artifact, name: fake-psc-rot, kind: psc_rot_image_b, version: 2.0.0, hash: 6d1c432647e9b9e4cf846ff5d17932d75cba49c0d3f23d24243238bc40bcfef5, length: 746
