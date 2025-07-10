@@ -76,6 +76,7 @@ impl ArtifactsWithPlan {
         body: impl Stream<Item = Result<Bytes, HttpError>> + Send,
         file_name: Option<String>,
         zone_mode: ControlPlaneZonesMode,
+        verification_mode: VerificationMode<'_>,
         log: &Logger,
     ) -> Result<Self, RepositoryError> {
         // Create a temporary file to store the incoming archive.``
@@ -117,6 +118,7 @@ impl ArtifactsWithPlan {
             file_name,
             repo_hash,
             zone_mode,
+            verification_mode,
             log,
         )
         .await?;
@@ -129,6 +131,7 @@ impl ArtifactsWithPlan {
         file_name: Option<String>,
         repo_hash: ArtifactHash,
         zone_mode: ControlPlaneZonesMode,
+        verification_mode: VerificationMode<'_>,
         log: &Logger,
     ) -> Result<Self, RepositoryError>
     where
@@ -156,16 +159,26 @@ impl ArtifactsWithPlan {
             })??
         };
 
-        // Time is unavailable during initial setup, so ignore expiration. Even
-        // if time were available, we might want to be able to load older
-        // versions of artifacts over the technician port in an emergency.
-        //
-        // XXX we aren't checking against a root of trust at this point --
-        // anyone can sign the repositories and this code will accept that.
-        let repository =
-            OmicronRepo::load_untrusted_ignore_expiration(log, dir.path())
+        // We want validly-signed zip archives to always work even if the
+        // signatures are expired, even when the system time is correct. (If we
+        // eventually load TUF repositories over HTTP, the system should enforce
+        // signature expiration.)
+        let repository = match verification_mode {
+            VerificationMode::TrustStore(trusted_roots) => {
+                OmicronRepo::load_ignore_expiration(
+                    log,
+                    dir.path(),
+                    trusted_roots,
+                )
                 .await
-                .map_err(RepositoryError::LoadRepository)?;
+                .map_err(RepositoryError::LoadRepository)?
+            }
+            VerificationMode::BlindlyTrustAnything => {
+                OmicronRepo::load_untrusted_ignore_expiration(log, dir.path())
+                    .await
+                    .map_err(RepositoryError::LoadRepository)?
+            }
+        };
 
         let artifacts = repository
             .read_artifacts()
@@ -330,6 +343,16 @@ pub enum ControlPlaneZonesMode {
     /// Ensure the control plane zones are individual `Zone` artifacts, used
     /// by Nexus.
     Split,
+}
+
+#[derive(Debug, Clone, Copy)]
+pub enum VerificationMode<'a> {
+    /// Verify the uploaded repository is accepted by one of these trusted root
+    /// roles.
+    TrustStore(&'a [Vec<u8>]),
+    /// Blindly trust the root role present in the repository (but still perform
+    /// signature checks using that root role).
+    BlindlyTrustAnything,
 }
 
 fn unzip_into_tempdir<T>(
@@ -571,7 +594,12 @@ mod tests {
         // doesn't matter for the test.
         let repo_hash = ArtifactHash([0u8; 32]);
         let plan = ArtifactsWithPlan::from_zip(
-            zip_bytes, None, repo_hash, zone_mode, log,
+            zip_bytes,
+            None,
+            repo_hash,
+            zone_mode,
+            VerificationMode::BlindlyTrustAnything,
+            log,
         )
         .await
         .with_context(|| format!("error reading {archive_path}"))?;

@@ -66,7 +66,9 @@ use tufaceous_artifact::ArtifactHash;
 use tufaceous_artifact::ArtifactVersion;
 use tufaceous_artifact::ArtifactVersionError;
 use tufaceous_lib::assemble::ArtifactManifest;
-use update_common::artifacts::{ArtifactsWithPlan, ControlPlaneZonesMode};
+use update_common::artifacts::{
+    ArtifactsWithPlan, ControlPlaneZonesMode, VerificationMode,
+};
 
 mod log_capture;
 
@@ -2259,6 +2261,7 @@ fn extract_tuf_repo_description(
             None,
             repo_hash,
             ControlPlaneZonesMode::Split,
+            VerificationMode::BlindlyTrustAnything,
             log,
         )
         .await

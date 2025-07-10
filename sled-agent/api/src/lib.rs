@@ -33,10 +33,6 @@ use omicron_uuid_kinds::{
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use sled_agent_types::{
-    boot_disk::{
-        BootDiskOsWriteStatus, BootDiskPathParams, BootDiskUpdatePathParams,
-        BootDiskWriteStartQueryParams,
-    },
     bootstore::BootstoreStatus,
     disk::DiskEnsureBody,
     early_networking::EarlyNetworkConfig,
@@ -492,38 +488,6 @@ pub trait SledAgentApi {
     async fn sled_add(
         rqctx: RequestContext<Self::Context>,
         body: TypedBody<AddSledRequest>,
-    ) -> Result<HttpResponseUpdatedNoContent, HttpError>;
-
-    /// Write a new host OS image to the specified boot disk
-    #[endpoint {
-        method = POST,
-        path = "/boot-disk/{boot_disk}/os/write",
-        request_body_max_bytes = HOST_OS_IMAGE_MAX_BYTES,
-    }]
-    async fn host_os_write_start(
-        rqctx: RequestContext<Self::Context>,
-        path_params: Path<BootDiskPathParams>,
-        query_params: Query<BootDiskWriteStartQueryParams>,
-        body: StreamingBody,
-    ) -> Result<HttpResponseUpdatedNoContent, HttpError>;
-
-    #[endpoint {
-        method = GET,
-        path = "/boot-disk/{boot_disk}/os/write/status",
-    }]
-    async fn host_os_write_status_get(
-        rqctx: RequestContext<Self::Context>,
-        path_params: Path<BootDiskPathParams>,
-    ) -> Result<HttpResponseOk<BootDiskOsWriteStatus>, HttpError>;
-
-    /// Clear the status of a completed write of a new host OS
-    #[endpoint {
-        method = DELETE,
-        path = "/boot-disk/{boot_disk}/os/write/status/{update_id}",
-    }]
-    async fn host_os_write_status_delete(
-        rqctx: RequestContext<Self::Context>,
-        path_params: Path<BootDiskUpdatePathParams>,
     ) -> Result<HttpResponseUpdatedNoContent, HttpError>;
 
     /// Fetch basic information about this sled

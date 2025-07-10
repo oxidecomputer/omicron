@@ -2325,7 +2325,7 @@ pub enum EnsureMupdateOverrideAction {
         /// their old values.
         zones: IdOrdMap<EnsureMupdateOverrideUpdatedZone>,
         /// The pending MGS update that was cleared, if any.
-        prev_mgs_update: Option<PendingMgsUpdate>,
+        prev_mgs_update: Option<Box<PendingMgsUpdate>>,
     },
     /// The inventory did not have an override but the blueprint did, so the
     /// blueprint's override was cleared.

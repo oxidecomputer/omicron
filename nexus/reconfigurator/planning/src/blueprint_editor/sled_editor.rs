@@ -779,7 +779,7 @@ impl ActiveSledEditor {
                 // Clear out the pending MGS update for this sled.
                 let prev_mgs_update = match pending_mgs_update {
                     Entry::Vacant(_) => None,
-                    Entry::Occupied(entry) => Some(entry.remove()),
+                    Entry::Occupied(entry) => Some(Box::new(entry.remove())),
                 };
 
                 // TODO: Do the same for host OS.
