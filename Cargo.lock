@@ -6663,6 +6663,7 @@ dependencies = [
  "nexus-reconfigurator-blippy",
  "nexus-sled-agent-shared",
  "nexus-types",
+ "omicron-cockroach-metrics",
  "omicron-common",
  "omicron-test-utils",
  "omicron-uuid-kinds",
