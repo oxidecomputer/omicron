@@ -888,8 +888,10 @@ pub enum ClearMupdateOverrideNonBootResult {
     /// No status was found for the non-boot disk, possibly indicating the
     /// non-boot disk being missing at the time Sled Agent was started.
     NoStatus,
-    
-    /// The internal disk was missing 
+
+    /// The disk was missing from the latest InternalDisksWithBootDisk but was
+    /// present at startup. The on-disk data was not altered.
+    DiskMissing,
 
     /// No mupdate override was found on the non-boot disk.
     NoOverride,
@@ -939,6 +941,13 @@ impl ClearMupdateOverrideNonBootResult {
                      started, mupdate override not cleared"
                 );
             }
+            ClearMupdateOverrideNonBootResult::DiskMissing => {
+                warn!(
+                    log,
+                    "non-boot disk missing from latest InternalDisks, \
+                     mupdate override not cleared"
+                );
+            }
             ClearMupdateOverrideNonBootResult::NoOverride => {
                 warn!(
                     log,
@@ -980,7 +989,14 @@ impl fmt::Display for ClearMupdateOverrideNonBootDisplay<'_> {
                 write!(
                     f,
                     "no status was available when sled-agent was started, \
-                     so not cleared"
+                     so mupdate override not cleared"
+                )
+            }
+            ClearMupdateOverrideNonBootResult::DiskMissing => {
+                write!(
+                    f,
+                    "non-boot disk missing from latest InternalDisks, \
+                     mupdate override not cleared"
                 )
             }
             ClearMupdateOverrideNonBootResult::NoOverride => {

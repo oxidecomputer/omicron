@@ -169,15 +169,76 @@ impl AllMupdateOverrides {
 
         // Are there any non-boot disks that were originally read at startup but
         // are missing from InternalDisksWithBootDisk?
-        for non_boot_disk_override in &self.non_boot_disk_overrides {
+        for mut non_boot_disk_override in &mut self.non_boot_disk_overrides {
             if !non_boot_disk_info
                 .contains_key(&non_boot_disk_override.zpool_id)
             {
+                // If the boot disk was successfully cleared, we may have
+                // introduced a mismatch.
+                if let Ok(boot_disk_info) = &boot_disk_result {
+                    let new_result = match &non_boot_disk_override.result {
+                        MupdateOverrideNonBootResult::MatchesPresent => {
+                            MupdateOverrideNonBootResult::Mismatch(
+                                MupdateOverrideNonBootMismatch::BootAbsentOtherPresent {
+                                    non_boot_disk_info: boot_disk_info.clone(),
+                                },
+                            )
+                        }
+                        MupdateOverrideNonBootResult::MatchesAbsent => {
+                            unreachable!(
+                                "boot disk absent means that \
+                                 boot_disk_result is always an error"
+                            )
+                        }
+                        MupdateOverrideNonBootResult::Mismatch(
+                            MupdateOverrideNonBootMismatch::BootPresentOtherAbsent
+                        ) => {
+                            // The mupdate override file is now absent from both
+                            // the boot and the non-boot disk, so this goes from
+                            // mismatch to MatchesAbsent.
+                            MupdateOverrideNonBootResult::MatchesAbsent
+                        }
+                        MupdateOverrideNonBootResult::Mismatch(
+                            MupdateOverrideNonBootMismatch::BootAbsentOtherPresent {
+                                ..
+                            },
+                        ) => {
+                            unreachable!(
+                                "boot disk absent means that \
+                                 boot_disk_result is always an error"
+                            )
+                        }
+                        MupdateOverrideNonBootResult::Mismatch(
+                            MupdateOverrideNonBootMismatch::ValueMismatch { non_boot_disk_info },
+                        ) => {
+                            // Goes to BootAbsentOtherPresent.
+                            MupdateOverrideNonBootResult::Mismatch(
+                                MupdateOverrideNonBootMismatch::BootAbsentOtherPresent {
+                                    non_boot_disk_info: non_boot_disk_info.clone(),
+                                }
+                            )
+                        }
+                        MupdateOverrideNonBootResult::Mismatch(
+                            MupdateOverrideNonBootMismatch::BootDiskReadError { .. },
+                        ) => {
+                            unreachable!(
+                                "boot disk read error means that \
+                                 boot_disk_result is always an error"
+                            )
+                        }
+                        MupdateOverrideNonBootResult::ReadError(_)
+                         => {
+                             non_boot_disk_override.result.clone()
+                        }
+                    };
+
+                    non_boot_disk_override.result = new_result;
+                }
                 non_boot_disk_info
                     .insert_unique(ClearMupdateOverrideNonBootInfo {
                         zpool_id: non_boot_disk_override.zpool_id,
                         path: Some(non_boot_disk_override.path.clone()),
-                        result: ClearMupdateOverrideNonBootResult::NoStatus,
+                        result: ClearMupdateOverrideNonBootResult::DiskMissing,
                     })
                     .expect("non-boot zpool IDs should be unique");
             }
