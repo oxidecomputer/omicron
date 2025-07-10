@@ -12,6 +12,7 @@ use itertools::Either;
 use nexus_sled_agent_shared::inventory::ZoneKind;
 use nexus_types::deployment::BlueprintDatasetConfig;
 use nexus_types::deployment::BlueprintDatasetDisposition;
+use nexus_types::deployment::BlueprintHostPhase2DesiredContents;
 use nexus_types::deployment::BlueprintHostPhase2DesiredSlots;
 use nexus_types::deployment::BlueprintPhysicalDiskConfig;
 use nexus_types::deployment::BlueprintPhysicalDiskDisposition;
@@ -26,6 +27,7 @@ use omicron_common::address::Ipv6Subnet;
 use omicron_common::address::SLED_PREFIX;
 use omicron_common::api::external::Generation;
 use omicron_common::disk::DatasetKind;
+use omicron_common::disk::M2Slot;
 use omicron_uuid_kinds::DatasetUuid;
 use omicron_uuid_kinds::MupdateOverrideUuid;
 use omicron_uuid_kinds::OmicronZoneUuid;
@@ -375,6 +377,16 @@ impl SledEditor {
         Ok(())
     }
 
+    // Sets the desired host phase 2 contents of a particular slot.
+    pub fn set_host_phase_2_slot(
+        &mut self,
+        slot: M2Slot,
+        host_phase_2: BlueprintHostPhase2DesiredContents,
+    ) -> Result<(), SledEditError> {
+        self.as_active_mut()?.set_host_phase_2_slot(slot, host_phase_2);
+        Ok(())
+    }
+
     /// Sets remove-mupdate-override configuration for this sled.
     ///
     /// Currently only used in test code.
@@ -708,6 +720,15 @@ impl ActiveSledEditor {
         host_phase_2: BlueprintHostPhase2DesiredSlots,
     ) {
         self.host_phase_2.set_value(host_phase_2);
+    }
+
+    // Sets the desired host phase 2 contents for a specific slot on this sled.
+    pub fn set_host_phase_2_slot(
+        &mut self,
+        slot: M2Slot,
+        host_phase_2: BlueprintHostPhase2DesiredContents,
+    ) {
+        self.host_phase_2.set_slot(slot, host_phase_2);
     }
 
     /// Backwards compatibility / test helper: If we're given a blueprint that

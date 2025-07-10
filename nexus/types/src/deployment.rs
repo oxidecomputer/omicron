@@ -1181,6 +1181,19 @@ impl BlueprintHostPhase2DesiredContents {
     }
 }
 
+impl fmt::Display for BlueprintHostPhase2DesiredContents {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::CurrentContents => {
+                write!(f, "current contents")
+            }
+            Self::Artifact { version, hash: _ } => {
+                write!(f, "artifact: {version}")
+            }
+        }
+    }
+}
+
 #[derive(Clone, Debug, Eq, PartialEq, JsonSchema, Diffable)]
 pub struct PendingMgsUpdates {
     // The IdMap key is the baseboard_id.  Only one outstanding MGS-managed

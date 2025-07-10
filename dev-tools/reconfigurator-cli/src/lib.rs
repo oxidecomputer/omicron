@@ -26,6 +26,7 @@ use nexus_reconfigurator_simulation::{BlueprintId, CollectionId, SimState};
 use nexus_reconfigurator_simulation::{SimStateBuilder, SimTufRepoSource};
 use nexus_reconfigurator_simulation::{SimTufRepoDescription, Simulator};
 use nexus_sled_agent_shared::inventory::ZoneKind;
+use nexus_types::deployment::BlueprintHostPhase2DesiredContents;
 use nexus_types::deployment::PlanningInput;
 use nexus_types::deployment::SledFilter;
 use nexus_types::deployment::execution;
@@ -43,6 +44,7 @@ use nexus_types::external_api::views::SledProvisionPolicy;
 use omicron_common::address::REPO_DEPOT_PORT;
 use omicron_common::api::external::Name;
 use omicron_common::api::external::{Generation, TufRepoDescription};
+use omicron_common::disk::M2Slot;
 use omicron_common::policy::NEXUS_REDUNDANCY;
 use omicron_common::update::OmicronZoneManifestSource;
 use omicron_repl_utils::run_repl_from_file;
@@ -573,6 +575,16 @@ enum BlueprintEditCommands {
         #[command(subcommand)]
         image_source: ImageSourceArgs,
     },
+    /// set the desired host phase 2 image for an internal disk slot
+    SetHostPhase2 {
+        /// sled to set the field on
+        sled_id: SledOpt,
+        /// internal disk slot
+        #[clap(value_parser = parse_m2_slot)]
+        slot: M2Slot,
+        #[command(subcommand)]
+        phase_2_source: HostPhase2SourceArgs,
+    },
     /// set the remove_mupdate_override field for a sled
     SetRemoveMupdateOverride {
         /// sled to set the field on
@@ -914,6 +926,29 @@ impl From<ImageSourceArgs> for BlueprintZoneImageSource {
     }
 }
 
+#[derive(Debug, Subcommand)]
+enum HostPhase2SourceArgs {
+    /// keep the current phase 2 contents
+    CurrentContents,
+    /// the host phase 2 comes from a specific TUF repo artifact
+    Artifact {
+        #[clap(value_parser = parse_blueprint_artifact_version)]
+        version: BlueprintArtifactVersion,
+        hash: ArtifactHash,
+    },
+}
+
+impl From<HostPhase2SourceArgs> for BlueprintHostPhase2DesiredContents {
+    fn from(value: HostPhase2SourceArgs) -> Self {
+        match value {
+            HostPhase2SourceArgs::CurrentContents => Self::CurrentContents,
+            HostPhase2SourceArgs::Artifact { version, hash } => {
+                Self::Artifact { version, hash }
+            }
+        }
+    }
+}
+
 fn parse_blueprint_artifact_version(
     version: &str,
 ) -> Result<BlueprintArtifactVersion, ArtifactVersionError> {
@@ -925,6 +960,14 @@ fn parse_blueprint_artifact_version(
     Ok(BlueprintArtifactVersion::Available {
         version: version.parse::<ArtifactVersion>()?,
     })
+}
+
+fn parse_m2_slot(slot: &str) -> anyhow::Result<M2Slot> {
+    match slot {
+        "a" | "A" | "0" => Ok(M2Slot::A),
+        "b" | "B" | "1" => Ok(M2Slot::B),
+        _ => bail!("invalid slot `{slot}` (expected `a` or `b`)"),
+    }
 }
 
 #[derive(Debug, Args)]
@@ -1635,6 +1678,24 @@ fn cmd_blueprint_edit(
             builder
                 .sled_set_zone_source(sled_id, zone_id, source)
                 .context("failed to set image source")?;
+            rv
+        }
+        BlueprintEditCommands::SetHostPhase2 {
+            sled_id,
+            slot,
+            phase_2_source,
+        } => {
+            let sled_id = sled_id.to_sled_id(system.description())?;
+            let source =
+                BlueprintHostPhase2DesiredContents::from(phase_2_source);
+            let rv = format!(
+                "set sled {sled_id} host phase 2 slot {slot:?} source to \
+                 {source}\n\
+                 warn: no validation is done on the requested source"
+            );
+            builder
+                .sled_set_host_phase_2_slot(sled_id, slot, source)
+                .context("failed to set host phase 2 source")?;
             rv
         }
         BlueprintEditCommands::ExpungeZone { zone_id } => {

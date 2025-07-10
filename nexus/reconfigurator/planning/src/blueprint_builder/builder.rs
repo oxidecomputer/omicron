@@ -27,6 +27,7 @@ use nexus_sled_agent_shared::inventory::OmicronZoneDataset;
 use nexus_sled_agent_shared::inventory::ZoneKind;
 use nexus_types::deployment::Blueprint;
 use nexus_types::deployment::BlueprintDatasetDisposition;
+use nexus_types::deployment::BlueprintHostPhase2DesiredContents;
 use nexus_types::deployment::BlueprintHostPhase2DesiredSlots;
 use nexus_types::deployment::BlueprintPhysicalDiskConfig;
 use nexus_types::deployment::BlueprintPhysicalDiskDisposition;
@@ -61,6 +62,7 @@ use omicron_common::api::external::Generation;
 use omicron_common::api::external::Vni;
 use omicron_common::api::internal::shared::NetworkInterface;
 use omicron_common::api::internal::shared::NetworkInterfaceKind;
+use omicron_common::disk::M2Slot;
 use omicron_common::policy::INTERNAL_DNS_REDUNDANCY;
 use omicron_uuid_kinds::GenericUuid;
 use omicron_uuid_kinds::MupdateOverrideUuid;
@@ -1841,6 +1843,22 @@ impl<'a> BlueprintBuilder<'a> {
         })?;
         editor
             .set_host_phase_2(host_phase_2)
+            .map_err(|err| Error::SledEditError { sled_id, err })
+    }
+
+    pub fn sled_set_host_phase_2_slot(
+        &mut self,
+        sled_id: SledUuid,
+        slot: M2Slot,
+        host_phase_2: BlueprintHostPhase2DesiredContents,
+    ) -> Result<(), Error> {
+        let editor = self.sled_editors.get_mut(&sled_id).ok_or_else(|| {
+            Error::Planner(anyhow!(
+                "tried to change image of zone on unknown sled {sled_id}"
+            ))
+        })?;
+        editor
+            .set_host_phase_2_slot(slot, host_phase_2)
             .map_err(|err| Error::SledEditError { sled_id, err })
     }
 

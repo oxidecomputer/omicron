@@ -5,6 +5,7 @@
 use super::scalar::ScalarEditor;
 use nexus_types::deployment::BlueprintHostPhase2DesiredContents;
 use nexus_types::deployment::BlueprintHostPhase2DesiredSlots;
+use omicron_common::disk::M2Slot;
 
 #[derive(Debug)]
 pub(super) struct HostPhase2Editor {
@@ -25,6 +26,18 @@ impl HostPhase2Editor {
         let BlueprintHostPhase2DesiredSlots { slot_a, slot_b } = host_phase_2;
         self.slot_a.set_value(slot_a);
         self.slot_b.set_value(slot_b);
+    }
+
+    pub fn set_slot(
+        &mut self,
+        slot: M2Slot,
+        desired: BlueprintHostPhase2DesiredContents,
+    ) {
+        let target = match slot {
+            M2Slot::A => &mut self.slot_a,
+            M2Slot::B => &mut self.slot_b,
+        };
+        target.set_value(desired);
     }
 
     pub fn is_modified(&self) -> bool {

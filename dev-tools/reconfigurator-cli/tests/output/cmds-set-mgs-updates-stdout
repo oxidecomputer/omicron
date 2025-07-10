@@ -1952,6 +1952,8 @@ Commands:
           add a CockroachDB instance to a particular sled
   set-zone-image
           set the image source for a zone
+  set-host-phase2
+          set the desired host phase 2 image for an internal disk slot
   set-remove-mupdate-override
           set the remove_mupdate_override field for a sled
   set-target-release-minimum-generation
