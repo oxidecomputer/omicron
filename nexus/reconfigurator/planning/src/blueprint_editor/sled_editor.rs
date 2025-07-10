@@ -6,6 +6,7 @@
 
 use crate::blueprint_builder::SledEditCounts;
 use crate::planner::SledPlannerRng;
+use host_phase_2::HostPhase2Editor;
 use illumos_utils::zpool::ZpoolName;
 use itertools::Either;
 use nexus_sled_agent_shared::inventory::ZoneKind;
@@ -38,6 +39,7 @@ use underlay_ip_allocator::SledUnderlayIpAllocator;
 
 mod datasets;
 mod disks;
+mod host_phase_2;
 mod scalar;
 mod underlay_ip_allocator;
 mod zones;
@@ -364,13 +366,13 @@ impl SledEditor {
         self.as_active_mut()?.set_zone_image_source(zone_id, image_source)
     }
 
-    // Sets the desired host phase 2 contents, returning the old desired phase 2
-    // contents.
+    // Sets the desired host phase 2 contents.
     pub fn set_host_phase_2(
         &mut self,
         host_phase_2: BlueprintHostPhase2DesiredSlots,
-    ) -> Result<BlueprintHostPhase2DesiredSlots, SledEditError> {
-        Ok(self.as_active_mut()?.set_host_phase_2(host_phase_2))
+    ) -> Result<(), SledEditError> {
+        self.as_active_mut()?.set_host_phase_2(host_phase_2);
+        Ok(())
     }
 
     /// Sets remove-mupdate-override configuration for this sled.
@@ -414,8 +416,7 @@ struct ActiveSledEditor {
     disks: DisksEditor,
     datasets: DatasetsEditor,
     remove_mupdate_override: ScalarEditor<Option<MupdateOverrideUuid>>,
-    // TODO-john make a host phase 2 editor type
-    host_phase_2: BlueprintHostPhase2DesiredSlots,
+    host_phase_2: HostPhase2Editor,
     debug_force_generation_bump: bool,
 }
 
@@ -451,7 +452,7 @@ impl ActiveSledEditor {
             remove_mupdate_override: ScalarEditor::new(
                 config.remove_mupdate_override,
             ),
-            host_phase_2: config.host_phase_2,
+            host_phase_2: HostPhase2Editor::new(config.host_phase_2),
             debug_force_generation_bump: false,
         })
     }
@@ -471,7 +472,9 @@ impl ActiveSledEditor {
             disks: DisksEditor::empty(),
             datasets: DatasetsEditor::empty(),
             remove_mupdate_override: ScalarEditor::new(None),
-            host_phase_2: BlueprintHostPhase2DesiredSlots::current_contents(),
+            host_phase_2: HostPhase2Editor::new(
+                BlueprintHostPhase2DesiredSlots::current_contents(),
+            ),
             debug_force_generation_bump: false,
         }
     }
@@ -482,6 +485,7 @@ impl ActiveSledEditor {
         let (zones, zones_counts) = self.zones.finalize();
         let remove_mupdate_override_is_modified =
             self.remove_mupdate_override.is_modified();
+        let changed_host_phase_2 = self.host_phase_2.is_modified();
         let mut sled_agent_generation = self.incoming_sled_agent_generation;
 
         // Bump the generation if we made any changes of concern to sled-agent.
@@ -490,6 +494,7 @@ impl ActiveSledEditor {
             || datasets_counts.has_nonzero_counts()
             || zones_counts.has_nonzero_counts()
             || remove_mupdate_override_is_modified
+            || changed_host_phase_2
         {
             sled_agent_generation = sled_agent_generation.next();
         }
@@ -504,7 +509,7 @@ impl ActiveSledEditor {
                 remove_mupdate_override: self
                     .remove_mupdate_override
                     .finalize(),
-                host_phase_2: self.host_phase_2,
+                host_phase_2: self.host_phase_2.finalize(),
             },
             edit_counts: SledEditCounts {
                 disks: disks_counts,
@@ -697,15 +702,12 @@ impl ActiveSledEditor {
         Ok(self.zones.set_zone_image_source(zone_id, image_source)?)
     }
 
-    // Sets the desired host phase 2 contents, returning the old desired phase 2
-    // contents.
+    // Sets the desired host phase 2 contents for this sled.
     pub fn set_host_phase_2(
         &mut self,
-        mut host_phase_2: BlueprintHostPhase2DesiredSlots,
-    ) -> BlueprintHostPhase2DesiredSlots {
-        // TODO-john FIXME bump generation if changed
-        mem::swap(&mut host_phase_2, &mut self.host_phase_2);
-        host_phase_2
+        host_phase_2: BlueprintHostPhase2DesiredSlots,
+    ) {
+        self.host_phase_2.set_value(host_phase_2);
     }
 
     /// Backwards compatibility / test helper: If we're given a blueprint that

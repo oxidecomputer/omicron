@@ -1829,7 +1829,6 @@ impl<'a> BlueprintBuilder<'a> {
         Ok(final_counts.difference_since(initial_counts))
     }
 
-    // TODO-john return type?
     pub fn sled_set_host_phase_2(
         &mut self,
         sled_id: SledUuid,
@@ -1842,8 +1841,7 @@ impl<'a> BlueprintBuilder<'a> {
         })?;
         editor
             .set_host_phase_2(host_phase_2)
-            .map_err(|err| Error::SledEditError { sled_id, err })?;
-        Ok(())
+            .map_err(|err| Error::SledEditError { sled_id, err })
     }
 
     /// Set the `remove_mupdate_override` field of the given sled.
