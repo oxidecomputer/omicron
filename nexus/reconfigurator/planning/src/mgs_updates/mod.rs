@@ -431,6 +431,9 @@ fn mgs_update_status_rot(
     // and the found active slot then this means a failed update. We cannot
     // proceed.
     // It will fail its precondition check.
+    // Transient boot preference is not in use yet, if we find that it is set we
+    // should not proceed. Once https://github.com/oxidecomputer/hubris/pull/2050
+    // is implemented, we should revist this check
     if found.active_slot.version() != expected.active_slot.version()
         || found.persistent_boot_preference
             != expected.persistent_boot_preference
@@ -438,25 +441,26 @@ fn mgs_update_status_rot(
             != expected.pending_persistent_boot_preference
         || found.transient_boot_preference != expected.transient_boot_preference
         || found.persistent_boot_preference != found.active_slot.slot
+        || found.transient_boot_preference.is_some()
+        || expected.transient_boot_preference.is_some()
     {
         return MgsUpdateStatus::Impossible;
     }
 
-    // If either found pending persistent boot preference or found transient
-    // boot preference are not empty, then an update is not done
+    // If found pending persistent boot preference is not empty, then an update
+    // is not done.
     //
     // TODO: Alternatively, this could also mean a failed update. See
     // https://github.com/oxidecomputer/omicron/issues/8414 for context
     // about when we'll be able to know whether an it's an ongoing update
     // or an RoT in a failed state.
     if found.pending_persistent_boot_preference.is_some()
-        || found.transient_boot_preference.is_some()
     {
         return MgsUpdateStatus::NotDone;
     }
 
     // If there is a mismatch between the expected active slot and the found
-    // active slot then the update is not done.
+    // active slot then an update is not done.
     if found.active_slot.slot != expected.active_slot.slot {
         return MgsUpdateStatus::NotDone;
     }
@@ -735,6 +739,8 @@ fn try_make_update_rot(
                 return false;
             }
 
+            // TODO-K: Do SIGN check or verify CMPA/CFPA pages
+
             match active_slot {
                 RotSlot::A => {
                     let slot_a_artifacts = [
@@ -774,9 +780,10 @@ fn try_make_update_rot(
 
     if matching_artifacts.len() > 1 {
         // This should be impossible unless we shipped a TUF repo with more
-        // than 1 artifact for the same board and slot. But it doesn't prevent
-        // us from picking one and proceeding. Make a note and proceed.
-        warn!(log, "found more than one matching artifact for RoT update");
+        // than 1 artifact for the same board and slot that verifies against the
+        // RoT's CMPA/CFPA. But it doesn't prevent us from picking one and
+        // proceeding. Make a note and proceed.
+        error!(log, "found more than one matching artifact for RoT update");
     }
 
     let artifact = matching_artifacts[0];
