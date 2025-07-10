@@ -384,23 +384,27 @@ async fn insert_impl(
         let mut new_artifacts = Vec::new();
         let mut all_artifacts = Vec::new();
 
-        enum ArtifactStatus {
+        enum ArtifactStatus<'a> {
             New,
-            Existing,
+            Existing(&'a TufArtifact),
             Mismatch,
         }
 
-        impl ArtifactStatus {
-            fn mark_existing(&mut self) {
+        impl<'a> ArtifactStatus<'a> {
+            fn mark_existing(&mut self, artifact: &'a TufArtifact) {
                 match self {
-                    ArtifactStatus::New => *self = ArtifactStatus::Existing,
-                    ArtifactStatus::Existing | ArtifactStatus::Mismatch => (),
+                    ArtifactStatus::New => {
+                        *self = ArtifactStatus::Existing(artifact)
+                    }
+                    ArtifactStatus::Existing(_) | ArtifactStatus::Mismatch => {
+                        ()
+                    }
                 }
             }
 
             fn mark_mismatch(&mut self) {
                 match self {
-                    ArtifactStatus::New | ArtifactStatus::Existing => {
+                    ArtifactStatus::New | ArtifactStatus::Existing(_) => {
                         *self = ArtifactStatus::Mismatch
                     }
                     ArtifactStatus::Mismatch => (),
@@ -413,7 +417,7 @@ async fn insert_impl(
             if let Some(&existing_nvk) =
                 results_by_id.get(&uploaded_artifact.nvk())
             {
-                status.mark_existing();
+                status.mark_existing(existing_nvk);
                 if existing_nvk.sha256 != uploaded_artifact.sha256
                     || existing_nvk.artifact_size()
                         != uploaded_artifact.artifact_size()
@@ -429,7 +433,7 @@ async fn insert_impl(
             if let Some(&existing_hash) = results_by_hash_id
                 .get(&(&uploaded_artifact.kind, uploaded_artifact.sha256))
             {
-                status.mark_existing();
+                status.mark_existing(existing_hash);
                 if existing_hash.name != uploaded_artifact.name
                     || existing_hash.version != uploaded_artifact.version
                 {
@@ -447,8 +451,8 @@ async fn insert_impl(
                     new_artifacts.push(uploaded_artifact.clone());
                     all_artifacts.push(uploaded_artifact);
                 }
-                ArtifactStatus::Existing => {
-                    all_artifacts.push(uploaded_artifact);
+                ArtifactStatus::Existing(existing_artifact) => {
+                    all_artifacts.push(existing_artifact.clone());
                 }
                 ArtifactStatus::Mismatch => {
                     // This is an error case -- we'll return an error before
@@ -498,7 +502,7 @@ async fn insert_impl(
         use nexus_db_schema::schema::tuf_repo_artifact::dsl;
 
         let mut values = Vec::new();
-        for artifact in desc.artifacts.clone() {
+        for artifact in &all_artifacts {
             slog::debug!(
                 log,
                 "inserting artifact into tuf_repo_artifact table";
