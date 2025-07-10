@@ -23,10 +23,10 @@ sled-update-install-dataset serial0 --to-target-release
 sled-update-install-dataset serial1 --with-manifest-error
 
 # On a third sled, update the install dataset and simulate a mupdate override.
-# (Currently we do this in the blueprint, but with
-# https://github.com/oxidecomputer/omicron/pull/8456 we should update this test and
-# set a mupdate-override on the sled directly.)
+# Also set it in the blueprint -- this simulates the situation where the mupdate
+# override is in progress and will be cleared in the future.
 sled-update-install-dataset serial2 --to-target-release
+sled-set serial2 mupdate-override ffffffff-ffff-ffff-ffff-ffffffffffff
 blueprint-edit latest set-remove-mupdate-override serial2 ffffffff-ffff-ffff-ffff-ffffffffffff
 
 # On a fourth sled, simulate an error validating the install dataset image on one zone.

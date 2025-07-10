@@ -375,6 +375,8 @@ enum SledSetCommand {
     Policy(SledSetPolicyArgs),
     #[clap(flatten)]
     Visibility(SledSetVisibilityCommand),
+    /// set the mupdate override for this sled
+    MupdateOverride(SledSetMupdateOverrideArgs),
 }
 
 #[derive(Debug, Args)]
@@ -494,6 +496,23 @@ struct SledUpdateSpArgs {
     /// sets the version reported for the SP inactive slot
     #[clap(long, required_unless_present_any = &["active"])]
     inactive: Option<ExpectedVersion>,
+}
+
+#[derive(Debug, Args)]
+struct SledSetMupdateOverrideArgs {
+    #[clap(flatten)]
+    source: SledMupdateOverrideSource,
+}
+
+#[derive(Debug, Args)]
+#[group(id = "sled-mupdate-override-source", required = true, multiple = false)]
+struct SledMupdateOverrideSource {
+    /// the new value of the mupdate override, or "unset"
+    mupdate_override_id: Option<MupdateOverrideUuidOpt>,
+
+    /// simulate an error reading the mupdate override
+    #[clap(long, conflicts_with = "mupdate_override_id")]
+    with_error: bool,
 }
 
 #[derive(Debug, Args)]
@@ -1300,6 +1319,51 @@ fn cmd_sled_set(
                     "set sled {sled_id} inventory visibility: {prev} -> {new}"
                 )))
             }
+        }
+        SledSetCommand::MupdateOverride(SledSetMupdateOverrideArgs {
+            source:
+                SledMupdateOverrideSource { mupdate_override_id, with_error },
+        }) => {
+            let (desc, prev) = if with_error {
+                let prev =
+                    system.description_mut().sled_set_mupdate_override_error(
+                        sled_id,
+                        "reconfigurator-cli simulated mupdate-override error"
+                            .to_owned(),
+                    )?;
+                ("error".to_owned(), prev)
+            } else {
+                let mupdate_override_id =
+                    mupdate_override_id.expect("clap ensures that this is set");
+                let prev = system.description_mut().sled_set_mupdate_override(
+                    sled_id,
+                    mupdate_override_id.into(),
+                )?;
+                let desc = match mupdate_override_id {
+                    MupdateOverrideUuidOpt::Set(id) => id.to_string(),
+                    MupdateOverrideUuidOpt::Unset => "unset".to_owned(),
+                };
+                (desc, prev)
+            };
+
+            let prev_desc = match prev {
+                Ok(Some(id)) => id.to_string(),
+                Ok(None) => "unset".to_owned(),
+                Err(_) => "error".to_owned(),
+            };
+
+            sim.commit_and_bump(
+                format!(
+                    "reconfigurator-cli sled-set-mupdate-override: {}: {} -> {}",
+                    sled_id, prev_desc, desc,
+                ),
+                state,
+            );
+
+            Ok(Some(format!(
+                "set sled {} mupdate override: {} -> {}",
+                sled_id, prev_desc, desc,
+            )))
         }
     }
 }

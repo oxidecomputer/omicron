@@ -9,6 +9,7 @@
 use crate::blueprint_builder::BlueprintBuilder;
 use crate::blueprint_builder::Ensure;
 use crate::blueprint_builder::EnsureMultiple;
+use crate::blueprint_builder::EnsureMupdateOverrideAction;
 use crate::blueprint_builder::Error;
 use crate::blueprint_builder::Operation;
 use crate::blueprint_editor::DisksEditError;
@@ -16,6 +17,7 @@ use crate::blueprint_editor::SledEditError;
 use crate::mgs_updates::plan_mgs_updates;
 use crate::planner::omicron_zone_placement::PlacementError;
 use gateway_client::types::SpType;
+use itertools::Itertools;
 use nexus_sled_agent_shared::inventory::OmicronZoneType;
 use nexus_sled_agent_shared::inventory::ZoneKind;
 use nexus_types::deployment::Blueprint;
@@ -42,6 +44,7 @@ use omicron_uuid_kinds::PhysicalDiskUuid;
 use omicron_uuid_kinds::SledUuid;
 use slog::debug;
 use slog::error;
+use slog::o;
 use slog::{Logger, info, warn};
 use slog_error_chain::InlineErrorChain;
 use std::collections::BTreeMap;
@@ -153,12 +156,28 @@ impl<'a> Planner<'a> {
     fn do_plan(&mut self) -> Result<(), Error> {
         self.do_plan_expunge()?;
         self.do_plan_decommission()?;
+        let plan_mupdate_override_res = self.do_plan_mupdate_override()?;
+
+        // Within `do_plan_noop_image_source`, we plan noop image sources on
+        // sleds other than those currently affected by mupdate overrides. This
+        // means that we don't have to wait for the `plan_mupdate_override_res`
+        // result for that step.
         self.do_plan_noop_image_source()?;
-        self.do_plan_add()?;
-        if let UpdateStepResult::ContinueToNextStep = self.do_plan_mgs_updates()
+
+        if let UpdateStepResult::ContinueToNextStep = plan_mupdate_override_res
         {
-            self.do_plan_zone_updates()?;
+            // If do_plan_mupdate_override returns Waiting, we don't plan *any*
+            // additional steps until the system has recovered.
+            self.do_plan_add()?;
+            if let UpdateStepResult::ContinueToNextStep =
+                self.do_plan_mgs_updates()
+            {
+                self.do_plan_zone_updates()?;
+            }
         }
+
+        // CockroachDB settings aren't dependent on zones, so they can be
+        // planned independently of the rest of the system.
         self.do_plan_cockroachdb_settings();
         Ok(())
     }
@@ -1405,6 +1424,206 @@ impl<'a> Planner<'a> {
         }
 
         Ok(())
+    }
+
+    fn do_plan_mupdate_override(&mut self) -> Result<UpdateStepResult, Error> {
+        // For each sled, compare what's in the inventory to what's in the
+        // blueprint.
+        let mut actions_by_sled = BTreeMap::new();
+        let log = self.log.new(o!("phase" => "do_plan_mupdate_override"));
+
+        // We use the list of in-service sleds here -- we don't want to alter
+        // expunged or decommissioned sleds.
+        for sled_id in self.input.all_sled_ids(SledFilter::InService) {
+            let log = log.new(o!("sled_id" => sled_id.to_string()));
+            let Some(inv_sled) = self.inventory.sled_agents.get(&sled_id)
+            else {
+                warn!(log, "no inventory found for in-service sled");
+                continue;
+            };
+            let action = match &inv_sled
+                .zone_image_resolver
+                .mupdate_override
+                .boot_override
+            {
+                Ok(inv_mupdate_override) => {
+                    self.blueprint.sled_ensure_mupdate_override(
+                        sled_id,
+                        inv_mupdate_override
+                            .as_ref()
+                            .map(|inv| inv.mupdate_override_id),
+                    )?
+                }
+                Err(message) => EnsureMupdateOverrideAction::GetOverrideError {
+                    message: message.clone(),
+                },
+            };
+            action.log_to(&log);
+            actions_by_sled.insert(sled_id, action);
+        }
+
+        // As a result of the action above, did any sleds get a new mupdate
+        // override in the blueprint? In that case, halt consideration of
+        // updates by setting the target_release_minimum_generation.
+        //
+        // Note that this is edge-triggered, not level-triggered. This is a
+        // domain requirement. Consider what happens if:
+        //
+        // 1. Let's say the target release generation is 5.
+        // 2. A sled is mupdated.
+        // 3. As a result of the mupdate, we update the target release minimum
+        //    generation to 6.
+        // 4. Then, an operator sets the target release generation to 6.
+        //
+        // At this point, we *do not* want to set the blueprint's minimum
+        // generation to 7. We only want to do it if we acknowledged a new sled
+        // getting mupdated.
+        //
+        // Some notes:
+        //
+        // * We only process sleds that are currently in the inventory. This
+        //   means that if some sleds take longer to come back up than others
+        //   and the target release is updated in the middle, we'll potentially
+        //   bump the minimum generation multiple times, asking the operator to
+        //   intervene each time.
+        //
+        //   It's worth considering ways to mitigate this in the future: for
+        //   example, we could ensure that for a particular TUF repo a shared
+        //   mupdate override ID is assigned by wicketd, and track the override
+        //   IDs that are currently in flight.
+        //
+        // * We aren't handling errors while fetching the mupdate override here.
+        //   We don't have a history of state transitions for the mupdate
+        //   override, so we can't do edge-triggered logic. We probably need
+        //   another channel to report errors. (But in general, errors should be
+        //   rare.)
+        if actions_by_sled.values().any(|action| {
+            matches!(action, EnsureMupdateOverrideAction::BpSetOverride { .. })
+        }) {
+            let current = self.blueprint.target_release_minimum_generation();
+            let new = self.input.tuf_repo().target_release_generation.next();
+            if current == new {
+                // No change needed.
+                info!(
+                    log,
+                    "would have updated target release minimum generation, but \
+                     it was already set to the desired value, so no change was \
+                     needed";
+                    "generation" => %current,
+                );
+            } else {
+                if current < new {
+                    info!(
+                        log,
+                        "updating target release minimum generation based on \
+                         new set-override actions";
+                        "current_generation" => %current,
+                        "new_generation" => %new,
+                    );
+                } else {
+                    // It would be very strange for the current value to be
+                    // greater than the new value. That would indicate something
+                    // like a row being removed from the target release
+                    // generation table -- one of the invariants of the target
+                    // release generation is that it only moves forward.
+                    //
+                    // In this case we bail out of planning entirely.
+                    return Err(
+                        Error::TargetReleaseMinimumGenerationRollback {
+                            current,
+                            new,
+                        },
+                    );
+                }
+                self.blueprint
+                    .set_target_release_minimum_generation(current, new)
+                    .expect("current value passed in => can't fail");
+            }
+        }
+
+        // Now we need to determine whether to also perform other actions like
+        // updating or adding zones. We have to be careful here:
+        //
+        // * We may have moved existing zones with an Artifact source to using
+        //   the install dataset via the BpSetOverride action, but we don't want
+        //   to use the install dataset on sleds that weren't MUPdated (because
+        //   the install dataset might be ancient).
+        //
+        // * While any overrides are in place according to inventory, we wait
+        //   for the system to recover and don't start new zones on *any* sleds,
+        //   or perform any further updates.
+        //
+        // This condition is level-triggered on the following conditions:
+        //
+        // 1. If the planning input's target release generation is less than the
+        //    minimum generation set in the blueprint, the operator hasn't set a
+        //    new generation in the blueprint -- we should wait to decide what
+        //    to do until the operator provides an indication.
+        //
+        // 2. If any sleds have a mupdate override set in the blueprint, then
+        //    we're still recovering from a MUPdate. If that is the case, we
+        //    don't want to add zones on *any* sled.
+        //
+        //    This might seem overly conservative (why block zone additions on
+        //    *all* sleds if *any* are currently recovering from a MUPdate?),
+        //    but is probably correct for the medium term: we want to minimize
+        //    the number of different versions of services running at any time.
+        //
+        //    There's some potential to relax this in the future (e.g. by
+        //    matching up the zone manifest with the target release to compute
+        //    the number of versions running at a given time), but that's a
+        //    non-trivial optimization that we should probably defer until we
+        //    see its necessity.
+        //
+        // What does "any sleds" mean in this context? We don't need to care
+        // about decommissioned or expunged sleds, so we consider in-service
+        // sleds.
+        let mut reasons = Vec::new();
+
+        // Condition 1 above.
+        if self.blueprint.target_release_minimum_generation()
+            > self.input.tuf_repo().target_release_generation
+        {
+            reasons.push(format!(
+                "current target release generation ({}) is lower than \
+                 minimum required by blueprint ({})",
+                self.input.tuf_repo().target_release_generation,
+                self.blueprint.target_release_minimum_generation(),
+            ));
+        }
+
+        // Condition 2 above.
+        {
+            let mut sleds_with_override = BTreeSet::new();
+            for sled_id in self.input.all_sled_ids(SledFilter::InService) {
+                if self
+                    .blueprint
+                    .sled_get_remove_mupdate_override(sled_id)?
+                    .is_some()
+                {
+                    sleds_with_override.insert(sled_id);
+                }
+            }
+
+            if !sleds_with_override.is_empty() {
+                reasons.push(format!(
+                    "sleds have remove mupdate override set in blueprint: {}",
+                    sleds_with_override.iter().join(", ")
+                ));
+            }
+        }
+
+        if !reasons.is_empty() {
+            let reasons = reasons.join("; ");
+            info!(
+                log,
+                "not ready to add or update new zones yet";
+                "reasons" => reasons,
+            );
+            Ok(UpdateStepResult::Waiting)
+        } else {
+            Ok(UpdateStepResult::ContinueToNextStep)
+        }
     }
 
     fn do_plan_cockroachdb_settings(&mut self) {
