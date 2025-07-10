@@ -75,6 +75,7 @@ pub async fn make_resources(
     builder.new_resource(authz::DEVICE_AUTH_REQUEST_LIST);
     builder.new_resource(authz::INVENTORY);
     builder.new_resource(authz::IP_POOL_LIST);
+    builder.new_resource(authz::UPDATE_TRUST_ROOT_LIST);
     builder.new_resource(authz::TARGET_RELEASE_CONFIG);
     builder.new_resource(authz::ALERT_CLASS_LIST);
 
@@ -157,6 +158,14 @@ pub async fn make_resources(
         authz::FLEET,
         tuf_artifact_id,
         LookupType::ById(tuf_artifact_id.into_untyped_uuid()),
+    ));
+
+    let tuf_trust_root_id =
+        "b2c043c7-5eaa-40b5-a0a2-cdf97b2e66b3".parse().unwrap();
+    builder.new_resource(authz::TufTrustRoot::new(
+        authz::FLEET,
+        tuf_trust_root_id,
+        LookupType::ById(tuf_trust_root_id.into_untyped_uuid()),
     ));
 
     let address_lot_id =

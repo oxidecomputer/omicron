@@ -106,6 +106,7 @@ use omicron_common::api::external::http_pagination::name_or_id_pagination;
 use omicron_common::bail_unless;
 use omicron_uuid_kinds::GenericUuid;
 use omicron_uuid_kinds::SupportBundleUuid;
+use omicron_uuid_kinds::TufTrustRootUuid;
 use propolis_client::support::WebSocketStream;
 use propolis_client::support::tungstenite::protocol::frame::coding::CloseCode;
 use propolis_client::support::tungstenite::protocol::{
@@ -6603,6 +6604,115 @@ impl NexusExternalApi for NexusExternalApiImpl {
             Ok(HttpResponseOk(TufRepoGetResponse {
                 description: description.into_external(),
             }))
+        };
+        apictx
+            .context
+            .external_latencies
+            .instrument_dropshot_handler(&rqctx, handler)
+            .await
+    }
+
+    async fn system_update_trust_root_list(
+        rqctx: RequestContext<Self::Context>,
+        query_params: Query<PaginatedById>,
+    ) -> Result<HttpResponseOk<ResultsPage<views::UpdatesTrustRoot>>, HttpError>
+    {
+        let apictx = rqctx.context();
+        let handler = async {
+            let opctx =
+                crate::context::op_context_for_external_api(&rqctx).await?;
+            let nexus = &apictx.context.nexus;
+
+            let query = query_params.into_inner();
+            let pagparams = data_page_params_for(&rqctx, &query)?;
+
+            let trust_roots = nexus
+                .updates_list_trust_roots(&opctx, &pagparams)
+                .await?
+                .into_iter()
+                .map(|p| p.into())
+                .collect();
+
+            Ok(HttpResponseOk(ScanById::results_page(
+                &query,
+                trust_roots,
+                &|_, trust_root: &views::UpdatesTrustRoot| {
+                    trust_root.id.into_untyped_uuid()
+                },
+            )?))
+        };
+        apictx
+            .context
+            .external_latencies
+            .instrument_dropshot_handler(&rqctx, handler)
+            .await
+    }
+
+    async fn system_update_trust_root_create(
+        rqctx: RequestContext<Self::Context>,
+        body: TypedBody<shared::TufSignedRootRole>,
+    ) -> Result<HttpResponseCreated<views::UpdatesTrustRoot>, HttpError> {
+        let apictx = rqctx.context();
+        let handler = async {
+            let opctx =
+                crate::context::op_context_for_external_api(&rqctx).await?;
+            let nexus = &apictx.context.nexus;
+
+            Ok(HttpResponseCreated(
+                nexus
+                    .updates_add_trust_root(&opctx, body.into_inner())
+                    .await?
+                    .into(),
+            ))
+        };
+        apictx
+            .context
+            .external_latencies
+            .instrument_dropshot_handler(&rqctx, handler)
+            .await
+    }
+
+    async fn system_update_trust_root_view(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<params::TufTrustRootPath>,
+    ) -> Result<HttpResponseOk<views::UpdatesTrustRoot>, HttpError> {
+        let apictx = rqctx.context();
+        let handler = async {
+            let opctx =
+                crate::context::op_context_for_external_api(&rqctx).await?;
+            let nexus = &apictx.context.nexus;
+
+            let id = TufTrustRootUuid::from_untyped_uuid(
+                path_params.into_inner().trust_root_id,
+            );
+
+            Ok(HttpResponseOk(
+                nexus.updates_get_trust_root(&opctx, id).await?.into(),
+            ))
+        };
+        apictx
+            .context
+            .external_latencies
+            .instrument_dropshot_handler(&rqctx, handler)
+            .await
+    }
+
+    async fn system_update_trust_root_delete(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<params::TufTrustRootPath>,
+    ) -> Result<HttpResponseDeleted, HttpError> {
+        let apictx = rqctx.context();
+        let handler = async {
+            let opctx =
+                crate::context::op_context_for_external_api(&rqctx).await?;
+            let nexus = &apictx.context.nexus;
+
+            let id = TufTrustRootUuid::from_untyped_uuid(
+                path_params.into_inner().trust_root_id,
+            );
+            nexus.updates_delete_trust_root(&opctx, id).await?;
+
+            Ok(HttpResponseDeleted())
         };
         apictx
             .context
