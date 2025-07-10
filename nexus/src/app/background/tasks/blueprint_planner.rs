@@ -257,10 +257,14 @@ impl BackgroundTask for BlueprintPlanner {
 #[cfg(test)]
 mod test {
     use super::*;
+    use crate::app::background::Activator;
+    use crate::app::background::tasks::blueprint_execution::BlueprintExecutor;
     use crate::app::background::tasks::blueprint_load::TargetBlueprintLoader;
     use crate::app::background::tasks::inventory_collection::InventoryCollector;
     use nexus_inventory::now_db_precision;
     use nexus_test_utils_macros::nexus_test;
+    use nexus_types::deployment::PendingMgsUpdates;
+    use omicron_uuid_kinds::OmicronZoneUuid;
 
     type ControlPlaneTestContext =
         nexus_test_utils::ControlPlaneTestContext<crate::Server>;
@@ -289,7 +293,7 @@ mod test {
             cptestctx.logctx.log.clone(),
             &[cptestctx.internal_dns.dns_server.local_address()],
         )
-        .unwrap();
+        .expect("can't start resolver");
         let mut collector = InventoryCollector::new(
             &opctx,
             datastore.clone(),
@@ -323,7 +327,7 @@ mod test {
         let status = serde_json::from_value::<BlueprintPlannerStatus>(
             planner.activate(&opctx).await,
         )
-        .unwrap();
+        .expect("can't activate planner");
         let blueprint_id = match status {
             BlueprintPlannerStatus::Targeted {
                 parent_blueprint_id,
@@ -348,11 +352,73 @@ mod test {
             blueprint.diff_since_blueprint(initial_blueprint).has_changes()
         );
 
-        // Planning again should not change the plan.
+        // Planning again should not change the plan, because nothing has changed.
         let status = serde_json::from_value::<BlueprintPlannerStatus>(
             planner.activate(&opctx).await,
         )
-        .unwrap();
+        .expect("can't re-activate planner");
+        assert_eq!(
+            status,
+            BlueprintPlannerStatus::Unchanged {
+                parent_blueprint_id: blueprint_id,
+            }
+        );
+
+        // Enable execution.
+        let mut target = *target;
+        target.enabled = true;
+        datastore
+            .blueprint_target_set_current_enabled(&opctx, target)
+            .await
+            .expect("can't enable execution");
+
+        // Ping the loader again so it gets the updated target.
+        loader.activate(&opctx).await;
+        let (target, blueprint) = &*rx_loader
+            .borrow_and_update()
+            .clone()
+            .expect("failed to re-load blueprint");
+        assert_eq!(target.target_id, blueprint.id);
+        assert_eq!(target.target_id, blueprint_id);
+        assert!(
+            blueprint.diff_since_blueprint(initial_blueprint).has_changes()
+        );
+
+        // Trigger an inventory collection.
+        collector.activate(&opctx).await;
+
+        // Execute the plan.
+        let (dummy_tx, _dummy_rx) = watch::channel(PendingMgsUpdates::new());
+        let mut executor = BlueprintExecutor::new(
+            datastore.clone(),
+            resolver.clone(),
+            rx_loader.clone(),
+            OmicronZoneUuid::new_v4(),
+            Activator::new(),
+            dummy_tx,
+        );
+        let value = executor.activate(&opctx).await;
+        let value = value.as_object().expect("response is not a JSON object");
+        assert_eq!(value["target_id"], blueprint.id.to_string());
+        assert!(value["enabled"].as_bool().expect("enabled should be boolean"));
+        assert!(value["execution_error"].is_null());
+        assert!(
+            !value["event_report"]
+                .as_object()
+                .expect("event report should be an object")["Ok"]
+                .as_object()
+                .expect("event report is not Ok")["step_events"]
+                .as_array()
+                .expect("steps should be an array")
+                .is_empty()
+        );
+
+        // Planning again should not change the plan, because the execution
+        // is all fake.
+        let status = serde_json::from_value::<BlueprintPlannerStatus>(
+            planner.activate(&opctx).await,
+        )
+        .expect("can't re-activate planner");
         assert_eq!(
             status,
             BlueprintPlannerStatus::Unchanged {

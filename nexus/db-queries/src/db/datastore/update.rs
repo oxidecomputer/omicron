@@ -18,11 +18,12 @@ use nexus_db_errors::OptionalError;
 use nexus_db_errors::{ErrorHandler, public_error_from_diesel};
 use nexus_db_lookup::DbConnection;
 use nexus_db_model::{
-    ArtifactHash, TufArtifact, TufRepo, TufRepoDescription, to_db_typed_uuid,
+    ArtifactHash, TufArtifact, TufRepo, TufRepoDescription, TufTrustRoot,
+    to_db_typed_uuid,
 };
 use omicron_common::api::external::{
-    self, CreateResult, DataPageParams, Generation, ListResultVec,
-    LookupResult, LookupType, ResourceType, TufRepoInsertStatus,
+    self, CreateResult, DataPageParams, DeleteResult, Generation,
+    ListResultVec, LookupResult, LookupType, ResourceType, TufRepoInsertStatus,
 };
 use omicron_uuid_kinds::GenericUuid;
 use omicron_uuid_kinds::TufRepoKind;
@@ -203,6 +204,70 @@ impl DataStore {
         get_generation(&*self.pool_connection_authorized(opctx).await?)
             .await
             .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))
+    }
+
+    /// List the trusted TUF root roles in the trust store.
+    pub async fn tuf_trust_root_list(
+        &self,
+        opctx: &OpContext,
+        pagparams: &DataPageParams<'_, Uuid>,
+    ) -> ListResultVec<TufTrustRoot> {
+        use nexus_db_schema::schema::tuf_trust_root::dsl;
+
+        opctx
+            .authorize(
+                authz::Action::ListChildren,
+                &authz::UPDATE_TRUST_ROOT_LIST,
+            )
+            .await?;
+        paginated(dsl::tuf_trust_root, dsl::id, pagparams)
+            .select(TufTrustRoot::as_select())
+            .filter(dsl::time_deleted.is_null())
+            .load_async(&*self.pool_connection_authorized(opctx).await?)
+            .await
+            .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))
+    }
+
+    /// Insert a trusted TUF root role into the trust store.
+    pub async fn tuf_trust_root_insert(
+        &self,
+        opctx: &OpContext,
+        trust_root: TufTrustRoot,
+    ) -> CreateResult<TufTrustRoot> {
+        use nexus_db_schema::schema::tuf_trust_root::dsl;
+
+        opctx
+            .authorize(
+                authz::Action::CreateChild,
+                &authz::UPDATE_TRUST_ROOT_LIST,
+            )
+            .await?;
+        diesel::insert_into(dsl::tuf_trust_root)
+            .values(trust_root)
+            .returning(TufTrustRoot::as_returning())
+            .get_result_async(&*self.pool_connection_authorized(opctx).await?)
+            .await
+            .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))
+    }
+
+    /// Remove a TUF root role from the trust store (by setting the time_deleted
+    /// field).
+    pub async fn tuf_trust_root_delete(
+        &self,
+        opctx: &OpContext,
+        authz_trust_root: &authz::TufTrustRoot,
+    ) -> DeleteResult {
+        use nexus_db_schema::schema::tuf_trust_root::dsl;
+
+        opctx.authorize(authz::Action::Delete, authz_trust_root).await?;
+        diesel::update(dsl::tuf_trust_root)
+            .filter(dsl::id.eq(to_db_typed_uuid(authz_trust_root.id())))
+            .filter(dsl::time_deleted.is_null())
+            .set(dsl::time_deleted.eq(chrono::Utc::now()))
+            .execute_async(&*self.pool_connection_authorized(opctx).await?)
+            .await
+            .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))
+            .map(|_| ())
     }
 }
 

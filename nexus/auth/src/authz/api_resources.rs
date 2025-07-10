@@ -668,6 +668,57 @@ impl AuthorizedResource for SiloUserList {
     }
 }
 
+#[derive(Clone, Copy, Debug)]
+pub struct UpdateTrustRootList;
+
+/// Singleton representing the [`UpdateTrustRootList`] itself for authz purposes
+pub const UPDATE_TRUST_ROOT_LIST: UpdateTrustRootList = UpdateTrustRootList;
+
+impl Eq for UpdateTrustRootList {}
+
+impl PartialEq for UpdateTrustRootList {
+    fn eq(&self, _: &Self) -> bool {
+        true
+    }
+}
+
+impl oso::PolarClass for UpdateTrustRootList {
+    fn get_polar_class_builder() -> oso::ClassBuilder<Self> {
+        oso::Class::builder()
+            .with_equality_check()
+            .add_attribute_getter("fleet", |_: &UpdateTrustRootList| FLEET)
+    }
+}
+
+impl AuthorizedResource for UpdateTrustRootList {
+    fn load_roles<'fut>(
+        &'fut self,
+        opctx: &'fut OpContext,
+        authn: &'fut authn::Context,
+        roleset: &'fut mut RoleSet,
+    ) -> futures::future::BoxFuture<'fut, Result<(), Error>> {
+        // There are no roles on the UpdateTrustRootList, only permissions.
+        // But we still need to load the Fleet-related roles to verify that the
+        // actor has the "admin" role on the Fleet (possibly conferred from a
+        // Silo role).
+        load_roles_for_resource_tree(&FLEET, opctx, authn, roleset).boxed()
+    }
+
+    fn on_unauthorized(
+        &self,
+        _: &Authz,
+        error: Error,
+        _: AnyActor,
+        _: Action,
+    ) -> Error {
+        error
+    }
+
+    fn polar_class(&self) -> oso::Class {
+        Self::get_polar_class()
+    }
+}
+
 /// System software target version configuration
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct TargetReleaseConfig;
@@ -961,14 +1012,6 @@ authz_resource! {
 }
 
 authz_resource! {
-    name = "RoleBuiltin",
-    parent = "Fleet",
-    primary_key = (String, String),
-    roles_allowed = false,
-    polar_snippet = FleetChild,
-}
-
-authz_resource! {
     name = "UserBuiltin",
     parent = "Fleet",
     primary_key = Uuid,
@@ -1121,6 +1164,14 @@ authz_resource! {
     name = "TufArtifact",
     parent = "Fleet",
     primary_key = { uuid_kind = TufArtifactKind },
+    roles_allowed = false,
+    polar_snippet = FleetChild,
+}
+
+authz_resource! {
+    name = "TufTrustRoot",
+    parent = "Fleet",
+    primary_key = { uuid_kind = TufTrustRootKind },
     roles_allowed = false,
     polar_snippet = FleetChild,
 }

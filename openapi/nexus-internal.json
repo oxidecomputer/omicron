@@ -7294,6 +7294,29 @@
           "last_port"
         ]
       },
+      "SpStatus": {
+        "type": "object",
+        "properties": {
+          "sled_id": {
+            "nullable": true,
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/TypedUuidForSledKind"
+              }
+            ]
+          },
+          "slot0_version": {
+            "$ref": "#/components/schemas/TufRepoVersion"
+          },
+          "slot1_version": {
+            "$ref": "#/components/schemas/TufRepoVersion"
+          }
+        },
+        "required": [
+          "slot0_version",
+          "slot1_version"
+        ]
+      },
       "SpType": {
         "description": "`SpType`\n\n<details><summary>JSON schema</summary>\n\n```json { \"type\": \"string\", \"enum\": [ \"sled\", \"power\", \"switch\" ] } ``` </details>",
         "type": "string",
@@ -7450,6 +7473,75 @@
       },
       "SwitchPutResponse": {
         "type": "object"
+      },
+      "TufRepoVersion": {
+        "oneOf": [
+          {
+            "type": "object",
+            "properties": {
+              "zone_status_version": {
+                "type": "string",
+                "enum": [
+                  "unknown"
+                ]
+              }
+            },
+            "required": [
+              "zone_status_version"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "zone_status_version": {
+                "type": "string",
+                "enum": [
+                  "install_dataset"
+                ]
+              }
+            },
+            "required": [
+              "zone_status_version"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "details": {
+                "type": "string",
+                "pattern": "^(0|[1-9]\\d*)\\.(0|[1-9]\\d*)\\.(0|[1-9]\\d*)(?:-((?:0|[1-9]\\d*|\\d*[a-zA-Z-][0-9a-zA-Z-]*)(?:\\.(?:0|[1-9]\\d*|\\d*[a-zA-Z-][0-9a-zA-Z-]*))*))?(?:\\+([0-9a-zA-Z-]+(?:\\.[0-9a-zA-Z-]+)*))?$"
+              },
+              "zone_status_version": {
+                "type": "string",
+                "enum": [
+                  "version"
+                ]
+              }
+            },
+            "required": [
+              "details",
+              "zone_status_version"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "details": {
+                "type": "string"
+              },
+              "zone_status_version": {
+                "type": "string",
+                "enum": [
+                  "error"
+                ]
+              }
+            },
+            "required": [
+              "details",
+              "zone_status_version"
+            ]
+          }
+        ]
       },
       "TxEqConfig": {
         "description": "Per-port tx-eq overrides.  This can be used to fine-tune the transceiver equalization settings to improve signal integrity.",
@@ -7625,6 +7717,12 @@
       "UpdateStatus": {
         "type": "object",
         "properties": {
+          "sps": {
+            "type": "object",
+            "additionalProperties": {
+              "$ref": "#/components/schemas/SpStatus"
+            }
+          },
           "zones": {
             "type": "object",
             "additionalProperties": {
@@ -7636,6 +7734,7 @@
           }
         },
         "required": [
+          "sps",
           "zones"
         ]
       },
@@ -7799,7 +7898,7 @@
         "type": "object",
         "properties": {
           "version": {
-            "$ref": "#/components/schemas/ZoneStatusVersion"
+            "$ref": "#/components/schemas/TufRepoVersion"
           },
           "zone_id": {
             "$ref": "#/components/schemas/TypedUuidForOmicronZoneKind"
@@ -7812,75 +7911,6 @@
           "version",
           "zone_id",
           "zone_type"
-        ]
-      },
-      "ZoneStatusVersion": {
-        "oneOf": [
-          {
-            "type": "object",
-            "properties": {
-              "zone_status_version": {
-                "type": "string",
-                "enum": [
-                  "unknown"
-                ]
-              }
-            },
-            "required": [
-              "zone_status_version"
-            ]
-          },
-          {
-            "type": "object",
-            "properties": {
-              "zone_status_version": {
-                "type": "string",
-                "enum": [
-                  "install_dataset"
-                ]
-              }
-            },
-            "required": [
-              "zone_status_version"
-            ]
-          },
-          {
-            "type": "object",
-            "properties": {
-              "details": {
-                "type": "string",
-                "pattern": "^(0|[1-9]\\d*)\\.(0|[1-9]\\d*)\\.(0|[1-9]\\d*)(?:-((?:0|[1-9]\\d*|\\d*[a-zA-Z-][0-9a-zA-Z-]*)(?:\\.(?:0|[1-9]\\d*|\\d*[a-zA-Z-][0-9a-zA-Z-]*))*))?(?:\\+([0-9a-zA-Z-]+(?:\\.[0-9a-zA-Z-]+)*))?$"
-              },
-              "zone_status_version": {
-                "type": "string",
-                "enum": [
-                  "version"
-                ]
-              }
-            },
-            "required": [
-              "details",
-              "zone_status_version"
-            ]
-          },
-          {
-            "type": "object",
-            "properties": {
-              "details": {
-                "type": "string"
-              },
-              "zone_status_version": {
-                "type": "string",
-                "enum": [
-                  "error"
-                ]
-              }
-            },
-            "required": [
-              "details",
-              "zone_status_version"
-            ]
-          }
         ]
       },
       "ZpoolName": {

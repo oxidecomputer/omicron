@@ -114,6 +114,7 @@ pub fn make_omicron_oso(log: &slog::Logger) -> Result<OsoInit, anyhow::Error> {
         SiloCertificateList::get_polar_class(),
         SiloIdentityProviderList::get_polar_class(),
         SiloUserList::get_polar_class(),
+        UpdateTrustRootList::get_polar_class(),
         TargetReleaseConfig::get_polar_class(),
         AlertClassList::get_polar_class(),
     ];
@@ -153,7 +154,6 @@ pub fn make_omicron_oso(log: &slog::Logger) -> Result<OsoInit, anyhow::Error> {
         DeviceAccessToken::init(),
         PhysicalDisk::init(),
         Rack::init(),
-        RoleBuiltin::init(),
         SshKey::init(),
         Silo::init(),
         SiloUser::init(),
@@ -164,6 +164,7 @@ pub fn make_omicron_oso(log: &slog::Logger) -> Result<OsoInit, anyhow::Error> {
         Sled::init(),
         TufRepo::init(),
         TufArtifact::init(),
+        TufTrustRoot::init(),
         Alert::init(),
         AlertReceiver::init(),
         WebhookSecret::init(),

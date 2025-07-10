@@ -10283,96 +10283,6 @@
         }
       }
     },
-    "/v1/system/roles": {
-      "get": {
-        "tags": [
-          "roles"
-        ],
-        "summary": "List built-in roles",
-        "operationId": "role_list",
-        "parameters": [
-          {
-            "in": "query",
-            "name": "limit",
-            "description": "Maximum number of items returned by a single call",
-            "schema": {
-              "nullable": true,
-              "type": "integer",
-              "format": "uint32",
-              "minimum": 1
-            }
-          },
-          {
-            "in": "query",
-            "name": "page_token",
-            "description": "Token returned by previous call to retrieve the subsequent page",
-            "schema": {
-              "nullable": true,
-              "type": "string"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "successful operation",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/RoleResultsPage"
-                }
-              }
-            }
-          },
-          "4XX": {
-            "$ref": "#/components/responses/Error"
-          },
-          "5XX": {
-            "$ref": "#/components/responses/Error"
-          }
-        },
-        "x-dropshot-pagination": {
-          "required": []
-        }
-      }
-    },
-    "/v1/system/roles/{role_name}": {
-      "get": {
-        "tags": [
-          "roles"
-        ],
-        "summary": "Fetch built-in role",
-        "operationId": "role_view",
-        "parameters": [
-          {
-            "in": "path",
-            "name": "role_name",
-            "description": "The built-in role's unique name.",
-            "required": true,
-            "schema": {
-              "type": "string"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "successful operation",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Role"
-                }
-              }
-            }
-          },
-          "4XX": {
-            "$ref": "#/components/responses/Error"
-          },
-          "5XX": {
-            "$ref": "#/components/responses/Error"
-          }
-        }
-      }
-    },
     "/v1/system/silo-quotas": {
       "get": {
         "tags": [
@@ -10929,7 +10839,8 @@
         "tags": [
           "experimental"
         ],
-        "summary": "Upload TUF repository",
+        "summary": "Upload system release repository",
+        "description": "System release repositories are verified by the updates trust store.",
         "operationId": "system_update_put_repository",
         "parameters": [
           {
@@ -10978,8 +10889,7 @@
         "tags": [
           "experimental"
         ],
-        "summary": "Fetch TUF repository description",
-        "description": "Fetch description of TUF repository by system version.",
+        "summary": "Fetch system release repository description by version",
         "operationId": "system_update_get_repository",
         "parameters": [
           {
@@ -11067,6 +10977,169 @@
                 }
               }
             }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/v1/system/update/trust-roots": {
+      "get": {
+        "tags": [
+          "experimental"
+        ],
+        "summary": "List root roles in the updates trust store",
+        "description": "A root role is a JSON document describing the cryptographic keys that are trusted to sign system release repositories, as described by The Update Framework. Uploading a repository requires its metadata to be signed by keys trusted by the trust store.",
+        "operationId": "system_update_trust_root_list",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "limit",
+            "description": "Maximum number of items returned by a single call",
+            "schema": {
+              "nullable": true,
+              "type": "integer",
+              "format": "uint32",
+              "minimum": 1
+            }
+          },
+          {
+            "in": "query",
+            "name": "page_token",
+            "description": "Token returned by previous call to retrieve the subsequent page",
+            "schema": {
+              "nullable": true,
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "sort_by",
+            "schema": {
+              "$ref": "#/components/schemas/IdSortMode"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UpdatesTrustRootResultsPage"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "x-dropshot-pagination": {
+          "required": []
+        }
+      },
+      "post": {
+        "tags": [
+          "experimental"
+        ],
+        "summary": "Add trusted root role to updates trust store",
+        "operationId": "system_update_trust_root_create",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {}
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "description": "successful creation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UpdatesTrustRoot"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/v1/system/update/trust-roots/{trust_root_id}": {
+      "get": {
+        "tags": [
+          "experimental"
+        ],
+        "summary": "Fetch trusted root role",
+        "operationId": "system_update_trust_root_view",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "trust_root_id",
+            "description": "ID of the trust root",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UpdatesTrustRoot"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      },
+      "delete": {
+        "tags": [
+          "experimental"
+        ],
+        "summary": "Delete trusted root role",
+        "description": "Note that this method does not currently check for any uploaded system release repositories that would become untrusted after deleting the root role.",
+        "operationId": "system_update_trust_root_delete",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "trust_root_id",
+            "description": "ID of the trust root",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "successful deletion"
           },
           "4XX": {
             "$ref": "#/components/responses/Error"
@@ -22197,50 +22270,6 @@
           "items"
         ]
       },
-      "Role": {
-        "description": "View of a Role",
-        "type": "object",
-        "properties": {
-          "description": {
-            "type": "string"
-          },
-          "name": {
-            "$ref": "#/components/schemas/RoleName"
-          }
-        },
-        "required": [
-          "description",
-          "name"
-        ]
-      },
-      "RoleName": {
-        "title": "A name for a built-in role",
-        "description": "Role names consist of two string components separated by dot (\".\").",
-        "type": "string",
-        "pattern": "[a-z-]+\\.[a-z-]+",
-        "maxLength": 63
-      },
-      "RoleResultsPage": {
-        "description": "A single page of results",
-        "type": "object",
-        "properties": {
-          "items": {
-            "description": "list of items on this page of results",
-            "type": "array",
-            "items": {
-              "$ref": "#/components/schemas/Role"
-            }
-          },
-          "next_page": {
-            "nullable": true,
-            "description": "token used to fetch the next page of results (if any)",
-            "type": "string"
-          }
-        },
-        "required": [
-          "items"
-        ]
-      },
       "Route": {
         "description": "A route to a destination network through a gateway address.",
         "type": "object",
@@ -25396,6 +25425,51 @@
           }
         ]
       },
+      "UpdatesTrustRoot": {
+        "description": "Trusted root role used by the update system to verify update repositories.",
+        "type": "object",
+        "properties": {
+          "id": {
+            "description": "The UUID of this trusted root role.",
+            "type": "string",
+            "format": "uuid"
+          },
+          "root_role": {
+            "description": "The trusted root role itself, a JSON document as described by The Update Framework."
+          },
+          "time_created": {
+            "description": "Time the trusted root role was added.",
+            "type": "string",
+            "format": "date-time"
+          }
+        },
+        "required": [
+          "id",
+          "root_role",
+          "time_created"
+        ]
+      },
+      "UpdatesTrustRootResultsPage": {
+        "description": "A single page of results",
+        "type": "object",
+        "properties": {
+          "items": {
+            "description": "list of items on this page of results",
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/UpdatesTrustRoot"
+            }
+          },
+          "next_page": {
+            "nullable": true,
+            "description": "token used to fetch the next page of results (if any)",
+            "type": "string"
+          }
+        },
+        "required": [
+          "items"
+        ]
+      },
       "User": {
         "description": "View of a User",
         "type": "object",
@@ -27235,13 +27309,6 @@
       "description": "Projects are a grouping of associated resources such as instances and disks within a silo for purposes of billing and access control.",
       "externalDocs": {
         "url": "http://docs.oxide.computer/api/projects"
-      }
-    },
-    {
-      "name": "roles",
-      "description": "Roles are a component of Identity and Access Management (IAM) that allow a user or agent account access to additional permissions.",
-      "externalDocs": {
-        "url": "http://docs.oxide.computer/api/roles"
       }
     },
     {

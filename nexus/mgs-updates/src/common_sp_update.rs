@@ -267,7 +267,7 @@ pub trait SpComponentUpdateHelper {
         log: &'a slog::Logger,
         mgs_clients: &'a mut MgsClients,
         update: &'a PendingMgsUpdate,
-    ) -> BoxFuture<'a, Result<(), GatewayClientError>>;
+    ) -> BoxFuture<'a, Result<(), PostUpdateError>>;
 }
 
 /// Describes the live state of the component before the update begins
@@ -319,10 +319,64 @@ pub enum PrecheckError {
     WrongInactiveVersion { expected: ExpectedVersion, found: FoundVersion },
 }
 
-#[derive(Debug)]
+#[derive(Debug, thiserror::Error)]
+pub enum PostUpdateError {
+    #[error("communicating with MGS")]
+    GatewayClientError(#[from] GatewayClientError),
+
+    #[error("transient error: {message:?}")]
+    TransientError { message: String },
+
+    #[error("fatal error: {error:?}")]
+    FatalError { error: String },
+}
+
+impl PostUpdateError {
+    pub fn is_fatal(&self) -> bool {
+        match self {
+            PostUpdateError::GatewayClientError(error) => {
+                !matches!(error, gateway_client::Error::CommunicationError(_))
+            }
+            PostUpdateError::TransientError { .. } => false,
+            PostUpdateError::FatalError { .. } => true,
+        }
+    }
+}
+
+#[derive(Debug, Clone)]
 pub enum FoundVersion {
     MissingVersion,
     Version(String),
+}
+
+impl FoundVersion {
+    pub fn matches(
+        &self,
+        expected: &ExpectedVersion,
+    ) -> Result<(), PrecheckError> {
+        match (expected, &self) {
+            // expected garbage, found garbage
+            (ExpectedVersion::NoValidVersion, FoundVersion::MissingVersion) => {
+                ()
+            }
+            // expected a specific version and found it
+            (
+                ExpectedVersion::Version(artifact_version),
+                FoundVersion::Version(found_version),
+            ) if artifact_version.to_string() == *found_version => (),
+            // anything else is a mismatch
+            (ExpectedVersion::NoValidVersion, FoundVersion::Version(_))
+            | (ExpectedVersion::Version(_), FoundVersion::MissingVersion)
+            | (ExpectedVersion::Version(_), FoundVersion::Version(_)) => {
+                return Err(PrecheckError::WrongInactiveVersion {
+                    expected: expected.clone(),
+                    found: self.clone(),
+                });
+            }
+        };
+
+        Ok(())
+    }
 }
 
 pub(crate) fn error_means_caboose_is_invalid(

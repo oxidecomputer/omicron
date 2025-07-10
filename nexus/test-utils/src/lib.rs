@@ -34,6 +34,7 @@ use nexus_config::MgdConfig;
 use nexus_config::NUM_INITIAL_RESERVED_IP_ADDRESSES;
 use nexus_config::NexusConfig;
 use nexus_db_queries::db::pub_test_utils::crdb;
+use nexus_sled_agent_shared::inventory::HostPhase2DesiredSlots;
 use nexus_sled_agent_shared::inventory::OmicronSledConfig;
 use nexus_sled_agent_shared::inventory::OmicronZoneDataset;
 use nexus_sled_agent_shared::recovery_silo::RecoverySiloConfig;
@@ -96,6 +97,7 @@ use slog::{Logger, debug, error, o};
 use std::collections::BTreeMap;
 use std::collections::HashMap;
 use std::fmt::Debug;
+use std::iter::{once, repeat, zip};
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr, SocketAddrV6};
 use std::sync::Arc;
 use std::time::Duration;
@@ -397,7 +399,11 @@ pub struct ControlPlaneTestContextBuilder<'a, N: NexusServer> {
     pub internal_dns: Option<dns_server::TransientServer>,
     dns_config: Option<DnsConfigParams>,
     initial_blueprint_id: Option<BlueprintUuid>,
+
+    // Build sled configs as we go, ensuring that sled-agent's
+    // initial configuration agrees with the blueprint we build.
     blueprint_zones: Vec<BlueprintZoneConfig>,
+    blueprint_sleds: Option<BTreeMap<SledUuid, BlueprintSledConfig>>,
 
     pub silo_name: Option<Name>,
     pub user_name: Option<UserId>,
@@ -447,6 +453,7 @@ impl<'a, N: NexusServer> ControlPlaneTestContextBuilder<'a, N> {
             dns_config: None,
             initial_blueprint_id: None,
             blueprint_zones: Vec::new(),
+            blueprint_sleds: None,
             silo_name: None,
             user_name: None,
             simulated_upstairs: Arc::new(sim::SimulatedUpstairs::new(
@@ -868,7 +875,7 @@ impl<'a, N: NexusServer> ControlPlaneTestContextBuilder<'a, N> {
         self.dns_config = Some(dns_config);
     }
 
-    // Perform RSS handoff
+    /// Perform RSS handoff
     pub async fn start_nexus_external(
         &mut self,
         tls_certificates: Vec<Certificate>,
@@ -899,112 +906,31 @@ impl<'a, N: NexusServer> ControlPlaneTestContextBuilder<'a, N> {
             user_password_hash,
         };
 
-        let blueprint = {
-            let mut blueprint_sleds = BTreeMap::new();
-            let mut disk_index = 0;
-
-            // The first sled agent is the only one that'll have configured
-            // blueprint zones, but the others all need to have disks.
-
-            let maybe_zones = std::iter::once(Some(&self.blueprint_zones))
-                .chain(std::iter::repeat(None));
-
-            for (sled_agent, maybe_zones) in
-                std::iter::zip(self.sled_agents.iter(), maybe_zones)
-            {
-                let sled_id = sled_agent.sled_agent_id();
-
-                let mut disks = IdMap::new();
-                let mut datasets = IdMap::new();
-
-                let zones = if let Some(zones) = maybe_zones {
-                    for zone in zones {
-                        let zpool = &zone.filesystem_pool;
-                        disks.insert(BlueprintPhysicalDiskConfig {
-                            disposition:
-                                BlueprintPhysicalDiskDisposition::InService,
-                            identity: omicron_common::disk::DiskIdentity {
-                                vendor: "nexus-tests".to_string(),
-                                model: "nexus-test-model".to_string(),
-                                serial: format!("nexus-test-disk-{disk_index}"),
-                            },
-                            id: PhysicalDiskUuid::new_v4(),
-                            pool_id: zpool.id(),
-                        });
-                        disk_index += 1;
-                        let id = DatasetUuid::new_v4();
-                        datasets.insert(BlueprintDatasetConfig {
-                            disposition: BlueprintDatasetDisposition::InService,
-                            id,
-                            pool: *zpool,
-                            kind: DatasetKind::TransientZone {
-                                name: illumos_utils::zone::zone_name(
-                                    zone.zone_type.kind().zone_prefix(),
-                                    Some(zone.id),
-                                ),
-                            },
-                            address: None,
-                            quota: None,
-                            reservation: None,
-                            compression: CompressionAlgorithm::Off,
-                        });
-                    }
-                    zones.iter().cloned().collect()
-                } else {
-                    IdMap::new()
-                };
-
-                // Populate extra fake disks, giving each sled 10 total.
-                if disks.len() < 10 {
-                    for _ in disks.len()..10 {
-                        disks.insert(BlueprintPhysicalDiskConfig {
-                            disposition:
-                                BlueprintPhysicalDiskDisposition::InService,
-                            identity: omicron_common::disk::DiskIdentity {
-                                vendor: "nexus-tests".to_string(),
-                                model: "nexus-test-model".to_string(),
-                                serial: format!("nexus-test-disk-{disk_index}"),
-                            },
-                            id: PhysicalDiskUuid::new_v4(),
-                            pool_id: ZpoolUuid::new_v4(),
-                        });
-                        disk_index += 1;
-                    }
-                }
-
-                blueprint_sleds.insert(
-                    sled_id,
-                    BlueprintSledConfig {
-                        state: SledState::Active,
-                        sled_agent_generation: Generation::new().next(),
-                        disks,
-                        datasets,
-                        zones,
-                        remove_mupdate_override: None,
-                    },
-                );
-            }
-
-            Blueprint {
-                id: BlueprintUuid::new_v4(),
-                sleds: blueprint_sleds,
-                pending_mgs_updates: PendingMgsUpdates::new(),
-                parent_blueprint_id: None,
-                internal_dns_version: dns_config.generation,
-                external_dns_version: Generation::new(),
-                target_release_minimum_generation: Generation::new(),
-                cockroachdb_fingerprint: String::new(),
-                cockroachdb_setting_preserve_downgrade:
-                    CockroachDbPreserveDowngrade::DoNotModify,
-                // Clickhouse clusters are not generated by RSS. One must run
-                // reconfigurator for that.
-                clickhouse_cluster_config: None,
-                oximeter_read_version: Generation::new(),
-                oximeter_read_mode: OximeterReadMode::SingleNode,
-                time_created: Utc::now(),
-                creator: "nexus-test-utils".to_string(),
-                comment: "initial test blueprint".to_string(),
-            }
+        // Construct an initial blueprint that agrees with the sled-agents'
+        // post-initialization configuration (generation 2).
+        let sleds = self
+            .blueprint_sleds
+            .take()
+            .expect("should have already made blueprint sled configs");
+        let blueprint = Blueprint {
+            id: BlueprintUuid::new_v4(),
+            sleds,
+            pending_mgs_updates: PendingMgsUpdates::new(),
+            parent_blueprint_id: None,
+            internal_dns_version: dns_config.generation,
+            external_dns_version: Generation::new(),
+            target_release_minimum_generation: Generation::new(),
+            cockroachdb_fingerprint: String::new(),
+            cockroachdb_setting_preserve_downgrade:
+                CockroachDbPreserveDowngrade::DoNotModify,
+            // Clickhouse clusters are not generated by RSS. One must run
+            // reconfigurator for that.
+            clickhouse_cluster_config: None,
+            oximeter_read_version: Generation::new(),
+            oximeter_read_mode: OximeterReadMode::SingleNode,
+            time_created: Utc::now(),
+            creator: "nexus-test-utils".to_string(),
+            comment: "initial test blueprint".to_string(),
         };
 
         self.initial_blueprint_id = Some(blueprint.id);
@@ -1124,33 +1050,6 @@ impl<'a, N: NexusServer> ControlPlaneTestContextBuilder<'a, N> {
     /// tell the other Sled Agents to report they have no zones configured, and
     /// write the early network config to all sleds.
     pub async fn configure_sled_agents(&mut self) {
-        let Some(sled_agent) = self.sled_agents.first() else {
-            panic!("expected sled agent has not been created");
-        };
-
-        let client = sled_agent_client::Client::new(
-            &format!("http://{}", sled_agent.local_addr()),
-            self.logctx.log.clone(),
-        );
-
-        client
-            .omicron_config_put(&OmicronSledConfig {
-                generation: Generation::new().next(),
-                // Sending no disks or datasets is probably wrong, but there are
-                // a lot of inconsistencies with this in nexus-test.
-                disks: IdMap::default(),
-                datasets: IdMap::default(),
-                zones: self
-                    .blueprint_zones
-                    .clone()
-                    .into_iter()
-                    .map(From::from)
-                    .collect(),
-                remove_mupdate_override: None,
-            })
-            .await
-            .expect("Failed to configure sled agent with our zones");
-
         let early_network_config = EarlyNetworkConfig {
             body: EarlyNetworkConfigBody {
                 ntp_servers: Vec::new(),
@@ -1167,33 +1066,59 @@ impl<'a, N: NexusServer> ControlPlaneTestContextBuilder<'a, N> {
             schema_version: 2,
         };
 
-        client
-            .write_network_bootstore_config(&early_network_config)
-            .await
-            .expect("Failed to write early networking config to bootstore");
+        macro_rules! from_clone {
+            ($source: expr) => {
+                $source.clone().into_iter().map(From::from).collect()
+            };
+        }
 
-        for sled_agent in self.sled_agents.iter().skip(1) {
+        // The first sled agent is the only one that'll have configured
+        // blueprint zones, but the others all need to have disks.
+        let zones = once(from_clone!(self.blueprint_zones))
+            .chain(repeat(Vec::<BlueprintZoneConfig>::new()));
+
+        // Compute the sled configurations once, and let the blueprint
+        // builder copy them.
+        self.make_sled_configs();
+        let sled_configs = self
+            .blueprint_sleds
+            .as_ref()
+            .expect("should have just made blueprint sled configs");
+
+        // Send the sled-agents their new configurations.
+        // This generation number should match the one in
+        // `make_sled_configs`.
+        let generation = Generation::from_u32(2);
+
+        for (sled_agent, sled_zones) in zip(self.sled_agents.iter(), zones) {
+            let sled_id = sled_agent.sled_agent_id();
             let client = sled_agent_client::Client::new(
                 &format!("http://{}", sled_agent.local_addr()),
                 self.logctx.log.clone(),
             );
 
+            let disks = from_clone!(sled_configs[&sled_id].disks);
+            let datasets = from_clone!(sled_configs[&sled_id].datasets);
+            let zones = from_clone!(sled_zones);
             client
                 .omicron_config_put(&OmicronSledConfig {
-                    generation: Generation::new().next(),
-                    // As above, sending no disks or datasets is probably wrong
-                    disks: IdMap::default(),
-                    datasets: IdMap::default(),
-                    zones: IdMap::default(),
+                    generation,
+                    disks,
+                    datasets,
+                    zones,
                     remove_mupdate_override: None,
+                    host_phase_2: HostPhase2DesiredSlots::current_contents(),
                 })
                 .await
-                .expect("Failed to configure sled agent with our zones");
+                .expect("Failed to configure sled agent {sled_id} with zones");
 
             client
                 .write_network_bootstore_config(&early_network_config)
                 .await
-                .expect("Failed to write early networking config to bootstore");
+                .expect(
+                    "Failed to write early networking config \
+                     to bootstore on sled {sled_id}",
+                );
         }
     }
 
@@ -1484,6 +1409,101 @@ impl<'a, N: NexusServer> ControlPlaneTestContextBuilder<'a, N> {
         }
         self.logctx.cleanup_successful();
     }
+
+    fn make_sled_configs(&mut self) {
+        assert!(
+            self.blueprint_sleds.is_none(),
+            "should not have made sled configs yet"
+        );
+
+        let mut blueprint_sleds = BTreeMap::new();
+        let mut disk_index = 0;
+
+        // The first sled agent is the only one that'll have configured
+        // blueprint zones, but the others all need to have disks.
+        let maybe_zones = once(Some(&self.blueprint_zones)).chain(repeat(None));
+
+        // The generation number that the sled-agents' configuration
+        // will have when this blueprint is executed. Should match
+        // the one in `configure_sled_agents`.
+        let sled_agent_generation = Generation::from_u32(2);
+
+        for (sled_agent, maybe_zones) in
+            zip(self.sled_agents.iter(), maybe_zones)
+        {
+            let sled_id = sled_agent.sled_agent_id();
+
+            let mut disks = IdMap::new();
+            let mut datasets = IdMap::new();
+            let zones = if let Some(zones) = maybe_zones {
+                for zone in zones {
+                    let zpool = &zone.filesystem_pool;
+                    disks.insert(BlueprintPhysicalDiskConfig {
+                        disposition:
+                            BlueprintPhysicalDiskDisposition::InService,
+                        identity: omicron_common::disk::DiskIdentity {
+                            vendor: "nexus-tests".to_string(),
+                            model: "nexus-test-model".to_string(),
+                            serial: format!("nexus-test-disk-{disk_index}"),
+                        },
+                        id: PhysicalDiskUuid::new_v4(),
+                        pool_id: zpool.id(),
+                    });
+                    disk_index += 1;
+                    let id = DatasetUuid::new_v4();
+                    datasets.insert(BlueprintDatasetConfig {
+                        disposition: BlueprintDatasetDisposition::InService,
+                        id,
+                        pool: *zpool,
+                        kind: DatasetKind::TransientZone {
+                            name: illumos_utils::zone::zone_name(
+                                zone.zone_type.kind().zone_prefix(),
+                                Some(zone.id),
+                            ),
+                        },
+                        address: None,
+                        quota: None,
+                        reservation: None,
+                        compression: CompressionAlgorithm::Off,
+                    });
+                }
+                zones.iter().cloned().collect()
+            } else {
+                IdMap::new()
+            };
+
+            // Populate extra fake disks, giving each sled 10 total.
+            if disks.len() < 10 {
+                for _ in disks.len()..10 {
+                    disks.insert(BlueprintPhysicalDiskConfig {
+                        disposition:
+                            BlueprintPhysicalDiskDisposition::InService,
+                        identity: omicron_common::disk::DiskIdentity {
+                            vendor: "nexus-tests".to_string(),
+                            model: "nexus-test-model".to_string(),
+                            serial: format!("nexus-test-disk-{disk_index}"),
+                        },
+                        id: PhysicalDiskUuid::new_v4(),
+                        pool_id: ZpoolUuid::new_v4(),
+                    });
+                    disk_index += 1;
+                }
+            }
+            blueprint_sleds.insert(
+                sled_id,
+                BlueprintSledConfig {
+                    state: SledState::Active,
+                    sled_agent_generation,
+                    disks,
+                    datasets,
+                    zones,
+                    remove_mupdate_override: None,
+                },
+            );
+        }
+
+        self.blueprint_sleds = Some(blueprint_sleds);
+    }
 }
 
 /// How to populate CockroachDB.
@@ -1767,7 +1787,7 @@ async fn setup_with_config_impl<N: NexusServer>(
     }
 
     // Start expected services: these will all be allocated to the first sled
-    // agent. Afterwards, configure the first sled agent, and start the rest of
+    // agent. Afterwards, configure the sled agents and start the rest of the
     // the required services.
 
     builder

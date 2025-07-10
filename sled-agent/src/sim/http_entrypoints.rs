@@ -37,10 +37,6 @@ use omicron_common::api::internal::shared::{
 };
 use range_requests::PotentialRange;
 use sled_agent_api::*;
-use sled_agent_types::boot_disk::BootDiskOsWriteStatus;
-use sled_agent_types::boot_disk::BootDiskPathParams;
-use sled_agent_types::boot_disk::BootDiskUpdatePathParams;
-use sled_agent_types::boot_disk::BootDiskWriteStartQueryParams;
 use sled_agent_types::bootstore::BootstoreStatus;
 use sled_agent_types::disk::DiskEnsureBody;
 use sled_agent_types::early_networking::EarlyNetworkConfig;
@@ -650,29 +646,6 @@ impl SledAgentApi for SledAgentSimImpl {
     async fn timesync_get(
         _rqctx: RequestContext<Self::Context>,
     ) -> Result<HttpResponseOk<TimeSync>, HttpError> {
-        method_unimplemented()
-    }
-
-    async fn host_os_write_start(
-        _rqctx: RequestContext<Self::Context>,
-        _path_params: Path<BootDiskPathParams>,
-        _query_params: Query<BootDiskWriteStartQueryParams>,
-        _body: StreamingBody,
-    ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
-        method_unimplemented()
-    }
-
-    async fn host_os_write_status_get(
-        _rqctx: RequestContext<Self::Context>,
-        _path_params: Path<BootDiskPathParams>,
-    ) -> Result<HttpResponseOk<BootDiskOsWriteStatus>, HttpError> {
-        method_unimplemented()
-    }
-
-    async fn host_os_write_status_delete(
-        _rqctx: RequestContext<Self::Context>,
-        _path_params: Path<BootDiskUpdatePathParams>,
-    ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
         method_unimplemented()
     }
 

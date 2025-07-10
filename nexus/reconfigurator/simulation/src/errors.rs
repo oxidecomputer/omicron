@@ -6,10 +6,11 @@ use std::collections::BTreeSet;
 
 use itertools::Itertools;
 use omicron_common::api::external::{Generation, Name};
-use omicron_uuid_kinds::CollectionUuid;
 use thiserror::Error;
 
-use crate::{BlueprintId, ResolvedBlueprintId};
+use crate::{
+    BlueprintId, CollectionId, ResolvedBlueprintId, ResolvedCollectionId,
+};
 
 /// The caller attempted to insert a duplicate key.
 #[derive(Clone, Debug, Error)]
@@ -23,7 +24,7 @@ impl DuplicateError {
         &self.id
     }
 
-    pub(crate) fn collection(id: CollectionUuid) -> Self {
+    pub(crate) fn collection(id: CollectionId) -> Self {
         Self { id: ObjectId::Collection(id) }
     }
 
@@ -46,8 +47,9 @@ impl DuplicateError {
 
 #[derive(Clone, Debug)]
 pub enum ObjectId {
-    Collection(CollectionUuid),
+    Collection(CollectionId),
     Blueprint(BlueprintId),
+    ResolvedCollection(ResolvedCollectionId),
     ResolvedBlueprint(ResolvedBlueprintId),
     InternalDns(Generation),
     ExternalDns(Generation),
@@ -57,7 +59,10 @@ pub enum ObjectId {
 impl ObjectId {
     fn to_error_string(&self) -> String {
         match self {
-            ObjectId::Collection(id) => {
+            ObjectId::Collection(CollectionId::Latest) => {
+                "no latest collection found".to_string()
+            }
+            ObjectId::Collection(CollectionId::Id(id)) => {
                 format!("collection ID {id}")
             }
             ObjectId::Blueprint(BlueprintId::Latest) => {
@@ -69,6 +74,7 @@ impl ObjectId {
             ObjectId::Blueprint(BlueprintId::Id(id)) => {
                 format!("blueprint ID {id}")
             }
+            ObjectId::ResolvedCollection(id) => id.to_string(),
             ObjectId::ResolvedBlueprint(id) => id.to_string(),
             ObjectId::InternalDns(generation) => {
                 format!("internal DNS at generation {generation}")
@@ -95,12 +101,16 @@ impl KeyError {
         &self.id
     }
 
-    pub(crate) fn collection(id: CollectionUuid) -> Self {
+    pub(crate) fn collection(id: CollectionId) -> Self {
         Self { id: ObjectId::Collection(id) }
     }
 
     pub(crate) fn blueprint(id: BlueprintId) -> Self {
         Self { id: ObjectId::Blueprint(id) }
+    }
+
+    pub(crate) fn resolved_collection(id: ResolvedCollectionId) -> Self {
+        Self { id: ObjectId::ResolvedCollection(id) }
     }
 
     pub(crate) fn resolved_blueprint(id: ResolvedBlueprintId) -> Self {

@@ -22,7 +22,7 @@ use nexus_reconfigurator_planning::planner::Planner;
 use nexus_reconfigurator_planning::system::{
     SledBuilder, SledInventoryVisibility, SystemDescription,
 };
-use nexus_reconfigurator_simulation::{BlueprintId, SimState};
+use nexus_reconfigurator_simulation::{BlueprintId, CollectionId, SimState};
 use nexus_reconfigurator_simulation::{SimStateBuilder, SimTufRepoSource};
 use nexus_reconfigurator_simulation::{SimTufRepoDescription, Simulator};
 use nexus_sled_agent_shared::inventory::ZoneKind;
@@ -66,7 +66,9 @@ use tufaceous_artifact::ArtifactHash;
 use tufaceous_artifact::ArtifactVersion;
 use tufaceous_artifact::ArtifactVersionError;
 use tufaceous_lib::assemble::ArtifactManifest;
-use update_common::artifacts::{ArtifactsWithPlan, ControlPlaneZonesMode};
+use update_common::artifacts::{
+    ArtifactsWithPlan, ControlPlaneZonesMode, VerificationMode,
+};
 
 mod log_capture;
 
@@ -239,9 +241,6 @@ fn process_command(
         Commands::BlueprintShow(args) => cmd_blueprint_show(sim, args),
         Commands::BlueprintDiff(args) => cmd_blueprint_diff(sim, args),
         Commands::BlueprintDiffDns(args) => cmd_blueprint_diff_dns(sim, args),
-        Commands::BlueprintDiffInventory(args) => {
-            cmd_blueprint_diff_inventory(sim, args)
-        }
         Commands::BlueprintSave(args) => cmd_blueprint_save(sim, args),
         Commands::Show => cmd_show(sim),
         Commands::Set(args) => cmd_set(sim, args),
@@ -312,8 +311,6 @@ enum Commands {
     BlueprintDiff(BlueprintDiffArgs),
     /// show differences between a blueprint and a particular DNS version
     BlueprintDiffDns(BlueprintDiffDnsArgs),
-    /// show differences between a blueprint and an inventory collection
-    BlueprintDiffInventory(BlueprintDiffInventoryArgs),
     /// write one blueprint to a file
     BlueprintSave(BlueprintSaveArgs),
 
@@ -522,11 +519,11 @@ struct BlueprintPlanArgs {
     /// id of the blueprint on which this one will be based, "latest", or
     /// "target"
     parent_blueprint_id: BlueprintIdOpt,
-    /// id of the inventory collection to use in planning
+    /// id of the inventory collection to use in planning or "latest"
     ///
     /// Must be provided unless there is only one collection in the loaded
     /// state.
-    collection_id: Option<CollectionUuid>,
+    collection_id: Option<CollectionIdOpt>,
 }
 
 #[derive(Debug, Args)]
@@ -725,6 +722,34 @@ impl From<BlueprintIdOpt> for BlueprintId {
             BlueprintIdOpt::Latest => BlueprintId::Latest,
             BlueprintIdOpt::Target => BlueprintId::Target,
             BlueprintIdOpt::Id(id) => BlueprintId::Id(id),
+        }
+    }
+}
+
+#[derive(Clone, Debug)]
+enum CollectionIdOpt {
+    /// use the latest collection sorted by time created
+    Latest,
+    /// use a specific collection
+    Id(CollectionUuid),
+}
+
+impl FromStr for CollectionIdOpt {
+    type Err = anyhow::Error;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        match s {
+            "latest" => Ok(CollectionIdOpt::Latest),
+            _ => Ok(CollectionIdOpt::Id(s.parse()?)),
+        }
+    }
+}
+
+impl From<CollectionIdOpt> for CollectionId {
+    fn from(value: CollectionIdOpt) -> Self {
+        match value {
+            CollectionIdOpt::Latest => CollectionId::Latest,
+            CollectionIdOpt::Id(id) => CollectionId::Id(id),
         }
     }
 }
@@ -1467,10 +1492,13 @@ fn cmd_blueprint_plan(
 
     let parent_blueprint_id =
         system.resolve_blueprint_id(args.parent_blueprint_id.into())?;
-    let collection_id = args.collection_id;
     let parent_blueprint = system.get_blueprint(&parent_blueprint_id)?;
-    let collection = match collection_id {
-        Some(collection_id) => system.get_collection(collection_id)?,
+    let collection = match args.collection_id {
+        Some(collection_id) => {
+            let resolved =
+                system.resolve_collection_id(collection_id.into())?;
+            system.get_collection(&resolved)?
+        }
         None => {
             let mut all_collections_iter = system.all_collections();
             match all_collections_iter.len() {
@@ -1888,23 +1916,6 @@ fn cmd_blueprint_diff_dns(
     Ok(Some(dns_diff.to_string()))
 }
 
-fn cmd_blueprint_diff_inventory(
-    sim: &mut ReconfiguratorSim,
-    args: BlueprintDiffInventoryArgs,
-) -> anyhow::Result<Option<String>> {
-    let collection_id = args.collection_id;
-    let blueprint_id = args.blueprint_id;
-
-    let state = sim.current_state();
-    let _collection = state.system().get_collection(collection_id)?;
-    let _blueprint =
-        state.system().resolve_and_get_blueprint(blueprint_id.into())?;
-    // See https://github.com/oxidecomputer/omicron/issues/7242
-    // let diff = blueprint.diff_since_collection(&collection);
-    // Ok(Some(diff.display().to_string()))
-    bail!("Not Implemented")
-}
-
 fn cmd_blueprint_save(
     sim: &mut ReconfiguratorSim,
     args: BlueprintSaveArgs,
@@ -2186,6 +2197,7 @@ fn extract_tuf_repo_description(
             None,
             repo_hash,
             ControlPlaneZonesMode::Split,
+            VerificationMode::BlindlyTrustAnything,
             log,
         )
         .await
