@@ -149,6 +149,20 @@ impl Context {
             }
         }
     }
+
+    /// Get the opctx actor's roles on a given resource
+    pub async fn get_roles<Resource>(
+        &self,
+        opctx: &OpContext,
+        resource: Resource,
+    ) -> Result<RoleSet, Error>
+    where
+        Resource: AuthorizedResource + Clone,
+    {
+        let mut roles = RoleSet::new();
+        resource.load_roles(opctx, &self.authn, &mut roles).await?;
+        Ok(roles)
+    }
 }
 
 pub trait AuthorizedResource: oso::ToPolar + Send + Sync + 'static {

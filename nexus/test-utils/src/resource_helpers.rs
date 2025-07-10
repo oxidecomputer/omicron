@@ -1106,11 +1106,8 @@ pub async fn grant_iam<T>(
     let existing_policy: shared::Policy<T> =
         NexusRequest::object_get(client, &policy_url)
             .authn_as(run_as.clone())
-            .execute()
-            .await
-            .expect("failed to fetch policy")
-            .parsed_body()
-            .expect("failed to parse policy");
+            .execute_and_parse_unwrap()
+            .await;
     let new_role_assignment = shared::RoleAssignment {
         identity_type: IdentityType::SiloUser,
         identity_id: grant_user,
@@ -1123,6 +1120,43 @@ pub async fn grant_iam<T>(
         .collect();
 
     let new_policy = shared::Policy { role_assignments: new_role_assignments };
+
+    // TODO-correctness use etag when we have it
+    NexusRequest::object_put(client, &policy_url, Some(&new_policy))
+        .authn_as(run_as)
+        .execute()
+        .await
+        .expect("failed to update policy");
+}
+
+/// Same as `grant_iam`, except that instead of adding a role, we are
+/// filtering out any matching roles for the user on that resource
+pub async fn revoke_iam<T>(
+    client: &ClientTestContext,
+    grant_resource_url: &str,
+    grant_role: T,
+    grant_user: Uuid,
+    run_as: AuthnMode,
+) where
+    T: serde::Serialize + serde::de::DeserializeOwned + PartialEq,
+{
+    let policy_url = format!("{}/policy", grant_resource_url);
+    let existing_policy: shared::Policy<T> =
+        NexusRequest::object_get(client, &policy_url)
+            .authn_as(run_as.clone())
+            .execute_and_parse_unwrap()
+            .await;
+
+    let filtered_role_assignments = existing_policy
+        .role_assignments
+        .into_iter()
+        .filter(|ra| {
+            !(ra.identity_id == grant_user && ra.role_name == grant_role)
+        })
+        .collect();
+
+    let new_policy =
+        shared::Policy { role_assignments: filtered_role_assignments };
 
     // TODO-correctness use etag when we have it
     NexusRequest::object_put(client, &policy_url, Some(&new_policy))
