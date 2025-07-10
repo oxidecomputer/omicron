@@ -355,13 +355,22 @@ impl SledEditor {
         self.as_active_mut()?.mark_expunged_zone_ready_for_cleanup(zone_id)
     }
 
-    /// Sets the image source for a zone.
+    /// Sets the image source for a zone, returning the old image source.
     pub fn set_zone_image_source(
         &mut self,
         zone_id: &OmicronZoneUuid,
         image_source: BlueprintZoneImageSource,
     ) -> Result<BlueprintZoneImageSource, SledEditError> {
         self.as_active_mut()?.set_zone_image_source(zone_id, image_source)
+    }
+
+    // Sets the desired host phase 2 contents, returning the old desired phase 2
+    // contents.
+    pub fn set_host_phase_2(
+        &mut self,
+        host_phase_2: BlueprintHostPhase2DesiredSlots,
+    ) -> Result<BlueprintHostPhase2DesiredSlots, SledEditError> {
+        Ok(self.as_active_mut()?.set_host_phase_2(host_phase_2))
     }
 
     /// Sets remove-mupdate-override configuration for this sled.
@@ -686,6 +695,17 @@ impl ActiveSledEditor {
         image_source: BlueprintZoneImageSource,
     ) -> Result<BlueprintZoneImageSource, SledEditError> {
         Ok(self.zones.set_zone_image_source(zone_id, image_source)?)
+    }
+
+    // Sets the desired host phase 2 contents, returning the old desired phase 2
+    // contents.
+    pub fn set_host_phase_2(
+        &mut self,
+        mut host_phase_2: BlueprintHostPhase2DesiredSlots,
+    ) -> BlueprintHostPhase2DesiredSlots {
+        // TODO-john FIXME bump generation if changed
+        mem::swap(&mut host_phase_2, &mut self.host_phase_2);
+        host_phase_2
     }
 
     /// Backwards compatibility / test helper: If we're given a blueprint that
