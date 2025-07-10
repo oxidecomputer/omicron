@@ -89,8 +89,8 @@ use nexus_client::{
     Client as NexusClient, Error as NexusError, types as NexusTypes,
 };
 use nexus_sled_agent_shared::inventory::{
-    ConfigReconcilerInventoryResult, OmicronSledConfig, OmicronZoneConfig,
-    OmicronZoneType, OmicronZonesConfig,
+    ConfigReconcilerInventoryResult, HostPhase2DesiredSlots, OmicronSledConfig,
+    OmicronZoneConfig, OmicronZoneType, OmicronZonesConfig,
 };
 use nexus_types::deployment::{
     Blueprint, BlueprintDatasetConfig, BlueprintDatasetDisposition,
@@ -592,6 +592,7 @@ impl ServiceInner {
                     datasets: config.datasets.values().cloned().collect(),
                     zones: zones_config.zones.into_iter().collect(),
                     remove_mupdate_override: None,
+                    host_phase_2: HostPhase2DesiredSlots::current_contents(),
                 };
 
                 self.set_config_on_sled(*sled_address, sled_config).await?;

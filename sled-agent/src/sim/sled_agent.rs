@@ -24,9 +24,9 @@ use dropshot::Body;
 use dropshot::HttpError;
 use futures::Stream;
 use nexus_sled_agent_shared::inventory::{
-    ConfigReconcilerInventoryStatus, Inventory, InventoryDataset,
-    InventoryDisk, InventoryZpool, OmicronSledConfig, OmicronZonesConfig,
-    SledRole, ZoneImageResolverInventory,
+    ConfigReconcilerInventoryStatus, HostPhase2DesiredSlots, Inventory,
+    InventoryDataset, InventoryDisk, InventoryZpool, OmicronSledConfig,
+    OmicronZonesConfig, SledRole, ZoneImageResolverInventory,
 };
 use omicron_common::api::external::{
     ByteCount, DiskState, Error, Generation, ResourceType,
@@ -741,6 +741,7 @@ impl SledAgent {
             datasets: datasets_config.datasets.into_values().collect(),
             zones: zones_config.zones.into_iter().collect(),
             remove_mupdate_override: None,
+            host_phase_2: HostPhase2DesiredSlots::current_contents(),
         };
 
         Ok(Inventory {
