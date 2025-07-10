@@ -1586,31 +1586,39 @@ impl<'a> Planner<'a> {
                 // We must hear from all nodes
                 let all_statuses = &self.inventory.cockroach_status;
                 if all_statuses.len() < COCKROACHDB_REDUNDANCY {
-                    debug!(self.log, "Not enough nodes");
+                    warn!(self.log, "Not enough nodes");
                     return false;
                 }
 
                 // All nodes must report: "We have the necessary redundancy, and
                 // have observed no underreplicated ranges".
-                for (_node_id, status) in all_statuses {
+                for (node_id, status) in all_statuses {
+                    let log = self.log.new(slog::o!(
+                        "operation" => "Checking Cockroach node status for shutdown safety",
+                        "node_id" => node_id.to_string()
+                    ));
                     let Some(ranges_underreplicated) =
                         status.ranges_underreplicated
                     else {
-                        debug!(self.log, "Missing underreplicated stat");
+                        warn!(log, "Missing underreplicated stat");
                         return false;
                     };
                     if ranges_underreplicated != 0 {
-                        debug!(self.log, "Underreplicated ranges != 0"; "ranges_underreplicated" => ranges_underreplicated);
+                        warn!(log, "Underreplicated ranges != 0"; "ranges_underreplicated" => ranges_underreplicated);
                         return false;
                     }
                     let Some(live_nodes) = status.liveness_live_nodes else {
-                        debug!(self.log, "Missing live_nodes");
+                        warn!(log, "Missing live_nodes");
                         return false;
                     };
                     if live_nodes < COCKROACHDB_REDUNDANCY as u64 {
-                        debug!(self.log, "Live nodes < COCKROACHDB_REDUNDANCY"; "live_nodes" => live_nodes);
+                        warn!(log, "Live nodes < COCKROACHDB_REDUNDANCY"; "live_nodes" => live_nodes);
                         return false;
                     }
+                    info!(
+                        log,
+                        "CockroachDB Node status looks ready for shutdown"
+                    );
                 }
                 true
             }
