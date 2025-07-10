@@ -21,6 +21,9 @@ use anyhow::anyhow;
 use anyhow::bail;
 use clickhouse_admin_types::OXIMETER_CLUSTER;
 use id_map::IdMap;
+use iddqd::IdOrdItem;
+use iddqd::IdOrdMap;
+use iddqd::id_upcast;
 use itertools::Either;
 use nexus_inventory::now_db_precision;
 use nexus_sled_agent_shared::inventory::OmicronZoneDataset;
@@ -41,6 +44,7 @@ use nexus_types::deployment::OmicronZoneExternalFloatingAddr;
 use nexus_types::deployment::OmicronZoneExternalFloatingIp;
 use nexus_types::deployment::OmicronZoneExternalSnatIp;
 use nexus_types::deployment::OximeterReadMode;
+use nexus_types::deployment::PendingMgsUpdate;
 use nexus_types::deployment::PendingMgsUpdates;
 use nexus_types::deployment::PlanningInput;
 use nexus_types::deployment::SledFilter;
@@ -83,6 +87,8 @@ use std::net::IpAddr;
 use std::net::Ipv6Addr;
 use std::net::SocketAddr;
 use std::net::SocketAddrV6;
+use swrite::SWrite;
+use swrite::swriteln;
 use thiserror::Error;
 
 use super::ClickhouseZonesThatShouldBeRunning;
@@ -134,6 +140,15 @@ pub enum Error {
     TargetReleaseMinimumGenerationMismatch {
         expected: Generation,
         actual: Generation,
+    },
+    #[error(
+        "target release minimum generation was set to {current}, \
+         but we tried to set it to the older generation {new}, indicating a \
+         possible table rollback which should not happen"
+    )]
+    TargetReleaseMinimumGenerationRollback {
+        current: Generation,
+        new: Generation,
     },
     #[error(transparent)]
     TufRepoContentsError(#[from] TufRepoContentsError),
@@ -266,6 +281,29 @@ impl From<StorageEditCounts> for SledEditCounts {
     }
 }
 
+/// A list of scalar (primitive) values which have been edited on a sled.
+#[derive(Debug, Clone, Copy, Eq, PartialEq)]
+pub struct EditedSledScalarEdits {
+    /// Whether the remove_mupdate_override field was modified.
+    pub remove_mupdate_override: bool,
+    /// Whether the debug operation to force a Sled Agent generation bump was
+    /// set.
+    pub debug_force_generation_bump: bool,
+}
+
+impl EditedSledScalarEdits {
+    pub fn zeroes() -> Self {
+        Self {
+            debug_force_generation_bump: false,
+            remove_mupdate_override: false,
+        }
+    }
+
+    pub fn has_edits(&self) -> bool {
+        self.debug_force_generation_bump || self.remove_mupdate_override
+    }
+}
+
 /// Describes operations which the BlueprintBuilder has performed to arrive
 /// at its state.
 ///
@@ -304,6 +342,10 @@ pub(crate) enum Operation {
         num_disks_expunged: usize,
         num_datasets_expunged: usize,
         num_zones_expunged: usize,
+    },
+    SetTargetReleaseMinimumGeneration {
+        current_generation: Generation,
+        new_generation: Generation,
     },
     SledNoopZoneImageSourcesUpdated {
         sled_id: SledUuid,
@@ -378,6 +420,16 @@ impl fmt::Display for Operation {
                     f,
                     "sled {sled_id}: performed {count} noop \
                      zone image source updates"
+                )
+            }
+            Self::SetTargetReleaseMinimumGeneration {
+                current_generation,
+                new_generation,
+            } => {
+                write!(
+                    f,
+                    "updated target release minimum generation from \
+                     {current_generation} to {new_generation}"
                 )
             }
         }
@@ -649,9 +701,14 @@ impl<'a> BlueprintBuilder<'a> {
         // are no longer in service and need expungement work.
         let mut sleds = BTreeMap::new();
         for (sled_id, editor) in self.sled_editors {
-            let EditedSled { config, edit_counts } = editor.finalize();
+            let EditedSled { config, edit_counts, scalar_edits } =
+                editor.finalize();
             sleds.insert(sled_id, config);
-            if edit_counts.has_nonzero_counts() {
+            if edit_counts.has_nonzero_counts() || scalar_edits.has_edits() {
+                let EditedSledScalarEdits {
+                    debug_force_generation_bump,
+                    remove_mupdate_override,
+                } = scalar_edits;
                 debug!(
                     self.log, "sled modified in new blueprint";
                     "sled_id" => %sled_id,
@@ -659,6 +716,8 @@ impl<'a> BlueprintBuilder<'a> {
                     "disk_edits" => ?edit_counts.disks,
                     "dataset_edits" => ?edit_counts.datasets,
                     "zone_edits" => ?edit_counts.zones,
+                    "debug_force_generation_bump" => debug_force_generation_bump,
+                    "remove_mupdate_override_modified" => remove_mupdate_override,
                 );
             } else {
                 debug!(
@@ -1158,6 +1217,36 @@ impl<'a> BlueprintBuilder<'a> {
             ))
         })?;
         Ok(editor.get_remove_mupdate_override())
+    }
+
+    /// Updates a sled's mupdate override field based on the mupdate override
+    /// provided by inventory.
+    pub fn sled_ensure_mupdate_override(
+        &mut self,
+        sled_id: SledUuid,
+        inv_mupdate_override_id: Option<MupdateOverrideUuid>,
+    ) -> Result<EnsureMupdateOverrideAction, Error> {
+        let editor = self.sled_editors.get_mut(&sled_id).ok_or_else(|| {
+            Error::Planner(anyhow!(
+                "tried to ensure mupdate override for unknown sled {sled_id}"
+            ))
+        })?;
+
+        // Also map the editor to the corresponding PendingMgsUpdates.
+        let sled_details = self
+            .input
+            .sled_lookup(SledFilter::InService, sled_id)
+            .map_err(|error| Error::Planner(anyhow!(error)))?;
+        // TODO: simplify down to &BaseboardId
+        let baseboard_id = Arc::new(sled_details.baseboard_id.clone());
+        let pending_mgs_update = self.pending_mgs_updates.entry(baseboard_id);
+
+        editor
+            .ensure_mupdate_override(
+                inv_mupdate_override_id,
+                pending_mgs_update,
+            )
+            .map_err(|err| Error::SledEditError { sled_id, err })
     }
 
     fn next_internal_dns_gz_address_index(&self, sled_id: SledUuid) -> u32 {
@@ -1960,21 +2049,29 @@ impl<'a> BlueprintBuilder<'a> {
             .len()
     }
 
+    /// Get the value of `target_release_minimum_generation`.
+    pub fn target_release_minimum_generation(&self) -> Generation {
+        self.target_release_minimum_generation
+    }
+
     /// Given the current value of `target_release_minimum_generation`, set the
     /// new value for this blueprint.
     pub fn set_target_release_minimum_generation(
         &mut self,
-        current: Generation,
-        target_release_minimum_generation: Generation,
+        current_generation: Generation,
+        new_generation: Generation,
     ) -> Result<(), Error> {
-        if self.target_release_minimum_generation != current {
+        if self.target_release_minimum_generation != current_generation {
             return Err(Error::TargetReleaseMinimumGenerationMismatch {
-                expected: current,
+                expected: current_generation,
                 actual: self.target_release_minimum_generation,
             });
         }
-        self.target_release_minimum_generation =
-            target_release_minimum_generation;
+        self.target_release_minimum_generation = new_generation;
+        self.record_operation(Operation::SetTargetReleaseMinimumGeneration {
+            current_generation,
+            new_generation,
+        });
         Ok(())
     }
 
@@ -2206,6 +2303,156 @@ pub(super) fn ensure_input_networking_records_appear_in_parent_blueprint(
         }
     }
     Ok(())
+}
+
+/// The result of an `ensure_mupdate_override` call for a particular sled.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub enum EnsureMupdateOverrideAction {
+    /// The inventory and blueprint overrides are consistent, so no action was
+    /// taken.
+    NoAction {
+        /// The mupdate override currently in place.
+        mupdate_override: Option<MupdateOverrideUuid>,
+    },
+    /// Inventory had an override that didn't match what was in the blueprint,
+    /// so the blueprint was updated to match the inventory.
+    BpSetOverride {
+        /// The override ID that was set.
+        inv_override: MupdateOverrideUuid,
+        /// The previous blueprint override that was removed.
+        prev_bp_override: Option<MupdateOverrideUuid>,
+        /// The zones which were updated to the install dataset, along with
+        /// their old values.
+        zones: IdOrdMap<EnsureMupdateOverrideUpdatedZone>,
+        /// The pending MGS update that was cleared, if any.
+        prev_mgs_update: Option<Box<PendingMgsUpdate>>,
+    },
+    /// The inventory did not have an override but the blueprint did, so the
+    /// blueprint's override was cleared.
+    BpClearOverride {
+        /// The previous blueprint override that was removed.
+        prev_bp_override: MupdateOverrideUuid,
+    },
+    /// Sled Agent encountered an error occurred retrieving the mupdate override
+    /// from the inventory.
+    GetOverrideError {
+        /// An error message.
+        message: String,
+    },
+}
+
+impl EnsureMupdateOverrideAction {
+    pub fn log_to(&self, log: &slog::Logger) {
+        match self {
+            EnsureMupdateOverrideAction::NoAction { mupdate_override } => {
+                debug!(
+                    log,
+                    "no mupdate override action taken, current value left unchanged";
+                    "mupdate_override" => ?mupdate_override,
+                );
+            }
+            EnsureMupdateOverrideAction::BpSetOverride {
+                inv_override,
+                prev_bp_override,
+                zones,
+                prev_mgs_update,
+            } => {
+                let mut zones_desc = String::new();
+                if zones.is_empty() {
+                    zones_desc.push_str("(none)");
+                } else {
+                    // Add a newline before the first zone -- it makes it easier
+                    // to read in log output.
+                    zones_desc.push('\n');
+                    for zone in zones {
+                        swriteln!(zones_desc, "  - {}", zone);
+                    }
+                }
+                info!(
+                    log,
+                    "blueprint mupdate override updated to match inventory";
+                    "new_bp_override" => %inv_override,
+                    "prev_bp_override" => ?prev_bp_override,
+                    "zones" => zones_desc,
+                );
+                if let Some(prev_mgs_update) = prev_mgs_update {
+                    info!(
+                        log,
+                        "previous MGS update cleared as part of updating \
+                         blueprint mupdate override to match inventory";
+                        prev_mgs_update,
+                    );
+                } else {
+                    info!(
+                        log,
+                        "no previous MGS update found as part of updating \
+                         blueprint mupdate override to match inventory",
+                    );
+                }
+            }
+            EnsureMupdateOverrideAction::BpClearOverride {
+                prev_bp_override,
+            } => {
+                info!(
+                    log,
+                    "inventory override no longer exists, blueprint override \
+                     cleared";
+                    "prev_bp_override" => %prev_bp_override,
+                )
+            }
+            EnsureMupdateOverrideAction::GetOverrideError { message } => {
+                error!(
+                    log, "error getting mupdate override info for sled, \
+                          not altering blueprint override";
+                    "message" => %message,
+                );
+            }
+        }
+    }
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct EnsureMupdateOverrideUpdatedZone {
+    /// The ID of the zone.
+    pub zone_id: OmicronZoneUuid,
+
+    /// The Omicron zone kind.
+    pub kind: ZoneKind,
+
+    /// The previous image source.
+    pub old_image_source: BlueprintZoneImageSource,
+
+    /// The new image source.
+    pub new_image_source: BlueprintZoneImageSource,
+}
+
+impl fmt::Display for EnsureMupdateOverrideUpdatedZone {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        if self.old_image_source == self.new_image_source {
+            write!(
+                f,
+                "zone {} ({:?}) left unchanged, image source: {}",
+                self.zone_id, self.kind, self.old_image_source,
+            )
+        } else {
+            write!(
+                f,
+                "zone {} ({:?}) updated from {} to {}",
+                self.zone_id,
+                self.kind,
+                self.old_image_source,
+                self.new_image_source,
+            )
+        }
+    }
+}
+
+impl IdOrdItem for EnsureMupdateOverrideUpdatedZone {
+    type Key<'a> = OmicronZoneUuid;
+    fn key(&self) -> Self::Key<'_> {
+        self.zone_id
+    }
+    id_upcast!();
 }
 
 #[cfg(test)]

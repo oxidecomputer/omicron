@@ -6,6 +6,8 @@
 //!
 //! For more about commingling MUPdate and update, see RFD 556.
 
+use std::fs;
+
 use crate::AllInstallMetadataFiles;
 use crate::InstallMetadataNonBootInfo;
 use crate::InstallMetadataNonBootMismatch;
@@ -14,7 +16,13 @@ use camino::Utf8PathBuf;
 use iddqd::IdOrdMap;
 use omicron_common::update::MupdateOverrideInfo;
 use omicron_uuid_kinds::InternalZpoolUuid;
+use omicron_uuid_kinds::MupdateOverrideUuid;
 use sled_agent_config_reconciler::InternalDisksWithBootDisk;
+use sled_agent_types::zone_images::ArcIoError;
+use sled_agent_types::zone_images::ClearMupdateOverrideBootDiskError;
+use sled_agent_types::zone_images::ClearMupdateOverrideNonBootInfo;
+use sled_agent_types::zone_images::ClearMupdateOverrideNonBootResult;
+use sled_agent_types::zone_images::ClearMupdateOverrideResult;
 use sled_agent_types::zone_images::MupdateOverrideNonBootInfo;
 use sled_agent_types::zone_images::MupdateOverrideNonBootMismatch;
 use sled_agent_types::zone_images::MupdateOverrideNonBootResult;
@@ -81,6 +89,104 @@ impl AllMupdateOverrides {
             boot_disk_path: self.boot_disk_path.clone(),
             boot_disk_override: self.boot_disk_override.clone(),
             non_boot_disk_overrides: self.non_boot_disk_overrides.clone(),
+        }
+    }
+
+    pub(crate) fn clear_override(
+        &mut self,
+        override_id: MupdateOverrideUuid,
+        internal_disks: InternalDisksWithBootDisk,
+    ) -> ClearMupdateOverrideResult {
+        let boot_disk_result = match self.boot_disk_override.clone() {
+            Ok(Some(info)) if info.mupdate_uuid == override_id => {
+                // Remove the override from the boot disk (which is fallible)
+                // before clearing it in-memory (which is infallible).
+                match fs::remove_file(&self.boot_disk_path) {
+                    Ok(()) => {
+                        // Remove the in-memory override.
+                        self.boot_disk_override = Ok(None);
+                        Ok(info)
+                    }
+                    Err(error) => {
+                        Err(ClearMupdateOverrideBootDiskError::RemoveError {
+                            path: self.boot_disk_path.clone(),
+                            error: ArcIoError::new(error),
+                        })
+                    }
+                }
+            }
+            Ok(Some(info)) => {
+                // The override ID does not match the boot disk override, so we
+                // shouldn't clear it.
+                Err(ClearMupdateOverrideBootDiskError::IdMismatch {
+                    actual: info.mupdate_uuid,
+                    provided: override_id,
+                })
+            }
+            Ok(None) => {
+                // There is no override on the boot disk, which indicates that
+                // the override was cleared in a prior attempt. Fail here until
+                // the sled config is updated.
+                Err(ClearMupdateOverrideBootDiskError::NoOverride {
+                    provided: override_id,
+                })
+            }
+            Err(error) => {
+                // If the mupdate override couldn't be read in the first place,
+                // we don't have enough information to determine if it should be
+                // cleared. Don't clear it.
+                Err(ClearMupdateOverrideBootDiskError::ReadError {
+                    path: self.boot_disk_path.clone(),
+                    error,
+                })
+            }
+        };
+
+        // Iterate over non-boot disks, clearing overrides if they exist.
+        let mut non_boot_disk_info = IdOrdMap::new();
+        for zpool_id in internal_disks.non_boot_disk_zpool_ids() {
+            let (path, clear_result) =
+                match self.non_boot_disk_overrides.get_mut(&zpool_id) {
+                    Some(mut info) => {
+                        let (new_result, clear_result) =
+                            clear_non_boot_disk(&boot_disk_result, &info);
+                        info.result = new_result;
+                        (Some(info.path.clone()), clear_result)
+                    }
+                    None => {
+                        // No status was found on the non-boot disk.
+                        (None, ClearMupdateOverrideNonBootResult::NoStatus)
+                    }
+                };
+            non_boot_disk_info
+                .insert_unique(ClearMupdateOverrideNonBootInfo {
+                    zpool_id,
+                    path,
+                    result: clear_result,
+                })
+                .expect("non-boot zpool IDs should be unique");
+        }
+
+        // Are there any non-boot disks that were originally read at startup but
+        // are missing from InternalDisksWithBootDisk?
+        for non_boot_disk_override in &self.non_boot_disk_overrides {
+            if !non_boot_disk_info
+                .contains_key(&non_boot_disk_override.zpool_id)
+            {
+                non_boot_disk_info
+                    .insert_unique(ClearMupdateOverrideNonBootInfo {
+                        zpool_id: non_boot_disk_override.zpool_id,
+                        path: Some(non_boot_disk_override.path.clone()),
+                        result: ClearMupdateOverrideNonBootResult::NoStatus,
+                    })
+                    .expect("non-boot zpool IDs should be unique");
+            }
+        }
+
+        ClearMupdateOverrideResult {
+            boot_disk_path: self.boot_disk_path.clone(),
+            boot_disk_result,
+            non_boot_disk_info,
         }
     }
 
@@ -178,6 +284,128 @@ fn make_non_boot_info(
         zpool_id: info.zpool_id,
         path: info.path,
         result,
+    }
+}
+
+fn clear_non_boot_disk(
+    boot_disk_result: &Result<
+        MupdateOverrideInfo,
+        ClearMupdateOverrideBootDiskError,
+    >,
+    info: &MupdateOverrideNonBootInfo,
+) -> (MupdateOverrideNonBootResult, ClearMupdateOverrideNonBootResult) {
+    match &info.result {
+        MupdateOverrideNonBootResult::MatchesPresent => {
+            if boot_disk_result.is_ok() {
+                // Try removing the file.
+                remove_non_boot_file(info)
+            } else {
+                // There was an error removing the boot disk, so don't alter the
+                // non-boot disk.
+                (
+                    info.result.clone(),
+                    ClearMupdateOverrideNonBootResult::BootDiskError,
+                )
+            }
+        }
+        MupdateOverrideNonBootResult::MatchesAbsent => {
+            // No action needed -- the status stays the same.
+            (info.result.clone(), ClearMupdateOverrideNonBootResult::NoOverride)
+        }
+        MupdateOverrideNonBootResult::Mismatch(
+            MupdateOverrideNonBootMismatch::BootPresentOtherAbsent,
+        ) => {
+            // The file doesn't exist on disk, so the clear result is always
+            // NoOverride. The new result depends on whether the override was
+            // cleared on the boot disk.
+            let new_result = if boot_disk_result.is_ok() {
+                MupdateOverrideNonBootResult::MatchesAbsent
+            } else {
+                info.result.clone()
+            };
+            let clear_result = ClearMupdateOverrideNonBootResult::NoOverride;
+            (new_result, clear_result)
+        }
+        MupdateOverrideNonBootResult::Mismatch(
+            MupdateOverrideNonBootMismatch::BootAbsentOtherPresent { .. },
+        ) => {
+            let error = boot_disk_result.as_ref().expect_err(
+                "boot disk override being absent always means we \
+                 failed to clear it",
+            );
+            assert!(
+                matches!(
+                    error,
+                    ClearMupdateOverrideBootDiskError::NoOverride { .. }
+                ),
+                "error should be NoOverride, but instead was {error:?}"
+            );
+
+            // Always remove the mupdate override on the non-boot disk. Since
+            // the boot disk is always authoritative, this is a chance for us to
+            // bring the non-boot disk into alignment.
+            remove_non_boot_file(info)
+        }
+        MupdateOverrideNonBootResult::Mismatch(
+            MupdateOverrideNonBootMismatch::ValueMismatch { .. },
+        ) => {
+            if boot_disk_result.is_ok() {
+                // Clear out the mupdate override.
+                remove_non_boot_file(info)
+            } else {
+                // There was an error removing the boot disk, so don't alter the
+                // non-boot disk.
+                (
+                    info.result.clone(),
+                    ClearMupdateOverrideNonBootResult::BootDiskError,
+                )
+            }
+        }
+        MupdateOverrideNonBootResult::Mismatch(
+            MupdateOverrideNonBootMismatch::BootDiskReadError { .. },
+        ) => {
+            // Since there was an error reading the boot disk's mupdate
+            // override, we don't alter the non-boot disk.
+            (
+                info.result.clone(),
+                ClearMupdateOverrideNonBootResult::BootDiskError,
+            )
+        }
+        MupdateOverrideNonBootResult::ReadError(error) => {
+            // Don't alter the non-boot disk on error.
+            (
+                info.result.clone(),
+                ClearMupdateOverrideNonBootResult::ReadError {
+                    path: info.path.clone(),
+                    error: error.clone(),
+                },
+            )
+        }
+    }
+}
+
+/// Removes a non-boot mupdate override file, assuming that the boot mupdate
+/// override file was successfully removed.
+fn remove_non_boot_file(
+    info: &MupdateOverrideNonBootInfo,
+) -> (MupdateOverrideNonBootResult, ClearMupdateOverrideNonBootResult) {
+    match fs::remove_file(&info.path) {
+        Ok(()) => {
+            // The new status is now MatchesAbsent.
+            let new_result = MupdateOverrideNonBootResult::MatchesAbsent;
+            let clear_result = ClearMupdateOverrideNonBootResult::Cleared {
+                prev_result: info.result.clone(),
+            };
+            (new_result, clear_result)
+        }
+        Err(error) => {
+            let new_result = info.result.clone();
+            let clear_result = ClearMupdateOverrideNonBootResult::RemoveError {
+                path: info.path.clone(),
+                error: ArcIoError::new(error),
+            };
+            (new_result, clear_result)
+        }
     }
 }
 
