@@ -346,9 +346,9 @@ if let Err(outer_err) = some_function() {
 ----
 
 Logging any error _must_ use an adapter as described in "Pitfall 1"; failure to
-do so will result in lost error causes in error chains such as this one. Using
-an error chain with `OuterError` as defined will result in doublespeak due to
-its inclusion of its source in its `Display` impl, but at least all the
+do so will result in lost error causes in any error chains where any error in
+the chain has a correct `Display` impl. Using an adapter with the incorrect
+`OuterError` as defined will result in doublespeak, but at least all the
 information is present:
 
 [source,rust]
@@ -430,9 +430,12 @@ from the `thiserror` author] confirming this point.
 
 === Pitfall 3: Overusing ``#[from]``
 
-Pitfall 1 and 2 lead to _incorrect_ error definitions and lost error causes.
-This pitfall is more of a judgment call / recommendation. `thiserror` allows an
-inner error to be specified as ``\#[from]`` instead of ``#[source]``; e.g.,
+Unlike pitfalls 1 and 2, which lead to _incorrect_ error definitions and lost
+error causes, Pitfall 3 is more of a "strong recommendation" that has exceptions
+(use your best judgment!).
+
+`thiserror` allows an inner error to be specified as ``\#[from]`` instead of
+``#[source]``; e.g.,
 
 [source,rust]
 ----
