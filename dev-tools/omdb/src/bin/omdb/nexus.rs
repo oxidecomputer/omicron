@@ -4009,6 +4009,7 @@ async fn cmd_nexus_support_bundles_list(
         reason_for_creation: String,
         reason_for_failure: String,
         state: String,
+        user_comment: String,
     }
     let rows = support_bundles.into_iter().map(|sb| SupportBundleInfo {
         id: *sb.id,
@@ -4018,6 +4019,7 @@ async fn cmd_nexus_support_bundles_list(
             .reason_for_failure
             .unwrap_or_else(|| "-".to_string()),
         state: format!("{:?}", sb.state),
+        user_comment: sb.user_comment.unwrap_or_else(|| "-".to_string()),
     });
     let table = tabled::Table::new(rows)
         .with(tabled::settings::Style::empty())

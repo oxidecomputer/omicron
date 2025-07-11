@@ -95,6 +95,7 @@ pub struct SupportBundle {
     pub zpool_id: DbTypedUuid<ZpoolKind>,
     pub dataset_id: DbTypedUuid<DatasetKind>,
     pub assigned_nexus: Option<DbTypedUuid<OmicronZoneKind>>,
+    pub user_comment: Option<String>,
 }
 
 impl SupportBundle {
@@ -113,6 +114,7 @@ impl SupportBundle {
             zpool_id: zpool_id.into(),
             dataset_id: dataset_id.into(),
             assigned_nexus: Some(nexus_id.into()),
+            user_comment: None,
         }
     }
 
@@ -128,6 +130,7 @@ impl From<SupportBundle> for SupportBundleView {
             time_created: bundle.time_created,
             reason_for_creation: bundle.reason_for_creation,
             reason_for_failure: bundle.reason_for_failure,
+            user_comment: bundle.user_comment,
             state: bundle.state.into(),
         }
     }

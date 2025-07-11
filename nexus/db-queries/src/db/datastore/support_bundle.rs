@@ -433,6 +433,42 @@ impl DataStore {
         }
     }
 
+    /// Updates the user comment of a support bundle.
+    ///
+    /// Returns:
+    /// - "Ok" if the bundle was updated successfully.
+    /// - "Err::InvalidRequest" if the comment exceeds the maximum length.
+    pub async fn support_bundle_update_user_comment(
+        &self,
+        opctx: &OpContext,
+        authz_bundle: &authz::SupportBundle,
+        user_comment: Option<String>,
+    ) -> Result<(), Error> {
+        opctx.authorize(authz::Action::Modify, authz_bundle).await?;
+
+        if let Some(ref comment) = user_comment {
+            if comment.len() > 4096 {
+                return Err(Error::invalid_request(
+                    "User comment cannot exceed 4096 bytes",
+                ));
+            }
+        }
+
+        use nexus_db_schema::schema::support_bundle::dsl;
+
+        let id = authz_bundle.id().into_untyped_uuid();
+        let conn = self.pool_connection_authorized(opctx).await?;
+        diesel::update(dsl::support_bundle)
+            .filter(dsl::id.eq(id))
+            .set(dsl::user_comment.eq(user_comment))
+            .execute_async(&*conn)
+            .await
+            .map(|_rows_modified| ())
+            .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))?;
+
+        Ok(())
+    }
+
     /// Deletes a support bundle.
     ///
     /// This should only be invoked after all storage for the support bundle has

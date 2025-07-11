@@ -158,6 +158,12 @@ pub struct SupportBundleFilePath {
     pub file: String,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+pub struct SupportBundleUpdate {
+    /// User comment for the support bundle
+    pub user_comment: Option<String>,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, PartialEq)]
 pub struct OptionalSiloSelector {
     /// Name or ID of the silo
