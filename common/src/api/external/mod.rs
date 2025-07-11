@@ -2059,10 +2059,6 @@ impl FromStr for L4PortRange {
                     .map_err(|e| L4PortRangeError::Value(right.into(), e))?
                     .into();
 
-                // First/last sanity checking is performed when constructing
-                // db::VpcFirewallRule. There has been a window of time where
-                // we have accepted invalid port ranges which could still be
-                // resident in CRDB.
                 Ok(L4PortRange { first, last })
             }
         }
@@ -2189,11 +2185,7 @@ impl FromStr for IcmpParamRange {
                     .parse::<u8>()
                     .map_err(|e| IcmpParamRangeError::Value(right.into(), e))?;
 
-                if first > last {
-                    Err(IcmpParamRangeError::EmptyRange)
-                } else {
-                    Ok(IcmpParamRange { first, last })
-                }
+                Ok(IcmpParamRange { first, last })
             }
         }
     }
@@ -3896,17 +3888,6 @@ mod test {
                 "range has no start value"
             ))
         );
-
-        // This remains valid (unlike `IcmpParamRange`) because there is a
-        // slim possibility that we may need to deserialise these ranges from
-        // CRDB. Later integration tests assert that this is caught on create.
-        assert_eq!(
-            L4PortRange::try_from("21-20".to_string()),
-            Ok(L4PortRange {
-                first: L4Port::try_from(21).unwrap(),
-                last: L4Port::try_from(20).unwrap()
-            })
-        );
     }
 
     #[test]
@@ -4204,13 +4185,6 @@ mod test {
         assert_eq!(
             "icmp:0,30-".parse::<VpcFirewallRuleProtocol>(),
             Err(Error::invalid_value("code", "range has no end value"))
-        );
-        assert_eq!(
-            "icmp:0,21-20".parse::<VpcFirewallRuleProtocol>(),
-            Err(Error::invalid_value(
-                "code",
-                "range has larger start value than end value"
-            ))
         );
     }
 

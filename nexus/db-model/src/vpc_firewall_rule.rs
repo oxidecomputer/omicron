@@ -222,6 +222,28 @@ fn validate_port_ranges(
     Ok(())
 }
 
+fn validate_protocols(
+    items: &[external::VpcFirewallRuleProtocol],
+) -> Result<(), external::Error> {
+    for proto in items {
+        if let external::VpcFirewallRuleProtocol::Icmp(Some(
+            external::VpcFirewallIcmpFilter {
+                code: Some(external::IcmpParamRange { first, last }),
+                ..
+            },
+        )) = proto
+        {
+            if last < first {
+                return Err(external::Error::invalid_value(
+                    "code",
+                    external::IcmpParamRangeError::EmptyRange.to_string(),
+                ));
+            }
+        }
+    }
+    Ok(())
+}
+
 impl VpcFirewallRule {
     pub fn new(
         rule_id: Uuid,
@@ -247,6 +269,7 @@ impl VpcFirewallRule {
         }
         if let Some(protocols) = rule.filters.protocols.as_ref() {
             ensure_max_len(&protocols, "filters.protocols", MAX_FW_RULE_PARTS)?;
+            validate_protocols(protocols.as_slice())?;
         }
 
         Ok(Self {
