@@ -906,7 +906,7 @@ mod test {
 
     /// Hash of the RoT development signing key
     // TODO-K: This sign only makes sense for one kind of artifact, we want to
-    // have different ones for switch and power
+    // have different ones for switch and power when we implement this.
     const ROT_STAGING_DEVEL_SIGN: &str =
         "11594bb5548a757e918e6fe056e2ad9e084297c9555417a025d8788eacf55daf";
 
@@ -1051,13 +1051,12 @@ mod test {
                 ArtifactKind::GIMLET_ROT_IMAGE_A,
                 test_artifact_for_board("oxide-rot-1"),
             ),
-            // TODO-K: Does this work as expected?
             make_artifact(
                 "oxide-rot-1",
                 ArtifactKind::GIMLET_ROT_IMAGE_B,
                 test_artifact_for_board("oxide-rot-1"),
             ),
-            // Make more artifacts for other artifact kinds and for other slots?
+            // TODO-K:  Make more artifacts for other RoT artifact kinds
         ];
 
         TufRepoDescription {
@@ -1546,11 +1545,6 @@ mod test {
                 (k, (serial, test_artifact_for_board(board_name)))
             })
             .collect();
-
-        //    //debug
-        //    if expected_updates.len() != 10000 {
-        //    panic!("num of expected updates:{} {expected_updates:?}", expected_updates.len());
-        //    }
 
         for _ in 0..expected_updates.len() {
             // Generate an inventory collection reflecting that everything is at
