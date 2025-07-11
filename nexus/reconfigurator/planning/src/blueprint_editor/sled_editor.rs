@@ -6,11 +6,14 @@
 
 use crate::blueprint_builder::SledEditCounts;
 use crate::planner::SledPlannerRng;
+use host_phase_2::HostPhase2Editor;
 use illumos_utils::zpool::ZpoolName;
 use itertools::Either;
 use nexus_sled_agent_shared::inventory::ZoneKind;
 use nexus_types::deployment::BlueprintDatasetConfig;
 use nexus_types::deployment::BlueprintDatasetDisposition;
+use nexus_types::deployment::BlueprintHostPhase2DesiredContents;
+use nexus_types::deployment::BlueprintHostPhase2DesiredSlots;
 use nexus_types::deployment::BlueprintPhysicalDiskConfig;
 use nexus_types::deployment::BlueprintPhysicalDiskDisposition;
 use nexus_types::deployment::BlueprintSledConfig;
@@ -24,6 +27,7 @@ use omicron_common::address::Ipv6Subnet;
 use omicron_common::address::SLED_PREFIX;
 use omicron_common::api::external::Generation;
 use omicron_common::disk::DatasetKind;
+use omicron_common::disk::M2Slot;
 use omicron_uuid_kinds::DatasetUuid;
 use omicron_uuid_kinds::MupdateOverrideUuid;
 use omicron_uuid_kinds::OmicronZoneUuid;
@@ -37,6 +41,7 @@ use underlay_ip_allocator::SledUnderlayIpAllocator;
 
 mod datasets;
 mod disks;
+mod host_phase_2;
 mod scalar;
 mod underlay_ip_allocator;
 mod zones;
@@ -354,13 +359,32 @@ impl SledEditor {
         self.as_active_mut()?.mark_expunged_zone_ready_for_cleanup(zone_id)
     }
 
-    /// Sets the image source for a zone.
+    /// Sets the image source for a zone, returning the old image source.
     pub fn set_zone_image_source(
         &mut self,
         zone_id: &OmicronZoneUuid,
         image_source: BlueprintZoneImageSource,
     ) -> Result<BlueprintZoneImageSource, SledEditError> {
         self.as_active_mut()?.set_zone_image_source(zone_id, image_source)
+    }
+
+    // Sets the desired host phase 2 contents.
+    pub fn set_host_phase_2(
+        &mut self,
+        host_phase_2: BlueprintHostPhase2DesiredSlots,
+    ) -> Result<(), SledEditError> {
+        self.as_active_mut()?.set_host_phase_2(host_phase_2);
+        Ok(())
+    }
+
+    // Sets the desired host phase 2 contents of a particular slot.
+    pub fn set_host_phase_2_slot(
+        &mut self,
+        slot: M2Slot,
+        host_phase_2: BlueprintHostPhase2DesiredContents,
+    ) -> Result<(), SledEditError> {
+        self.as_active_mut()?.set_host_phase_2_slot(slot, host_phase_2);
+        Ok(())
     }
 
     /// Sets remove-mupdate-override configuration for this sled.
@@ -404,6 +428,7 @@ struct ActiveSledEditor {
     disks: DisksEditor,
     datasets: DatasetsEditor,
     remove_mupdate_override: ScalarEditor<Option<MupdateOverrideUuid>>,
+    host_phase_2: HostPhase2Editor,
     debug_force_generation_bump: bool,
 }
 
@@ -439,6 +464,7 @@ impl ActiveSledEditor {
             remove_mupdate_override: ScalarEditor::new(
                 config.remove_mupdate_override,
             ),
+            host_phase_2: HostPhase2Editor::new(config.host_phase_2),
             debug_force_generation_bump: false,
         })
     }
@@ -458,6 +484,9 @@ impl ActiveSledEditor {
             disks: DisksEditor::empty(),
             datasets: DatasetsEditor::empty(),
             remove_mupdate_override: ScalarEditor::new(None),
+            host_phase_2: HostPhase2Editor::new(
+                BlueprintHostPhase2DesiredSlots::current_contents(),
+            ),
             debug_force_generation_bump: false,
         }
     }
@@ -468,6 +497,7 @@ impl ActiveSledEditor {
         let (zones, zones_counts) = self.zones.finalize();
         let remove_mupdate_override_is_modified =
             self.remove_mupdate_override.is_modified();
+        let changed_host_phase_2 = self.host_phase_2.is_modified();
         let mut sled_agent_generation = self.incoming_sled_agent_generation;
 
         // Bump the generation if we made any changes of concern to sled-agent.
@@ -476,6 +506,7 @@ impl ActiveSledEditor {
             || datasets_counts.has_nonzero_counts()
             || zones_counts.has_nonzero_counts()
             || remove_mupdate_override_is_modified
+            || changed_host_phase_2
         {
             sled_agent_generation = sled_agent_generation.next();
         }
@@ -490,6 +521,7 @@ impl ActiveSledEditor {
                 remove_mupdate_override: self
                     .remove_mupdate_override
                     .finalize(),
+                host_phase_2: self.host_phase_2.finalize(),
             },
             edit_counts: SledEditCounts {
                 disks: disks_counts,
@@ -680,6 +712,23 @@ impl ActiveSledEditor {
         image_source: BlueprintZoneImageSource,
     ) -> Result<BlueprintZoneImageSource, SledEditError> {
         Ok(self.zones.set_zone_image_source(zone_id, image_source)?)
+    }
+
+    // Sets the desired host phase 2 contents for this sled.
+    pub fn set_host_phase_2(
+        &mut self,
+        host_phase_2: BlueprintHostPhase2DesiredSlots,
+    ) {
+        self.host_phase_2.set_value(host_phase_2);
+    }
+
+    // Sets the desired host phase 2 contents for a specific slot on this sled.
+    pub fn set_host_phase_2_slot(
+        &mut self,
+        slot: M2Slot,
+        host_phase_2: BlueprintHostPhase2DesiredContents,
+    ) {
+        self.host_phase_2.set_slot(slot, host_phase_2);
     }
 
     /// Backwards compatibility / test helper: If we're given a blueprint that

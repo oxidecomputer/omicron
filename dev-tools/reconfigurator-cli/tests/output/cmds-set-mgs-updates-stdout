@@ -13,6 +13,14 @@ parent:    6ccc786b-17f1-4562-958f-5a7d9a5a15fd
 
   sled: bb0ec23a-f97c-4b6a-a5bc-864b1ebc9236 (active, config generation 2)
 
+    host phase 2 contents:
+    ------------------------
+    slot   boot image source
+    ------------------------
+    A      current contents 
+    B      current contents 
+
+
     physical disks:
     ------------------------------------------------------------------------------------
     vendor        model        serial                                        disposition
@@ -67,6 +75,14 @@ parent:    6ccc786b-17f1-4562-958f-5a7d9a5a15fd
 
   sled: bba6ea73-6c9c-4ab5-8bb4-1dd145071407 (active, config generation 2)
 
+    host phase 2 contents:
+    ------------------------
+    slot   boot image source
+    ------------------------
+    A      current contents 
+    B      current contents 
+
+
     physical disks:
     ------------------------------------------------------------------------------------
     vendor        model        serial                                        disposition
@@ -117,6 +133,14 @@ parent:    6ccc786b-17f1-4562-958f-5a7d9a5a15fd
 
 
   sled: cc00b21a-5685-480a-ab5e-d2e29cf369df (active, config generation 2)
+
+    host phase 2 contents:
+    ------------------------
+    slot   boot image source
+    ------------------------
+    A      current contents 
+    B      current contents 
+
 
     physical disks:
     ------------------------------------------------------------------------------------
@@ -197,6 +221,14 @@ parent:    ad97e762-7bf1-45a6-a98f-60afb7e491c0
 
   sled: bb0ec23a-f97c-4b6a-a5bc-864b1ebc9236 (active, config generation 2)
 
+    host phase 2 contents:
+    ------------------------
+    slot   boot image source
+    ------------------------
+    A      current contents 
+    B      current contents 
+
+
     physical disks:
     ------------------------------------------------------------------------------------
     vendor        model        serial                                        disposition
@@ -251,6 +283,14 @@ parent:    ad97e762-7bf1-45a6-a98f-60afb7e491c0
 
   sled: bba6ea73-6c9c-4ab5-8bb4-1dd145071407 (active, config generation 2)
 
+    host phase 2 contents:
+    ------------------------
+    slot   boot image source
+    ------------------------
+    A      current contents 
+    B      current contents 
+
+
     physical disks:
     ------------------------------------------------------------------------------------
     vendor        model        serial                                        disposition
@@ -301,6 +341,14 @@ parent:    ad97e762-7bf1-45a6-a98f-60afb7e491c0
 
 
   sled: cc00b21a-5685-480a-ab5e-d2e29cf369df (active, config generation 2)
+
+    host phase 2 contents:
+    ------------------------
+    slot   boot image source
+    ------------------------
+    A      current contents 
+    B      current contents 
+
 
     physical disks:
     ------------------------------------------------------------------------------------
@@ -717,6 +765,14 @@ parent:    cca24b71-09b5-4042-9185-b33e9f2ebba0
 
   sled: bb0ec23a-f97c-4b6a-a5bc-864b1ebc9236 (active, config generation 2)
 
+    host phase 2 contents:
+    ------------------------
+    slot   boot image source
+    ------------------------
+    A      current contents 
+    B      current contents 
+
+
     physical disks:
     ------------------------------------------------------------------------------------
     vendor        model        serial                                        disposition
@@ -771,6 +827,14 @@ parent:    cca24b71-09b5-4042-9185-b33e9f2ebba0
 
   sled: bba6ea73-6c9c-4ab5-8bb4-1dd145071407 (active, config generation 2)
 
+    host phase 2 contents:
+    ------------------------
+    slot   boot image source
+    ------------------------
+    A      current contents 
+    B      current contents 
+
+
     physical disks:
     ------------------------------------------------------------------------------------
     vendor        model        serial                                        disposition
@@ -821,6 +885,14 @@ parent:    cca24b71-09b5-4042-9185-b33e9f2ebba0
 
 
   sled: cc00b21a-5685-480a-ab5e-d2e29cf369df (active, config generation 2)
+
+    host phase 2 contents:
+    ------------------------
+    slot   boot image source
+    ------------------------
+    A      current contents 
+    B      current contents 
+
 
     physical disks:
     ------------------------------------------------------------------------------------
@@ -1240,6 +1312,14 @@ parent:    5bf974f3-81f9-455b-b24e-3099f765664c
 
   sled: bb0ec23a-f97c-4b6a-a5bc-864b1ebc9236 (active, config generation 2)
 
+    host phase 2 contents:
+    ------------------------
+    slot   boot image source
+    ------------------------
+    A      current contents 
+    B      current contents 
+
+
     physical disks:
     ------------------------------------------------------------------------------------
     vendor        model        serial                                        disposition
@@ -1294,6 +1374,14 @@ parent:    5bf974f3-81f9-455b-b24e-3099f765664c
 
   sled: bba6ea73-6c9c-4ab5-8bb4-1dd145071407 (active, config generation 2)
 
+    host phase 2 contents:
+    ------------------------
+    slot   boot image source
+    ------------------------
+    A      current contents 
+    B      current contents 
+
+
     physical disks:
     ------------------------------------------------------------------------------------
     vendor        model        serial                                        disposition
@@ -1344,6 +1432,14 @@ parent:    5bf974f3-81f9-455b-b24e-3099f765664c
 
 
   sled: cc00b21a-5685-480a-ab5e-d2e29cf369df (active, config generation 2)
+
+    host phase 2 contents:
+    ------------------------
+    slot   boot image source
+    ------------------------
+    A      current contents 
+    B      current contents 
+
 
     physical disks:
     ------------------------------------------------------------------------------------
@@ -1595,6 +1691,14 @@ parent:    1b837a27-3be1-4fcb-8499-a921c839e1d0
 
   sled: bb0ec23a-f97c-4b6a-a5bc-864b1ebc9236 (active, config generation 2)
 
+    host phase 2 contents:
+    ------------------------
+    slot   boot image source
+    ------------------------
+    A      current contents 
+    B      current contents 
+
+
     physical disks:
     ------------------------------------------------------------------------------------
     vendor        model        serial                                        disposition
@@ -1649,6 +1753,14 @@ parent:    1b837a27-3be1-4fcb-8499-a921c839e1d0
 
   sled: bba6ea73-6c9c-4ab5-8bb4-1dd145071407 (active, config generation 2)
 
+    host phase 2 contents:
+    ------------------------
+    slot   boot image source
+    ------------------------
+    A      current contents 
+    B      current contents 
+
+
     physical disks:
     ------------------------------------------------------------------------------------
     vendor        model        serial                                        disposition
@@ -1699,6 +1811,14 @@ parent:    1b837a27-3be1-4fcb-8499-a921c839e1d0
 
 
   sled: cc00b21a-5685-480a-ab5e-d2e29cf369df (active, config generation 2)
+
+    host phase 2 contents:
+    ------------------------
+    slot   boot image source
+    ------------------------
+    A      current contents 
+    B      current contents 
+
 
     physical disks:
     ------------------------------------------------------------------------------------
@@ -1952,6 +2072,8 @@ Commands:
           add a CockroachDB instance to a particular sled
   set-zone-image
           set the image source for a zone
+  set-host-phase2
+          set the desired host phase 2 image for an internal disk slot
   set-remove-mupdate-override
           set the remove_mupdate_override field for a sled
   set-target-release-minimum-generation

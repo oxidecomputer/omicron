@@ -1653,12 +1653,12 @@ pub(crate) mod test {
     use expectorate::assert_contents;
     use nexus_sled_agent_shared::inventory::ConfigReconcilerInventory;
     use nexus_sled_agent_shared::inventory::ConfigReconcilerInventoryResult;
+    use nexus_types::deployment::BlueprintArtifactVersion;
     use nexus_types::deployment::BlueprintDatasetDisposition;
     use nexus_types::deployment::BlueprintDiffSummary;
     use nexus_types::deployment::BlueprintPhysicalDiskDisposition;
     use nexus_types::deployment::BlueprintZoneDisposition;
     use nexus_types::deployment::BlueprintZoneImageSource;
-    use nexus_types::deployment::BlueprintZoneImageVersion;
     use nexus_types::deployment::BlueprintZoneType;
     use nexus_types::deployment::ClickhouseMode;
     use nexus_types::deployment::ClickhousePolicy;
@@ -5159,7 +5159,7 @@ pub(crate) mod test {
             .expect("can't parse artifact version");
         let fake_hash = ArtifactHash([0; 32]);
         let image_source = BlueprintZoneImageSource::Artifact {
-            version: BlueprintZoneImageVersion::Available {
+            version: BlueprintArtifactVersion::Available {
                 version: version.clone(),
             },
             hash: fake_hash,
@@ -5229,7 +5229,7 @@ pub(crate) mod test {
             })
         {
             zone.image_source = BlueprintZoneImageSource::Artifact {
-                version: BlueprintZoneImageVersion::Available {
+                version: BlueprintArtifactVersion::Available {
                     version: version.clone(),
                 },
                 hash: fake_hash,
@@ -5741,7 +5741,7 @@ pub(crate) mod test {
             .expect("can't parse artifact version");
         let fake_hash = ArtifactHash([0; 32]);
         let image_source = BlueprintZoneImageSource::Artifact {
-            version: BlueprintZoneImageVersion::Available {
+            version: BlueprintArtifactVersion::Available {
                 version: version.clone(),
             },
             hash: fake_hash,

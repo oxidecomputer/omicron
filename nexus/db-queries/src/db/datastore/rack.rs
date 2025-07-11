@@ -1010,6 +1010,7 @@ mod test {
         SledBuilder, SystemDescription,
     };
     use nexus_sled_agent_shared::inventory::OmicronZoneDataset;
+    use nexus_types::deployment::BlueprintHostPhase2DesiredSlots;
     use nexus_types::deployment::BlueprintSledConfig;
     use nexus_types::deployment::CockroachDbPreserveDowngrade;
     use nexus_types::deployment::PendingMgsUpdates;
@@ -1315,6 +1316,8 @@ mod test {
                         datasets: IdMap::new(),
                         zones,
                         remove_mupdate_override: None,
+                        host_phase_2:
+                            BlueprintHostPhase2DesiredSlots::current_contents(),
                     },
                 )
             })

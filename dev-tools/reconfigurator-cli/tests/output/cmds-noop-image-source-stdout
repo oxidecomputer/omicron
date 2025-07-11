@@ -200,6 +200,14 @@ to:   blueprint 58d5e830-0884-47d8-a7cd-b2b3751adeb4
 
   sled 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6 (active, config generation 2 -> 3):
 
+    host phase 2 contents:
+    ------------------------
+    slot   boot image source
+    ------------------------
+    A      current contents 
+    B      current contents 
+
+
     physical disks:
     ------------------------------------------------------------------------------------
     vendor        model        serial                                        disposition
@@ -244,6 +252,14 @@ to:   blueprint 58d5e830-0884-47d8-a7cd-b2b3751adeb4
 
   sled 9a867dc9-d505-427f-9eff-cdb1d4d9bd73 (active -> decommissioned, config generation 2 -> 3):
 
+    host phase 2 contents:
+    ------------------------
+    slot   boot image source
+    ------------------------
+    A      current contents 
+    B      current contents 
+
+
     physical disks:
     ---------------------------------------------------------------------------------------
     vendor        model        serial                                        disposition   
@@ -279,6 +295,14 @@ to:   blueprint 58d5e830-0884-47d8-a7cd-b2b3751adeb4
 
 
   sled aff6c093-197d-42c5-ad80-9f10ba051a34 (active, config generation 2 -> 3):
+
+    host phase 2 contents:
+    ------------------------
+    slot   boot image source
+    ------------------------
+    A      current contents 
+    B      current contents 
+
 
     physical disks:
     ------------------------------------------------------------------------------------
@@ -544,6 +568,14 @@ to:   blueprint af934083-59b5-4bf6-8966-6fb5292c29e1
  MODIFIED SLEDS:
 
   sled e96e226f-4ed9-4c01-91b9-69a9cd076c9e (active, config generation 2 -> 3):
+
+    host phase 2 contents:
+    ------------------------
+    slot   boot image source
+    ------------------------
+    A      current contents 
+    B      current contents 
+
 
     physical disks:
     ------------------------------------------------------------------------------------

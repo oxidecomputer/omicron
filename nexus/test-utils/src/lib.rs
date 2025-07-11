@@ -42,6 +42,7 @@ use nexus_test_interface::NexusServer;
 use nexus_types::deployment::Blueprint;
 use nexus_types::deployment::BlueprintDatasetConfig;
 use nexus_types::deployment::BlueprintDatasetDisposition;
+use nexus_types::deployment::BlueprintHostPhase2DesiredSlots;
 use nexus_types::deployment::BlueprintPhysicalDiskConfig;
 use nexus_types::deployment::BlueprintPhysicalDiskDisposition;
 use nexus_types::deployment::BlueprintSledConfig;
@@ -1498,6 +1499,8 @@ impl<'a, N: NexusServer> ControlPlaneTestContextBuilder<'a, N> {
                     datasets,
                     zones,
                     remove_mupdate_override: None,
+                    host_phase_2:
+                        BlueprintHostPhase2DesiredSlots::current_contents(),
                 },
             );
         }

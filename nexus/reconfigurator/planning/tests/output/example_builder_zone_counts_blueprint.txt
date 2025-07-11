@@ -3,6 +3,14 @@ parent:    e35b2fdd-354d-48d9-acb5-703b2c269a54
 
   sled: 0dbf1e39-e265-4071-a8df-6d1225b46694 (active, config generation 2)
 
+    host phase 2 contents:
+    ------------------------
+    slot   boot image source
+    ------------------------
+    A      current contents 
+    B      current contents 
+
+
     physical disks:
     ------------------------------------------------------------------------------------
     vendor        model        serial                                        disposition
@@ -104,6 +112,14 @@ parent:    e35b2fdd-354d-48d9-acb5-703b2c269a54
 
   sled: 15cf73a6-445b-4d36-9232-5ed364019bc6 (active, config generation 2)
 
+    host phase 2 contents:
+    ------------------------
+    slot   boot image source
+    ------------------------
+    A      current contents 
+    B      current contents 
+
+
     physical disks:
     ------------------------------------------------------------------------------------
     vendor        model        serial                                        disposition
@@ -200,6 +216,14 @@ parent:    e35b2fdd-354d-48d9-acb5-703b2c269a54
 
   sled: 50e6c1c0-43b2-4abc-9041-41165597f639 (active, config generation 2)
 
+    host phase 2 contents:
+    ------------------------
+    slot   boot image source
+    ------------------------
+    A      current contents 
+    B      current contents 
+
+
     physical disks:
     ------------------------------------------------------------------------------------
     vendor        model        serial                                        disposition
@@ -293,6 +317,14 @@ parent:    e35b2fdd-354d-48d9-acb5-703b2c269a54
 
   sled: 969ff976-df34-402c-a362-53db03a6b97f (active, config generation 2)
 
+    host phase 2 contents:
+    ------------------------
+    slot   boot image source
+    ------------------------
+    A      current contents 
+    B      current contents 
+
+
     physical disks:
     ------------------------------------------------------------------------------------
     vendor        model        serial                                        disposition
@@ -385,6 +417,14 @@ parent:    e35b2fdd-354d-48d9-acb5-703b2c269a54
 
 
   sled: ec5c0b37-b651-4c45-ac1c-24541ef9c44b (active, config generation 2)
+
+    host phase 2 contents:
+    ------------------------
+    slot   boot image source
+    ------------------------
+    A      current contents 
+    B      current contents 
+
 
     physical disks:
     ------------------------------------------------------------------------------------

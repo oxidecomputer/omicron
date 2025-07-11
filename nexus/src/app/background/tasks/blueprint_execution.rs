@@ -192,8 +192,9 @@ mod test {
         StepOutcome, StepStatus,
     };
     use nexus_types::deployment::{
-        Blueprint, BlueprintSledConfig, BlueprintTarget, BlueprintZoneConfig,
-        BlueprintZoneDisposition, BlueprintZoneImageSource, BlueprintZoneType,
+        Blueprint, BlueprintHostPhase2DesiredSlots, BlueprintSledConfig,
+        BlueprintTarget, BlueprintZoneConfig, BlueprintZoneDisposition,
+        BlueprintZoneImageSource, BlueprintZoneType,
         CockroachDbPreserveDowngrade, OximeterReadMode, PendingMgsUpdates,
         blueprint_zone_type,
     };
@@ -238,6 +239,8 @@ mod test {
                         datasets: IdMap::new(),
                         zones,
                         remove_mupdate_override: None,
+                        host_phase_2:
+                            BlueprintHostPhase2DesiredSlots::current_contents(),
                     },
                 )
             })

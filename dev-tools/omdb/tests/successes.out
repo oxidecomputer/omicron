@@ -1461,6 +1461,14 @@ parent:    <none>
 
   sled: ..........<REDACTED_UUID>........... (active, config generation 2)
 
+    host phase 2 contents:
+    ------------------------
+    slot   boot image source
+    ------------------------
+    A      current contents 
+    B      current contents 
+
+
     physical disks:
     -----------------------------------------------------------------
     vendor        model              serial               disposition
@@ -1491,6 +1499,14 @@ parent:    <none>
 
 
   sled: ..........<REDACTED_UUID>........... (active, config generation 2)
+
+    host phase 2 contents:
+    ------------------------
+    slot   boot image source
+    ------------------------
+    A      current contents 
+    B      current contents 
+
 
     physical disks:
     ----------------------------------------------------------------
@@ -1565,6 +1581,14 @@ parent:    <none>
 
   sled: ..........<REDACTED_UUID>........... (active, config generation 2)
 
+    host phase 2 contents:
+    ------------------------
+    slot   boot image source
+    ------------------------
+    A      current contents 
+    B      current contents 
+
+
     physical disks:
     -----------------------------------------------------------------
     vendor        model              serial               disposition
@@ -1595,6 +1619,14 @@ parent:    <none>
 
 
   sled: ..........<REDACTED_UUID>........... (active, config generation 2)
+
+    host phase 2 contents:
+    ------------------------
+    slot   boot image source
+    ------------------------
+    A      current contents 
+    B      current contents 
+
 
     physical disks:
     ----------------------------------------------------------------

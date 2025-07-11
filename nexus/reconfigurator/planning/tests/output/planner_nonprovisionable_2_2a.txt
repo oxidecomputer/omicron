@@ -5,6 +5,14 @@ to:   blueprint 9f71f5d3-a272-4382-9154-6ea2e171a6c6
 
   sled 68d24ac5-f341-49ea-a92a-0381b52ab387 (was decommissioned, config generation 2):
 
+    host phase 2 contents:
+    ------------------------
+    slot   boot image source
+    ------------------------
+-   A      current contents 
+-   B      current contents 
+
+
     physical disks:
     ------------------------------------------------------------------------------------
     vendor        model        serial                                        disposition
@@ -96,6 +104,14 @@ to:   blueprint 9f71f5d3-a272-4382-9154-6ea2e171a6c6
 
   sled 2d1cb4f2-cf44-40fc-b118-85036eb732a9 (active, config generation 2):
 
+    host phase 2 contents:
+    ------------------------
+    slot   boot image source
+    ------------------------
+    A      current contents 
+    B      current contents 
+
+
     physical disks:
     ------------------------------------------------------------------------------------
     vendor        model        serial                                        disposition
@@ -186,6 +202,14 @@ to:   blueprint 9f71f5d3-a272-4382-9154-6ea2e171a6c6
 
 
   sled 48d95fef-bc9f-4f50-9a53-1e075836291d (decommissioned, config generation 3 -> 4):
+
+    host phase 2 contents:
+    ------------------------
+    slot   boot image source
+    ------------------------
+    A      current contents 
+    B      current contents 
+
 
     physical disks:
     -------------------------------------------------------------------------------------

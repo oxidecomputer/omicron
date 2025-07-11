@@ -5,6 +5,14 @@ to:   blueprint f432fcd5-1284-4058-8b4a-9286a3de6163
 
   sled ec61eded-c34f-443d-a580-dadf757529c4 (active, config generation 2 -> 3):
 
+    host phase 2 contents:
+    ------------------------
+    slot   boot image source
+    ------------------------
+    A      current contents 
+    B      current contents 
+
+
     physical disks:
     ------------------------------------------------------------------------------------
     vendor        model        serial                                        disposition
