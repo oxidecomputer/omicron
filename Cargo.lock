@@ -7740,6 +7740,7 @@ dependencies = [
  "tufaceous-lib",
  "update-common",
  "update-engine",
+ "usdt",
  "uuid",
  "zip 4.2.0",
 ]
