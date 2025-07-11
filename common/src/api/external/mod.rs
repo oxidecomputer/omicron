@@ -3870,6 +3870,13 @@ mod test {
                 "range has no start value"
             ))
         );
+        assert_eq!(
+            L4PortRange::try_from("21-20".to_string()).map_err(Into::into),
+            Err(Error::invalid_value(
+                "l4_port_range",
+                "range has larger start value than end value"
+            ))
+        );
     }
 
     #[test]
@@ -4167,6 +4174,13 @@ mod test {
         assert_eq!(
             "icmp:0,30-".parse::<VpcFirewallRuleProtocol>(),
             Err(Error::invalid_value("code", "range has no end value"))
+        );
+        assert_eq!(
+            "icmp:0,21-20".parse::<VpcFirewallRuleProtocol>(),
+            Err(Error::invalid_value(
+                "code",
+                "range has larger start value than end value"
+            ))
         );
     }
 
