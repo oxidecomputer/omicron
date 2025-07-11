@@ -1470,6 +1470,7 @@ table! {
         dataset_id -> Uuid,
 
         assigned_nexus -> Nullable<Uuid>,
+        user_comment -> Nullable<Text>,
     }
 }
 

@@ -2474,6 +2474,12 @@ pub static VERIFY_ENDPOINTS: LazyLock<Vec<VerifyEndpoint>> =
                 allowed_methods: vec![
                     AllowedMethod::Get,
                     AllowedMethod::Delete,
+                    AllowedMethod::Put(
+                        serde_json::to_value(&params::SupportBundleUpdate {
+                            user_comment: None,
+                        })
+                        .unwrap(),
+                    ),
                 ],
             },
             /* Updates */

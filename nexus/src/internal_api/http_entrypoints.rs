@@ -36,6 +36,7 @@ use nexus_types::external_api::params::PhysicalDiskPath;
 use nexus_types::external_api::params::SledSelector;
 use nexus_types::external_api::params::SupportBundleFilePath;
 use nexus_types::external_api::params::SupportBundlePath;
+use nexus_types::external_api::params::SupportBundleUpdate;
 use nexus_types::external_api::params::UninitializedSledId;
 use nexus_types::external_api::shared::ProbeInfo;
 use nexus_types::external_api::shared::UninitializedSled;
@@ -1311,6 +1312,37 @@ impl NexusInternalApi for NexusInternalApiImpl {
                 .await?;
 
             Ok(HttpResponseDeleted())
+        };
+        apictx
+            .context
+            .external_latencies
+            .instrument_dropshot_handler(&rqctx, handler)
+            .await
+    }
+
+    async fn support_bundle_update(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<SupportBundlePath>,
+        body: TypedBody<SupportBundleUpdate>,
+    ) -> Result<HttpResponseOk<shared::SupportBundleInfo>, HttpError> {
+        let apictx = rqctx.context();
+        let handler = async {
+            let nexus = &apictx.context.nexus;
+            let path = path_params.into_inner();
+            let update = body.into_inner();
+
+            let opctx =
+                crate::context::op_context_for_internal_api(&rqctx).await;
+
+            let bundle = nexus
+                .support_bundle_update_user_comment(
+                    &opctx,
+                    SupportBundleUuid::from_untyped_uuid(path.bundle_id),
+                    update.user_comment,
+                )
+                .await?;
+
+            Ok(HttpResponseOk(bundle.into()))
         };
         apictx
             .context
