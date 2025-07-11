@@ -61,6 +61,13 @@ enum Cmds {
     CheckWorkspaceDeps,
     /// Run configured clippy checks
     Clippy(clippy::ClippyArgs),
+
+    /// Analyze historical build and test timing information
+    Hist {
+        /// Pass through all arguments to omicron-hist binary
+        #[arg(trailing_var_arg = true, allow_hyphen_values = true)]
+        args: Vec<String>,
+    },
     /// Download binaries, OpenAPI specs, and other out-of-repo utilities.
     Download(external::External),
 
@@ -120,6 +127,14 @@ fn main() -> Result<()> {
         Cmds::Clippy(args) => clippy::run_cmd(args),
         Cmds::CheckFeatures(args) => check_features::run_cmd(args),
         Cmds::CheckWorkspaceDeps => check_workspace_deps::run_cmd(),
+        Cmds::Hist { args } => {
+            // Delegate to the separate omicron-hist binary for performance
+            let mut cmd = Command::new("cargo");
+            cmd.args(["run", "-p", "omicron-hist", "--"]).args(args);
+
+            let error = cmd.exec();
+            Err(error).context("failed to exec omicron-hist binary")
+        }
         Cmds::DbDev(external) => external.exec_bin("db-dev"),
         Cmds::Download(external) => {
             // Allow specialized environments (e.g., testbed/a4x2) that can't
