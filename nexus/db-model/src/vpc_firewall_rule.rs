@@ -211,6 +211,17 @@ fn ensure_max_len<T>(
     Ok(())
 }
 
+fn validate_port_ranges(
+    items: &[external::L4PortRange],
+) -> Result<(), external::Error> {
+    for range in items {
+        if range.last < range.first {
+            return Err(external::L4PortRangeError::EmptyRange.into());
+        }
+    }
+    Ok(())
+}
+
 impl VpcFirewallRule {
     pub fn new(
         rule_id: Uuid,
@@ -232,6 +243,7 @@ impl VpcFirewallRule {
         }
         if let Some(ports) = rule.filters.ports.as_ref() {
             ensure_max_len(&ports, "filters.ports", MAX_FW_RULE_PARTS)?;
+            validate_port_ranges(ports.as_slice())?;
         }
         if let Some(protocols) = rule.filters.protocols.as_ref() {
             ensure_max_len(&protocols, "filters.protocols", MAX_FW_RULE_PARTS)?;

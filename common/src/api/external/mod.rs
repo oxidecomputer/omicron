@@ -2059,11 +2059,11 @@ impl FromStr for L4PortRange {
                     .map_err(|e| L4PortRangeError::Value(right.into(), e))?
                     .into();
 
-                if first > last {
-                    Err(L4PortRangeError::EmptyRange)
-                } else {
-                    Ok(L4PortRange { first, last })
-                }
+                // First/last sanity checking is performed when constructing
+                // db::VpcFirewallRule. There has been a window of time where
+                // we have accepted invalid port ranges which could still be
+                // resident in CRDB.
+                Ok(L4PortRange { first, last })
             }
         }
     }
@@ -3896,12 +3896,16 @@ mod test {
                 "range has no start value"
             ))
         );
+
+        // This remains valid (unlike `IcmpParamRange`) because there is a
+        // slim possibility that we may need to deserialise these ranges from
+        // CRDB. Later integration tests assert that this is caught on create.
         assert_eq!(
-            L4PortRange::try_from("21-20".to_string()).map_err(Into::into),
-            Err(Error::invalid_value(
-                "l4_port_range",
-                "range has larger start value than end value"
-            ))
+            L4PortRange::try_from("21-20".to_string()),
+            Ok(L4PortRange {
+                first: L4Port::try_from(21).unwrap(),
+                last: L4Port::try_from(20).unwrap()
+            })
         );
     }
 
