@@ -6,6 +6,7 @@
 
 use crate::external_api::shared::{
     self, Baseboard, IpKind, IpRange, ServiceUsingCertificate,
+    TufSignedRootRole,
 };
 use crate::identity::AssetIdentityMetadata;
 use api_identity::ObjectIdentity;
@@ -501,14 +502,14 @@ pub struct IpPoolRange {
 #[derive(Debug, Clone, Deserialize, PartialEq, Serialize, JsonSchema)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum ExternalIp {
-    Ephemeral { ip: IpAddr },
+    Ephemeral { ip: IpAddr, ip_pool_id: Uuid },
     Floating(FloatingIp),
 }
 
 impl ExternalIp {
     pub fn ip(&self) -> IpAddr {
         match self {
-            Self::Ephemeral { ip } => *ip,
+            Self::Ephemeral { ip, .. } => *ip,
             Self::Floating(float) => float.ip,
         }
     }
@@ -1479,6 +1480,18 @@ pub struct TargetRelease {
 
     /// The source of the target release.
     pub release_source: TargetReleaseSource,
+}
+
+/// Trusted root role used by the update system to verify update repositories.
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize, JsonSchema)]
+pub struct UpdatesTrustRoot {
+    /// The UUID of this trusted root role.
+    pub id: Uuid,
+    /// Time the trusted root role was added.
+    pub time_created: DateTime<Utc>,
+    /// The trusted root role itself, a JSON document as described by The Update
+    /// Framework.
+    pub root_role: TufSignedRootRole,
 }
 
 fn expected_one_of<T: strum::VariantArray + fmt::Display>() -> String {

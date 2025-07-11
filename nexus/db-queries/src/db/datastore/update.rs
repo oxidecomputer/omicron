@@ -18,11 +18,12 @@ use nexus_db_errors::OptionalError;
 use nexus_db_errors::{ErrorHandler, public_error_from_diesel};
 use nexus_db_lookup::DbConnection;
 use nexus_db_model::{
-    ArtifactHash, TufArtifact, TufRepo, TufRepoDescription, to_db_typed_uuid,
+    ArtifactHash, TufArtifact, TufRepo, TufRepoDescription, TufTrustRoot,
+    to_db_typed_uuid,
 };
 use omicron_common::api::external::{
-    self, CreateResult, DataPageParams, Generation, ListResultVec,
-    LookupResult, LookupType, ResourceType, TufRepoInsertStatus,
+    self, CreateResult, DataPageParams, DeleteResult, Generation,
+    ListResultVec, LookupResult, LookupType, ResourceType, TufRepoInsertStatus,
 };
 use omicron_uuid_kinds::GenericUuid;
 use omicron_uuid_kinds::TufRepoKind;
@@ -204,6 +205,70 @@ impl DataStore {
             .await
             .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))
     }
+
+    /// List the trusted TUF root roles in the trust store.
+    pub async fn tuf_trust_root_list(
+        &self,
+        opctx: &OpContext,
+        pagparams: &DataPageParams<'_, Uuid>,
+    ) -> ListResultVec<TufTrustRoot> {
+        use nexus_db_schema::schema::tuf_trust_root::dsl;
+
+        opctx
+            .authorize(
+                authz::Action::ListChildren,
+                &authz::UPDATE_TRUST_ROOT_LIST,
+            )
+            .await?;
+        paginated(dsl::tuf_trust_root, dsl::id, pagparams)
+            .select(TufTrustRoot::as_select())
+            .filter(dsl::time_deleted.is_null())
+            .load_async(&*self.pool_connection_authorized(opctx).await?)
+            .await
+            .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))
+    }
+
+    /// Insert a trusted TUF root role into the trust store.
+    pub async fn tuf_trust_root_insert(
+        &self,
+        opctx: &OpContext,
+        trust_root: TufTrustRoot,
+    ) -> CreateResult<TufTrustRoot> {
+        use nexus_db_schema::schema::tuf_trust_root::dsl;
+
+        opctx
+            .authorize(
+                authz::Action::CreateChild,
+                &authz::UPDATE_TRUST_ROOT_LIST,
+            )
+            .await?;
+        diesel::insert_into(dsl::tuf_trust_root)
+            .values(trust_root)
+            .returning(TufTrustRoot::as_returning())
+            .get_result_async(&*self.pool_connection_authorized(opctx).await?)
+            .await
+            .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))
+    }
+
+    /// Remove a TUF root role from the trust store (by setting the time_deleted
+    /// field).
+    pub async fn tuf_trust_root_delete(
+        &self,
+        opctx: &OpContext,
+        authz_trust_root: &authz::TufTrustRoot,
+    ) -> DeleteResult {
+        use nexus_db_schema::schema::tuf_trust_root::dsl;
+
+        opctx.authorize(authz::Action::Delete, authz_trust_root).await?;
+        diesel::update(dsl::tuf_trust_root)
+            .filter(dsl::id.eq(to_db_typed_uuid(authz_trust_root.id())))
+            .filter(dsl::time_deleted.is_null())
+            .set(dsl::time_deleted.eq(chrono::Utc::now()))
+            .execute_async(&*self.pool_connection_authorized(opctx).await?)
+            .await
+            .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))
+            .map(|_| ())
+    }
 }
 
 // This is a separate method mostly to make rustfmt not bail out on long lines
@@ -319,23 +384,27 @@ async fn insert_impl(
         let mut new_artifacts = Vec::new();
         let mut all_artifacts = Vec::new();
 
-        enum ArtifactStatus {
+        enum ArtifactStatus<'a> {
             New,
-            Existing,
+            Existing(&'a TufArtifact),
             Mismatch,
         }
 
-        impl ArtifactStatus {
-            fn mark_existing(&mut self) {
+        impl<'a> ArtifactStatus<'a> {
+            fn mark_existing(&mut self, artifact: &'a TufArtifact) {
                 match self {
-                    ArtifactStatus::New => *self = ArtifactStatus::Existing,
-                    ArtifactStatus::Existing | ArtifactStatus::Mismatch => (),
+                    ArtifactStatus::New => {
+                        *self = ArtifactStatus::Existing(artifact)
+                    }
+                    ArtifactStatus::Existing(_) | ArtifactStatus::Mismatch => {
+                        ()
+                    }
                 }
             }
 
             fn mark_mismatch(&mut self) {
                 match self {
-                    ArtifactStatus::New | ArtifactStatus::Existing => {
+                    ArtifactStatus::New | ArtifactStatus::Existing(_) => {
                         *self = ArtifactStatus::Mismatch
                     }
                     ArtifactStatus::Mismatch => (),
@@ -348,7 +417,7 @@ async fn insert_impl(
             if let Some(&existing_nvk) =
                 results_by_id.get(&uploaded_artifact.nvk())
             {
-                status.mark_existing();
+                status.mark_existing(existing_nvk);
                 if existing_nvk.sha256 != uploaded_artifact.sha256
                     || existing_nvk.artifact_size()
                         != uploaded_artifact.artifact_size()
@@ -364,7 +433,7 @@ async fn insert_impl(
             if let Some(&existing_hash) = results_by_hash_id
                 .get(&(&uploaded_artifact.kind, uploaded_artifact.sha256))
             {
-                status.mark_existing();
+                status.mark_existing(existing_hash);
                 if existing_hash.name != uploaded_artifact.name
                     || existing_hash.version != uploaded_artifact.version
                 {
@@ -382,8 +451,8 @@ async fn insert_impl(
                     new_artifacts.push(uploaded_artifact.clone());
                     all_artifacts.push(uploaded_artifact);
                 }
-                ArtifactStatus::Existing => {
-                    all_artifacts.push(uploaded_artifact);
+                ArtifactStatus::Existing(existing_artifact) => {
+                    all_artifacts.push(existing_artifact.clone());
                 }
                 ArtifactStatus::Mismatch => {
                     // This is an error case -- we'll return an error before
@@ -433,7 +502,7 @@ async fn insert_impl(
         use nexus_db_schema::schema::tuf_repo_artifact::dsl;
 
         let mut values = Vec::new();
-        for artifact in desc.artifacts.clone() {
+        for artifact in &all_artifacts {
             slog::debug!(
                 log,
                 "inserting artifact into tuf_repo_artifact table";

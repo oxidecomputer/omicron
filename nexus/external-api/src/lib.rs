@@ -26,7 +26,7 @@ use omicron_common::api::external::{
 use openapi_manager_types::ValidationContext;
 use openapiv3::OpenAPI;
 
-pub const API_VERSION: &str = "20250604.0.0";
+pub const API_VERSION: &str = "20250730.0.0";
 
 const MIB: usize = 1024 * 1024;
 const GIB: usize = 1024 * MIB;
@@ -2953,7 +2953,9 @@ pub trait NexusExternalApi {
 
     // Updates
 
-    /// Upload TUF repository
+    /// Upload system release repository
+    ///
+    /// System release repositories are verified by the updates trust store.
     #[endpoint {
         method = PUT,
         path = "/v1/system/update/repository",
@@ -2966,9 +2968,7 @@ pub trait NexusExternalApi {
         body: StreamingBody,
     ) -> Result<HttpResponseOk<TufRepoInsertResponse>, HttpError>;
 
-    /// Fetch TUF repository description
-    ///
-    /// Fetch description of TUF repository by system version.
+    /// Fetch system release repository description by version
     #[endpoint {
         method = GET,
         path = "/v1/system/update/repository/{system_version}",
@@ -2978,6 +2978,59 @@ pub trait NexusExternalApi {
         rqctx: RequestContext<Self::Context>,
         path_params: Path<params::UpdatesGetRepositoryParams>,
     ) -> Result<HttpResponseOk<TufRepoGetResponse>, HttpError>;
+
+    /// List root roles in the updates trust store
+    ///
+    /// A root role is a JSON document describing the cryptographic keys that
+    /// are trusted to sign system release repositories, as described by The
+    /// Update Framework. Uploading a repository requires its metadata to be
+    /// signed by keys trusted by the trust store.
+    #[endpoint {
+        method = GET,
+        path = "/v1/system/update/trust-roots",
+        tags = ["experimental"], // ["system/update"],
+    }]
+    async fn system_update_trust_root_list(
+        rqctx: RequestContext<Self::Context>,
+        query_params: Query<PaginatedById>,
+    ) -> Result<HttpResponseOk<ResultsPage<views::UpdatesTrustRoot>>, HttpError>;
+
+    /// Add trusted root role to updates trust store
+    #[endpoint {
+        method = POST,
+        path = "/v1/system/update/trust-roots",
+        tags = ["experimental"], // ["system/update"],
+    }]
+    async fn system_update_trust_root_create(
+        rqctx: RequestContext<Self::Context>,
+        body: TypedBody<shared::TufSignedRootRole>,
+    ) -> Result<HttpResponseCreated<views::UpdatesTrustRoot>, HttpError>;
+
+    /// Fetch trusted root role
+    #[endpoint {
+        method = GET,
+        path = "/v1/system/update/trust-roots/{trust_root_id}",
+        tags = ["experimental"], // ["system/update"],
+    }]
+    async fn system_update_trust_root_view(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<params::TufTrustRootPath>,
+    ) -> Result<HttpResponseOk<views::UpdatesTrustRoot>, HttpError>;
+
+    /// Delete trusted root role
+    ///
+    /// Note that this method does not currently check for any uploaded system
+    /// release repositories that would become untrusted after deleting the
+    /// root role.
+    #[endpoint {
+        method = DELETE,
+        path = "/v1/system/update/trust-roots/{trust_root_id}",
+        tags = ["experimental"], // ["system/update"],
+    }]
+    async fn system_update_trust_root_delete(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<params::TufTrustRootPath>,
+    ) -> Result<HttpResponseDeleted, HttpError>;
 
     /// Get the current target release of the rack's system software
     ///

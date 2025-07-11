@@ -19,6 +19,7 @@ use serde::Deserialize;
 use serde::Deserializer;
 use serde::Serialize;
 use serde::de::Error as _;
+use slog_error_chain::InlineErrorChain;
 use strum::EnumIter;
 use uuid::Uuid;
 
@@ -255,6 +256,45 @@ pub enum UpdateableComponentType {
     HeliosHostPhase1,
     HeliosHostPhase2,
     HostOmicron,
+}
+
+/// Wrapper type for TUF root roles to prevent misuse.
+///
+/// The format of TUF root roles is an implementation detail and Nexus should
+/// generally treat them as opaque JSON blobs without inspecting any fields
+/// or, especially, adding any data to them. This value should be created only
+/// through Serde deserialization.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, JsonSchema)]
+#[serde(transparent)]
+pub struct TufSignedRootRole(serde_json::Value);
+
+impl TufSignedRootRole {
+    pub fn to_bytes(&self) -> Vec<u8> {
+        self.0.to_string().into_bytes()
+    }
+}
+
+// We'd like to use `#[serde(try_from = ..)]` here but it conflicts with
+// `#[serde(transparent)]`, which we're using for the Serialize derive.
+impl<'de> Deserialize<'de> for TufSignedRootRole {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        use tough::schema::{Root, Signed};
+
+        let value = serde_json::Value::deserialize(deserializer)?;
+        // Verify that this appears to be a valid, self-signed TUF root role.
+        let root =
+            <Signed<Root>>::deserialize(&value).map_err(D::Error::custom)?;
+        match root.signed.verify_role(&root) {
+            Ok(()) => Ok(Self(value)),
+            Err(err) => Err(D::Error::custom(format!(
+                "Unable to verify root role: {}",
+                InlineErrorChain::new(&err)
+            ))),
+        }
+    }
 }
 
 /// Properties that uniquely identify an Oxide hardware component

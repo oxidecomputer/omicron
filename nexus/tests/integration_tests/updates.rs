@@ -2,65 +2,152 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-// TODO(iliana):
-// - refactor `test_update_end_to_end` into a test setup function
-// - test that an unknown artifact returns 404, not 500
-// - tests around target names and artifact names that contain dangerous paths like `../`
-
 use anyhow::{Context, Result, ensure};
 use camino::Utf8Path;
 use camino_tempfile::{Builder, Utf8TempPath};
-use clap::Parser;
-use dropshot::test_util::LogContext;
+use chrono::{DateTime, Duration, Timelike, Utc};
+use dropshot::ResultsPage;
 use http::{Method, StatusCode};
-use nexus_config::UpdatesConfig;
 use nexus_db_queries::context::OpContext;
 use nexus_test_utils::background::run_tuf_artifact_replication_step;
 use nexus_test_utils::background::wait_tuf_artifact_replication_step;
 use nexus_test_utils::http_testing::{AuthnMode, NexusRequest, RequestBuilder};
-use nexus_test_utils::{load_test_config, test_setup, test_setup_with_config};
+use nexus_test_utils::test_setup;
+use nexus_test_utils_macros::nexus_test;
+use nexus_types::external_api::views::UpdatesTrustRoot;
 use omicron_common::api::external::{
     TufRepoGetResponse, TufRepoInsertResponse, TufRepoInsertStatus,
 };
-use omicron_sled_agent::sim;
 use pretty_assertions::assert_eq;
 use semver::Version;
 use serde::Deserialize;
 use std::collections::HashSet;
 use std::fmt::Debug;
-use std::io::Write;
+use tough::editor::signed::SignedRole;
+use tough::schema::Root;
 use tufaceous_artifact::KnownArtifactKind;
+use tufaceous_lib::Key;
+use tufaceous_lib::assemble::{ArtifactManifest, OmicronRepoAssembler};
 use tufaceous_lib::assemble::{DeserializedManifest, ManifestTweak};
+
+const TRUST_ROOTS_URL: &str = "/v1/system/update/trust-roots";
+
+type ControlPlaneTestContext =
+    nexus_test_utils::ControlPlaneTestContext<omicron_nexus::Server>;
+
+pub struct TestTrustRoot {
+    pub key: Key,
+    pub expiry: DateTime<Utc>,
+    pub root_role: SignedRole<Root>,
+}
+
+impl TestTrustRoot {
+    pub async fn generate() -> Result<TestTrustRoot> {
+        let key = Key::generate_ed25519()?;
+        let expiry = Utc::now()
+            .with_nanosecond(0)
+            .expect("0 is less than 2,000,000,000")
+            + Duration::weeks(1);
+        let root_role =
+            tufaceous_lib::root::new_root(vec![key.clone()], expiry).await?;
+        Ok(TestTrustRoot { key, expiry, root_role })
+    }
+
+    pub fn to_upload_request<'a>(
+        &'a self,
+        client: &'a dropshot::test_util::ClientTestContext,
+        expected_status: StatusCode,
+    ) -> NexusRequest<'a> {
+        let request =
+            RequestBuilder::new(client, Method::POST, TRUST_ROOTS_URL)
+                .body(Some(self.root_role.signed()))
+                .expect_status(Some(expected_status));
+        NexusRequest::new(request).authn_as(AuthnMode::PrivilegedUser)
+    }
+
+    pub async fn assemble_repo(
+        &self,
+        log: &slog::Logger,
+        tweaks: &[ManifestTweak],
+    ) -> Result<TestRepo> {
+        let archive_path = Builder::new()
+            .prefix("archive")
+            .suffix(".zip")
+            .tempfile()
+            .context("error creating temp file for archive")?
+            .into_temp_path();
+
+        let manifest = ArtifactManifest::from_deserialized(
+            Utf8Path::new(""),
+            DeserializedManifest::tweaked_fake(tweaks),
+        )?;
+        let mut assembler = OmicronRepoAssembler::new(
+            log,
+            manifest,
+            vec![self.key.clone()],
+            self.expiry,
+            archive_path.to_path_buf(),
+        );
+        assembler.set_root_role(self.root_role.clone());
+        assembler.build().await?;
+        Ok(TestRepo(archive_path))
+    }
+}
+
+pub struct TestRepo(pub Utf8TempPath);
+
+impl TestRepo {
+    /// Generate a `NexusRequest` to upload this repo.
+    ///
+    /// Prefer `into_upload_request` to ensure the temporary file is deleted.
+    pub fn to_upload_request<'a>(
+        &self,
+        client: &'a dropshot::test_util::ClientTestContext,
+        expected_status: StatusCode,
+    ) -> NexusRequest<'a> {
+        let url = format!(
+            "/v1/system/update/repository?file_name={}",
+            self.0.file_name().expect("archive path must have a file name")
+        );
+        let request = RequestBuilder::new(client, Method::PUT, &url)
+            .body_file(Some(&self.0))
+            .expect_status(Some(expected_status));
+        NexusRequest::new(request).authn_as(AuthnMode::PrivilegedUser)
+    }
+
+    /// Generate a `NexusRequest` to upload this repo, and then delete the
+    /// temporary file.
+    ///
+    /// Panics if we fail to delete the temporary file.
+    pub fn into_upload_request(
+        self,
+        client: &dropshot::test_util::ClientTestContext,
+        expected_status: StatusCode,
+    ) -> NexusRequest<'_> {
+        let request = self.to_upload_request(client, expected_status);
+        self.0.close().unwrap();
+        request
+    }
+}
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn test_repo_upload_unconfigured() -> Result<()> {
-    let mut config = load_test_config();
-    let logctx = LogContext::new("test_update_uninitialized", &config.pkg.log);
-    let cptestctx = test_setup_with_config::<omicron_nexus::Server>(
-        "test_update_uninitialized",
-        &mut config,
-        sim::SimMode::Explicit,
-        None,
-        0,
-    )
-    .await;
+    let cptestctx =
+        test_setup::<omicron_nexus::Server>("test_update_uninitialized", 0)
+            .await;
     let client = &cptestctx.external_client;
+    let logctx = &cptestctx.logctx;
 
-    // Build a fake TUF repo
-    let archive_path = make_archive(&logctx.log).await?;
-
-    // Attempt to upload the repository to Nexus. This should fail with a 500
-    // error because the updates system is not configured.
-    {
-        make_upload_request(
-            client,
-            &archive_path,
-            StatusCode::INTERNAL_SERVER_ERROR,
-        )
+    // Generate a trust root, but _don't_ upload it to Nexus.
+    let trust_root = TestTrustRoot::generate().await?;
+    // Build a fake TUF repo and attempt to upload it to Nexus. This should fail
+    // with a 400 error because we did not upload a trusted root role.
+    trust_root
+        .assemble_repo(&logctx.log, &[])
+        .await?
+        .into_upload_request(client, StatusCode::BAD_REQUEST)
         .execute()
-        .await
-        .context("repository upload should have failed with 500 error")?;
-    }
+        .await?;
 
     // The artifact replication background task should have nothing to do.
     let status =
@@ -71,63 +158,54 @@ async fn test_repo_upload_unconfigured() -> Result<()> {
     );
     assert_eq!(status.local_repos, 0);
 
-    // Attempt to fetch a repository description from Nexus. This should also
-    // fail with a 500 error.
+    // Attempt to fetch a repository description from Nexus. This should fail
+    // with a 404 error.
     {
         make_get_request(
             client,
             "1.0.0".parse().unwrap(),
-            StatusCode::INTERNAL_SERVER_ERROR,
+            StatusCode::NOT_FOUND,
         )
         .execute()
         .await
-        .context("repository fetch should have failed with 500 error")?;
+        .context("repository fetch should have failed with 404 error")?;
     }
 
     cptestctx.teardown().await;
-    logctx.cleanup_successful();
-
     Ok(())
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn test_repo_upload() -> Result<()> {
-    let mut config = load_test_config();
-    config.pkg.updates = Some(UpdatesConfig {
-        // XXX: This is currently not used by the update system, but
-        // trusted_root will become meaningful in the future.
-        trusted_root: "does-not-exist.json".into(),
-    });
-    let logctx = LogContext::new("test_update_end_to_end", &config.pkg.log);
-    let cptestctx = test_setup_with_config::<omicron_nexus::Server>(
+    let cptestctx = test_setup::<omicron_nexus::Server>(
         "test_update_end_to_end",
-        &mut config,
-        sim::SimMode::Explicit,
-        None,
         3, // 4 total sled agents
     )
     .await;
     let client = &cptestctx.external_client;
+    let logctx = &cptestctx.logctx;
 
     // The initial generation number should be 1.
     let datastore = cptestctx.server.server_context().nexus.datastore();
-    let opctx =
-        OpContext::for_tests(cptestctx.logctx.log.new(o!()), datastore.clone());
+    let opctx = OpContext::for_tests(logctx.log.new(o!()), datastore.clone());
     assert_eq!(
         datastore.tuf_get_generation(&opctx).await.unwrap(),
         1u32.into()
     );
 
-    // Build a fake TUF repo
-    let archive_path = make_archive(&logctx.log).await?;
+    let trust_root = TestTrustRoot::generate().await?;
+    trust_root.to_upload_request(client, StatusCode::CREATED).execute().await?;
 
-    // Upload the repository to Nexus.
+    // Build a fake TUF repo
+    let repo = trust_root.assemble_repo(&logctx.log, &[]).await?;
+
+    // Generate a repository and upload it to Nexus.
     let mut initial_description = {
-        let response =
-            make_upload_request(client, &archive_path, StatusCode::OK)
-                .execute()
-                .await
-                .context("error uploading repository")?;
+        let response = repo
+            .to_upload_request(client, StatusCode::OK)
+            .execute()
+            .await
+            .context("error uploading repository")?;
 
         let response =
             serde_json::from_slice::<TufRepoInsertResponse>(&response.body)
@@ -198,11 +276,11 @@ async fn test_repo_upload() -> Result<()> {
     // Upload the repository to Nexus again. This should return a 200 with an
     // `AlreadyExists` status.
     let mut reupload_description = {
-        let response =
-            make_upload_request(client, &archive_path, StatusCode::OK)
-                .execute()
-                .await
-                .context("error uploading repository a second time")?;
+        let response = repo
+            .into_upload_request(client, StatusCode::OK)
+            .execute()
+            .await
+            .context("error uploading repository a second time")?;
 
         let response =
             serde_json::from_slice::<TufRepoInsertResponse>(&response.body)
@@ -257,19 +335,16 @@ async fn test_repo_upload() -> Result<()> {
             kind: KnownArtifactKind::GimletSp,
             version: "2.0.0".parse().unwrap(),
         }];
-        let archive_path = make_tweaked_archive(&logctx.log, tweaks).await?;
-
-        let response = make_upload_request(
-            client,
-            &archive_path,
-            StatusCode::CONFLICT,
-        )
-        .execute()
-        .await
-        .context(
-            "error uploading repository with different artifact version \
-             but same system version",
-        )?;
+        let response = trust_root
+            .assemble_repo(&logctx.log, tweaks)
+            .await?
+            .into_upload_request(client, StatusCode::CONFLICT)
+            .execute()
+            .await
+            .context(
+                "error uploading repository with different artifact version \
+                 but same system version",
+            )?;
         assert_error_message_contains(
             &response.body,
             "Uploaded repository with system version 1.0.0 has SHA256 hash",
@@ -286,16 +361,16 @@ async fn test_repo_upload() -> Result<()> {
                 size_delta: 1024,
             },
         ];
-        let archive_path = make_tweaked_archive(&logctx.log, tweaks).await?;
-
-        let response =
-            make_upload_request(client, &archive_path, StatusCode::CONFLICT)
-                .execute()
-                .await
-                .context(
-                    "error uploading repository with artifact \
-                     containing different hash for same version",
-                )?;
+        let response = trust_root
+            .assemble_repo(&logctx.log, tweaks)
+            .await?
+            .into_upload_request(client, StatusCode::CONFLICT)
+            .execute()
+            .await
+            .context(
+                "error uploading repository with artifact \
+                 containing different hash for same version",
+            )?;
         assert_error_message_contains(
             &response.body,
             "Uploaded artifacts don't match existing artifacts with same IDs:",
@@ -323,16 +398,16 @@ async fn test_repo_upload() -> Result<()> {
             },
         ];
 
-        let archive_path = make_tweaked_archive(&logctx.log, tweaks).await?;
-
-        let response =
-            make_upload_request(client, &archive_path, StatusCode::CONFLICT)
-                .execute()
-                .await
-                .context(
-                    "error uploading repository with artifact \
-                     containing different hash for same version",
-                )?;
+        let response = trust_root
+            .assemble_repo(&logctx.log, tweaks)
+            .await?
+            .into_upload_request(client, StatusCode::CONFLICT)
+            .execute()
+            .await
+            .context(
+                "error uploading repository with artifact \
+                 containing different hash for same version",
+            )?;
         assert_error_message_contains(
             &response.body,
             "Uploaded artifacts don't match existing artifacts with same IDs:",
@@ -352,18 +427,45 @@ async fn test_repo_upload() -> Result<()> {
     // changes. This should be accepted.
     {
         let tweaks = &[ManifestTweak::SystemVersion("2.0.0".parse().unwrap())];
-        let archive_path = make_tweaked_archive(&logctx.log, tweaks).await?;
-
-        let response =
-            make_upload_request(client, &archive_path, StatusCode::OK)
-                .execute()
-                .await
-                .context("error uploading repository with different system version (should succeed)")?;
+        let response = trust_root
+            .assemble_repo(&logctx.log, tweaks)
+            .await?
+            .into_upload_request(client, StatusCode::OK)
+            .execute()
+            .await
+            .context(
+                "error uploading repository with different system version \
+                (should succeed)",
+            )?;
 
         let response =
             serde_json::from_slice::<TufRepoInsertResponse>(&response.body)
                 .context("error deserializing response body")?;
         assert_eq!(response.status, TufRepoInsertStatus::Inserted);
+        let mut description = response.recorded;
+        description.sort_artifacts();
+
+        // The artifacts should be exactly the same as the 1.0.0 repo we uploaded.
+        assert_eq!(
+            initial_description.artifacts, description.artifacts,
+            "artifacts for 1.0.0 and 2.0.0 should match"
+        );
+
+        // Now get the repository that was just uploaded and make sure the
+        // artifact list is the same.
+        let response: TufRepoGetResponse =
+            make_get_request(client, "2.0.0".parse().unwrap(), StatusCode::OK)
+                .execute()
+                .await
+                .context("error fetching repository")?
+                .parsed_body()?;
+        let mut get_description = response.description;
+        get_description.sort_artifacts();
+
+        assert_eq!(
+            description, get_description,
+            "initial description matches fetched description"
+        );
     }
     // No artifacts changed, so the generation number should still be 2...
     assert_eq!(
@@ -382,66 +484,7 @@ async fn test_repo_upload() -> Result<()> {
     assert_eq!(status.local_repos, 0);
 
     cptestctx.teardown().await;
-    logctx.cleanup_successful();
-
     Ok(())
-}
-
-async fn make_archive(log: &slog::Logger) -> anyhow::Result<Utf8TempPath> {
-    make_tweaked_archive(log, &[]).await
-}
-
-async fn make_tweaked_archive(
-    log: &slog::Logger,
-    tweaks: &[ManifestTweak],
-) -> anyhow::Result<Utf8TempPath> {
-    let manifest = DeserializedManifest::tweaked_fake(tweaks);
-    let mut manifest_file = Builder::new()
-        .prefix("manifest")
-        .suffix(".toml")
-        .tempfile()
-        .context("error creating temp file for manifest")?;
-    let manifest_to_toml = manifest.to_toml()?;
-    manifest_file.write_all(manifest_to_toml.as_bytes())?;
-
-    let archive_path = Builder::new()
-        .prefix("archive")
-        .suffix(".zip")
-        .tempfile()
-        .context("error creating temp file for archive")?
-        .into_temp_path();
-
-    let args = tufaceous::Args::try_parse_from([
-        "tufaceous",
-        "assemble",
-        manifest_file.path().as_str(),
-        archive_path.as_str(),
-    ])
-    .context("error parsing args")?;
-
-    args.exec(log).await.context("error executing assemble command")?;
-
-    Ok(archive_path)
-}
-
-fn make_upload_request<'a>(
-    client: &'a dropshot::test_util::ClientTestContext,
-    archive_path: &'a Utf8Path,
-    expected_status: StatusCode,
-) -> NexusRequest<'a> {
-    let file_name =
-        archive_path.file_name().expect("archive_path must have a file name");
-    let request = NexusRequest::new(
-        RequestBuilder::new(
-            client,
-            Method::PUT,
-            &format!("/v1/system/update/repository?file_name={}", file_name),
-        )
-        .body_file(Some(archive_path))
-        .expect_status(Some(expected_status)),
-    )
-    .authn_as(AuthnMode::PrivilegedUser);
-    request
 }
 
 fn make_get_request(
@@ -482,29 +525,62 @@ fn assert_error_message_contains(
     Ok(())
 }
 
-// =^..^=   =^..^=   =^..^=   =^..^=   =^..^=   =^..^=   =^..^=   =^..^=
+#[nexus_test]
+async fn test_trust_root_operations(cptestctx: &ControlPlaneTestContext) {
+    let client = &cptestctx.external_client;
+    let trust_root =
+        TestTrustRoot::generate().await.expect("trust root generation failed");
 
-// Tests that ".." paths are disallowed by dropshot.
-#[tokio::test]
-async fn test_download_with_dots_fails() {
-    let cptestctx =
-        test_setup::<omicron_nexus::Server>("test_download_with_dots_fails", 0)
-            .await;
-    let client = &cptestctx.internal_client;
+    // POST /v1/system/update/trust-roots
+    let trust_root_view: UpdatesTrustRoot = trust_root
+        .to_upload_request(client, StatusCode::CREATED)
+        .execute()
+        .await
+        .expect("trust root add failed")
+        .parsed_body()
+        .expect("failed to parse add response");
 
-    let filename = "hey/can/you/look/../../../../up/the/directory/tree";
-    let artifact_get_url = format!("/artifacts/{}", filename);
+    // GET /v1/system/update/trust-roots
+    let request = RequestBuilder::new(client, Method::GET, TRUST_ROOTS_URL)
+        .expect_status(Some(StatusCode::OK));
+    let response: ResultsPage<UpdatesTrustRoot> = NexusRequest::new(request)
+        .authn_as(AuthnMode::PrivilegedUser)
+        .execute()
+        .await
+        .expect("trust root list failed")
+        .parsed_body()
+        .expect("failed to parse list response");
+    assert_eq!(response.items, &[trust_root_view.clone()]);
 
-    NexusRequest::expect_failure(
-        client,
-        StatusCode::BAD_REQUEST,
-        Method::GET,
-        &artifact_get_url,
-    )
-    .authn_as(AuthnMode::PrivilegedUser)
-    .execute()
-    .await
-    .unwrap();
+    // GET /v1/system/update/trust-roots/{id}
+    let id_url = format!("{TRUST_ROOTS_URL}/{}", trust_root_view.id);
+    let request = RequestBuilder::new(client, Method::GET, &id_url)
+        .expect_status(Some(StatusCode::OK));
+    let response: UpdatesTrustRoot = NexusRequest::new(request)
+        .authn_as(AuthnMode::PrivilegedUser)
+        .execute()
+        .await
+        .expect("trust root get failed")
+        .parsed_body()
+        .expect("failed to parse get response");
+    assert_eq!(response, trust_root_view);
 
-    cptestctx.teardown().await;
+    // DELETE /v1/system/update/trust-roots/{id}
+    let request = RequestBuilder::new(client, Method::DELETE, &id_url)
+        .expect_status(Some(StatusCode::NO_CONTENT));
+    NexusRequest::new(request)
+        .authn_as(AuthnMode::PrivilegedUser)
+        .execute()
+        .await
+        .expect("trust root delete failed");
+    let request = RequestBuilder::new(client, Method::GET, TRUST_ROOTS_URL)
+        .expect_status(Some(StatusCode::OK));
+    let response: ResultsPage<UpdatesTrustRoot> = NexusRequest::new(request)
+        .authn_as(AuthnMode::PrivilegedUser)
+        .execute()
+        .await
+        .expect("trust root list after delete failed")
+        .parsed_body()
+        .expect("failed to parse list after delete response");
+    assert!(response.items.is_empty());
 }

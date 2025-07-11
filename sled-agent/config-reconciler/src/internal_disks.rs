@@ -324,7 +324,7 @@ impl InternalDisks {
         })
     }
 
-    pub fn boot_image_raw_devfs_path(
+    pub(crate) fn boot_image_raw_devfs_path(
         &self,
         slot: M2Slot,
     ) -> Option<Result<Utf8PathBuf, Arc<PooledDiskError>>> {

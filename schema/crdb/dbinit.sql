@@ -2556,6 +2556,20 @@ INSERT INTO omicron.public.tuf_generation (
     (TRUE, 1)
 ON CONFLICT DO NOTHING;
 
+-- Trusted TUF root roles, used to verify TUF repo signatures
+CREATE TABLE IF NOT EXISTS omicron.public.tuf_trust_root (
+    id UUID PRIMARY KEY,
+    time_created TIMESTAMPTZ NOT NULL,
+    time_deleted TIMESTAMPTZ,
+    root_role JSONB NOT NULL
+);
+
+-- This index is used for paginating through non-deleted roots.
+CREATE UNIQUE INDEX IF NOT EXISTS tuf_trust_root_by_id
+ON omicron.public.tuf_trust_root (id)
+WHERE
+    time_deleted IS NULL;
+
 /*******************************************************************/
 
 -- The source of the software release that should be deployed to the rack.
@@ -4229,6 +4243,15 @@ CREATE TABLE IF NOT EXISTS omicron.public.inv_clickhouse_keeper_membership (
     raft_config INT8[] NOT NULL,
 
     PRIMARY KEY (inv_collection_id, queried_keeper_id)
+);
+
+CREATE TABLE IF NOT EXISTS omicron.public.inv_cockroachdb_status (
+    inv_collection_id UUID NOT NULL,
+    node_id TEXT NOT NULL,
+    ranges_underreplicated INT8,
+    liveness_live_nodes INT8,
+
+    PRIMARY KEY (inv_collection_id, node_id)
 );
 
 /*
@@ -6175,7 +6198,7 @@ INSERT INTO omicron.public.db_metadata (
     version,
     target_version
 ) VALUES
-    (TRUE, NOW(), NOW(), '159.0.0', NULL)
+    (TRUE, NOW(), NOW(), '161.0.0', NULL)
 ON CONFLICT DO NOTHING;
 
 COMMIT;

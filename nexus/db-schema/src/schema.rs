@@ -1441,6 +1441,16 @@ table! {
 }
 
 table! {
+    tuf_trust_root (id) {
+        id -> Uuid,
+        time_created -> Timestamptz,
+        time_modified -> Timestamptz,
+        time_deleted -> Nullable<Timestamptz>,
+        root_role -> Jsonb,
+    }
+}
+
+table! {
     target_release (generation) {
         generation -> Int8,
         time_requested -> Timestamptz,
@@ -1877,6 +1887,15 @@ table! {
         version -> Int8,
         planner_enabled -> Bool,
         time_modified -> Timestamptz,
+    }
+}
+
+table! {
+    inv_cockroachdb_status (inv_collection_id, node_id) {
+        inv_collection_id -> Uuid,
+        node_id -> Text,
+        ranges_underreplicated -> Nullable<Int8>,
+        liveness_live_nodes -> Nullable<Int8>,
     }
 }
 
