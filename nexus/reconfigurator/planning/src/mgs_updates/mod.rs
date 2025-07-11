@@ -1261,8 +1261,9 @@ mod test {
         );
         assert!(updates.is_empty());
 
-        // Test that when a TUF repo is specified and one RoT is outdated, then
-        // it's configured with an update (and the update looks correct).
+        // Test that when a TUF repo is specified and one RoT and SP are
+        // outdated, then it's configured with an update (and the update looks
+        // correct).
         let repo = make_tuf_repo();
         let updates = plan_mgs_updates(
             log,
@@ -1277,7 +1278,6 @@ mod test {
         assert_eq!(first_update.baseboard_id.serial_number, "sled_0");
         assert_eq!(first_update.sp_type, SpType::Sled);
         assert_eq!(first_update.slot_id, 0);
-        // assert_eq!(first_update.artifact_hash, ARTIFACT_HASH_SP_GIMLET_D);
         assert_eq!(first_update.artifact_hash, ARTIFACT_HASH_OXIDE_ROT_1);
         assert_eq!(first_update.artifact_version, ARTIFACT_VERSION_2);
 
@@ -1294,9 +1294,9 @@ mod test {
         );
         assert_eq!(updates, later_updates);
 
-        // Test that when two updates are needed, but one is already pending,
-        // then the other one is *not* started (because it exceeds
-        // nmax_updates).
+        // Test that when two updates for two SpTypes are needed, but one is
+        // already pending, then the other one is *not* started (because it
+        // exceeds nmax_updates).
         let later_collection = make_collection(
             ARTIFACT_VERSION_2,
             &BTreeMap::from([
@@ -1321,7 +1321,7 @@ mod test {
         );
         assert_eq!(updates, later_updates);
 
-        // At this point, we're ready to test that when the first update
+        // At this point, we're ready to test that when the first SpType update
         // completes, then the second one *is* started.  This tests two
         // different things: first that we noticed the first one completed, and
         // second that we noticed another thing needed an update
@@ -1349,7 +1349,6 @@ mod test {
         assert_eq!(next_update.sp_type, SpType::Switch);
         assert_eq!(next_update.slot_id, 1);
         assert_eq!(next_update.artifact_hash, ARTIFACT_HASH_OXIDE_ROT_1);
-        //assert_eq!(next_update.artifact_hash, ARTIFACT_HASH_SP_SIDECAR_C);
         assert_eq!(next_update.artifact_version, ARTIFACT_VERSION_2);
 
         // Finally, test that when all RoTs and SPs are in spec, then no updates
@@ -1407,10 +1406,6 @@ mod test {
         // Verify the precondition details of an ordinary update.
         let old_update =
             updates.into_iter().next().expect("at least one update");
-        //let PendingMgsUpdateDetails::Sp {
-        //    expected_active_version: old_expected_active_version,
-        //    expected_inactive_version: old_expected_inactive_version,
-        //} = &old_update.details
         let PendingMgsUpdateDetails::Rot {
             expected_active_slot: old_expected_active_slot,
             expected_inactive_version: old_expected_inactive_version,
@@ -1452,10 +1447,6 @@ mod test {
         assert_eq!(old_update.slot_id, new_update.slot_id);
         assert_eq!(old_update.artifact_hash, new_update.artifact_hash);
         assert_eq!(old_update.artifact_version, new_update.artifact_version);
-        // let PendingMgsUpdateDetails::Sp {
-        //     expected_active_version: new_expected_active_version,
-        //     expected_inactive_version: new_expected_inactive_version,
-        // } = &new_update.details
         let PendingMgsUpdateDetails::Rot {
             expected_active_slot: new_expected_active_slot,
             expected_inactive_version: new_expected_inactive_version,
