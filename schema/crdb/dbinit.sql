@@ -2650,7 +2650,10 @@ CREATE TABLE IF NOT EXISTS omicron.public.support_bundle (
 
     -- The Nexus which is in charge of collecting the support bundle,
     -- and later managing its storage.
-    assigned_nexus UUID
+    assigned_nexus UUID,
+
+    user_comment TEXT
+
 );
 
 -- The "UNIQUE" part of this index helps enforce that we allow one support bundle
@@ -6209,7 +6212,7 @@ INSERT INTO omicron.public.db_metadata (
     version,
     target_version
 ) VALUES
-    (TRUE, NOW(), NOW(), '165.0.0', NULL)
+    (TRUE, NOW(), NOW(), '166.0.0', NULL)
 ON CONFLICT DO NOTHING;
 
 COMMIT;

@@ -3368,6 +3368,7 @@ pub trait NexusExternalApi {
     }]
     async fn support_bundle_create(
         rqctx: RequestContext<Self::Context>,
+        body: TypedBody<params::SupportBundleCreate>,
     ) -> Result<HttpResponseCreated<shared::SupportBundleInfo>, HttpError>;
 
     /// Delete an existing support bundle
@@ -3383,6 +3384,18 @@ pub trait NexusExternalApi {
         rqctx: RequestContext<Self::Context>,
         path_params: Path<params::SupportBundlePath>,
     ) -> Result<HttpResponseDeleted, HttpError>;
+
+    /// Update a support bundle
+    #[endpoint {
+        method = PUT,
+        path = "/experimental/v1/system/support-bundles/{bundle_id}",
+        tags = ["experimental"], // system/support-bundles: only one tag is allowed
+    }]
+    async fn support_bundle_update(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<params::SupportBundlePath>,
+        body: TypedBody<params::SupportBundleUpdate>,
+    ) -> Result<HttpResponseOk<shared::SupportBundleInfo>, HttpError>;
 
     // Probes (experimental)
 

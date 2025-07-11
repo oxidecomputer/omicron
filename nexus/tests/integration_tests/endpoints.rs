@@ -1421,8 +1421,8 @@ pub static URL_USERS_DB_INIT: LazyLock<String> = LazyLock::new(|| {
 });
 
 /// List of endpoints to be verified
-pub static VERIFY_ENDPOINTS: LazyLock<Vec<VerifyEndpoint>> =
-    LazyLock::new(|| {
+pub static VERIFY_ENDPOINTS: LazyLock<Vec<VerifyEndpoint>> = LazyLock::new(
+    || {
         vec![
             // Global IAM policy
             VerifyEndpoint {
@@ -2499,7 +2499,9 @@ pub static VERIFY_ENDPOINTS: LazyLock<Vec<VerifyEndpoint>> =
                 unprivileged_access: UnprivilegedAccess::None,
                 allowed_methods: vec![
                     AllowedMethod::Get,
-                    AllowedMethod::Post(serde_json::to_value(()).unwrap()),
+                    AllowedMethod::Post(serde_json::to_value(&nexus_types::external_api::params::SupportBundleCreate {
+                        user_comment: None,
+                    }).unwrap()),
                 ],
             },
             VerifyEndpoint {
@@ -2509,6 +2511,12 @@ pub static VERIFY_ENDPOINTS: LazyLock<Vec<VerifyEndpoint>> =
                 allowed_methods: vec![
                     AllowedMethod::Get,
                     AllowedMethod::Delete,
+                    AllowedMethod::Put(
+                        serde_json::to_value(&params::SupportBundleUpdate {
+                            user_comment: None,
+                        })
+                        .unwrap(),
+                    ),
                 ],
             },
             /* Updates */
@@ -3021,4 +3029,5 @@ pub static VERIFY_ENDPOINTS: LazyLock<Vec<VerifyEndpoint>> =
                 allowed_methods: vec![AllowedMethod::Get],
             },
         ]
-    });
+    },
+);
