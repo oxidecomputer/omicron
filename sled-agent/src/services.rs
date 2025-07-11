@@ -2009,6 +2009,14 @@ impl ServiceManager {
                 let ntp_service = ServiceBuilder::new("oxide/ntp")
                     .add_instance(ServiceInstanceBuilder::new("default"));
 
+                let ntp_admin_config = PropertyGroupBuilder::new("config")
+                    .add_property("address", "astring", address.to_string());
+                let ntp_admin_service = ServiceBuilder::new("oxide/ntp-admin")
+                    .add_instance(
+                        ServiceInstanceBuilder::new("default")
+                            .add_property_group(ntp_admin_config),
+                    );
+
                 let chrony_setup_service =
                     ServiceBuilder::new("oxide/chrony-setup").add_instance(
                         ServiceInstanceBuilder::new("default")
@@ -2025,6 +2033,7 @@ impl ServiceManager {
                     .add_service(dns_install_service)
                     .add_service(dns_client_service)
                     .add_service(ntp_service)
+                    .add_service(ntp_admin_service)
                     .add_service(opte_interface_setup);
 
                 profile
@@ -2070,6 +2079,14 @@ impl ServiceManager {
                 let ntp_service = ServiceBuilder::new("oxide/ntp")
                     .add_instance(ServiceInstanceBuilder::new("default"));
 
+                let ntp_admin_config = PropertyGroupBuilder::new("config")
+                    .add_property("address", "astring", address.to_string());
+                let ntp_admin_service = ServiceBuilder::new("oxide/ntp-admin")
+                    .add_instance(
+                        ServiceInstanceBuilder::new("default")
+                            .add_property_group(ntp_admin_config),
+                    );
+
                 let chrony_setup_service =
                     ServiceBuilder::new("oxide/chrony-setup").add_instance(
                         ServiceInstanceBuilder::new("default")
@@ -2082,7 +2099,8 @@ impl ServiceManager {
                     .add_service(disabled_ssh_service)
                     .add_service(dns_install_service)
                     .add_service(enabled_dns_client_service)
-                    .add_service(ntp_service);
+                    .add_service(ntp_service)
+                    .add_service(ntp_admin_service);
 
                 profile
                     .add_to_zone(&self.inner.log, &installed_zone)
