@@ -1489,10 +1489,6 @@ mod test {
         assert_eq!(old_update.slot_id, new_update.slot_id);
         assert_eq!(old_update.artifact_hash, new_update.artifact_hash);
         assert_eq!(old_update.artifact_version, new_update.artifact_version);
-        //let PendingMgsUpdateDetails::Sp {
-        //    expected_active_version: new_expected_active_version,
-        //    expected_inactive_version: new_expected_inactive_version,
-        //} = &new_update.details
         let PendingMgsUpdateDetails::Rot {
             expected_active_slot: new_expected_active_slot,
             expected_inactive_version: new_expected_inactive_version,
@@ -1524,7 +1520,7 @@ mod test {
 
         // Maintain a map of SPs and RoTs that we've updated.  We'll use this to
         // configure the inventory collection that we create at each step.
-        let mut exceptions = BTreeMap::new();
+        let mut sp_exceptions = BTreeMap::new();
         let mut rot_exceptions = BTreeMap::new();
 
         // We do not control the order of updates.  But we expect to update each
@@ -1542,7 +1538,7 @@ mod test {
             // version 1 except for what we've already updated.
             let collection = make_collection(
                 ARTIFACT_VERSION_1,
-                &exceptions,
+                &sp_exceptions,
                 ExpectedVersion::NoValidVersion,
                 ARTIFACT_VERSION_1,
                 &rot_exceptions,
@@ -1581,7 +1577,7 @@ mod test {
                 },
                 PendingMgsUpdateDetails::Sp { .. } => {
                     assert!(
-                        exceptions
+                        sp_exceptions
                             .insert((sp_type, sp_slot), ARTIFACT_VERSION_2)
                             .is_none()
                     );
@@ -1595,7 +1591,7 @@ mod test {
         // Take one more lap.  It should reflect zero updates.
         let collection = make_collection(
             ARTIFACT_VERSION_1,
-            &exceptions,
+            &sp_exceptions,
             ExpectedVersion::NoValidVersion,
             ARTIFACT_VERSION_1,
             &rot_exceptions,
@@ -1697,10 +1693,6 @@ mod test {
             PendingMgsUpdateDetails::Sp { .. } => SpComponent::Sp,
         };
         println!("found update: {} slot {}", sp_type, sp_slot);
-        println!(
-            "DEBUG: REMOVE type: {} slot: {} component {:?}",
-            sp_type, sp_slot, sp_component
-        );
         let (expected_serial, expected_artifact) = expected_updates
             .remove(&(sp_type, sp_slot, sp_component))
             .expect("unexpected update");
@@ -1721,14 +1713,6 @@ mod test {
             } => (expected_active_version, expected_inactive_version),
             PendingMgsUpdateDetails::RotBootloader { .. } => unimplemented!(),
         };
-        //        let PendingMgsUpdateDetails::Sp {
-        //            expected_active_version,
-        //            expected_inactive_version,
-        //        } = &update.details
-        //        else {
-        //            panic!("expected SP update");
-        //        };
-        // Verify update against SpComponent?
         assert_eq!(*expected_active_version, ARTIFACT_VERSION_1);
         assert_eq!(*expected_inactive_version, ExpectedVersion::NoValidVersion);
     }
