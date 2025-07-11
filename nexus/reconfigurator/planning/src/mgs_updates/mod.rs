@@ -1641,8 +1641,7 @@ mod test {
 
         let mut expected_updates: BTreeMap<_, _> = test_config()
             .into_iter()
-            // TODO-K: Test RoT too?
-            .map(|(k, (serial, board_name, ..))| {
+            .map(|(k, (serial, board_name))| {
                 (k, (serial, test_artifact_for_board(board_name)))
             })
             .collect();
@@ -1664,7 +1663,11 @@ mod test {
             &TargetReleaseDescription::TufRepo(repo.clone()),
             usize::MAX,
         );
-        assert_eq!(all_updates.len(), expected_updates.len());
+        // `all_updates` counts each update per SpType. This means an update for
+        // SP and RoT for the same SpType count as a sinlge update. For
+        // `expected_updates`, each component update counts as an update, so the
+        // amount of `all_updates` should be half of `expected_updates`.
+        assert_eq!(all_updates.len(), expected_updates.len()/2);
         for update in &all_updates {
             verify_one_sp_update(&mut expected_updates, update);
         }
