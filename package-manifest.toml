@@ -793,6 +793,30 @@ source.sha256 = "dc55a2accd33a347df4cbdc0026cbaccea2c004940c3fec8cadcdd633d440df
 output.type = "zone"
 output.intermediate_only = true
 
+[package.overwatch]
+# The overwatch binary for the global zone
+service_name = "overwatch"
+only_for_targets.image = "standard"
+source.type = "prebuilt"
+source.repo = "overwatch"
+source.commit = "40198750e044fe26e656578116c376ab668c53dc"
+# The SHA256 digest is automatically posted to:
+# https://buildomat.eng.oxide.computer/public/file/oxidecomputer/overwatch/image/<commit>/overwatch.sha256.txt
+source.sha256 = "5d409dd31dccb4d157534aba96dc82e30f9fcfaf104e12b571f91919d7bcf73b"
+output.type = "tarball"
+
+[package.omicron-zone-overwatch]
+# The overwatch binary for the switch zone
+service_name = "overwatch"
+only_for_targets.image = "standard"
+source.type = "prebuilt"
+source.repo = "overwatch"
+source.commit = "40198750e044fe26e656578116c376ab668c53dc"
+# The SHA256 digest is automatically posted to:
+# https://buildomat.eng.oxide.computer/public/file/oxidecomputer/overwatch/image/<commit>/omicron-zone-overwatch.sha256.txt
+source.sha256 = "9a997a8dcdda6774375079e447d9d4ecd4358e965aa9b23b018a2132b36a7b21"
+output.type = "zone"
+
 # To package and install the asic variant of the switch, do:
 #
 # $ cargo run --release --bin omicron-package -- -t default target create -p dev -m gimlet -s asic
@@ -806,6 +830,7 @@ source.type = "composite"
 source.packages = [
   "omicron-faux-mgs.tar.gz",
   "omicron-gateway-asic.tar.gz",
+  "omicron-zone-overwatch.tar.gz",
   "dendrite-asic.tar.gz",
   "lldp.tar.gz",
   "pumpkind.tar.gz",
@@ -859,6 +884,7 @@ only_for_targets.image = "standard"
 source.type = "composite"
 source.packages = [
   "omicron-gateway-softnpu.tar.gz",
+  "omicron-zone-overwatch.tar.gz",
   "dendrite-softnpu.tar.gz",
   "lldp.tar.gz",
   "wicketd.tar.gz",
@@ -869,7 +895,7 @@ source.packages = [
   "sp-sim-softnpu.tar.gz",
   "omicron-omdb.tar.gz",
   "zone-setup.tar.gz",
-  "zone-network-install.tar.gz"
+  "zone-network-install.tar.gz",
 ]
 output.type = "zone"
 
