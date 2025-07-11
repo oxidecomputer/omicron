@@ -333,7 +333,7 @@
             "in": "query",
             "name": "sort_by",
             "schema": {
-              "$ref": "#/components/schemas/IdSortMode"
+              "$ref": "#/components/schemas/TimeAndIdSortMode"
             }
           }
         ],
@@ -27147,18 +27147,6 @@
           }
         ]
       },
-      "IdSortMode": {
-        "description": "Supported set of sort modes for scanning by id only.\n\nCurrently, we only support scanning in ascending order.",
-        "oneOf": [
-          {
-            "description": "sort in increasing order of \"id\"",
-            "type": "string",
-            "enum": [
-              "id_ascending"
-            ]
-          }
-        ]
-      },
       "TimeAndIdSortMode": {
         "description": "Supported set of sort modes for scanning by timestamp and ID",
         "oneOf": [
@@ -27195,6 +27183,18 @@
         "enum": [
           "ascending",
           "descending"
+        ]
+      },
+      "IdSortMode": {
+        "description": "Supported set of sort modes for scanning by id only.\n\nCurrently, we only support scanning in ascending order.",
+        "oneOf": [
+          {
+            "description": "sort in increasing order of \"id\"",
+            "type": "string",
+            "enum": [
+              "id_ascending"
+            ]
+          }
         ]
       },
       "SystemMetricName": {

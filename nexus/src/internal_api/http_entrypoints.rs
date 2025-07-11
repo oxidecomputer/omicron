@@ -53,7 +53,9 @@ use nexus_types::internal_api::views::UpdateStatus;
 use nexus_types::internal_api::views::to_list;
 use omicron_common::api::external::Instance;
 use omicron_common::api::external::http_pagination::PaginatedById;
+use omicron_common::api::external::http_pagination::PaginatedByTimeAndId;
 use omicron_common::api::external::http_pagination::ScanById;
+use omicron_common::api::external::http_pagination::ScanByTimeAndId;
 use omicron_common::api::external::http_pagination::ScanParams;
 use omicron_common::api::external::http_pagination::data_page_params_for;
 use omicron_common::api::internal::nexus::DiskRuntimeState;
@@ -1029,7 +1031,7 @@ impl NexusInternalApi for NexusInternalApiImpl {
 
     async fn support_bundle_list(
         rqctx: RequestContext<ApiContext>,
-        query_params: Query<PaginatedById>,
+        query_params: Query<PaginatedByTimeAndId>,
     ) -> Result<HttpResponseOk<ResultsPage<shared::SupportBundleInfo>>, HttpError>
     {
         let apictx = rqctx.context();
@@ -1049,11 +1051,11 @@ impl NexusInternalApi for NexusInternalApiImpl {
                 .map(|p| p.into())
                 .collect();
 
-            Ok(HttpResponseOk(ScanById::results_page(
+            Ok(HttpResponseOk(ScanByTimeAndId::results_page(
                 &query,
                 bundles,
                 &|_, bundle: &shared::SupportBundleInfo| {
-                    bundle.id.into_untyped_uuid()
+                    (bundle.time_created, bundle.id.into_untyped_uuid())
                 },
             )?))
         };

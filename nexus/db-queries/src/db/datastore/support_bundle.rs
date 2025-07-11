@@ -11,6 +11,7 @@ use crate::db::model::RendezvousDebugDataset;
 use crate::db::model::SupportBundle;
 use crate::db::model::SupportBundleState;
 use crate::db::pagination::paginated;
+use crate::db::pagination::paginated_multicolumn;
 use crate::db::update_and_check::{UpdateAndCheck, UpdateStatus};
 use async_bb8_diesel::AsyncRunQueryDsl;
 use diesel::prelude::*;
@@ -166,21 +167,25 @@ impl DataStore {
         Ok(db_bundle)
     }
 
-    /// Lists one page of support bundles
+    /// Lists one page of support bundles ordered by creation time
     pub async fn support_bundle_list(
         &self,
         opctx: &OpContext,
-        pagparams: &DataPageParams<'_, Uuid>,
+        pagparams: &DataPageParams<'_, (chrono::DateTime<chrono::Utc>, Uuid)>,
     ) -> ListResultVec<SupportBundle> {
         opctx.authorize(authz::Action::Read, &authz::FLEET).await?;
         use nexus_db_schema::schema::support_bundle::dsl;
 
         let conn = self.pool_connection_authorized(opctx).await?;
-        paginated(dsl::support_bundle, dsl::id, pagparams)
-            .select(SupportBundle::as_select())
-            .load_async(&*conn)
-            .await
-            .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))
+        paginated_multicolumn(
+            dsl::support_bundle,
+            (dsl::time_created, dsl::id),
+            pagparams,
+        )
+        .select(SupportBundle::as_select())
+        .load_async(&*conn)
+        .await
+        .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))
     }
 
     /// Lists one page of support bundles in a particular state, assigned to
@@ -1413,6 +1418,72 @@ mod test {
                 .unwrap()
                 .contains(FAILURE_REASON_NO_NEXUS)
         );
+
+        db.terminate().await;
+        logctx.cleanup_successful();
+    }
+
+    #[tokio::test]
+    async fn test_bundle_list_time_ordering() {
+        let logctx = dev::test_setup_log("test_bundle_list_time_ordering");
+        let db = TestDatabase::new_with_datastore(&logctx.log).await;
+        let (opctx, datastore) = (db.opctx(), db.datastore());
+
+        let _test_sled = create_sled_and_zpools(&datastore, &opctx, 3).await;
+        let this_nexus_id = OmicronZoneUuid::new_v4();
+
+        // Create multiple bundles with slight time delays to ensure different creation times
+        let mut bundle_ids = Vec::new();
+        let mut bundle_times = Vec::new();
+
+        for _i in 0..3 {
+            let bundle = datastore
+                .support_bundle_create(
+                    &opctx,
+                    "Bundle for time ordering test",
+                    this_nexus_id,
+                )
+                .await
+                .expect("Should be able to create bundle");
+            bundle_ids.push(bundle.id);
+            bundle_times.push(bundle.time_created);
+
+            // Small delay to ensure different creation times
+            tokio::time::sleep(tokio::time::Duration::from_millis(10)).await;
+        }
+
+        // List bundles using time-based pagination
+        let pagparams = DataPageParams::max_page();
+        let observed_bundles = datastore
+            .support_bundle_list(&opctx, &pagparams)
+            .await
+            .expect("Should be able to list bundles");
+
+        assert_eq!(3, observed_bundles.len());
+
+        // Verify bundles are ordered by creation time (ascending)
+        for i in 0..observed_bundles.len() - 1 {
+            assert!(
+                observed_bundles[i].time_created
+                    <= observed_bundles[i + 1].time_created,
+                "Bundles should be ordered by creation time (ascending). Bundle at index {} has time {:?}, but bundle at index {} has time {:?}",
+                i,
+                observed_bundles[i].time_created,
+                i + 1,
+                observed_bundles[i + 1].time_created
+            );
+        }
+
+        // Verify that the bundles are our created bundles
+        let returned_ids: Vec<_> =
+            observed_bundles.iter().map(|b| b.id).collect();
+        for bundle_id in &bundle_ids {
+            assert!(
+                returned_ids.contains(bundle_id),
+                "Bundle ID {:?} should be in the returned list",
+                bundle_id
+            );
+        }
 
         db.terminate().await;
         logctx.cleanup_successful();

@@ -591,3 +591,52 @@ async fn test_support_bundle_range_requests(
     .unwrap();
     assert_eq!(second_half, full_contents[first_half.len()..]);
 }
+
+// Test that support bundle listing returns bundles ordered by creation time
+#[nexus_test]
+async fn test_support_bundle_list_time_ordering(
+    cptestctx: &ControlPlaneTestContext,
+) {
+    let client = &cptestctx.external_client;
+
+    // Create a disk test with multiple zpools to allow multiple bundles
+    let _disk_test =
+        DiskTestBuilder::new(&cptestctx).with_zpool_count(3).build().await;
+
+    // Create multiple bundles with delays to ensure different creation times
+    let mut bundle_ids = Vec::new();
+
+    for _ in 0..3 {
+        let bundle = bundle_create(&client).await.unwrap();
+        bundle_ids.push(bundle.id);
+
+        // Small delay to ensure different creation times
+        tokio::time::sleep(tokio::time::Duration::from_millis(50)).await;
+    }
+
+    // List all bundles
+    let bundles = bundles_list(&client).await.unwrap();
+    assert_eq!(bundles.len(), 3, "Should have created 3 bundles");
+
+    // Verify bundles are ordered by creation time (ascending)
+    for i in 0..bundles.len() - 1 {
+        assert!(
+            bundles[i].time_created <= bundles[i + 1].time_created,
+            "Bundles should be ordered by creation time (ascending). Bundle at index {} has time {:?}, but bundle at index {} has time {:?}",
+            i,
+            bundles[i].time_created,
+            i + 1,
+            bundles[i + 1].time_created
+        );
+    }
+
+    // Verify that all our created bundles are present
+    let returned_ids: Vec<_> = bundles.iter().map(|b| b.id).collect();
+    for bundle_id in &bundle_ids {
+        assert!(
+            returned_ids.contains(bundle_id),
+            "Bundle ID {:?} should be in the returned list",
+            bundle_id
+        );
+    }
+}

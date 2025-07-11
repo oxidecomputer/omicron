@@ -39,7 +39,7 @@ impl super::Nexus {
     pub async fn support_bundle_list(
         &self,
         opctx: &OpContext,
-        pagparams: &DataPageParams<'_, Uuid>,
+        pagparams: &DataPageParams<'_, (chrono::DateTime<chrono::Utc>, Uuid)>,
     ) -> ListResultVec<SupportBundle> {
         self.db_datastore.support_bundle_list(&opctx, pagparams).await
     }

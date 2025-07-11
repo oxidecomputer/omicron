@@ -7203,7 +7203,7 @@ impl NexusExternalApi for NexusExternalApiImpl {
 
     async fn support_bundle_list(
         rqctx: RequestContext<ApiContext>,
-        query_params: Query<PaginatedById>,
+        query_params: Query<PaginatedByTimeAndId>,
     ) -> Result<HttpResponseOk<ResultsPage<shared::SupportBundleInfo>>, HttpError>
     {
         let apictx = rqctx.context();
@@ -7223,11 +7223,11 @@ impl NexusExternalApi for NexusExternalApiImpl {
                 .map(|p| p.into())
                 .collect();
 
-            Ok(HttpResponseOk(ScanById::results_page(
+            Ok(HttpResponseOk(ScanByTimeAndId::results_page(
                 &query,
                 bundles,
                 &|_, bundle: &shared::SupportBundleInfo| {
-                    bundle.id.into_untyped_uuid()
+                    (bundle.time_created, bundle.id.into_untyped_uuid())
                 },
             )?))
         };
