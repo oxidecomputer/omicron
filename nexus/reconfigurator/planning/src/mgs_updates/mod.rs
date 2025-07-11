@@ -1080,7 +1080,7 @@ mod test {
             id: ArtifactId {
                 name: name.to_string(),
                 version: ARTIFACT_VERSION_2,
-                kind: kind,
+                kind,
             },
             hash,
             size: 0, // unused here
@@ -1574,15 +1574,17 @@ mod test {
                             .insert((sp_type, sp_slot), ARTIFACT_VERSION_2)
                             .is_none()
                     );
-                },
+                }
                 PendingMgsUpdateDetails::Sp { .. } => {
                     assert!(
                         sp_exceptions
                             .insert((sp_type, sp_slot), ARTIFACT_VERSION_2)
                             .is_none()
                     );
-                },
-                PendingMgsUpdateDetails::RotBootloader { .. } => unimplemented!()
+                }
+                PendingMgsUpdateDetails::RotBootloader { .. } => {
+                    unimplemented!()
+                }
             }
 
             latest_updates = new_updates;
@@ -1648,7 +1650,7 @@ mod test {
         // SP and RoT for the same SpType count as a sinlge update. For
         // `expected_updates`, each component update counts as an update, so the
         // amount of `all_updates` should be half of `expected_updates`.
-        assert_eq!(all_updates.len(), expected_updates.len()/2);
+        assert_eq!(all_updates.len(), expected_updates.len() / 2);
         for update in &all_updates {
             verify_one_sp_update(&mut expected_updates, update);
         }
