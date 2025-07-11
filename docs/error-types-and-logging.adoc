@@ -8,7 +8,7 @@
 
 We rely on the Rust standard library
 https://doc.rust-lang.org/std/error/trait.Error.html[`std::error::Error`] trait
-throughout omicron. Several parts of it have been deprecated; the parts that are
+throughout Omicron. Several parts of it have been deprecated; the parts that are
 relevant to us are:
 
 * Errors implement `fmt::Display`
@@ -71,7 +71,7 @@ this document attempts to cover.
 
 == Defining Error enums with `thiserror`
 
-In omicron we primarily use
+In Omicron we primarily use
 https://docs.rs/thiserror/latest/thiserror/[`thiserror`] to define types that
 implement `std::error::Error`. (We also use `anyhow` some; that's covered
 below.)
@@ -142,7 +142,7 @@ failed reading body of `/some/file`: failed to fill whole buffer
 ----
 
 There are a few common problematic patterns (all of which are still present in
-omicron in various places; we should try to fix them as we can!). I think it's
+Omicron in various places; we should try to fix them as we can!). I think it's
 too easy to do the wrong thing in these cases, but I don't know that there's a
 good way to address that other than documenting them as we do here.
 
@@ -187,7 +187,7 @@ the source error; e.g.,
 // This is incorrect!
 #[derive(Debug, thiserror::Error)]
 enum ReadFileError {
-    #[error("failed to open `{path}`: {err}")]
+    #[error("failed to open `{path}`: {err}")] // Wrong! See below.
     FailedOpen {
         path: Utf8PathBuf,
         #[source]
@@ -250,7 +250,7 @@ impl like so:
 // This is incorrect!
 #[derive(Debug, thiserror::Error)]
 enum ReadFileError {
-    #[error("failed to open `{path}`: {err}")]
+    #[error("failed to open `{path}`: {err}")] // Wrong! See below.
     FailedOpen {
         path: Utf8PathBuf,
         #[source]
