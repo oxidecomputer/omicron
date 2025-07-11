@@ -6556,6 +6556,7 @@ dependencies = [
  "omicron-test-utils",
  "omicron-uuid-kinds",
  "omicron-workspace-hack",
+ "tufaceous-artifact",
 ]
 
 [[package]]
