@@ -445,9 +445,9 @@ gateway-client = { path = "clients/gateway-client" }
 # compatibility, but will mean that faux-mgs might be missing new
 # functionality.)
 #
-gateway-ereport-messages = { git = "https://github.com/oxidecomputer/management-gateway-service", rev = "0e1e055b66ec007c537e5bd45e210c245f9c537d", default-features = false, features = ["debug-impls"] }
-gateway-messages = { git = "https://github.com/oxidecomputer/management-gateway-service", rev = "0e1e055b66ec007c537e5bd45e210c245f9c537d", default-features = false, features = ["std"] }
-gateway-sp-comms = { git = "https://github.com/oxidecomputer/management-gateway-service", rev = "0e1e055b66ec007c537e5bd45e210c245f9c537d" }
+gateway-ereport-messages = { git = "https://github.com/oxidecomputer/management-gateway-service", rev = "77e316c812aa057b9714d0d99c4a7bdd36d45be2", default-features = false, features = ["debug-impls"] }
+gateway-messages = { git = "https://github.com/oxidecomputer/management-gateway-service", rev = "77e316c812aa057b9714d0d99c4a7bdd36d45be2", default-features = false, features = ["std"] }
+gateway-sp-comms = { git = "https://github.com/oxidecomputer/management-gateway-service", rev = "77e316c812aa057b9714d0d99c4a7bdd36d45be2" }
 gateway-test-utils = { path = "gateway-test-utils" }
 gateway-types = { path = "gateway-types" }
 gethostname = "0.5.0"
