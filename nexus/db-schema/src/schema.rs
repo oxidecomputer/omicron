@@ -202,7 +202,7 @@ table! {
         dst -> Inet,
         gw -> Inet,
         vid -> Nullable<Int4>,
-        local_pref -> Nullable<Int2>,
+        rib_priority -> Nullable<Int2>,
     }
 }
 

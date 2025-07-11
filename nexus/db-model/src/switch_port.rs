@@ -609,7 +609,6 @@ pub struct SwitchPortRouteConfig {
     pub dst: IpNetwork,
     pub gw: IpNetwork,
     pub vid: Option<SqlU16>,
-    #[diesel(column_name = local_pref)]
     pub rib_priority: Option<SqlU8>,
 }
 
