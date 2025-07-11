@@ -1891,10 +1891,16 @@ impl From<u8> for IcmpParamRange {
     }
 }
 
-impl From<RangeInclusive<u8>> for IcmpParamRange {
-    fn from(value: RangeInclusive<u8>) -> Self {
-        let (first, last) = value.into_inner();
-        Self { first, last }
+impl TryFrom<RangeInclusive<u8>> for IcmpParamRange {
+    type Error = IcmpParamRangeError;
+
+    fn try_from(value: RangeInclusive<u8>) -> Result<Self, Self::Error> {
+        if value.is_empty() {
+            Err(IcmpParamRangeError::EmptyRange)
+        } else {
+            let (first, last) = value.into_inner();
+            Ok(Self { first, last })
+        }
     }
 }
 
@@ -2052,7 +2058,12 @@ impl FromStr for L4PortRange {
                     .parse::<NonZeroU16>()
                     .map_err(|e| L4PortRangeError::Value(right.into(), e))?
                     .into();
-                Ok(L4PortRange { first, last })
+
+                if first > last {
+                    Err(L4PortRangeError::EmptyRange)
+                } else {
+                    Ok(L4PortRange { first, last })
+                }
             }
         }
     }
@@ -2064,6 +2075,8 @@ pub enum L4PortRangeError {
     MissingStart,
     #[error("range has no end value")]
     MissingEnd,
+    #[error("range has larger start value than end value")]
+    EmptyRange,
     #[error("{0:?} unparsable for type: {1}")]
     Value(String, ParseIntError),
 }
@@ -2132,10 +2145,16 @@ impl From<L4Port> for L4PortRange {
     }
 }
 
-impl From<RangeInclusive<L4Port>> for L4PortRange {
-    fn from(value: RangeInclusive<L4Port>) -> Self {
-        let (first, last) = value.into_inner();
-        Self { first, last }
+impl TryFrom<RangeInclusive<L4Port>> for L4PortRange {
+    type Error = L4PortRangeError;
+
+    fn try_from(value: RangeInclusive<L4Port>) -> Result<Self, Self::Error> {
+        if value.is_empty() {
+            Err(L4PortRangeError::EmptyRange)
+        } else {
+            let (first, last) = value.into_inner();
+            Ok(Self { first, last })
+        }
     }
 }
 
@@ -2169,7 +2188,12 @@ impl FromStr for IcmpParamRange {
                 let last = right
                     .parse::<u8>()
                     .map_err(|e| IcmpParamRangeError::Value(right.into(), e))?;
-                Ok(IcmpParamRange { first, last })
+
+                if first > last {
+                    Err(IcmpParamRangeError::EmptyRange)
+                } else {
+                    Ok(IcmpParamRange { first, last })
+                }
             }
         }
     }
@@ -2181,6 +2205,8 @@ pub enum IcmpParamRangeError {
     MissingStart,
     #[error("range has no end value")]
     MissingEnd,
+    #[error("range has larger start value than end value")]
+    EmptyRange,
     #[error("{0:?} unparsable for type: {1}")]
     Value(String, ParseIntError),
 }
@@ -4132,7 +4158,7 @@ mod test {
         assert_eq!(
             VpcFirewallRuleProtocol::Icmp(Some(VpcFirewallIcmpFilter {
                 icmp_type: 60,
-                code: Some((0..=10).into())
+                code: Some((0..=10).try_into().unwrap())
             })),
             "icmp:60,0-10".parse().unwrap()
         );
