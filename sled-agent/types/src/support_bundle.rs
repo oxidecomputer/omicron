@@ -17,4 +17,4 @@
 // not removed. If the files used here change in the future, DumpSetupWorker should also be
 // updated.
 pub const BUNDLE_FILE_NAME: &str = "bundle.zip";
-pub const BUNDLE_TMP_FILE_NAME_SUFFIX: &str = "bundle.zip.tmp";
+pub const BUNDLE_TMP_FILE_NAME: &str = "bundle.zip.tmp";

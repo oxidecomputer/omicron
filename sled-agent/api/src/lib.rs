@@ -166,17 +166,51 @@ pub trait SledAgentApi {
         path_params: Path<SupportBundleListPathParam>,
     ) -> Result<HttpResponseOk<Vec<SupportBundleMetadata>>, HttpError>;
 
-    /// Create a support bundle within a particular dataset
+    /// Starts creation of a support bundle within a particular dataset
+    ///
+    /// Callers should transfer chunks of the bundle with
+    /// "support_bundle_transfer", and then call "support_bundle_finalize"
+    /// once the bundle has finished transferring.
+    ///
+    /// If a support bundle was previously created without being finalized
+    /// successfully, this endpoint will reset the state.
+    ///
+    /// If a support bundle was previously created and finalized successfully,
+    /// this endpoint will return metadata indicating that it already exists.
     #[endpoint {
         method = POST,
-        path = "/support-bundles/{zpool_id}/{dataset_id}/{support_bundle_id}",
-        request_body_max_bytes = SUPPORT_BUNDLE_MAX_BYTES,
+        path = "/support-bundles/{zpool_id}/{dataset_id}/{support_bundle_id}"
     }]
-    async fn support_bundle_create(
+    async fn support_bundle_start_creation(
         rqctx: RequestContext<Self::Context>,
         path_params: Path<SupportBundlePathParam>,
-        query_params: Query<SupportBundleCreateQueryParams>,
+    ) -> Result<HttpResponseCreated<SupportBundleMetadata>, HttpError>;
+
+    /// Transfers a chunk of a support bundle within a particular dataset
+    #[endpoint {
+        method = PUT,
+        path = "/support-bundles/{zpool_id}/{dataset_id}/{support_bundle_id}/transfer",
+        request_body_max_bytes = SUPPORT_BUNDLE_MAX_BYTES,
+    }]
+    async fn support_bundle_transfer(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<SupportBundlePathParam>,
+        query_params: Query<SupportBundleTransferQueryParams>,
         body: StreamingBody,
+    ) -> Result<HttpResponseCreated<SupportBundleMetadata>, HttpError>;
+
+    /// Finalizes the creation of a support bundle
+    ///
+    /// If the requested hash matched the bundle, the bundle is created.
+    /// Otherwise, an error is returned.
+    #[endpoint {
+        method = POST,
+        path = "/support-bundles/{zpool_id}/{dataset_id}/{support_bundle_id}/finalize"
+    }]
+    async fn support_bundle_finalize(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<SupportBundlePathParam>,
+        query_params: Query<SupportBundleFinalizeQueryParams>,
     ) -> Result<HttpResponseCreated<SupportBundleMetadata>, HttpError>;
 
     /// Fetch a support bundle from a particular dataset
@@ -760,9 +794,15 @@ pub struct SupportBundleFilePathParam {
     pub file: String,
 }
 
+/// Metadata about a support bundle transfer
+#[derive(Deserialize, Serialize, JsonSchema)]
+pub struct SupportBundleTransferQueryParams {
+    pub offset: u64,
+}
+
 /// Metadata about a support bundle
 #[derive(Deserialize, Serialize, JsonSchema)]
-pub struct SupportBundleCreateQueryParams {
+pub struct SupportBundleFinalizeQueryParams {
     pub hash: ArtifactHash,
 }
 

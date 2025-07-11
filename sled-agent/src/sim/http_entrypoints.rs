@@ -379,25 +379,68 @@ impl SledAgentApi for SledAgentSimImpl {
         Ok(HttpResponseOk(bundles))
     }
 
-    async fn support_bundle_create(
+    async fn support_bundle_start_creation(
         rqctx: RequestContext<Self::Context>,
         path_params: Path<SupportBundlePathParam>,
-        query_params: Query<SupportBundleCreateQueryParams>,
+    ) -> Result<HttpResponseCreated<SupportBundleMetadata>, HttpError> {
+        let sa = rqctx.context();
+
+        let SupportBundlePathParam { zpool_id, dataset_id, support_bundle_id } =
+            path_params.into_inner();
+
+        Ok(HttpResponseCreated(
+            sa.support_bundle_start_creation(
+                zpool_id,
+                dataset_id,
+                support_bundle_id,
+            )
+            .await?,
+        ))
+    }
+
+    async fn support_bundle_transfer(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<SupportBundlePathParam>,
+        query_params: Query<SupportBundleTransferQueryParams>,
         body: StreamingBody,
     ) -> Result<HttpResponseCreated<SupportBundleMetadata>, HttpError> {
         let sa = rqctx.context();
 
         let SupportBundlePathParam { zpool_id, dataset_id, support_bundle_id } =
             path_params.into_inner();
-        let SupportBundleCreateQueryParams { hash } = query_params.into_inner();
+        let SupportBundleTransferQueryParams { offset } =
+            query_params.into_inner();
 
         Ok(HttpResponseCreated(
-            sa.support_bundle_create(
+            sa.support_bundle_transfer(
+                zpool_id,
+                dataset_id,
+                support_bundle_id,
+                offset,
+                body.into_stream(),
+            )
+            .await?,
+        ))
+    }
+
+    async fn support_bundle_finalize(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<SupportBundlePathParam>,
+        query_params: Query<SupportBundleFinalizeQueryParams>,
+    ) -> Result<HttpResponseCreated<SupportBundleMetadata>, HttpError> {
+        let sa = rqctx.context();
+
+        let SupportBundlePathParam { zpool_id, dataset_id, support_bundle_id } =
+            path_params.into_inner();
+        let SupportBundleFinalizeQueryParams { hash } =
+            query_params.into_inner();
+
+        Ok(HttpResponseCreated(
+            sa.support_bundle_finalize(
                 zpool_id,
                 dataset_id,
                 support_bundle_id,
                 hash,
-                body.into_stream(),
             )
             .await?,
         ))

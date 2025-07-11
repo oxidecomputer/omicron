@@ -219,27 +219,65 @@ impl SledAgentApi for SledAgentImpl {
         Ok(HttpResponseOk(bundles))
     }
 
-    async fn support_bundle_create(
+    async fn support_bundle_start_creation(
         rqctx: RequestContext<Self::Context>,
         path_params: Path<SupportBundlePathParam>,
-        query_params: Query<SupportBundleCreateQueryParams>,
+    ) -> Result<HttpResponseCreated<SupportBundleMetadata>, HttpError> {
+        let sa = rqctx.context();
+
+        let SupportBundlePathParam { zpool_id, dataset_id, support_bundle_id } =
+            path_params.into_inner();
+
+        let metadata = sa
+            .as_support_bundle_storage()
+            .start_creation(zpool_id, dataset_id, support_bundle_id)
+            .await?;
+
+        Ok(HttpResponseCreated(metadata))
+    }
+
+    async fn support_bundle_transfer(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<SupportBundlePathParam>,
+        query_params: Query<SupportBundleTransferQueryParams>,
         body: StreamingBody,
     ) -> Result<HttpResponseCreated<SupportBundleMetadata>, HttpError> {
         let sa = rqctx.context();
 
         let SupportBundlePathParam { zpool_id, dataset_id, support_bundle_id } =
             path_params.into_inner();
-        let SupportBundleCreateQueryParams { hash } = query_params.into_inner();
+        let SupportBundleTransferQueryParams { offset } =
+            query_params.into_inner();
 
         let metadata = sa
             .as_support_bundle_storage()
-            .create(
+            .transfer(
                 zpool_id,
                 dataset_id,
                 support_bundle_id,
-                hash,
+                offset,
                 body.into_stream(),
             )
+            .await?;
+
+        Ok(HttpResponseCreated(metadata))
+    }
+
+    async fn support_bundle_finalize(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<SupportBundlePathParam>,
+        query_params: Query<SupportBundleFinalizeQueryParams>,
+    ) -> Result<HttpResponseCreated<SupportBundleMetadata>, HttpError> {
+        let sa = rqctx.context();
+
+        let SupportBundlePathParam { zpool_id, dataset_id, support_bundle_id } =
+            path_params.into_inner();
+        let SupportBundleFinalizeQueryParams { hash } =
+            query_params.into_inner();
+
+        let metadata = sa
+            .as_support_bundle_storage()
+            .finalize(zpool_id, dataset_id, support_bundle_id, hash)
             .await?;
 
         Ok(HttpResponseCreated(metadata))
