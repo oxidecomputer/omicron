@@ -22,6 +22,7 @@ omicron-common.workspace = true
 oxide-tokio-rt.workspace = true
 serde.workspace = true
 serde_cbor.workspace = true
+sha2.workspace = true
 sha3.workspace = true
 slog.workspace = true
 slog-dtrace.workspace = true

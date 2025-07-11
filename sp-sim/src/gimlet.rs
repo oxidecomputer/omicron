@@ -1596,18 +1596,15 @@ impl SpHandler for Handler {
         _addr: u32,
         _buf: &mut [u8],
     ) -> Result<(), SpError> {
-        // TODO we should simulate this; will need it for OS update testing.
         Err(SpError::RequestUnsupportedForSp)
     }
 
-    fn start_host_flash_hash(&mut self, _slot: u16) -> Result<(), SpError> {
-        // TODO we should simulate this; will need it for OS update testing.
-        Err(SpError::RequestUnsupportedForSp)
+    fn start_host_flash_hash(&mut self, slot: u16) -> Result<(), SpError> {
+        self.update_state.start_host_flash_hash(slot)
     }
 
-    fn get_host_flash_hash(&mut self, _slot: u16) -> Result<[u8; 32], SpError> {
-        // TODO we should simulate this; will need it for OS update testing.
-        Err(SpError::RequestUnsupportedForSp)
+    fn get_host_flash_hash(&mut self, slot: u16) -> Result<[u8; 32], SpError> {
+        self.update_state.get_host_flash_hash(slot)
     }
 }
 

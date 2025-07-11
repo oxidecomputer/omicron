@@ -12486,6 +12486,7 @@ dependencies = [
  "oxide-tokio-rt",
  "serde",
  "serde_cbor",
+ "sha2",
  "sha3",
  "slog",
  "slog-dtrace",
