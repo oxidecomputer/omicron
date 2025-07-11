@@ -510,18 +510,23 @@ impl for this variant directly to the inner error.
 
 == Using `anyhow`
 
-General guidance is "use `thiserror` for libraries and `anyhow` for
-applications". `thiserror` allows callers to programmatically inspect error
-variants (e.g., by matching on error enums). `anyhow` is easier to use in that
-it doesn't require defining explicit error types, but removes the ability for
-the caller to programmatically reason about the error details.
+`thiserror` and `anyhow` are crates from the same author that provide different
+kinds of tooling for reporting errors. The `thiserror` docs describe `anyhow` as
+"a convenient single error type to use in application code", which has become
+the general guidance to "use `thiserror` for libraries and `anyhow` for
+applications".
 
-Most omicron code should default to using `thiserror`; we often want
-strongly-typed error types that can be acted on by callers. If using `anyhow`,
-the above guidance about "attach meaningful context to errors" still applies,
-but is easier to do at call sites. Continuing the example from above, we could
-rewrite our function to use ``anyhow``'s `Context` extension to `Result` and
-`Option`:
+We can refine that some: Using `thiserror` is always fine, even for
+applications, and is the right choice if any consumers of the error type(s) want
+to match on the error kinds programmatically. `anyhow` is more convenient, but
+is fine only when callers never need to do that.
+
+Most Omicron code should default to using `thiserror`; we often want
+strongly-typed error types that can be acted on programmatically by callers. If
+using `anyhow`, the above guidance about "attach meaningful context to errors"
+still applies, but is easier to do at call sites. Continuing the example from
+above, we could rewrite our function to use ``anyhow``'s `Context` extension to
+`Result` and `Option`:
 
 [source,rust]
 ----
