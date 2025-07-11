@@ -631,7 +631,7 @@ async fn test_firewall_rules_illegal_range(
     assert_eq!(error.error_code, Some("InvalidValue".to_string()));
     assert_eq!(
         error.message,
-        "unsupported value for \"l4_port_range\": range has larger start value than end value"
+        "unsupported value for \"code\": range has larger start value than end value"
     );
 
     rule.filters.protocols = None;
