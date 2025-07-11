@@ -467,10 +467,10 @@ enum WorseReadFileError {
 }
 ----
 
-``\#[from]`` implies ``#[source]`` and also provides a `From<InnerError> for
-YourError` implementation. The upside of this is that the producer of
-`YourError` can now use `?` when calling a function that emits the inner error
-type, which can be much shorter than using `.map_err()` to attach context:
+``\#[from]`` implies ``#[source]`` and also provides a `From<InnerError> for YourError`
+implementation. The upside of this is that the producer of `YourError` can now
+use `?` when calling a function that emits the inner error type, which can be
+much shorter than using `.map_err()` to attach context:
 
 [source,rust]
 ----
