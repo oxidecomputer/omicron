@@ -30,6 +30,12 @@ serial serial0
 subnet fd00:1122:3344:101::/64
 SP active version:   Some("0.0.1")
 SP inactive version: None
+RoT active slot: A
+RoT slot A version: Some("0.0.2")
+RoT slot B version: None
+RoT persistent boot preference: A
+RoT pending persistent boot preference: None
+RoT transient boot preference: None
 zpools (10):
     674c6591-11be-44f2-9df1-db3bb663ec01 (zpool)
     SledDisk { disk_identity: DiskIdentity { vendor: "fake-vendor", model: "fake-model", serial: "serial-674c6591-11be-44f2-9df1-db3bb663ec01" }, disk_id: a52a7c57-7fd0-4139-8293-bda299523c53 (physical_disk), policy: InService, state: Active }
@@ -77,6 +83,12 @@ serial serial0
 subnet fd00:1122:3344:101::/64
 SP active version:   Some("1.0.0")
 SP inactive version: None
+RoT active slot: A
+RoT slot A version: Some("0.0.2")
+RoT slot B version: None
+RoT persistent boot preference: A
+RoT pending persistent boot preference: None
+RoT transient boot preference: None
 zpools (10):
     674c6591-11be-44f2-9df1-db3bb663ec01 (zpool)
     SledDisk { disk_identity: DiskIdentity { vendor: "fake-vendor", model: "fake-model", serial: "serial-674c6591-11be-44f2-9df1-db3bb663ec01" }, disk_id: a52a7c57-7fd0-4139-8293-bda299523c53 (physical_disk), policy: InService, state: Active }
@@ -109,6 +121,12 @@ serial serial0
 subnet fd00:1122:3344:101::/64
 SP active version:   Some("1.0.0")
 SP inactive version: Some("2.0.0")
+RoT active slot: A
+RoT slot A version: Some("0.0.2")
+RoT slot B version: None
+RoT persistent boot preference: A
+RoT pending persistent boot preference: None
+RoT transient boot preference: None
 zpools (10):
     674c6591-11be-44f2-9df1-db3bb663ec01 (zpool)
     SledDisk { disk_identity: DiskIdentity { vendor: "fake-vendor", model: "fake-model", serial: "serial-674c6591-11be-44f2-9df1-db3bb663ec01" }, disk_id: a52a7c57-7fd0-4139-8293-bda299523c53 (physical_disk), policy: InService, state: Active }
@@ -141,6 +159,12 @@ serial serial0
 subnet fd00:1122:3344:101::/64
 SP active version:   Some("3.0.0")
 SP inactive version: Some("2.0.0")
+RoT active slot: A
+RoT slot A version: Some("0.0.2")
+RoT slot B version: None
+RoT persistent boot preference: A
+RoT pending persistent boot preference: None
+RoT transient boot preference: None
 zpools (10):
     674c6591-11be-44f2-9df1-db3bb663ec01 (zpool)
     SledDisk { disk_identity: DiskIdentity { vendor: "fake-vendor", model: "fake-model", serial: "serial-674c6591-11be-44f2-9df1-db3bb663ec01" }, disk_id: a52a7c57-7fd0-4139-8293-bda299523c53 (physical_disk), policy: InService, state: Active }
@@ -173,6 +197,12 @@ serial serial0
 subnet fd00:1122:3344:101::/64
 SP active version:   Some("4.0.0")
 SP inactive version: None
+RoT active slot: A
+RoT slot A version: Some("0.0.2")
+RoT slot B version: None
+RoT persistent boot preference: A
+RoT pending persistent boot preference: None
+RoT transient boot preference: None
 zpools (10):
     674c6591-11be-44f2-9df1-db3bb663ec01 (zpool)
     SledDisk { disk_identity: DiskIdentity { vendor: "fake-vendor", model: "fake-model", serial: "serial-674c6591-11be-44f2-9df1-db3bb663ec01" }, disk_id: a52a7c57-7fd0-4139-8293-bda299523c53 (physical_disk), policy: InService, state: Active }
@@ -205,6 +235,12 @@ serial serial0
 subnet fd00:1122:3344:101::/64
 SP active version:   Some("4.0.0")
 SP inactive version: Some("5.0.0")
+RoT active slot: A
+RoT slot A version: Some("0.0.2")
+RoT slot B version: None
+RoT persistent boot preference: A
+RoT pending persistent boot preference: None
+RoT transient boot preference: None
 zpools (10):
     674c6591-11be-44f2-9df1-db3bb663ec01 (zpool)
     SledDisk { disk_identity: DiskIdentity { vendor: "fake-vendor", model: "fake-model", serial: "serial-674c6591-11be-44f2-9df1-db3bb663ec01" }, disk_id: a52a7c57-7fd0-4139-8293-bda299523c53 (physical_disk), policy: InService, state: Active }
@@ -269,6 +305,12 @@ serial serial0
 subnet fd00:1122:3344:101::/64
 SP active version:   Some("4.0.0")
 SP inactive version: Some("5.0.0")
+RoT active slot: A
+RoT slot A version: Some("0.0.2")
+RoT slot B version: None
+RoT persistent boot preference: A
+RoT pending persistent boot preference: None
+RoT transient boot preference: None
 zpools (10):
     674c6591-11be-44f2-9df1-db3bb663ec01 (zpool)
     SledDisk { disk_identity: DiskIdentity { vendor: "fake-vendor", model: "fake-model", serial: "serial-674c6591-11be-44f2-9df1-db3bb663ec01" }, disk_id: a52a7c57-7fd0-4139-8293-bda299523c53 (physical_disk), policy: InService, state: Active }
