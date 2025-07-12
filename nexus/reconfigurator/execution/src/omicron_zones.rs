@@ -168,6 +168,9 @@ async fn oximeter_cleanup(
     Ok(())
 }
 
+// TODO(https://github.com/oxidecomputer/omicron/issues/8496): If this service
+// was fully in DNS, this would not be necessary.
+//
 // Helper trait that is implemented by `Resolver`, but allows unit tests to
 // inject a fake resolver that points to a mock server when calling
 // `decommission_cockroachdb_node()`.

@@ -15,6 +15,7 @@ use nexus_types::inventory::CabooseWhich;
 use nexus_types::inventory::Collection;
 use nexus_types::inventory::RotPage;
 use nexus_types::inventory::RotPageWhich;
+use omicron_cockroach_metrics::CockroachClusterAdminClient;
 use slog::Logger;
 use slog::o;
 use slog::{debug, error};
@@ -29,6 +30,7 @@ pub struct Collector<'a> {
     log: slog::Logger,
     mgs_clients: Vec<gateway_client::Client>,
     keeper_admin_clients: Vec<clickhouse_admin_keeper_client::Client>,
+    cockroach_admin_client: &'a CockroachClusterAdminClient,
     sled_agent_lister: &'a (dyn SledAgentEnumerator + Send + Sync),
     in_progress: CollectionBuilder,
 }
@@ -38,6 +40,7 @@ impl<'a> Collector<'a> {
         creator: &str,
         mgs_clients: Vec<gateway_client::Client>,
         keeper_admin_clients: Vec<clickhouse_admin_keeper_client::Client>,
+        cockroach_admin_client: &'a CockroachClusterAdminClient,
         sled_agent_lister: &'a (dyn SledAgentEnumerator + Send + Sync),
         log: slog::Logger,
     ) -> Self {
@@ -45,6 +48,7 @@ impl<'a> Collector<'a> {
             log,
             mgs_clients,
             keeper_admin_clients,
+            cockroach_admin_client,
             sled_agent_lister,
             in_progress: CollectionBuilder::new(creator),
         }
@@ -70,6 +74,7 @@ impl<'a> Collector<'a> {
         self.collect_all_mgs().await;
         self.collect_all_sled_agents().await;
         self.collect_all_keepers().await;
+        self.collect_all_cockroach().await;
 
         debug!(&self.log, "finished collection");
 
@@ -401,6 +406,29 @@ impl<'a> Collector<'a> {
             }
         }
     }
+
+    /// Collect inventory from CockroachDB nodes
+    async fn collect_all_cockroach(&mut self) {
+        debug!(&self.log, "begin collection from CockroachDB nodes");
+
+        // Fetch metrics from all nodes
+        let metrics_results = self
+            .cockroach_admin_client
+            .fetch_prometheus_metrics_from_all_nodes()
+            .await;
+
+        if metrics_results.is_empty() {
+            self.in_progress.found_error(InventoryError::from(
+                anyhow::anyhow!("No CockroachDB nodes returned metrics"),
+            ));
+            return;
+        }
+
+        // Store results for each successful node using the node ID returned by each node
+        for (node_id, metrics) in metrics_results {
+            self.in_progress.found_cockroach_metrics(node_id, metrics);
+        }
+    }
 }
 
 #[cfg(test)]
@@ -416,6 +444,7 @@ mod test {
     use nexus_sled_agent_shared::inventory::OmicronZoneImageSource;
     use nexus_sled_agent_shared::inventory::OmicronZoneType;
     use nexus_types::inventory::Collection;
+    use omicron_cockroach_metrics::CockroachClusterAdminClient;
     use omicron_common::api::external::Generation;
     use omicron_common::zpool_name::ZpoolName;
     use omicron_sled_agent::sim;
@@ -426,6 +455,7 @@ mod test {
     use std::net::Ipv6Addr;
     use std::net::SocketAddrV6;
     use std::sync::Arc;
+    use std::time::Duration;
     use swrite::SWrite as _;
     use swrite::swrite;
     use swrite::swriteln;
@@ -695,6 +725,70 @@ mod test {
         agent
     }
 
+    // Set up httpmock server for CockroachDB admin endpoints
+    fn mock_crdb_admin_server() -> httpmock::MockServer {
+        let mock_server = httpmock::MockServer::start();
+        mock_server.mock(|when, then| {
+            when.method(httpmock::Method::GET).path("/proxy/status/vars");
+            then.status(200)
+                .header("content-type", "application/json")
+                .body("\"# Basic CockroachDB metrics\\nliveness_livenodes 1\\nranges_underreplicated 0\\n\"");
+        });
+        mock_server.mock(|when, then| {
+            when.method(httpmock::Method::GET).path("/proxy/status/nodes");
+            then.status(200).header("content-type", "application/json").body(
+                serde_json::to_string(
+                    &serde_json::json!({
+                        "nodes": [{
+                            "desc": {
+                                "nodeId": "1",
+                                "address": {
+                                    "networkField": "tcp",
+                                    "addressField": "127.0.0.1:26257"
+                                },
+                                "sqlAddress": {
+                                    "networkField": "tcp",
+                                    "addressField": "127.0.0.1:26257"
+                                },
+                                "httpAddress": {
+                                    "networkField": "tcp",
+                                    "addressField": "127.0.0.1:8080"
+                                },
+                                "buildTag": "v21.1.0",
+                                "startedAt": "1640995200000000000",
+                                "clusterName": "test-cluster"
+                            },
+                            "buildInfo": {
+                                "goVersion": "go1.17",
+                                "tag": "v21.1.0"
+                            },
+                            "startedAt": "1640995200000000000",
+                            "updatedAt": "1640995200000000000",
+                            "totalSystemMemory": "8589934592",
+                            "numCpus": 4
+                        }],
+                        "livenessByNodeId": {
+                            "1": 3
+                        }
+                    })
+                    .to_string(),
+                )
+                .unwrap(),
+            );
+        });
+        mock_server.mock(|when, then| {
+            when.method(httpmock::Method::GET).path("/node/id");
+            then.status(200).header("content-type", "application/json").body(
+                serde_json::to_string(&serde_json::json!({
+                    "zone_id": "12345678-1234-1234-1234-123456789012",
+                    "node_id": "1"
+                }))
+                .unwrap(),
+            );
+        });
+        mock_server
+    }
+
     #[tokio::test]
     async fn test_basic() {
         // Set up the stock MGS test setup (which includes a couple of fake SPs)
@@ -733,10 +827,17 @@ mod test {
         // We don't have any mocks for this, and it's unclear how much value
         // there would be in providing them at this juncture.
         let keeper_clients = Vec::new();
+        // Configure the mock server as a backend for the CockroachDB client
+        let timeout = Duration::from_secs(15);
+        let crdb_cluster =
+            CockroachClusterAdminClient::new(log.clone(), timeout);
+        let crdb_admin_server = mock_crdb_admin_server();
+        crdb_cluster.update_backends(&[*crdb_admin_server.address()]).await;
         let collector = Collector::new(
             "test-suite",
             vec![mgs_client],
             keeper_clients,
+            &crdb_cluster,
             &sled_enum,
             log.clone(),
         );
@@ -744,7 +845,11 @@ mod test {
             .collect_all()
             .await
             .expect("failed to carry out collection");
-        assert!(collection.errors.is_empty());
+        assert!(
+            collection.errors.is_empty(),
+            "Collection errors: {:#?}",
+            collection.errors
+        );
         assert_eq!(collection.collector, "test-suite");
 
         let s = dump_collection(&collection);
@@ -805,10 +910,16 @@ mod test {
         // We don't have any mocks for this, and it's unclear how much value
         // there would be in providing them at this juncture.
         let keeper_clients = Vec::new();
+        let timeout = Duration::from_secs(15);
+        let crdb_cluster =
+            CockroachClusterAdminClient::new(log.clone(), timeout);
+        let crdb_admin_server = mock_crdb_admin_server();
+        crdb_cluster.update_backends(&[*crdb_admin_server.address()]).await;
         let collector = Collector::new(
             "test-suite",
             mgs_clients,
             keeper_clients,
+            &crdb_cluster,
             &sled_enum,
             log.clone(),
         );
@@ -852,10 +963,16 @@ mod test {
         // We don't have any mocks for this, and it's unclear how much value
         // there would be in providing them at this juncture.
         let keeper_clients = Vec::new();
+        let timeout = Duration::from_secs(15);
+        let crdb_cluster =
+            CockroachClusterAdminClient::new(log.clone(), timeout);
+        let crdb_admin_server = mock_crdb_admin_server();
+        crdb_cluster.update_backends(&[*crdb_admin_server.address()]).await;
         let collector = Collector::new(
             "test-suite",
             mgs_clients,
             keeper_clients,
+            &crdb_cluster,
             &sled_enum,
             log.clone(),
         );
@@ -904,10 +1021,16 @@ mod test {
         // We don't have any mocks for this, and it's unclear how much value
         // there would be in providing them at this juncture.
         let keeper_clients = Vec::new();
+        let timeout = Duration::from_secs(15);
+        let crdb_cluster =
+            CockroachClusterAdminClient::new(log.clone(), timeout);
+        let crdb_admin_server = mock_crdb_admin_server();
+        crdb_cluster.update_backends(&[*crdb_admin_server.address()]).await;
         let collector = Collector::new(
             "test-suite",
             vec![mgs_client],
             keeper_clients,
+            &crdb_cluster,
             &sled_enum,
             log.clone(),
         );
