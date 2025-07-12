@@ -295,6 +295,7 @@ mod test {
         )
         .expect("can't start resolver");
         let mut collector = InventoryCollector::new(
+            &opctx,
             datastore.clone(),
             resolver.clone(),
             "test_planner",

@@ -4245,6 +4245,15 @@ CREATE TABLE IF NOT EXISTS omicron.public.inv_clickhouse_keeper_membership (
     PRIMARY KEY (inv_collection_id, queried_keeper_id)
 );
 
+CREATE TABLE IF NOT EXISTS omicron.public.inv_cockroachdb_status (
+    inv_collection_id UUID NOT NULL,
+    node_id TEXT NOT NULL,
+    ranges_underreplicated INT8,
+    liveness_live_nodes INT8,
+
+    PRIMARY KEY (inv_collection_id, node_id)
+);
+
 /*
  * Various runtime configuration switches for reconfigurator
  *
@@ -6189,7 +6198,7 @@ INSERT INTO omicron.public.db_metadata (
     version,
     target_version
 ) VALUES
-    (TRUE, NOW(), NOW(), '160.0.0', NULL)
+    (TRUE, NOW(), NOW(), '161.0.0', NULL)
 ON CONFLICT DO NOTHING;
 
 COMMIT;

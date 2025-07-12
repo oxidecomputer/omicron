@@ -7,7 +7,7 @@
       "url": "https://oxide.computer",
       "email": "api@oxide.computer"
     },
-    "version": "20250604.0.0"
+    "version": "20250730.0.0"
   },
   "paths": {
     "/device/auth": {
@@ -17580,6 +17580,10 @@
                 "type": "string",
                 "format": "ip"
               },
+              "ip_pool_id": {
+                "type": "string",
+                "format": "uuid"
+              },
               "kind": {
                 "type": "string",
                 "enum": [
@@ -17589,6 +17593,7 @@
             },
             "required": [
               "ip",
+              "ip_pool_id",
               "kind"
             ]
           },
