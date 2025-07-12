@@ -4,7 +4,7 @@
 
 //! A configuration of a trust quroum at a given epoch
 
-use crate::crypto::{EncryptedRackSecret, RackSecret, Salt, Sha3_256Digest};
+use crate::crypto::{EncryptedRackSecrets, RackSecret, Salt, Sha3_256Digest};
 use crate::validators::ValidatedReconfigureMsg;
 use crate::{Epoch, PlatformId, Threshold};
 use gfss::shamir::{Share, SplitError};
@@ -48,7 +48,7 @@ pub struct Configuration {
     pub threshold: Threshold,
 
     // There is no previous configuration for the initial configuration
-    pub previous_configuration: Option<PreviousConfiguration>,
+    pub previous_configuration: Option<LastCommittedConfiguration>,
 }
 
 impl IdOrdItem for Configuration {
@@ -112,27 +112,20 @@ impl Configuration {
     }
 }
 
-/// Information for the last committed configuration that is necessary to track
-/// in the next `Configuration`.
+/// Information for the last committed configuration that is required for secret
+/// rotation.
 #[derive(
     Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize,
 )]
-pub struct PreviousConfiguration {
+pub struct LastCommittedConfiguration {
     /// The epoch of the last committed configuration
     pub epoch: Epoch,
 
     /// Is the previous configuration LRTQ?
     pub is_lrtq: bool,
 
-    /// The encrypted rack secret for the last committed epoch
+    /// The encrypted rack secrets for all relevant prior committed epochs
     ///
-    /// This allows us to derive old encryption keys so they can be rotated
-    pub encrypted_last_committed_rack_secret: EncryptedRackSecret,
-
-    /// A random value used to derive the key to encrypt the rack secret from
-    /// the last committed epoch.
-    ///
-    /// We only encrypt the rack secret once and so we use a nonce of all zeros.
-    /// This is why there is no corresponding `nonce` field.
-    pub encrypted_last_committed_rack_secret_salt: Salt,
+    /// This allows us to derive old encryption keys so they can be rotated.
+    pub encrypted_rack_secrets: EncryptedRackSecrets,
 }

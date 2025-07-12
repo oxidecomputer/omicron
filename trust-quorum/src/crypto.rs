@@ -5,19 +5,24 @@
 //! Various cryptographic constructs used by trust quroum.
 
 use bootstore::trust_quorum::RackSecret as LrtqRackSecret;
+use chacha20poly1305::{ChaCha20Poly1305, Key, KeyInit, aead, aead::Aead};
 use derive_more::From;
 use gfss::shamir::{self, CombineError, SecretShares, Share, SplitError};
+use hkdf::Hkdf;
+use omicron_uuid_kinds::{GenericUuid, RackUuid};
 use rand::RngCore;
 use rand::rngs::OsRng;
 use secrecy::{ExposeSecret, SecretBox};
 use serde::{Deserialize, Serialize};
 use sha3::{Digest, Sha3_256};
 use slog_error_chain::SlogInlineError;
+use static_assertions::const_assert_eq;
+use std::collections::BTreeMap;
 use std::fmt::Debug;
 use subtle::ConstantTimeEq;
-use zeroize::{Zeroize, ZeroizeOnDrop};
+use zeroize::{Zeroize, ZeroizeOnDrop, Zeroizing};
 
-use crate::Threshold;
+use crate::{Epoch, Threshold};
 
 /// Each share contains a byte for the y-coordinate of 32 points on 32 different
 /// polynomials over Ed25519. All points share an x-coordinate, which is the 0th
@@ -25,14 +30,6 @@ use crate::Threshold;
 ///
 /// This is enough information to share a secret 32 bytes long.
 const LRTQ_SHARE_SIZE: usize = 33;
-
-/// We don't distinguish whether this is an Ed25519 Scalar or set of GF(256)
-/// polynomials points with an x-coordinate of 0. Both can be treated as 32 byte
-/// blobs when decrypted, as they are immediately fed into HKDF.
-#[derive(
-    Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize,
-)]
-pub struct EncryptedRackSecret(pub Vec<u8>);
 
 // The key share format used for LRTQ
 #[derive(Clone, Serialize, Deserialize, Zeroize, ZeroizeOnDrop, From)]
@@ -221,6 +218,118 @@ impl Default for Salt {
     fn default() -> Self {
         Self::new()
     }
+}
+
+#[derive(
+    Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize,
+)]
+/// All possibly relevant __encrypted__ rack secrets for _prior_ committed
+/// configurations
+pub struct EncryptedRackSecrets {
+    /// A random value used to derive the key to encrypt the rack secrets for
+    /// prior committed epochs.
+    salt: Salt,
+    data: Box<[u8]>,
+}
+
+impl EncryptedRackSecrets {
+    pub fn new(salt: Salt, data: Box<[u8]>) -> Self {
+        EncryptedRackSecrets { salt, data }
+    }
+}
+
+/// All possibly relevant __unencrypted__ rack secrets for _prior_ committed
+/// configurations
+///
+/// For secret rotations we need to maintain all prior rack secrets for
+/// configutrations that any current trust quorum members may be stuck
+/// at. Eventually they will learn the latest configuration and decrypt
+/// `EncryptedRackSecrets` in order to get these plaintext versions. They will
+/// then use the rack secret for their currently committed configuration for key
+/// rotation .
+pub struct PlaintextRackSecrets {
+    secrets: BTreeMap<Epoch, ReconstructedRackSecret>,
+}
+
+impl PlaintextRackSecrets {
+    pub fn new() -> PlaintextRackSecrets {
+        PlaintextRackSecrets { secrets: BTreeMap::new() }
+    }
+
+    pub fn insert(&mut self, epoch: Epoch, secret: ReconstructedRackSecret) {
+        assert!(self.secrets.insert(epoch, secret).is_none());
+    }
+
+    pub fn get(&mut self, epoch: Epoch) -> Option<&ReconstructedRackSecret> {
+        self.secrets.get(&epoch)
+    }
+
+    /// Consume the plaintext and return an `EncryptedRackSecrets`
+    ///
+    /// We are encrypting rack secrets for prior epochs with the latest
+    /// rack secret.
+    pub fn encrypt(
+        self,
+        rack_id: RackUuid,
+        new_epoch: Epoch,
+        new_rack_secret: &ReconstructedRackSecret,
+    ) -> aead::Result<EncryptedRackSecrets> {
+        assert!(self.secrets.len() > 0);
+        let salt = Salt::new();
+        let key = derive_encryption_key_for_rack_secrets(
+            rack_id,
+            new_epoch,
+            salt,
+            new_rack_secret,
+        );
+
+        // Figure out the size of our plaintext and create a zeroizable buffer
+        // for it.
+        const SECRET_LEN: usize = 32;
+        const EPOCH_LEN: usize = size_of::<Epoch>();
+        const_assert_eq!(EPOCH_LEN, 8);
+        let plaintext_size = (SECRET_LEN + EPOCH_LEN) * self.secrets.len();
+        let mut plaintext =
+            Zeroizing::new(Vec::<u8>::with_capacity(plaintext_size));
+
+        // Write each epoch as a big endian u64 followed by the plaintext secret
+        for (epoch, secret) in &self.secrets {
+            plaintext.extend_from_slice(&epoch.0.to_be_bytes());
+            plaintext.extend_from_slice(secret.secret.0.expose_secret());
+        }
+
+        // This key only encrypts a single plaintext and so a nonce of all zeroes
+        // is all that's required.
+        let nonce = [0u8; 12].into();
+        let encrypted =
+            key.encrypt(&nonce, plaintext.as_ref())?.into_boxed_slice();
+        Ok(EncryptedRackSecrets { salt, data: encrypted })
+    }
+}
+
+/// Derive an encryption key from a rack secret used to decrypt
+/// `EncryptedRackSecrets` and encrypt `PlaintextRackSecrets`
+fn derive_encryption_key_for_rack_secrets(
+    rack_id: RackUuid,
+    epoch: Epoch,
+    salt: Salt,
+    rack_secret: &ReconstructedRackSecret,
+) -> ChaCha20Poly1305 {
+    let prk =
+        Hkdf::<Sha3_256>::new(Some(&salt.0[..]), rack_secret.expose_secret());
+
+    // The "info" string is context to bind the key to its purpose
+    let mut key = Zeroizing::new([0u8; 32]);
+    prk.expand_multi_info(
+        &[
+            b"trust-quorum-v1-rack-secret",
+            rack_id.as_untyped_uuid().as_ref(),
+            &epoch.0.to_be_bytes(),
+        ],
+        key.as_mut(),
+    )
+    .unwrap();
+    ChaCha20Poly1305::new(Key::from_slice(key.as_ref()))
 }
 
 #[cfg(test)]
