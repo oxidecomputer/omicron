@@ -22,6 +22,7 @@ use omicron_common::disk::DatasetKind;
 use omicron_uuid_kinds::DatasetUuid;
 use omicron_uuid_kinds::OmicronZoneUuid;
 use omicron_uuid_kinds::PhysicalDiskUuid;
+use sled_agent_types::zone_images::ClearMupdateOverrideResult;
 use sled_storage::config::MountConfig;
 use sled_storage::dataset::U2_DEBUG_DATASET;
 use sled_storage::dataset::ZONE_DATASET;
@@ -213,6 +214,8 @@ struct LatestReconciliationResult {
     zones_inventory: BTreeMap<OmicronZoneUuid, ConfigReconcilerInventoryResult>,
     timesync_status: TimeSyncStatus,
     boot_partitions: BootPartitionContentsInventory,
+    // TODO: use this
+    clear_mupdate_override: Option<ClearMupdateOverrideResult>,
 }
 
 impl LatestReconciliationResult {
@@ -424,6 +427,91 @@ impl ReconcilerTask {
             }
         };
 
+        // Reconcile the mupdate override field. This can be done independently
+        // of the other parts of reconciliation (and this doesn't have to block
+        // other parts of reconciliation), but the argument for this is somewhat
+        // non-trivial. Here's an outline:
+        //
+        // **If clearing the mupdate override succeeds but zone shutdown or
+        // startup fails:**
+        //
+        // (This is the most common case, and also the most interesting.)
+        //
+        // * Before ledgering a config, we check that if the
+        //   remove_mupdate_override field is set, all zones' image sources
+        //   are set to InstallDataset.
+        // * As a result, while reconciling against *this* configuration, the
+        //   reconciler will attempt to start zones exclusively from the
+        //   install dataset.
+        // * Inventory will report a cleared mupdate override field.
+        // * Based on this, the planner will clear the remove_mupdate_override
+        //   field in the blueprint.
+        // * For sleds that don't have a remove_mupdate_override field set in
+        //   the blueprint, including this one, the planner will perform no-op
+        //   image source updates from InstallDataset to Artifact, if the hash
+        //   of the zone manifest matches the one in the target release.
+        // * As a result, the reconciler will get a new configuration with
+        //   zone image sources set to Artifact with that hash.
+        // * Even though the update is logically a no-op from the blueprint's
+        //   perspective, the reconciler will switch to starting zones from
+        //   the artifact store rather than the install dataset.
+        // * But, notably, assuming the zone was correctly written out, its
+        //   hash is the same as that in the install dataset! So in effect
+        //   there's no difference between starting from the install dataset
+        //   and the artifact store.
+        // * What about updates that the planner might want to perform? They
+        //   will not happen until the set of running zones in the blueprint
+        //   is the same as that in the install dataset. (XXX is this true?)
+        //
+        // **If clearing the mupdate override fails due to an ID mismatch:**
+        //
+        // (The system is expected to handle this case gracefully.)
+        //
+        // * The config reconciler continues to honor the mupdate override
+        //   below.
+        // * Inventory will report the latest mupdate override ID.
+        // * The Reconfigurator planner will update the blueprint's mupdate
+        //   override field with the new value.
+        // * The next configuration will have the new value, and reconcilation
+        //   should hopefully succeed at that point.
+        //
+        // **If clearing the mupdate override fails due to an error deleting
+        // the override file from disk:**
+        //
+        // (The system should handle this case reasonably as well.)
+        //
+        // * The config reconciler continues to honor the mupdate override
+        //   below.
+        // * Inventory will continue to report the current mupdate override ID.
+        // * The Reconfigurator planner will not update the blueprint's mupdate
+        //   override field.
+        // * The next configuration will have the new value, and reconcilation
+        //   should hopefully succeed at that point.
+        //
+        // **If clearing the mupdate override fails due to an error reading
+        // the override:**
+        //
+        // (The system is not designed to handle this case gracefully.)
+        //
+        // * Omicron zones will fail to start because the zone image resolver
+        //   will continue to produce an error.
+        // * Inventory will report an error in place of the mupdate override ID.
+        // * The Reconfigurator planner will not make any updates to the
+        //   blueprint's mupdate override field until the error is resolved.
+        // * This will be a support incident -- a corrupt mupdate override file
+        //   is not a case the system is currently designed to handle.
+        let clear_mupdate_override =
+            if let Some(override_id) = sled_config.remove_mupdate_override {
+                let internal_disks =
+                    self.internal_disks_rx.wait_for_boot_disk().await;
+                Some(
+                    sled_agent_facilities
+                        .clear_mupdate_override(override_id, internal_disks),
+                )
+            } else {
+                None
+            };
+
         // Reconcile any changes to our boot partitions. This is typically a
         // no-op; if we've successfully read both boot partitions in a previous
         // reconciliation and don't have new contents to write, it will just
@@ -562,6 +650,7 @@ impl ReconcilerTask {
             zones_inventory: self.zones.to_inventory(),
             timesync_status,
             boot_partitions: boot_partitions.into_inventory(),
+            clear_mupdate_override,
         };
         self.reconciler_result_tx.send_modify(|r| {
             r.status = ReconcilerTaskStatus::Idle {

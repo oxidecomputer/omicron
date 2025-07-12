@@ -1077,6 +1077,7 @@ fn config_differs_only_by_image_source(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::InternalDisksWithBootDisk;
     use crate::dataset_serialization_task::DatasetEnsureError;
     use anyhow::anyhow;
     use assert_matches::assert_matches;
@@ -1102,8 +1103,11 @@ mod tests {
     use omicron_common::update::OmicronZoneManifestSource;
     use omicron_test_utils::dev;
     use omicron_uuid_kinds::DatasetUuid;
+    use omicron_uuid_kinds::MupdateOverrideUuid;
     use omicron_uuid_kinds::ZpoolUuid;
     use sled_agent_types::zone_images::ArtifactReadResult;
+    use sled_agent_types::zone_images::ClearMupdateOverrideBootDiskError;
+    use sled_agent_types::zone_images::ClearMupdateOverrideResult;
     use sled_agent_types::zone_images::MupdateOverrideStatus;
     use sled_agent_types::zone_images::ResolverStatus;
     use sled_agent_types::zone_images::ZoneManifestArtifactResult;
@@ -1230,6 +1234,8 @@ mod tests {
         }
     }
 
+    const BOOT_DISK_PATH: &str = "/test/boot/disk";
+
     #[derive(Debug)]
     struct FakeSledAgentFacilitiesInner {
         start_responses: VecDeque<anyhow::Result<RunningZone>>,
@@ -1239,7 +1245,7 @@ mod tests {
 
     impl Default for FakeSledAgentFacilitiesInner {
         fn default() -> Self {
-            let boot_disk_path = Utf8PathBuf::from("/test/boot/disk");
+            let boot_disk_path = Utf8PathBuf::from(BOOT_DISK_PATH);
             Self {
                 start_responses: Default::default(),
                 removed_ddm_prefixes: Default::default(),
@@ -1314,6 +1320,22 @@ mod tests {
 
         fn zone_image_resolver_status(&self) -> ResolverStatus {
             self.inner.lock().unwrap().resolver_status.clone()
+        }
+
+        fn clear_mupdate_override(
+            &self,
+            override_id: MupdateOverrideUuid,
+            _internal_disks: InternalDisksWithBootDisk,
+        ) -> ClearMupdateOverrideResult {
+            ClearMupdateOverrideResult {
+                boot_disk_path: Utf8PathBuf::from(BOOT_DISK_PATH),
+                boot_disk_result: Err(
+                    ClearMupdateOverrideBootDiskError::NoOverride {
+                        provided: override_id,
+                    },
+                ),
+                non_boot_disk_info: IdOrdMap::new(),
+            }
         }
 
         fn metrics_untrack_zone_links(
