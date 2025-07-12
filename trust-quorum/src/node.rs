@@ -291,7 +291,7 @@ mod tests {
         assert_eq!(config.coordinator, *node.platform_id());
         assert_eq!(config.members.len(), input.reconfigure_msg.members.len());
         assert_eq!(config.threshold, input.reconfigure_msg.threshold);
-        assert!(config.previous_configuration.is_none());
+        assert!(config.encrypted_rack_secrets.is_none());
 
         // Ensure that prepare messages are properly put in the outbox to be
         // sent by the I/O parts of the codebase
