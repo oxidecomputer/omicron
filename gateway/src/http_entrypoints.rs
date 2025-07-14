@@ -559,12 +559,20 @@ impl GatewayApi for GatewayImpl {
                 ));
             }
 
-            // TODO-john catch hash in progress?
-            sp.start_host_flash_hash(firmware_slot).await.map_err(|err| {
-                SpCommsError::SpCommunicationFailed { sp: sp_id, err }
-            })?;
-
-            Ok(HttpResponseUpdatedNoContent())
+            // The SP (reasonably!) returns a `HashInProgress` error if we try
+            // to start hashing while hashing is being calculated, but we're
+            // presenting an idempotent "start hashing if it isn't started"
+            // endpoint instead. Swallow that error.
+            match sp.start_host_flash_hash(firmware_slot).await {
+                Ok(())
+                | Err(CommunicationError::SpError(SpError::Hf(
+                    HfError::HashInProgress,
+                ))) => Ok(HttpResponseUpdatedNoContent()),
+                Err(err) => {
+                    Err(SpCommsError::SpCommunicationFailed { sp: sp_id, err }
+                        .into())
+                }
+            }
         };
         apictx.latencies.instrument_dropshot_handler(&rqctx, handler).await
     }

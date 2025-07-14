@@ -41,6 +41,7 @@ dropshot.workspace = true
 gateway-messages.workspace = true
 gateway-test-utils.workspace = true
 hubtools.workspace = true
+omicron-test-utils.workspace = true
 rand.workspace = true
 repo-depot-api.workspace = true
 sp-sim.workspace = true
