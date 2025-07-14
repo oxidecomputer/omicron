@@ -16,6 +16,7 @@ use crate::blueprint_editor::SledEditError;
 use crate::mgs_updates::plan_mgs_updates;
 use crate::planner::omicron_zone_placement::PlacementError;
 use gateway_client::types::SpType;
+use nexus_sled_agent_shared::inventory::ConfigReconcilerInventoryResult;
 use nexus_sled_agent_shared::inventory::OmicronZoneImageSource;
 use nexus_sled_agent_shared::inventory::OmicronZoneType;
 use nexus_sled_agent_shared::inventory::ZoneKind;
@@ -1226,8 +1227,8 @@ impl<'a> Planner<'a> {
         // Wait for zones to appear up-to-date in the inventory.
         let inventory_zones = self
             .inventory
-            .all_running_omicron_zones()
-            .map(|z| (z.id, z.image_source.clone()))
+            .all_reconciled_omicron_zones()
+            .map(|(z, sa_result)| (z.id, (&z.image_source, sa_result)))
             .collect::<BTreeMap<_, _>>();
 
         #[derive(Debug)]
@@ -1248,6 +1249,11 @@ impl<'a> Planner<'a> {
             MissingInInventory {
                 bp_image_source: &'a BlueprintZoneImageSource,
             },
+            ReconciliationError {
+                bp_image_source: &'a BlueprintZoneImageSource,
+                inv_image_source: &'a OmicronZoneImageSource,
+                message: &'a str,
+            },
         }
 
         for &sled_id in &sleds {
@@ -1267,14 +1273,18 @@ impl<'a> Planner<'a> {
                     let bp_image_source =
                         OmicronZoneImageSource::from(zone.image_source.clone());
                     match inventory_zones.get(&zone.id) {
-                        Some(inv_image_source)
-                            if inv_image_source == &bp_image_source =>
-                        {
+                        Some((
+                            inv_image_source,
+                            ConfigReconcilerInventoryResult::Ok,
+                        )) if *inv_image_source == &bp_image_source => {
                             // The inventory and blueprint image sources match
                             // -- this means that the zone is up-to-date.
                             None
                         }
-                        Some(inv_image_source) => {
+                        Some((
+                            inv_image_source,
+                            ConfigReconcilerInventoryResult::Ok,
+                        )) => {
                             // The inventory and blueprint image sources differ.
                             Some(ZoneCurrentlyUpdating {
                                 zone_id: zone.id,
@@ -1282,6 +1292,23 @@ impl<'a> Planner<'a> {
                                 reason: UpdatingReason::ImageSourceMismatch {
                                     bp_image_source: &zone.image_source,
                                     inv_image_source,
+                                },
+                            })
+                        }
+                        Some((
+                            inv_image_source,
+                            ConfigReconcilerInventoryResult::Err { message },
+                        )) => {
+                            // The inventory reports this zone but there was an
+                            // error reconciling it (most likely an error
+                            // starting the zone).
+                            Some(ZoneCurrentlyUpdating {
+                                zone_id: zone.id,
+                                zone_kind: zone.kind(),
+                                reason: UpdatingReason::ReconciliationError {
+                                    bp_image_source: &zone.image_source,
+                                    inv_image_source,
+                                    message,
                                 },
                             })
                         }
