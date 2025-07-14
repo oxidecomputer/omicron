@@ -784,12 +784,12 @@ pub struct ResolvedVpcRoute {
 }
 
 /// VPC firewall rule after object name resolution has been performed by Nexus
-#[derive(Clone, Debug, Serialize, Deserialize, JsonSchema)]
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, JsonSchema)]
 pub struct ResolvedVpcFirewallRule {
     pub status: external::VpcFirewallRuleStatus,
     pub direction: external::VpcFirewallRuleDirection,
     pub targets: Vec<NetworkInterface>,
-    pub filter_hosts: Option<Vec<HostIdentifier>>,
+    pub filter_hosts: Option<HashSet<HostIdentifier>>,
     pub filter_ports: Option<Vec<external::L4PortRange>>,
     pub filter_protocols: Option<Vec<external::VpcFirewallRuleProtocol>>,
     pub action: external::VpcFirewallRuleAction,

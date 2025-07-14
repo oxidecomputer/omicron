@@ -47,6 +47,7 @@ omicron-workspace-hack.workspace = true
 dropshot.workspace = true
 expectorate.workspace = true
 maplit.workspace = true
+omicron-cockroach-metrics.workspace = true
 omicron-common = { workspace = true, features = ["testing"] }
 omicron-test-utils.workspace = true
 proptest.workspace = true

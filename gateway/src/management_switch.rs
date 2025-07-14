@@ -161,6 +161,8 @@ pub struct ManagementSwitch {
     // When it's dropped, it cancels the background tokio task that loops on
     // that socket receiving incoming packets.
     _shared_socket: Option<SharedSocket<shared_socket::SingleSpMessage>>,
+    // As above, we must also not drop the shared ereport socket.
+    _shared_ereport_socket: Option<SharedSocket<Vec<u8>>>,
     location_map: Arc<OnceLock<Result<LocationMap, String>>>,
     discovery_task: JoinHandle<()>,
     log: Logger,
@@ -336,6 +338,7 @@ impl ManagementSwitch {
             local_ignition_controller_port,
             location_map,
             _shared_socket: shared_socket,
+            _shared_ereport_socket: ereport_socket,
             port_to_handle,
             port_to_ignition_target,
             discovery_task,

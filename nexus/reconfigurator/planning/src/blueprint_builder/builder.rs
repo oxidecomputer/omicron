@@ -403,14 +403,12 @@ impl fmt::Display for Operation {
 ///    However, the new blueprint can only be made the system's target if its
 ///    parent is the current target.
 pub struct BlueprintBuilder<'a> {
-    #[allow(dead_code)]
     log: Logger,
 
     /// previous blueprint, on which this one will be based
     parent_blueprint: &'a Blueprint,
 
     /// The latest inventory collection
-    #[allow(unused)]
     collection: &'a Collection,
 
     // These fields are used to allocate resources for sleds.

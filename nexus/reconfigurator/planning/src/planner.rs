@@ -37,6 +37,7 @@ use nexus_types::external_api::views::PhysicalDiskPolicy;
 use nexus_types::external_api::views::SledPolicy;
 use nexus_types::external_api::views::SledState;
 use nexus_types::inventory::Collection;
+use omicron_common::policy::COCKROACHDB_REDUNDANCY;
 use omicron_common::policy::INTERNAL_DNS_REDUNDANCY;
 use omicron_uuid_kinds::PhysicalDiskUuid;
 use omicron_uuid_kinds::SledUuid;
@@ -1227,20 +1228,27 @@ impl<'a> Planner<'a> {
             .map(|z| (z.id, z.image_source.clone()))
             .collect::<BTreeMap<_, _>>();
         for &sled_id in &sleds {
-            if !self
+            let zones_currently_updating = self
                 .blueprint
                 .current_sled_zones(
                     sled_id,
                     BlueprintZoneDisposition::is_in_service,
                 )
-                .all(|zone| {
+                .filter_map(|zone| {
                     let image_source = zone.image_source.clone().into();
-                    inventory_zones.get(&zone.id) == Some(&image_source)
+                    if inventory_zones.get(&zone.id) != Some(&image_source) {
+                        Some((zone.id, zone.zone_type.kind()))
+                    } else {
+                        None
+                    }
                 })
-            {
+                .collect::<Vec<_>>();
+
+            if !zones_currently_updating.is_empty() {
                 info!(
                     self.log, "some zones not yet up-to-date";
                     "sled_id" => %sled_id,
+                    "zones_currently_updating" => ?zones_currently_updating,
                 );
                 return Ok(());
             }
@@ -1572,11 +1580,48 @@ impl<'a> Planner<'a> {
     /// case, we have no choice but to reconcile with the fact that the zone is
     /// now gone.
     fn can_zone_be_shut_down_safely(&self, zone: &BlueprintZoneConfig) -> bool {
-        // TODO-cleanup remove this `allow` once we populate a variant below
-        #[allow(clippy::match_single_binding)]
         match zone.zone_type.kind() {
-            // <https://github.com/oxidecomputer/omicron/issues/6404>
-            // ZoneKind::CockroachDb => todo!("check cluster status in inventory"),
+            ZoneKind::CockroachDb => {
+                debug!(self.log, "Checking if Cockroach node can shut down");
+                // We must hear from all nodes
+                let all_statuses = &self.inventory.cockroach_status;
+                if all_statuses.len() < COCKROACHDB_REDUNDANCY {
+                    warn!(self.log, "Not enough nodes");
+                    return false;
+                }
+
+                // All nodes must report: "We have the necessary redundancy, and
+                // have observed no underreplicated ranges".
+                for (node_id, status) in all_statuses {
+                    let log = self.log.new(slog::o!(
+                        "operation" => "Checking Cockroach node status for shutdown safety",
+                        "node_id" => node_id.to_string()
+                    ));
+                    let Some(ranges_underreplicated) =
+                        status.ranges_underreplicated
+                    else {
+                        warn!(log, "Missing underreplicated stat");
+                        return false;
+                    };
+                    if ranges_underreplicated != 0 {
+                        warn!(log, "Underreplicated ranges != 0"; "ranges_underreplicated" => ranges_underreplicated);
+                        return false;
+                    }
+                    let Some(live_nodes) = status.liveness_live_nodes else {
+                        warn!(log, "Missing live_nodes");
+                        return false;
+                    };
+                    if live_nodes < COCKROACHDB_REDUNDANCY as u64 {
+                        warn!(log, "Live nodes < COCKROACHDB_REDUNDANCY"; "live_nodes" => live_nodes);
+                        return false;
+                    }
+                    info!(
+                        log,
+                        "CockroachDB Node status looks ready for shutdown"
+                    );
+                }
+                true
+            }
             _ => true, // other zone kinds have no special safety checks
         }
     }
@@ -1625,12 +1670,14 @@ pub(crate) mod test {
     use nexus_types::external_api::views::PhysicalDiskState;
     use nexus_types::external_api::views::SledProvisionPolicy;
     use nexus_types::external_api::views::SledState;
+    use nexus_types::inventory::CockroachStatus;
     use omicron_common::api::external::Generation;
     use omicron_common::api::external::TufArtifactMeta;
     use omicron_common::api::external::TufRepoDescription;
     use omicron_common::api::external::TufRepoMeta;
     use omicron_common::disk::DatasetKind;
     use omicron_common::disk::DiskIdentity;
+    use omicron_common::policy::COCKROACHDB_REDUNDANCY;
     use omicron_common::policy::CRUCIBLE_PANTRY_REDUNDANCY;
     use omicron_common::policy::NEXUS_REDUNDANCY;
     use omicron_common::update::ArtifactId;
@@ -5358,6 +5405,302 @@ pub(crate) mod test {
             &logctx.log,
             &blueprint16,
             &input,
+            &example.collection,
+            TEST_NAME,
+        );
+
+        logctx.cleanup_successful();
+    }
+
+    #[test]
+    fn test_update_cockroach() {
+        static TEST_NAME: &str = "update_cockroach";
+        let logctx = test_setup_log(TEST_NAME);
+        let log = logctx.log.clone();
+
+        // Use our example system.
+        let mut rng = SimRngState::from_seed(TEST_NAME);
+        let (mut example, mut blueprint) = ExampleSystemBuilder::new_with_rng(
+            &logctx.log,
+            rng.next_system_rng(),
+        )
+        .build();
+        verify_blueprint(&blueprint);
+
+        // Update the example system and blueprint, as a part of test set-up.
+        //
+        // Ask for COCKROACHDB_REDUNDANCY cockroach nodes
+
+        let mut input_builder = example.input.clone().into_builder();
+        input_builder.policy_mut().target_cockroachdb_zone_count =
+            COCKROACHDB_REDUNDANCY;
+        example.input = input_builder.build();
+
+        let blueprint_name = "blueprint_with_cockroach";
+        let new_blueprint = Planner::new_based_on(
+            log.clone(),
+            &blueprint,
+            &example.input,
+            &blueprint_name,
+            &example.collection,
+        )
+        .expect("can't create planner")
+        .with_rng(PlannerRng::from_seed((TEST_NAME, &blueprint_name)))
+        .plan()
+        .unwrap_or_else(|_| panic!("can't plan to include Cockroach nodes"));
+
+        let summary = new_blueprint.diff_since_blueprint(&blueprint);
+        assert_eq!(summary.total_zones_added(), COCKROACHDB_REDUNDANCY);
+        assert_eq!(summary.total_zones_removed(), 0);
+        assert_eq!(summary.total_zones_modified(), 0);
+        blueprint = new_blueprint;
+        update_collection_from_blueprint(&mut example, &blueprint);
+
+        // We should have started with no specified TUF repo and nothing to do.
+        assert_planning_makes_no_changes(
+            &logctx.log,
+            &blueprint,
+            &example.input,
+            &example.collection,
+            TEST_NAME,
+        );
+
+        // All zones should be sourced from the install dataset by default.
+        assert!(
+            blueprint
+                .all_omicron_zones(BlueprintZoneDisposition::is_in_service)
+                .all(|(_, z)| matches!(
+                    z.image_source,
+                    BlueprintZoneImageSource::InstallDataset
+                ))
+        );
+
+        // This test "starts" here -- we specify a new TUF repo with an updated
+        // CockroachDB image. We create a new TUF repo where version of
+        // CockroachDB has been updated out of the install dataset.
+        //
+        // The planner should avoid doing this update until it has confirmation
+        // from inventory that the cluster is healthy.
+
+        let mut input_builder = example.input.clone().into_builder();
+        let version = ArtifactVersion::new_static("1.0.0-freeform")
+            .expect("can't parse artifact version");
+        let fake_hash = ArtifactHash([0; 32]);
+        let image_source = BlueprintZoneImageSource::Artifact {
+            version: BlueprintZoneImageVersion::Available {
+                version: version.clone(),
+            },
+            hash: fake_hash,
+        };
+        let artifacts = vec![
+            // Omit `BoundaryNtp` because it has the same artifact name as
+            // `InternalNtp`.
+            fake_zone_artifact!(Clickhouse, version.clone()),
+            fake_zone_artifact!(ClickhouseKeeper, version.clone()),
+            fake_zone_artifact!(ClickhouseServer, version.clone()),
+            fake_zone_artifact!(CockroachDb, version.clone()),
+            fake_zone_artifact!(Crucible, version.clone()),
+            fake_zone_artifact!(CruciblePantry, version.clone()),
+            fake_zone_artifact!(ExternalDns, version.clone()),
+            fake_zone_artifact!(InternalDns, version.clone()),
+            fake_zone_artifact!(InternalNtp, version.clone()),
+            fake_zone_artifact!(Nexus, version.clone()),
+            fake_zone_artifact!(Oximeter, version.clone()),
+        ];
+        let target_release_generation = Generation::from_u32(2);
+        input_builder.policy_mut().tuf_repo = TufRepoPolicy {
+            target_release_generation,
+            description: TargetReleaseDescription::TufRepo(
+                TufRepoDescription {
+                    repo: TufRepoMeta {
+                        hash: fake_hash,
+                        targets_role_version: 0,
+                        valid_until: Utc::now(),
+                        system_version: Version::new(1, 0, 0),
+                        file_name: String::from(""),
+                    },
+                    artifacts,
+                },
+            ),
+        };
+        example.input = input_builder.build();
+
+        // Manually update all zones except Cockroach
+        //
+        // We just specified a new TUF repo, everything is going to shift from
+        // the install dataset to this new repo.
+        for mut zone in blueprint
+            .sleds
+            .values_mut()
+            .flat_map(|config| config.zones.iter_mut())
+            .filter(|z| !z.zone_type.is_cockroach())
+        {
+            zone.image_source = BlueprintZoneImageSource::Artifact {
+                version: BlueprintZoneImageVersion::Available {
+                    version: version.clone(),
+                },
+                hash: fake_hash,
+            };
+        }
+        update_collection_from_blueprint(&mut example, &blueprint);
+
+        // Some helper predicates for the assertions below.
+        let is_old_cockroach = |zone: &BlueprintZoneConfig| -> bool {
+            zone.zone_type.is_cockroach()
+                && matches!(
+                    zone.image_source,
+                    BlueprintZoneImageSource::InstallDataset
+                )
+        };
+        let is_up_to_date_cockroach = |zone: &BlueprintZoneConfig| -> bool {
+            zone.zone_type.is_cockroach() && zone.image_source == image_source
+        };
+        let create_valid_looking_status = || {
+            let mut result = BTreeMap::new();
+            for i in 1..=COCKROACHDB_REDUNDANCY {
+                result.insert(
+                    omicron_cockroach_metrics::NodeId(i.to_string()),
+                    CockroachStatus {
+                        ranges_underreplicated: Some(0),
+                        liveness_live_nodes: Some(GOAL_REDUNDANCY),
+                    },
+                );
+            }
+            result
+        };
+
+        // If we have missing info in our inventory, the
+        // planner will not update any Cockroach zones.
+        example.collection.cockroach_status = BTreeMap::new();
+        assert_planning_makes_no_changes(
+            &log,
+            &blueprint,
+            &example.input,
+            &example.collection,
+            TEST_NAME,
+        );
+
+        // If we're missing info from even a single node, we
+        // will still refuse to update.
+        example.collection.cockroach_status = create_valid_looking_status();
+        example.collection.cockroach_status.pop_first();
+        assert_planning_makes_no_changes(
+            &log,
+            &blueprint,
+            &example.input,
+            &example.collection,
+            TEST_NAME,
+        );
+
+        const GOAL_REDUNDANCY: u64 = COCKROACHDB_REDUNDANCY as u64;
+
+        // If we have any non-zero "ranges_underreplicated" in in our inventory,
+        // the planner will not update any Cockroach zones.
+        example.collection.cockroach_status = create_valid_looking_status();
+        *example
+            .collection
+            .cockroach_status
+            .get_mut(&omicron_cockroach_metrics::NodeId("1".to_string()))
+            .unwrap() = CockroachStatus {
+            ranges_underreplicated: Some(1),
+            liveness_live_nodes: Some(GOAL_REDUNDANCY),
+        };
+        assert_planning_makes_no_changes(
+            &log,
+            &blueprint,
+            &example.input,
+            &example.collection,
+            TEST_NAME,
+        );
+
+        // If we don't have enough live nodes, we won't update Cockroach zones.
+        example.collection.cockroach_status = create_valid_looking_status();
+        *example
+            .collection
+            .cockroach_status
+            .get_mut(&omicron_cockroach_metrics::NodeId("1".to_string()))
+            .unwrap() = CockroachStatus {
+            ranges_underreplicated: Some(0),
+            liveness_live_nodes: Some(GOAL_REDUNDANCY - 1),
+        };
+
+        assert_planning_makes_no_changes(
+            &log,
+            &blueprint,
+            &example.input,
+            &example.collection,
+            TEST_NAME,
+        );
+
+        // Once we have zero underreplicated ranges, we can start to update
+        // Cockroach zones.
+        //
+        // We'll update one zone at a time, from the install dataset to the
+        // new TUF repo artifact.
+        for i in 1..=COCKROACHDB_REDUNDANCY {
+            // Keep setting this value in a loop;
+            // "update_collection_from_blueprint" resets it.
+            example.collection.cockroach_status = create_valid_looking_status();
+
+            println!("Updating cockroach {i} of {COCKROACHDB_REDUNDANCY}");
+            let new_blueprint = Planner::new_based_on(
+                log.clone(),
+                &blueprint,
+                &example.input,
+                &format!("test_blueprint_cockroach_{i}"),
+                &example.collection,
+            )
+            .expect("can't create planner")
+            .with_rng(PlannerRng::from_seed((TEST_NAME, "bp_crdb")))
+            .plan()
+            .expect("plan for trivial TUF repo");
+
+            blueprint = new_blueprint;
+
+            assert_eq!(
+                blueprint
+                    .all_omicron_zones(BlueprintZoneDisposition::is_in_service)
+                    .filter(|(_, z)| is_old_cockroach(z))
+                    .count(),
+                COCKROACHDB_REDUNDANCY - i
+            );
+            assert_eq!(
+                blueprint
+                    .all_omicron_zones(BlueprintZoneDisposition::is_in_service)
+                    .filter(|(_, z)| is_up_to_date_cockroach(z))
+                    .count(),
+                i
+            );
+            update_collection_from_blueprint(&mut example, &blueprint);
+        }
+
+        // Validate that we have no further changes to make, once all Cockroach
+        // zones have been updated.
+        example.collection.cockroach_status = create_valid_looking_status();
+
+        assert_planning_makes_no_changes(
+            &log,
+            &blueprint,
+            &example.input,
+            &example.collection,
+            TEST_NAME,
+        );
+
+        // Validate that we do not flip back to the install dataset after
+        // performing the update.
+        example.collection.cockroach_status = create_valid_looking_status();
+        example
+            .collection
+            .cockroach_status
+            .values_mut()
+            .next()
+            .unwrap()
+            .ranges_underreplicated = Some(1);
+
+        assert_planning_makes_no_changes(
+            &log,
+            &blueprint,
+            &example.input,
             &example.collection,
             TEST_NAME,
         );

@@ -241,7 +241,9 @@ pub struct ProducerRegistrationResponse {
 /// A `HostIdentifier` represents either an IP host or network (v4 or v6),
 /// or an entire VPC (identified by its VNI). It is used in firewall rule
 /// host filters.
-#[derive(Clone, Debug, Deserialize, Serialize, PartialEq, JsonSchema)]
+#[derive(
+    Clone, Debug, Deserialize, Serialize, Eq, PartialEq, Hash, JsonSchema,
+)]
 #[serde(tag = "type", content = "value", rename_all = "snake_case")]
 pub enum HostIdentifier {
     Ip(oxnet::IpNet),

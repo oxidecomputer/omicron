@@ -2664,6 +2664,10 @@ CREATE INDEX IF NOT EXISTS lookup_bundle_by_nexus ON omicron.public.support_bund
     assigned_nexus
 );
 
+CREATE INDEX IF NOT EXISTS lookup_bundle_by_creation ON omicron.public.support_bundle (
+    time_created
+);
+
 /*******************************************************************/
 
 /*
@@ -6205,7 +6209,7 @@ INSERT INTO omicron.public.db_metadata (
     version,
     target_version
 ) VALUES
-    (TRUE, NOW(), NOW(), '162.0.0', NULL)
+    (TRUE, NOW(), NOW(), '163.0.0', NULL)
 ON CONFLICT DO NOTHING;
 
 COMMIT;
