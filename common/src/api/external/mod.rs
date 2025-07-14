@@ -3474,6 +3474,105 @@ pub enum ImportExportPolicy {
     Allow(Vec<oxnet::IpNet>),
 }
 
+/// Information about a flow recorded on a `NetworkInterface`.
+#[derive(
+    Clone, Debug, Deserialize, JsonSchema, Serialize, PartialEq,
+)]
+pub struct FlowMetadata {
+    /// An ephemeral ID bound to this flow.
+    pub flow_id: Uuid,
+    /// The time the first packet of this flow was seen at.
+    pub created_at: DateTime<Utc>,
+    /// The direction of the first packet of this flow.
+    pub initial_packet: Direction,
+    /// The flowkey (or 5-tuple) of any packets on this flow as viewed by
+    /// the instance.
+    pub internal_key: Flowkey,
+    /// The flowkey (or 5-tuple) of any packets on this flow as viewed by
+    /// the remote half.
+    pub external_key: Flowkey,
+    /// All entities responsible for allowing packets in this flow to reach the
+    /// instance.
+    pub admitted_by_in: Option<Vec<VpcEntity>>,
+    /// All entities responsible for allowing packets in this flow to be sent
+    /// by the instance.
+    pub admitted_by_out: Option<Vec<VpcEntity>>,
+    /// How any outbound packets are to be routed.
+    pub forwarded: Option<ForwardClass>,
+}
+
+/// The direction of a flow or packet, with respect to its target `Instance`.
+#[derive(
+    Clone, Debug, Deserialize, JsonSchema, Serialize, PartialEq, Eq, Hash,
+)]
+#[serde(rename_all = "snake_case")]
+pub enum Direction {
+    In,
+    Out,
+}
+
+/// Addresses and protocol-specific information used to group packets into a flow.
+#[derive(
+    Clone, Debug, Deserialize, JsonSchema, Serialize, PartialEq, Eq, Hash,
+)]
+pub struct Flowkey {
+    pub source_address: IpAddr,
+    pub destination_address: IpAddr,
+    pub protocol: u8,
+    pub info: Option<ProtocolInfo>,
+}
+
+/// Protocol-specific flow information.
+#[derive(
+    Clone, Debug, Deserialize, JsonSchema, Serialize, PartialEq, Eq, Hash,
+)]
+#[serde(rename_all = "snake_case", tag = "type", content = "value")]
+pub enum ProtocolInfo {
+    Ports(PortProtocolInfo),
+    Icmp(IcmpProtocolInfo),
+}
+
+/// A pair of ports, identifying a flow in protocols such as TCP or UDP.
+#[derive(
+    Clone, Debug, Deserialize, JsonSchema, Serialize, PartialEq, Eq, Hash,
+)]
+pub struct PortProtocolInfo {
+    source_port: u16,
+    destination_port: u16,
+}
+
+/// Message types information carried by ICMP.
+#[derive(
+    Clone, Debug, Deserialize, JsonSchema, Serialize, PartialEq, Eq, Hash,
+)]
+pub struct IcmpProtocolInfo {
+    r#type: u8,
+    code: u8,
+}
+
+/// How the remote half of a flow is reached.
+#[derive(
+    Clone, Debug, Deserialize, JsonSchema, Serialize, PartialEq, Eq, Hash,
+)]
+#[serde(rename_all = "snake_case")]
+pub enum ForwardClass {
+    VpcLocal,
+    External,
+}
+
+/// A control-plane object which has matched a given flow and chosen to
+/// allow it.
+#[derive(
+    Clone, Debug, Deserialize, JsonSchema, Serialize, PartialEq, Eq, Hash,
+)]
+#[serde(rename_all = "snake_case", tag = "type", content = "value")]
+pub enum VpcEntity {
+    FirewallRule(Uuid),
+    FirewallDefault,
+    VpcRoute(Uuid),
+    InternetGateway(Uuid),
+}
+
 /// Use instead of Option in API request body structs to get a field that can
 /// be null (parsed as `None`) but is not optional. Unlike Option, Nullable
 /// will fail to parse if the key is not present. The JSON Schema in the

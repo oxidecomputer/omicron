@@ -15,6 +15,7 @@ cfg_if::cfg_if! {
 mod firewall_rules;
 mod port;
 mod port_manager;
+mod stat;
 
 pub use firewall_rules::opte_firewall_rules;
 use ipnetwork::IpNetwork;

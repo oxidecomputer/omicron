@@ -11,7 +11,10 @@ use oxide_vpc::api::ClearVirt2PhysReq;
 use oxide_vpc::api::DelRouterEntryReq;
 use oxide_vpc::api::DhcpCfg;
 use oxide_vpc::api::Direction;
+use oxide_vpc::api::DumpFlowStatResp;
+use oxide_vpc::api::DumpRootStatResp;
 use oxide_vpc::api::DumpVirt2PhysResp;
+use oxide_vpc::api::InnerFlowId;
 use oxide_vpc::api::IpCfg;
 use oxide_vpc::api::IpCidr;
 use oxide_vpc::api::ListPortsResp;
@@ -25,6 +28,8 @@ use oxide_vpc::api::SetFwRulesReq;
 use oxide_vpc::api::SetVirt2PhysReq;
 use oxide_vpc::api::VpcCfg;
 use slog::Logger;
+use uuid::Uuid;
+use std::collections::BTreeMap;
 use std::collections::HashMap;
 use std::collections::hash_map::Entry;
 use std::net::IpAddr;
@@ -256,6 +261,30 @@ impl Handle {
         _: &ClearVirt2PhysReq,
     ) -> Result<NoResp, OpteError> {
         unimplemented!("Not yet used in tests")
+    }
+
+    /// Request the current state of some (or all) root stats contained
+    /// in a port.
+    ///
+    /// An empty `stat_ids` will request all present stats.
+    pub fn dump_root_stats(
+        &self,
+        _port_name: &str,
+        _stat_ids: impl IntoIterator<Item = Uuid>,
+    ) -> Result<DumpRootStatResp, Error> {
+        Ok(DumpRootStatResp { root_stats: BTreeMap::new() })
+    }
+
+    /// Request the current state of some (or all) flow stats contained
+    /// in a port.
+    ///
+    /// An empty `flow_keys` will request all present flows.
+    pub fn dump_flow_stats(
+        &self,
+        _port_name: &str,
+        _flow_keys: impl IntoIterator<Item = InnerFlowId>,
+    ) -> Result<DumpFlowStatResp<InnerFlowId>, Error> {
+        Ok(DumpFlowStatResp { flow_stats: BTreeMap::new() })
     }
 
     /// List ports on the current system.
