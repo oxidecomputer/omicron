@@ -5487,7 +5487,7 @@ pub(crate) mod test {
             .expect("can't parse artifact version");
         let fake_hash = ArtifactHash([0; 32]);
         let image_source = BlueprintZoneImageSource::Artifact {
-            version: BlueprintZoneImageVersion::Available {
+            version: BlueprintArtifactVersion::Available {
                 version: version.clone(),
             },
             hash: fake_hash,
@@ -5536,7 +5536,7 @@ pub(crate) mod test {
             .filter(|z| !z.zone_type.is_cockroach())
         {
             zone.image_source = BlueprintZoneImageSource::Artifact {
-                version: BlueprintZoneImageVersion::Available {
+                version: BlueprintArtifactVersion::Available {
                     version: version.clone(),
                 },
                 hash: fake_hash,
