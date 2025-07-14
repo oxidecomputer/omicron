@@ -250,4 +250,6 @@ async fn test_host_phase1_hashing() {
             (1, ComponentFirmwareHashStatus::Hashed(expected_sha256_1)),
         ])
         .await;
+
+    mgstestctx.teardown().await;
 }
