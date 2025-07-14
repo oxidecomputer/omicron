@@ -536,6 +536,65 @@ impl GatewayApi for GatewayImpl {
         apictx.latencies.instrument_dropshot_handler(&rqctx, handler).await
     }
 
+    async fn sp_component_hash_firmware_start(
+        rqctx: RequestContext<Self::Context>,
+        path: Path<PathSpComponentFirmwareSlot>,
+    ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
+        let apictx = rqctx.context();
+
+        let PathSpComponentFirmwareSlot { sp, component, firmware_slot } =
+            path.into_inner();
+        let sp_id = sp.into();
+        let handler = async {
+            let sp = apictx.mgmt_switch.sp(sp_id)?;
+            let component = component_from_str(&component)?;
+
+            if component != SpComponent::HOST_CPU_BOOT_FLASH {
+                return Err(HttpError::for_bad_request(
+                    Some("RequestUnsupportedForComponent".to_string()),
+                    "Only the host boot flash can be hashed".into(),
+                ));
+            }
+
+            sp.start_host_flash_hash(firmware_slot).await.map_err(|err| {
+                SpCommsError::SpCommunicationFailed { sp: sp_id, err }
+            })?;
+
+            Ok(HttpResponseUpdatedNoContent())
+        };
+        apictx.latencies.instrument_dropshot_handler(&rqctx, handler).await
+    }
+
+    async fn sp_component_hash_firmware_get(
+        rqctx: RequestContext<Self::Context>,
+        path: Path<PathSpComponentFirmwareSlot>,
+    ) -> Result<HttpResponseOk<ComponentFirmwareHash>, HttpError> {
+        let apictx = rqctx.context();
+
+        let PathSpComponentFirmwareSlot { sp, component, firmware_slot } =
+            path.into_inner();
+        let sp_id = sp.into();
+        let handler = async {
+            let sp = apictx.mgmt_switch.sp(sp_id)?;
+            let component = component_from_str(&component)?;
+
+            if component != SpComponent::HOST_CPU_BOOT_FLASH {
+                return Err(HttpError::for_bad_request(
+                    Some("RequestUnsupportedForComponent".to_string()),
+                    "Only the host boot flash can be hashed".into(),
+                ));
+            }
+
+            let sha256 =
+                sp.get_host_flash_hash(firmware_slot).await.map_err(|err| {
+                    SpCommsError::SpCommunicationFailed { sp: sp_id, err }
+                })?;
+
+            Ok(HttpResponseOk(ComponentFirmwareHash { sha256 }))
+        };
+        apictx.latencies.instrument_dropshot_handler(&rqctx, handler).await
+    }
+
     async fn sp_component_update_abort(
         rqctx: RequestContext<Self::Context>,
         path: Path<PathSpComponent>,

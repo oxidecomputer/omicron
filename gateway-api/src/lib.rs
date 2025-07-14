@@ -27,7 +27,7 @@ use gateway_types::{
     },
 };
 use schemars::JsonSchema;
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
 /// This endpoint is used to upload SP and ROT Hubris archives as well as phase 1 host OS
@@ -258,6 +258,36 @@ pub trait GatewayApi {
         rqctx: RequestContext<Self::Context>,
         path: Path<PathSpComponent>,
     ) -> Result<HttpResponseOk<SpUpdateStatus>, HttpError>;
+
+    /// Start computing the hash of a given slot of a component.
+    ///
+    /// This endpoint is only valid for the `host-boot-flash` component.
+    ///
+    /// Computing the hash takes several seconds; callers can poll for results
+    /// using `sp_component_hash_firmware_get()`.
+    #[endpoint {
+        method = POST,
+        path = "/sp/{type}/{slot}/component/{component}/hash/{firmware_slot}",
+    }]
+    async fn sp_component_hash_firmware_start(
+        rqctx: RequestContext<Self::Context>,
+        path: Path<PathSpComponentFirmwareSlot>,
+    ) -> Result<HttpResponseUpdatedNoContent, HttpError>;
+
+    /// Get a computed hash of a given slot of a component.
+    ///
+    /// This endpoint is only valid for the `host-boot-flash` component.
+    ///
+    /// Computing the hash takes several seconds; callers can start hashing
+    /// using `sp_component_hash_firmware_start()`.
+    #[endpoint {
+        method = GET,
+        path = "/sp/{type}/{slot}/component/{component}/hash/{firmware_slot}",
+    }]
+    async fn sp_component_hash_firmware_get(
+        rqctx: RequestContext<Self::Context>,
+        path: Path<PathSpComponentFirmwareSlot>,
+    ) -> Result<HttpResponseOk<ComponentFirmwareHash>, HttpError>;
 
     /// Abort any in-progress update an SP component
     ///
@@ -543,6 +573,19 @@ pub struct PathSpComponent {
 }
 
 #[derive(Deserialize, JsonSchema)]
+pub struct PathSpComponentFirmwareSlot {
+    /// ID for the SP that the gateway service translates into the appropriate
+    /// port for communicating with the given SP.
+    #[serde(flatten)]
+    pub sp: SpIdentifier,
+    /// ID for the component of the SP; this is the internal identifier used by
+    /// the SP itself to identify its components.
+    pub component: String,
+    /// Firmware slot of the component.
+    pub firmware_slot: u16,
+}
+
+#[derive(Deserialize, JsonSchema)]
 pub struct PathSpTaskDumpIndex {
     /// ID for the SP that the gateway service translates into the appropriate
     /// port for communicating with the given SP.
@@ -614,4 +657,9 @@ pub struct PathSpIgnitionCommand {
     pub sp: SpIdentifier,
     /// Ignition command to perform on the targeted SP.
     pub command: IgnitionCommand,
+}
+
+#[derive(Serialize, Deserialize, JsonSchema)]
+pub struct ComponentFirmwareHash {
+    pub sha256: [u8; 32],
 }
