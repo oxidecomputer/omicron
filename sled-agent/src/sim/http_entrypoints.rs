@@ -47,7 +47,6 @@ use sled_agent_types::instance::VmmPutStateBody;
 use sled_agent_types::instance::VmmPutStateResponse;
 use sled_agent_types::instance::VmmUnregisterResponse;
 use sled_agent_types::sled::AddSledRequest;
-use sled_agent_types::time_sync::TimeSync;
 use sled_agent_types::zone_bundle::BundleUtilization;
 use sled_agent_types::zone_bundle::CleanupContext;
 use sled_agent_types::zone_bundle::CleanupCount;
@@ -683,12 +682,6 @@ impl SledAgentApi for SledAgentSimImpl {
     async fn sled_role_get(
         _rqctx: RequestContext<Self::Context>,
     ) -> Result<HttpResponseOk<SledRole>, HttpError> {
-        method_unimplemented()
-    }
-
-    async fn timesync_get(
-        _rqctx: RequestContext<Self::Context>,
-    ) -> Result<HttpResponseOk<TimeSync>, HttpError> {
         method_unimplemented()
     }
 
