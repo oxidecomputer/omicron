@@ -16,6 +16,7 @@ use crate::blueprint_editor::SledEditError;
 use crate::mgs_updates::plan_mgs_updates;
 use crate::planner::omicron_zone_placement::PlacementError;
 use gateway_client::types::SpType;
+use nexus_sled_agent_shared::inventory::OmicronZoneImageSource;
 use nexus_sled_agent_shared::inventory::OmicronZoneType;
 use nexus_sled_agent_shared::inventory::ZoneKind;
 use nexus_types::deployment::Blueprint;
@@ -39,6 +40,7 @@ use nexus_types::external_api::views::SledState;
 use nexus_types::inventory::Collection;
 use omicron_common::policy::COCKROACHDB_REDUNDANCY;
 use omicron_common::policy::INTERNAL_DNS_REDUNDANCY;
+use omicron_uuid_kinds::OmicronZoneUuid;
 use omicron_uuid_kinds::PhysicalDiskUuid;
 use omicron_uuid_kinds::SledUuid;
 use slog::debug;
@@ -1227,7 +1229,34 @@ impl<'a> Planner<'a> {
             .all_running_omicron_zones()
             .map(|z| (z.id, z.image_source.clone()))
             .collect::<BTreeMap<_, _>>();
+
+        #[derive(Debug)]
+        #[expect(dead_code)]
+        struct ZoneCurrentlyUpdating<'a> {
+            zone_id: OmicronZoneUuid,
+            zone_kind: ZoneKind,
+            reason: UpdatingReason<'a>,
+        }
+
+        #[derive(Debug)]
+        #[expect(dead_code)]
+        enum UpdatingReason<'a> {
+            ImageSourceMismatch {
+                bp_image_source: &'a BlueprintZoneImageSource,
+                inv_image_source: &'a OmicronZoneImageSource,
+            },
+            MissingInInventory {
+                bp_image_source: &'a BlueprintZoneImageSource,
+            },
+        }
+
         for &sled_id in &sleds {
+            // Build a list of zones currently in the blueprint but where
+            // inventory has a mismatch or does not know about the zone.
+            //
+            // What about the case where a zone is in inventory but not in the
+            // blueprint? See
+            // https://github.com/oxidecomputer/omicron/issues/8589.
             let zones_currently_updating = self
                 .blueprint
                 .current_sled_zones(
@@ -1235,11 +1264,37 @@ impl<'a> Planner<'a> {
                     BlueprintZoneDisposition::is_in_service,
                 )
                 .filter_map(|zone| {
-                    let image_source = zone.image_source.clone().into();
-                    if inventory_zones.get(&zone.id) != Some(&image_source) {
-                        Some((zone.id, zone.zone_type.kind()))
-                    } else {
-                        None
+                    let bp_image_source =
+                        OmicronZoneImageSource::from(zone.image_source.clone());
+                    match inventory_zones.get(&zone.id) {
+                        Some(inv_image_source)
+                            if inv_image_source == &bp_image_source =>
+                        {
+                            // The inventory and blueprint image sources match
+                            // -- this means that the zone is up-to-date.
+                            None
+                        }
+                        Some(inv_image_source) => {
+                            // The inventory and blueprint image sources differ.
+                            Some(ZoneCurrentlyUpdating {
+                                zone_id: zone.id,
+                                zone_kind: zone.kind(),
+                                reason: UpdatingReason::ImageSourceMismatch {
+                                    bp_image_source: &zone.image_source,
+                                    inv_image_source,
+                                },
+                            })
+                        }
+                        None => {
+                            // The blueprint has a zone that inventory does not have.
+                            Some(ZoneCurrentlyUpdating {
+                                zone_id: zone.id,
+                                zone_kind: zone.kind(),
+                                reason: UpdatingReason::MissingInInventory {
+                                    bp_image_source: &zone.image_source,
+                                },
+                            })
+                        }
                     }
                 })
                 .collect::<Vec<_>>();
