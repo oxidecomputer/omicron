@@ -16,7 +16,7 @@ use std::{collections::BTreeMap, sync::LazyLock};
 ///
 /// This must be updated when you change the database schema.  Refer to
 /// schema/crdb/README.adoc in the root of this repository for details.
-pub const SCHEMA_VERSION: Version = Version::new(161, 0, 0);
+pub const SCHEMA_VERSION: Version = Version::new(162, 0, 0);
 
 /// List of all past database schema versions, in *reverse* order
 ///
