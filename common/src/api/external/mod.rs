@@ -3552,8 +3552,8 @@ pub enum ProtocolInfo {
     Clone, Debug, Deserialize, JsonSchema, Serialize, PartialEq, Eq, Hash,
 )]
 pub struct PortProtocolInfo {
-    source_port: u16,
-    destination_port: u16,
+    pub source_port: u16,
+    pub destination_port: u16,
 }
 
 /// Message types information carried by ICMP.
@@ -3561,9 +3561,9 @@ pub struct PortProtocolInfo {
     Clone, Debug, Deserialize, JsonSchema, Serialize, PartialEq, Eq, Hash,
 )]
 pub struct IcmpProtocolInfo {
-    r#type: u8,
-    code: u8,
-    id: Option<u16>,
+    pub r#type: u8,
+    pub code: u8,
+    pub id: Option<u16>,
 }
 
 /// How the remote half of a flow is reached.

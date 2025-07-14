@@ -15,6 +15,8 @@ use oxnet::IpNet;
 use std::net::IpAddr;
 use std::sync::Arc;
 
+use super::stat::PortStats;
+
 #[derive(Debug)]
 pub struct PortData {
     /// Name of the port as identified by OPTE
@@ -31,6 +33,9 @@ pub struct PortData {
     pub(crate) subnet: IpNet,
     /// Information about the virtual gateway, aka OPTE
     pub(crate) gateway: Gateway,
+
+    /// Periodically polled stats from this port.
+    pub(crate) stats: PortStats,
 }
 
 #[derive(Debug)]

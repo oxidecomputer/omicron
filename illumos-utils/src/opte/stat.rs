@@ -8,9 +8,7 @@ use super::Handle;
 use omicron_common::api::external::{
     self, Flow, FlowMetadata, FlowStat as ExternalFlowStat,
 };
-use oxide_vpc::api::{
-    Direction, FlowPair, FlowStat, FullCounter, InnerFlowId, Protocol,
-};
+use oxide_vpc::api::{Direction, FlowStat, FullCounter, InnerFlowId};
 use slog::Logger;
 use std::{
     collections::{HashMap, hash_map::Entry},
@@ -32,6 +30,7 @@ const PRUNE_AGE: Duration = Duration::from_secs(10);
 
 type UniqueFlow = (InnerFlowId, InnerFlowId, u64);
 
+#[derive(Debug)]
 pub struct PortStats {
     shared: Arc<PortStatsShared>,
 }
@@ -43,7 +42,7 @@ impl Drop for PortStats {
 }
 
 impl PortStats {
-    pub async fn new(name: impl Into<String>, log: Logger) -> Self {
+    pub fn new(name: impl Into<String>, log: Logger) -> Self {
         let shared = Arc::new(PortStatsShared {
             name: name.into(),
             task_quit: false.into(),
@@ -148,6 +147,7 @@ impl PortStats {
     //       oximeter in articular.
 }
 
+#[derive(Debug)]
 struct PortStatsShared {
     name: String,
     state: RwLock<State>,
@@ -194,9 +194,14 @@ impl PortStatsShared {
     fn collect_roots(&self) -> Result<(), anyhow::Error> {
         let new_stats = {
             let hdl = Handle::new()?;
-            hdl.dump_flow_stats(&self.name, [])?
+            hdl.dump_root_stats(&self.name, [])?
         };
         let now = Instant::now();
+
+        let mut state = self.state.write().unwrap();
+        for (id, stats) in new_stats.root_stats {
+            state.roots.insert(id, Timed { hit_at: now, body: stats });
+        }
 
         Ok(())
     }
@@ -219,7 +224,7 @@ struct Timed<S> {
     body: S,
 }
 
-#[derive(Default)]
+#[derive(Default, Debug)]
 struct State {
     flows: HashMap<InnerFlowId, Timed<FlowSnapshot>>,
     roots: HashMap<Uuid, Timed<FullCounter>>,
@@ -240,6 +245,7 @@ async fn run_port_stat(state: Arc<PortStatsShared>) {
             return;
         }
 
+        // TODO: log on error.
         tokio::select! {
             _ = flow_collect.tick() => {
                 state.collect_flows();
@@ -254,17 +260,14 @@ async fn run_port_stat(state: Arc<PortStatsShared>) {
     }
 }
 
+#[derive(Debug)]
 pub enum FlowLabel {
     Entity(external::VpcEntity),
     Destination(external::ForwardClass),
     Builtin(VpcBuiltinLabel),
 }
 
-pub enum FirewallLabel {
-    Rule(Uuid),
-    Default,
-}
-
+#[derive(Debug)]
 pub enum VpcBuiltinLabel {
     // TODO
 }

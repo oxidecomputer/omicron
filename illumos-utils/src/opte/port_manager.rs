@@ -12,6 +12,7 @@ use crate::opte::Port;
 use crate::opte::Vni;
 use crate::opte::opte_firewall_rules;
 use crate::opte::port::PortData;
+use crate::opte::stat::PortStats;
 use ipnetwork::IpNetwork;
 use macaddr::MacAddr6;
 use omicron_common::api::external;
@@ -316,6 +317,7 @@ impl PortManager {
                 vni,
                 subnet: nic.subnet,
                 gateway,
+                stats: PortStats::new(&port_name, self.inner.log.clone()),
             });
             let old = ports.insert((nic.id, nic.kind), port.clone());
             assert!(
