@@ -16,6 +16,7 @@ use gateway_types::{
         SpState,
     },
     component_details::SpComponentDetails,
+    error::ComponentFlashError,
     host::HostStartupOptions,
     ignition::{IgnitionCommand, SpIgnitionInfo},
     rot::{RotCfpa, RotCfpaSlot, RotCmpa, RotState},
@@ -272,7 +273,7 @@ pub trait GatewayApi {
     async fn sp_component_hash_firmware_start(
         rqctx: RequestContext<Self::Context>,
         path: Path<PathSpComponentFirmwareSlot>,
-    ) -> Result<HttpResponseUpdatedNoContent, HttpError>;
+    ) -> Result<HttpResponseUpdatedNoContent, ComponentFlashError>;
 
     /// Get a computed hash of a given slot of a component.
     ///
@@ -287,7 +288,7 @@ pub trait GatewayApi {
     async fn sp_component_hash_firmware_get(
         rqctx: RequestContext<Self::Context>,
         path: Path<PathSpComponentFirmwareSlot>,
-    ) -> Result<HttpResponseOk<ComponentFirmwareHash>, HttpError>;
+    ) -> Result<HttpResponseOk<ComponentFirmwareHash>, ComponentFlashError>;
 
     /// Abort any in-progress update an SP component
     ///

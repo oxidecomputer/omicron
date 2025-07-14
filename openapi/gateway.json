@@ -773,10 +773,10 @@
             }
           },
           "4XX": {
-            "$ref": "#/components/responses/Error"
+            "$ref": "#/components/responses/ComponentFlashError"
           },
           "5XX": {
-            "$ref": "#/components/responses/Error"
+            "$ref": "#/components/responses/ComponentFlashError"
           }
         }
       },
@@ -829,10 +829,10 @@
             "description": "resource updated"
           },
           "4XX": {
-            "$ref": "#/components/responses/Error"
+            "$ref": "#/components/responses/ComponentFlashError"
           },
           "5XX": {
-            "$ref": "#/components/responses/Error"
+            "$ref": "#/components/responses/ComponentFlashError"
           }
         }
       }
@@ -1834,6 +1834,74 @@
         },
         "required": [
           "sha256"
+        ]
+      },
+      "ComponentFlashError": {
+        "oneOf": [
+          {
+            "type": "object",
+            "properties": {
+              "state": {
+                "type": "string",
+                "enum": [
+                  "hash_uncalculated"
+                ]
+              }
+            },
+            "required": [
+              "state"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "state": {
+                "type": "string",
+                "enum": [
+                  "hash_stale"
+                ]
+              }
+            },
+            "required": [
+              "state"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "state": {
+                "type": "string",
+                "enum": [
+                  "hash_in_progress"
+                ]
+              }
+            },
+            "required": [
+              "state"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "error_code": {
+                "nullable": true,
+                "type": "string"
+              },
+              "message": {
+                "type": "string"
+              },
+              "state": {
+                "type": "string",
+                "enum": [
+                  "other"
+                ]
+              }
+            },
+            "required": [
+              "message",
+              "state"
+            ]
+          }
         ]
       },
       "Duration": {
@@ -3911,6 +3979,16 @@
           "application/json": {
             "schema": {
               "$ref": "#/components/schemas/Error"
+            }
+          }
+        }
+      },
+      "ComponentFlashError": {
+        "description": "ComponentFlashError",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/ComponentFlashError"
             }
           }
         }

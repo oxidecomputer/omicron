@@ -6,10 +6,12 @@
 
 use crate::management_switch::SpIdentifier;
 use dropshot::HttpError;
+use gateway_messages::HfError;
 use gateway_messages::SpError;
 use gateway_sp_comms::BindError;
 pub use gateway_sp_comms::error::CommunicationError;
 use gateway_sp_comms::error::UpdateError;
+use gateway_types::error::ComponentFlashError;
 use slog_error_chain::InlineErrorChain;
 use slog_error_chain::SlogInlineError;
 use std::error::Error;
@@ -231,4 +233,34 @@ pub(crate) fn http_err_with_message(
         internal_message: message,
         headers: None,
     }
+}
+
+/// Convert a `CommunicationError` with a given `sp` into a
+/// `ComponentFlashError`.
+pub(crate) fn map_component_flash_error(
+    sp: SpIdentifier,
+    err: CommunicationError,
+) -> ComponentFlashError {
+    if let CommunicationError::SpError(err) = &err {
+        if let SpError::Hf(err) = err {
+            match err {
+                HfError::HashUncalculated => {
+                    return ComponentFlashError::HashUncalculated;
+                }
+                HfError::RecalculateHash => {
+                    return ComponentFlashError::HashStale;
+                }
+                HfError::HashInProgress => {
+                    return ComponentFlashError::HashInProgress;
+                }
+                HfError::NotMuxedToSp
+                | HfError::BadAddress
+                | HfError::QspiTimeout
+                | HfError::QspiTransferError => (),
+            }
+        }
+    }
+    ComponentFlashError::from(HttpError::from(
+        SpCommsError::SpCommunicationFailed { sp, err },
+    ))
 }

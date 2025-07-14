@@ -9,6 +9,7 @@
 use crate::ServerContext;
 use crate::error::SpCommsError;
 use crate::http_err_with_message;
+use crate::map_component_flash_error;
 use base64::Engine;
 use dropshot::ApiDescription;
 use dropshot::HttpError;
@@ -36,6 +37,7 @@ use gateway_types::component::SpComponentList;
 use gateway_types::component::SpIdentifier;
 use gateway_types::component::SpState;
 use gateway_types::component_details::SpComponentDetails;
+use gateway_types::error::ComponentFlashError;
 use gateway_types::host::HostStartupOptions;
 use gateway_types::ignition::SpIgnitionInfo;
 use gateway_types::rot::RotCfpa;
@@ -539,26 +541,28 @@ impl GatewayApi for GatewayImpl {
     async fn sp_component_hash_firmware_start(
         rqctx: RequestContext<Self::Context>,
         path: Path<PathSpComponentFirmwareSlot>,
-    ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
+    ) -> Result<HttpResponseUpdatedNoContent, ComponentFlashError> {
         let apictx = rqctx.context();
 
         let PathSpComponentFirmwareSlot { sp, component, firmware_slot } =
             path.into_inner();
         let sp_id = sp.into();
         let handler = async {
-            let sp = apictx.mgmt_switch.sp(sp_id)?;
+            let sp = apictx.mgmt_switch.sp(sp_id).map_err(HttpError::from)?;
             let component = component_from_str(&component)?;
 
             if component != SpComponent::HOST_CPU_BOOT_FLASH {
-                return Err(HttpError::for_bad_request(
-                    Some("RequestUnsupportedForComponent".to_string()),
-                    "Only the host boot flash can be hashed".into(),
+                return Err(ComponentFlashError::from(
+                    HttpError::for_bad_request(
+                        Some("RequestUnsupportedForComponent".to_string()),
+                        "Only the host boot flash can be hashed".into(),
+                    ),
                 ));
             }
 
-            sp.start_host_flash_hash(firmware_slot).await.map_err(|err| {
-                SpCommsError::SpCommunicationFailed { sp: sp_id, err }
-            })?;
+            sp.start_host_flash_hash(firmware_slot)
+                .await
+                .map_err(|err| map_component_flash_error(sp_id, err))?;
 
             Ok(HttpResponseUpdatedNoContent())
         };
@@ -568,27 +572,30 @@ impl GatewayApi for GatewayImpl {
     async fn sp_component_hash_firmware_get(
         rqctx: RequestContext<Self::Context>,
         path: Path<PathSpComponentFirmwareSlot>,
-    ) -> Result<HttpResponseOk<ComponentFirmwareHash>, HttpError> {
+    ) -> Result<HttpResponseOk<ComponentFirmwareHash>, ComponentFlashError>
+    {
         let apictx = rqctx.context();
 
         let PathSpComponentFirmwareSlot { sp, component, firmware_slot } =
             path.into_inner();
         let sp_id = sp.into();
         let handler = async {
-            let sp = apictx.mgmt_switch.sp(sp_id)?;
+            let sp = apictx.mgmt_switch.sp(sp_id).map_err(HttpError::from)?;
             let component = component_from_str(&component)?;
 
             if component != SpComponent::HOST_CPU_BOOT_FLASH {
-                return Err(HttpError::for_bad_request(
-                    Some("RequestUnsupportedForComponent".to_string()),
-                    "Only the host boot flash can be hashed".into(),
+                return Err(ComponentFlashError::from(
+                    HttpError::for_bad_request(
+                        Some("RequestUnsupportedForComponent".to_string()),
+                        "Only the host boot flash can be hashed".into(),
+                    ),
                 ));
             }
 
-            let sha256 =
-                sp.get_host_flash_hash(firmware_slot).await.map_err(|err| {
-                    SpCommsError::SpCommunicationFailed { sp: sp_id, err }
-                })?;
+            let sha256 = sp
+                .get_host_flash_hash(firmware_slot)
+                .await
+                .map_err(|err| map_component_flash_error(sp_id, err))?;
 
             Ok(HttpResponseOk(ComponentFirmwareHash { sha256 }))
         };

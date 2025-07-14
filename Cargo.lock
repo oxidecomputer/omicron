@@ -3663,6 +3663,7 @@ name = "gateway-types"
 version = "0.1.0"
 dependencies = [
  "daft",
+ "dropshot",
  "gateway-messages",
  "hex",
  "ipcc",
@@ -3671,6 +3672,7 @@ dependencies = [
  "omicron-workspace-hack",
  "schemars",
  "serde",
+ "thiserror 2.0.12",
  "tufaceous-artifact",
  "uuid",
 ]
