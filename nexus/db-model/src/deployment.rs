@@ -5,7 +5,7 @@
 //! Types for representing the deployed software and configuration in the
 //! database
 
-use crate::inventory::{SpMgsSlot, SpType, ZoneType};
+use crate::inventory::{HwRotSlot, SpMgsSlot, SpType, ZoneType};
 use crate::omicron_zone_config::{self, OmicronZoneNic};
 use crate::typed_uuid::DbTypedUuid;
 use crate::{
@@ -22,11 +22,10 @@ use nexus_db_schema::schema::{
     bp_clickhouse_keeper_zone_id_to_node_id,
     bp_clickhouse_server_zone_id_to_node_id, bp_omicron_dataset,
     bp_omicron_physical_disk, bp_omicron_zone, bp_omicron_zone_nic,
-    bp_oximeter_read_policy, bp_pending_mgs_update_sp, bp_sled_metadata,
-    bp_target,
+    bp_oximeter_read_policy, bp_pending_mgs_update_rot,
+    bp_pending_mgs_update_sp, bp_sled_metadata, bp_target,
 };
 use nexus_sled_agent_shared::inventory::OmicronZoneDataset;
-use nexus_types::deployment::BlueprintPhysicalDiskConfig;
 use nexus_types::deployment::BlueprintPhysicalDiskDisposition;
 use nexus_types::deployment::BlueprintTarget;
 use nexus_types::deployment::BlueprintZoneConfig;
@@ -40,6 +39,9 @@ use nexus_types::deployment::{
     BlueprintDatasetConfig, BlueprintZoneImageVersion, OximeterReadMode,
 };
 use nexus_types::deployment::{BlueprintDatasetDisposition, ExpectedVersion};
+use nexus_types::deployment::{
+    BlueprintPhysicalDiskConfig, ExpectedActiveRotSlot,
+};
 use nexus_types::deployment::{BlueprintZoneImageSource, blueprint_zone_type};
 use nexus_types::deployment::{
     OmicronZoneExternalFloatingAddr, OmicronZoneExternalFloatingIp,
@@ -1284,6 +1286,57 @@ impl BpPendingMgsUpdateSp {
                     Some(v) => ExpectedVersion::Version((*v).clone()),
                     None => ExpectedVersion::NoValidVersion,
                 },
+            },
+        }
+    }
+}
+
+#[derive(Queryable, Clone, Debug, Selectable, Insertable)]
+#[diesel(table_name = bp_pending_mgs_update_rot)]
+pub struct BpPendingMgsUpdateRot {
+    pub blueprint_id: DbTypedUuid<BlueprintKind>,
+    pub hw_baseboard_id: Uuid,
+    pub sp_type: SpType,
+    pub sp_slot: SpMgsSlot,
+    pub artifact_sha256: ArtifactHash,
+    pub artifact_version: DbArtifactVersion,
+    pub expected_active_slot: HwRotSlot,
+    pub expected_active_version: DbArtifactVersion,
+    pub expected_inactive_version: Option<DbArtifactVersion>,
+    pub expected_persistent_boot_preference: HwRotSlot,
+    pub expected_pending_persistent_boot_preference: Option<HwRotSlot>,
+    pub expected_transient_boot_preference: Option<HwRotSlot>,
+}
+
+impl BpPendingMgsUpdateRot {
+    pub fn into_generic(
+        self,
+        baseboard_id: Arc<BaseboardId>,
+    ) -> PendingMgsUpdate {
+        PendingMgsUpdate {
+            baseboard_id,
+            sp_type: self.sp_type.into(),
+            slot_id: **self.sp_slot,
+            artifact_hash: self.artifact_sha256.into(),
+            artifact_version: (*self.artifact_version).clone(),
+            details: PendingMgsUpdateDetails::Rot {
+                expected_active_slot: ExpectedActiveRotSlot {
+                    slot: self.expected_active_slot.into(),
+                    version: (*self.expected_active_version).clone(),
+                },
+                expected_inactive_version: self
+                    .expected_inactive_version
+                    .map(|v| ExpectedVersion::Version(v.into()))
+                    .unwrap_or(ExpectedVersion::NoValidVersion),
+                expected_persistent_boot_preference: self
+                    .expected_persistent_boot_preference
+                    .into(),
+                expected_pending_persistent_boot_preference: self
+                    .expected_pending_persistent_boot_preference
+                    .map(|s| s.into()),
+                expected_transient_boot_preference: self
+                    .expected_transient_boot_preference
+                    .map(|s| s.into()),
             },
         }
     }
