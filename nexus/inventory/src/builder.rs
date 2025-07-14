@@ -31,6 +31,7 @@ use nexus_types::inventory::RotPageWhich;
 use nexus_types::inventory::RotState;
 use nexus_types::inventory::ServiceProcessor;
 use nexus_types::inventory::SledAgent;
+use nexus_types::inventory::TimeSync;
 use nexus_types::inventory::Zpool;
 use omicron_cockroach_metrics::CockroachMetric;
 use omicron_cockroach_metrics::NodeId;
@@ -120,6 +121,7 @@ pub struct CollectionBuilder {
     clickhouse_keeper_cluster_membership:
         BTreeSet<ClickhouseKeeperClusterMembership>,
     cockroach_status: BTreeMap<NodeId, CockroachStatus>,
+    ntp_timesync: IdOrdMap<TimeSync>,
     // CollectionBuilderRng is taken by value, rather than passed in as a
     // mutable ref, to encourage a tree-like structure where each RNG is
     // generally independent.
@@ -150,6 +152,7 @@ impl CollectionBuilder {
             sleds: IdOrdMap::new(),
             clickhouse_keeper_cluster_membership: BTreeSet::new(),
             cockroach_status: BTreeMap::new(),
+            ntp_timesync: IdOrdMap::new(),
             rng: CollectionBuilderRng::from_entropy(),
         }
     }
@@ -173,6 +176,7 @@ impl CollectionBuilder {
             clickhouse_keeper_cluster_membership: self
                 .clickhouse_keeper_cluster_membership,
             cockroach_status: self.cockroach_status,
+            ntp_timesync: self.ntp_timesync,
         }
     }
 
@@ -550,6 +554,17 @@ impl CollectionBuilder {
         self.clickhouse_keeper_cluster_membership.insert(membership);
     }
 
+    /// Record information about timesync
+    pub fn found_ntp_timesync(
+        &mut self,
+        timesync: TimeSync,
+    ) -> Result<(), anyhow::Error> {
+        self.ntp_timesync
+            .insert_unique(timesync)
+            .map_err(|err| err.into_owned())
+            .context("NTP service reported time multiple times")
+    }
+
     /// Record metrics from a CockroachDB node
     pub fn found_cockroach_metrics(
         &mut self,
@@ -621,6 +636,8 @@ mod test {
         assert!(collection.cabooses_found.is_empty());
         assert!(collection.rot_pages_found.is_empty());
         assert!(collection.clickhouse_keeper_cluster_membership.is_empty());
+        assert!(collection.cockroach_status.is_empty());
+        assert!(collection.ntp_timesync.is_empty());
     }
 
     // Simple test of a single, fairly typical collection that contains just
