@@ -3474,10 +3474,25 @@ pub enum ImportExportPolicy {
     Allow(Vec<oxnet::IpNet>),
 }
 
+/// A packet flow recorded on a `NetworkInterface`.
+#[derive(Clone, Debug, Deserialize, JsonSchema, Serialize, PartialEq)]
+pub struct Flow {
+    pub metadata: FlowMetadata,
+    pub in_stat: FlowStat,
+    pub out_stat: FlowStat,
+}
+
+/// A packet flow recorded on a `NetworkInterface`.
+#[derive(Clone, Debug, Deserialize, JsonSchema, Serialize, PartialEq)]
+pub struct FlowStat {
+    pub packets: u64,
+    pub bytes: u64,
+    pub packet_rate: f64,
+    pub byte_rate: f64,
+}
+
 /// Information about a flow recorded on a `NetworkInterface`.
-#[derive(
-    Clone, Debug, Deserialize, JsonSchema, Serialize, PartialEq,
-)]
+#[derive(Clone, Debug, Deserialize, JsonSchema, Serialize, PartialEq, Eq)]
 pub struct FlowMetadata {
     /// An ephemeral ID bound to this flow.
     pub flow_id: Uuid,
@@ -3548,6 +3563,7 @@ pub struct PortProtocolInfo {
 pub struct IcmpProtocolInfo {
     r#type: u8,
     code: u8,
+    id: Option<u16>,
 }
 
 /// How the remote half of a flow is reached.

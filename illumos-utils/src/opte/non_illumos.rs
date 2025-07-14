@@ -28,13 +28,13 @@ use oxide_vpc::api::SetFwRulesReq;
 use oxide_vpc::api::SetVirt2PhysReq;
 use oxide_vpc::api::VpcCfg;
 use slog::Logger;
-use uuid::Uuid;
 use std::collections::BTreeMap;
 use std::collections::HashMap;
 use std::collections::hash_map::Entry;
 use std::net::IpAddr;
 use std::sync::Mutex;
 use std::sync::OnceLock;
+use uuid::Uuid;
 
 type OpteError = anyhow::Error;
 
