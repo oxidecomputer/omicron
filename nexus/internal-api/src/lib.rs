@@ -34,7 +34,10 @@ use nexus_types::{
     },
 };
 use omicron_common::api::{
-    external::{Instance, http_pagination::PaginatedById},
+    external::{
+        Instance,
+        http_pagination::{PaginatedById, PaginatedByTimeAndId},
+    },
     internal::nexus::{
         DiskRuntimeState, DownstairsClientStopRequest, DownstairsClientStopped,
         ProducerEndpoint, ProducerRegistrationResponse, RepairFinishInfo,
@@ -587,7 +590,7 @@ pub trait NexusInternalApi {
     }]
     async fn support_bundle_list(
         rqctx: RequestContext<Self::Context>,
-        query_params: Query<PaginatedById>,
+        query_params: Query<PaginatedByTimeAndId>,
     ) -> Result<HttpResponseOk<ResultsPage<shared::SupportBundleInfo>>, HttpError>;
 
     /// View a support bundle
