@@ -1014,7 +1014,7 @@ INFO sufficient ExternalDns zones exist in plan, desired_count: 3, current_count
 INFO sufficient Nexus zones exist in plan, desired_count: 3, current_count: 3
 INFO sufficient Oximeter zones exist in plan, desired_count: 0, current_count: 0
 WARN cannot issue more SP updates (no current artifacts)
-INFO some zones not yet up-to-date, sled_id: 2b8f0cb3-0295-4b3c-bc58-4fe88b57112c, zones_currently_updating: [(e375dd21-320b-43b7-bc92-a2c3dac9d9e1 (service), InternalDns)]
+INFO some zones not yet up-to-date, sled_id: 2b8f0cb3-0295-4b3c-bc58-4fe88b57112c, zones_currently_updating: [ZoneCurrentlyUpdating { zone_id: e375dd21-320b-43b7-bc92-a2c3dac9d9e1 (service), zone_kind: InternalDns, reason: MissingInInventory { bp_image_source: InstallDataset } }]
 INFO will ensure cockroachdb setting, setting: cluster.preserve_downgrade_option, value: DoNotModify
 generated blueprint af934083-59b5-4bf6-8966-6fb5292c29e1 based on parent blueprint 58d5e830-0884-47d8-a7cd-b2b3751adeb4
 
