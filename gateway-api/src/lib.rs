@@ -16,8 +16,7 @@ use gateway_types::{
         SpState,
     },
     component_details::SpComponentDetails,
-    error::ComponentFlashError,
-    host::HostStartupOptions,
+    host::{ComponentFirmwareHashStatus, HostStartupOptions},
     ignition::{IgnitionCommand, SpIgnitionInfo},
     rot::{RotCfpa, RotCfpaSlot, RotCmpa, RotState},
     sensor::SpSensorReading,
@@ -28,7 +27,7 @@ use gateway_types::{
     },
 };
 use schemars::JsonSchema;
-use serde::{Deserialize, Serialize};
+use serde::Deserialize;
 use uuid::Uuid;
 
 /// This endpoint is used to upload SP and ROT Hubris archives as well as phase 1 host OS
@@ -273,7 +272,7 @@ pub trait GatewayApi {
     async fn sp_component_hash_firmware_start(
         rqctx: RequestContext<Self::Context>,
         path: Path<PathSpComponentFirmwareSlot>,
-    ) -> Result<HttpResponseUpdatedNoContent, ComponentFlashError>;
+    ) -> Result<HttpResponseUpdatedNoContent, HttpError>;
 
     /// Get a computed hash of a given slot of a component.
     ///
@@ -288,7 +287,7 @@ pub trait GatewayApi {
     async fn sp_component_hash_firmware_get(
         rqctx: RequestContext<Self::Context>,
         path: Path<PathSpComponentFirmwareSlot>,
-    ) -> Result<HttpResponseOk<ComponentFirmwareHash>, ComponentFlashError>;
+    ) -> Result<HttpResponseOk<ComponentFirmwareHashStatus>, HttpError>;
 
     /// Abort any in-progress update an SP component
     ///
@@ -658,9 +657,4 @@ pub struct PathSpIgnitionCommand {
     pub sp: SpIdentifier,
     /// Ignition command to perform on the targeted SP.
     pub command: IgnitionCommand,
-}
-
-#[derive(Serialize, Deserialize, JsonSchema)]
-pub struct ComponentFirmwareHash {
-    pub sha256: [u8; 32],
 }

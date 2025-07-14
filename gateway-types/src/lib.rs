@@ -7,7 +7,6 @@
 pub mod caboose;
 pub mod component;
 pub mod component_details;
-pub mod error;
 pub mod host;
 pub mod ignition;
 pub mod rot;

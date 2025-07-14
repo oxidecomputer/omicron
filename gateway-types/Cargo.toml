@@ -9,7 +9,6 @@ workspace = true
 
 [dependencies]
 daft.workspace = true
-dropshot.workspace = true
 gateway-messages.workspace = true
 # Avoid depending on gateway-sp-comms! It is a pretty heavy dependency and
 # would only be used for From impls anyway. We put those impls in
@@ -21,6 +20,5 @@ omicron-uuid-kinds.workspace = true
 omicron-workspace-hack.workspace = true
 schemars.workspace = true
 serde.workspace = true
-thiserror.workspace = true
 tufaceous-artifact.workspace = true
 uuid.workspace = true

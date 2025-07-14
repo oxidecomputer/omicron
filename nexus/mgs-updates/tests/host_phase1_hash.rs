@@ -8,13 +8,11 @@
 //! ask it to start hashing, then we'll get "still hashing" errors for a few
 //! seconds, then we'll get the hash result.
 
-use gateway_client::Error;
 use gateway_client::SpComponent;
-use gateway_client::types::ComponentFlashError;
+use gateway_client::types::ComponentFirmwareHashStatus;
 use gateway_client::types::SpType;
 use gateway_messages::SpPort;
 use gateway_test_utils::setup as mgs_setup;
-use slog_error_chain::InlineErrorChain;
 
 #[tokio::test]
 async fn test_host_phase1_hashing() {
@@ -34,7 +32,7 @@ async fn test_host_phase1_hashing() {
     // We haven't yet started hashing; we should get the error we expect for
     // both slots.
     for firmware_slot in [0, 1] {
-        match mgs_client
+        let status = mgs_client
             .sp_component_hash_firmware_get(
                 sp_type,
                 sp_slot,
@@ -42,15 +40,10 @@ async fn test_host_phase1_hashing() {
                 firmware_slot,
             )
             .await
-        {
-            Err(Error::ErrorResponse(err)) => match err.into_inner() {
-                ComponentFlashError::HashUncalculated => (),
-                other => panic!("unexpected error response: {other:?}"),
-            },
-            Err(err) => {
-                panic!("unexpected error: {}", InlineErrorChain::new(&err))
-            }
-            Ok(resp) => panic!("unexpected success: {resp:?}"),
+            .expect("got firmware hash status");
+        match status.into_inner() {
+            ComponentFirmwareHashStatus::HashNotCalculated => (),
+            other => panic!("unexpected status: {other:?}"),
         }
     }
 }

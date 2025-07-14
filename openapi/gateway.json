@@ -767,16 +767,16 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/ComponentFirmwareHash"
+                  "$ref": "#/components/schemas/ComponentFirmwareHashStatus"
                 }
               }
             }
           },
           "4XX": {
-            "$ref": "#/components/responses/ComponentFlashError"
+            "$ref": "#/components/responses/Error"
           },
           "5XX": {
-            "$ref": "#/components/responses/ComponentFlashError"
+            "$ref": "#/components/responses/Error"
           }
         }
       },
@@ -829,10 +829,10 @@
             "description": "resource updated"
           },
           "4XX": {
-            "$ref": "#/components/responses/ComponentFlashError"
+            "$ref": "#/components/responses/Error"
           },
           "5XX": {
-            "$ref": "#/components/responses/ComponentFlashError"
+            "$ref": "#/components/responses/Error"
           }
         }
       }
@@ -1818,58 +1818,28 @@
   },
   "components": {
     "schemas": {
-      "ComponentFirmwareHash": {
-        "type": "object",
-        "properties": {
-          "sha256": {
-            "type": "array",
-            "items": {
-              "type": "integer",
-              "format": "uint8",
-              "minimum": 0
-            },
-            "minItems": 32,
-            "maxItems": 32
-          }
-        },
-        "required": [
-          "sha256"
-        ]
-      },
-      "ComponentFlashError": {
+      "ComponentFirmwareHashStatus": {
         "oneOf": [
           {
+            "description": "The hash is not available; the client must issue a separate request to begin calculating the hash.",
             "type": "object",
             "properties": {
-              "state": {
+              "status": {
                 "type": "string",
                 "enum": [
-                  "hash_uncalculated"
+                  "hash_not_calculated"
                 ]
               }
             },
             "required": [
-              "state"
+              "status"
             ]
           },
           {
+            "description": "The hash is currently being calculated; the client should sleep briefly then check again.\n\nWe expect this operation to take a handful of seconds in practice.",
             "type": "object",
             "properties": {
-              "state": {
-                "type": "string",
-                "enum": [
-                  "hash_stale"
-                ]
-              }
-            },
-            "required": [
-              "state"
-            ]
-          },
-          {
-            "type": "object",
-            "properties": {
-              "state": {
+              "status": {
                 "type": "string",
                 "enum": [
                   "hash_in_progress"
@@ -1877,29 +1847,33 @@
               }
             },
             "required": [
-              "state"
+              "status"
             ]
           },
           {
+            "description": "The hash of the given firmware slot.",
             "type": "object",
             "properties": {
-              "error_code": {
-                "nullable": true,
-                "type": "string"
+              "sha256": {
+                "type": "array",
+                "items": {
+                  "type": "integer",
+                  "format": "uint8",
+                  "minimum": 0
+                },
+                "minItems": 32,
+                "maxItems": 32
               },
-              "message": {
-                "type": "string"
-              },
-              "state": {
+              "status": {
                 "type": "string",
                 "enum": [
-                  "other"
+                  "hashed"
                 ]
               }
             },
             "required": [
-              "message",
-              "state"
+              "sha256",
+              "status"
             ]
           }
         ]
@@ -3979,16 +3953,6 @@
           "application/json": {
             "schema": {
               "$ref": "#/components/schemas/Error"
-            }
-          }
-        }
-      },
-      "ComponentFlashError": {
-        "description": "ComponentFlashError",
-        "content": {
-          "application/json": {
-            "schema": {
-              "$ref": "#/components/schemas/ComponentFlashError"
             }
           }
         }

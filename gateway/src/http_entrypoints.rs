@@ -9,7 +9,6 @@
 use crate::ServerContext;
 use crate::error::SpCommsError;
 use crate::http_err_with_message;
-use crate::map_component_flash_error;
 use base64::Engine;
 use dropshot::ApiDescription;
 use dropshot::HttpError;
@@ -24,8 +23,10 @@ use dropshot::WebsocketEndpointResult;
 use dropshot::WebsocketUpgrade;
 use futures::TryFutureExt;
 use gateway_api::*;
+use gateway_messages::HfError;
 use gateway_messages::RotBootInfo;
 use gateway_messages::SpComponent;
+use gateway_messages::SpError;
 use gateway_sp_comms::HostPhase2Provider;
 use gateway_sp_comms::VersionedSpState;
 use gateway_sp_comms::error::CommunicationError;
@@ -37,7 +38,7 @@ use gateway_types::component::SpComponentList;
 use gateway_types::component::SpIdentifier;
 use gateway_types::component::SpState;
 use gateway_types::component_details::SpComponentDetails;
-use gateway_types::error::ComponentFlashError;
+use gateway_types::host::ComponentFirmwareHashStatus;
 use gateway_types::host::HostStartupOptions;
 use gateway_types::ignition::SpIgnitionInfo;
 use gateway_types::rot::RotCfpa;
@@ -541,28 +542,27 @@ impl GatewayApi for GatewayImpl {
     async fn sp_component_hash_firmware_start(
         rqctx: RequestContext<Self::Context>,
         path: Path<PathSpComponentFirmwareSlot>,
-    ) -> Result<HttpResponseUpdatedNoContent, ComponentFlashError> {
+    ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
         let apictx = rqctx.context();
 
         let PathSpComponentFirmwareSlot { sp, component, firmware_slot } =
             path.into_inner();
         let sp_id = sp.into();
         let handler = async {
-            let sp = apictx.mgmt_switch.sp(sp_id).map_err(HttpError::from)?;
+            let sp = apictx.mgmt_switch.sp(sp_id)?;
             let component = component_from_str(&component)?;
 
             if component != SpComponent::HOST_CPU_BOOT_FLASH {
-                return Err(ComponentFlashError::from(
-                    HttpError::for_bad_request(
-                        Some("RequestUnsupportedForComponent".to_string()),
-                        "Only the host boot flash can be hashed".into(),
-                    ),
+                return Err(HttpError::for_bad_request(
+                    Some("RequestUnsupportedForComponent".to_string()),
+                    "Only the host boot flash can be hashed".into(),
                 ));
             }
 
-            sp.start_host_flash_hash(firmware_slot)
-                .await
-                .map_err(|err| map_component_flash_error(sp_id, err))?;
+            // TODO-john catch hash in progress?
+            sp.start_host_flash_hash(firmware_slot).await.map_err(|err| {
+                SpCommsError::SpCommunicationFailed { sp: sp_id, err }
+            })?;
 
             Ok(HttpResponseUpdatedNoContent())
         };
@@ -572,32 +572,48 @@ impl GatewayApi for GatewayImpl {
     async fn sp_component_hash_firmware_get(
         rqctx: RequestContext<Self::Context>,
         path: Path<PathSpComponentFirmwareSlot>,
-    ) -> Result<HttpResponseOk<ComponentFirmwareHash>, ComponentFlashError>
-    {
+    ) -> Result<HttpResponseOk<ComponentFirmwareHashStatus>, HttpError> {
         let apictx = rqctx.context();
 
         let PathSpComponentFirmwareSlot { sp, component, firmware_slot } =
             path.into_inner();
         let sp_id = sp.into();
         let handler = async {
-            let sp = apictx.mgmt_switch.sp(sp_id).map_err(HttpError::from)?;
+            let sp = apictx.mgmt_switch.sp(sp_id)?;
             let component = component_from_str(&component)?;
 
             if component != SpComponent::HOST_CPU_BOOT_FLASH {
-                return Err(ComponentFlashError::from(
-                    HttpError::for_bad_request(
-                        Some("RequestUnsupportedForComponent".to_string()),
-                        "Only the host boot flash can be hashed".into(),
-                    ),
+                return Err(HttpError::for_bad_request(
+                    Some("RequestUnsupportedForComponent".to_string()),
+                    "Only the host boot flash can be hashed".into(),
                 ));
             }
 
-            let sha256 = sp
-                .get_host_flash_hash(firmware_slot)
-                .await
-                .map_err(|err| map_component_flash_error(sp_id, err))?;
+            let status = match sp.get_host_flash_hash(firmware_slot).await {
+                // success
+                Ok(sha256) => ComponentFirmwareHashStatus::Hashed { sha256 },
 
-            Ok(HttpResponseOk(ComponentFirmwareHash { sha256 }))
+                // expected failure: hash needs to be calculated (or
+                // recalculated; either way the client operation is the same)
+                Err(CommunicationError::SpError(SpError::Hf(
+                    HfError::HashUncalculated | HfError::RecalculateHash,
+                ))) => ComponentFirmwareHashStatus::HashNotCalculated,
+
+                // expected failure: hashing is currently in progress; client
+                // needs to wait and try again later
+                Err(CommunicationError::SpError(SpError::Hf(
+                    HfError::HashInProgress,
+                ))) => ComponentFirmwareHashStatus::HashInProgress,
+
+                // other errors are failures
+                Err(err) => {
+                    return Err(HttpError::from(
+                        SpCommsError::SpCommunicationFailed { sp: sp_id, err },
+                    ));
+                }
+            };
+
+            Ok(HttpResponseOk(status))
         };
         apictx.latencies.instrument_dropshot_handler(&rqctx, handler).await
     }
