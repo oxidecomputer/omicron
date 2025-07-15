@@ -13,6 +13,7 @@ chrono.workspace = true
 debug-ignore.workspace = true
 daft.workspace = true
 gateway-client.workspace = true
+iddqd.workspace = true
 id-map.workspace = true
 illumos-utils.workspace = true
 indexmap.workspace = true
