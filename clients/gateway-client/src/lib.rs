@@ -7,6 +7,9 @@
 //! Interface for API requests to a Management Gateway Service (MGS) instance
 
 pub use gateway_messages::SpComponent;
+use std::time::Duration;
+use std::time::Instant;
+use types::ComponentFirmwareHashStatus;
 
 // We specifically want to allow consumers, such as `wicketd`, to embed
 // inventory datatypes into their own APIs, rather than recreate structs.
@@ -95,5 +98,103 @@ impl Ord for crate::types::SpIdentifier {
 impl PartialOrd for crate::types::SpIdentifier {
     fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
         Some(self.cmp(other))
+    }
+}
+
+#[derive(Debug, thiserror::Error)]
+pub enum HostPhase1HashError {
+    #[error("timed out waiting for hash calculation")]
+    Timeout,
+    #[error("hash calculation failed (phase1 written while hashing?)")]
+    ContentsModifiedWhileHashing,
+    #[error("failed to send request to {kind}")]
+    RequestError {
+        kind: &'static str,
+        #[source]
+        err: Error<types::Error>,
+    },
+}
+
+impl Client {
+    /// Get the hash of the host phase 1 flash contents in the given slot.
+    ///
+    /// This operation is implemented asynchronously on the SP: a client (us)
+    /// must request the hash be calculated, then poll until the calculation is
+    /// complete. This method takes care of the "start / poll" operation; the
+    /// caller must provide a timeout for how long they're willing to wait for
+    /// the calculation to complete. In practice, we expect this to take a
+    /// handful of seconds on real hardware.
+    pub async fn host_phase_1_flash_hash_calculate_with_timeout(
+        &self,
+        sp: types::SpIdentifier,
+        phase1_slot: u16,
+        timeout: Duration,
+    ) -> Result<[u8; 32], HostPhase1HashError> {
+        const SLEEP_BETWEEN_POLLS: Duration = Duration::from_secs(1);
+        const PHASE1_FLASH: &str =
+            SpComponent::HOST_CPU_BOOT_FLASH.const_as_str();
+
+        let need_to_start_hashing = match self
+            .sp_component_hash_firmware_get(
+                sp.type_,
+                sp.slot,
+                PHASE1_FLASH,
+                phase1_slot,
+            )
+            .await
+            .map_err(|err| HostPhase1HashError::RequestError {
+                kind: "get hash",
+                err,
+            })?
+            .into_inner()
+        {
+            ComponentFirmwareHashStatus::Hashed(hash) => return Ok(hash),
+            ComponentFirmwareHashStatus::HashInProgress => false,
+            ComponentFirmwareHashStatus::HashNotCalculated => true,
+        };
+
+        if need_to_start_hashing {
+            self.sp_component_hash_firmware_start(
+                sp.type_,
+                sp.slot,
+                PHASE1_FLASH,
+                phase1_slot,
+            )
+            .await
+            .map_err(|err| HostPhase1HashError::RequestError {
+                kind: "start hashing",
+                err,
+            })?;
+        }
+
+        let start = Instant::now();
+        loop {
+            tokio::time::sleep(SLEEP_BETWEEN_POLLS).await;
+            if start.elapsed() > timeout {
+                return Err(HostPhase1HashError::Timeout);
+            }
+            match self
+                .sp_component_hash_firmware_get(
+                    sp.type_,
+                    sp.slot,
+                    PHASE1_FLASH,
+                    phase1_slot,
+                )
+                .await
+                .map_err(|err| HostPhase1HashError::RequestError {
+                    kind: "get hash",
+                    err,
+                })?
+                .into_inner()
+            {
+                ComponentFirmwareHashStatus::Hashed(hash) => return Ok(hash),
+                ComponentFirmwareHashStatus::HashInProgress => continue,
+                ComponentFirmwareHashStatus::HashNotCalculated => {
+                    return Err(
+                        HostPhase1HashError::ContentsModifiedWhileHashing,
+                    );
+                }
+            }
+        }
     }
 }

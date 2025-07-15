@@ -619,6 +619,7 @@ impl DiskManagementError {
     Deserialize,
     Serialize,
     JsonSchema,
+    strum::EnumIter,
 )]
 pub enum M2Slot {
     A,

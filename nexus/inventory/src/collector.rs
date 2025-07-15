@@ -16,11 +16,13 @@ use nexus_types::inventory::Collection;
 use nexus_types::inventory::RotPage;
 use nexus_types::inventory::RotPageWhich;
 use omicron_cockroach_metrics::CockroachClusterAdminClient;
+use omicron_common::disk::M2Slot;
 use slog::Logger;
 use slog::o;
 use slog::{debug, error};
 use std::time::Duration;
 use strum::IntoEnumIterator;
+use tufaceous_artifact::ArtifactHash;
 
 /// connection and request timeout used for Sled Agent HTTP client
 const SLED_AGENT_TIMEOUT: Duration = Duration::from_secs(60);
@@ -175,6 +177,59 @@ impl<'a> Collector<'a> {
                 // reported already.  Move on.
                 continue;
             };
+
+            // For each host phase 1 slot, attempt to collect its hash, if it
+            // hasn't been collected already. Generally, we'd only get here for
+            // the first MGS client.  Assuming that one succeeds, the other(s)
+            // will skip this loop.
+            for slot in M2Slot::iter() {
+                const PHASE1_HASH_TIMEOUT: Duration = Duration::from_secs(30);
+
+                if in_progress
+                    .found_host_phase_1_flash_hash_already(&baseboard_id, slot)
+                {
+                    continue;
+                }
+
+                let phase1_slot = match slot {
+                    M2Slot::A => 0,
+                    M2Slot::B => 1,
+                };
+
+                let result = client
+                    .host_phase_1_flash_hash_calculate_with_timeout(
+                        sp,
+                        phase1_slot,
+                        PHASE1_HASH_TIMEOUT,
+                    )
+                    .await
+                    .with_context(|| {
+                        format!(
+                            "MGS {:?}: SP {sp:?}: phase 1 slot {slot:?}",
+                            client.baseurl(),
+                        )
+                    });
+                let hash = match result {
+                    Err(error) => {
+                        in_progress.found_error(InventoryError::from(error));
+                        continue;
+                    }
+                    Ok(hash) => hash,
+                };
+                if let Err(error) = in_progress.found_host_phase_1_flash_hash(
+                    &baseboard_id,
+                    slot,
+                    client.baseurl(),
+                    ArtifactHash(hash),
+                ) {
+                    error!(
+                        log,
+                        "error reporting host phase 1 flash hash: \
+                         {baseboard_id:?} {slot:?} {:?}: {error:#}",
+                        client.baseurl(),
+                    );
+                }
+            }
 
             // For each kind of caboose that we care about, if it hasn't been
             // fetched already, fetch it and record it.  Generally, we'd only
