@@ -413,10 +413,23 @@ fn derive_encryption_key_for_rack_secrets(
         Hkdf::<Sha3_256>::new(Some(&salt.0[..]), rack_secret.expose_secret());
     let mut key = Zeroizing::new(ALL_ZEROES);
 
+    // Limit where and how this key can be used as part of its construction.
+    // It's a defense in depth practice to prevent confused deputy attacks.
+    //
+    // In this particular case, we are saying that this key is intended for
+    // the first iteration of the trust quorum protocol and it is being used to
+    // encrypt rack secrets. In addition, the key is only valid for this rack
+    // id and epoch, but those are separate parameters in addition to the fixed
+    // context for the protocol.
+    //
+    // The constant is intentionally local to this method to prevent reusing it
+    // for other key derivations. Please do not move its definition.
+    const KEY_CONTEXT: &'static [u8] = b"trust-quorum-v1-rack-secrets";
+
     // SAFETY: `key` is sized such that `prk.expand_multi_info` will never fail.
     prk.expand_multi_info(
         &[
-            b"trust-quorum-v1-rack-secret",
+            KEY_CONTEXT,
             rack_id.as_untyped_uuid().as_ref(),
             &epoch.0.to_be_bytes(),
         ],
