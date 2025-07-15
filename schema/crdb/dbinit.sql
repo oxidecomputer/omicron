@@ -4715,9 +4715,9 @@ CREATE TABLE IF NOT EXISTS omicron.public.bp_pending_mgs_update_rot (
     expected_active_slot omicron.public.hw_rot_slot NOT NULL,
     expected_active_version STRING NOT NULL,
     expected_inactive_version STRING, -- NULL means invalid (no version expected)
-    expected_persistent_boot_preference: omicron.public.hw_rot_slot NOT NULL,
-    expected_pending_persistent_boot_preference: omicron.public.hw_rot_slot,
-    expected_transient_boot_preference: omicron.public.hw_rot_slot,
+    expected_persistent_boot_preference omicron.public.hw_rot_slot NOT NULL,
+    expected_pending_persistent_boot_preference omicron.public.hw_rot_slot,
+    expected_transient_boot_preference omicron.public.hw_rot_slot,
 
     PRIMARY KEY(blueprint_id, hw_baseboard_id)
 );
