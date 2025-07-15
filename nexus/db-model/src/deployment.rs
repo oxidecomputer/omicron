@@ -1254,6 +1254,18 @@ impl BpOximeterReadPolicy {
     }
 }
 
+pub trait BpPendingMgsUpdateComponent {
+    /// Converts a BpMgsUpdate into a PendingMgsUpdate
+    fn into_generic(
+        self,
+        baseboard_id: Arc<
+        BaseboardId>,
+    ) -> PendingMgsUpdate;
+
+    /// Retrieves the baseboard ID
+    fn hw_baseboard_id(&self) -> &Uuid;
+}
+
 #[derive(Queryable, Clone, Debug, Selectable, Insertable)]
 #[diesel(table_name = bp_pending_mgs_update_sp)]
 pub struct BpPendingMgsUpdateSp {
@@ -1267,8 +1279,12 @@ pub struct BpPendingMgsUpdateSp {
     pub expected_inactive_version: Option<DbArtifactVersion>,
 }
 
-impl BpPendingMgsUpdateSp {
-    pub fn into_generic(
+impl BpPendingMgsUpdateComponent for BpPendingMgsUpdateSp {
+    fn hw_baseboard_id(&self) -> &Uuid {
+        &self.hw_baseboard_id    
+    }
+
+    fn into_generic(
         self,
         baseboard_id: Arc<BaseboardId>,
     ) -> PendingMgsUpdate {
@@ -1308,8 +1324,12 @@ pub struct BpPendingMgsUpdateRot {
     pub expected_transient_boot_preference: Option<HwRotSlot>,
 }
 
-impl BpPendingMgsUpdateRot {
-    pub fn into_generic(
+impl BpPendingMgsUpdateComponent for BpPendingMgsUpdateRot {
+    fn hw_baseboard_id(&self) -> &Uuid {
+        &self.hw_baseboard_id    
+    }
+
+    fn into_generic(
         self,
         baseboard_id: Arc<BaseboardId>,
     ) -> PendingMgsUpdate {

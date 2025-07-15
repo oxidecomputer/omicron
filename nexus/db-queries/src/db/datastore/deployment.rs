@@ -14,6 +14,7 @@ use async_bb8_diesel::AsyncRunQueryDsl;
 use chrono::DateTime;
 use chrono::Utc;
 use clickhouse_admin_types::{KeeperId, ServerId};
+use nexus_db_model::BpPendingMgsUpdateComponent;
 use core::future::Future;
 use core::pin::Pin;
 use diesel::BoolExpressionMethods;
@@ -87,9 +88,11 @@ use omicron_common::api::external::LookupType;
 use omicron_common::api::external::ResourceType;
 use omicron_common::bail_unless;
 use omicron_uuid_kinds::BlueprintUuid;
+use omicron_uuid_kinds::BlueprintKind;
 use omicron_uuid_kinds::GenericUuid;
 use omicron_uuid_kinds::OmicronZoneUuid;
 use omicron_uuid_kinds::SledUuid;
+use omicron_uuid_kinds::TypedUuid;
 use std::collections::BTreeMap;
 use std::collections::BTreeSet;
 use std::sync::Arc;
@@ -1360,40 +1363,10 @@ impl DataStore {
             }
         };
 
-        // Load all pending SP updates.
+        // Load all pending RoT updates.
         //
         // Pagination is a little silly here because we will only allow one at a
         // time in practice for a while, but it's easy enough to do.
-        let mut pending_updates_sp = Vec::new();
-        {
-            use nexus_db_schema::schema::bp_pending_mgs_update_sp::dsl;
-
-            let mut paginator = Paginator::new(
-                SQL_BATCH_SIZE,
-                dropshot::PaginationOrder::Ascending,
-            );
-            while let Some(p) = paginator.next() {
-                let batch = paginated(
-                    dsl::bp_pending_mgs_update_sp,
-                    dsl::hw_baseboard_id,
-                    &p.current_pagparams(),
-                )
-                .filter(dsl::blueprint_id.eq(to_db_typed_uuid(blueprint_id)))
-                .select(BpPendingMgsUpdateSp::as_select())
-                .load_async(&*conn)
-                .await
-                .map_err(|e| {
-                    public_error_from_diesel(e, ErrorHandler::Server)
-                })?;
-
-                paginator = p.found_batch(&batch, &|d| d.hw_baseboard_id);
-                for row in batch {
-                    pending_updates_sp.push(row);
-                }
-            }
-        }
-
-        // Load all pending RoT updates.
         let mut pending_updates_rot = Vec::new();
         {
             use nexus_db_schema::schema::bp_pending_mgs_update_rot::dsl;
@@ -1422,6 +1395,36 @@ impl DataStore {
                 }
             }
         }
+
+        // Load all pending SP updates.
+        let mut pending_updates_sp = Vec::new();
+        {
+            use nexus_db_schema::schema::bp_pending_mgs_update_sp::dsl;
+
+            let mut paginator = Paginator::new(
+                SQL_BATCH_SIZE,
+                dropshot::PaginationOrder::Ascending,
+            );
+            while let Some(p) = paginator.next() {
+                let batch = paginated(
+                    dsl::bp_pending_mgs_update_sp,
+                    dsl::hw_baseboard_id,
+                    &p.current_pagparams(),
+                )
+                .filter(dsl::blueprint_id.eq(to_db_typed_uuid(blueprint_id)))
+                .select(BpPendingMgsUpdateSp::as_select())
+                .load_async(&*conn)
+                .await
+                .map_err(|e| {
+                    public_error_from_diesel(e, ErrorHandler::Server)
+                })?;
+
+                paginator = p.found_batch(&batch, &|d| d.hw_baseboard_id);
+                for row in batch {
+                    pending_updates_sp.push(row);
+                }
+            }
+        }        
 
         // Collect the unique baseboard ids referenced by pending updates.
         let baseboard_id_ids: BTreeSet<_> =
@@ -1463,46 +1466,10 @@ impl DataStore {
         // Combine this information to assemble the set of pending MGS updates.
         let mut pending_mgs_updates = PendingMgsUpdates::new();
         for row in pending_updates_rot {
-            let Some(baseboard) = baseboards_by_id.get(&row.hw_baseboard_id)
-            else {
-                // This should be impossible.
-                return Err(Error::internal_error(&format!(
-                    "loading blueprint {}: missing baseboard that we should \
-                     have fetched: {}",
-                    blueprint_id, row.hw_baseboard_id
-                )));
-            };
-
-            let update = row.into_generic(baseboard.clone());
-            if let Some(previous) = pending_mgs_updates.insert(update) {
-                // This should be impossible.
-                return Err(Error::internal_error(&format!(
-                    "blueprint {}: found multiple pending updates for \
-                     baseboard {:?}",
-                    blueprint_id, previous.baseboard_id
-                )));
-            }
+            process_update_row(row, &baseboards_by_id, &mut pending_mgs_updates, &blueprint_id)?;
         }
         for row in pending_updates_sp {
-            let Some(baseboard) = baseboards_by_id.get(&row.hw_baseboard_id)
-            else {
-                // This should be impossible.
-                return Err(Error::internal_error(&format!(
-                    "loading blueprint {}: missing baseboard that we should \
-                     have fetched: {}",
-                    blueprint_id, row.hw_baseboard_id
-                )));
-            };
-
-            let update = row.into_generic(baseboard.clone());
-            if let Some(previous) = pending_mgs_updates.insert(update) {
-                // This should be impossible.
-                return Err(Error::internal_error(&format!(
-                    "blueprint {}: found multiple pending updates for \
-                     baseboard {:?}",
-                    blueprint_id, previous.baseboard_id
-                )));
-            }
+            process_update_row(row, &baseboards_by_id, &mut pending_mgs_updates, &blueprint_id)?;
         }
 
         Ok(Blueprint {
@@ -2147,6 +2114,37 @@ impl DataStore {
     }
 }
 
+// Helper to process BpPendingMgsUpdateComponent rows
+fn process_update_row<T>(
+    row: T,
+    baseboards_by_id: &BTreeMap<Uuid, Arc<BaseboardId>>,
+    pending_mgs_updates: &mut PendingMgsUpdates,
+    blueprint_id: &TypedUuid<BlueprintKind>,
+) -> Result<(), Error>
+where
+    T: BpPendingMgsUpdateComponent,
+{
+    let Some(baseboard) = baseboards_by_id.get(row.hw_baseboard_id()) else {
+        // This should be impossible.
+        return Err(Error::internal_error(&format!(
+            "loading blueprint {}: missing baseboard that we should \
+             have fetched: {}",
+            blueprint_id, row.hw_baseboard_id()
+        )));
+    };
+
+    let update = row.into_generic(baseboard.clone());
+    if let Some(previous) = pending_mgs_updates.insert(update) {
+        // This should be impossible.
+        return Err(Error::internal_error(&format!(
+            "blueprint {}: found multiple pending updates for \
+             baseboard {:?}",
+            blueprint_id, previous.baseboard_id
+        )));
+    }
+    Ok(())
+}
+
 // Helper to create an `authz::Blueprint` for a specific blueprint ID
 fn authz_blueprint_from_id(blueprint_id: BlueprintUuid) -> authz::Blueprint {
     let blueprint_id = blueprint_id.into_untyped_uuid();
@@ -2642,6 +2640,7 @@ mod tests {
             query_count!(bp_clickhouse_server_zone_id_to_node_id, blueprint_id),
             query_count!(bp_oximeter_read_policy, blueprint_id),
             query_count!(bp_pending_mgs_update_sp, blueprint_id),
+            query_count!(bp_pending_mgs_update_rot, blueprint_id),
         ] {
             let count: i64 = result.unwrap();
             assert_eq!(
