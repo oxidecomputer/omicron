@@ -38,6 +38,9 @@ const SECRET_LEN: usize = 32;
 const EPOCH_LEN: usize = size_of::<Epoch>();
 const_assert_eq!(EPOCH_LEN, 8);
 
+// The size of a ChaCha20Poly1305 nonce in bytes
+const CHACHA20POLY1305_NONCE_LEN: usize = 12;
+
 // The key share format used for LRTQ
 #[derive(Clone, Serialize, Deserialize, Zeroize, ZeroizeOnDrop, From)]
 pub struct LrtqShare(Vec<u8>);
@@ -87,21 +90,21 @@ pub struct Sha3_256Digest(pub [u8; 32]);
 /// memory via moves, and also so that it is not accidentally growable like
 /// a `Vec`.
 #[derive(Debug)]
-struct RackSecretData(SecretBox<[u8; 32]>);
+struct RackSecretData(SecretBox<[u8; SECRET_LEN]>);
 
 /// A rack secret reconstructed via share combination.
 ///
-/// This secret must be treated as a generic array of 32 bytes. We don't
-/// differentiate between whether or not this secret was recreated via Ed25519
-/// +Ristretto key shares (LRTQ) or GF256 Key Shares (current protocol).
+/// This secret must be treated as a generic array of `SECRET_LEN` bytes. We
+/// don't differentiate between whether or not this secret was recreated via
+/// Ed25519 +Ristretto key shares (LRTQ) or GF256 Key Shares (current protocol).
 /// Therefore, this rack secret should never be split back into key shares.
 #[derive(Debug)]
 pub struct ReconstructedRackSecret {
     secret: RackSecretData,
 }
 
-impl ExposeSecret<[u8; 32]> for ReconstructedRackSecret {
-    fn expose_secret(&self) -> &[u8; 32] {
+impl ExposeSecret<[u8; SECRET_LEN]> for ReconstructedRackSecret {
+    fn expose_secret(&self) -> &[u8; SECRET_LEN] {
         &self.secret.0.expose_secret()
     }
 }
@@ -121,7 +124,7 @@ pub struct InvalidRackSecretSizeError;
 impl TryFrom<SecretBox<[u8]>> for ReconstructedRackSecret {
     type Error = InvalidRackSecretSizeError;
     fn try_from(value: SecretBox<[u8]>) -> Result<Self, Self::Error> {
-        let data: Box<[u8; 32]> = Box::new(
+        let data: Box<[u8; SECRET_LEN]> = Box::new(
             value
                 .expose_secret()
                 .try_into()
@@ -136,7 +139,7 @@ impl TryFrom<SecretBox<[u8]>> for ReconstructedRackSecret {
 impl TryFrom<&[u8]> for ReconstructedRackSecret {
     type Error = InvalidRackSecretSizeError;
     fn try_from(value: &[u8]) -> Result<Self, Self::Error> {
-        let data: Box<[u8; 32]> =
+        let data: Box<[u8; SECRET_LEN]> =
             Box::new(value.try_into().map_err(|_| InvalidRackSecretSizeError)?);
         Ok(ReconstructedRackSecret {
             secret: RackSecretData(SecretBox::new(data)),
@@ -178,8 +181,8 @@ pub struct RackSecret {
     secret: RackSecretData,
 }
 
-impl ExposeSecret<[u8; 32]> for RackSecret {
-    fn expose_secret(&self) -> &[u8; 32] {
+impl ExposeSecret<[u8; SECRET_LEN]> for RackSecret {
+    fn expose_secret(&self) -> &[u8; SECRET_LEN] {
         &self.secret.0.expose_secret()
     }
 }
@@ -191,11 +194,11 @@ impl Default for RackSecret {
 }
 
 impl RackSecret {
-    /// Create a random 32 byte secret
+    /// Create a random `SECRET_LEN` byte secret
     pub fn new() -> RackSecret {
         let mut rng = OsRng;
-        let mut data = Box::new([0u8; 32]);
-        while data.ct_eq(&[0u8; 32]).into() {
+        let mut data = Box::new([0u8; SECRET_LEN]);
+        while data.ct_eq(&[0u8; SECRET_LEN]).into() {
             rng.fill_bytes(&mut *data);
         }
         RackSecret { secret: RackSecretData(SecretBox::new(data)) }
@@ -303,7 +306,7 @@ impl EncryptedRackSecrets {
 
         // This key only encrypts a single plaintext and so a nonce of all zeroes
         // is all that's required.
-        let nonce = [0u8; 12].into();
+        let nonce = [0u8; CHACHA20POLY1305_NONCE_LEN].into();
 
         let plaintext =
             Zeroizing::new(key.decrypt(&nonce, self.data.as_ref())?);
@@ -390,7 +393,7 @@ impl PlaintextRackSecrets {
 
         // This key only encrypts a single plaintext and so a nonce of all zeroes
         // is all that's required.
-        let nonce = [0u8; 12].into();
+        let nonce = [0u8; CHACHA20POLY1305_NONCE_LEN].into();
         let encrypted =
             key.encrypt(&nonce, plaintext.as_ref())?.into_boxed_slice();
         Ok(EncryptedRackSecrets { salt, data: encrypted })
@@ -405,11 +408,10 @@ fn derive_encryption_key_for_rack_secrets(
     salt: Salt,
     rack_secret: &ReconstructedRackSecret,
 ) -> ChaCha20Poly1305 {
+    const ALL_ZEROES: [u8; 32] = [0u8; SECRET_LEN];
     let prk =
         Hkdf::<Sha3_256>::new(Some(&salt.0[..]), rack_secret.expose_secret());
-
-    // The "info" string is context to bind the key to its purpose
-    let mut key = Zeroizing::new([0u8; 32]);
+    let mut key = Zeroizing::new(ALL_ZEROES);
 
     // SAFETY: `key` is sized such that `prk.expand_multi_info` will never fail.
     prk.expand_multi_info(
@@ -421,6 +423,10 @@ fn derive_encryption_key_for_rack_secrets(
         key.as_mut(),
     )
     .unwrap();
+
+    let is_key_all_zeroes: bool = ALL_ZEROES.ct_eq(key.as_ref()).into();
+    assert!(!is_key_all_zeroes);
+
     ChaCha20Poly1305::new(Key::from_slice(key.as_ref()))
 }
 
