@@ -58,12 +58,22 @@ impl super::Nexus {
         entry: &AuditLogEntryInit,
         result: &Result<R, HttpError>,
     ) -> UpdateResult<()> {
-        let status_code = match result {
-            Ok(response) => response.status_code(),
-            Err(error) => error.status_code.as_status(),
-        }
-        .as_u16();
-        let update = AuditLogCompletion::new(status_code);
+        let (status_code, error_code, error_message) = match result {
+            Ok(response) => (response.status_code(), None, None),
+            Err(error) => (
+                error.status_code.as_status(),
+                error.error_code.clone(),
+                // For now we only log the external message. If we want to log
+                // the internal message, we need to make sure that is ok to do.
+                Some(error.external_message.clone()),
+            ),
+        };
+
+        let update = AuditLogCompletion::new(
+            status_code.as_u16(),
+            error_code,
+            error_message,
+        );
         self.db_datastore.audit_log_entry_complete(opctx, &entry, update).await
     }
 }

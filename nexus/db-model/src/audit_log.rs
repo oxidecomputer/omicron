@@ -108,13 +108,21 @@ impl AuditLogEntryInit {
 pub struct AuditLogCompletion {
     pub time_completed: DateTime<Utc>,
     pub http_status_code: SqlU16,
+    pub error_code: Option<String>,
+    pub error_message: Option<String>,
 }
 
 impl AuditLogCompletion {
-    pub fn new(http_status_code: u16) -> Self {
+    pub fn new(
+        http_status_code: u16,
+        error_code: Option<String>,
+        error_message: Option<String>,
+    ) -> Self {
         Self {
             time_completed: Utc::now(),
             http_status_code: SqlU16(http_status_code),
+            error_code,
+            error_message,
         }
     }
 }
