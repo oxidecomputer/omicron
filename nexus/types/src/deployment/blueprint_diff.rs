@@ -6,16 +6,17 @@
 
 use super::blueprint_display::{
     BpClickhouseServersTableSchema, BpDatasetsTableSchema, BpDiffState,
-    BpGeneration, BpOmicronZonesTableSchema, BpPendingMgsUpdates,
-    BpPhysicalDisksTableSchema, BpTable, BpTableColumn, BpTableData,
-    BpTableRow, KvList, KvPair, constants::*, linear_table_modified,
-    linear_table_unchanged,
+    BpGeneration, BpHostPhase2TableSchema, BpOmicronZonesTableSchema,
+    BpPendingMgsUpdates, BpPhysicalDisksTableSchema, BpTable, BpTableColumn,
+    BpTableData, BpTableRow, KvList, KvPair, constants::*,
+    linear_table_modified, linear_table_unchanged,
 };
 use super::{
     BlueprintDatasetConfigDiff, BlueprintDatasetDisposition, BlueprintDiff,
-    BlueprintMetadata, BlueprintPhysicalDiskConfig,
-    BlueprintPhysicalDiskConfigDiff, BlueprintZoneConfigDiff,
-    BlueprintZoneImageSource, ClickhouseClusterConfig,
+    BlueprintHostPhase2DesiredSlots, BlueprintHostPhase2DesiredSlotsDiff,
+    BlueprintHostPhase2TableData, BlueprintMetadata,
+    BlueprintPhysicalDiskConfig, BlueprintPhysicalDiskConfigDiff,
+    BlueprintZoneConfigDiff, BlueprintZoneImageSource, ClickhouseClusterConfig,
     CockroachDbPreserveDowngrade, PendingMgsUpdatesDiff, unwrap_or_none,
     zone_sort_key,
 };
@@ -1586,6 +1587,65 @@ impl ClickhouseClusterConfigDiffTables {
     }
 }
 
+/// Differences in host phase 2 contents
+#[derive(Debug)]
+pub struct BpDiffHostPhase2<'a> {
+    pub added: BTreeMap<SledUuid, &'a BlueprintHostPhase2DesiredSlots>,
+    pub common: BTreeMap<SledUuid, BlueprintHostPhase2DesiredSlotsDiff<'a>>,
+    pub removed: BTreeMap<SledUuid, &'a BlueprintHostPhase2DesiredSlots>,
+}
+
+impl<'a> BpDiffHostPhase2<'a> {
+    /// Convert from our diff summary to our display compatibility layer
+    pub fn from_diff_summary(summary: &'a BlueprintDiffSummary<'a>) -> Self {
+        let sleds = &summary.diff.sleds;
+        Self {
+            added: sleds
+                .added
+                .iter()
+                .map(|(sled_id, config)| (**sled_id, &config.host_phase_2))
+                .collect(),
+            common: sleds
+                .common
+                .iter()
+                .map(|(sled_id, config)| {
+                    (**sled_id, config.diff_pair().host_phase_2)
+                })
+                .collect(),
+            removed: sleds
+                .removed
+                .iter()
+                .map(|(sled_id, config)| (**sled_id, &config.host_phase_2))
+                .collect(),
+        }
+    }
+
+    /// Return a [`BpTable`] for the given `sled_id`
+    pub fn to_bp_sled_subtable(&self, sled_id: &SledUuid) -> Option<BpTable> {
+        let mut rows = vec![];
+        if let Some(diff) = self.common.get(sled_id) {
+            rows.extend(BlueprintHostPhase2TableData::diff_rows(diff));
+        }
+        if let Some(desired) = self.removed.get(sled_id) {
+            rows.extend(
+                BlueprintHostPhase2TableData::new(desired)
+                    .rows(BpDiffState::Removed),
+            );
+        }
+        if let Some(desired) = self.added.get(sled_id) {
+            rows.extend(
+                BlueprintHostPhase2TableData::new(desired)
+                    .rows(BpDiffState::Added),
+            );
+        }
+        if rows.is_empty() {
+            None
+        } else {
+            Some(BpTable::new(BpHostPhase2TableSchema {}, None, rows))
+        }
+    }
+}
+
 /// Differences in pending MGS updates
 #[derive(Debug)]
 pub struct BpDiffPendingMgsUpdates<'a> {
@@ -1695,6 +1755,7 @@ pub struct BlueprintDiffDisplay<'diff> {
     zones: BpDiffZones,
     disks: BpDiffPhysicalDisks<'diff>,
     datasets: BpDiffDatasets,
+    host_phase_2: BpDiffHostPhase2<'diff>,
     pending_mgs_updates: BpDiffPendingMgsUpdates<'diff>,
 }
 
@@ -1706,6 +1767,7 @@ impl<'diff> BlueprintDiffDisplay<'diff> {
         let zones = BpDiffZones::from_diff_summary(summary);
         let disks = BpDiffPhysicalDisks::from_diff_summary(summary);
         let datasets = BpDiffDatasets::from_diff_summary(summary);
+        let host_phase_2 = BpDiffHostPhase2::from_diff_summary(summary);
         let pending_mgs_updates =
             BpDiffPendingMgsUpdates::from_diff_summary(summary);
         Self {
@@ -1715,6 +1777,7 @@ impl<'diff> BlueprintDiffDisplay<'diff> {
             zones,
             disks,
             datasets,
+            host_phase_2,
             pending_mgs_updates,
         }
     }
@@ -1857,6 +1920,11 @@ impl<'diff> BlueprintDiffDisplay<'diff> {
         f: &mut fmt::Formatter<'_>,
         sled_id: &SledUuid,
     ) -> fmt::Result {
+        // Write the host phase 2 table if needed
+        if let Some(table) = self.host_phase_2.to_bp_sled_subtable(sled_id) {
+            writeln!(f, "{table}\n")?;
+        }
+
         // Write the physical disks table if needed
         if let Some(table) = self.disks.to_bp_sled_subtable(sled_id) {
             writeln!(f, "{table}\n")?;

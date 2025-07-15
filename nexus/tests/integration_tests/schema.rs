@@ -2661,7 +2661,7 @@ const BP_OXIMETER_READ_POLICY_ID_3: &str =
 
 // Insert two blueprints and 4 oximeter read policies, two of which do not have
 // a corresponding blueprint
-fn before_163_0_0<'a>(ctx: &'a MigrationContext<'a>) -> BoxFuture<'a, ()> {
+fn before_164_0_0<'a>(ctx: &'a MigrationContext<'a>) -> BoxFuture<'a, ()> {
     Box::pin(async move {
         ctx.client
             .batch_execute(
@@ -2691,7 +2691,7 @@ fn before_163_0_0<'a>(ctx: &'a MigrationContext<'a>) -> BoxFuture<'a, ()> {
 }
 
 // Validate that rows that do not have a corresponding blueprint are gone
-fn after_163_0_0<'a>(ctx: &'a MigrationContext<'a>) -> BoxFuture<'a, ()> {
+fn after_164_0_0<'a>(ctx: &'a MigrationContext<'a>) -> BoxFuture<'a, ()> {
     Box::pin(async move {
         let rows = ctx
             .client
@@ -2795,8 +2795,8 @@ fn get_migration_checks() -> BTreeMap<Version, DataMigrationFns> {
             .after(migration_156::after),
     );
     map.insert(
-        Version::new(163, 0, 0),
-        DataMigrationFns::new().before(before_163_0_0).after(after_163_0_0),
+        Version::new(164, 0, 0),
+        DataMigrationFns::new().before(before_164_0_0).after(after_164_0_0),
     );
 
     map
