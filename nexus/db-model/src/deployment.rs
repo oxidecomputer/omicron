@@ -1256,11 +1256,7 @@ impl BpOximeterReadPolicy {
 
 pub trait BpPendingMgsUpdateComponent {
     /// Converts a BpMgsUpdate into a PendingMgsUpdate
-    fn into_generic(
-        self,
-        baseboard_id: Arc<
-        BaseboardId>,
-    ) -> PendingMgsUpdate;
+    fn into_generic(self, baseboard_id: Arc<BaseboardId>) -> PendingMgsUpdate;
 
     /// Retrieves the baseboard ID
     fn hw_baseboard_id(&self) -> &Uuid;
@@ -1281,13 +1277,10 @@ pub struct BpPendingMgsUpdateSp {
 
 impl BpPendingMgsUpdateComponent for BpPendingMgsUpdateSp {
     fn hw_baseboard_id(&self) -> &Uuid {
-        &self.hw_baseboard_id    
+        &self.hw_baseboard_id
     }
 
-    fn into_generic(
-        self,
-        baseboard_id: Arc<BaseboardId>,
-    ) -> PendingMgsUpdate {
+    fn into_generic(self, baseboard_id: Arc<BaseboardId>) -> PendingMgsUpdate {
         PendingMgsUpdate {
             baseboard_id,
             sp_type: self.sp_type.into(),
@@ -1326,13 +1319,10 @@ pub struct BpPendingMgsUpdateRot {
 
 impl BpPendingMgsUpdateComponent for BpPendingMgsUpdateRot {
     fn hw_baseboard_id(&self) -> &Uuid {
-        &self.hw_baseboard_id    
+        &self.hw_baseboard_id
     }
 
-    fn into_generic(
-        self,
-        baseboard_id: Arc<BaseboardId>,
-    ) -> PendingMgsUpdate {
+    fn into_generic(self, baseboard_id: Arc<BaseboardId>) -> PendingMgsUpdate {
         PendingMgsUpdate {
             baseboard_id,
             sp_type: self.sp_type.into(),

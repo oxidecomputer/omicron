@@ -14,7 +14,6 @@ use async_bb8_diesel::AsyncRunQueryDsl;
 use chrono::DateTime;
 use chrono::Utc;
 use clickhouse_admin_types::{KeeperId, ServerId};
-use nexus_db_model::BpPendingMgsUpdateComponent;
 use core::future::Future;
 use core::pin::Pin;
 use diesel::BoolExpressionMethods;
@@ -54,6 +53,7 @@ use nexus_db_model::BpOmicronPhysicalDisk;
 use nexus_db_model::BpOmicronZone;
 use nexus_db_model::BpOmicronZoneNic;
 use nexus_db_model::BpOximeterReadPolicy;
+use nexus_db_model::BpPendingMgsUpdateComponent;
 use nexus_db_model::BpPendingMgsUpdateRot;
 use nexus_db_model::BpPendingMgsUpdateSp;
 use nexus_db_model::BpSledMetadata;
@@ -87,8 +87,8 @@ use omicron_common::api::external::ListResultVec;
 use omicron_common::api::external::LookupType;
 use omicron_common::api::external::ResourceType;
 use omicron_common::bail_unless;
-use omicron_uuid_kinds::BlueprintUuid;
 use omicron_uuid_kinds::BlueprintKind;
+use omicron_uuid_kinds::BlueprintUuid;
 use omicron_uuid_kinds::GenericUuid;
 use omicron_uuid_kinds::OmicronZoneUuid;
 use omicron_uuid_kinds::SledUuid;
@@ -1424,7 +1424,7 @@ impl DataStore {
                     pending_updates_sp.push(row);
                 }
             }
-        }        
+        }
 
         // Collect the unique baseboard ids referenced by pending updates.
         let baseboard_id_ids: BTreeSet<_> =
@@ -1466,10 +1466,20 @@ impl DataStore {
         // Combine this information to assemble the set of pending MGS updates.
         let mut pending_mgs_updates = PendingMgsUpdates::new();
         for row in pending_updates_rot {
-            process_update_row(row, &baseboards_by_id, &mut pending_mgs_updates, &blueprint_id)?;
+            process_update_row(
+                row,
+                &baseboards_by_id,
+                &mut pending_mgs_updates,
+                &blueprint_id,
+            )?;
         }
         for row in pending_updates_sp {
-            process_update_row(row, &baseboards_by_id, &mut pending_mgs_updates, &blueprint_id)?;
+            process_update_row(
+                row,
+                &baseboards_by_id,
+                &mut pending_mgs_updates,
+                &blueprint_id,
+            )?;
         }
 
         Ok(Blueprint {
@@ -2129,7 +2139,8 @@ where
         return Err(Error::internal_error(&format!(
             "loading blueprint {}: missing baseboard that we should \
              have fetched: {}",
-            blueprint_id, row.hw_baseboard_id()
+            blueprint_id,
+            row.hw_baseboard_id()
         )));
     };
 
