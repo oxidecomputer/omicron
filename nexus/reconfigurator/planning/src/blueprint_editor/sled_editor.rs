@@ -4,8 +4,16 @@
 
 //! Support for editing the blueprint details of a single sled.
 
+use crate::blueprint_builder::BpMupdateOverrideNotClearedReason;
+use crate::blueprint_builder::EditedSledScalarEdits;
+use crate::blueprint_builder::EnsureMupdateOverrideAction;
+use crate::blueprint_builder::EnsureMupdateOverrideUpdatedZone;
 use crate::blueprint_builder::SledEditCounts;
+use crate::planner::NoopConvertSledInfoMut;
+use crate::planner::NoopConvertSledStatus;
 use crate::planner::SledPlannerRng;
+use id_map::Entry;
+use iddqd::IdOrdMap;
 use illumos_utils::zpool::ZpoolName;
 use itertools::Either;
 use nexus_sled_agent_shared::inventory::ZoneKind;
@@ -18,6 +26,7 @@ use nexus_types::deployment::BlueprintZoneConfig;
 use nexus_types::deployment::BlueprintZoneDisposition;
 use nexus_types::deployment::BlueprintZoneImageSource;
 use nexus_types::deployment::BlueprintZoneType;
+use nexus_types::deployment::PendingMgsUpdate;
 use nexus_types::deployment::blueprint_zone_type;
 use nexus_types::external_api::views::SledState;
 use omicron_common::address::Ipv6Subnet;
@@ -153,8 +162,11 @@ impl SledEditor {
             SledState::Decommissioned,
             "for_existing_decommissioned called on non-decommissioned sled"
         );
-        let inner =
-            EditedSled { config, edit_counts: SledEditCounts::zeroes() };
+        let inner = EditedSled {
+            config,
+            edit_counts: SledEditCounts::zeroes(),
+            scalar_edits: EditedSledScalarEdits::zeroes(),
+        };
         Ok(Self(InnerSledEditor::Decommissioned(inner)))
     }
 
@@ -363,6 +375,21 @@ impl SledEditor {
         self.as_active_mut()?.set_zone_image_source(zone_id, image_source)
     }
 
+    /// Updates a sled's mupdate override field based on the mupdate override
+    /// provided by inventory.
+    pub fn ensure_mupdate_override(
+        &mut self,
+        inv_mupdate_override_id: Option<MupdateOverrideUuid>,
+        pending_mgs_update: Entry<'_, PendingMgsUpdate>,
+        noop_sled_info: NoopConvertSledInfoMut<'_>,
+    ) -> Result<EnsureMupdateOverrideAction, SledEditError> {
+        self.as_active_mut()?.ensure_mupdate_override(
+            inv_mupdate_override_id,
+            pending_mgs_update,
+            noop_sled_info,
+        )
+    }
+
     /// Sets remove-mupdate-override configuration for this sled.
     ///
     /// Currently only used in test code.
@@ -411,6 +438,7 @@ struct ActiveSledEditor {
 pub(crate) struct EditedSled {
     pub config: BlueprintSledConfig,
     pub edit_counts: SledEditCounts,
+    pub scalar_edits: EditedSledScalarEdits,
 }
 
 impl ActiveSledEditor {
@@ -470,6 +498,11 @@ impl ActiveSledEditor {
             self.remove_mupdate_override.is_modified();
         let mut sled_agent_generation = self.incoming_sled_agent_generation;
 
+        let scalar_edits = EditedSledScalarEdits {
+            debug_force_generation_bump: self.debug_force_generation_bump,
+            remove_mupdate_override: remove_mupdate_override_is_modified,
+        };
+
         // Bump the generation if we made any changes of concern to sled-agent.
         if self.debug_force_generation_bump
             || disks_counts.has_nonzero_counts()
@@ -496,6 +529,7 @@ impl ActiveSledEditor {
                 datasets: datasets_counts,
                 zones: zones_counts,
             },
+            scalar_edits,
         }
     }
 
@@ -694,6 +728,142 @@ impl ActiveSledEditor {
                 .ensure_in_service(&mut self.datasets, rng);
         }
         Ok(())
+    }
+
+    /// Update a sled's mupdate override field based on the mupdate override
+    /// provided by inventory.
+    pub fn ensure_mupdate_override(
+        &mut self,
+        inv_mupdate_override_id: Option<MupdateOverrideUuid>,
+        pending_mgs_update: Entry<'_, PendingMgsUpdate>,
+        noop_sled_info: NoopConvertSledInfoMut<'_>,
+    ) -> Result<EnsureMupdateOverrideAction, SledEditError> {
+        match (inv_mupdate_override_id, *self.remove_mupdate_override.value()) {
+            (Some(inv_override), Some(bp_override))
+                if inv_override == bp_override =>
+            {
+                // If the inventory and blueprint overrides are the same, the
+                // sled agent hasn't yet removed the override. Nothing to do at
+                // the moment.
+                Ok(EnsureMupdateOverrideAction::NoAction {
+                    mupdate_override: Some(inv_override),
+                })
+            }
+            (Some(inv_override), bp_override) => {
+                // Inventory says there's an override in place, but the
+                // blueprint doesn't (or has a different override in place).
+                // This means that a MUPdate happened since we last did
+                // blueprint planning.
+                //
+                // Set the blueprint's remove_mupdate_override.
+                self.set_remove_mupdate_override(Some(inv_override));
+                // Also update the cached value inside `noop_sled_info`.
+                if let NoopConvertSledInfoMut::Ok(mut info) = noop_sled_info {
+                    if let NoopConvertSledStatus::MaybeEligible(me) =
+                        &mut info.status
+                    {
+                        me.mupdate_override_id = Some(inv_override);
+                    }
+                }
+
+                // Set all zone image sources to InstallDataset. This is an
+                // acknowledgement of the current state of the world.
+                let zone_ids: Vec<_> = self
+                    .zones(BlueprintZoneDisposition::is_in_service)
+                    .map(|zone| (zone.id, zone.kind()))
+                    .collect();
+
+                let mut zones = IdOrdMap::with_capacity(zone_ids.len());
+                for (zone_id, kind) in zone_ids {
+                    let old_image_source = self.zones.set_zone_image_source(
+                        &zone_id,
+                        BlueprintZoneImageSource::InstallDataset,
+                    )?;
+                    let item = EnsureMupdateOverrideUpdatedZone {
+                        zone_id,
+                        kind,
+                        old_image_source,
+                        new_image_source:
+                            BlueprintZoneImageSource::InstallDataset,
+                    };
+                    zones.insert_unique(item).expect(
+                        "self.zones is a BTreeMap so zone IDs are unique",
+                    );
+                }
+
+                // Clear out the pending MGS update for this sled.
+                let prev_mgs_update = match pending_mgs_update {
+                    Entry::Vacant(_) => None,
+                    Entry::Occupied(entry) => Some(Box::new(entry.remove())),
+                };
+
+                // TODO: Do the same for host OS.
+
+                Ok(EnsureMupdateOverrideAction::BpSetOverride {
+                    inv_override,
+                    prev_bp_override: bp_override,
+                    zones,
+                    prev_mgs_update,
+                })
+            }
+            (None, Some(bp_override)) => {
+                // The blueprint says there's an override in place, but the
+                // inventory doesn't. This means that the sled has removed its
+                // override that was set in the above branch.
+                //
+                // However, the blueprint's remove_mupdate_override remains in
+                // place until all zones' image sources can be noop-converted to
+                // Artifact. We do this to minimize the number of different
+                // versions of software that exist.
+                use BpMupdateOverrideNotClearedReason::*;
+
+                match noop_sled_info {
+                    NoopConvertSledInfoMut::Ok(mut info) => match &mut info
+                        .status
+                    {
+                        NoopConvertSledStatus::Ineligible(reason) => Ok(
+                            EnsureMupdateOverrideAction::BpOverrideNotCleared {
+                                bp_override,
+                                reason: NoopSledIneligible(reason.clone()),
+                            },
+                        ),
+                        NoopConvertSledStatus::MaybeEligible(me) => {
+                            // Are any zones ineligible for conversion?
+                            let zone_counts = me.zone_counts();
+                            if zone_counts.num_ineligible > 0 {
+                                Ok(EnsureMupdateOverrideAction::BpOverrideNotCleared {
+                                    bp_override,
+                                    reason: NoopZonesIneligible { zone_counts },
+                                })
+                            } else {
+                                // All zones are eligible for conversion. Clear
+                                // the mupdate override field.
+                                //
+                                // The actual conversion process will happen
+                                // later, during do_plan_noop_image_source.
+                                self.set_remove_mupdate_override(None);
+                                me.mupdate_override_id = None;
+                                Ok(EnsureMupdateOverrideAction::BpClearOverride {
+                                    prev_bp_override: bp_override,
+                                })
+                            }
+                        }
+                    },
+                    NoopConvertSledInfoMut::GlobalIneligible(reason) => {
+                        Ok(EnsureMupdateOverrideAction::BpOverrideNotCleared {
+                            bp_override,
+                            reason: NoopGlobalIneligible(reason.clone()),
+                        })
+                    }
+                }
+            }
+            (None, None) => {
+                // No override in place, nothing to do.
+                Ok(EnsureMupdateOverrideAction::NoAction {
+                    mupdate_override: None,
+                })
+            }
+        }
     }
 
     /// Set remove-mupdate-override configuration for this sled.

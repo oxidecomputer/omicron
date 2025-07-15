@@ -9,13 +9,16 @@
 use crate::blueprint_builder::BlueprintBuilder;
 use crate::blueprint_builder::Ensure;
 use crate::blueprint_builder::EnsureMultiple;
+use crate::blueprint_builder::EnsureMupdateOverrideAction;
 use crate::blueprint_builder::Error;
 use crate::blueprint_builder::Operation;
 use crate::blueprint_editor::DisksEditError;
 use crate::blueprint_editor::SledEditError;
 use crate::mgs_updates::plan_mgs_updates;
+use crate::planner::image_source::NoopConvertZoneStatus;
 use crate::planner::omicron_zone_placement::PlacementError;
 use gateway_client::types::SpType;
+use itertools::Itertools;
 use nexus_sled_agent_shared::inventory::ConfigReconcilerInventoryResult;
 use nexus_sled_agent_shared::inventory::OmicronZoneImageSource;
 use nexus_sled_agent_shared::inventory::OmicronZoneType;
@@ -32,7 +35,6 @@ use nexus_types::deployment::DiskFilter;
 use nexus_types::deployment::PlanningInput;
 use nexus_types::deployment::SledDetails;
 use nexus_types::deployment::SledFilter;
-use nexus_types::deployment::TargetReleaseDescription;
 use nexus_types::deployment::TufRepoContentsError;
 use nexus_types::deployment::ZpoolFilter;
 use nexus_types::external_api::views::PhysicalDiskPolicy;
@@ -46,19 +48,26 @@ use omicron_uuid_kinds::PhysicalDiskUuid;
 use omicron_uuid_kinds::SledUuid;
 use slog::debug;
 use slog::error;
+use slog::o;
 use slog::{Logger, info, warn};
 use slog_error_chain::InlineErrorChain;
 use std::collections::BTreeMap;
 use std::collections::BTreeSet;
-use std::collections::HashMap;
 use std::str::FromStr;
 
+pub(crate) use self::image_source::NoopConvertGlobalIneligibleReason;
+pub(crate) use self::image_source::NoopConvertInfo;
+pub(crate) use self::image_source::NoopConvertSledIneligibleReason;
+pub(crate) use self::image_source::NoopConvertSledInfoMut;
+pub(crate) use self::image_source::NoopConvertSledStatus;
+pub(crate) use self::image_source::NoopConvertZoneCounts;
 pub(crate) use self::omicron_zone_placement::DiscretionaryOmicronZone;
 use self::omicron_zone_placement::OmicronZonePlacement;
 use self::omicron_zone_placement::OmicronZonePlacementSledState;
 pub use self::rng::PlannerRng;
 pub use self::rng::SledPlannerRng;
 
+mod image_source;
 mod omicron_zone_placement;
 pub(crate) mod rng;
 
@@ -157,12 +166,37 @@ impl<'a> Planner<'a> {
     fn do_plan(&mut self) -> Result<(), Error> {
         self.do_plan_expunge()?;
         self.do_plan_decommission()?;
-        self.do_plan_noop_image_source()?;
-        self.do_plan_add()?;
-        if let UpdateStepResult::ContinueToNextStep = self.do_plan_mgs_updates()
+
+        let mut noop_info =
+            NoopConvertInfo::new(self.input, self.inventory, &self.blueprint)?;
+
+        let plan_mupdate_override_res =
+            self.do_plan_mupdate_override(&mut noop_info)?;
+
+        // Log noop-convert results after do_plan_mupdate_override, because this
+        // step might alter noop_info.
+        noop_info.log_to(&self.log);
+
+        // Within `do_plan_noop_image_source`, we plan noop image sources on
+        // sleds other than those currently affected by mupdate overrides. This
+        // means that we don't have to wait for the `plan_mupdate_override_res`
+        // result for that step.
+        self.do_plan_noop_image_source(noop_info)?;
+
+        if let UpdateStepResult::ContinueToNextStep = plan_mupdate_override_res
         {
-            self.do_plan_zone_updates()?;
+            // If do_plan_mupdate_override returns Waiting, we don't plan *any*
+            // additional steps until the system has recovered.
+            self.do_plan_add()?;
+            if let UpdateStepResult::ContinueToNextStep =
+                self.do_plan_mgs_updates()
+            {
+                self.do_plan_zone_updates()?;
+            }
         }
+
+        // CockroachDB settings aren't dependent on zones, so they can be
+        // planned independently of the rest of the system.
         self.do_plan_cockroachdb_settings();
         Ok(())
     }
@@ -504,177 +538,74 @@ impl<'a> Planner<'a> {
         Ok(())
     }
 
-    fn do_plan_noop_image_source(&mut self) -> Result<(), Error> {
-        let TargetReleaseDescription::TufRepo(current_artifacts) =
-            self.input.tuf_repo().description()
-        else {
-            info!(
-                self.log,
-                "skipping noop image source check for all sleds \
-                 (no current TUF repo)",
-            );
-            return Ok(());
+    fn do_plan_noop_image_source(
+        &mut self,
+        noop_info: NoopConvertInfo,
+    ) -> Result<(), Error> {
+        let sleds = match noop_info {
+            NoopConvertInfo::GlobalEligible { sleds } => sleds,
+            NoopConvertInfo::GlobalIneligible { .. } => return Ok(()),
         };
-        let artifacts_by_hash: HashMap<_, _> = current_artifacts
-            .artifacts
-            .iter()
-            .map(|artifact| (artifact.hash, artifact))
-            .collect();
+        for sled in sleds {
+            let eligible = match &sled.status {
+                NoopConvertSledStatus::Ineligible(_) => continue,
+                NoopConvertSledStatus::MaybeEligible(maybe_eligible) => {
+                    // If the mupdate override ID is set, we can't do noop
+                    // conversions. This information is already logged so we
+                    // don't need to log it again.
+                    if maybe_eligible.mupdate_override_id.is_some() {
+                        continue;
+                    }
 
-        for sled_id in self.input.all_sled_ids(SledFilter::InService) {
-            let Some(inv_sled) = self.inventory.sled_agents.get(&sled_id)
-            else {
-                info!(
-                    self.log,
-                    "skipping noop image source check \
-                     (sled not present in latest inventory collection)";
-                    "sled_id" => %sled_id,
-                );
-                continue;
-            };
-
-            let zone_manifest = match &inv_sled
-                .zone_image_resolver
-                .zone_manifest
-                .boot_inventory
-            {
-                Ok(zm) => zm,
-                Err(message) => {
-                    // This is a string so we don't use InlineErrorChain::new.
-                    let message: &str = message;
-                    warn!(
-                        self.log,
-                        "skipping noop image source check since \
-                         sled-agent encountered error retrieving zone manifest \
-                         (this is abnormal)";
-                        "sled_id" => %sled_id,
-                        "error" => %message,
-                    );
-                    continue;
+                    maybe_eligible
                 }
             };
 
-            // Does the blueprint have the remove_mupdate_override field set for
-            // this sled? If it does, we don't want to touch the zones on this
-            // sled (they should all be InstallDataset until the
-            // remove_mupdate_override field is cleared).
-            if let Some(id) =
-                self.blueprint.sled_get_remove_mupdate_override(sled_id)?
-            {
-                info!(
+            let zone_counts = eligible.zone_counts();
+            if zone_counts.num_install_dataset() == 0 {
+                debug!(
                     self.log,
-                    "skipping noop image source check on sled \
-                     (blueprint has get_remove_mupdate_override set for sled)";
-                    "sled_id" => %sled_id,
-                    "bp_remove_mupdate_override_id" => %id,
+                    "all zones are already Artifact, so \
+                     no noop image source action required";
+                    "num_total" => zone_counts.num_total,
                 );
                 continue;
             }
+            if zone_counts.num_maybe_eligible > 0 {
+                info!(
+                    self.log,
+                    "noop converting {}/{} install-dataset zones to artifact store",
+                    // If we're here, then num_maybe_eligible represents
+                    // actually eligible zones.
+                    zone_counts.num_maybe_eligible,
+                    zone_counts.num_install_dataset();
+                    "sled_id" => %sled.sled_id,
+                    "num_total" => zone_counts.num_total,
+                    "num_already_artifact" => zone_counts.num_already_artifact,
+                );
+            }
 
-            // Which zones have image sources set to InstallDataset?
-            let install_dataset_zones = self
-                .blueprint
-                .current_sled_zones(
-                    sled_id,
-                    BlueprintZoneDisposition::is_in_service,
-                )
-                .filter(|z| {
-                    z.image_source == BlueprintZoneImageSource::InstallDataset
-                });
-
-            // Out of these, which zones' hashes (as reported in the zone
-            // manifest) match the corresponding ones in the TUF repo?
-            let mut install_dataset_zone_count = 0;
-            let matching_zones: Vec<_> = install_dataset_zones
-                .inspect(|_| {
-                    install_dataset_zone_count += 1;
-                })
-                .filter_map(|z| {
-                    let file_name = z.kind().artifact_in_install_dataset();
-                    let Some(artifact) = zone_manifest.artifacts.get(file_name)
-                    else {
-                        // The blueprint indicates that a zone should be present
-                        // that isn't in the install dataset. This might be an old
-                        // install dataset with a zone kind known to this version of
-                        // Nexus that isn't present in it. Not normally a cause for
-                        // concern.
-                        debug!(
-                            self.log,
-                            "blueprint zone not found in zone manifest, \
-                             ignoring for noop checks";
-                            "sled_id" => %sled_id,
-                            "zone_id" => %z.id,
-                            "kind" => z.kind().report_str(),
-                            "file_name" => file_name,
-                        );
-                        return None;
-                    };
-                    if let Err(message) = &artifact.status {
-                        // The artifact is somehow invalid and corrupt -- definitely
-                        // something to warn about and not proceed.
-                        warn!(
-                            self.log,
-                            "zone manifest inventory indicated install dataset \
-                             artifact is invalid, not using artifact (this is \
-                             abnormal)";
-                            "sled_id" => %sled_id,
-                            "zone_id" => %z.id,
-                            "kind" => z.kind().report_str(),
-                            "file_name" => file_name,
-                            "error" => %message,
-                        );
-                        return None;
+            for zone in &eligible.zones {
+                match &zone.status {
+                    NoopConvertZoneStatus::Eligible(new_image_source) => {
+                        self.blueprint.sled_set_zone_source(
+                            sled.sled_id,
+                            zone.zone_id,
+                            new_image_source.clone(),
+                        )?;
                     }
+                    NoopConvertZoneStatus::AlreadyArtifact { .. }
+                    | NoopConvertZoneStatus::Ineligible(_) => {}
+                }
+            }
 
-                    // Does the hash match what's in the TUF repo?
-                    let Some(tuf_artifact) =
-                        artifacts_by_hash.get(&artifact.expected_hash)
-                    else {
-                        debug!(
-                            self.log,
-                            "install dataset artifact hash not found in TUF repo, \
-                             ignoring for noop checks";
-                            "sled_id" => %sled_id,
-                            "zone_id" => %z.id,
-                            "kind" => z.kind().report_str(),
-                            "file_name" => file_name,
-                        );
-                        return None;
-                    };
-
-                    info!(
-                        self.log,
-                        "install dataset artifact hash matches TUF repo, \
-                         switching out the zone image source to Artifact";
-                        "sled_id" => %sled_id,
-                        "tuf_artifact_id" => %tuf_artifact.id,
-                    );
-                    Some((z.id, tuf_artifact))
-                })
-                .collect();
-
-            info!(
-                self.log,
-                "noop converting {}/{} install-dataset zones to artifact store",
-                matching_zones.len(),
-                install_dataset_zone_count;
-                "sled_id" => %sled_id,
-            );
-
-            // Set all these zones' image sources to the corresponding
-            // blueprint.
-            for (zone_id, tuf_artifact) in &matching_zones {
-                self.blueprint.sled_set_zone_source(
-                    sled_id,
-                    *zone_id,
-                    BlueprintZoneImageSource::from_available_artifact(
-                        tuf_artifact,
-                    ),
-                )?;
+            // Again, if we're here, then num_maybe_eligible represents actually
+            // eligible zones.
+            if zone_counts.num_maybe_eligible > 0 {
                 self.blueprint.record_operation(
                     Operation::SledNoopZoneImageSourcesUpdated {
-                        sled_id,
-                        count: matching_zones.len(),
+                        sled_id: sled.sled_id,
+                        count: zone_counts.num_maybe_eligible,
                     },
                 );
             }
@@ -1495,6 +1426,210 @@ impl<'a> Planner<'a> {
         }
 
         Ok(())
+    }
+
+    fn do_plan_mupdate_override(
+        &mut self,
+        noop_info: &mut NoopConvertInfo,
+    ) -> Result<UpdateStepResult, Error> {
+        // For each sled, compare what's in the inventory to what's in the
+        // blueprint.
+        let mut actions_by_sled = BTreeMap::new();
+        let log = self.log.new(o!("phase" => "do_plan_mupdate_override"));
+
+        // We use the list of in-service sleds here -- we don't want to alter
+        // expunged or decommissioned sleds.
+        for sled_id in self.input.all_sled_ids(SledFilter::InService) {
+            let log = log.new(o!("sled_id" => sled_id.to_string()));
+            let Some(inv_sled) = self.inventory.sled_agents.get(&sled_id)
+            else {
+                warn!(log, "no inventory found for in-service sled");
+                continue;
+            };
+            let action = match &inv_sled
+                .zone_image_resolver
+                .mupdate_override
+                .boot_override
+            {
+                Ok(inv_mupdate_override) => {
+                    self.blueprint.sled_ensure_mupdate_override(
+                        sled_id,
+                        inv_mupdate_override
+                            .as_ref()
+                            .map(|inv| inv.mupdate_override_id),
+                        noop_info,
+                    )?
+                }
+                Err(message) => EnsureMupdateOverrideAction::GetOverrideError {
+                    message: message.clone(),
+                },
+            };
+            action.log_to(&log);
+            actions_by_sled.insert(sled_id, action);
+        }
+
+        // As a result of the action above, did any sleds get a new mupdate
+        // override in the blueprint? In that case, halt consideration of
+        // updates by setting the target_release_minimum_generation.
+        //
+        // Note that this is edge-triggered, not level-triggered. This is a
+        // domain requirement. Consider what happens if:
+        //
+        // 1. Let's say the target release generation is 5.
+        // 2. A sled is mupdated.
+        // 3. As a result of the mupdate, we update the target release minimum
+        //    generation to 6.
+        // 4. Then, an operator sets the target release generation to 6.
+        //
+        // At this point, we *do not* want to set the blueprint's minimum
+        // generation to 7. We only want to do it if we acknowledged a new sled
+        // getting mupdated.
+        //
+        // Some notes:
+        //
+        // * We only process sleds that are currently in the inventory. This
+        //   means that if some sleds take longer to come back up than others
+        //   and the target release is updated in the middle, we'll potentially
+        //   bump the minimum generation multiple times, asking the operator to
+        //   intervene each time.
+        //
+        //   It's worth considering ways to mitigate this in the future: for
+        //   example, we could ensure that for a particular TUF repo a shared
+        //   mupdate override ID is assigned by wicketd, and track the override
+        //   IDs that are currently in flight.
+        //
+        // * We aren't handling errors while fetching the mupdate override here.
+        //   We don't have a history of state transitions for the mupdate
+        //   override, so we can't do edge-triggered logic. We probably need
+        //   another channel to report errors. (But in general, errors should be
+        //   rare.)
+        if actions_by_sled.values().any(|action| {
+            matches!(action, EnsureMupdateOverrideAction::BpSetOverride { .. })
+        }) {
+            let current = self.blueprint.target_release_minimum_generation();
+            let new = self.input.tuf_repo().target_release_generation.next();
+            if current == new {
+                // No change needed.
+                info!(
+                    log,
+                    "would have updated target release minimum generation, but \
+                     it was already set to the desired value, so no change was \
+                     needed";
+                    "generation" => %current,
+                );
+            } else {
+                if current < new {
+                    info!(
+                        log,
+                        "updating target release minimum generation based on \
+                         new set-override actions";
+                        "current_generation" => %current,
+                        "new_generation" => %new,
+                    );
+                } else {
+                    // It would be very strange for the current value to be
+                    // greater than the new value. That would indicate something
+                    // like a row being removed from the target release
+                    // generation table -- one of the invariants of the target
+                    // release generation is that it only moves forward.
+                    //
+                    // In this case we bail out of planning entirely.
+                    return Err(
+                        Error::TargetReleaseMinimumGenerationRollback {
+                            current,
+                            new,
+                        },
+                    );
+                }
+                self.blueprint
+                    .set_target_release_minimum_generation(current, new)
+                    .expect("current value passed in => can't fail");
+            }
+        }
+
+        // Now we need to determine whether to also perform other actions like
+        // updating or adding zones. We have to be careful here:
+        //
+        // * We may have moved existing zones with an Artifact source to using
+        //   the install dataset via the BpSetOverride action, but we don't want
+        //   to use the install dataset on sleds that weren't MUPdated (because
+        //   the install dataset might be ancient).
+        //
+        // * While any overrides are in place according to inventory, we wait
+        //   for the system to recover and don't start new zones on *any* sleds,
+        //   or perform any further updates.
+        //
+        // This condition is level-triggered on the following conditions:
+        //
+        // 1. If the planning input's target release generation is less than the
+        //    minimum generation set in the blueprint, the operator hasn't set a
+        //    new generation in the blueprint -- we should wait to decide what
+        //    to do until the operator provides an indication.
+        //
+        // 2. If any sleds have a mupdate override set in the blueprint, then
+        //    we're still recovering from a MUPdate. If that is the case, we
+        //    don't want to add zones on *any* sled.
+        //
+        //    This might seem overly conservative (why block zone additions on
+        //    *all* sleds if *any* are currently recovering from a MUPdate?),
+        //    but is probably correct for the medium term: we want to minimize
+        //    the number of different versions of services running at any time.
+        //
+        //    There's some potential to relax this in the future (e.g. by
+        //    matching up the zone manifest with the target release to compute
+        //    the number of versions running at a given time), but that's a
+        //    non-trivial optimization that we should probably defer until we
+        //    see its necessity.
+        //
+        // What does "any sleds" mean in this context? We don't need to care
+        // about decommissioned or expunged sleds, so we consider in-service
+        // sleds.
+        let mut reasons = Vec::new();
+
+        // Condition 1 above.
+        if self.blueprint.target_release_minimum_generation()
+            > self.input.tuf_repo().target_release_generation
+        {
+            reasons.push(format!(
+                "current target release generation ({}) is lower than \
+                 minimum required by blueprint ({})",
+                self.input.tuf_repo().target_release_generation,
+                self.blueprint.target_release_minimum_generation(),
+            ));
+        }
+
+        // Condition 2 above.
+        {
+            let mut sleds_with_override = BTreeSet::new();
+            for sled_id in self.input.all_sled_ids(SledFilter::InService) {
+                if self
+                    .blueprint
+                    .sled_get_remove_mupdate_override(sled_id)?
+                    .is_some()
+                {
+                    sleds_with_override.insert(sled_id);
+                }
+            }
+
+            if !sleds_with_override.is_empty() {
+                reasons.push(format!(
+                    "sleds have remove mupdate override set in blueprint: {}",
+                    sleds_with_override.iter().join(", ")
+                ));
+            }
+        }
+
+        if !reasons.is_empty() {
+            let reasons = reasons.join("; ");
+            info!(
+                log,
+                "not ready to add or update new zones yet";
+                "reasons" => reasons,
+            );
+            Ok(UpdateStepResult::Waiting)
+        } else {
+            Ok(UpdateStepResult::ContinueToNextStep)
+        }
     }
 
     fn do_plan_cockroachdb_settings(&mut self) {
