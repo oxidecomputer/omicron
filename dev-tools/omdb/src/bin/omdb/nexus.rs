@@ -1258,11 +1258,12 @@ fn print_task_blueprint_planner(details: &serde_json::Value) {
                      but could not make it the target: {error}"
             );
         }
-        BlueprintPlannerStatus::Targeted { blueprint_id, .. } => {
+        BlueprintPlannerStatus::Targeted { blueprint_id, report, .. } => {
             println!(
                 "    planned new blueprint {blueprint_id}, \
                      and made it the current target"
             );
+            println!("{report}");
         }
     }
 }
