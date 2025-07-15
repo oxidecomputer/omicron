@@ -333,6 +333,7 @@ mod test {
     use nexus_test_utils::resource_helpers::create_silo;
     use nexus_test_utils_macros::nexus_test;
     use nexus_types::deployment::Blueprint;
+    use nexus_types::deployment::BlueprintHostPhase2DesiredSlots;
     use nexus_types::deployment::BlueprintSledConfig;
     use nexus_types::deployment::BlueprintTarget;
     use nexus_types::deployment::BlueprintZoneConfig;
@@ -697,6 +698,8 @@ mod test {
                     datasets: IdMap::new(),
                     zones,
                     remove_mupdate_override: None,
+                    host_phase_2:
+                        BlueprintHostPhase2DesiredSlots::current_contents(),
                 },
             );
         }
