@@ -13,7 +13,6 @@ CREATE TABLE IF NOT EXISTS audit_log (
     access_method STRING,
 
     -- fields we can only fill in after the operation
-    resource_id UUID,
     time_completed TIMESTAMPTZ,
     http_status_code INT4,
     error_code STRING,

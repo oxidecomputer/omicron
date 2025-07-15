@@ -10,7 +10,6 @@ SELECT
     actor_id,
     actor_silo_id,
     access_method,
-    resource_id,
     time_completed,
     http_status_code,
     error_code,

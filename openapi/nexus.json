@@ -14440,12 +14440,6 @@
             "description": "Full URL of the request",
             "type": "string"
           },
-          "resource_id": {
-            "nullable": true,
-            "description": "Resource identifier",
-            "type": "string",
-            "format": "uuid"
-          },
           "source_ip": {
             "description": "IP address that made the request",
             "type": "string",

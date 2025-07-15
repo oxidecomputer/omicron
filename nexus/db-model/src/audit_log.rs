@@ -63,16 +63,6 @@ pub struct AuditLogEntry {
     pub actor_silo_id: Option<Uuid>,
     pub access_method: Option<String>,
 
-    // TODO: RFD 523 says: "Additionally, the response (or error) data should be
-    // included in the same log entry as the original request data. Separating
-    // the response from the request into two different log entries is extremely
-    // expensive for customers to identify which requests correspond to which
-    // responses."
-
-    // Seems like it has to be optional because at the beginning of the
-    // operation, we have not yet resolved the resource selector to an ID
-    pub resource_id: Option<Uuid>,
-
     // Fields that are not present on init
     /// Time log entry was completed with info about result of operation
     pub time_completed: DateTime<Utc>,
@@ -139,7 +129,6 @@ impl From<AuditLogEntry> for views::AuditLogEntry {
             operation_id: entry.operation_id,
             source_ip: entry.source_ip.ip(),
             user_agent: entry.user_agent,
-            resource_id: entry.resource_id,
             // TODO: make robust by writing down actor type at DB write time
             // rather than assuming it based on the presence or absence of user
             // and silo IDs

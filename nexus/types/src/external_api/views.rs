@@ -1572,9 +1572,6 @@ pub struct AuditLogEntry {
     pub access_method: Option<String>,
 
     // Fields that are optional because they get filled in after the action completes
-    /// Resource identifier
-    pub resource_id: Option<Uuid>,
-
     /// Time operation completed
     pub time_completed: DateTime<Utc>,
 
