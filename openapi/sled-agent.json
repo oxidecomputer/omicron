@@ -875,8 +875,9 @@
     },
     "/support-bundles/{zpool_id}/{dataset_id}/{support_bundle_id}": {
       "post": {
-        "summary": "Create a support bundle within a particular dataset",
-        "operationId": "support_bundle_create",
+        "summary": "Starts creation of a support bundle within a particular dataset",
+        "description": "Callers should transfer chunks of the bundle with \"support_bundle_transfer\", and then call \"support_bundle_finalize\" once the bundle has finished transferring.\n\nIf a support bundle was previously created without being finalized successfully, this endpoint will reset the state.\n\nIf a support bundle was previously created and finalized successfully, this endpoint will return metadata indicating that it already exists.",
+        "operationId": "support_bundle_start_creation",
         "parameters": [
           {
             "in": "path",
@@ -904,28 +905,8 @@
             "schema": {
               "$ref": "#/components/schemas/TypedUuidForZpoolKind"
             }
-          },
-          {
-            "in": "query",
-            "name": "hash",
-            "required": true,
-            "schema": {
-              "type": "string",
-              "format": "hex string (32 bytes)"
-            }
           }
         ],
-        "requestBody": {
-          "content": {
-            "application/octet-stream": {
-              "schema": {
-                "type": "string",
-                "format": "binary"
-              }
-            }
-          },
-          "required": true
-        },
         "responses": {
           "201": {
             "description": "successful creation",
@@ -1216,6 +1197,69 @@
         }
       }
     },
+    "/support-bundles/{zpool_id}/{dataset_id}/{support_bundle_id}/finalize": {
+      "post": {
+        "summary": "Finalizes the creation of a support bundle",
+        "description": "If the requested hash matched the bundle, the bundle is created. Otherwise, an error is returned.",
+        "operationId": "support_bundle_finalize",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "dataset_id",
+            "description": "The dataset on which this support bundle was provisioned",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/TypedUuidForDatasetKind"
+            }
+          },
+          {
+            "in": "path",
+            "name": "support_bundle_id",
+            "description": "The ID of the support bundle itself",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/TypedUuidForSupportBundleKind"
+            }
+          },
+          {
+            "in": "path",
+            "name": "zpool_id",
+            "description": "The zpool on which this support bundle was provisioned",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/TypedUuidForZpoolKind"
+            }
+          },
+          {
+            "in": "query",
+            "name": "hash",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "hex string (32 bytes)"
+            }
+          }
+        ],
+        "responses": {
+          "201": {
+            "description": "successful creation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SupportBundleMetadata"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
     "/support-bundles/{zpool_id}/{dataset_id}/{support_bundle_id}/index": {
       "get": {
         "summary": "Fetch the index (list of files within a support bundle)",
@@ -1316,6 +1360,80 @@
                 "schema": {}
               }
             }
+          }
+        }
+      }
+    },
+    "/support-bundles/{zpool_id}/{dataset_id}/{support_bundle_id}/transfer": {
+      "put": {
+        "summary": "Transfers a chunk of a support bundle within a particular dataset",
+        "operationId": "support_bundle_transfer",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "dataset_id",
+            "description": "The dataset on which this support bundle was provisioned",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/TypedUuidForDatasetKind"
+            }
+          },
+          {
+            "in": "path",
+            "name": "support_bundle_id",
+            "description": "The ID of the support bundle itself",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/TypedUuidForSupportBundleKind"
+            }
+          },
+          {
+            "in": "path",
+            "name": "zpool_id",
+            "description": "The zpool on which this support bundle was provisioned",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/TypedUuidForZpoolKind"
+            }
+          },
+          {
+            "in": "query",
+            "name": "offset",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "format": "uint64",
+              "minimum": 0
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/octet-stream": {
+              "schema": {
+                "type": "string",
+                "format": "binary"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "description": "successful creation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SupportBundleMetadata"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
           }
         }
       }
@@ -6500,7 +6618,8 @@
             "type": "array",
             "items": {
               "$ref": "#/components/schemas/HostIdentifier"
-            }
+            },
+            "uniqueItems": true
           },
           "filter_ports": {
             "nullable": true,

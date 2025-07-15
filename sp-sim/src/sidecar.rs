@@ -1272,6 +1272,23 @@ impl SpHandler for Handler {
             }
         }
     }
+
+    fn read_host_flash(
+        &mut self,
+        _slot: u16,
+        _addr: u32,
+        _buf: &mut [u8],
+    ) -> Result<(), SpError> {
+        Err(SpError::RequestUnsupportedForSp)
+    }
+
+    fn start_host_flash_hash(&mut self, _slot: u16) -> Result<(), SpError> {
+        Err(SpError::RequestUnsupportedForSp)
+    }
+
+    fn get_host_flash_hash(&mut self, _slot: u16) -> Result<[u8; 32], SpError> {
+        Err(SpError::RequestUnsupportedForSp)
+    }
 }
 
 impl SimSpHandler for Handler {

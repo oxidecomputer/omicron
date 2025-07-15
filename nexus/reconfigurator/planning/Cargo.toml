@@ -13,6 +13,7 @@ chrono.workspace = true
 debug-ignore.workspace = true
 daft.workspace = true
 gateway-client.workspace = true
+iddqd.workspace = true
 id-map.workspace = true
 illumos-utils.workspace = true
 indexmap.workspace = true
@@ -47,6 +48,7 @@ omicron-workspace-hack.workspace = true
 dropshot.workspace = true
 expectorate.workspace = true
 maplit.workspace = true
+omicron-cockroach-metrics.workspace = true
 omicron-common = { workspace = true, features = ["testing"] }
 omicron-test-utils.workspace = true
 proptest.workspace = true

@@ -696,7 +696,7 @@ source = "git+https://github.com/oxidecomputer/propolis?rev=c03bd1a29c775acfc65d
 dependencies = [
  "bhyve_api_sys",
  "libc",
- "strum",
+ "strum 0.26.3",
 ]
 
 [[package]]
@@ -705,7 +705,7 @@ version = "0.0.0"
 source = "git+https://github.com/oxidecomputer/propolis?rev=c03bd1a29c775acfc65de561b8fc436e2459a633#c03bd1a29c775acfc65de561b8fc436e2459a633"
 dependencies = [
  "libc",
- "strum",
+ "strum 0.26.3",
 ]
 
 [[package]]
@@ -714,7 +714,7 @@ version = "0.69.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "271383c67ccabffb7381723dea0672a673f292304fcb45c01cc648c7a8d58088"
 dependencies = [
- "bitflags 2.9.0",
+ "bitflags 2.9.1",
  "cexpr",
  "clang-sys",
  "itertools 0.12.1",
@@ -737,7 +737,7 @@ version = "0.71.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "5f58bf3d7db68cfbac37cfc485a8d711e87e064c3d0fe0435b92f7a407f9d6b3"
 dependencies = [
- "bitflags 2.9.0",
+ "bitflags 2.9.1",
  "cexpr",
  "clang-sys",
  "itertools 0.13.0",
@@ -806,9 +806,9 @@ checksum = "bef38d45163c2f1dde094a7dfd33ccf595c92905c8f8f4fdc18d06fb1037718a"
 
 [[package]]
 name = "bitflags"
-version = "2.9.0"
+version = "2.9.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "5c8214115b7bf84099f1309324e63141d4c5d7cc26862f97a0a857dbefe165bd"
+checksum = "1b8e56985ec62d17e9c1001dc89c88ecd7dc08e47eba5ec7c29c7b5eeecde967"
 dependencies = [
  "serde",
 ]
@@ -1982,7 +1982,7 @@ version = "0.28.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "829d955a0bb380ef178a640b91779e3987da38c9aea133b20614cfed8cdea9c6"
 dependencies = [
- "bitflags 2.9.0",
+ "bitflags 2.9.1",
  "crossterm_winapi",
  "futures-core",
  "mio",
@@ -2518,7 +2518,7 @@ version = "2.2.11"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "a917a9209950404d5be011c81d081a2692a822f73c3d6af586f0cab5ff50f614"
 dependencies = [
- "bitflags 2.9.0",
+ "bitflags 2.9.1",
  "byteorder",
  "chrono",
  "diesel_derives",
@@ -3576,24 +3576,26 @@ dependencies = [
 [[package]]
 name = "gateway-ereport-messages"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/management-gateway-service?rev=0e1e055b66ec007c537e5bd45e210c245f9c537d#0e1e055b66ec007c537e5bd45e210c245f9c537d"
+source = "git+https://github.com/oxidecomputer/management-gateway-service?rev=77e316c812aa057b9714d0d99c4a7bdd36d45be2#77e316c812aa057b9714d0d99c4a7bdd36d45be2"
 dependencies = [
+ "serde",
  "zerocopy 0.8.26",
 ]
 
 [[package]]
 name = "gateway-messages"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/management-gateway-service?rev=0e1e055b66ec007c537e5bd45e210c245f9c537d#0e1e055b66ec007c537e5bd45e210c245f9c537d"
+source = "git+https://github.com/oxidecomputer/management-gateway-service?rev=77e316c812aa057b9714d0d99c4a7bdd36d45be2#77e316c812aa057b9714d0d99c4a7bdd36d45be2"
 dependencies = [
- "bitflags 2.9.0",
+ "bitflags 2.9.1",
  "hubpack",
  "serde",
  "serde-big-array",
  "serde_repr",
  "smoltcp 0.9.1",
  "static_assertions",
- "strum_macros 0.25.3",
+ "strum 0.27.1",
+ "strum_macros 0.27.1",
  "uuid",
  "zerocopy 0.8.26",
 ]
@@ -3601,7 +3603,7 @@ dependencies = [
 [[package]]
 name = "gateway-sp-comms"
 version = "0.1.1"
-source = "git+https://github.com/oxidecomputer/management-gateway-service?rev=0e1e055b66ec007c537e5bd45e210c245f9c537d#0e1e055b66ec007c537e5bd45e210c245f9c537d"
+source = "git+https://github.com/oxidecomputer/management-gateway-service?rev=77e316c812aa057b9714d0d99c4a7bdd36d45be2#77e316c812aa057b9714d0d99c4a7bdd36d45be2"
 dependencies = [
  "async-trait",
  "backoff",
@@ -3770,7 +3772,7 @@ version = "0.19.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "b903b73e45dc0c6c596f2d37eccece7c1c8bb6e4407b001096387c63d0d93724"
 dependencies = [
- "bitflags 2.9.0",
+ "bitflags 2.9.1",
  "libc",
  "libgit2-sys",
  "log",
@@ -3802,7 +3804,7 @@ version = "0.9.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "0bf760ebf69878d9fd8f110c89703d90ce35095324d1f1edcb595c63945ee757"
 dependencies = [
- "bitflags 2.9.0",
+ "bitflags 2.9.1",
  "ignore",
  "walkdir",
 ]
@@ -4740,7 +4742,7 @@ name = "illumos-sys-hdrs"
 version = "0.1.0"
 source = "git+https://github.com/oxidecomputer/opte?rev=23cebf3b1c911f09c203f7df50cc06bf780338e5#23cebf3b1c911f09c203f7df50cc06bf780338e5"
 dependencies = [
- "bitflags 2.9.0",
+ "bitflags 2.9.1",
 ]
 
 [[package]]
@@ -4856,7 +4858,7 @@ version = "0.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "1bf487a5cb3a9d3346e5b7dac34193ba0b2aefe5d1c196e8caf454c19e200a04"
 dependencies = [
- "bitflags 2.9.0",
+ "bitflags 2.9.1",
  "ingot-macros",
  "ingot-types",
  "macaddr",
@@ -5477,7 +5479,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "4979f22fdb869068da03c9f7528f8297c6fd2606bc3a4affe42e6a823fdb8da4"
 dependencies = [
  "cfg-if",
- "windows-targets 0.52.6",
+ "windows-targets 0.48.5",
 ]
 
 [[package]]
@@ -5532,7 +5534,7 @@ version = "0.1.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c0ff37bd590ca25063e35af745c343cb7a0271906fb7b37e4813e8f79f00268d"
 dependencies = [
- "bitflags 2.9.0",
+ "bitflags 2.9.1",
  "libc",
  "redox_syscall 0.5.7",
 ]
@@ -6099,7 +6101,7 @@ dependencies = [
  "serde",
  "serde_urlencoded",
  "slog",
- "strum",
+ "strum 0.27.1",
  "thiserror 2.0.12",
  "tokio",
  "uuid",
@@ -6180,7 +6182,7 @@ dependencies = [
  "omicron-rpaths",
  "omicron-workspace-hack",
  "pq-sys",
- "strum",
+ "strum 0.27.1",
  "uuid",
 ]
 
@@ -6237,6 +6239,7 @@ dependencies = [
  "nexus-sled-agent-shared",
  "nexus-types",
  "omicron-certificates",
+ "omicron-cockroach-metrics",
  "omicron-common",
  "omicron-passwords",
  "omicron-rpaths",
@@ -6256,7 +6259,7 @@ dependencies = [
  "slog",
  "slog-error-chain",
  "steno",
- "strum",
+ "strum 0.27.1",
  "thiserror 2.0.12",
  "tokio",
  "tufaceous-artifact",
@@ -6306,6 +6309,7 @@ dependencies = [
  "nexus-sled-agent-shared",
  "nexus-test-utils",
  "nexus-types",
+ "omicron-cockroach-metrics",
  "omicron-common",
  "omicron-passwords",
  "omicron-rpaths",
@@ -6339,7 +6343,7 @@ dependencies = [
  "slog-error-chain",
  "static_assertions",
  "steno",
- "strum",
+ "strum 0.27.1",
  "subprocess",
  "swrite",
  "term",
@@ -6421,10 +6425,12 @@ dependencies = [
  "gateway-messages",
  "gateway-test-utils",
  "gateway-types",
+ "httpmock",
  "id-map",
  "iddqd",
  "nexus-sled-agent-shared",
  "nexus-types",
+ "omicron-cockroach-metrics",
  "omicron-common",
  "omicron-sled-agent",
  "omicron-uuid-kinds",
@@ -6436,7 +6442,7 @@ dependencies = [
  "sled-agent-types",
  "sled-agent-zone-images-examples",
  "slog",
- "strum",
+ "strum 0.27.1",
  "swrite",
  "thiserror 2.0.12",
  "tokio",
@@ -6649,6 +6655,7 @@ dependencies = [
  "expectorate",
  "gateway-client",
  "id-map",
+ "iddqd",
  "illumos-utils",
  "indexmap 2.10.0",
  "internal-dns-resolver",
@@ -6660,6 +6667,7 @@ dependencies = [
  "nexus-reconfigurator-blippy",
  "nexus-sled-agent-shared",
  "nexus-types",
+ "omicron-cockroach-metrics",
  "omicron-common",
  "omicron-test-utils",
  "omicron-uuid-kinds",
@@ -6674,7 +6682,7 @@ dependencies = [
  "slog-error-chain",
  "sp-sim",
  "static_assertions",
- "strum",
+ "strum 0.27.1",
  "test-strategy",
  "thiserror 2.0.12",
  "tufaceous-artifact",
@@ -6794,7 +6802,7 @@ dependencies = [
  "serde",
  "serde_json",
  "sled-hardware-types",
- "strum",
+ "strum 0.27.1",
  "thiserror 2.0.12",
  "tufaceous-artifact",
  "uuid",
@@ -6907,6 +6915,7 @@ dependencies = [
  "newtype-uuid",
  "newtype_derive",
  "nexus-sled-agent-shared",
+ "omicron-cockroach-metrics",
  "omicron-common",
  "omicron-passwords",
  "omicron-uuid-kinds",
@@ -6925,7 +6934,7 @@ dependencies = [
  "slog",
  "slog-error-chain",
  "steno",
- "strum",
+ "strum 0.27.1",
  "test-strategy",
  "thiserror 2.0.12",
  "tough",
@@ -6950,7 +6959,7 @@ version = "0.27.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "2eb04e9c688eff1c89d72b407f168cf79bb9e867a9d3323ed6c01519eb9cc053"
 dependencies = [
- "bitflags 2.9.0",
+ "bitflags 2.9.1",
  "cfg-if",
  "libc",
  "memoffset",
@@ -6962,7 +6971,7 @@ version = "0.28.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "ab2156c4fce2f8df6c499cc1c763e4394b7482525bf2a9701c9d79d215f519e4"
 dependencies = [
- "bitflags 2.9.0",
+ "bitflags 2.9.1",
  "cfg-if",
  "cfg_aliases 0.1.1",
  "libc",
@@ -6974,7 +6983,7 @@ version = "0.29.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "71e2746dc3a24dd78b3cfcb7be93368c6de9963d30f43a6a73998a9cf4b17b46"
 dependencies = [
- "bitflags 2.9.0",
+ "bitflags 2.9.1",
  "cfg-if",
  "cfg_aliases 0.2.1",
  "libc",
@@ -6987,7 +6996,7 @@ version = "0.30.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "74523f3a35e05aba87a1d978330aef40f67b0304ac79c1c00b294c9830543db6"
 dependencies = [
- "bitflags 2.9.0",
+ "bitflags 2.9.1",
  "cfg-if",
  "cfg_aliases 0.2.1",
  "libc",
@@ -7352,11 +7361,13 @@ dependencies = [
  "cockroach-admin-client",
  "futures",
  "omicron-workspace-hack",
+ "parallel-task-set",
  "proptest",
+ "reqwest",
  "serde",
  "serde_json",
  "slog",
- "strum",
+ "strum 0.27.1",
  "tokio",
 ]
 
@@ -7402,7 +7413,7 @@ dependencies = [
  "serde_with",
  "slog",
  "slog-error-chain",
- "strum",
+ "strum 0.27.1",
  "test-strategy",
  "thiserror 2.0.12",
  "tokio",
@@ -7658,6 +7669,7 @@ dependencies = [
  "nexus-test-utils-macros",
  "nexus-types",
  "num-integer",
+ "omicron-cockroach-metrics",
  "omicron-common",
  "omicron-passwords",
  "omicron-rpaths",
@@ -7715,7 +7727,7 @@ dependencies = [
  "slog-term",
  "sp-sim",
  "steno",
- "strum",
+ "strum 0.27.1",
  "subprocess",
  "tempfile",
  "term",
@@ -7804,7 +7816,7 @@ dependencies = [
  "slog",
  "slog-error-chain",
  "steno",
- "strum",
+ "strum 0.27.1",
  "subprocess",
  "support-bundle-viewer",
  "supports-color",
@@ -7849,7 +7861,7 @@ dependencies = [
  "slog-bunyan",
  "slog-term",
  "smf 0.2.3",
- "strum",
+ "strum 0.27.1",
  "tar",
  "thiserror 2.0.12",
  "tokio",
@@ -8094,7 +8106,7 @@ dependencies = [
  "smf 0.2.3",
  "sprockets-tls",
  "static_assertions",
- "strum",
+ "strum 0.27.1",
  "subprocess",
  "tar",
  "tempfile",
@@ -8179,7 +8191,7 @@ dependencies = [
  "base64 0.22.1",
  "base64ct",
  "bitflags 1.3.2",
- "bitflags 2.9.0",
+ "bitflags 2.9.1",
  "bstr",
  "buf-list",
  "byteorder",
@@ -8216,6 +8228,7 @@ dependencies = [
  "futures-sink",
  "futures-task",
  "futures-util",
+ "gateway-ereport-messages",
  "gateway-messages",
  "generic-array",
  "getrandom 0.2.15",
@@ -8288,7 +8301,8 @@ dependencies = [
  "smallvec 1.15.0",
  "spin",
  "string_cache",
- "strum",
+ "strum 0.26.3",
+ "strum 0.27.1",
  "subtle",
  "syn 1.0.109",
  "syn 2.0.104",
@@ -8456,7 +8470,7 @@ version = "0.10.73"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "8505734d46c8ab1e19a1dce3aef597ad87dcb4c37e7188231769bd6bd51cebf8"
 dependencies = [
- "bitflags 2.9.0",
+ "bitflags 2.9.1",
  "cfg-if",
  "foreign-types 0.3.2",
  "libc",
@@ -8499,7 +8513,7 @@ name = "opte"
 version = "0.1.0"
 source = "git+https://github.com/oxidecomputer/opte?rev=23cebf3b1c911f09c203f7df50cc06bf780338e5#23cebf3b1c911f09c203f7df50cc06bf780338e5"
 dependencies = [
- "bitflags 2.9.0",
+ "bitflags 2.9.1",
  "dyn-clone",
  "illumos-sys-hdrs",
  "ingot",
@@ -8738,7 +8752,7 @@ dependencies = [
  "slog-dtrace",
  "slog-error-chain",
  "slog-term",
- "strum",
+ "strum 0.27.1",
  "subprocess",
  "thiserror 2.0.12",
  "tokio",
@@ -8803,7 +8817,7 @@ dependencies = [
  "slog-term",
  "sqlformat",
  "sqlparser",
- "strum",
+ "strum 0.27.1",
  "tabled 0.15.0",
  "tempfile",
  "termtree",
@@ -8989,7 +9003,7 @@ dependencies = [
  "schemars",
  "serde",
  "serde_json",
- "strum",
+ "strum 0.27.1",
  "thiserror 2.0.12",
  "trybuild",
  "uuid",
@@ -9010,7 +9024,7 @@ dependencies = [
  "regex",
  "schemars",
  "serde",
- "strum",
+ "strum 0.26.3",
  "thiserror 1.0.69",
  "uuid",
 ]
@@ -10246,7 +10260,7 @@ checksum = "6fcdab19deb5195a31cf7726a210015ff1496ba1464fd42cb4f537b8b01b471f"
 dependencies = [
  "bit-set 0.8.0",
  "bit-vec 0.8.0",
- "bitflags 2.9.0",
+ "bitflags 2.9.1",
  "lazy_static",
  "num-traits",
  "rand 0.9.1",
@@ -10519,7 +10533,7 @@ version = "0.29.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "eabd94c2f37801c20583fc49dd5cd6b0ba68c716787c2dd6ed18571e1e63117b"
 dependencies = [
- "bitflags 2.9.0",
+ "bitflags 2.9.1",
  "cassowary",
  "compact_str",
  "crossterm",
@@ -10528,7 +10542,7 @@ dependencies = [
  "itertools 0.13.0",
  "lru",
  "paste",
- "strum",
+ "strum 0.26.3",
  "unicode-segmentation",
  "unicode-truncate",
  "unicode-width 0.2.0",
@@ -10658,7 +10672,7 @@ version = "0.5.7"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "9b6dfecf2c74bce2466cabf93f6664d6998a69eb21e39f4207930065b27b771f"
 dependencies = [
- "bitflags 2.9.0",
+ "bitflags 2.9.1",
 ]
 
 [[package]]
@@ -10685,7 +10699,7 @@ dependencies = [
  "nu-ansi-term 0.50.1",
  "serde",
  "strip-ansi-escapes",
- "strum",
+ "strum 0.26.3",
  "strum_macros 0.26.4",
  "thiserror 2.0.12",
  "unicode-segmentation",
@@ -10897,7 +10911,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "b91f7eff05f748767f183df4320a63d6936e9c6107d97c9e6bdd9784f4289c94"
 dependencies = [
  "base64 0.21.7",
- "bitflags 2.9.0",
+ "bitflags 2.9.1",
  "serde",
  "serde_derive",
 ]
@@ -10984,7 +10998,7 @@ dependencies = [
  "aes",
  "aes-gcm",
  "async-trait",
- "bitflags 2.9.0",
+ "bitflags 2.9.1",
  "byteorder",
  "cbc",
  "chacha20",
@@ -11132,7 +11146,7 @@ version = "0.38.37"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "8acb788b847c24f28525660c4d7758620a7210875711f79e7f663cc152726811"
 dependencies = [
- "bitflags 2.9.0",
+ "bitflags 2.9.1",
  "errno",
  "libc",
  "linux-raw-sys 0.4.14",
@@ -11145,7 +11159,7 @@ version = "1.0.7"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c71e83d6afe7ff64890ec6b71d6a69bb8a610ab78ce364b3352876bb4c801266"
 dependencies = [
- "bitflags 2.9.0",
+ "bitflags 2.9.1",
  "errno",
  "libc",
  "linux-raw-sys 0.9.4",
@@ -11294,7 +11308,7 @@ version = "14.0.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "7803e8936da37efd9b6d4478277f4b2b9bb5cdb37a113e8d63222e58da647e63"
 dependencies = [
- "bitflags 2.9.0",
+ "bitflags 2.9.1",
  "cfg-if",
  "clipboard-win",
  "fd-lock",
@@ -11509,7 +11523,7 @@ version = "2.11.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "897b2245f0b511c87893af39b033e5ca9cce68824c4d7e7630b5a1d339658d02"
 dependencies = [
- "bitflags 2.9.0",
+ "bitflags 2.9.1",
  "core-foundation 0.9.4",
  "core-foundation-sys",
  "libc",
@@ -11522,7 +11536,7 @@ version = "3.2.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "271720403f46ca04f7ba6f55d438f8bd878d6b8ca0a1046e8228c4145bcbb316"
 dependencies = [
- "bitflags 2.9.0",
+ "bitflags 2.9.1",
  "core-foundation 0.10.1",
  "core-foundation-sys",
  "libc",
@@ -11835,9 +11849,9 @@ checksum = "0fda2ff0d084019ba4d7c6f371c95d8fd75ce3524c3cb8fb653a3023f6323e64"
 
 [[package]]
 name = "signal-hook"
-version = "0.3.18"
+version = "0.3.17"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d881a16cf4426aa584979d30bd82cb33429027e42122b169753d6ef1085ed6e2"
+checksum = "8621587d4798caf8eb44879d42e56b9a93ea5dcd315a6487c357130095b62801"
 dependencies = [
  "libc",
  "signal-hook-registry",
@@ -12070,7 +12084,7 @@ dependencies = [
  "sled-hardware-types",
  "slog",
  "slog-error-chain",
- "strum",
+ "strum 0.27.1",
  "thiserror 2.0.12",
  "toml 0.8.23",
  "tufaceous-artifact",
@@ -12726,6 +12740,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "strum"
+version = "0.27.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "f64def088c51c9510a8579e3c5d67c65349dcf755e5479ad3d010aa6454e2c32"
+dependencies = [
+ "strum_macros 0.27.1",
+]
+
+[[package]]
 name = "strum_macros"
 version = "0.24.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -12740,11 +12763,11 @@ dependencies = [
 
 [[package]]
 name = "strum_macros"
-version = "0.25.3"
+version = "0.26.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "23dc1fa9ac9c169a78ba62f0b841814b7abae11bdd047b9c58f893439e309ea0"
+checksum = "4c6bee85a5a24955dc440386795aa378cd9cf82acd5f764469152d2270e581be"
 dependencies = [
- "heck 0.4.1",
+ "heck 0.5.0",
  "proc-macro2",
  "quote",
  "rustversion",
@@ -12753,9 +12776,9 @@ dependencies = [
 
 [[package]]
 name = "strum_macros"
-version = "0.26.4"
+version = "0.27.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "4c6bee85a5a24955dc440386795aa378cd9cf82acd5f764469152d2270e581be"
+checksum = "c77a8c5abcaf0f9ce05d62342b7d298c346515365c36b673df4ebe3ced01fde8"
 dependencies = [
  "heck 0.5.0",
  "proc-macro2",
@@ -12865,7 +12888,7 @@ version = "0.6.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "3c879d448e9d986b661742763247d3693ed13609438cf3d006f51f5368a5ba6b"
 dependencies = [
- "bitflags 2.9.0",
+ "bitflags 2.9.1",
  "core-foundation 0.9.4",
  "system-configuration-sys",
 ]
@@ -13575,7 +13598,7 @@ version = "0.6.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "adc82fd73de2a9722ac5da747f12383d2bfdb93591ee6c58486e0097890f05f2"
 dependencies = [
- "bitflags 2.9.0",
+ "bitflags 2.9.1",
  "bytes",
  "futures-util",
  "http",
@@ -13738,7 +13761,7 @@ name = "transceiver-messages"
 version = "0.1.1"
 source = "git+https://github.com/oxidecomputer/transceiver-control?branch=main#f3cb309c2bd2c03423467fd93992e9033ae3133c"
 dependencies = [
- "bitflags 2.9.0",
+ "bitflags 2.9.1",
  "clap",
  "hubpack",
  "schemars",
@@ -13751,7 +13774,7 @@ name = "transceiver-messages"
 version = "0.1.1"
 source = "git+https://github.com/oxidecomputer/transceiver-control#4aac6125a8e6cefbb71d9f8a3d1fe6704207d476"
 dependencies = [
- "bitflags 2.9.0",
+ "bitflags 2.9.1",
  "clap",
  "hubpack",
  "schemars",
@@ -13816,7 +13839,7 @@ dependencies = [
 [[package]]
 name = "tufaceous"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/tufaceous?branch=main#3923a4358e8be55fef0f50859e8ea1efa48f00f0"
+source = "git+https://github.com/oxidecomputer/tufaceous?branch=main#c269f5704d39eb4234e67e18be10d424ef23ac77"
 dependencies = [
  "anyhow",
  "camino",
@@ -13837,7 +13860,7 @@ dependencies = [
 [[package]]
 name = "tufaceous-artifact"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/tufaceous?branch=main#3923a4358e8be55fef0f50859e8ea1efa48f00f0"
+source = "git+https://github.com/oxidecomputer/tufaceous?branch=main#c269f5704d39eb4234e67e18be10d424ef23ac77"
 dependencies = [
  "daft",
  "hex",
@@ -13846,7 +13869,7 @@ dependencies = [
  "semver 1.0.26",
  "serde",
  "serde_human_bytes",
- "strum",
+ "strum 0.26.3",
  "test-strategy",
  "thiserror 2.0.12",
 ]
@@ -13854,7 +13877,7 @@ dependencies = [
 [[package]]
 name = "tufaceous-brand-metadata"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/tufaceous?branch=main#3923a4358e8be55fef0f50859e8ea1efa48f00f0"
+source = "git+https://github.com/oxidecomputer/tufaceous?branch=main#c269f5704d39eb4234e67e18be10d424ef23ac77"
 dependencies = [
  "semver 1.0.26",
  "serde",
@@ -13866,7 +13889,7 @@ dependencies = [
 [[package]]
 name = "tufaceous-lib"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/tufaceous?branch=main#3923a4358e8be55fef0f50859e8ea1efa48f00f0"
+source = "git+https://github.com/oxidecomputer/tufaceous?branch=main#c269f5704d39eb4234e67e18be10d424ef23ac77"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -14699,9 +14722,9 @@ dependencies = [
 
 [[package]]
 name = "webpki-roots"
-version = "1.0.0"
+version = "1.0.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "2853738d1cc4f2da3a225c18ec6c3721abb31961096e9dbf5ab35fa88b19cfdb"
+checksum = "8782dd5a41a24eed3a4f40b606249b3e236ca61adf1f25ea4d45c73de122b502"
 dependencies = [
  "rustls-pki-types",
 ]
@@ -14720,9 +14743,9 @@ dependencies = [
 
 [[package]]
 name = "whoami"
-version = "1.6.0"
+version = "1.5.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "6994d13118ab492c3c80c1f81928718159254c53c472bf9ce36f8dae4add02a7"
+checksum = "372d5b87f58ec45c384ba03563b03544dc5fadc3983e434b286913f5b4a9bb6d"
 dependencies = [
  "redox_syscall 0.5.7",
  "wasite",
@@ -15310,7 +15333,7 @@ version = "0.33.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "3268f3d866458b787f390cf61f4bbb563b922d091359f9608842999eaee3943c"
 dependencies = [
- "bitflags 2.9.0",
+ "bitflags 2.9.1",
 ]
 
 [[package]]
@@ -15408,7 +15431,7 @@ dependencies = [
  "slog",
  "slog-async",
  "slog-term",
- "strum",
+ "strum 0.27.1",
  "tar",
  "tokio",
 ]

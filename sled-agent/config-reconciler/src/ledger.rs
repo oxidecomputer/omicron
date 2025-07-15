@@ -69,7 +69,7 @@ pub enum LedgerNewConfigError {
     ConfigurationChanged { generation: Generation },
     #[error("failed to commit sled config to ledger")]
     LedgerCommitFailed(#[source] ledger::Error),
-    #[error("sled config failed artifact store existence checks: {0}")]
+    #[error("sled config is invalid: {0}")]
     ValidationFailed(String),
 }
 
