@@ -16,7 +16,6 @@ use crate::blueprint_editor::SledEditError;
 use crate::mgs_updates::plan_mgs_updates;
 use crate::planner::image_source::NoopConvertInfo;
 use crate::planner::image_source::NoopConvertSledStatus;
-use crate::planner::image_source::NoopConvertZoneCounts;
 use crate::planner::image_source::NoopConvertZoneStatus;
 use crate::planner::omicron_zone_placement::PlacementError;
 use gateway_client::types::SpType;
@@ -521,34 +520,22 @@ impl<'a> Planner<'a> {
             NoopConvertInfo::GlobalIneligible { .. } => return Ok(()),
         };
         for sled in sleds {
-            let zones = match &sled.status {
+            let eligible = match &sled.status {
                 NoopConvertSledStatus::Ineligible(_) => continue,
-                NoopConvertSledStatus::MaybeEligible {
-                    mupdate_override_id,
-                    zones,
-                } => {
+                NoopConvertSledStatus::MaybeEligible(maybe_eligible) => {
                     // If the mupdate override ID is set, we can't do noop
-                    // conversions. Log this fact.
-                    if let Some(override_id) = mupdate_override_id {
-                        info!(
-                            self.log,
-                            "sled is ineligible for noop conversions due to \
-                             mupdate override";
-                            "sled_id" => %sled.sled_id,
-                            "mupdate_override_id" => %override_id,
-                        );
+                    // conversions. This information is already logged so we
+                    // don't need to log it again.
+                    if maybe_eligible.mupdate_override_id.is_some() {
                         continue;
                     }
 
-                    zones
+                    maybe_eligible
                 }
             };
 
-            let zone_counts = NoopConvertZoneCounts::new(zones);
-            let num_install_dataset =
-                zone_counts.num_maybe_eligible + zone_counts.num_ineligible;
-
-            if num_install_dataset == 0 {
+            let zone_counts = eligible.zone_counts();
+            if zone_counts.num_install_dataset() == 0 {
                 debug!(
                     self.log,
                     "all zones are already Artifact, so \
@@ -561,17 +548,17 @@ impl<'a> Planner<'a> {
                 info!(
                     self.log,
                     "noop converting {}/{} install-dataset zones to artifact store",
-                    // If we're here, then the count is of actually eligible zones,
-                    // not just maybe-eligible ones.
+                    // If we're here, then num_maybe_eligible represents
+                    // actually eligible zones.
                     zone_counts.num_maybe_eligible,
-                    num_install_dataset;
+                    zone_counts.num_install_dataset();
                     "sled_id" => %sled.sled_id,
                     "num_total" => zone_counts.num_total,
                     "num_already_artifact" => zone_counts.num_already_artifact,
                 );
             }
 
-            for zone in zones {
+            for zone in &eligible.zones {
                 match &zone.status {
                     NoopConvertZoneStatus::Eligible(new_image_source) => {
                         self.blueprint.sled_set_zone_source(
@@ -585,12 +572,16 @@ impl<'a> Planner<'a> {
                 }
             }
 
-            self.blueprint.record_operation(
-                Operation::SledNoopZoneImageSourcesUpdated {
-                    sled_id: sled.sled_id,
-                    count: zone_counts.num_maybe_eligible,
-                },
-            );
+            // Again, if we're here, then num_maybe_eligible represents actually
+            // eligible zones.
+            if zone_counts.num_maybe_eligible > 0 {
+                self.blueprint.record_operation(
+                    Operation::SledNoopZoneImageSourcesUpdated {
+                        sled_id: sled.sled_id,
+                        count: zone_counts.num_maybe_eligible,
+                    },
+                );
+            }
         }
 
         Ok(())

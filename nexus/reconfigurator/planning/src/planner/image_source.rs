@@ -2,7 +2,7 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-use std::collections::HashMap;
+use std::{collections::HashMap, fmt};
 
 use iddqd::{IdOrdItem, IdOrdMap, id_upcast};
 use nexus_sled_agent_shared::inventory::ZoneKind;
@@ -25,7 +25,7 @@ use crate::blueprint_builder::{BlueprintBuilder, Error};
 #[derive(Clone, Debug)]
 pub(crate) enum NoopConvertInfo {
     /// There's a global reason due to which no-op conversions cannot occur.
-    GlobalIneligible { reason: NoopConvertGlobalIneligibleReason },
+    GlobalIneligible(NoopConvertGlobalIneligibleReason),
 
     /// Global checks have passed.
     GlobalEligible { sleds: IdOrdMap<NoopConvertSledInfo> },
@@ -40,9 +40,9 @@ impl NoopConvertInfo {
         let TargetReleaseDescription::TufRepo(current_artifacts) =
             input.tuf_repo().description()
         else {
-            return Ok(Self::GlobalIneligible {
-                reason: NoopConvertGlobalIneligibleReason::NoTufRepo,
-            });
+            return Ok(Self::GlobalIneligible(
+                NoopConvertGlobalIneligibleReason::NoTargetRelease,
+            ));
         };
 
         let mut sleds = IdOrdMap::new();
@@ -87,26 +87,6 @@ impl NoopConvertInfo {
                 }
             };
 
-            // Does the blueprint have the remove_mupdate_override field set for
-            // this sled? If it does, we don't want to touch the zones on this
-            // sled (they should all be InstallDataset until the
-            // remove_mupdate_override field is cleared).
-            if let Some(override_id) =
-                blueprint.sled_get_remove_mupdate_override(sled_id)?
-            {
-                sleds
-                    .insert_unique(NoopConvertSledInfo {
-                        sled_id,
-                        status: NoopConvertSledStatus::Ineligible(
-                            NoopConvertSledIneligibleReason::BpMupdateOverride {
-                                override_id,
-                            },
-                        ),
-                    })
-                    .expect("sled IDs are unique");
-                continue;
-            }
-
             // Out of these, which zones' hashes (as reported in the zone
             // manifest) match the corresponding ones in the TUF repo?
             let zones = blueprint
@@ -137,10 +117,6 @@ impl NoopConvertInfo {
 
                     let Some(artifact) = zone_manifest.artifacts.get(file_name)
                     else {
-                        // The blueprint indicates that a zone should be present
-                        // that isn't in the install dataset. This might be an old
-                        // install dataset with a zone kind known to this version of
-                        // Nexus that isn't present in it.
                         return NoopConvertZoneInfo {
                             zone_id: z.id,
                             kind: z.kind(),
@@ -192,11 +168,13 @@ impl NoopConvertInfo {
             sleds
                 .insert_unique(NoopConvertSledInfo {
                     sled_id,
-                    status: NoopConvertSledStatus::MaybeEligible {
-                        mupdate_override_id: blueprint
-                            .sled_get_remove_mupdate_override(sled_id)?,
-                        zones,
-                    },
+                    status: NoopConvertSledStatus::MaybeEligible(
+                        NoopConvertSledMaybeEligible {
+                            mupdate_override_id: blueprint
+                                .sled_get_remove_mupdate_override(sled_id)?,
+                            zones,
+                        },
+                    ),
                 })
                 .expect("sled IDs are unique");
         }
@@ -206,13 +184,11 @@ impl NoopConvertInfo {
 
     pub(crate) fn log_to(&self, log: &slog::Logger) {
         match self {
-            Self::GlobalIneligible {
-                reason: NoopConvertGlobalIneligibleReason::NoTufRepo,
-            } => {
+            Self::GlobalIneligible(reason) => {
                 info!(
                     log,
-                    "skipping noop image source check for all sleds \
-                     (no current TUF repo)",
+                    "skipping noop image source check for all sleds";
+                    "reason" => %reason,
                 );
             }
             Self::GlobalEligible { sleds } => {
@@ -228,8 +204,18 @@ impl NoopConvertInfo {
 
 #[derive(Clone, Debug)]
 pub(crate) enum NoopConvertGlobalIneligibleReason {
-    /// No TUF repository is available.
-    NoTufRepo,
+    /// No target release was set.
+    NoTargetRelease,
+}
+
+impl fmt::Display for NoopConvertGlobalIneligibleReason {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::NoTargetRelease => {
+                write!(f, "no target release is currently set")
+            }
+        }
+    }
 }
 
 #[derive(Clone, Debug)]
@@ -255,100 +241,61 @@ pub(crate) enum NoopConvertSledStatus {
 
     /// The sled might be eligible for conversion in case `mupdate_override_id`
     /// is `None`.
-    MaybeEligible {
-        mupdate_override_id: Option<MupdateOverrideUuid>,
-        zones: IdOrdMap<NoopConvertZoneInfo>,
-    },
+    MaybeEligible(NoopConvertSledMaybeEligible),
 }
 
 impl NoopConvertSledStatus {
     fn log_to(&self, log: &slog::Logger) {
         match self {
-            Self::Ineligible(
-                NoopConvertSledIneligibleReason::NotInInventory,
-            ) => {
-                info!(
-                    log,
-                    "skipped noop image source check \
-                     (sled not present in latest inventory collection)"
-                );
-            }
-            Self::Ineligible(
-                NoopConvertSledIneligibleReason::ManifestError { message },
-            ) => {
-                // This is a string so we don't use InlineErrorChain::new.
-                let message: &str = message;
-                warn!(
-                    log,
-                    "skipped noop image source check since \
-                     sled-agent encountered error retrieving zone manifest \
-                     (this is abnormal)";
-                    "error" => %message,
-                );
-            }
-            Self::Ineligible(
-                NoopConvertSledIneligibleReason::BpMupdateOverride {
-                    override_id,
-                },
-            ) => {
-                info!(
-                    log,
-                    "skipped noop image source check on sled \
-                     (blueprint has get_remove_mupdate_override set for sled)";
-                    "bp_remove_mupdate_override_id" => %override_id,
-                );
-            }
-            Self::MaybeEligible { mupdate_override_id, zones } => {
-                let zone_counts = NoopConvertZoneCounts::new(zones);
-
-                if let Some(override_id) = mupdate_override_id {
-                    info!(
-                        log,
-                        "performed noop image source checks on sled \
-                         (maybe_eligible_zones will become eligible if \
-                         mupdate_override_id is cleared in a planning step)";
-                        "mupdate_override_id" => %override_id,
-                        "num_total" => zone_counts.num_total,
-                        "num_already_artifact" => zone_counts.num_already_artifact,
-                        "num_maybe_eligible" => zone_counts.num_maybe_eligible,
-                        "num_ineligible" => zone_counts.num_ineligible,
-                    );
-                } else {
-                    info!(
-                        log,
-                        "performed noop image source checks on sled";
-                        "num_total" => zone_counts.num_total,
-                        "num_already_artifact" => zone_counts.num_already_artifact,
-                        // Since mupdate_override_id is None, eligible zones are
-                        // truly eligible.
-                        "num_eligible" => zone_counts.num_maybe_eligible,
-                        "num_ineligible" => zone_counts.num_ineligible,
-                    );
+            Self::Ineligible(reason) => {
+                // The slog macros require that the log level is determined at
+                // compile time, but we want the different enum variants here to
+                // be logged at different levels. Hence this mess.
+                match reason {
+                    NoopConvertSledIneligibleReason::NotInInventory => {
+                        info!(
+                            log,
+                            "skipped noop image source check on sled";
+                            "reason" => %reason,
+                        )
+                    }
+                    NoopConvertSledIneligibleReason::ManifestError {
+                        ..
+                    } => {
+                        warn!(
+                            log,
+                            "skipped noop image source check on sled";
+                            "reason" => %reason,
+                        )
+                    }
                 }
-
-                for zone in zones {
-                    zone.log_to(log);
-                }
+            }
+            Self::MaybeEligible(sled) => {
+                sled.log_to(log);
             }
         }
     }
 }
 
 #[derive(Clone, Debug)]
-pub(crate) struct NoopConvertZoneCounts {
-    pub(crate) num_total: usize,
-    pub(crate) num_already_artifact: usize,
-    pub(crate) num_maybe_eligible: usize,
-    pub(crate) num_ineligible: usize,
+pub(crate) struct NoopConvertSledMaybeEligible {
+    // A sled is eligible for conversion if the mupdate_override_id is None
+    //
+    // The code is structured in this manner because the planner's mupdate
+    // override step requires access to the sled's zones, and is responsible for
+    // clearing this field if it also clears the mupdate override in the
+    // blueprint.
+    pub(crate) mupdate_override_id: Option<MupdateOverrideUuid>,
+    pub(crate) zones: IdOrdMap<NoopConvertZoneInfo>,
 }
 
-impl NoopConvertZoneCounts {
-    pub(crate) fn new(zones: &IdOrdMap<NoopConvertZoneInfo>) -> Self {
+impl NoopConvertSledMaybeEligible {
+    pub(crate) fn zone_counts(&self) -> NoopConvertZoneCounts {
         let mut num_already_artifact = 0;
         let mut num_maybe_eligible = 0;
         let mut num_ineligible = 0;
 
-        for zone in zones {
+        for zone in &self.zones {
             match &zone.status {
                 NoopConvertZoneStatus::AlreadyArtifact { .. } => {
                     num_already_artifact += 1;
@@ -362,12 +309,61 @@ impl NoopConvertZoneCounts {
             }
         }
 
-        Self {
-            num_total: zones.len(),
+        NoopConvertZoneCounts {
+            num_total: self.zones.len(),
             num_already_artifact,
             num_maybe_eligible,
             num_ineligible,
         }
+    }
+
+    fn log_to(&self, log: &slog::Logger) {
+        let zone_counts = self.zone_counts();
+
+        if let Some(override_id) = self.mupdate_override_id {
+            info!(
+                log,
+                "performed noop image source checks on sled, \
+                 but no conversions will occur because \
+                 remove_mupdate_override is set in the blueprint";
+                "mupdate_override_id" => %override_id,
+                "num_total" => zone_counts.num_total,
+                "num_already_artifact" => zone_counts.num_already_artifact,
+                // This counts the number of zones that would be eligible if
+                // remove_mupdate_override were not set.
+                "num_would_be_eligible" => zone_counts.num_maybe_eligible,
+                "num_ineligible" => zone_counts.num_ineligible,
+            );
+        } else {
+            info!(
+                log,
+                "performed noop image source checks on sled";
+                "num_total" => zone_counts.num_total,
+                "num_already_artifact" => zone_counts.num_already_artifact,
+                // Since mupdate_override_id is None, maybe-eligible zones are
+                // truly eligible.
+                "num_eligible" => zone_counts.num_maybe_eligible,
+                "num_ineligible" => zone_counts.num_ineligible,
+            );
+        }
+
+        for zone in &self.zones {
+            zone.log_to(log);
+        }
+    }
+}
+
+#[derive(Clone, Debug)]
+pub(crate) struct NoopConvertZoneCounts {
+    pub(crate) num_total: usize,
+    pub(crate) num_already_artifact: usize,
+    pub(crate) num_maybe_eligible: usize,
+    pub(crate) num_ineligible: usize,
+}
+
+impl NoopConvertZoneCounts {
+    pub(crate) fn num_install_dataset(&self) -> usize {
+        self.num_maybe_eligible + self.num_ineligible
     }
 }
 
@@ -378,9 +374,17 @@ pub(crate) enum NoopConvertSledIneligibleReason {
 
     /// An error occurred retrieving the sled's install dataset zone manifest.
     ManifestError { message: String },
+}
 
-    /// The blueprint for this sled has remove_mupdate_override set.
-    BpMupdateOverride { override_id: MupdateOverrideUuid },
+impl fmt::Display for NoopConvertSledIneligibleReason {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::NotInInventory => write!(f, "sled not found in inventory"),
+            Self::ManifestError { message } => {
+                write!(f, "error retrieving zone manifest: {}", message)
+            }
+        }
+    }
 }
 
 #[derive(Clone, Debug)]
@@ -409,18 +413,20 @@ impl NoopConvertZoneInfo {
                 );
             }
             NoopConvertZoneStatus::Eligible(new_image_source) => {
-                info!(
+                debug!(
                     log,
-                    "zone is eligible for noop image source conversion";
+                    "zone may be eligible for noop image source conversion";
                     "new_image_source" => %new_image_source,
                 );
             }
             NoopConvertZoneStatus::Ineligible(
                 NoopConvertZoneIneligibleReason::NotInManifest,
             ) => {
-                // This case shouldn't generally happen, but it can currently
-                // happen with rkadm, as well as in the reconfigurator-cli. Mark
-                // it as debug to avoid spamming reconfigurator-cli output.
+                // This case shouldn't generally happen in production, but it
+                // can currently occur in the reconfigurator-cli since our
+                // simulated systems don't have a zone manifest without them
+                // being initialized. Log this at the DEBUG level to avoid
+                // spamming reconfigurator-cli output.
                 debug!(
                     log,
                     "blueprint zone not found in zone manifest, \
@@ -442,11 +448,12 @@ impl NoopConvertZoneInfo {
             NoopConvertZoneStatus::Ineligible(
                 NoopConvertZoneIneligibleReason::NotInTufRepo { expected_hash },
             ) => {
-                // Sleds should all be MUPdated to the same version, so the TUF
-                // repo is expected to contain all the hashes. The only time
-                // that isn't the case is right after a MUPdate when the TUF
-                // repo hasn't been uploaded yet. This isn't quite a warning or
-                // error case, so log this at INFO level.
+                // If a MUPdate happens, sleds should all be MUPdated to the
+                // same version, so the TUF repo is expected to contain all the
+                // hashes. The only time that isn't the case is right after a
+                // MUPdate when the TUF repo hasn't been uploaded yet. This
+                // isn't quite a warning or error case, so log this at the INFO
+                // level.
                 info!(
                     log,
                     "install dataset artifact hash not found in TUF repo, \
