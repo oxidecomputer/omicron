@@ -2695,7 +2695,10 @@ fn after_164_0_0<'a>(ctx: &'a MigrationContext<'a>) -> BoxFuture<'a, ()> {
     Box::pin(async move {
         let rows = ctx
             .client
-            .query("SELECT blueprint_id FROM omicron.public.bp_oximeter_read_policy;", &[])
+            .query(
+                "SELECT blueprint_id FROM omicron.public.bp_oximeter_read_policy ORDER BY blueprint_id;",
+                &[],
+            )
             .await
             .expect("failed to query post-migration bp_oximeter_read_policy table");
         assert_eq!(rows.len(), 2);
