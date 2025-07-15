@@ -7,7 +7,9 @@
 use camino::Utf8PathBuf;
 use dropshot::HttpError;
 use legacy_configs::convert_legacy_ledgers;
+use nexus_sled_agent_shared::inventory::HostPhase2DesiredSlots;
 use nexus_sled_agent_shared::inventory::OmicronSledConfig;
+use nexus_sled_agent_shared::inventory::OmicronZoneImageSource;
 use omicron_common::api::external::Generation;
 use omicron_common::ledger;
 use omicron_common::ledger::Ledger;
@@ -67,8 +69,8 @@ pub enum LedgerNewConfigError {
     ConfigurationChanged { generation: Generation },
     #[error("failed to commit sled config to ledger")]
     LedgerCommitFailed(#[source] ledger::Error),
-    #[error("sled config failed artifact store existence checks: {0}")]
-    ArtifactStoreValidationFailed(String),
+    #[error("sled config is invalid: {0}")]
+    ValidationFailed(String),
 }
 
 impl From<LedgerNewConfigError> for HttpError {
@@ -80,7 +82,7 @@ impl From<LedgerNewConfigError> for HttpError {
             }
             LedgerNewConfigError::GenerationOutdated { .. }
             | LedgerNewConfigError::ConfigurationChanged { .. }
-            | LedgerNewConfigError::ArtifactStoreValidationFailed(_) => {
+            | LedgerNewConfigError::ValidationFailed(_) => {
                 HttpError::for_bad_request(None, message)
             }
             LedgerNewConfigError::LedgerCommitFailed(_) => {
@@ -438,21 +440,48 @@ impl<T: SledAgentArtifactStore> LedgerTask<T> {
             }
         }
 
-        // Continue validating the incoming config. For now, the only other
-        // thing we confirm is that any referenced artifacts are present in the
-        // artifact store.
-        let mut artifact_validation_errors = Vec::new();
+        // Continue validating the incoming config:
+        let mut validation_errors = Vec::new();
+        // * If the config has a remove_mupdate_override set, then all zones
+        //   should have their image source set to InstallDataset.
+        if let Some(mupdate_override_id) = new_config.remove_mupdate_override {
+            for zone in &new_config.zones {
+                match zone.image_source {
+                    OmicronZoneImageSource::InstallDataset => {}
+                    OmicronZoneImageSource::Artifact { hash } => {
+                        validation_errors.push(format!(
+                            "remove mupdate override \
+                            set to {mupdate_override_id}, but zone {} \
+                            has image source Artifact with hash {hash}",
+                            zone.id,
+                        ));
+                    }
+                }
+            }
+
+            if new_config.host_phase_2
+                != HostPhase2DesiredSlots::current_contents()
+            {
+                validation_errors.push(format!(
+                    "remove mupdate override set to {mupdate_override_id}, but \
+                    host phase 2 contents are not set to current: {:#?}",
+                    new_config.host_phase_2,
+                ));
+            }
+        }
+
+        // * Any referenced artifacts are present in the artifact store.
         for artifact_hash in config_artifact_hashes(new_config) {
             match self.artifact_store.get_artifact(artifact_hash).await {
                 Ok(_file) => (),
                 Err(err) => {
-                    artifact_validation_errors.push(format!("{err:#}"));
+                    validation_errors.push(format!("{err:#}"));
                 }
             }
         }
-        if !artifact_validation_errors.is_empty() {
-            return Err(LedgerNewConfigError::ArtifactStoreValidationFailed(
-                artifact_validation_errors.join(", "),
+        if !validation_errors.is_empty() {
+            return Err(LedgerNewConfigError::ValidationFailed(
+                validation_errors.join(", "),
             ));
         }
 
@@ -664,6 +693,7 @@ mod tests {
     use omicron_test_utils::dev::poll::CondCheckError;
     use omicron_test_utils::dev::poll::wait_for_watch_channel_condition;
     use omicron_uuid_kinds::InternalZpoolUuid;
+    use omicron_uuid_kinds::MupdateOverrideUuid;
     use omicron_uuid_kinds::OmicronZoneUuid;
     use omicron_uuid_kinds::PhysicalDiskUuid;
     use omicron_uuid_kinds::ZpoolUuid;
@@ -1092,7 +1122,7 @@ mod tests {
             .expect("can communicate with task")
             .expect_err("config should fail");
         match err {
-            LedgerNewConfigError::ArtifactStoreValidationFailed(_) => (),
+            LedgerNewConfigError::ValidationFailed(_) => (),
             _ => panic!("unexpected error {}", InlineErrorChain::new(&err)),
         }
 
@@ -1128,7 +1158,7 @@ mod tests {
             .expect("can communicate with task")
             .expect_err("config should fail");
         match err {
-            LedgerNewConfigError::ArtifactStoreValidationFailed(_) => (),
+            LedgerNewConfigError::ValidationFailed(_) => (),
             _ => panic!("unexpected error {}", InlineErrorChain::new(&err)),
         }
 
@@ -1140,6 +1170,86 @@ mod tests {
                 hash: existing_artifact_hash,
             },
         };
+
+        test_harness
+            .task_handle
+            .set_new_config(config)
+            .await
+            .expect("can communicate with task")
+            .expect("config should be ledgered");
+
+        logctx.cleanup_successful();
+    }
+
+    #[tokio::test]
+    async fn reject_configs_with_mupdate_override_and_artifact_image_source() {
+        let logctx = dev::test_setup_log(
+            "reject_configs_with_mupdate_override_and_artifact_image_source",
+        );
+
+        // Set up a test harness with a fake artifact.
+        let artifact_hash = ArtifactHash([0; 32]);
+        let test_harness = TestHarness::with_fake_artifacts(
+            logctx.log.clone(),
+            [artifact_hash].into_iter(),
+        )
+        .await;
+
+        // Create a config that references a zone with this artifact hash, and
+        // with remove_mupdate_override set to a value.
+        let mut config = make_nonempty_sled_config();
+        config.remove_mupdate_override = Some(MupdateOverrideUuid::max());
+        config
+            .zones
+            .insert(make_dummy_zone_config_using_artifact_hash(artifact_hash));
+
+        // The ledger task should reject this config due to the artifact store
+        // set to InstallDataset.
+        let err = test_harness
+            .task_handle
+            .set_new_config(config.clone())
+            .await
+            .expect("can communicate with task")
+            .expect_err("config should fail");
+        match err {
+            LedgerNewConfigError::ValidationFailed(message) => {
+                assert!(
+                    message.contains("remove mupdate override set to"),
+                    "error message contains \"remove mupdate override \
+                     set to\": {message}"
+                );
+            }
+            _ => panic!("unexpected error {}", InlineErrorChain::new(&err)),
+        }
+
+        // Try a config where the host phase 2 contents are not set to
+        // CurrentContents.
+        config.generation = config.generation.next();
+        config.zones = IdMap::new();
+        config.host_phase_2 = HostPhase2DesiredSlots {
+            slot_a: HostPhase2DesiredContents::CurrentContents,
+            slot_b: HostPhase2DesiredContents::Artifact { hash: artifact_hash },
+        };
+        let err = test_harness
+            .task_handle
+            .set_new_config(config.clone())
+            .await
+            .expect("can communicate with task")
+            .expect_err("config should fail");
+        match err {
+            LedgerNewConfigError::ValidationFailed(message) => {
+                assert!(
+                    message.contains("remove mupdate override set to"),
+                    "error message contains \"remove mupdate override \
+                     set to\": {message}"
+                );
+            }
+            _ => panic!("unexpected error {}", InlineErrorChain::new(&err)),
+        }
+
+        // Change the config to reference the artifact that does exist; this one
+        // should be accepted.
+        config.host_phase_2 = HostPhase2DesiredSlots::current_contents();
 
         test_harness
             .task_handle

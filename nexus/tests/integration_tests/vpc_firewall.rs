@@ -17,11 +17,12 @@ use nexus_test_utils::resource_helpers::{
 use nexus_test_utils_macros::nexus_test;
 use nexus_types::external_api::views::Vpc;
 use omicron_common::api::external::{
-    IdentityMetadata, L4Port, L4PortRange, ServiceIcmpConfig, VpcFirewallRule,
-    VpcFirewallRuleAction, VpcFirewallRuleDirection, VpcFirewallRuleFilter,
-    VpcFirewallRuleHostFilter, VpcFirewallRulePriority,
-    VpcFirewallRuleProtocol, VpcFirewallRuleStatus, VpcFirewallRuleTarget,
-    VpcFirewallRuleUpdate, VpcFirewallRuleUpdateParams, VpcFirewallRules,
+    IcmpParamRange, IdentityMetadata, L4Port, L4PortRange, ServiceIcmpConfig,
+    VpcFirewallIcmpFilter, VpcFirewallRule, VpcFirewallRuleAction,
+    VpcFirewallRuleDirection, VpcFirewallRuleFilter, VpcFirewallRuleHostFilter,
+    VpcFirewallRulePriority, VpcFirewallRuleProtocol, VpcFirewallRuleStatus,
+    VpcFirewallRuleTarget, VpcFirewallRuleUpdate, VpcFirewallRuleUpdateParams,
+    VpcFirewallRules,
 };
 use omicron_nexus::Nexus;
 use std::convert::TryFrom;
@@ -588,6 +589,68 @@ async fn test_firewall_rules_max_lengths(cptestctx: &ControlPlaneTestContext) {
         format!(
             "unsupported value for \"filters.protocols\": max length {max_parts}"
         )
+    );
+}
+
+#[nexus_test]
+async fn test_firewall_rules_illegal_range(
+    cptestctx: &ControlPlaneTestContext,
+) {
+    let client = &cptestctx.external_client;
+
+    let project_name = "my-project";
+    create_project(&client, &project_name).await;
+
+    let mut rule = VpcFirewallRuleUpdate {
+        name: "illegal-range".parse().unwrap(),
+        description: "".to_string(),
+        status: VpcFirewallRuleStatus::Enabled,
+        direction: VpcFirewallRuleDirection::Inbound,
+        targets: vec![],
+        filters: VpcFirewallRuleFilter {
+            hosts: None,
+            protocols: Some(vec![VpcFirewallRuleProtocol::Icmp(Some(
+                VpcFirewallIcmpFilter {
+                    icmp_type: 0,
+                    code: Some(IcmpParamRange { first: 21, last: 20 }),
+                },
+            ))]),
+            ports: None,
+        },
+        action: VpcFirewallRuleAction::Allow,
+        priority: VpcFirewallRulePriority(65534),
+    };
+
+    let error = object_put_error(
+        client,
+        &format!("/v1/vpc-firewall-rules?vpc=default&project={}", project_name),
+        &VpcFirewallRuleUpdateParams { rules: vec![rule.clone()] },
+        StatusCode::BAD_REQUEST,
+    )
+    .await;
+    assert_eq!(error.error_code, Some("InvalidValue".to_string()));
+    assert_eq!(
+        error.message,
+        "unsupported value for \"code\": range has larger start value than end value"
+    );
+
+    rule.filters.protocols = None;
+    rule.filters.ports = Some(vec![L4PortRange {
+        first: L4Port::try_from(1000).unwrap(),
+        last: L4Port::try_from(900).unwrap(),
+    }]);
+
+    let error = object_put_error(
+        client,
+        &format!("/v1/vpc-firewall-rules?vpc=default&project={}", project_name),
+        &VpcFirewallRuleUpdateParams { rules: vec![rule] },
+        StatusCode::BAD_REQUEST,
+    )
+    .await;
+    assert_eq!(error.error_code, Some("InvalidValue".to_string()));
+    assert_eq!(
+        error.message,
+        "unsupported value for \"l4_port_range\": range has larger start value than end value"
     );
 }
 

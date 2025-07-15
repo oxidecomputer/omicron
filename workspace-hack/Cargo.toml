@@ -26,7 +26,7 @@ base16ct = { version = "0.2.0", default-features = false, features = ["alloc"] }
 base64 = { version = "0.22.1" }
 base64ct = { version = "1.6.0", default-features = false, features = ["std"] }
 bitflags-dff4ba8e3ae991db = { package = "bitflags", version = "1.3.2" }
-bitflags-f595c2ba2a3f28df = { package = "bitflags", version = "2.9.0", default-features = false, features = ["serde"] }
+bitflags-f595c2ba2a3f28df = { package = "bitflags", version = "2.9.1", default-features = false, features = ["serde"] }
 bstr = { version = "1.10.0" }
 buf-list = { version = "1.0.3", default-features = false, features = ["tokio1"] }
 byteorder = { version = "1.5.0" }
@@ -59,7 +59,8 @@ futures-io = { version = "0.3.31" }
 futures-sink = { version = "0.3.31" }
 futures-task = { version = "0.3.31", default-features = false, features = ["std"] }
 futures-util = { version = "0.3.31", features = ["channel", "io", "sink"] }
-gateway-messages = { git = "https://github.com/oxidecomputer/management-gateway-service", rev = "0e1e055b66ec007c537e5bd45e210c245f9c537d", features = ["std"] }
+gateway-ereport-messages = { git = "https://github.com/oxidecomputer/management-gateway-service", rev = "77e316c812aa057b9714d0d99c4a7bdd36d45be2", default-features = false, features = ["debug-impls", "serde"] }
+gateway-messages = { git = "https://github.com/oxidecomputer/management-gateway-service", rev = "77e316c812aa057b9714d0d99c4a7bdd36d45be2", features = ["std"] }
 generic-array = { version = "0.14.7", default-features = false, features = ["more_lengths", "zeroize"] }
 getrandom-6f8ce4dd05d13bba = { package = "getrandom", version = "0.2.15", default-features = false, features = ["js", "rdrand", "std"] }
 group = { version = "0.13.0", default-features = false, features = ["alloc"] }
@@ -123,7 +124,8 @@ slog = { version = "2.7.0", features = ["dynamic-keys", "max_level_trace", "rele
 smallvec = { version = "1.15.0", default-features = false, features = ["const_new"] }
 spin = { version = "0.9.8" }
 string_cache = { version = "0.8.9" }
-strum = { version = "0.26.3", features = ["derive"] }
+strum-2f80eeee3b1b6c7e = { package = "strum", version = "0.26.3", features = ["derive"] }
+strum-754bda37e0fb3874 = { package = "strum", version = "0.27.1", features = ["derive"] }
 subtle = { version = "2.6.1" }
 syn-f595c2ba2a3f28df = { package = "syn", version = "2.0.104", features = ["extra-traits", "fold", "full", "visit", "visit-mut"] }
 thiserror = { version = "2.0.12" }
@@ -158,7 +160,7 @@ base16ct = { version = "0.2.0", default-features = false, features = ["alloc"] }
 base64 = { version = "0.22.1" }
 base64ct = { version = "1.6.0", default-features = false, features = ["std"] }
 bitflags-dff4ba8e3ae991db = { package = "bitflags", version = "1.3.2" }
-bitflags-f595c2ba2a3f28df = { package = "bitflags", version = "2.9.0", default-features = false, features = ["serde"] }
+bitflags-f595c2ba2a3f28df = { package = "bitflags", version = "2.9.1", default-features = false, features = ["serde"] }
 bstr = { version = "1.10.0" }
 buf-list = { version = "1.0.3", default-features = false, features = ["tokio1"] }
 byteorder = { version = "1.5.0" }
@@ -192,7 +194,8 @@ futures-io = { version = "0.3.31" }
 futures-sink = { version = "0.3.31" }
 futures-task = { version = "0.3.31", default-features = false, features = ["std"] }
 futures-util = { version = "0.3.31", features = ["channel", "io", "sink"] }
-gateway-messages = { git = "https://github.com/oxidecomputer/management-gateway-service", rev = "0e1e055b66ec007c537e5bd45e210c245f9c537d", features = ["std"] }
+gateway-ereport-messages = { git = "https://github.com/oxidecomputer/management-gateway-service", rev = "77e316c812aa057b9714d0d99c4a7bdd36d45be2", default-features = false, features = ["debug-impls", "serde"] }
+gateway-messages = { git = "https://github.com/oxidecomputer/management-gateway-service", rev = "77e316c812aa057b9714d0d99c4a7bdd36d45be2", features = ["std"] }
 generic-array = { version = "0.14.7", default-features = false, features = ["more_lengths", "zeroize"] }
 getrandom-6f8ce4dd05d13bba = { package = "getrandom", version = "0.2.15", default-features = false, features = ["js", "rdrand", "std"] }
 group = { version = "0.13.0", default-features = false, features = ["alloc"] }
@@ -256,7 +259,8 @@ slog = { version = "2.7.0", features = ["dynamic-keys", "max_level_trace", "rele
 smallvec = { version = "1.15.0", default-features = false, features = ["const_new"] }
 spin = { version = "0.9.8" }
 string_cache = { version = "0.8.9" }
-strum = { version = "0.26.3", features = ["derive"] }
+strum-2f80eeee3b1b6c7e = { package = "strum", version = "0.26.3", features = ["derive"] }
+strum-754bda37e0fb3874 = { package = "strum", version = "0.27.1", features = ["derive"] }
 subtle = { version = "2.6.1" }
 syn-dff4ba8e3ae991db = { package = "syn", version = "1.0.109", features = ["extra-traits", "fold", "full", "visit"] }
 syn-f595c2ba2a3f28df = { package = "syn", version = "2.0.104", features = ["extra-traits", "fold", "full", "visit", "visit-mut"] }
@@ -285,7 +289,7 @@ zip-164d15cefe24d7eb = { package = "zip", version = "4.2.0", default-features = 
 zip-3b31131e45eafb45 = { package = "zip", version = "0.6.6", default-features = false, features = ["bzip2", "deflate"] }
 
 [target.x86_64-unknown-linux-gnu.dependencies]
-bitflags-f595c2ba2a3f28df = { package = "bitflags", version = "2.9.0", default-features = false, features = ["std"] }
+bitflags-f595c2ba2a3f28df = { package = "bitflags", version = "2.9.1", default-features = false, features = ["std"] }
 cookie = { version = "0.18.1", default-features = false, features = ["percent-encode"] }
 dof = { version = "0.3.0", default-features = false, features = ["des"] }
 getrandom-468e82937335b1c9 = { package = "getrandom", version = "0.3.1", default-features = false, features = ["std"] }
@@ -296,7 +300,7 @@ mio = { version = "1.0.2", features = ["net", "os-ext"] }
 rustix = { version = "0.38.37", features = ["event", "fs", "net", "pipe", "process", "stdio", "system", "termios", "time"] }
 
 [target.x86_64-unknown-linux-gnu.build-dependencies]
-bitflags-f595c2ba2a3f28df = { package = "bitflags", version = "2.9.0", default-features = false, features = ["std"] }
+bitflags-f595c2ba2a3f28df = { package = "bitflags", version = "2.9.1", default-features = false, features = ["std"] }
 cookie = { version = "0.18.1", default-features = false, features = ["percent-encode"] }
 dof = { version = "0.3.0", default-features = false, features = ["des"] }
 getrandom-468e82937335b1c9 = { package = "getrandom", version = "0.3.1", default-features = false, features = ["std"] }
@@ -307,7 +311,7 @@ mio = { version = "1.0.2", features = ["net", "os-ext"] }
 rustix = { version = "0.38.37", features = ["event", "fs", "net", "pipe", "process", "stdio", "system", "termios", "time"] }
 
 [target.x86_64-apple-darwin.dependencies]
-bitflags-f595c2ba2a3f28df = { package = "bitflags", version = "2.9.0", default-features = false, features = ["std"] }
+bitflags-f595c2ba2a3f28df = { package = "bitflags", version = "2.9.1", default-features = false, features = ["std"] }
 cookie = { version = "0.18.1", default-features = false, features = ["percent-encode"] }
 getrandom-468e82937335b1c9 = { package = "getrandom", version = "0.3.1", default-features = false, features = ["std"] }
 hyper-rustls = { version = "0.27.7", features = ["http2", "ring", "webpki-tokio"] }
@@ -316,7 +320,7 @@ mio = { version = "1.0.2", features = ["net", "os-ext"] }
 rustix = { version = "0.38.37", features = ["event", "fs", "net", "pipe", "process", "stdio", "system", "termios", "time"] }
 
 [target.x86_64-apple-darwin.build-dependencies]
-bitflags-f595c2ba2a3f28df = { package = "bitflags", version = "2.9.0", default-features = false, features = ["std"] }
+bitflags-f595c2ba2a3f28df = { package = "bitflags", version = "2.9.1", default-features = false, features = ["std"] }
 cookie = { version = "0.18.1", default-features = false, features = ["percent-encode"] }
 getrandom-468e82937335b1c9 = { package = "getrandom", version = "0.3.1", default-features = false, features = ["std"] }
 hyper-rustls = { version = "0.27.7", features = ["http2", "ring", "webpki-tokio"] }
@@ -325,7 +329,7 @@ mio = { version = "1.0.2", features = ["net", "os-ext"] }
 rustix = { version = "0.38.37", features = ["event", "fs", "net", "pipe", "process", "stdio", "system", "termios", "time"] }
 
 [target.aarch64-apple-darwin.dependencies]
-bitflags-f595c2ba2a3f28df = { package = "bitflags", version = "2.9.0", default-features = false, features = ["std"] }
+bitflags-f595c2ba2a3f28df = { package = "bitflags", version = "2.9.1", default-features = false, features = ["std"] }
 cookie = { version = "0.18.1", default-features = false, features = ["percent-encode"] }
 getrandom-468e82937335b1c9 = { package = "getrandom", version = "0.3.1", default-features = false, features = ["std"] }
 hyper-rustls = { version = "0.27.7", features = ["http2", "ring", "webpki-tokio"] }
@@ -334,7 +338,7 @@ mio = { version = "1.0.2", features = ["net", "os-ext"] }
 rustix = { version = "0.38.37", features = ["event", "fs", "net", "pipe", "process", "stdio", "system", "termios", "time"] }
 
 [target.aarch64-apple-darwin.build-dependencies]
-bitflags-f595c2ba2a3f28df = { package = "bitflags", version = "2.9.0", default-features = false, features = ["std"] }
+bitflags-f595c2ba2a3f28df = { package = "bitflags", version = "2.9.1", default-features = false, features = ["std"] }
 cookie = { version = "0.18.1", default-features = false, features = ["percent-encode"] }
 getrandom-468e82937335b1c9 = { package = "getrandom", version = "0.3.1", default-features = false, features = ["std"] }
 hyper-rustls = { version = "0.27.7", features = ["http2", "ring", "webpki-tokio"] }
@@ -343,7 +347,7 @@ mio = { version = "1.0.2", features = ["net", "os-ext"] }
 rustix = { version = "0.38.37", features = ["event", "fs", "net", "pipe", "process", "stdio", "system", "termios", "time"] }
 
 [target.x86_64-unknown-illumos.dependencies]
-bitflags-f595c2ba2a3f28df = { package = "bitflags", version = "2.9.0", default-features = false, features = ["std"] }
+bitflags-f595c2ba2a3f28df = { package = "bitflags", version = "2.9.1", default-features = false, features = ["std"] }
 cookie = { version = "0.18.1", default-features = false, features = ["percent-encode"] }
 dof = { version = "0.3.0", default-features = false, features = ["des"] }
 getrandom-468e82937335b1c9 = { package = "getrandom", version = "0.3.1", default-features = false, features = ["std"] }
@@ -357,7 +361,7 @@ toml_edit-cdcf2f9584511fe6 = { package = "toml_edit", version = "0.19.15", featu
 winnow = { version = "0.6.26", features = ["simd"] }
 
 [target.x86_64-unknown-illumos.build-dependencies]
-bitflags-f595c2ba2a3f28df = { package = "bitflags", version = "2.9.0", default-features = false, features = ["std"] }
+bitflags-f595c2ba2a3f28df = { package = "bitflags", version = "2.9.1", default-features = false, features = ["std"] }
 clang-sys = { version = "1.8.1", default-features = false, features = ["clang_11_0", "runtime"] }
 cookie = { version = "0.18.1", default-features = false, features = ["percent-encode"] }
 dof = { version = "0.3.0", default-features = false, features = ["des"] }
