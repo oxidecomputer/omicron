@@ -36,7 +36,7 @@ generated inventory collection eb0796d5-ab8a-4f7b-a884-b4aeacb8ab51 from configu
 > # Try to plan a new blueprint; this should be okay even though the sled
 > # we added has no disks.
 > blueprint-plan dbcbd3d6-41ff-48ae-ac0b-1becc9b2fd21 eb0796d5-ab8a-4f7b-a884-b4aeacb8ab51
-INFO skipping noop image source check for all sleds (no current TUF repo)
+INFO skipping noop image source check for all sleds, reason: no target release is currently set
 INFO skipping sled (no zpools in service), sled_id: 00320471-945d-413c-85e7-03e091a70b3c
 INFO sufficient BoundaryNtp zones exist in plan, desired_count: 0, current_count: 0
 INFO sufficient Clickhouse zones exist in plan, desired_count: 1, current_count: 1
