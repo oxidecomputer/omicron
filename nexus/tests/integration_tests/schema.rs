@@ -2650,10 +2650,14 @@ mod migration_156 {
     }
 }
 
-const BP_OXIMETER_READ_POLICY_ID_0: &str = "5cb42909-d94a-4903-be72-330eea0325d9";
-const BP_OXIMETER_READ_POLICY_ID_1: &str = "142b62c2-9348-4530-9eed-7077351fb94b";
-const BP_OXIMETER_READ_POLICY_ID_2: &str = "3b5b7861-03aa-420a-a057-0a14347dc4c0";
-const BP_OXIMETER_READ_POLICY_ID_3: &str = "de7ab4c0-30d4-4e9e-b620-3a959a9d59dd";
+const BP_OXIMETER_READ_POLICY_ID_0: &str =
+    "5cb42909-d94a-4903-be72-330eea0325d9";
+const BP_OXIMETER_READ_POLICY_ID_1: &str =
+    "142b62c2-9348-4530-9eed-7077351fb94b";
+const BP_OXIMETER_READ_POLICY_ID_2: &str =
+    "3b5b7861-03aa-420a-a057-0a14347dc4c0";
+const BP_OXIMETER_READ_POLICY_ID_3: &str =
+    "de7ab4c0-30d4-4e9e-b620-3a959a9d59dd";
 
 // Insert two blueprints and 4 oximeter read policies, two of which do not have
 // a corresponding blueprint
