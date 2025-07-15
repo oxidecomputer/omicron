@@ -1350,7 +1350,6 @@ impl InstanceRunner {
 
         self.port_manager.external_ips_ensure(
             primary_nic.id,
-            primary_nic.kind,
             Some(self.source_nat),
             self.ephemeral_ip,
             &self.floating_ips,
@@ -1366,7 +1365,6 @@ impl InstanceRunner {
 
         self.port_manager.external_ips_ensure(
             primary_nic.id,
-            primary_nic.kind,
             Some(self.source_nat),
             self.ephemeral_ip,
             &self.floating_ips,
@@ -1414,7 +1412,6 @@ impl InstanceRunner {
 
         self.port_manager.external_ips_ensure(
             primary_nic.id,
-            primary_nic.kind,
             Some(self.source_nat),
             self.ephemeral_ip,
             &self.floating_ips,

@@ -5,7 +5,6 @@
 //! Mock / dummy versions of the OPTE module, for non-illumos platforms
 
 use crate::addrobj::AddrObject;
-use omicron_common::api::internal::shared::NetworkInterfaceKind;
 use oxide_vpc::api::AddRouterEntryReq;
 use oxide_vpc::api::ClearVirt2PhysReq;
 use oxide_vpc::api::DelRouterEntryReq;
@@ -46,11 +45,11 @@ pub enum Error {
     #[error("Invalid IP configuration for port")]
     InvalidPortIpConfig,
 
-    #[error("Tried to release non-existent port ({0}, {1:?})")]
-    ReleaseMissingPort(uuid::Uuid, NetworkInterfaceKind),
+    #[error("Tried to release non-existent port ({0})")]
+    ReleaseMissingPort(uuid::Uuid),
 
-    #[error("Tried to update external IPs on non-existent port ({0}, {1:?})")]
-    ExternalIpUpdateMissingPort(uuid::Uuid, NetworkInterfaceKind),
+    #[error("Tried to update external IPs on non-existent port ({0})")]
+    ExternalIpUpdateMissingPort(uuid::Uuid),
 
     #[error("Could not find Primary NIC")]
     NoPrimaryNic,

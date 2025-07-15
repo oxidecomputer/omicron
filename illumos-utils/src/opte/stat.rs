@@ -8,12 +8,15 @@ use super::Handle;
 use omicron_common::api::external::{
     self, Flow, FlowMetadata, FlowStat as ExternalFlowStat,
 };
-use oxide_vpc::api::{Direction, FlowStat, FullCounter, InnerFlowId};
+use oxide_vpc::api::{
+    Direction, FlowStat, FullCounter, InnerFlowId, stat as vpc_stat,
+};
 use slog::Logger;
+use slog_error_chain::InlineErrorChain;
 use std::{
     collections::{HashMap, hash_map::Entry},
     sync::{
-        Arc, RwLock,
+        Arc, LazyLock, RwLock,
         atomic::{AtomicBool, Ordering},
     },
     time::{Duration, Instant},
@@ -224,12 +227,59 @@ struct Timed<S> {
     body: S,
 }
 
-#[derive(Default, Debug)]
+static BASE_MAP: LazyLock<HashMap<Uuid, FlowLabel>> = LazyLock::new(|| {
+    [
+        (
+            vpc_stat::DESTINATION_INTERNET,
+            FlowLabel::Destination(external::ForwardClass::External),
+        ),
+        (
+            vpc_stat::DESTINATION_VPC_LOCAL,
+            FlowLabel::Destination(external::ForwardClass::VpcLocal),
+        ),
+        (
+            vpc_stat::FW_DEFAULT_IN,
+            FlowLabel::Entity(external::VpcEntity::FirewallDefaultIn),
+        ),
+        (
+            vpc_stat::FW_DEFAULT_OUT,
+            FlowLabel::Builtin(VpcBuiltinLabel::FirewallDefaultOut),
+        ),
+        (
+            vpc_stat::ROUTER_NOROUTE,
+            FlowLabel::Builtin(VpcBuiltinLabel::NoRouteMatched),
+        ),
+        (
+            vpc_stat::GATEWAY_NOSPOOF_IN,
+            FlowLabel::Builtin(VpcBuiltinLabel::SpoofPrevention),
+        ),
+        (
+            vpc_stat::GATEWAY_NOSPOOF_OUT,
+            FlowLabel::Builtin(VpcBuiltinLabel::SpoofPrevention),
+        ),
+    ]
+    .into_iter()
+    .collect()
+});
+
+#[derive(Debug)]
 struct State {
     flows: HashMap<InnerFlowId, Timed<FlowSnapshot>>,
     roots: HashMap<Uuid, Timed<FullCounter>>,
     label_map: HashMap<Uuid, FlowLabel>,
     flow_instances: HashMap<UniqueFlow, Timed<Uuid>>,
+}
+
+impl Default for State {
+    fn default() -> Self {
+        Self {
+            label_map: BASE_MAP.clone(),
+
+            flows: HashMap::new(),
+            roots: HashMap::new(),
+            flow_instances: HashMap::new(),
+        }
+    }
 }
 
 async fn run_port_stat(state: Arc<PortStatsShared>) {
@@ -248,10 +298,24 @@ async fn run_port_stat(state: Arc<PortStatsShared>) {
         // TODO: log on error.
         tokio::select! {
             _ = flow_collect.tick() => {
-                state.collect_flows();
+                if let Err(e) = state.collect_flows() {
+                    slog::error!(
+                        &state.log,
+                        "failed to collect flow stats for OPTE port";
+                        "port" => &state.name,
+                        "err" => InlineErrorChain::new(e.as_ref()),
+                    );
+                }
             },
             _ = root_collect.tick() => {
-                state.collect_roots();
+                if let Err(e) = state.collect_roots() {
+                    slog::error!(
+                        &state.log,
+                        "failed to collect root stats for OPTE port";
+                        "port" => &state.name,
+                        "err" => InlineErrorChain::new(e.as_ref()),
+                    );
+                }
             },
             _ = prune.tick() => {
                 state.prune();
@@ -260,16 +324,20 @@ async fn run_port_stat(state: Arc<PortStatsShared>) {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub enum FlowLabel {
     Entity(external::VpcEntity),
     Destination(external::ForwardClass),
+    // TODO: These will be used as part of oximeter association.
+    #[expect(unused)]
     Builtin(VpcBuiltinLabel),
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub enum VpcBuiltinLabel {
-    // TODO
+    NoRouteMatched,
+    FirewallDefaultOut,
+    SpoofPrevention,
 }
 
 #[derive(Debug)]

@@ -9,6 +9,7 @@ use crate::opte::Handle;
 use crate::opte::Vni;
 use macaddr::MacAddr6;
 use omicron_common::api::external;
+use omicron_common::api::internal::shared::NetworkInterfaceKind;
 use omicron_common::api::internal::shared::RouterId;
 use omicron_common::api::internal::shared::RouterKind;
 use oxnet::IpNet;
@@ -17,6 +18,9 @@ use std::sync::Arc;
 
 use super::stat::PortStats;
 
+// TODO: This should probably comprise `NetworkInterface`, to enable more
+// unified management/querying of state across Instance/Zone/Port. That
+// would require some large changes to `InstanceRunner`.
 #[derive(Debug)]
 pub struct PortData {
     /// Name of the port as identified by OPTE
@@ -29,10 +33,16 @@ pub struct PortData {
     pub(crate) slot: u8,
     /// Geneve VNI for the VPC
     pub(crate) vni: Vni,
-    /// Subnet the port belong to within the VPC.
+    /// Subnet the port belongs to within the VPC.
     pub(crate) subnet: IpNet,
     /// Information about the virtual gateway, aka OPTE
     pub(crate) gateway: Gateway,
+
+    // TODO: Will be used in later rootstat -> VPC UUID hierarchy for
+    // oximeter.
+    #[expect(unused)]
+    /// The type and ID of the client this NIC is bound to.
+    pub(crate) parent: NetworkInterfaceKind,
 
     /// Periodically polled stats from this port.
     pub(crate) stats: PortStats,
@@ -112,6 +122,10 @@ impl Port {
 
     pub fn slot(&self) -> u8 {
         self.inner.slot
+    }
+
+    pub fn stats(&self) -> &PortStats {
+        &self.inner.stats
     }
 
     pub fn system_router_key(&self) -> RouterId {

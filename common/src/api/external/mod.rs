@@ -3584,7 +3584,7 @@ pub enum ForwardClass {
 #[serde(rename_all = "snake_case", tag = "type", content = "value")]
 pub enum VpcEntity {
     FirewallRule(Uuid),
-    FirewallDefault,
+    FirewallDefaultIn,
     VpcRoute(Uuid),
     InternetGateway(Uuid),
 }

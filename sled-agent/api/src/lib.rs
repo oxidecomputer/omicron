@@ -16,7 +16,7 @@ use nexus_sled_agent_shared::inventory::{
     Inventory, OmicronSledConfig, SledRole,
 };
 use omicron_common::{
-    api::external::Generation,
+    api::external::{Flow, Generation},
     api::internal::{
         nexus::{DiskRuntimeState, SledVmmState},
         shared::{
@@ -546,6 +546,25 @@ pub trait SledAgentApi {
         body: TypedBody<ExternalIpGatewayMap>,
     ) -> Result<HttpResponseUpdatedNoContent, HttpError>;
 
+    /// Get the IDs of all OPTE interfaces
+    #[endpoint {
+        method = GET,
+        path = "/network-interfaces",
+    }]
+    async fn nic_ids_list(
+        request_context: RequestContext<Self::Context>,
+    ) -> Result<HttpResponseOk<Vec<Uuid>>, HttpError>;
+
+    /// Get per-flow stats currently reported by an OPTE interface.
+    #[endpoint {
+        method = GET,
+        path = "/network-interfaces/{nic_id}/flows",
+    }]
+    async fn nic_flows_list(
+        request_context: RequestContext<Self::Context>,
+        path_params: Path<NicPathParam>,
+    ) -> Result<HttpResponseOk<Vec<Flow>>, HttpError>;
+
     #[endpoint {
         method = GET,
         path = "/support/zoneadm-info",
@@ -884,4 +903,10 @@ pub struct VmmIssueDiskSnapshotRequestResponse {
 #[derive(Deserialize, JsonSchema)]
 pub struct VpcPathParam {
     pub vpc_id: Uuid,
+}
+
+/// Path parameters for NIC requests
+#[derive(Deserialize, JsonSchema)]
+pub struct NicPathParam {
+    pub nic_id: Uuid,
 }

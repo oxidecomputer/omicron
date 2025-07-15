@@ -83,7 +83,7 @@ struct PortManagerInner {
 
     /// Map of all ports, keyed on the interface Uuid and its kind
     /// (which includes the Uuid of the parent instance or service)
-    ports: Mutex<BTreeMap<(Uuid, NetworkInterfaceKind), Port>>,
+    ports: Mutex<BTreeMap<Uuid, Port>>,
 
     /// Map of all current resolved routes.
     routes: Mutex<HashMap<RouterId, RouteSet>>,
@@ -308,7 +308,7 @@ impl PortManager {
         };
         let (port, ticket) = {
             let mut ports = self.inner.ports.lock().unwrap();
-            let ticket = PortTicket::new(nic.id, nic.kind, self.inner.clone());
+            let ticket = PortTicket::new(nic.id, self.inner.clone());
             let port = Port::new(PortData {
                 name: port_name.clone(),
                 ip: nic.ip,
@@ -317,9 +317,10 @@ impl PortManager {
                 vni,
                 subnet: nic.subnet,
                 gateway,
+                parent: nic.kind,
                 stats: PortStats::new(&port_name, self.inner.log.clone()),
             });
-            let old = ports.insert((nic.id, nic.kind), port.clone());
+            let old = ports.insert(nic.id, port.clone());
             assert!(
                 old.is_none(),
                 "Duplicate OPTE port detected: interface_id = {}, kind = {:?}",
@@ -623,15 +624,14 @@ impl PortManager {
     pub fn external_ips_ensure(
         &self,
         nic_id: Uuid,
-        nic_kind: NetworkInterfaceKind,
         source_nat: Option<SourceNatConfig>,
         ephemeral_ip: Option<IpAddr>,
         floating_ips: &[IpAddr],
     ) -> Result<(), Error> {
         let ports = self.inner.ports.lock().unwrap();
-        let port = ports.get(&(nic_id, nic_kind)).ok_or_else(|| {
-            Error::ExternalIpUpdateMissingPort(nic_id, nic_kind)
-        })?;
+        let port = ports
+            .get(&nic_id)
+            .ok_or_else(|| Error::ExternalIpUpdateMissingPort(nic_id))?;
 
         self.external_ips_ensure_port(
             port,
@@ -780,9 +780,9 @@ impl PortManager {
         // We update VPC rules as a set so grab only
         // the relevant ports using the VPC's VNI.
         let vpc_ports = ports
-            .iter()
-            .filter(|((_, _), port)| u32::from(vni) == u32::from(*port.vni()));
-        for ((_, _), port) in vpc_ports {
+            .values()
+            .filter(|port| u32::from(vni) == u32::from(*port.vni()));
+        for port in vpc_ports {
             let rules = opte_firewall_rules(rules, port.vni(), port.mac());
             let port_name = port.name().to_string();
             info!(
@@ -797,6 +797,24 @@ impl PortManager {
             })?;
         }
         Ok(())
+    }
+
+    pub fn get_nic_ids(&self) -> Vec<Uuid> {
+        let ports = self.inner.ports.lock().unwrap();
+
+        ports.keys().copied().collect()
+    }
+
+    pub fn get_nic_flows(
+        &self,
+        nic_id: Uuid,
+    ) -> Result<Vec<external::Flow>, Error> {
+        let ports = self.inner.ports.lock().unwrap();
+        let port = ports
+            .get(&nic_id)
+            .ok_or_else(|| Error::ExternalIpUpdateMissingPort(nic_id))?;
+
+        Ok(port.stats().flow_stats())
     }
 
     pub fn list_virtual_nics(
@@ -887,7 +905,6 @@ impl PortManager {
 
 pub struct PortTicket {
     id: Uuid,
-    kind: NetworkInterfaceKind,
     manager: Arc<PortManagerInner>,
 }
 
@@ -895,31 +912,25 @@ impl std::fmt::Debug for PortTicket {
     fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
         f.debug_struct("PortTicket")
             .field("id", &self.id)
-            .field("kind", &self.kind)
             .field("manager", &"{ .. }")
             .finish()
     }
 }
 
 impl PortTicket {
-    fn new(
-        id: Uuid,
-        kind: NetworkInterfaceKind,
-        manager: Arc<PortManagerInner>,
-    ) -> Self {
-        Self { id, kind, manager }
+    fn new(id: Uuid, manager: Arc<PortManagerInner>) -> Self {
+        Self { id, manager }
     }
 
     fn release_inner(&mut self) -> Result<(), Error> {
         let mut ports = self.manager.ports.lock().unwrap();
-        let Some(port) = ports.remove(&(self.id, self.kind)) else {
+        let Some(port) = ports.remove(&self.id) else {
             error!(
                 self.manager.log,
                 "Tried to release non-existent port";
                 "id" => ?&self.id,
-                "kind" => ?&self.kind,
             );
-            return Err(Error::ReleaseMissingPort(self.id, self.kind));
+            return Err(Error::ReleaseMissingPort(self.id));
         };
         drop(ports);
 
@@ -948,7 +959,6 @@ impl PortTicket {
             self.manager.log,
             "Removed OPTE port from manager";
             "id" => ?&self.id,
-            "kind" => ?&self.kind,
             "port" => ?&port,
         );
         Ok(())
