@@ -364,7 +364,7 @@ impl PlaintextRackSecrets {
         new_epoch: Epoch,
         new_rack_secret: &ReconstructedRackSecret,
     ) -> aead::Result<EncryptedRackSecrets> {
-        assert!(self.secrets.len() > 0);
+        assert!(!self.secrets.is_empty());
 
         // We generate a fresh salt because we should only be encrypting
         // once for this epoch. This is also why we consume `self`.
