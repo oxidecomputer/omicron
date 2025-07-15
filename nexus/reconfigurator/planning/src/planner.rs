@@ -15,9 +15,12 @@ use crate::blueprint_builder::Operation;
 use crate::blueprint_editor::DisksEditError;
 use crate::blueprint_editor::SledEditError;
 use crate::mgs_updates::plan_mgs_updates;
+use crate::planner::image_source::NoopConvertZoneStatus;
 use crate::planner::omicron_zone_placement::PlacementError;
 use gateway_client::types::SpType;
 use itertools::Itertools;
+use nexus_sled_agent_shared::inventory::ConfigReconcilerInventoryResult;
+use nexus_sled_agent_shared::inventory::OmicronZoneImageSource;
 use nexus_sled_agent_shared::inventory::OmicronZoneType;
 use nexus_sled_agent_shared::inventory::ZoneKind;
 use nexus_types::deployment::Blueprint;
@@ -32,14 +35,15 @@ use nexus_types::deployment::DiskFilter;
 use nexus_types::deployment::PlanningInput;
 use nexus_types::deployment::SledDetails;
 use nexus_types::deployment::SledFilter;
-use nexus_types::deployment::TargetReleaseDescription;
 use nexus_types::deployment::TufRepoContentsError;
 use nexus_types::deployment::ZpoolFilter;
 use nexus_types::external_api::views::PhysicalDiskPolicy;
 use nexus_types::external_api::views::SledPolicy;
 use nexus_types::external_api::views::SledState;
 use nexus_types::inventory::Collection;
+use omicron_common::policy::COCKROACHDB_REDUNDANCY;
 use omicron_common::policy::INTERNAL_DNS_REDUNDANCY;
+use omicron_uuid_kinds::OmicronZoneUuid;
 use omicron_uuid_kinds::PhysicalDiskUuid;
 use omicron_uuid_kinds::SledUuid;
 use slog::debug;
@@ -49,15 +53,21 @@ use slog::{Logger, info, warn};
 use slog_error_chain::InlineErrorChain;
 use std::collections::BTreeMap;
 use std::collections::BTreeSet;
-use std::collections::HashMap;
 use std::str::FromStr;
 
+pub(crate) use self::image_source::NoopConvertGlobalIneligibleReason;
+pub(crate) use self::image_source::NoopConvertInfo;
+pub(crate) use self::image_source::NoopConvertSledIneligibleReason;
+pub(crate) use self::image_source::NoopConvertSledInfoMut;
+pub(crate) use self::image_source::NoopConvertSledStatus;
+pub(crate) use self::image_source::NoopConvertZoneCounts;
 pub(crate) use self::omicron_zone_placement::DiscretionaryOmicronZone;
 use self::omicron_zone_placement::OmicronZonePlacement;
 use self::omicron_zone_placement::OmicronZonePlacementSledState;
 pub use self::rng::PlannerRng;
 pub use self::rng::SledPlannerRng;
 
+mod image_source;
 mod omicron_zone_placement;
 pub(crate) mod rng;
 
@@ -156,13 +166,22 @@ impl<'a> Planner<'a> {
     fn do_plan(&mut self) -> Result<(), Error> {
         self.do_plan_expunge()?;
         self.do_plan_decommission()?;
-        let plan_mupdate_override_res = self.do_plan_mupdate_override()?;
+
+        let mut noop_info =
+            NoopConvertInfo::new(self.input, self.inventory, &self.blueprint)?;
+
+        let plan_mupdate_override_res =
+            self.do_plan_mupdate_override(&mut noop_info)?;
+
+        // Log noop-convert results after do_plan_mupdate_override, because this
+        // step might alter noop_info.
+        noop_info.log_to(&self.log);
 
         // Within `do_plan_noop_image_source`, we plan noop image sources on
         // sleds other than those currently affected by mupdate overrides. This
         // means that we don't have to wait for the `plan_mupdate_override_res`
         // result for that step.
-        self.do_plan_noop_image_source()?;
+        self.do_plan_noop_image_source(noop_info)?;
 
         if let UpdateStepResult::ContinueToNextStep = plan_mupdate_override_res
         {
@@ -519,177 +538,74 @@ impl<'a> Planner<'a> {
         Ok(())
     }
 
-    fn do_plan_noop_image_source(&mut self) -> Result<(), Error> {
-        let TargetReleaseDescription::TufRepo(current_artifacts) =
-            self.input.tuf_repo().description()
-        else {
-            info!(
-                self.log,
-                "skipping noop image source check for all sleds \
-                 (no current TUF repo)",
-            );
-            return Ok(());
+    fn do_plan_noop_image_source(
+        &mut self,
+        noop_info: NoopConvertInfo,
+    ) -> Result<(), Error> {
+        let sleds = match noop_info {
+            NoopConvertInfo::GlobalEligible { sleds } => sleds,
+            NoopConvertInfo::GlobalIneligible { .. } => return Ok(()),
         };
-        let artifacts_by_hash: HashMap<_, _> = current_artifacts
-            .artifacts
-            .iter()
-            .map(|artifact| (artifact.hash, artifact))
-            .collect();
+        for sled in sleds {
+            let eligible = match &sled.status {
+                NoopConvertSledStatus::Ineligible(_) => continue,
+                NoopConvertSledStatus::MaybeEligible(maybe_eligible) => {
+                    // If the mupdate override ID is set, we can't do noop
+                    // conversions. This information is already logged so we
+                    // don't need to log it again.
+                    if maybe_eligible.mupdate_override_id.is_some() {
+                        continue;
+                    }
 
-        for sled_id in self.input.all_sled_ids(SledFilter::InService) {
-            let Some(inv_sled) = self.inventory.sled_agents.get(&sled_id)
-            else {
-                info!(
-                    self.log,
-                    "skipping noop image source check \
-                     (sled not present in latest inventory collection)";
-                    "sled_id" => %sled_id,
-                );
-                continue;
-            };
-
-            let zone_manifest = match &inv_sled
-                .zone_image_resolver
-                .zone_manifest
-                .boot_inventory
-            {
-                Ok(zm) => zm,
-                Err(message) => {
-                    // This is a string so we don't use InlineErrorChain::new.
-                    let message: &str = message;
-                    warn!(
-                        self.log,
-                        "skipping noop image source check since \
-                         sled-agent encountered error retrieving zone manifest \
-                         (this is abnormal)";
-                        "sled_id" => %sled_id,
-                        "error" => %message,
-                    );
-                    continue;
+                    maybe_eligible
                 }
             };
 
-            // Does the blueprint have the remove_mupdate_override field set for
-            // this sled? If it does, we don't want to touch the zones on this
-            // sled (they should all be InstallDataset until the
-            // remove_mupdate_override field is cleared).
-            if let Some(id) =
-                self.blueprint.sled_get_remove_mupdate_override(sled_id)?
-            {
-                info!(
+            let zone_counts = eligible.zone_counts();
+            if zone_counts.num_install_dataset() == 0 {
+                debug!(
                     self.log,
-                    "skipping noop image source check on sled \
-                     (blueprint has get_remove_mupdate_override set for sled)";
-                    "sled_id" => %sled_id,
-                    "bp_remove_mupdate_override_id" => %id,
+                    "all zones are already Artifact, so \
+                     no noop image source action required";
+                    "num_total" => zone_counts.num_total,
                 );
                 continue;
             }
+            if zone_counts.num_maybe_eligible > 0 {
+                info!(
+                    self.log,
+                    "noop converting {}/{} install-dataset zones to artifact store",
+                    // If we're here, then num_maybe_eligible represents
+                    // actually eligible zones.
+                    zone_counts.num_maybe_eligible,
+                    zone_counts.num_install_dataset();
+                    "sled_id" => %sled.sled_id,
+                    "num_total" => zone_counts.num_total,
+                    "num_already_artifact" => zone_counts.num_already_artifact,
+                );
+            }
 
-            // Which zones have image sources set to InstallDataset?
-            let install_dataset_zones = self
-                .blueprint
-                .current_sled_zones(
-                    sled_id,
-                    BlueprintZoneDisposition::is_in_service,
-                )
-                .filter(|z| {
-                    z.image_source == BlueprintZoneImageSource::InstallDataset
-                });
-
-            // Out of these, which zones' hashes (as reported in the zone
-            // manifest) match the corresponding ones in the TUF repo?
-            let mut install_dataset_zone_count = 0;
-            let matching_zones: Vec<_> = install_dataset_zones
-                .inspect(|_| {
-                    install_dataset_zone_count += 1;
-                })
-                .filter_map(|z| {
-                    let file_name = z.kind().artifact_in_install_dataset();
-                    let Some(artifact) = zone_manifest.artifacts.get(file_name)
-                    else {
-                        // The blueprint indicates that a zone should be present
-                        // that isn't in the install dataset. This might be an old
-                        // install dataset with a zone kind known to this version of
-                        // Nexus that isn't present in it. Not normally a cause for
-                        // concern.
-                        debug!(
-                            self.log,
-                            "blueprint zone not found in zone manifest, \
-                             ignoring for noop checks";
-                            "sled_id" => %sled_id,
-                            "zone_id" => %z.id,
-                            "kind" => z.kind().report_str(),
-                            "file_name" => file_name,
-                        );
-                        return None;
-                    };
-                    if let Err(message) = &artifact.status {
-                        // The artifact is somehow invalid and corrupt -- definitely
-                        // something to warn about and not proceed.
-                        warn!(
-                            self.log,
-                            "zone manifest inventory indicated install dataset \
-                             artifact is invalid, not using artifact (this is \
-                             abnormal)";
-                            "sled_id" => %sled_id,
-                            "zone_id" => %z.id,
-                            "kind" => z.kind().report_str(),
-                            "file_name" => file_name,
-                            "error" => %message,
-                        );
-                        return None;
+            for zone in &eligible.zones {
+                match &zone.status {
+                    NoopConvertZoneStatus::Eligible(new_image_source) => {
+                        self.blueprint.sled_set_zone_source(
+                            sled.sled_id,
+                            zone.zone_id,
+                            new_image_source.clone(),
+                        )?;
                     }
+                    NoopConvertZoneStatus::AlreadyArtifact { .. }
+                    | NoopConvertZoneStatus::Ineligible(_) => {}
+                }
+            }
 
-                    // Does the hash match what's in the TUF repo?
-                    let Some(tuf_artifact) =
-                        artifacts_by_hash.get(&artifact.expected_hash)
-                    else {
-                        debug!(
-                            self.log,
-                            "install dataset artifact hash not found in TUF repo, \
-                             ignoring for noop checks";
-                            "sled_id" => %sled_id,
-                            "zone_id" => %z.id,
-                            "kind" => z.kind().report_str(),
-                            "file_name" => file_name,
-                        );
-                        return None;
-                    };
-
-                    info!(
-                        self.log,
-                        "install dataset artifact hash matches TUF repo, \
-                         switching out the zone image source to Artifact";
-                        "sled_id" => %sled_id,
-                        "tuf_artifact_id" => %tuf_artifact.id,
-                    );
-                    Some((z.id, tuf_artifact))
-                })
-                .collect();
-
-            info!(
-                self.log,
-                "noop converting {}/{} install-dataset zones to artifact store",
-                matching_zones.len(),
-                install_dataset_zone_count;
-                "sled_id" => %sled_id,
-            );
-
-            // Set all these zones' image sources to the corresponding
-            // blueprint.
-            for (zone_id, tuf_artifact) in &matching_zones {
-                self.blueprint.sled_set_zone_source(
-                    sled_id,
-                    *zone_id,
-                    BlueprintZoneImageSource::from_available_artifact(
-                        tuf_artifact,
-                    ),
-                )?;
+            // Again, if we're here, then num_maybe_eligible represents actually
+            // eligible zones.
+            if zone_counts.num_maybe_eligible > 0 {
                 self.blueprint.record_operation(
                     Operation::SledNoopZoneImageSourcesUpdated {
-                        sled_id,
-                        count: matching_zones.len(),
+                        sled_id: sled.sled_id,
+                        count: zone_counts.num_maybe_eligible,
                     },
                 );
             }
@@ -1242,24 +1158,110 @@ impl<'a> Planner<'a> {
         // Wait for zones to appear up-to-date in the inventory.
         let inventory_zones = self
             .inventory
-            .all_running_omicron_zones()
-            .map(|z| (z.id, z.image_source.clone()))
+            .all_reconciled_omicron_zones()
+            .map(|(z, sa_result)| (z.id, (&z.image_source, sa_result)))
             .collect::<BTreeMap<_, _>>();
+
+        #[derive(Debug)]
+        #[expect(dead_code)]
+        struct ZoneCurrentlyUpdating<'a> {
+            zone_id: OmicronZoneUuid,
+            zone_kind: ZoneKind,
+            reason: UpdatingReason<'a>,
+        }
+
+        #[derive(Debug)]
+        #[expect(dead_code)]
+        enum UpdatingReason<'a> {
+            ImageSourceMismatch {
+                bp_image_source: &'a BlueprintZoneImageSource,
+                inv_image_source: &'a OmicronZoneImageSource,
+            },
+            MissingInInventory {
+                bp_image_source: &'a BlueprintZoneImageSource,
+            },
+            ReconciliationError {
+                bp_image_source: &'a BlueprintZoneImageSource,
+                inv_image_source: &'a OmicronZoneImageSource,
+                message: &'a str,
+            },
+        }
+
         for &sled_id in &sleds {
-            if !self
+            // Build a list of zones currently in the blueprint but where
+            // inventory has a mismatch or does not know about the zone.
+            //
+            // What about the case where a zone is in inventory but not in the
+            // blueprint? See
+            // https://github.com/oxidecomputer/omicron/issues/8589.
+            let zones_currently_updating = self
                 .blueprint
                 .current_sled_zones(
                     sled_id,
                     BlueprintZoneDisposition::is_in_service,
                 )
-                .all(|zone| {
-                    let image_source = zone.image_source.clone().into();
-                    inventory_zones.get(&zone.id) == Some(&image_source)
+                .filter_map(|zone| {
+                    let bp_image_source =
+                        OmicronZoneImageSource::from(zone.image_source.clone());
+                    match inventory_zones.get(&zone.id) {
+                        Some((
+                            inv_image_source,
+                            ConfigReconcilerInventoryResult::Ok,
+                        )) if *inv_image_source == &bp_image_source => {
+                            // The inventory and blueprint image sources match
+                            // -- this means that the zone is up-to-date.
+                            None
+                        }
+                        Some((
+                            inv_image_source,
+                            ConfigReconcilerInventoryResult::Ok,
+                        )) => {
+                            // The inventory and blueprint image sources differ.
+                            Some(ZoneCurrentlyUpdating {
+                                zone_id: zone.id,
+                                zone_kind: zone.kind(),
+                                reason: UpdatingReason::ImageSourceMismatch {
+                                    bp_image_source: &zone.image_source,
+                                    inv_image_source,
+                                },
+                            })
+                        }
+                        Some((
+                            inv_image_source,
+                            ConfigReconcilerInventoryResult::Err { message },
+                        )) => {
+                            // The inventory reports this zone but there was an
+                            // error reconciling it (most likely an error
+                            // starting the zone).
+                            Some(ZoneCurrentlyUpdating {
+                                zone_id: zone.id,
+                                zone_kind: zone.kind(),
+                                reason: UpdatingReason::ReconciliationError {
+                                    bp_image_source: &zone.image_source,
+                                    inv_image_source,
+                                    message,
+                                },
+                            })
+                        }
+                        None => {
+                            // The blueprint has a zone that inventory does not have.
+                            Some(ZoneCurrentlyUpdating {
+                                zone_id: zone.id,
+                                zone_kind: zone.kind(),
+                                reason: UpdatingReason::MissingInInventory {
+                                    bp_image_source: &zone.image_source,
+                                },
+                            })
+                        }
+                    }
                 })
-            {
+                .collect::<Vec<_>>();
+
+            if !zones_currently_updating.is_empty() {
                 info!(
                     self.log, "some zones not yet up-to-date";
                     "sled_id" => %sled_id,
+                    "zones_currently_updating" => ?zones_currently_updating,
                 );
                 return Ok(());
             }
@@ -1426,7 +1428,10 @@ impl<'a> Planner<'a> {
         Ok(())
     }
 
-    fn do_plan_mupdate_override(&mut self) -> Result<UpdateStepResult, Error> {
+    fn do_plan_mupdate_override(
+        &mut self,
+        noop_info: &mut NoopConvertInfo,
+    ) -> Result<UpdateStepResult, Error> {
         // For each sled, compare what's in the inventory to what's in the
         // blueprint.
         let mut actions_by_sled = BTreeMap::new();
@@ -1452,6 +1457,7 @@ impl<'a> Planner<'a> {
                         inv_mupdate_override
                             .as_ref()
                             .map(|inv| inv.mupdate_override_id),
+                        noop_info,
                     )?
                 }
                 Err(message) => EnsureMupdateOverrideAction::GetOverrideError {
@@ -1791,11 +1797,48 @@ impl<'a> Planner<'a> {
     /// case, we have no choice but to reconcile with the fact that the zone is
     /// now gone.
     fn can_zone_be_shut_down_safely(&self, zone: &BlueprintZoneConfig) -> bool {
-        // TODO-cleanup remove this `allow` once we populate a variant below
-        #[allow(clippy::match_single_binding)]
         match zone.zone_type.kind() {
-            // <https://github.com/oxidecomputer/omicron/issues/6404>
-            // ZoneKind::CockroachDb => todo!("check cluster status in inventory"),
+            ZoneKind::CockroachDb => {
+                debug!(self.log, "Checking if Cockroach node can shut down");
+                // We must hear from all nodes
+                let all_statuses = &self.inventory.cockroach_status;
+                if all_statuses.len() < COCKROACHDB_REDUNDANCY {
+                    warn!(self.log, "Not enough nodes");
+                    return false;
+                }
+
+                // All nodes must report: "We have the necessary redundancy, and
+                // have observed no underreplicated ranges".
+                for (node_id, status) in all_statuses {
+                    let log = self.log.new(slog::o!(
+                        "operation" => "Checking Cockroach node status for shutdown safety",
+                        "node_id" => node_id.to_string()
+                    ));
+                    let Some(ranges_underreplicated) =
+                        status.ranges_underreplicated
+                    else {
+                        warn!(log, "Missing underreplicated stat");
+                        return false;
+                    };
+                    if ranges_underreplicated != 0 {
+                        warn!(log, "Underreplicated ranges != 0"; "ranges_underreplicated" => ranges_underreplicated);
+                        return false;
+                    }
+                    let Some(live_nodes) = status.liveness_live_nodes else {
+                        warn!(log, "Missing live_nodes");
+                        return false;
+                    };
+                    if live_nodes < COCKROACHDB_REDUNDANCY as u64 {
+                        warn!(log, "Live nodes < COCKROACHDB_REDUNDANCY"; "live_nodes" => live_nodes);
+                        return false;
+                    }
+                    info!(
+                        log,
+                        "CockroachDB Node status looks ready for shutdown"
+                    );
+                }
+                true
+            }
             _ => true, // other zone kinds have no special safety checks
         }
     }
@@ -1844,12 +1887,14 @@ pub(crate) mod test {
     use nexus_types::external_api::views::PhysicalDiskState;
     use nexus_types::external_api::views::SledProvisionPolicy;
     use nexus_types::external_api::views::SledState;
+    use nexus_types::inventory::CockroachStatus;
     use omicron_common::api::external::Generation;
     use omicron_common::api::external::TufArtifactMeta;
     use omicron_common::api::external::TufRepoDescription;
     use omicron_common::api::external::TufRepoMeta;
     use omicron_common::disk::DatasetKind;
     use omicron_common::disk::DiskIdentity;
+    use omicron_common::policy::COCKROACHDB_REDUNDANCY;
     use omicron_common::policy::CRUCIBLE_PANTRY_REDUNDANCY;
     use omicron_common::policy::NEXUS_REDUNDANCY;
     use omicron_common::update::ArtifactId;
@@ -5577,6 +5622,302 @@ pub(crate) mod test {
             &logctx.log,
             &blueprint16,
             &input,
+            &example.collection,
+            TEST_NAME,
+        );
+
+        logctx.cleanup_successful();
+    }
+
+    #[test]
+    fn test_update_cockroach() {
+        static TEST_NAME: &str = "update_cockroach";
+        let logctx = test_setup_log(TEST_NAME);
+        let log = logctx.log.clone();
+
+        // Use our example system.
+        let mut rng = SimRngState::from_seed(TEST_NAME);
+        let (mut example, mut blueprint) = ExampleSystemBuilder::new_with_rng(
+            &logctx.log,
+            rng.next_system_rng(),
+        )
+        .build();
+        verify_blueprint(&blueprint);
+
+        // Update the example system and blueprint, as a part of test set-up.
+        //
+        // Ask for COCKROACHDB_REDUNDANCY cockroach nodes
+
+        let mut input_builder = example.input.clone().into_builder();
+        input_builder.policy_mut().target_cockroachdb_zone_count =
+            COCKROACHDB_REDUNDANCY;
+        example.input = input_builder.build();
+
+        let blueprint_name = "blueprint_with_cockroach";
+        let new_blueprint = Planner::new_based_on(
+            log.clone(),
+            &blueprint,
+            &example.input,
+            &blueprint_name,
+            &example.collection,
+        )
+        .expect("can't create planner")
+        .with_rng(PlannerRng::from_seed((TEST_NAME, &blueprint_name)))
+        .plan()
+        .unwrap_or_else(|_| panic!("can't plan to include Cockroach nodes"));
+
+        let summary = new_blueprint.diff_since_blueprint(&blueprint);
+        assert_eq!(summary.total_zones_added(), COCKROACHDB_REDUNDANCY);
+        assert_eq!(summary.total_zones_removed(), 0);
+        assert_eq!(summary.total_zones_modified(), 0);
+        blueprint = new_blueprint;
+        update_collection_from_blueprint(&mut example, &blueprint);
+
+        // We should have started with no specified TUF repo and nothing to do.
+        assert_planning_makes_no_changes(
+            &logctx.log,
+            &blueprint,
+            &example.input,
+            &example.collection,
+            TEST_NAME,
+        );
+
+        // All zones should be sourced from the install dataset by default.
+        assert!(
+            blueprint
+                .all_omicron_zones(BlueprintZoneDisposition::is_in_service)
+                .all(|(_, z)| matches!(
+                    z.image_source,
+                    BlueprintZoneImageSource::InstallDataset
+                ))
+        );
+
+        // This test "starts" here -- we specify a new TUF repo with an updated
+        // CockroachDB image. We create a new TUF repo where version of
+        // CockroachDB has been updated out of the install dataset.
+        //
+        // The planner should avoid doing this update until it has confirmation
+        // from inventory that the cluster is healthy.
+
+        let mut input_builder = example.input.clone().into_builder();
+        let version = ArtifactVersion::new_static("1.0.0-freeform")
+            .expect("can't parse artifact version");
+        let fake_hash = ArtifactHash([0; 32]);
+        let image_source = BlueprintZoneImageSource::Artifact {
+            version: BlueprintZoneImageVersion::Available {
+                version: version.clone(),
+            },
+            hash: fake_hash,
+        };
+        let artifacts = vec![
+            // Omit `BoundaryNtp` because it has the same artifact name as
+            // `InternalNtp`.
+            fake_zone_artifact!(Clickhouse, version.clone()),
+            fake_zone_artifact!(ClickhouseKeeper, version.clone()),
+            fake_zone_artifact!(ClickhouseServer, version.clone()),
+            fake_zone_artifact!(CockroachDb, version.clone()),
+            fake_zone_artifact!(Crucible, version.clone()),
+            fake_zone_artifact!(CruciblePantry, version.clone()),
+            fake_zone_artifact!(ExternalDns, version.clone()),
+            fake_zone_artifact!(InternalDns, version.clone()),
+            fake_zone_artifact!(InternalNtp, version.clone()),
+            fake_zone_artifact!(Nexus, version.clone()),
+            fake_zone_artifact!(Oximeter, version.clone()),
+        ];
+        let target_release_generation = Generation::from_u32(2);
+        input_builder.policy_mut().tuf_repo = TufRepoPolicy {
+            target_release_generation,
+            description: TargetReleaseDescription::TufRepo(
+                TufRepoDescription {
+                    repo: TufRepoMeta {
+                        hash: fake_hash,
+                        targets_role_version: 0,
+                        valid_until: Utc::now(),
+                        system_version: Version::new(1, 0, 0),
+                        file_name: String::from(""),
+                    },
+                    artifacts,
+                },
+            ),
+        };
+        example.input = input_builder.build();
+
+        // Manually update all zones except Cockroach
+        //
+        // We just specified a new TUF repo, everything is going to shift from
+        // the install dataset to this new repo.
+        for mut zone in blueprint
+            .sleds
+            .values_mut()
+            .flat_map(|config| config.zones.iter_mut())
+            .filter(|z| !z.zone_type.is_cockroach())
+        {
+            zone.image_source = BlueprintZoneImageSource::Artifact {
+                version: BlueprintZoneImageVersion::Available {
+                    version: version.clone(),
+                },
+                hash: fake_hash,
+            };
+        }
+        update_collection_from_blueprint(&mut example, &blueprint);
+
+        // Some helper predicates for the assertions below.
+        let is_old_cockroach = |zone: &BlueprintZoneConfig| -> bool {
+            zone.zone_type.is_cockroach()
+                && matches!(
+                    zone.image_source,
+                    BlueprintZoneImageSource::InstallDataset
+                )
+        };
+        let is_up_to_date_cockroach = |zone: &BlueprintZoneConfig| -> bool {
+            zone.zone_type.is_cockroach() && zone.image_source == image_source
+        };
+        let create_valid_looking_status = || {
+            let mut result = BTreeMap::new();
+            for i in 1..=COCKROACHDB_REDUNDANCY {
+                result.insert(
+                    omicron_cockroach_metrics::NodeId(i.to_string()),
+                    CockroachStatus {
+                        ranges_underreplicated: Some(0),
+                        liveness_live_nodes: Some(GOAL_REDUNDANCY),
+                    },
+                );
+            }
+            result
+        };
+
+        // If we have missing info in our inventory, the
+        // planner will not update any Cockroach zones.
+        example.collection.cockroach_status = BTreeMap::new();
+        assert_planning_makes_no_changes(
+            &log,
+            &blueprint,
+            &example.input,
+            &example.collection,
+            TEST_NAME,
+        );
+
+        // If we're missing info from even a single node, we
+        // will still refuse to update.
+        example.collection.cockroach_status = create_valid_looking_status();
+        example.collection.cockroach_status.pop_first();
+        assert_planning_makes_no_changes(
+            &log,
+            &blueprint,
+            &example.input,
+            &example.collection,
+            TEST_NAME,
+        );
+
+        const GOAL_REDUNDANCY: u64 = COCKROACHDB_REDUNDANCY as u64;
+
+        // If we have any non-zero "ranges_underreplicated" in in our inventory,
+        // the planner will not update any Cockroach zones.
+        example.collection.cockroach_status = create_valid_looking_status();
+        *example
+            .collection
+            .cockroach_status
+            .get_mut(&omicron_cockroach_metrics::NodeId("1".to_string()))
+            .unwrap() = CockroachStatus {
+            ranges_underreplicated: Some(1),
+            liveness_live_nodes: Some(GOAL_REDUNDANCY),
+        };
+        assert_planning_makes_no_changes(
+            &log,
+            &blueprint,
+            &example.input,
+            &example.collection,
+            TEST_NAME,
+        );
+
+        // If we don't have enough live nodes, we won't update Cockroach zones.
+        example.collection.cockroach_status = create_valid_looking_status();
+        *example
+            .collection
+            .cockroach_status
+            .get_mut(&omicron_cockroach_metrics::NodeId("1".to_string()))
+            .unwrap() = CockroachStatus {
+            ranges_underreplicated: Some(0),
+            liveness_live_nodes: Some(GOAL_REDUNDANCY - 1),
+        };
+
+        assert_planning_makes_no_changes(
+            &log,
+            &blueprint,
+            &example.input,
+            &example.collection,
+            TEST_NAME,
+        );
+
+        // Once we have zero underreplicated ranges, we can start to update
+        // Cockroach zones.
+        //
+        // We'll update one zone at a time, from the install dataset to the
+        // new TUF repo artifact.
+        for i in 1..=COCKROACHDB_REDUNDANCY {
+            // Keep setting this value in a loop;
+            // "update_collection_from_blueprint" resets it.
+            example.collection.cockroach_status = create_valid_looking_status();
+
+            println!("Updating cockroach {i} of {COCKROACHDB_REDUNDANCY}");
+            let new_blueprint = Planner::new_based_on(
+                log.clone(),
+                &blueprint,
+                &example.input,
+                &format!("test_blueprint_cockroach_{i}"),
+                &example.collection,
+            )
+            .expect("can't create planner")
+            .with_rng(PlannerRng::from_seed((TEST_NAME, "bp_crdb")))
+            .plan()
+            .expect("plan for trivial TUF repo");
+
+            blueprint = new_blueprint;
+
+            assert_eq!(
+                blueprint
+                    .all_omicron_zones(BlueprintZoneDisposition::is_in_service)
+                    .filter(|(_, z)| is_old_cockroach(z))
+                    .count(),
+                COCKROACHDB_REDUNDANCY - i
+            );
+            assert_eq!(
+                blueprint
+                    .all_omicron_zones(BlueprintZoneDisposition::is_in_service)
+                    .filter(|(_, z)| is_up_to_date_cockroach(z))
+                    .count(),
+                i
+            );
+            update_collection_from_blueprint(&mut example, &blueprint);
+        }
+
+        // Validate that we have no further changes to make, once all Cockroach
+        // zones have been updated.
+        example.collection.cockroach_status = create_valid_looking_status();
+
+        assert_planning_makes_no_changes(
+            &log,
+            &blueprint,
+            &example.input,
+            &example.collection,
+            TEST_NAME,
+        );
+
+        // Validate that we do not flip back to the install dataset after
+        // performing the update.
+        example.collection.cockroach_status = create_valid_looking_status();
+        example
+            .collection
+            .cockroach_status
+            .values_mut()
+            .next()
+            .unwrap()
+            .ranges_underreplicated = Some(1);
+
+        assert_planning_makes_no_changes(
+            &log,
+            &blueprint,
+            &example.input,
             &example.collection,
             TEST_NAME,
         );

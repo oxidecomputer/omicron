@@ -93,9 +93,11 @@ blueprint-diff latest
 # applied.
 sled-set serial2 mupdate-override unset
 
-# Run the planner again. This should cause sled 2's mupdate override field
-# to be unset, but no further planning steps to happen because the
-# target release generation is not new enough.
+# Run the planner again. This will not cause sled 2's blueprint
+# remove_mupdate_override to be unset just yet, because some zones'
+# image sources cannot yet be converted over to Artifact. Also, no
+# further planning steps will happen because the target release
+# generation is not new enough.
 inventory-generate
 blueprint-plan latest latest
 blueprint-show latest

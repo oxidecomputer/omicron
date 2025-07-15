@@ -2664,6 +2664,10 @@ CREATE INDEX IF NOT EXISTS lookup_bundle_by_nexus ON omicron.public.support_bund
     assigned_nexus
 );
 
+CREATE INDEX IF NOT EXISTS lookup_bundle_by_creation ON omicron.public.support_bundle (
+    time_created
+);
+
 /*******************************************************************/
 
 /*
@@ -4243,6 +4247,15 @@ CREATE TABLE IF NOT EXISTS omicron.public.inv_clickhouse_keeper_membership (
     raft_config INT8[] NOT NULL,
 
     PRIMARY KEY (inv_collection_id, queried_keeper_id)
+);
+
+CREATE TABLE IF NOT EXISTS omicron.public.inv_cockroachdb_status (
+    inv_collection_id UUID NOT NULL,
+    node_id TEXT NOT NULL,
+    ranges_underreplicated INT8,
+    liveness_live_nodes INT8,
+
+    PRIMARY KEY (inv_collection_id, node_id)
 );
 
 /*
@@ -6189,7 +6202,7 @@ INSERT INTO omicron.public.db_metadata (
     version,
     target_version
 ) VALUES
-    (TRUE, NOW(), NOW(), '160.0.0', NULL)
+    (TRUE, NOW(), NOW(), '162.0.0', NULL)
 ON CONFLICT DO NOTHING;
 
 COMMIT;

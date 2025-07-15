@@ -4,10 +4,13 @@
 
 //! Support for editing the blueprint details of a single sled.
 
+use crate::blueprint_builder::BpMupdateOverrideNotClearedReason;
 use crate::blueprint_builder::EditedSledScalarEdits;
 use crate::blueprint_builder::EnsureMupdateOverrideAction;
 use crate::blueprint_builder::EnsureMupdateOverrideUpdatedZone;
 use crate::blueprint_builder::SledEditCounts;
+use crate::planner::NoopConvertSledInfoMut;
+use crate::planner::NoopConvertSledStatus;
 use crate::planner::SledPlannerRng;
 use id_map::Entry;
 use iddqd::IdOrdMap;
@@ -378,10 +381,12 @@ impl SledEditor {
         &mut self,
         inv_mupdate_override_id: Option<MupdateOverrideUuid>,
         pending_mgs_update: Entry<'_, PendingMgsUpdate>,
+        noop_sled_info: NoopConvertSledInfoMut<'_>,
     ) -> Result<EnsureMupdateOverrideAction, SledEditError> {
         self.as_active_mut()?.ensure_mupdate_override(
             inv_mupdate_override_id,
             pending_mgs_update,
+            noop_sled_info,
         )
     }
 
@@ -731,6 +736,7 @@ impl ActiveSledEditor {
         &mut self,
         inv_mupdate_override_id: Option<MupdateOverrideUuid>,
         pending_mgs_update: Entry<'_, PendingMgsUpdate>,
+        noop_sled_info: NoopConvertSledInfoMut<'_>,
     ) -> Result<EnsureMupdateOverrideAction, SledEditError> {
         match (inv_mupdate_override_id, *self.remove_mupdate_override.value()) {
             (Some(inv_override), Some(bp_override))
@@ -751,6 +757,15 @@ impl ActiveSledEditor {
                 //
                 // Set the blueprint's remove_mupdate_override.
                 self.set_remove_mupdate_override(Some(inv_override));
+                // Also update the cached value inside `noop_sled_info`.
+                if let NoopConvertSledInfoMut::Ok(mut info) = noop_sled_info {
+                    if let NoopConvertSledStatus::MaybeEligible(me) =
+                        &mut info.status
+                    {
+                        me.mupdate_override_id = Some(inv_override);
+                    }
+                }
+
                 // Set all zone image sources to InstallDataset. This is an
                 // acknowledgement of the current state of the world.
                 let zone_ids: Vec<_> = self
@@ -791,15 +806,56 @@ impl ActiveSledEditor {
                     prev_mgs_update,
                 })
             }
-            (None, Some(prev_bp_override)) => {
+            (None, Some(bp_override)) => {
                 // The blueprint says there's an override in place, but the
                 // inventory doesn't. This means that the sled has removed its
-                // override that was set in the above branch. We can remove the
-                // override from the blueprint.
-                self.set_remove_mupdate_override(None);
-                Ok(EnsureMupdateOverrideAction::BpClearOverride {
-                    prev_bp_override,
-                })
+                // override that was set in the above branch.
+                //
+                // However, the blueprint's remove_mupdate_override remains in
+                // place until all zones' image sources can be noop-converted to
+                // Artifact. We do this to minimize the number of different
+                // versions of software that exist.
+                use BpMupdateOverrideNotClearedReason::*;
+
+                match noop_sled_info {
+                    NoopConvertSledInfoMut::Ok(mut info) => match &mut info
+                        .status
+                    {
+                        NoopConvertSledStatus::Ineligible(reason) => Ok(
+                            EnsureMupdateOverrideAction::BpOverrideNotCleared {
+                                bp_override,
+                                reason: NoopSledIneligible(reason.clone()),
+                            },
+                        ),
+                        NoopConvertSledStatus::MaybeEligible(me) => {
+                            // Are any zones ineligible for conversion?
+                            let zone_counts = me.zone_counts();
+                            if zone_counts.num_ineligible > 0 {
+                                Ok(EnsureMupdateOverrideAction::BpOverrideNotCleared {
+                                    bp_override,
+                                    reason: NoopZonesIneligible { zone_counts },
+                                })
+                            } else {
+                                // All zones are eligible for conversion. Clear
+                                // the mupdate override field.
+                                //
+                                // The actual conversion process will happen
+                                // later, during do_plan_noop_image_source.
+                                self.set_remove_mupdate_override(None);
+                                me.mupdate_override_id = None;
+                                Ok(EnsureMupdateOverrideAction::BpClearOverride {
+                                    prev_bp_override: bp_override,
+                                })
+                            }
+                        }
+                    },
+                    NoopConvertSledInfoMut::GlobalIneligible(reason) => {
+                        Ok(EnsureMupdateOverrideAction::BpOverrideNotCleared {
+                            bp_override,
+                            reason: NoopGlobalIneligible(reason.clone()),
+                        })
+                    }
+                }
             }
             (None, None) => {
                 // No override in place, nothing to do.

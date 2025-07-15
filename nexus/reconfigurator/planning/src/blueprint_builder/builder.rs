@@ -14,6 +14,10 @@ use crate::blueprint_editor::ExternalSnatNetworkingChoice;
 use crate::blueprint_editor::NoAvailableDnsSubnets;
 use crate::blueprint_editor::SledEditError;
 use crate::blueprint_editor::SledEditor;
+use crate::planner::NoopConvertGlobalIneligibleReason;
+use crate::planner::NoopConvertInfo;
+use crate::planner::NoopConvertSledIneligibleReason;
+use crate::planner::NoopConvertZoneCounts;
 use crate::planner::ZoneExpungeReason;
 use crate::planner::rng::PlannerRng;
 use anyhow::Context as _;
@@ -452,14 +456,12 @@ impl fmt::Display for Operation {
 ///    However, the new blueprint can only be made the system's target if its
 ///    parent is the current target.
 pub struct BlueprintBuilder<'a> {
-    #[allow(dead_code)]
     log: Logger,
 
     /// previous blueprint, on which this one will be based
     parent_blueprint: &'a Blueprint,
 
     /// The latest inventory collection
-    #[allow(unused)]
     collection: &'a Collection,
 
     // These fields are used to allocate resources for sleds.
@@ -1221,10 +1223,11 @@ impl<'a> BlueprintBuilder<'a> {
 
     /// Updates a sled's mupdate override field based on the mupdate override
     /// provided by inventory.
-    pub fn sled_ensure_mupdate_override(
+    pub(crate) fn sled_ensure_mupdate_override(
         &mut self,
         sled_id: SledUuid,
         inv_mupdate_override_id: Option<MupdateOverrideUuid>,
+        noop_info: &mut NoopConvertInfo,
     ) -> Result<EnsureMupdateOverrideAction, Error> {
         let editor = self.sled_editors.get_mut(&sled_id).ok_or_else(|| {
             Error::Planner(anyhow!(
@@ -1240,11 +1243,13 @@ impl<'a> BlueprintBuilder<'a> {
         // TODO: simplify down to &BaseboardId
         let baseboard_id = Arc::new(sled_details.baseboard_id.clone());
         let pending_mgs_update = self.pending_mgs_updates.entry(baseboard_id);
+        let noop_sled_info = noop_info.sled_info_mut(sled_id)?;
 
         editor
             .ensure_mupdate_override(
                 inv_mupdate_override_id,
                 pending_mgs_update,
+                noop_sled_info,
             )
             .map_err(|err| Error::SledEditError { sled_id, err })
     }
@@ -2307,7 +2312,7 @@ pub(super) fn ensure_input_networking_records_appear_in_parent_blueprint(
 
 /// The result of an `ensure_mupdate_override` call for a particular sled.
 #[derive(Clone, Debug, Eq, PartialEq)]
-pub enum EnsureMupdateOverrideAction {
+pub(crate) enum EnsureMupdateOverrideAction {
     /// The inventory and blueprint overrides are consistent, so no action was
     /// taken.
     NoAction {
@@ -2327,13 +2332,23 @@ pub enum EnsureMupdateOverrideAction {
         /// The pending MGS update that was cleared, if any.
         prev_mgs_update: Option<Box<PendingMgsUpdate>>,
     },
-    /// The inventory did not have an override but the blueprint did, so the
-    /// blueprint's override was cleared.
+    /// The inventory did not have an override but the blueprint did, and other
+    /// conditions were met, so the blueprint's override was cleared.
     BpClearOverride {
         /// The previous blueprint override that was removed.
         prev_bp_override: MupdateOverrideUuid,
     },
-    /// Sled Agent encountered an error occurred retrieving the mupdate override
+    /// The inventory did not have an override but the blueprint did, but some
+    /// zones' image sources can't be converted over to Artifact, so the
+    /// blueprint's override was left in place.
+    BpOverrideNotCleared {
+        /// The blueprint override that was not removed.
+        bp_override: MupdateOverrideUuid,
+        /// The reason the blueprint override was not cleared.
+        reason: BpMupdateOverrideNotClearedReason,
+    },
+    /// Sled Agent encountered an error occurred retrieving the mupdate
+    /// override
     /// from the inventory.
     GetOverrideError {
         /// An error message.
@@ -2400,10 +2415,23 @@ impl EnsureMupdateOverrideAction {
                     "prev_bp_override" => %prev_bp_override,
                 )
             }
+            EnsureMupdateOverrideAction::BpOverrideNotCleared {
+                bp_override,
+                reason,
+            } => {
+                info!(
+                    log,
+                    "inventory override no longer exists, but blueprint \
+                     override could not be cleared";
+                    "bp_override" => %bp_override,
+                    "reason" => %reason,
+                );
+            }
             EnsureMupdateOverrideAction::GetOverrideError { message } => {
                 error!(
-                    log, "error getting mupdate override info for sled, \
-                          not altering blueprint override";
+                    log,
+                    "error getting mupdate override info for sled, \
+                     not altering blueprint override";
                     "message" => %message,
                 );
             }
@@ -2453,6 +2481,49 @@ impl IdOrdItem for EnsureMupdateOverrideUpdatedZone {
         self.zone_id
     }
     id_upcast!();
+}
+
+/// The reason a blueprint's mupdate override for a sled was not cleared, even
+/// though inventory no longer has the sled.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub(crate) enum BpMupdateOverrideNotClearedReason {
+    /// There is a global reason noop conversions are not possible.
+    NoopGlobalIneligible(NoopConvertGlobalIneligibleReason),
+
+    /// There is a sled-specific reason noop conversions are not possible.
+    NoopSledIneligible(NoopConvertSledIneligibleReason),
+
+    /// Some zones' image sources cannot be noop-converted to Artifact.
+    NoopZonesIneligible { zone_counts: NoopConvertZoneCounts },
+}
+
+impl fmt::Display for BpMupdateOverrideNotClearedReason {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            BpMupdateOverrideNotClearedReason::NoopGlobalIneligible(reason) => {
+                write!(
+                    f,
+                    "no sleds can be noop-converted to Artifact: {reason}",
+                )
+            }
+            BpMupdateOverrideNotClearedReason::NoopSledIneligible(reason) => {
+                write!(
+                    f,
+                    "this sled cannot be noop-converted to Artifact: {reason}",
+                )
+            }
+            BpMupdateOverrideNotClearedReason::NoopZonesIneligible {
+                zone_counts,
+            } => {
+                write!(
+                    f,
+                    "{}/{} zones cannot be noop-converted to Artifact: {zone_counts:?}",
+                    zone_counts.num_ineligible,
+                    zone_counts.num_install_dataset(),
+                )
+            }
+        }
+    }
 }
 
 #[cfg(test)]

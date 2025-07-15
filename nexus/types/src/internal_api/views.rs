@@ -685,18 +685,18 @@ impl UpdateStatus {
             return TufRepoVersion::InstallDataset;
         };
 
-        if let Some(old) = old.tuf_repo() {
-            if old.artifacts.iter().any(|meta| meta.hash == hash) {
-                return TufRepoVersion::Version(
-                    old.repo.system_version.clone(),
-                );
-            }
-        }
-
         if let Some(new) = new.tuf_repo() {
             if new.artifacts.iter().any(|meta| meta.hash == hash) {
                 return TufRepoVersion::Version(
                     new.repo.system_version.clone(),
+                );
+            }
+        }
+
+        if let Some(old) = old.tuf_repo() {
+            if old.artifacts.iter().any(|meta| meta.hash == hash) {
+                return TufRepoVersion::Version(
+                    old.repo.system_version.clone(),
                 );
             }
         }

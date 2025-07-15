@@ -114,9 +114,9 @@ INFO blueprint mupdate override updated to match inventory, phase: do_plan_mupda
 INFO no previous MGS update found as part of updating blueprint mupdate override to match inventory, phase: do_plan_mupdate_override, sled_id: d81c6a84-79b8-4958-ae41-ea46c9b19763
 INFO updating target release minimum generation based on new set-override actions, phase: do_plan_mupdate_override, current_generation: 1, new_generation: 3
 INFO not ready to add or update new zones yet, phase: do_plan_mupdate_override, reasons: current target release generation (2) is lower than minimum required by blueprint (3); sleds have remove mupdate override set in blueprint: 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6, d81c6a84-79b8-4958-ae41-ea46c9b19763
-INFO noop converting 0/7 install-dataset zones to artifact store, sled_id: 2b8f0cb3-0295-4b3c-bc58-4fe88b57112c
-INFO skipping noop image source check on sled (blueprint has get_remove_mupdate_override set for sled), sled_id: 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6, bp_remove_mupdate_override_id: 6123eac1-ec5b-42ba-b73f-9845105a9971
-INFO skipping noop image source check on sled (blueprint has get_remove_mupdate_override set for sled), sled_id: d81c6a84-79b8-4958-ae41-ea46c9b19763, bp_remove_mupdate_override_id: 203fa72c-85c1-466a-8ed3-338ee029530d
+INFO performed noop image source checks on sled, sled_id: 2b8f0cb3-0295-4b3c-bc58-4fe88b57112c, num_total: 7, num_already_artifact: 0, num_eligible: 0, num_ineligible: 7
+INFO performed noop image source checks on sled, but no conversions will occur because remove_mupdate_override is set in the blueprint, sled_id: 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6, mupdate_override_id: 6123eac1-ec5b-42ba-b73f-9845105a9971, num_total: 6, num_already_artifact: 1, num_maybe_eligible: 5, num_ineligible: 0
+INFO performed noop image source checks on sled, but no conversions will occur because remove_mupdate_override is set in the blueprint, sled_id: d81c6a84-79b8-4958-ae41-ea46c9b19763, mupdate_override_id: 203fa72c-85c1-466a-8ed3-338ee029530d, num_total: 6, num_already_artifact: 0, num_maybe_eligible: 0, num_ineligible: 6
 INFO will ensure cockroachdb setting, setting: cluster.preserve_downgrade_option, value: DoNotModify
 generated blueprint df06bb57-ad42-4431-9206-abff322896c7 based on parent blueprint af934083-59b5-4bf6-8966-6fb5292c29e1
 
@@ -408,9 +408,9 @@ WARN skipping zones eligible for cleanup check (sled not present in latest inven
 ERRO error getting mupdate override info for sled, not altering blueprint override, phase: do_plan_mupdate_override, sled_id: 2b8f0cb3-0295-4b3c-bc58-4fe88b57112c, message: reconfigurator-cli simulated mupdate-override error
 WARN no inventory found for in-service sled, phase: do_plan_mupdate_override, sled_id: 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6
 INFO not ready to add or update new zones yet, phase: do_plan_mupdate_override, reasons: sleds have remove mupdate override set in blueprint: 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6, d81c6a84-79b8-4958-ae41-ea46c9b19763
-INFO noop converting 0/7 install-dataset zones to artifact store, sled_id: 2b8f0cb3-0295-4b3c-bc58-4fe88b57112c
-INFO skipping noop image source check (sled not present in latest inventory collection), sled_id: 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6
-INFO skipping noop image source check on sled (blueprint has get_remove_mupdate_override set for sled), sled_id: d81c6a84-79b8-4958-ae41-ea46c9b19763, bp_remove_mupdate_override_id: 203fa72c-85c1-466a-8ed3-338ee029530d
+INFO performed noop image source checks on sled, sled_id: 2b8f0cb3-0295-4b3c-bc58-4fe88b57112c, num_total: 7, num_already_artifact: 0, num_eligible: 0, num_ineligible: 7
+INFO skipped noop image source check on sled, sled_id: 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6, reason: sled not found in inventory
+INFO performed noop image source checks on sled, but no conversions will occur because remove_mupdate_override is set in the blueprint, sled_id: d81c6a84-79b8-4958-ae41-ea46c9b19763, mupdate_override_id: 203fa72c-85c1-466a-8ed3-338ee029530d, num_total: 6, num_already_artifact: 0, num_maybe_eligible: 0, num_ineligible: 6
 INFO will ensure cockroachdb setting, setting: cluster.preserve_downgrade_option, value: DoNotModify
 generated blueprint 7f976e0d-d2a5-4eeb-9e82-c82bc2824aba based on parent blueprint df06bb57-ad42-4431-9206-abff322896c7
 
@@ -615,15 +615,16 @@ INFO blueprint mupdate override updated to match inventory, phase: do_plan_mupda
 INFO no previous MGS update found as part of updating blueprint mupdate override to match inventory, phase: do_plan_mupdate_override, sled_id: d81c6a84-79b8-4958-ae41-ea46c9b19763
 INFO updating target release minimum generation based on new set-override actions, phase: do_plan_mupdate_override, current_generation: 3, new_generation: 4
 INFO not ready to add or update new zones yet, phase: do_plan_mupdate_override, reasons: current target release generation (3) is lower than minimum required by blueprint (4); sleds have remove mupdate override set in blueprint: d81c6a84-79b8-4958-ae41-ea46c9b19763
-INFO noop converting 0/7 install-dataset zones to artifact store, sled_id: 2b8f0cb3-0295-4b3c-bc58-4fe88b57112c
-INFO install dataset artifact hash matches TUF repo, switching out the zone image source to Artifact, sled_id: 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6, tuf_artifact_id: nexus v1.0.0 (zone)
-INFO install dataset artifact hash matches TUF repo, switching out the zone image source to Artifact, sled_id: 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6, tuf_artifact_id: internal-dns v1.0.0 (zone)
-INFO install dataset artifact hash matches TUF repo, switching out the zone image source to Artifact, sled_id: 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6, tuf_artifact_id: crucible-zone v1.0.0 (zone)
-INFO install dataset artifact hash matches TUF repo, switching out the zone image source to Artifact, sled_id: 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6, tuf_artifact_id: ntp v1.0.0 (zone)
-INFO install dataset artifact hash matches TUF repo, switching out the zone image source to Artifact, sled_id: 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6, tuf_artifact_id: external-dns v1.0.0 (zone)
-INFO install dataset artifact hash matches TUF repo, switching out the zone image source to Artifact, sled_id: 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6, tuf_artifact_id: crucible-pantry-zone v1.0.0 (zone)
-INFO noop converting 6/6 install-dataset zones to artifact store, sled_id: 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6
-INFO skipping noop image source check on sled (blueprint has get_remove_mupdate_override set for sled), sled_id: d81c6a84-79b8-4958-ae41-ea46c9b19763, bp_remove_mupdate_override_id: 1c0ce176-6dc8-4a90-adea-d4a8000751da
+INFO performed noop image source checks on sled, sled_id: 2b8f0cb3-0295-4b3c-bc58-4fe88b57112c, num_total: 7, num_already_artifact: 0, num_eligible: 0, num_ineligible: 7
+INFO performed noop image source checks on sled, sled_id: 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6, num_total: 6, num_already_artifact: 0, num_eligible: 6, num_ineligible: 0
+INFO performed noop image source checks on sled, but no conversions will occur because remove_mupdate_override is set in the blueprint, sled_id: d81c6a84-79b8-4958-ae41-ea46c9b19763, mupdate_override_id: 1c0ce176-6dc8-4a90-adea-d4a8000751da, num_total: 6, num_already_artifact: 0, num_maybe_eligible: 0, num_ineligible: 6
+INFO install dataset artifact hash not found in TUF repo, ignoring for noop checks, sled_id: d81c6a84-79b8-4958-ae41-ea46c9b19763, zone_id: 3eeb8d49-eb1a-43f8-bb64-c2338421c2c6, kind: nexus, file_name: nexus.tar.gz, expected_hash: e9b7035f41848a987a798c15ac424cc91dd662b1af0920d58d8aa1ebad7467b6
+INFO install dataset artifact hash not found in TUF repo, ignoring for noop checks, sled_id: d81c6a84-79b8-4958-ae41-ea46c9b19763, zone_id: 75b220ba-a0f4-4872-8202-dc7c87f062d0, kind: crucible_pantry, file_name: crucible_pantry.tar.gz, expected_hash: 3ff26dad96faa8f67251f5de40458b4f809d536bfe8572134da0e42c2fa12674
+INFO install dataset artifact hash not found in TUF repo, ignoring for noop checks, sled_id: d81c6a84-79b8-4958-ae41-ea46c9b19763, zone_id: ea5b4030-b52f-44b2-8d70-45f15f987d01, kind: internal_dns, file_name: internal_dns.tar.gz, expected_hash: de30657a72b066b8ef1f56351a0a5d4d7000da0a62c4be9b2e949a107ca8a389
+INFO install dataset artifact hash not found in TUF repo, ignoring for noop checks, sled_id: d81c6a84-79b8-4958-ae41-ea46c9b19763, zone_id: f10a4fb9-759f-4a65-b25e-5794ad2d07d8, kind: internal_ntp, file_name: ntp.tar.gz, expected_hash: d76e26198daed69cdae04490d7477f8c842e0dbe37d463eac0d0a8d3fb803095
+INFO install dataset artifact hash not found in TUF repo, ignoring for noop checks, sled_id: d81c6a84-79b8-4958-ae41-ea46c9b19763, zone_id: f55647d4-5500-4ad3-893a-df45bd50d622, kind: crucible, file_name: crucible.tar.gz, expected_hash: 866f6a7c2e51c056fb722b5113e80181cc9cd8b712a0d3dbf1edc4ce29e5229e
+INFO install dataset artifact hash not found in TUF repo, ignoring for noop checks, sled_id: d81c6a84-79b8-4958-ae41-ea46c9b19763, zone_id: f6ec9c67-946a-4da3-98d5-581f72ce8bf0, kind: external_dns, file_name: external_dns.tar.gz, expected_hash: f282c45771429f7bebf71f0cc668521066db57c6bb07fcfccdfb44825d3d930f
+INFO noop converting 6/6 install-dataset zones to artifact store, sled_id: 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6, num_total: 6, num_already_artifact: 0
 INFO will ensure cockroachdb setting, setting: cluster.preserve_downgrade_option, value: DoNotModify
 generated blueprint 9034c710-3e57-45f3-99e5-4316145e87ac based on parent blueprint 7f976e0d-d2a5-4eeb-9e82-c82bc2824aba
 
@@ -860,19 +861,27 @@ external DNS:
 set sled d81c6a84-79b8-4958-ae41-ea46c9b19763 mupdate override: 1c0ce176-6dc8-4a90-adea-d4a8000751da -> unset
 
 
-> # Run the planner again. This should cause sled 2's mupdate override field
-> # to be unset, but no further planning steps to happen because the
-> # target release generation is not new enough.
+> # Run the planner again. This will not cause sled 2's blueprint
+> # remove_mupdate_override to be unset just yet, because some zones'
+> # image sources cannot yet be converted over to Artifact. Also, no
+> # further planning steps will happen because the target release
+> # generation is not new enough.
 > inventory-generate
 generated inventory collection a71f7a73-35a6-45e8-acbe-f1c5925eed69 from configured sleds
 
 > blueprint-plan latest latest
 ERRO error getting mupdate override info for sled, not altering blueprint override, phase: do_plan_mupdate_override, sled_id: 2b8f0cb3-0295-4b3c-bc58-4fe88b57112c, message: reconfigurator-cli simulated mupdate-override error
-INFO inventory override no longer exists, blueprint override cleared, phase: do_plan_mupdate_override, sled_id: d81c6a84-79b8-4958-ae41-ea46c9b19763, prev_bp_override: 1c0ce176-6dc8-4a90-adea-d4a8000751da
-INFO not ready to add or update new zones yet, phase: do_plan_mupdate_override, reasons: current target release generation (3) is lower than minimum required by blueprint (4)
-INFO noop converting 0/7 install-dataset zones to artifact store, sled_id: 2b8f0cb3-0295-4b3c-bc58-4fe88b57112c
-INFO noop converting 0/0 install-dataset zones to artifact store, sled_id: 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6
-INFO noop converting 0/6 install-dataset zones to artifact store, sled_id: d81c6a84-79b8-4958-ae41-ea46c9b19763
+INFO inventory override no longer exists, but blueprint override could not be cleared, phase: do_plan_mupdate_override, sled_id: d81c6a84-79b8-4958-ae41-ea46c9b19763, bp_override: 1c0ce176-6dc8-4a90-adea-d4a8000751da, reason: 6/6 zones cannot be noop-converted to Artifact: NoopConvertZoneCounts { num_total: 6, num_already_artifact: 0, num_maybe_eligible: 0, num_ineligible: 6 }
+INFO not ready to add or update new zones yet, phase: do_plan_mupdate_override, reasons: current target release generation (3) is lower than minimum required by blueprint (4); sleds have remove mupdate override set in blueprint: d81c6a84-79b8-4958-ae41-ea46c9b19763
+INFO performed noop image source checks on sled, sled_id: 2b8f0cb3-0295-4b3c-bc58-4fe88b57112c, num_total: 7, num_already_artifact: 0, num_eligible: 0, num_ineligible: 7
+INFO performed noop image source checks on sled, sled_id: 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6, num_total: 6, num_already_artifact: 6, num_eligible: 0, num_ineligible: 0
+INFO performed noop image source checks on sled, but no conversions will occur because remove_mupdate_override is set in the blueprint, sled_id: d81c6a84-79b8-4958-ae41-ea46c9b19763, mupdate_override_id: 1c0ce176-6dc8-4a90-adea-d4a8000751da, num_total: 6, num_already_artifact: 0, num_maybe_eligible: 0, num_ineligible: 6
+INFO install dataset artifact hash not found in TUF repo, ignoring for noop checks, sled_id: d81c6a84-79b8-4958-ae41-ea46c9b19763, zone_id: 3eeb8d49-eb1a-43f8-bb64-c2338421c2c6, kind: nexus, file_name: nexus.tar.gz, expected_hash: e9b7035f41848a987a798c15ac424cc91dd662b1af0920d58d8aa1ebad7467b6
+INFO install dataset artifact hash not found in TUF repo, ignoring for noop checks, sled_id: d81c6a84-79b8-4958-ae41-ea46c9b19763, zone_id: 75b220ba-a0f4-4872-8202-dc7c87f062d0, kind: crucible_pantry, file_name: crucible_pantry.tar.gz, expected_hash: 3ff26dad96faa8f67251f5de40458b4f809d536bfe8572134da0e42c2fa12674
+INFO install dataset artifact hash not found in TUF repo, ignoring for noop checks, sled_id: d81c6a84-79b8-4958-ae41-ea46c9b19763, zone_id: ea5b4030-b52f-44b2-8d70-45f15f987d01, kind: internal_dns, file_name: internal_dns.tar.gz, expected_hash: de30657a72b066b8ef1f56351a0a5d4d7000da0a62c4be9b2e949a107ca8a389
+INFO install dataset artifact hash not found in TUF repo, ignoring for noop checks, sled_id: d81c6a84-79b8-4958-ae41-ea46c9b19763, zone_id: f10a4fb9-759f-4a65-b25e-5794ad2d07d8, kind: internal_ntp, file_name: ntp.tar.gz, expected_hash: d76e26198daed69cdae04490d7477f8c842e0dbe37d463eac0d0a8d3fb803095
+INFO install dataset artifact hash not found in TUF repo, ignoring for noop checks, sled_id: d81c6a84-79b8-4958-ae41-ea46c9b19763, zone_id: f55647d4-5500-4ad3-893a-df45bd50d622, kind: crucible, file_name: crucible.tar.gz, expected_hash: 866f6a7c2e51c056fb722b5113e80181cc9cd8b712a0d3dbf1edc4ce29e5229e
+INFO install dataset artifact hash not found in TUF repo, ignoring for noop checks, sled_id: d81c6a84-79b8-4958-ae41-ea46c9b19763, zone_id: f6ec9c67-946a-4da3-98d5-581f72ce8bf0, kind: external_dns, file_name: external_dns.tar.gz, expected_hash: f282c45771429f7bebf71f0cc668521066db57c6bb07fcfccdfb44825d3d930f
 INFO will ensure cockroachdb setting, setting: cluster.preserve_downgrade_option, value: DoNotModify
 generated blueprint d60afc57-f15d-476c-bd0f-b1071e2bb976 based on parent blueprint 9034c710-3e57-45f3-99e5-4316145e87ac
 
@@ -961,7 +970,8 @@ parent:    9034c710-3e57-45f3-99e5-4316145e87ac
 
 
 
-  sled: d81c6a84-79b8-4958-ae41-ea46c9b19763 (active, config generation 5)
+  sled: d81c6a84-79b8-4958-ae41-ea46c9b19763 (active, config generation 4)
+    will remove mupdate override:   1c0ce176-6dc8-4a90-adea-d4a8000751da
 
     physical disks:
     ------------------------------------------------------------------------------------
@@ -1027,47 +1037,6 @@ parent:    9034c710-3e57-45f3-99e5-4316145e87ac
 > blueprint-diff latest
 from: blueprint 9034c710-3e57-45f3-99e5-4316145e87ac
 to:   blueprint d60afc57-f15d-476c-bd0f-b1071e2bb976
-
- MODIFIED SLEDS:
-
-  sled d81c6a84-79b8-4958-ae41-ea46c9b19763 (active, config generation 4 -> 5):
--   will remove mupdate override:   1c0ce176-6dc8-4a90-adea-d4a8000751da -> (none)
-
-    physical disks:
-    ------------------------------------------------------------------------------------
-    vendor        model        serial                                        disposition
-    ------------------------------------------------------------------------------------
-    fake-vendor   fake-model   serial-4930954e-9ac7-4453-b63f-5ab97c389a99   in service 
-
-
-    datasets:
-    -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
-    dataset name                                                                                                   dataset id                             disposition   quota     reservation   compression
-    -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
-    oxp_4930954e-9ac7-4453-b63f-5ab97c389a99/crucible                                                              090bd88d-0a43-4040-a832-b13ae721f74f   in service    none      none          off        
-    oxp_4930954e-9ac7-4453-b63f-5ab97c389a99/crypt/external_dns                                                    4da74a5b-6911-4cca-b624-b90c65530117   in service    none      none          off        
-    oxp_4930954e-9ac7-4453-b63f-5ab97c389a99/crypt/internal_dns                                                    252ac39f-b9e2-4697-8c07-3a833115d704   in service    none      none          off        
-    oxp_4930954e-9ac7-4453-b63f-5ab97c389a99/crypt/zone                                                            45cd9687-20be-4247-b62a-dfdacf324929   in service    none      none          off        
-    oxp_4930954e-9ac7-4453-b63f-5ab97c389a99/crypt/zone/oxz_crucible_f55647d4-5500-4ad3-893a-df45bd50d622          1cb0a47a-59ac-4892-8e92-cf87b4290f96   in service    none      none          off        
-    oxp_4930954e-9ac7-4453-b63f-5ab97c389a99/crypt/zone/oxz_crucible_pantry_75b220ba-a0f4-4872-8202-dc7c87f062d0   b1deff4b-51df-4a37-9043-afbd7c70a1cb   in service    none      none          off        
-    oxp_4930954e-9ac7-4453-b63f-5ab97c389a99/crypt/zone/oxz_external_dns_f6ec9c67-946a-4da3-98d5-581f72ce8bf0      c65a9c1c-36dc-4ddb-8aac-ec3be8dbb209   in service    none      none          off        
-    oxp_4930954e-9ac7-4453-b63f-5ab97c389a99/crypt/zone/oxz_internal_dns_ea5b4030-b52f-44b2-8d70-45f15f987d01      21fd4f3a-ec31-469b-87b1-087c343a2422   in service    none      none          off        
-    oxp_4930954e-9ac7-4453-b63f-5ab97c389a99/crypt/zone/oxz_nexus_3eeb8d49-eb1a-43f8-bb64-c2338421c2c6             e009d8b8-4695-4322-b53f-f03f2744aef7   in service    none      none          off        
-    oxp_4930954e-9ac7-4453-b63f-5ab97c389a99/crypt/zone/oxz_ntp_f10a4fb9-759f-4a65-b25e-5794ad2d07d8               41071985-1dfd-4ce5-8bc2-897161a8bce4   in service    none      none          off        
-    oxp_4930954e-9ac7-4453-b63f-5ab97c389a99/crypt/debug                                                           7a6a2058-ea78-49de-9730-cce5e28b4cfb   in service    100 GiB   none          gzip-9     
-
-
-    omicron zones:
-    ---------------------------------------------------------------------------------------------------------------
-    zone type         zone id                                image source      disposition   underlay IP           
-    ---------------------------------------------------------------------------------------------------------------
-    crucible          f55647d4-5500-4ad3-893a-df45bd50d622   install dataset   in service    fd00:1122:3344:103::25
-    crucible_pantry   75b220ba-a0f4-4872-8202-dc7c87f062d0   install dataset   in service    fd00:1122:3344:103::24
-    external_dns      f6ec9c67-946a-4da3-98d5-581f72ce8bf0   install dataset   in service    fd00:1122:3344:103::23
-    internal_dns      ea5b4030-b52f-44b2-8d70-45f15f987d01   install dataset   in service    fd00:1122:3344:3::1   
-    internal_ntp      f10a4fb9-759f-4a65-b25e-5794ad2d07d8   install dataset   in service    fd00:1122:3344:103::21
-    nexus             3eeb8d49-eb1a-43f8-bb64-c2338421c2c6   install dataset   in service    fd00:1122:3344:103::22
-
 
  COCKROACHDB SETTINGS:
     state fingerprint:::::::::::::::::   (none) (unchanged)
@@ -1234,15 +1203,11 @@ set target release based on repo-2.0.0.zip
 
 > blueprint-plan latest latest
 ERRO error getting mupdate override info for sled, not altering blueprint override, phase: do_plan_mupdate_override, sled_id: 2b8f0cb3-0295-4b3c-bc58-4fe88b57112c, message: reconfigurator-cli simulated mupdate-override error
-INFO noop converting 0/7 install-dataset zones to artifact store, sled_id: 2b8f0cb3-0295-4b3c-bc58-4fe88b57112c
-INFO noop converting 0/0 install-dataset zones to artifact store, sled_id: 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6
-INFO install dataset artifact hash matches TUF repo, switching out the zone image source to Artifact, sled_id: d81c6a84-79b8-4958-ae41-ea46c9b19763, tuf_artifact_id: nexus v2.0.0 (zone)
-INFO install dataset artifact hash matches TUF repo, switching out the zone image source to Artifact, sled_id: d81c6a84-79b8-4958-ae41-ea46c9b19763, tuf_artifact_id: crucible-pantry-zone v2.0.0 (zone)
-INFO install dataset artifact hash matches TUF repo, switching out the zone image source to Artifact, sled_id: d81c6a84-79b8-4958-ae41-ea46c9b19763, tuf_artifact_id: internal-dns v2.0.0 (zone)
-INFO install dataset artifact hash matches TUF repo, switching out the zone image source to Artifact, sled_id: d81c6a84-79b8-4958-ae41-ea46c9b19763, tuf_artifact_id: ntp v2.0.0 (zone)
-INFO install dataset artifact hash matches TUF repo, switching out the zone image source to Artifact, sled_id: d81c6a84-79b8-4958-ae41-ea46c9b19763, tuf_artifact_id: crucible-zone v2.0.0 (zone)
-INFO install dataset artifact hash matches TUF repo, switching out the zone image source to Artifact, sled_id: d81c6a84-79b8-4958-ae41-ea46c9b19763, tuf_artifact_id: external-dns v2.0.0 (zone)
-INFO noop converting 6/6 install-dataset zones to artifact store, sled_id: d81c6a84-79b8-4958-ae41-ea46c9b19763
+INFO inventory override no longer exists, blueprint override cleared, phase: do_plan_mupdate_override, sled_id: d81c6a84-79b8-4958-ae41-ea46c9b19763, prev_bp_override: 1c0ce176-6dc8-4a90-adea-d4a8000751da
+INFO performed noop image source checks on sled, sled_id: 2b8f0cb3-0295-4b3c-bc58-4fe88b57112c, num_total: 7, num_already_artifact: 0, num_eligible: 0, num_ineligible: 7
+INFO performed noop image source checks on sled, sled_id: 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6, num_total: 6, num_already_artifact: 6, num_eligible: 0, num_ineligible: 0
+INFO performed noop image source checks on sled, sled_id: d81c6a84-79b8-4958-ae41-ea46c9b19763, num_total: 6, num_already_artifact: 0, num_eligible: 6, num_ineligible: 0
+INFO noop converting 6/6 install-dataset zones to artifact store, sled_id: d81c6a84-79b8-4958-ae41-ea46c9b19763, num_total: 6, num_already_artifact: 0
 INFO sufficient BoundaryNtp zones exist in plan, desired_count: 0, current_count: 0
 INFO sufficient Clickhouse zones exist in plan, desired_count: 1, current_count: 1
 INFO sufficient ClickhouseKeeper zones exist in plan, desired_count: 0, current_count: 0
@@ -1261,7 +1226,7 @@ INFO skipping board for SP update, serial_number: serial0, part_number: model0
 WARN cannot configure SP update for board (no matching artifact), serial_number: serial2, part_number: model2
 INFO skipping board for SP update, serial_number: serial2, part_number: model2
 INFO ran out of boards for SP update
-INFO some zones not yet up-to-date, sled_id: 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6
+INFO some zones not yet up-to-date, sled_id: 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6, zones_currently_updating: [ZoneCurrentlyUpdating { zone_id: 0c71b3b2-6ceb-4e8f-b020-b08675e83038 (service), zone_kind: Nexus, reason: ImageSourceMismatch { bp_image_source: Artifact { version: Available { version: ArtifactVersion("1.0.0") }, hash: ArtifactHash("0e32b4a3e5d3668bb1d6a16fb06b74dc60b973fa479dcee0aae3adbb52bf1388") }, inv_image_source: InstallDataset } }, ZoneCurrentlyUpdating { zone_id: 427ec88f-f467-42fa-9bbb-66a91a36103c (service), zone_kind: InternalDns, reason: ImageSourceMismatch { bp_image_source: Artifact { version: Available { version: ArtifactVersion("1.0.0") }, hash: ArtifactHash("ffbf1373f7ee08dddd74c53ed2a94e7c4c572a982d3a9bc94000c6956b700c6a") }, inv_image_source: InstallDataset } }, ZoneCurrentlyUpdating { zone_id: 5199c033-4cf9-4ab6-8ae7-566bd7606363 (service), zone_kind: Crucible, reason: ImageSourceMismatch { bp_image_source: Artifact { version: Available { version: ArtifactVersion("1.0.0") }, hash: ArtifactHash("6f17cf65fb5a5bec5542dd07c03cd0acc01e59130f02c532c8d848ecae810047") }, inv_image_source: InstallDataset } }, ZoneCurrentlyUpdating { zone_id: 6444f8a5-6465-4f0b-a549-1993c113569c (service), zone_kind: InternalNtp, reason: ImageSourceMismatch { bp_image_source: Artifact { version: Available { version: ArtifactVersion("1.0.0") }, hash: ArtifactHash("67593d686ed04a1709f93972b71f4ebc148a9362120f65d239943e814a9a7439") }, inv_image_source: InstallDataset } }, ZoneCurrentlyUpdating { zone_id: 803bfb63-c246-41db-b0da-d3b87ddfc63d (service), zone_kind: ExternalDns, reason: ImageSourceMismatch { bp_image_source: Artifact { version: Available { version: ArtifactVersion("1.0.0") }, hash: ArtifactHash("ccca13ed19b8731f9adaf0d6203b02ea3b9ede4fa426b9fac0a07ce95440046d") }, inv_image_source: InstallDataset } }, ZoneCurrentlyUpdating { zone_id: ba4994a8-23f9-4b1a-a84f-a08d74591389 (service), zone_kind: CruciblePantry, reason: ImageSourceMismatch { bp_image_source: Artifact { version: Available { version: ArtifactVersion("1.0.0") }, hash: ArtifactHash("21f0ada306859c23917361f2e0b9235806c32607ec689c7e8cf16bb898bc5a02") }, inv_image_source: InstallDataset } }]
 INFO will ensure cockroachdb setting, setting: cluster.preserve_downgrade_option, value: DoNotModify
 generated blueprint a5a8f242-ffa5-473c-8efd-2acf2dc0b736 based on parent blueprint d60afc57-f15d-476c-bd0f-b1071e2bb976
 
@@ -1350,7 +1315,7 @@ parent:    d60afc57-f15d-476c-bd0f-b1071e2bb976
 
 
 
-  sled: d81c6a84-79b8-4958-ae41-ea46c9b19763 (active, config generation 6)
+  sled: d81c6a84-79b8-4958-ae41-ea46c9b19763 (active, config generation 5)
 
     physical disks:
     ------------------------------------------------------------------------------------
@@ -1399,7 +1364,7 @@ parent:    d60afc57-f15d-476c-bd0f-b1071e2bb976
  METADATA:
     created by:::::::::::::   reconfigurator-sim
     created at:::::::::::::   <REDACTED_TIMESTAMP>
-    comment::::::::::::::::   sled d81c6a84-79b8-4958-ae41-ea46c9b19763: performed 6 noop zone image source updates, sled d81c6a84-79b8-4958-ae41-ea46c9b19763: performed 6 noop zone image source updates, sled d81c6a84-79b8-4958-ae41-ea46c9b19763: performed 6 noop zone image source updates, sled d81c6a84-79b8-4958-ae41-ea46c9b19763: performed 6 noop zone image source updates, sled d81c6a84-79b8-4958-ae41-ea46c9b19763: performed 6 noop zone image source updates, sled d81c6a84-79b8-4958-ae41-ea46c9b19763: performed 6 noop zone image source updates
+    comment::::::::::::::::   sled d81c6a84-79b8-4958-ae41-ea46c9b19763: performed 6 noop zone image source updates
     internal DNS version:::   1
     external DNS version:::   1
     target release min gen:   4
@@ -1413,7 +1378,8 @@ to:   blueprint a5a8f242-ffa5-473c-8efd-2acf2dc0b736
 
  MODIFIED SLEDS:
 
-  sled d81c6a84-79b8-4958-ae41-ea46c9b19763 (active, config generation 5 -> 6):
+  sled d81c6a84-79b8-4958-ae41-ea46c9b19763 (active, config generation 4 -> 5):
+-   will remove mupdate override:   1c0ce176-6dc8-4a90-adea-d4a8000751da -> (none)
 
     physical disks:
     ------------------------------------------------------------------------------------

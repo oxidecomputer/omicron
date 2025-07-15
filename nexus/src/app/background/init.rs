@@ -457,6 +457,7 @@ impl BackgroundTasksInitializer {
         // blueprint executor runs.
         let inventory_watcher = {
             let collector = inventory_collection::InventoryCollector::new(
+                &opctx,
                 datastore.clone(),
                 resolver.clone(),
                 &nexus_id.to_string(),
