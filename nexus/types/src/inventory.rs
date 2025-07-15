@@ -36,6 +36,7 @@ use omicron_common::api::external::ByteCount;
 pub use omicron_common::api::internal::shared::NetworkInterface;
 pub use omicron_common::api::internal::shared::NetworkInterfaceKind;
 pub use omicron_common::api::internal::shared::SourceNatConfig;
+use omicron_common::disk::M2Slot;
 pub use omicron_common::zpool_name::ZpoolName;
 use omicron_uuid_kinds::CollectionUuid;
 use omicron_uuid_kinds::DatasetUuid;
@@ -49,6 +50,7 @@ use std::collections::BTreeSet;
 use std::net::SocketAddrV6;
 use std::sync::Arc;
 use strum::EnumIter;
+use tufaceous_artifact::ArtifactHash;
 
 /// Results of collecting hardware/software inventory from various Omicron
 /// components
@@ -99,6 +101,14 @@ pub struct Collection {
     /// table.
     #[serde_as(as = "Vec<(_, _)>")]
     pub sps: BTreeMap<Arc<BaseboardId>, ServiceProcessor>,
+    /// all host phase 1 flash hashes, keyed first by the phase 1 slot, then the
+    /// baseboard id of the sled where they were found
+    ///
+    /// In practice, these will be inserted into the
+    /// `inv_host_phase_1_flash_hash` table.
+    #[serde_as(as = "BTreeMap<_, Vec<(_, _)>>")]
+    pub host_phase_1_flash_hashes:
+        BTreeMap<M2Slot, BTreeMap<Arc<BaseboardId>, HostPhase1FlashHash>>,
     /// all roots of trust, keyed by baseboard id
     ///
     /// In practice, these will be inserted into the `inv_root_of_trust` table.
@@ -371,6 +381,18 @@ pub struct RotState {
     pub slot_b_error: Option<RotImageError>,
     pub stage0_error: Option<RotImageError>,
     pub stage0next_error: Option<RotImageError>,
+}
+
+/// Describes a host phase 1 flash hash found from a service processor
+/// during collection
+#[derive(
+    Clone, Debug, Ord, Eq, PartialOrd, PartialEq, Deserialize, Serialize,
+)]
+pub struct HostPhase1FlashHash {
+    pub time_collected: DateTime<Utc>,
+    pub source: String,
+    pub slot: M2Slot,
+    pub hash: ArtifactHash,
 }
 
 /// Describes which caboose this is (which component, which slot)

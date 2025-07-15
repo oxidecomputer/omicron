@@ -1558,6 +1558,18 @@ table! {
 }
 
 table! {
+    inv_host_phase_1_flash_hash (inv_collection_id, hw_baseboard_id, slot) {
+        inv_collection_id -> Uuid,
+        hw_baseboard_id -> Uuid,
+        time_collected -> Timestamptz,
+        source -> Text,
+
+        slot -> crate::enums::HwHostPhase1SlotEnum,
+        hash -> Text,
+    }
+}
+
+table! {
     inv_caboose (inv_collection_id, hw_baseboard_id, which) {
         inv_collection_id -> Uuid,
         hw_baseboard_id -> Uuid,

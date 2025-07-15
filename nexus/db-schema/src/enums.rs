@@ -39,6 +39,7 @@ define_enums! {
     DownstairsClientStopRequestReasonEnum => "downstairs_client_stop_request_reason_type",
     DownstairsClientStoppedReasonEnum => "downstairs_client_stopped_reason_type",
     FailureDomainEnum => "failure_domain",
+    HwHostPhase1SlotEnum => "hw_host_phase_1_slot",
     HwPowerStateEnum => "hw_power_state",
     HwRotSlotEnum => "hw_rot_slot",
     IdentityProviderTypeEnum => "provider_type",

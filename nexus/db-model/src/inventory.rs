@@ -30,7 +30,7 @@ use nexus_db_schema::schema::inv_zone_manifest_zone;
 use nexus_db_schema::schema::{
     hw_baseboard_id, inv_caboose, inv_clickhouse_keeper_membership,
     inv_cockroachdb_status, inv_collection, inv_collection_error, inv_dataset,
-    inv_last_reconciliation_dataset_result,
+    inv_host_phase_1_flash_hash, inv_last_reconciliation_dataset_result,
     inv_last_reconciliation_disk_result,
     inv_last_reconciliation_orphaned_dataset,
     inv_last_reconciliation_zone_result, inv_mupdate_override_non_boot,
@@ -154,6 +154,36 @@ impl From<HwRotSlot> for RotSlot {
         match value {
             HwRotSlot::A => RotSlot::A,
             HwRotSlot::B => RotSlot::B,
+        }
+    }
+}
+
+// See [`M2Slot`].
+impl_enum_type!(
+    HwHostPhase1SlotEnum:
+
+    #[derive(Copy, Clone, Debug, AsExpression, FromSqlRow, PartialEq)]
+    pub enum HwHostPhase1Slot;
+
+    // Enum values
+    A => b"A"
+    B => b"B"
+);
+
+impl From<HwHostPhase1Slot> for M2Slot {
+    fn from(value: HwHostPhase1Slot) -> Self {
+        match value {
+            HwHostPhase1Slot::A => Self::A,
+            HwHostPhase1Slot::B => Self::B,
+        }
+    }
+}
+
+impl From<M2Slot> for HwHostPhase1Slot {
+    fn from(value: M2Slot) -> Self {
+        match value {
+            M2Slot::A => Self::A,
+            M2Slot::B => Self::B,
         }
     }
 }
@@ -752,6 +782,19 @@ impl From<InvRootOfTrust> for nexus_types::inventory::RotState {
     }
 }
 
+/// See [`nexus_types::inventory::HostPhase1FlashHash`].
+#[derive(Queryable, Clone, Debug, Selectable)]
+#[diesel(table_name = inv_host_phase_1_flash_hash)]
+pub struct InvHostPhase1FlashHash {
+    pub inv_collection_id: Uuid,
+    pub hw_baseboard_id: Uuid,
+    pub time_collected: DateTime<Utc>,
+    pub source: String,
+
+    pub slot: HwHostPhase1Slot,
+    pub hash: ArtifactHash,
+}
+
 /// See [`nexus_types::inventory::CabooseFound`].
 #[derive(Queryable, Clone, Debug, Selectable)]
 #[diesel(table_name = inv_caboose)]
@@ -966,6 +1009,7 @@ impl InvSledConfigReconciler {
         boot_partition_a_error: Option<String>,
         boot_partition_b_error: Option<String>,
     ) -> Self {
+        // TODO-john replace this column with the hw_host_phase_1_slot enum?
         let (boot_disk_slot, boot_disk_error) = match boot_disk {
             Ok(M2Slot::A) => (Some(SqlU8(0)), None),
             Ok(M2Slot::B) => (Some(SqlU8(1)), None),
