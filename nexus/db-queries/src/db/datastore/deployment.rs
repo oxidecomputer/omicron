@@ -2530,6 +2530,7 @@ mod tests {
 
     use crate::db::pub_test_utils::TestDatabase;
     use crate::db::raw_query_builder::QueryBuilder;
+    use gateway_types::rot::RotSlot;
     use nexus_inventory::CollectionBuilder;
     use nexus_inventory::now_db_precision;
     use nexus_reconfigurator_planning::blueprint_builder::BlueprintBuilder;
@@ -2543,6 +2544,7 @@ mod tests {
     use nexus_types::deployment::BlueprintZoneImageSource;
     use nexus_types::deployment::BlueprintZoneImageVersion;
     use nexus_types::deployment::BlueprintZoneType;
+    use nexus_types::deployment::ExpectedActiveRotSlot;
     use nexus_types::deployment::OmicronZoneExternalFloatingIp;
     use nexus_types::deployment::PendingMgsUpdate;
     use nexus_types::deployment::PlanningInput;
@@ -2918,6 +2920,7 @@ mod tests {
             .zpools;
 
         // Create a builder for a child blueprint.
+        // TODO-K: This is what I want
         let mut builder = BlueprintBuilder::new_based_on(
             &logctx.log,
             &blueprint1,
@@ -3167,15 +3170,36 @@ mod tests {
         // blueprint2 is more interesting in terms of containing a variety of
         // different blueprint structures.  We want to try deleting that.  To do
         // that, we have to create a new blueprint and make that one the target.
-        let blueprint3 = BlueprintBuilder::new_based_on(
+        let mut builder = BlueprintBuilder::new_based_on(
             &logctx.log,
             &blueprint2,
             &planning_input,
             &collection,
             "dummy",
         )
-        .expect("failed to create builder")
-        .build();
+        .expect("failed to create builder");
+
+        // Configure an RoT update
+        let (baseboard_id, sp) =
+            collection.sps.iter().next().expect("at least one SP");
+        builder.pending_mgs_update_insert(PendingMgsUpdate {
+            baseboard_id: baseboard_id.clone(),
+            sp_type: sp.sp_type,
+            slot_id: sp.sp_slot,
+            details: PendingMgsUpdateDetails::Rot {
+                expected_active_slot: ExpectedActiveRotSlot {
+                    slot: RotSlot::A,
+                    version: "1.0.0".parse().unwrap(),
+                },
+                expected_inactive_version: ExpectedVersion::NoValidVersion,
+                expected_persistent_boot_preference: RotSlot::A,
+                expected_pending_persistent_boot_preference: None,
+                expected_transient_boot_preference: None,
+            },
+            artifact_hash: ArtifactHash([72; 32]),
+            artifact_version: "2.0.0".parse().unwrap(),
+        });
+        let blueprint3 = builder.build();
         datastore
             .blueprint_insert(&opctx, &blueprint3)
             .await
