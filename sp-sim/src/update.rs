@@ -5,6 +5,8 @@
 use std::collections::BTreeMap;
 use std::io::Cursor;
 use std::mem;
+use std::time::Duration;
+use std::time::Instant;
 
 use crate::SIM_GIMLET_BOARD;
 use crate::SIM_ROT_BOARD;
@@ -13,6 +15,7 @@ use crate::SIM_SIDECAR_BOARD;
 use crate::helpers::rot_slot_id_from_u16;
 use crate::helpers::rot_slot_id_to_u16;
 use gateway_messages::Fwid;
+use gateway_messages::HfError;
 use gateway_messages::RotSlotId;
 use gateway_messages::RotStateV3;
 use gateway_messages::SpComponent;
@@ -21,8 +24,13 @@ use gateway_messages::UpdateChunk;
 use gateway_messages::UpdateId;
 use gateway_messages::UpdateInProgressStatus;
 use hubtools::RawHubrisImage;
+use sha2::Sha256;
 use sha3::Digest;
 use sha3::Sha3_256;
+
+// How long do we take to hash host flash? Real SPs take a handful of seconds;
+// we'll pick something similar.
+const TIME_TO_HASH_HOST_PHASE_1: Duration = Duration::from_secs(5);
 
 pub(crate) struct SimSpUpdate {
     /// tracks the state of any ongoing simulated update
@@ -38,6 +46,8 @@ pub(crate) struct SimSpUpdate {
     /// data from the last completed phase1 update for each slot (exposed for
     /// testing)
     last_host_phase1_update_data: BTreeMap<u16, Box<[u8]>>,
+    /// state of hashing each of the host phase1 slots
+    phase1_hash_state: BTreeMap<u16, HostFlashHashState>,
 
     /// records whether a change to the stage0 "active slot" has been requested
     pending_stage0_update: bool,
@@ -177,6 +187,7 @@ impl SimSpUpdate {
             last_sp_update_data: None,
             last_rot_update_data: None,
             last_host_phase1_update_data: BTreeMap::new(),
+            phase1_hash_state: BTreeMap::new(),
 
             pending_stage0_update: false,
 
@@ -302,6 +313,13 @@ impl SimSpUpdate {
                 // claimed it would be).
                 std::io::Write::write_all(data, chunk_data)
                     .map_err(|_| SpError::UpdateIsTooLarge)?;
+
+                // If we're writing to the host flash, invalidate the cached
+                // hash of this slot.
+                if *component == SpComponent::HOST_CPU_BOOT_FLASH {
+                    self.phase1_hash_state
+                        .insert(*slot, HostFlashHashState::HashInvalidated);
+                }
 
                 if data.position() == data.get_ref().len() as u64 {
                     let mut stolen = Cursor::new(Box::default());
@@ -450,6 +468,78 @@ impl SimSpUpdate {
         slot: u16,
     ) -> Option<Box<[u8]>> {
         self.last_host_phase1_update_data.get(&slot).cloned()
+    }
+
+    pub(crate) fn start_host_flash_hash(
+        &mut self,
+        slot: u16,
+    ) -> Result<(), SpError> {
+        match self
+            .phase1_hash_state
+            .entry(slot)
+            .or_insert(HostFlashHashState::NeverHashed)
+        {
+            // No current hash; record our start time so we can emulate hashing
+            // taking a few seconds.
+            state @ (HostFlashHashState::NeverHashed
+            | HostFlashHashState::HashInvalidated) => {
+                *state = HostFlashHashState::HashStarted(Instant::now());
+                Ok(())
+            }
+            // Already hashed; this is a no-op.
+            HostFlashHashState::Hashed(_) => Ok(()),
+            // Still hashing; check and see if it's done. This is either an
+            // error (if we're still hashing) or a no-op (if we're done).
+            HostFlashHashState::HashStarted(started) => {
+                let started = *started;
+                self.finalize_host_flash_hash_if_sufficient_time_elapsed(
+                    slot, started,
+                )?;
+                Ok(())
+            }
+        }
+    }
+
+    pub(crate) fn get_host_flash_hash(
+        &mut self,
+        slot: u16,
+    ) -> Result<[u8; 32], SpError> {
+        match self
+            .phase1_hash_state
+            .entry(slot)
+            .or_insert(HostFlashHashState::NeverHashed)
+        {
+            HostFlashHashState::NeverHashed => {
+                Err(SpError::Hf(HfError::HashUncalculated))
+            }
+            HostFlashHashState::HashStarted(started) => {
+                let started = *started;
+                self.finalize_host_flash_hash_if_sufficient_time_elapsed(
+                    slot, started,
+                )
+            }
+            HostFlashHashState::Hashed(hash) => Ok(*hash),
+            HostFlashHashState::HashInvalidated => {
+                Err(SpError::Hf(HfError::RecalculateHash))
+            }
+        }
+    }
+
+    fn finalize_host_flash_hash_if_sufficient_time_elapsed(
+        &mut self,
+        slot: u16,
+        started: Instant,
+    ) -> Result<[u8; 32], SpError> {
+        if started.elapsed() < TIME_TO_HASH_HOST_PHASE_1 {
+            return Err(SpError::Hf(HfError::HashInProgress));
+        }
+
+        let data = self.last_host_phase1_update_data(slot);
+        let data = data.as_deref().unwrap_or(&[]);
+        let hash = Sha256::digest(&data).into();
+        self.phase1_hash_state.insert(slot, HostFlashHashState::Hashed(hash));
+
+        Ok(hash)
     }
 
     pub(crate) fn get_component_caboose_value(
@@ -662,4 +752,12 @@ fn fake_fwid_compute(data: &[u8]) -> Fwid {
     let mut digest = Sha3_256::default();
     digest.update(data);
     Fwid::Sha3_256(digest.finalize().into())
+}
+
+#[derive(Debug, Clone, Copy)]
+enum HostFlashHashState {
+    NeverHashed,
+    HashStarted(Instant),
+    Hashed([u8; 32]),
+    HashInvalidated,
 }
