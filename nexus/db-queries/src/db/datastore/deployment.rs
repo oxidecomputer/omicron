@@ -2972,7 +2972,6 @@ mod tests {
             .zpools;
 
         // Create a builder for a child blueprint.
-        // TODO-K: This is what I want
         let mut builder = BlueprintBuilder::new_based_on(
             &logctx.log,
             &blueprint1,
