@@ -21,6 +21,7 @@ use nexus_sled_agent_shared::inventory::Inventory;
 use nexus_sled_agent_shared::inventory::InventoryDataset;
 use nexus_sled_agent_shared::inventory::InventoryDisk;
 use nexus_sled_agent_shared::inventory::InventoryZpool;
+use nexus_sled_agent_shared::inventory::MupdateOverrideBootInventory;
 use nexus_sled_agent_shared::inventory::OmicronSledConfig;
 use nexus_sled_agent_shared::inventory::SledRole;
 use nexus_sled_agent_shared::inventory::ZoneImageResolverInventory;
@@ -59,12 +60,14 @@ use omicron_common::disk::DiskIdentity;
 use omicron_common::disk::DiskVariant;
 use omicron_common::policy::INTERNAL_DNS_REDUNDANCY;
 use omicron_common::policy::NEXUS_REDUNDANCY;
+use omicron_uuid_kinds::MupdateOverrideUuid;
 use omicron_uuid_kinds::SledUuid;
 use omicron_uuid_kinds::ZpoolUuid;
 use std::collections::BTreeMap;
 use std::collections::BTreeSet;
 use std::fmt;
 use std::fmt::Debug;
+use std::mem;
 use std::net::Ipv4Addr;
 use std::net::Ipv6Addr;
 use std::sync::Arc;
@@ -533,6 +536,36 @@ impl SystemDescription {
             format!("attempted to access sled {} not found in system", sled_id)
         })?;
         Ok(sled.sp_inactive_caboose().map(|c| c.version.as_ref()))
+    }
+
+    /// Set a sled's mupdate override field.
+    ///
+    /// Returns the previous value, or previous error if set.
+    pub fn sled_set_mupdate_override(
+        &mut self,
+        sled_id: SledUuid,
+        mupdate_override: Option<MupdateOverrideUuid>,
+    ) -> anyhow::Result<Result<Option<MupdateOverrideUuid>, String>> {
+        let sled = self.sleds.get_mut(&sled_id).with_context(|| {
+            format!("attempted to access sled {} not found in system", sled_id)
+        })?;
+        let sled = Arc::make_mut(sled);
+        Ok(sled.set_mupdate_override(Ok(mupdate_override)))
+    }
+
+    /// Set a sled's mupdate override field to an error.
+    ///
+    /// Returns the previous value, or previous error if set.
+    pub fn sled_set_mupdate_override_error(
+        &mut self,
+        sled_id: SledUuid,
+        message: String,
+    ) -> anyhow::Result<Result<Option<MupdateOverrideUuid>, String>> {
+        let sled = self.sleds.get_mut(&sled_id).with_context(|| {
+            format!("attempted to access sled {} not found in system", sled_id)
+        })?;
+        let sled = Arc::make_mut(sled);
+        Ok(sled.set_mupdate_override(Err(message)))
     }
 
     pub fn set_tuf_repo(&mut self, tuf_repo: TufRepoPolicy) {
@@ -1221,6 +1254,30 @@ impl Sled {
             version: version.to_string(),
             sign: None,
         }
+    }
+
+    /// Set the mupdate override field for a sled, returning the previous value.
+    fn set_mupdate_override(
+        &mut self,
+        mupdate_override_id: Result<Option<MupdateOverrideUuid>, String>,
+    ) -> Result<Option<MupdateOverrideUuid>, String> {
+        // We don't alter the non-boot override because it's not used in this process.
+        let inv = match mupdate_override_id {
+            Ok(Some(id)) => Ok(Some(MupdateOverrideBootInventory {
+                mupdate_override_id: id,
+            })),
+            Ok(None) => Ok(None),
+            Err(message) => Err(message),
+        };
+        let prev = mem::replace(
+            &mut self
+                .inventory_sled_agent
+                .zone_image_resolver
+                .mupdate_override
+                .boot_override,
+            inv,
+        );
+        prev.map(|prev| prev.map(|prev| prev.mupdate_override_id))
     }
 }
 
