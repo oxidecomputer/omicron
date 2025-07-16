@@ -14402,7 +14402,7 @@
         "properties": {
           "access_method": {
             "nullable": true,
-            "description": "API token or session cookie. Optional because it will not be defined on unauthenticated requests like login attempts.",
+            "description": "Indicates whether request was made with an API token or session cookie. Optional because it will not be defined on unauthenticated requests like login attempts.",
             "type": "string"
           },
           "actor": {

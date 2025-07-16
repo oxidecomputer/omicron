@@ -13,6 +13,16 @@ use uuid::Uuid;
 
 use crate::context::ApiContext;
 
+/// Truncate a str to at most `max` bytes, but make sure not to cut any chars
+/// in half.
+fn safe_truncate(s: &str, max: usize) -> &str {
+    let mut end = s.len().min(max);
+    while !s.is_char_boundary(end) {
+        end -= 1; // back up until we hit a boundary
+    }
+    &s[..end]
+}
+
 impl super::Nexus {
     pub(crate) async fn audit_log_list(
         &self,
@@ -29,25 +39,28 @@ impl super::Nexus {
     pub(crate) async fn audit_log_entry_init(
         &self,
         opctx: &OpContext,
-        // TODO: not sure we want the app layer to be aware of RequestContext.
-        // might be better to extract the relevant fields at the call site. still
-        // would want a helper to avoid duplication
+        // This file is the only place we pass the entire request context into
+        // a nexus app layer function. It seems fine, but if we wanted to avoid
+        // that, we could instead give this function a million arguments and
+        // extract the relevant fields at the call site.
         rqctx: &RequestContext<ApiContext>,
     ) -> CreateResult<AuditLogEntryInit> {
         let actor = opctx.authn.actor();
-        let entry =
-            AuditLogEntryInit::new(
-                rqctx.request_id.clone(),
-                rqctx.endpoint.operation_id.clone(),
-                rqctx.request.uri().to_string(),
-                rqctx.request.remote_addr().ip(),
-                rqctx.request.headers().get("User-Agent").and_then(|value| {
-                    value.to_str().ok().map(|s| s.to_string())
-                }),
-                actor.map(|a| a.actor_id()),
-                actor.and_then(|a| a.silo_id()),
-                opctx.authn.scheme_used().map(|s| s.to_string()),
-            );
+        let entry = AuditLogEntryInit::new(
+            rqctx.request_id.clone(),
+            rqctx.endpoint.operation_id.clone(),
+            rqctx.request.uri().to_string(),
+            rqctx.request.remote_addr().ip(),
+            rqctx
+                .request
+                .headers()
+                .get("User-Agent")
+                .and_then(|value| value.to_str().ok())
+                .map(|s| safe_truncate(s, 255).to_string()),
+            actor.map(|a| a.actor_id()),
+            actor.and_then(|a| a.silo_id()),
+            opctx.authn.scheme_used().map(|s| s.to_string()),
+        );
         self.db_datastore.audit_log_entry_init(opctx, entry).await
     }
 

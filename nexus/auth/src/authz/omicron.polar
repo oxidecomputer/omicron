@@ -453,8 +453,11 @@ resource AuditLog {
 	# Fleet viewers can read the audit log
 	"list_children" if "viewer" on "parent_fleet";
 }
-# TODO: is this right? any op context should be able to write to the audit log?
-# feels weird though
+
+# Any actor should be able to write to the audit log because we need to be able
+# to write to the log from any request, authenticated or not. Audit log writes
+# are always a byproduct of other operations: there are no endpoints that allow
+# the user to write to the log deliberately.
 has_permission(_actor: AuthenticatedActor, "create_child", _audit_log: AuditLog);
 
 has_relation(fleet: Fleet, "parent_fleet", audit_log: AuditLog)

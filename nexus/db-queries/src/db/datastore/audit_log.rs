@@ -22,6 +22,8 @@ use uuid::Uuid;
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 //
 impl DataStore {
+    /// List audit log rows after start time (inclusive) and before optional end
+    /// time (exclusive), i.e., rows where `start_time <= t < end_time`.
     pub async fn audit_log_list(
         &self,
         opctx: &OpContext,
@@ -38,11 +40,11 @@ impl DataStore {
             pagparams,
         )
         .filter(audit_log_complete::time_completed.ge(start_time));
-        // TODO: confirm and document exclusive/inclusive behavior
-        let query = if let Some(end) = end_time {
-            query.filter(audit_log_complete::time_completed.lt(end))
-        } else {
-            query
+        let query = match end_time {
+            Some(end) => {
+                query.filter(audit_log_complete::time_completed.lt(end))
+            }
+            None => query,
         };
         query
             .select(AuditLogEntry::as_select())
@@ -92,7 +94,7 @@ impl DataStore {
             .execute_async(&*self.pool_connection_authorized(opctx).await?)
             .await
             .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))?;
-        Ok(()) // TODO: make sure we don't want to return something else
+        Ok(())
     }
 }
 
@@ -190,7 +192,11 @@ mod tests {
         assert_eq!(audit_log[0].request_id, "req-1");
 
         // now complete entry2
-        let completion = AuditLogCompletion::new(204, None, None);
+        let completion = AuditLogCompletion::new(
+            400,
+            Some("InvalidRequest".to_string()),
+            Some("Request was invalid".to_string()),
+        );
         datastore
             .audit_log_entry_complete(opctx, &entry2.clone(), completion)
             .await
@@ -207,7 +213,12 @@ mod tests {
         assert_eq!(audit_log[0].request_id, "req-1");
         assert_eq!(audit_log[0].http_status_code.0, 201);
         assert_eq!(audit_log[1].request_id, "req-2");
-        assert_eq!(audit_log[1].http_status_code.0, 204);
+        assert_eq!(audit_log[1].http_status_code.0, 400);
+        assert_eq!(audit_log[1].error_code, Some("InvalidRequest".to_string()));
+        assert_eq!(
+            audit_log[1].error_message,
+            Some("Request was invalid".to_string())
+        );
 
         // Only get first entry
         let audit_log = datastore

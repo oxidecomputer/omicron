@@ -1567,8 +1567,9 @@ pub struct AuditLogEntry {
 
     pub actor: AuditLogEntryActor,
 
-    /// API token or session cookie. Optional because it will not be defined on
-    /// unauthenticated requests like login attempts.
+    /// Indicates whether request was made with an API token or session cookie.
+    /// Optional because it will not be defined on unauthenticated requests like
+    /// login attempts.
     pub access_method: Option<String>,
 
     // Fields that are optional because they get filled in after the action completes

@@ -25,30 +25,23 @@ pub struct AuditLogEntryInit {
     pub operation_id: String,
     pub source_ip: IpNetwork,
     pub user_agent: Option<String>,
-    // TODO: we probably want a dedicated enum for these columns and for that
-    // we need a fancier set of columns. For example, we may want to initialize
-    // the row with a _potential_ actor (probably a different field), like the
-    // username or whatever is being used for login. This should probably be
-    // preserved even after authentication determines an actual actor ID. See
-    // the Actor struct in nexus/auth/src/authn/mod.ts
+
+    // TODO: For login attempts, we may want to initialize the row with
+    // a potential actor so we can tell which account is being targeted by failed attempts. For password login, we should have the username on hand to log. For SAML, it's
+    // less clear whether this makes sense because we only get those requests
+    // from the IdP after a successful login on their end, and they're
+    // cryptographically signed. So maybe this only applies to password login.
 
     // these are optional because of requests like login attempts, where there
     // is no actor until after the operation.
     pub actor_id: Option<Uuid>,
     pub actor_silo_id: Option<Uuid>,
 
-    // TODO: fancier type for access method capturing possibility of login
-    // attempts. might make sense to roll this all into the actor enum because
-    // we have an access method if and only if we have an actor (I think)
     /// API token or session cookie. Optional because it will not be defined
     /// on unauthenticated requests like login attempts.
     pub access_method: Option<String>,
 }
 
-// TODO: doc comments
-// TODO: figure out how this relates to the other struct. currently we're not
-// retrieving partial entries at all, but I think we will probably want to have
-// that capability
 #[derive(Queryable, Selectable, Clone, Debug)]
 #[diesel(table_name = audit_log_complete)]
 pub struct AuditLogEntry {
@@ -61,6 +54,8 @@ pub struct AuditLogEntry {
     pub user_agent: Option<String>,
     pub actor_id: Option<Uuid>,
     pub actor_silo_id: Option<Uuid>,
+
+    /// The name of the authn scheme used. None if unauthenticated.
     pub access_method: Option<String>,
 
     // Fields that are not present on init
@@ -71,9 +66,6 @@ pub struct AuditLogEntry {
     // Error information if the action failed
     pub error_code: Option<String>,
     pub error_message: Option<String>,
-    // TODO: including a real response complicates things
-    // Response data on success (if applicable)
-    // pub success_response: Option<Value>,
 }
 
 impl AuditLogEntryInit {
