@@ -218,12 +218,12 @@ impl DataStore {
     pub async fn silo_user_token_list(
         &self,
         opctx: &OpContext,
-        user_authn_list: authz::SiloUserAuthnList,
+        authz_token_list: authz::SiloUserTokenList,
         pagparams: &DataPageParams<'_, Uuid>,
     ) -> ListResultVec<DeviceAccessToken> {
-        opctx.authorize(authz::Action::ListChildren, &user_authn_list).await?;
+        opctx.authorize(authz::Action::ListChildren, &authz_token_list).await?;
 
-        let silo_user_id = user_authn_list.silo_user().id();
+        let silo_user_id = authz_token_list.silo_user().id();
 
         use nexus_db_schema::schema::device_access_token::dsl;
         paginated(dsl::device_access_token, dsl::id, &pagparams)
@@ -273,17 +273,17 @@ impl DataStore {
     pub async fn silo_user_tokens_delete(
         &self,
         opctx: &OpContext,
-        authn_list: &authz::SiloUserAuthnList,
+        authz_token_list: &authz::SiloUserTokenList,
     ) -> Result<(), Error> {
         // authz policy enforces that the opctx actor is a silo admin on the
         // target user's own silo in particular
-        opctx.authorize(authz::Action::Modify, authn_list).await?;
+        opctx.authorize(authz::Action::Modify, authz_token_list).await?;
 
         use nexus_db_schema::schema::device_access_token;
         diesel::delete(device_access_token::table)
             .filter(
                 device_access_token::silo_user_id
-                    .eq(authn_list.silo_user().id()),
+                    .eq(authz_token_list.silo_user().id()),
             )
             .execute_async(&*self.pool_connection_authorized(opctx).await?)
             .await

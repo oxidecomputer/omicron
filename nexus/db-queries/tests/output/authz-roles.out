@@ -320,6 +320,20 @@ resource: SiloUser "silo1-user": authn list
   silo1-proj1-viewer               ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
   unauthenticated                  !  !  !  !  !  !  !  !
 
+resource: SiloUser "silo1-user": token list
+
+  USER                             Q  R LC RP  M MP CC  D
+  fleet-admin                      ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
+  fleet-collaborator               ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
+  fleet-viewer                     ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
+  silo1-admin                      ✘  ✘  ✔  ✘  ✔  ✔  ✘  ✔
+  silo1-collaborator               ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
+  silo1-viewer                     ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
+  silo1-proj1-admin                ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
+  silo1-proj1-collaborator         ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
+  silo1-proj1-viewer               ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
+  unauthenticated                  !  !  !  !  !  !  !  !
+
 resource: Image "silo1-image"
 
   USER                             Q  R LC RP  M MP CC  D
@@ -881,6 +895,20 @@ resource: SiloImage "silo2-silo-image"
   unauthenticated                  !  !  !  !  !  !  !  !
 
 resource: SiloUser "silo2-user": authn list
+
+  USER                             Q  R LC RP  M MP CC  D
+  fleet-admin                      ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
+  fleet-collaborator               ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
+  fleet-viewer                     ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
+  silo1-admin                      ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
+  silo1-collaborator               ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
+  silo1-viewer                     ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
+  silo1-proj1-admin                ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
+  silo1-proj1-collaborator         ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
+  silo1-proj1-viewer               ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
+  unauthenticated                  !  !  !  !  !  !  !  !
+
+resource: SiloUser "silo2-user": token list
 
   USER                             Q  R LC RP  M MP CC  D
   fleet-admin                      ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
