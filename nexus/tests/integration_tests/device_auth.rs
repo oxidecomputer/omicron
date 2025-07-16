@@ -634,7 +634,7 @@ async fn test_admin_logout_deletes_tokens_and_sessions(
 ) {
     let testctx = &cptestctx.external_client;
 
-    // create a user have a user ID on hand to use in the authn_as
+    // create users so we can have user IDs to pass to authn_as
     let silo_url = "/v1/system/silos/test-suite-silo";
     let test_suite_silo: views::Silo = object_get(testctx, silo_url).await;
     let user1 = create_local_user(

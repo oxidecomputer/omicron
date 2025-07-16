@@ -324,6 +324,16 @@ impl super::Nexus {
             .fetch()
             .await?;
 
+        // We could use a transaction here for these two queries, but it seems
+        // unnecessary. If the token delete succeeds but the session delete
+        // fails, the user will get an error response to the logout request,
+        // but it will have worked halfway. That is _slightly_ surprising if
+        // they expect the tokens to still be there after that, but at least
+        // the error makes clear they have to hit the endpoint again to be sure
+        // everything is gone. The half-deleted state doesn't break anything,
+        // either, except what it's supposed to break: the user's ability to
+        // authenticate with tokens.
+
         let authz_token_list =
             authz::SiloUserTokenList::new(authz_silo_user.clone());
         self.datastore()
