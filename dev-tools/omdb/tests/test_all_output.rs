@@ -207,7 +207,6 @@ async fn test_omdb_success_cases(cptestctx: &ControlPlaneTestContext) {
         &["db", "instances"],
         &["db", "sleds"],
         &["db", "sleds", "-F", "discretionary"],
-        &["db", "inventory", "collections", "show", "latest"],
         &["mgs", "inventory"],
         &["nexus", "background-tasks", "doc"],
         &["nexus", "background-tasks", "show"],

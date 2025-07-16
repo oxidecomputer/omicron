@@ -7212,7 +7212,11 @@ async fn inv_collection_print_devices(
             print!(" (cubby {})", sp.sp_slot);
         }
         println!("");
-        println!("    found at: {} from {}", sp.time_collected, sp.source);
+        println!(
+            "    found at: {} from {}",
+            sp.time_collected.to_rfc3339_opts(SecondsFormat::Secs, true),
+            sp.source
+        );
 
         #[derive(Tabled)]
         #[tabled(rename_all = "SCREAMING_SNAKE_CASE")]
@@ -7382,7 +7386,8 @@ fn inv_collection_print_sleds(collection: &Collection) {
         );
         println!(
             "    found at:    {} from {}",
-            sled.time_collected, sled.source
+            sled.time_collected.to_rfc3339_opts(SecondsFormat::Secs, true),
+            sled.source
         );
         println!("    address:     {}", sled.sled_agent_address);
         println!("    usable hw threads:   {}", sled.usable_hardware_threads);
