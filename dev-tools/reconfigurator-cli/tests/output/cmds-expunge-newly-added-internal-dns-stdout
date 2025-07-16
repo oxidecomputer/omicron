@@ -11,6 +11,14 @@ parent:    184f10b3-61cb-41ef-9b93-3489b2bac559
 
   sled: 2b8f0cb3-0295-4b3c-bc58-4fe88b57112c (active, config generation 2)
 
+    host phase 2 contents:
+    ------------------------
+    slot   boot image source
+    ------------------------
+    A      current contents 
+    B      current contents 
+
+
     physical disks:
     ------------------------------------------------------------------------------------
     vendor        model        serial                                        disposition
@@ -107,6 +115,14 @@ parent:    184f10b3-61cb-41ef-9b93-3489b2bac559
 
   sled: 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6 (active, config generation 2)
 
+    host phase 2 contents:
+    ------------------------
+    slot   boot image source
+    ------------------------
+    A      current contents 
+    B      current contents 
+
+
     physical disks:
     ------------------------------------------------------------------------------------
     vendor        model        serial                                        disposition
@@ -199,6 +215,14 @@ parent:    184f10b3-61cb-41ef-9b93-3489b2bac559
 
 
   sled: d81c6a84-79b8-4958-ae41-ea46c9b19763 (active, config generation 2)
+
+    host phase 2 contents:
+    ------------------------
+    slot   boot image source
+    ------------------------
+    A      current contents 
+    B      current contents 
+
 
     physical disks:
     ------------------------------------------------------------------------------------
@@ -321,6 +345,14 @@ to:   blueprint 8da82a8e-bf97-4fbd-8ddd-9f6462732cf1
  MODIFIED SLEDS:
 
   sled 2b8f0cb3-0295-4b3c-bc58-4fe88b57112c (active, config generation 2 -> 3):
+
+    host phase 2 contents:
+    ------------------------
+    slot   boot image source
+    ------------------------
+    A      current contents 
+    B      current contents 
+
 
     physical disks:
     ------------------------------------------------------------------------------------
@@ -675,6 +707,14 @@ to:   blueprint 58d5e830-0884-47d8-a7cd-b2b3751adeb4
 
   sled 2b8f0cb3-0295-4b3c-bc58-4fe88b57112c (active, config generation 3):
 
+    host phase 2 contents:
+    ------------------------
+    slot   boot image source
+    ------------------------
+    A      current contents 
+    B      current contents 
+
+
     physical disks:
     ------------------------------------------------------------------------------------
     vendor        model        serial                                        disposition
@@ -1002,7 +1042,7 @@ external DNS:
 
 > # Planning a new blueprint will now replace the expunged zone, with new records for its replacement.
 > blueprint-plan 58d5e830-0884-47d8-a7cd-b2b3751adeb4
-INFO skipping noop image source check for all sleds (no current TUF repo)
+INFO skipping noop image source check for all sleds, reason: no target release is currently set
 INFO sufficient BoundaryNtp zones exist in plan, desired_count: 0, current_count: 0
 INFO sufficient Clickhouse zones exist in plan, desired_count: 1, current_count: 1
 INFO sufficient ClickhouseKeeper zones exist in plan, desired_count: 0, current_count: 0
@@ -1025,6 +1065,14 @@ to:   blueprint af934083-59b5-4bf6-8966-6fb5292c29e1
  MODIFIED SLEDS:
 
   sled 2b8f0cb3-0295-4b3c-bc58-4fe88b57112c (active, config generation 3 -> 4):
+
+    host phase 2 contents:
+    ------------------------
+    slot   boot image source
+    ------------------------
+    A      current contents 
+    B      current contents 
+
 
     physical disks:
     ------------------------------------------------------------------------------------

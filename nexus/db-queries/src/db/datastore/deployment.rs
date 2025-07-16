@@ -97,6 +97,7 @@ use std::collections::BTreeMap;
 use std::collections::BTreeSet;
 use std::sync::Arc;
 use thiserror::Error;
+use tufaceous_artifact::ArtifactKind;
 use tufaceous_artifact::KnownArtifactKind;
 use uuid::Uuid;
 
@@ -234,6 +235,16 @@ impl DataStore {
                 remove_mupdate_override: sled
                     .remove_mupdate_override
                     .map(|id| id.into()),
+                host_phase_2_desired_slot_a: sled
+                    .host_phase_2
+                    .slot_a
+                    .artifact_hash()
+                    .map(ArtifactHash),
+                host_phase_2_desired_slot_b: sled
+                    .host_phase_2
+                    .slot_b
+                    .artifact_hash()
+                    .map(ArtifactHash),
             })
             .collect::<Vec<_>>();
 
@@ -893,6 +904,12 @@ impl DataStore {
         // below).
         let mut sled_configs: BTreeMap<SledUuid, BlueprintSledConfig> = {
             use nexus_db_schema::schema::bp_sled_metadata::dsl;
+            use nexus_db_schema::schema::tuf_artifact::dsl as tuf_artifact_dsl;
+
+            let (tuf1, tuf2) = diesel::alias!(
+                nexus_db_schema::schema::tuf_artifact as tuf_artifact_1,
+                nexus_db_schema::schema::tuf_artifact as tuf_artifact_2,
+            );
 
             let mut sled_configs = BTreeMap::new();
             let mut paginator = Paginator::new(
@@ -906,16 +923,47 @@ impl DataStore {
                     &p.current_pagparams(),
                 )
                 .filter(dsl::blueprint_id.eq(to_db_typed_uuid(blueprint_id)))
-                .select(BpSledMetadata::as_select())
-                .load_async(&*conn)
+                // Left join against the tuf_artifact table twice (once for each
+                // host slot) in case the artifact is missing from the table,
+                // which is non-fatal.
+                .left_join(
+                    tuf1.on(tuf1
+                        .field(tuf_artifact_dsl::kind)
+                        .eq(ArtifactKind::HOST_PHASE_2.to_string())
+                        .and(
+                            tuf1.field(tuf_artifact_dsl::sha256)
+                                .nullable()
+                                .eq(dsl::host_phase_2_desired_slot_a),
+                        )),
+                )
+                .left_join(
+                    tuf2.on(tuf2
+                        .field(tuf_artifact_dsl::kind)
+                        .eq(ArtifactKind::HOST_PHASE_2.to_string())
+                        .and(
+                            tuf2.field(tuf_artifact_dsl::sha256)
+                                .nullable()
+                                .eq(dsl::host_phase_2_desired_slot_b),
+                        )),
+                )
+                .select((
+                    BpSledMetadata::as_select(),
+                    tuf1.fields(tuf_artifact_dsl::version).nullable(),
+                    tuf2.fields(tuf_artifact_dsl::version).nullable(),
+                ))
+                .load_async::<(
+                    BpSledMetadata,
+                    Option<DbArtifactVersion>,
+                    Option<DbArtifactVersion>,
+                )>(&*conn)
                 .await
                 .map_err(|e| {
                     public_error_from_diesel(e, ErrorHandler::Server)
                 })?;
 
-                paginator = p.found_batch(&batch, &|s| s.sled_id);
+                paginator = p.found_batch(&batch, &|(s, _, _)| s.sled_id);
 
-                for s in batch {
+                for (s, slot_a_version, slot_b_version) in batch {
                     let config = BlueprintSledConfig {
                         state: s.sled_state.into(),
                         sled_agent_generation: *s.sled_agent_generation,
@@ -925,6 +973,8 @@ impl DataStore {
                         remove_mupdate_override: s
                             .remove_mupdate_override
                             .map(|id| id.into()),
+                        host_phase_2: s
+                            .host_phase_2(slot_a_version, slot_b_version),
                     };
                     let old = sled_configs.insert(s.sled_id.into(), config);
                     bail_unless!(
@@ -2538,11 +2588,13 @@ mod tests {
     use nexus_reconfigurator_planning::blueprint_builder::EnsureMultiple;
     use nexus_reconfigurator_planning::example::ExampleSystemBuilder;
     use nexus_reconfigurator_planning::example::example;
+    use nexus_types::deployment::BlueprintArtifactVersion;
+    use nexus_types::deployment::BlueprintHostPhase2DesiredContents;
+    use nexus_types::deployment::BlueprintHostPhase2DesiredSlots;
     use nexus_types::deployment::BlueprintPhysicalDiskDisposition;
     use nexus_types::deployment::BlueprintZoneConfig;
     use nexus_types::deployment::BlueprintZoneDisposition;
     use nexus_types::deployment::BlueprintZoneImageSource;
-    use nexus_types::deployment::BlueprintZoneImageVersion;
     use nexus_types::deployment::BlueprintZoneType;
     use nexus_types::deployment::ExpectedActiveRotSlot;
     use nexus_types::deployment::OmicronZoneExternalFloatingIp;
@@ -2977,16 +3029,23 @@ mod tests {
 
         const ARTIFACT_VERSION_1: ArtifactVersion =
             ArtifactVersion::new_const("1.0.0");
-        const ARTIFACT_HASH_1: ArtifactHash = ArtifactHash([1; 32]);
-        const ARTIFACT_HASH_2: ArtifactHash = ArtifactHash([2; 32]);
+        const ARTIFACT_VERSION_2: ArtifactVersion =
+            ArtifactVersion::new_const("2.0.0");
+        const ARTIFACT_VERSION_3: ArtifactVersion =
+            ArtifactVersion::new_const("2.0.0");
+        const ZONE_ARTIFACT_HASH_1: ArtifactHash = ArtifactHash([1; 32]);
+        const ZONE_ARTIFACT_HASH_2: ArtifactHash = ArtifactHash([2; 32]);
+        const HOST_ARTIFACT_HASH_1: ArtifactHash = ArtifactHash([3; 32]);
+        const HOST_ARTIFACT_HASH_2: ArtifactHash = ArtifactHash([4; 32]);
+        const HOST_ARTIFACT_HASH_3: ArtifactHash = ArtifactHash([5; 32]);
 
-        // Add an artifact to the tuf_artifact table. This is used to test
-        // artifact version lookup.
+        // Add rows to the tuf_artifact table to test version lookups.
         {
             const SYSTEM_VERSION: semver::Version =
                 semver::Version::new(0, 0, 1);
             const SYSTEM_HASH: ArtifactHash = ArtifactHash([3; 32]);
 
+            // Add a zone artifact and two host phase 2 artifacts.
             datastore
                 .tuf_repo_insert(
                     opctx,
@@ -2998,15 +3057,35 @@ mod tests {
                             system_version: SYSTEM_VERSION,
                             file_name: String::new(),
                         },
-                        artifacts: vec![TufArtifactMeta {
-                            id: ArtifactId {
-                                name: String::new(),
-                                version: ARTIFACT_VERSION_1,
-                                kind: KnownArtifactKind::Zone.into(),
+                        artifacts: vec![
+                            TufArtifactMeta {
+                                id: ArtifactId {
+                                    name: String::new(),
+                                    version: ARTIFACT_VERSION_1,
+                                    kind: KnownArtifactKind::Zone.into(),
+                                },
+                                hash: ZONE_ARTIFACT_HASH_1,
+                                size: 0,
                             },
-                            hash: ARTIFACT_HASH_1,
-                            size: 0,
-                        }],
+                            TufArtifactMeta {
+                                id: ArtifactId {
+                                    name: "host-1".into(),
+                                    version: ARTIFACT_VERSION_2,
+                                    kind: ArtifactKind::HOST_PHASE_2,
+                                },
+                                hash: HOST_ARTIFACT_HASH_1,
+                                size: 0,
+                            },
+                            TufArtifactMeta {
+                                id: ArtifactId {
+                                    name: "host-2".into(),
+                                    version: ARTIFACT_VERSION_3,
+                                    kind: ArtifactKind::HOST_PHASE_2,
+                                },
+                                hash: HOST_ARTIFACT_HASH_2,
+                                size: 0,
+                            },
+                        ],
                     },
                 )
                 .await
@@ -3034,10 +3113,10 @@ mod tests {
                     new_sled_id,
                     zone_ids[0],
                     BlueprintZoneImageSource::Artifact {
-                        version: BlueprintZoneImageVersion::Available {
+                        version: BlueprintArtifactVersion::Available {
                             version: ARTIFACT_VERSION_1,
                         },
-                        hash: ARTIFACT_HASH_1,
+                        hash: ZONE_ARTIFACT_HASH_1,
                     },
                 )
                 .unwrap();
@@ -3046,11 +3125,76 @@ mod tests {
                     new_sled_id,
                     zone_ids[1],
                     BlueprintZoneImageSource::Artifact {
-                        version: BlueprintZoneImageVersion::Unknown,
-                        hash: ARTIFACT_HASH_2,
+                        version: BlueprintArtifactVersion::Unknown,
+                        hash: ZONE_ARTIFACT_HASH_2,
                     },
                 )
                 .unwrap();
+        }
+
+        // Try a few different combinations of desired host phase 2 contents on
+        // four sleds:
+        //
+        // 1. slot_a set to a known version; slot_b left at current contents
+        // 2. slot_a left at current contents; slot_b set to a known version
+        // 3. both slots set to a known version
+        // 4. slot_a set to a known version; slot b set to an unknown version
+        {
+            let sled_ids = builder.sled_ids_with_zones().collect::<Vec<_>>();
+            assert!(sled_ids.len() >= 4, "at least 4 sleds");
+
+            let host_phase_2_samples = [
+                BlueprintHostPhase2DesiredSlots {
+                    slot_a: BlueprintHostPhase2DesiredContents::Artifact {
+                        version: BlueprintArtifactVersion::Available {
+                            version: ARTIFACT_VERSION_2,
+                        },
+                        hash: HOST_ARTIFACT_HASH_1,
+                    },
+                    slot_b: BlueprintHostPhase2DesiredContents::CurrentContents,
+                },
+                BlueprintHostPhase2DesiredSlots {
+                    slot_a: BlueprintHostPhase2DesiredContents::CurrentContents,
+                    slot_b: BlueprintHostPhase2DesiredContents::Artifact {
+                        version: BlueprintArtifactVersion::Available {
+                            version: ARTIFACT_VERSION_2,
+                        },
+                        hash: HOST_ARTIFACT_HASH_1,
+                    },
+                },
+                BlueprintHostPhase2DesiredSlots {
+                    slot_a: BlueprintHostPhase2DesiredContents::Artifact {
+                        version: BlueprintArtifactVersion::Available {
+                            version: ARTIFACT_VERSION_2,
+                        },
+                        hash: HOST_ARTIFACT_HASH_1,
+                    },
+                    slot_b: BlueprintHostPhase2DesiredContents::Artifact {
+                        version: BlueprintArtifactVersion::Available {
+                            version: ARTIFACT_VERSION_3,
+                        },
+                        hash: HOST_ARTIFACT_HASH_2,
+                    },
+                },
+                BlueprintHostPhase2DesiredSlots {
+                    slot_a: BlueprintHostPhase2DesiredContents::Artifact {
+                        version: BlueprintArtifactVersion::Available {
+                            version: ARTIFACT_VERSION_2,
+                        },
+                        hash: HOST_ARTIFACT_HASH_1,
+                    },
+                    slot_b: BlueprintHostPhase2DesiredContents::Artifact {
+                        version: BlueprintArtifactVersion::Unknown,
+                        hash: HOST_ARTIFACT_HASH_3,
+                    },
+                },
+            ];
+
+            for (sled_id, host_phase_2) in
+                sled_ids.into_iter().zip(host_phase_2_samples.into_iter())
+            {
+                builder.sled_set_host_phase_2(sled_id, host_phase_2).unwrap();
+            }
         }
 
         // Configure an SP update.
