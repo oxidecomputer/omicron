@@ -6,15 +6,16 @@ use std::{collections::HashMap, fmt};
 
 use anyhow::anyhow;
 use iddqd::{IdOrdItem, IdOrdMap, id_ord_map::RefMut, id_upcast};
-use nexus_sled_agent_shared::inventory::ZoneKind;
+use nexus_sled_agent_shared::inventory::{ZoneKind, ZoneManifestBootInventory};
 use nexus_types::{
     deployment::{
-        BlueprintZoneDisposition, BlueprintZoneImageSource,
-        BlueprintZoneImageVersion, PlanningInput, SledFilter,
-        TargetReleaseDescription,
+        BlueprintArtifactVersion, BlueprintZoneConfig,
+        BlueprintZoneDisposition, BlueprintZoneImageSource, PlanningInput,
+        SledFilter, TargetReleaseDescription,
     },
     inventory::Collection,
 };
+use omicron_common::api::external::TufArtifactMeta;
 use omicron_uuid_kinds::{MupdateOverrideUuid, OmicronZoneUuid, SledUuid};
 use slog::{debug, info, o, warn};
 use tufaceous_artifact::ArtifactHash;
@@ -95,88 +96,32 @@ impl NoopConvertInfo {
                     sled_id,
                     BlueprintZoneDisposition::is_in_service,
                 )
-                .map(|z| {
-                    let file_name = z.kind().artifact_in_install_dataset();
-
-                    match &z.image_source {
-                        BlueprintZoneImageSource::InstallDataset => {}
-                        BlueprintZoneImageSource::Artifact {
-                            version,
-                            hash,
-                        } => {
-                            return NoopConvertZoneInfo {
-                                zone_id: z.id,
-                                kind: z.kind(),
-                                status:
-                                    NoopConvertZoneStatus::AlreadyArtifact {
-                                        version: version.clone(),
-                                        hash: *hash,
-                                    },
-                            };
-                        }
-                    }
-
-                    let Some(artifact) = zone_manifest.artifacts.get(file_name)
-                    else {
-                        return NoopConvertZoneInfo {
-                            zone_id: z.id,
-                            kind: z.kind(),
-                            status: NoopConvertZoneStatus::Ineligible(
-                                NoopConvertZoneIneligibleReason::NotInManifest,
-                            ),
-                        };
-                    };
-                    if let Err(message) = &artifact.status {
-                        // The artifact is somehow invalid and corrupt.
-                        return NoopConvertZoneInfo {
-                            zone_id: z.id,
-                            kind: z.kind(),
-                            status: NoopConvertZoneStatus::Ineligible(
-                                NoopConvertZoneIneligibleReason::ArtifactError {
-                                    message: message.to_owned(),
-                                },
-                            ),
-                        };
-                    }
-
-                    // Does the hash match what's in the TUF repo?
-                    let Some(&tuf_artifact) =
-                        artifacts_by_hash.get(&artifact.expected_hash)
-                    else {
-                        return NoopConvertZoneInfo {
-                            zone_id: z.id,
-                            kind: z.kind(),
-                            status: NoopConvertZoneStatus::Ineligible(
-                                NoopConvertZoneIneligibleReason::NotInTufRepo {
-                                    expected_hash: artifact.expected_hash,
-                                },
-                            ),
-                        };
-                    };
-
-                    NoopConvertZoneInfo {
-                        zone_id: z.id,
-                        kind: z.kind(),
-                        status: NoopConvertZoneStatus::Eligible(
-                            BlueprintZoneImageSource::from_available_artifact(
-                                tuf_artifact,
-                            ),
-                        ),
-                    }
+                .map(|zone| {
+                    NoopConvertZoneInfo::new(
+                        zone,
+                        zone_manifest,
+                        &artifacts_by_hash,
+                    )
                 })
                 .collect();
 
-            sleds
-                .insert_unique(NoopConvertSledInfo {
-                    sled_id,
-                    status: NoopConvertSledStatus::MaybeEligible(
-                        NoopConvertSledMaybeEligible {
-                            mupdate_override_id: blueprint
-                                .sled_get_remove_mupdate_override(sled_id)?,
-                            zones,
-                        },
-                    ),
+            let status = if let Some(mupdate_override_id) =
+                blueprint.sled_get_remove_mupdate_override(sled_id)?
+            {
+                NoopConvertSledStatus::Ineligible(
+                    NoopConvertSledIneligibleReason::MupdateOverride {
+                        mupdate_override_id,
+                        zones,
+                    },
+                )
+            } else {
+                NoopConvertSledStatus::Eligible(NoopConvertSledEligible {
+                    zones,
                 })
+            };
+
+            sleds
+                .insert_unique(NoopConvertSledInfo { sled_id, status })
                 .expect("sled IDs are unique");
         }
 
@@ -272,9 +217,8 @@ pub(crate) enum NoopConvertSledStatus {
     /// The sled is ineligible for conversion.
     Ineligible(NoopConvertSledIneligibleReason),
 
-    /// The sled might be eligible for conversion in case `mupdate_override_id`
-    /// is `None`.
-    MaybeEligible(NoopConvertSledMaybeEligible),
+    /// The sled is eligible for conversion.
+    Eligible(NoopConvertSledEligible),
 }
 
 impl NoopConvertSledStatus {
@@ -285,7 +229,10 @@ impl NoopConvertSledStatus {
                 // compile time, but we want the different enum variants here to
                 // be logged at different levels. Hence this mess.
                 match reason {
-                    NoopConvertSledIneligibleReason::NotInInventory => {
+                    NoopConvertSledIneligibleReason::NotInInventory
+                    | NoopConvertSledIneligibleReason::MupdateOverride {
+                        ..
+                    } => {
                         info!(
                             log,
                             "skipped noop image source check on sled";
@@ -303,7 +250,7 @@ impl NoopConvertSledStatus {
                     }
                 }
             }
-            Self::MaybeEligible(sled) => {
+            Self::Eligible(sled) => {
                 sled.log_to(log);
             }
         }
@@ -311,74 +258,28 @@ impl NoopConvertSledStatus {
 }
 
 #[derive(Clone, Debug)]
-pub(crate) struct NoopConvertSledMaybeEligible {
-    // A sled is eligible for conversion if the mupdate_override_id is None
-    //
-    // The code is structured in this manner because the planner's mupdate
-    // override step requires access to the sled's zones, and is responsible for
-    // clearing this field if it also clears the mupdate override in the
-    // blueprint.
-    pub(crate) mupdate_override_id: Option<MupdateOverrideUuid>,
+pub(crate) struct NoopConvertSledEligible {
     pub(crate) zones: IdOrdMap<NoopConvertZoneInfo>,
 }
 
-impl NoopConvertSledMaybeEligible {
+impl NoopConvertSledEligible {
     pub(crate) fn zone_counts(&self) -> NoopConvertZoneCounts {
-        let mut num_already_artifact = 0;
-        let mut num_maybe_eligible = 0;
-        let mut num_ineligible = 0;
-
-        for zone in &self.zones {
-            match &zone.status {
-                NoopConvertZoneStatus::AlreadyArtifact { .. } => {
-                    num_already_artifact += 1;
-                }
-                NoopConvertZoneStatus::Eligible(_) => {
-                    num_maybe_eligible += 1;
-                }
-                NoopConvertZoneStatus::Ineligible(_) => {
-                    num_ineligible += 1;
-                }
-            }
-        }
-
-        NoopConvertZoneCounts {
-            num_total: self.zones.len(),
-            num_already_artifact,
-            num_maybe_eligible,
-            num_ineligible,
-        }
+        NoopConvertZoneCounts::new(&self.zones)
     }
 
     fn log_to(&self, log: &slog::Logger) {
         let zone_counts = self.zone_counts();
 
-        if let Some(override_id) = self.mupdate_override_id {
-            info!(
-                log,
-                "performed noop image source checks on sled, \
-                 but no conversions will occur because \
-                 remove_mupdate_override is set in the blueprint";
-                "mupdate_override_id" => %override_id,
-                "num_total" => zone_counts.num_total,
-                "num_already_artifact" => zone_counts.num_already_artifact,
-                // This counts the number of zones that would be eligible if
-                // remove_mupdate_override were not set.
-                "num_would_be_eligible" => zone_counts.num_maybe_eligible,
-                "num_ineligible" => zone_counts.num_ineligible,
-            );
-        } else {
-            info!(
-                log,
-                "performed noop image source checks on sled";
-                "num_total" => zone_counts.num_total,
-                "num_already_artifact" => zone_counts.num_already_artifact,
-                // Since mupdate_override_id is None, maybe-eligible zones are
-                // truly eligible.
-                "num_eligible" => zone_counts.num_maybe_eligible,
-                "num_ineligible" => zone_counts.num_ineligible,
-            );
-        }
+        info!(
+            log,
+            "performed noop image source checks on sled";
+            "num_total" => zone_counts.num_total,
+            "num_already_artifact" => zone_counts.num_already_artifact,
+            // Since mupdate_override_id is None, maybe-eligible zones are
+            // truly eligible.
+            "num_eligible" => zone_counts.num_eligible,
+            "num_ineligible" => zone_counts.num_ineligible,
+        );
 
         for zone in &self.zones {
             zone.log_to(log);
@@ -390,13 +291,40 @@ impl NoopConvertSledMaybeEligible {
 pub(crate) struct NoopConvertZoneCounts {
     pub(crate) num_total: usize,
     pub(crate) num_already_artifact: usize,
-    pub(crate) num_maybe_eligible: usize,
+    pub(crate) num_eligible: usize,
     pub(crate) num_ineligible: usize,
 }
 
 impl NoopConvertZoneCounts {
+    pub(crate) fn new(zones: &IdOrdMap<NoopConvertZoneInfo>) -> Self {
+        let mut num_already_artifact = 0;
+        let mut num_eligible = 0;
+        let mut num_ineligible = 0;
+
+        for zone in zones {
+            match &zone.status {
+                NoopConvertZoneStatus::AlreadyArtifact { .. } => {
+                    num_already_artifact += 1;
+                }
+                NoopConvertZoneStatus::Eligible(_) => {
+                    num_eligible += 1;
+                }
+                NoopConvertZoneStatus::Ineligible(_) => {
+                    num_ineligible += 1;
+                }
+            }
+        }
+
+        Self {
+            num_total: zones.len(),
+            num_already_artifact,
+            num_eligible,
+            num_ineligible,
+        }
+    }
+
     pub(crate) fn num_install_dataset(&self) -> usize {
-        self.num_maybe_eligible + self.num_ineligible
+        self.num_eligible + self.num_ineligible
     }
 }
 
@@ -407,6 +335,20 @@ pub(crate) enum NoopConvertSledIneligibleReason {
 
     /// An error occurred retrieving the sled's install dataset zone manifest.
     ManifestError { message: String },
+
+    /// The `remove_mupdate_override` field is set for this sled in the
+    /// blueprint.
+    MupdateOverride {
+        /// The override ID.
+        mupdate_override_id: MupdateOverrideUuid,
+
+        /// Information about zones.
+        ///
+        /// If the mupdate override is changed, a sled can transition from
+        /// ineligible to eligible, or vice versa. We build and retain the zone
+        /// map for easy state transitions.
+        zones: IdOrdMap<NoopConvertZoneInfo>,
+    },
 }
 
 impl fmt::Display for NoopConvertSledIneligibleReason {
@@ -416,11 +358,18 @@ impl fmt::Display for NoopConvertSledIneligibleReason {
             Self::ManifestError { message } => {
                 write!(f, "error retrieving zone manifest: {}", message)
             }
+            Self::MupdateOverride { mupdate_override_id, .. } => {
+                write!(
+                    f,
+                    "remove_mupdate_override is set in the blueprint \
+                     ({mupdate_override_id})",
+                )
+            }
         }
     }
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Eq, PartialEq)]
 pub(crate) struct NoopConvertZoneInfo {
     pub(crate) zone_id: OmicronZoneUuid,
     pub(crate) kind: ZoneKind,
@@ -428,6 +377,73 @@ pub(crate) struct NoopConvertZoneInfo {
 }
 
 impl NoopConvertZoneInfo {
+    fn new(
+        zone: &BlueprintZoneConfig,
+        zone_manifest: &ZoneManifestBootInventory,
+        artifacts_by_hash: &HashMap<ArtifactHash, &TufArtifactMeta>,
+    ) -> Self {
+        let file_name = zone.kind().artifact_in_install_dataset();
+
+        match &zone.image_source {
+            BlueprintZoneImageSource::InstallDataset => {}
+            BlueprintZoneImageSource::Artifact { version, hash } => {
+                return NoopConvertZoneInfo {
+                    zone_id: zone.id,
+                    kind: zone.kind(),
+                    status: NoopConvertZoneStatus::AlreadyArtifact {
+                        version: version.clone(),
+                        hash: *hash,
+                    },
+                };
+            }
+        }
+
+        let Some(artifact) = zone_manifest.artifacts.get(file_name) else {
+            return NoopConvertZoneInfo {
+                zone_id: zone.id,
+                kind: zone.kind(),
+                status: NoopConvertZoneStatus::Ineligible(
+                    NoopConvertZoneIneligibleReason::NotInManifest,
+                ),
+            };
+        };
+        if let Err(message) = &artifact.status {
+            // The artifact is somehow invalid and corrupt.
+            return NoopConvertZoneInfo {
+                zone_id: zone.id,
+                kind: zone.kind(),
+                status: NoopConvertZoneStatus::Ineligible(
+                    NoopConvertZoneIneligibleReason::ArtifactError {
+                        message: message.to_owned(),
+                    },
+                ),
+            };
+        }
+
+        // Does the hash match what's in the TUF repo?
+        let Some(&tuf_artifact) =
+            artifacts_by_hash.get(&artifact.expected_hash)
+        else {
+            return NoopConvertZoneInfo {
+                zone_id: zone.id,
+                kind: zone.kind(),
+                status: NoopConvertZoneStatus::Ineligible(
+                    NoopConvertZoneIneligibleReason::NotInTufRepo {
+                        expected_hash: artifact.expected_hash,
+                    },
+                ),
+            };
+        };
+
+        NoopConvertZoneInfo {
+            zone_id: zone.id,
+            kind: zone.kind(),
+            status: NoopConvertZoneStatus::Eligible(
+                BlueprintZoneImageSource::from_available_artifact(tuf_artifact),
+            ),
+        }
+    }
+
     fn log_to(&self, log: &slog::Logger) {
         let log = log.new(o!(
             "zone_id" => self.zone_id.to_string(),
@@ -508,14 +524,14 @@ impl IdOrdItem for NoopConvertZoneInfo {
     id_upcast!();
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Eq, PartialEq)]
 pub(crate) enum NoopConvertZoneStatus {
-    AlreadyArtifact { version: BlueprintZoneImageVersion, hash: ArtifactHash },
+    AlreadyArtifact { version: BlueprintArtifactVersion, hash: ArtifactHash },
     Ineligible(NoopConvertZoneIneligibleReason),
     Eligible(BlueprintZoneImageSource),
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Eq, PartialEq)]
 pub(crate) enum NoopConvertZoneIneligibleReason {
     NotInManifest,
     ArtifactError { message: String },
