@@ -30,8 +30,9 @@ use sha3::Sha3_256;
 use tokio::sync::mpsc;
 
 // How long do we take to hash host flash? Real SPs take a handful of seconds;
-// we'll pick something similar.
-const TIME_TO_HASH_HOST_PHASE_1: Duration = Duration::from_secs(5);
+// we'll pick something similar but shorter to avoid slowing down tests too
+// much.
+const TIME_TO_HASH_HOST_PHASE_1: Duration = Duration::from_millis(1500);
 
 pub(crate) struct SimSpUpdate {
     /// tracks the state of any ongoing simulated update
