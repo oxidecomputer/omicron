@@ -339,7 +339,7 @@ impl EncryptedRackSecrets {
 /// at. Eventually they will learn the latest configuration and decrypt
 /// `EncryptedRackSecrets` in order to get these plaintext versions. They will
 /// then use the rack secret for their currently committed configuration for key
-/// rotation .
+/// rotation.
 pub struct PlaintextRackSecrets {
     secrets: BTreeMap<Epoch, ReconstructedRackSecret>,
 }
