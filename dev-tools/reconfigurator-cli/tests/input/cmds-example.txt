@@ -22,6 +22,7 @@ inventory-list
 blueprint-list
 
 sled-show 89d02b1b-478c-401a-8e28-7a26f74fa41b
+inventory-show latest
 blueprint-show ade5749d-bdf3-4fab-a8ae-00bea01b3a5a
 
 # Exercise `blueprint-diff` arguments.
