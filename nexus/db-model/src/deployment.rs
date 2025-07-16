@@ -36,13 +36,13 @@ use nexus_types::deployment::BlueprintZoneDisposition;
 use nexus_types::deployment::BlueprintZoneType;
 use nexus_types::deployment::ClickhouseClusterConfig;
 use nexus_types::deployment::CockroachDbPreserveDowngrade;
+use nexus_types::deployment::ExpectedActiveRotSlot;
 use nexus_types::deployment::PendingMgsUpdate;
 use nexus_types::deployment::PendingMgsUpdateDetails;
 use nexus_types::deployment::{
     BlueprintArtifactVersion, BlueprintDatasetConfig, OximeterReadMode,
 };
 use nexus_types::deployment::{BlueprintDatasetDisposition, ExpectedVersion};
-use nexus_types::deployment::ExpectedActiveRotSlot;
 use nexus_types::deployment::{BlueprintZoneImageSource, blueprint_zone_type};
 use nexus_types::deployment::{
     OmicronZoneExternalFloatingAddr, OmicronZoneExternalFloatingIp,
