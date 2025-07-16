@@ -263,8 +263,10 @@ pub trait GatewayApi {
     ///
     /// This endpoint is only valid for the `host-boot-flash` component.
     ///
-    /// Computing the hash takes several seconds; callers can poll for results
-    /// using `sp_component_hash_firmware_get()`.
+    /// Computing the hash takes several seconds; callers should poll for results
+    /// using `sp_component_hash_firmware_get()`. In general they should call
+    /// `sp_component_hash_firmware_get()` first anyway, as the hashes are
+    /// cached in the SP and may already be ready.
     #[endpoint {
         method = POST,
         path = "/sp/{type}/{slot}/component/{component}/hash/{firmware_slot}",
@@ -278,8 +280,11 @@ pub trait GatewayApi {
     ///
     /// This endpoint is only valid for the `host-boot-flash` component.
     ///
-    /// Computing the hash takes several seconds; callers can start hashing
-    /// using `sp_component_hash_firmware_start()`.
+    /// Computing the hash takes several seconds; this endpoint returns the
+    /// current status. If the status is `HashNotStarted`, callers should start
+    /// hashing using `sp_component_hash_firmware_start()`. If the status is
+    /// `HashInProgress`, callers should wait a bit then call this endpoint
+    /// again.
     #[endpoint {
         method = GET,
         path = "/sp/{type}/{slot}/component/{component}/hash/{firmware_slot}",
