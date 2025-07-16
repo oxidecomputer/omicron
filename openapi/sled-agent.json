@@ -404,6 +404,74 @@
         }
       }
     },
+    "/network-interfaces": {
+      "get": {
+        "summary": "Get the IDs of all OPTE interfaces",
+        "operationId": "nic_ids_list",
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "title": "Array_of_Uuid",
+                  "type": "array",
+                  "items": {
+                    "type": "string",
+                    "format": "uuid"
+                  }
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/network-interfaces/{nic_id}/flows": {
+      "get": {
+        "summary": "Get per-flow stats currently reported by an OPTE interface.",
+        "operationId": "nic_flows_list",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "nic_id",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "title": "Array_of_Flow",
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/Flow"
+                  }
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
     "/omicron-config": {
       "put": {
         "operationId": "omicron_config_put",
@@ -3827,6 +3895,14 @@
           "search_domains"
         ]
       },
+      "Direction": {
+        "description": "The direction of a flow or packet, with respect to its target `Instance`.",
+        "type": "string",
+        "enum": [
+          "in",
+          "out"
+        ]
+      },
       "DiskEnsureBody": {
         "description": "Sent from to a sled agent to establish the runtime state of a Disk",
         "type": "object",
@@ -4335,6 +4411,168 @@
         ],
         "additionalProperties": false
       },
+      "Flow": {
+        "description": "A packet flow recorded on a `NetworkInterface`.",
+        "type": "object",
+        "properties": {
+          "in_stat": {
+            "$ref": "#/components/schemas/FlowStat"
+          },
+          "metadata": {
+            "$ref": "#/components/schemas/FlowMetadata"
+          },
+          "out_stat": {
+            "$ref": "#/components/schemas/FlowStat"
+          }
+        },
+        "required": [
+          "in_stat",
+          "metadata",
+          "out_stat"
+        ]
+      },
+      "FlowMetadata": {
+        "description": "Information about a flow recorded on a `NetworkInterface`.",
+        "type": "object",
+        "properties": {
+          "admitted_by_in": {
+            "nullable": true,
+            "description": "All entities responsible for allowing packets in this flow to reach the instance.",
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/VpcEntity"
+            }
+          },
+          "admitted_by_out": {
+            "nullable": true,
+            "description": "All entities responsible for allowing packets in this flow to be sent by the instance.",
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/VpcEntity"
+            }
+          },
+          "created_at": {
+            "description": "The time the first packet of this flow was seen at.",
+            "type": "string",
+            "format": "date-time"
+          },
+          "external_key": {
+            "description": "The flowkey (or 5-tuple) of any packets on this flow as viewed by the remote half.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/Flowkey"
+              }
+            ]
+          },
+          "flow_id": {
+            "description": "An ephemeral ID bound to this flow.",
+            "type": "string",
+            "format": "uuid"
+          },
+          "forwarded": {
+            "nullable": true,
+            "description": "How any outbound packets are to be routed.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/ForwardClass"
+              }
+            ]
+          },
+          "initial_packet": {
+            "description": "The direction of the first packet of this flow.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/Direction"
+              }
+            ]
+          },
+          "internal_key": {
+            "description": "The flowkey (or 5-tuple) of any packets on this flow as viewed by the instance.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/Flowkey"
+              }
+            ]
+          }
+        },
+        "required": [
+          "created_at",
+          "external_key",
+          "flow_id",
+          "initial_packet",
+          "internal_key"
+        ]
+      },
+      "FlowStat": {
+        "description": "A packet flow recorded on a `NetworkInterface`.",
+        "type": "object",
+        "properties": {
+          "byte_rate": {
+            "type": "number",
+            "format": "double"
+          },
+          "bytes": {
+            "type": "integer",
+            "format": "uint64",
+            "minimum": 0
+          },
+          "packet_rate": {
+            "type": "number",
+            "format": "double"
+          },
+          "packets": {
+            "type": "integer",
+            "format": "uint64",
+            "minimum": 0
+          }
+        },
+        "required": [
+          "byte_rate",
+          "bytes",
+          "packet_rate",
+          "packets"
+        ]
+      },
+      "Flowkey": {
+        "description": "Addresses and protocol-specific information used to group packets into a flow.",
+        "type": "object",
+        "properties": {
+          "destination_address": {
+            "type": "string",
+            "format": "ip"
+          },
+          "info": {
+            "nullable": true,
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/ProtocolInfo"
+              }
+            ]
+          },
+          "protocol": {
+            "type": "integer",
+            "format": "uint8",
+            "minimum": 0
+          },
+          "source_address": {
+            "type": "string",
+            "format": "ip"
+          }
+        },
+        "required": [
+          "destination_address",
+          "protocol",
+          "source_address"
+        ]
+      },
+      "ForwardClass": {
+        "description": "How the remote half of a flow is reached.",
+        "type": "string",
+        "enum": [
+          "vpc_local",
+          "external"
+        ]
+      },
       "Generation": {
         "description": "Generation numbers stored in the database, used for optimistic concurrency control",
         "type": "integer",
@@ -4570,6 +4808,32 @@
         "pattern": "^[0-9]{1,3}(-[0-9]{1,3})?$",
         "minLength": 1,
         "maxLength": 7
+      },
+      "IcmpProtocolInfo": {
+        "description": "Message types information carried by ICMP.",
+        "type": "object",
+        "properties": {
+          "code": {
+            "type": "integer",
+            "format": "uint8",
+            "minimum": 0
+          },
+          "id": {
+            "nullable": true,
+            "type": "integer",
+            "format": "uint16",
+            "minimum": 0
+          },
+          "type": {
+            "type": "integer",
+            "format": "uint8",
+            "minimum": 0
+          }
+        },
+        "required": [
+          "code",
+          "type"
+        ]
       },
       "IdMapDatasetConfig": {
         "type": "object",
@@ -6381,6 +6645,26 @@
           "rs"
         ]
       },
+      "PortProtocolInfo": {
+        "description": "A pair of ports, identifying a flow in protocols such as TCP or UDP.",
+        "type": "object",
+        "properties": {
+          "destination_port": {
+            "type": "integer",
+            "format": "uint16",
+            "minimum": 0
+          },
+          "source_port": {
+            "type": "integer",
+            "format": "uint16",
+            "minimum": 0
+          }
+        },
+        "required": [
+          "destination_port",
+          "source_port"
+        ]
+      },
       "PortSpeed": {
         "description": "Switchport Speed options",
         "type": "string",
@@ -6423,6 +6707,47 @@
         },
         "minItems": 2,
         "maxItems": 2
+      },
+      "ProtocolInfo": {
+        "description": "Protocol-specific flow information.",
+        "oneOf": [
+          {
+            "type": "object",
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "ports"
+                ]
+              },
+              "value": {
+                "$ref": "#/components/schemas/PortProtocolInfo"
+              }
+            },
+            "required": [
+              "type",
+              "value"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "icmp"
+                ]
+              },
+              "value": {
+                "$ref": "#/components/schemas/IcmpProtocolInfo"
+              }
+            },
+            "required": [
+              "type",
+              "value"
+            ]
+          }
+        ]
       },
       "QemuPvpanic": {
         "type": "object",
@@ -7693,6 +8018,82 @@
         "type": "integer",
         "format": "uint32",
         "minimum": 0
+      },
+      "VpcEntity": {
+        "description": "A control-plane object which has matched a given flow and chosen to allow it.",
+        "oneOf": [
+          {
+            "type": "object",
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "firewall_rule"
+                ]
+              },
+              "value": {
+                "type": "string",
+                "format": "uuid"
+              }
+            },
+            "required": [
+              "type",
+              "value"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "firewall_default_in"
+                ]
+              }
+            },
+            "required": [
+              "type"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "vpc_route"
+                ]
+              },
+              "value": {
+                "type": "string",
+                "format": "uuid"
+              }
+            },
+            "required": [
+              "type",
+              "value"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "internet_gateway"
+                ]
+              },
+              "value": {
+                "type": "string",
+                "format": "uuid"
+              }
+            },
+            "required": [
+              "type",
+              "value"
+            ]
+          }
+        ]
       },
       "VpcFirewallIcmpFilter": {
         "type": "object",

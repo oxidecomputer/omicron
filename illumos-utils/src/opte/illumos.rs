@@ -7,7 +7,6 @@
 use crate::addrobj::AddrObject;
 use crate::dladm;
 use camino::Utf8Path;
-use omicron_common::api::internal::shared::NetworkInterfaceKind;
 use opte_ioctl::Error as OpteError;
 use opte_ioctl::OpteHdl;
 use slog::Logger;

@@ -1009,8 +1009,8 @@ mod tests {
     use uuid::Uuid;
 
     // Regression for https://github.com/oxidecomputer/omicron/issues/7541.
-    #[test]
-    fn multiple_ports_does_not_destroy_default_route() {
+    #[tokio::test]
+    async fn multiple_ports_does_not_destroy_default_route() {
         let logctx =
             test_setup_log("multiple_ports_does_not_destroy_default_route");
         let manager = PortManager::new(logctx.log.clone(), Ipv6Addr::LOCALHOST);
