@@ -14,6 +14,9 @@ use crate::blueprint_editor::ExternalSnatNetworkingChoice;
 use crate::blueprint_editor::NoAvailableDnsSubnets;
 use crate::blueprint_editor::SledEditError;
 use crate::blueprint_editor::SledEditor;
+use crate::planner::NoopConvertGlobalIneligibleReason;
+use crate::planner::NoopConvertInfo;
+use crate::planner::NoopConvertSledIneligibleReason;
 use crate::planner::ZoneExpungeReason;
 use crate::planner::rng::PlannerRng;
 use anyhow::Context as _;
@@ -30,6 +33,8 @@ use nexus_sled_agent_shared::inventory::OmicronZoneDataset;
 use nexus_sled_agent_shared::inventory::ZoneKind;
 use nexus_types::deployment::Blueprint;
 use nexus_types::deployment::BlueprintDatasetDisposition;
+use nexus_types::deployment::BlueprintHostPhase2DesiredContents;
+use nexus_types::deployment::BlueprintHostPhase2DesiredSlots;
 use nexus_types::deployment::BlueprintPhysicalDiskConfig;
 use nexus_types::deployment::BlueprintPhysicalDiskDisposition;
 use nexus_types::deployment::BlueprintSledConfig;
@@ -64,6 +69,7 @@ use omicron_common::api::external::Generation;
 use omicron_common::api::external::Vni;
 use omicron_common::api::internal::shared::NetworkInterface;
 use omicron_common::api::internal::shared::NetworkInterfaceKind;
+use omicron_common::disk::M2Slot;
 use omicron_common::policy::INTERNAL_DNS_REDUNDANCY;
 use omicron_uuid_kinds::GenericUuid;
 use omicron_uuid_kinds::MupdateOverrideUuid;
@@ -527,6 +533,8 @@ impl<'a> BlueprintBuilder<'a> {
                     datasets: IdMap::default(),
                     zones: IdMap::default(),
                     remove_mupdate_override: None,
+                    host_phase_2:
+                        BlueprintHostPhase2DesiredSlots::current_contents(),
                 };
                 (sled_id, config)
             })
@@ -1219,10 +1227,11 @@ impl<'a> BlueprintBuilder<'a> {
 
     /// Updates a sled's mupdate override field based on the mupdate override
     /// provided by inventory.
-    pub fn sled_ensure_mupdate_override(
+    pub(crate) fn sled_ensure_mupdate_override(
         &mut self,
         sled_id: SledUuid,
         inv_mupdate_override_id: Option<MupdateOverrideUuid>,
+        noop_info: &mut NoopConvertInfo,
     ) -> Result<EnsureMupdateOverrideAction, Error> {
         let editor = self.sled_editors.get_mut(&sled_id).ok_or_else(|| {
             Error::Planner(anyhow!(
@@ -1238,11 +1247,13 @@ impl<'a> BlueprintBuilder<'a> {
         // TODO: simplify down to &BaseboardId
         let baseboard_id = Arc::new(sled_details.baseboard_id.clone());
         let pending_mgs_update = self.pending_mgs_updates.entry(baseboard_id);
+        let noop_sled_info = noop_info.sled_info_mut(sled_id)?;
 
         editor
             .ensure_mupdate_override(
                 inv_mupdate_override_id,
                 pending_mgs_update,
+                noop_sled_info,
             )
             .map_err(|err| Error::SledEditError { sled_id, err })
     }
@@ -1913,6 +1924,37 @@ impl<'a> BlueprintBuilder<'a> {
         Ok(final_counts.difference_since(initial_counts))
     }
 
+    pub fn sled_set_host_phase_2(
+        &mut self,
+        sled_id: SledUuid,
+        host_phase_2: BlueprintHostPhase2DesiredSlots,
+    ) -> Result<(), Error> {
+        let editor = self.sled_editors.get_mut(&sled_id).ok_or_else(|| {
+            Error::Planner(anyhow!(
+                "tried to change image of zone on unknown sled {sled_id}"
+            ))
+        })?;
+        editor
+            .set_host_phase_2(host_phase_2)
+            .map_err(|err| Error::SledEditError { sled_id, err })
+    }
+
+    pub fn sled_set_host_phase_2_slot(
+        &mut self,
+        sled_id: SledUuid,
+        slot: M2Slot,
+        host_phase_2: BlueprintHostPhase2DesiredContents,
+    ) -> Result<(), Error> {
+        let editor = self.sled_editors.get_mut(&sled_id).ok_or_else(|| {
+            Error::Planner(anyhow!(
+                "tried to change image of zone on unknown sled {sled_id}"
+            ))
+        })?;
+        editor
+            .set_host_phase_2_slot(slot, host_phase_2)
+            .map_err(|err| Error::SledEditError { sled_id, err })
+    }
+
     /// Set the `remove_mupdate_override` field of the given sled.
     pub fn sled_set_remove_mupdate_override(
         &mut self,
@@ -2305,7 +2347,7 @@ pub(super) fn ensure_input_networking_records_appear_in_parent_blueprint(
 
 /// The result of an `ensure_mupdate_override` call for a particular sled.
 #[derive(Clone, Debug, Eq, PartialEq)]
-pub enum EnsureMupdateOverrideAction {
+pub(crate) enum EnsureMupdateOverrideAction {
     /// The inventory and blueprint overrides are consistent, so no action was
     /// taken.
     NoAction {
@@ -2324,14 +2366,26 @@ pub enum EnsureMupdateOverrideAction {
         zones: IdOrdMap<EnsureMupdateOverrideUpdatedZone>,
         /// The pending MGS update that was cleared, if any.
         prev_mgs_update: Option<Box<PendingMgsUpdate>>,
+        /// The previous host phase 2 contents.
+        prev_host_phase_2: BlueprintHostPhase2DesiredSlots,
     },
-    /// The inventory did not have an override but the blueprint did, so the
-    /// blueprint's override was cleared.
+    /// The inventory did not have an override but the blueprint did, and other
+    /// conditions were met, so the blueprint's override was cleared.
     BpClearOverride {
         /// The previous blueprint override that was removed.
         prev_bp_override: MupdateOverrideUuid,
     },
-    /// Sled Agent encountered an error occurred retrieving the mupdate override
+    /// The inventory did not have an override but the blueprint did, but some
+    /// zones' image sources can't be converted over to Artifact, so the
+    /// blueprint's override was left in place.
+    BpOverrideNotCleared {
+        /// The blueprint override that was not removed.
+        bp_override: MupdateOverrideUuid,
+        /// The reason the blueprint override was not cleared.
+        reason: BpMupdateOverrideNotClearedReason,
+    },
+    /// Sled Agent encountered an error occurred retrieving the mupdate
+    /// override
     /// from the inventory.
     GetOverrideError {
         /// An error message.
@@ -2354,6 +2408,7 @@ impl EnsureMupdateOverrideAction {
                 prev_bp_override,
                 zones,
                 prev_mgs_update,
+                prev_host_phase_2,
             } => {
                 let mut zones_desc = String::new();
                 if zones.is_empty() {
@@ -2366,12 +2421,58 @@ impl EnsureMupdateOverrideAction {
                         swriteln!(zones_desc, "  - {}", zone);
                     }
                 }
+
+                let mut host_phase_2_desc = String::from("\n");
+                let BlueprintHostPhase2DesiredSlots { slot_a, slot_b } =
+                    prev_host_phase_2;
+                match slot_a {
+                    BlueprintHostPhase2DesiredContents::CurrentContents => {
+                        swriteln!(
+                            host_phase_2_desc,
+                            "  - host phase 2 slot A: current contents (unchanged)"
+                        );
+                    }
+                    BlueprintHostPhase2DesiredContents::Artifact {
+                        version,
+                        hash,
+                    } => {
+                        swriteln!(
+                            host_phase_2_desc,
+                            "  - host phase 2 slot A: updated from artifact \
+                             (version {}, hash {}) to preserving current contents",
+                            version,
+                            hash
+                        );
+                    }
+                }
+                match slot_b {
+                    BlueprintHostPhase2DesiredContents::CurrentContents => {
+                        swriteln!(
+                            host_phase_2_desc,
+                            "  - host phase 2 slot B: current contents (unchanged)"
+                        );
+                    }
+                    BlueprintHostPhase2DesiredContents::Artifact {
+                        version,
+                        hash,
+                    } => {
+                        swriteln!(
+                            host_phase_2_desc,
+                            "  - host phase 2 slot B: updated from artifact \
+                             (version {}, hash {}) to preserving current contents",
+                            version,
+                            hash
+                        );
+                    }
+                }
+
                 info!(
                     log,
                     "blueprint mupdate override updated to match inventory";
                     "new_bp_override" => %inv_override,
                     "prev_bp_override" => ?prev_bp_override,
                     "zones" => zones_desc,
+                    "host_phase_2" => host_phase_2_desc,
                 );
                 if let Some(prev_mgs_update) = prev_mgs_update {
                     info!(
@@ -2398,10 +2499,23 @@ impl EnsureMupdateOverrideAction {
                     "prev_bp_override" => %prev_bp_override,
                 )
             }
+            EnsureMupdateOverrideAction::BpOverrideNotCleared {
+                bp_override,
+                reason,
+            } => {
+                info!(
+                    log,
+                    "inventory override no longer exists, but blueprint \
+                     override could not be cleared";
+                    "bp_override" => %bp_override,
+                    "reason" => %reason,
+                );
+            }
             EnsureMupdateOverrideAction::GetOverrideError { message } => {
                 error!(
-                    log, "error getting mupdate override info for sled, \
-                          not altering blueprint override";
+                    log,
+                    "error getting mupdate override info for sled, \
+                     not altering blueprint override";
                     "message" => %message,
                 );
             }
@@ -2453,6 +2567,36 @@ impl IdOrdItem for EnsureMupdateOverrideUpdatedZone {
     id_upcast!();
 }
 
+/// The reason a blueprint's mupdate override for a sled was not cleared, even
+/// though inventory no longer has the sled.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub(crate) enum BpMupdateOverrideNotClearedReason {
+    /// There is a global reason noop conversions are not possible.
+    NoopGlobalIneligible(NoopConvertGlobalIneligibleReason),
+
+    /// There is a sled-specific reason noop conversions are not possible.
+    NoopSledIneligible(NoopConvertSledIneligibleReason),
+}
+
+impl fmt::Display for BpMupdateOverrideNotClearedReason {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            BpMupdateOverrideNotClearedReason::NoopGlobalIneligible(reason) => {
+                write!(
+                    f,
+                    "no sleds can be noop-converted to Artifact: {reason}",
+                )
+            }
+            BpMupdateOverrideNotClearedReason::NoopSledIneligible(reason) => {
+                write!(
+                    f,
+                    "this sled cannot be noop-converted to Artifact: {reason}",
+                )
+            }
+        }
+    }
+}
+
 #[cfg(test)]
 pub mod test {
     use super::*;
@@ -2464,8 +2608,8 @@ pub mod test {
     use expectorate::assert_contents;
     use nexus_reconfigurator_blippy::Blippy;
     use nexus_reconfigurator_blippy::BlippyReportSortKey;
+    use nexus_types::deployment::BlueprintArtifactVersion;
     use nexus_types::deployment::BlueprintDatasetDisposition;
-    use nexus_types::deployment::BlueprintZoneImageVersion;
     use nexus_types::deployment::OmicronZoneNetworkResources;
     use nexus_types::external_api::views::SledPolicy;
     use omicron_common::address::IpRange;
@@ -3386,7 +3530,7 @@ pub mod test {
                 .set_zone_image_source(
                     &zone_id,
                     BlueprintZoneImageSource::Artifact {
-                        version: BlueprintZoneImageVersion::Available {
+                        version: BlueprintArtifactVersion::Available {
                             version: ARTIFACT_VERSION,
                         },
                         // The hash is not displayed in the diff -- only the
