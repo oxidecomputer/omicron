@@ -2664,6 +2664,10 @@ CREATE INDEX IF NOT EXISTS lookup_bundle_by_nexus ON omicron.public.support_bund
     assigned_nexus
 );
 
+CREATE INDEX IF NOT EXISTS lookup_bundle_by_creation ON omicron.public.support_bundle (
+    time_created
+);
+
 /*******************************************************************/
 
 /*
@@ -3700,6 +3704,12 @@ CREATE TABLE IF NOT EXISTS omicron.public.inv_sled_agent (
     PRIMARY KEY (inv_collection_id, sled_id)
 );
 
+CREATE TYPE IF NOT EXISTS omicron.public.clear_mupdate_override_boot_success
+AS ENUM (
+    'cleared',
+    'no-override'
+);
+
 CREATE TABLE IF NOT EXISTS omicron.public.inv_sled_config_reconciler (
     -- where this observation came from
     -- (foreign key into `inv_collection` table)
@@ -3736,6 +3746,37 @@ CREATE TABLE IF NOT EXISTS omicron.public.inv_sled_config_reconciler (
     -- for the given slot. As above 0=a and 1=b.
     boot_partition_a_error TEXT,
     boot_partition_b_error TEXT,
+
+    -- Success clearing the mupdate override.
+    clear_mupdate_override_boot_success omicron.public.clear_mupdate_override_boot_success,
+    -- Error clearing the mupdate override.
+    clear_mupdate_override_boot_error TEXT,
+
+    -- A message describing the result clearing the mupdate override on the
+    -- non-boot disk.
+    clear_mupdate_override_non_boot_message TEXT,
+
+    -- Three cases:
+    --
+    -- 1. No clear_mupdate_override instruction was passed in. All three
+    --    columns are NULL.
+    -- 2. Clearing the override was successful. boot_success is NOT NULL,
+    --    boot_error is NULL, and non_boot_message is NOT NULL.
+    -- 3. Clearing the override failed. boot_success is NULL, boot_error is
+    --    NOT NULL, and non_boot_message is NOT NULL.
+    CONSTRAINT clear_mupdate_override_consistency CHECK (
+        (clear_mupdate_override_boot_success IS NULL
+         AND clear_mupdate_override_boot_error IS NULL
+         AND clear_mupdate_override_non_boot_message IS NULL)
+    OR
+        (clear_mupdate_override_boot_success IS NOT NULL
+         AND clear_mupdate_override_boot_error IS NULL
+         AND clear_mupdate_override_non_boot_message IS NOT NULL)
+    OR
+        (clear_mupdate_override_boot_success IS NULL
+         AND clear_mupdate_override_boot_error IS NOT NULL
+         AND clear_mupdate_override_non_boot_message IS NOT NULL)
+    ),
 
     PRIMARY KEY (inv_collection_id, sled_id)
 );
@@ -4404,6 +4445,13 @@ CREATE TABLE IF NOT EXISTS omicron.public.bp_sled_metadata (
     sled_agent_generation INT8 NOT NULL,
     -- NULL means do not remove any overrides
     remove_mupdate_override UUID,
+
+    -- desired artifact hash for internal disk slots' boot partitions
+    -- NULL is translated to
+    -- `BlueprintHostPhase2DesiredContents::CurrentContents`
+    host_phase_2_desired_slot_a STRING(64),
+    host_phase_2_desired_slot_b STRING(64),
+
     PRIMARY KEY (blueprint_id, sled_id)
 );
 
@@ -6198,7 +6246,7 @@ INSERT INTO omicron.public.db_metadata (
     version,
     target_version
 ) VALUES
-    (TRUE, NOW(), NOW(), '161.0.0', NULL)
+    (TRUE, NOW(), NOW(), '165.0.0', NULL)
 ON CONFLICT DO NOTHING;
 
 COMMIT;

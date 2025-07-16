@@ -15,9 +15,12 @@ use crate::blueprint_builder::Operation;
 use crate::blueprint_editor::DisksEditError;
 use crate::blueprint_editor::SledEditError;
 use crate::mgs_updates::plan_mgs_updates;
+use crate::planner::image_source::NoopConvertZoneStatus;
 use crate::planner::omicron_zone_placement::PlacementError;
 use gateway_client::types::SpType;
 use itertools::Itertools;
+use nexus_sled_agent_shared::inventory::ConfigReconcilerInventoryResult;
+use nexus_sled_agent_shared::inventory::OmicronZoneImageSource;
 use nexus_sled_agent_shared::inventory::OmicronZoneType;
 use nexus_sled_agent_shared::inventory::ZoneKind;
 use nexus_types::deployment::Blueprint;
@@ -32,7 +35,6 @@ use nexus_types::deployment::DiskFilter;
 use nexus_types::deployment::PlanningInput;
 use nexus_types::deployment::SledDetails;
 use nexus_types::deployment::SledFilter;
-use nexus_types::deployment::TargetReleaseDescription;
 use nexus_types::deployment::TufRepoContentsError;
 use nexus_types::deployment::ZpoolFilter;
 use nexus_types::external_api::views::PhysicalDiskPolicy;
@@ -41,6 +43,7 @@ use nexus_types::external_api::views::SledState;
 use nexus_types::inventory::Collection;
 use omicron_common::policy::COCKROACHDB_REDUNDANCY;
 use omicron_common::policy::INTERNAL_DNS_REDUNDANCY;
+use omicron_uuid_kinds::OmicronZoneUuid;
 use omicron_uuid_kinds::PhysicalDiskUuid;
 use omicron_uuid_kinds::SledUuid;
 use slog::debug;
@@ -50,15 +53,21 @@ use slog::{Logger, info, warn};
 use slog_error_chain::InlineErrorChain;
 use std::collections::BTreeMap;
 use std::collections::BTreeSet;
-use std::collections::HashMap;
 use std::str::FromStr;
 
+pub(crate) use self::image_source::NoopConvertGlobalIneligibleReason;
+pub(crate) use self::image_source::NoopConvertInfo;
+pub(crate) use self::image_source::NoopConvertSledEligible;
+pub(crate) use self::image_source::NoopConvertSledIneligibleReason;
+pub(crate) use self::image_source::NoopConvertSledInfoMut;
+pub(crate) use self::image_source::NoopConvertSledStatus;
 pub(crate) use self::omicron_zone_placement::DiscretionaryOmicronZone;
 use self::omicron_zone_placement::OmicronZonePlacement;
 use self::omicron_zone_placement::OmicronZonePlacementSledState;
 pub use self::rng::PlannerRng;
 pub use self::rng::SledPlannerRng;
 
+mod image_source;
 mod omicron_zone_placement;
 pub(crate) mod rng;
 
@@ -157,13 +166,22 @@ impl<'a> Planner<'a> {
     fn do_plan(&mut self) -> Result<(), Error> {
         self.do_plan_expunge()?;
         self.do_plan_decommission()?;
-        let plan_mupdate_override_res = self.do_plan_mupdate_override()?;
+
+        let mut noop_info =
+            NoopConvertInfo::new(self.input, self.inventory, &self.blueprint)?;
+
+        let plan_mupdate_override_res =
+            self.do_plan_mupdate_override(&mut noop_info)?;
+
+        // Log noop-convert results after do_plan_mupdate_override, because this
+        // step might alter noop_info.
+        noop_info.log_to(&self.log);
 
         // Within `do_plan_noop_image_source`, we plan noop image sources on
         // sleds other than those currently affected by mupdate overrides. This
         // means that we don't have to wait for the `plan_mupdate_override_res`
         // result for that step.
-        self.do_plan_noop_image_source()?;
+        self.do_plan_noop_image_source(noop_info)?;
 
         if let UpdateStepResult::ContinueToNextStep = plan_mupdate_override_res
         {
@@ -520,177 +538,61 @@ impl<'a> Planner<'a> {
         Ok(())
     }
 
-    fn do_plan_noop_image_source(&mut self) -> Result<(), Error> {
-        let TargetReleaseDescription::TufRepo(current_artifacts) =
-            self.input.tuf_repo().description()
-        else {
-            info!(
-                self.log,
-                "skipping noop image source check for all sleds \
-                 (no current TUF repo)",
-            );
-            return Ok(());
+    fn do_plan_noop_image_source(
+        &mut self,
+        noop_info: NoopConvertInfo,
+    ) -> Result<(), Error> {
+        let sleds = match noop_info {
+            NoopConvertInfo::GlobalEligible { sleds } => sleds,
+            NoopConvertInfo::GlobalIneligible { .. } => return Ok(()),
         };
-        let artifacts_by_hash: HashMap<_, _> = current_artifacts
-            .artifacts
-            .iter()
-            .map(|artifact| (artifact.hash, artifact))
-            .collect();
-
-        for sled_id in self.input.all_sled_ids(SledFilter::InService) {
-            let Some(inv_sled) = self.inventory.sled_agents.get(&sled_id)
-            else {
-                info!(
-                    self.log,
-                    "skipping noop image source check \
-                     (sled not present in latest inventory collection)";
-                    "sled_id" => %sled_id,
-                );
-                continue;
+        for sled in sleds {
+            let eligible = match &sled.status {
+                NoopConvertSledStatus::Ineligible(_) => continue,
+                NoopConvertSledStatus::Eligible(eligible) => eligible,
             };
 
-            let zone_manifest = match &inv_sled
-                .zone_image_resolver
-                .zone_manifest
-                .boot_inventory
-            {
-                Ok(zm) => zm,
-                Err(message) => {
-                    // This is a string so we don't use InlineErrorChain::new.
-                    let message: &str = message;
-                    warn!(
-                        self.log,
-                        "skipping noop image source check since \
-                         sled-agent encountered error retrieving zone manifest \
-                         (this is abnormal)";
-                        "sled_id" => %sled_id,
-                        "error" => %message,
-                    );
-                    continue;
-                }
-            };
-
-            // Does the blueprint have the remove_mupdate_override field set for
-            // this sled? If it does, we don't want to touch the zones on this
-            // sled (they should all be InstallDataset until the
-            // remove_mupdate_override field is cleared).
-            if let Some(id) =
-                self.blueprint.sled_get_remove_mupdate_override(sled_id)?
-            {
-                info!(
+            let zone_counts = eligible.zone_counts();
+            if zone_counts.num_install_dataset() == 0 {
+                debug!(
                     self.log,
-                    "skipping noop image source check on sled \
-                     (blueprint has get_remove_mupdate_override set for sled)";
-                    "sled_id" => %sled_id,
-                    "bp_remove_mupdate_override_id" => %id,
+                    "all zones are already Artifact, so \
+                     no noop image source action required";
+                    "num_total" => zone_counts.num_total,
                 );
                 continue;
             }
+            if zone_counts.num_eligible > 0 {
+                info!(
+                    self.log,
+                    "noop converting {}/{} install-dataset zones to artifact store",
+                    zone_counts.num_eligible,
+                    zone_counts.num_install_dataset();
+                    "sled_id" => %sled.sled_id,
+                    "num_total" => zone_counts.num_total,
+                    "num_already_artifact" => zone_counts.num_already_artifact,
+                );
+            }
 
-            // Which zones have image sources set to InstallDataset?
-            let install_dataset_zones = self
-                .blueprint
-                .current_sled_zones(
-                    sled_id,
-                    BlueprintZoneDisposition::is_in_service,
-                )
-                .filter(|z| {
-                    z.image_source == BlueprintZoneImageSource::InstallDataset
-                });
-
-            // Out of these, which zones' hashes (as reported in the zone
-            // manifest) match the corresponding ones in the TUF repo?
-            let mut install_dataset_zone_count = 0;
-            let matching_zones: Vec<_> = install_dataset_zones
-                .inspect(|_| {
-                    install_dataset_zone_count += 1;
-                })
-                .filter_map(|z| {
-                    let file_name = z.kind().artifact_in_install_dataset();
-                    let Some(artifact) = zone_manifest.artifacts.get(file_name)
-                    else {
-                        // The blueprint indicates that a zone should be present
-                        // that isn't in the install dataset. This might be an old
-                        // install dataset with a zone kind known to this version of
-                        // Nexus that isn't present in it. Not normally a cause for
-                        // concern.
-                        debug!(
-                            self.log,
-                            "blueprint zone not found in zone manifest, \
-                             ignoring for noop checks";
-                            "sled_id" => %sled_id,
-                            "zone_id" => %z.id,
-                            "kind" => z.kind().report_str(),
-                            "file_name" => file_name,
-                        );
-                        return None;
-                    };
-                    if let Err(message) = &artifact.status {
-                        // The artifact is somehow invalid and corrupt -- definitely
-                        // something to warn about and not proceed.
-                        warn!(
-                            self.log,
-                            "zone manifest inventory indicated install dataset \
-                             artifact is invalid, not using artifact (this is \
-                             abnormal)";
-                            "sled_id" => %sled_id,
-                            "zone_id" => %z.id,
-                            "kind" => z.kind().report_str(),
-                            "file_name" => file_name,
-                            "error" => %message,
-                        );
-                        return None;
+            for zone in &eligible.zones {
+                match &zone.status {
+                    NoopConvertZoneStatus::Eligible(new_image_source) => {
+                        self.blueprint.sled_set_zone_source(
+                            sled.sled_id,
+                            zone.zone_id,
+                            new_image_source.clone(),
+                        )?;
                     }
+                    NoopConvertZoneStatus::AlreadyArtifact { .. }
+                    | NoopConvertZoneStatus::Ineligible(_) => {}
+                }
+            }
 
-                    // Does the hash match what's in the TUF repo?
-                    let Some(tuf_artifact) =
-                        artifacts_by_hash.get(&artifact.expected_hash)
-                    else {
-                        debug!(
-                            self.log,
-                            "install dataset artifact hash not found in TUF repo, \
-                             ignoring for noop checks";
-                            "sled_id" => %sled_id,
-                            "zone_id" => %z.id,
-                            "kind" => z.kind().report_str(),
-                            "file_name" => file_name,
-                        );
-                        return None;
-                    };
-
-                    info!(
-                        self.log,
-                        "install dataset artifact hash matches TUF repo, \
-                         switching out the zone image source to Artifact";
-                        "sled_id" => %sled_id,
-                        "tuf_artifact_id" => %tuf_artifact.id,
-                    );
-                    Some((z.id, tuf_artifact))
-                })
-                .collect();
-
-            info!(
-                self.log,
-                "noop converting {}/{} install-dataset zones to artifact store",
-                matching_zones.len(),
-                install_dataset_zone_count;
-                "sled_id" => %sled_id,
-            );
-
-            // Set all these zones' image sources to the corresponding
-            // blueprint.
-            for (zone_id, tuf_artifact) in &matching_zones {
-                self.blueprint.sled_set_zone_source(
-                    sled_id,
-                    *zone_id,
-                    BlueprintZoneImageSource::from_available_artifact(
-                        tuf_artifact,
-                    ),
-                )?;
+            if zone_counts.num_eligible > 0 {
                 self.blueprint.record_operation(
                     Operation::SledNoopZoneImageSourcesUpdated {
-                        sled_id,
-                        count: matching_zones.len(),
+                        sled_id: sled.sled_id,
+                        count: zone_counts.num_eligible,
                     },
                 );
             }
@@ -1243,10 +1145,42 @@ impl<'a> Planner<'a> {
         // Wait for zones to appear up-to-date in the inventory.
         let inventory_zones = self
             .inventory
-            .all_running_omicron_zones()
-            .map(|z| (z.id, z.image_source.clone()))
+            .all_reconciled_omicron_zones()
+            .map(|(z, sa_result)| (z.id, (&z.image_source, sa_result)))
             .collect::<BTreeMap<_, _>>();
+
+        #[derive(Debug)]
+        #[expect(dead_code)]
+        struct ZoneCurrentlyUpdating<'a> {
+            zone_id: OmicronZoneUuid,
+            zone_kind: ZoneKind,
+            reason: UpdatingReason<'a>,
+        }
+
+        #[derive(Debug)]
+        #[expect(dead_code)]
+        enum UpdatingReason<'a> {
+            ImageSourceMismatch {
+                bp_image_source: &'a BlueprintZoneImageSource,
+                inv_image_source: &'a OmicronZoneImageSource,
+            },
+            MissingInInventory {
+                bp_image_source: &'a BlueprintZoneImageSource,
+            },
+            ReconciliationError {
+                bp_image_source: &'a BlueprintZoneImageSource,
+                inv_image_source: &'a OmicronZoneImageSource,
+                message: &'a str,
+            },
+        }
+
         for &sled_id in &sleds {
+            // Build a list of zones currently in the blueprint but where
+            // inventory has a mismatch or does not know about the zone.
+            //
+            // What about the case where a zone is in inventory but not in the
+            // blueprint? See
+            // https://github.com/oxidecomputer/omicron/issues/8589.
             let zones_currently_updating = self
                 .blueprint
                 .current_sled_zones(
@@ -1254,11 +1188,58 @@ impl<'a> Planner<'a> {
                     BlueprintZoneDisposition::is_in_service,
                 )
                 .filter_map(|zone| {
-                    let image_source = zone.image_source.clone().into();
-                    if inventory_zones.get(&zone.id) != Some(&image_source) {
-                        Some((zone.id, zone.zone_type.kind()))
-                    } else {
-                        None
+                    let bp_image_source =
+                        OmicronZoneImageSource::from(zone.image_source.clone());
+                    match inventory_zones.get(&zone.id) {
+                        Some((
+                            inv_image_source,
+                            ConfigReconcilerInventoryResult::Ok,
+                        )) if *inv_image_source == &bp_image_source => {
+                            // The inventory and blueprint image sources match
+                            // -- this means that the zone is up-to-date.
+                            None
+                        }
+                        Some((
+                            inv_image_source,
+                            ConfigReconcilerInventoryResult::Ok,
+                        )) => {
+                            // The inventory and blueprint image sources differ.
+                            Some(ZoneCurrentlyUpdating {
+                                zone_id: zone.id,
+                                zone_kind: zone.kind(),
+                                reason: UpdatingReason::ImageSourceMismatch {
+                                    bp_image_source: &zone.image_source,
+                                    inv_image_source,
+                                },
+                            })
+                        }
+                        Some((
+                            inv_image_source,
+                            ConfigReconcilerInventoryResult::Err { message },
+                        )) => {
+                            // The inventory reports this zone but there was an
+                            // error reconciling it (most likely an error
+                            // starting the zone).
+                            Some(ZoneCurrentlyUpdating {
+                                zone_id: zone.id,
+                                zone_kind: zone.kind(),
+                                reason: UpdatingReason::ReconciliationError {
+                                    bp_image_source: &zone.image_source,
+                                    inv_image_source,
+                                    message,
+                                },
+                            })
+                        }
+                        None => {
+                            // The blueprint has a zone that inventory does not have.
+                            Some(ZoneCurrentlyUpdating {
+                                zone_id: zone.id,
+                                zone_kind: zone.kind(),
+                                reason: UpdatingReason::MissingInInventory {
+                                    bp_image_source: &zone.image_source,
+                                },
+                            })
+                        }
                     }
                 })
                 .collect::<Vec<_>>();
@@ -1434,7 +1415,10 @@ impl<'a> Planner<'a> {
         Ok(())
     }
 
-    fn do_plan_mupdate_override(&mut self) -> Result<UpdateStepResult, Error> {
+    fn do_plan_mupdate_override(
+        &mut self,
+        noop_info: &mut NoopConvertInfo,
+    ) -> Result<UpdateStepResult, Error> {
         // For each sled, compare what's in the inventory to what's in the
         // blueprint.
         let mut actions_by_sled = BTreeMap::new();
@@ -1460,6 +1444,7 @@ impl<'a> Planner<'a> {
                         inv_mupdate_override
                             .as_ref()
                             .map(|inv| inv.mupdate_override_id),
+                        noop_info,
                     )?
                 }
                 Err(message) => EnsureMupdateOverrideAction::GetOverrideError {
@@ -1872,12 +1857,12 @@ pub(crate) mod test {
     use expectorate::assert_contents;
     use nexus_sled_agent_shared::inventory::ConfigReconcilerInventory;
     use nexus_sled_agent_shared::inventory::ConfigReconcilerInventoryResult;
+    use nexus_types::deployment::BlueprintArtifactVersion;
     use nexus_types::deployment::BlueprintDatasetDisposition;
     use nexus_types::deployment::BlueprintDiffSummary;
     use nexus_types::deployment::BlueprintPhysicalDiskDisposition;
     use nexus_types::deployment::BlueprintZoneDisposition;
     use nexus_types::deployment::BlueprintZoneImageSource;
-    use nexus_types::deployment::BlueprintZoneImageVersion;
     use nexus_types::deployment::BlueprintZoneType;
     use nexus_types::deployment::ClickhouseMode;
     use nexus_types::deployment::ClickhousePolicy;
@@ -5378,7 +5363,7 @@ pub(crate) mod test {
             .expect("can't parse artifact version");
         let fake_hash = ArtifactHash([0; 32]);
         let image_source = BlueprintZoneImageSource::Artifact {
-            version: BlueprintZoneImageVersion::Available {
+            version: BlueprintArtifactVersion::Available {
                 version: version.clone(),
             },
             hash: fake_hash,
@@ -5448,7 +5433,7 @@ pub(crate) mod test {
             })
         {
             zone.image_source = BlueprintZoneImageSource::Artifact {
-                version: BlueprintZoneImageVersion::Available {
+                version: BlueprintArtifactVersion::Available {
                     version: version.clone(),
                 },
                 hash: fake_hash,
@@ -5706,7 +5691,7 @@ pub(crate) mod test {
             .expect("can't parse artifact version");
         let fake_hash = ArtifactHash([0; 32]);
         let image_source = BlueprintZoneImageSource::Artifact {
-            version: BlueprintZoneImageVersion::Available {
+            version: BlueprintArtifactVersion::Available {
                 version: version.clone(),
             },
             hash: fake_hash,
@@ -5755,7 +5740,7 @@ pub(crate) mod test {
             .filter(|z| !z.zone_type.is_cockroach())
         {
             zone.image_source = BlueprintZoneImageSource::Artifact {
-                version: BlueprintZoneImageVersion::Available {
+                version: BlueprintArtifactVersion::Available {
                     version: version.clone(),
                 },
                 hash: fake_hash,
@@ -5960,7 +5945,7 @@ pub(crate) mod test {
             .expect("can't parse artifact version");
         let fake_hash = ArtifactHash([0; 32]);
         let image_source = BlueprintZoneImageSource::Artifact {
-            version: BlueprintZoneImageVersion::Available {
+            version: BlueprintArtifactVersion::Available {
                 version: version.clone(),
             },
             hash: fake_hash,

@@ -7,9 +7,9 @@ use crate::report::BlippyReport;
 use crate::report::BlippyReportSortKey;
 use core::fmt;
 use nexus_types::deployment::Blueprint;
+use nexus_types::deployment::BlueprintArtifactVersion;
 use nexus_types::deployment::BlueprintDatasetConfig;
 use nexus_types::deployment::BlueprintZoneConfig;
-use nexus_types::deployment::BlueprintZoneImageVersion;
 use nexus_types::inventory::ZpoolName;
 use omicron_common::address::DnsSubnet;
 use omicron_common::address::Ipv6Subnet;
@@ -183,7 +183,7 @@ pub enum SledKind {
     MupdateOverrideWithArtifactZone {
         mupdate_override_id: MupdateOverrideUuid,
         zone: BlueprintZoneConfig,
-        version: BlueprintZoneImageVersion,
+        version: BlueprintArtifactVersion,
         hash: ArtifactHash,
     },
 }

@@ -141,6 +141,10 @@ pub struct ConfigReconcilerInventory {
     pub orphaned_datasets: IdOrdMap<OrphanedDataset>,
     pub zones: BTreeMap<OmicronZoneUuid, ConfigReconcilerInventoryResult>,
     pub boot_partitions: BootPartitionContents,
+    /// The result of clearing the mupdate override field.
+    ///
+    /// `None` if `remove_mupdate_override` was not provided in the sled config.
+    pub clear_mupdate_override: Option<ClearMupdateOverrideInventory>,
 }
 
 impl ConfigReconcilerInventory {
@@ -198,6 +202,17 @@ impl ConfigReconcilerInventory {
             .iter()
             .map(|z| (z.id, ConfigReconcilerInventoryResult::Ok))
             .collect();
+        let clear_mupdate_override = config.remove_mupdate_override.map(|_| {
+            ClearMupdateOverrideInventory {
+                boot_disk_result: Ok(
+                    ClearMupdateOverrideBootSuccess::Cleared,
+                ),
+                non_boot_message: "mupdate override successfully cleared \
+                                   on non-boot disks"
+                    .to_owned(),
+            }
+        });
+
         Self {
             last_reconciled_config: config,
             external_disks,
@@ -214,6 +229,7 @@ impl ConfigReconcilerInventory {
                     slot_b: Err(err),
                 }
             },
+            clear_mupdate_override,
         }
     }
 }
@@ -273,6 +289,32 @@ impl IdOrdItem for OrphanedDataset {
     }
 
     id_upcast!();
+}
+
+/// Status of clearing the mupdate override in the inventory.
+#[derive(Clone, Debug, PartialEq, Eq, Deserialize, JsonSchema, Serialize)]
+pub struct ClearMupdateOverrideInventory {
+    /// The result of clearing the mupdate override on the boot disk.
+    pub boot_disk_result:
+        Result<ClearMupdateOverrideBootSuccess, String>,
+
+    /// What happened on non-boot disks.
+    ///
+    /// We aren't modeling this out in more detail, because we plan to not try
+    /// and keep ledgered data in sync across both disks in the future.
+    pub non_boot_message: String,
+}
+
+/// Status of clearing the mupdate override on the boot disk.
+#[derive(Clone, Debug, PartialEq, Eq, Deserialize, JsonSchema, Serialize)]
+pub enum ClearMupdateOverrideBootSuccess {
+    /// The mupdate override was successfully cleared.
+    Cleared,
+
+    /// No mupdate override was found.
+    ///
+    /// This is considered a success for idempotency reasons.
+    NoOverride,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Deserialize, JsonSchema, Serialize)]

@@ -882,7 +882,7 @@
             "in": "query",
             "name": "sort_by",
             "schema": {
-              "$ref": "#/components/schemas/IdSortMode"
+              "$ref": "#/components/schemas/TimeAndIdSortMode"
             }
           }
         ],
@@ -2544,6 +2544,45 @@
           "time_created"
         ]
       },
+      "BlueprintArtifactVersion": {
+        "description": "The version of an artifact in a blueprint.\n\nThis is used for debugging output.",
+        "oneOf": [
+          {
+            "description": "A specific version of the image is available.",
+            "type": "object",
+            "properties": {
+              "artifact_version": {
+                "type": "string",
+                "enum": [
+                  "available"
+                ]
+              },
+              "version": {
+                "$ref": "#/components/schemas/ArtifactVersion"
+              }
+            },
+            "required": [
+              "artifact_version",
+              "version"
+            ]
+          },
+          {
+            "description": "The version could not be determined. This is non-fatal.",
+            "type": "object",
+            "properties": {
+              "artifact_version": {
+                "type": "string",
+                "enum": [
+                  "unknown"
+                ]
+              }
+            },
+            "required": [
+              "artifact_version"
+            ]
+          }
+        ]
+      },
       "BlueprintDatasetConfig": {
         "description": "Information about a dataset as recorded in a blueprint",
         "type": "object",
@@ -2609,6 +2648,66 @@
               "expunged"
             ]
           }
+        ]
+      },
+      "BlueprintHostPhase2DesiredContents": {
+        "description": "Describes the desired contents of a host phase 2 slot (i.e., the boot partition on one of the internal M.2 drives).\n\nThis is the blueprint version of [`HostPhase2DesiredContents`].",
+        "oneOf": [
+          {
+            "description": "Do not change the current contents.\n\nWe use this value when we've detected a sled has been mupdated (and we don't want to overwrite phase 2 images until we understand how to recover from that mupdate) and as the default value when reading a blueprint that was ledgered before this concept existed.",
+            "type": "object",
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "current_contents"
+                ]
+              }
+            },
+            "required": [
+              "type"
+            ]
+          },
+          {
+            "description": "Set the phase 2 slot to the given artifact.\n\nThe artifact will come from an unpacked and distributed TUF repo.",
+            "type": "object",
+            "properties": {
+              "hash": {
+                "type": "string",
+                "format": "hex string (32 bytes)"
+              },
+              "type": {
+                "type": "string",
+                "enum": [
+                  "artifact"
+                ]
+              },
+              "version": {
+                "$ref": "#/components/schemas/BlueprintArtifactVersion"
+              }
+            },
+            "required": [
+              "hash",
+              "type",
+              "version"
+            ]
+          }
+        ]
+      },
+      "BlueprintHostPhase2DesiredSlots": {
+        "description": "Describes the desired contents for both host phase 2 slots.\n\nThis is the blueprint version of [`HostPhase2DesiredSlots`].",
+        "type": "object",
+        "properties": {
+          "slot_a": {
+            "$ref": "#/components/schemas/BlueprintHostPhase2DesiredContents"
+          },
+          "slot_b": {
+            "$ref": "#/components/schemas/BlueprintHostPhase2DesiredContents"
+          }
+        },
+        "required": [
+          "slot_a",
+          "slot_b"
         ]
       },
       "BlueprintMetadata": {
@@ -2798,6 +2897,9 @@
           "disks": {
             "$ref": "#/components/schemas/IdMapBlueprintPhysicalDiskConfig"
           },
+          "host_phase_2": {
+            "$ref": "#/components/schemas/BlueprintHostPhase2DesiredSlots"
+          },
           "remove_mupdate_override": {
             "nullable": true,
             "allOf": [
@@ -2824,6 +2926,7 @@
         "required": [
           "datasets",
           "disks",
+          "host_phase_2",
           "sled_agent_generation",
           "state",
           "zones"
@@ -2993,52 +3096,13 @@
                 ]
               },
               "version": {
-                "$ref": "#/components/schemas/BlueprintZoneImageVersion"
+                "$ref": "#/components/schemas/BlueprintArtifactVersion"
               }
             },
             "required": [
               "hash",
               "type",
               "version"
-            ]
-          }
-        ]
-      },
-      "BlueprintZoneImageVersion": {
-        "description": "The version of a blueprint zone image in use.\n\nThis is used for debugging output.",
-        "oneOf": [
-          {
-            "description": "A specific version of the image is available.",
-            "type": "object",
-            "properties": {
-              "image_version": {
-                "type": "string",
-                "enum": [
-                  "available"
-                ]
-              },
-              "version": {
-                "$ref": "#/components/schemas/ArtifactVersion"
-              }
-            },
-            "required": [
-              "image_version",
-              "version"
-            ]
-          },
-          {
-            "description": "The version could not be determined. This is non-fatal.",
-            "type": "object",
-            "properties": {
-              "image_version": {
-                "type": "string",
-                "enum": [
-                  "unknown"
-                ]
-              }
-            },
-            "required": [
-              "image_version"
             ]
           }
         ]
@@ -7957,6 +8021,25 @@
             "type": "string",
             "enum": [
               "id_ascending"
+            ]
+          }
+        ]
+      },
+      "TimeAndIdSortMode": {
+        "description": "Supported set of sort modes for scanning by timestamp and ID",
+        "oneOf": [
+          {
+            "description": "sort in increasing order of timestamp and ID, i.e., earliest first",
+            "type": "string",
+            "enum": [
+              "ascending"
+            ]
+          },
+          {
+            "description": "sort in increasing order of timestamp and ID, i.e., most recent first",
+            "type": "string",
+            "enum": [
+              "descending"
             ]
           }
         ]

@@ -40,7 +40,9 @@ enum Args {
 }
 
 fn main() {
-    if let Err(err) = oxide_tokio_rt::run(main_impl()) {
+    let mut builder = oxide_tokio_rt::Builder::new_multi_thread();
+    builder.worker_threads(8);
+    if let Err(err) = oxide_tokio_rt::run_builder(&mut builder, main_impl()) {
         fatal(err);
     }
 }

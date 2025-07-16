@@ -12086,6 +12086,7 @@ dependencies = [
  "slog",
  "slog-error-chain",
  "strum 0.27.1",
+ "swrite",
  "thiserror 2.0.12",
  "toml 0.8.23",
  "tufaceous-artifact",

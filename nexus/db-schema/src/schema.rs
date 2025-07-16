@@ -1626,6 +1626,10 @@ table! {
 
         boot_partition_a_error -> Nullable<Text>,
         boot_partition_b_error -> Nullable<Text>,
+
+        clear_mupdate_override_boot_success -> Nullable<crate::enums::ClearMupdateOverrideBootSuccessEnum>,
+        clear_mupdate_override_boot_error -> Nullable<Text>,
+        clear_mupdate_override_non_boot_message -> Nullable<Text>,
     }
 }
 
@@ -1940,8 +1944,13 @@ table! {
         sled_state -> crate::enums::SledStateEnum,
         sled_agent_generation -> Int8,
         remove_mupdate_override -> Nullable<Uuid>,
+
+        host_phase_2_desired_slot_a -> Nullable<Text>,
+        host_phase_2_desired_slot_b -> Nullable<Text>,
     }
 }
+
+allow_tables_to_appear_in_same_query!(bp_sled_metadata, tuf_artifact);
 
 table! {
     bp_omicron_physical_disk (blueprint_id, id) {

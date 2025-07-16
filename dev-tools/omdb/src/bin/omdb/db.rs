@@ -7429,6 +7429,7 @@ fn inv_collection_print_sleds(collection: &Collection) {
                 orphaned_datasets,
                 zones,
                 boot_partitions,
+                clear_mupdate_override,
             } = last_reconciliation;
 
             inv_print_boot_partition_contents("    ", boot_partitions);

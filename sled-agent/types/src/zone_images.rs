@@ -6,6 +6,8 @@ use std::{fmt, fs::FileType, io, sync::Arc};
 
 use camino::Utf8PathBuf;
 use iddqd::{IdOrdItem, IdOrdMap, id_upcast};
+use nexus_sled_agent_shared::inventory::ClearMupdateOverrideBootSuccess;
+use nexus_sled_agent_shared::inventory::ClearMupdateOverrideInventory;
 use nexus_sled_agent_shared::inventory::MupdateOverrideBootInventory;
 use nexus_sled_agent_shared::inventory::MupdateOverrideInventory;
 use nexus_sled_agent_shared::inventory::MupdateOverrideNonBootInventory;
@@ -22,6 +24,7 @@ use omicron_uuid_kinds::InternalZpoolUuid;
 use omicron_uuid_kinds::MupdateOverrideUuid;
 use slog::{error, info, o, warn};
 use slog_error_chain::InlineErrorChain;
+use swrite::{SWrite, swriteln};
 use thiserror::Error;
 use tufaceous_artifact::ArtifactHash;
 
@@ -738,17 +741,40 @@ pub struct ClearMupdateOverrideResult {
     pub boot_disk_path: Utf8PathBuf,
 
     /// The result of clearing the mupdate override on the boot disk.
-    ///
-    /// This is the previous `MupdateOverrideInfo` if successful, otherwise an
-    /// error.
-    pub boot_disk_result:
-        Result<MupdateOverrideInfo, ClearMupdateOverrideBootDiskError>,
+    pub boot_disk_result: Result<
+        DbClearMupdateOverrideBootSuccess,
+        ClearMupdateOverrideBootError,
+    >,
 
     /// The result of clearing the mupdate override on non-boot disks.
     pub non_boot_disk_info: IdOrdMap<ClearMupdateOverrideNonBootInfo>,
 }
 
 impl ClearMupdateOverrideResult {
+    pub fn to_inventory(&self) -> ClearMupdateOverrideInventory {
+        let boot_disk_result = match &self.boot_disk_result {
+            Ok(DbClearMupdateOverrideBootSuccess::Cleared(_)) => {
+                Ok(ClearMupdateOverrideBootSuccess::Cleared)
+            }
+            Ok(DbClearMupdateOverrideBootSuccess::NoOverride) => {
+                Ok(ClearMupdateOverrideBootSuccess::NoOverride)
+            }
+            Err(error) => Err(InlineErrorChain::new(error).to_string()),
+        };
+
+        let mut non_boot_message = String::new();
+        for info in &self.non_boot_disk_info {
+            swriteln!(
+                non_boot_message,
+                "- for non-boot disk {}: {}",
+                info.zpool_id,
+                info.result.display(),
+            );
+        }
+
+        ClearMupdateOverrideInventory { boot_disk_result, non_boot_message }
+    }
+
     pub fn log_to(&self, log: &slog::Logger) {
         let log =
             log.new(o!("boot_disk_path" => self.boot_disk_path.to_string()));
@@ -775,8 +801,20 @@ impl ClearMupdateOverrideResult {
     }
 }
 
+/// A success condition clearing the mupdate override on a boot disk.
+#[derive(Clone, Debug)]
+pub enum DbClearMupdateOverrideBootSuccess {
+    /// The mupdate override was matched up and successfully cleared.
+    Cleared(MupdateOverrideInfo),
+
+    /// No mupdate override was found.
+    ///
+    /// This is considered a success condition for idempotency reasons.
+    NoOverride,
+}
+
 #[derive(Clone, Debug, Error, PartialEq)]
-pub enum ClearMupdateOverrideBootDiskError {
+pub enum ClearMupdateOverrideBootError {
     #[error(
         "mismatch between override ID on boot disk ({actual}) \
          and provided ID ({provided})"
@@ -785,11 +823,6 @@ pub enum ClearMupdateOverrideBootDiskError {
         /// The actual override ID on the boot disk.
         actual: MupdateOverrideUuid,
 
-        /// The override ID provided to the `clear_mupdate_override` method.
-        provided: MupdateOverrideUuid,
-    },
-    #[error("no mupdate override found on boot disk, provided ID: {provided}")]
-    NoOverride {
         /// The override ID provided to the `clear_mupdate_override` method.
         provided: MupdateOverrideUuid,
     },
@@ -861,6 +894,9 @@ pub enum ClearMupdateOverrideNonBootResult {
         prev_result: MupdateOverrideNonBootResult,
     },
 
+    /// No mupdate override was found on the non-boot disk.
+    NoOverride,
+
     /// There was an error clearing the mupdate override on the boot disk, so
     /// the non-boot disk was not altered.
     BootDiskError,
@@ -892,9 +928,6 @@ pub enum ClearMupdateOverrideNonBootResult {
     /// The disk was missing from the latest InternalDisksWithBootDisk but was
     /// present at startup. The on-disk data was not altered.
     DiskMissing,
-
-    /// No mupdate override was found on the non-boot disk.
-    NoOverride,
 }
 
 impl ClearMupdateOverrideNonBootResult {

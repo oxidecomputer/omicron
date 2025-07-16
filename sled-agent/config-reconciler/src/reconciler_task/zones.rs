@@ -1106,8 +1106,8 @@ mod tests {
     use omicron_uuid_kinds::MupdateOverrideUuid;
     use omicron_uuid_kinds::ZpoolUuid;
     use sled_agent_types::zone_images::ArtifactReadResult;
-    use sled_agent_types::zone_images::ClearMupdateOverrideBootDiskError;
     use sled_agent_types::zone_images::ClearMupdateOverrideResult;
+    use sled_agent_types::zone_images::DbClearMupdateOverrideBootSuccess;
     use sled_agent_types::zone_images::MupdateOverrideStatus;
     use sled_agent_types::zone_images::ResolverStatus;
     use sled_agent_types::zone_images::ZoneManifestArtifactResult;
@@ -1324,15 +1324,15 @@ mod tests {
 
         fn clear_mupdate_override(
             &self,
-            override_id: MupdateOverrideUuid,
+            _override_id: MupdateOverrideUuid,
             _internal_disks: InternalDisksWithBootDisk,
         ) -> ClearMupdateOverrideResult {
+            // TODO: In the future, we'll probably want to model this better and
+            // not just return no-override.
             ClearMupdateOverrideResult {
                 boot_disk_path: Utf8PathBuf::from(BOOT_DISK_PATH),
-                boot_disk_result: Err(
-                    ClearMupdateOverrideBootDiskError::NoOverride {
-                        provided: override_id,
-                    },
+                boot_disk_result: Ok(
+                    DbClearMupdateOverrideBootSuccess::NoOverride,
                 ),
                 non_boot_disk_info: IdOrdMap::new(),
             }

@@ -160,24 +160,17 @@ generated inventory collection eb0796d5-ab8a-4f7b-a884-b4aeacb8ab51 from configu
 WARN skipping zones eligible for cleanup check (sled not present in latest inventory collection), sled_id: e96e226f-4ed9-4c01-91b9-69a9cd076c9e
 WARN no inventory found for in-service sled, phase: do_plan_mupdate_override, sled_id: e96e226f-4ed9-4c01-91b9-69a9cd076c9e
 INFO not ready to add or update new zones yet, phase: do_plan_mupdate_override, reasons: sleds have remove mupdate override set in blueprint: d81c6a84-79b8-4958-ae41-ea46c9b19763
-WARN skipping noop image source check since sled-agent encountered error retrieving zone manifest (this is abnormal), sled_id: 2b8f0cb3-0295-4b3c-bc58-4fe88b57112c, error: reconfigurator-sim simulated error: simulated error obtaining zone manifest
-INFO install dataset artifact hash matches TUF repo, switching out the zone image source to Artifact, sled_id: 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6, tuf_artifact_id: nexus v1.0.0 (zone)
-INFO install dataset artifact hash matches TUF repo, switching out the zone image source to Artifact, sled_id: 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6, tuf_artifact_id: internal-dns v1.0.0 (zone)
-INFO install dataset artifact hash matches TUF repo, switching out the zone image source to Artifact, sled_id: 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6, tuf_artifact_id: crucible-zone v1.0.0 (zone)
-INFO install dataset artifact hash matches TUF repo, switching out the zone image source to Artifact, sled_id: 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6, tuf_artifact_id: ntp v1.0.0 (zone)
-INFO install dataset artifact hash matches TUF repo, switching out the zone image source to Artifact, sled_id: 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6, tuf_artifact_id: external-dns v1.0.0 (zone)
-INFO install dataset artifact hash matches TUF repo, switching out the zone image source to Artifact, sled_id: 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6, tuf_artifact_id: crucible-pantry-zone v1.0.0 (zone)
-INFO noop converting 6/6 install-dataset zones to artifact store, sled_id: 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6
-INFO install dataset artifact hash matches TUF repo, switching out the zone image source to Artifact, sled_id: aff6c093-197d-42c5-ad80-9f10ba051a34, tuf_artifact_id: nexus v1.0.0 (zone)
-INFO install dataset artifact hash matches TUF repo, switching out the zone image source to Artifact, sled_id: aff6c093-197d-42c5-ad80-9f10ba051a34, tuf_artifact_id: external-dns v1.0.0 (zone)
-INFO install dataset artifact hash matches TUF repo, switching out the zone image source to Artifact, sled_id: aff6c093-197d-42c5-ad80-9f10ba051a34, tuf_artifact_id: crucible-zone v1.0.0 (zone)
-INFO install dataset artifact hash matches TUF repo, switching out the zone image source to Artifact, sled_id: aff6c093-197d-42c5-ad80-9f10ba051a34, tuf_artifact_id: internal-dns v1.0.0 (zone)
-INFO install dataset artifact hash matches TUF repo, switching out the zone image source to Artifact, sled_id: aff6c093-197d-42c5-ad80-9f10ba051a34, tuf_artifact_id: crucible-pantry-zone v1.0.0 (zone)
-WARN zone manifest inventory indicated install dataset artifact is invalid, not using artifact (this is abnormal), sled_id: aff6c093-197d-42c5-ad80-9f10ba051a34, zone_id: e8fe709c-725f-4bb2-b714-ffcda13a9e54, kind: internal_ntp, file_name: ntp.tar.gz, error: reconfigurator-sim: simulated error validating zone image
-INFO noop converting 5/6 install-dataset zones to artifact store, sled_id: aff6c093-197d-42c5-ad80-9f10ba051a34
-INFO noop converting 0/2 install-dataset zones to artifact store, sled_id: b82ede02-399c-48c6-a1de-411df4fa49a7
-INFO skipping noop image source check on sled (blueprint has get_remove_mupdate_override set for sled), sled_id: d81c6a84-79b8-4958-ae41-ea46c9b19763, bp_remove_mupdate_override_id: ffffffff-ffff-ffff-ffff-ffffffffffff
-INFO skipping noop image source check (sled not present in latest inventory collection), sled_id: e96e226f-4ed9-4c01-91b9-69a9cd076c9e
+WARN skipped noop image source check on sled, sled_id: 2b8f0cb3-0295-4b3c-bc58-4fe88b57112c, reason: error retrieving zone manifest: reconfigurator-sim simulated error: simulated error obtaining zone manifest
+INFO performed noop image source checks on sled, sled_id: 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6, num_total: 6, num_already_artifact: 0, num_eligible: 6, num_ineligible: 0
+INFO performed noop image source checks on sled, sled_id: aff6c093-197d-42c5-ad80-9f10ba051a34, num_total: 6, num_already_artifact: 0, num_eligible: 5, num_ineligible: 1
+WARN zone manifest inventory indicated install dataset artifact is invalid, not using artifact (this is abnormal), sled_id: aff6c093-197d-42c5-ad80-9f10ba051a34, zone_id: e8fe709c-725f-4bb2-b714-ffcda13a9e54, kind: internal_ntp, file_name: ntp.tar.gz, message: reconfigurator-sim: simulated error validating zone image
+INFO performed noop image source checks on sled, sled_id: b82ede02-399c-48c6-a1de-411df4fa49a7, num_total: 2, num_already_artifact: 0, num_eligible: 0, num_ineligible: 2
+INFO install dataset artifact hash not found in TUF repo, ignoring for noop checks, sled_id: b82ede02-399c-48c6-a1de-411df4fa49a7, zone_id: b910534b-2a53-4335-a3d9-5311d2f3186a, kind: internal_ntp, file_name: ntp.tar.gz, expected_hash: d76e26198daed69cdae04490d7477f8c842e0dbe37d463eac0d0a8d3fb803095
+INFO install dataset artifact hash not found in TUF repo, ignoring for noop checks, sled_id: b82ede02-399c-48c6-a1de-411df4fa49a7, zone_id: ecbe0b3d-1acc-44b2-b6d4-f4d2770516e4, kind: crucible, file_name: crucible.tar.gz, expected_hash: 866f6a7c2e51c056fb722b5113e80181cc9cd8b712a0d3dbf1edc4ce29e5229e
+INFO skipped noop image source check on sled, sled_id: d81c6a84-79b8-4958-ae41-ea46c9b19763, reason: remove_mupdate_override is set in the blueprint (ffffffff-ffff-ffff-ffff-ffffffffffff)
+INFO skipped noop image source check on sled, sled_id: e96e226f-4ed9-4c01-91b9-69a9cd076c9e, reason: sled not found in inventory
+INFO noop converting 6/6 install-dataset zones to artifact store, sled_id: 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6, num_total: 6, num_already_artifact: 0
+INFO noop converting 5/6 install-dataset zones to artifact store, sled_id: aff6c093-197d-42c5-ad80-9f10ba051a34, num_total: 6, num_already_artifact: 0
 INFO will ensure cockroachdb setting, setting: cluster.preserve_downgrade_option, value: DoNotModify
 generated blueprint 58d5e830-0884-47d8-a7cd-b2b3751adeb4 based on parent blueprint 8da82a8e-bf97-4fbd-8ddd-9f6462732cf1
 
@@ -190,6 +183,14 @@ to:   blueprint 58d5e830-0884-47d8-a7cd-b2b3751adeb4
  MODIFIED SLEDS:
 
   sled 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6 (active, config generation 2 -> 3):
+
+    host phase 2 contents:
+    ------------------------
+    slot   boot image source
+    ------------------------
+    A      current contents 
+    B      current contents 
+
 
     physical disks:
     ------------------------------------------------------------------------------------
@@ -235,6 +236,14 @@ to:   blueprint 58d5e830-0884-47d8-a7cd-b2b3751adeb4
 
   sled 9a867dc9-d505-427f-9eff-cdb1d4d9bd73 (active -> decommissioned, config generation 2 -> 3):
 
+    host phase 2 contents:
+    ------------------------
+    slot   boot image source
+    ------------------------
+    A      current contents 
+    B      current contents 
+
+
     physical disks:
     ---------------------------------------------------------------------------------------
     vendor        model        serial                                        disposition   
@@ -270,6 +279,14 @@ to:   blueprint 58d5e830-0884-47d8-a7cd-b2b3751adeb4
 
 
   sled aff6c093-197d-42c5-ad80-9f10ba051a34 (active, config generation 2 -> 3):
+
+    host phase 2 contents:
+    ------------------------
+    slot   boot image source
+    ------------------------
+    A      current contents 
+    B      current contents 
+
 
     physical disks:
     ------------------------------------------------------------------------------------
@@ -495,15 +512,16 @@ generated inventory collection 61f451b3-2121-4ed6-91c7-a550054f6c21 from configu
 
 > blueprint-plan latest latest
 INFO not ready to add or update new zones yet, phase: do_plan_mupdate_override, reasons: sleds have remove mupdate override set in blueprint: d81c6a84-79b8-4958-ae41-ea46c9b19763
-WARN skipping noop image source check since sled-agent encountered error retrieving zone manifest (this is abnormal), sled_id: 2b8f0cb3-0295-4b3c-bc58-4fe88b57112c, error: reconfigurator-sim simulated error: simulated error obtaining zone manifest
-INFO noop converting 0/0 install-dataset zones to artifact store, sled_id: 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6
-WARN zone manifest inventory indicated install dataset artifact is invalid, not using artifact (this is abnormal), sled_id: aff6c093-197d-42c5-ad80-9f10ba051a34, zone_id: e8fe709c-725f-4bb2-b714-ffcda13a9e54, kind: internal_ntp, file_name: ntp.tar.gz, error: reconfigurator-sim: simulated error validating zone image
-INFO noop converting 0/1 install-dataset zones to artifact store, sled_id: aff6c093-197d-42c5-ad80-9f10ba051a34
-INFO noop converting 0/2 install-dataset zones to artifact store, sled_id: b82ede02-399c-48c6-a1de-411df4fa49a7
-INFO skipping noop image source check on sled (blueprint has get_remove_mupdate_override set for sled), sled_id: d81c6a84-79b8-4958-ae41-ea46c9b19763, bp_remove_mupdate_override_id: ffffffff-ffff-ffff-ffff-ffffffffffff
-INFO install dataset artifact hash matches TUF repo, switching out the zone image source to Artifact, sled_id: e96e226f-4ed9-4c01-91b9-69a9cd076c9e, tuf_artifact_id: crucible-zone v1.0.0 (zone)
-INFO install dataset artifact hash matches TUF repo, switching out the zone image source to Artifact, sled_id: e96e226f-4ed9-4c01-91b9-69a9cd076c9e, tuf_artifact_id: ntp v1.0.0 (zone)
-INFO noop converting 2/2 install-dataset zones to artifact store, sled_id: e96e226f-4ed9-4c01-91b9-69a9cd076c9e
+WARN skipped noop image source check on sled, sled_id: 2b8f0cb3-0295-4b3c-bc58-4fe88b57112c, reason: error retrieving zone manifest: reconfigurator-sim simulated error: simulated error obtaining zone manifest
+INFO performed noop image source checks on sled, sled_id: 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6, num_total: 6, num_already_artifact: 6, num_eligible: 0, num_ineligible: 0
+INFO performed noop image source checks on sled, sled_id: aff6c093-197d-42c5-ad80-9f10ba051a34, num_total: 6, num_already_artifact: 5, num_eligible: 0, num_ineligible: 1
+WARN zone manifest inventory indicated install dataset artifact is invalid, not using artifact (this is abnormal), sled_id: aff6c093-197d-42c5-ad80-9f10ba051a34, zone_id: e8fe709c-725f-4bb2-b714-ffcda13a9e54, kind: internal_ntp, file_name: ntp.tar.gz, message: reconfigurator-sim: simulated error validating zone image
+INFO performed noop image source checks on sled, sled_id: b82ede02-399c-48c6-a1de-411df4fa49a7, num_total: 2, num_already_artifact: 0, num_eligible: 0, num_ineligible: 2
+INFO install dataset artifact hash not found in TUF repo, ignoring for noop checks, sled_id: b82ede02-399c-48c6-a1de-411df4fa49a7, zone_id: b910534b-2a53-4335-a3d9-5311d2f3186a, kind: internal_ntp, file_name: ntp.tar.gz, expected_hash: d76e26198daed69cdae04490d7477f8c842e0dbe37d463eac0d0a8d3fb803095
+INFO install dataset artifact hash not found in TUF repo, ignoring for noop checks, sled_id: b82ede02-399c-48c6-a1de-411df4fa49a7, zone_id: ecbe0b3d-1acc-44b2-b6d4-f4d2770516e4, kind: crucible, file_name: crucible.tar.gz, expected_hash: 866f6a7c2e51c056fb722b5113e80181cc9cd8b712a0d3dbf1edc4ce29e5229e
+INFO skipped noop image source check on sled, sled_id: d81c6a84-79b8-4958-ae41-ea46c9b19763, reason: remove_mupdate_override is set in the blueprint (ffffffff-ffff-ffff-ffff-ffffffffffff)
+INFO performed noop image source checks on sled, sled_id: e96e226f-4ed9-4c01-91b9-69a9cd076c9e, num_total: 2, num_already_artifact: 0, num_eligible: 2, num_ineligible: 0
+INFO noop converting 2/2 install-dataset zones to artifact store, sled_id: e96e226f-4ed9-4c01-91b9-69a9cd076c9e, num_total: 2, num_already_artifact: 0
 INFO will ensure cockroachdb setting, setting: cluster.preserve_downgrade_option, value: DoNotModify
 generated blueprint af934083-59b5-4bf6-8966-6fb5292c29e1 based on parent blueprint 58d5e830-0884-47d8-a7cd-b2b3751adeb4
 
@@ -516,6 +534,14 @@ to:   blueprint af934083-59b5-4bf6-8966-6fb5292c29e1
  MODIFIED SLEDS:
 
   sled e96e226f-4ed9-4c01-91b9-69a9cd076c9e (active, config generation 2 -> 3):
+
+    host phase 2 contents:
+    ------------------------
+    slot   boot image source
+    ------------------------
+    A      current contents 
+    B      current contents 
+
 
     physical disks:
     ------------------------------------------------------------------------------------

@@ -597,7 +597,7 @@ mod tests {
     use crate::blippy::Note;
     use nexus_reconfigurator_planning::example::ExampleSystemBuilder;
     use nexus_reconfigurator_planning::example::example;
-    use nexus_types::deployment::BlueprintZoneImageVersion;
+    use nexus_types::deployment::BlueprintArtifactVersion;
     use nexus_types::deployment::BlueprintZoneType;
     use nexus_types::deployment::blueprint_zone_type;
     use omicron_test_utils::dev::test_setup_log;
@@ -1644,7 +1644,7 @@ mod tests {
                 .find(|z| z.disposition.is_in_service())
                 .expect("at least one in-service zone");
 
-            let version = BlueprintZoneImageVersion::Available {
+            let version = BlueprintArtifactVersion::Available {
                 version: ArtifactVersion::new_const("1.0.0"),
             };
             let hash = ArtifactHash([1u8; 32]);
