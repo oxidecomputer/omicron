@@ -14,6 +14,7 @@ use iddqd::IdOrdMap;
 use omicron_uuid_kinds::{GenericUuid, RackUuid};
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, BTreeSet};
+use subtle::ConstantTimeEq;
 
 /// All the persistent state for this protocol
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
@@ -32,6 +33,58 @@ pub struct PersistentState {
     // wiping its storage.
     pub expunged: Option<ExpungedMetadata>,
 }
+
+// We manually implement `PartialEq` here because of the constant
+// time comparison required for comparing key shares. We don't want to
+// implement `PartialEq` on those key shares directly because we want
+// to limit how we do comparisons in the `gfss` library. This helps us
+// guarantee we keep any optimization barriers in place as described in
+// the [Choice](https://docs.rs/subtle/latest/subtle/struct.Choice.html)
+// documentation for [subtle](https://docs.rs/subtle/latest/subtle/index.html)
+impl PartialEq for PersistentState {
+    fn eq(&self, other: &Self) -> bool {
+        // Destructure to ensure compilation fails if we add fields to
+        // `PersistentState` and forget to update this method.
+        let PersistentState {
+            lrtq: lrtq1,
+            configs: configs1,
+            shares: shares1,
+            commits: commits1,
+            expunged: expunged1,
+        } = &self;
+        let PersistentState {
+            lrtq: lrtq2,
+            configs: configs2,
+            shares: shares2,
+            commits: commits2,
+            expunged: expunged2,
+        } = &other;
+
+        lrtq1 == lrtq2
+            && configs1 == configs2
+            && shares1.len() == shares2.len()
+            && shares1.iter().zip(shares2.iter()).all(
+                |((epoch1, share1), (epoch2, share2))| {
+                    epoch1 == epoch2
+                        && share1
+                            .x_coordinate
+                            .ct_eq(&share2.x_coordinate)
+                            .into()
+                        && share1.y_coordinates.len()
+                            == share2.y_coordinates.len()
+                        && share1
+                            .y_coordinates
+                            .iter()
+                            .zip(share2.y_coordinates.iter())
+                            .all(|(y1, y2)| y1.ct_eq(y2).into())
+                },
+            )
+            && commits1 == commits2
+            && expunged1 == expunged2
+    }
+}
+
+impl Eq for PersistentState {}
 
 impl PersistentState {
     pub fn empty() -> PersistentState {
