@@ -9,7 +9,7 @@ use chacha20poly1305::{ChaCha20Poly1305, Key, KeyInit, aead, aead::Aead};
 use derive_more::From;
 use gfss::shamir::{self, CombineError, SecretShares, Share, SplitError};
 use hkdf::Hkdf;
-use omicron_uuid_kinds::{GenericUuid, RackUuid};
+use omicron_uuid_kinds::RackUuid;
 use rand::RngCore;
 use rand::rngs::OsRng;
 use secrecy::{ExposeSecret, SecretBox};
@@ -428,11 +428,7 @@ fn derive_encryption_key_for_rack_secrets(
 
     // SAFETY: `key` is sized such that `prk.expand_multi_info` will never fail.
     prk.expand_multi_info(
-        &[
-            KEY_CONTEXT,
-            rack_id.as_untyped_uuid().as_ref(),
-            &epoch.0.to_be_bytes(),
-        ],
+        &[KEY_CONTEXT, rack_id.as_ref(), &epoch.0.to_be_bytes()],
         key.as_mut(),
     )
     .unwrap();
