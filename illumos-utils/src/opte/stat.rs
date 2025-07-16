@@ -295,7 +295,6 @@ async fn run_port_stat(state: Arc<PortStatsShared>) {
             return;
         }
 
-        // TODO: log on error.
         tokio::select! {
             _ = flow_collect.tick() => {
                 if let Err(e) = state.collect_flows() {

@@ -212,10 +212,12 @@ async fn cmd_nics_flows(
         println!("      internal key   {:?}", metadata.internal_key);
         println!("      external key   {:?}", metadata.external_key);
         println!("      opened on      {:?}", metadata.initial_packet);
+        println!("      forwarded via  {:?}", metadata.forwarded);
         println!("      allowed in by  {:?}", metadata.admitted_by_in);
         println!("      allowed out by {:?}", metadata.admitted_by_out);
         println!("      in_stats       {:?}", in_stat);
-        println!("      out_stats       {:?}", out_stat);
+        println!("      out_stats      {:?}", out_stat);
+        println!("+---------------------+");
     }
 
     Ok(())
