@@ -65,6 +65,8 @@ pub enum NetworkInterfaceKind {
 pub struct NetworkInterface {
     pub id: Uuid,
     pub kind: NetworkInterfaceKind,
+    pub subnet_id: Uuid,
+    pub vpc_id: Uuid,
     pub name: Name,
     pub ip: IpAddr,
     pub mac: external::MacAddr,
@@ -779,6 +781,7 @@ impl TryFrom<&[ipnetwork::IpNetwork]> for IpAllowList {
     Clone, Debug, Deserialize, Serialize, JsonSchema, PartialEq, Eq, Hash,
 )]
 pub struct ResolvedVpcRoute {
+    pub id: Uuid,
     pub dest: IpNet,
     pub target: RouterTarget,
 }
@@ -786,6 +789,7 @@ pub struct ResolvedVpcRoute {
 /// VPC firewall rule after object name resolution has been performed by Nexus
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, JsonSchema)]
 pub struct ResolvedVpcFirewallRule {
+    pub id: Uuid,
     pub status: external::VpcFirewallRuleStatus,
     pub direction: external::VpcFirewallRuleDirection,
     pub targets: Vec<NetworkInterface>,
