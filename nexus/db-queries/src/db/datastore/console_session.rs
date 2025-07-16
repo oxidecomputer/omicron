@@ -165,7 +165,7 @@ impl DataStore {
     pub async fn silo_user_session_list(
         &self,
         opctx: &OpContext,
-        authn_list: authz::SiloUserAuthnList,
+        authn_list: authz::SiloUserSessionList,
         pagparams: &DataPageParams<'_, Uuid>,
     ) -> ListResultVec<ConsoleSession> {
         opctx.authorize(authz::Action::ListChildren, &authn_list).await?;
@@ -192,7 +192,7 @@ impl DataStore {
     pub async fn silo_user_sessions_delete(
         &self,
         opctx: &OpContext,
-        authn_list: &authz::SiloUserAuthnList,
+        authn_list: &authz::SiloUserSessionList,
     ) -> Result<(), Error> {
         // authz policy enforces that the opctx actor is a silo admin on the
         // target user's own silo in particular

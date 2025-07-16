@@ -672,9 +672,9 @@ impl AuthorizedResource for SiloUserList {
 
 /// Synthetic resource for managing a user's sessions
 #[derive(Clone, Debug, Eq, PartialEq)]
-pub struct SiloUserAuthnList(SiloUser);
+pub struct SiloUserSessionList(SiloUser);
 
-impl SiloUserAuthnList {
+impl SiloUserSessionList {
     pub fn new(silo_user: SiloUser) -> Self {
         Self(silo_user)
     }
@@ -688,18 +688,18 @@ impl SiloUserAuthnList {
     }
 }
 
-impl oso::PolarClass for SiloUserAuthnList {
+impl oso::PolarClass for SiloUserSessionList {
     fn get_polar_class_builder() -> oso::ClassBuilder<Self> {
         oso::Class::builder().with_equality_check().add_attribute_getter(
             "silo_user",
-            |user_sessions: &SiloUserAuthnList| {
+            |user_sessions: &SiloUserSessionList| {
                 user_sessions.silo_user().clone()
             },
         )
     }
 }
 
-impl AuthorizedResource for SiloUserAuthnList {
+impl AuthorizedResource for SiloUserSessionList {
     fn load_roles<'fut>(
         &'fut self,
         opctx: &'fut OpContext,

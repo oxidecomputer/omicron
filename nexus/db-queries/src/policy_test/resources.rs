@@ -281,7 +281,7 @@ async fn make_silo(
         silo_image_id,
         LookupType::ByName(format!("{}-silo-image", silo_name)),
     ));
-    builder.new_resource(authz::SiloUserAuthnList::new(silo_user.clone()));
+    builder.new_resource(authz::SiloUserSessionList::new(silo_user.clone()));
     builder.new_resource(authz::SiloUserTokenList::new(silo_user));
 
     // Image is a special case in that this resource is technically just a

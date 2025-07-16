@@ -331,7 +331,7 @@ impl super::Nexus {
             .await?;
 
         let authz_authn_list =
-            authz::SiloUserAuthnList::new(authz_silo_user.clone());
+            authz::SiloUserSessionList::new(authz_silo_user.clone());
         self.datastore()
             .silo_user_sessions_delete(opctx, &authz_authn_list)
             .await?;
@@ -387,7 +387,7 @@ impl super::Nexus {
                 .fetch()
                 .await?;
 
-        let user_authn_list = authz::SiloUserAuthnList::new(authz_silo_user);
+        let user_authn_list = authz::SiloUserSessionList::new(authz_silo_user);
 
         self.datastore()
             .silo_user_session_list(opctx, user_authn_list, pagparams)

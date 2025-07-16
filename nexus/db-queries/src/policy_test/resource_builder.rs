@@ -346,7 +346,7 @@ impl DynAuthorizedResource for authz::SiloUserList {
     }
 }
 
-impl DynAuthorizedResource for authz::SiloUserAuthnList {
+impl DynAuthorizedResource for authz::SiloUserSessionList {
     fn do_authorize<'a, 'b>(
         &'a self,
         opctx: &'b OpContext,
@@ -359,7 +359,7 @@ impl DynAuthorizedResource for authz::SiloUserAuthnList {
     }
 
     fn resource_name(&self) -> String {
-        format!("{}: authn list", self.silo_user().resource_name())
+        format!("{}: session list", self.silo_user().resource_name())
     }
 }
 
