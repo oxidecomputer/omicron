@@ -8,7 +8,9 @@ use dropshot::ResultsPage;
 use dropshot::test_util::ClientTestContext;
 use http::header::HeaderName;
 use http::{StatusCode, header, method::Method};
+use nexus_auth::authz;
 use nexus_auth::context::OpContext;
+use nexus_types::silo::DEFAULT_SILO_ID;
 use std::env::current_dir;
 
 use crate::integration_tests::saml::SAML_RESPONSE_IDP_DESCRIPTOR;
@@ -20,18 +22,22 @@ use nexus_db_queries::db::identity::{Asset, Resource};
 use nexus_test_utils::http_testing::{
     AuthnMode, NexusRequest, RequestBuilder, TestResponse,
 };
-use nexus_test_utils::resource_helpers::test_params;
 use nexus_test_utils::resource_helpers::{
-    create_silo, grant_iam, object_create,
+    create_silo, grant_iam, object_create, object_get, object_put,
 };
+use nexus_test_utils::resource_helpers::{revoke_iam, test_params};
 use nexus_test_utils::{
     TEST_SUITE_PASSWORD, load_test_config, test_setup_with_config,
 };
 use nexus_test_utils_macros::nexus_test;
 use nexus_types::external_api::params::{self, ProjectCreate};
-use nexus_types::external_api::shared::{SiloIdentityMode, SiloRole};
+use nexus_types::external_api::shared::{
+    FleetRole, IdentityType, SiloIdentityMode, SiloRole,
+};
 use nexus_types::external_api::{shared, views};
-use omicron_common::api::external::{Error, IdentityMetadataCreateParams};
+use omicron_common::api::external::{
+    Error, IdentityMetadataCreateParams, LookupType,
+};
 use omicron_sled_agent::sim;
 use omicron_test_utils::dev::poll::{CondCheckError, wait_for_condition};
 
@@ -426,14 +432,7 @@ async fn test_session_me(cptestctx: &ControlPlaneTestContext) {
         .expect("failed to 401 on unauthed request");
 
     // now make same request with auth
-    let priv_user = NexusRequest::object_get(testctx, "/v1/me")
-        .authn_as(AuthnMode::PrivilegedUser)
-        .execute()
-        .await
-        .expect("failed to get current user")
-        .parsed_body::<views::CurrentUser>()
-        .unwrap();
-
+    let priv_user = get_priv_me(testctx).await;
     assert_eq!(
         priv_user,
         views::CurrentUser {
@@ -442,15 +441,13 @@ async fn test_session_me(cptestctx: &ControlPlaneTestContext) {
                 display_name: USER_TEST_PRIVILEGED.external_id.clone(),
                 silo_id: DEFAULT_SILO.id(),
             },
-            silo_name: DEFAULT_SILO.name().clone()
+            silo_name: DEFAULT_SILO.name().clone(),
+            fleet_role: Some("admin".to_string()),
+            silo_role: Some("admin".to_string()),
         }
     );
 
-    let unpriv_user = NexusRequest::object_get(testctx, "/v1/me")
-        .authn_as(AuthnMode::UnprivilegedUser)
-        .execute_and_parse_unwrap::<views::CurrentUser>()
-        .await;
-
+    let unpriv_user = get_unpriv_me(testctx).await;
     assert_eq!(
         unpriv_user,
         views::CurrentUser {
@@ -459,9 +456,144 @@ async fn test_session_me(cptestctx: &ControlPlaneTestContext) {
                 display_name: USER_TEST_UNPRIVILEGED.external_id.clone(),
                 silo_id: DEFAULT_SILO.id(),
             },
-            silo_name: DEFAULT_SILO.name().clone()
+            silo_name: DEFAULT_SILO.name().clone(),
+            fleet_role: None,
+            silo_role: None,
         }
     );
+
+    // add collab role to unpriv and check response again
+    let silo_url = format!("/v1/system/silos/{}", DEFAULT_SILO.identity().name);
+    grant_iam(
+        testctx,
+        &silo_url,
+        SiloRole::Collaborator,
+        USER_TEST_UNPRIVILEGED.id(),
+        AuthnMode::PrivilegedUser,
+    )
+    .await;
+
+    let unpriv_user = get_unpriv_me(testctx).await;
+    assert_eq!(unpriv_user.fleet_role, None);
+    assert_eq!(unpriv_user.silo_role, Some("collaborator".to_string()));
+
+    // now add silo admin to the same user. they will now technically have
+    // both admin and collaborator on the silo, which means their effective role
+    // is admin
+    grant_iam(
+        testctx,
+        &silo_url,
+        SiloRole::Admin,
+        USER_TEST_UNPRIVILEGED.id(),
+        AuthnMode::PrivilegedUser,
+    )
+    .await;
+
+    // since we are picking the strongest role on the resource, it should now
+    // say admin instead of collaborator
+    let unpriv_user = get_unpriv_me(testctx).await;
+    assert_eq!(unpriv_user.silo_role, Some("admin".to_string()));
+
+    // now add fleet viewer
+    grant_iam(
+        testctx,
+        "/v1/system", // fleet
+        FleetRole::Viewer,
+        USER_TEST_UNPRIVILEGED.id(),
+        AuthnMode::PrivilegedUser,
+    )
+    .await;
+
+    let unpriv_user = get_unpriv_me(testctx).await;
+    assert_eq!(unpriv_user.fleet_role, Some("viewer".to_string()));
+    assert_eq!(unpriv_user.silo_role, Some("admin".to_string()));
+
+    // take admin back away and we should be back to collaborator
+    revoke_iam(
+        testctx,
+        &silo_url,
+        SiloRole::Admin,
+        USER_TEST_UNPRIVILEGED.id(),
+        AuthnMode::PrivilegedUser,
+    )
+    .await;
+
+    let unpriv_user = get_unpriv_me(testctx).await;
+    assert_eq!(unpriv_user.fleet_role, Some("viewer".to_string()));
+    assert_eq!(unpriv_user.silo_role, Some("collaborator".to_string()));
+
+    // now let's make sure group memberships are reflected in effective role
+    let nexus = &cptestctx.server.server_context().nexus;
+    let log = cptestctx.logctx.log.new(o!());
+    let opctx = OpContext::for_tests(log.new(o!()), nexus.datastore().clone());
+
+    let authz_silo = authz::Silo::new(
+        authz::FLEET,
+        DEFAULT_SILO_ID,
+        LookupType::ById(DEFAULT_SILO_ID),
+    );
+
+    let group_name = "group1".to_string();
+    let group = nexus
+        .silo_group_lookup_or_create_by_name(&opctx, &authz_silo, &group_name)
+        .await
+        .expect("Group created");
+
+    // Now add unprivileged user to the group
+    let authz_silo_user = authz::SiloUser::new(
+        authz_silo,
+        USER_TEST_UNPRIVILEGED.id(),
+        LookupType::ById(USER_TEST_UNPRIVILEGED.id()),
+    );
+    nexus
+        .datastore()
+        .silo_group_membership_replace_for_user(
+            &opctx,
+            &authz_silo_user,
+            vec![group.id()],
+        )
+        .await
+        .expect("Failed to set user group memberships");
+
+    // expect no change in roles because the group has no role
+    let unpriv_user = get_unpriv_me(testctx).await;
+    assert_eq!(unpriv_user.fleet_role, Some("viewer".to_string()));
+    assert_eq!(unpriv_user.silo_role, Some("collaborator".to_string()));
+
+    // assign admin role to the group
+    let silo_policy_url = format!("{}/policy", silo_url);
+    let existing_policy: shared::Policy<SiloRole> =
+        object_get(testctx, &silo_policy_url).await;
+    let new_role_assignment = shared::RoleAssignment {
+        identity_type: IdentityType::SiloGroup,
+        identity_id: group.id(),
+        role_name: SiloRole::Admin,
+    };
+    let mut new_role_assignments = existing_policy.role_assignments;
+    new_role_assignments.push(new_role_assignment);
+
+    let new_policy = shared::Policy { role_assignments: new_role_assignments };
+    let _: shared::Policy<SiloRole> =
+        object_put(testctx, &silo_policy_url, &new_policy).await;
+
+    // now the user should have admin from the group
+    let unpriv_user = get_unpriv_me(testctx).await;
+    assert_eq!(unpriv_user.fleet_role, Some("viewer".to_string()));
+    assert_eq!(unpriv_user.silo_role, Some("admin".to_string()));
+}
+
+async fn get_unpriv_me(testctx: &ClientTestContext) -> views::CurrentUser {
+    NexusRequest::object_get(testctx, "/v1/me")
+        .authn_as(AuthnMode::UnprivilegedUser)
+        .execute_and_parse_unwrap()
+        .await
+}
+
+async fn get_priv_me(testctx: &ClientTestContext) -> views::CurrentUser {
+    NexusRequest::object_get(testctx, "/v1/me")
+        .authn_as(AuthnMode::PrivilegedUser)
+        .execute_and_parse_unwrap()
+        .await
 }
 
 #[nexus_test]

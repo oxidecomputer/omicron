@@ -95,6 +95,7 @@ pub struct RoleAssignment<AllowedRoles> {
     Deserialize,
     EnumIter,
     Eq,
+    FromStr,
     Ord,
     PartialEq,
     PartialOrd,
