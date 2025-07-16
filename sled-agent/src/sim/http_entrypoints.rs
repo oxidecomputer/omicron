@@ -27,6 +27,7 @@ use dropshot::endpoint;
 use nexus_sled_agent_shared::inventory::Inventory;
 use nexus_sled_agent_shared::inventory::OmicronSledConfig;
 use nexus_sled_agent_shared::inventory::SledRole;
+use omicron_common::api::external::Flow;
 use omicron_common::api::internal::nexus::DiskRuntimeState;
 use omicron_common::api::internal::nexus::SledVmmState;
 use omicron_common::api::internal::shared::ExternalIpGatewayMap;
@@ -56,6 +57,7 @@ use sled_agent_types::zone_bundle::ZoneBundleMetadata;
 use sled_diagnostics::SledDiagnosticsQueryOutput;
 use std::collections::BTreeMap;
 use std::sync::Arc;
+use uuid::Uuid;
 
 use super::sled_agent::SledAgent;
 
@@ -614,6 +616,19 @@ impl SledAgentApi for SledAgentSimImpl {
         let _sa = rqctx.context();
         // sa.set_vpc_routes(body.into_inner()).await;
         Ok(HttpResponseUpdatedNoContent())
+    }
+
+    async fn nic_ids_list(
+        _rqctx: RequestContext<Self::Context>,
+    ) -> Result<HttpResponseOk<Vec<Uuid>>, HttpError> {
+        method_unimplemented()
+    }
+
+    async fn nic_flows_list(
+        _rqctx: RequestContext<Self::Context>,
+        _params: Path<NicPathParam>,
+    ) -> Result<HttpResponseOk<Vec<Flow>>, HttpError> {
+        method_unimplemented()
     }
 
     async fn zone_bundle_list_all(

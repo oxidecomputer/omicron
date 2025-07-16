@@ -22,6 +22,7 @@ use oxide_vpc::api::IpAddr;
 use oxide_vpc::api::Ports;
 use oxide_vpc::api::ProtoFilter;
 use oxnet::IpNet;
+use uuid::Uuid;
 
 trait FromVpcFirewallRule {
     fn action(&self) -> FirewallAction;
@@ -170,6 +171,7 @@ pub fn opte_firewall_rules(
                                     .set_protocol(proto.clone());
                                 filters
                             },
+                            stat_id: Some(Uuid::new_v4()),
                         })
                         .collect::<Vec<FirewallRule>>()
                 })

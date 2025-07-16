@@ -5,18 +5,21 @@
 //! Mock / dummy versions of the OPTE module, for non-illumos platforms
 
 use crate::addrobj::AddrObject;
-use omicron_common::api::internal::shared::NetworkInterfaceKind;
 use oxide_vpc::api::AddRouterEntryReq;
 use oxide_vpc::api::ClearVirt2PhysReq;
 use oxide_vpc::api::DelRouterEntryReq;
 use oxide_vpc::api::DhcpCfg;
 use oxide_vpc::api::Direction;
+use oxide_vpc::api::DumpFlowStatResp;
+use oxide_vpc::api::DumpRootStatResp;
 use oxide_vpc::api::DumpVirt2PhysResp;
+use oxide_vpc::api::InnerFlowId;
 use oxide_vpc::api::IpCfg;
 use oxide_vpc::api::IpCidr;
 use oxide_vpc::api::ListPortsResp;
 use oxide_vpc::api::NoResp;
 use oxide_vpc::api::PortInfo;
+use oxide_vpc::api::Route;
 use oxide_vpc::api::RouterClass;
 use oxide_vpc::api::RouterTarget;
 use oxide_vpc::api::SetExternalIpsReq;
@@ -24,11 +27,13 @@ use oxide_vpc::api::SetFwRulesReq;
 use oxide_vpc::api::SetVirt2PhysReq;
 use oxide_vpc::api::VpcCfg;
 use slog::Logger;
+use std::collections::BTreeMap;
 use std::collections::HashMap;
 use std::collections::hash_map::Entry;
 use std::net::IpAddr;
 use std::sync::Mutex;
 use std::sync::OnceLock;
+use uuid::Uuid;
 
 type OpteError = anyhow::Error;
 
@@ -40,11 +45,11 @@ pub enum Error {
     #[error("Invalid IP configuration for port")]
     InvalidPortIpConfig,
 
-    #[error("Tried to release non-existent port ({0}, {1:?})")]
-    ReleaseMissingPort(uuid::Uuid, NetworkInterfaceKind),
+    #[error("Tried to release non-existent port ({0})")]
+    ReleaseMissingPort(uuid::Uuid),
 
-    #[error("Tried to update external IPs on non-existent port ({0}, {1:?})")]
-    ExternalIpUpdateMissingPort(uuid::Uuid, NetworkInterfaceKind),
+    #[error("Tried to update external IPs on non-existent port ({0})")]
+    ExternalIpUpdateMissingPort(uuid::Uuid),
 
     #[error("Could not find Primary NIC")]
     NoPrimaryNic,
@@ -69,75 +74,29 @@ pub fn delete_all_xde_devices(log: &Logger) -> Result<(), Error> {
     Ok(())
 }
 
-#[derive(Debug)]
+// Removes the stat ID from the Route payload.
+#[derive(Debug, Eq, PartialEq)]
 pub(crate) struct RouteInfo {
     pub dest: IpCidr,
     pub target: RouterTarget,
     pub class: RouterClass,
 }
 
-// NOTE: It would be nice to derive this, but `RouterTarget` and `RouterClass`
-// are in OPTE, and they don't currently implement this trait.
-impl PartialEq for RouteInfo {
-    fn eq(&self, other: &Self) -> bool {
-        if self.dest != other.dest {
-            return false;
-        }
-        match (self.class, other.class) {
-            (RouterClass::System, RouterClass::Custom) => return false,
-            (RouterClass::Custom, RouterClass::System) => return false,
-            (RouterClass::System, RouterClass::System)
-            | (RouterClass::Custom, RouterClass::Custom) => {}
-        }
-        match (self.target, other.target) {
-            (RouterTarget::Drop, RouterTarget::Drop) => true,
-            (
-                RouterTarget::InternetGateway(id0),
-                RouterTarget::InternetGateway(id1),
-            ) => id0 == id1,
-            (RouterTarget::Ip(ip0), RouterTarget::Ip(ip1)) => ip0 == ip1,
-            (
-                RouterTarget::VpcSubnet(cidr0),
-                RouterTarget::VpcSubnet(cidr1),
-            ) => cidr0 == cidr1,
-            (RouterTarget::Drop, RouterTarget::InternetGateway(_))
-            | (RouterTarget::Drop, RouterTarget::Ip(_))
-            | (RouterTarget::Drop, RouterTarget::VpcSubnet(_))
-            | (RouterTarget::InternetGateway(_), RouterTarget::Drop)
-            | (RouterTarget::InternetGateway(_), RouterTarget::Ip(_))
-            | (RouterTarget::InternetGateway(_), RouterTarget::VpcSubnet(_))
-            | (RouterTarget::Ip(_), RouterTarget::Drop)
-            | (RouterTarget::Ip(_), RouterTarget::InternetGateway(_))
-            | (RouterTarget::Ip(_), RouterTarget::VpcSubnet(_))
-            | (RouterTarget::VpcSubnet(_), RouterTarget::Drop)
-            | (RouterTarget::VpcSubnet(_), RouterTarget::InternetGateway(_))
-            | (RouterTarget::VpcSubnet(_), RouterTarget::Ip(_)) => false,
-        }
-    }
-}
-
-impl RouteInfo {
-    #[cfg(test)]
-    pub fn is_system_default_ipv4_route(&self) -> bool {
-        let system_default_route = RouteInfo {
-            dest: IpCidr::Ip4(oxide_vpc::api::Ipv4Cidr::new(
+#[cfg(test)]
+pub(crate) fn is_system_default_ipv4_route(route: &RouteInfo) -> bool {
+    (route.dest, route.target, route.class)
+        == (
+            IpCidr::Ip4(oxide_vpc::api::Ipv4Cidr::new(
                 oxide_vpc::api::Ipv4Addr::ANY_ADDR,
                 0.try_into().unwrap(),
             )),
-            target: RouterTarget::InternetGateway(None),
-            class: RouterClass::System,
-        };
-        *self == system_default_route
-    }
+            RouterTarget::InternetGateway(None),
+            RouterClass::System,
+        )
 }
 
-impl From<&AddRouterEntryReq> for RouteInfo {
-    fn from(value: &AddRouterEntryReq) -> Self {
-        Self { dest: value.dest, target: value.target, class: value.class }
-    }
-}
-impl From<&DelRouterEntryReq> for RouteInfo {
-    fn from(value: &DelRouterEntryReq) -> Self {
+impl From<&Route> for RouteInfo {
+    fn from(value: &Route) -> Self {
         Self { dest: value.dest, target: value.target, class: value.class }
     }
 }
@@ -246,7 +205,7 @@ impl Handle {
         else {
             anyhow::bail!("No such port '{}'", req.port_name);
         };
-        routes.push(req.into());
+        routes.push((&req.route).into());
         Ok(NO_RESPONSE)
     }
 
@@ -270,7 +229,7 @@ impl Handle {
         else {
             anyhow::bail!("No such port '{}'", req.port_name);
         };
-        let req = RouteInfo::from(req);
+        let req = RouteInfo::from(&req.route);
         if let Some(index) = routes.iter().position(|rt| rt == &req) {
             routes.remove(index);
         }
@@ -301,6 +260,30 @@ impl Handle {
         _: &ClearVirt2PhysReq,
     ) -> Result<NoResp, OpteError> {
         unimplemented!("Not yet used in tests")
+    }
+
+    /// Request the current state of some (or all) root stats contained
+    /// in a port.
+    ///
+    /// An empty `stat_ids` will request all present stats.
+    pub fn dump_root_stats(
+        &self,
+        _port_name: &str,
+        _stat_ids: impl IntoIterator<Item = Uuid>,
+    ) -> Result<DumpRootStatResp, Error> {
+        Ok(DumpRootStatResp { root_stats: BTreeMap::new() })
+    }
+
+    /// Request the current state of some (or all) flow stats contained
+    /// in a port.
+    ///
+    /// An empty `flow_keys` will request all present flows.
+    pub fn dump_flow_stats(
+        &self,
+        _port_name: &str,
+        _flow_keys: impl IntoIterator<Item = InnerFlowId>,
+    ) -> Result<DumpFlowStatResp<InnerFlowId>, Error> {
+        Ok(DumpFlowStatResp { flow_stats: BTreeMap::new() })
     }
 
     /// List ports on the current system.

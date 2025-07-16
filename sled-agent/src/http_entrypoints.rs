@@ -19,7 +19,7 @@ use dropshot::{
 use nexus_sled_agent_shared::inventory::{
     Inventory, OmicronSledConfig, SledRole,
 };
-use omicron_common::api::external::Error;
+use omicron_common::api::external::{Error, Flow};
 use omicron_common::api::internal::nexus::{DiskRuntimeState, SledVmmState};
 use omicron_common::api::internal::shared::{
     ExternalIpGatewayMap, ResolvedVpcRouteSet, ResolvedVpcRouteState,
@@ -45,6 +45,7 @@ use sled_diagnostics::{
     SledDiagnosticsCommandHttpOutput, SledDiagnosticsQueryOutput,
 };
 use std::collections::BTreeMap;
+use uuid::Uuid;
 
 type SledApiDescription = ApiDescription<SledAgent>;
 
@@ -864,6 +865,22 @@ impl SledAgentApi for SledAgentImpl {
         let sa = request_context.context();
         sa.set_eip_gateways(body.into_inner()).await?;
         Ok(HttpResponseUpdatedNoContent())
+    }
+
+    async fn nic_ids_list(
+        request_context: RequestContext<Self::Context>,
+    ) -> Result<HttpResponseOk<Vec<Uuid>>, HttpError> {
+        let sa = request_context.context();
+        Ok(HttpResponseOk(sa.get_nic_ids()))
+    }
+
+    async fn nic_flows_list(
+        request_context: RequestContext<Self::Context>,
+        path_params: Path<NicPathParam>,
+    ) -> Result<HttpResponseOk<Vec<Flow>>, HttpError> {
+        let sa = request_context.context();
+        let res = sa.get_nic_flows(path_params.into_inner().nic_id)?;
+        Ok(HttpResponseOk(res))
     }
 
     async fn support_zoneadm_info(

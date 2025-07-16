@@ -38,7 +38,9 @@ use nexus_sled_agent_shared::inventory::{
 use omicron_common::address::{
     Ipv6Subnet, SLED_PREFIX, get_sled_address, get_switch_zone_address,
 };
-use omicron_common::api::external::{ByteCount, ByteCountRangeError, Vni};
+use omicron_common::api::external::{
+    ByteCount, ByteCountRangeError, Flow, Vni,
+};
 use omicron_common::api::internal::nexus::{DiskRuntimeState, SledVmmState};
 use omicron_common::api::internal::shared::{
     ExternalIpGatewayMap, HostPortConfig, RackNetworkConfig,
@@ -1075,6 +1077,14 @@ impl SledAgent {
         }
 
         Ok(())
+    }
+
+    pub fn get_nic_ids(&self) -> Vec<Uuid> {
+        self.inner.port_manager.get_nic_ids()
+    }
+
+    pub fn get_nic_flows(&self, nic_id: Uuid) -> Result<Vec<Flow>, Error> {
+        self.inner.port_manager.get_nic_flows(nic_id).map_err(Into::into)
     }
 
     /// Return identifiers for this sled.
