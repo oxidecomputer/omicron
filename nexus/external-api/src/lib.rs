@@ -26,7 +26,7 @@ use omicron_common::api::external::{
 use openapi_manager_types::ValidationContext;
 use openapiv3::OpenAPI;
 
-pub const API_VERSION: &str = "20250604.0.0";
+pub const API_VERSION: &str = "20250730.0.0";
 
 const MIB: usize = 1024 * 1024;
 const GIB: usize = 1024 * MIB;
@@ -148,12 +148,6 @@ const PUT_UPDATE_REPOSITORY_MAX_BYTES: usize = 4 * GIB;
                 description = "Projects are a grouping of associated resources such as instances and disks within a silo for purposes of billing and access control.",
                 external_docs = {
                     url = "http://docs.oxide.computer/api/projects"
-                }
-            },
-            "roles" = {
-                description = "Roles are a component of Identity and Access Management (IAM) that allow a user or agent account access to additional permissions.",
-                external_docs = {
-                    url = "http://docs.oxide.computer/api/roles"
                 }
             },
             "silos" = {
@@ -2959,7 +2953,9 @@ pub trait NexusExternalApi {
 
     // Updates
 
-    /// Upload TUF repository
+    /// Upload system release repository
+    ///
+    /// System release repositories are verified by the updates trust store.
     #[endpoint {
         method = PUT,
         path = "/v1/system/update/repository",
@@ -2972,9 +2968,7 @@ pub trait NexusExternalApi {
         body: StreamingBody,
     ) -> Result<HttpResponseOk<TufRepoInsertResponse>, HttpError>;
 
-    /// Fetch TUF repository description
-    ///
-    /// Fetch description of TUF repository by system version.
+    /// Fetch system release repository description by version
     #[endpoint {
         method = GET,
         path = "/v1/system/update/repository/{system_version}",
@@ -2984,6 +2978,59 @@ pub trait NexusExternalApi {
         rqctx: RequestContext<Self::Context>,
         path_params: Path<params::UpdatesGetRepositoryParams>,
     ) -> Result<HttpResponseOk<TufRepoGetResponse>, HttpError>;
+
+    /// List root roles in the updates trust store
+    ///
+    /// A root role is a JSON document describing the cryptographic keys that
+    /// are trusted to sign system release repositories, as described by The
+    /// Update Framework. Uploading a repository requires its metadata to be
+    /// signed by keys trusted by the trust store.
+    #[endpoint {
+        method = GET,
+        path = "/v1/system/update/trust-roots",
+        tags = ["experimental"], // ["system/update"],
+    }]
+    async fn system_update_trust_root_list(
+        rqctx: RequestContext<Self::Context>,
+        query_params: Query<PaginatedById>,
+    ) -> Result<HttpResponseOk<ResultsPage<views::UpdatesTrustRoot>>, HttpError>;
+
+    /// Add trusted root role to updates trust store
+    #[endpoint {
+        method = POST,
+        path = "/v1/system/update/trust-roots",
+        tags = ["experimental"], // ["system/update"],
+    }]
+    async fn system_update_trust_root_create(
+        rqctx: RequestContext<Self::Context>,
+        body: TypedBody<shared::TufSignedRootRole>,
+    ) -> Result<HttpResponseCreated<views::UpdatesTrustRoot>, HttpError>;
+
+    /// Fetch trusted root role
+    #[endpoint {
+        method = GET,
+        path = "/v1/system/update/trust-roots/{trust_root_id}",
+        tags = ["experimental"], // ["system/update"],
+    }]
+    async fn system_update_trust_root_view(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<params::TufTrustRootPath>,
+    ) -> Result<HttpResponseOk<views::UpdatesTrustRoot>, HttpError>;
+
+    /// Delete trusted root role
+    ///
+    /// Note that this method does not currently check for any uploaded system
+    /// release repositories that would become untrusted after deleting the
+    /// root role.
+    #[endpoint {
+        method = DELETE,
+        path = "/v1/system/update/trust-roots/{trust_root_id}",
+        tags = ["experimental"], // ["system/update"],
+    }]
+    async fn system_update_trust_root_delete(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<params::TufTrustRootPath>,
+    ) -> Result<HttpResponseDeleted, HttpError>;
 
     /// Get the current target release of the rack's system software
     ///
@@ -3076,32 +3123,6 @@ pub trait NexusExternalApi {
         rqctx: RequestContext<Self::Context>,
         path_params: Path<params::UserBuiltinSelector>,
     ) -> Result<HttpResponseOk<views::UserBuiltin>, HttpError>;
-
-    // Built-in roles
-
-    /// List built-in roles
-    #[endpoint {
-        method = GET,
-        path = "/v1/system/roles",
-        tags = ["roles"],
-    }]
-    async fn role_list(
-        rqctx: RequestContext<Self::Context>,
-        query_params: Query<
-            PaginationParams<EmptyScanParams, params::RolePage>,
-        >,
-    ) -> Result<HttpResponseOk<ResultsPage<views::Role>>, HttpError>;
-
-    /// Fetch built-in role
-    #[endpoint {
-        method = GET,
-        path = "/v1/system/roles/{role_name}",
-        tags = ["roles"],
-    }]
-    async fn role_view(
-        rqctx: RequestContext<Self::Context>,
-        path_params: Path<params::RolePath>,
-    ) -> Result<HttpResponseOk<views::Role>, HttpError>;
 
     // Current user
 
@@ -3216,7 +3237,7 @@ pub trait NexusExternalApi {
     }]
     async fn support_bundle_list(
         rqctx: RequestContext<Self::Context>,
-        query_params: Query<PaginatedById>,
+        query_params: Query<PaginatedByTimeAndId>,
     ) -> Result<HttpResponseOk<ResultsPage<shared::SupportBundleInfo>>, HttpError>;
 
     /// View a support bundle

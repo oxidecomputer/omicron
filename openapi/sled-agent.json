@@ -185,131 +185,6 @@
         }
       }
     },
-    "/boot-disk/{boot_disk}/os/write": {
-      "post": {
-        "summary": "Write a new host OS image to the specified boot disk",
-        "operationId": "host_os_write_start",
-        "parameters": [
-          {
-            "in": "path",
-            "name": "boot_disk",
-            "required": true,
-            "schema": {
-              "$ref": "#/components/schemas/M2Slot"
-            }
-          },
-          {
-            "in": "query",
-            "name": "sha3_256_digest",
-            "required": true,
-            "schema": {
-              "type": "string",
-              "format": "hex string (32 bytes)"
-            }
-          },
-          {
-            "in": "query",
-            "name": "update_id",
-            "required": true,
-            "schema": {
-              "type": "string",
-              "format": "uuid"
-            }
-          }
-        ],
-        "requestBody": {
-          "content": {
-            "application/octet-stream": {
-              "schema": {
-                "type": "string",
-                "format": "binary"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "204": {
-            "description": "resource updated"
-          },
-          "4XX": {
-            "$ref": "#/components/responses/Error"
-          },
-          "5XX": {
-            "$ref": "#/components/responses/Error"
-          }
-        }
-      }
-    },
-    "/boot-disk/{boot_disk}/os/write/status": {
-      "get": {
-        "operationId": "host_os_write_status_get",
-        "parameters": [
-          {
-            "in": "path",
-            "name": "boot_disk",
-            "required": true,
-            "schema": {
-              "$ref": "#/components/schemas/M2Slot"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "successful operation",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/BootDiskOsWriteStatus"
-                }
-              }
-            }
-          },
-          "4XX": {
-            "$ref": "#/components/responses/Error"
-          },
-          "5XX": {
-            "$ref": "#/components/responses/Error"
-          }
-        }
-      }
-    },
-    "/boot-disk/{boot_disk}/os/write/status/{update_id}": {
-      "delete": {
-        "summary": "Clear the status of a completed write of a new host OS",
-        "operationId": "host_os_write_status_delete",
-        "parameters": [
-          {
-            "in": "path",
-            "name": "boot_disk",
-            "required": true,
-            "schema": {
-              "$ref": "#/components/schemas/M2Slot"
-            }
-          },
-          {
-            "in": "path",
-            "name": "update_id",
-            "required": true,
-            "schema": {
-              "type": "string",
-              "format": "uuid"
-            }
-          }
-        ],
-        "responses": {
-          "204": {
-            "description": "resource updated"
-          },
-          "4XX": {
-            "$ref": "#/components/responses/Error"
-          },
-          "5XX": {
-            "$ref": "#/components/responses/Error"
-          }
-        }
-      }
-    },
     "/bootstore/status": {
       "get": {
         "summary": "Get the internal state of the local bootstore node",
@@ -1000,8 +875,9 @@
     },
     "/support-bundles/{zpool_id}/{dataset_id}/{support_bundle_id}": {
       "post": {
-        "summary": "Create a support bundle within a particular dataset",
-        "operationId": "support_bundle_create",
+        "summary": "Starts creation of a support bundle within a particular dataset",
+        "description": "Callers should transfer chunks of the bundle with \"support_bundle_transfer\", and then call \"support_bundle_finalize\" once the bundle has finished transferring.\n\nIf a support bundle was previously created without being finalized successfully, this endpoint will reset the state.\n\nIf a support bundle was previously created and finalized successfully, this endpoint will return metadata indicating that it already exists.",
+        "operationId": "support_bundle_start_creation",
         "parameters": [
           {
             "in": "path",
@@ -1029,28 +905,8 @@
             "schema": {
               "$ref": "#/components/schemas/TypedUuidForZpoolKind"
             }
-          },
-          {
-            "in": "query",
-            "name": "hash",
-            "required": true,
-            "schema": {
-              "type": "string",
-              "format": "hex string (32 bytes)"
-            }
           }
         ],
-        "requestBody": {
-          "content": {
-            "application/octet-stream": {
-              "schema": {
-                "type": "string",
-                "format": "binary"
-              }
-            }
-          },
-          "required": true
-        },
         "responses": {
           "201": {
             "description": "successful creation",
@@ -1341,6 +1197,69 @@
         }
       }
     },
+    "/support-bundles/{zpool_id}/{dataset_id}/{support_bundle_id}/finalize": {
+      "post": {
+        "summary": "Finalizes the creation of a support bundle",
+        "description": "If the requested hash matched the bundle, the bundle is created. Otherwise, an error is returned.",
+        "operationId": "support_bundle_finalize",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "dataset_id",
+            "description": "The dataset on which this support bundle was provisioned",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/TypedUuidForDatasetKind"
+            }
+          },
+          {
+            "in": "path",
+            "name": "support_bundle_id",
+            "description": "The ID of the support bundle itself",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/TypedUuidForSupportBundleKind"
+            }
+          },
+          {
+            "in": "path",
+            "name": "zpool_id",
+            "description": "The zpool on which this support bundle was provisioned",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/TypedUuidForZpoolKind"
+            }
+          },
+          {
+            "in": "query",
+            "name": "hash",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "hex string (32 bytes)"
+            }
+          }
+        ],
+        "responses": {
+          "201": {
+            "description": "successful creation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SupportBundleMetadata"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
     "/support-bundles/{zpool_id}/{dataset_id}/{support_bundle_id}/index": {
       "get": {
         "summary": "Fetch the index (list of files within a support bundle)",
@@ -1441,6 +1360,80 @@
                 "schema": {}
               }
             }
+          }
+        }
+      }
+    },
+    "/support-bundles/{zpool_id}/{dataset_id}/{support_bundle_id}/transfer": {
+      "put": {
+        "summary": "Transfers a chunk of a support bundle within a particular dataset",
+        "operationId": "support_bundle_transfer",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "dataset_id",
+            "description": "The dataset on which this support bundle was provisioned",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/TypedUuidForDatasetKind"
+            }
+          },
+          {
+            "in": "path",
+            "name": "support_bundle_id",
+            "description": "The ID of the support bundle itself",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/TypedUuidForSupportBundleKind"
+            }
+          },
+          {
+            "in": "path",
+            "name": "zpool_id",
+            "description": "The zpool on which this support bundle was provisioned",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/TypedUuidForZpoolKind"
+            }
+          },
+          {
+            "in": "query",
+            "name": "offset",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "format": "uint64",
+              "minimum": 0
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/octet-stream": {
+              "schema": {
+                "type": "string",
+                "format": "binary"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "description": "successful creation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SupportBundleMetadata"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
           }
         }
       }
@@ -2697,162 +2690,6 @@
           "memory_mb"
         ],
         "additionalProperties": false
-      },
-      "BootDiskOsWriteProgress": {
-        "description": "Current progress of an OS image being written to disk.",
-        "oneOf": [
-          {
-            "description": "The image is still being uploaded.",
-            "type": "object",
-            "properties": {
-              "bytes_received": {
-                "type": "integer",
-                "format": "uint",
-                "minimum": 0
-              },
-              "state": {
-                "type": "string",
-                "enum": [
-                  "receiving_uploaded_image"
-                ]
-              }
-            },
-            "required": [
-              "bytes_received",
-              "state"
-            ]
-          },
-          {
-            "description": "The image is being written to disk.",
-            "type": "object",
-            "properties": {
-              "bytes_written": {
-                "type": "integer",
-                "format": "uint",
-                "minimum": 0
-              },
-              "state": {
-                "type": "string",
-                "enum": [
-                  "writing_image_to_disk"
-                ]
-              }
-            },
-            "required": [
-              "bytes_written",
-              "state"
-            ]
-          },
-          {
-            "description": "The image is being read back from disk for validation.",
-            "type": "object",
-            "properties": {
-              "bytes_read": {
-                "type": "integer",
-                "format": "uint",
-                "minimum": 0
-              },
-              "state": {
-                "type": "string",
-                "enum": [
-                  "validating_written_image"
-                ]
-              }
-            },
-            "required": [
-              "bytes_read",
-              "state"
-            ]
-          }
-        ]
-      },
-      "BootDiskOsWriteStatus": {
-        "description": "Status of an update to a boot disk OS.",
-        "oneOf": [
-          {
-            "description": "No update has been started for this disk, or any previously-started update has completed and had its status cleared.",
-            "type": "object",
-            "properties": {
-              "status": {
-                "type": "string",
-                "enum": [
-                  "no_update_started"
-                ]
-              }
-            },
-            "required": [
-              "status"
-            ]
-          },
-          {
-            "description": "An update is currently running.",
-            "type": "object",
-            "properties": {
-              "progress": {
-                "$ref": "#/components/schemas/BootDiskOsWriteProgress"
-              },
-              "status": {
-                "type": "string",
-                "enum": [
-                  "in_progress"
-                ]
-              },
-              "update_id": {
-                "type": "string",
-                "format": "uuid"
-              }
-            },
-            "required": [
-              "progress",
-              "status",
-              "update_id"
-            ]
-          },
-          {
-            "description": "The most recent update completed successfully.",
-            "type": "object",
-            "properties": {
-              "status": {
-                "type": "string",
-                "enum": [
-                  "complete"
-                ]
-              },
-              "update_id": {
-                "type": "string",
-                "format": "uuid"
-              }
-            },
-            "required": [
-              "status",
-              "update_id"
-            ]
-          },
-          {
-            "description": "The most recent update failed.",
-            "type": "object",
-            "properties": {
-              "message": {
-                "type": "string"
-              },
-              "status": {
-                "type": "string",
-                "enum": [
-                  "failed"
-                ]
-              },
-              "update_id": {
-                "type": "string",
-                "format": "uuid"
-              }
-            },
-            "required": [
-              "message",
-              "status",
-              "update_id"
-            ]
-          }
-        ]
       },
       "BootImageHeader": {
         "type": "object",
@@ -4722,6 +4559,62 @@
           }
         ]
       },
+      "HostPhase2DesiredContents": {
+        "description": "Describes the desired contents of a host phase 2 slot (i.e., the boot partition on one of the internal M.2 drives).",
+        "oneOf": [
+          {
+            "description": "Do not change the current contents.\n\nWe use this value when we've detected a sled has been mupdated (and we don't want to overwrite phase 2 images until we understand how to recover from that mupdate) and as the default value when reading an [`OmicronSledConfig`] that was ledgered before this concept existed.",
+            "type": "object",
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "current_contents"
+                ]
+              }
+            },
+            "required": [
+              "type"
+            ]
+          },
+          {
+            "description": "Set the phase 2 slot to the given artifact.\n\nThe artifact will come from an unpacked and distributed TUF repo.",
+            "type": "object",
+            "properties": {
+              "hash": {
+                "type": "string",
+                "format": "hex string (32 bytes)"
+              },
+              "type": {
+                "type": "string",
+                "enum": [
+                  "artifact"
+                ]
+              }
+            },
+            "required": [
+              "hash",
+              "type"
+            ]
+          }
+        ]
+      },
+      "HostPhase2DesiredSlots": {
+        "description": "Describes the desired contents for both host phase 2 slots.",
+        "type": "object",
+        "properties": {
+          "slot_a": {
+            "$ref": "#/components/schemas/HostPhase2DesiredContents"
+          },
+          "slot_b": {
+            "$ref": "#/components/schemas/HostPhase2DesiredContents"
+          }
+        },
+        "required": [
+          "slot_a",
+          "slot_b"
+        ]
+      },
       "HostPortConfig": {
         "type": "object",
         "properties": {
@@ -5874,6 +5767,21 @@
           "generation": {
             "$ref": "#/components/schemas/Generation"
           },
+          "host_phase_2": {
+            "default": {
+              "slot_a": {
+                "type": "current_contents"
+              },
+              "slot_b": {
+                "type": "current_contents"
+              }
+            },
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/HostPhase2DesiredSlots"
+              }
+            ]
+          },
           "remove_mupdate_override": {
             "nullable": true,
             "allOf": [
@@ -6710,7 +6618,8 @@
             "type": "array",
             "items": {
               "$ref": "#/components/schemas/HostIdentifier"
-            }
+            },
+            "uniqueItems": true
           },
           "filter_ports": {
             "nullable": true,

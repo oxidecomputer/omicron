@@ -2556,6 +2556,20 @@ INSERT INTO omicron.public.tuf_generation (
     (TRUE, 1)
 ON CONFLICT DO NOTHING;
 
+-- Trusted TUF root roles, used to verify TUF repo signatures
+CREATE TABLE IF NOT EXISTS omicron.public.tuf_trust_root (
+    id UUID PRIMARY KEY,
+    time_created TIMESTAMPTZ NOT NULL,
+    time_deleted TIMESTAMPTZ,
+    root_role JSONB NOT NULL
+);
+
+-- This index is used for paginating through non-deleted roots.
+CREATE UNIQUE INDEX IF NOT EXISTS tuf_trust_root_by_id
+ON omicron.public.tuf_trust_root (id)
+WHERE
+    time_deleted IS NULL;
+
 /*******************************************************************/
 
 -- The source of the software release that should be deployed to the rack.
@@ -2648,6 +2662,10 @@ CREATE UNIQUE INDEX IF NOT EXISTS one_bundle_per_dataset ON omicron.public.suppo
 
 CREATE INDEX IF NOT EXISTS lookup_bundle_by_nexus ON omicron.public.support_bundle (
     assigned_nexus
+);
+
+CREATE INDEX IF NOT EXISTS lookup_bundle_by_creation ON omicron.public.support_bundle (
+    time_created
 );
 
 /*******************************************************************/
@@ -2850,55 +2868,6 @@ CREATE UNIQUE INDEX IF NOT EXISTS device_access_token_unique
 CREATE INDEX IF NOT EXISTS lookup_device_access_token_by_silo_user
     ON omicron.public.device_access_token (silo_user_id);
 
-/*
- * Roles built into the system
- *
- * You can think of a built-in role as an opaque token to which we assign a
- * hardcoded set of permissions.  The role that we call "project.viewer"
- * corresponds to the "viewer" role on the "project" resource.  A user that has
- * this role on a particular Project is granted various read-only permissions on
- * that Project.  The specific permissions associated with the role are defined
- * in Omicron's Polar (Oso) policy file.
- *
- * A built-in role like "project.viewer" has four parts:
- *
- * * resource type: "project"
- * * role name: "viewer"
- * * full name: "project.viewer"
- * * description: "Project Viewer"
- *
- * Internally, we can treat the tuple (resource type, role name) as a composite
- * primary key.  Externally, we expose this as the full name.  This is
- * consistent with RFD 43 and other IAM systems.
- *
- * These fields look awfully close to the identity metadata that we use for most
- * other tables.  But they're just different enough that we can't use most of
- * the same abstractions:
- *
- * * "id": We have no need for a uuid because the (resource_type, role_name) is
- *   already unique and immutable.
- * * "name": What we call "full name" above could instead be called "name",
- *   which would be consistent with other identity metadata.  But it's not a
- *   legal "name" because of the period, and it would be confusing to have
- *   "resource type", "role name", and "name".
- * * "time_created": not that useful because it's whenever the system was
- *   initialized, and we have plenty of other timestamps for that
- * * "time_modified": does not apply because the role cannot be changed
- * * "time_deleted" does not apply because the role cannot be deleted
- *
- * If the set of roles and their permissions are fixed, why store them in the
- * database at all?  Because what's dynamic is the assignment of roles to users.
- * We have a separate table that says "user U has role ROLE on resource
- * RESOURCE".  How do we represent the ROLE part of this association?  We use a
- * foreign key into this "role_builtin" table.
- */
-CREATE TABLE IF NOT EXISTS omicron.public.role_builtin (
-    resource_type STRING(63),
-    role_name STRING(63),
-    description STRING(512),
-
-    PRIMARY KEY(resource_type, role_name)
-);
 
 /*
  * Assignments between users, roles, and resources
@@ -2917,7 +2886,6 @@ CREATE TYPE IF NOT EXISTS omicron.public.identity_type AS ENUM (
 );
 
 CREATE TABLE IF NOT EXISTS omicron.public.role_assignment (
-    /* Composite foreign key into "role_builtin" table */
     resource_type STRING(63) NOT NULL,
     role_name STRING(63) NOT NULL,
 
@@ -3922,6 +3890,11 @@ CREATE TABLE IF NOT EXISTS omicron.public.inv_omicron_sled_config (
     -- remove mupdate override ID, if set
     remove_mupdate_override UUID,
 
+    -- desired artifact hash for internal disk slots' boot partitions
+    -- NULL is translated to `HostPhase2DesiredContents::CurrentContents`
+    host_phase_2_desired_slot_a STRING(64),
+    host_phase_2_desired_slot_b STRING(64),
+
     PRIMARY KEY (inv_collection_id, id)
 );
 
@@ -4276,6 +4249,15 @@ CREATE TABLE IF NOT EXISTS omicron.public.inv_clickhouse_keeper_membership (
     PRIMARY KEY (inv_collection_id, queried_keeper_id)
 );
 
+CREATE TABLE IF NOT EXISTS omicron.public.inv_cockroachdb_status (
+    inv_collection_id UUID NOT NULL,
+    node_id TEXT NOT NULL,
+    ranges_underreplicated INT8,
+    liveness_live_nodes INT8,
+
+    PRIMARY KEY (inv_collection_id, node_id)
+);
+
 /*
  * Various runtime configuration switches for reconfigurator
  *
@@ -4426,6 +4408,13 @@ CREATE TABLE IF NOT EXISTS omicron.public.bp_sled_metadata (
     sled_agent_generation INT8 NOT NULL,
     -- NULL means do not remove any overrides
     remove_mupdate_override UUID,
+
+    -- desired artifact hash for internal disk slots' boot partitions
+    -- NULL is translated to
+    -- `BlueprintHostPhase2DesiredContents::CurrentContents`
+    host_phase_2_desired_slot_a STRING(64),
+    host_phase_2_desired_slot_b STRING(64),
+
     PRIMARY KEY (blueprint_id, sled_id)
 );
 
@@ -6220,7 +6209,7 @@ INSERT INTO omicron.public.db_metadata (
     version,
     target_version
 ) VALUES
-    (TRUE, NOW(), NOW(), '157.0.0', NULL)
+    (TRUE, NOW(), NOW(), '164.0.0', NULL)
 ON CONFLICT DO NOTHING;
 
 COMMIT;

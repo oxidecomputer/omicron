@@ -7,6 +7,7 @@ use std::sync::Arc;
 use camino::Utf8Path;
 use omicron_common::disk::DiskIdentity;
 use omicron_uuid_kinds::InternalZpoolUuid;
+use sled_agent_config_reconciler::InternalDiskDetails;
 use sled_agent_config_reconciler::InternalDisksReceiver;
 use sled_storage::config::MountConfig;
 
@@ -15,10 +16,19 @@ pub(crate) fn make_internal_disks_rx(
     boot_zpool: InternalZpoolUuid,
     other_zpools: &[InternalZpoolUuid],
 ) -> InternalDisksReceiver {
-    let identity_from_zpool = |zpool: InternalZpoolUuid| DiskIdentity {
-        vendor: "sled-agent-zone-images-test".to_string(),
-        model: "fake-disk".to_string(),
-        serial: zpool.to_string(),
+    let fake_from_zpool = |zpool: InternalZpoolUuid, is_boot_disk: bool| {
+        let identity = DiskIdentity {
+            vendor: "sled-agent-zone-images-test".to_string(),
+            model: "fake-disk".to_string(),
+            serial: zpool.to_string(),
+        };
+        InternalDiskDetails::fake_details(
+            identity,
+            zpool,
+            is_boot_disk,
+            None,
+            None,
+        )
     };
     let mount_config = MountConfig {
         root: root.to_path_buf(),
@@ -26,11 +36,11 @@ pub(crate) fn make_internal_disks_rx(
     };
     InternalDisksReceiver::fake_static(
         Arc::new(mount_config),
-        std::iter::once((identity_from_zpool(boot_zpool), boot_zpool)).chain(
+        std::iter::once(fake_from_zpool(boot_zpool, true)).chain(
             other_zpools
                 .iter()
                 .copied()
-                .map(|pool| (identity_from_zpool(pool), pool)),
+                .map(|pool| fake_from_zpool(pool, false)),
         ),
     )
 }

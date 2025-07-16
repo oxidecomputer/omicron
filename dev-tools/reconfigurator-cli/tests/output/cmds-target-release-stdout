@@ -192,9 +192,9 @@ f45ba181-4b56-42cc-a762-874d90184a43 0       <REDACTED_TIMESTAMP>
 
 > # First step: upgrade one RoT.
 > blueprint-plan dbcbd3d6-41ff-48ae-ac0b-1becc9b2fd21 f45ba181-4b56-42cc-a762-874d90184a43
-INFO noop converting 0/9 install-dataset zones to artifact store, sled_id: 2b8f0cb3-0295-4b3c-bc58-4fe88b57112c
-INFO noop converting 0/8 install-dataset zones to artifact store, sled_id: 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6
-INFO noop converting 0/8 install-dataset zones to artifact store, sled_id: d81c6a84-79b8-4958-ae41-ea46c9b19763
+INFO performed noop image source checks on sled, sled_id: 2b8f0cb3-0295-4b3c-bc58-4fe88b57112c, num_total: 9, num_already_artifact: 0, num_eligible: 0, num_ineligible: 9
+INFO performed noop image source checks on sled, sled_id: 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6, num_total: 8, num_already_artifact: 0, num_eligible: 0, num_ineligible: 8
+INFO performed noop image source checks on sled, sled_id: d81c6a84-79b8-4958-ae41-ea46c9b19763, num_total: 8, num_already_artifact: 0, num_eligible: 0, num_ineligible: 8
 INFO sufficient BoundaryNtp zones exist in plan, desired_count: 0, current_count: 0
 INFO sufficient Clickhouse zones exist in plan, desired_count: 1, current_count: 1
 INFO sufficient ClickhouseKeeper zones exist in plan, desired_count: 0, current_count: 0
@@ -377,9 +377,9 @@ external DNS:
 
 > # If we generate another plan, there should be no change.
 > blueprint-plan 8da82a8e-bf97-4fbd-8ddd-9f6462732cf1 f45ba181-4b56-42cc-a762-874d90184a43
-INFO noop converting 0/9 install-dataset zones to artifact store, sled_id: 2b8f0cb3-0295-4b3c-bc58-4fe88b57112c
-INFO noop converting 0/8 install-dataset zones to artifact store, sled_id: 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6
-INFO noop converting 0/8 install-dataset zones to artifact store, sled_id: d81c6a84-79b8-4958-ae41-ea46c9b19763
+INFO performed noop image source checks on sled, sled_id: 2b8f0cb3-0295-4b3c-bc58-4fe88b57112c, num_total: 9, num_already_artifact: 0, num_eligible: 0, num_ineligible: 9
+INFO performed noop image source checks on sled, sled_id: 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6, num_total: 8, num_already_artifact: 0, num_eligible: 0, num_ineligible: 8
+INFO performed noop image source checks on sled, sled_id: d81c6a84-79b8-4958-ae41-ea46c9b19763, num_total: 8, num_already_artifact: 0, num_eligible: 0, num_ineligible: 8
 INFO sufficient BoundaryNtp zones exist in plan, desired_count: 0, current_count: 0
 INFO sufficient Clickhouse zones exist in plan, desired_count: 1, current_count: 1
 INFO sufficient ClickhouseKeeper zones exist in plan, desired_count: 0, current_count: 0
@@ -563,9 +563,9 @@ set sled 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6 RoT settings: slot a -> 1.0.0
 generated inventory collection eb0796d5-ab8a-4f7b-a884-b4aeacb8ab51 from configured sleds
 
 > blueprint-plan 58d5e830-0884-47d8-a7cd-b2b3751adeb4 eb0796d5-ab8a-4f7b-a884-b4aeacb8ab51
-INFO noop converting 0/9 install-dataset zones to artifact store, sled_id: 2b8f0cb3-0295-4b3c-bc58-4fe88b57112c
-INFO noop converting 0/8 install-dataset zones to artifact store, sled_id: 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6
-INFO noop converting 0/8 install-dataset zones to artifact store, sled_id: d81c6a84-79b8-4958-ae41-ea46c9b19763
+INFO performed noop image source checks on sled, sled_id: 2b8f0cb3-0295-4b3c-bc58-4fe88b57112c, num_total: 9, num_already_artifact: 0, num_eligible: 0, num_ineligible: 9
+INFO performed noop image source checks on sled, sled_id: 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6, num_total: 8, num_already_artifact: 0, num_eligible: 0, num_ineligible: 8
+INFO performed noop image source checks on sled, sled_id: d81c6a84-79b8-4958-ae41-ea46c9b19763, num_total: 8, num_already_artifact: 0, num_eligible: 0, num_ineligible: 8
 INFO sufficient BoundaryNtp zones exist in plan, desired_count: 0, current_count: 0
 INFO sufficient Clickhouse zones exist in plan, desired_count: 1, current_count: 1
 INFO sufficient ClickhouseKeeper zones exist in plan, desired_count: 0, current_count: 0
@@ -1957,6 +1957,14 @@ to:   blueprint c1a0d242-9160-40f4-96ae-61f8f40a0b1b
  MODIFIED SLEDS:
 
   sled 2b8f0cb3-0295-4b3c-bc58-4fe88b57112c (active, config generation 2 -> 3):
+
+    host phase 2 contents:
+    ------------------------
+    slot   boot image source
+    ------------------------
+    A      current contents 
+    B      current contents 
+
 
     physical disks:
     ------------------------------------------------------------------------------------

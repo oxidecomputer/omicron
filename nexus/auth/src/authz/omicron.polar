@@ -383,6 +383,16 @@ resource BlueprintConfig {
 has_relation(fleet: Fleet, "parent_fleet", list: BlueprintConfig)
 	if list.fleet = fleet;
 
+# Describes the policy for accessing "/v1/system/update/trust-roots" in the API
+resource UpdateTrustRootList {
+	permissions = [ "list_children", "create_child" ];
+	relations = { parent_fleet: Fleet };
+	"list_children" if "viewer" on "parent_fleet";
+	"create_child" if "admin" on "parent_fleet";
+}
+has_relation(fleet: Fleet, "parent_fleet", collection: UpdateTrustRootList)
+	if collection.fleet = fleet;
+
 # Describes the policy for accessing blueprints
 resource TargetReleaseConfig {
 	permissions = [

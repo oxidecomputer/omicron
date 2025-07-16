@@ -1,0 +1,2 @@
+ALTER TABLE omicron.public.inv_omicron_sled_config
+ADD COLUMN IF NOT EXISTS host_phase_2_desired_slot_a STRING(64);

@@ -89,12 +89,13 @@ use nexus_client::{
     Client as NexusClient, Error as NexusError, types as NexusTypes,
 };
 use nexus_sled_agent_shared::inventory::{
-    ConfigReconcilerInventoryResult, OmicronSledConfig, OmicronZoneConfig,
-    OmicronZoneType, OmicronZonesConfig,
+    ConfigReconcilerInventoryResult, HostPhase2DesiredSlots, OmicronSledConfig,
+    OmicronZoneConfig, OmicronZoneType, OmicronZonesConfig,
 };
 use nexus_types::deployment::{
     Blueprint, BlueprintDatasetConfig, BlueprintDatasetDisposition,
-    BlueprintZoneType, CockroachDbPreserveDowngrade, blueprint_zone_type,
+    BlueprintHostPhase2DesiredSlots, BlueprintZoneType,
+    CockroachDbPreserveDowngrade, blueprint_zone_type,
 };
 use nexus_types::deployment::{
     BlueprintSledConfig, OximeterReadMode, PendingMgsUpdates,
@@ -592,6 +593,7 @@ impl ServiceInner {
                     datasets: config.datasets.values().cloned().collect(),
                     zones: zones_config.zones.into_iter().collect(),
                     remove_mupdate_override: None,
+                    host_phase_2: HostPhase2DesiredSlots::current_contents(),
                 };
 
                 self.set_config_on_sled(*sled_address, sled_config).await?;
@@ -1580,6 +1582,8 @@ pub(crate) fn build_initial_blueprint_from_sled_configs(
                 disks: sled_config.disks.clone(),
                 datasets,
                 zones: sled_config.zones.iter().cloned().collect(),
+                host_phase_2: BlueprintHostPhase2DesiredSlots::current_contents(
+                ),
                 remove_mupdate_override: None,
             },
         );

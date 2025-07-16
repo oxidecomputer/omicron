@@ -33,10 +33,6 @@ use omicron_uuid_kinds::{
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use sled_agent_types::{
-    boot_disk::{
-        BootDiskOsWriteStatus, BootDiskPathParams, BootDiskUpdatePathParams,
-        BootDiskWriteStartQueryParams,
-    },
     bootstore::BootstoreStatus,
     disk::DiskEnsureBody,
     early_networking::EarlyNetworkConfig,
@@ -170,17 +166,51 @@ pub trait SledAgentApi {
         path_params: Path<SupportBundleListPathParam>,
     ) -> Result<HttpResponseOk<Vec<SupportBundleMetadata>>, HttpError>;
 
-    /// Create a support bundle within a particular dataset
+    /// Starts creation of a support bundle within a particular dataset
+    ///
+    /// Callers should transfer chunks of the bundle with
+    /// "support_bundle_transfer", and then call "support_bundle_finalize"
+    /// once the bundle has finished transferring.
+    ///
+    /// If a support bundle was previously created without being finalized
+    /// successfully, this endpoint will reset the state.
+    ///
+    /// If a support bundle was previously created and finalized successfully,
+    /// this endpoint will return metadata indicating that it already exists.
     #[endpoint {
         method = POST,
-        path = "/support-bundles/{zpool_id}/{dataset_id}/{support_bundle_id}",
-        request_body_max_bytes = SUPPORT_BUNDLE_MAX_BYTES,
+        path = "/support-bundles/{zpool_id}/{dataset_id}/{support_bundle_id}"
     }]
-    async fn support_bundle_create(
+    async fn support_bundle_start_creation(
         rqctx: RequestContext<Self::Context>,
         path_params: Path<SupportBundlePathParam>,
-        query_params: Query<SupportBundleCreateQueryParams>,
+    ) -> Result<HttpResponseCreated<SupportBundleMetadata>, HttpError>;
+
+    /// Transfers a chunk of a support bundle within a particular dataset
+    #[endpoint {
+        method = PUT,
+        path = "/support-bundles/{zpool_id}/{dataset_id}/{support_bundle_id}/transfer",
+        request_body_max_bytes = SUPPORT_BUNDLE_MAX_BYTES,
+    }]
+    async fn support_bundle_transfer(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<SupportBundlePathParam>,
+        query_params: Query<SupportBundleTransferQueryParams>,
         body: StreamingBody,
+    ) -> Result<HttpResponseCreated<SupportBundleMetadata>, HttpError>;
+
+    /// Finalizes the creation of a support bundle
+    ///
+    /// If the requested hash matched the bundle, the bundle is created.
+    /// Otherwise, an error is returned.
+    #[endpoint {
+        method = POST,
+        path = "/support-bundles/{zpool_id}/{dataset_id}/{support_bundle_id}/finalize"
+    }]
+    async fn support_bundle_finalize(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<SupportBundlePathParam>,
+        query_params: Query<SupportBundleFinalizeQueryParams>,
     ) -> Result<HttpResponseCreated<SupportBundleMetadata>, HttpError>;
 
     /// Fetch a support bundle from a particular dataset
@@ -494,38 +524,6 @@ pub trait SledAgentApi {
         body: TypedBody<AddSledRequest>,
     ) -> Result<HttpResponseUpdatedNoContent, HttpError>;
 
-    /// Write a new host OS image to the specified boot disk
-    #[endpoint {
-        method = POST,
-        path = "/boot-disk/{boot_disk}/os/write",
-        request_body_max_bytes = HOST_OS_IMAGE_MAX_BYTES,
-    }]
-    async fn host_os_write_start(
-        rqctx: RequestContext<Self::Context>,
-        path_params: Path<BootDiskPathParams>,
-        query_params: Query<BootDiskWriteStartQueryParams>,
-        body: StreamingBody,
-    ) -> Result<HttpResponseUpdatedNoContent, HttpError>;
-
-    #[endpoint {
-        method = GET,
-        path = "/boot-disk/{boot_disk}/os/write/status",
-    }]
-    async fn host_os_write_status_get(
-        rqctx: RequestContext<Self::Context>,
-        path_params: Path<BootDiskPathParams>,
-    ) -> Result<HttpResponseOk<BootDiskOsWriteStatus>, HttpError>;
-
-    /// Clear the status of a completed write of a new host OS
-    #[endpoint {
-        method = DELETE,
-        path = "/boot-disk/{boot_disk}/os/write/status/{update_id}",
-    }]
-    async fn host_os_write_status_delete(
-        rqctx: RequestContext<Self::Context>,
-        path_params: Path<BootDiskUpdatePathParams>,
-    ) -> Result<HttpResponseUpdatedNoContent, HttpError>;
-
     /// Fetch basic information about this sled
     #[endpoint {
         method = GET,
@@ -796,9 +794,15 @@ pub struct SupportBundleFilePathParam {
     pub file: String,
 }
 
+/// Metadata about a support bundle transfer
+#[derive(Deserialize, Serialize, JsonSchema)]
+pub struct SupportBundleTransferQueryParams {
+    pub offset: u64,
+}
+
 /// Metadata about a support bundle
 #[derive(Deserialize, Serialize, JsonSchema)]
-pub struct SupportBundleCreateQueryParams {
+pub struct SupportBundleFinalizeQueryParams {
     pub hash: ArtifactHash,
 }
 

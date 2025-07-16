@@ -24,9 +24,9 @@ use dropshot::Body;
 use dropshot::HttpError;
 use futures::Stream;
 use nexus_sled_agent_shared::inventory::{
-    ConfigReconcilerInventoryStatus, Inventory, InventoryDataset,
-    InventoryDisk, InventoryZpool, OmicronSledConfig, OmicronZonesConfig,
-    SledRole, ZoneImageResolverInventory,
+    ConfigReconcilerInventoryStatus, HostPhase2DesiredSlots, Inventory,
+    InventoryDataset, InventoryDisk, InventoryZpool, OmicronSledConfig,
+    OmicronZonesConfig, SledRole, ZoneImageResolverInventory,
 };
 use omicron_common::api::external::{
     ByteCount, DiskState, Error, Generation, ResourceType,
@@ -741,6 +741,7 @@ impl SledAgent {
             datasets: datasets_config.datasets.into_values().collect(),
             zones: zones_config.zones.into_iter().collect(),
             remove_mupdate_override: None,
+            host_phase_2: HostPhase2DesiredSlots::current_contents(),
         };
 
         Ok(Inventory {
@@ -824,23 +825,44 @@ impl SledAgent {
             .map_err(|err| err.into())
     }
 
-    pub async fn support_bundle_create(
+    pub async fn support_bundle_start_creation(
+        &self,
+        zpool_id: ZpoolUuid,
+        dataset_id: DatasetUuid,
+        support_bundle_id: SupportBundleUuid,
+    ) -> Result<SupportBundleMetadata, HttpError> {
+        self.storage
+            .as_support_bundle_storage(&self.log)
+            .start_creation(zpool_id, dataset_id, support_bundle_id)
+            .await
+            .map_err(|err| err.into())
+    }
+
+    pub async fn support_bundle_transfer(
+        &self,
+        zpool_id: ZpoolUuid,
+        dataset_id: DatasetUuid,
+        support_bundle_id: SupportBundleUuid,
+        offset: u64,
+        stream: impl Stream<Item = Result<Bytes, HttpError>>,
+    ) -> Result<SupportBundleMetadata, HttpError> {
+        self.storage
+            .as_support_bundle_storage(&self.log)
+            .transfer(zpool_id, dataset_id, support_bundle_id, offset, stream)
+            .await
+            .map_err(|err| err.into())
+    }
+
+    pub async fn support_bundle_finalize(
         &self,
         zpool_id: ZpoolUuid,
         dataset_id: DatasetUuid,
         support_bundle_id: SupportBundleUuid,
         expected_hash: ArtifactHash,
-        stream: impl Stream<Item = Result<Bytes, HttpError>>,
     ) -> Result<SupportBundleMetadata, HttpError> {
         self.storage
             .as_support_bundle_storage(&self.log)
-            .create(
-                zpool_id,
-                dataset_id,
-                support_bundle_id,
-                expected_hash,
-                stream,
-            )
+            .finalize(zpool_id, dataset_id, support_bundle_id, expected_hash)
             .await
             .map_err(|err| err.into())
     }

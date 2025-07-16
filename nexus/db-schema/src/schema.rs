@@ -1378,14 +1378,6 @@ table! {
 }
 
 table! {
-    role_builtin (resource_type, role_name) {
-        resource_type -> Text,
-        role_name -> Text,
-        description -> Text,
-    }
-}
-
-table! {
     role_assignment (
         identity_type,
         identity_id,
@@ -1445,6 +1437,16 @@ table! {
     tuf_generation (singleton) {
         singleton -> Bool,
         generation -> Int8,
+    }
+}
+
+table! {
+    tuf_trust_root (id) {
+        id -> Uuid,
+        time_created -> Timestamptz,
+        time_modified -> Timestamptz,
+        time_deleted -> Nullable<Timestamptz>,
+        root_role -> Jsonb,
     }
 }
 
@@ -1788,6 +1790,8 @@ table! {
 
         generation -> Int8,
         remove_mupdate_override -> Nullable<Uuid>,
+        host_phase_2_desired_slot_a -> Nullable<Text>,
+        host_phase_2_desired_slot_b -> Nullable<Text>,
     }
 }
 
@@ -1886,6 +1890,15 @@ table! {
     }
 }
 
+table! {
+    inv_cockroachdb_status (inv_collection_id, node_id) {
+        inv_collection_id -> Uuid,
+        node_id -> Text,
+        ranges_underreplicated -> Nullable<Int8>,
+        liveness_live_nodes -> Nullable<Int8>,
+    }
+}
+
 /* blueprints */
 
 table! {
@@ -1927,8 +1940,13 @@ table! {
         sled_state -> crate::enums::SledStateEnum,
         sled_agent_generation -> Int8,
         remove_mupdate_override -> Nullable<Uuid>,
+
+        host_phase_2_desired_slot_a -> Nullable<Text>,
+        host_phase_2_desired_slot_b -> Nullable<Text>,
     }
 }
+
+allow_tables_to_appear_in_same_query!(bp_sled_metadata, tuf_artifact);
 
 table! {
     bp_omicron_physical_disk (blueprint_id, id) {
@@ -2336,7 +2354,6 @@ allow_tables_to_appear_in_same_query!(
     vpc_router,
     vpc_firewall_rule,
     user_builtin,
-    role_builtin,
     role_assignment,
     probe,
     internet_gateway,
