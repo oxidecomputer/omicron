@@ -438,6 +438,98 @@ zpools (4):
     SledDisk { disk_identity: DiskIdentity { vendor: "fake-vendor", model: "fake-model", serial: "serial-f96f5901-2907-4f21-bfeb-772f8a3c4e44" }, disk_id: f7e6334e-7e25-472e-a418-62caeaccd329 (physical_disk), policy: InService, state: Active }
 
 
+> inventory-show latest
+collection: 9e187896-7809-46d0-9210-d75be1b3c4d4
+collector:  example
+started:    <REDACTED_TIMESTAMP>
+done:       <REDACTED_TIMESTAMP>
+errors:     0
+
+SLED AGENTS
+
+sled 89d02b1b-478c-401a-8e28-7a26f74fa41b (role = Gimlet, serial serial0)
+    found at:    <REDACTED_TIMESTAMP> from fake sled agent
+    address:     [fd00:1122:3344:101::1]:12345
+    usable hw threads:   10
+    usable memory (GiB): 0
+    reservoir (GiB):     0
+    physical disks:
+      U2: DiskIdentity { vendor: "fake-vendor", model: "fake-model", serial: "serial-0477165a-a72e-4814-b8d6-74aa02cb2040" } in 0
+      U2: DiskIdentity { vendor: "fake-vendor", model: "fake-model", serial: "serial-9f9f5b5c-f668-49cf-8474-b08e504ac09b" } in 1
+      U2: DiskIdentity { vendor: "fake-vendor", model: "fake-model", serial: "serial-ab94a812-86ce-428c-bbbb-6ce1ab0b071b" } in 2
+      U2: DiskIdentity { vendor: "fake-vendor", model: "fake-model", serial: "serial-f96f5901-2907-4f21-bfeb-772f8a3c4e44" } in 3
+    zpools
+      0477165a-a72e-4814-b8d6-74aa02cb2040: total size: 100 GiB
+      9f9f5b5c-f668-49cf-8474-b08e504ac09b: total size: 100 GiB
+      ab94a812-86ce-428c-bbbb-6ce1ab0b071b: total size: 100 GiB
+      f96f5901-2907-4f21-bfeb-772f8a3c4e44: total size: 100 GiB
+    datasets:
+      oxp_ab94a812-86ce-428c-bbbb-6ce1ab0b071b/crypt/zone - id: 4395fcea-042d-4112-bf91-5a1120ec1436, compression: off
+        available: 1 GiB, used: 0 B
+        reservation: None, quota: None
+      oxp_9f9f5b5c-f668-49cf-8474-b08e504ac09b/crypt/debug - id: 5c796daf-a469-4ad7-9d61-c8585922dee4, compression: gzip-9
+        available: 1 GiB, used: 0 B
+        reservation: None, quota: Some(ByteCount(107374182400))
+      oxp_ab94a812-86ce-428c-bbbb-6ce1ab0b071b/crypt/debug - id: 5d833628-618a-4e9a-9b0c-a13f6d0000fd, compression: gzip-9
+        available: 1 GiB, used: 0 B
+        reservation: None, quota: Some(ByteCount(107374182400))
+      oxp_0477165a-a72e-4814-b8d6-74aa02cb2040/crypt/zone - id: 8899e637-8cbd-45ee-bf31-46326155385b, compression: off
+        available: 1 GiB, used: 0 B
+        reservation: None, quota: None
+      oxp_f96f5901-2907-4f21-bfeb-772f8a3c4e44/crypt/debug - id: 9ffaf17f-2539-4409-b7c8-a1b2f6445f0a, compression: gzip-9
+        available: 1 GiB, used: 0 B
+        reservation: None, quota: Some(ByteCount(107374182400))
+      oxp_9f9f5b5c-f668-49cf-8474-b08e504ac09b/crypt/zone - id: a61f2fc1-6886-4f21-ad8c-bb8d0654a250, compression: off
+        available: 1 GiB, used: 0 B
+        reservation: None, quota: None
+      oxp_f96f5901-2907-4f21-bfeb-772f8a3c4e44/crypt/zone - id: c03328b4-8f4c-49f0-8905-0d1e610d8f79, compression: off
+        available: 1 GiB, used: 0 B
+        reservation: None, quota: None
+      oxp_0477165a-a72e-4814-b8d6-74aa02cb2040/crypt/debug - id: dba5f33d-a4fc-4c1e-bae9-4074c2e2b057, compression: gzip-9
+        available: 1 GiB, used: 0 B
+        reservation: None, quota: Some(ByteCount(107374182400))
+
+LEDGERED SLED CONFIG
+    generation: 2
+    remove_mupdate_override: None
+    desired host phase 2 slot a: keep current contents
+    desired host phase 2 slot b: keep current contents
+    DISKS: 4
+        ID                                           ZPOOL_ID                                     VENDOR              MODEL              SERIAL                                      
+        2b4bce7e-8346-416c-b409-a31593b77202         ab94a812-86ce-428c-bbbb-6ce1ab0b071b         fake-vendor         fake-model         serial-ab94a812-86ce-428c-bbbb-6ce1ab0b071b 
+        6a5a31ab-4edc-44e0-a7a1-4190bfe582f7         0477165a-a72e-4814-b8d6-74aa02cb2040         fake-vendor         fake-model         serial-0477165a-a72e-4814-b8d6-74aa02cb2040 
+        9d603382-d7ed-4868-a411-8309a6f2b6a7         9f9f5b5c-f668-49cf-8474-b08e504ac09b         fake-vendor         fake-model         serial-9f9f5b5c-f668-49cf-8474-b08e504ac09b 
+        f7e6334e-7e25-472e-a418-62caeaccd329         f96f5901-2907-4f21-bfeb-772f8a3c4e44         fake-vendor         fake-model         serial-f96f5901-2907-4f21-bfeb-772f8a3c4e44 
+    DATASETS: 8
+        ID                                           NAME                                                         COMPRESSION         QUOTA           RESERVATION 
+        4395fcea-042d-4112-bf91-5a1120ec1436         oxp_ab94a812-86ce-428c-bbbb-6ce1ab0b071b/crypt/zone          off                 none            none        
+        5c796daf-a469-4ad7-9d61-c8585922dee4         oxp_9f9f5b5c-f668-49cf-8474-b08e504ac09b/crypt/debug         gzip-9              100 GiB         none        
+        5d833628-618a-4e9a-9b0c-a13f6d0000fd         oxp_ab94a812-86ce-428c-bbbb-6ce1ab0b071b/crypt/debug         gzip-9              100 GiB         none        
+        8899e637-8cbd-45ee-bf31-46326155385b         oxp_0477165a-a72e-4814-b8d6-74aa02cb2040/crypt/zone          off                 none            none        
+        9ffaf17f-2539-4409-b7c8-a1b2f6445f0a         oxp_f96f5901-2907-4f21-bfeb-772f8a3c4e44/crypt/debug         gzip-9              100 GiB         none        
+        a61f2fc1-6886-4f21-ad8c-bb8d0654a250         oxp_9f9f5b5c-f668-49cf-8474-b08e504ac09b/crypt/zone          off                 none            none        
+        c03328b4-8f4c-49f0-8905-0d1e610d8f79         oxp_f96f5901-2907-4f21-bfeb-772f8a3c4e44/crypt/zone          off                 none            none        
+        dba5f33d-a4fc-4c1e-bae9-4074c2e2b057         oxp_0477165a-a72e-4814-b8d6-74aa02cb2040/crypt/debug         gzip-9              100 GiB         none        
+    zone config empty
+    boot disk slot: FAILED TO DETERMINE: constructed via debug_assume_success()
+    slot A details UNAVAILABLE: constructed via debug_assume_success()
+    slot B details UNAVAILABLE: constructed via debug_assume_success()
+    last reconciled config: matches ledgered config
+        no orphaned datasets
+        all disks reconciled successfully
+        all datasets reconciled successfully
+        all zones reconciled successfully
+    reconciler task status: idle (finished at <REDACTED_TIMESTAMP> after running for <REDACTED_DURATION>s)
+ORPHANED DATASETS
+
+sled 89d02b1b-478c-401a-8e28-7a26f74fa41b (serial serial0)
+    no orphaned datasets
+
+KEEPER MEMBERSHIP
+No membership retrieved.
+
+
+
 > blueprint-show ade5749d-bdf3-4fab-a8ae-00bea01b3a5a
 blueprint  ade5749d-bdf3-4fab-a8ae-00bea01b3a5a
 parent:    02697f74-b14a-4418-90f0-c28b2a3a6aa9
