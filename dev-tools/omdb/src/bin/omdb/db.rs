@@ -158,6 +158,7 @@ use omicron_common::api::external::DataPageParams;
 use omicron_common::api::external::Generation;
 use omicron_common::api::external::InstanceState;
 use omicron_common::api::external::MacAddr;
+use omicron_common::disk::M2Slot;
 use omicron_uuid_kinds::CollectionUuid;
 use omicron_uuid_kinds::DatasetUuid;
 use omicron_uuid_kinds::DownstairsRegionUuid;
@@ -7212,6 +7213,31 @@ async fn inv_collection_print_devices(
         }
         println!("");
         println!("    found at: {} from {}", sp.time_collected, sp.source);
+
+        #[derive(Tabled)]
+        #[tabled(rename_all = "SCREAMING_SNAKE_CASE")]
+        struct HostPhase1FlashHashRow {
+            slot: String,
+            hash: String,
+        }
+
+        println!("    host phase 1 hashes:");
+        let host_phase1_hash_rows: Vec<_> = M2Slot::iter()
+            .filter_map(|s| {
+                collection
+                    .host_phase_1_flash_hash_for(s, baseboard_id)
+                    .map(|h| (s, h))
+            })
+            .map(|(slot, phase1)| HostPhase1FlashHashRow {
+                slot: format!("{slot:?}"),
+                hash: phase1.hash.to_string(),
+            })
+            .collect();
+        let table = tabled::Table::new(host_phase1_hash_rows)
+            .with(tabled::settings::Style::empty())
+            .with(tabled::settings::Padding::new(0, 1, 0, 0))
+            .to_string();
+        println!("{}", textwrap::indent(&table.to_string(), "        "));
 
         #[derive(Tabled)]
         #[tabled(rename_all = "SCREAMING_SNAKE_CASE")]

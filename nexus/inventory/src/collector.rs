@@ -10,6 +10,7 @@ use crate::builder::InventoryError;
 use anyhow::Context;
 use gateway_client::types::GetCfpaParams;
 use gateway_client::types::RotCfpaSlot;
+use gateway_client::types::SpType;
 use gateway_messages::SpComponent;
 use nexus_types::inventory::CabooseWhich;
 use nexus_types::inventory::Collection;
@@ -178,56 +179,63 @@ impl<'a> Collector<'a> {
                 continue;
             };
 
-            // For each host phase 1 slot, attempt to collect its hash, if it
-            // hasn't been collected already. Generally, we'd only get here for
-            // the first MGS client.  Assuming that one succeeds, the other(s)
-            // will skip this loop.
-            for slot in M2Slot::iter() {
-                const PHASE1_HASH_TIMEOUT: Duration = Duration::from_secs(30);
+            // For sled SPs, for each host phase 1 slot, attempt to collect its
+            // hash, if it hasn't been collected already. Generally, we'd only
+            // get here for the first MGS client.  Assuming that one succeeds,
+            // the other(s) will skip this loop.
+            if matches!(sp.type_, SpType::Sled) {
+                for slot in M2Slot::iter() {
+                    const PHASE1_HASH_TIMEOUT: Duration =
+                        Duration::from_secs(30);
 
-                if in_progress
-                    .found_host_phase_1_flash_hash_already(&baseboard_id, slot)
-                {
-                    continue;
-                }
-
-                let phase1_slot = match slot {
-                    M2Slot::A => 0,
-                    M2Slot::B => 1,
-                };
-
-                let result = client
-                    .host_phase_1_flash_hash_calculate_with_timeout(
-                        sp,
-                        phase1_slot,
-                        PHASE1_HASH_TIMEOUT,
-                    )
-                    .await
-                    .with_context(|| {
-                        format!(
-                            "MGS {:?}: SP {sp:?}: phase 1 slot {slot:?}",
-                            client.baseurl(),
-                        )
-                    });
-                let hash = match result {
-                    Err(error) => {
-                        in_progress.found_error(InventoryError::from(error));
+                    if in_progress.found_host_phase_1_flash_hash_already(
+                        &baseboard_id,
+                        slot,
+                    ) {
                         continue;
                     }
-                    Ok(hash) => hash,
-                };
-                if let Err(error) = in_progress.found_host_phase_1_flash_hash(
-                    &baseboard_id,
-                    slot,
-                    client.baseurl(),
-                    ArtifactHash(hash),
-                ) {
-                    error!(
-                        log,
-                        "error reporting host phase 1 flash hash: \
-                         {baseboard_id:?} {slot:?} {:?}: {error:#}",
-                        client.baseurl(),
-                    );
+
+                    let phase1_slot = match slot {
+                        M2Slot::A => 0,
+                        M2Slot::B => 1,
+                    };
+
+                    let result = client
+                        .host_phase_1_flash_hash_calculate_with_timeout(
+                            sp,
+                            phase1_slot,
+                            PHASE1_HASH_TIMEOUT,
+                        )
+                        .await
+                        .with_context(|| {
+                            format!(
+                                "MGS {:?}: SP {sp:?}: phase 1 slot {slot:?}",
+                                client.baseurl(),
+                            )
+                        });
+                    let hash = match result {
+                        Err(error) => {
+                            in_progress
+                                .found_error(InventoryError::from(error));
+                            continue;
+                        }
+                        Ok(hash) => hash,
+                    };
+                    if let Err(error) = in_progress
+                        .found_host_phase_1_flash_hash(
+                            &baseboard_id,
+                            slot,
+                            client.baseurl(),
+                            ArtifactHash(hash),
+                        )
+                    {
+                        error!(
+                            log,
+                            "error reporting host phase 1 flash hash: \
+                             {baseboard_id:?} {slot:?} {:?}: {error:#}",
+                            client.baseurl(),
+                        );
+                    }
                 }
             }
 

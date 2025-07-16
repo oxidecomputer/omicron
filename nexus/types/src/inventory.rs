@@ -166,6 +166,16 @@ pub struct Collection {
 }
 
 impl Collection {
+    pub fn host_phase_1_flash_hash_for(
+        &self,
+        slot: M2Slot,
+        baseboard_id: &BaseboardId,
+    ) -> Option<&HostPhase1FlashHash> {
+        self.host_phase_1_flash_hashes
+            .get(&slot)
+            .and_then(|by_bb| by_bb.get(baseboard_id))
+    }
+
     pub fn caboose_for(
         &self,
         which: CabooseWhich,

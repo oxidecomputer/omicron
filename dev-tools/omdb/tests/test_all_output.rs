@@ -10,12 +10,15 @@
 use dropshot::Method;
 use expectorate::assert_contents;
 use http::StatusCode;
+use nexus_db_queries::context::OpContext;
 use nexus_test_utils::wait_for_producer;
 use nexus_test_utils::{OXIMETER_UUID, PRODUCER_UUID};
 use nexus_test_utils_macros::nexus_test;
 use nexus_types::deployment::Blueprint;
 use nexus_types::deployment::SledFilter;
 use nexus_types::deployment::UnstableReconfiguratorState;
+use omicron_common::api::external::SwitchLocation;
+use omicron_test_utils::dev::poll::{CondCheckError, wait_for_condition};
 use omicron_test_utils::dev::test_cmds::Redactor;
 use omicron_test_utils::dev::test_cmds::path_to_executable;
 use omicron_test_utils::dev::test_cmds::run_command;
@@ -23,6 +26,7 @@ use slog_error_chain::InlineErrorChain;
 use std::fmt::Write;
 use std::net::IpAddr;
 use std::path::Path;
+use std::time::Duration;
 use subprocess::Exec;
 use uuid::Uuid;
 
@@ -131,17 +135,20 @@ async fn test_omdb_usage_errors() {
 async fn test_omdb_success_cases(cptestctx: &ControlPlaneTestContext) {
     clear_omdb_env();
 
-    let gwtestctx = gateway_test_utils::setup::test_setup(
-        "test_omdb_success_case",
-        gateway_messages::SpPort::One,
-    )
-    .await;
     let cmd_path = path_to_executable(CMD_OMDB);
 
     let postgres_url = cptestctx.database.listen_url();
     let nexus_internal_url =
         format!("http://{}/", cptestctx.internal_client.bind_address);
-    let mgs_url = format!("http://{}/", gwtestctx.client.bind_address);
+    let mgs_url = format!(
+        "http://{}/",
+        cptestctx
+            .gateway
+            .get(&SwitchLocation::Switch0)
+            .expect("nexus_test always sets up MGS on switch 0")
+            .client
+            .bind_address
+    );
     let ox_url = format!("http://{}/", cptestctx.oximeter.server_address());
     let ox_test_producer = cptestctx.producer.address().ip();
     let ch_url = format!("http://{}/", cptestctx.clickhouse.http_address());
@@ -165,6 +172,31 @@ async fn test_omdb_success_cases(cptestctx: &ControlPlaneTestContext) {
     )
     .await;
 
+    // Wait for Nexus to have gathered at least one inventory collection. (We'll
+    // check below that `reconfigurator export` contains at least one, so have
+    // to wait until there's one to export.)
+    {
+        let datastore = cptestctx.server.server_context().nexus.datastore();
+        let opctx = OpContext::for_tests(
+            cptestctx.logctx.log.clone(),
+            datastore.clone(),
+        );
+
+        wait_for_condition(
+            || async {
+                match datastore.inventory_get_latest_collection(&opctx).await {
+                    Ok(Some(_)) => Ok(()),
+                    Ok(None) => Err(CondCheckError::NotYet),
+                    Err(err) => Err(CondCheckError::Failed(err)),
+                }
+            },
+            &Duration::from_millis(500),
+            &Duration::from_secs(60),
+        )
+        .await
+        .expect("test nexus gathered an inventory collection");
+    }
+
     let mut output = String::new();
 
     let invocations: &[&[&str]] = &[
@@ -175,6 +207,7 @@ async fn test_omdb_success_cases(cptestctx: &ControlPlaneTestContext) {
         &["db", "instances"],
         &["db", "sleds"],
         &["db", "sleds", "-F", "discretionary"],
+        &["db", "inventory", "collections", "show", "latest"],
         &["mgs", "inventory"],
         &["nexus", "background-tasks", "doc"],
         &["nexus", "background-tasks", "show"],
@@ -319,8 +352,6 @@ async fn test_omdb_success_cases(cptestctx: &ControlPlaneTestContext) {
         &ox_url,
         ox_test_producer,
     );
-
-    gwtestctx.teardown().await;
 }
 
 /// Verify that we properly deal with cases where:

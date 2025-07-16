@@ -87,6 +87,242 @@ stderr:
 note: using database URL postgresql://root@[::1]:REDACTED_PORT/omicron?sslmode=disable
 note: database schema version matches expected (<redacted database version>)
 =============================================
+EXECUTING COMMAND: omdb ["db", "inventory", "collections", "show", "latest"]
+termination: Exited(0)
+---------------------------------------------
+stdout:
+collection: ..........<REDACTED_UUID>...........
+collector:  ..........<REDACTED_UUID>........... (likely a Nexus instance)
+started:    <REDACTED_TIMESTAMP>
+done:       <REDACTED_TIMESTAMP>
+errors:     1
+  error 0: No CockroachDB nodes returned metrics
+
+Sled SimGimlet00
+    part number: i86pc
+    power:    A2
+    revision: 0
+    MGS slot: Sled 0 (cubby 0)
+    found at: 2025-07-16 18:39:37.773939 UTC from http://[::1]:REDACTED_PORT
+    host phase 1 hashes:
+        SLOT HASH                                                             
+        A    e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855 
+        B    e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855 
+    cabooses:
+        SLOT       BOARD        NAME         VERSION GIT_COMMIT SIGN                                                             
+        SpSlot0    SimGimletSp  SimGimlet    0.0.2   ffffffff   n/a                                                              
+        SpSlot1    SimGimletSp  SimGimlet    0.0.1   fefefefe   n/a                                                              
+        RotSlotA   SimRot       SimGimletRot 0.0.4   eeeeeeee   11594bb5548a757e918e6fe056e2ad9e084297c9555417a025d8788eacf55daf 
+        RotSlotB   SimRot       SimGimletRot 0.0.3   edededed   11594bb5548a757e918e6fe056e2ad9e084297c9555417a025d8788eacf55daf 
+        Stage0     SimRotStage0 SimGimletRot 0.0.200 ddddddddd  11594bb5548a757e918e6fe056e2ad9e084297c9555417a025d8788eacf55daf 
+        Stage0Next SimRotStage0 SimGimletRot 0.0.200 dadadadad  11594bb5548a757e918e6fe056e2ad9e084297c9555417a025d8788eacf55daf 
+    RoT pages:
+        SLOT         DATA_BASE64                         
+        Cmpa         Z2ltbGV0LWNtcGEAAAAAAAAAAAAAAAAA... 
+        CfpaActive   Z2ltbGV0LWNmcGEtYWN0aXZlAAAAAAAA... 
+        CfpaInactive Z2ltbGV0LWNmcGEtaW<REDACTED_DURATION>hY3RpdmUAAAAA... 
+        CfpaScratch  Z2ltbGV0LWNmcGEtc2NyYXRjaAAAAAAA... 
+    RoT: active slot: slot A
+    RoT: persistent boot preference: slot A
+    RoT: pending persistent boot preference: -
+    RoT: transient boot preference: -
+    RoT: slot A SHA3-256: aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+    RoT: slot B SHA3-256: bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb
+
+Sled SimGimlet01
+    part number: i86pc
+    power:    A2
+    revision: 0
+    MGS slot: Sled 1 (cubby 1)
+    found at: 2025-07-16 18:39:37.782787 UTC from http://[::1]:REDACTED_PORT
+    host phase 1 hashes:
+        SLOT HASH                                                             
+        A    e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855 
+        B    e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855 
+    cabooses:
+        SLOT       BOARD        NAME         VERSION GIT_COMMIT SIGN                                                             
+        SpSlot0    SimGimletSp  SimGimlet    0.0.2   ffffffff   n/a                                                              
+        SpSlot1    SimGimletSp  SimGimlet    0.0.1   fefefefe   n/a                                                              
+        RotSlotA   SimRot       SimGimletRot 0.0.4   eeeeeeee   11594bb5548a757e918e6fe056e2ad9e084297c9555417a025d8788eacf55daf 
+        RotSlotB   SimRot       SimGimletRot 0.0.3   edededed   11594bb5548a757e918e6fe056e2ad9e084297c9555417a025d8788eacf55daf 
+        Stage0     SimRotStage0 SimGimletRot 0.0.200 ddddddddd  11594bb5548a757e918e6fe056e2ad9e084297c9555417a025d8788eacf55daf 
+        Stage0Next SimRotStage0 SimGimletRot 0.0.200 dadadadad  11594bb5548a757e918e6fe056e2ad9e084297c9555417a025d8788eacf55daf 
+    RoT pages:
+        SLOT         DATA_BASE64                         
+        Cmpa         Z2ltbGV0LWNtcGEAAAAAAAAAAAAAAAAA... 
+        CfpaActive   Z2ltbGV0LWNmcGEtYWN0aXZlAAAAAAAA... 
+        CfpaInactive Z2ltbGV0LWNmcGEtaW<REDACTED_DURATION>hY3RpdmUAAAAA... 
+        CfpaScratch  Z2ltbGV0LWNmcGEtc2NyYXRjaAAAAAAA... 
+    RoT: active slot: slot A
+    RoT: persistent boot preference: slot A
+    RoT: pending persistent boot preference: -
+    RoT: transient boot preference: -
+    RoT: slot A SHA3-256: aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+    RoT: slot B SHA3-256: bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb
+
+Switch SimSidecar0
+    part number: FAKE_SIM_SIDECAR
+    power:    A2
+    revision: 0
+    MGS slot: Switch 0
+    found at: 2025-07-16 18:39:37.756192 UTC from http://[::1]:REDACTED_PORT
+    host phase 1 hashes:
+        SLOT HASH 
+    cabooses:
+        SLOT       BOARD        NAME          VERSION GIT_COMMIT SIGN                                                             
+        SpSlot0    SimSidecarSp SimSidecar    0.0.2   ffffffff   n/a                                                              
+        SpSlot1    SimSidecarSp SimSidecar    0.0.1   fefefefe   n/a                                                              
+        RotSlotA   SimRot       SimSidecarRot 0.0.4   eeeeeeee   11594bb5548a757e918e6fe056e2ad9e084297c9555417a025d8788eacf55daf 
+        RotSlotB   SimRot       SimSidecarRot 0.0.3   edededed   11594bb5548a757e918e6fe056e2ad9e084297c9555417a025d8788eacf55daf 
+        Stage0     SimRotStage0 SimSidecarRot 0.0.200 ddddddddd  11594bb5548a757e918e6fe056e2ad9e084297c9555417a025d8788eacf55daf 
+        Stage0Next SimRotStage0 SimSidecarRot 0.0.200 dadadadad  11594bb5548a757e918e6fe056e2ad9e084297c9555417a025d8788eacf55daf 
+    RoT pages:
+        SLOT         DATA_BASE64                         
+        Cmpa         c2lkZWNhci1jbXBhAAAAAAAAAAAAAAAA... 
+        CfpaActive   c2lkZWNhci1jZnBhLWFjdGl2ZQAAAAAA... 
+        CfpaInactive c2lkZWNhci1jZnBhLWluYWN0aXZlAAAA... 
+        CfpaScratch  c2lkZWNhci1jZnBhLXNjcmF0Y2gAAAAA... 
+    RoT: active slot: slot A
+    RoT: persistent boot preference: slot A
+    RoT: pending persistent boot preference: -
+    RoT: transient boot preference: -
+    RoT: slot A SHA3-256: aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+    RoT: slot B SHA3-256: bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb
+
+Switch SimSidecar1
+    part number: FAKE_SIM_SIDECAR
+    power:    A2
+    revision: 0
+    MGS slot: Switch 1
+    found at: 2025-07-16 18:39:37.766483 UTC from http://[::1]:REDACTED_PORT
+    host phase 1 hashes:
+        SLOT HASH 
+    cabooses:
+        SLOT       BOARD        NAME          VERSION GIT_COMMIT SIGN                                                             
+        SpSlot0    SimSidecarSp SimSidecar    0.0.2   ffffffff   n/a                                                              
+        SpSlot1    SimSidecarSp SimSidecar    0.0.1   fefefefe   n/a                                                              
+        RotSlotA   SimRot       SimSidecarRot 0.0.4   eeeeeeee   11594bb5548a757e918e6fe056e2ad9e084297c9555417a025d8788eacf55daf 
+        RotSlotB   SimRot       SimSidecarRot 0.0.3   edededed   11594bb5548a757e918e6fe056e2ad9e084297c9555417a025d8788eacf55daf 
+        Stage0     SimRotStage0 SimSidecarRot 0.0.200 ddddddddd  11594bb5548a757e918e6fe056e2ad9e084297c9555417a025d8788eacf55daf 
+        Stage0Next SimRotStage0 SimSidecarRot 0.0.200 dadadadad  11594bb5548a757e918e6fe056e2ad9e084297c9555417a025d8788eacf55daf 
+    RoT pages:
+        SLOT         DATA_BASE64                         
+        Cmpa         c2lkZWNhci1jbXBhAAAAAAAAAAAAAAAA... 
+        CfpaActive   c2lkZWNhci1jZnBhLWFjdGl2ZQAAAAAA... 
+        CfpaInactive c2lkZWNhci1jZnBhLWluYWN0aXZlAAAA... 
+        CfpaScratch  c2lkZWNhci1jZnBhLXNjcmF0Y2gAAAAA... 
+    RoT: active slot: slot A
+    RoT: persistent boot preference: slot A
+    RoT: pending persistent boot preference: -
+    RoT: transient boot preference: -
+    RoT: slot A SHA3-256: aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+    RoT: slot B SHA3-256: bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb
+
+SLED AGENTS
+
+sled ..........<REDACTED_UUID>........... (role = Scrimlet, serial sim-..........<REDACTED_UUID>...........)
+    found at:    2025-07-16 18:39:37.824145 UTC from http://[::1]:REDACTED_PORT
+    address:     [::1]:REDACTED_PORT
+    usable hw threads:   16
+    usable memory (GiB): 32
+    reservoir (GiB):     16
+
+LEDGERED SLED CONFIG
+    generation: 2
+    remove_mupdate_override: None
+    desired host phase 2 slot a: keep current contents
+    desired host phase 2 slot b: keep current contents
+    DISKS: 10
+        ID                                           ZPOOL_ID                                     VENDOR              MODEL                    SERIAL             
+        ..........<REDACTED_UUID>...........         ..........<REDACTED_UUID>...........         nexus-tests         nexus-test-model         nexus-test-disk-13 
+        ..........<REDACTED_UUID>...........         ..........<REDACTED_UUID>...........         nexus-tests         nexus-test-model         nexus-test-disk-16 
+        ..........<REDACTED_UUID>...........         ..........<REDACTED_UUID>...........         nexus-tests         nexus-test-model         nexus-test-disk-11 
+        ..........<REDACTED_UUID>...........         ..........<REDACTED_UUID>...........         nexus-tests         nexus-test-model         nexus-test-disk-19 
+        ..........<REDACTED_UUID>...........         ..........<REDACTED_UUID>...........         nexus-tests         nexus-test-model         nexus-test-disk-17 
+        ..........<REDACTED_UUID>...........         ..........<REDACTED_UUID>...........         nexus-tests         nexus-test-model         nexus-test-disk-15 
+        ..........<REDACTED_UUID>...........         ..........<REDACTED_UUID>...........         nexus-tests         nexus-test-model         nexus-test-disk-10 
+        ..........<REDACTED_UUID>...........         ..........<REDACTED_UUID>...........         nexus-tests         nexus-test-model         nexus-test-disk-14 
+        ..........<REDACTED_UUID>...........         ..........<REDACTED_UUID>...........         nexus-tests         nexus-test-model         nexus-test-disk-12 
+        ..........<REDACTED_UUID>...........         ..........<REDACTED_UUID>...........         nexus-tests         nexus-test-model         nexus-test-disk-18 
+    dataset config empty
+    zone config empty
+    reconciler task status: not yet run
+
+sled ..........<REDACTED_UUID>........... (role = Scrimlet, serial sim-..........<REDACTED_UUID>...........)
+    found at:    2025-07-16 18:39:37.840595 UTC from http://[::1]:REDACTED_PORT
+    address:     [::1]:REDACTED_PORT
+    usable hw threads:   16
+    usable memory (GiB): 32
+    reservoir (GiB):     16
+    datasets:
+      oxp_..........<REDACTED_UUID>.........../crypt/zone/oxz_external_dns_..........<REDACTED_UUID>........... - id: ..........<REDACTED_UUID>..........., compression: off
+        available: 0 B, used: 0 B
+        reservation: None, quota: None
+      oxp_..........<REDACTED_UUID>.........../crypt/zone/oxz_nexus_..........<REDACTED_UUID>........... - id: ..........<REDACTED_UUID>..........., compression: off
+        available: 0 B, used: 0 B
+        reservation: None, quota: None
+      oxp_..........<REDACTED_UUID>.........../crypt/zone/oxz_ntp_..........<REDACTED_UUID>........... - id: ..........<REDACTED_UUID>..........., compression: off
+        available: 0 B, used: 0 B
+        reservation: None, quota: None
+      oxp_..........<REDACTED_UUID>.........../crypt/zone/oxz_crucible_pantry_..........<REDACTED_UUID>........... - id: ..........<REDACTED_UUID>..........., compression: off
+        available: 0 B, used: 0 B
+        reservation: None, quota: None
+      oxp_..........<REDACTED_UUID>.........../crypt/zone/oxz_internal_dns_..........<REDACTED_UUID>........... - id: ..........<REDACTED_UUID>..........., compression: off
+        available: 0 B, used: 0 B
+        reservation: None, quota: None
+      oxp_..........<REDACTED_UUID>.........../crypt/zone/oxz_clickhouse_..........<REDACTED_UUID>........... - id: ..........<REDACTED_UUID>..........., compression: off
+        available: 0 B, used: 0 B
+        reservation: None, quota: None
+      oxp_..........<REDACTED_UUID>.........../crypt/zone/oxz_cockroachdb_..........<REDACTED_UUID>........... - id: ..........<REDACTED_UUID>..........., compression: off
+        available: 0 B, used: 0 B
+        reservation: None, quota: None
+
+LEDGERED SLED CONFIG
+    generation: 2
+    remove_mupdate_override: None
+    desired host phase 2 slot a: keep current contents
+    desired host phase 2 slot b: keep current contents
+    DISKS: 10
+        ID                                           ZPOOL_ID                                     VENDOR              MODEL                    SERIAL            
+        ..........<REDACTED_UUID>...........         ..........<REDACTED_UUID>...........         nexus-tests         nexus-test-model         nexus-test-disk-4 
+        ..........<REDACTED_UUID>...........         ..........<REDACTED_UUID>...........         nexus-tests         nexus-test-model         nexus-test-disk-3 
+        ..........<REDACTED_UUID>...........         ..........<REDACTED_UUID>...........         nexus-tests         nexus-test-model         nexus-test-disk-8 
+        ..........<REDACTED_UUID>...........         ..........<REDACTED_UUID>...........         nexus-tests         nexus-test-model         nexus-test-disk-1 
+        ..........<REDACTED_UUID>...........         ..........<REDACTED_UUID>...........         nexus-tests         nexus-test-model         nexus-test-disk-0 
+        ..........<REDACTED_UUID>...........         ..........<REDACTED_UUID>...........         nexus-tests         nexus-test-model         nexus-test-disk-6 
+        ..........<REDACTED_UUID>...........         ..........<REDACTED_UUID>...........         nexus-tests         nexus-test-model         nexus-test-disk-7 
+        ..........<REDACTED_UUID>...........         ..........<REDACTED_UUID>...........         nexus-tests         nexus-test-model         nexus-test-disk-2 
+        ..........<REDACTED_UUID>...........         ..........<REDACTED_UUID>...........         nexus-tests         nexus-test-model         nexus-test-disk-5 
+        ..........<REDACTED_UUID>...........         ..........<REDACTED_UUID>...........         nexus-tests         nexus-test-model         nexus-test-disk-9 
+    DATASETS: 7
+        ID                                           NAME                                                                                                                 COMPRESSION         QUOTA         RESERVATION 
+        ..........<REDACTED_UUID>...........         oxp_..........<REDACTED_UUID>.........../crypt/zone/oxz_crucible_pantry_..........<REDACTED_UUID>...........         off                 none          none        
+        ..........<REDACTED_UUID>...........         oxp_..........<REDACTED_UUID>.........../crypt/zone/oxz_external_dns_..........<REDACTED_UUID>...........            off                 none          none        
+        ..........<REDACTED_UUID>...........         oxp_..........<REDACTED_UUID>.........../crypt/zone/oxz_clickhouse_..........<REDACTED_UUID>...........              off                 none          none        
+        ..........<REDACTED_UUID>...........         oxp_..........<REDACTED_UUID>.........../crypt/zone/oxz_cockroachdb_..........<REDACTED_UUID>...........             off                 none          none        
+        ..........<REDACTED_UUID>...........         oxp_..........<REDACTED_UUID>.........../crypt/zone/oxz_ntp_..........<REDACTED_UUID>...........                     off                 none          none        
+        ..........<REDACTED_UUID>...........         oxp_..........<REDACTED_UUID>.........../crypt/zone/oxz_internal_dns_..........<REDACTED_UUID>...........            off                 none          none        
+        ..........<REDACTED_UUID>...........         oxp_..........<REDACTED_UUID>.........../crypt/zone/oxz_nexus_..........<REDACTED_UUID>...........                   off                 none          none        
+    ZONES: 7
+        ID                                           KIND                    IMAGE_SOURCE    
+        ..........<REDACTED_UUID>...........         crucible_pantry         install-dataset 
+        ..........<REDACTED_UUID>...........         nexus                   install-dataset 
+        ..........<REDACTED_UUID>...........         boundary_ntp            install-dataset 
+        ..........<REDACTED_UUID>...........         clickhouse              install-dataset 
+        ..........<REDACTED_UUID>...........         external_dns            install-dataset 
+        ..........<REDACTED_UUID>...........         internal_dns            install-dataset 
+        ..........<REDACTED_UUID>...........         cockroach_db            install-dataset 
+    reconciler task status: not yet run
+
+KEEPER MEMBERSHIP
+No membership retrieved.
+
+---------------------------------------------
+stderr:
+note: using database URL postgresql://root@[::1]:REDACTED_PORT/omicron?sslmode=disable
+note: database schema version matches expected (<redacted database version>)
+warning: 1 collection error was reported above
+=============================================
 EXECUTING COMMAND: omdb ["mgs", "inventory"]
 termination: Exited(0)
 ---------------------------------------------
