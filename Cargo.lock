@@ -8283,6 +8283,7 @@ dependencies = [
  "ipnetwork",
  "itertools 0.10.5",
  "itertools 0.12.1",
+ "itertools 0.13.0",
  "lalrpop-util",
  "lazy_static",
  "libc",
