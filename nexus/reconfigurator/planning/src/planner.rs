@@ -522,16 +522,7 @@ impl<'a> Planner<'a> {
         for sled in sleds {
             let eligible = match &sled.status {
                 NoopConvertSledStatus::Ineligible(_) => continue,
-                NoopConvertSledStatus::MaybeEligible(maybe_eligible) => {
-                    // If the mupdate override ID is set, we can't do noop
-                    // conversions. This information is already logged so we
-                    // don't need to log it again.
-                    if maybe_eligible.mupdate_override_id.is_some() {
-                        continue;
-                    }
-
-                    maybe_eligible
-                }
+                NoopConvertSledStatus::Eligible(eligible) => eligible,
             };
 
             let zone_counts = eligible.zone_counts();
@@ -544,13 +535,11 @@ impl<'a> Planner<'a> {
                 );
                 continue;
             }
-            if zone_counts.num_maybe_eligible > 0 {
+            if zone_counts.num_eligible > 0 {
                 info!(
                     self.log,
                     "noop converting {}/{} install-dataset zones to artifact store",
-                    // If we're here, then num_maybe_eligible represents
-                    // actually eligible zones.
-                    zone_counts.num_maybe_eligible,
+                    zone_counts.num_eligible,
                     zone_counts.num_install_dataset();
                     "sled_id" => %sled.sled_id,
                     "num_total" => zone_counts.num_total,
@@ -572,13 +561,11 @@ impl<'a> Planner<'a> {
                 }
             }
 
-            // Again, if we're here, then num_maybe_eligible represents actually
-            // eligible zones.
-            if zone_counts.num_maybe_eligible > 0 {
+            if zone_counts.num_eligible > 0 {
                 self.blueprint.record_operation(
                     Operation::SledNoopZoneImageSourcesUpdated {
                         sled_id: sled.sled_id,
-                        count: zone_counts.num_maybe_eligible,
+                        count: zone_counts.num_eligible,
                     },
                 );
             }
@@ -1639,12 +1626,12 @@ pub(crate) mod test {
     use expectorate::assert_contents;
     use nexus_sled_agent_shared::inventory::ConfigReconcilerInventory;
     use nexus_sled_agent_shared::inventory::ConfigReconcilerInventoryResult;
+    use nexus_types::deployment::BlueprintArtifactVersion;
     use nexus_types::deployment::BlueprintDatasetDisposition;
     use nexus_types::deployment::BlueprintDiffSummary;
     use nexus_types::deployment::BlueprintPhysicalDiskDisposition;
     use nexus_types::deployment::BlueprintZoneDisposition;
     use nexus_types::deployment::BlueprintZoneImageSource;
-    use nexus_types::deployment::BlueprintZoneImageVersion;
     use nexus_types::deployment::BlueprintZoneType;
     use nexus_types::deployment::ClickhouseMode;
     use nexus_types::deployment::ClickhousePolicy;
@@ -5145,7 +5132,7 @@ pub(crate) mod test {
             .expect("can't parse artifact version");
         let fake_hash = ArtifactHash([0; 32]);
         let image_source = BlueprintZoneImageSource::Artifact {
-            version: BlueprintZoneImageVersion::Available {
+            version: BlueprintArtifactVersion::Available {
                 version: version.clone(),
             },
             hash: fake_hash,
@@ -5215,7 +5202,7 @@ pub(crate) mod test {
             })
         {
             zone.image_source = BlueprintZoneImageSource::Artifact {
-                version: BlueprintZoneImageVersion::Available {
+                version: BlueprintArtifactVersion::Available {
                     version: version.clone(),
                 },
                 hash: fake_hash,
@@ -5473,7 +5460,7 @@ pub(crate) mod test {
             .expect("can't parse artifact version");
         let fake_hash = ArtifactHash([0; 32]);
         let image_source = BlueprintZoneImageSource::Artifact {
-            version: BlueprintZoneImageVersion::Available {
+            version: BlueprintArtifactVersion::Available {
                 version: version.clone(),
             },
             hash: fake_hash,
@@ -5522,7 +5509,7 @@ pub(crate) mod test {
             .filter(|z| !z.zone_type.is_cockroach())
         {
             zone.image_source = BlueprintZoneImageSource::Artifact {
-                version: BlueprintZoneImageVersion::Available {
+                version: BlueprintArtifactVersion::Available {
                     version: version.clone(),
                 },
                 hash: fake_hash,
@@ -5727,7 +5714,7 @@ pub(crate) mod test {
             .expect("can't parse artifact version");
         let fake_hash = ArtifactHash([0; 32]);
         let image_source = BlueprintZoneImageSource::Artifact {
-            version: BlueprintZoneImageVersion::Available {
+            version: BlueprintArtifactVersion::Available {
                 version: version.clone(),
             },
             hash: fake_hash,

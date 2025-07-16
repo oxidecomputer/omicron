@@ -163,7 +163,7 @@ WARN zone manifest inventory indicated install dataset artifact is invalid, not 
 INFO performed noop image source checks on sled, sled_id: b82ede02-399c-48c6-a1de-411df4fa49a7, num_total: 2, num_already_artifact: 0, num_eligible: 0, num_ineligible: 2
 INFO install dataset artifact hash not found in TUF repo, ignoring for noop checks, sled_id: b82ede02-399c-48c6-a1de-411df4fa49a7, zone_id: b910534b-2a53-4335-a3d9-5311d2f3186a, kind: internal_ntp, file_name: ntp.tar.gz, expected_hash: d76e26198daed69cdae04490d7477f8c842e0dbe37d463eac0d0a8d3fb803095
 INFO install dataset artifact hash not found in TUF repo, ignoring for noop checks, sled_id: b82ede02-399c-48c6-a1de-411df4fa49a7, zone_id: ecbe0b3d-1acc-44b2-b6d4-f4d2770516e4, kind: crucible, file_name: crucible.tar.gz, expected_hash: 866f6a7c2e51c056fb722b5113e80181cc9cd8b712a0d3dbf1edc4ce29e5229e
-INFO performed noop image source checks on sled, but no conversions will occur because remove_mupdate_override is set in the blueprint, sled_id: d81c6a84-79b8-4958-ae41-ea46c9b19763, mupdate_override_id: ffffffff-ffff-ffff-ffff-ffffffffffff, num_total: 2, num_already_artifact: 0, num_would_be_eligible: 2, num_ineligible: 0
+INFO skipped noop image source check on sled, sled_id: d81c6a84-79b8-4958-ae41-ea46c9b19763, reason: remove_mupdate_override is set in the blueprint (ffffffff-ffff-ffff-ffff-ffffffffffff)
 INFO skipped noop image source check on sled, sled_id: e96e226f-4ed9-4c01-91b9-69a9cd076c9e, reason: sled not found in inventory
 INFO noop converting 6/6 install-dataset zones to artifact store, sled_id: 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6, num_total: 6, num_already_artifact: 0
 INFO noop converting 5/6 install-dataset zones to artifact store, sled_id: aff6c093-197d-42c5-ad80-9f10ba051a34, num_total: 6, num_already_artifact: 0
@@ -192,6 +192,14 @@ to:   blueprint 58d5e830-0884-47d8-a7cd-b2b3751adeb4
  MODIFIED SLEDS:
 
   sled 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6 (active, config generation 2 -> 3):
+
+    host phase 2 contents:
+    ------------------------
+    slot   boot image source
+    ------------------------
+    A      current contents 
+    B      current contents 
+
 
     physical disks:
     ------------------------------------------------------------------------------------
@@ -237,6 +245,14 @@ to:   blueprint 58d5e830-0884-47d8-a7cd-b2b3751adeb4
 
   sled 9a867dc9-d505-427f-9eff-cdb1d4d9bd73 (active -> decommissioned, config generation 2 -> 3):
 
+    host phase 2 contents:
+    ------------------------
+    slot   boot image source
+    ------------------------
+    A      current contents 
+    B      current contents 
+
+
     physical disks:
     ---------------------------------------------------------------------------------------
     vendor        model        serial                                        disposition   
@@ -272,6 +288,14 @@ to:   blueprint 58d5e830-0884-47d8-a7cd-b2b3751adeb4
 
 
   sled aff6c093-197d-42c5-ad80-9f10ba051a34 (active, config generation 2 -> 3):
+
+    host phase 2 contents:
+    ------------------------
+    slot   boot image source
+    ------------------------
+    A      current contents 
+    B      current contents 
+
 
     physical disks:
     ------------------------------------------------------------------------------------
@@ -511,7 +535,7 @@ WARN zone manifest inventory indicated install dataset artifact is invalid, not 
 INFO performed noop image source checks on sled, sled_id: b82ede02-399c-48c6-a1de-411df4fa49a7, num_total: 2, num_already_artifact: 0, num_eligible: 0, num_ineligible: 2
 INFO install dataset artifact hash not found in TUF repo, ignoring for noop checks, sled_id: b82ede02-399c-48c6-a1de-411df4fa49a7, zone_id: b910534b-2a53-4335-a3d9-5311d2f3186a, kind: internal_ntp, file_name: ntp.tar.gz, expected_hash: d76e26198daed69cdae04490d7477f8c842e0dbe37d463eac0d0a8d3fb803095
 INFO install dataset artifact hash not found in TUF repo, ignoring for noop checks, sled_id: b82ede02-399c-48c6-a1de-411df4fa49a7, zone_id: ecbe0b3d-1acc-44b2-b6d4-f4d2770516e4, kind: crucible, file_name: crucible.tar.gz, expected_hash: 866f6a7c2e51c056fb722b5113e80181cc9cd8b712a0d3dbf1edc4ce29e5229e
-INFO performed noop image source checks on sled, but no conversions will occur because remove_mupdate_override is set in the blueprint, sled_id: d81c6a84-79b8-4958-ae41-ea46c9b19763, mupdate_override_id: ffffffff-ffff-ffff-ffff-ffffffffffff, num_total: 2, num_already_artifact: 0, num_would_be_eligible: 2, num_ineligible: 0
+INFO skipped noop image source check on sled, sled_id: d81c6a84-79b8-4958-ae41-ea46c9b19763, reason: remove_mupdate_override is set in the blueprint (ffffffff-ffff-ffff-ffff-ffffffffffff)
 INFO performed noop image source checks on sled, sled_id: e96e226f-4ed9-4c01-91b9-69a9cd076c9e, num_total: 2, num_already_artifact: 0, num_eligible: 2, num_ineligible: 0
 INFO noop converting 2/2 install-dataset zones to artifact store, sled_id: e96e226f-4ed9-4c01-91b9-69a9cd076c9e, num_total: 2, num_already_artifact: 0
 INFO sufficient BoundaryNtp zones exist in plan, desired_count: 0, current_count: 0
@@ -538,6 +562,14 @@ to:   blueprint af934083-59b5-4bf6-8966-6fb5292c29e1
  MODIFIED SLEDS:
 
   sled e96e226f-4ed9-4c01-91b9-69a9cd076c9e (active, config generation 2 -> 3):
+
+    host phase 2 contents:
+    ------------------------
+    slot   boot image source
+    ------------------------
+    A      current contents 
+    B      current contents 
+
 
     physical disks:
     ------------------------------------------------------------------------------------
