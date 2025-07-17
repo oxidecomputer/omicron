@@ -442,10 +442,9 @@ impl TestState {
         }
         prop_assert_eq!(config.threshold, msg.threshold);
 
-        prop_assert_eq!(
-            config.previous_configuration.as_ref().map(|c| c.epoch),
-            msg.last_committed_epoch
-        );
+        if msg.last_committed_epoch.is_some() {
+            prop_assert!(config.encrypted_rack_secrets.is_some());
+        }
 
         Ok(())
     }

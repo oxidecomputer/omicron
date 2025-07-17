@@ -17,6 +17,7 @@ gfss.workspace = true
 hex.workspace = true
 hkdf.workspace = true
 iddqd.workspace = true
+omicron-uuid-kinds.workspace = true
 rand = { workspace = true, features = ["getrandom"] }
 secrecy.workspace = true
 serde.workspace = true
@@ -24,11 +25,11 @@ serde_with.workspace = true
 sha3.workspace = true
 slog.workspace = true
 slog-error-chain.workspace = true
+static_assertions.workspace = true
 subtle.workspace = true
 thiserror.workspace = true
 tokio.workspace = true
 uuid.workspace = true
-omicron-uuid-kinds.workspace = true
 zeroize.workspace = true
 omicron-workspace-hack.workspace = true
 

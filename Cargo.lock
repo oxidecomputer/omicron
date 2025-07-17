@@ -13891,6 +13891,7 @@ dependencies = [
  "sha3",
  "slog",
  "slog-error-chain",
+ "static_assertions",
  "subtle",
  "test-strategy",
  "thiserror 2.0.12",
