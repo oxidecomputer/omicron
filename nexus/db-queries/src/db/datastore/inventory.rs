@@ -4049,7 +4049,7 @@ mod test {
     use nexus_sled_agent_shared::inventory::BootPartitionDetails;
     use nexus_sled_agent_shared::inventory::OrphanedDataset;
     use nexus_sled_agent_shared::inventory::{
-        BootImageHeader, ClearMupdateOverrideBootSuccess,
+        BootImageHeader, ClearMupdateOverrideBootSuccessInventory,
         ClearMupdateOverrideInventory,
     };
     use nexus_sled_agent_shared::inventory::{
@@ -4916,7 +4916,7 @@ mod test {
                     clear_mupdate_override: Some(
                         ClearMupdateOverrideInventory {
                             boot_disk_result: Ok(
-                                ClearMupdateOverrideBootSuccess::Cleared,
+                                ClearMupdateOverrideBootSuccessInventory::Cleared,
                             ),
                             non_boot_message: "simulated non-boot message"
                                 .to_owned(),

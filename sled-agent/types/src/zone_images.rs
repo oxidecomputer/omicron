@@ -6,7 +6,7 @@ use std::{fmt, fs::FileType, io, sync::Arc};
 
 use camino::Utf8PathBuf;
 use iddqd::{IdOrdItem, IdOrdMap, id_upcast};
-use nexus_sled_agent_shared::inventory::ClearMupdateOverrideBootSuccess;
+use nexus_sled_agent_shared::inventory::ClearMupdateOverrideBootSuccessInventory;
 use nexus_sled_agent_shared::inventory::ClearMupdateOverrideInventory;
 use nexus_sled_agent_shared::inventory::MupdateOverrideBootInventory;
 use nexus_sled_agent_shared::inventory::MupdateOverrideInventory;
@@ -741,10 +741,8 @@ pub struct ClearMupdateOverrideResult {
     pub boot_disk_path: Utf8PathBuf,
 
     /// The result of clearing the mupdate override on the boot disk.
-    pub boot_disk_result: Result<
-        DbClearMupdateOverrideBootSuccess,
-        ClearMupdateOverrideBootError,
-    >,
+    pub boot_disk_result:
+        Result<ClearMupdateOverrideBootSuccess, ClearMupdateOverrideBootError>,
 
     /// The result of clearing the mupdate override on non-boot disks.
     pub non_boot_disk_info: IdOrdMap<ClearMupdateOverrideNonBootInfo>,
@@ -753,11 +751,11 @@ pub struct ClearMupdateOverrideResult {
 impl ClearMupdateOverrideResult {
     pub fn to_inventory(&self) -> ClearMupdateOverrideInventory {
         let boot_disk_result = match &self.boot_disk_result {
-            Ok(DbClearMupdateOverrideBootSuccess::Cleared(_)) => {
-                Ok(ClearMupdateOverrideBootSuccess::Cleared)
+            Ok(ClearMupdateOverrideBootSuccess::Cleared(_)) => {
+                Ok(ClearMupdateOverrideBootSuccessInventory::Cleared)
             }
-            Ok(DbClearMupdateOverrideBootSuccess::NoOverride) => {
-                Ok(ClearMupdateOverrideBootSuccess::NoOverride)
+            Ok(ClearMupdateOverrideBootSuccess::NoOverride) => {
+                Ok(ClearMupdateOverrideBootSuccessInventory::NoOverride)
             }
             Err(error) => Err(InlineErrorChain::new(error).to_string()),
         };
@@ -802,8 +800,8 @@ impl ClearMupdateOverrideResult {
 }
 
 /// A success condition clearing the mupdate override on a boot disk.
-#[derive(Clone, Debug)]
-pub enum DbClearMupdateOverrideBootSuccess {
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum ClearMupdateOverrideBootSuccess {
     /// The mupdate override was matched up and successfully cleared.
     Cleared(MupdateOverrideInfo),
 
@@ -848,7 +846,7 @@ pub enum ClearMupdateOverrideBootError {
     },
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct ClearMupdateOverrideNonBootInfo {
     /// The zpool ID of the non-boot disk.
     pub zpool_id: InternalZpoolUuid,
@@ -885,7 +883,7 @@ impl IdOrdItem for ClearMupdateOverrideNonBootInfo {
     id_upcast!();
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq)]
 pub enum ClearMupdateOverrideNonBootResult {
     /// The mupdate override was present and was cleared successfully.
     Cleared {

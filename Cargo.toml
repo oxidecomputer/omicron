@@ -16,6 +16,7 @@ members = [
     "clients/gateway-client",
     "clients/installinator-client",
     "clients/nexus-client",
+    "clients/ntp-admin-client",
     "clients/oxide-client",
     "clients/oximeter-client",
     "clients/repo-depot-client",
@@ -104,6 +105,9 @@ members = [
     "nexus/test-utils-macros",
     "nexus/test-utils",
     "nexus/types",
+    "ntp-admin",
+    "ntp-admin/api",
+    "ntp-admin/types",
     "oximeter/api",
     "oximeter/collector",
     "oximeter/db",
@@ -168,6 +172,7 @@ default-members = [
     "clients/gateway-client",
     "clients/installinator-client",
     "clients/nexus-client",
+    "clients/ntp-admin-client",
     "clients/oxide-client",
     "clients/oximeter-client",
     "clients/repo-depot-client",
@@ -258,6 +263,9 @@ default-members = [
     "nexus/test-utils-macros",
     "nexus/test-utils",
     "nexus/types",
+    "ntp-admin",
+    "ntp-admin/api",
+    "ntp-admin/types",
     "oximeter/api",
     "oximeter/collector",
     "oximeter/db",
@@ -511,6 +519,9 @@ lldp_protocol = { git = "https://github.com/oxidecomputer/lldp", package = "prot
 macaddr = { version = "1.0.1", features = ["serde_std"] }
 maplit = "1.0.2"
 newtype_derive = "0.1.6"
+ntp-admin-api = { path = "ntp-admin/api" }
+ntp-admin-client = { path = "clients/ntp-admin-client" }
+ntp-admin-types = { path = "ntp-admin/types" }
 mg-admin-client = { git = "https://github.com/oxidecomputer/maghemite", rev = "fa5f15cdcd5864161a929e2ec01534f70dfba216" }
 ddm-admin-client = { git = "https://github.com/oxidecomputer/maghemite", rev = "fa5f15cdcd5864161a929e2ec01534f70dfba216" }
 multimap = "0.10.1"
@@ -556,6 +567,7 @@ omicron-common = { path = "common" }
 omicron-dev-lib = { path = "dev-tools/omicron-dev-lib" }
 omicron-gateway = { path = "gateway" }
 omicron-nexus = { path = "nexus" }
+omicron-ntp-admin = { path = "ntp-admin" }
 omicron-omdb = { path = "dev-tools/omdb" }
 omicron-package = { path = "package" }
 omicron-passwords = { path = "passwords" }

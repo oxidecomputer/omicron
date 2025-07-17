@@ -43,7 +43,7 @@ use nexus_db_schema::schema::{
 };
 use nexus_sled_agent_shared::inventory::BootImageHeader;
 use nexus_sled_agent_shared::inventory::BootPartitionDetails;
-use nexus_sled_agent_shared::inventory::ClearMupdateOverrideBootSuccess;
+use nexus_sled_agent_shared::inventory::ClearMupdateOverrideBootSuccessInventory;
 use nexus_sled_agent_shared::inventory::ClearMupdateOverrideInventory;
 use nexus_sled_agent_shared::inventory::ConfigReconcilerInventoryStatus;
 use nexus_sled_agent_shared::inventory::HostPhase2DesiredContents;
@@ -1037,19 +1037,21 @@ impl_enum_type!(
     NoOverride => b"no-override"
 );
 
-impl From<ClearMupdateOverrideBootSuccess>
+impl From<ClearMupdateOverrideBootSuccessInventory>
     for DbClearMupdateOverrideBootSuccess
 {
-    fn from(value: ClearMupdateOverrideBootSuccess) -> Self {
+    fn from(value: ClearMupdateOverrideBootSuccessInventory) -> Self {
         match value {
-            ClearMupdateOverrideBootSuccess::Cleared => Self::Cleared,
-            ClearMupdateOverrideBootSuccess::NoOverride => Self::NoOverride,
+            ClearMupdateOverrideBootSuccessInventory::Cleared => Self::Cleared,
+            ClearMupdateOverrideBootSuccessInventory::NoOverride => {
+                Self::NoOverride
+            }
         }
     }
 }
 
 impl From<DbClearMupdateOverrideBootSuccess>
-    for ClearMupdateOverrideBootSuccess
+    for ClearMupdateOverrideBootSuccessInventory
 {
     fn from(value: DbClearMupdateOverrideBootSuccess) -> Self {
         match value {

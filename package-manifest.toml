@@ -371,6 +371,7 @@ source.type = "composite"
 source.packages = [
   "chrony-setup.tar.gz",
   "ntp-svc.tar.gz",
+  "omicron-ntp-admin.tar.gz",
   "opte-interface-setup.tar.gz",
   "zone-setup.tar.gz",
   "zone-network-install.tar.gz"
@@ -386,6 +387,20 @@ source.paths = [
 ]
 output.intermediate_only = true
 output.type = "zone"
+
+[package.omicron-ntp-admin]
+service_name = "ntp-admin"
+only_for_targets.image = "standard"
+source.type = "local"
+source.rust.binary_names = ["ntp-admin"]
+source.rust.release = true
+source.paths = [
+  { from = "smf/ntp-admin/manifest.xml", to = "/var/svc/manifest/site/ntp-admin/manifest.xml" },
+  { from = "smf/ntp-admin/config.toml", to = "/opt/oxide/lib/svc/ntp-admin/config.toml" },
+  { from = "smf/ntp-admin/method_script.sh", to = "/opt/oxide/lib/svc/manifest/ntp-admin.sh" },
+]
+output.type = "zone"
+output.intermediate_only = true
 
 [package.chrony-setup]
 service_name = "chrony-setup"

@@ -7,6 +7,7 @@ use std::net::IpAddr;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
+// TODO: Remove me, in favor of ntp-admin/types/src/lib.rs
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema, PartialEq)]
 pub struct TimeSync {
     /// The synchronization state of the sled, true when the system clock

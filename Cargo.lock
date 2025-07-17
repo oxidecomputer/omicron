@@ -6683,7 +6683,6 @@ dependencies = [
  "sp-sim",
  "static_assertions",
  "strum 0.27.1",
- "swrite",
  "test-strategy",
  "thiserror 2.0.12",
  "tufaceous-artifact",
@@ -6795,6 +6794,7 @@ dependencies = [
  "id-map",
  "iddqd",
  "illumos-utils",
+ "indent_write",
  "omicron-common",
  "omicron-passwords",
  "omicron-uuid-kinds",
@@ -6911,8 +6911,10 @@ dependencies = [
  "id-map",
  "iddqd",
  "illumos-utils",
+ "indent_write",
  "internal-dns-types",
  "ipnetwork",
+ "itertools 0.14.0",
  "newtype-uuid",
  "newtype_derive",
  "nexus-sled-agent-shared",
@@ -6936,10 +6938,13 @@ dependencies = [
  "slog-error-chain",
  "steno",
  "strum 0.27.1",
+ "tabled 0.15.0",
  "test-strategy",
+ "textwrap",
  "thiserror 2.0.12",
  "tough",
  "tufaceous-artifact",
+ "unicode-width 0.1.14",
  "update-engine",
  "url",
  "uuid",
@@ -7025,6 +7030,47 @@ name = "normalize-line-endings"
 version = "0.3.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "61807f77802ff30975e01f4f071c8ba10c022052f98b3294119f3e615d13e5be"
+
+[[package]]
+name = "ntp-admin-api"
+version = "0.1.0"
+dependencies = [
+ "dropshot",
+ "http",
+ "ntp-admin-types",
+ "omicron-common",
+ "omicron-uuid-kinds",
+ "omicron-workspace-hack",
+ "schemars",
+ "serde",
+]
+
+[[package]]
+name = "ntp-admin-client"
+version = "0.1.0"
+dependencies = [
+ "chrono",
+ "omicron-workspace-hack",
+ "progenitor 0.10.0",
+ "reqwest",
+ "schemars",
+ "serde",
+ "slog",
+]
+
+[[package]]
+name = "ntp-admin-types"
+version = "0.1.0"
+dependencies = [
+ "chrono",
+ "omicron-common",
+ "omicron-workspace-hack",
+ "proptest",
+ "schemars",
+ "serde",
+ "test-strategy",
+ "thiserror 2.0.12",
+]
 
 [[package]]
 name = "nu-ansi-term"
@@ -7747,6 +7793,47 @@ dependencies = [
 ]
 
 [[package]]
+name = "omicron-ntp-admin"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "camino",
+ "chrono",
+ "clap",
+ "dropshot",
+ "expectorate",
+ "http",
+ "nexus-test-utils",
+ "ntp-admin-api",
+ "ntp-admin-types",
+ "omicron-common",
+ "omicron-rpaths",
+ "omicron-test-utils",
+ "omicron-uuid-kinds",
+ "omicron-workspace-hack",
+ "openapi-lint",
+ "openapiv3",
+ "oxide-tokio-rt",
+ "pq-sys",
+ "proptest",
+ "reqwest",
+ "schemars",
+ "serde",
+ "serde_json",
+ "slog",
+ "slog-async",
+ "slog-dtrace",
+ "slog-error-chain",
+ "subprocess",
+ "test-strategy",
+ "thiserror 2.0.12",
+ "tokio",
+ "tokio-postgres",
+ "toml 0.8.23",
+ "url",
+]
+
+[[package]]
 name = "omicron-omdb"
 version = "0.1.0"
 dependencies = [
@@ -8424,6 +8511,7 @@ dependencies = [
  "newtype_derive",
  "nexus-external-api",
  "nexus-internal-api",
+ "ntp-admin-api",
  "omicron-workspace-hack",
  "openapi-lint",
  "openapi-manager-types",
@@ -12489,6 +12577,7 @@ dependencies = [
  "oxide-tokio-rt",
  "serde",
  "serde_cbor",
+ "sha2",
  "sha3",
  "slog",
  "slog-dtrace",

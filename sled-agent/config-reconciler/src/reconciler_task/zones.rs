@@ -1106,8 +1106,8 @@ mod tests {
     use omicron_uuid_kinds::MupdateOverrideUuid;
     use omicron_uuid_kinds::ZpoolUuid;
     use sled_agent_types::zone_images::ArtifactReadResult;
+    use sled_agent_types::zone_images::ClearMupdateOverrideBootSuccess;
     use sled_agent_types::zone_images::ClearMupdateOverrideResult;
-    use sled_agent_types::zone_images::DbClearMupdateOverrideBootSuccess;
     use sled_agent_types::zone_images::MupdateOverrideStatus;
     use sled_agent_types::zone_images::ResolverStatus;
     use sled_agent_types::zone_images::ZoneManifestArtifactResult;
@@ -1332,7 +1332,7 @@ mod tests {
             ClearMupdateOverrideResult {
                 boot_disk_path: Utf8PathBuf::from(BOOT_DISK_PATH),
                 boot_disk_result: Ok(
-                    DbClearMupdateOverrideBootSuccess::NoOverride,
+                    ClearMupdateOverrideBootSuccess::NoOverride,
                 ),
                 non_boot_disk_info: IdOrdMap::new(),
             }
