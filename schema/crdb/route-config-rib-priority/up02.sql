@@ -6,4 +6,3 @@ SET rib_priority =
         WHEN local_pref < 0 THEN 0
         ELSE local_pref::INT2
     END;
-SET LOCAL disallow_full_table_scans = on;
