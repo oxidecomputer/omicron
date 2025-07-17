@@ -10,7 +10,6 @@
 use dropshot::Method;
 use expectorate::assert_contents;
 use http::StatusCode;
-use nexus_db_queries::context::OpContext;
 use nexus_test_utils::wait_for_producer;
 use nexus_test_utils::{OXIMETER_UUID, PRODUCER_UUID};
 use nexus_test_utils_macros::nexus_test;
@@ -18,7 +17,6 @@ use nexus_types::deployment::Blueprint;
 use nexus_types::deployment::SledFilter;
 use nexus_types::deployment::UnstableReconfiguratorState;
 use omicron_common::api::external::SwitchLocation;
-use omicron_test_utils::dev::poll::{CondCheckError, wait_for_condition};
 use omicron_test_utils::dev::test_cmds::Redactor;
 use omicron_test_utils::dev::test_cmds::path_to_executable;
 use omicron_test_utils::dev::test_cmds::run_command;
@@ -175,27 +173,9 @@ async fn test_omdb_success_cases(cptestctx: &ControlPlaneTestContext) {
     // Wait for Nexus to have gathered at least one inventory collection. (We'll
     // check below that `reconfigurator export` contains at least one, so have
     // to wait until there's one to export.)
-    {
-        let datastore = cptestctx.server.server_context().nexus.datastore();
-        let opctx = OpContext::for_tests(
-            cptestctx.logctx.log.clone(),
-            datastore.clone(),
-        );
-
-        wait_for_condition(
-            || async {
-                match datastore.inventory_get_latest_collection(&opctx).await {
-                    Ok(Some(_)) => Ok(()),
-                    Ok(None) => Err(CondCheckError::NotYet),
-                    Err(err) => Err(CondCheckError::Failed(err)),
-                }
-            },
-            &Duration::from_millis(500),
-            &Duration::from_secs(60),
-        )
-        .await
-        .expect("test nexus gathered an inventory collection");
-    }
+    cptestctx
+        .wait_for_at_least_one_inventory_collection(Duration::from_secs(60))
+        .await;
 
     let mut output = String::new();
 

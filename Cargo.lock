@@ -6851,6 +6851,7 @@ version = "0.1.0"
 dependencies = [
  "async-trait",
  "nexus-config",
+ "nexus-db-queries",
  "nexus-sled-agent-shared",
  "nexus-types",
  "omicron-common",
@@ -6908,6 +6909,7 @@ dependencies = [
  "serde_urlencoded",
  "sled-agent-client",
  "slog",
+ "slog-error-chain",
  "tokio",
  "tokio-postgres",
  "tokio-util",
