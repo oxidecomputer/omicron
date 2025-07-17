@@ -894,7 +894,7 @@ async fn expect_redirect(testctx: &ClientTestContext, from: &str, to: &str) {
 /// the session was found but is expired. vs not found at all
 #[tokio::test]
 async fn test_session_idle_timeout_deletes_session() {
-    // set idle timeout to 1 second so we can test expiration
+    // set idle timeout to 0 so we can test expiration
     let mut config = load_test_config();
     config.pkg.console.session_idle_timeout_minutes = 0;
     let cptestctx = test_setup_with_config::<omicron_nexus::Server>(

@@ -8,6 +8,7 @@ use chrono::Utc;
 use dropshot::test_util::ClientTestContext;
 use dropshot::{HttpErrorResponseBody, ResultsPage};
 use nexus_auth::authn::USER_TEST_UNPRIVILEGED;
+use nexus_config::NexusConfig;
 use nexus_db_queries::db::fixed_data::silo::DEFAULT_SILO;
 use nexus_db_queries::db::identity::{Asset, Resource};
 use nexus_test_utils::http_testing::TestResponse;
@@ -19,6 +20,7 @@ use nexus_test_utils::{
     http_testing::{AuthnMode, NexusRequest, RequestBuilder},
     resource_helpers::grant_iam,
 };
+use nexus_test_utils::{load_test_config, test_setup_with_config};
 use nexus_test_utils_macros::nexus_test;
 use nexus_types::external_api::{params, views};
 use nexus_types::external_api::{
@@ -29,6 +31,7 @@ use nexus_types::external_api::{
 };
 
 use http::{StatusCode, header, method::Method};
+use omicron_sled_agent::sim;
 use oxide_client::types::{FleetRole, SiloRole};
 use serde::Deserialize;
 use tokio::time::{Duration, sleep};
@@ -634,9 +637,10 @@ async fn test_admin_logout_deletes_tokens_and_sessions(
 ) {
     let testctx = &cptestctx.external_client;
 
+    let silo_name = cptestctx.silo_name.as_str();
     // create users so we can have user IDs to pass to authn_as
-    let silo_url = "/v1/system/silos/test-suite-silo";
-    let test_suite_silo: views::Silo = object_get(testctx, silo_url).await;
+    let silo_url = format!("/v1/system/silos/{}", silo_name);
+    let test_suite_silo: views::Silo = object_get(testctx, &silo_url).await;
     let user1 = create_local_user(
         testctx,
         &test_suite_silo,
@@ -660,8 +664,7 @@ async fn test_admin_logout_deletes_tokens_and_sessions(
 
     // create a token and session for user1
     get_device_token(testctx, AuthnMode::SiloUser(user1.id)).await;
-    create_session_for_user(testctx, "test-suite-silo", "user1", "password1")
-        .await;
+    create_session_for_user(testctx, silo_name, "user1", "password1").await;
 
     // now there is a token and session for user1
     let tokens = list_user_tokens(testctx, user1.id).await;
@@ -706,10 +709,8 @@ async fn test_admin_logout_deletes_tokens_and_sessions(
     // create another couple of tokens and sessions for user1
     get_device_token(testctx, AuthnMode::SiloUser(user1.id)).await;
     get_device_token(testctx, AuthnMode::SiloUser(user1.id)).await;
-    create_session_for_user(testctx, "test-suite-silo", "user1", "password1")
-        .await;
-    create_session_for_user(testctx, "test-suite-silo", "user1", "password1")
-        .await;
+    create_session_for_user(testctx, silo_name, "user1", "password1").await;
+    create_session_for_user(testctx, silo_name, "user1", "password1").await;
 
     let tokens = list_user_tokens(testctx, user1.id).await;
     assert_eq!(tokens.len(), 2);
@@ -745,7 +746,7 @@ async fn test_admin_logout_deletes_tokens_and_sessions(
     // make user 2 a silo admin so they can delete user 1's tokens
     grant_iam(
         testctx,
-        silo_url,
+        &silo_url,
         SiloRole::Admin,
         user2.id,
         AuthnMode::PrivilegedUser,
@@ -767,6 +768,70 @@ async fn test_admin_logout_deletes_tokens_and_sessions(
     assert!(tokens.is_empty());
     let sessions = list_user_sessions(testctx, user1.id).await;
     assert!(sessions.is_empty());
+}
+
+// Strictly speaking, this is not about device auth at all, but we need the
+// lovely helpers we've defined in this file to make things convenient. This
+// suggests we could stand to reorganize or rename some test files.
+
+#[tokio::test]
+async fn test_session_list_excludes_expired() {
+    // Test with default TTL - session should not be expired
+    let mut config = load_test_config();
+    test_session_list_with_config(&mut config, 1).await;
+
+    // Test with idle TTL = 0 - session should be expired immediately
+    let mut config = load_test_config();
+    config.pkg.console.session_idle_timeout_minutes = 0;
+    test_session_list_with_config(&mut config, 0).await;
+
+    // Test with abs TTL = 0 - session should be expired immediately
+    let mut config = load_test_config();
+    config.pkg.console.session_absolute_timeout_minutes = 0;
+    test_session_list_with_config(&mut config, 0).await;
+}
+
+/// Set up a test context with the given config, create a user in the test suite
+/// silo, and create a session, and assert about the length of the session list
+async fn test_session_list_with_config(
+    config: &mut NexusConfig,
+    expected_sessions: usize,
+) {
+    let cptestctx = test_setup_with_config::<omicron_nexus::Server>(
+        "test_session_list_excludes_expired",
+        config,
+        sim::SimMode::Explicit,
+        None,
+        0,
+    )
+    .await;
+    let testctx = &cptestctx.external_client;
+
+    let silo_name = cptestctx.silo_name.as_str();
+    let silo_url = format!("/v1/system/silos/{}", silo_name);
+    let test_suite_silo: views::Silo = object_get(testctx, &silo_url).await;
+    let user1 = create_local_user(
+        testctx,
+        &test_suite_silo,
+        &"user1".parse().unwrap(),
+        test_params::UserPassword::Password("password1".to_string()),
+    )
+    .await;
+
+    let sessions = list_user_sessions(testctx, user1.id).await;
+    assert!(sessions.is_empty());
+
+    create_session_for_user(testctx, silo_name, "user1", "password1").await;
+
+    let sessions = list_user_sessions(&testctx, user1.id).await;
+
+    assert_eq!(
+        sessions.len(),
+        expected_sessions,
+        "Expected session list to have {expected_sessions} items"
+    );
+
+    cptestctx.teardown().await; // important!
 }
 
 async fn get_tokens_priv(

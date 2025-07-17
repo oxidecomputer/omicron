@@ -7,6 +7,7 @@
 use crate::external_api::params;
 use crate::external_api::shared;
 use anyhow::Context;
+use chrono::TimeDelta;
 use nexus_db_lookup::LookupPath;
 use nexus_db_lookup::lookup;
 use nexus_db_model::SiloAuthSettings;
@@ -390,6 +391,9 @@ impl super::Nexus {
         opctx: &OpContext,
         silo_user_id: Uuid,
         pagparams: &DataPageParams<'_, Uuid>,
+        // TODO: https://github.com/oxidecomputer/omicron/issues/8625
+        idle_ttl: TimeDelta,
+        abs_ttl: TimeDelta,
     ) -> ListResultVec<db::model::ConsoleSession> {
         let (_, authz_silo_user, _db_silo_user) =
             LookupPath::new(opctx, self.datastore())
@@ -400,7 +404,13 @@ impl super::Nexus {
         let user_authn_list = authz::SiloUserSessionList::new(authz_silo_user);
 
         self.datastore()
-            .silo_user_session_list(opctx, user_authn_list, pagparams)
+            .silo_user_session_list(
+                opctx,
+                user_authn_list,
+                pagparams,
+                idle_ttl,
+                abs_ttl,
+            )
             .await
     }
 

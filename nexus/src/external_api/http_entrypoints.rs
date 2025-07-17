@@ -6928,8 +6928,16 @@ impl NexusExternalApi for NexusExternalApiImpl {
             let pag_params = data_page_params_for(&rqctx, &query)?;
             let opctx =
                 crate::context::op_context_for_external_api(&rqctx).await?;
+
             let sessions = nexus
-                .silo_user_session_list(&opctx, path.user_id, &pag_params)
+                .silo_user_session_list(
+                    &opctx,
+                    path.user_id,
+                    &pag_params,
+                    // TODO: https://github.com/oxidecomputer/omicron/issues/8625
+                    apictx.context.console_config.session_idle_timeout,
+                    apictx.context.console_config.session_absolute_timeout,
+                )
                 .await?
                 .into_iter()
                 .map(views::ConsoleSession::from)

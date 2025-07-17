@@ -11,6 +11,7 @@ use crate::context::OpContext;
 use crate::db::model::ConsoleSession;
 use crate::db::pagination::paginated;
 use async_bb8_diesel::AsyncRunQueryDsl;
+use chrono::TimeDelta;
 use chrono::Utc;
 use diesel::prelude::*;
 use nexus_db_errors::ErrorHandler;
@@ -162,26 +163,34 @@ impl DataStore {
     }
 
     /// List console sessions for a specific user
+    ///
+    /// Have to pass down TTLs because they come from the nexus server config.
     pub async fn silo_user_session_list(
         &self,
         opctx: &OpContext,
         authn_list: authz::SiloUserSessionList,
         pagparams: &DataPageParams<'_, Uuid>,
+        idle_ttl: TimeDelta,
+        abs_ttl: TimeDelta,
     ) -> ListResultVec<ConsoleSession> {
         opctx.authorize(authz::Action::ListChildren, &authn_list).await?;
 
         let user_id = authn_list.silo_user().id();
 
+        // HACK: unlike with tokens, we do not have expiration time here,
+        // so we can't filter out expired sessions by comparing to now. The
+        // real way to do this would be to change this to time_expires_idle
+        // and time_expires_abs and just compare them to now directly. Then
+        // we would not have to pass the TTLs down from the handler.
+        let now = Utc::now();
+
         use nexus_db_schema::schema::console_session::dsl;
         paginated(dsl::console_session, dsl::id, &pagparams)
             .filter(dsl::silo_user_id.eq(user_id))
-            // TODO: unlike with tokens, we do not have expiration time here,
-            // so we can't filter out expired sessions by comparing to now. In
-            // the authn code, this works by dynamically comparing the created
-            // and last used times against now + idle/absolute TTL. We may
-            // have to do that here but it's kind of sad. It might be nicer to
-            // make sessions work more like tokens and put idle and absolute
-            // expiration time right there in the table at session create time.
+            // session is not expired according to abs timeout
+            .filter(dsl::time_created.ge(now - abs_ttl))
+            // session is also not expired according to idle timeout
+            .filter(dsl::time_last_used.ge(now - idle_ttl))
             .select(ConsoleSession::as_select())
             .load_async(&*self.pool_connection_authorized(opctx).await?)
             .await
