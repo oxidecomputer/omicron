@@ -11,6 +11,8 @@ use std::{
     sync::LazyLock,
 };
 
+use chrono::SecondsFormat;
+use clap::Subcommand;
 use gateway_client::types::SpType;
 use iddqd::IdOrdMap;
 use itertools::Itertools;
@@ -96,6 +98,19 @@ impl<'a> CollectionDisplay<'a> {
         self.long_string_formatter.show_long_strings = show_long_strings;
         self
     }
+
+    /// Apply a [`CollectionDisplayCliFilter`] to this displayer.
+    pub fn apply_cli_filter(
+        &mut self,
+        filter: &CollectionDisplayCliFilter,
+    ) -> &mut Self {
+        self.include_sps(filter.to_include_sps())
+            .include_sleds(filter.include_sleds())
+            .include_orphaned_datasets(filter.include_orphaned_datasets())
+            .include_clickhouse_keeper_membership(
+                filter.include_keeper_membership(),
+            )
+    }
 }
 
 impl fmt::Display for CollectionDisplay<'_> {
@@ -110,8 +125,9 @@ impl fmt::Display for CollectionDisplay<'_> {
         )?;
         if self.include_sleds {
             display_sleds(&self.collection, f)?;
-        }
-        if self.include_orphaned_datasets {
+        } else if self.include_orphaned_datasets {
+            // display_sleds already includes orphaned datasets, hence "else if
+            // self.include_orphaned_datasets" rather than just "if".
             display_orphaned_datasets(&self.collection, f)?;
         }
         if self.include_clickhouse_keeper_membership {
@@ -129,6 +145,58 @@ impl fmt::Display for CollectionDisplay<'_> {
         }
 
         Ok(())
+    }
+}
+
+/// A command-line friendly representation of filters for a [`CollectionDisplay`].
+#[derive(Clone, Debug, Subcommand)]
+pub enum CollectionDisplayCliFilter {
+    /// show all information from the collection
+    All,
+    /// show information about service processors (baseboard)
+    Sp {
+        /// show only information about one SP
+        serial: Option<String>,
+    },
+    /// show orphaned datasets
+    OrphanedDatasets,
+}
+
+impl CollectionDisplayCliFilter {
+    fn to_include_sps(&self) -> CollectionDisplayIncludeSps {
+        match self {
+            Self::All | Self::Sp { serial: None } => {
+                CollectionDisplayIncludeSps::All
+            }
+            Self::Sp { serial: Some(serial) } => {
+                CollectionDisplayIncludeSps::Serial(serial.clone())
+            }
+            Self::OrphanedDatasets => CollectionDisplayIncludeSps::None,
+        }
+    }
+
+    fn include_sleds(&self) -> bool {
+        match self {
+            Self::All => true,
+            Self::Sp { .. } => false,
+            Self::OrphanedDatasets => false,
+        }
+    }
+
+    fn include_orphaned_datasets(&self) -> bool {
+        match self {
+            Self::All => true,
+            Self::Sp { .. } => false,
+            Self::OrphanedDatasets => true,
+        }
+    }
+
+    fn include_keeper_membership(&self) -> bool {
+        match self {
+            Self::All => true,
+            Self::Sp { .. } => false,
+            Self::OrphanedDatasets => false,
+        }
     }
 }
 
@@ -429,7 +497,9 @@ fn display_sleds(
         writeln!(
             f,
             "    found at:    {} from {}",
-            sled.time_collected, sled.source
+            sled.time_collected
+                .to_rfc3339_opts(SecondsFormat::Millis, /* use_z */ true),
+            sled.source
         )?;
         writeln!(f, "    address:     {}", sled.sled_agent_address)?;
         writeln!(
@@ -585,8 +655,12 @@ fn display_sleds(
             ConfigReconcilerInventoryStatus::Idle { completed_at, ran_for } => {
                 writeln!(
                     f,
-                    "idle (finished at {completed_at} \
-                     after running for {ran_for:?})"
+                    "idle (finished at {} \
+                     after running for {ran_for:?})",
+                    completed_at.to_rfc3339_opts(
+                        SecondsFormat::Millis,
+                        /* use_z */ true,
+                    )
                 )?;
             }
         }
@@ -884,7 +958,7 @@ fn display_keeper_membership(
         writeln!(f, "    raft config: {s}")?;
     }
     if collection.clickhouse_keeper_cluster_membership.is_empty() {
-        writeln!(f, "No membership retrieved.")?;
+        writeln!(f, "    no membership retrieved")?;
     }
     writeln!(f, "")?;
 

@@ -138,7 +138,7 @@ use nexus_types::identity::Resource;
 use nexus_types::internal_api::params::DnsRecord;
 use nexus_types::internal_api::params::Srv;
 use nexus_types::inventory::Collection;
-use nexus_types::inventory::CollectionDisplayIncludeSps;
+use nexus_types::inventory::CollectionDisplayCliFilter;
 use omicron_common::api::external;
 use omicron_common::api::external::DataPageParams;
 use omicron_common::api::external::Generation;
@@ -614,7 +614,7 @@ struct CollectionsShowArgs {
     show_long_strings: bool,
 
     #[clap(subcommand)]
-    filter: Option<CollectionsShowFilter>,
+    filter: Option<CollectionDisplayCliFilter>,
 }
 
 #[derive(Debug, Clone, Copy, Args)]
@@ -658,60 +658,6 @@ impl CollectionIdOrLatest {
                 .inventory_collection_read(opctx, *id)
                 .await
                 .with_context(|| format!("fetching collection {id}")),
-        }
-    }
-}
-
-#[derive(Debug, Subcommand, Clone)]
-enum CollectionsShowFilter {
-    /// show all information from the collection
-    All,
-    /// show information about service processors (baseboard)
-    Sp {
-        /// show only information about one SP
-        serial: Option<String>,
-    },
-    /// show orphaned datasets
-    OrphanedDatasets,
-}
-
-impl CollectionsShowFilter {
-    fn to_include_sps(&self) -> CollectionDisplayIncludeSps {
-        match self {
-            CollectionsShowFilter::All
-            | CollectionsShowFilter::Sp { serial: None } => {
-                CollectionDisplayIncludeSps::All
-            }
-            CollectionsShowFilter::Sp { serial: Some(serial) } => {
-                CollectionDisplayIncludeSps::Serial(serial.clone())
-            }
-            CollectionsShowFilter::OrphanedDatasets => {
-                CollectionDisplayIncludeSps::None
-            }
-        }
-    }
-
-    fn include_sleds(&self) -> bool {
-        match self {
-            CollectionsShowFilter::All => true,
-            CollectionsShowFilter::Sp { .. } => false,
-            CollectionsShowFilter::OrphanedDatasets => false,
-        }
-    }
-
-    fn include_orphaned_datasets(&self) -> bool {
-        match self {
-            CollectionsShowFilter::All => true,
-            CollectionsShowFilter::Sp { .. } => false,
-            CollectionsShowFilter::OrphanedDatasets => true,
-        }
-    }
-
-    fn include_keeper_membership(&self) -> bool {
-        match self {
-            CollectionsShowFilter::All => true,
-            CollectionsShowFilter::Sp { .. } => false,
-            CollectionsShowFilter::OrphanedDatasets => false,
         }
     }
 }
@@ -6764,13 +6710,12 @@ async fn cmd_db_inventory(
                     ref filter,
                 }),
         }) => {
-            let filter = filter.as_ref().unwrap_or(&CollectionsShowFilter::All);
             cmd_db_inventory_collections_show(
                 opctx,
                 datastore,
                 id_or_latest,
                 show_long_strings,
-                filter,
+                filter.as_ref(),
             )
             .await
         }
@@ -7064,19 +7009,15 @@ async fn cmd_db_inventory_collections_show(
     datastore: &DataStore,
     id_or_latest: CollectionIdOrLatest,
     show_long_strings: bool,
-    filter: &CollectionsShowFilter,
+    filter: Option<&CollectionDisplayCliFilter>,
 ) -> Result<(), anyhow::Error> {
     let collection = id_or_latest.to_collection(opctx, datastore).await?;
 
     let mut display = collection.display();
-    display
-        .include_sps(filter.to_include_sps())
-        .include_sleds(filter.include_sleds())
-        .include_orphaned_datasets(filter.include_orphaned_datasets())
-        .include_clickhouse_keeper_membership(
-            filter.include_keeper_membership(),
-        )
-        .show_long_strings(show_long_strings);
+    if let Some(filter) = filter {
+        display.apply_cli_filter(filter);
+    }
+    display.show_long_strings(show_long_strings);
     println!("{}", display);
 
     Ok(())
