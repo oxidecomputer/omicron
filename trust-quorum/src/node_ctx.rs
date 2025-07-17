@@ -20,12 +20,29 @@ pub trait NodeCallerCtx: NodeCommonCtx {
     fn num_envelopes(&self) -> usize;
     fn drain_envelopes(&mut self) -> impl Iterator<Item = Envelope>;
     fn envelopes(&self) -> impl Iterator<Item = &Envelope>;
-    fn persistent_state_changed(&mut self) -> bool;
+
+    /// Check if the contained `PersistentState` has been mutated
+    ///
+    /// IMPORTANT: Calling this method resets the state of mutation to `false`.
+    /// This means that callers should only call this once after each API call
+    /// and cache the result as necessary. This is also why this method takes an
+    /// `&mut self`.
+    fn persistent_state_change_check_and_reset(&mut self) -> bool;
 }
 
 /// An API for an [`NodeCtx`] usable from inside FSM states
 pub trait NodeHandlerCtx: NodeCommonCtx {
     fn send(&mut self, to: PlatformId, msg: PeerMsg);
+
+    /// Attempt to update the persistent state inside the callback `f`. If
+    /// the state is updated, then `f` should return `true`, otherwise it should
+    /// return `false`.
+    ///
+    /// IMPORTANT: This method sets a bit indicating whether or not the
+    /// underlying `PersistentState` was mutated, for use by callers. This
+    /// method can safely be called multiple times. If any call mutates the
+    /// persistent state, then the bit will remain set. The bit is only cleared
+    /// when a caller calls `persistent_state_change_check_and_reset`.
     fn update_persistent_state<F>(&mut self, f: F)
     where
         F: FnOnce(&mut PersistentState) -> bool;
@@ -120,7 +137,7 @@ impl NodeCallerCtx for NodeCtx {
         self.outgoing.iter()
     }
 
-    fn persistent_state_changed(&mut self) -> bool {
+    fn persistent_state_change_check_and_reset(&mut self) -> bool {
         let changed = self.persistent_state_changed;
         self.persistent_state_changed = false;
         changed

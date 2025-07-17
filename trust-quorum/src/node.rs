@@ -242,9 +242,9 @@ mod tests {
         .expect("success");
 
         // An initial configuraration always causes a change to persistent state
-        assert!(ctx.persistent_state_changed());
+        assert!(ctx.persistent_state_change_check_and_reset());
         // Checking if the persistent state has changed above cleared the bit
-        assert!(!ctx.persistent_state_changed());
+        assert!(!ctx.persistent_state_change_check_and_reset());
 
         let persistent_state = ctx.persistent_state().clone();
 

@@ -208,7 +208,7 @@ impl TestState {
         // failure of this method should be considered a test failure.
         self.sut.action_coordinate_reconfiguration(msg)?;
 
-        if self.sut.ctx.persistent_state_changed() {
+        if self.sut.ctx.persistent_state_change_check_and_reset() {
             // The request succeeded
             self.assert_persistent_state_after_coordinate_reconfiguration(
                 prior_persistent_state,
@@ -364,7 +364,7 @@ impl TestState {
         // to check this.
         let reply = PeerMsg { rack_id, kind: PeerMsgKind::PrepareAck(epoch) };
         self.sut.node.handle(&mut self.sut.ctx, from.clone(), reply);
-        prop_assert!(!self.sut.ctx.persistent_state_changed());
+        prop_assert!(!self.sut.ctx.persistent_state_change_check_and_reset());
         prop_assert_eq!(self.sut.ctx.num_envelopes(), 0);
 
         // Also update the model state
