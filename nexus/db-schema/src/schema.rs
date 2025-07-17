@@ -2081,6 +2081,19 @@ table! {
 }
 
 table! {
+    bp_pending_mgs_update_rot_bootloader (blueprint_id, hw_baseboard_id) {
+        blueprint_id -> Uuid,
+        hw_baseboard_id -> Uuid,
+        sp_type -> crate::enums::SpTypeEnum,
+        sp_slot -> Int4,
+        artifact_sha256 -> Text,
+        artifact_version -> Text,
+        expected_stage0_version -> Text,
+        expected_stage0_next_version -> Nullable<Text>,
+    }
+}
+
+table! {
     bp_pending_mgs_update_sp (blueprint_id, hw_baseboard_id) {
         blueprint_id -> Uuid,
         hw_baseboard_id -> Uuid,
