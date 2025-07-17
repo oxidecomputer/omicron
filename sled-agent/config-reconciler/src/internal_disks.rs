@@ -431,19 +431,24 @@ impl InternalDisksWithBootDisk {
         )
     }
 
+    pub fn non_boot_disk_zpool_ids(
+        &self,
+    ) -> impl Iterator<Item = InternalZpoolUuid> + '_ {
+        self.inner.disks.iter().filter_map(|disk| {
+            (disk.id != self.boot_disk).then_some(disk.zpool_id)
+        })
+    }
+
     pub fn non_boot_disk_install_datasets(
         &self,
     ) -> impl Iterator<Item = (InternalZpoolUuid, Utf8PathBuf)> + '_ {
-        self.inner.disks.iter().filter(|disk| disk.id != self.boot_disk).map(
-            |disk| {
-                let dataset = ZpoolName::Internal(disk.zpool_id)
-                    .dataset_mountpoint(
-                        &self.inner.mount_config.root,
-                        INSTALL_DATASET,
-                    );
-                (disk.zpool_id, dataset)
-            },
-        )
+        self.non_boot_disk_zpool_ids().map(|zpool_id| {
+            let dataset = ZpoolName::Internal(zpool_id).dataset_mountpoint(
+                &self.inner.mount_config.root,
+                INSTALL_DATASET,
+            );
+            (zpool_id, dataset)
+        })
     }
 }
 
