@@ -2,6 +2,7 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
+use crate::HostFlashHashCompletionSender;
 use crate::Responsiveness;
 use crate::SimulatedSp;
 use crate::config::GimletConfig;
@@ -403,6 +404,25 @@ impl Gimlet {
 
     pub fn last_request_handled(&self) -> Option<SimSpHandledRequest> {
         *self.last_request_handled.lock().unwrap()
+    }
+
+    /// Instead of host phase 1 hashing completing after a few seconds, return a
+    /// handle that can be used to explicitly trigger completion.
+    ///
+    /// # Panics
+    ///
+    /// Panics if this `Gimlet` was created with only an RoT instead of a full
+    /// SP + RoT complex.
+    pub async fn set_phase1_hash_policy_explicit_control(
+        &self,
+    ) -> HostFlashHashCompletionSender {
+        self.handler
+            .as_ref()
+            .expect("gimlet was created with SP config")
+            .lock()
+            .await
+            .update_state
+            .set_phase1_hash_policy_explicit_control()
     }
 }
 

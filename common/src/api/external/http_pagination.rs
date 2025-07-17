@@ -447,13 +447,13 @@ pub struct ScanByTimeAndId<Selector = ()> {
 #[serde(rename_all = "snake_case")]
 pub enum TimeAndIdSortMode {
     /// sort in increasing order of timestamp and ID, i.e., earliest first
-    Ascending,
+    TimeAndIdAscending,
     /// sort in increasing order of timestamp and ID, i.e., most recent first
-    Descending,
+    TimeAndIdDescending,
 }
 
 fn default_ts_id_sort_mode() -> TimeAndIdSortMode {
-    TimeAndIdSortMode::Ascending
+    TimeAndIdSortMode::TimeAndIdAscending
 }
 
 impl<T: Clone + Debug + DeserializeOwned + JsonSchema + PartialEq + Serialize>
@@ -462,8 +462,10 @@ impl<T: Clone + Debug + DeserializeOwned + JsonSchema + PartialEq + Serialize>
     type MarkerValue = (DateTime<Utc>, Uuid);
     fn direction(&self) -> PaginationOrder {
         match self.sort_by {
-            TimeAndIdSortMode::Ascending => PaginationOrder::Ascending,
-            TimeAndIdSortMode::Descending => PaginationOrder::Descending,
+            TimeAndIdSortMode::TimeAndIdAscending => PaginationOrder::Ascending,
+            TimeAndIdSortMode::TimeAndIdDescending => {
+                PaginationOrder::Descending
+            }
         }
     }
     fn from_query(p: &PaginatedByTimeAndId<T>) -> Result<&Self, HttpError> {
@@ -579,7 +581,7 @@ mod test {
             selector: (),
         };
         let scan_by_time_and_id = ScanByTimeAndId::<()> {
-            sort_by: TimeAndIdSortMode::Ascending,
+            sort_by: TimeAndIdSortMode::TimeAndIdAscending,
             selector: (),
         };
         let id: Uuid = "61a78113-d3c6-4b35-a410-23e9eae64328".parse().unwrap();
@@ -961,7 +963,7 @@ mod test {
     #[test]
     fn test_scan_by_time_and_id() {
         let scan = ScanByTimeAndId {
-            sort_by: TimeAndIdSortMode::Ascending,
+            sort_by: TimeAndIdSortMode::TimeAndIdAscending,
             selector: (),
         };
 
@@ -982,7 +984,7 @@ mod test {
         let (p0, p1) = test_scan_param_common(
             &list,
             &scan,
-            "sort_by=ascending",
+            "sort_by=time_and_id_ascending",
             &item0_marker,
             &item_last_marker,
             &scan,
@@ -1005,13 +1007,13 @@ mod test {
 
         // test descending too, why not (it caught a mistake!)
         let scan_desc = ScanByTimeAndId {
-            sort_by: TimeAndIdSortMode::Descending,
+            sort_by: TimeAndIdSortMode::TimeAndIdDescending,
             selector: (),
         };
         let (p0, p1) = test_scan_param_common(
             &list,
             &scan_desc,
-            "sort_by=descending",
+            "sort_by=time_and_id_descending",
             &item0_marker,
             &item_last_marker,
             &scan,
@@ -1039,7 +1041,7 @@ mod test {
 
         assert_eq!(
             error.to_string(),
-            "unknown variant `nothing`, expected `ascending` or `descending`"
+            "unknown variant `nothing`, expected `time_and_id_ascending` or `time_and_id_descending`"
         );
     }
 }
