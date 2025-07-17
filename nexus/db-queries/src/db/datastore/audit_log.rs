@@ -36,14 +36,12 @@ impl DataStore {
         use nexus_db_schema::schema::audit_log_complete;
         let query = paginated_multicolumn(
             audit_log_complete::table,
-            (audit_log_complete::time_completed, audit_log_complete::id),
+            (audit_log_complete::timestamp, audit_log_complete::id),
             pagparams,
         )
-        .filter(audit_log_complete::time_completed.ge(start_time));
+        .filter(audit_log_complete::timestamp.ge(start_time));
         let query = match end_time {
-            Some(end) => {
-                query.filter(audit_log_complete::time_completed.lt(end))
-            }
+            Some(end) => query.filter(audit_log_complete::timestamp.lt(end)),
             None => query,
         };
         query
@@ -222,11 +220,16 @@ mod tests {
 
         // Only get first entry
         let audit_log = datastore
-            .audit_log_list(opctx, &pagparams, t1, Some(t2))
+            .audit_log_list(opctx, &pagparams, t0, Some(t1))
             .await
             .expect("retrieve first audit log entry");
         assert_eq!(audit_log.len(), 1);
         assert_eq!(audit_log[0].request_id, "req-1");
+        assert!(
+            audit_log[0].timestamp >= t0 && audit_log[0].timestamp < t1,
+            "{} was not between {t0} and {t1}",
+            audit_log[0].timestamp,
+        );
         assert!(
             audit_log[0].time_completed >= t1
                 && audit_log[0].time_completed < t2,
@@ -241,6 +244,11 @@ mod tests {
             .expect("retrieve second audit log entry");
         assert_eq!(audit_log.len(), 1);
         assert_eq!(audit_log[0].request_id, "req-2");
+        assert!(
+            audit_log[0].timestamp >= t2 && audit_log[0].timestamp < t3,
+            "{} was not between {t2} and {t3}",
+            audit_log[0].timestamp,
+        );
         assert!(
             audit_log[0].time_completed >= t3
                 && audit_log[0].time_completed < t4,

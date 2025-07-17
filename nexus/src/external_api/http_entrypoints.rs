@@ -7649,9 +7649,7 @@ impl NexusExternalApi for NexusExternalApiImpl {
             Ok(HttpResponseOk(ScanByTimeAndId::results_page(
                 &query,
                 log_entries.into_iter().map(Into::into).collect(),
-                &|_, entry: &views::AuditLogEntry| {
-                    (entry.time_completed, entry.id)
-                },
+                &|_, entry: &views::AuditLogEntry| (entry.timestamp, entry.id),
             )?))
         };
         apictx
