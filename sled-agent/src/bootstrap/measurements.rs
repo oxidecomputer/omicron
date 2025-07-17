@@ -22,16 +22,12 @@ pub async fn sled_new_measurement_paths(
     receiver: &InternalDisksReceiver,
 ) -> Result<Vec<Utf8PathBuf>, MeasurementError> {
     let mut all = vec![];
-    let mut dirs = vec![];
 
-    let current = receiver.current();
-
-    dirs.push(
-        current
-            .boot_disk_install_dataset()
-            .ok_or(MeasurementError::MissingBootDisk)?
-            .join("measurements"),
-    );
+    let mut dirs: Vec<_> = receiver
+        .current()
+        .all_install_datasets()
+        .map(|p| p.join("measurements"))
+        .collect();
 
     if dirs.is_empty() {
         return Err(MeasurementError::MissingInstallSet);

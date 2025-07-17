@@ -73,7 +73,11 @@ impl SprocketsServer {
                 };
 
             let log = self.log.new(o!("remote_addr" => remote_addr));
-            info!(log, "Accepted connection from peer {:?}", stream.peer_platform_id());
+            info!(
+                log,
+                "Accepted connection from peer {:?}",
+                stream.peer_platform_id()
+            );
 
             let tx_requests = self.tx_requests.clone();
             tokio::spawn(async move {
