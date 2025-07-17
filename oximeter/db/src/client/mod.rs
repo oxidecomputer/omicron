@@ -79,7 +79,11 @@ const DEFAULT_REQUEST_TIMEOUT: Duration = Duration::from_secs(30);
 mod probes {
     /// Fires when a SQL query begins, with the query string.
     ///
-    /// The first argument is the query ID, and the same sent to the server.
+    /// The first argument is a UUID assigned to the query. This is sent to the
+    /// ClickHouse server along with the query string, where it's used as the
+    /// query ID in tables like the query log. This can be used to correlate
+    /// behavior on the client side with how the server itself processes the
+    /// query.
     fn sql__query__start(query_id: &str, sql: &str) {}
 
     /// Fires when a SQL query ends, either in success or failure.

@@ -24,6 +24,9 @@ use std::net::IpAddr;
 /// Encoder for client packets.
 #[derive(Clone, Copy, Debug)]
 pub struct Encoder {
+    /// IP address of the server we're encoding packets to.
+    ///
+    /// This is used only as an argument USDT probes, not encoding itself.
     pub addr: IpAddr,
 }
 

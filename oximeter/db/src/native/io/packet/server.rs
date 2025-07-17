@@ -19,6 +19,9 @@ use std::net::IpAddr;
 /// A decoder for packets from the ClickHouse server.
 #[derive(Debug)]
 pub struct Decoder {
+    /// IP address of the server we're decoding packets from.
+    ///
+    /// This is used only as an argument USDT probes, not decoding itself.
     pub addr: IpAddr,
 }
 
