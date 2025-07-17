@@ -19,6 +19,7 @@ use omicron_test_utils::dev::poll::CondCheckError;
 use omicron_test_utils::dev::poll::wait_for_condition;
 use sha2::Digest as _;
 use sha2::Sha256;
+use sp_sim::HostFlashHashPolicy;
 use sp_sim::SimulatedSp;
 use std::time::Duration;
 use uuid::Uuid;
@@ -79,6 +80,14 @@ async fn test_host_phase1_hashing() {
         sp_component,
     };
 
+    // We want explicit (i.e., not-timer-based) control over when hashing
+    // completes.
+    let hashing_complete_sender = {
+        let (policy, sender) = HostFlashHashPolicy::channel();
+        sp_sim.set_phase1_hash_policy(policy).await;
+        sender
+    };
+
     // We haven't yet started hashing; we should get the error we expect for
     // both slots.
     for firmware_slot in [0, 1] {
@@ -96,11 +105,6 @@ async fn test_host_phase1_hashing() {
             other => panic!("unexpected status: {other:?}"),
         }
     }
-
-    // We want explicit (i.e., not-timer-based) control over when hashing
-    // completes.
-    let hashing_complete_sender =
-        sp_sim.set_phase1_hash_policy_explicit_control().await;
 
     // Start hashing firmware slot 0.
     mgs_client
