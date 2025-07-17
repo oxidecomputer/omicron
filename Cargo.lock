@@ -5479,7 +5479,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "4979f22fdb869068da03c9f7528f8297c6fd2606bc3a4affe42e6a823fdb8da4"
 dependencies = [
  "cfg-if",
- "windows-targets 0.48.5",
+ "windows-targets 0.52.6",
 ]
 
 [[package]]
@@ -10384,9 +10384,9 @@ dependencies = [
 
 [[package]]
 name = "qorb"
-version = "0.4.0"
+version = "0.4.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "0a3a29f6021f8ccb73eef615ad8b17006098376a75e9ba41eb0f6b976bd12e97"
+checksum = "2f223a85f489c9548719fb367c6733e8bc9d4eef76d6ea59a18299acd9497c60"
 dependencies = [
  "anyhow",
  "async-trait",
