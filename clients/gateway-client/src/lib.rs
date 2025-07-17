@@ -60,6 +60,7 @@ progenitor::generate_api!(
     }),
     derives = [schemars::JsonSchema],
     patch = {
+        ComponentFirmwareHashStatus = { derives = [PartialEq, Eq, PartialOrd, Ord] },
         HostPhase2RecoveryImageId = { derives = [PartialEq, Eq, PartialOrd, Ord] },
         ImageVersion = { derives = [PartialEq, Eq, PartialOrd, Ord] },
         RotImageDetails = { derives = [PartialEq, Eq, PartialOrd, Ord] },

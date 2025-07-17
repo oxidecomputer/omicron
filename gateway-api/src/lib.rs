@@ -16,7 +16,7 @@ use gateway_types::{
         SpState,
     },
     component_details::SpComponentDetails,
-    host::HostStartupOptions,
+    host::{ComponentFirmwareHashStatus, HostStartupOptions},
     ignition::{IgnitionCommand, SpIgnitionInfo},
     rot::{RotCfpa, RotCfpaSlot, RotCmpa, RotState},
     sensor::SpSensorReading,
@@ -258,6 +258,41 @@ pub trait GatewayApi {
         rqctx: RequestContext<Self::Context>,
         path: Path<PathSpComponent>,
     ) -> Result<HttpResponseOk<SpUpdateStatus>, HttpError>;
+
+    /// Start computing the hash of a given slot of a component.
+    ///
+    /// This endpoint is only valid for the `host-boot-flash` component.
+    ///
+    /// Computing the hash takes several seconds; callers should poll for results
+    /// using `sp_component_hash_firmware_get()`. In general they should call
+    /// `sp_component_hash_firmware_get()` first anyway, as the hashes are
+    /// cached in the SP and may already be ready.
+    #[endpoint {
+        method = POST,
+        path = "/sp/{type}/{slot}/component/{component}/hash/{firmware_slot}",
+    }]
+    async fn sp_component_hash_firmware_start(
+        rqctx: RequestContext<Self::Context>,
+        path: Path<PathSpComponentFirmwareSlot>,
+    ) -> Result<HttpResponseUpdatedNoContent, HttpError>;
+
+    /// Get a computed hash of a given slot of a component.
+    ///
+    /// This endpoint is only valid for the `host-boot-flash` component.
+    ///
+    /// Computing the hash takes several seconds; this endpoint returns the
+    /// current status. If the status is `HashNotStarted`, callers should start
+    /// hashing using `sp_component_hash_firmware_start()`. If the status is
+    /// `HashInProgress`, callers should wait a bit then call this endpoint
+    /// again.
+    #[endpoint {
+        method = GET,
+        path = "/sp/{type}/{slot}/component/{component}/hash/{firmware_slot}",
+    }]
+    async fn sp_component_hash_firmware_get(
+        rqctx: RequestContext<Self::Context>,
+        path: Path<PathSpComponentFirmwareSlot>,
+    ) -> Result<HttpResponseOk<ComponentFirmwareHashStatus>, HttpError>;
 
     /// Abort any in-progress update an SP component
     ///
@@ -540,6 +575,19 @@ pub struct PathSpComponent {
     /// ID for the component of the SP; this is the internal identifier used by
     /// the SP itself to identify its components.
     pub component: String,
+}
+
+#[derive(Deserialize, JsonSchema)]
+pub struct PathSpComponentFirmwareSlot {
+    /// ID for the SP that the gateway service translates into the appropriate
+    /// port for communicating with the given SP.
+    #[serde(flatten)]
+    pub sp: SpIdentifier,
+    /// ID for the component of the SP; this is the internal identifier used by
+    /// the SP itself to identify its components.
+    pub component: String,
+    /// Firmware slot of the component.
+    pub firmware_slot: u16,
 }
 
 #[derive(Deserialize, JsonSchema)]

@@ -127,8 +127,9 @@ impl fmt::Display for CollectionDisplay<'_> {
         )?;
         if self.include_sleds {
             display_sleds(&self.collection, f)?;
-        }
-        if self.include_orphaned_datasets {
+        } else if self.include_orphaned_datasets {
+            // display_sleds already includes orphaned datasets, hence "else if
+            // self.include_orphaned_datasets" rather than just "if".
             display_orphaned_datasets(&self.collection, f)?;
         }
         if self.include_clickhouse_keeper_membership {
