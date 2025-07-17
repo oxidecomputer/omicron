@@ -26,7 +26,10 @@ pub use messages::*;
 pub use node::Node;
 pub use persistent_state::{PersistentState, PersistentStateSummary};
 mod fsm_state;
-pub(crate) use fsm_state::{FsmCtx, FsmState};
+pub(crate) use fsm_state::{
+    FallibleTransition, FsmCtx, FsmCtxApi, FsmCtxCommonApi, FsmCtxNodeApi,
+    FsmState,
+};
 
 #[derive(
     Debug,

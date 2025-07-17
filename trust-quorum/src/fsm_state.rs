@@ -5,6 +5,7 @@
 //! A trait for the trust-quorum protocol state machine
 
 mod coordinating;
+mod uninitialized;
 
 use crate::{
     Envelope, PeerMsg, PersistentState, PlatformId, ReconfigureMsg,
@@ -14,6 +15,7 @@ use std::time::Instant;
 
 /// An api shared by [`FsmCtxNodeApi`] and [`FsmCtxApi`]
 pub trait FsmCtxCommonApi {
+    fn platform_id(&self) -> &PlatformId;
     fn now(&self) -> Instant;
     fn persistent_state(&self) -> &PersistentState;
 }
@@ -31,6 +33,10 @@ pub trait FsmCtxApi: FsmCtxCommonApi {
 }
 
 /// Common state shared among all FSM states
+///
+/// We separate access to this context via different APIs; namely [`FsmCtxApi`]
+/// and [`FsmCtxNodeApi`]. This statically prevents both the fsm states and
+/// [`Node`]s from performing improper mutations.
 pub struct FsmCtx {
     /// The unique hardware ID of a sled
     platform_id: PlatformId,
@@ -46,6 +52,10 @@ pub struct FsmCtx {
 }
 
 impl FsmCtxCommonApi for FsmCtx {
+    fn platform_id(&self) -> &PlatformId {
+        &self.platform_id
+    }
+
     fn now(&self) -> Instant {
         self.now
     }
@@ -98,14 +108,9 @@ pub(crate) trait FsmState {
     fn tick(&mut self, ctx: &mut dyn FsmCtxApi);
 
     /// Start coordinating a reconfiguration
-    ///
-    /// On success:
-    ///  * puts messages that need sending to other nodes in `outbox`.
-    ///  * returns `Ok(Some(PersistentState))` which the caller must write to
-    ///    disk if the state has changed. Returns `Ok(None)` otherwise.
     fn coordinate_reconfiguration(
-        &mut self,
+        self: Box<Self>,
         ctx: &mut dyn FsmCtxApi,
         msg: ReconfigureMsg,
-    ) -> Result<Option<&PersistentState>, ReconfigurationError>;
+    ) -> Result<Box<dyn FsmState>, (Box<dyn FsmState>, ReconfigurationError)>;
 }

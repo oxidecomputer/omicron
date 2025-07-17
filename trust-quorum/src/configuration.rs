@@ -64,7 +64,7 @@ impl IdOrdItem for Configuration {
 impl Configuration {
     /// Create a new configuration for the trust quorum
     ///
-    /// `previous_configuration` is never filled in upon construction. A
+    /// `encrypted_rack_secrets` is never filled in upon construction. A
     /// coordinator will fill this in as necessary after retrieving shares for
     /// the last committed epoch.
     pub fn new(
