@@ -25,7 +25,8 @@ pub(crate) use coordinator_state::CoordinatorState;
 pub use crypto::RackSecret;
 pub use messages::*;
 pub use node::Node;
-pub(crate) use node_ctx::NodeHandlerCtx;
+// public only for docs.
+pub use node_ctx::NodeHandlerCtx;
 pub use node_ctx::{NodeCallerCtx, NodeCommonCtx, NodeCtx};
 pub use persistent_state::{PersistentState, PersistentStateSummary};
 

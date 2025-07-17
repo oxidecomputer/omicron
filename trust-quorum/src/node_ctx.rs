@@ -23,9 +23,10 @@ pub trait NodeCallerCtx: NodeCommonCtx {
 
     /// Check if the contained `PersistentState` has been mutated
     ///
-    /// IMPORTANT: Calling this method resets the state of mutation to `false`.
-    /// This means that callers should only call this once after each API call
-    /// and cache the result as necessary. This is also why this method takes an
+    /// IMPORTANT: Calling this method resets the state of mutation to
+    /// `false`. This means that callers should only call this once after each
+    /// [`crate::Node`] API call and cache the result as necessary. This is also
+    /// why this method takes an
     /// `&mut self`.
     fn persistent_state_change_check_and_reset(&mut self) -> bool;
 }
@@ -52,7 +53,7 @@ pub trait NodeHandlerCtx: NodeCommonCtx {
 ///
 /// We separate access to this context via different APIs; namely [`NodeCallerCtx`]
 /// and [`NodeHandlerCtx`]. This statically prevents both the caller and
-/// [`Node`] internals from performing improper mutations.
+/// [`crate::Node`] internals from performing improper mutations.
 pub struct NodeCtx {
     /// The unique hardware ID of a sled
     platform_id: PlatformId,
@@ -63,7 +64,7 @@ pub struct NodeCtx {
     /// Was persistent_state modified by a call to `update_persistent_state`?
     ///
     /// This gets reset by reading the persistent state with
-    /// [`NodeCallerCtx::persistent_state_change`].
+    /// [`NodeCallerCtx::persistent_state_change_check_and_reset`].
     persistent_state_changed: bool,
 
     /// Outgoing messages destined for other peers
