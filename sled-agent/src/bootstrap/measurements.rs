@@ -11,8 +11,8 @@ use thiserror::Error;
 pub enum MeasurementError {
     #[error("Missing INSTALL dataset")]
     MissingInstallSet,
-    #[error("io: {0}")]
-    Io(std::io::Error),
+    #[error("io error at {path}")]
+    Io { path: Utf8PathBuf, err: std::io::Error },
     #[error("Missing boot disk")]
     MissingBootDisk,
 }
@@ -50,7 +50,10 @@ pub async fn sled_new_measurement_paths(
         match dir.read_dir_utf8() {
             Ok(iter) => {
                 for entry in iter {
-                    let entry = entry.map_err(MeasurementError::Io)?;
+                    let entry = entry.map_err(|err| MeasurementError::Io {
+                        path: dir.clone(),
+                        err,
+                    })?;
                     all.push(entry.path().into());
                 }
             }

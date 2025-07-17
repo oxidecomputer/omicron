@@ -157,8 +157,8 @@ pub enum StartError {
     #[error("Failed to initialize lrtq node as learner: {0}")]
     FailedLearnerInit(bootstore::NodeRequestError),
 
-    #[error("Measurment error: {0}")]
-    MeasurementError(MeasurementError),
+    #[error("Measurment error")]
+    MeasurementError(#[source] MeasurementError),
 }
 
 /// Server for the bootstrap agent.

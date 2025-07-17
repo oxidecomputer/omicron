@@ -76,7 +76,9 @@ pub(crate) async fn build_tuf_repo(
 
     for entry in std::fs::read_dir(
         output_dir.join("hubris-staging").join("measurement_corpus"),
-    )? {
+    )
+    .context("failed to read `hubris-staging/measurement_corpus")?
+    {
         let entry = entry?;
         measurement_corpus.push(DeserializedControlPlaneZoneSource::File {
             file_name: Some(format!(
@@ -89,7 +91,9 @@ pub(crate) async fn build_tuf_repo(
 
     for entry in std::fs::read_dir(
         output_dir.join("hubris-production").join("measurement_corpus"),
-    )? {
+    )
+    .context("failed to read `hubris-production/measurement_corpus")?
+    {
         let entry = entry?;
         measurement_corpus.push(DeserializedControlPlaneZoneSource::File {
             file_name: Some(format!(
