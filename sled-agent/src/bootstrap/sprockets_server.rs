@@ -10,6 +10,7 @@ use crate::bootstrap::params::version;
 use crate::bootstrap::views::Response;
 use crate::bootstrap::views::ResponseEnvelope;
 use crate::bootstrap::views::SledAgentResponse;
+use camino::Utf8PathBuf;
 use sled_agent_types::sled::StartSledAgentRequest;
 use slog::Logger;
 use sprockets_tls::Stream;
@@ -59,19 +60,24 @@ impl SprocketsServer {
     /// which is cancel-safe. Note that cancelling this
     /// server does not necessarily cancel any outstanding requests that it has
     /// already received (and which may still be executing).
-    pub(super) async fn run(mut self) {
+    pub(super) async fn run(mut self, corpus: Vec<Utf8PathBuf>) {
         loop {
             // Sprockets actually _uses_ the key here!
-            let (stream, remote_addr) = match self.listener.accept().await {
-                Ok(conn) => conn,
-                Err(err) => {
-                    error!(self.log, "accept() failed"; "err" => #%err);
-                    continue;
-                }
-            };
+            let (stream, remote_addr) =
+                match self.listener.accept(&corpus).await {
+                    Ok(conn) => conn,
+                    Err(err) => {
+                        error!(self.log, "accept() failed"; "err" => #%err);
+                        continue;
+                    }
+                };
 
             let log = self.log.new(o!("remote_addr" => remote_addr));
-            info!(log, "Accepted connection");
+            info!(
+                log,
+                "Accepted connection from peer {:?}",
+                stream.peer_platform_id()
+            );
 
             let tx_requests = self.tx_requests.clone();
             tokio::spawn(async move {

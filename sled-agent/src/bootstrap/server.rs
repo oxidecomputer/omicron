@@ -12,6 +12,7 @@ use super::views::SledAgentResponse;
 use crate::bootstrap::config::BOOTSTRAP_AGENT_RACK_INIT_PORT;
 use crate::bootstrap::http_entrypoints::BootstrapServerContext;
 use crate::bootstrap::maghemite;
+use crate::bootstrap::measurements::MeasurementError;
 use crate::bootstrap::pre_server::BootstrapAgentStartup;
 use crate::bootstrap::pumpkind;
 use crate::bootstrap::rack_ops::RssAccess;
@@ -155,6 +156,9 @@ pub enum StartError {
 
     #[error("Failed to initialize lrtq node as learner: {0}")]
     FailedLearnerInit(bootstore::NodeRequestError),
+
+    #[error("Measurment error")]
+    MeasurementError(#[source] MeasurementError),
 }
 
 /// Server for the bootstrap agent.
@@ -204,6 +208,13 @@ impl Server {
         // enqueue another, and we can send back an HTTP busy.
         let (sled_reset_tx, sled_reset_rx) = mpsc::channel(1);
 
+        let all_measurements =
+            crate::bootstrap::measurements::sled_new_measurement_paths(
+                &internal_disks_rx,
+            )
+            .await
+            .map_err(StartError::MeasurementError)?;
+
         // Start the bootstrap dropshot server.
         let bootstrap_context = BootstrapServerContext {
             base_log: base_log.clone(),
@@ -239,7 +250,8 @@ impl Server {
         )
         .await
         .map_err(StartError::BindSprocketsServer)?;
-        let sprockets_server_handle = tokio::spawn(sprockets_server.run());
+        let sprockets_server_handle =
+            tokio::spawn(sprockets_server.run(all_measurements));
 
         // Do we have a persistent sled-agent request that we need to restore?
         let state = if let Some(ledger) = maybe_ledger {

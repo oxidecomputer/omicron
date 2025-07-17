@@ -10,6 +10,7 @@ use super::params::version;
 use super::views::SledAgentResponse;
 use crate::bootstrap::views::Response;
 use crate::bootstrap::views::ResponseEnvelope;
+use camino::Utf8PathBuf;
 use sled_agent_types::sled::StartSledAgentRequest;
 use slog::Logger;
 use sprockets_tls::client::Client as SprocketsClient;
@@ -72,15 +73,17 @@ pub(crate) struct Client {
     addr: SocketAddrV6,
     log: Logger,
     sprockets_conf: SprocketsConfig,
+    corpus: Vec<Utf8PathBuf>,
 }
 
 impl Client {
     pub(crate) fn new(
         addr: SocketAddrV6,
         sprockets_conf: SprocketsConfig,
+        corpus: Vec<Utf8PathBuf>,
         log: Logger,
     ) -> Self {
-        Self { addr, sprockets_conf, log }
+        Self { addr, sprockets_conf, log, corpus }
     }
 
     /// Start sled agent by sending an initialization request determined from
@@ -114,6 +117,7 @@ impl Client {
         let stream = SprocketsClient::connect(
             self.sprockets_conf.clone(),
             self.addr,
+            self.corpus.clone(),
             log.clone(),
         )
         .await
