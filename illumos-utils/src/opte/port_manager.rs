@@ -12,6 +12,7 @@ use crate::opte::Port;
 use crate::opte::Vni;
 use crate::opte::opte_firewall_rules;
 use crate::opte::port::PortData;
+use crate::opte::route::Route;
 use crate::opte::stat::PortStats;
 use ipnetwork::IpNetwork;
 use macaddr::MacAddr6;
@@ -67,7 +68,7 @@ use uuid::Uuid;
 #[derive(Debug, Default, Clone)]
 struct RouteSet {
     version: Option<RouterVersion>,
-    routes: HashSet<ResolvedVpcRoute>,
+    routes: HashSet<Route>,
     active_ports: usize,
 }
 
@@ -379,13 +380,15 @@ impl PortManager {
                     let target = ApiRouterTarget::InternetGateway(
                         InternetGatewayRouterTarget::System,
                     );
-                    routes.insert(ResolvedVpcRoute {
+                    routes.insert(Route {
+                        id: None,
                         dest: IpNet::V4(
                             Ipv4Net::new(Ipv4Addr::UNSPECIFIED, 0).unwrap(),
                         ),
                         target,
                     });
-                    routes.insert(ResolvedVpcRoute {
+                    routes.insert(Route {
+                        id: None,
                         dest: IpNet::V6(
                             Ipv6Net::new(Ipv6Addr::UNSPECIFIED, 0).unwrap(),
                         ),
@@ -482,17 +485,20 @@ impl PortManager {
 
     pub fn vpc_routes_ensure(
         &self,
-        new_routes: Vec<ResolvedVpcRouteSet>,
+        new_route_sets: Vec<ResolvedVpcRouteSet>,
     ) -> Result<(), Error> {
         let mut routes = self.inner.routes.lock().unwrap();
         let mut deltas = HashMap::new();
-        slog::debug!(self.inner.log, "new routes: {new_routes:#?}");
-        for new in new_routes {
+        slog::debug!(self.inner.log, "new routes: {new_route_sets:#?}");
+        for new in new_route_sets {
             // Disregard any route information for a subnet we don't have.
             let Some(old) = routes.get(&new.id) else {
                 slog::warn!(self.inner.log, "ignoring route {new:#?}");
                 continue;
             };
+
+            let new_routes: HashSet<_> =
+                new.routes.into_iter().map(Route::from).collect();
 
             // We have to handle subnet router changes, as well as
             // spurious updates from multiple Nexus instances.
@@ -513,8 +519,8 @@ impl PortManager {
                         continue;
                     }
                     _ => (
-                        new.routes.difference(&old.routes).cloned().collect(),
-                        old.routes.difference(&new.routes).cloned().collect(),
+                        new_routes.difference(&old.routes).cloned().collect(),
+                        old.routes.difference(&new_routes).cloned().collect(),
                     ),
                 };
             deltas.insert(new.id, (to_add, to_delete));
@@ -524,7 +530,7 @@ impl PortManager {
                 new.id,
                 RouteSet {
                     version: new.version,
-                    routes: new.routes,
+                    routes: new_routes,
                     active_ports,
                 },
             );
@@ -560,33 +566,45 @@ impl PortManager {
                 );
 
                 for route in to_delete {
-                    let route = DelRouterEntryReq {
+                    let opte_route = DelRouterEntryReq {
                         route: oxide_vpc::api::Route {
                             dest: super::net_to_cidr(route.dest),
                             target: super::router_target_opte(&route.target),
                             class,
+                            // Stat ID is not used on removal within OPTE, this
+                            // is done using the above three fields for matching.
                             stat_id: None,
                         },
                         port_name: port.name().into(),
                     };
 
-                    hdl.del_router_entry(&route)?;
+                    hdl.del_router_entry(&opte_route)?;
+
+                    if let Some(id) = route.id {
+                        port.stats().deregister_entity(
+                            external::VpcEntity::VpcRoute(id),
+                        );
+                    }
 
                     debug!(
                         self.inner.log,
                         "Removed router entry";
                         "port_name" => &port.name(),
-                        "route" => ?route,
+                        "route" => ?opte_route,
                     );
                 }
 
                 for route in to_add {
+                    let stat_id = route.id.map(|id| {
+                        port.stats()
+                            .register_entity(external::VpcEntity::VpcRoute(id))
+                    });
                     let route = AddRouterEntryReq {
                         route: oxide_vpc::api::Route {
                             dest: super::net_to_cidr(route.dest),
                             target: super::router_target_opte(&route.target),
                             class,
-                            stat_id: Some(Uuid::new_v4()),
+                            stat_id,
                         },
                         port_name: port.name().into(),
                     };
