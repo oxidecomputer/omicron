@@ -2713,16 +2713,12 @@ fn after_164_0_0<'a>(ctx: &'a MigrationContext<'a>) -> BoxFuture<'a, ()> {
     })
 }
 
-const ROUTE_CONFIG_PORT_SETTINGS_ID_0: &str =
-    "1e700b64-79e0-4515-9771-bcc2391b6d4d";
-const ROUTE_CONFIG_PORT_SETTINGS_ID_1: &str =
-    "c6b015ff-1c98-474f-b9e9-dfc30546094f";
-const ROUTE_CONFIG_PORT_SETTINGS_ID_2: &str =
-    "8b777d9b-62a3-4c4d-b0b7-314315c2a7fc";
-const ROUTE_CONFIG_PORT_SETTINGS_ID_3: &str =
-    "7c675e89-74b1-45da-9577-cf75f028107a";
-const ROUTE_CONFIG_PORT_SETTINGS_ID_4: &str =
-    "e2413d63-9307-4918-b9c4-bce959c63042";
+const PORT_SETTINGS_ID_165_0: &str = "1e700b64-79e0-4515-9771-bcc2391b6d4d";
+const PORT_SETTINGS_ID_165_1: &str = "c6b015ff-1c98-474f-b9e9-dfc30546094f";
+const PORT_SETTINGS_ID_165_2: &str = "8b777d9b-62a3-4c4d-b0b7-314315c2a7fc";
+const PORT_SETTINGS_ID_165_3: &str = "7c675e89-74b1-45da-9577-cf75f028107a";
+const PORT_SETTINGS_ID_165_4: &str = "e2413d63-9307-4918-b9c4-bce959c63042";
+const PORT_SETTINGS_ID_165_5: &str = "05df929f-1596-42f4-b78f-aebb5d7028c4";
 
 // Insert records using the `local_pref` column before it's renamed and its
 // database type is changed from INT8 to INT2. The receiving Rust type is u8
@@ -2736,19 +2732,22 @@ fn before_165_0_0<'a>(ctx: &'a MigrationContext<'a>) -> BoxFuture<'a, ()> {
                   (port_settings_id, interface_name, dst, gw, vid, local_pref)
                 VALUES
                   (
-                    '{ROUTE_CONFIG_PORT_SETTINGS_ID_0}', 'phy0', '0.0.0.0/0', '0.0.0.0', NULL, -1
+                    '{PORT_SETTINGS_ID_165_0}', 'phy0', '0.0.0.0/0', '0.0.0.0', NULL, -1
                   ),
                   (
-                    '{ROUTE_CONFIG_PORT_SETTINGS_ID_1}', 'phy0', '0.0.0.0/0', '0.0.0.0', NULL, 0
+                    '{PORT_SETTINGS_ID_165_1}', 'phy0', '0.0.0.0/0', '0.0.0.0', NULL, 0
                   ),
                   (
-                    '{ROUTE_CONFIG_PORT_SETTINGS_ID_2}', 'phy0', '0.0.0.0/0', '0.0.0.0', NULL, 128
+                    '{PORT_SETTINGS_ID_165_2}', 'phy0', '0.0.0.0/0', '0.0.0.0', NULL, 128
                   ),
                   (
-                    '{ROUTE_CONFIG_PORT_SETTINGS_ID_3}', 'phy0', '0.0.0.0/0', '0.0.0.0', NULL, 255
+                    '{PORT_SETTINGS_ID_165_3}', 'phy0', '0.0.0.0/0', '0.0.0.0', NULL, 255
                   ),
                   (
-                    '{ROUTE_CONFIG_PORT_SETTINGS_ID_4}', 'phy0', '0.0.0.0/0', '0.0.0.0', NULL, 256
+                    '{PORT_SETTINGS_ID_165_4}', 'phy0', '0.0.0.0/0', '0.0.0.0', NULL, 256
+                  ),
+                  (
+                    '{PORT_SETTINGS_ID_165_5}', 'phy0', '0.0.0.0/0', '0.0.0.0', NULL, NULL
                   );
               "),
             )
@@ -2769,19 +2768,20 @@ fn after_165_0_0<'a>(ctx: &'a MigrationContext<'a>) -> BoxFuture<'a, ()> {
             )
             .await
             .expect("failed to query post-migration switch_port_settings_route_config table");
-        assert_eq!(rows.len(), 5);
+        assert_eq!(rows.len(), 6);
 
-        let records: HashMap<Uuid, i16> = HashMap::from([
-            (Uuid::from_str(ROUTE_CONFIG_PORT_SETTINGS_ID_0).unwrap(), 0),
-            (Uuid::from_str(ROUTE_CONFIG_PORT_SETTINGS_ID_1).unwrap(), 0),
-            (Uuid::from_str(ROUTE_CONFIG_PORT_SETTINGS_ID_2).unwrap(), 128),
-            (Uuid::from_str(ROUTE_CONFIG_PORT_SETTINGS_ID_3).unwrap(), 255),
-            (Uuid::from_str(ROUTE_CONFIG_PORT_SETTINGS_ID_4).unwrap(), 255),
+        let records: HashMap<Uuid, Option<i16>> = HashMap::from([
+            (Uuid::from_str(PORT_SETTINGS_ID_165_0).unwrap(), Some(0)),
+            (Uuid::from_str(PORT_SETTINGS_ID_165_1).unwrap(), Some(0)),
+            (Uuid::from_str(PORT_SETTINGS_ID_165_2).unwrap(), Some(128)),
+            (Uuid::from_str(PORT_SETTINGS_ID_165_3).unwrap(), Some(255)),
+            (Uuid::from_str(PORT_SETTINGS_ID_165_4).unwrap(), Some(255)),
+            (Uuid::from_str(PORT_SETTINGS_ID_165_5).unwrap(), None),
         ]);
 
         for row in rows {
             let port_settings_id = row.get::<&str, Uuid>("port_settings_id");
-            let rib_priority_got = row.get::<&str, i16>("rib_priority");
+            let rib_priority_got = row.get::<&str, Option<i16>>("rib_priority");
 
             let rib_priority_want = records
                 .get(&port_settings_id)
