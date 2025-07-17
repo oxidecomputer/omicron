@@ -88,6 +88,7 @@ criterion.workspace = true
 expectorate.workspace = true
 hyper-rustls.workspace = true
 gateway-client.workspace = true
+gateway-types.workspace = true
 illumos-utils.workspace = true
 internal-dns-resolver.workspace = true
 itertools.workspace = true
