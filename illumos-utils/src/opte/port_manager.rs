@@ -22,7 +22,6 @@ use omicron_common::api::internal::shared::InternetGatewayRouterTarget;
 use omicron_common::api::internal::shared::NetworkInterface;
 use omicron_common::api::internal::shared::NetworkInterfaceKind;
 use omicron_common::api::internal::shared::ResolvedVpcFirewallRule;
-use omicron_common::api::internal::shared::ResolvedVpcRoute;
 use omicron_common::api::internal::shared::ResolvedVpcRouteSet;
 use omicron_common::api::internal::shared::ResolvedVpcRouteState;
 use omicron_common::api::internal::shared::RouterId;

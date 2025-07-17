@@ -167,6 +167,8 @@ impl OmicronZoneNic {
     ) -> anyhow::Result<NetworkInterface> {
         Ok(NetworkInterface {
             id: self.id,
+            subnet_id: None,
+            vpc_id: None,
             ip: self.ip.ip(),
             kind: NetworkInterfaceKind::Service {
                 id: zone_id.into_untyped_uuid(),

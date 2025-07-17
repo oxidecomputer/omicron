@@ -415,6 +415,7 @@ pub async fn resolve_firewall_rules_for_sled_agent(
             .map(|protocols| protocols.iter().map(|v| v.0).collect());
 
         sled_agent_rules.push(ResolvedVpcFirewallRule {
+            id: rule.id(),
             status: rule.status.0,
             direction: rule.direction.0,
             targets,

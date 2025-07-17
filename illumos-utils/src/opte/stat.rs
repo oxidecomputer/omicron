@@ -385,8 +385,6 @@ async fn run_port_stat(state: Arc<PortStatsShared>) {
 pub enum FlowLabel {
     Entity(external::VpcEntity),
     Destination(external::ForwardClass),
-    // TODO: These will be used as part of oximeter association.
-    #[expect(unused)]
     Builtin(VpcBuiltinLabel),
 }
 

@@ -1231,6 +1231,10 @@ impl<'a> BlueprintBuilder<'a> {
         } = self.resource_allocator()?.next_external_ip_external_dns()?;
         let nic = NetworkInterface {
             id: self.rng.sled_rng(sled_id).next_network_interface(),
+            subnet_id: Some(
+                *nexus_db_fixed_data::vpc_subnet::DNS_VPC_SUBNET_ID,
+            ),
+            vpc_id: Some(*nexus_db_fixed_data::vpc::SERVICES_VPC_ID),
             kind: NetworkInterfaceKind::Service { id: id.into_untyped_uuid() },
             name: format!("external-dns-{id}").parse().unwrap(),
             ip: nic_ip,
@@ -1429,6 +1433,10 @@ impl<'a> BlueprintBuilder<'a> {
 
         let nic = NetworkInterface {
             id: self.rng.sled_rng(sled_id).next_network_interface(),
+            subnet_id: Some(
+                *nexus_db_fixed_data::vpc_subnet::NEXUS_VPC_SUBNET_ID,
+            ),
+            vpc_id: Some(*nexus_db_fixed_data::vpc::SERVICES_VPC_ID),
             kind: NetworkInterfaceKind::Service {
                 id: nexus_id.into_untyped_uuid(),
             },
@@ -1728,6 +1736,10 @@ impl<'a> BlueprintBuilder<'a> {
         };
         let nic = NetworkInterface {
             id: self.rng.sled_rng(sled_id).next_network_interface(),
+            subnet_id: Some(
+                *nexus_db_fixed_data::vpc_subnet::NTP_VPC_SUBNET_ID,
+            ),
+            vpc_id: Some(*nexus_db_fixed_data::vpc::SERVICES_VPC_ID),
             kind: NetworkInterfaceKind::Service {
                 id: new_zone_id.into_untyped_uuid(),
             },

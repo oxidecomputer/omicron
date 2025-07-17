@@ -50,6 +50,8 @@ use uuid::Uuid;
 #[derive(Debug, diesel::Queryable)]
 struct NicInfo {
     id: Uuid,
+    subnet_id: Uuid,
+    vpc_id: Uuid,
     parent_id: Uuid,
     kind: NetworkInterfaceKind,
     name: db::model::Name,
@@ -85,6 +87,8 @@ impl From<NicInfo> for omicron_common::api::internal::shared::NetworkInterface {
         };
         omicron_common::api::internal::shared::NetworkInterface {
             id: nic.id,
+            subnet_id: Some(nic.subnet_id),
+            vpc_id: Some(nic.vpc_id),
             kind,
             name: nic.name.into(),
             ip: nic.ip.ip(),
@@ -501,6 +505,8 @@ impl DataStore {
             // of a JOIN and not from a single table. DRY this out if possible.
             .select((
                 network_interface::id,
+                network_interface::subnet_id,
+                network_interface::vpc_id,
                 network_interface::parent_id,
                 network_interface::kind,
                 network_interface::name,

@@ -65,8 +65,6 @@ pub enum NetworkInterfaceKind {
 pub struct NetworkInterface {
     pub id: Uuid,
     pub kind: NetworkInterfaceKind,
-    pub subnet_id: Uuid,
-    pub vpc_id: Uuid,
     pub name: Name,
     pub ip: IpAddr,
     pub mac: external::MacAddr,
@@ -76,6 +74,19 @@ pub struct NetworkInterface {
     pub slot: u8,
     #[serde(default)]
     pub transit_ips: Vec<IpNet>,
+
+    // TODO: These entries are nullable because there are some downstream types
+    // (e.g., `OmicronZoneNic` and its CRDB representation) that want to be
+    // converted to `NetworkInterface`s but lack these fields, and since these
+    // are blueprint types it's not clear to me which NICs currently exist to
+    // resolve this via lookup. Every NIC *does have these fields* -- this
+    // should be doable, but it suggests a laborious migration beyond the scope
+    // of flowstats.
+    //
+    // The net result is that we can't correctly aggregate on VPC/subnet scales
+    // for services.
+    pub subnet_id: Option<Uuid>,
+    pub vpc_id: Option<Uuid>,
 }
 
 /// An IP address and port range used for source NAT, i.e., making

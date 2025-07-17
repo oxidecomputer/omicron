@@ -2786,6 +2786,7 @@ impl DataStore {
                 } else {
                     None
                 };
+            let id = rule.id();
 
             // Some dests/targets (e.g., subnet) resolve to *several* specifiers
             // to handle both v4 and v6. The user-facing API will prevent severe
@@ -2895,11 +2896,11 @@ impl DataStore {
             //      It would be really useful to raise collisions and
             //      misses to users, somehow.
             if let (Some(dest), Some(target)) = (v4_dest, v4_target) {
-                out.insert(ResolvedVpcRoute { dest, target });
+                out.insert(ResolvedVpcRoute { id, dest, target });
             }
 
             if let (Some(dest), Some(target)) = (v6_dest, v6_target) {
-                out.insert(ResolvedVpcRoute { dest, target });
+                out.insert(ResolvedVpcRoute { id, dest, target });
             }
         }
 
