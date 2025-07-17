@@ -17,6 +17,7 @@ mod coordinator_state;
 pub(crate) mod crypto;
 mod messages;
 mod node;
+mod node_ctx;
 mod persistent_state;
 mod validators;
 pub use configuration::Configuration;
@@ -24,6 +25,8 @@ pub(crate) use coordinator_state::CoordinatorState;
 pub use crypto::RackSecret;
 pub use messages::*;
 pub use node::Node;
+pub(crate) use node_ctx::NodeHandlerCtx;
+pub use node_ctx::{NodeCallerCtx, NodeCommonCtx, NodeCtx};
 pub use persistent_state::{PersistentState, PersistentStateSummary};
 
 #[derive(
