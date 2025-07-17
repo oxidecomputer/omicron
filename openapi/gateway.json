@@ -716,6 +716,127 @@
         }
       }
     },
+    "/sp/{type}/{slot}/component/{component}/hash/{firmware_slot}": {
+      "get": {
+        "summary": "Get a computed hash of a given slot of a component.",
+        "description": "This endpoint is only valid for the `host-boot-flash` component.\n\nComputing the hash takes several seconds; this endpoint returns the current status. If the status is `HashNotStarted`, callers should start hashing using `sp_component_hash_firmware_start()`. If the status is `HashInProgress`, callers should wait a bit then call this endpoint again.",
+        "operationId": "sp_component_hash_firmware_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "component",
+            "description": "ID for the component of the SP; this is the internal identifier used by the SP itself to identify its components.",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "firmware_slot",
+            "description": "Firmware slot of the component.",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "format": "uint16",
+              "minimum": 0
+            }
+          },
+          {
+            "in": "path",
+            "name": "slot",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "format": "uint16",
+              "minimum": 0
+            }
+          },
+          {
+            "in": "path",
+            "name": "type",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/SpType"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ComponentFirmwareHashStatus"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      },
+      "post": {
+        "summary": "Start computing the hash of a given slot of a component.",
+        "description": "This endpoint is only valid for the `host-boot-flash` component.\n\nComputing the hash takes several seconds; callers should poll for results using `sp_component_hash_firmware_get()`. In general they should call `sp_component_hash_firmware_get()` first anyway, as the hashes are cached in the SP and may already be ready.",
+        "operationId": "sp_component_hash_firmware_start",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "component",
+            "description": "ID for the component of the SP; this is the internal identifier used by the SP itself to identify its components.",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "firmware_slot",
+            "description": "Firmware slot of the component.",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "format": "uint16",
+              "minimum": 0
+            }
+          },
+          {
+            "in": "path",
+            "name": "slot",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "format": "uint16",
+              "minimum": 0
+            }
+          },
+          {
+            "in": "path",
+            "name": "type",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/SpType"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "resource updated"
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
     "/sp/{type}/{slot}/component/{component}/reset": {
       "post": {
         "summary": "Reset an SP component (possibly the SP itself).",
@@ -1697,6 +1818,66 @@
   },
   "components": {
     "schemas": {
+      "ComponentFirmwareHashStatus": {
+        "oneOf": [
+          {
+            "description": "The hash is not available; the client must issue a separate request to begin calculating the hash.",
+            "type": "object",
+            "properties": {
+              "status": {
+                "type": "string",
+                "enum": [
+                  "hash_not_calculated"
+                ]
+              }
+            },
+            "required": [
+              "status"
+            ]
+          },
+          {
+            "description": "The hash is currently being calculated; the client should sleep briefly then check again.\n\nWe expect this operation to take a handful of seconds in practice.",
+            "type": "object",
+            "properties": {
+              "status": {
+                "type": "string",
+                "enum": [
+                  "hash_in_progress"
+                ]
+              }
+            },
+            "required": [
+              "status"
+            ]
+          },
+          {
+            "description": "The hash of the given firmware slot.",
+            "type": "object",
+            "properties": {
+              "sha256": {
+                "type": "array",
+                "items": {
+                  "type": "integer",
+                  "format": "uint8",
+                  "minimum": 0
+                },
+                "minItems": 32,
+                "maxItems": 32
+              },
+              "status": {
+                "type": "string",
+                "enum": [
+                  "hashed"
+                ]
+              }
+            },
+            "required": [
+              "sha256",
+              "status"
+            ]
+          }
+        ]
+      },
       "Duration": {
         "type": "object",
         "properties": {
