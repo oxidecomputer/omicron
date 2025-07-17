@@ -355,8 +355,11 @@ mod test {
             assert!(num_collections > 0);
 
             // Regardless of the activation source, we should have at
-            // most `nkeep + 1` collections.
-            assert!(num_collections <= nkeep + 1);
+            // most `nkeep + 2` collections: at most `nkeep + 1` from
+            // our collection, and at most one more if we lose the race
+            // with Nexus.
+            println!("have {num_collections} for nkeep = {nkeep}");
+            assert!(num_collections <= nkeep + 2);
 
             // Filter down to just the collections we activated. (This could be
             // empty if Nexus shoved several collections in!)
