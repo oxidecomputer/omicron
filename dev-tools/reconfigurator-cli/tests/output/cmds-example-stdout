@@ -1108,14 +1108,6 @@ LEDGERED SLED CONFIG
         b61b7c3c-d665-44b3-9312-794aa81c59de     crucible         install-dataset 
         b957d6cf-f7b2-4bee-9928-c5fde8c59e04     crucible         install-dataset 
         e246f5e3-0650-4afc-860f-ee7114d309c5     crucible         install-dataset 
-    boot disk slot: FAILED TO DETERMINE: constructed via debug_assume_success()
-    slot A details UNAVAILABLE: constructed via debug_assume_success()
-    slot B details UNAVAILABLE: constructed via debug_assume_success()
-    last reconciled config: matches ledgered config
-        no orphaned datasets
-        all disks reconciled successfully
-        all datasets reconciled successfully
-        all zones reconciled successfully
     zone image resolver status:
         zone manifest:
             path on boot disk: /fake/path/install/zones.json
@@ -1124,9 +1116,17 @@ LEDGERED SLED CONFIG
                 no artifacts in install dataset (this should only be seen in simulated systems)
             no non-boot disks
         mupdate override:
-            boot disk path: /fake/path/install/mupdate_override.json
+            path on boot disk: /fake/path/install/mupdate_override.json
             no override on boot disk
             no non-boot disks
+    boot disk slot: FAILED TO DETERMINE: constructed via debug_assume_success()
+    slot A details UNAVAILABLE: constructed via debug_assume_success()
+    slot B details UNAVAILABLE: constructed via debug_assume_success()
+    last reconciled config: matches ledgered config
+        no orphaned datasets
+        all disks reconciled successfully
+        all datasets reconciled successfully
+        all zones reconciled successfully
     reconciler task status: idle (finished at <REDACTED_TIMESTAMP> after running for <REDACTED_DURATION>s)
 
 sled 32d8d836-4d8a-4e54-8fa9-f31d79c42646 (role = Gimlet, serial serial2)
@@ -1215,14 +1215,6 @@ LEDGERED SLED CONFIG
         6c2a57b0-2de0-4409-a6b9-c9aa5614eefa     crucible         install-dataset 
         99a750b2-724d-4828-ae5f-0df1aad90166     crucible         install-dataset 
         e668d83e-a28c-42dc-b574-467e57403cc1     crucible         install-dataset 
-    boot disk slot: FAILED TO DETERMINE: constructed via debug_assume_success()
-    slot A details UNAVAILABLE: constructed via debug_assume_success()
-    slot B details UNAVAILABLE: constructed via debug_assume_success()
-    last reconciled config: matches ledgered config
-        no orphaned datasets
-        all disks reconciled successfully
-        all datasets reconciled successfully
-        all zones reconciled successfully
     zone image resolver status:
         zone manifest:
             path on boot disk: /fake/path/install/zones.json
@@ -1231,9 +1223,17 @@ LEDGERED SLED CONFIG
                 no artifacts in install dataset (this should only be seen in simulated systems)
             no non-boot disks
         mupdate override:
-            boot disk path: /fake/path/install/mupdate_override.json
+            path on boot disk: /fake/path/install/mupdate_override.json
             no override on boot disk
             no non-boot disks
+    boot disk slot: FAILED TO DETERMINE: constructed via debug_assume_success()
+    slot A details UNAVAILABLE: constructed via debug_assume_success()
+    slot B details UNAVAILABLE: constructed via debug_assume_success()
+    last reconciled config: matches ledgered config
+        no orphaned datasets
+        all disks reconciled successfully
+        all datasets reconciled successfully
+        all zones reconciled successfully
     reconciler task status: idle (finished at <REDACTED_TIMESTAMP> after running for <REDACTED_DURATION>s)
 
 sled 89d02b1b-478c-401a-8e28-7a26f74fa41b (role = Gimlet, serial serial0)
@@ -1415,14 +1415,6 @@ LEDGERED SLED CONFIG
         dc2666e6-4c3e-4b8e-99bc-bcdb5f8986e1     crucible_pantry     install-dataset 
         f4dc5b5d-6eb6-40a9-a079-971eca862285     crucible            install-dataset 
         ffbf02f0-261d-4723-b613-eb861245acbd     internal_dns        install-dataset 
-    boot disk slot: FAILED TO DETERMINE: constructed via debug_assume_success()
-    slot A details UNAVAILABLE: constructed via debug_assume_success()
-    slot B details UNAVAILABLE: constructed via debug_assume_success()
-    last reconciled config: matches ledgered config
-        no orphaned datasets
-        all disks reconciled successfully
-        all datasets reconciled successfully
-        all zones reconciled successfully
     zone image resolver status:
         zone manifest:
             path on boot disk: /fake/path/install/zones.json
@@ -1431,9 +1423,17 @@ LEDGERED SLED CONFIG
                 no artifacts in install dataset (this should only be seen in simulated systems)
             no non-boot disks
         mupdate override:
-            boot disk path: /fake/path/install/mupdate_override.json
+            path on boot disk: /fake/path/install/mupdate_override.json
             no override on boot disk
             no non-boot disks
+    boot disk slot: FAILED TO DETERMINE: constructed via debug_assume_success()
+    slot A details UNAVAILABLE: constructed via debug_assume_success()
+    slot B details UNAVAILABLE: constructed via debug_assume_success()
+    last reconciled config: matches ledgered config
+        no orphaned datasets
+        all disks reconciled successfully
+        all datasets reconciled successfully
+        all zones reconciled successfully
     reconciler task status: idle (finished at <REDACTED_TIMESTAMP> after running for <REDACTED_DURATION>s)
 ORPHANED DATASETS
 

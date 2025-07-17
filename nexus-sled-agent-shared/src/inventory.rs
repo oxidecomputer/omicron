@@ -725,7 +725,7 @@ impl fmt::Display for MupdateOverrideInventoryDisplay<'_> {
             non_boot_status,
         } = self.inner;
 
-        writeln!(f, "boot disk path: {boot_disk_path}")?;
+        writeln!(f, "path on boot disk: {boot_disk_path}")?;
         match boot_override {
             Ok(Some(boot_override)) => {
                 writeln!(

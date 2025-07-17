@@ -601,6 +601,14 @@ fn display_sleds(
 
         let mut indented = IndentWriter::new("    ", f);
 
+        writeln!(indented, "zone image resolver status:")?;
+        {
+            let mut indent2 = IndentWriter::new("    ", &mut indented);
+            // Use write! rather than writeln! since zone_image_resolver.display()
+            // always produces a newline at the end.
+            write!(indent2, "{}", zone_image_resolver.display())?;
+        }
+
         if let Some(last_reconciliation) = &last_reconciliation {
             let ConfigReconcilerInventory {
                 last_reconciled_config,
@@ -671,12 +679,6 @@ fn display_sleds(
                 }
             }
         }
-
-        writeln!(indented, "zone image resolver status:")?;
-        let mut indent2 = IndentWriter::new("    ", &mut indented);
-        // Use write! rather than writeln! since zone_image_resolver.display()
-        // always produces a newline at the end.
-        write!(indent2, "{}", zone_image_resolver.display())?;
 
         write!(indented, "reconciler task status: ")?;
         match &reconciler_status {
