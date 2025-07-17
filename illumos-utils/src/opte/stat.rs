@@ -19,7 +19,7 @@ use std::{
         Arc, LazyLock, RwLock,
         atomic::{AtomicBool, Ordering},
     },
-    time::{Duration, Instant},
+    time::{Duration, Instant, SystemTime},
 };
 use tokio::time::MissedTickBehavior;
 use uuid::Uuid;
@@ -105,7 +105,7 @@ impl PortStats {
                                 flow_id: ufid.body,
                                 // TODO: need to correlate timestamps between
                                 //       kmod and here?!
-                                created_at: Default::default(),
+                                created_at: SystemTime::now().into(),
                                 initial_packet: direction(body.last.first_dir),
                                 internal_key: flowkey(out_key),
                                 external_key: flowkey(in_key),
@@ -130,6 +130,9 @@ impl PortStats {
                     Entry::Occupied(mut val) => {
                         // The second half fills in the remaining metadata.
                         let val = val.get_mut();
+                        if val.metadata.forwarded.is_none() {
+                            val.metadata.forwarded = forwarded;
+                        }
                         match body.last.dir {
                             Direction::In => {
                                 val.metadata.admitted_by_in = Some(bases)
@@ -147,7 +150,7 @@ impl PortStats {
     }
 
     // TODO: want `fn root_stats`, need to be able to pull back up into
-    //       oximeter in articular.
+    //       oximeter in particular.
 }
 
 #[derive(Debug)]
