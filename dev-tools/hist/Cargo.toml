@@ -1,0 +1,25 @@
+[package]
+name = "omicron-hist"
+version = "0.1.0"
+edition = "2021"
+license = "MPL-2.0"
+
+[[bin]]
+name = "omicron-hist"
+path = "src/main.rs"
+
+[lints]
+workspace = true
+
+[dependencies]
+anyhow.workspace = true
+clap.workspace = true
+crossterm.workspace = true
+futures.workspace = true
+omicron-workspace-hack.workspace = true
+quick-xml.workspace = true
+ratatui.workspace = true
+reqwest = { workspace = true, features = ["json"] }
+serde_json.workspace = true
+sigpipe.workspace = true
+tokio = { workspace = true, features = ["rt", "rt-multi-thread", "process", "macros", "time"] }
