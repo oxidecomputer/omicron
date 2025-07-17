@@ -3111,7 +3111,10 @@ pub trait NexusExternalApi {
         query_params: Query<PaginatedById>,
     ) -> Result<HttpResponseOk<ResultsPage<views::ConsoleSession>>, HttpError>;
 
-    /// Delete all of user's tokens and sessions
+    /// Log user out
+    ///
+    /// Silo admins can use this endpoint to log the specified user out by
+    /// deleting all of their tokens AND sessions. This cannot be undone.
     #[endpoint {
         method = POST,
         path = "/v1/users/{user_id}/logout",
