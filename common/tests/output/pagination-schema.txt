@@ -306,7 +306,7 @@ schema for pagination parameters: page selector, scan by time and id
       "minItems": 2
     },
     "sort_by": {
-      "default": "ascending",
+      "default": "time_and_id_ascending",
       "allOf": [
         {
           "$ref": "#/definitions/TimeAndIdSortMode"
@@ -322,14 +322,14 @@ schema for pagination parameters: page selector, scan by time and id
           "description": "sort in increasing order of timestamp and ID, i.e., earliest first",
           "type": "string",
           "enum": [
-            "ascending"
+            "time_and_id_ascending"
           ]
         },
         {
           "description": "sort in increasing order of timestamp and ID, i.e., most recent first",
           "type": "string",
           "enum": [
-            "descending"
+            "time_and_id_descending"
           ]
         }
       ]

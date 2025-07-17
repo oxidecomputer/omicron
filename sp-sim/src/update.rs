@@ -27,6 +27,7 @@ use hubtools::RawHubrisImage;
 use sha2::Sha256;
 use sha3::Digest;
 use sha3::Sha3_256;
+use tokio::sync::mpsc;
 
 // How long do we take to hash host flash? Real SPs take a handful of seconds;
 // we'll pick something similar.
@@ -48,6 +49,11 @@ pub(crate) struct SimSpUpdate {
     last_host_phase1_update_data: BTreeMap<u16, Box<[u8]>>,
     /// state of hashing each of the host phase1 slots
     phase1_hash_state: BTreeMap<u16, HostFlashHashState>,
+    /// how do we decide when we're done hashing host phase1 slots? this allows
+    /// us to default to `TIME_TO_HASH_HOST_PHASE_1` (e.g., for running sp-sim
+    /// as a part of `omicron-dev`) while giving tests that want explicit
+    /// control the ability to precisely trigger completion of hashing.
+    phase1_hash_policy: HostFlashHashPolicy,
 
     /// records whether a change to the stage0 "active slot" has been requested
     pending_stage0_update: bool,
@@ -188,6 +194,9 @@ impl SimSpUpdate {
             last_rot_update_data: None,
             last_host_phase1_update_data: BTreeMap::new(),
             phase1_hash_state: BTreeMap::new(),
+            phase1_hash_policy: HostFlashHashPolicy::Timer(
+                TIME_TO_HASH_HOST_PHASE_1,
+            ),
 
             pending_stage0_update: false,
 
@@ -200,6 +209,16 @@ impl SimSpUpdate {
 
             rot_state,
         }
+    }
+
+    /// Instead of host phase 1 hashing completing after a few seconds, return a
+    /// handle that can be used to explicitly trigger completion.
+    pub(crate) fn set_phase1_hash_policy_explicit_control(
+        &mut self,
+    ) -> HostFlashHashCompletionSender {
+        let (tx, rx) = mpsc::unbounded_channel();
+        self.phase1_hash_policy = HostFlashHashPolicy::Channel(rx);
+        HostFlashHashCompletionSender(tx)
     }
 
     pub(crate) fn sp_update_prepare(
@@ -530,8 +549,17 @@ impl SimSpUpdate {
         slot: u16,
         started: Instant,
     ) -> Result<[u8; 32], SpError> {
-        if started.elapsed() < TIME_TO_HASH_HOST_PHASE_1 {
-            return Err(SpError::Hf(HfError::HashInProgress));
+        match &mut self.phase1_hash_policy {
+            HostFlashHashPolicy::Timer(duration) => {
+                if started.elapsed() < *duration {
+                    return Err(SpError::Hf(HfError::HashInProgress));
+                }
+            }
+            HostFlashHashPolicy::Channel(rx) => {
+                if rx.try_recv().is_err() {
+                    return Err(SpError::Hf(HfError::HashInProgress));
+                }
+            }
         }
 
         let data = self.last_host_phase1_update_data(slot);
@@ -760,4 +788,24 @@ enum HostFlashHashState {
     HashStarted(Instant),
     Hashed([u8; 32]),
     HashInvalidated,
+}
+
+#[derive(Debug)]
+enum HostFlashHashPolicy {
+    /// complete hashing after `Duration` has elapsed
+    Timer(Duration),
+    /// complete hashing if there's a message in this channel
+    Channel(mpsc::UnboundedReceiver<()>),
+}
+
+pub struct HostFlashHashCompletionSender(mpsc::UnboundedSender<()>);
+
+impl HostFlashHashCompletionSender {
+    /// Allow the next request to get the hash result to succeed.
+    ///
+    /// Multiple calls to this function will queue multiple hash result
+    /// successes.
+    pub fn complete_next_hashing_attempt(&self) {
+        self.0.send(()).expect("receiving sp-sim instance is gone");
+    }
 }

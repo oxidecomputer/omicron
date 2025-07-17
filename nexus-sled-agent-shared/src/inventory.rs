@@ -297,6 +297,10 @@ impl IdOrdItem for OrphanedDataset {
 #[derive(Clone, Debug, PartialEq, Eq, Deserialize, JsonSchema, Serialize)]
 pub struct ClearMupdateOverrideInventory {
     /// The result of clearing the mupdate override on the boot disk.
+    #[serde(with = "snake_case_result")]
+    #[schemars(
+        schema_with = "SnakeCaseResult::<ClearMupdateOverrideBootSuccessInventory, String>::json_schema"
+    )]
     pub boot_disk_result:
         Result<ClearMupdateOverrideBootSuccessInventory, String>,
 
@@ -309,6 +313,7 @@ pub struct ClearMupdateOverrideInventory {
 
 /// Status of clearing the mupdate override on the boot disk.
 #[derive(Clone, Debug, PartialEq, Eq, Deserialize, JsonSchema, Serialize)]
+#[serde(rename_all = "snake_case")]
 pub enum ClearMupdateOverrideBootSuccessInventory {
     /// The mupdate override was successfully cleared.
     Cleared,

@@ -6,7 +6,9 @@
 
 // Copyright 2024 Oxide Computer Company
 
-use dropshot::{HttpError, HttpResponse, RequestContext, ServerContext};
+use dropshot::{
+    HttpResponse, HttpResponseError, RequestContext, ServerContext,
+};
 use futures::Future;
 use http::StatusCode;
 use oximeter::{
@@ -156,14 +158,15 @@ impl LatencyTracker {
     /// produces an expected `dropshot` response. This method runs and times the handler, records
     /// the latency in the appropriate timeseries, and forwards the result of the handler to the
     /// caller.
-    pub async fn instrument_dropshot_handler<T, H, R>(
+    pub async fn instrument_dropshot_handler<T, H, R, E>(
         &self,
         context: &RequestContext<T>,
         handler: H,
-    ) -> Result<R, HttpError>
+    ) -> Result<R, E>
     where
         R: HttpResponse,
-        H: Future<Output = Result<R, HttpError>>,
+        E: HttpResponseError,
+        H: Future<Output = Result<R, E>>,
         T: ServerContext,
     {
         let start = Instant::now();
@@ -171,7 +174,7 @@ impl LatencyTracker {
         let latency = start.elapsed();
         let status_code = match &result {
             Ok(response) => response.status_code(),
-            Err(ref e) => e.status_code.as_status(),
+            Err(ref e) => e.status_code().as_status(),
         };
         if let Err(e) =
             self.update(&context.endpoint.operation_id, status_code, latency)
