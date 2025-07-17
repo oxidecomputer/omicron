@@ -2,7 +2,7 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 //
-// Copyright 2024 Oxide Computer Company
+// Copyright 2025 Oxide Computer Company
 
 //! Encode client packets destined for the server.
 
@@ -19,10 +19,13 @@ use crate::native::packets::client::Stage;
 use crate::native::probes;
 use bytes::BufMut as _;
 use bytes::BytesMut;
+use std::net::IpAddr;
 
 /// Encoder for client packets.
 #[derive(Clone, Copy, Debug)]
-pub struct Encoder;
+pub struct Encoder {
+    pub addr: IpAddr,
+}
 
 impl Encoder {
     /// Encode a client hello packet.
@@ -150,6 +153,7 @@ impl tokio_util::codec::Encoder<Packet> for Encoder {
         dst: &mut BytesMut,
     ) -> Result<(), Self::Error> {
         let kind = item.kind();
+        probes::packet__send__start!(|| (self.addr.to_string(), kind, &item));
         match item {
             Packet::Hello(hello) => self.encode_hello(&hello, dst),
             Packet::Query(query) => self.encode_query(query, dst),
@@ -157,7 +161,7 @@ impl tokio_util::codec::Encoder<Packet> for Encoder {
             Packet::Cancel => dst.put_u8(Packet::CANCEL),
             Packet::Ping => dst.put_u8(Packet::PING),
         };
-        probes::packet__sent!(|| kind);
+        probes::packet__send__done!(|| self.addr.to_string());
         Ok(())
     }
 }

@@ -4,7 +4,7 @@
 
 //! Rust client to ClickHouse database
 
-// Copyright 2024 Oxide Computer Company
+// Copyright 2025 Oxide Computer Company
 
 pub(crate) mod dbwrite;
 #[cfg(any(feature = "oxql", test))]
@@ -78,10 +78,12 @@ const DEFAULT_REQUEST_TIMEOUT: Duration = Duration::from_secs(30);
 #[usdt::provider(provider = "clickhouse_client")]
 mod probes {
     /// Fires when a SQL query begins, with the query string.
-    fn sql__query__start(_: &usdt::UniqueId, sql: &str) {}
+    ///
+    /// The first argument is the query ID, and the same sent to the server.
+    fn sql__query__start(query_id: &str, sql: &str) {}
 
     /// Fires when a SQL query ends, either in success or failure.
-    fn sql__query__done(_: &usdt::UniqueId) {}
+    fn sql__query__done(query_id: &str) {}
 }
 
 /// A `Client` to the ClickHouse metrics database.
@@ -1124,16 +1126,16 @@ impl Client {
             "n_rows" => block.n_rows(),
             "n_columns" => block.n_columns(),
         );
-        let id = usdt::UniqueId::new();
-        probes::sql__query__start!(|| (&id, sql));
+        let id = Uuid::new_v4();
+        probes::sql__query__start!(|| (id.to_string(), sql));
         let now = tokio::time::Instant::now();
         let result = tokio::time::timeout(
             self.request_timeout,
-            handle.insert(sql, block),
+            handle.insert(id, sql, block),
         )
         .await;
         let elapsed = now.elapsed();
-        probes::sql__query__done!(|| (&id));
+        probes::sql__query__done!(|| id.to_string());
         match result {
             Ok(result) => result.map_err(Error::from),
             Err(_) => Err(Error::DatabaseUnavailable(format!(
@@ -1166,13 +1168,14 @@ impl Client {
             "sql" => sql,
         );
 
-        let id = usdt::UniqueId::new();
-        probes::sql__query__start!(|| (&id, sql));
+        let id = Uuid::new_v4();
+        probes::sql__query__start!(|| (id.to_string(), sql));
         let now = tokio::time::Instant::now();
         let result =
-            tokio::time::timeout(self.request_timeout, handle.query(sql)).await;
+            tokio::time::timeout(self.request_timeout, handle.query(id, sql))
+                .await;
         let elapsed = now.elapsed();
-        probes::sql__query__done!(|| (&id));
+        probes::sql__query__done!(|| id.to_string());
         match result {
             Ok(result) => result.map_err(Error::from),
             Err(_) => Err(Error::DatabaseUnavailable(format!(
