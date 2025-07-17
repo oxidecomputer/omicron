@@ -70,6 +70,7 @@ use omicron_common::address::AZ_PREFIX;
 use omicron_common::address::DENDRITE_PORT;
 use omicron_common::address::LLDP_PORT;
 use omicron_common::address::MGS_PORT;
+use omicron_common::address::NTP_ADMIN_PORT;
 use omicron_common::address::RACK_PREFIX;
 use omicron_common::address::SLED_PREFIX;
 use omicron_common::address::TFPORTD_PORT;
@@ -2009,6 +2010,25 @@ impl ServiceManager {
                 let ntp_service = ServiceBuilder::new("oxide/ntp")
                     .add_instance(ServiceInstanceBuilder::new("default"));
 
+                // We shouldn't need to hardcode a port here:
+                // https://github.com/oxidecomputer/omicron/issues/6796
+                let ntp_admin_address = {
+                    let mut address = *address;
+                    address.set_port(NTP_ADMIN_PORT);
+                    address
+                };
+                let ntp_admin_config = PropertyGroupBuilder::new("config")
+                    .add_property(
+                        "address",
+                        "astring",
+                        ntp_admin_address.to_string(),
+                    );
+                let ntp_admin_service = ServiceBuilder::new("oxide/ntp-admin")
+                    .add_instance(
+                        ServiceInstanceBuilder::new("default")
+                            .add_property_group(ntp_admin_config),
+                    );
+
                 let chrony_setup_service =
                     ServiceBuilder::new("oxide/chrony-setup").add_instance(
                         ServiceInstanceBuilder::new("default")
@@ -2025,6 +2045,7 @@ impl ServiceManager {
                     .add_service(dns_install_service)
                     .add_service(dns_client_service)
                     .add_service(ntp_service)
+                    .add_service(ntp_admin_service)
                     .add_service(opte_interface_setup);
 
                 profile
@@ -2070,6 +2091,25 @@ impl ServiceManager {
                 let ntp_service = ServiceBuilder::new("oxide/ntp")
                     .add_instance(ServiceInstanceBuilder::new("default"));
 
+                // We shouldn't need to hardcode a port here:
+                // https://github.com/oxidecomputer/omicron/issues/6796
+                let ntp_admin_address = {
+                    let mut address = *address;
+                    address.set_port(NTP_ADMIN_PORT);
+                    address
+                };
+                let ntp_admin_config = PropertyGroupBuilder::new("config")
+                    .add_property(
+                        "address",
+                        "astring",
+                        ntp_admin_address.to_string(),
+                    );
+                let ntp_admin_service = ServiceBuilder::new("oxide/ntp-admin")
+                    .add_instance(
+                        ServiceInstanceBuilder::new("default")
+                            .add_property_group(ntp_admin_config),
+                    );
+
                 let chrony_setup_service =
                     ServiceBuilder::new("oxide/chrony-setup").add_instance(
                         ServiceInstanceBuilder::new("default")
@@ -2082,7 +2122,8 @@ impl ServiceManager {
                     .add_service(disabled_ssh_service)
                     .add_service(dns_install_service)
                     .add_service(enabled_dns_client_service)
-                    .add_service(ntp_service);
+                    .add_service(ntp_service)
+                    .add_service(ntp_admin_service);
 
                 profile
                     .add_to_zone(&self.inner.log, &installed_zone)

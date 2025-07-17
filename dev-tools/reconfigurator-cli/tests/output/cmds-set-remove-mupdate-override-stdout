@@ -658,7 +658,7 @@ parent:    afb09faf-a586-4483-9289-04d4f1d8ba23
  METADATA:
     created by:::::::::::::   reconfigurator-cli
     created at:::::::::::::   <REDACTED_TIMESTAMP>
-    comment::::::::::::::::   updated target release minimum generation from 1 to 2
+    comment::::::::::::::::   (none)
     internal DNS version:::   1
     external DNS version:::   1
     target release min gen:   2
