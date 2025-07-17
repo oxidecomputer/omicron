@@ -231,6 +231,9 @@ fn process_command(
             cmd_sled_update_install_dataset(sim, args)
         }
         Commands::SledUpdateSp(args) => cmd_sled_update_sp(sim, args),
+        Commands::SledUpdateRotBootloader(args) => {
+            cmd_sled_update_rot_bootlaoder(sim, args)
+        }
         Commands::SiloList => cmd_silo_list(sim),
         Commands::SiloAdd(args) => cmd_silo_add(sim, args),
         Commands::SiloRemove(args) => cmd_silo_remove(sim, args),
@@ -284,6 +287,8 @@ enum Commands {
     SledSet(SledSetArgs),
     /// update the install dataset on a sled, simulating a mupdate
     SledUpdateInstallDataset(SledUpdateInstallDatasetArgs),
+    /// simulate updating the sled's RoT Bootloader versions
+    SledUpdateRotBootloader(SledUpdateRotBootloaderArgs),
     /// simulate updating the sled's SP versions
     SledUpdateSp(SledUpdateSpArgs),
 
@@ -482,6 +487,21 @@ struct SledMupdateValidSource {
     /// simulate a mupdate to the target release
     #[clap(long)]
     to_target_release: bool,
+}
+
+#[derive(Debug, Args)]
+struct SledUpdateRotBootloaderArgs {
+    /// id of the sled
+    sled_id: SledOpt,
+
+    /// sets the version reported for the RoT bootloader stage0 (active) slot
+    #[clap(long, required_unless_present_any = &["stage0_next"])]
+    stage0: Option<ArtifactVersion>,
+
+    /// sets the version reported for the RoT bootloader stage0_next (inactive)
+    /// slot
+    #[clap(long, required_unless_present_any = &["stage0"])]
+    stage0_next: Option<ExpectedVersion>,
 }
 
 #[derive(Debug, Args)]
@@ -1278,6 +1298,8 @@ fn cmd_sled_show(
     let state = sim.current_state();
     let description = state.system().description();
     let sled_id = args.sled_id.to_sled_id(description)?;
+    let stage0_version = description.sled_stage0_version(sled_id)?;
+    let stage0_next_version = description.sled_stage0_next_version(sled_id)?;
     let sp_active_version = description.sled_sp_active_version(sled_id)?;
     let sp_inactive_version = description.sled_sp_inactive_version(sled_id)?;
     let planning_input = description
@@ -1290,6 +1312,12 @@ fn cmd_sled_show(
     swriteln!(s, "sled {} ({}, {})", sled_id, sled.policy, sled.state);
     swriteln!(s, "serial {}", sled.baseboard_id.serial_number);
     swriteln!(s, "subnet {}", sled_resources.subnet.net());
+    swriteln!(s, "RoT bootloader stage 0 version:   {:?}", stage0_version);
+    swriteln!(
+        s,
+        "RoT bootloader stage 0 next version: {:?}",
+        stage0_next_version
+    );
     swriteln!(s, "SP active version:   {:?}", sp_active_version);
     swriteln!(s, "SP inactive version: {:?}", sp_inactive_version);
     swriteln!(s, "zpools ({}):", sled_resources.zpools.len());
@@ -1370,6 +1398,48 @@ fn cmd_sled_update_install_dataset(
     Ok(Some(format!(
         "sled {}: install dataset updated: {}",
         sled_id, description.message
+    )))
+}
+
+fn cmd_sled_update_rot_bootlaoder(
+    sim: &mut ReconfiguratorSim,
+    args: SledUpdateRotBootloaderArgs,
+) -> anyhow::Result<Option<String>> {
+    let mut labels = Vec::new();
+    if let Some(stage0) = &args.stage0 {
+        labels.push(format!("stage0 -> {}", stage0));
+    }
+    if let Some(stage0_next) = &args.stage0_next {
+        labels.push(format!("stage0_next -> {}", stage0_next));
+    }
+
+    assert!(
+        !labels.is_empty(),
+        "clap configuration requires that at least one argument is specified"
+    );
+
+    let mut state = sim.current_state().to_mut();
+    let system = state.system_mut();
+    let sled_id = args.sled_id.to_sled_id(system.description())?;
+    system.description_mut().sled_update_rot_bootloader_versions(
+        sled_id,
+        args.stage0,
+        args.stage0_next,
+    )?;
+
+    sim.commit_and_bump(
+        format!(
+            "reconfigurator-cli sled-update-rot-bootloader: {}: {}",
+            sled_id,
+            labels.join(", "),
+        ),
+        state,
+    );
+
+    Ok(Some(format!(
+        "set sled {} RoT bootloader versions: {}",
+        sled_id,
+        labels.join(", ")
     )))
 }
 
