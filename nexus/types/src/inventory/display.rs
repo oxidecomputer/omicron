@@ -957,7 +957,7 @@ fn display_keeper_membership(
         writeln!(f, "    raft config: {s}")?;
     }
     if collection.clickhouse_keeper_cluster_membership.is_empty() {
-        writeln!(f, "No membership retrieved.")?;
+        writeln!(f, "    no membership retrieved")?;
     }
     writeln!(f, "")?;
 
