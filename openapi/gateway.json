@@ -719,7 +719,7 @@
     "/sp/{type}/{slot}/component/{component}/hash/{firmware_slot}": {
       "get": {
         "summary": "Get a computed hash of a given slot of a component.",
-        "description": "This endpoint is only valid for the `host-boot-flash` component.\n\nComputing the hash takes several seconds; callers can start hashing using `sp_component_hash_firmware_start()`.",
+        "description": "This endpoint is only valid for the `host-boot-flash` component.\n\nComputing the hash takes several seconds; this endpoint returns the current status. If the status is `HashNotStarted`, callers should start hashing using `sp_component_hash_firmware_start()`. If the status is `HashInProgress`, callers should wait a bit then call this endpoint again.",
         "operationId": "sp_component_hash_firmware_get",
         "parameters": [
           {
@@ -782,7 +782,7 @@
       },
       "post": {
         "summary": "Start computing the hash of a given slot of a component.",
-        "description": "This endpoint is only valid for the `host-boot-flash` component.\n\nComputing the hash takes several seconds; callers can poll for results using `sp_component_hash_firmware_get()`.",
+        "description": "This endpoint is only valid for the `host-boot-flash` component.\n\nComputing the hash takes several seconds; callers should poll for results using `sp_component_hash_firmware_get()`. In general they should call `sp_component_hash_firmware_get()` first anyway, as the hashes are cached in the SP and may already be ready.",
         "operationId": "sp_component_hash_firmware_start",
         "parameters": [
           {
