@@ -1142,13 +1142,13 @@ impl Sled {
             policy,
             state: SledState::Active,
             resources: SledResources { subnet: sled_subnet, zpools },
-            sp_active_caboose: Some(Arc::new(
-                Self::default_sp_component_caboose(String::from("0.0.1")),
-            )),
+            sp_active_caboose: Some(Arc::new(Self::default_sp_caboose(
+                String::from("0.0.1"),
+            ))),
             sp_inactive_caboose: None,
-            rot_slot_a_caboose: Some(Arc::new(
-                Self::default_rot_component_caboose(String::from("0.0.2")),
-            )),
+            rot_slot_a_caboose: Some(Arc::new(Self::default_rot_caboose(
+                String::from("0.0.2"),
+            ))),
             rot_slot_b_caboose: None,
         }
     }
@@ -1372,7 +1372,7 @@ impl Sled {
                     Arc::make_mut(caboose).version = active_version.to_string()
                 }
                 new @ None => {
-                    *new = Some(Arc::new(Self::default_sp_component_caboose(
+                    *new = Some(Arc::new(Self::default_sp_caboose(
                         active_version.to_string(),
                     )));
                 }
@@ -1390,11 +1390,9 @@ impl Sled {
                             Arc::make_mut(caboose).version = v.to_string()
                         }
                         new @ None => {
-                            *new = Some(Arc::new(
-                                Self::default_sp_component_caboose(
-                                    v.to_string(),
-                                ),
-                            ));
+                            *new = Some(Arc::new(Self::default_sp_caboose(
+                                v.to_string(),
+                            )));
                         }
                     }
                 }
@@ -1422,11 +1420,9 @@ impl Sled {
                             Arc::make_mut(caboose).version = v.to_string()
                         }
                         new @ None => {
-                            *new = Some(Arc::new(
-                                Self::default_rot_component_caboose(
-                                    v.to_string(),
-                                ),
-                            ));
+                            *new = Some(Arc::new(Self::default_rot_caboose(
+                                v.to_string(),
+                            )));
                         }
                     }
                 }
@@ -1444,11 +1440,9 @@ impl Sled {
                             Arc::make_mut(caboose).version = v.to_string()
                         }
                         new @ None => {
-                            *new = Some(Arc::new(
-                                Self::default_rot_component_caboose(
-                                    v.to_string(),
-                                ),
-                            ));
+                            *new = Some(Arc::new(Self::default_rot_caboose(
+                                v.to_string(),
+                            )));
                         }
                     }
                 }
@@ -1456,7 +1450,7 @@ impl Sled {
         }
     }
 
-    fn default_sp_component_caboose(version: String) -> Caboose {
+    fn default_sp_caboose(version: String) -> Caboose {
         let board = sp_sim::SIM_GIMLET_BOARD.to_string();
         Caboose {
             board: board.clone(),
@@ -1467,7 +1461,7 @@ impl Sled {
         }
     }
 
-    fn default_rot_component_caboose(version: String) -> Caboose {
+    fn default_rot_caboose(version: String) -> Caboose {
         let board = sp_sim::SIM_ROT_BOARD.to_string();
         Caboose {
             board: board.clone(),
