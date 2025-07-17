@@ -114,7 +114,7 @@ impl Client {
         let log = self.log.new(o!("component" => "SledAgentSprocketsClient"));
         // Establish connection and sprockets connection (if possible).
         // The sprockets client loads the associated root certificates at this point.
-        let (stream, _platform_id) = SprocketsClient::connect(
+        let stream = SprocketsClient::connect(
             self.sprockets_conf.clone(),
             self.addr,
             self.corpus.clone(),

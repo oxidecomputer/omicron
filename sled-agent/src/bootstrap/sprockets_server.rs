@@ -63,7 +63,7 @@ impl SprocketsServer {
     pub(super) async fn run(mut self, corpus: Vec<Utf8PathBuf>) {
         loop {
             // Sprockets actually _uses_ the key here!
-            let (stream, remote_addr, platform_id) =
+            let (stream, remote_addr) =
                 match self.listener.accept(&corpus).await {
                     Ok(conn) => conn,
                     Err(err) => {
@@ -73,7 +73,7 @@ impl SprocketsServer {
                 };
 
             let log = self.log.new(o!("remote_addr" => remote_addr));
-            info!(log, "Accepted connection from peer {:?}", platform_id);
+            info!(log, "Accepted connection from peer {:?}", stream.peer_platform_id());
 
             let tx_requests = self.tx_requests.clone();
             tokio::spawn(async move {

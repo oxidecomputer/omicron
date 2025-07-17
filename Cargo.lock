@@ -7065,7 +7065,7 @@ dependencies = [
  "omicron-common",
  "omicron-uuid-kinds",
  "omicron-workspace-hack",
- "schemars",
+ "schemars 0.8.22",
  "serde",
 ]
 
@@ -7077,7 +7077,7 @@ dependencies = [
  "omicron-workspace-hack",
  "progenitor 0.10.0",
  "reqwest",
- "schemars",
+ "schemars 0.8.22",
  "serde",
  "slog",
 ]
@@ -7090,7 +7090,7 @@ dependencies = [
  "omicron-common",
  "omicron-workspace-hack",
  "proptest",
- "schemars",
+ "schemars 0.8.22",
  "serde",
  "test-strategy",
  "thiserror 2.0.12",
@@ -7841,7 +7841,7 @@ dependencies = [
  "pq-sys",
  "proptest",
  "reqwest",
- "schemars",
+ "schemars 0.8.22",
  "serde",
  "serde_json",
  "slog",
@@ -12683,7 +12683,7 @@ dependencies = [
 [[package]]
 name = "sprockets-tls"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/sprockets.git?rev=f16e6ab9ccaca3b9d826fa078b5b1bbea5987b44#f16e6ab9ccaca3b9d826fa078b5b1bbea5987b44"
+source = "git+https://github.com/oxidecomputer/sprockets.git?rev=7b63ccb979288408fb772aa6d15f4a324497c754#7b63ccb979288408fb772aa6d15f4a324497c754"
 dependencies = [
  "anyhow",
  "attest-data",
