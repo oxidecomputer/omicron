@@ -19,6 +19,7 @@ use futures::future::BoxFuture;
 use futures::stream::FuturesUnordered;
 use gateway_client::Client as MgsClient;
 use gateway_client::types::SpIdentifier;
+use gateway_client::types::SpIgnition;
 use internal_dns_resolver::Resolver;
 use internal_dns_types::names::ServiceName;
 use nexus_db_model::SupportBundle;
@@ -1100,14 +1101,10 @@ async fn save_all_sp_dumps(
         })
         .context("failed to resolve address of MGS")?;
 
-    let all_sps = mgs_client
-        .sp_all_ids()
-        .await
-        .context("failed to get list of SPs from MGS")?
-        .into_inner();
+    let available_sps = get_available_sps(&mgs_client).await?;
 
     let mut tasks = ParallelTaskSet::new();
-    for sp in all_sps {
+    for sp in available_sps {
         let mgs_client = mgs_client.clone();
         let sp_dumps_dir = sp_dumps_dir.to_owned();
 
@@ -1130,6 +1127,29 @@ async fn save_all_sp_dumps(
     }
 
     Ok(())
+}
+
+/// Use MGS ignition info to find active SPs.
+async fn get_available_sps(
+    mgs_client: &MgsClient,
+) -> anyhow::Result<Vec<SpIdentifier>> {
+    let ignition_info = mgs_client
+        .ignition_list()
+        .await
+        .context("failed to get ignition info from MGS")?
+        .into_inner();
+
+    let mut active_sps = Vec::new();
+    for info in ignition_info {
+        if let SpIgnition::Yes { power, flt_sp, .. } = info.details {
+            // Only return SPs that are powered on and are not in a faulted state.
+            if power && !flt_sp {
+                active_sps.push(info.id);
+            }
+        }
+    }
+
+    Ok(active_sps)
 }
 
 /// Fetch and save task dumps from a single SP.
