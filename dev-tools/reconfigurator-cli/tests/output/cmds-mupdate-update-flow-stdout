@@ -1,0 +1,406 @@
+using provided RNG seed: reconfigurator-cli-test
+> # Load an example system.
+
+> load-example --nsleds 3 --ndisks-per-sled 1
+loaded example system with:
+- collection: f45ba181-4b56-42cc-a762-874d90184a43
+- blueprint: dbcbd3d6-41ff-48ae-ac0b-1becc9b2fd21
+
+
+> # Create a TUF repository from a fake manifest. We're going to use this
+> # repository to test out the minimum release generation flow.
+> tuf-assemble ../../update-common/manifests/fake.toml
+INFO assembling repository in <ASSEMBLING_REPOSITORY_IN_REDACTED>
+INFO artifacts assembled and archived to `repo-1.0.0.zip`, component: OmicronRepoAssembler
+created repo-1.0.0.zip for system version 1.0.0
+
+> set target-release repo-1.0.0.zip
+INFO extracting uploaded archive to <EXTRACTING_UPLOADED_ARCHIVE_TO_REDACTED>
+INFO created directory to store extracted artifacts, path: <CREATED_DIRECTORY_TO_STORE_EXTRACTED_ARTIFACTS_PATH_REDACTED>
+INFO added artifact, name: SimGimletSp, kind: gimlet_sp, version: 1.0.0, hash: 7e6667e646ad001b54c8365a3d309c03f89c59102723d38d01697ee8079fe670, length: 747
+INFO added artifact, name: fake-gimlet-rot, kind: gimlet_rot_image_a, version: 1.0.0, hash: 04e4a7fdb84acca92c8fd3235e26d64ea61bef8a5f98202589fd346989c5720a, length: 735
+INFO added artifact, name: fake-gimlet-rot, kind: gimlet_rot_image_b, version: 1.0.0, hash: 04e4a7fdb84acca92c8fd3235e26d64ea61bef8a5f98202589fd346989c5720a, length: 735
+INFO added artifact, name: fake-gimlet-rot-bootloader, kind: gimlet_rot_bootloader, version: 1.0.0, hash: 005ea358f1cd316df42465b1e3a0334ea22cc0c0442cf9ddf9b42fbf49780236, length: 750
+INFO added artifact, name: fake-host, kind: host_phase_1, version: 1.0.0, hash: 2053f8594971bbf0a7326c833e2ffc12b065b9d823b9c0b967d275fa595e4e89, length: 524288
+INFO added artifact, name: fake-host, kind: host_phase_2, version: 1.0.0, hash: f3dd0c7a1bd4500ea0d8bcf67581f576d47752b2f1998a4cb0f0c3155c483008, length: 1048576
+INFO added artifact, name: fake-trampoline, kind: trampoline_phase_1, version: 1.0.0, hash: 9b7575cad720f017e936fe5994fc4e21fe040acaaf83c2edd86132aa3d667c7b, length: 524288
+INFO added artifact, name: fake-trampoline, kind: trampoline_phase_2, version: 1.0.0, hash: f355fb8429a7e0f0716dad035f9a06c799168d6c0ffcde85b1a96fef21d4b53e, length: 1048576
+INFO added artifact, name: clickhouse, kind: zone, version: 1.0.0, hash: 52b1eb4daff6f9140491d547b11248392920230db3db0eef5f5fa5333fe9e659, length: 1686
+INFO added artifact, name: clickhouse_keeper, kind: zone, version: 1.0.0, hash: cda702919449d86663be97295043aeca0ead69ae5db3bbdb20053972254a27a3, length: 1690
+INFO added artifact, name: clickhouse_server, kind: zone, version: 1.0.0, hash: 5f9ae6a9821bbe8ff0bf60feddf8b167902fe5f3e2c98bd21edd1ec9d969a001, length: 1690
+INFO added artifact, name: cockroachdb, kind: zone, version: 1.0.0, hash: f3a1a3c0b3469367b005ee78665d982059d5e14e93a479412426bf941c4ed291, length: 1689
+INFO added artifact, name: crucible-zone, kind: zone, version: 1.0.0, hash: 6f17cf65fb5a5bec5542dd07c03cd0acc01e59130f02c532c8d848ecae810047, length: 1690
+INFO added artifact, name: crucible-pantry-zone, kind: zone, version: 1.0.0, hash: 21f0ada306859c23917361f2e0b9235806c32607ec689c7e8cf16bb898bc5a02, length: 1695
+INFO added artifact, name: external-dns, kind: zone, version: 1.0.0, hash: ccca13ed19b8731f9adaf0d6203b02ea3b9ede4fa426b9fac0a07ce95440046d, length: 1689
+INFO added artifact, name: internal-dns, kind: zone, version: 1.0.0, hash: ffbf1373f7ee08dddd74c53ed2a94e7c4c572a982d3a9bc94000c6956b700c6a, length: 1689
+INFO added artifact, name: ntp, kind: zone, version: 1.0.0, hash: 67593d686ed04a1709f93972b71f4ebc148a9362120f65d239943e814a9a7439, length: 1681
+INFO added artifact, name: nexus, kind: zone, version: 1.0.0, hash: 0e32b4a3e5d3668bb1d6a16fb06b74dc60b973fa479dcee0aae3adbb52bf1388, length: 1682
+INFO added artifact, name: oximeter, kind: zone, version: 1.0.0, hash: 048d8fe8cdef5b175aad714d0f148aa80ce36c9114ac15ce9d02ed3d37877a77, length: 1682
+INFO added artifact, name: fake-psc-sp, kind: psc_sp, version: 1.0.0, hash: f896cf5b19ca85864d470ad8587f980218bff3954e7f52bbd999699cd0f9635b, length: 744
+INFO added artifact, name: fake-psc-rot, kind: psc_rot_image_a, version: 1.0.0, hash: 179eb660ebc92e28b6748b6af03d9f998d6131319edd4654a1e948454c62551b, length: 750
+INFO added artifact, name: fake-psc-rot, kind: psc_rot_image_b, version: 1.0.0, hash: 179eb660ebc92e28b6748b6af03d9f998d6131319edd4654a1e948454c62551b, length: 750
+INFO added artifact, name: fake-psc-rot-bootloader, kind: psc_rot_bootloader, version: 1.0.0, hash: 005ea358f1cd316df42465b1e3a0334ea22cc0c0442cf9ddf9b42fbf49780236, length: 750
+INFO added artifact, name: fake-switch-sp, kind: switch_sp, version: 1.0.0, hash: ab32ec86e942e1a16c8d43ea143cd80dd05a9639529d3569b1c24dfa2587ee74, length: 740
+INFO added artifact, name: fake-switch-rot, kind: switch_rot_image_a, version: 1.0.0, hash: 04e4a7fdb84acca92c8fd3235e26d64ea61bef8a5f98202589fd346989c5720a, length: 735
+INFO added artifact, name: fake-switch-rot, kind: switch_rot_image_b, version: 1.0.0, hash: 04e4a7fdb84acca92c8fd3235e26d64ea61bef8a5f98202589fd346989c5720a, length: 735
+INFO added artifact, name: fake-switch-rot-bootloader, kind: switch_rot_bootloader, version: 1.0.0, hash: 005ea358f1cd316df42465b1e3a0334ea22cc0c0442cf9ddf9b42fbf49780236, length: 750
+set target release based on repo-1.0.0.zip
+
+
+> # Update the install dataset on this sled to the target release.
+> # (This populates the zone manifest, used for no-op conversions from
+> # install dataset to artifact down the road.)
+> sled-update-install-dataset serial0 --to-target-release
+sled 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6: install dataset updated: to target release (system version 1.0.0)
+
+> # Simulate a mupdate on sled 0 by setting the mupdate override field to a
+> # new UUID (generated using uuidgen).
+> sled-set serial0 mupdate-override 6123eac1-ec5b-42ba-b73f-9845105a9971
+set sled 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6 mupdate override: unset -> 6123eac1-ec5b-42ba-b73f-9845105a9971
+
+
+> # On sled 1, simulate an error obtaining the mupdate override.
+> sled-set serial1 mupdate-override --with-error
+set sled 2b8f0cb3-0295-4b3c-bc58-4fe88b57112c mupdate override: unset -> error
+
+
+> # Simulate a mupdate on sled 2 as well.
+> sled-set serial2 mupdate-override 203fa72c-85c1-466a-8ed3-338ee029530d
+set sled d81c6a84-79b8-4958-ae41-ea46c9b19763 mupdate override: unset -> 203fa72c-85c1-466a-8ed3-338ee029530d
+
+
+> # Generate an inventory and display it.
+> #
+> # TODO: in the future, we'll plan against this inventory.
+> inventory-generate
+generated inventory collection eb0796d5-ab8a-4f7b-a884-b4aeacb8ab51 from configured sleds
+
+> inventory-show latest
+collection: eb0796d5-ab8a-4f7b-a884-b4aeacb8ab51
+collector:  example
+started:    <REDACTED_TIMESTAMP>
+done:       <REDACTED_TIMESTAMP>
+errors:     0
+
+SLED AGENTS
+
+sled 2b8f0cb3-0295-4b3c-bc58-4fe88b57112c (role = Gimlet, serial serial1)
+    found at:    <REDACTED_TIMESTAMP> from fake sled agent
+    address:     [fd00:1122:3344:102::1]:12345
+    usable hw threads:   10
+    usable memory (GiB): 0
+    reservoir (GiB):     0
+    physical disks:
+      U2: DiskIdentity { vendor: "fake-vendor", model: "fake-model", serial: "serial-72c59873-31ff-4e36-8d76-ff834009349a" } in 0
+    zpools
+      72c59873-31ff-4e36-8d76-ff834009349a: total size: 100 GiB
+    datasets:
+      oxp_72c59873-31ff-4e36-8d76-ff834009349a/crypt/zone/oxz_internal_dns_99e2f30b-3174-40bf-a78a-90da8abba8ca - id: 09b9cc9b-3426-470b-a7bc-538f82dede03, compression: off
+        available: 1 GiB, used: 0 B
+        reservation: None, quota: None
+      oxp_72c59873-31ff-4e36-8d76-ff834009349a/crypt/zone/oxz_crucible_bd354eef-d8a6-4165-9124-283fb5e46d77 - id: 2ad1875a-92ac-472f-8c26-593309f0e4da, compression: off
+        available: 1 GiB, used: 0 B
+        reservation: None, quota: None
+      oxp_72c59873-31ff-4e36-8d76-ff834009349a/crypt/zone/oxz_ntp_62620961-fc4a-481e-968b-f5acbac0dc63 - id: 2db6b7c1-0f46-4ced-a3ad-48872793360e, compression: off
+        available: 1 GiB, used: 0 B
+        reservation: None, quota: None
+      oxp_72c59873-31ff-4e36-8d76-ff834009349a/crypt/zone/oxz_clickhouse_353b3b65-20f7-48c3-88f7-495bd5d31545 - id: 318fae85-abcb-4259-b1b6-ac96d193f7b7, compression: off
+        available: 1 GiB, used: 0 B
+        reservation: None, quota: None
+      oxp_72c59873-31ff-4e36-8d76-ff834009349a/crypt/internal_dns - id: 3560dd69-3b23-4c69-807d-d673104cfc68, compression: off
+        available: 1 GiB, used: 0 B
+        reservation: None, quota: None
+      oxp_72c59873-31ff-4e36-8d76-ff834009349a/crypt/clickhouse - id: 3b66453b-7148-4c1b-84a9-499e43290ab4, compression: off
+        available: 1 GiB, used: 0 B
+        reservation: None, quota: None
+      oxp_72c59873-31ff-4e36-8d76-ff834009349a/crypt/zone - id: 4829f422-aa31-41a8-ab73-95684ff1ef48, compression: off
+        available: 1 GiB, used: 0 B
+        reservation: None, quota: None
+      oxp_72c59873-31ff-4e36-8d76-ff834009349a/crypt/zone/oxz_nexus_466a9f29-62bf-4e63-924a-b9efdb86afec - id: 775f9207-c42d-4af2-9186-27ffef67735e, compression: off
+        available: 1 GiB, used: 0 B
+        reservation: None, quota: None
+      oxp_72c59873-31ff-4e36-8d76-ff834009349a/crypt/external_dns - id: 841d5648-05f0-47b0-b446-92f6b60fe9a6, compression: off
+        available: 1 GiB, used: 0 B
+        reservation: None, quota: None
+      oxp_72c59873-31ff-4e36-8d76-ff834009349a/crucible - id: 8c4fa711-1d5d-4e93-85f0-d17bff47b063, compression: off
+        available: 1 GiB, used: 0 B
+        reservation: None, quota: None
+      oxp_72c59873-31ff-4e36-8d76-ff834009349a/crypt/debug - id: 93957ca0-9ed1-4e7b-8c34-2ce07a69541c, compression: gzip-9
+        available: 1 GiB, used: 0 B
+        reservation: None, quota: Some(ByteCount(107374182400))
+      oxp_72c59873-31ff-4e36-8d76-ff834009349a/crypt/zone/oxz_external_dns_6c3ae381-04f7-41ea-b0ac-74db387dbc3a - id: b46de15d-33e7-4cd0-aa7c-e7be2a61e71b, compression: off
+        available: 1 GiB, used: 0 B
+        reservation: None, quota: None
+      oxp_72c59873-31ff-4e36-8d76-ff834009349a/crypt/zone/oxz_crucible_pantry_ad6a3a03-8d0f-4504-99a4-cbf73d69b973 - id: c31623de-c19b-4615-9f1d-5e1daa5d3bda, compression: off
+        available: 1 GiB, used: 0 B
+        reservation: None, quota: None
+
+LEDGERED SLED CONFIG
+    generation: 2
+    remove_mupdate_override: None
+    desired host phase 2 slot a: keep current contents
+    desired host phase 2 slot b: keep current contents
+    DISKS: 1
+        ID                                       ZPOOL_ID                                 VENDOR          MODEL          SERIAL                                      
+        f26df0e3-46bb-4c85-8146-efcab46179da     72c59873-31ff-4e36-8d76-ff834009349a     fake-vendor     fake-model     serial-72c59873-31ff-4e36-8d76-ff834009349a 
+    DATASETS: 13
+        ID                                       NAME                                                                                                             COMPRESSION     QUOTA       RESERVATION 
+        09b9cc9b-3426-470b-a7bc-538f82dede03     oxp_72c59873-31ff-4e36-8d76-ff834009349a/crypt/zone/oxz_internal_dns_99e2f30b-3174-40bf-a78a-90da8abba8ca        off             none        none        
+        2ad1875a-92ac-472f-8c26-593309f0e4da     oxp_72c59873-31ff-4e36-8d76-ff834009349a/crypt/zone/oxz_crucible_bd354eef-d8a6-4165-9124-283fb5e46d77            off             none        none        
+        2db6b7c1-0f46-4ced-a3ad-48872793360e     oxp_72c59873-31ff-4e36-8d76-ff834009349a/crypt/zone/oxz_ntp_62620961-fc4a-481e-968b-f5acbac0dc63                 off             none        none        
+        318fae85-abcb-4259-b1b6-ac96d193f7b7     oxp_72c59873-31ff-4e36-8d76-ff834009349a/crypt/zone/oxz_clickhouse_353b3b65-20f7-48c3-88f7-495bd5d31545          off             none        none        
+        3560dd69-3b23-4c69-807d-d673104cfc68     oxp_72c59873-31ff-4e36-8d76-ff834009349a/crypt/internal_dns                                                      off             none        none        
+        3b66453b-7148-4c1b-84a9-499e43290ab4     oxp_72c59873-31ff-4e36-8d76-ff834009349a/crypt/clickhouse                                                        off             none        none        
+        4829f422-aa31-41a8-ab73-95684ff1ef48     oxp_72c59873-31ff-4e36-8d76-ff834009349a/crypt/zone                                                              off             none        none        
+        775f9207-c42d-4af2-9186-27ffef67735e     oxp_72c59873-31ff-4e36-8d76-ff834009349a/crypt/zone/oxz_nexus_466a9f29-62bf-4e63-924a-b9efdb86afec               off             none        none        
+        841d5648-05f0-47b0-b446-92f6b60fe9a6     oxp_72c59873-31ff-4e36-8d76-ff834009349a/crypt/external_dns                                                      off             none        none        
+        8c4fa711-1d5d-4e93-85f0-d17bff47b063     oxp_72c59873-31ff-4e36-8d76-ff834009349a/crucible                                                                off             none        none        
+        93957ca0-9ed1-4e7b-8c34-2ce07a69541c     oxp_72c59873-31ff-4e36-8d76-ff834009349a/crypt/debug                                                             gzip-9          100 GiB     none        
+        b46de15d-33e7-4cd0-aa7c-e7be2a61e71b     oxp_72c59873-31ff-4e36-8d76-ff834009349a/crypt/zone/oxz_external_dns_6c3ae381-04f7-41ea-b0ac-74db387dbc3a        off             none        none        
+        c31623de-c19b-4615-9f1d-5e1daa5d3bda     oxp_72c59873-31ff-4e36-8d76-ff834009349a/crypt/zone/oxz_crucible_pantry_ad6a3a03-8d0f-4504-99a4-cbf73d69b973     off             none        none        
+    ZONES: 7
+        ID                                       KIND                IMAGE_SOURCE    
+        353b3b65-20f7-48c3-88f7-495bd5d31545     clickhouse          install-dataset 
+        466a9f29-62bf-4e63-924a-b9efdb86afec     nexus               install-dataset 
+        62620961-fc4a-481e-968b-f5acbac0dc63     internal_ntp        install-dataset 
+        6c3ae381-04f7-41ea-b0ac-74db387dbc3a     external_dns        install-dataset 
+        99e2f30b-3174-40bf-a78a-90da8abba8ca     internal_dns        install-dataset 
+        ad6a3a03-8d0f-4504-99a4-cbf73d69b973     crucible_pantry     install-dataset 
+        bd354eef-d8a6-4165-9124-283fb5e46d77     crucible            install-dataset 
+    boot disk slot: FAILED TO DETERMINE: constructed via debug_assume_success()
+    slot A details UNAVAILABLE: constructed via debug_assume_success()
+    slot B details UNAVAILABLE: constructed via debug_assume_success()
+    last reconciled config: matches ledgered config
+        no orphaned datasets
+        all disks reconciled successfully
+        all datasets reconciled successfully
+        all zones reconciled successfully
+    zone image resolver status:
+        zone manifest:
+            path on boot disk: /fake/path/install/zones.json
+            boot disk inventory:
+                manifest generated by installinator (mupdate ID: 00000000-0000-0000-0000-000000000000)
+                no artifacts in install dataset (this should only be seen in simulated systems)
+            no non-boot disks
+        mupdate override:
+            boot disk path: /fake/path/install/mupdate_override.json
+            error obtaining override on boot disk: reconfigurator-cli simulated mupdate-override error
+            no non-boot disks
+    reconciler task status: idle (finished at <REDACTED_TIMESTAMP> after running for <REDACTED_DURATION>s)
+
+sled 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6 (role = Gimlet, serial serial0)
+    found at:    <REDACTED_TIMESTAMP> from fake sled agent
+    address:     [fd00:1122:3344:101::1]:12345
+    usable hw threads:   10
+    usable memory (GiB): 0
+    reservoir (GiB):     0
+    physical disks:
+      U2: DiskIdentity { vendor: "fake-vendor", model: "fake-model", serial: "serial-c6d33b64-fb96-4129-bab1-7878a06a5f9b" } in 0
+    zpools
+      c6d33b64-fb96-4129-bab1-7878a06a5f9b: total size: 100 GiB
+    datasets:
+      oxp_c6d33b64-fb96-4129-bab1-7878a06a5f9b/crypt/zone/oxz_crucible_pantry_ba4994a8-23f9-4b1a-a84f-a08d74591389 - id: 1bca7f71-5e42-4749-91ec-fa40793a3a9a, compression: off
+        available: 1 GiB, used: 0 B
+        reservation: None, quota: None
+      oxp_c6d33b64-fb96-4129-bab1-7878a06a5f9b/crypt/debug - id: 248c6c10-1ac6-45de-bb55-ede36ca56bbd, compression: gzip-9
+        available: 1 GiB, used: 0 B
+        reservation: None, quota: Some(ByteCount(107374182400))
+      oxp_c6d33b64-fb96-4129-bab1-7878a06a5f9b/crypt/zone/oxz_external_dns_803bfb63-c246-41db-b0da-d3b87ddfc63d - id: 3ac089c9-9dec-465b-863a-188e80d71fb4, compression: off
+        available: 1 GiB, used: 0 B
+        reservation: None, quota: None
+      oxp_c6d33b64-fb96-4129-bab1-7878a06a5f9b/crucible - id: 43931274-7fe8-4077-825d-dff2bc8efa58, compression: off
+        available: 1 GiB, used: 0 B
+        reservation: None, quota: None
+      oxp_c6d33b64-fb96-4129-bab1-7878a06a5f9b/crypt/zone - id: 4617d206-4330-4dfa-b9f3-f63a3db834f9, compression: off
+        available: 1 GiB, used: 0 B
+        reservation: None, quota: None
+      oxp_c6d33b64-fb96-4129-bab1-7878a06a5f9b/crypt/internal_dns - id: 4f60b534-eaa3-40a1-b60f-bfdf147af478, compression: off
+        available: 1 GiB, used: 0 B
+        reservation: None, quota: None
+      oxp_c6d33b64-fb96-4129-bab1-7878a06a5f9b/crypt/zone/oxz_internal_dns_427ec88f-f467-42fa-9bbb-66a91a36103c - id: 686c19cf-a0d7-45f6-866f-c564612b2664, compression: off
+        available: 1 GiB, used: 0 B
+        reservation: None, quota: None
+      oxp_c6d33b64-fb96-4129-bab1-7878a06a5f9b/crypt/zone/oxz_nexus_0c71b3b2-6ceb-4e8f-b020-b08675e83038 - id: 793ac181-1b01-403c-850d-7f5c54bda6c9, compression: off
+        available: 1 GiB, used: 0 B
+        reservation: None, quota: None
+      oxp_c6d33b64-fb96-4129-bab1-7878a06a5f9b/crypt/external_dns - id: a4c3032e-21fa-4d4a-b040-a7e3c572cf3c, compression: off
+        available: 1 GiB, used: 0 B
+        reservation: None, quota: None
+      oxp_c6d33b64-fb96-4129-bab1-7878a06a5f9b/crypt/zone/oxz_crucible_5199c033-4cf9-4ab6-8ae7-566bd7606363 - id: ad41be71-6c15-4428-b510-20ceacde4fa6, compression: off
+        available: 1 GiB, used: 0 B
+        reservation: None, quota: None
+      oxp_c6d33b64-fb96-4129-bab1-7878a06a5f9b/crypt/zone/oxz_ntp_6444f8a5-6465-4f0b-a549-1993c113569c - id: cdf3684f-a6cf-4449-b9ec-e696b2c663e2, compression: off
+        available: 1 GiB, used: 0 B
+        reservation: None, quota: None
+
+LEDGERED SLED CONFIG
+    generation: 2
+    remove_mupdate_override: None
+    desired host phase 2 slot a: keep current contents
+    desired host phase 2 slot b: keep current contents
+    DISKS: 1
+        ID                                       ZPOOL_ID                                 VENDOR          MODEL          SERIAL                                      
+        3f399219-7701-414c-9f07-8e97f688765c     c6d33b64-fb96-4129-bab1-7878a06a5f9b     fake-vendor     fake-model     serial-c6d33b64-fb96-4129-bab1-7878a06a5f9b 
+    DATASETS: 11
+        ID                                       NAME                                                                                                             COMPRESSION     QUOTA       RESERVATION 
+        1bca7f71-5e42-4749-91ec-fa40793a3a9a     oxp_c6d33b64-fb96-4129-bab1-7878a06a5f9b/crypt/zone/oxz_crucible_pantry_ba4994a8-23f9-4b1a-a84f-a08d74591389     off             none        none        
+        248c6c10-1ac6-45de-bb55-ede36ca56bbd     oxp_c6d33b64-fb96-4129-bab1-7878a06a5f9b/crypt/debug                                                             gzip-9          100 GiB     none        
+        3ac089c9-9dec-465b-863a-188e80d71fb4     oxp_c6d33b64-fb96-4129-bab1-7878a06a5f9b/crypt/zone/oxz_external_dns_803bfb63-c246-41db-b0da-d3b87ddfc63d        off             none        none        
+        43931274-7fe8-4077-825d-dff2bc8efa58     oxp_c6d33b64-fb96-4129-bab1-7878a06a5f9b/crucible                                                                off             none        none        
+        4617d206-4330-4dfa-b9f3-f63a3db834f9     oxp_c6d33b64-fb96-4129-bab1-7878a06a5f9b/crypt/zone                                                              off             none        none        
+        4f60b534-eaa3-40a1-b60f-bfdf147af478     oxp_c6d33b64-fb96-4129-bab1-7878a06a5f9b/crypt/internal_dns                                                      off             none        none        
+        686c19cf-a0d7-45f6-866f-c564612b2664     oxp_c6d33b64-fb96-4129-bab1-7878a06a5f9b/crypt/zone/oxz_internal_dns_427ec88f-f467-42fa-9bbb-66a91a36103c        off             none        none        
+        793ac181-1b01-403c-850d-7f5c54bda6c9     oxp_c6d33b64-fb96-4129-bab1-7878a06a5f9b/crypt/zone/oxz_nexus_0c71b3b2-6ceb-4e8f-b020-b08675e83038               off             none        none        
+        a4c3032e-21fa-4d4a-b040-a7e3c572cf3c     oxp_c6d33b64-fb96-4129-bab1-7878a06a5f9b/crypt/external_dns                                                      off             none        none        
+        ad41be71-6c15-4428-b510-20ceacde4fa6     oxp_c6d33b64-fb96-4129-bab1-7878a06a5f9b/crypt/zone/oxz_crucible_5199c033-4cf9-4ab6-8ae7-566bd7606363            off             none        none        
+        cdf3684f-a6cf-4449-b9ec-e696b2c663e2     oxp_c6d33b64-fb96-4129-bab1-7878a06a5f9b/crypt/zone/oxz_ntp_6444f8a5-6465-4f0b-a549-1993c113569c                 off             none        none        
+    ZONES: 6
+        ID                                       KIND                IMAGE_SOURCE    
+        0c71b3b2-6ceb-4e8f-b020-b08675e83038     nexus               install-dataset 
+        427ec88f-f467-42fa-9bbb-66a91a36103c     internal_dns        install-dataset 
+        5199c033-4cf9-4ab6-8ae7-566bd7606363     crucible            install-dataset 
+        6444f8a5-6465-4f0b-a549-1993c113569c     internal_ntp        install-dataset 
+        803bfb63-c246-41db-b0da-d3b87ddfc63d     external_dns        install-dataset 
+        ba4994a8-23f9-4b1a-a84f-a08d74591389     crucible_pantry     install-dataset 
+    boot disk slot: FAILED TO DETERMINE: constructed via debug_assume_success()
+    slot A details UNAVAILABLE: constructed via debug_assume_success()
+    slot B details UNAVAILABLE: constructed via debug_assume_success()
+    last reconciled config: matches ledgered config
+        no orphaned datasets
+        all disks reconciled successfully
+        all datasets reconciled successfully
+        all zones reconciled successfully
+    zone image resolver status:
+        zone manifest:
+            path on boot disk: /fake/path/install/zones.json
+            boot disk inventory:
+                manifest generated by sled-agent
+                artifacts in install dataset:
+                  - clickhouse.tar.gz (expected 1686 bytes with hash 52b1eb4daff6f9140491d547b11248392920230db3db0eef5f5fa5333fe9e659): ok
+                  - clickhouse_keeper.tar.gz (expected 1690 bytes with hash cda702919449d86663be97295043aeca0ead69ae5db3bbdb20053972254a27a3): ok
+                  - clickhouse_server.tar.gz (expected 1690 bytes with hash 5f9ae6a9821bbe8ff0bf60feddf8b167902fe5f3e2c98bd21edd1ec9d969a001): ok
+                  - cockroachdb.tar.gz (expected 1689 bytes with hash f3a1a3c0b3469367b005ee78665d982059d5e14e93a479412426bf941c4ed291): ok
+                  - crucible.tar.gz (expected 1690 bytes with hash 6f17cf65fb5a5bec5542dd07c03cd0acc01e59130f02c532c8d848ecae810047): ok
+                  - crucible_pantry.tar.gz (expected 1695 bytes with hash 21f0ada306859c23917361f2e0b9235806c32607ec689c7e8cf16bb898bc5a02): ok
+                  - external_dns.tar.gz (expected 1689 bytes with hash ccca13ed19b8731f9adaf0d6203b02ea3b9ede4fa426b9fac0a07ce95440046d): ok
+                  - internal_dns.tar.gz (expected 1689 bytes with hash ffbf1373f7ee08dddd74c53ed2a94e7c4c572a982d3a9bc94000c6956b700c6a): ok
+                  - nexus.tar.gz (expected 1682 bytes with hash 0e32b4a3e5d3668bb1d6a16fb06b74dc60b973fa479dcee0aae3adbb52bf1388): ok
+                  - ntp.tar.gz (expected 1681 bytes with hash 67593d686ed04a1709f93972b71f4ebc148a9362120f65d239943e814a9a7439): ok
+                  - oximeter.tar.gz (expected 1682 bytes with hash 048d8fe8cdef5b175aad714d0f148aa80ce36c9114ac15ce9d02ed3d37877a77): ok
+            no non-boot disks
+        mupdate override:
+            boot disk path: /fake/path/install/mupdate_override.json
+            override on boot disk: 6123eac1-ec5b-42ba-b73f-9845105a9971
+            no non-boot disks
+    reconciler task status: idle (finished at <REDACTED_TIMESTAMP> after running for <REDACTED_DURATION>s)
+
+sled d81c6a84-79b8-4958-ae41-ea46c9b19763 (role = Gimlet, serial serial2)
+    found at:    <REDACTED_TIMESTAMP> from fake sled agent
+    address:     [fd00:1122:3344:103::1]:12345
+    usable hw threads:   10
+    usable memory (GiB): 0
+    reservoir (GiB):     0
+    physical disks:
+      U2: DiskIdentity { vendor: "fake-vendor", model: "fake-model", serial: "serial-4930954e-9ac7-4453-b63f-5ab97c389a99" } in 0
+    zpools
+      4930954e-9ac7-4453-b63f-5ab97c389a99: total size: 100 GiB
+    datasets:
+      oxp_4930954e-9ac7-4453-b63f-5ab97c389a99/crucible - id: 090bd88d-0a43-4040-a832-b13ae721f74f, compression: off
+        available: 1 GiB, used: 0 B
+        reservation: None, quota: None
+      oxp_4930954e-9ac7-4453-b63f-5ab97c389a99/crypt/zone/oxz_crucible_f55647d4-5500-4ad3-893a-df45bd50d622 - id: 1cb0a47a-59ac-4892-8e92-cf87b4290f96, compression: off
+        available: 1 GiB, used: 0 B
+        reservation: None, quota: None
+      oxp_4930954e-9ac7-4453-b63f-5ab97c389a99/crypt/zone/oxz_internal_dns_ea5b4030-b52f-44b2-8d70-45f15f987d01 - id: 21fd4f3a-ec31-469b-87b1-087c343a2422, compression: off
+        available: 1 GiB, used: 0 B
+        reservation: None, quota: None
+      oxp_4930954e-9ac7-4453-b63f-5ab97c389a99/crypt/internal_dns - id: 252ac39f-b9e2-4697-8c07-3a833115d704, compression: off
+        available: 1 GiB, used: 0 B
+        reservation: None, quota: None
+      oxp_4930954e-9ac7-4453-b63f-5ab97c389a99/crypt/zone/oxz_ntp_f10a4fb9-759f-4a65-b25e-5794ad2d07d8 - id: 41071985-1dfd-4ce5-8bc2-897161a8bce4, compression: off
+        available: 1 GiB, used: 0 B
+        reservation: None, quota: None
+      oxp_4930954e-9ac7-4453-b63f-5ab97c389a99/crypt/zone - id: 45cd9687-20be-4247-b62a-dfdacf324929, compression: off
+        available: 1 GiB, used: 0 B
+        reservation: None, quota: None
+      oxp_4930954e-9ac7-4453-b63f-5ab97c389a99/crypt/external_dns - id: 4da74a5b-6911-4cca-b624-b90c65530117, compression: off
+        available: 1 GiB, used: 0 B
+        reservation: None, quota: None
+      oxp_4930954e-9ac7-4453-b63f-5ab97c389a99/crypt/debug - id: 7a6a2058-ea78-49de-9730-cce5e28b4cfb, compression: gzip-9
+        available: 1 GiB, used: 0 B
+        reservation: None, quota: Some(ByteCount(107374182400))
+      oxp_4930954e-9ac7-4453-b63f-5ab97c389a99/crypt/zone/oxz_crucible_pantry_75b220ba-a0f4-4872-8202-dc7c87f062d0 - id: b1deff4b-51df-4a37-9043-afbd7c70a1cb, compression: off
+        available: 1 GiB, used: 0 B
+        reservation: None, quota: None
+      oxp_4930954e-9ac7-4453-b63f-5ab97c389a99/crypt/zone/oxz_external_dns_f6ec9c67-946a-4da3-98d5-581f72ce8bf0 - id: c65a9c1c-36dc-4ddb-8aac-ec3be8dbb209, compression: off
+        available: 1 GiB, used: 0 B
+        reservation: None, quota: None
+      oxp_4930954e-9ac7-4453-b63f-5ab97c389a99/crypt/zone/oxz_nexus_3eeb8d49-eb1a-43f8-bb64-c2338421c2c6 - id: e009d8b8-4695-4322-b53f-f03f2744aef7, compression: off
+        available: 1 GiB, used: 0 B
+        reservation: None, quota: None
+
+LEDGERED SLED CONFIG
+    generation: 2
+    remove_mupdate_override: None
+    desired host phase 2 slot a: keep current contents
+    desired host phase 2 slot b: keep current contents
+    DISKS: 1
+        ID                                       ZPOOL_ID                                 VENDOR          MODEL          SERIAL                                      
+        08724339-3d5b-432c-b7f3-55efdcf9f098     4930954e-9ac7-4453-b63f-5ab97c389a99     fake-vendor     fake-model     serial-4930954e-9ac7-4453-b63f-5ab97c389a99 
+    DATASETS: 11
+        ID                                       NAME                                                                                                             COMPRESSION     QUOTA       RESERVATION 
+        090bd88d-0a43-4040-a832-b13ae721f74f     oxp_4930954e-9ac7-4453-b63f-5ab97c389a99/crucible                                                                off             none        none        
+        1cb0a47a-59ac-4892-8e92-cf87b4290f96     oxp_4930954e-9ac7-4453-b63f-5ab97c389a99/crypt/zone/oxz_crucible_f55647d4-5500-4ad3-893a-df45bd50d622            off             none        none        
+        21fd4f3a-ec31-469b-87b1-087c343a2422     oxp_4930954e-9ac7-4453-b63f-5ab97c389a99/crypt/zone/oxz_internal_dns_ea5b4030-b52f-44b2-8d70-45f15f987d01        off             none        none        
+        252ac39f-b9e2-4697-8c07-3a833115d704     oxp_4930954e-9ac7-4453-b63f-5ab97c389a99/crypt/internal_dns                                                      off             none        none        
+        41071985-1dfd-4ce5-8bc2-897161a8bce4     oxp_4930954e-9ac7-4453-b63f-5ab97c389a99/crypt/zone/oxz_ntp_f10a4fb9-759f-4a65-b25e-5794ad2d07d8                 off             none        none        
+        45cd9687-20be-4247-b62a-dfdacf324929     oxp_4930954e-9ac7-4453-b63f-5ab97c389a99/crypt/zone                                                              off             none        none        
+        4da74a5b-6911-4cca-b624-b90c65530117     oxp_4930954e-9ac7-4453-b63f-5ab97c389a99/crypt/external_dns                                                      off             none        none        
+        7a6a2058-ea78-49de-9730-cce5e28b4cfb     oxp_4930954e-9ac7-4453-b63f-5ab97c389a99/crypt/debug                                                             gzip-9          100 GiB     none        
+        b1deff4b-51df-4a37-9043-afbd7c70a1cb     oxp_4930954e-9ac7-4453-b63f-5ab97c389a99/crypt/zone/oxz_crucible_pantry_75b220ba-a0f4-4872-8202-dc7c87f062d0     off             none        none        
+        c65a9c1c-36dc-4ddb-8aac-ec3be8dbb209     oxp_4930954e-9ac7-4453-b63f-5ab97c389a99/crypt/zone/oxz_external_dns_f6ec9c67-946a-4da3-98d5-581f72ce8bf0        off             none        none        
+        e009d8b8-4695-4322-b53f-f03f2744aef7     oxp_4930954e-9ac7-4453-b63f-5ab97c389a99/crypt/zone/oxz_nexus_3eeb8d49-eb1a-43f8-bb64-c2338421c2c6               off             none        none        
+    ZONES: 6
+        ID                                       KIND                IMAGE_SOURCE    
+        3eeb8d49-eb1a-43f8-bb64-c2338421c2c6     nexus               install-dataset 
+        75b220ba-a0f4-4872-8202-dc7c87f062d0     crucible_pantry     install-dataset 
+        ea5b4030-b52f-44b2-8d70-45f15f987d01     internal_dns        install-dataset 
+        f10a4fb9-759f-4a65-b25e-5794ad2d07d8     internal_ntp        install-dataset 
+        f55647d4-5500-4ad3-893a-df45bd50d622     crucible            install-dataset 
+        f6ec9c67-946a-4da3-98d5-581f72ce8bf0     external_dns        install-dataset 
+    boot disk slot: FAILED TO DETERMINE: constructed via debug_assume_success()
+    slot A details UNAVAILABLE: constructed via debug_assume_success()
+    slot B details UNAVAILABLE: constructed via debug_assume_success()
+    last reconciled config: matches ledgered config
+        no orphaned datasets
+        all disks reconciled successfully
+        all datasets reconciled successfully
+        all zones reconciled successfully
+    zone image resolver status:
+        zone manifest:
+            path on boot disk: /fake/path/install/zones.json
+            boot disk inventory:
+                manifest generated by installinator (mupdate ID: 00000000-0000-0000-0000-000000000000)
+                no artifacts in install dataset (this should only be seen in simulated systems)
+            no non-boot disks
+        mupdate override:
+            boot disk path: /fake/path/install/mupdate_override.json
+            override on boot disk: 203fa72c-85c1-466a-8ed3-338ee029530d
+            no non-boot disks
+    reconciler task status: idle (finished at <REDACTED_TIMESTAMP> after running for <REDACTED_DURATION>s)
+ORPHANED DATASETS
+
+sled 2b8f0cb3-0295-4b3c-bc58-4fe88b57112c (serial serial1)
+    no orphaned datasets
+
+sled 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6 (serial serial0)
+    no orphaned datasets
+
+sled d81c6a84-79b8-4958-ae41-ea46c9b19763 (serial serial2)
+    no orphaned datasets
+
+KEEPER MEMBERSHIP
+    no membership retrieved
+
+
+
