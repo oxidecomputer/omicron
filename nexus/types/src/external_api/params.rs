@@ -96,6 +96,7 @@ path_param!(CertificatePath, certificate, "certificate");
 
 id_path_param!(SupportBundlePath, bundle_id, "support bundle");
 id_path_param!(GroupPath, group_id, "group");
+id_path_param!(UserPath, user_id, "user");
 id_path_param!(TokenPath, token_id, "token");
 id_path_param!(TufTrustRootPath, trust_root_id, "trust root");
 
