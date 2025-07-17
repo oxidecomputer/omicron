@@ -968,7 +968,7 @@ fn display_sled_config(
         });
         let table = tabled::Table::new(rows)
             .with(tabled::settings::Style::empty())
-            .with(tabled::settings::Padding::new(0, 1, 0, 0))
+            .with(tabled::settings::Padding::new(4, 1, 0, 0))
             .to_string();
         writeln!(indented, "ZONES: {}", zones.len())?;
         writeln!(indented, "{table}")?;
@@ -994,7 +994,7 @@ fn display_keeper_membership(
         writeln!(f, "    raft config: {s}")?;
     }
     if collection.clickhouse_keeper_cluster_membership.is_empty() {
-        writeln!(f, "No membership retrieved.")?;
+        writeln!(f, "    no membership retrieved")?;
     }
     writeln!(f, "")?;
 
