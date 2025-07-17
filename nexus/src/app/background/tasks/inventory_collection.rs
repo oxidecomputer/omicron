@@ -357,7 +357,8 @@ mod test {
             // Regardless of the activation source, we should have at
             // most `nkeep + 2` collections: at most `nkeep + 1` from
             // our collection, and at most one more if we lose the race
-            // with Nexus.
+            // with Nexus and it happens to insert another collection
+            // after we pruned down to `nkeep`.
             println!("have {num_collections} for nkeep = {nkeep}");
             assert!(num_collections <= nkeep + 2);
 
