@@ -2470,6 +2470,7 @@ mod tests {
             query_count!(bp_clickhouse_server_zone_id_to_node_id, blueprint_id),
             query_count!(bp_oximeter_read_policy, blueprint_id),
             query_count!(bp_pending_mgs_update_sp, blueprint_id),
+            query_count!(bp_pending_mgs_update_rot_bootloader, blueprint_id),
         ] {
             let count: i64 = result.unwrap();
             assert_eq!(
