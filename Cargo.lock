@@ -1330,6 +1330,7 @@ dependencies = [
  "chrono",
  "chrono-tz-build",
  "phf",
+ "serde",
 ]
 
 [[package]]
