@@ -503,7 +503,7 @@ impl ReconcilerTask {
 
         // Collect the current timesync status (needed to start any new zones,
         // and also we want to report it as part of each reconciler result).
-        let timesync_status = self.zones.check_timesync().await;
+        let timesync_status = self.zones.check_timesync(&self.log).await;
 
         // Call back into sled-agent and let it do any work that needs to happen
         // once time is sync'd (e.g., rewrite `uptime`).

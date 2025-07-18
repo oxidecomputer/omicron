@@ -36,7 +36,6 @@ use sled_agent_types::instance::{
     VmmPutStateResponse, VmmUnregisterResponse,
 };
 use sled_agent_types::sled::AddSledRequest;
-use sled_agent_types::time_sync::TimeSync;
 use sled_agent_types::zone_bundle::{
     BundleUtilization, CleanupContext, CleanupCount, CleanupPeriod,
     StorageLimit, ZoneBundleId, ZoneBundleMetadata,
@@ -706,13 +705,6 @@ impl SledAgentApi for SledAgentImpl {
         let vnics = sa.list_virtual_nics().await.map_err(Error::from)?;
 
         Ok(HttpResponseOk(vnics))
-    }
-
-    async fn timesync_get(
-        rqctx: RequestContext<Self::Context>,
-    ) -> Result<HttpResponseOk<TimeSync>, HttpError> {
-        let sa = rqctx.context();
-        Ok(HttpResponseOk(sa.timesync_get().await.map_err(|e| Error::from(e))?))
     }
 
     async fn uplink_ensure(
