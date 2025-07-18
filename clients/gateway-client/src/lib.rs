@@ -130,6 +130,29 @@ impl Client {
         phase1_slot: u16,
         timeout: Duration,
     ) -> Result<[u8; 32], HostPhase1HashError> {
+        // The most common cases of calling this function are:
+        //
+        // 1. The hash is already calculated; we get it in the first `get`
+        //    operation below and return after a single request to MGS.
+        // 2. The hash needs to be recalculated; we'll issue a "start hashing"
+        //    request then go into the polling loop. We expect to sit in that
+        //    loop for a handful of seconds.
+        //
+        // Given these, we could make this poll duration longer, since we know
+        // the operation takes a little while. But there are two arguments for
+        // polling somewhat more frequently:
+        //
+        // 1. Timeouts, timeouts, always wrong; if we believe hashing takes (by
+        //    way of example) 7 seconds, so we set the timeout to something
+        //    slightly larger than that (say 10 seconds), if a real device takes
+        //    slightly longer than our timeout, we now wait 20 seconds.
+        // 2. An uncommon case of calling this function is that our initial
+        //    `get` returns `HashInProgress`; in this case we have no idea how
+        //    long the hashing has already been running, so would not know how
+        //    long to try to wait.
+        //
+        // It should be pretty cheap to poll the SP at 1 Hz, so we sidestep both
+        // of those issues by doing so.
         const SLEEP_BETWEEN_POLLS: Duration = Duration::from_secs(1);
         const PHASE1_FLASH: &str =
             SpComponent::HOST_CPU_BOOT_FLASH.const_as_str();
@@ -154,6 +177,13 @@ impl Client {
         };
 
         if need_to_start_hashing {
+            // It's possible multiple Nexus instances race, all see
+            // `HashNotCalculated` above, then all try to start hashing here.
+            // The SP will accept the first request and return a
+            // `HashInProgress` error for subsequent attempts, but MGS does its
+            // best to make this operation idempotent; in particular, it will
+            // catch a `HashInProgress` error here and return an HTTP success.
+            // We'll return any other error.
             self.sp_component_hash_firmware_start(
                 sp.type_,
                 sp.slot,
