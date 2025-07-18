@@ -3076,6 +3076,55 @@ pub trait NexusExternalApi {
         query_params: Query<PaginatedById<params::OptionalGroupSelector>>,
     ) -> Result<HttpResponseOk<ResultsPage<views::User>>, HttpError>;
 
+    /// Fetch user
+    #[endpoint {
+        method = GET,
+        path = "/v1/users/{user_id}",
+        tags = ["silos"],
+    }]
+    async fn user_view(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<params::UserPath>,
+    ) -> Result<HttpResponseOk<views::User>, HttpError>;
+
+    /// List user's access tokens
+    #[endpoint {
+        method = GET,
+        path = "/v1/users/{user_id}/access-tokens",
+        tags = ["silos"],
+    }]
+    async fn user_token_list(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<params::UserPath>,
+        query_params: Query<PaginatedById>,
+    ) -> Result<HttpResponseOk<ResultsPage<views::DeviceAccessToken>>, HttpError>;
+
+    /// List user's console sessions
+    #[endpoint {
+        method = GET,
+        path = "/v1/users/{user_id}/sessions",
+        tags = ["silos"],
+    }]
+    async fn user_session_list(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<params::UserPath>,
+        query_params: Query<PaginatedById>,
+    ) -> Result<HttpResponseOk<ResultsPage<views::ConsoleSession>>, HttpError>;
+
+    /// Log user out
+    ///
+    /// Silo admins can use this endpoint to log the specified user out by
+    /// deleting all of their tokens AND sessions. This cannot be undone.
+    #[endpoint {
+        method = POST,
+        path = "/v1/users/{user_id}/logout",
+        tags = ["silos"],
+    }]
+    async fn user_logout(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<params::UserPath>,
+    ) -> Result<HttpResponseUpdatedNoContent, HttpError>;
+
     // Silo groups
 
     /// List groups

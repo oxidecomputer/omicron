@@ -7,6 +7,7 @@
 use crate::external_api::params;
 use crate::external_api::shared;
 use anyhow::Context;
+use chrono::TimeDelta;
 use nexus_db_lookup::LookupPath;
 use nexus_db_lookup::lookup;
 use nexus_db_model::SiloAuthSettings;
@@ -311,6 +312,106 @@ impl super::Nexus {
             )
             .await?;
         Ok(db_silo_user)
+    }
+
+    /// Delete all of user's tokens and sessions
+    pub(crate) async fn current_silo_user_logout(
+        &self,
+        opctx: &OpContext,
+        silo_user_id: Uuid,
+    ) -> UpdateResult<()> {
+        let (_, authz_silo_user, _) = LookupPath::new(opctx, self.datastore())
+            .silo_user_id(silo_user_id)
+            .fetch()
+            .await?;
+
+        // We could use a transaction here for these two queries, but it seems
+        // unnecessary. If the token delete succeeds but the session delete
+        // fails, the user will get an error response to the logout request,
+        // but it will have worked halfway. That is _slightly_ surprising if
+        // they expect the tokens to still be there after that, but at least
+        // the error makes clear they have to hit the endpoint again to be sure
+        // everything is gone. The half-deleted state doesn't break anything,
+        // either, except what it's supposed to break: the user's ability to
+        // authenticate with tokens.
+
+        let authz_token_list =
+            authz::SiloUserTokenList::new(authz_silo_user.clone());
+        self.datastore()
+            .silo_user_tokens_delete(opctx, &authz_token_list)
+            .await?;
+
+        let authz_authn_list =
+            authz::SiloUserSessionList::new(authz_silo_user.clone());
+        self.datastore()
+            .silo_user_sessions_delete(opctx, &authz_authn_list)
+            .await?;
+
+        Ok(())
+    }
+
+    /// Fetch a user in a Silo
+    pub(crate) async fn current_silo_user_lookup(
+        &self,
+        opctx: &OpContext,
+        silo_user_id: Uuid,
+    ) -> LookupResult<(authz::SiloUser, db::model::SiloUser)> {
+        let (_, authz_silo_user, db_silo_user) =
+            LookupPath::new(opctx, self.datastore())
+                .silo_user_id(silo_user_id)
+                .fetch()
+                .await?;
+
+        Ok((authz_silo_user, db_silo_user))
+    }
+
+    /// List device access tokens for a user in a Silo
+    pub(crate) async fn silo_user_token_list(
+        &self,
+        opctx: &OpContext,
+        silo_user_id: Uuid,
+        pagparams: &DataPageParams<'_, Uuid>,
+    ) -> ListResultVec<db::model::DeviceAccessToken> {
+        let (_, authz_silo_user, _db_silo_user) =
+            LookupPath::new(opctx, self.datastore())
+                .silo_user_id(silo_user_id)
+                .fetch()
+                .await?;
+
+        let authz_token_list = authz::SiloUserTokenList::new(authz_silo_user);
+
+        self.datastore()
+            .silo_user_token_list(opctx, authz_token_list, pagparams)
+            .await
+    }
+
+    /// List console sessions for a user in a Silo
+    pub(crate) async fn silo_user_session_list(
+        &self,
+        opctx: &OpContext,
+        silo_user_id: Uuid,
+        pagparams: &DataPageParams<'_, Uuid>,
+        // TODO: https://github.com/oxidecomputer/omicron/issues/8625
+        idle_ttl: TimeDelta,
+        abs_ttl: TimeDelta,
+    ) -> ListResultVec<db::model::ConsoleSession> {
+        let (_, authz_silo_user, _db_silo_user) =
+            LookupPath::new(opctx, self.datastore())
+                .silo_user_id(silo_user_id)
+                .fetch()
+                .await?;
+
+        let user_authn_list = authz::SiloUserSessionList::new(authz_silo_user);
+
+        self.datastore()
+            .silo_user_session_list(
+                opctx,
+                user_authn_list,
+                pagparams,
+                idle_ttl,
+                abs_ttl,
+            )
+            .await
     }
 
     // The "local" identity provider (available only in `LocalOnly` Silos)

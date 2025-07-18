@@ -25,7 +25,9 @@ humantime.workspace = true
 iddqd.workspace = true
 id-map.workspace = true
 illumos-utils.workspace = true
+indent_write.workspace = true
 ipnetwork.workspace = true
+itertools.workspace = true
 newtype_derive.workspace = true
 omicron-cockroach-metrics.workspace = true
 omicron-uuid-kinds.workspace = true
@@ -42,10 +44,13 @@ slog.workspace = true
 slog-error-chain.workspace = true
 steno.workspace = true
 strum.workspace = true
+tabled.workspace = true
+textwrap.workspace = true
 thiserror.workspace = true
 tufaceous-artifact.workspace = true
 newtype-uuid.workspace = true
 update-engine.workspace = true
+unicode-width.workspace = true
 uuid.workspace = true
 url = { workspace = true, features = ["serde"] }
 

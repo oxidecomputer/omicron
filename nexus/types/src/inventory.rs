@@ -52,6 +52,10 @@ use std::sync::Arc;
 use strum::EnumIter;
 use tufaceous_artifact::ArtifactHash;
 
+mod display;
+
+pub use display::*;
+
 /// Results of collecting hardware/software inventory from various Omicron
 /// components
 ///
@@ -248,6 +252,15 @@ impl Collection {
             .iter()
             .max_by_key(|membership| membership.leader_committed_log_index)
             .map(|membership| (membership.clone()))
+    }
+
+    /// Return a type which can be used to display a collection in a
+    /// human-readable format.
+    ///
+    /// The return [`CollectionDisplay`] has several knobs that can be tweaked
+    /// to display part or all of a collection.
+    pub fn display(&self) -> CollectionDisplay<'_> {
+        CollectionDisplay::new(self)
     }
 }
 

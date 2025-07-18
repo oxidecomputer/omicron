@@ -139,6 +139,15 @@ pub static DEMO_SILO_USERS_LIST_URL: LazyLock<String> = LazyLock::new(|| {
 pub static DEMO_SILO_USER_ID_GET_URL: LazyLock<String> = LazyLock::new(|| {
     format!("/v1/system/users/{{id}}?silo={}", DEFAULT_SILO.identity().name,)
 });
+pub static DEMO_SILO_USER_ID_IN_SILO_URL: LazyLock<String> =
+    LazyLock::new(|| "/v1/users/{id}".to_string());
+pub static DEMO_SILO_USER_TOKEN_LIST_URL: LazyLock<String> =
+    LazyLock::new(|| "/v1/users/{id}/access-tokens".to_string());
+pub static DEMO_SILO_USER_SESSION_LIST_URL: LazyLock<String> =
+    LazyLock::new(|| "/v1/users/{id}/sessions".to_string());
+pub static DEMO_SILO_USER_LOGOUT_URL: LazyLock<String> =
+    LazyLock::new(|| "/v1/users/{id}/logout".to_string());
+
 pub static DEMO_SILO_USER_ID_DELETE_URL: LazyLock<String> =
     LazyLock::new(|| {
         format!(
@@ -1674,6 +1683,32 @@ pub static VERIFY_ENDPOINTS: LazyLock<Vec<VerifyEndpoint>> =
                 visibility: Visibility::Public,
                 unprivileged_access: UnprivilegedAccess::ReadOnly,
                 allowed_methods: vec![AllowedMethod::Get],
+            },
+            VerifyEndpoint {
+                url: &DEMO_SILO_USER_ID_IN_SILO_URL,
+                visibility: Visibility::Protected,
+                unprivileged_access: UnprivilegedAccess::ReadOnly,
+                allowed_methods: vec![AllowedMethod::Get],
+            },
+            VerifyEndpoint {
+                url: &DEMO_SILO_USER_TOKEN_LIST_URL,
+                visibility: Visibility::Public,
+                unprivileged_access: UnprivilegedAccess::None,
+                allowed_methods: vec![AllowedMethod::Get],
+            },
+            VerifyEndpoint {
+                url: &DEMO_SILO_USER_SESSION_LIST_URL,
+                visibility: Visibility::Public,
+                unprivileged_access: UnprivilegedAccess::None,
+                allowed_methods: vec![AllowedMethod::Get],
+            },
+            VerifyEndpoint {
+                url: &DEMO_SILO_USER_LOGOUT_URL,
+                visibility: Visibility::Public,
+                unprivileged_access: UnprivilegedAccess::None,
+                allowed_methods: vec![AllowedMethod::Post(serde_json::json!(
+                    {}
+                ))],
             },
             VerifyEndpoint {
                 url: "/v1/groups",
