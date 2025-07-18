@@ -6860,6 +6860,121 @@ impl NexusExternalApi for NexusExternalApiImpl {
             .await
     }
 
+    async fn user_view(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<params::UserPath>,
+    ) -> Result<HttpResponseOk<views::User>, HttpError> {
+        let apictx = rqctx.context();
+        let handler = async {
+            let nexus = &apictx.context.nexus;
+            let path = path_params.into_inner();
+            let opctx =
+                crate::context::op_context_for_external_api(&rqctx).await?;
+            let (.., user) =
+                nexus.current_silo_user_lookup(&opctx, path.user_id).await?;
+            Ok(HttpResponseOk(user.into()))
+        };
+        apictx
+            .context
+            .external_latencies
+            .instrument_dropshot_handler(&rqctx, handler)
+            .await
+    }
+
+    async fn user_token_list(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<params::UserPath>,
+        query_params: Query<PaginatedById>,
+    ) -> Result<HttpResponseOk<ResultsPage<views::DeviceAccessToken>>, HttpError>
+    {
+        let apictx = rqctx.context();
+        let handler = async {
+            let nexus = &apictx.context.nexus;
+            let path = path_params.into_inner();
+            let query = query_params.into_inner();
+            let pag_params = data_page_params_for(&rqctx, &query)?;
+            let opctx =
+                crate::context::op_context_for_external_api(&rqctx).await?;
+            let tokens = nexus
+                .silo_user_token_list(&opctx, path.user_id, &pag_params)
+                .await?
+                .into_iter()
+                .map(views::DeviceAccessToken::from)
+                .collect();
+            Ok(HttpResponseOk(ScanById::results_page(
+                &query,
+                tokens,
+                &marker_for_id,
+            )?))
+        };
+        apictx
+            .context
+            .external_latencies
+            .instrument_dropshot_handler(&rqctx, handler)
+            .await
+    }
+
+    async fn user_session_list(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<params::UserPath>,
+        query_params: Query<PaginatedById>,
+    ) -> Result<HttpResponseOk<ResultsPage<views::ConsoleSession>>, HttpError>
+    {
+        let apictx = rqctx.context();
+        let handler = async {
+            let nexus = &apictx.context.nexus;
+            let path = path_params.into_inner();
+            let query = query_params.into_inner();
+            let pag_params = data_page_params_for(&rqctx, &query)?;
+            let opctx =
+                crate::context::op_context_for_external_api(&rqctx).await?;
+
+            let sessions = nexus
+                .silo_user_session_list(
+                    &opctx,
+                    path.user_id,
+                    &pag_params,
+                    // TODO: https://github.com/oxidecomputer/omicron/issues/8625
+                    apictx.context.console_config.session_idle_timeout,
+                    apictx.context.console_config.session_absolute_timeout,
+                )
+                .await?
+                .into_iter()
+                .map(views::ConsoleSession::from)
+                .collect();
+            Ok(HttpResponseOk(ScanById::results_page(
+                &query,
+                sessions,
+                &marker_for_id,
+            )?))
+        };
+        apictx
+            .context
+            .external_latencies
+            .instrument_dropshot_handler(&rqctx, handler)
+            .await
+    }
+
+    async fn user_logout(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<params::UserPath>,
+    ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
+        let apictx = rqctx.context();
+        let handler = async {
+            let nexus = &apictx.context.nexus;
+            let path = path_params.into_inner();
+            let opctx =
+                crate::context::op_context_for_external_api(&rqctx).await?;
+            nexus.current_silo_user_logout(&opctx, path.user_id).await?;
+            Ok(HttpResponseUpdatedNoContent())
+        };
+        apictx
+            .context
+            .external_latencies
+            .instrument_dropshot_handler(&rqctx, handler)
+            .await
+    }
+
     // Silo groups
 
     async fn group_list(

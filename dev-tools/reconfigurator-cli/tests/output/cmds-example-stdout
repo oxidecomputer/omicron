@@ -1402,16 +1402,6 @@ LEDGERED SLED CONFIG
         all datasets reconciled successfully
         all zones reconciled successfully
     reconciler task status: idle (finished at <REDACTED_TIMESTAMP> after running for <REDACTED_DURATION>s)
-ORPHANED DATASETS
-
-sled 2eb69596-f081-4e2d-9425-9994926e0832 (serial serial1)
-    no orphaned datasets
-
-sled 32d8d836-4d8a-4e54-8fa9-f31d79c42646 (serial serial2)
-    no orphaned datasets
-
-sled 89d02b1b-478c-401a-8e28-7a26f74fa41b (serial serial0)
-    no orphaned datasets
 
 KEEPER MEMBERSHIP
     no membership retrieved
