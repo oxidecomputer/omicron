@@ -569,7 +569,7 @@ impl LogsHandle {
                 extra: true,
                 // This will cause oxlog to call stat on each file resulting
                 // in a sorted order.
-                show_empty: true,
+                show_empty: false,
                 date_range: None,
             },
         );
@@ -655,7 +655,7 @@ impl LogsHandle {
 
             // Attempt to parse and sort any extra logs we find for a service.
             let extra_logs = match service.as_str() {
-                // cockroach embeds it's rotation status in the name:
+                // cockroach embeds its rotation status in the name:
                 // "cockroach-health.log" vs
                 // "oach-health.oxzcockroachdba3628a56-6f85-43b5-be50-71d8f0e04877.root.2025-01-31T21_43_26Z.011435.log"
                 "cockroachdb" => sort_cockroach_extra_logs(&service_logs.extra),
