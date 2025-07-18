@@ -484,7 +484,7 @@ impl SystemDescription {
         Ok(prev)
     }
 
-    /// Update the RoT bootlaoder versions reported for a sled.
+    /// Update the RoT bootloader versions reported for a sled.
     ///
     /// Where `None` is provided, no changes are made.
     pub fn sled_update_rot_bootloader_versions(
@@ -633,7 +633,7 @@ impl SystemDescription {
                     part_number: sp_state.model.clone(),
                     serial_number: sp_state.serial_number.clone(),
                 };
-                if let Some(stage0) = &s.stage0_caboose() {
+                if let Some(stage0) = s.stage0_caboose() {
                     builder
                         .found_caboose(
                             &baseboard_id,
@@ -651,7 +651,7 @@ impl SystemDescription {
                         .context("recording RoT bootloader stage0 caboose")?;
                 }
 
-                if let Some(stage0_next) = &s.stage0_next_caboose() {
+                if let Some(stage0_next) = s.stage0_next_caboose() {
                     builder
                         .found_caboose(
                             &baseboard_id,
