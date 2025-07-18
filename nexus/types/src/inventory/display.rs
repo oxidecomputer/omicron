@@ -26,6 +26,7 @@ use nexus_sled_agent_shared::inventory::{
 use omicron_uuid_kinds::{
     DatasetUuid, OmicronZoneUuid, PhysicalDiskUuid, ZpoolUuid,
 };
+use std::collections::HashMap;
 use strum::IntoEnumIterator;
 use tabled::Tabled;
 use tufaceous_artifact::ArtifactHash;
@@ -42,6 +43,7 @@ pub struct CollectionDisplay<'a> {
     include_sleds: bool,
     include_orphaned_datasets: bool,
     include_clickhouse_keeper_membership: bool,
+    include_cockroach_status: bool,
     long_string_formatter: LongStringFormatter,
 }
 
@@ -54,6 +56,7 @@ impl<'a> CollectionDisplay<'a> {
             include_sleds: true,
             include_orphaned_datasets: true,
             include_clickhouse_keeper_membership: true,
+            include_cockroach_status: true,
             long_string_formatter: LongStringFormatter::new(),
         }
     }
@@ -94,6 +97,15 @@ impl<'a> CollectionDisplay<'a> {
         self
     }
 
+    /// Control display of Cockroach cluster information (defaults to true).
+    pub fn include_cockroach_status(
+        &mut self,
+        include_cockroach_status: bool,
+    ) -> &mut Self {
+        self.include_cockroach_status = include_cockroach_status;
+        self
+    }
+
     /// Show long strings (defaults to false).
     pub fn show_long_strings(&mut self, show_long_strings: bool) -> &mut Self {
         self.long_string_formatter.show_long_strings = show_long_strings;
@@ -111,6 +123,7 @@ impl<'a> CollectionDisplay<'a> {
             .include_clickhouse_keeper_membership(
                 filter.include_keeper_membership(),
             )
+            .include_cockroach_status(filter.include_cockroach_status())
     }
 }
 
@@ -133,6 +146,9 @@ impl fmt::Display for CollectionDisplay<'_> {
         }
         if self.include_clickhouse_keeper_membership {
             display_keeper_membership(&self.collection, f)?;
+        }
+        if self.include_cockroach_status {
+            display_cockroach_status(&self.collection, f)?;
         }
 
         if nerrors > 0 {
@@ -193,6 +209,14 @@ impl CollectionDisplayCliFilter {
     }
 
     fn include_keeper_membership(&self) -> bool {
+        match self {
+            Self::All => true,
+            Self::Sp { .. } => false,
+            Self::OrphanedDatasets => false,
+        }
+    }
+
+    fn include_cockroach_status(&self) -> bool {
         match self {
             Self::All => true,
             Self::Sp { .. } => false,
@@ -998,6 +1022,53 @@ fn display_keeper_membership(
         writeln!(f, "    no membership retrieved")?;
     }
     writeln!(f, "")?;
+
+    Ok(())
+}
+
+fn display_cockroach_status(
+    collection: &Collection,
+    f: &mut dyn fmt::Write,
+) -> fmt::Result {
+    writeln!(f, "\nCOCKROACH STATUS")?;
+
+    // Under normal conditions, cockroach nodes will report the same data. For
+    // brevity, we will map "status" -> "nodes reporting that status", to avoid
+    // emitting the same information repeatedly for each node.
+    let mut status_to_node: HashMap<_, Vec<_>> = HashMap::new();
+
+    for (node, status) in &collection.cockroach_status {
+        status_to_node.entry(status).or_default().push(node);
+    }
+
+    for (status, nodes) in &status_to_node {
+        writeln!(
+            f,
+            "\n  status from nodes: {}",
+            nodes.iter().map(|n| n.to_string()).join(", ")
+        )?;
+
+        writeln!(
+            f,
+            "\n    ranges underreplicated: {}",
+            status
+                .ranges_underreplicated
+                .map(|r| r.to_string())
+                .unwrap_or_else(|| "<cOULD NOT BE PARSED>".to_string())
+        )?;
+        writeln!(
+            f,
+            "\n    live nodes: {}",
+            status
+                .liveness_live_nodes
+                .map(|r| r.to_string())
+                .unwrap_or_else(|| "<COULD NOT BE PARSED>".to_string())
+        )?;
+    }
+    if status_to_node.is_empty() {
+        writeln!(f, "    no cockroach status retrieved")?;
+    }
+    writeln!(f)?;
 
     Ok(())
 }
