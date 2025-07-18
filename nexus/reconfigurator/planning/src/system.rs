@@ -1280,9 +1280,10 @@ impl Sled {
                     Arc::make_mut(caboose).version = stage0_version.to_string()
                 }
                 new @ None => {
-                    *new = Some(Arc::new(Self::default_sp_caboose(
-                        stage0_version.to_string(),
-                    )));
+                    *new =
+                        Some(Arc::new(Self::default_rot_bootloader_caboose(
+                            stage0_version.to_string(),
+                        )));
                 }
             }
         }
