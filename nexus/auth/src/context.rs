@@ -8,6 +8,7 @@ use super::authz;
 use crate::authn::ConsoleSessionWithSiloId;
 use crate::authn::external::session_cookie::Session;
 use crate::authz::AuthorizedResource;
+use crate::probes;
 use crate::storage::Storage;
 use chrono::{DateTime, Utc};
 use omicron_common::api::external::Error;
@@ -275,7 +276,17 @@ impl OpContext {
             "action" => ?action,
             "resource" => ?*resource
         );
+        let id = usdt::UniqueId::new();
+        probes::authz__start!(|| {
+            (
+                &id,
+                format!("{:?}", self.authn.actor()),
+                format!("{action:?}"),
+                format!("{resource:?}"),
+            )
+        });
         let result = self.authz.authorize(self, action, resource.clone()).await;
+        probes::authz__done!(|| (&id, format!("{result:?}")));
         debug!(self.log, "authorize result";
             "actor" => ?self.authn.actor(),
             "action" => ?action,
