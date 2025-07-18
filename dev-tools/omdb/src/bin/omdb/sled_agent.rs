@@ -12,6 +12,8 @@ use anyhow::bail;
 use clap::Args;
 use clap::Subcommand;
 use sled_agent_client::types::ChickenSwitchDestroyOrphanedDatasets;
+use sled_agent_client::types::Flow;
+use uuid::Uuid;
 
 /// Arguments to the "omdb sled-agent" subcommand
 #[derive(Debug, Args)]
@@ -36,6 +38,10 @@ enum SledAgentCommands {
     #[clap(subcommand)]
     Zones(ZoneCommands),
 
+    /// print information about network interfaces
+    #[clap(subcommand)]
+    Nics(NicCommands),
+
     /// print information about the local bootstore node
     #[clap(subcommand)]
     Bootstore(BootstoreCommands),
@@ -50,6 +56,19 @@ enum SledAgentCommands {
 enum ZoneCommands {
     /// Print list of all running control plane zones
     List,
+}
+
+#[derive(Debug, Subcommand)]
+enum NicCommands {
+    /// Print list of all known OPTE ports
+    List,
+    /// Print all flow stats currently seen on a given OPTE port
+    Flows(FlowStatsArgs),
+}
+
+#[derive(Debug, Args)]
+pub struct FlowStatsArgs {
+    nic_id: Uuid,
 }
 
 #[derive(Debug, Subcommand)]
@@ -102,6 +121,12 @@ impl SledAgentArgs {
             SledAgentCommands::Zones(ZoneCommands::List) => {
                 cmd_zones_list(&client).await
             }
+            SledAgentCommands::Nics(NicCommands::List) => {
+                cmd_nics_list(&client).await
+            }
+            SledAgentCommands::Nics(NicCommands::Flows(args)) => {
+                cmd_nics_flows(&client, args).await
+            }
             SledAgentCommands::Bootstore(BootstoreCommands::Status) => {
                 cmd_bootstore_status(&client).await
             }
@@ -146,6 +171,53 @@ async fn cmd_zones_list(
     }
     for zone in &zones {
         println!("    {:?}", zone);
+    }
+
+    Ok(())
+}
+
+/// Runs `omdb sled-agent nics list`
+async fn cmd_nics_list(
+    client: &sled_agent_client::Client,
+) -> Result<(), anyhow::Error> {
+    let response = client.nic_ids_list().await.context("listing nics")?;
+    let nics = response.into_inner();
+
+    println!("nics:");
+    if nics.is_empty() {
+        println!("    <none>");
+    }
+    for nic in &nics {
+        println!("    {}", nic);
+    }
+
+    Ok(())
+}
+
+/// Runs `omdb sled-agent nics list`
+async fn cmd_nics_flows(
+    client: &sled_agent_client::Client,
+    FlowStatsArgs { nic_id }: &FlowStatsArgs,
+) -> Result<(), anyhow::Error> {
+    let response =
+        client.nic_flows_list(nic_id).await.context("listing nics")?;
+    let flows = response.into_inner();
+
+    println!("flows:");
+    if flows.is_empty() {
+        println!("    <none>");
+    }
+    for Flow { metadata, in_stat, out_stat } in &flows {
+        println!("    {} ({}):", metadata.flow_id, metadata.created_at);
+        println!("      internal key   {:?}", metadata.internal_key);
+        println!("      external key   {:?}", metadata.external_key);
+        println!("      opened on      {:?}", metadata.initial_packet);
+        println!("      forwarded via  {:?}", metadata.forwarded);
+        println!("      allowed in by  {:?}", metadata.admitted_by_in);
+        println!("      allowed out by {:?}", metadata.admitted_by_out);
+        println!("      in_stats       {:?}", in_stat);
+        println!("      out_stats      {:?}", out_stat);
+        println!("+---------------------+");
     }
 
     Ok(())
