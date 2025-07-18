@@ -1009,7 +1009,8 @@ impl InvSledConfigReconciler {
         boot_partition_a_error: Option<String>,
         boot_partition_b_error: Option<String>,
     ) -> Self {
-        // TODO-john replace this column with the hw_host_phase_1_slot enum?
+        // TODO-cleanup We should use `HwM2Slot` instead of integers for this
+        // column: https://github.com/oxidecomputer/omicron/issues/8642
         let (boot_disk_slot, boot_disk_error) = match boot_disk {
             Ok(M2Slot::A) => (Some(SqlU8(0)), None),
             Ok(M2Slot::B) => (Some(SqlU8(1)), None),
