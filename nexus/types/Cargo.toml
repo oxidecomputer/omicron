@@ -25,8 +25,11 @@ humantime.workspace = true
 iddqd.workspace = true
 id-map.workspace = true
 illumos-utils.workspace = true
+indent_write.workspace = true
 ipnetwork.workspace = true
+itertools.workspace = true
 newtype_derive.workspace = true
+omicron-cockroach-metrics.workspace = true
 omicron-uuid-kinds.workspace = true
 openssl.workspace = true
 oxql-types.workspace = true
@@ -41,10 +44,13 @@ slog.workspace = true
 slog-error-chain.workspace = true
 steno.workspace = true
 strum.workspace = true
+tabled.workspace = true
+textwrap.workspace = true
 thiserror.workspace = true
 tufaceous-artifact.workspace = true
 newtype-uuid.workspace = true
 update-engine.workspace = true
+unicode-width.workspace = true
 uuid.workspace = true
 url = { workspace = true, features = ["serde"] }
 
@@ -57,6 +63,7 @@ omicron-common.workspace = true
 omicron-passwords.workspace = true
 omicron-workspace-hack.workspace = true
 semver.workspace = true
+tough.workspace = true
 # Note: we're trying to avoid a dependency from nexus-types to sled-agent-types
 # because the correct direction of dependency is unclear. If there are types
 # common to both, put them in `omicron-common` or `nexus-sled-agent-shared`.

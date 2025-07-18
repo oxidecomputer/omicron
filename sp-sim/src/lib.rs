@@ -26,6 +26,8 @@ pub use slog::Logger;
 use std::net::SocketAddrV6;
 use tokio::sync::mpsc;
 use tokio::sync::watch;
+pub use update::HostFlashHashCompletionSender;
+pub use update::HostFlashHashPolicy;
 
 pub const SIM_ROT_BOARD: &str = "SimRot";
 pub const SIM_ROT_STAGE0_BOARD: &str = "SimRotStage0";
@@ -155,6 +157,11 @@ impl SimRack {
             gimlets.push(
                 Gimlet::spawn(
                     gimlet,
+                    // We could expose this in the config file if we want
+                    // callers to be able configure timer-based hashing instead?
+                    // For now, just use the fastest version (assume contents
+                    // are always hashed).
+                    HostFlashHashPolicy::assume_already_hashed(),
                     log.new(slog::o!("slot" => format!("gimlet {}", i))),
                 )
                 .await?,

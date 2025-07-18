@@ -26,6 +26,8 @@ use nexus_db_schema::schema::{
     bp_target,
 };
 use nexus_sled_agent_shared::inventory::OmicronZoneDataset;
+use nexus_types::deployment::BlueprintHostPhase2DesiredContents;
+use nexus_types::deployment::BlueprintHostPhase2DesiredSlots;
 use nexus_types::deployment::BlueprintPhysicalDiskConfig;
 use nexus_types::deployment::BlueprintPhysicalDiskDisposition;
 use nexus_types::deployment::BlueprintTarget;
@@ -37,7 +39,7 @@ use nexus_types::deployment::CockroachDbPreserveDowngrade;
 use nexus_types::deployment::PendingMgsUpdate;
 use nexus_types::deployment::PendingMgsUpdateDetails;
 use nexus_types::deployment::{
-    BlueprintDatasetConfig, BlueprintZoneImageVersion, OximeterReadMode,
+    BlueprintArtifactVersion, BlueprintDatasetConfig, OximeterReadMode,
 };
 use nexus_types::deployment::{BlueprintDatasetDisposition, ExpectedVersion};
 use nexus_types::deployment::{BlueprintZoneImageSource, blueprint_zone_type};
@@ -157,6 +159,54 @@ pub struct BpSledMetadata {
     pub sled_state: SledState,
     pub sled_agent_generation: Generation,
     pub remove_mupdate_override: Option<DbTypedUuid<MupdateOverrideKind>>,
+    pub host_phase_2_desired_slot_a: Option<ArtifactHash>,
+    pub host_phase_2_desired_slot_b: Option<ArtifactHash>,
+}
+
+impl BpSledMetadata {
+    pub fn host_phase_2(
+        &self,
+        slot_a_artifact_version: Option<DbArtifactVersion>,
+        slot_b_artifact_version: Option<DbArtifactVersion>,
+    ) -> BlueprintHostPhase2DesiredSlots {
+        // If we found an artifact version, use it; otherwise, use `Unknown`.
+        fn interpret_version(
+            maybe_version: Option<DbArtifactVersion>,
+        ) -> BlueprintArtifactVersion {
+            match maybe_version {
+                Some(version) => {
+                    BlueprintArtifactVersion::Available { version: version.0 }
+                }
+                None => BlueprintArtifactVersion::Unknown,
+            }
+        }
+
+        // If we have an artifact hash, use it (and attach a version).
+        // Otherwise, use `CurrentContents`.
+        fn interpret_slot(
+            maybe_hash: Option<ArtifactHash>,
+            maybe_version: Option<DbArtifactVersion>,
+        ) -> BlueprintHostPhase2DesiredContents {
+            match maybe_hash {
+                Some(hash) => BlueprintHostPhase2DesiredContents::Artifact {
+                    version: interpret_version(maybe_version),
+                    hash: hash.0,
+                },
+                None => BlueprintHostPhase2DesiredContents::CurrentContents,
+            }
+        }
+
+        BlueprintHostPhase2DesiredSlots {
+            slot_a: interpret_slot(
+                self.host_phase_2_desired_slot_a,
+                slot_a_artifact_version,
+            ),
+            slot_b: interpret_slot(
+                self.host_phase_2_desired_slot_b,
+                slot_b_artifact_version,
+            ),
+        }
+    }
 }
 
 impl_enum_type!(
@@ -1009,7 +1059,7 @@ struct DbBpZoneImageSourceColumns {
     // The BlueprintZoneImageVersion is not actually stored in bp_omicron_zone
     // table directly, but is instead looked up from the tuf_artifact table at
     // blueprint load time.
-    image_artifact_data: Option<(BlueprintZoneImageVersion, ArtifactHash)>,
+    image_artifact_data: Option<(BlueprintArtifactVersion, ArtifactHash)>,
 }
 
 impl DbBpZoneImageSourceColumns {
@@ -1022,10 +1072,10 @@ impl DbBpZoneImageSourceColumns {
         // Some.
         let image_artifact_data = image_artifact_sha256.map(|hash| {
             let version = match image_artifact_row {
-                Some(artifact_row) => BlueprintZoneImageVersion::Available {
+                Some(artifact_row) => BlueprintArtifactVersion::Available {
                     version: artifact_row.version.0,
                 },
-                None => BlueprintZoneImageVersion::Unknown,
+                None => BlueprintArtifactVersion::Unknown,
             };
             (version, hash)
         });

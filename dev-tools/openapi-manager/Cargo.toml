@@ -27,6 +27,7 @@ itertools.workspace = true
 nexus-external-api.workspace = true
 nexus-internal-api.workspace = true
 newtype_derive.workspace = true
+ntp-admin-api.workspace = true
 omicron-workspace-hack.workspace = true
 openapi-lint.workspace = true
 openapi-manager-types.workspace = true

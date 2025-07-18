@@ -22,6 +22,7 @@ iddqd.workspace = true
 ipnetwork.workspace = true
 macaddr.workspace = true
 newtype_derive.workspace = true
+omicron-cockroach-metrics.workspace = true
 omicron-uuid-kinds.workspace = true
 oxnet.workspace = true
 parse-display.workspace = true

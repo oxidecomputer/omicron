@@ -32,15 +32,18 @@ sled-agent-types.workspace = true
 sled-agent-zone-images-examples.workspace = true
 slog.workspace = true
 strum.workspace = true
+swrite.workspace = true
 thiserror.workspace = true
 tufaceous-artifact.workspace = true
 typed-rng.workspace = true
 uuid.workspace = true
+omicron-cockroach-metrics.workspace = true
 omicron-workspace-hack.workspace = true
 
 [dev-dependencies]
 expectorate.workspace = true
 gateway-test-utils.workspace = true
+httpmock.workspace = true
 omicron-sled-agent.workspace = true
 regex.workspace = true
 tokio.workspace = true

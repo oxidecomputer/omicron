@@ -21,6 +21,7 @@ use nexus_sled_agent_shared::inventory::BootImageHeader;
 use nexus_sled_agent_shared::inventory::BootPartitionDetails;
 use nexus_sled_agent_shared::inventory::ConfigReconcilerInventory;
 use nexus_sled_agent_shared::inventory::ConfigReconcilerInventoryStatus;
+use nexus_sled_agent_shared::inventory::HostPhase2DesiredSlots;
 use nexus_sled_agent_shared::inventory::Inventory;
 use nexus_sled_agent_shared::inventory::InventoryDataset;
 use nexus_sled_agent_shared::inventory::InventoryDisk;
@@ -35,6 +36,8 @@ use nexus_types::inventory::CabooseWhich;
 use nexus_types::inventory::RotPage;
 use nexus_types::inventory::RotPageWhich;
 use nexus_types::inventory::ZpoolName;
+use omicron_cockroach_metrics::MetricValue;
+use omicron_cockroach_metrics::PrometheusMetrics;
 use omicron_common::api::external::ByteCount;
 use omicron_common::disk::DatasetConfig;
 use omicron_common::disk::DatasetKind;
@@ -67,6 +70,7 @@ use sled_agent_zone_images_examples::NON_BOOT_PATHS;
 use sled_agent_zone_images_examples::NON_BOOT_UUID;
 use sled_agent_zone_images_examples::WriteInstallDatasetContext;
 use sled_agent_zone_images_examples::dataset_missing_error;
+use std::collections::BTreeMap;
 use std::sync::Arc;
 use std::time::Duration;
 use strum::IntoEnumIterator;
@@ -345,6 +349,7 @@ pub fn representative() -> Representative {
         datasets: Default::default(),
         zones: sled14.zones.into_iter().collect(),
         remove_mupdate_override: None,
+        host_phase_2: HostPhase2DesiredSlots::current_contents(),
     };
     let sled16 = OmicronSledConfig {
         generation: sled16.generation,
@@ -352,6 +357,7 @@ pub fn representative() -> Representative {
         datasets: Default::default(),
         zones: sled16.zones.into_iter().collect(),
         remove_mupdate_override: None,
+        host_phase_2: HostPhase2DesiredSlots::current_contents(),
     };
     let sled17 = OmicronSledConfig {
         generation: sled17.generation,
@@ -359,6 +365,7 @@ pub fn representative() -> Representative {
         datasets: Default::default(),
         zones: sled17.zones.into_iter().collect(),
         remove_mupdate_override: None,
+        host_phase_2: HostPhase2DesiredSlots::current_contents(),
     };
 
     // Create iterator producing fixed IDs.
@@ -603,6 +610,16 @@ pub fn representative() -> Representative {
             queried_keeper: KeeperId(1),
             leader_committed_log_index: 1000,
             raft_config: [KeeperId(1)].into_iter().collect(),
+        },
+    );
+
+    builder.found_cockroach_metrics(
+        omicron_cockroach_metrics::NodeId::new("1".to_string()),
+        PrometheusMetrics {
+            metrics: BTreeMap::from([(
+                "ranges_underreplicated".to_string(),
+                MetricValue::Unsigned(0),
+            )]),
         },
     );
 

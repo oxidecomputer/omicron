@@ -7,14 +7,21 @@
 use bytes::Bytes;
 use dropshot::HttpError;
 use futures::Stream;
-use nexus_db_model::TufRepoDescription;
-use nexus_db_queries::authz;
+use nexus_auth::authz;
+use nexus_db_lookup::LookupPath;
+use nexus_db_model::{TufRepoDescription, TufTrustRoot};
 use nexus_db_queries::context::OpContext;
+use nexus_db_queries::db::{datastore::SQL_BATCH_SIZE, pagination::Paginator};
+use nexus_types::external_api::shared::TufSignedRootRole;
 use omicron_common::api::external::{
-    Error, TufRepoInsertResponse, TufRepoInsertStatus,
+    DataPageParams, Error, TufRepoInsertResponse, TufRepoInsertStatus,
 };
+use omicron_uuid_kinds::{GenericUuid, TufTrustRootUuid};
 use semver::Version;
-use update_common::artifacts::{ArtifactsWithPlan, ControlPlaneZonesMode};
+use update_common::artifacts::{
+    ArtifactsWithPlan, ControlPlaneZonesMode, VerificationMode,
+};
+use uuid::Uuid;
 
 impl super::Nexus {
     pub(crate) async fn updates_put_repository(
@@ -23,18 +30,27 @@ impl super::Nexus {
         body: impl Stream<Item = Result<Bytes, HttpError>> + Send + Sync + 'static,
         file_name: String,
     ) -> Result<TufRepoInsertResponse, HttpError> {
-        opctx.authorize(authz::Action::Modify, &authz::FLEET).await?;
-
-        // XXX: this needs to validate against the trusted root!
-        let _updates_config =
-            self.updates_config.as_ref().ok_or_else(|| {
-                Error::internal_error("updates system not initialized")
-            })?;
+        let mut trusted_roots = Vec::new();
+        let mut paginator = Paginator::new(
+            SQL_BATCH_SIZE,
+            dropshot::PaginationOrder::Ascending,
+        );
+        while let Some(p) = paginator.next() {
+            let batch = self
+                .db_datastore
+                .tuf_trust_root_list(opctx, &p.current_pagparams())
+                .await?;
+            paginator = p.found_batch(&batch, &|a| a.id.into_untyped_uuid());
+            for root in batch {
+                trusted_roots.push(root.root_role.0.to_bytes());
+            }
+        }
 
         let artifacts_with_plan = ArtifactsWithPlan::from_stream(
             body,
             Some(file_name),
             ControlPlaneZonesMode::Split,
+            VerificationMode::TrustStore(&trusted_roots),
             &self.log,
         )
         .await
@@ -79,19 +95,58 @@ impl super::Nexus {
         opctx: &OpContext,
         system_version: Version,
     ) -> Result<TufRepoDescription, HttpError> {
-        opctx.authorize(authz::Action::Read, &authz::FLEET).await?;
-
-        let _updates_config =
-            self.updates_config.as_ref().ok_or_else(|| {
-                Error::internal_error("updates system not initialized")
-            })?;
-
-        let tuf_repo_description = self
-            .db_datastore
+        self.db_datastore
             .tuf_repo_get_by_version(opctx, system_version.into())
             .await
-            .map_err(HttpError::from)?;
+            .map_err(HttpError::from)
+    }
 
-        Ok(tuf_repo_description)
+    pub(crate) async fn updates_add_trust_root(
+        &self,
+        opctx: &OpContext,
+        trust_root: TufSignedRootRole,
+    ) -> Result<TufTrustRoot, HttpError> {
+        self.db_datastore
+            .tuf_trust_root_insert(opctx, TufTrustRoot::new(trust_root))
+            .await
+            .map_err(HttpError::from)
+    }
+
+    pub(crate) async fn updates_get_trust_root(
+        &self,
+        opctx: &OpContext,
+        id: TufTrustRootUuid,
+    ) -> Result<TufTrustRoot, HttpError> {
+        let (.., trust_root) = LookupPath::new(opctx, &self.db_datastore)
+            .tuf_trust_root(id)
+            .fetch()
+            .await?;
+        Ok(trust_root)
+    }
+
+    pub(crate) async fn updates_list_trust_roots(
+        &self,
+        opctx: &OpContext,
+        pagparams: &DataPageParams<'_, Uuid>,
+    ) -> Result<Vec<TufTrustRoot>, HttpError> {
+        self.db_datastore
+            .tuf_trust_root_list(opctx, pagparams)
+            .await
+            .map_err(HttpError::from)
+    }
+
+    pub(crate) async fn updates_delete_trust_root(
+        &self,
+        opctx: &OpContext,
+        id: TufTrustRootUuid,
+    ) -> Result<(), HttpError> {
+        let (authz, ..) = LookupPath::new(opctx, &self.db_datastore)
+            .tuf_trust_root(id)
+            .fetch_for(authz::Action::Delete)
+            .await?;
+        self.db_datastore
+            .tuf_trust_root_delete(opctx, &authz)
+            .await
+            .map_err(HttpError::from)
     }
 }

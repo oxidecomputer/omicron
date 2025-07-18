@@ -65,6 +65,10 @@ support_bundle_list                      GET      /experimental/v1/system/suppor
 support_bundle_view                      GET      /experimental/v1/system/support-bundles/{bundle_id}
 system_update_get_repository             GET      /v1/system/update/repository/{system_version}
 system_update_put_repository             PUT      /v1/system/update/repository
+system_update_trust_root_create          POST     /v1/system/update/trust-roots
+system_update_trust_root_delete          DELETE   /v1/system/update/trust-roots/{trust_root_id}
+system_update_trust_root_list            GET      /v1/system/update/trust-roots
+system_update_trust_root_view            GET      /v1/system/update/trust-roots/{trust_root_id}
 target_release_update                    PUT      /v1/system/update/target-release
 target_release_view                      GET      /v1/system/update/target-release
 timeseries_query                         POST     /v1/timeseries/query
@@ -140,11 +144,6 @@ project_policy_view                      GET      /v1/projects/{project}/policy
 project_update                           PUT      /v1/projects/{project}
 project_view                             GET      /v1/projects/{project}
 
-API operations found with tag "roles"
-OPERATION ID                             METHOD   URL PATH
-role_list                                GET      /v1/system/roles
-role_view                                GET      /v1/system/roles/{role_name}
-
 API operations found with tag "silos"
 OPERATION ID                             METHOD   URL PATH
 auth_settings_update                     PUT      /v1/auth-settings
@@ -158,6 +157,10 @@ group_view                               GET      /v1/groups/{group_id}
 policy_update                            PUT      /v1/policy
 policy_view                              GET      /v1/policy
 user_list                                GET      /v1/users
+user_logout                              POST     /v1/users/{user_id}/logout
+user_session_list                        GET      /v1/users/{user_id}/sessions
+user_token_list                          GET      /v1/users/{user_id}/access-tokens
+user_view                                GET      /v1/users/{user_id}
 utilization_view                         GET      /v1/utilization
 
 API operations found with tag "snapshots"

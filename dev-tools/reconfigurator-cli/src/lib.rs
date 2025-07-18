@@ -22,27 +22,30 @@ use nexus_reconfigurator_planning::planner::Planner;
 use nexus_reconfigurator_planning::system::{
     SledBuilder, SledInventoryVisibility, SystemDescription,
 };
-use nexus_reconfigurator_simulation::{BlueprintId, SimState};
+use nexus_reconfigurator_simulation::{BlueprintId, CollectionId, SimState};
 use nexus_reconfigurator_simulation::{SimStateBuilder, SimTufRepoSource};
 use nexus_reconfigurator_simulation::{SimTufRepoDescription, Simulator};
 use nexus_sled_agent_shared::inventory::ZoneKind;
+use nexus_types::deployment::BlueprintHostPhase2DesiredContents;
 use nexus_types::deployment::PlanningInput;
 use nexus_types::deployment::SledFilter;
 use nexus_types::deployment::execution;
 use nexus_types::deployment::execution::blueprint_external_dns_config;
 use nexus_types::deployment::execution::blueprint_internal_dns_config;
 use nexus_types::deployment::{Blueprint, UnstableReconfiguratorState};
+use nexus_types::deployment::{BlueprintArtifactVersion, PendingMgsUpdate};
 use nexus_types::deployment::{BlueprintZoneDisposition, ExpectedVersion};
 use nexus_types::deployment::{
     BlueprintZoneImageSource, PendingMgsUpdateDetails,
 };
-use nexus_types::deployment::{BlueprintZoneImageVersion, PendingMgsUpdate};
 use nexus_types::deployment::{OmicronZoneNic, TargetReleaseDescription};
 use nexus_types::external_api::views::SledPolicy;
 use nexus_types::external_api::views::SledProvisionPolicy;
+use nexus_types::inventory::CollectionDisplayCliFilter;
 use omicron_common::address::REPO_DEPOT_PORT;
 use omicron_common::api::external::Name;
 use omicron_common::api::external::{Generation, TufRepoDescription};
+use omicron_common::disk::M2Slot;
 use omicron_common::policy::NEXUS_REDUNDANCY;
 use omicron_common::update::OmicronZoneManifestSource;
 use omicron_repl_utils::run_repl_from_file;
@@ -66,7 +69,9 @@ use tufaceous_artifact::ArtifactHash;
 use tufaceous_artifact::ArtifactVersion;
 use tufaceous_artifact::ArtifactVersionError;
 use tufaceous_lib::assemble::ArtifactManifest;
-use update_common::artifacts::{ArtifactsWithPlan, ControlPlaneZonesMode};
+use update_common::artifacts::{
+    ArtifactsWithPlan, ControlPlaneZonesMode, VerificationMode,
+};
 
 mod log_capture;
 
@@ -232,6 +237,7 @@ fn process_command(
         Commands::SiloRemove(args) => cmd_silo_remove(sim, args),
         Commands::InventoryList => cmd_inventory_list(sim),
         Commands::InventoryGenerate => cmd_inventory_generate(sim),
+        Commands::InventoryShow(args) => cmd_inventory_show(sim, args),
         Commands::BlueprintList => cmd_blueprint_list(sim),
         Commands::BlueprintBlippy(args) => cmd_blueprint_blippy(sim, args),
         Commands::BlueprintEdit(args) => cmd_blueprint_edit(sim, args),
@@ -239,9 +245,6 @@ fn process_command(
         Commands::BlueprintShow(args) => cmd_blueprint_show(sim, args),
         Commands::BlueprintDiff(args) => cmd_blueprint_diff(sim, args),
         Commands::BlueprintDiffDns(args) => cmd_blueprint_diff_dns(sim, args),
-        Commands::BlueprintDiffInventory(args) => {
-            cmd_blueprint_diff_inventory(sim, args)
-        }
         Commands::BlueprintSave(args) => cmd_blueprint_save(sim, args),
         Commands::Show => cmd_show(sim),
         Commands::Set(args) => cmd_set(sim, args),
@@ -297,6 +300,8 @@ enum Commands {
     InventoryList,
     /// generates an inventory collection from the configured sleds
     InventoryGenerate,
+    /// show details about an inventory collection
+    InventoryShow(InventoryShowArgs),
 
     /// list all blueprints
     BlueprintList,
@@ -312,8 +317,6 @@ enum Commands {
     BlueprintDiff(BlueprintDiffArgs),
     /// show differences between a blueprint and a particular DNS version
     BlueprintDiffDns(BlueprintDiffDnsArgs),
-    /// show differences between a blueprint and an inventory collection
-    BlueprintDiffInventory(BlueprintDiffInventoryArgs),
     /// write one blueprint to a file
     BlueprintSave(BlueprintSaveArgs),
 
@@ -512,9 +515,16 @@ struct SiloAddRemoveArgs {
 }
 
 #[derive(Debug, Args)]
-struct InventoryArgs {
-    /// id of the inventory collection to use in planning
-    collection_id: CollectionUuid,
+struct InventoryShowArgs {
+    /// id of the inventory collection to show or "latest"
+    collection_id: CollectionIdOpt,
+
+    /// show long strings in their entirety
+    #[clap(long)]
+    show_long_strings: bool,
+
+    #[clap(subcommand)]
+    filter: Option<CollectionDisplayCliFilter>,
 }
 
 #[derive(Debug, Args)]
@@ -522,11 +532,11 @@ struct BlueprintPlanArgs {
     /// id of the blueprint on which this one will be based, "latest", or
     /// "target"
     parent_blueprint_id: BlueprintIdOpt,
-    /// id of the inventory collection to use in planning
+    /// id of the inventory collection to use in planning or "latest"
     ///
     /// Must be provided unless there is only one collection in the loaded
     /// state.
-    collection_id: Option<CollectionUuid>,
+    collection_id: Option<CollectionIdOpt>,
 }
 
 #[derive(Debug, Args)]
@@ -575,6 +585,16 @@ enum BlueprintEditCommands {
         zone_id: OmicronZoneUuid,
         #[command(subcommand)]
         image_source: ImageSourceArgs,
+    },
+    /// set the desired host phase 2 image for an internal disk slot
+    SetHostPhase2 {
+        /// sled to set the field on
+        sled_id: SledOpt,
+        /// internal disk slot
+        #[clap(value_parser = parse_m2_slot)]
+        slot: M2Slot,
+        #[command(subcommand)]
+        phase_2_source: HostPhase2SourceArgs,
     },
     /// set the remove_mupdate_override field for a sled
     SetRemoveMupdateOverride {
@@ -729,6 +749,34 @@ impl From<BlueprintIdOpt> for BlueprintId {
     }
 }
 
+#[derive(Clone, Debug)]
+enum CollectionIdOpt {
+    /// use the latest collection sorted by time created
+    Latest,
+    /// use a specific collection
+    Id(CollectionUuid),
+}
+
+impl FromStr for CollectionIdOpt {
+    type Err = anyhow::Error;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        match s {
+            "latest" => Ok(CollectionIdOpt::Latest),
+            _ => Ok(CollectionIdOpt::Id(s.parse()?)),
+        }
+    }
+}
+
+impl From<CollectionIdOpt> for CollectionId {
+    fn from(value: CollectionIdOpt) -> Self {
+        match value {
+            CollectionIdOpt::Latest => CollectionId::Latest,
+            CollectionIdOpt::Id(id) => CollectionId::Id(id),
+        }
+    }
+}
+
 /// Clap field for an optional mupdate override UUID.
 ///
 /// This structure is similar to `Option`, but is specified separately to:
@@ -816,8 +864,8 @@ enum ImageSourceArgs {
     InstallDataset,
     /// the zone image comes from a specific TUF repo artifact
     Artifact {
-        #[clap(value_parser = parse_blueprint_zone_image_version)]
-        version: BlueprintZoneImageVersion,
+        #[clap(value_parser = parse_blueprint_artifact_version)]
+        version: BlueprintArtifactVersion,
         hash: ArtifactHash,
     },
 }
@@ -856,10 +904,10 @@ fn image_source_unwrap_or(
                 Ok(BlueprintZoneImageSource::InstallDataset) | Err(_) => (),
                 Ok(BlueprintZoneImageSource::Artifact { version, hash }) => {
                     let version = match version {
-                        BlueprintZoneImageVersion::Available { version } => {
+                        BlueprintArtifactVersion::Available { version } => {
                             version.to_string()
                         }
-                        BlueprintZoneImageVersion::Unknown => {
+                        BlueprintArtifactVersion::Unknown => {
                             "unknown".to_string()
                         }
                     };
@@ -889,17 +937,48 @@ impl From<ImageSourceArgs> for BlueprintZoneImageSource {
     }
 }
 
-fn parse_blueprint_zone_image_version(
+#[derive(Debug, Subcommand)]
+enum HostPhase2SourceArgs {
+    /// keep the current phase 2 contents
+    CurrentContents,
+    /// the host phase 2 comes from a specific TUF repo artifact
+    Artifact {
+        #[clap(value_parser = parse_blueprint_artifact_version)]
+        version: BlueprintArtifactVersion,
+        hash: ArtifactHash,
+    },
+}
+
+impl From<HostPhase2SourceArgs> for BlueprintHostPhase2DesiredContents {
+    fn from(value: HostPhase2SourceArgs) -> Self {
+        match value {
+            HostPhase2SourceArgs::CurrentContents => Self::CurrentContents,
+            HostPhase2SourceArgs::Artifact { version, hash } => {
+                Self::Artifact { version, hash }
+            }
+        }
+    }
+}
+
+fn parse_blueprint_artifact_version(
     version: &str,
-) -> Result<BlueprintZoneImageVersion, ArtifactVersionError> {
+) -> Result<BlueprintArtifactVersion, ArtifactVersionError> {
     // Treat the literal string "unknown" as an unknown version.
     if version == "unknown" {
-        return Ok(BlueprintZoneImageVersion::Unknown);
+        return Ok(BlueprintArtifactVersion::Unknown);
     }
 
-    Ok(BlueprintZoneImageVersion::Available {
+    Ok(BlueprintArtifactVersion::Available {
         version: version.parse::<ArtifactVersion>()?,
     })
+}
+
+fn parse_m2_slot(slot: &str) -> anyhow::Result<M2Slot> {
+    match slot {
+        "A" | "a" | "0" => Ok(M2Slot::A),
+        "B" | "b" | "1" => Ok(M2Slot::B),
+        _ => bail!("invalid slot `{slot}` (expected `A` or `B`)"),
+    }
 }
 
 #[derive(Debug, Args)]
@@ -922,14 +1001,6 @@ struct BlueprintDiffDnsArgs {
 enum CliDnsGroup {
     Internal,
     External,
-}
-
-#[derive(Debug, Args)]
-struct BlueprintDiffInventoryArgs {
-    /// id of the inventory collection
-    collection_id: CollectionUuid,
-    /// id of the blueprint, "latest", or "target"
-    blueprint_id: BlueprintIdOpt,
 }
 
 #[derive(Debug, Args)]
@@ -1395,6 +1466,24 @@ fn cmd_inventory_generate(
     Ok(Some(rv))
 }
 
+fn cmd_inventory_show(
+    sim: &mut ReconfiguratorSim,
+    args: InventoryShowArgs,
+) -> anyhow::Result<Option<String>> {
+    let state = sim.current_state();
+    let system = state.system();
+    let resolved = system.resolve_collection_id(args.collection_id.into())?;
+    let collection = system.get_collection(&resolved)?;
+
+    let mut display = collection.display();
+    if let Some(filter) = &args.filter {
+        display.apply_cli_filter(filter);
+    }
+    display.show_long_strings(args.show_long_strings);
+
+    Ok(Some(display.to_string()))
+}
+
 fn cmd_blueprint_list(
     sim: &mut ReconfiguratorSim,
 ) -> anyhow::Result<Option<String>> {
@@ -1467,10 +1556,13 @@ fn cmd_blueprint_plan(
 
     let parent_blueprint_id =
         system.resolve_blueprint_id(args.parent_blueprint_id.into())?;
-    let collection_id = args.collection_id;
     let parent_blueprint = system.get_blueprint(&parent_blueprint_id)?;
-    let collection = match collection_id {
-        Some(collection_id) => system.get_collection(collection_id)?,
+    let collection = match args.collection_id {
+        Some(collection_id) => {
+            let resolved =
+                system.resolve_collection_id(collection_id.into())?;
+            system.get_collection(&resolved)?
+        }
         None => {
             let mut all_collections_iter = system.all_collections();
             match all_collections_iter.len() {
@@ -1607,6 +1699,24 @@ fn cmd_blueprint_edit(
             builder
                 .sled_set_zone_source(sled_id, zone_id, source)
                 .context("failed to set image source")?;
+            rv
+        }
+        BlueprintEditCommands::SetHostPhase2 {
+            sled_id,
+            slot,
+            phase_2_source,
+        } => {
+            let sled_id = sled_id.to_sled_id(system.description())?;
+            let source =
+                BlueprintHostPhase2DesiredContents::from(phase_2_source);
+            let rv = format!(
+                "set sled {sled_id} host phase 2 slot {slot:?} source to \
+                 {source}\n\
+                 warn: no validation is done on the requested source"
+            );
+            builder
+                .sled_set_host_phase_2_slot(sled_id, slot, source)
+                .context("failed to set host phase 2 source")?;
             rv
         }
         BlueprintEditCommands::ExpungeZone { zone_id } => {
@@ -1886,23 +1996,6 @@ fn cmd_blueprint_diff_dns(
     let dns_diff = DnsDiff::new(&existing_dns_zone, &blueprint_dns_zone)
         .context("failed to assemble DNS diff")?;
     Ok(Some(dns_diff.to_string()))
-}
-
-fn cmd_blueprint_diff_inventory(
-    sim: &mut ReconfiguratorSim,
-    args: BlueprintDiffInventoryArgs,
-) -> anyhow::Result<Option<String>> {
-    let collection_id = args.collection_id;
-    let blueprint_id = args.blueprint_id;
-
-    let state = sim.current_state();
-    let _collection = state.system().get_collection(collection_id)?;
-    let _blueprint =
-        state.system().resolve_and_get_blueprint(blueprint_id.into())?;
-    // See https://github.com/oxidecomputer/omicron/issues/7242
-    // let diff = blueprint.diff_since_collection(&collection);
-    // Ok(Some(diff.display().to_string()))
-    bail!("Not Implemented")
 }
 
 fn cmd_blueprint_save(
@@ -2186,6 +2279,7 @@ fn extract_tuf_repo_description(
             None,
             repo_hash,
             ControlPlaneZonesMode::Split,
+            VerificationMode::BlindlyTrustAnything,
             log,
         )
         .await

@@ -16,9 +16,13 @@ use nexus_db_queries::db::DataStore;
 use nexus_inventory::InventoryError;
 use nexus_types::deployment::SledFilter;
 use nexus_types::inventory::Collection;
+use omicron_cockroach_metrics::CockroachClusterAdminClient;
 use omicron_uuid_kinds::CollectionUuid;
 use serde_json::json;
+use slog::{debug, o, warn};
+use std::net::SocketAddr;
 use std::sync::Arc;
+use std::time::Duration;
 use tokio::sync::watch;
 
 /// Background task that reads inventory for the rack
@@ -29,10 +33,12 @@ pub struct InventoryCollector {
     nkeep: u32,
     disable: bool,
     tx: watch::Sender<Option<CollectionUuid>>,
+    cockroach_admin_client: CockroachClusterAdminClient,
 }
 
 impl InventoryCollector {
     pub fn new(
+        opctx: &OpContext,
         datastore: Arc<DataStore>,
         resolver: internal_dns_resolver::Resolver,
         creator: &str,
@@ -40,6 +46,13 @@ impl InventoryCollector {
         disable: bool,
     ) -> InventoryCollector {
         let (tx, _) = watch::channel(None);
+        let timeout = Duration::from_secs(15);
+        let cockroach_admin_client = CockroachClusterAdminClient::new(
+            opctx
+                .log
+                .new(slog::o!("component" => "inventory_cockroach_client")),
+            timeout,
+        );
         InventoryCollector {
             datastore,
             resolver,
@@ -47,6 +60,7 @@ impl InventoryCollector {
             nkeep,
             disable,
             tx,
+            cockroach_admin_client,
         }
     }
 
@@ -68,6 +82,7 @@ impl BackgroundTask for InventoryCollector {
                 &self.creator,
                 self.nkeep,
                 self.disable,
+                &self.cockroach_admin_client,
             )
             .await
             .context("failed to collect inventory")
@@ -104,6 +119,7 @@ async fn inventory_activate(
     creator: &str,
     nkeep: u32,
     disabled: bool,
+    cockroach_admin_client: &CockroachClusterAdminClient,
 ) -> Result<Collection, anyhow::Error> {
     // If we're disabled, don't do anything.  (This switch is only intended for
     // unforeseen production emergencies.)
@@ -180,6 +196,25 @@ async fn inventory_activate(
         },
     };
 
+    // Update CockroachDB cluster backends.
+    let cockroach_addresses = resolver
+        .lookup_all_socket_v6(ServiceName::Cockroach)
+        .await
+        .context("looking up cockroach addresses")?;
+
+    // TODO(https://github.com/oxidecomputer/omicron/issues/8496): If
+    // we could look up the admin service, instead of hard-coding it as
+    // "same as cockroach, but different port", that be preferable.
+    let admin_addresses: Vec<_> = cockroach_addresses
+        .into_iter()
+        .map(|mut addr| {
+            addr.set_port(omicron_common::address::COCKROACH_ADMIN_PORT);
+            SocketAddr::V6(addr)
+        })
+        .collect();
+
+    cockroach_admin_client.update_backends(admin_addresses.as_slice()).await;
+
     // Create an enumerator to find sled agents.
     let sled_enum = DbSledAgentEnumerator { opctx, datastore };
 
@@ -188,6 +223,7 @@ async fn inventory_activate(
         creator,
         mgs_clients,
         keeper_admin_clients,
+        cockroach_admin_client,
         &sled_enum,
         opctx.log.clone(),
     );
@@ -295,6 +331,7 @@ mod test {
         // allow a backlog to accumulate.
         let nkeep = 3;
         let mut task = InventoryCollector::new(
+            &opctx,
             datastore.clone(),
             resolver.clone(),
             "me",
@@ -318,8 +355,14 @@ mod test {
             assert!(num_collections > 0);
 
             // Regardless of the activation source, we should have at
-            // most `nkeep + 1` collections.
-            assert!(num_collections <= nkeep + 1);
+            // most `nkeep + 2` collections: at most `nkeep + 1` from
+            // our collection, and at most one more if we lose the race
+            // with Nexus and it happens to insert another collection
+            // after we pruned down to `nkeep`.
+            assert!(
+                num_collections <= nkeep + 2,
+                "expected {num_collections} <= {nkeep} + 2"
+            );
 
             // Filter down to just the collections we activated. (This could be
             // empty if Nexus shoved several collections in!)
@@ -360,6 +403,7 @@ mod test {
 
         // Create a disabled task and make sure that does nothing.
         let mut task = InventoryCollector::new(
+            &opctx,
             datastore.clone(),
             resolver,
             "disabled",

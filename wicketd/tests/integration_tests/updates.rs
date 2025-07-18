@@ -22,7 +22,7 @@ use omicron_common::{
 };
 use omicron_uuid_kinds::{InternalZpoolUuid, MupdateUuid};
 use sled_agent_config_reconciler::{
-    InternalDisksReceiver, InternalDisksWithBootDisk,
+    InternalDiskDetails, InternalDisksReceiver, InternalDisksWithBootDisk,
 };
 use sled_agent_types::zone_images::MupdateOverrideNonBootResult;
 use sled_agent_zone_images::ZoneImageSourceResolver;
@@ -694,10 +694,19 @@ fn make_internal_disks(
     boot_zpool: InternalZpoolUuid,
     other_zpools: &[InternalZpoolUuid],
 ) -> InternalDisksWithBootDisk {
-    let identity_from_zpool = |zpool: InternalZpoolUuid| DiskIdentity {
-        vendor: "wicketd-integration-test".to_string(),
-        model: "fake-disk".to_string(),
-        serial: zpool.to_string(),
+    let fake_from_zpool = |zpool: InternalZpoolUuid, is_boot_disk: bool| {
+        let identity = DiskIdentity {
+            vendor: "wicketd-integration-test".to_string(),
+            model: "fake-disk".to_string(),
+            serial: zpool.to_string(),
+        };
+        InternalDiskDetails::fake_details(
+            identity,
+            zpool,
+            is_boot_disk,
+            None,
+            None,
+        )
     };
     let mount_config = MountConfig {
         root: root.to_path_buf(),
@@ -705,11 +714,11 @@ fn make_internal_disks(
     };
     InternalDisksReceiver::fake_static(
         Arc::new(mount_config),
-        std::iter::once((identity_from_zpool(boot_zpool), boot_zpool)).chain(
+        std::iter::once(fake_from_zpool(boot_zpool, true)).chain(
             other_zpools
                 .iter()
                 .copied()
-                .map(|pool| (identity_from_zpool(pool), pool)),
+                .map(|pool| fake_from_zpool(pool, false)),
         ),
     )
     .current_with_boot_disk()

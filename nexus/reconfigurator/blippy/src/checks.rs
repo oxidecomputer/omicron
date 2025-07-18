@@ -12,8 +12,10 @@ use nexus_types::deployment::BlueprintPhysicalDiskDisposition;
 use nexus_types::deployment::BlueprintSledConfig;
 use nexus_types::deployment::BlueprintZoneConfig;
 use nexus_types::deployment::BlueprintZoneDisposition;
+use nexus_types::deployment::BlueprintZoneImageSource;
 use nexus_types::deployment::BlueprintZoneType;
 use nexus_types::deployment::OmicronZoneExternalIp;
+use nexus_types::deployment::SledFilter;
 use nexus_types::deployment::blueprint_zone_type;
 use omicron_common::address::DnsSubnet;
 use omicron_common::address::Ipv6Subnet;
@@ -31,6 +33,7 @@ pub(crate) fn perform_all_blueprint_only_checks(blippy: &mut Blippy<'_>) {
     check_external_networking(blippy);
     check_dataset_zpool_uniqueness(blippy);
     check_datasets(blippy);
+    check_mupdate_override(blippy);
 }
 
 fn check_underlay_ips(blippy: &mut Blippy<'_>) {
@@ -537,6 +540,55 @@ fn check_datasets(blippy: &mut Blippy<'_>) {
     }
 }
 
+fn check_mupdate_override(blippy: &mut Blippy<'_>) {
+    // Perform checks for invariants that should be upheld if
+    // remove_mupdate_override is set for a sled.
+    for (&sled_id, sled) in &blippy.blueprint().sleds {
+        if !sled.state.matches(SledFilter::InService) {
+            continue;
+        }
+
+        if let Some(mupdate_override_id) = sled.remove_mupdate_override {
+            // All in-service zones should be set to InstallDataset.
+            for zone in &sled.zones {
+                if zone.disposition.is_in_service() {
+                    match &zone.image_source {
+                        BlueprintZoneImageSource::InstallDataset => {
+                            // This is valid.
+                        }
+                        BlueprintZoneImageSource::Artifact {
+                            version,
+                            hash,
+                        } => {
+                            // This is invalid -- if remove_mupdate_override is
+                            // set, all zones must be InstallDataset.
+                            blippy.push_sled_note(
+                                sled_id,
+                                Severity::Fatal,
+                                SledKind::MupdateOverrideWithArtifactZone {
+                                    mupdate_override_id,
+                                    zone: zone.clone(),
+                                    version: version.clone(),
+                                    hash: *hash,
+                                },
+                            );
+                        }
+                    }
+                }
+            }
+
+            // TODO: The host phase 2 contents should be set to CurrentContents
+            // (waiting for
+            // https://github.com/oxidecomputer/omicron/issues/8542).
+
+            // TODO: PendingMgsUpdates for this sled should be empty. Mapping
+            // sled IDs to their MGS identifiers (baseboard ID) requires a map
+            // that's not currently part of the blueprint. We may want to either
+            // include that map in the blueprint, or pass it in via blippy.
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -545,10 +597,14 @@ mod tests {
     use crate::blippy::Note;
     use nexus_reconfigurator_planning::example::ExampleSystemBuilder;
     use nexus_reconfigurator_planning::example::example;
+    use nexus_types::deployment::BlueprintArtifactVersion;
     use nexus_types::deployment::BlueprintZoneType;
     use nexus_types::deployment::blueprint_zone_type;
     use omicron_test_utils::dev::test_setup_log;
+    use omicron_uuid_kinds::MupdateOverrideUuid;
     use std::mem;
+    use tufaceous_artifact::ArtifactHash;
+    use tufaceous_artifact::ArtifactVersion;
 
     // The tests below all take the example blueprint, mutate in some invalid
     // way, and confirm that blippy reports the invalidity. This test confirms
@@ -1558,6 +1614,63 @@ mod tests {
                 "did not find expected note {note:?}"
             );
         }
+
+        logctx.cleanup_successful();
+    }
+
+    #[test]
+    fn test_mupdate_override_with_artifact_image_source() {
+        static TEST_NAME: &str =
+            "test_remove_mupdate_override_with_artifact_image_source";
+        let logctx = test_setup_log(TEST_NAME);
+        let (_, _, mut blueprint) = example(&logctx.log, TEST_NAME);
+
+        // Find a sled with zones and set remove_mupdate_override on it.
+        let (&sled_id, sled) = blueprint
+            .sleds
+            .iter_mut()
+            .find(|(_, config)| !config.zones.is_empty())
+            .expect("at least one sled with zones");
+
+        // Set the remove_mupdate_override field on the sled.
+        let mupdate_override_id = MupdateOverrideUuid::max();
+        sled.remove_mupdate_override = Some(mupdate_override_id);
+
+        // Find a zone and set it to use an artifact image source.
+        let kind = {
+            let mut zone = sled
+                .zones
+                .iter_mut()
+                .find(|z| z.disposition.is_in_service())
+                .expect("at least one in-service zone");
+
+            let version = BlueprintArtifactVersion::Available {
+                version: ArtifactVersion::new_const("1.0.0"),
+            };
+            let hash = ArtifactHash([1u8; 32]);
+            zone.image_source = BlueprintZoneImageSource::Artifact {
+                version: version.clone(),
+                hash,
+            };
+
+            SledKind::MupdateOverrideWithArtifactZone {
+                mupdate_override_id,
+                zone: zone.clone(),
+                version,
+                hash,
+            }
+        };
+
+        let expected_note = Note {
+            severity: Severity::Fatal,
+            kind: Kind::Sled { sled_id, kind },
+        };
+
+        let report =
+            Blippy::new(&blueprint).into_report(BlippyReportSortKey::Kind);
+        eprintln!("{}", report.display());
+        assert_eq!(report.notes().len(), 1, "exactly one note expected");
+        assert_eq!(report.notes()[0], expected_note);
 
         logctx.cleanup_successful();
     }

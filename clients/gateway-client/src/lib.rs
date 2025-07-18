@@ -60,10 +60,11 @@ progenitor::generate_api!(
     }),
     derives = [schemars::JsonSchema],
     patch = {
+        ComponentFirmwareHashStatus = { derives = [PartialEq, Eq, PartialOrd, Ord] },
         HostPhase2RecoveryImageId = { derives = [PartialEq, Eq, PartialOrd, Ord] },
         ImageVersion = { derives = [PartialEq, Eq, PartialOrd, Ord] },
         RotImageDetails = { derives = [PartialEq, Eq, PartialOrd, Ord] },
-        RotImageError = { derives = [ PartialEq, Eq, PartialOrd, Ord] },
+        RotImageError = { derives = [ thiserror::Error, PartialEq, Eq, PartialOrd, Ord] },
         RotState = { derives = [PartialEq, Eq, PartialOrd, Ord] },
         SpComponentCaboose = { derives = [PartialEq, Eq] },
         SpIdentifier = { derives = [Copy, PartialEq, Hash, Eq] },

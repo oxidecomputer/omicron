@@ -32,6 +32,7 @@ use nexus_db_errors::public_error_from_diesel;
 use nexus_db_errors::public_error_from_diesel_lookup;
 use nexus_db_model::InvCaboose;
 use nexus_db_model::InvClickhouseKeeperMembership;
+use nexus_db_model::InvCockroachStatus;
 use nexus_db_model::InvCollection;
 use nexus_db_model::InvCollectionError;
 use nexus_db_model::InvConfigReconcilerStatus;
@@ -88,9 +89,11 @@ use nexus_sled_agent_shared::inventory::OrphanedDataset;
 use nexus_sled_agent_shared::inventory::ZoneArtifactInventory;
 use nexus_sled_agent_shared::inventory::ZoneManifestNonBootInventory;
 use nexus_types::inventory::BaseboardId;
+use nexus_types::inventory::CockroachStatus;
 use nexus_types::inventory::Collection;
 use nexus_types::inventory::PhysicalDiskFirmware;
 use nexus_types::inventory::SledAgent;
+use omicron_cockroach_metrics::NodeId as CockroachNodeId;
 use omicron_common::api::external::Error;
 use omicron_common::api::external::InternalContext;
 use omicron_common::api::external::LookupType;
@@ -372,6 +375,15 @@ impl DataStore {
                 .map_err(|e| Error::internal_error(&e.to_string()))?,
             );
         }
+
+        let inv_cockroach_status_records: Vec<InvCockroachStatus> = collection
+            .cockroach_status
+            .iter()
+            .map(|(node_id, status)| {
+                InvCockroachStatus::new(collection_id, node_id.clone(), status)
+            })
+            .collect::<Result<Vec<_>, _>>()
+            .map_err(|e| Error::internal_error(&e.to_string()))?;
 
         // This implementation inserts all records associated with the
         // collection in one transaction.  This is primarily for simplicity.  It
@@ -1403,6 +1415,16 @@ impl DataStore {
                     .await?;
             }
 
+            // Insert the cockroach status information we've observed
+            if !inv_cockroach_status_records.is_empty() {
+                use nexus_db_schema::schema::inv_cockroachdb_status::dsl;
+                diesel::insert_into(dsl::inv_cockroachdb_status)
+                    .values(inv_cockroach_status_records)
+                    .execute_async(&conn)
+                    .await?;
+            }
+
+
             // Finally, insert the list of errors.
             {
                 use nexus_db_schema::schema::inv_collection_error::dsl as errors_dsl;
@@ -1691,6 +1713,7 @@ impl DataStore {
             nzpools: usize,
             nerrors: usize,
             nclickhouse_keeper_membership: usize,
+            ncockroach_status: usize,
         }
 
         let NumRowsDeleted {
@@ -1720,6 +1743,7 @@ impl DataStore {
             nzpools,
             nerrors,
             nclickhouse_keeper_membership,
+            ncockroach_status,
         } =
             self.transaction_retry_wrapper("inventory_delete_collection")
                 .transaction(&conn, |conn| async move {
@@ -1965,6 +1989,17 @@ impl DataStore {
                         .execute_async(&conn)
                         .await?
                     };
+                    // Remove rows for cockroach status
+                    let ncockroach_status = {
+                        use nexus_db_schema::schema::inv_cockroachdb_status::dsl;
+                        diesel::delete(
+                            dsl::inv_cockroachdb_status.filter(
+                                dsl::inv_collection_id.eq(db_collection_id),
+                            ),
+                        )
+                        .execute_async(&conn)
+                        .await?
+                    };
 
                     Ok(NumRowsDeleted {
                         ncollections,
@@ -1993,6 +2028,7 @@ impl DataStore {
                         nzpools,
                         nerrors,
                         nclickhouse_keeper_membership,
+                        ncockroach_status,
                     })
                 })
                 .await
@@ -2031,7 +2067,8 @@ impl DataStore {
             "nomicron_sled_config_zone_nics" => nomicron_sled_config_zone_nics,
             "nzpools" => nzpools,
             "nerrors" => nerrors,
-            "nclickhouse_keeper_membership" => nclickhouse_keeper_membership
+            "nclickhouse_keeper_membership" => nclickhouse_keeper_membership,
+            "ncockroach_status" => ncockroach_status,
         );
 
         Ok(())
@@ -2774,6 +2811,7 @@ impl DataStore {
                             disks: IdMap::default(),
                             datasets: IdMap::default(),
                             zones: IdMap::default(),
+                            host_phase_2: sled_config.host_phase_2.into(),
                         },
                     });
                 }
@@ -3370,6 +3408,33 @@ impl DataStore {
             memberships
         };
 
+        // Load the cockroach status records for all nodes.
+        let cockroach_status: BTreeMap<CockroachNodeId, CockroachStatus> = {
+            use nexus_db_schema::schema::inv_cockroachdb_status::dsl;
+
+            let status_records: Vec<InvCockroachStatus> =
+                dsl::inv_cockroachdb_status
+                    .filter(dsl::inv_collection_id.eq(db_id))
+                    .select(InvCockroachStatus::as_select())
+                    .load_async(&*conn)
+                    .await
+                    .map_err(|e| {
+                        public_error_from_diesel(e, ErrorHandler::Server)
+                    })?;
+
+            status_records
+                .into_iter()
+                .map(|record| {
+                    let node_id = CockroachNodeId::new(record.node_id.clone());
+                    let status: nexus_types::inventory::CockroachStatus =
+                        record.try_into().map_err(|e| {
+                            Error::internal_error(&format!("{e:#}"))
+                        })?;
+                    Ok((node_id, status))
+                })
+                .collect::<Result<BTreeMap<_, _>, Error>>()?
+        };
+
         // Finally, build up the sled-agent map using the sled agent and
         // omicron zone rows. A for loop is easier to understand than into_iter
         // + filter_map + return Result + collect.
@@ -3615,6 +3680,7 @@ impl DataStore {
             rot_pages_found,
             sled_agents,
             clickhouse_keeper_cluster_membership,
+            cockroach_status,
         })
     }
 }
@@ -3871,6 +3937,7 @@ impl ConfigReconcilerRows {
             sled_config_id,
             config.generation,
             config.remove_mupdate_override,
+            config.host_phase_2.clone(),
         ));
         self.disks.extend(config.disks.iter().map(|disk| {
             InvOmicronSledConfigDisk::new(

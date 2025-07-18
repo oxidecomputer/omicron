@@ -7,6 +7,7 @@
 use std::{
     collections::{HashMap, HashSet, hash_map::Entry},
     io::{BufRead, BufReader, Seek, Write},
+    sync::LazyLock,
 };
 
 use camino::{Utf8Path, Utf8PathBuf};
@@ -18,6 +19,7 @@ use illumos_utils::zfs::{
 use oxlog::LogFile;
 use oxlog::SvcLogs;
 use rand::{Rng, distributions::Alphanumeric, thread_rng};
+use regex::Regex;
 use slog::Logger;
 use std::collections::BTreeMap;
 use zip::{result::ZipError, write::FullFileOptions};
@@ -565,7 +567,8 @@ impl LogsHandle {
                 current: true,
                 archived: true,
                 extra: true,
-                // This avoids calling stat on every log file found.
+                // This will cause oxlog to call stat on each file resulting
+                // in a sorted order.
                 show_empty: true,
                 date_range: None,
             },
@@ -650,54 +653,37 @@ impl LogsHandle {
 
             //  - Grab all of the service's extra logs -
 
-            // Currently we are only grabbing cockroachdb logs. If other
-            // services contain valuable logs we should add them here.
-            if service == "cockroachdb" {
-                let cockroach_extra_logs =
-                    sort_cockroach_extra_logs(&service_logs.extra);
-                for (_prefix, extra_logs) in cockroach_extra_logs {
-                    // We always want the most current log being written to.
-                    if let Some(log) = extra_logs.current {
-                        self.process_logs(
-                            &service,
-                            &mut zip,
-                            &mut log_snapshots,
-                            log,
-                            LogType::Extra,
-                        )
-                        .await?;
-                    }
-
-                    // We clamp the number of rotated logs we grab to 5.
-                    for log in extra_logs.rotated.iter().rev().take(max_rotated)
-                    {
-                        self.process_logs(
-                            &service,
-                            &mut zip,
-                            &mut log_snapshots,
-                            log,
-                            LogType::Extra,
-                        )
-                        .await?;
-                    }
-                }
-            }
-
-            // Include the chrony logs found in "/var/log/chrony".
-            // These currently include:
-            // - measurements.log
-            // - statistics.log
-            // - tracking.log
-            //
-            // TODO: Once omicron#4728 is picked up we will need to handle the
-            // rotation and sorting of these files.
-            if service == "ntp" {
-                for log in service_logs.extra {
+            // Attempt to parse and sort any extra logs we find for a service.
+            let extra_logs = match service.as_str() {
+                // cockroach embeds it's rotation status in the name:
+                // "cockroach-health.log" vs
+                // "oach-health.oxzcockroachdba3628a56-6f85-43b5-be50-71d8f0e04877.root.2025-01-31T21_43_26Z.011435.log"
+                "cockroachdb" => sort_cockroach_extra_logs(&service_logs.extra),
+                // fall back parser that matches "service.log",
+                // "service.field.n.log", "service.log.1", or
+                // "service.field.n.log.1"
+                _ => sort_extra_logs(&self.log, &service_logs.extra),
+            };
+            for (_, logs) in extra_logs {
+                // We always want the most current log being written to.
+                if let Some(log) = logs.current {
                     self.process_logs(
                         &service,
                         &mut zip,
                         &mut log_snapshots,
-                        log.path.as_path(),
+                        log,
+                        LogType::Extra,
+                    )
+                    .await?;
+                }
+
+                // We clamp the number of rotated logs we grab to 5.
+                for log in logs.rotated.iter().rev().take(max_rotated) {
+                    self.process_logs(
+                        &service,
+                        &mut zip,
+                        &mut log_snapshots,
+                        log,
                         LogType::Extra,
                     )
                     .await?;
@@ -754,14 +740,58 @@ fn write_log_to_zip<W: Write + Seek>(
     Ok(())
 }
 
+/// A log file that is found in oxlog's "extra" bucket of service logs.
+#[derive(Debug, PartialEq)]
+enum ExtraLogKind<'a> {
+    /// The current log being written to e.g. service-a.log
+    Current { name: &'a str, log: &'a LogFile },
+    /// A log file that has been rotated e.g. service-a.log.4
+    Rotated { name: &'a str, log: &'a LogFile },
+}
+
 #[derive(Debug, Default, PartialEq)]
-struct CockroachExtraLog<'a> {
+struct ExtraLogs<'a> {
     current: Option<&'a Utf8Path>,
     rotated: Vec<&'a Utf8Path>,
 }
-fn sort_cockroach_extra_logs(
-    logs: &[LogFile],
-) -> HashMap<&str, CockroachExtraLog<'_>> {
+
+fn sort_extra_logs<'a>(
+    logger: &Logger,
+    logs: &'a [LogFile],
+) -> HashMap<&'a str, ExtraLogs<'a>> {
+    let mut res = HashMap::new();
+
+    for log in logs {
+        if let Some(kind) = parse_extra_log(log) {
+            match kind {
+                ExtraLogKind::Current { name, log } => {
+                    let entry: &mut ExtraLogs<'_> =
+                        res.entry(name).or_default();
+                    // We don't expect to stumble upon this unless there's a
+                    // programmer error, in which case we should leave ourselves
+                    // a record of it.
+                    if let Some(old_path) = entry.current {
+                        warn!(
+                            logger,
+                            "found multiple current log files for {name}";
+                            "old" => %old_path,
+                            "new" => %log.path,
+                        );
+                    }
+                    entry.current = Some(&log.path);
+                }
+                ExtraLogKind::Rotated { name, log } => {
+                    let entry = res.entry(name).or_default();
+                    entry.rotated.push(&log.path);
+                }
+            }
+        }
+    }
+
+    res
+}
+
+fn sort_cockroach_extra_logs(logs: &[LogFile]) -> HashMap<&str, ExtraLogs<'_>> {
     // Known logging paths for cockroachdb:
     // https://www.cockroachlabs.com/docs/stable/logging-overview#logging-destinations
     let cockroach_log_prefix = HashSet::from([
@@ -780,7 +810,7 @@ fn sort_cockroach_extra_logs(
         "cockroach-stderr",
     ]);
 
-    let mut interested: HashMap<&str, CockroachExtraLog<'_>> = HashMap::new();
+    let mut interested: HashMap<&str, ExtraLogs<'_>> = HashMap::new();
     for log in logs {
         let Some(file_name) = log.path.file_name() else {
             continue;
@@ -812,6 +842,52 @@ fn sort_cockroach_extra_logs(
     interested
 }
 
+/// For a provided `LogFile` return an optional `ExtraLog` if it's in a well
+/// formed  logging format consisting of any non whitespace character followed
+/// by any number of none whitespace characters followed by a literal "." that
+/// ends in a single ".log" or ".log.N" where N is a digit desginating log
+/// rotation.
+///
+/// Examples:
+/// - service-1.log
+/// - service-1.log.4
+/// - service-2.stderr.log
+/// - service-2.stderr.log.2
+fn parse_extra_log(logfile: &LogFile) -> Option<ExtraLogKind> {
+    static RE: LazyLock<Regex> = LazyLock::new(|| {
+        //Regex explanation:
+        // ^                : start of the line
+        // (?:([^.\s]+)     : at least one character that is not whitespace or a
+        //                    "." (capturing: log name)
+        // (?:\.[^.\s]+)*)  : a "." followed by at least one character that is
+        //                    not whitespace or a "." 0 or more times
+        //                    (non capturing)
+        // \.log            : .log
+        // (\.\d+)?         : an optional "." followed by one or more digits
+        //                    (capturing: current | rotated)
+        // $                : end of the line
+        Regex::new(r"^(?:([^.\s]+)(?:\.[^.\s]+)*)\.log(\.\d+)?$").unwrap()
+    });
+
+    let Some(file_name) = logfile.path.file_name() else { return None };
+    RE.captures(file_name).and_then(|c| {
+        // The first capture group is not optional and is the log files name
+        c.get(1).map(|name| {
+            match c.get(2).is_some() {
+                // Capture group 2 means that we have a logfile that
+                // ends in a number e.g. "sled-agent.log.2"
+                true => {
+                    ExtraLogKind::Rotated { name: name.as_str(), log: logfile }
+                }
+                // Otherwise we have found the current log file
+                false => {
+                    ExtraLogKind::Current { name: name.as_str(), log: logfile }
+                }
+            }
+        })
+    })
+}
+
 #[cfg(test)]
 mod test {
     use std::collections::HashMap;
@@ -838,7 +914,7 @@ mod test {
                 oxlog::LogFile { path: Utf8PathBuf::from(l), size: None, modified: None }
             }).collect();
 
-        let mut expected: HashMap<&str, CockroachExtraLog> = HashMap::new();
+        let mut expected: HashMap<&str, ExtraLogs<'_>> = HashMap::new();
 
         // cockroach
         expected.entry("cockroach").or_default().current =
@@ -1310,5 +1386,64 @@ mod illumos_tests {
         // Cleanup
         harness.cleanup().await;
         logctx.cleanup_successful();
+    }
+
+    #[test]
+    fn test_extra_log_file_regex() {
+        let current = [
+            ("foo.log", "foo"),
+            ("foo.bar.baz.log", "foo"),
+            ("cockroach-health.log", "cockroach-health"),
+            (
+                "cockroach-health.oxzcockroachdba3628a56-6f85-43b5-be50-71d8f0e04877.root.2025-01-31T21_43_26Z.011435.log",
+                "cockroach-health",
+            ),
+        ];
+        for (log, name) in current {
+            let logfile = LogFile {
+                path: log.parse().unwrap(),
+                size: None,
+                modified: None,
+            };
+            let res = parse_extra_log(&logfile);
+            assert_eq!(
+                res.unwrap(),
+                ExtraLogKind::Current { name, log: &logfile }
+            );
+        }
+
+        let rotated = [
+            ("foo.log.1", "foo"),
+            ("foo.bar.baz.log.1", "foo"),
+            ("cockroach-health.log.4", "cockroach-health"),
+            (
+                "cockroach-health.oxzcockroachdba3628a56-6f85-43b5-be50-71d8f0e04877.root.2025-01-31T21_43_26Z.011435.log.9",
+                "cockroach-health",
+            ),
+        ];
+        for (log, name) in rotated {
+            let logfile = LogFile {
+                path: log.parse().unwrap(),
+                size: None,
+                modified: None,
+            };
+            let res = parse_extra_log(&logfile);
+            assert_eq!(
+                res.unwrap(),
+                ExtraLogKind::Rotated { name, log: &logfile }
+            );
+        }
+
+        let invalid =
+            ["foo bar.log.1", "some-cool-log", "log.foo.1", "log.foo"];
+        for log in invalid {
+            let logfile = LogFile {
+                path: log.parse().unwrap(),
+                size: None,
+                modified: None,
+            };
+            let res = parse_extra_log(&logfile);
+            assert!(res.is_none());
+        }
     }
 }

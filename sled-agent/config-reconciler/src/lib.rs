@@ -81,3 +81,6 @@ pub use reconciler_task::TimeSyncError;
 pub use reconciler_task::TimeSyncStatus;
 pub use sled_agent_facilities::SledAgentArtifactStore;
 pub use sled_agent_facilities::SledAgentFacilities;
+
+#[cfg(any(test, feature = "testing"))]
+pub use internal_disks::InternalDiskDetails;

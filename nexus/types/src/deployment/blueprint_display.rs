@@ -347,6 +347,18 @@ impl fmt::Display for BpTable {
     }
 }
 
+/// The [`BpTable`] schema for desired host phase 2 contents
+pub struct BpHostPhase2TableSchema {}
+impl BpTableSchema for BpHostPhase2TableSchema {
+    fn table_name(&self) -> &'static str {
+        "host phase 2 contents"
+    }
+
+    fn column_names(&self) -> &'static [&'static str] {
+        &["slot", "boot image source"]
+    }
+}
+
 /// The [`BpTable`] schema for physical disks
 pub struct BpPhysicalDisksTableSchema {}
 impl BpTableSchema for BpPhysicalDisksTableSchema {

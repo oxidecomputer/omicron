@@ -371,6 +371,7 @@ source.type = "composite"
 source.packages = [
   "chrony-setup.tar.gz",
   "ntp-svc.tar.gz",
+  "omicron-ntp-admin.tar.gz",
   "opte-interface-setup.tar.gz",
   "zone-setup.tar.gz",
   "zone-network-install.tar.gz"
@@ -386,6 +387,20 @@ source.paths = [
 ]
 output.intermediate_only = true
 output.type = "zone"
+
+[package.omicron-ntp-admin]
+service_name = "ntp-admin"
+only_for_targets.image = "standard"
+source.type = "local"
+source.rust.binary_names = ["ntp-admin"]
+source.rust.release = true
+source.paths = [
+  { from = "smf/ntp-admin/manifest.xml", to = "/var/svc/manifest/site/ntp-admin/manifest.xml" },
+  { from = "smf/ntp-admin/config.toml", to = "/opt/oxide/lib/svc/ntp-admin/config.toml" },
+  { from = "smf/ntp-admin/method_script.sh", to = "/opt/oxide/lib/svc/manifest/ntp-admin.sh" },
+]
+output.type = "zone"
+output.intermediate_only = true
 
 [package.chrony-setup]
 service_name = "chrony-setup"
@@ -560,8 +575,8 @@ source.type = "prebuilt"
 source.repo = "management-gateway-service"
 # In general, this commit should match the pinned revision of `gateway-sp-comms`
 # in `Cargo.toml`.
-source.commit = "0e1e055b66ec007c537e5bd45e210c245f9c537d"
-source.sha256 = "7723adcc881af22ab6acd9f25886adb5c2a06470c36e9aca686a54a4ad8a3e64"
+source.commit = "77e316c812aa057b9714d0d99c4a7bdd36d45be2"
+source.sha256 = "8e71c91fc0d6af919acd2601f66b642cf1bf8ee09c5e43e42f5ff180f730391c"
 output.type = "zone"
 output.intermediate_only = true
 
@@ -622,10 +637,10 @@ service_name = "propolis-server"
 only_for_targets.image = "standard"
 source.type = "prebuilt"
 source.repo = "propolis"
-source.commit = "e3988414bd68ecf806078fb898120e1194451ee9"
+source.commit = "c03bd1a29c775acfc65de561b8fc436e2459a633"
 # The SHA256 digest is automatically posted to:
 # https://buildomat.eng.oxide.computer/public/file/oxidecomputer/propolis/image/<commit>/propolis-server.sha256.txt
-source.sha256 = "a858fe9db8db262b402a44598e991c6298f92531421029f7728b3fdd45fe621b"
+source.sha256 = "a83979355bd5b7346c3647ad674c1da5a746d7045b992c1edcf8729cc7634e5d"
 output.type = "zone"
 
 [package.mg-ddm-gz]
@@ -720,8 +735,8 @@ only_for_targets.image = "standard"
 # the other `source.*` keys.
 source.type = "prebuilt"
 source.repo = "dendrite"
-source.commit = "196b6b1389cedbe71ffaa369ccf2af90664fac75"
-source.sha256 = "6fec7a1fe40ad8184772ea994dbd4d56de3180bba0e73cb86f95f8f6f65b18fa"
+source.commit = "c44dd2504f2a623e640d94955376cdb5cadd7ed6"
+source.sha256 = "c69e76e8d72e28bf2a19cd33dc4790195c17ea8acdf0cf9335dcaf5c34c99510"
 output.type = "zone"
 output.intermediate_only = true
 
@@ -747,8 +762,8 @@ only_for_targets.image = "standard"
 # the other `source.*` keys.
 source.type = "prebuilt"
 source.repo = "dendrite"
-source.commit = "196b6b1389cedbe71ffaa369ccf2af90664fac75"
-source.sha256 = "0a76e0335f03e6145308a36e2ac4bf25bc9597f31892c47e0258e9fb296b1055"
+source.commit = "c44dd2504f2a623e640d94955376cdb5cadd7ed6"
+source.sha256 = "2e06ebbe2e4efdca61fc5c3e488748fd24579ccf266649234ab238e650d684eb"
 output.type = "zone"
 output.intermediate_only = true
 
@@ -767,8 +782,8 @@ only_for_targets.image = "standard"
 # the other `source.*` keys.
 source.type = "prebuilt"
 source.repo = "dendrite"
-source.commit = "196b6b1389cedbe71ffaa369ccf2af90664fac75"
-source.sha256 = "3218c481957977ef910c9160d207232eef206fe40fa9e387fd87bd5fc6ca6661"
+source.commit = "c44dd2504f2a623e640d94955376cdb5cadd7ed6"
+source.sha256 = "6b9c4fd710bfa484663e646e971dd2300ecedc5de74163f24c267a86d69075bf"
 output.type = "zone"
 output.intermediate_only = true
 

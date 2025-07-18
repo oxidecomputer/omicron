@@ -6,6 +6,7 @@
 //! datasets, and zones) into the current unified [`OmicronSledConfig`].
 
 use camino::Utf8PathBuf;
+use nexus_sled_agent_shared::inventory::HostPhase2DesiredSlots;
 use nexus_sled_agent_shared::inventory::OmicronSledConfig;
 use nexus_sled_agent_shared::inventory::OmicronZoneConfig;
 use omicron_common::api::external::Generation;
@@ -213,6 +214,8 @@ fn merge_old_configs(
         zones: zones.zones.into_iter().map(|z| z.zone).collect(),
         // Old configs are pre-mupdate overrides.
         remove_mupdate_override: None,
+        // Old configs are pre-host-phase-2 knowledge.
+        host_phase_2: HostPhase2DesiredSlots::current_contents(),
     }
 }
 

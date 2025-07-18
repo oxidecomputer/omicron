@@ -37,10 +37,6 @@ use omicron_common::api::internal::shared::{
 };
 use range_requests::PotentialRange;
 use sled_agent_api::*;
-use sled_agent_types::boot_disk::BootDiskOsWriteStatus;
-use sled_agent_types::boot_disk::BootDiskPathParams;
-use sled_agent_types::boot_disk::BootDiskUpdatePathParams;
-use sled_agent_types::boot_disk::BootDiskWriteStartQueryParams;
 use sled_agent_types::bootstore::BootstoreStatus;
 use sled_agent_types::disk::DiskEnsureBody;
 use sled_agent_types::early_networking::EarlyNetworkConfig;
@@ -51,7 +47,6 @@ use sled_agent_types::instance::VmmPutStateBody;
 use sled_agent_types::instance::VmmPutStateResponse;
 use sled_agent_types::instance::VmmUnregisterResponse;
 use sled_agent_types::sled::AddSledRequest;
-use sled_agent_types::time_sync::TimeSync;
 use sled_agent_types::zone_bundle::BundleUtilization;
 use sled_agent_types::zone_bundle::CleanupContext;
 use sled_agent_types::zone_bundle::CleanupCount;
@@ -383,25 +378,68 @@ impl SledAgentApi for SledAgentSimImpl {
         Ok(HttpResponseOk(bundles))
     }
 
-    async fn support_bundle_create(
+    async fn support_bundle_start_creation(
         rqctx: RequestContext<Self::Context>,
         path_params: Path<SupportBundlePathParam>,
-        query_params: Query<SupportBundleCreateQueryParams>,
+    ) -> Result<HttpResponseCreated<SupportBundleMetadata>, HttpError> {
+        let sa = rqctx.context();
+
+        let SupportBundlePathParam { zpool_id, dataset_id, support_bundle_id } =
+            path_params.into_inner();
+
+        Ok(HttpResponseCreated(
+            sa.support_bundle_start_creation(
+                zpool_id,
+                dataset_id,
+                support_bundle_id,
+            )
+            .await?,
+        ))
+    }
+
+    async fn support_bundle_transfer(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<SupportBundlePathParam>,
+        query_params: Query<SupportBundleTransferQueryParams>,
         body: StreamingBody,
     ) -> Result<HttpResponseCreated<SupportBundleMetadata>, HttpError> {
         let sa = rqctx.context();
 
         let SupportBundlePathParam { zpool_id, dataset_id, support_bundle_id } =
             path_params.into_inner();
-        let SupportBundleCreateQueryParams { hash } = query_params.into_inner();
+        let SupportBundleTransferQueryParams { offset } =
+            query_params.into_inner();
 
         Ok(HttpResponseCreated(
-            sa.support_bundle_create(
+            sa.support_bundle_transfer(
+                zpool_id,
+                dataset_id,
+                support_bundle_id,
+                offset,
+                body.into_stream(),
+            )
+            .await?,
+        ))
+    }
+
+    async fn support_bundle_finalize(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<SupportBundlePathParam>,
+        query_params: Query<SupportBundleFinalizeQueryParams>,
+    ) -> Result<HttpResponseCreated<SupportBundleMetadata>, HttpError> {
+        let sa = rqctx.context();
+
+        let SupportBundlePathParam { zpool_id, dataset_id, support_bundle_id } =
+            path_params.into_inner();
+        let SupportBundleFinalizeQueryParams { hash } =
+            query_params.into_inner();
+
+        Ok(HttpResponseCreated(
+            sa.support_bundle_finalize(
                 zpool_id,
                 dataset_id,
                 support_bundle_id,
                 hash,
-                body.into_stream(),
             )
             .await?,
         ))
@@ -644,35 +682,6 @@ impl SledAgentApi for SledAgentSimImpl {
     async fn sled_role_get(
         _rqctx: RequestContext<Self::Context>,
     ) -> Result<HttpResponseOk<SledRole>, HttpError> {
-        method_unimplemented()
-    }
-
-    async fn timesync_get(
-        _rqctx: RequestContext<Self::Context>,
-    ) -> Result<HttpResponseOk<TimeSync>, HttpError> {
-        method_unimplemented()
-    }
-
-    async fn host_os_write_start(
-        _rqctx: RequestContext<Self::Context>,
-        _path_params: Path<BootDiskPathParams>,
-        _query_params: Query<BootDiskWriteStartQueryParams>,
-        _body: StreamingBody,
-    ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
-        method_unimplemented()
-    }
-
-    async fn host_os_write_status_get(
-        _rqctx: RequestContext<Self::Context>,
-        _path_params: Path<BootDiskPathParams>,
-    ) -> Result<HttpResponseOk<BootDiskOsWriteStatus>, HttpError> {
-        method_unimplemented()
-    }
-
-    async fn host_os_write_status_delete(
-        _rqctx: RequestContext<Self::Context>,
-        _path_params: Path<BootDiskUpdatePathParams>,
-    ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
         method_unimplemented()
     }
 
