@@ -497,72 +497,6 @@ fn name_schema(
     .into()
 }
 
-/// Name for a built-in role
-#[derive(
-    Clone,
-    Debug,
-    DeserializeFromStr,
-    Display,
-    Eq,
-    FromStr,
-    Ord,
-    PartialEq,
-    PartialOrd,
-    SerializeDisplay,
-)]
-#[display("{resource_type}.{role_name}")]
-pub struct RoleName {
-    // "resource_type" is generally the String value of one of the
-    // `ResourceType` variants.  We could store the parsed `ResourceType`
-    // instead, but it's useful to be able to represent RoleNames for resource
-    // types that we don't know about.  That could happen if we happen to find
-    // them in the database, for example.
-    #[from_str(regex = "[a-z-]+")]
-    resource_type: String,
-    #[from_str(regex = "[a-z-]+")]
-    role_name: String,
-}
-
-impl RoleName {
-    pub fn new(resource_type: &str, role_name: &str) -> RoleName {
-        RoleName {
-            resource_type: String::from(resource_type),
-            role_name: String::from(role_name),
-        }
-    }
-}
-
-/// Custom JsonSchema implementation to encode the constraints on RoleName
-impl JsonSchema for RoleName {
-    fn schema_name() -> String {
-        "RoleName".to_string()
-    }
-    fn json_schema(
-        _: &mut schemars::gen::SchemaGenerator,
-    ) -> schemars::schema::Schema {
-        schemars::schema::Schema::Object(schemars::schema::SchemaObject {
-            metadata: Some(Box::new(schemars::schema::Metadata {
-                title: Some("A name for a built-in role".to_string()),
-                description: Some(
-                    "Role names consist of two string components \
-                     separated by dot (\".\")."
-                        .to_string(),
-                ),
-                ..Default::default()
-            })),
-            instance_type: Some(schemars::schema::SingleOrVec::Single(
-                Box::new(schemars::schema::InstanceType::String),
-            )),
-            string: Some(Box::new(schemars::schema::StringValidation {
-                max_length: Some(63),
-                min_length: None,
-                pattern: Some("[a-z-]+\\.[a-z-]+".to_string()),
-            })),
-            ..Default::default()
-        })
-    }
-}
-
 /// Byte count to express memory or storage capacity.
 //
 // The maximum supported byte count is [`i64::MAX`].  This makes it somewhat
@@ -1045,6 +979,7 @@ pub enum ResourceType {
     RoleBuiltin,
     TufRepo,
     TufArtifact,
+    TufTrustRoot,
     SwitchPort,
     UserBuiltin,
     Zpool,
@@ -1956,10 +1891,16 @@ impl From<u8> for IcmpParamRange {
     }
 }
 
-impl From<RangeInclusive<u8>> for IcmpParamRange {
-    fn from(value: RangeInclusive<u8>) -> Self {
-        let (first, last) = value.into_inner();
-        Self { first, last }
+impl TryFrom<RangeInclusive<u8>> for IcmpParamRange {
+    type Error = IcmpParamRangeError;
+
+    fn try_from(value: RangeInclusive<u8>) -> Result<Self, Self::Error> {
+        if value.is_empty() {
+            Err(IcmpParamRangeError::EmptyRange)
+        } else {
+            let (first, last) = value.into_inner();
+            Ok(Self { first, last })
+        }
     }
 }
 
@@ -2117,6 +2058,7 @@ impl FromStr for L4PortRange {
                     .parse::<NonZeroU16>()
                     .map_err(|e| L4PortRangeError::Value(right.into(), e))?
                     .into();
+
                 Ok(L4PortRange { first, last })
             }
         }
@@ -2129,6 +2071,8 @@ pub enum L4PortRangeError {
     MissingStart,
     #[error("range has no end value")]
     MissingEnd,
+    #[error("range has larger start value than end value")]
+    EmptyRange,
     #[error("{0:?} unparsable for type: {1}")]
     Value(String, ParseIntError),
 }
@@ -2197,10 +2141,16 @@ impl From<L4Port> for L4PortRange {
     }
 }
 
-impl From<RangeInclusive<L4Port>> for L4PortRange {
-    fn from(value: RangeInclusive<L4Port>) -> Self {
-        let (first, last) = value.into_inner();
-        Self { first, last }
+impl TryFrom<RangeInclusive<L4Port>> for L4PortRange {
+    type Error = L4PortRangeError;
+
+    fn try_from(value: RangeInclusive<L4Port>) -> Result<Self, Self::Error> {
+        if value.is_empty() {
+            Err(L4PortRangeError::EmptyRange)
+        } else {
+            let (first, last) = value.into_inner();
+            Ok(Self { first, last })
+        }
     }
 }
 
@@ -2234,6 +2184,7 @@ impl FromStr for IcmpParamRange {
                 let last = right
                     .parse::<u8>()
                     .map_err(|e| IcmpParamRangeError::Value(right.into(), e))?;
+
                 Ok(IcmpParamRange { first, last })
             }
         }
@@ -2246,6 +2197,8 @@ pub enum IcmpParamRangeError {
     MissingStart,
     #[error("range has no end value")]
     MissingEnd,
+    #[error("range has larger start value than end value")]
+    EmptyRange,
     #[error("{0:?} unparsable for type: {1}")]
     Value(String, ParseIntError),
 }
@@ -3063,7 +3016,8 @@ pub struct SwitchPortRouteConfig {
     /// over an 802.1Q tagged L2 segment.
     pub vlan_id: Option<u16>,
 
-    /// RIB Priority indicating priority within and across protocols.
+    /// Route RIB priority. Higher priority indicates precedence within and across
+    /// protocols.
     pub rib_priority: Option<u8>,
 }
 
@@ -3595,8 +3549,8 @@ mod test {
     use super::VpcFirewallRuleHostFilter;
     use super::VpcFirewallRuleTarget;
     use super::{
-        ByteCount, Digest, L4Port, L4PortRange, Name, RoleName,
-        VpcFirewallRuleAction, VpcFirewallRuleDirection, VpcFirewallRuleFilter,
+        ByteCount, Digest, L4Port, L4PortRange, Name, VpcFirewallRuleAction,
+        VpcFirewallRuleDirection, VpcFirewallRuleFilter,
         VpcFirewallRulePriority, VpcFirewallRuleProtocol,
         VpcFirewallRuleStatus, VpcFirewallRuleUpdate,
         VpcFirewallRuleUpdateParams,
@@ -3677,54 +3631,6 @@ mod test {
             eprintln!("check name \"{}\" (should be valid)", name);
             assert_eq!(name, name.parse::<Name>().unwrap().as_str());
         }
-    }
-
-    #[test]
-    fn test_role_name_parse() {
-        // Error cases
-        let bad_inputs = vec![
-            // empty string is always worth testing
-            "",
-            // missing dot
-            "project",
-            // extra dot (or, illegal character in the second component)
-            "project.admin.super",
-            // missing resource type (or, another bogus resource type)
-            ".admin",
-            // missing role name
-            "project.",
-            // illegal characters in role name
-            "project.not_good",
-        ];
-
-        for input in bad_inputs {
-            eprintln!("check name {:?} (expecting error)", input);
-            let result =
-                input.parse::<RoleName>().expect_err("unexpectedly succeeded");
-            eprintln!("(expected) error: {:?}", result);
-        }
-
-        eprintln!("check name \"project.admin\" (expecting success)");
-        let role_name =
-            "project.admin".parse::<RoleName>().expect("failed to parse");
-        assert_eq!(role_name.to_string(), "project.admin");
-        assert_eq!(role_name.resource_type, "project");
-        assert_eq!(role_name.role_name, "admin");
-
-        eprintln!("check name \"barf.admin\" (expecting success)");
-        let role_name =
-            "barf.admin".parse::<RoleName>().expect("failed to parse");
-        assert_eq!(role_name.to_string(), "barf.admin");
-        assert_eq!(role_name.resource_type, "barf");
-        assert_eq!(role_name.role_name, "admin");
-
-        eprintln!("check name \"organization.super-user\" (expecting success)");
-        let role_name = "organization.super-user"
-            .parse::<RoleName>()
-            .expect("failed to parse");
-        assert_eq!(role_name.to_string(), "organization.super-user");
-        assert_eq!(role_name.resource_type, "organization");
-        assert_eq!(role_name.role_name, "super-user");
     }
 
     #[test]
@@ -4238,7 +4144,7 @@ mod test {
         assert_eq!(
             VpcFirewallRuleProtocol::Icmp(Some(VpcFirewallIcmpFilter {
                 icmp_type: 60,
-                code: Some((0..=10).into())
+                code: Some((0..=10).try_into().unwrap())
             })),
             "icmp:60,0-10".parse().unwrap()
         );

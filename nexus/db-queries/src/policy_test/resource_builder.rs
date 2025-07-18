@@ -276,6 +276,7 @@ impl_dyn_authorized_resource_for_resource!(authz::SshKey);
 impl_dyn_authorized_resource_for_resource!(authz::SupportBundle);
 impl_dyn_authorized_resource_for_resource!(authz::TufArtifact);
 impl_dyn_authorized_resource_for_resource!(authz::TufRepo);
+impl_dyn_authorized_resource_for_resource!(authz::TufTrustRoot);
 impl_dyn_authorized_resource_for_resource!(authz::Vpc);
 impl_dyn_authorized_resource_for_resource!(authz::VpcSubnet);
 impl_dyn_authorized_resource_for_resource!(authz::Alert);
@@ -290,6 +291,7 @@ impl_dyn_authorized_resource_for_global!(authz::DeviceAuthRequestList);
 impl_dyn_authorized_resource_for_global!(authz::DnsConfig);
 impl_dyn_authorized_resource_for_global!(authz::IpPoolList);
 impl_dyn_authorized_resource_for_global!(authz::Inventory);
+impl_dyn_authorized_resource_for_global!(authz::UpdateTrustRootList);
 impl_dyn_authorized_resource_for_global!(authz::TargetReleaseConfig);
 impl_dyn_authorized_resource_for_global!(authz::AlertClassList);
 
@@ -341,5 +343,39 @@ impl DynAuthorizedResource for authz::SiloUserList {
 
     fn resource_name(&self) -> String {
         format!("{}: user list", self.silo().resource_name())
+    }
+}
+
+impl DynAuthorizedResource for authz::SiloUserSessionList {
+    fn do_authorize<'a, 'b>(
+        &'a self,
+        opctx: &'b OpContext,
+        action: authz::Action,
+    ) -> BoxFuture<'a, Result<(), Error>>
+    where
+        'b: 'a,
+    {
+        opctx.authorize(action, self).boxed()
+    }
+
+    fn resource_name(&self) -> String {
+        format!("{}: session list", self.silo_user().resource_name())
+    }
+}
+
+impl DynAuthorizedResource for authz::SiloUserTokenList {
+    fn do_authorize<'a, 'b>(
+        &'a self,
+        opctx: &'b OpContext,
+        action: authz::Action,
+    ) -> BoxFuture<'a, Result<(), Error>>
+    where
+        'b: 'a,
+    {
+        opctx.authorize(action, self).boxed()
+    }
+
+    fn resource_name(&self) -> String {
+        format!("{}: token list", self.silo_user().resource_name())
     }
 }

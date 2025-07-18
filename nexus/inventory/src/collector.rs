@@ -15,6 +15,7 @@ use nexus_types::inventory::CabooseWhich;
 use nexus_types::inventory::Collection;
 use nexus_types::inventory::RotPage;
 use nexus_types::inventory::RotPageWhich;
+use omicron_cockroach_metrics::CockroachClusterAdminClient;
 use slog::Logger;
 use slog::o;
 use slog::{debug, error};
@@ -29,6 +30,7 @@ pub struct Collector<'a> {
     log: slog::Logger,
     mgs_clients: Vec<gateway_client::Client>,
     keeper_admin_clients: Vec<clickhouse_admin_keeper_client::Client>,
+    cockroach_admin_client: &'a CockroachClusterAdminClient,
     sled_agent_lister: &'a (dyn SledAgentEnumerator + Send + Sync),
     in_progress: CollectionBuilder,
 }
@@ -38,6 +40,7 @@ impl<'a> Collector<'a> {
         creator: &str,
         mgs_clients: Vec<gateway_client::Client>,
         keeper_admin_clients: Vec<clickhouse_admin_keeper_client::Client>,
+        cockroach_admin_client: &'a CockroachClusterAdminClient,
         sled_agent_lister: &'a (dyn SledAgentEnumerator + Send + Sync),
         log: slog::Logger,
     ) -> Self {
@@ -45,6 +48,7 @@ impl<'a> Collector<'a> {
             log,
             mgs_clients,
             keeper_admin_clients,
+            cockroach_admin_client,
             sled_agent_lister,
             in_progress: CollectionBuilder::new(creator),
         }
@@ -70,6 +74,13 @@ impl<'a> Collector<'a> {
         self.collect_all_mgs().await;
         self.collect_all_sled_agents().await;
         self.collect_all_keepers().await;
+        self.collect_all_cockroach().await;
+
+        // TODO(https://github.com/oxidecomputer/omicron/issues/8546): Collect
+        // NTP timesync statuses
+
+        // TODO(https://github.com/oxidecomputer/omicron/issues/8544): Collect
+        // DNS generations
 
         debug!(&self.log, "finished collection");
 
@@ -401,6 +412,29 @@ impl<'a> Collector<'a> {
             }
         }
     }
+
+    /// Collect inventory from CockroachDB nodes
+    async fn collect_all_cockroach(&mut self) {
+        debug!(&self.log, "begin collection from CockroachDB nodes");
+
+        // Fetch metrics from all nodes
+        let metrics_results = self
+            .cockroach_admin_client
+            .fetch_prometheus_metrics_from_all_nodes()
+            .await;
+
+        if metrics_results.is_empty() {
+            self.in_progress.found_error(InventoryError::from(
+                anyhow::anyhow!("No CockroachDB nodes returned metrics"),
+            ));
+            return;
+        }
+
+        // Store results for each successful node using the node ID returned by each node
+        for (node_id, metrics) in metrics_results {
+            self.in_progress.found_cockroach_metrics(node_id, metrics);
+        }
+    }
 }
 
 #[cfg(test)]
@@ -410,11 +444,13 @@ mod test {
     use gateway_messages::SpPort;
     use id_map::IdMap;
     use nexus_sled_agent_shared::inventory::ConfigReconcilerInventoryStatus;
+    use nexus_sled_agent_shared::inventory::HostPhase2DesiredSlots;
     use nexus_sled_agent_shared::inventory::OmicronSledConfig;
     use nexus_sled_agent_shared::inventory::OmicronZoneConfig;
     use nexus_sled_agent_shared::inventory::OmicronZoneImageSource;
     use nexus_sled_agent_shared::inventory::OmicronZoneType;
     use nexus_types::inventory::Collection;
+    use omicron_cockroach_metrics::CockroachClusterAdminClient;
     use omicron_common::api::external::Generation;
     use omicron_common::zpool_name::ZpoolName;
     use omicron_sled_agent::sim;
@@ -422,10 +458,13 @@ mod test {
     use omicron_uuid_kinds::SledUuid;
     use omicron_uuid_kinds::ZpoolUuid;
     use slog::o;
-    use std::fmt::Write;
     use std::net::Ipv6Addr;
     use std::net::SocketAddrV6;
     use std::sync::Arc;
+    use std::time::Duration;
+    use swrite::SWrite as _;
+    use swrite::swrite;
+    use swrite::swriteln;
 
     fn dump_sled_config(s: &mut String, config: &OmicronSledConfig) {
         let OmicronSledConfig {
@@ -434,42 +473,44 @@ mod test {
             datasets,
             zones,
             remove_mupdate_override,
+            host_phase_2,
         } = config;
 
-        writeln!(s, "        generation: {generation}").unwrap();
-        writeln!(
+        swriteln!(s, "        generation: {generation}");
+        swriteln!(
             s,
             "        remove_mupdate_override: {remove_mupdate_override:?}"
-        )
-        .unwrap();
+        );
+        {
+            let HostPhase2DesiredSlots { slot_a, slot_b } = host_phase_2;
+            swriteln!(s, "        host_phase_2.slot_a: {slot_a:?}");
+            swriteln!(s, "        host_phase_2.slot_b: {slot_b:?}");
+        }
         for disk in disks {
-            writeln!(
+            swriteln!(
                 s,
                 "        disk {}: {} / {} / {}",
                 disk.id,
                 disk.identity.vendor,
                 disk.identity.model,
                 disk.identity.serial
-            )
-            .unwrap();
+            );
         }
         for dataset in datasets {
-            writeln!(
+            swriteln!(
                 s,
                 "        dataset {}: {}",
                 dataset.id,
                 dataset.name.full_name()
-            )
-            .unwrap();
+            );
         }
         for zone in zones {
-            writeln!(
+            swriteln!(
                 s,
                 "        zone {} type {}",
                 zone.id,
                 zone.zone_type.kind().report_str(),
-            )
-            .unwrap();
+            );
         }
     }
 
@@ -482,143 +523,138 @@ mod test {
         // depends on what the serialization is for.  It's easy enough to just
         // print what we want here.
         let mut s = String::new();
-        write!(&mut s, "baseboards:\n").unwrap();
+        swrite!(s, "baseboards:\n");
         for b in &collection.baseboards {
-            write!(
-                &mut s,
+            swrite!(
+                s,
                 "    part {:?} serial {:?}\n",
-                b.part_number, b.serial_number
-            )
-            .unwrap();
+                b.part_number,
+                b.serial_number
+            );
         }
 
-        write!(&mut s, "\ncabooses:\n").unwrap();
+        swrite!(s, "\ncabooses:\n");
         for c in &collection.cabooses {
-            write!(
-                &mut s,
+            swrite!(
+                s,
                 "    board {:?} name {:?} version {:?} git_commit {:?} sign {:?}\n",
-                c.board, c.name, c.version, c.git_commit, c.sign,
-            )
-            .unwrap();
+                c.board,
+                c.name,
+                c.version,
+                c.git_commit,
+                c.sign,
+            );
         }
 
-        write!(&mut s, "\nrot pages:\n").unwrap();
+        swrite!(s, "\nrot pages:\n");
         for p in &collection.rot_pages {
-            write!(&mut s, "    data_base64 {:?}\n", p.data_base64).unwrap();
+            swrite!(s, "    data_base64 {:?}\n", p.data_base64);
         }
 
         // All we really need to check here is that we're reporting the right
         // SPs, RoTs, and cabooses.  The actual SP data, RoT data, and caboose
         // data comes straight from MGS.  And proper handling of that data is
         // tested in the builder.
-        write!(&mut s, "\nSPs:\n").unwrap();
+        swrite!(s, "\nSPs:\n");
         for (bb, _) in &collection.sps {
-            write!(
-                &mut s,
+            swrite!(
+                s,
                 "    baseboard part {:?} serial {:?}\n",
-                bb.part_number, bb.serial_number,
-            )
-            .unwrap();
+                bb.part_number,
+                bb.serial_number,
+            );
         }
 
-        write!(&mut s, "\nRoTs:\n").unwrap();
+        swrite!(s, "\nRoTs:\n");
         for (bb, _) in &collection.rots {
-            write!(
-                &mut s,
+            swrite!(
+                s,
                 "    baseboard part {:?} serial {:?}\n",
-                bb.part_number, bb.serial_number,
-            )
-            .unwrap();
+                bb.part_number,
+                bb.serial_number,
+            );
         }
 
-        write!(&mut s, "\ncabooses found:\n").unwrap();
+        swrite!(s, "\ncabooses found:\n");
         for (kind, bb_to_found) in &collection.cabooses_found {
             for (bb, found) in bb_to_found {
-                write!(
-                    &mut s,
+                swrite!(
+                    s,
                     "    {:?} baseboard part {:?} serial {:?}: board {:?}\n",
-                    kind, bb.part_number, bb.serial_number, found.caboose.board,
-                )
-                .unwrap();
+                    kind,
+                    bb.part_number,
+                    bb.serial_number,
+                    found.caboose.board,
+                );
             }
         }
 
-        write!(&mut s, "\nrot pages found:\n").unwrap();
+        swrite!(s, "\nrot pages found:\n");
         for (kind, bb_to_found) in &collection.rot_pages_found {
             for (bb, found) in bb_to_found {
-                write!(
-                    &mut s,
+                swrite!(
+                    s,
                     "    {:?} baseboard part {:?} serial {:?}: \
                               data_base64 {:?}\n",
                     kind,
                     bb.part_number,
                     bb.serial_number,
                     found.page.data_base64
-                )
-                .unwrap();
+                );
             }
         }
 
-        write!(&mut s, "\nsled agents found:\n").unwrap();
+        swrite!(s, "\nsled agents found:\n");
         for sled_info in &collection.sled_agents {
-            write!(
-                &mut s,
+            swrite!(
+                s,
                 "  sled {} ({:?})\n",
-                sled_info.sled_id, sled_info.sled_role
-            )
-            .unwrap();
-            write!(&mut s, "    baseboard {:?}\n", sled_info.baseboard_id)
-                .unwrap();
+                sled_info.sled_id,
+                sled_info.sled_role
+            );
+            swrite!(s, "    baseboard {:?}\n", sled_info.baseboard_id);
 
             if let Some(config) = &sled_info.ledgered_sled_config {
-                writeln!(&mut s, "    ledgered sled config:").unwrap();
+                swriteln!(s, "    ledgered sled config:");
                 dump_sled_config(&mut s, config);
             } else {
-                writeln!(&mut s, "    no ledgered sled config").unwrap();
+                swriteln!(s, "    no ledgered sled config");
             }
 
             if let Some(last_reconciliation) = &sled_info.last_reconciliation {
-                writeln!(&mut s, "    last reconciled config:").unwrap();
+                swriteln!(s, "    last reconciled config:");
                 dump_sled_config(
                     &mut s,
                     &last_reconciliation.last_reconciled_config,
                 );
                 for (id, result) in &last_reconciliation.external_disks {
-                    writeln!(&mut s, "    result for disk {id}: {result:?}")
-                        .unwrap();
+                    swriteln!(s, "    result for disk {id}: {result:?}");
                 }
                 for (id, result) in &last_reconciliation.datasets {
-                    writeln!(&mut s, "    result for dataset {id}: {result:?}")
-                        .unwrap();
+                    swriteln!(s, "    result for dataset {id}: {result:?}");
                 }
                 for (id, result) in &last_reconciliation.zones {
-                    writeln!(&mut s, "    result for zone {id}: {result:?}")
-                        .unwrap();
+                    swriteln!(s, "    result for zone {id}: {result:?}");
                 }
             } else {
-                writeln!(&mut s, "    no completed reconciliation").unwrap();
+                swriteln!(s, "    no completed reconciliation");
             }
 
             match &sled_info.reconciler_status {
                 ConfigReconcilerInventoryStatus::NotYetRun => {
-                    writeln!(&mut s, "    reconciler task not yet run")
-                        .unwrap();
+                    swriteln!(s, "    reconciler task not yet run");
                 }
                 ConfigReconcilerInventoryStatus::Running { config, .. } => {
-                    writeln!(
-                        &mut s,
-                        "    reconciler task running with config:"
-                    )
-                    .unwrap();
+                    swriteln!(s, "    reconciler task running with config:");
                     dump_sled_config(&mut s, config);
                 }
                 ConfigReconcilerInventoryStatus::Idle { .. } => {
-                    writeln!(&mut s, "    reconciler task idle").unwrap();
+                    swriteln!(s, "    reconciler task idle");
                 }
             }
         }
 
-        write!(&mut s, "\nerrors:\n").unwrap();
+        swrite!(s, "\nerrors:\n");
         let os_error_re = regex::Regex::new(r"os error \d+").unwrap();
         let comm_error_re =
             regex::Regex::new(r"Communication Error.*").unwrap();
@@ -635,7 +671,7 @@ mod test {
             // general sense.
             let message = comm_error_re
                 .replace_all(&message, "Communication Error <<redacted>>");
-            write!(&mut s, "error: {}\n", message).unwrap();
+            swrite!(s, "error: {}\n", message);
         }
 
         s
@@ -687,11 +723,76 @@ mod test {
                 .into_iter()
                 .collect(),
                 remove_mupdate_override: None,
+                host_phase_2: HostPhase2DesiredSlots::current_contents(),
             })
             .await
             .expect("failed to write initial zone version to fake sled agent");
 
         agent
+    }
+
+    // Set up httpmock server for CockroachDB admin endpoints
+    fn mock_crdb_admin_server() -> httpmock::MockServer {
+        let mock_server = httpmock::MockServer::start();
+        mock_server.mock(|when, then| {
+            when.method(httpmock::Method::GET).path("/proxy/status/vars");
+            then.status(200)
+                .header("content-type", "application/json")
+                .body("\"# Basic CockroachDB metrics\\nliveness_livenodes 1\\nranges_underreplicated 0\\n\"");
+        });
+        mock_server.mock(|when, then| {
+            when.method(httpmock::Method::GET).path("/proxy/status/nodes");
+            then.status(200).header("content-type", "application/json").body(
+                serde_json::to_string(
+                    &serde_json::json!({
+                        "nodes": [{
+                            "desc": {
+                                "nodeId": "1",
+                                "address": {
+                                    "networkField": "tcp",
+                                    "addressField": "127.0.0.1:26257"
+                                },
+                                "sqlAddress": {
+                                    "networkField": "tcp",
+                                    "addressField": "127.0.0.1:26257"
+                                },
+                                "httpAddress": {
+                                    "networkField": "tcp",
+                                    "addressField": "127.0.0.1:8080"
+                                },
+                                "buildTag": "v21.1.0",
+                                "startedAt": "1640995200000000000",
+                                "clusterName": "test-cluster"
+                            },
+                            "buildInfo": {
+                                "goVersion": "go1.17",
+                                "tag": "v21.1.0"
+                            },
+                            "startedAt": "1640995200000000000",
+                            "updatedAt": "1640995200000000000",
+                            "totalSystemMemory": "8589934592",
+                            "numCpus": 4
+                        }],
+                        "livenessByNodeId": {
+                            "1": 3
+                        }
+                    })
+                    .to_string(),
+                )
+                .unwrap(),
+            );
+        });
+        mock_server.mock(|when, then| {
+            when.method(httpmock::Method::GET).path("/node/id");
+            then.status(200).header("content-type", "application/json").body(
+                serde_json::to_string(&serde_json::json!({
+                    "zone_id": "12345678-1234-1234-1234-123456789012",
+                    "node_id": "1"
+                }))
+                .unwrap(),
+            );
+        });
+        mock_server
     }
 
     #[tokio::test]
@@ -732,10 +833,17 @@ mod test {
         // We don't have any mocks for this, and it's unclear how much value
         // there would be in providing them at this juncture.
         let keeper_clients = Vec::new();
+        // Configure the mock server as a backend for the CockroachDB client
+        let timeout = Duration::from_secs(15);
+        let crdb_cluster =
+            CockroachClusterAdminClient::new(log.clone(), timeout);
+        let crdb_admin_server = mock_crdb_admin_server();
+        crdb_cluster.update_backends(&[*crdb_admin_server.address()]).await;
         let collector = Collector::new(
             "test-suite",
             vec![mgs_client],
             keeper_clients,
+            &crdb_cluster,
             &sled_enum,
             log.clone(),
         );
@@ -743,7 +851,11 @@ mod test {
             .collect_all()
             .await
             .expect("failed to carry out collection");
-        assert!(collection.errors.is_empty());
+        assert!(
+            collection.errors.is_empty(),
+            "Collection errors: {:#?}",
+            collection.errors
+        );
         assert_eq!(collection.collector, "test-suite");
 
         let s = dump_collection(&collection);
@@ -804,10 +916,16 @@ mod test {
         // We don't have any mocks for this, and it's unclear how much value
         // there would be in providing them at this juncture.
         let keeper_clients = Vec::new();
+        let timeout = Duration::from_secs(15);
+        let crdb_cluster =
+            CockroachClusterAdminClient::new(log.clone(), timeout);
+        let crdb_admin_server = mock_crdb_admin_server();
+        crdb_cluster.update_backends(&[*crdb_admin_server.address()]).await;
         let collector = Collector::new(
             "test-suite",
             mgs_clients,
             keeper_clients,
+            &crdb_cluster,
             &sled_enum,
             log.clone(),
         );
@@ -851,10 +969,16 @@ mod test {
         // We don't have any mocks for this, and it's unclear how much value
         // there would be in providing them at this juncture.
         let keeper_clients = Vec::new();
+        let timeout = Duration::from_secs(15);
+        let crdb_cluster =
+            CockroachClusterAdminClient::new(log.clone(), timeout);
+        let crdb_admin_server = mock_crdb_admin_server();
+        crdb_cluster.update_backends(&[*crdb_admin_server.address()]).await;
         let collector = Collector::new(
             "test-suite",
             mgs_clients,
             keeper_clients,
+            &crdb_cluster,
             &sled_enum,
             log.clone(),
         );
@@ -903,10 +1027,16 @@ mod test {
         // We don't have any mocks for this, and it's unclear how much value
         // there would be in providing them at this juncture.
         let keeper_clients = Vec::new();
+        let timeout = Duration::from_secs(15);
+        let crdb_cluster =
+            CockroachClusterAdminClient::new(log.clone(), timeout);
+        let crdb_admin_server = mock_crdb_admin_server();
+        crdb_cluster.update_backends(&[*crdb_admin_server.address()]).await;
         let collector = Collector::new(
             "test-suite",
             vec![mgs_client],
             keeper_clients,
+            &crdb_cluster,
             &sled_enum,
             log.clone(),
         );

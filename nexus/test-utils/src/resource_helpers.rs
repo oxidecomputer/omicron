@@ -3,6 +3,7 @@
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 use crate::ControlPlaneTestContext;
+use crate::TEST_SUITE_PASSWORD;
 use crate::http_testing::RequestBuilder;
 
 use super::http_testing::AuthnMode;
@@ -12,6 +13,7 @@ use dropshot::HttpErrorResponseBody;
 use dropshot::Method;
 use dropshot::test_util::ClientTestContext;
 use http::StatusCode;
+use http::header;
 use nexus_db_queries::db::fixed_data::silo::DEFAULT_SILO;
 use nexus_test_interface::NexusServer;
 use nexus_types::deployment::Blueprint;
@@ -1162,6 +1164,35 @@ pub async fn projects_list(
     .all_items
     .into_iter()
     .collect()
+}
+
+/// Log in with test suite password, return session cookie
+pub async fn create_console_session<N: NexusServer>(
+    cptestctx: &ControlPlaneTestContext<N>,
+) -> String {
+    let testctx = &cptestctx.external_client;
+    let url = format!("/v1/login/{}/local", cptestctx.silo_name);
+    let credentials = test_params::UsernamePasswordCredentials {
+        username: cptestctx.user_name.as_ref().parse().unwrap(),
+        password: TEST_SUITE_PASSWORD.to_string(),
+    };
+    let login = RequestBuilder::new(&testctx, Method::POST, &url)
+        .body(Some(&credentials))
+        .expect_status(Some(StatusCode::NO_CONTENT))
+        .execute()
+        .await
+        .expect("failed to log in");
+
+    let session_cookie = {
+        let header_name = header::SET_COOKIE;
+        login.headers.get(header_name).unwrap().to_str().unwrap().to_string()
+    };
+    let (session_token, rest) = session_cookie.split_once("; ").unwrap();
+
+    assert!(session_token.starts_with("session="));
+    assert_eq!(rest, "Path=/; HttpOnly; SameSite=Lax; Max-Age=86400");
+
+    session_token.to_string()
 }
 
 #[derive(Debug)]

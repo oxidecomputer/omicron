@@ -24,9 +24,9 @@ use nexus_sled_agent_shared::inventory::ConfigReconcilerInventoryResult;
 use nexus_sled_agent_shared::inventory::OmicronZoneConfig;
 use nexus_sled_agent_shared::inventory::OmicronZoneImageSource;
 use nexus_sled_agent_shared::inventory::OmicronZoneType;
+use ntp_admin_client::types::TimeSync;
 use omicron_common::address::Ipv6Subnet;
 use omicron_uuid_kinds::OmicronZoneUuid;
-use sled_agent_types::time_sync::TimeSync;
 use sled_agent_types::zone_bundle::ZoneBundleCause;
 use sled_agent_types::zone_images::ResolverStatus;
 use sled_storage::config::MountConfig;
@@ -36,10 +36,7 @@ use slog::warn;
 use slog_error_chain::InlineErrorChain;
 use std::borrow::Cow;
 use std::collections::BTreeMap;
-use std::net::IpAddr;
-use std::net::Ipv6Addr;
 use std::num::NonZeroUsize;
-use std::str::FromStr as _;
 use std::sync::Arc;
 
 use super::OmicronDatasets;
@@ -70,6 +67,8 @@ pub enum TimeSyncError {
     NoRunningNtpZone,
     #[error("multiple running NTP zones - this should never happen!")]
     MultipleRunningNtpZones,
+    #[error("failed to communicate with NTP admin server")]
+    NtpAdmin(#[from] ntp_admin_client::Error<ntp_admin_client::types::Error>),
     #[error("failed to execute chronyc within NTP zone")]
     ExecuteChronyc(#[source] RunCommandError),
     #[error(
@@ -465,10 +464,10 @@ impl OmicronZones {
     }
 
     /// Check the timesync status from a running NTP zone (if it exists)
-    pub(super) async fn check_timesync(&self) -> TimeSyncStatus {
+    pub(super) async fn check_timesync(&self, log: &Logger) -> TimeSyncStatus {
         match &self.timesync_config {
             TimeSyncConfig::Normal => {
-                match self.timesync_status_from_ntp_zone().await {
+                match self.timesync_status_from_ntp_zone(log).await {
                     Ok(timesync) => TimeSyncStatus::TimeSync(timesync),
                     Err(err) => {
                         TimeSyncStatus::FailedToGetSyncStatus(Arc::new(err))
@@ -481,83 +480,45 @@ impl OmicronZones {
 
     async fn timesync_status_from_ntp_zone(
         &self,
+        log: &Logger,
     ) -> Result<TimeSync, TimeSyncError> {
         // Get the one and only running NTP zone, or return an error.
-        let mut running_ntp_zones = self.zones.iter().filter_map(|z| {
+        let mut ntp_admin_addresses = self.zones.iter().filter_map(|z| {
             if !z.config.zone_type.is_ntp() {
                 return None;
             }
+            // TODO(https://github.com/oxidecomputer/omicron/issues/6796):
+            //
+            // We could avoid hard-coding the port here if the zone was fully
+            // specified to include both NTP and Admin server addresses.
+            let mut addr = match z.config.zone_type {
+                OmicronZoneType::BoundaryNtp { address, .. } => address,
+                OmicronZoneType::InternalNtp { address, .. } => address,
+                _ => return None,
+            };
+            addr.set_port(omicron_common::address::NTP_ADMIN_PORT);
 
             match &z.state {
-                ZoneState::Running(running_zone) => Some(running_zone),
+                ZoneState::Running(_) => Some(addr),
                 ZoneState::PartiallyShutDown { .. }
                 | ZoneState::FailedToStart(_) => None,
             }
         });
-        let running_ntp_zone =
-            running_ntp_zones.next().ok_or(TimeSyncError::NoRunningNtpZone)?;
-        if running_ntp_zones.next().is_some() {
+        let ntp_admin_address = ntp_admin_addresses
+            .next()
+            .ok_or(TimeSyncError::NoRunningNtpZone)?;
+        if ntp_admin_addresses.next().is_some() {
             return Err(TimeSyncError::MultipleRunningNtpZones);
         }
 
-        // XXXNTP - This could be replaced with a direct connection to the
-        // daemon using a patched version of the chrony_candm crate to allow
-        // a custom server socket path. From the GZ, it should be possible to
-        // connect to the UNIX socket at
-        // format!("{}/var/run/chrony/chronyd.sock", ntp_zone.root())
+        let client = ntp_admin_client::Client::new(
+            &format!("http://{ntp_admin_address}"),
+            log.clone(),
+        );
 
-        let stdout = running_ntp_zone
-            .run_cmd(&["/usr/bin/chronyc", "-c", "tracking"])
-            .map_err(TimeSyncError::ExecuteChronyc)?;
+        let timesync = client.timesync().await?.into_inner();
 
-        let v: Vec<&str> = stdout.split(',').collect();
-
-        if v.len() < 10 {
-            return Err(TimeSyncError::FailedToParse {
-                reason: "too few fields",
-                stdout,
-            });
-        }
-
-        let Ok(ref_id) = u32::from_str_radix(v[0], 16) else {
-            return Err(TimeSyncError::FailedToParse {
-                reason: "bad ref_id",
-                stdout,
-            });
-        };
-        let ip_addr =
-            IpAddr::from_str(v[1]).unwrap_or(Ipv6Addr::UNSPECIFIED.into());
-        let Ok(stratum) = u8::from_str(v[2]) else {
-            return Err(TimeSyncError::FailedToParse {
-                reason: "bad stratum",
-                stdout,
-            });
-        };
-        let Ok(ref_time) = f64::from_str(v[3]) else {
-            return Err(TimeSyncError::FailedToParse {
-                reason: "bad ref_time",
-                stdout,
-            });
-        };
-        let Ok(correction) = f64::from_str(v[4]) else {
-            return Err(TimeSyncError::FailedToParse {
-                reason: "bad correction",
-                stdout,
-            });
-        };
-
-        // Per `chronyc waitsync`'s implementation, if either the
-        // reference IP address is not unspecified or the reference
-        // ID is not 0 or 0x7f7f0101, we are synchronized to a peer.
-        let peer_sync =
-            !ip_addr.is_unspecified() || (ref_id != 0 && ref_id != 0x7f7f0101);
-
-        let sync = stratum < 10
-            && ref_time > 1234567890.0
-            && peer_sync
-            && correction.abs() <= 0.05;
-
-        Ok(TimeSync { sync, ref_id, ip_addr, stratum, ref_time, correction })
+        Ok(timesync)
     }
 }
 
@@ -1111,6 +1072,7 @@ mod tests {
     use sled_agent_types::zone_images::ZoneManifestStatus;
     use std::collections::BTreeSet;
     use std::collections::VecDeque;
+    use std::net::Ipv6Addr;
     use std::sync::Mutex;
     use tufaceous_artifact::ArtifactHash;
 

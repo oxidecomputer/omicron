@@ -2,6 +2,7 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
+use crate::HostFlashHashPolicy;
 use crate::Responsiveness;
 use crate::SimulatedSp;
 use crate::config::Config;
@@ -531,6 +532,8 @@ impl Handler {
             update_state: SimSpUpdate::new(
                 BaseboardKind::Sidecar,
                 no_stage0_caboose,
+                // sidecar doesn't have phase 1 flash; any policy is fine
+                HostFlashHashPolicy::assume_already_hashed(),
             ),
             reset_pending: None,
             should_fail_to_respond_signal: None,
@@ -1271,6 +1274,23 @@ impl SpHandler for Handler {
                 Ok(None)
             }
         }
+    }
+
+    fn read_host_flash(
+        &mut self,
+        _slot: u16,
+        _addr: u32,
+        _buf: &mut [u8],
+    ) -> Result<(), SpError> {
+        Err(SpError::RequestUnsupportedForSp)
+    }
+
+    fn start_host_flash_hash(&mut self, _slot: u16) -> Result<(), SpError> {
+        Err(SpError::RequestUnsupportedForSp)
+    }
+
+    fn get_host_flash_hash(&mut self, _slot: u16) -> Result<[u8; 32], SpError> {
+        Err(SpError::RequestUnsupportedForSp)
     }
 }
 

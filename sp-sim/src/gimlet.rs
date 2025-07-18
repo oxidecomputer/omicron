@@ -2,6 +2,7 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
+use crate::HostFlashHashPolicy;
 use crate::Responsiveness;
 use crate::SimulatedSp;
 use crate::config::GimletConfig;
@@ -206,7 +207,11 @@ impl SimulatedSp for Gimlet {
 }
 
 impl Gimlet {
-    pub async fn spawn(gimlet: &GimletConfig, log: Logger) -> Result<Self> {
+    pub async fn spawn(
+        gimlet: &GimletConfig,
+        phase1_hash_policy: HostFlashHashPolicy,
+        log: Logger,
+    ) -> Result<Self> {
         info!(log, "setting up simulated gimlet");
 
         let attached_mgs = Arc::new(Mutex::new(None));
@@ -264,6 +269,7 @@ impl Gimlet {
         let mut update_state = SimSpUpdate::new(
             BaseboardKind::Gimlet,
             gimlet.common.no_stage0_caboose,
+            phase1_hash_policy,
         );
         let ereport_state = {
             let mut cfg = gimlet.common.ereport_config.clone();
@@ -403,6 +409,22 @@ impl Gimlet {
 
     pub fn last_request_handled(&self) -> Option<SimSpHandledRequest> {
         *self.last_request_handled.lock().unwrap()
+    }
+
+    /// Set the policy for simulating host phase 1 flash hashing.
+    ///
+    /// # Panics
+    ///
+    /// Panics if this `Gimlet` was created with only an RoT instead of a full
+    /// SP + RoT complex.
+    pub async fn set_phase1_hash_policy(&self, policy: HostFlashHashPolicy) {
+        self.handler
+            .as_ref()
+            .expect("gimlet was created with SP config")
+            .lock()
+            .await
+            .update_state
+            .set_phase1_hash_policy(policy)
     }
 }
 
@@ -1588,6 +1610,23 @@ impl SpHandler for Handler {
                 Ok(None)
             }
         }
+    }
+
+    fn read_host_flash(
+        &mut self,
+        _slot: u16,
+        _addr: u32,
+        _buf: &mut [u8],
+    ) -> Result<(), SpError> {
+        Err(SpError::RequestUnsupportedForSp)
+    }
+
+    fn start_host_flash_hash(&mut self, slot: u16) -> Result<(), SpError> {
+        self.update_state.start_host_flash_hash(slot)
+    }
+
+    fn get_host_flash_hash(&mut self, slot: u16) -> Result<[u8; 32], SpError> {
+        self.update_state.get_host_flash_hash(slot)
     }
 }
 

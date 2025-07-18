@@ -139,6 +139,15 @@ pub static DEMO_SILO_USERS_LIST_URL: LazyLock<String> = LazyLock::new(|| {
 pub static DEMO_SILO_USER_ID_GET_URL: LazyLock<String> = LazyLock::new(|| {
     format!("/v1/system/users/{{id}}?silo={}", DEFAULT_SILO.identity().name,)
 });
+pub static DEMO_SILO_USER_ID_IN_SILO_URL: LazyLock<String> =
+    LazyLock::new(|| "/v1/users/{id}".to_string());
+pub static DEMO_SILO_USER_TOKEN_LIST_URL: LazyLock<String> =
+    LazyLock::new(|| "/v1/users/{id}/access-tokens".to_string());
+pub static DEMO_SILO_USER_SESSION_LIST_URL: LazyLock<String> =
+    LazyLock::new(|| "/v1/users/{id}/sessions".to_string());
+pub static DEMO_SILO_USER_LOGOUT_URL: LazyLock<String> =
+    LazyLock::new(|| "/v1/users/{id}/logout".to_string());
+
 pub static DEMO_SILO_USER_ID_DELETE_URL: LazyLock<String> =
     LazyLock::new(|| {
         format!(
@@ -1251,6 +1260,18 @@ pub static DEMO_INBOUND_ICMP_URL: &'static str =
 pub static DEMO_INBOUND_ICMP_UPDATE: LazyLock<ServiceIcmpConfig> =
     LazyLock::new(|| ServiceIcmpConfig { enabled: true });
 
+pub static DEMO_UPDATE_TRUST_ROOTS_URL: &'static str =
+    "/v1/system/update/trust-roots";
+
+pub static DEMO_UPDATE_TRUST_ROOT_URL: LazyLock<String> =
+    LazyLock::new(|| format!("{DEMO_UPDATE_TRUST_ROOTS_URL}/{{id}}"));
+
+pub static DEMO_UPDATE_TRUST_ROOT_CREATE: LazyLock<serde_json::Value> =
+    LazyLock::new(|| {
+        serde_json::from_str(include_str!("data/tuf-expired-root.json"))
+            .unwrap()
+    });
+
 /// Describes an API endpoint to be verified by the "unauthorized" test
 ///
 /// These structs are also used to check whether we're covering all endpoints in
@@ -1662,6 +1683,32 @@ pub static VERIFY_ENDPOINTS: LazyLock<Vec<VerifyEndpoint>> =
                 visibility: Visibility::Public,
                 unprivileged_access: UnprivilegedAccess::ReadOnly,
                 allowed_methods: vec![AllowedMethod::Get],
+            },
+            VerifyEndpoint {
+                url: &DEMO_SILO_USER_ID_IN_SILO_URL,
+                visibility: Visibility::Protected,
+                unprivileged_access: UnprivilegedAccess::ReadOnly,
+                allowed_methods: vec![AllowedMethod::Get],
+            },
+            VerifyEndpoint {
+                url: &DEMO_SILO_USER_TOKEN_LIST_URL,
+                visibility: Visibility::Public,
+                unprivileged_access: UnprivilegedAccess::None,
+                allowed_methods: vec![AllowedMethod::Get],
+            },
+            VerifyEndpoint {
+                url: &DEMO_SILO_USER_SESSION_LIST_URL,
+                visibility: Visibility::Public,
+                unprivileged_access: UnprivilegedAccess::None,
+                allowed_methods: vec![AllowedMethod::Get],
+            },
+            VerifyEndpoint {
+                url: &DEMO_SILO_USER_LOGOUT_URL,
+                visibility: Visibility::Public,
+                unprivileged_access: UnprivilegedAccess::None,
+                allowed_methods: vec![AllowedMethod::Post(serde_json::json!(
+                    {}
+                ))],
             },
             VerifyEndpoint {
                 url: "/v1/groups",
@@ -2352,18 +2399,6 @@ pub static VERIFY_ENDPOINTS: LazyLock<Vec<VerifyEndpoint>> =
             },
             /* IAM */
             VerifyEndpoint {
-                url: "/v1/system/roles",
-                visibility: Visibility::Public,
-                unprivileged_access: UnprivilegedAccess::None,
-                allowed_methods: vec![AllowedMethod::Get],
-            },
-            VerifyEndpoint {
-                url: "/v1/system/roles/fleet.admin",
-                visibility: Visibility::Protected,
-                unprivileged_access: UnprivilegedAccess::None,
-                allowed_methods: vec![AllowedMethod::Get],
-            },
-            VerifyEndpoint {
                 url: "/v1/system/users-builtin",
                 visibility: Visibility::Public,
                 unprivileged_access: UnprivilegedAccess::None,
@@ -2478,6 +2513,24 @@ pub static VERIFY_ENDPOINTS: LazyLock<Vec<VerifyEndpoint>> =
             },
             /* Updates */
             VerifyEndpoint {
+                url: DEMO_UPDATE_TRUST_ROOTS_URL,
+                visibility: Visibility::Public,
+                unprivileged_access: UnprivilegedAccess::None,
+                allowed_methods: vec![
+                    AllowedMethod::Get,
+                    AllowedMethod::Post(DEMO_UPDATE_TRUST_ROOT_CREATE.clone()),
+                ],
+            },
+            VerifyEndpoint {
+                url: &DEMO_UPDATE_TRUST_ROOT_URL,
+                visibility: Visibility::Protected,
+                unprivileged_access: UnprivilegedAccess::None,
+                allowed_methods: vec![
+                    AllowedMethod::Get,
+                    AllowedMethod::Delete,
+                ],
+            },
+            VerifyEndpoint {
                 url: "/v1/system/update/repository?file_name=demo-repo.zip",
                 visibility: Visibility::Public,
                 unprivileged_access: UnprivilegedAccess::None,
@@ -2490,9 +2543,7 @@ pub static VERIFY_ENDPOINTS: LazyLock<Vec<VerifyEndpoint>> =
                 url: "/v1/system/update/repository/1.0.0",
                 visibility: Visibility::Public,
                 unprivileged_access: UnprivilegedAccess::None,
-                // The update system is disabled, which causes a 500 error even for
-                // privileged users. That is captured by GetUnimplemented.
-                allowed_methods: vec![AllowedMethod::GetUnimplemented],
+                allowed_methods: vec![AllowedMethod::Get],
             },
             VerifyEndpoint {
                 url: "/v1/system/update/target-release",

@@ -7,6 +7,7 @@
 
 use super::endpoints::*;
 use crate::integration_tests::saml::SAML_IDP_DESCRIPTOR;
+use crate::integration_tests::updates::TestTrustRoot;
 use dropshot::HttpErrorResponseBody;
 use dropshot::test_util::ClientTestContext;
 use headers::authorization::Credentials;
@@ -19,14 +20,12 @@ use nexus_test_utils::http_testing::NexusRequest;
 use nexus_test_utils::http_testing::RequestBuilder;
 use nexus_test_utils::http_testing::TestResponse;
 use nexus_test_utils::resource_helpers::TestDataset;
-use nexus_test_utils_macros::nexus_test;
+use nexus_test_utils::test_setup;
 use omicron_common::disk::DatasetKind;
 use omicron_uuid_kinds::DatasetUuid;
 use omicron_uuid_kinds::ZpoolUuid;
 use std::sync::LazyLock;
 
-type ControlPlaneTestContext =
-    nexus_test_utils::ControlPlaneTestContext<omicron_nexus::Server>;
 type DiskTest<'a> =
     nexus_test_utils::resource_helpers::DiskTest<'a, omicron_nexus::Server>;
 
@@ -57,9 +56,15 @@ type DiskTest<'a> =
 //   endpoint with a non-existent resource to ensure that we get the same result
 //   (so that we don't leak information about existence based on, say, 401 vs.
 //   403).
-#[nexus_test]
-async fn test_unauthorized(cptestctx: &ControlPlaneTestContext) {
-    let mut disk_test = DiskTest::new(cptestctx).await;
+//
+// Uploading a TUF repository requires a multithreaded runtime with 2 worker
+// threads.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn test_unauthorized() {
+    let cptestctx =
+        test_setup::<omicron_nexus::Server>("test_unauthorized", 0).await;
+
+    let mut disk_test = DiskTest::new(&cptestctx).await;
     let sled_id = cptestctx.first_sled_id();
     disk_test
         .add_zpool_with_datasets_ext(
@@ -117,6 +122,25 @@ async fn test_unauthorized(cptestctx: &ControlPlaneTestContext) {
         });
     }
 
+    // Special test data: upload a fake repository with the system release
+    // "1.0.0". The resources do not need to be added to `setup_results` as we
+    // have already added a separate trust root to verify that endpoint, and
+    // repositories are fetched by system release.
+    let trust_root = TestTrustRoot::generate().await.unwrap();
+    trust_root
+        .to_upload_request(client, StatusCode::CREATED)
+        .execute()
+        .await
+        .unwrap();
+    trust_root
+        .assemble_repo(&log, &[])
+        .await
+        .unwrap()
+        .into_upload_request(client, StatusCode::OK)
+        .execute()
+        .await
+        .unwrap();
+
     // Verify the hardcoded endpoints.
     info!(log, "verifying endpoints");
     print!("{}", VERIFY_HEADER);
@@ -124,6 +148,8 @@ async fn test_unauthorized(cptestctx: &ControlPlaneTestContext) {
         let setup_response = setup_results.get(&endpoint.url);
         verify_endpoint(&log, client, endpoint, setup_response).await;
     }
+
+    cptestctx.teardown().await;
 }
 
 const VERIFY_HEADER: &str = r#"
@@ -224,6 +250,10 @@ static SETUP_REQUESTS: LazyLock<Vec<SetupReq>> = LazyLock::new(|| {
                 &*DEMO_SILO_USER_ID_GET_URL,
                 &*DEMO_SILO_USER_ID_DELETE_URL,
                 &*DEMO_SILO_USER_ID_SET_PASSWORD_URL,
+                &*DEMO_SILO_USER_ID_IN_SILO_URL,
+                &*DEMO_SILO_USER_TOKEN_LIST_URL,
+                &*DEMO_SILO_USER_SESSION_LIST_URL,
+                &*DEMO_SILO_USER_LOGOUT_URL,
             ],
         },
         // Create the default IP pool
@@ -369,6 +399,12 @@ static SETUP_REQUESTS: LazyLock<Vec<SetupReq>> = LazyLock::new(|| {
             url: &SUPPORT_BUNDLES_URL,
             body: serde_json::to_value(()).unwrap(),
             id_routes: vec!["/experimental/v1/system/support-bundles/{id}"],
+        },
+        // Create a trusted root for updates
+        SetupReq::Post {
+            url: &DEMO_UPDATE_TRUST_ROOTS_URL,
+            body: DEMO_UPDATE_TRUST_ROOT_CREATE.clone(),
+            id_routes: vec![&*DEMO_UPDATE_TRUST_ROOT_URL],
         },
         // Create a webhook receiver
         SetupReq::Post {

@@ -7,6 +7,7 @@ use crate::report::BlippyReport;
 use crate::report::BlippyReportSortKey;
 use core::fmt;
 use nexus_types::deployment::Blueprint;
+use nexus_types::deployment::BlueprintArtifactVersion;
 use nexus_types::deployment::BlueprintDatasetConfig;
 use nexus_types::deployment::BlueprintZoneConfig;
 use nexus_types::inventory::ZpoolName;
@@ -15,11 +16,13 @@ use omicron_common::address::Ipv6Subnet;
 use omicron_common::address::SLED_PREFIX;
 use omicron_common::api::external::MacAddr;
 use omicron_common::disk::DatasetKind;
+use omicron_uuid_kinds::MupdateOverrideUuid;
 use omicron_uuid_kinds::SledUuid;
 use omicron_uuid_kinds::ZpoolUuid;
 use std::collections::BTreeSet;
 use std::net::IpAddr;
 use std::net::SocketAddrV6;
+use tufaceous_artifact::ArtifactHash;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Note {
@@ -176,6 +179,12 @@ pub enum SledKind {
     NonCrucibleDatasetWithAddress {
         dataset: BlueprintDatasetConfig,
         address: SocketAddrV6,
+    },
+    MupdateOverrideWithArtifactZone {
+        mupdate_override_id: MupdateOverrideUuid,
+        zone: BlueprintZoneConfig,
+        version: BlueprintArtifactVersion,
+        hash: ArtifactHash,
     },
 }
 
@@ -370,6 +379,20 @@ impl fmt::Display for SledKind {
                     "non-Crucible dataset ({:?} {}) has an address: {} \
                      (only Crucible datasets should have addresses)",
                     dataset.kind, dataset.id, address,
+                )
+            }
+            SledKind::MupdateOverrideWithArtifactZone {
+                mupdate_override_id,
+                zone,
+                version,
+                hash,
+            } => {
+                write!(
+                    f,
+                    "sled has remove_mupdate_override set ({mupdate_override_id}), \
+                     but zone {} image source is set to Artifact (version {version}, \
+                     hash {hash})",
+                    zone.id,
                 )
             }
         }

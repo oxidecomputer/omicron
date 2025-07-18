@@ -97,7 +97,7 @@ use illumos_utils::zone::ZONE_PREFIX;
 use illumos_utils::zpool::{ZpoolHealth, ZpoolName};
 use omicron_common::disk::DiskVariant;
 use sled_agent_types::support_bundle::BUNDLE_FILE_NAME;
-use sled_agent_types::support_bundle::BUNDLE_TMP_FILE_NAME_SUFFIX;
+use sled_agent_types::support_bundle::BUNDLE_TMP_FILE_NAME;
 use sled_storage::config::MountConfig;
 use sled_storage::dataset::{CRASH_DATASET, DUMP_DATASET};
 use sled_storage::disk::Disk;
@@ -527,11 +527,7 @@ fn safe_to_delete(path: &Utf8Path, meta: &std::fs::Metadata) -> bool {
         return false;
     };
     // Ignore support bundles
-    if file_name == BUNDLE_FILE_NAME {
-        return false;
-    }
-    // Ignore support bundle "temp files" as they're being created.
-    if file_name.ends_with(BUNDLE_TMP_FILE_NAME_SUFFIX) {
+    if file_name == BUNDLE_FILE_NAME || file_name == BUNDLE_TMP_FILE_NAME {
         return false;
     }
     return true;
@@ -2127,9 +2123,7 @@ mod tests {
             .set_size(100)
             .make_much_older();
         files
-            .add_file(
-                "c4640fac-c67c-4480-b736-5d9a7fe336ba/abcd-bundle.zip.tmp",
-            )
+            .add_file("c4640fac-c67c-4480-b736-5d9a7fe336ba/bundle.zip.tmp")
             .set_size(100)
             .make_much_older();
 
