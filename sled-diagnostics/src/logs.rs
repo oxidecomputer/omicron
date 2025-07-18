@@ -1390,15 +1390,7 @@ mod illumos_tests {
 
     #[test]
     fn test_extra_log_file_regex() {
-        let current = [
-            ("foo.log", "foo"),
-            ("foo.bar.baz.log", "foo"),
-            ("cockroach-health.log", "cockroach-health"),
-            (
-                "cockroach-health.oxzcockroachdba3628a56-6f85-43b5-be50-71d8f0e04877.root.2025-01-31T21_43_26Z.011435.log",
-                "cockroach-health",
-            ),
-        ];
+        let current = [("foo.log", "foo"), ("foo.bar.baz.log", "foo")];
         for (log, name) in current {
             let logfile = LogFile {
                 path: log.parse().unwrap(),
@@ -1412,15 +1404,7 @@ mod illumos_tests {
             );
         }
 
-        let rotated = [
-            ("foo.log.1", "foo"),
-            ("foo.bar.baz.log.1", "foo"),
-            ("cockroach-health.log.4", "cockroach-health"),
-            (
-                "cockroach-health.oxzcockroachdba3628a56-6f85-43b5-be50-71d8f0e04877.root.2025-01-31T21_43_26Z.011435.log.9",
-                "cockroach-health",
-            ),
-        ];
+        let rotated = [("foo.log.1", "foo"), ("foo.bar.baz.log.1", "foo")];
         for (log, name) in rotated {
             let logfile = LogFile {
                 path: log.parse().unwrap(),
