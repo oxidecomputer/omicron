@@ -7,7 +7,7 @@
 use super::Handle;
 use iddqd::{BiHashItem, BiHashMap, bi_upcast};
 use omicron_common::api::external::{
-    self, Flow, FlowMetadata, FlowStat as ExternalFlowStat,
+    self, Flow, FlowMetadata, FlowStat as ExternalFlowStat, VpcEntity,
 };
 use oxide_vpc::api::{
     Direction, FlowStat, FullCounter, InnerFlowId, stat as vpc_stat,
@@ -15,7 +15,7 @@ use oxide_vpc::api::{
 use slog::Logger;
 use slog_error_chain::InlineErrorChain;
 use std::{
-    collections::{HashMap, hash_map::Entry},
+    collections::{HashMap, HashSet, hash_map::Entry},
     sync::{
         Arc, LazyLock, RwLock,
         atomic::{AtomicBool, Ordering},
@@ -161,13 +161,27 @@ impl PortStats {
 
     /// Associate a control plane entity with a new opaque stat ID for OPTE,
     /// or retrieve the existing value if needed.
-    pub fn register_entity(&self, entity: external::VpcEntity) -> Uuid {
+    pub fn register_entity(&self, entity: VpcEntity) -> Uuid {
         self.shared.register_entity(entity)
     }
 
     /// Remove the stat ID mapping for a given control plane entity.
-    pub fn deregister_entity(&self, entity: external::VpcEntity) {
+    pub fn deregister_entity(&self, entity: VpcEntity) {
         self.shared.deregister_entity(entity)
+    }
+
+    /// Retrieve all currently registered VPC Entities.
+    pub fn entities(&self) -> HashSet<VpcEntity> {
+        let state = self.shared.state.read().unwrap();
+        state
+            .label_map
+            .iter()
+            .filter_map(|v| match &v.label {
+                FlowLabel::Entity(VpcEntity::FirewallDefaultIn) => None,
+                FlowLabel::Entity(v) => Some(v.clone()),
+                _ => None,
+            })
+            .collect()
     }
 }
 
@@ -241,7 +255,7 @@ impl PortStatsShared {
             .retain(|_, v| now.duration_since(v.hit_at) <= PRUNE_AGE);
     }
 
-    fn register_entity(&self, entity: external::VpcEntity) -> Uuid {
+    fn register_entity(&self, entity: VpcEntity) -> Uuid {
         let mut state = self.state.write().unwrap();
         let id = Uuid::new_v4();
         let label = FlowLabel::Entity(entity);
@@ -251,7 +265,11 @@ impl PortStatsShared {
         }
     }
 
-    fn deregister_entity(&self, entity: external::VpcEntity) {
+    // XXX: Should this actually remove each entry, or set it for soft
+    //      deletion? We may want to keep entries around for a little
+    //      longer to enable the future oximeter task some time to get
+    //      evacuated stats up-to-date after a rule change.
+    fn deregister_entity(&self, entity: VpcEntity) {
         let mut state = self.state.write().unwrap();
         let label = FlowLabel::Entity(entity);
         state.label_map.remove2(&label);
@@ -297,7 +315,7 @@ static BASE_MAP: LazyLock<BiHashMap<StatIdMapping>> = LazyLock::new(|| {
         },
         StatIdMapping {
             id: vpc_stat::FW_DEFAULT_IN,
-            label: FlowLabel::Entity(external::VpcEntity::FirewallDefaultIn),
+            label: FlowLabel::Entity(VpcEntity::FirewallDefaultIn),
         },
         StatIdMapping {
             id: vpc_stat::FW_DEFAULT_OUT,
@@ -383,7 +401,7 @@ async fn run_port_stat(state: Arc<PortStatsShared>) {
 
 #[derive(Debug, Clone, Hash, PartialEq, Eq)]
 pub enum FlowLabel {
-    Entity(external::VpcEntity),
+    Entity(VpcEntity),
     Destination(external::ForwardClass),
     Builtin(VpcBuiltinLabel),
 }

@@ -351,7 +351,8 @@ impl PortManager {
         };
 
         // Initialize firewall rules for the new port.
-        let rules = opte_firewall_rules(firewall_rules, &vni, &mac);
+        let rules =
+            opte_firewall_rules(firewall_rules, &vni, &mac, port.stats());
         debug!(
             self.inner.log,
             "Setting firewall rules";
@@ -800,7 +801,12 @@ impl PortManager {
             .values()
             .filter(|port| u32::from(vni) == u32::from(*port.vni()));
         for port in vpc_ports {
-            let rules = opte_firewall_rules(rules, port.vni(), port.mac());
+            let rules = opte_firewall_rules(
+                rules,
+                port.vni(),
+                port.mac(),
+                port.stats(),
+            );
             let port_name = port.name().to_string();
             info!(
                 self.inner.log,
@@ -813,6 +819,7 @@ impl PortManager {
                 rules,
             })?;
         }
+
         Ok(())
     }
 
