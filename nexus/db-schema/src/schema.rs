@@ -1907,6 +1907,14 @@ table! {
     }
 }
 
+table! {
+    inv_internal_dns (inv_collection_id, zone_id) {
+        inv_collection_id -> Uuid,
+        zone_id -> Uuid,
+        generation -> Int8,
+    }
+}
+
 /* blueprints */
 
 table! {
