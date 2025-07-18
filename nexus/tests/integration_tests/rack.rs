@@ -23,6 +23,7 @@ use nexus_types::internal_api::params::SledAgentInfo;
 use omicron_common::api::external::ByteCount;
 use omicron_common::api::external::Generation;
 use omicron_uuid_kinds::GenericUuid;
+use std::time::Duration;
 use uuid::Uuid;
 
 type ControlPlaneTestContext =
@@ -98,6 +99,12 @@ async fn test_rack_initialization(cptestctx: &ControlPlaneTestContext) {
 
 #[nexus_test]
 async fn test_sled_list_uninitialized(cptestctx: &ControlPlaneTestContext) {
+    // Setup: wait until we've collected an inventory from the system set
+    // up by `#[nexus_test].
+    cptestctx
+        .wait_for_at_least_one_inventory_collection(Duration::from_secs(60))
+        .await;
+
     let internal_client = &cptestctx.internal_client;
     let external_client = &cptestctx.external_client;
     let list_url = "/v1/system/hardware/sleds-uninitialized";
@@ -159,6 +166,12 @@ async fn test_sled_list_uninitialized(cptestctx: &ControlPlaneTestContext) {
 
 #[nexus_test]
 async fn test_sled_add(cptestctx: &ControlPlaneTestContext) {
+    // Setup: wait until we've collected an inventory from the system set
+    // up by `#[nexus_test].
+    cptestctx
+        .wait_for_at_least_one_inventory_collection(Duration::from_secs(60))
+        .await;
+
     let external_client = &cptestctx.external_client;
     let list_url = "/v1/system/hardware/sleds-uninitialized";
     let mut uninitialized_sleds =

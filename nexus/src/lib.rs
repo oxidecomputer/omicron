@@ -27,6 +27,7 @@ use external_api::http_entrypoints::external_api;
 use internal_api::http_entrypoints::internal_api;
 use nexus_config::NexusConfig;
 use nexus_db_model::RendezvousDebugDataset;
+use nexus_db_queries::db;
 use nexus_types::deployment::Blueprint;
 use nexus_types::deployment::BlueprintZoneDisposition;
 use nexus_types::deployment::BlueprintZoneType;
@@ -333,6 +334,10 @@ impl nexus_test_interface::NexusServer for Server {
 
         // Start the Nexus external API.
         Server::start(internal_server).await.unwrap()
+    }
+
+    fn datastore(&self) -> &Arc<db::DataStore> {
+        self.apictx.context.nexus.datastore()
     }
 
     async fn get_http_server_external_address(&self) -> SocketAddr {
