@@ -22,8 +22,8 @@ use nexus_db_schema::schema::{
     bp_clickhouse_keeper_zone_id_to_node_id,
     bp_clickhouse_server_zone_id_to_node_id, bp_omicron_dataset,
     bp_omicron_physical_disk, bp_omicron_zone, bp_omicron_zone_nic,
-    bp_oximeter_read_policy, bp_pending_mgs_update_sp, bp_sled_metadata,
-    bp_target,
+    bp_oximeter_read_policy, bp_pending_mgs_update_rot_bootloader,
+    bp_pending_mgs_update_sp, bp_sled_metadata, bp_target,
 };
 use nexus_sled_agent_shared::inventory::OmicronZoneDataset;
 use nexus_types::deployment::BlueprintHostPhase2DesiredContents;
@@ -1298,6 +1298,53 @@ impl BpOximeterReadPolicy {
             blueprint_id: blueprint_id.into(),
             version,
             oximeter_read_mode: DbOximeterReadMode::from(read_mode),
+        }
+    }
+}
+
+pub trait BpPendingMgsUpdateComponent {
+    /// Converts a BpMgsUpdate into a PendingMgsUpdate
+    fn into_generic(self, baseboard_id: Arc<BaseboardId>) -> PendingMgsUpdate;
+
+    /// Retrieves the baseboard ID
+    fn hw_baseboard_id(&self) -> &Uuid;
+}
+
+#[derive(Queryable, Clone, Debug, Selectable, Insertable)]
+#[diesel(table_name = bp_pending_mgs_update_rot_bootloader)]
+pub struct BpPendingMgsUpdateRotBootloader {
+    pub blueprint_id: DbTypedUuid<BlueprintKind>,
+    pub hw_baseboard_id: Uuid,
+    pub sp_type: SpType,
+    pub sp_slot: SpMgsSlot,
+    pub artifact_sha256: ArtifactHash,
+    pub artifact_version: DbArtifactVersion,
+    pub expected_stage0_version: DbArtifactVersion,
+    pub expected_stage0_next_version: Option<DbArtifactVersion>,
+}
+
+impl BpPendingMgsUpdateComponent for BpPendingMgsUpdateRotBootloader {
+    fn hw_baseboard_id(&self) -> &Uuid {
+        &self.hw_baseboard_id
+    }
+
+    fn into_generic(self, baseboard_id: Arc<BaseboardId>) -> PendingMgsUpdate {
+        PendingMgsUpdate {
+            baseboard_id,
+            sp_type: self.sp_type.into(),
+            slot_id: **self.sp_slot,
+            artifact_hash: self.artifact_sha256.into(),
+            artifact_version: (*self.artifact_version).clone(),
+            details: PendingMgsUpdateDetails::RotBootloader {
+                expected_stage0_version: (*self.expected_stage0_version)
+                    .clone(),
+                expected_stage0_next_version: match self
+                    .expected_stage0_next_version
+                {
+                    Some(v) => ExpectedVersion::Version((*v).clone()),
+                    None => ExpectedVersion::NoValidVersion,
+                },
+            },
         }
     }
 }
