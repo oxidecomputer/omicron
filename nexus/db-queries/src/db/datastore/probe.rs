@@ -26,6 +26,8 @@ use omicron_common::api::external::NameOrId;
 use omicron_common::api::external::ResourceType;
 use omicron_common::api::external::http_pagination::PaginatedBy;
 use omicron_common::api::internal::shared::NetworkInterface;
+use omicron_uuid_kinds::GenericUuid;
+use omicron_uuid_kinds::SledUuid;
 use ref_cast::RefCast;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
@@ -166,7 +168,7 @@ impl super::DataStore {
     /// determining what probes they should be running.
     pub async fn probe_list_for_sled(
         &self,
-        sled: Uuid,
+        sled: SledUuid,
         opctx: &OpContext,
         pagparams: &DataPageParams<'_, Uuid>,
     ) -> ListResultVec<ProbeInfo> {
@@ -176,7 +178,7 @@ impl super::DataStore {
 
         let probes = paginated(dsl::probe, dsl::id, pagparams)
             .filter(dsl::time_deleted.is_null())
-            .filter(dsl::sled.eq(sled))
+            .filter(dsl::sled.eq(sled.into_untyped_uuid()))
             .select(Probe::as_select())
             .load_async(&*conn)
             .await

@@ -1064,6 +1064,8 @@ mod tests {
             .create_port(PortCreateParams {
                 nic: &NetworkInterface {
                     id: Uuid::new_v4(),
+                    subnet_id: None,
+                    vpc_id: None,
                     kind: NetworkInterfaceKind::Service { id: Uuid::new_v4() },
                     name: "opte0".parse().unwrap(),
                     ip: private_ipv4_addr0,
@@ -1171,6 +1173,7 @@ mod tests {
                 version: 1,
             }),
             routes: HashSet::from([ResolvedVpcRoute {
+                id: Uuid::new_v4(),
                 dest: default_ipv4_route,
                 target: RouterTarget::InternetGateway(
                     InternetGatewayRouterTarget::System,
@@ -1239,6 +1242,8 @@ mod tests {
             .create_port(PortCreateParams {
                 nic: &NetworkInterface {
                     id: Uuid::new_v4(),
+                    subnet_id: None,
+                    vpc_id: None,
                     kind: NetworkInterfaceKind::Service { id: Uuid::new_v4() },
                     name: "opte1".parse().unwrap(),
                     ip: private_ipv4_addr1,

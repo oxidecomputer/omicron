@@ -33,6 +33,7 @@ use nexus_config::InternalDns;
 use nexus_config::MgdConfig;
 use nexus_config::NUM_INITIAL_RESERVED_IP_ADDRESSES;
 use nexus_config::NexusConfig;
+use nexus_db_queries::db::fixed_data;
 use nexus_db_queries::db::pub_test_utils::crdb;
 use nexus_sled_agent_shared::inventory::HostPhase2DesiredSlots;
 use nexus_sled_agent_shared::inventory::OmicronSledConfig;
@@ -821,6 +822,10 @@ impl<'a, N: NexusServer> ControlPlaneTestContextBuilder<'a, N> {
                 internal_address: address,
                 nic: NetworkInterface {
                     id: Uuid::new_v4(),
+                    subnet_id: Some(
+                        *fixed_data::vpc_subnet::NEXUS_VPC_SUBNET_ID,
+                    ),
+                    vpc_id: Some(*fixed_data::vpc::SERVICES_VPC_ID),
                     ip: NEXUS_OPTE_IPV4_SUBNET
                         .nth(NUM_INITIAL_RESERVED_IP_ADDRESSES + 1)
                         .unwrap()
@@ -1186,6 +1191,10 @@ impl<'a, N: NexusServer> ControlPlaneTestContextBuilder<'a, N> {
                     domain: None,
                     nic: NetworkInterface {
                         id: Uuid::new_v4(),
+                        subnet_id: Some(
+                            *fixed_data::vpc_subnet::NTP_VPC_SUBNET_ID,
+                        ),
+                        vpc_id: Some(*fixed_data::vpc::SERVICES_VPC_ID),
                         kind: NetworkInterfaceKind::Service {
                             id: zone_id.into_untyped_uuid(),
                         },
@@ -1282,6 +1291,10 @@ impl<'a, N: NexusServer> ControlPlaneTestContextBuilder<'a, N> {
                     http_address: dropshot_address,
                     nic: NetworkInterface {
                         id: Uuid::new_v4(),
+                        subnet_id: Some(
+                            *fixed_data::vpc_subnet::DNS_VPC_SUBNET_ID,
+                        ),
+                        vpc_id: Some(*fixed_data::vpc::SERVICES_VPC_ID),
                         ip: DNS_OPTE_IPV4_SUBNET
                             .nth(NUM_INITIAL_RESERVED_IP_ADDRESSES + 1)
                             .unwrap()

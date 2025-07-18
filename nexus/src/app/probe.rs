@@ -10,6 +10,7 @@ use omicron_common::api::external::{
     CreateResult, DataPageParams, DeleteResult, ListResultVec, LookupResult,
     NameOrId, http_pagination::PaginatedBy,
 };
+use omicron_uuid_kinds::SledUuid;
 use uuid::Uuid;
 
 impl super::Nexus {
@@ -31,7 +32,7 @@ impl super::Nexus {
         &self,
         opctx: &OpContext,
         pagparams: &DataPageParams<'_, Uuid>,
-        sled: Uuid,
+        sled: SledUuid,
     ) -> ListResultVec<ProbeInfo> {
         self.db_datastore.probe_list_for_sled(sled, opctx, pagparams).await
     }

@@ -101,6 +101,7 @@ pub trait NexusInternalApi {
     async fn sled_firewall_rules_request(
         rqctx: RequestContext<Self::Context>,
         path_params: Path<SledAgentPathParam>,
+        query_params: Query<SledAgentFwQueryParam>,
     ) -> Result<HttpResponseUpdatedNoContent, HttpError>;
 
     /// Report that the Rack Setup Service initialization is complete
@@ -842,7 +843,11 @@ pub struct SledId {
 /// Path parameters for probes
 #[derive(Deserialize, JsonSchema)]
 pub struct ProbePathParam {
-    pub sled: Uuid,
+    pub sled: SledUuid,
+}
+#[derive(Serialize, Deserialize, JsonSchema)]
+pub struct SledAgentFwQueryParam {
+    pub vpc_id: Uuid,
 }
 
 #[derive(Deserialize, JsonSchema)]

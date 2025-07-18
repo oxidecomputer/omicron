@@ -127,11 +127,23 @@ impl super::Nexus {
     pub(crate) async fn sled_request_firewall_rules(
         &self,
         opctx: &OpContext,
-        id: Uuid,
+        sled_id: Uuid,
+        vpc_id: Uuid,
     ) -> Result<(), Error> {
-        info!(self.log, "requesting firewall rules"; "sled_uuid" => id.to_string());
-        self.plumb_service_firewall_rules(opctx, &[id]).await?;
-        Ok(())
+        info!(
+            self.log, "requesting firewall rules";
+            "sled_uuid" => sled_id.to_string(),
+            "vpc_id" => vpc_id.to_string()
+        );
+        nexus_networking::plumb_vpc_firewall_rules(
+            &self.db_datastore,
+            opctx,
+            std::slice::from_ref(&sled_id),
+            vpc_id,
+            &self.opctx_alloc,
+            &self.log,
+        )
+        .await
     }
 
     pub(crate) async fn sled_list(

@@ -3313,6 +3313,8 @@ mod tests {
                         },
                         nic: NetworkInterface {
                             id: Uuid::new_v4(),
+                            subnet_id: None,
+                            vpc_id: None,
                             kind: NetworkInterfaceKind::Service {
                                 id: *zone_id.as_untyped_uuid(),
                             },

@@ -34,7 +34,6 @@ use omicron_common::api::external::IdentityMetadataCreateParams;
 use omicron_common::api::external::IdentityMetadataUpdateParams;
 use omicron_common::api::external::NameOrId;
 use omicron_common::api::external::SimpleIdentityOrName;
-use omicron_common::api::internal::shared::ResolvedVpcRoute;
 use omicron_common::api::internal::shared::RouterTarget;
 use omicron_uuid_kinds::GenericUuid;
 use omicron_uuid_kinds::InstanceUuid;
@@ -607,14 +606,20 @@ async fn test_vpc_routers_custom_delivered_to_instance(
         );
     }
 
-    assert!(last_routes[0].1.contains(&ResolvedVpcRoute {
-        dest: "240.0.0.0/8".parse().unwrap(),
-        target: RouterTarget::Drop,
-    }));
-    assert!(last_routes[1].1.contains(&ResolvedVpcRoute {
-        dest: "241.0.0.0/8".parse().unwrap(),
-        target: RouterTarget::Drop,
-    }));
+    assert!(
+        last_routes[0]
+            .1
+            .iter()
+            .any(|v| v.dest == "240.0.0.0/8".parse().unwrap()
+                && v.target == RouterTarget::Drop)
+    );
+    assert!(
+        last_routes[1]
+            .1
+            .iter()
+            .any(|v| v.dest == "241.0.0.0/8".parse().unwrap()
+                && v.target == RouterTarget::Drop)
+    );
 
     // Adding a new route should propagate that out to sleds.
     create_route(
@@ -638,10 +643,9 @@ async fn test_vpc_routers_custom_delivered_to_instance(
     .await;
 
     assert_eq!(last_routes[0].0, new_system);
-    assert!(new_custom.contains(&ResolvedVpcRoute {
-        dest: "2.0.7.0/24".parse().unwrap(),
-        target: RouterTarget::Ip(instance_nics[INSTANCE_NAMES[1]][0].ip),
-    }));
+    assert!(new_custom.iter().any(|v| v.dest == "2.0.7.0/24".parse().unwrap()
+        && v.target
+            == RouterTarget::Ip(instance_nics[INSTANCE_NAMES[1]][0].ip)));
 
     // Swapping router should change the installed routes at that sled.
     set_custom_router(

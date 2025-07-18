@@ -132,17 +132,20 @@ impl NexusInternalApi for NexusInternalApiImpl {
     async fn sled_firewall_rules_request(
         rqctx: RequestContext<Self::Context>,
         path_params: Path<SledAgentPathParam>,
+        query_params: Query<SledAgentFwQueryParam>,
     ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
         let apictx = &rqctx.context().context;
         let nexus = &apictx.nexus;
         let opctx = crate::context::op_context_for_internal_api(&rqctx).await;
         let path = path_params.into_inner();
+        let query = query_params.into_inner();
         let sled_id = &path.sled_id;
         let handler = async {
             nexus
                 .sled_request_firewall_rules(
                     &opctx,
                     sled_id.into_untyped_uuid(),
+                    query.vpc_id,
                 )
                 .await?;
             Ok(HttpResponseUpdatedNoContent())
