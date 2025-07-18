@@ -526,20 +526,7 @@ T ENA ID                                   PARENT                               
 
 > blueprint-plan ade5749d-bdf3-4fab-a8ae-00bea01b3a5a
 INFO skipping noop image source check for all sleds, reason: no target release is currently set
-INFO found sled missing NTP zone (will add one), sled_id: 89d02b1b-478c-401a-8e28-7a26f74fa41b
-INFO sufficient BoundaryNtp zones exist in plan, desired_count: 0, current_count: 0
-WARN failed to place all new desired Clickhouse zones, placed: 0, wanted_to_place: 1
-INFO sufficient ClickhouseKeeper zones exist in plan, desired_count: 0, current_count: 0
-INFO sufficient ClickhouseServer zones exist in plan, desired_count: 0, current_count: 0
-INFO sufficient CockroachDb zones exist in plan, desired_count: 0, current_count: 0
-WARN failed to place all new desired CruciblePantry zones, placed: 0, wanted_to_place: 3
-WARN failed to place all new desired InternalDns zones, placed: 0, wanted_to_place: 3
-INFO sufficient ExternalDns zones exist in plan, desired_count: 0, current_count: 0
-WARN failed to place all new desired Nexus zones, placed: 0, wanted_to_place: 3
-INFO sufficient Oximeter zones exist in plan, desired_count: 0, current_count: 0
 WARN cannot issue more SP updates (no current artifacts)
-INFO some zones not yet up-to-date, sled_id: 89d02b1b-478c-401a-8e28-7a26f74fa41b, zones_currently_updating: [ZoneCurrentlyUpdating { zone_id: b3c9c041-d2f0-4767-bdaf-0e52e9d7a013 (service), zone_kind: InternalNtp, reason: MissingInInventory { bp_image_source: InstallDataset } }]
-INFO will ensure cockroachdb setting, setting: cluster.preserve_downgrade_option, value: DoNotModify
 generated blueprint 86db3308-f817-4626-8838-4085949a6a41 based on parent blueprint ade5749d-bdf3-4fab-a8ae-00bea01b3a5a
 
 > blueprint-list
@@ -1018,19 +1005,7 @@ parent:    02697f74-b14a-4418-90f0-c28b2a3a6aa9
 > # sled to be expunged.
 > blueprint-plan latest
 INFO skipping noop image source check for all sleds, reason: no target release is currently set
-INFO sufficient BoundaryNtp zones exist in plan, desired_count: 0, current_count: 0
-INFO sufficient Clickhouse zones exist in plan, desired_count: 1, current_count: 1
-INFO sufficient ClickhouseKeeper zones exist in plan, desired_count: 0, current_count: 0
-INFO sufficient ClickhouseServer zones exist in plan, desired_count: 0, current_count: 0
-INFO sufficient CockroachDb zones exist in plan, desired_count: 0, current_count: 0
-INFO sufficient CruciblePantry zones exist in plan, desired_count: 3, current_count: 3
-INFO sufficient InternalDns zones exist in plan, desired_count: 3, current_count: 3
-INFO sufficient ExternalDns zones exist in plan, desired_count: 3, current_count: 3
-INFO sufficient Nexus zones exist in plan, desired_count: 3, current_count: 3
-INFO sufficient Oximeter zones exist in plan, desired_count: 0, current_count: 0
 WARN cannot issue more SP updates (no current artifacts)
-INFO all zones up-to-date
-INFO will ensure cockroachdb setting, setting: cluster.preserve_downgrade_option, value: DoNotModify
 generated blueprint 86db3308-f817-4626-8838-4085949a6a41 based on parent blueprint ade5749d-bdf3-4fab-a8ae-00bea01b3a5a
 
 > blueprint-diff ade5749d-bdf3-4fab-a8ae-00bea01b3a5a latest
