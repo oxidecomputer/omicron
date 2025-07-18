@@ -160,26 +160,26 @@ impl From<HwRotSlot> for RotSlot {
 
 // See [`M2Slot`].
 impl_enum_type!(
-    HwHostPhase1SlotEnum:
+    HwM2SlotEnum:
 
     #[derive(Copy, Clone, Debug, AsExpression, FromSqlRow, PartialEq)]
-    pub enum HwHostPhase1Slot;
+    pub enum HwM2Slot;
 
     // Enum values
     A => b"A"
     B => b"B"
 );
 
-impl From<HwHostPhase1Slot> for M2Slot {
-    fn from(value: HwHostPhase1Slot) -> Self {
+impl From<HwM2Slot> for M2Slot {
+    fn from(value: HwM2Slot) -> Self {
         match value {
-            HwHostPhase1Slot::A => Self::A,
-            HwHostPhase1Slot::B => Self::B,
+            HwM2Slot::A => Self::A,
+            HwM2Slot::B => Self::B,
         }
     }
 }
 
-impl From<M2Slot> for HwHostPhase1Slot {
+impl From<M2Slot> for HwM2Slot {
     fn from(value: M2Slot) -> Self {
         match value {
             M2Slot::A => Self::A,
@@ -791,7 +791,7 @@ pub struct InvHostPhase1FlashHash {
     pub time_collected: DateTime<Utc>,
     pub source: String,
 
-    pub slot: HwHostPhase1Slot,
+    pub slot: HwM2Slot,
     pub hash: ArtifactHash,
 }
 

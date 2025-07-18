@@ -31,7 +31,7 @@ use nexus_db_errors::ErrorHandler;
 use nexus_db_errors::public_error_from_diesel;
 use nexus_db_errors::public_error_from_diesel_lookup;
 use nexus_db_model::ArtifactHash;
-use nexus_db_model::HwHostPhase1Slot;
+use nexus_db_model::HwM2Slot;
 use nexus_db_model::InvCaboose;
 use nexus_db_model::InvClickhouseKeeperMembership;
 use nexus_db_model::InvCockroachStatus;
@@ -72,7 +72,7 @@ use nexus_db_model::{
 };
 use nexus_db_model::{HwPowerState, InvZoneManifestNonBoot};
 use nexus_db_model::{HwRotSlot, InvMupdateOverrideNonBoot};
-use nexus_db_schema::enums::HwHostPhase1SlotEnum;
+use nexus_db_schema::enums::HwM2SlotEnum;
 use nexus_db_schema::enums::HwRotSlotEnum;
 use nexus_db_schema::enums::RotImageErrorEnum;
 use nexus_db_schema::enums::RotPageWhichEnum;
@@ -699,8 +699,8 @@ impl DataStore {
                             phase1.source
                                 .clone()
                                 .into_sql::<diesel::sql_types::Text>(),
-                            HwHostPhase1Slot::from(phase1.slot)
-                                .into_sql::<HwHostPhase1SlotEnum>(),
+                            HwM2Slot::from(phase1.slot)
+                                .into_sql::<HwM2SlotEnum>(),
                             ArtifactHash(phase1.hash)
                                 .into_sql::<diesel::sql_types::Text>(),
                         ))

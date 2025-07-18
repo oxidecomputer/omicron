@@ -1564,7 +1564,7 @@ table! {
         time_collected -> Timestamptz,
         source -> Text,
 
-        slot -> crate::enums::HwHostPhase1SlotEnum,
+        slot -> crate::enums::HwM2SlotEnum,
         hash -> Text,
     }
 }

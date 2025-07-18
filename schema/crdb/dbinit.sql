@@ -3506,7 +3506,7 @@ CREATE TABLE IF NOT EXISTS omicron.public.inv_root_of_trust (
 );
 
 -- host phase 1 slots
-CREATE TYPE IF NOT EXISTS omicron.public.hw_host_phase_1_slot AS ENUM (
+CREATE TYPE IF NOT EXISTS omicron.public.hw_m2_slot AS ENUM (
     'A',
     'B'
 );
@@ -3527,7 +3527,7 @@ CREATE TABLE IF NOT EXISTS omicron.public.inv_host_phase_1_flash_hash (
     source TEXT NOT NULL,
 
     -- phase 1 slot for this hash
-    slot omicron.public.hw_host_phase_1_slot NOT NULL,
+    slot omicron.public.hw_m2_slot NOT NULL,
     -- the actual hash of the contents
     hash STRING(64) NOT NULL,
 
