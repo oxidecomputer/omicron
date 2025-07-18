@@ -22549,7 +22549,7 @@
           },
           "rib_priority": {
             "nullable": true,
-            "description": "Local preference for route. Higher preference indictes precedence within and across protocols.",
+            "description": "Route RIB priority. Higher priority indicates precedence within and across protocols.",
             "type": "integer",
             "format": "uint8",
             "minimum": 0
@@ -24825,7 +24825,7 @@
           },
           "rib_priority": {
             "nullable": true,
-            "description": "RIB Priority indicating priority within and across protocols.",
+            "description": "Route RIB priority. Higher priority indicates precedence within and across protocols.",
             "type": "integer",
             "format": "uint8",
             "minimum": 0
