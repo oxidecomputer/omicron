@@ -6959,6 +6959,7 @@ dependencies = [
  "id-map",
  "iddqd",
  "illumos-utils",
+ "indent_write",
  "internal-dns-types",
  "ipnetwork",
  "itertools 0.14.0",
