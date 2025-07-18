@@ -35,8 +35,8 @@ use tufaceous_artifact::ArtifactHash;
 use uuid::Uuid;
 
 use crate::inventory::{
-    CabooseWhich, Collection, Dataset, PhysicalDisk, RotPageWhich, SledAgent,
-    TimeSync, Zpool,
+    CabooseWhich, Collection, Dataset, InternalDnsGenerationStatus,
+    PhysicalDisk, RotPageWhich, SledAgent, TimeSync, Zpool,
 };
 
 /// Code to display inventory collections.
@@ -701,6 +701,12 @@ fn display_sleds(
                     &collection.ntp_timesync,
                     &mut indented,
                 )?;
+
+                display_internal_dns_status(
+                    config,
+                    &collection.internal_dns_generation_status,
+                    &mut indented,
+                )?;
             }
 
             {
@@ -904,6 +910,21 @@ fn display_boot_partition_contents(
         }
     }
 
+    Ok(())
+}
+
+fn display_internal_dns_status(
+    ledgered_sled_config: &OmicronSledConfig,
+    internal_dns_generation_status: &IdOrdMap<InternalDnsGenerationStatus>,
+    f: &mut dyn fmt::Write,
+) -> fmt::Result {
+    let internal_dns_generation_status = ledgered_sled_config
+        .zones
+        .keys()
+        .find_map(|zone_id| internal_dns_generation_status.get(zone_id));
+    if let Some(st) = internal_dns_generation_status {
+        writeln!(f, "Internal DNS generation: {}", st.generation)?
+    }
     Ok(())
 }
 

@@ -13,6 +13,7 @@ base64.workspace = true
 camino.workspace = true
 chrono.workspace = true
 clickhouse-admin-keeper-client.workspace = true
+dns-service-client.workspace = true
 clickhouse-admin-server-client.workspace = true
 clickhouse-admin-types.workspace = true
 futures.workspace = true
