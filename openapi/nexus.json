@@ -11577,6 +11577,216 @@
         }
       }
     },
+    "/v1/users/{user_id}": {
+      "get": {
+        "tags": [
+          "silos"
+        ],
+        "summary": "Fetch user",
+        "operationId": "user_view",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "user_id",
+            "description": "ID of the user",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/User"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/v1/users/{user_id}/access-tokens": {
+      "get": {
+        "tags": [
+          "silos"
+        ],
+        "summary": "List user's access tokens",
+        "operationId": "user_token_list",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "user_id",
+            "description": "ID of the user",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "description": "Maximum number of items returned by a single call",
+            "schema": {
+              "nullable": true,
+              "type": "integer",
+              "format": "uint32",
+              "minimum": 1
+            }
+          },
+          {
+            "in": "query",
+            "name": "page_token",
+            "description": "Token returned by previous call to retrieve the subsequent page",
+            "schema": {
+              "nullable": true,
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "sort_by",
+            "schema": {
+              "$ref": "#/components/schemas/IdSortMode"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DeviceAccessTokenResultsPage"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "x-dropshot-pagination": {
+          "required": []
+        }
+      }
+    },
+    "/v1/users/{user_id}/logout": {
+      "post": {
+        "tags": [
+          "silos"
+        ],
+        "summary": "Log user out",
+        "description": "Silo admins can use this endpoint to log the specified user out by deleting all of their tokens AND sessions. This cannot be undone.",
+        "operationId": "user_logout",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "user_id",
+            "description": "ID of the user",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "resource updated"
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/v1/users/{user_id}/sessions": {
+      "get": {
+        "tags": [
+          "silos"
+        ],
+        "summary": "List user's console sessions",
+        "operationId": "user_session_list",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "user_id",
+            "description": "ID of the user",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "description": "Maximum number of items returned by a single call",
+            "schema": {
+              "nullable": true,
+              "type": "integer",
+              "format": "uint32",
+              "minimum": 1
+            }
+          },
+          {
+            "in": "query",
+            "name": "page_token",
+            "description": "Token returned by previous call to retrieve the subsequent page",
+            "schema": {
+              "nullable": true,
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "sort_by",
+            "schema": {
+              "$ref": "#/components/schemas/IdSortMode"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ConsoleSessionResultsPage"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "x-dropshot-pagination": {
+          "required": []
+        }
+      }
+    },
     "/v1/utilization": {
       "get": {
         "tags": [
@@ -16153,6 +16363,51 @@
             "type": "array",
             "items": {
               "$ref": "#/components/schemas/Certificate"
+            }
+          },
+          "next_page": {
+            "nullable": true,
+            "description": "token used to fetch the next page of results (if any)",
+            "type": "string"
+          }
+        },
+        "required": [
+          "items"
+        ]
+      },
+      "ConsoleSession": {
+        "description": "View of a console session",
+        "type": "object",
+        "properties": {
+          "id": {
+            "description": "A unique, immutable, system-controlled identifier for the session",
+            "type": "string",
+            "format": "uuid"
+          },
+          "time_created": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "time_last_used": {
+            "type": "string",
+            "format": "date-time"
+          }
+        },
+        "required": [
+          "id",
+          "time_created",
+          "time_last_used"
+        ]
+      },
+      "ConsoleSessionResultsPage": {
+        "description": "A single page of results",
+        "type": "object",
+        "properties": {
+          "items": {
+            "description": "list of items on this page of results",
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ConsoleSession"
             }
           },
           "next_page": {
@@ -22294,7 +22549,7 @@
           },
           "rib_priority": {
             "nullable": true,
-            "description": "Local preference for route. Higher preference indictes precedence within and across protocols.",
+            "description": "Route RIB priority. Higher priority indicates precedence within and across protocols.",
             "type": "integer",
             "format": "uint8",
             "minimum": 0
@@ -24570,7 +24825,7 @@
           },
           "rib_priority": {
             "nullable": true,
-            "description": "RIB Priority indicating priority within and across protocols.",
+            "description": "Route RIB priority. Higher priority indicates precedence within and across protocols.",
             "type": "integer",
             "format": "uint8",
             "minimum": 0
@@ -27154,14 +27409,14 @@
             "description": "sort in increasing order of timestamp and ID, i.e., earliest first",
             "type": "string",
             "enum": [
-              "ascending"
+              "time_and_id_ascending"
             ]
           },
           {
             "description": "sort in increasing order of timestamp and ID, i.e., most recent first",
             "type": "string",
             "enum": [
-              "descending"
+              "time_and_id_descending"
             ]
           }
         ]
