@@ -1058,6 +1058,7 @@ Usage: omdb sled-agent [OPTIONS] <COMMAND>
 
 Commands:
   zones           print information about zones
+  nics            print information about network interfaces
   bootstore       print information about the local bootstore node
   chicken-switch  control "chicken switches" (potentially-destructive sled-agent behavior that can
                   be toggled on or off via `omdb`)
