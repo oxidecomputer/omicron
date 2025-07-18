@@ -13,6 +13,10 @@ export PATH="$OMICRON_WS/out/clickhouse:$PATH"
 export PATH="$OMICRON_WS/out/dendrite-stub/bin:$PATH"
 export PATH="$OMICRON_WS/out/mgd/root/opt/oxide/mgd/bin:$PATH"
 
+# remove duplicates, preserving order
+UPATH=$(echo "$PATH" |tr ':' '\n' | cat -n | sort -uk2 | sort -n | cut -f2- | paste -sd: -)
+export PATH=$UPATH
+
 # if xtrace was set previously, do not unset it
 case $OLD_SHELL_OPTS in
     *x*)
