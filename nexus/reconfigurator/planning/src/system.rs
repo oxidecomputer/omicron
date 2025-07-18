@@ -57,6 +57,7 @@ use omicron_common::api::external::ByteCount;
 use omicron_common::api::external::Generation;
 use omicron_common::disk::DiskIdentity;
 use omicron_common::disk::DiskVariant;
+use omicron_common::disk::M2Slot;
 use omicron_common::policy::INTERNAL_DNS_REDUNDANCY;
 use omicron_common::policy::NEXUS_REDUNDANCY;
 use omicron_uuid_kinds::SledUuid;
@@ -69,6 +70,7 @@ use std::net::Ipv4Addr;
 use std::net::Ipv6Addr;
 use std::sync::Arc;
 use std::time::Duration;
+use tufaceous_artifact::ArtifactHash;
 use tufaceous_artifact::ArtifactVersion;
 
 /// Describes an actual or synthetic Oxide rack for planning and testing
@@ -596,6 +598,18 @@ impl SystemDescription {
                     part_number: sp_state.model.clone(),
                     serial_number: sp_state.serial_number.clone(),
                 };
+
+                for (m2_slot, hash) in s.sp_host_phase_1_hash_flash() {
+                    builder
+                        .found_host_phase_1_flash_hash(
+                            &baseboard_id,
+                            m2_slot,
+                            "fake MGS 1",
+                            hash,
+                        )
+                        .context("recording SP host phase 1 flash hash")?;
+                }
+
                 if let Some(active) = &s.sp_active_caboose() {
                     builder
                         .found_caboose(
@@ -805,6 +819,7 @@ pub struct SledHwInventory<'a> {
     pub baseboard_id: &'a BaseboardId,
     pub sp: &'a nexus_types::inventory::ServiceProcessor,
     pub rot: &'a nexus_types::inventory::RotState,
+    pub sp_host_phase_1_hash_flash: BTreeMap<M2Slot, ArtifactHash>,
     pub sp_active: Option<Arc<nexus_types::inventory::Caboose>>,
     pub sp_inactive: Option<Arc<nexus_types::inventory::Caboose>>,
 }
@@ -822,6 +837,7 @@ pub struct Sled {
     policy: SledPolicy,
     state: SledState,
     resources: SledResources,
+    sp_host_phase_1_hash_flash: BTreeMap<M2Slot, ArtifactHash>,
     sp_active_caboose: Option<Arc<nexus_types::inventory::Caboose>>,
     sp_inactive_caboose: Option<Arc<nexus_types::inventory::Caboose>>,
 }
@@ -972,6 +988,12 @@ impl Sled {
             policy,
             state: SledState::Active,
             resources: SledResources { subnet: sled_subnet, zpools },
+            sp_host_phase_1_hash_flash: [
+                (M2Slot::A, ArtifactHash([1; 32])),
+                (M2Slot::B, ArtifactHash([2; 32])),
+            ]
+            .into_iter()
+            .collect(),
             sp_active_caboose: Some(Arc::new(Self::default_sp_caboose(
                 String::from("0.0.1"),
             ))),
@@ -1006,6 +1028,10 @@ impl Sled {
             })
             .unwrap_or(Baseboard::Unknown);
 
+        let sp_host_phase_1_hash_flash = inventory_sp
+            .as_ref()
+            .map(|hw| hw.sp_host_phase_1_hash_flash.clone())
+            .unwrap_or_default();
         let sp_active_caboose =
             inventory_sp.as_ref().and_then(|hw| hw.sp_active.clone());
         let sp_inactive_caboose =
@@ -1119,6 +1145,7 @@ impl Sled {
             policy: sled_policy,
             state: sled_state,
             resources: sled_resources,
+            sp_host_phase_1_hash_flash,
             sp_active_caboose,
             sp_inactive_caboose,
         }
@@ -1145,6 +1172,14 @@ impl Sled {
 
     pub fn sp_state(&self) -> Option<&(u16, SpState)> {
         self.inventory_sp.as_ref()
+    }
+
+    pub fn sp_host_phase_1_hash_flash(
+        &self,
+    ) -> impl Iterator<Item = (M2Slot, ArtifactHash)> + '_ {
+        self.sp_host_phase_1_hash_flash
+            .iter()
+            .map(|(&slot, &hash)| (slot, hash))
     }
 
     fn sled_agent_inventory(&self) -> &Inventory {

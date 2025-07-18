@@ -1025,9 +1025,11 @@ Sled serial0
     power:    A2
     revision: 0
     MGS slot: Sled 0 (cubby 0)
-    found at: 2025-07-18 15:33:16.074202 UTC from fake MGS 1
+    found at: <REDACTED_TIMESTAMP> from fake MGS 1
     host phase 1 hashes:
-        SLOT HASH 
+        SLOT HASH                                                             
+        A    0101010101010101010101010101010101010101010101010101010101010101 
+        B    0202020202020202020202020202020202020202020202020202020202020202 
     cabooses:
         SLOT    BOARD       NAME        VERSION GIT_COMMIT SIGN 
         SpSlot0 SimGimletSp SimGimletSp 0.0.1   unknown    n/a  
@@ -1045,9 +1047,11 @@ Sled serial1
     power:    A2
     revision: 0
     MGS slot: Sled 1 (cubby 1)
-    found at: 2025-07-18 15:33:16.074361 UTC from fake MGS 1
+    found at: <REDACTED_TIMESTAMP> from fake MGS 1
     host phase 1 hashes:
-        SLOT HASH 
+        SLOT HASH                                                             
+        A    0101010101010101010101010101010101010101010101010101010101010101 
+        B    0202020202020202020202020202020202020202020202020202020202020202 
     cabooses:
         SLOT    BOARD       NAME        VERSION GIT_COMMIT SIGN 
         SpSlot0 SimGimletSp SimGimletSp 0.0.1   unknown    n/a  
@@ -1065,9 +1069,11 @@ Sled serial2
     power:    A2
     revision: 0
     MGS slot: Sled 2 (cubby 2)
-    found at: 2025-07-18 15:33:16.074434 UTC from fake MGS 1
+    found at: <REDACTED_TIMESTAMP> from fake MGS 1
     host phase 1 hashes:
-        SLOT HASH 
+        SLOT HASH                                                             
+        A    0101010101010101010101010101010101010101010101010101010101010101 
+        B    0202020202020202020202020202020202020202020202020202020202020202 
     cabooses:
         SLOT    BOARD       NAME        VERSION GIT_COMMIT SIGN 
         SpSlot0 SimGimletSp SimGimletSp 0.0.1   unknown    n/a  

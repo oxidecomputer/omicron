@@ -6799,6 +6799,7 @@ dependencies = [
  "omicron-workspace-hack",
  "petname",
  "slog",
+ "strum 0.27.1",
  "swrite",
  "sync-ptr",
  "thiserror 2.0.12",

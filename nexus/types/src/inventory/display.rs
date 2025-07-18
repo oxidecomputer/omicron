@@ -342,7 +342,13 @@ fn display_devices(
             write!(f, " (cubby {})", sp.sp_slot)?;
         }
         writeln!(f, "")?;
-        writeln!(f, "    found at: {} from {}", sp.time_collected, sp.source)?;
+        writeln!(
+            f,
+            "    found at: {} from {}",
+            sp.time_collected
+                .to_rfc3339_opts(SecondsFormat::Millis, /* use_z */ true),
+            sp.source
+        )?;
 
         #[derive(Tabled)]
         #[tabled(rename_all = "SCREAMING_SNAKE_CASE")]
