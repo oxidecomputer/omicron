@@ -61,8 +61,11 @@ impl super::Nexus {
         &self,
         opctx: &OpContext,
         reason: &'static str,
+        user_comment: Option<String>,
     ) -> CreateResult<SupportBundle> {
-        self.db_datastore.support_bundle_create(&opctx, reason, self.id).await
+        self.db_datastore
+            .support_bundle_create(&opctx, reason, self.id, user_comment)
+            .await
     }
 
     pub async fn support_bundle_download(
@@ -223,5 +226,28 @@ impl super::Nexus {
             )
             .await?;
         Ok(())
+    }
+
+    pub async fn support_bundle_update_user_comment(
+        &self,
+        opctx: &OpContext,
+        id: SupportBundleUuid,
+        user_comment: Option<String>,
+    ) -> LookupResult<SupportBundle> {
+        let (authz_bundle, ..) = LookupPath::new(opctx, &self.db_datastore)
+            .support_bundle(id)
+            .lookup_for(authz::Action::Modify)
+            .await?;
+
+        self.db_datastore
+            .support_bundle_update_user_comment(
+                &opctx,
+                &authz_bundle,
+                user_comment,
+            )
+            .await?;
+
+        // Return the updated bundle
+        self.support_bundle_view(opctx, id).await
     }
 }

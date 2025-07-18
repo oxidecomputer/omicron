@@ -911,6 +911,16 @@
       "post": {
         "summary": "Create a new support bundle",
         "operationId": "support_bundle_create",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SupportBundleCreate"
+              }
+            }
+          },
+          "required": true
+        },
         "responses": {
           "201": {
             "description": "successful creation",
@@ -947,6 +957,50 @@
             }
           }
         ],
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SupportBundleInfo"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      },
+      "put": {
+        "summary": "Update a support bundle",
+        "operationId": "support_bundle_update",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "bundle_id",
+            "description": "ID of the support bundle",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SupportBundleUpdate"
+              }
+            }
+          },
+          "required": true
+        },
         "responses": {
           "200": {
             "description": "successful operation",
@@ -7419,6 +7473,16 @@
           "weight"
         ]
       },
+      "SupportBundleCreate": {
+        "type": "object",
+        "properties": {
+          "user_comment": {
+            "nullable": true,
+            "description": "User comment for the support bundle",
+            "type": "string"
+          }
+        }
+      },
       "SupportBundleInfo": {
         "type": "object",
         "properties": {
@@ -7438,6 +7502,10 @@
           "time_created": {
             "type": "string",
             "format": "date-time"
+          },
+          "user_comment": {
+            "nullable": true,
+            "type": "string"
           }
         },
         "required": [
@@ -7499,6 +7567,16 @@
             ]
           }
         ]
+      },
+      "SupportBundleUpdate": {
+        "type": "object",
+        "properties": {
+          "user_comment": {
+            "nullable": true,
+            "description": "User comment for the support bundle",
+            "type": "string"
+          }
+        }
       },
       "SwitchLocation": {
         "description": "Identifies switch physical location",
