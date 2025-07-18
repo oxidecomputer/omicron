@@ -5,8 +5,9 @@
 //! Flow and root stat tracking for individual OPTE ports.
 
 use super::Handle;
+use iddqd::{BiHashItem, BiHashMap, bi_upcast};
 use omicron_common::api::external::{
-    self, Flow, FlowMetadata, FlowStat as ExternalFlowStat,
+    self, Flow, FlowMetadata, FlowStat as ExternalFlowStat, VpcEntity,
 };
 use oxide_vpc::api::{
     Direction, FlowStat, FullCounter, InnerFlowId, stat as vpc_stat,
@@ -14,7 +15,7 @@ use oxide_vpc::api::{
 use slog::Logger;
 use slog_error_chain::InlineErrorChain;
 use std::{
-    collections::{HashMap, hash_map::Entry},
+    collections::{HashMap, HashSet, hash_map::Entry},
     sync::{
         Arc, LazyLock, RwLock,
         atomic::{AtomicBool, Ordering},
@@ -76,12 +77,18 @@ impl PortStats {
                     .last
                     .bases
                     .iter()
-                    .filter_map(|v| match state.label_map.get(v) {
-                        Some(FlowLabel::Destination(v)) => {
+                    .filter_map(|v| match state.label_map.get1(v) {
+                        Some(StatIdMapping {
+                            label: FlowLabel::Destination(v),
+                            ..
+                        }) => {
                             forwarded = Some(v.clone());
                             None
                         }
-                        Some(FlowLabel::Entity(v)) => Some(v.clone()),
+                        Some(StatIdMapping {
+                            label: FlowLabel::Entity(v),
+                            ..
+                        }) => Some(v.clone()),
                         _ => None,
                     })
                     .collect();
@@ -151,6 +158,31 @@ impl PortStats {
 
     // TODO: want `fn root_stats`, need to be able to pull back up into
     //       oximeter in particular.
+
+    /// Associate a control plane entity with a new opaque stat ID for OPTE,
+    /// or retrieve the existing value if needed.
+    pub fn register_entity(&self, entity: VpcEntity) -> Uuid {
+        self.shared.register_entity(entity)
+    }
+
+    /// Remove the stat ID mapping for a given control plane entity.
+    pub fn deregister_entity(&self, entity: VpcEntity) {
+        self.shared.deregister_entity(entity)
+    }
+
+    /// Retrieve all currently registered VPC Entities.
+    pub fn entities(&self) -> HashSet<VpcEntity> {
+        let state = self.shared.state.read().unwrap();
+        state
+            .label_map
+            .iter()
+            .filter_map(|v| match &v.label {
+                FlowLabel::Entity(VpcEntity::FirewallDefaultIn) => None,
+                FlowLabel::Entity(v) => Some(v.clone()),
+                _ => None,
+            })
+            .collect()
+    }
 }
 
 #[derive(Debug)]
@@ -222,6 +254,26 @@ impl PortStatsShared {
             .flow_instances
             .retain(|_, v| now.duration_since(v.hit_at) <= PRUNE_AGE);
     }
+
+    fn register_entity(&self, entity: VpcEntity) -> Uuid {
+        let mut state = self.state.write().unwrap();
+        let id = Uuid::new_v4();
+        let label = FlowLabel::Entity(entity);
+        match state.label_map.insert_unique(StatIdMapping { id, label }) {
+            Ok(()) => id,
+            Err(item) => item.duplicates()[0].id,
+        }
+    }
+
+    // XXX: Should this actually remove each entry, or set it for soft
+    //      deletion? We may want to keep entries around for a little
+    //      longer to enable the future oximeter task some time to get
+    //      evacuated stats up-to-date after a rule change.
+    fn deregister_entity(&self, entity: VpcEntity) {
+        let mut state = self.state.write().unwrap();
+        let label = FlowLabel::Entity(entity);
+        state.label_map.remove2(&label);
+    }
 }
 
 #[derive(Debug, PartialEq, PartialOrd, Ord, Hash, Eq)]
@@ -230,36 +282,57 @@ struct Timed<S> {
     body: S,
 }
 
-static BASE_MAP: LazyLock<HashMap<Uuid, FlowLabel>> = LazyLock::new(|| {
+#[derive(Debug, Clone)]
+struct StatIdMapping {
+    id: Uuid,
+    label: FlowLabel,
+}
+
+impl BiHashItem for StatIdMapping {
+    type K1<'a> = &'a Uuid;
+    type K2<'a> = &'a FlowLabel;
+
+    fn key1(&self) -> Self::K1<'_> {
+        &self.id
+    }
+
+    fn key2(&self) -> Self::K2<'_> {
+        &self.label
+    }
+
+    bi_upcast!();
+}
+
+static BASE_MAP: LazyLock<BiHashMap<StatIdMapping>> = LazyLock::new(|| {
     [
-        (
-            vpc_stat::DESTINATION_INTERNET,
-            FlowLabel::Destination(external::ForwardClass::External),
-        ),
-        (
-            vpc_stat::DESTINATION_VPC_LOCAL,
-            FlowLabel::Destination(external::ForwardClass::VpcLocal),
-        ),
-        (
-            vpc_stat::FW_DEFAULT_IN,
-            FlowLabel::Entity(external::VpcEntity::FirewallDefaultIn),
-        ),
-        (
-            vpc_stat::FW_DEFAULT_OUT,
-            FlowLabel::Builtin(VpcBuiltinLabel::FirewallDefaultOut),
-        ),
-        (
-            vpc_stat::ROUTER_NOROUTE,
-            FlowLabel::Builtin(VpcBuiltinLabel::NoRouteMatched),
-        ),
-        (
-            vpc_stat::GATEWAY_NOSPOOF_IN,
-            FlowLabel::Builtin(VpcBuiltinLabel::SpoofPrevention),
-        ),
-        (
-            vpc_stat::GATEWAY_NOSPOOF_OUT,
-            FlowLabel::Builtin(VpcBuiltinLabel::SpoofPrevention),
-        ),
+        StatIdMapping {
+            id: vpc_stat::DESTINATION_INTERNET,
+            label: FlowLabel::Destination(external::ForwardClass::External),
+        },
+        StatIdMapping {
+            id: vpc_stat::DESTINATION_VPC_LOCAL,
+            label: FlowLabel::Destination(external::ForwardClass::VpcLocal),
+        },
+        StatIdMapping {
+            id: vpc_stat::FW_DEFAULT_IN,
+            label: FlowLabel::Entity(VpcEntity::FirewallDefaultIn),
+        },
+        StatIdMapping {
+            id: vpc_stat::FW_DEFAULT_OUT,
+            label: FlowLabel::Builtin(VpcBuiltinLabel::FirewallDefaultOut),
+        },
+        StatIdMapping {
+            id: vpc_stat::ROUTER_NOROUTE,
+            label: FlowLabel::Builtin(VpcBuiltinLabel::NoRouteMatched),
+        },
+        StatIdMapping {
+            id: vpc_stat::GATEWAY_NOSPOOF_IN,
+            label: FlowLabel::Builtin(VpcBuiltinLabel::SpoofPrevention),
+        },
+        StatIdMapping {
+            id: vpc_stat::GATEWAY_NOSPOOF_OUT,
+            label: FlowLabel::Builtin(VpcBuiltinLabel::SpoofPrevention),
+        },
     ]
     .into_iter()
     .collect()
@@ -269,7 +342,7 @@ static BASE_MAP: LazyLock<HashMap<Uuid, FlowLabel>> = LazyLock::new(|| {
 struct State {
     flows: HashMap<InnerFlowId, Timed<FlowSnapshot>>,
     roots: HashMap<Uuid, Timed<FullCounter>>,
-    label_map: HashMap<Uuid, FlowLabel>,
+    label_map: BiHashMap<StatIdMapping>,
     flow_instances: HashMap<UniqueFlow, Timed<Uuid>>,
 }
 
@@ -326,16 +399,14 @@ async fn run_port_stat(state: Arc<PortStatsShared>) {
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Hash, PartialEq, Eq)]
 pub enum FlowLabel {
-    Entity(external::VpcEntity),
+    Entity(VpcEntity),
     Destination(external::ForwardClass),
-    // TODO: These will be used as part of oximeter association.
-    #[expect(unused)]
     Builtin(VpcBuiltinLabel),
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Hash, PartialEq, Eq)]
 pub enum VpcBuiltinLabel {
     NoRouteMatched,
     FirewallDefaultOut,

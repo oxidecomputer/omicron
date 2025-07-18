@@ -1522,8 +1522,7 @@
             "name": "sled",
             "required": true,
             "schema": {
-              "type": "string",
-              "format": "uuid"
+              "$ref": "#/components/schemas/TypedUuidForSledKind"
             }
           },
           {
@@ -1792,6 +1791,15 @@
             "required": true,
             "schema": {
               "$ref": "#/components/schemas/TypedUuidForSledKind"
+            }
+          },
+          {
+            "in": "query",
+            "name": "vpc_id",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
             }
           }
         ],
@@ -5315,6 +5323,11 @@
           "subnet": {
             "$ref": "#/components/schemas/IpNet"
           },
+          "subnet_id": {
+            "nullable": true,
+            "type": "string",
+            "format": "uuid"
+          },
           "transit_ips": {
             "default": [],
             "type": "array",
@@ -5324,6 +5337,11 @@
           },
           "vni": {
             "$ref": "#/components/schemas/Vni"
+          },
+          "vpc_id": {
+            "nullable": true,
+            "type": "string",
+            "format": "uuid"
           }
         },
         "required": [

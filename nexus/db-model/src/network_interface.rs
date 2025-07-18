@@ -78,6 +78,8 @@ impl NetworkInterface {
     ) -> internal::shared::NetworkInterface {
         internal::shared::NetworkInterface {
             id: self.id(),
+            subnet_id: Some(self.subnet_id),
+            vpc_id: Some(self.vpc_id),
             kind: match self.kind {
                 NetworkInterfaceKind::Instance => {
                     internal::shared::NetworkInterfaceKind::Instance {

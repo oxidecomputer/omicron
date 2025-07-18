@@ -74,6 +74,19 @@ pub struct NetworkInterface {
     pub slot: u8,
     #[serde(default)]
     pub transit_ips: Vec<IpNet>,
+
+    // TODO: These entries are nullable because there are some downstream types
+    // (e.g., `OmicronZoneNic` and its CRDB representation) that want to be
+    // converted to `NetworkInterface`s but lack these fields, and since these
+    // are blueprint types it's not clear to me which NICs currently exist to
+    // resolve this via lookup. Every NIC *does have these fields* -- this
+    // should be doable, but it suggests a laborious migration beyond the scope
+    // of flowstats.
+    //
+    // The net result is that we can't correctly aggregate on VPC/subnet scales
+    // for services.
+    pub subnet_id: Option<Uuid>,
+    pub vpc_id: Option<Uuid>,
 }
 
 /// An IP address and port range used for source NAT, i.e., making
@@ -779,6 +792,7 @@ impl TryFrom<&[ipnetwork::IpNetwork]> for IpAllowList {
     Clone, Debug, Deserialize, Serialize, JsonSchema, PartialEq, Eq, Hash,
 )]
 pub struct ResolvedVpcRoute {
+    pub id: Uuid,
     pub dest: IpNet,
     pub target: RouterTarget,
 }
@@ -786,6 +800,7 @@ pub struct ResolvedVpcRoute {
 /// VPC firewall rule after object name resolution has been performed by Nexus
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, JsonSchema)]
 pub struct ResolvedVpcFirewallRule {
+    pub id: Uuid,
     pub status: external::VpcFirewallRuleStatus,
     pub direction: external::VpcFirewallRuleDirection,
     pub targets: Vec<NetworkInterface>,

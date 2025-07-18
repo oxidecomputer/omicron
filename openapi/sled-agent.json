@@ -5754,6 +5754,11 @@
           "subnet": {
             "$ref": "#/components/schemas/IpNet"
           },
+          "subnet_id": {
+            "nullable": true,
+            "type": "string",
+            "format": "uuid"
+          },
           "transit_ips": {
             "default": [],
             "type": "array",
@@ -5763,6 +5768,11 @@
           },
           "vni": {
             "$ref": "#/components/schemas/Vni"
+          },
+          "vpc_id": {
+            "nullable": true,
+            "type": "string",
+            "format": "uuid"
           }
         },
         "required": [
@@ -6842,6 +6852,10 @@
               "$ref": "#/components/schemas/VpcFirewallRuleProtocol"
             }
           },
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
           "priority": {
             "type": "integer",
             "format": "uint16",
@@ -6860,6 +6874,7 @@
         "required": [
           "action",
           "direction",
+          "id",
           "priority",
           "status",
           "targets"
@@ -6872,12 +6887,17 @@
           "dest": {
             "$ref": "#/components/schemas/IpNet"
           },
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
           "target": {
             "$ref": "#/components/schemas/RouterTarget"
           }
         },
         "required": [
           "dest",
+          "id",
           "target"
         ]
       },

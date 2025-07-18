@@ -429,6 +429,10 @@ pub async fn run_standalone_server(
                 external_ip: from_ipaddr_to_external_floating_ip(ip),
                 nic: nexus_types::inventory::NetworkInterface {
                     id: Uuid::new_v4(),
+                    subnet_id: Some(
+                        *nexus_db_fixed_data::vpc_subnet::NEXUS_VPC_SUBNET_ID,
+                    ),
+                    vpc_id: Some(*nexus_db_fixed_data::vpc::SERVICES_VPC_ID),
                     kind: NetworkInterfaceKind::Service {
                         id: id.into_untyped_uuid(),
                     },
@@ -479,6 +483,12 @@ pub async fn run_standalone_server(
                     ),
                     nic: nexus_types::inventory::NetworkInterface {
                         id: Uuid::new_v4(),
+                        subnet_id: Some(
+                            *nexus_db_fixed_data::vpc_subnet::DNS_VPC_SUBNET_ID,
+                        ),
+                        vpc_id: Some(
+                            *nexus_db_fixed_data::vpc::SERVICES_VPC_ID,
+                        ),
                         kind: NetworkInterfaceKind::Service {
                             id: id.into_untyped_uuid(),
                         },

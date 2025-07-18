@@ -501,6 +501,10 @@ mod tests {
             };
             let nexus_nic = NetworkInterface {
                 id: Uuid::new_v4(),
+                subnet_id: Some(
+                    *nexus_db_fixed_data::vpc_subnet::NEXUS_VPC_SUBNET_ID,
+                ),
+                vpc_id: Some(*nexus_db_fixed_data::vpc::SERVICES_VPC_ID),
                 kind: NetworkInterfaceKind::Service {
                     id: nexus_id.into_untyped_uuid(),
                 },
@@ -527,6 +531,10 @@ mod tests {
             };
             let dns_nic = NetworkInterface {
                 id: Uuid::new_v4(),
+                subnet_id: Some(
+                    *nexus_db_fixed_data::vpc_subnet::DNS_VPC_SUBNET_ID,
+                ),
+                vpc_id: Some(*nexus_db_fixed_data::vpc::SERVICES_VPC_ID),
                 kind: NetworkInterfaceKind::Service {
                     id: dns_id.into_untyped_uuid(),
                 },
@@ -556,6 +564,10 @@ mod tests {
             };
             let ntp_nic = NetworkInterface {
                 id: Uuid::new_v4(),
+                subnet_id: Some(
+                    *nexus_db_fixed_data::vpc_subnet::DNS_VPC_SUBNET_ID,
+                ),
+                vpc_id: Some(*nexus_db_fixed_data::vpc::SERVICES_VPC_ID),
                 kind: NetworkInterfaceKind::Service {
                     id: ntp_id.into_untyped_uuid(),
                 },

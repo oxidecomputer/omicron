@@ -5,8 +5,10 @@
 //! Convert Omicron VPC firewall rules to OPTE firewall rules.
 
 use super::net_to_cidr;
+use super::stat::PortStats;
 use crate::opte::Vni;
 use macaddr::MacAddr6;
+use omicron_common::api::external::VpcEntity;
 use omicron_common::api::external::VpcFirewallRuleAction;
 use omicron_common::api::external::VpcFirewallRuleDirection;
 use omicron_common::api::external::VpcFirewallRuleProtocol;
@@ -22,7 +24,7 @@ use oxide_vpc::api::IpAddr;
 use oxide_vpc::api::Ports;
 use oxide_vpc::api::ProtoFilter;
 use oxnet::IpNet;
-use uuid::Uuid;
+use std::collections::HashSet;
 
 trait FromVpcFirewallRule {
     fn action(&self) -> FirewallAction;
@@ -126,9 +128,17 @@ pub fn opte_firewall_rules(
     rules: &[ResolvedVpcFirewallRule],
     vni: &Vni,
     mac: &MacAddr6,
+    stats: &PortStats,
 ) -> Vec<FirewallRule> {
+    let initial_stat_entities = stats.entities();
+    let initial_firewall_rules: HashSet<_> = initial_stat_entities
+        .into_iter()
+        .filter(|v| matches!(v, VpcEntity::FirewallRule(_)))
+        .collect();
+    let mut expected_rules = HashSet::new();
+
     #[allow(clippy::map_flatten)]
-    rules
+    let out = rules
         .iter()
         .filter(|rule| rule.disabled())
         .filter(|rule| {
@@ -145,6 +155,11 @@ pub fn opte_firewall_rules(
             let ports = rule.ports();
             let protos = rule.protos();
             let hosts = rule.hosts();
+
+            let ent = VpcEntity::FirewallRule(rule.id);
+            let stat_id = stats.register_entity(ent.clone());
+            expected_rules.insert(ent);
+
             protos
                 .iter()
                 .map(|proto| {
@@ -171,7 +186,7 @@ pub fn opte_firewall_rules(
                                     .set_protocol(proto.clone());
                                 filters
                             },
-                            stat_id: Some(Uuid::new_v4()),
+                            stat_id: Some(stat_id),
                         })
                         .collect::<Vec<FirewallRule>>()
                 })
@@ -179,5 +194,11 @@ pub fn opte_firewall_rules(
         })
         .flatten()
         .flatten()
-        .collect::<Vec<FirewallRule>>()
+        .collect::<Vec<FirewallRule>>();
+
+    for absent_entity in initial_firewall_rules.difference(&expected_rules) {
+        stats.deregister_entity(absent_entity.clone());
+    }
+
+    out
 }

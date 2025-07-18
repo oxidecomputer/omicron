@@ -9,14 +9,8 @@ use illumos_utils::zpool::ZpoolOrRamdisk;
 use nexus_client::types::{
     BackgroundTasksActivateRequest, ProbeExternalIp, ProbeInfo,
 };
-use omicron_common::api::external::{
-    VpcFirewallRuleAction, VpcFirewallRuleDirection, VpcFirewallRulePriority,
-    VpcFirewallRuleStatus,
-};
-use omicron_common::api::internal::shared::{
-    NetworkInterface, ResolvedVpcFirewallRule,
-};
-use omicron_uuid_kinds::{GenericUuid, OmicronZoneUuid};
+use omicron_common::api::internal::shared::NetworkInterface;
+use omicron_uuid_kinds::{GenericUuid, OmicronZoneUuid, SledUuid};
 use rand::SeedableRng;
 use rand::prelude::IteratorRandom;
 use sled_agent_config_reconciler::{
@@ -25,6 +19,7 @@ use sled_agent_config_reconciler::{
 };
 use sled_agent_zone_images::ramdisk_file_source;
 use slog::{Logger, error, warn};
+use slog_error_chain::InlineErrorChain;
 use std::collections::{HashMap, HashSet};
 use std::hash::{Hash, Hasher};
 use std::sync::Arc;
@@ -59,7 +54,7 @@ pub(crate) struct ProbeManagerInner {
     join_handle: Mutex<Option<JoinHandle<()>>>,
     nexus_client: NexusClient,
     log: Logger,
-    sled_id: Uuid,
+    sled_id: SledUuid,
     vnic_allocator: VnicAllocator<Etherstub>,
     port_manager: PortManager,
     metrics_queue: MetricsRequestQueue,
@@ -71,7 +66,7 @@ pub(crate) struct ProbeManagerInner {
 
 impl ProbeManager {
     pub(crate) fn new(
-        sled_id: Uuid,
+        sled_id: SledUuid,
         nexus_client: NexusClient,
         etherstub: Etherstub,
         port_manager: PortManager,
@@ -240,13 +235,14 @@ impl ProbeManagerInner {
                     }
                 };
 
-                let n_added = self.add(target.difference(&current)).await;
+                let vpcs_to_query = self.add(target.difference(&current)).await;
                 self.remove(current.difference(&target)).await;
                 self.check(current.intersection(&target)).await;
 
                 // If we have created some new probes, we may need the control plane
-                // to provide us with valid routes for the VPC the probe belongs to.
-                if n_added > 0 {
+                // to provide us with valid routes and firewall rules for the VPC the
+                // probe belongs to.
+                if !vpcs_to_query.is_empty() {
                     if let Err(e) = self
                         .nexus_client
                         .bgtask_activate(&BackgroundTasksActivateRequest {
@@ -255,6 +251,17 @@ impl ProbeManagerInner {
                         .await
                     {
                         error!(self.log, "get routes for probe: {e}");
+                    }
+
+                    for vpc in vpcs_to_query {
+                        if let Err(e) = self
+                            .nexus_client
+                            .sled_firewall_rules_request(&self.sled_id, &vpc)
+                            .await
+                        {
+                            error!(self.log, "get firewall rules for probe: {e}";
+                            "vpc_id" => vpc.to_string());
+                        }
                     }
                 }
             }
@@ -294,20 +301,40 @@ impl ProbeManagerInner {
 
     /// Add a set of probes to this sled.
     ///
-    /// Returns the number of inserted probes.
-    async fn add<'a, I>(self: &Arc<Self>, probes: I) -> usize
+    /// Returns the set of VPCs to query for firewall rules for inserted probes.
+    async fn add<'a, I>(self: &Arc<Self>, probes: I) -> HashSet<Uuid>
     where
         I: Iterator<Item = &'a ProbeState>,
     {
-        let mut i = 0;
+        let mut out = HashSet::new();
         for probe in probes {
             info!(self.log, "adding probe {}", probe.id);
             if let Err(e) = self.add_probe(probe).await {
-                error!(self.log, "add probe: {e}");
+                error!(
+                    self.log, "add probe";
+                    "probe_id" => probe.id.to_string(),
+                    "error" => InlineErrorChain::new(e.as_ref()),
+                );
+                continue;
             }
-            i += 1;
+
+            // This invariant is already enforced by add_probe.
+            let Some(nic) = probe.interface.as_ref() else {
+                continue;
+            };
+
+            let Some(vpc_id) = nic.vpc_id else {
+                error!(
+                    self.log, "tried to add probe without valid vpc_id";
+                    "probe_id" => probe.id.to_string(),
+                    "nic_id" => nic.id.to_string(),
+                );
+                continue;
+            };
+
+            out.insert(vpc_id);
         }
-        i
+        out
     }
 
     /// Add a probe to this sled. This sets up resources for the probe zone
@@ -337,16 +364,7 @@ impl ProbeManagerInner {
             source_nat: None,
             ephemeral_ip: Some(eip.ip),
             floating_ips: &[],
-            firewall_rules: &[ResolvedVpcFirewallRule {
-                status: VpcFirewallRuleStatus::Enabled,
-                direction: VpcFirewallRuleDirection::Inbound,
-                targets: vec![nic.clone()],
-                filter_hosts: None,
-                filter_ports: None,
-                filter_protocols: None,
-                action: VpcFirewallRuleAction::Allow,
-                priority: VpcFirewallRulePriority(100),
-            }],
+            firewall_rules: &[], // Initialised using sled_firewall_rules_request.
             dhcp_config: DhcpCfg::default(),
         })?;
 

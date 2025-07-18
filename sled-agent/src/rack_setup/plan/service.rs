@@ -1032,6 +1032,10 @@ impl ServicePortBuilder {
 
         let nic = NetworkInterface {
             id: Uuid::new_v4(),
+            subnet_id: Some(
+                *nexus_db_fixed_data::vpc_subnet::DNS_VPC_SUBNET_ID,
+            ),
+            vpc_id: Some(*nexus_db_fixed_data::vpc::SERVICES_VPC_ID),
             kind: NetworkInterfaceKind::Service {
                 // TODO-cleanup use TypedUuid everywhere
                 id: svc_id.into_untyped_uuid(),
@@ -1073,6 +1077,10 @@ impl ServicePortBuilder {
 
         let nic = NetworkInterface {
             id: Uuid::new_v4(),
+            subnet_id: Some(
+                *nexus_db_fixed_data::vpc_subnet::NEXUS_VPC_SUBNET_ID,
+            ),
+            vpc_id: Some(*nexus_db_fixed_data::vpc::SERVICES_VPC_ID),
             kind: NetworkInterfaceKind::Service {
                 // TODO-cleanup use TypedUuid everywhere
                 id: svc_id.into_untyped_uuid(),
@@ -1133,6 +1141,10 @@ impl ServicePortBuilder {
 
         let nic = NetworkInterface {
             id: Uuid::new_v4(),
+            subnet_id: Some(
+                *nexus_db_fixed_data::vpc_subnet::NTP_VPC_SUBNET_ID,
+            ),
+            vpc_id: Some(*nexus_db_fixed_data::vpc::SERVICES_VPC_ID),
             kind: NetworkInterfaceKind::Service {
                 // TODO-cleanup use TypedUuid everywhere
                 id: svc_id.into_untyped_uuid(),

@@ -415,6 +415,7 @@ pub async fn resolve_firewall_rules_for_sled_agent(
             .map(|protocols| protocols.iter().map(|v| v.0).collect());
 
         sled_agent_rules.push(ResolvedVpcFirewallRule {
+            id: rule.id(),
             status: rule.status.0,
             direction: rule.direction.0,
             targets,
@@ -495,6 +496,32 @@ pub async fn send_sled_agents_firewall_rules(
 
 /// Ensure firewall rules for internal services get reflected on all the
 /// relevant sleds.
+pub async fn plumb_vpc_firewall_rules(
+    datastore: &DataStore,
+    opctx: &OpContext,
+    sleds_filter: &[Uuid],
+    vpc_id: Uuid,
+    sled_lookup_opctx: &OpContext,
+    log: &Logger,
+) -> Result<(), Error> {
+    let vpc = LookupPath::new(opctx, datastore).vpc_id(vpc_id);
+    let fw_rules = vpc_list_firewall_rules(datastore, opctx, &vpc).await?;
+    let (_, _, _, vpc) = vpc.fetch().await?;
+    send_sled_agents_firewall_rules(
+        datastore,
+        opctx,
+        &vpc,
+        &fw_rules,
+        sleds_filter,
+        sled_lookup_opctx,
+        log,
+    )
+    .await?;
+    Ok(())
+}
+
+/// Ensure firewall rules for internal services get reflected on all the
+/// relevant sleds.
 pub async fn plumb_service_firewall_rules(
     datastore: &DataStore,
     opctx: &OpContext,
@@ -502,22 +529,15 @@ pub async fn plumb_service_firewall_rules(
     sled_lookup_opctx: &OpContext,
     log: &Logger,
 ) -> Result<(), Error> {
-    let svcs_vpc = LookupPath::new(opctx, datastore)
-        .vpc_id(*db::fixed_data::vpc::SERVICES_VPC_ID);
-    let svcs_fw_rules =
-        vpc_list_firewall_rules(datastore, opctx, &svcs_vpc).await?;
-    let (_, _, _, svcs_vpc) = svcs_vpc.fetch().await?;
-    send_sled_agents_firewall_rules(
+    plumb_vpc_firewall_rules(
         datastore,
         opctx,
-        &svcs_vpc,
-        &svcs_fw_rules,
         sleds_filter,
+        *db::fixed_data::vpc::SERVICES_VPC_ID,
         sled_lookup_opctx,
         log,
     )
-    .await?;
-    Ok(())
+    .await
 }
 
 /// Return true if the user-facing services allowlist applies to a VPC.

@@ -21565,6 +21565,11 @@
           "subnet": {
             "$ref": "#/components/schemas/IpNet"
           },
+          "subnet_id": {
+            "nullable": true,
+            "type": "string",
+            "format": "uuid"
+          },
           "transit_ips": {
             "default": [],
             "type": "array",
@@ -21574,6 +21579,11 @@
           },
           "vni": {
             "$ref": "#/components/schemas/Vni"
+          },
+          "vpc_id": {
+            "nullable": true,
+            "type": "string",
+            "format": "uuid"
           }
         },
         "required": [

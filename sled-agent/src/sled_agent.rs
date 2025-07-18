@@ -644,7 +644,7 @@ impl SledAgent {
         });
 
         let probes = ProbeManager::new(
-            request.body.id.into_untyped_uuid(),
+            request.body.id,
             nexus_client.clone(),
             etherstub.clone(),
             port_manager.clone(),
