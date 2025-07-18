@@ -7560,16 +7560,22 @@ impl NexusExternalApi for NexusExternalApiImpl {
 
     async fn support_bundle_create(
         rqctx: RequestContext<Self::Context>,
+        body: TypedBody<params::SupportBundleCreate>,
     ) -> Result<HttpResponseCreated<shared::SupportBundleInfo>, HttpError> {
         let apictx = rqctx.context();
         let handler = async {
             let nexus = &apictx.context.nexus;
+            let create_params = body.into_inner();
 
             let opctx =
                 crate::context::op_context_for_external_api(&rqctx).await?;
 
             let bundle = nexus
-                .support_bundle_create(&opctx, "Created by external API")
+                .support_bundle_create(
+                    &opctx,
+                    "Created by external API",
+                    create_params.user_comment,
+                )
                 .await?;
             Ok(HttpResponseCreated(bundle.into()))
         };
@@ -7600,6 +7606,37 @@ impl NexusExternalApi for NexusExternalApiImpl {
                 .await?;
 
             Ok(HttpResponseDeleted())
+        };
+        apictx
+            .context
+            .external_latencies
+            .instrument_dropshot_handler(&rqctx, handler)
+            .await
+    }
+
+    async fn support_bundle_update(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<params::SupportBundlePath>,
+        body: TypedBody<params::SupportBundleUpdate>,
+    ) -> Result<HttpResponseOk<shared::SupportBundleInfo>, HttpError> {
+        let apictx = rqctx.context();
+        let handler = async {
+            let nexus = &apictx.context.nexus;
+            let path = path_params.into_inner();
+            let update = body.into_inner();
+
+            let opctx =
+                crate::context::op_context_for_external_api(&rqctx).await?;
+
+            let bundle = nexus
+                .support_bundle_update_user_comment(
+                    &opctx,
+                    SupportBundleUuid::from_untyped_uuid(path.bundle_id),
+                    update.user_comment,
+                )
+                .await?;
+
+            Ok(HttpResponseOk(bundle.into()))
         };
         apictx
             .context

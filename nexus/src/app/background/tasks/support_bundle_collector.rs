@@ -1454,7 +1454,12 @@ mod test {
         // Assign a bundle to ourselves. We expect to collect it on
         // the next call to "collect_bundle".
         let bundle = datastore
-            .support_bundle_create(&opctx, "For collection testing", nexus.id())
+            .support_bundle_create(
+                &opctx,
+                "For collection testing",
+                nexus.id(),
+                None,
+            )
             .await
             .expect("Couldn't allocate a support bundle");
         assert_eq!(bundle.state, SupportBundleState::Collecting);
@@ -1514,7 +1519,12 @@ mod test {
             TestDataset::setup(cptestctx, &datastore, &opctx, 1).await;
 
         let bundle = datastore
-            .support_bundle_create(&opctx, "For collection testing", nexus.id())
+            .support_bundle_create(
+                &opctx,
+                "For collection testing",
+                nexus.id(),
+                None,
+            )
             .await
             .expect("Couldn't allocate a support bundle");
         assert_eq!(bundle.state, SupportBundleState::Collecting);
@@ -1594,11 +1604,21 @@ mod test {
 
         // Assign two bundles to ourselves.
         let bundle1 = datastore
-            .support_bundle_create(&opctx, "For collection testing", nexus.id())
+            .support_bundle_create(
+                &opctx,
+                "For collection testing",
+                nexus.id(),
+                None,
+            )
             .await
             .expect("Couldn't allocate a support bundle");
         let bundle2 = datastore
-            .support_bundle_create(&opctx, "For collection testing", nexus.id())
+            .support_bundle_create(
+                &opctx,
+                "For collection testing",
+                nexus.id(),
+                None,
+            )
             .await
             .expect("Couldn't allocate a second support bundle");
 
@@ -1679,7 +1699,12 @@ mod test {
         // If we delete the bundle before we start collection, we can delete it
         // immediately.
         let bundle = datastore
-            .support_bundle_create(&opctx, "For collection testing", nexus.id())
+            .support_bundle_create(
+                &opctx,
+                "For collection testing",
+                nexus.id(),
+                None,
+            )
             .await
             .expect("Couldn't allocate a support bundle");
         assert_eq!(bundle.state, SupportBundleState::Collecting);
@@ -1738,7 +1763,12 @@ mod test {
 
         // We can allocate a support bundle and collect it
         let bundle = datastore
-            .support_bundle_create(&opctx, "For collection testing", nexus.id())
+            .support_bundle_create(
+                &opctx,
+                "For collection testing",
+                nexus.id(),
+                None,
+            )
             .await
             .expect("Couldn't allocate a support bundle");
         assert_eq!(bundle.state, SupportBundleState::Collecting);
@@ -1811,7 +1841,12 @@ mod test {
         // We can allocate a support bundle, though we'll fail it before it gets
         // collected.
         let bundle = datastore
-            .support_bundle_create(&opctx, "For collection testing", nexus.id())
+            .support_bundle_create(
+                &opctx,
+                "For collection testing",
+                nexus.id(),
+                None,
+            )
             .await
             .expect("Couldn't allocate a support bundle");
         assert_eq!(bundle.state, SupportBundleState::Collecting);
@@ -1875,7 +1910,12 @@ mod test {
 
         // We can allocate a support bundle and collect it
         let bundle = datastore
-            .support_bundle_create(&opctx, "For collection testing", nexus.id())
+            .support_bundle_create(
+                &opctx,
+                "For collection testing",
+                nexus.id(),
+                None,
+            )
             .await
             .expect("Couldn't allocate a support bundle");
         assert_eq!(bundle.state, SupportBundleState::Collecting);
@@ -1955,7 +1995,12 @@ mod test {
 
         // We can allocate a support bundle and collect it
         let bundle = datastore
-            .support_bundle_create(&opctx, "For collection testing", nexus.id())
+            .support_bundle_create(
+                &opctx,
+                "For collection testing",
+                nexus.id(),
+                None,
+            )
             .await
             .expect("Couldn't allocate a support bundle");
         assert_eq!(bundle.state, SupportBundleState::Collecting);

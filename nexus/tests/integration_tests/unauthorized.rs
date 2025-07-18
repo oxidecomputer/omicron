@@ -397,7 +397,12 @@ static SETUP_REQUESTS: LazyLock<Vec<SetupReq>> = LazyLock::new(|| {
         // Create a Support Bundle
         SetupReq::Post {
             url: &SUPPORT_BUNDLES_URL,
-            body: serde_json::to_value(()).unwrap(),
+            body: serde_json::to_value(
+                &nexus_types::external_api::params::SupportBundleCreate {
+                    user_comment: None,
+                },
+            )
+            .unwrap(),
             id_routes: vec!["/experimental/v1/system/support-bundles/{id}"],
         },
         // Create a trusted root for updates
