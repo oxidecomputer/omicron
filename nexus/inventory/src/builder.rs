@@ -25,6 +25,7 @@ use nexus_types::inventory::CabooseFound;
 use nexus_types::inventory::CabooseWhich;
 use nexus_types::inventory::CockroachStatus;
 use nexus_types::inventory::Collection;
+use nexus_types::inventory::InternalDnsGenerationStatus;
 use nexus_types::inventory::RotPage;
 use nexus_types::inventory::RotPageFound;
 use nexus_types::inventory::RotPageWhich;
@@ -122,6 +123,7 @@ pub struct CollectionBuilder {
         BTreeSet<ClickhouseKeeperClusterMembership>,
     cockroach_status: BTreeMap<NodeId, CockroachStatus>,
     ntp_timesync: IdOrdMap<TimeSync>,
+    internal_dns_generation_status: IdOrdMap<InternalDnsGenerationStatus>,
     // CollectionBuilderRng is taken by value, rather than passed in as a
     // mutable ref, to encourage a tree-like structure where each RNG is
     // generally independent.
@@ -153,6 +155,7 @@ impl CollectionBuilder {
             clickhouse_keeper_cluster_membership: BTreeSet::new(),
             cockroach_status: BTreeMap::new(),
             ntp_timesync: IdOrdMap::new(),
+            internal_dns_generation_status: IdOrdMap::new(),
             rng: CollectionBuilderRng::from_entropy(),
         }
     }
@@ -177,6 +180,7 @@ impl CollectionBuilder {
                 .clickhouse_keeper_cluster_membership,
             cockroach_status: self.cockroach_status,
             ntp_timesync: self.ntp_timesync,
+            internal_dns_generation_status: self.internal_dns_generation_status,
         }
     }
 
@@ -578,6 +582,19 @@ impl CollectionBuilder {
             metrics.get_metric_unsigned(CockroachMetric::LivenessLiveNodes);
         self.cockroach_status.insert(node_id, status);
     }
+
+    /// Record information about internal DNS generation status
+    pub fn found_internal_dns_generation_status(
+        &mut self,
+        status: InternalDnsGenerationStatus,
+    ) -> Result<(), anyhow::Error> {
+        self.internal_dns_generation_status
+            .insert_unique(status)
+            .map_err(|err| err.into_owned())
+            .context(
+                "Internal DNS server reported generation status multiple times",
+            )
+    }
 }
 
 /// Returns the current time, truncated to the previous microsecond.
@@ -638,6 +655,7 @@ mod test {
         assert!(collection.clickhouse_keeper_cluster_membership.is_empty());
         assert!(collection.cockroach_status.is_empty());
         assert!(collection.ntp_timesync.is_empty());
+        assert!(collection.internal_dns_generation_status.is_empty());
     }
 
     // Simple test of a single, fairly typical collection that contains just
