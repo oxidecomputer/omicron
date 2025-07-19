@@ -12296,6 +12296,7 @@ dependencies = [
  "oxlog",
  "parallel-task-set",
  "rand 0.8.5",
+ "regex",
  "schemars",
  "serde",
  "sled-storage",

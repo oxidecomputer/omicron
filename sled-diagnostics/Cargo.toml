@@ -19,6 +19,7 @@ once_cell.workspace = true
 oxlog.workspace = true
 parallel-task-set.workspace = true
 rand.workspace = true
+regex.workspace = true
 schemars.workspace = true
 serde.workspace = true
 slog.workspace = true
