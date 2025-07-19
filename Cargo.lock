@@ -6843,6 +6843,7 @@ dependencies = [
  "id-map",
  "iddqd",
  "illumos-utils",
+ "indent_write",
  "omicron-common",
  "omicron-passwords",
  "omicron-uuid-kinds",

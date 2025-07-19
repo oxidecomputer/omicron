@@ -32,7 +32,8 @@ use tufaceous_artifact::ArtifactHash;
 use uuid::Uuid;
 
 use crate::inventory::{
-    CabooseWhich, Collection, Dataset, PhysicalDisk, RotPageWhich, Zpool,
+    CabooseWhich, Collection, Dataset, PhysicalDisk, RotPageWhich, SledAgent,
+    Zpool,
 };
 
 /// Code to display inventory collections.
@@ -486,12 +487,31 @@ fn display_sleds(
     let mut f = f;
     writeln!(f, "SLED AGENTS")?;
     for sled in &collection.sled_agents {
+        let SledAgent {
+            time_collected,
+            source,
+            sled_id,
+            baseboard_id,
+            sled_agent_address,
+            sled_role,
+            usable_hardware_threads,
+            usable_physical_ram,
+            reservoir_size,
+            disks,
+            zpools,
+            datasets,
+            ledgered_sled_config,
+            reconciler_status,
+            last_reconciliation,
+            zone_image_resolver,
+        } = sled;
+
         writeln!(
             f,
             "\nsled {} (role = {:?}, serial {})",
-            sled.sled_id,
-            sled.sled_role,
-            match &sled.baseboard_id {
+            sled_id,
+            sled_role,
+            match &baseboard_id {
                 Some(baseboard_id) => &baseboard_id.serial_number,
                 None => "unknown",
             },
@@ -502,49 +522,45 @@ fn display_sleds(
         writeln!(
             indented,
             "found at:    {} from {}",
-            sled.time_collected
+            time_collected
                 .to_rfc3339_opts(SecondsFormat::Millis, /* use_z */ true),
-            sled.source
+            source
         )?;
-        writeln!(indented, "address:     {}", sled.sled_agent_address)?;
-        writeln!(
-            indented,
-            "usable hw threads:   {}",
-            sled.usable_hardware_threads
-        )?;
+        writeln!(indented, "address:     {}", sled_agent_address)?;
+        writeln!(indented, "usable hw threads:   {}", usable_hardware_threads)?;
         writeln!(
             indented,
             "usable memory (GiB): {}",
-            sled.usable_physical_ram.to_whole_gibibytes()
+            usable_physical_ram.to_whole_gibibytes()
         )?;
         writeln!(
             indented,
             "reservoir (GiB):     {}",
-            sled.reservoir_size.to_whole_gibibytes()
+            reservoir_size.to_whole_gibibytes()
         )?;
 
-        if !sled.zpools.is_empty() {
+        if !zpools.is_empty() {
             writeln!(indented, "physical disks:")?;
         }
-        for disk in &sled.disks {
+        for disk in disks {
             let PhysicalDisk { identity, variant, slot, .. } = disk;
             let mut indent2 = IndentWriter::new("  ", &mut indented);
             writeln!(indent2, "{variant:?}: {identity:?} in {slot}")?;
         }
 
-        if !sled.zpools.is_empty() {
+        if !zpools.is_empty() {
             writeln!(indented, "zpools")?;
         }
-        for zpool in &sled.zpools {
+        for zpool in zpools {
             let Zpool { id, total_size, .. } = zpool;
             let mut indent2 = IndentWriter::new("  ", &mut indented);
             writeln!(indent2, "{id}: total size: {total_size}")?;
         }
 
-        if !sled.datasets.is_empty() {
+        if !datasets.is_empty() {
             writeln!(indented, "datasets:")?;
         }
-        for dataset in &sled.datasets {
+        for dataset in datasets {
             let Dataset {
                 id,
                 name,
@@ -578,7 +594,7 @@ fn display_sleds(
 
         f = indented.into_inner();
 
-        if let Some(config) = &sled.ledgered_sled_config {
+        if let Some(config) = &ledgered_sled_config {
             display_sled_config("LEDGERED", config, f)?;
         } else {
             writeln!(f, "    no ledgered sled config")?;
@@ -586,7 +602,15 @@ fn display_sleds(
 
         let mut indented = IndentWriter::new("    ", f);
 
-        if let Some(last_reconciliation) = &sled.last_reconciliation {
+        writeln!(indented, "zone image resolver status:")?;
+        {
+            let mut indent2 = IndentWriter::new("    ", &mut indented);
+            // Use write! rather than writeln! since zone_image_resolver.display()
+            // always produces a newline at the end.
+            write!(indent2, "{}", zone_image_resolver.display())?;
+        }
+
+        if let Some(last_reconciliation) = &last_reconciliation {
             let ConfigReconcilerInventory {
                 last_reconciled_config,
                 external_disks,
@@ -598,9 +622,7 @@ fn display_sleds(
 
             display_boot_partition_contents(boot_partitions, &mut indented)?;
 
-            if Some(last_reconciled_config)
-                == sled.ledgered_sled_config.as_ref()
-            {
+            if Some(last_reconciled_config) == ledgered_sled_config.as_ref() {
                 writeln!(
                     indented,
                     "last reconciled config: matches ledgered config"
@@ -660,7 +682,7 @@ fn display_sleds(
         }
 
         write!(indented, "reconciler task status: ")?;
-        match &sled.reconciler_status {
+        match &reconciler_status {
             ConfigReconcilerInventoryStatus::NotYetRun => {
                 writeln!(indented, "not yet run")?;
             }
@@ -673,7 +695,7 @@ fn display_sleds(
                     indented,
                     "running for {running_for:?} (since {started_at})"
                 )?;
-                if Some(config) == sled.ledgered_sled_config.as_ref() {
+                if Some(config) == ledgered_sled_config.as_ref() {
                     writeln!(
                         indented,
                         "reconciling currently-ledgered config"
