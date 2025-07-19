@@ -150,7 +150,7 @@ impl BlueprintPlanner {
                 ));
             }
         };
-        let blueprint = match planner.plan() {
+        let (blueprint, report) = match planner.plan_and_report() {
             Ok(blueprint) => blueprint,
             Err(error) => {
                 error!(&opctx.log, "can't plan: {error}");
@@ -241,7 +241,11 @@ impl BlueprintPlanner {
 
         // We have a new target!
         self.tx_blueprint.send_replace(Some(Arc::new((target, blueprint))));
-        BlueprintPlannerStatus::Targeted { parent_blueprint_id, blueprint_id }
+        BlueprintPlannerStatus::Targeted {
+            parent_blueprint_id,
+            blueprint_id,
+            report,
+        }
     }
 }
 
@@ -332,8 +336,10 @@ mod test {
             BlueprintPlannerStatus::Targeted {
                 parent_blueprint_id,
                 blueprint_id,
+                report,
             } if parent_blueprint_id == initial_blueprint.id
-                && blueprint_id != initial_blueprint.id =>
+                && blueprint_id != initial_blueprint.id
+                && blueprint_id == report.blueprint_id =>
             {
                 blueprint_id
             }
