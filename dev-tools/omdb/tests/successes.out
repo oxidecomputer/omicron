@@ -1398,6 +1398,47 @@ task: "webhook_deliverator"
 stderr:
 note: using Nexus URL http://127.0.0.1:REDACTED_PORT/
 =============================================
+EXECUTING COMMAND: omdb ["nexus", "chicken-switches", "show", "current"]
+termination: Exited(0)
+---------------------------------------------
+stdout:
+No chicken switches enabled
+---------------------------------------------
+stderr:
+note: using Nexus URL http://127.0.0.1:REDACTED_PORT/
+=============================================
+EXECUTING COMMAND: omdb ["-w", "nexus", "chicken-switches", "set", "--planner-enabled", "true"]
+termination: Exited(0)
+---------------------------------------------
+stdout:
+Chicken switches updated at version 1
+---------------------------------------------
+stderr:
+note: using Nexus URL http://127.0.0.1:REDACTED_PORT/
+=============================================
+EXECUTING COMMAND: omdb ["-w", "nexus", "chicken-switches", "set", "--add-zones-with-mupdate-override", "false"]
+termination: Exited(0)
+---------------------------------------------
+stdout:
+Chicken switches updated at version 2
+---------------------------------------------
+stderr:
+note: using Nexus URL http://127.0.0.1:REDACTED_PORT/
+=============================================
+EXECUTING COMMAND: omdb ["nexus", "chicken-switches", "show", "current"]
+termination: Exited(0)
+---------------------------------------------
+stdout:
+Reconfigurator Chicken Switches: 
+    version: 2
+    modified time: 2025-07-20 03:11:17.302303 UTC
+    planner enabled: true
+    planner switches:
+        add zones with mupdate override: false
+---------------------------------------------
+stderr:
+note: using Nexus URL http://127.0.0.1:REDACTED_PORT/
+=============================================
 EXECUTING COMMAND: omdb ["nexus", "sagas", "list"]
 termination: Exited(0)
 ---------------------------------------------

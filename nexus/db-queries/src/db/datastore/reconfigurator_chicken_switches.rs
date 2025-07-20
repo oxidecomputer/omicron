@@ -101,11 +101,15 @@ impl DataStore {
         opctx: &OpContext,
         switches: ReconfiguratorChickenSwitchesParam,
     ) -> Result<(), Error> {
-        let ReconfiguratorChickenSwitchesParam { version, planner_enabled } =
-            switches;
+        let ReconfiguratorChickenSwitchesParam {
+            version,
+            planner_enabled,
+            planner_switches,
+        } = switches;
         let switches = ReconfiguratorChickenSwitches {
             version,
             planner_enabled,
+            planner_switches,
             time_modified: chrono::Utc::now(),
         };
 
@@ -145,8 +149,9 @@ impl DataStore {
 
         sql_query(
             r"INSERT INTO reconfigurator_chicken_switches
-                (version, planner_enabled, time_modified)
-              SELECT $1, $2, $3
+                (version, planner_enabled, time_modified,
+                 add_zones_with_mupdate_override)
+              SELECT $1, $2, $3, $4
               WHERE $1 - 1 IN (
                   SELECT COALESCE(MAX(version), 0)
                   FROM reconfigurator_chicken_switches
@@ -155,6 +160,9 @@ impl DataStore {
         .bind::<sql_types::BigInt, SqlU32>(switches.version.into())
         .bind::<sql_types::Bool, _>(switches.planner_enabled)
         .bind::<sql_types::Timestamptz, _>(switches.time_modified)
+        .bind::<sql_types::Bool, _>(
+            switches.planner_switches.add_zones_with_mupdate_override,
+        )
         .execute_async(&*self.pool_connection_authorized(opctx).await?)
         .await
         .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))
@@ -164,6 +172,7 @@ impl DataStore {
 mod tests {
     use super::*;
     use crate::db::pub_test_utils::TestDatabase;
+    use nexus_types::deployment::PlannerChickenSwitches;
     use omicron_test_utils::dev;
 
     #[tokio::test]
@@ -190,6 +199,7 @@ mod tests {
         let mut switches = ReconfiguratorChickenSwitchesParam {
             version: 0,
             planner_enabled: false,
+            planner_switches: PlannerChickenSwitches::default(),
         };
 
         assert!(

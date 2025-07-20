@@ -73,7 +73,9 @@ impl BackgroundTask for ChickenSwitchesLoader {
 mod test {
     use super::*;
     use nexus_test_utils_macros::nexus_test;
-    use nexus_types::deployment::ReconfiguratorChickenSwitchesParam;
+    use nexus_types::deployment::{
+        PlannerChickenSwitches, ReconfiguratorChickenSwitchesParam,
+    };
 
     type ControlPlaneTestContext =
         nexus_test_utils::ControlPlaneTestContext<crate::Server>;
@@ -93,6 +95,7 @@ mod test {
         let switches = ReconfiguratorChickenSwitchesParam {
             version: 1,
             planner_enabled: true,
+            planner_switches: PlannerChickenSwitches::default(),
         };
         datastore
             .reconfigurator_chicken_switches_insert_latest_version(
@@ -107,6 +110,7 @@ mod test {
         let switches = ReconfiguratorChickenSwitchesParam {
             version: 2,
             planner_enabled: false,
+            planner_switches: PlannerChickenSwitches::default(),
         };
         datastore
             .reconfigurator_chicken_switches_insert_latest_version(

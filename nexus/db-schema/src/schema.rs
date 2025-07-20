@@ -1627,6 +1627,10 @@ table! {
 
         boot_partition_a_error -> Nullable<Text>,
         boot_partition_b_error -> Nullable<Text>,
+
+        clear_mupdate_override_boot_success -> Nullable<crate::enums::ClearMupdateOverrideBootSuccessEnum>,
+        clear_mupdate_override_boot_error -> Nullable<Text>,
+        clear_mupdate_override_non_boot_message -> Nullable<Text>,
     }
 }
 
@@ -1888,6 +1892,7 @@ table! {
         version -> Int8,
         planner_enabled -> Bool,
         time_modified -> Timestamptz,
+        add_zones_with_mupdate_override -> Bool,
     }
 }
 

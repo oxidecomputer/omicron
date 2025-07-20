@@ -113,20 +113,25 @@ impl BlueprintPlanner {
         };
 
         // Assemble the planning context.
-        let input =
-            match PlanningInputFromDb::assemble(opctx, &self.datastore).await {
-                Ok(input) => input,
-                Err(error) => {
-                    error!(
-                        &opctx.log,
-                        "can't assemble planning input";
-                        "error" => %error,
-                    );
-                    return BlueprintPlannerStatus::Error(format!(
-                        "can't assemble planning input: {error}"
-                    ));
-                }
-            };
+        let input = match PlanningInputFromDb::assemble(
+            opctx,
+            &self.datastore,
+            switches.planner_switches.clone(),
+        )
+        .await
+        {
+            Ok(input) => input,
+            Err(error) => {
+                error!(
+                    &opctx.log,
+                    "can't assemble planning input";
+                    "error" => %error,
+                );
+                return BlueprintPlannerStatus::Error(format!(
+                    "can't assemble planning input: {error}"
+                ));
+            }
+        };
 
         // Generate a new blueprint.
         let planner = match Planner::new_based_on(
@@ -263,7 +268,7 @@ mod test {
     use crate::app::background::tasks::inventory_collection::InventoryCollector;
     use nexus_inventory::now_db_precision;
     use nexus_test_utils_macros::nexus_test;
-    use nexus_types::deployment::PendingMgsUpdates;
+    use nexus_types::deployment::{PendingMgsUpdates, PlannerChickenSwitches};
     use omicron_uuid_kinds::OmicronZoneUuid;
 
     type ControlPlaneTestContext =
@@ -310,6 +315,7 @@ mod test {
             watch::channel(ReconfiguratorChickenSwitches {
                 version: 1,
                 planner_enabled: true,
+                planner_switches: PlannerChickenSwitches::default(),
                 time_modified: now_db_precision(),
             });
 

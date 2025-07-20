@@ -15,16 +15,7 @@ pub struct ReconfiguratorChickenSwitches {
     pub version: SqlU32,
     pub planner_enabled: bool,
     pub time_modified: DateTime<Utc>,
-}
-
-impl ReconfiguratorChickenSwitches {
-    pub fn new(version: u32, planner_enabled: bool) -> Self {
-        Self {
-            version: version.into(),
-            planner_enabled,
-            time_modified: Utc::now(),
-        }
-    }
+    pub add_zones_with_mupdate_override: bool,
 }
 
 impl From<deployment::ReconfiguratorChickenSwitches>
@@ -35,6 +26,9 @@ impl From<deployment::ReconfiguratorChickenSwitches>
             version: value.version.into(),
             planner_enabled: value.planner_enabled,
             time_modified: value.time_modified,
+            add_zones_with_mupdate_override: value
+                .planner_switches
+                .add_zones_with_mupdate_override,
         }
     }
 }
@@ -46,6 +40,10 @@ impl From<ReconfiguratorChickenSwitches>
         Self {
             version: value.version.into(),
             planner_enabled: value.planner_enabled,
+            planner_switches: deployment::PlannerChickenSwitches {
+                add_zones_with_mupdate_override: value
+                    .add_zones_with_mupdate_override,
+            },
             time_modified: value.time_modified,
         }
     }

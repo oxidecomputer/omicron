@@ -72,6 +72,7 @@ mod zone_type;
 use crate::inventory::BaseboardId;
 pub use blueprint_diff::BlueprintDiffSummary;
 use blueprint_display::BpPendingMgsUpdates;
+pub use chicken_switches::PlannerChickenSwitches;
 pub use chicken_switches::ReconfiguratorChickenSwitches;
 pub use chicken_switches::ReconfiguratorChickenSwitchesParam;
 pub use clickhouse::ClickhouseClusterConfig;
