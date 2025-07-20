@@ -2095,6 +2095,23 @@ table! {
 }
 
 table! {
+    bp_pending_mgs_update_rot (blueprint_id, hw_baseboard_id) {
+        blueprint_id -> Uuid,
+        hw_baseboard_id -> Uuid,
+        sp_type -> crate::enums::SpTypeEnum,
+        sp_slot -> Int4,
+        artifact_sha256 -> Text,
+        artifact_version -> Text,
+        expected_active_slot -> crate::enums::HwRotSlotEnum,
+        expected_active_version -> Text,
+        expected_inactive_version -> Nullable<Text>,
+        expected_persistent_boot_preference -> crate::enums::HwRotSlotEnum,
+        expected_pending_persistent_boot_preference -> Nullable<crate::enums::HwRotSlotEnum>,
+        expected_transient_boot_preference -> Nullable<crate::enums::HwRotSlotEnum>,
+    }
+}
+
+table! {
     bootstore_keys (key, generation) {
         key -> Text,
         generation -> Int8,
