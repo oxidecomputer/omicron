@@ -49,11 +49,13 @@ use omicron_common::backoff::{
     BackoffError, retry_notify, retry_policy_internal_service_aggressive,
 };
 use omicron_ddm_admin_client::Client as DdmAdminClient;
-use omicron_uuid_kinds::{GenericUuid, PropolisUuid, SledUuid};
+use omicron_uuid_kinds::{
+    GenericUuid, MupdateOverrideUuid, PropolisUuid, SledUuid,
+};
 use sled_agent_config_reconciler::{
     ConfigReconcilerHandle, ConfigReconcilerSpawnToken, InternalDisksReceiver,
-    LedgerNewConfigError, LedgerTaskError, ReconcilerInventory,
-    SledAgentArtifactStore, SledAgentFacilities,
+    InternalDisksWithBootDisk, LedgerNewConfigError, LedgerTaskError,
+    ReconcilerInventory, SledAgentArtifactStore, SledAgentFacilities,
 };
 use sled_agent_types::disk::DiskStateRequested;
 use sled_agent_types::early_networking::EarlyNetworkConfig;
@@ -66,7 +68,9 @@ use sled_agent_types::zone_bundle::{
     BundleUtilization, CleanupContext, CleanupCount, CleanupPeriod,
     PriorityOrder, StorageLimit, ZoneBundleCause, ZoneBundleMetadata,
 };
-use sled_agent_types::zone_images::ResolverStatus;
+use sled_agent_types::zone_images::{
+    ClearMupdateOverrideResult, ResolverStatus,
+};
 use sled_diagnostics::SledDiagnosticsCmdError;
 use sled_diagnostics::SledDiagnosticsCmdOutput;
 use sled_hardware::{HardwareManager, MemoryReservations, underlay};
@@ -1315,6 +1319,16 @@ impl SledAgentFacilities for ReconcilerFacilities {
 
     fn zone_image_resolver_status(&self) -> ResolverStatus {
         self.service_manager.zone_image_resolver().status()
+    }
+
+    fn clear_mupdate_override(
+        &self,
+        override_id: MupdateOverrideUuid,
+        internal_disks: InternalDisksWithBootDisk,
+    ) -> ClearMupdateOverrideResult {
+        self.service_manager
+            .zone_image_resolver()
+            .clear_mupdate_override(override_id, internal_disks)
     }
 
     fn metrics_untrack_zone_links(
