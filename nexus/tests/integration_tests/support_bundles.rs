@@ -143,8 +143,20 @@ async fn bundle_delete(
 async fn bundle_create(
     client: &ClientTestContext,
 ) -> Result<SupportBundleInfo> {
+    bundle_create_with_comment(client, None).await
+}
+
+async fn bundle_create_with_comment(
+    client: &ClientTestContext,
+    user_comment: Option<String>,
+) -> Result<SupportBundleInfo> {
+    use nexus_types::external_api::params::SupportBundleCreate;
+
+    let create_params = SupportBundleCreate { user_comment };
+
     NexusRequest::new(
         RequestBuilder::new(client, Method::POST, BUNDLES_URL)
+            .body(Some(&create_params))
             .expect_status(Some(StatusCode::CREATED)),
     )
     .authn_as(AuthnMode::PrivilegedUser)
@@ -160,8 +172,12 @@ async fn bundle_create_expect_fail(
     expected_status: StatusCode,
     expected_message: &str,
 ) -> Result<()> {
+    use nexus_types::external_api::params::SupportBundleCreate;
+
+    let create_params = SupportBundleCreate { user_comment: None };
     let error = NexusRequest::new(
         RequestBuilder::new(client, Method::POST, BUNDLES_URL)
+            .body(Some(&create_params))
             .expect_status(Some(expected_status)),
     )
     .authn_as(AuthnMode::PrivilegedUser)
@@ -277,6 +293,29 @@ async fn bundle_download_expect_fail(
         );
     }
     Ok(())
+}
+
+async fn bundle_update_comment(
+    client: &ClientTestContext,
+    id: SupportBundleUuid,
+    comment: Option<String>,
+) -> Result<SupportBundleInfo> {
+    use nexus_types::external_api::params::SupportBundleUpdate;
+
+    let url = format!("{BUNDLES_URL}/{id}");
+    let update = SupportBundleUpdate { user_comment: comment };
+
+    NexusRequest::new(
+        RequestBuilder::new(client, Method::PUT, &url)
+            .body(Some(&update))
+            .expect_status(Some(StatusCode::OK)),
+    )
+    .authn_as(AuthnMode::PrivilegedUser)
+    .execute()
+    .await
+    .context("failed to update bundle comment")?
+    .parsed_body()
+    .context("failed to parse 'update bundle comment' response")
 }
 
 // -- Background Task --
@@ -639,4 +678,109 @@ async fn test_support_bundle_list_time_ordering(
             bundle_id
         );
     }
+}
+
+// Test updating bundle comments
+#[nexus_test]
+async fn test_support_bundle_update_comment(
+    cptestctx: &ControlPlaneTestContext,
+) {
+    let client = &cptestctx.external_client;
+
+    let _disk_test =
+        DiskTestBuilder::new(&cptestctx).with_zpool_count(1).build().await;
+
+    // Create a bundle
+    let bundle = bundle_create(&client).await.unwrap();
+    assert_eq!(bundle.user_comment, None);
+
+    // Update the comment
+    let comment = Some("Test comment".to_string());
+    let updated_bundle =
+        bundle_update_comment(&client, bundle.id, comment.clone())
+            .await
+            .unwrap();
+    assert_eq!(updated_bundle.user_comment, comment);
+
+    // Update with a different comment
+    let new_comment = Some("Updated comment".to_string());
+    let updated_bundle =
+        bundle_update_comment(&client, bundle.id, new_comment.clone())
+            .await
+            .unwrap();
+    assert_eq!(updated_bundle.user_comment, new_comment);
+
+    // Clear the comment
+    let updated_bundle =
+        bundle_update_comment(&client, bundle.id, None).await.unwrap();
+    assert_eq!(updated_bundle.user_comment, None);
+
+    // Test maximum length validation (4096 bytes)
+    let max_comment = "a".repeat(4096);
+    let updated_bundle =
+        bundle_update_comment(&client, bundle.id, Some(max_comment.clone()))
+            .await
+            .unwrap();
+    assert_eq!(updated_bundle.user_comment, Some(max_comment));
+
+    // Test exceeding maximum length (4097 bytes)
+    let too_long_comment = "a".repeat(4097);
+    let url = format!("{BUNDLES_URL}/{}", bundle.id);
+    let update = nexus_types::external_api::params::SupportBundleUpdate {
+        user_comment: Some(too_long_comment),
+    };
+
+    let error = NexusRequest::new(
+        RequestBuilder::new(client, Method::PUT, &url)
+            .body(Some(&update))
+            .expect_status(Some(StatusCode::BAD_REQUEST)),
+    )
+    .authn_as(AuthnMode::PrivilegedUser)
+    .execute()
+    .await
+    .context("failed to update bundle comment")
+    .unwrap()
+    .parsed_body::<HttpErrorResponseBody>()
+    .context("failed to parse error response")
+    .unwrap();
+
+    assert!(error.message.contains("cannot exceed 4096 bytes"));
+
+    // Clean up
+    bundle_delete(&client, bundle.id).await.unwrap();
+}
+
+// Test creating bundles with comments
+#[nexus_test]
+async fn test_support_bundle_create_with_comment(
+    cptestctx: &ControlPlaneTestContext,
+) {
+    let client = &cptestctx.external_client;
+
+    let _disk_test =
+        DiskTestBuilder::new(&cptestctx).with_zpool_count(3).build().await;
+
+    // Create a bundle without comment
+    let bundle_no_comment =
+        bundle_create_with_comment(&client, None).await.unwrap();
+    assert_eq!(bundle_no_comment.user_comment, None);
+
+    // Create a bundle with comment
+    let comment = Some("Test comment during creation".to_string());
+    let bundle_with_comment =
+        bundle_create_with_comment(&client, comment.clone()).await.unwrap();
+    assert_eq!(bundle_with_comment.user_comment, comment);
+
+    // Create a bundle with empty comment
+    let empty_comment = Some("".to_string());
+    let bundle_empty_comment =
+        bundle_create_with_comment(&client, empty_comment.clone())
+            .await
+            .unwrap();
+    assert_eq!(bundle_empty_comment.user_comment, empty_comment);
+
+    // Clean up
+    bundle_delete(&client, bundle_no_comment.id).await.unwrap();
+    bundle_delete(&client, bundle_with_comment.id).await.unwrap();
+    bundle_delete(&client, bundle_empty_comment.id).await.unwrap();
 }

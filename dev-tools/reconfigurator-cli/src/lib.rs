@@ -41,6 +41,7 @@ use nexus_types::deployment::{
 use nexus_types::deployment::{OmicronZoneNic, TargetReleaseDescription};
 use nexus_types::external_api::views::SledPolicy;
 use nexus_types::external_api::views::SledProvisionPolicy;
+use nexus_types::inventory::CollectionDisplayCliFilter;
 use omicron_common::address::REPO_DEPOT_PORT;
 use omicron_common::api::external::Name;
 use omicron_common::api::external::{Generation, TufRepoDescription};
@@ -236,6 +237,7 @@ fn process_command(
         Commands::SiloRemove(args) => cmd_silo_remove(sim, args),
         Commands::InventoryList => cmd_inventory_list(sim),
         Commands::InventoryGenerate => cmd_inventory_generate(sim),
+        Commands::InventoryShow(args) => cmd_inventory_show(sim, args),
         Commands::BlueprintList => cmd_blueprint_list(sim),
         Commands::BlueprintBlippy(args) => cmd_blueprint_blippy(sim, args),
         Commands::BlueprintEdit(args) => cmd_blueprint_edit(sim, args),
@@ -298,6 +300,8 @@ enum Commands {
     InventoryList,
     /// generates an inventory collection from the configured sleds
     InventoryGenerate,
+    /// show details about an inventory collection
+    InventoryShow(InventoryShowArgs),
 
     /// list all blueprints
     BlueprintList,
@@ -377,6 +381,8 @@ enum SledSetCommand {
     Policy(SledSetPolicyArgs),
     #[clap(flatten)]
     Visibility(SledSetVisibilityCommand),
+    /// set the mupdate override for this sled
+    MupdateOverride(SledSetMupdateOverrideArgs),
 }
 
 #[derive(Debug, Args)]
@@ -499,6 +505,23 @@ struct SledUpdateSpArgs {
 }
 
 #[derive(Debug, Args)]
+struct SledSetMupdateOverrideArgs {
+    #[clap(flatten)]
+    source: SledMupdateOverrideSource,
+}
+
+#[derive(Debug, Args)]
+#[group(id = "sled-mupdate-override-source", required = true, multiple = false)]
+struct SledMupdateOverrideSource {
+    /// the new value of the mupdate override, or "unset"
+    mupdate_override_id: Option<MupdateOverrideUuidOpt>,
+
+    /// simulate an error reading the mupdate override
+    #[clap(long, conflicts_with = "mupdate_override_id")]
+    with_error: bool,
+}
+
+#[derive(Debug, Args)]
 struct SledRemoveArgs {
     /// id of the sled
     sled_id: SledOpt,
@@ -511,9 +534,16 @@ struct SiloAddRemoveArgs {
 }
 
 #[derive(Debug, Args)]
-struct InventoryArgs {
-    /// id of the inventory collection to use in planning
-    collection_id: CollectionUuid,
+struct InventoryShowArgs {
+    /// id of the inventory collection to show or "latest"
+    collection_id: CollectionIdOpt,
+
+    /// show long strings in their entirety
+    #[clap(long)]
+    show_long_strings: bool,
+
+    #[clap(subcommand)]
+    filter: Option<CollectionDisplayCliFilter>,
 }
 
 #[derive(Debug, Args)]
@@ -993,14 +1023,6 @@ enum CliDnsGroup {
 }
 
 #[derive(Debug, Args)]
-struct BlueprintDiffInventoryArgs {
-    /// id of the inventory collection
-    collection_id: CollectionUuid,
-    /// id of the blueprint, "latest", or "target"
-    blueprint_id: BlueprintIdOpt,
-}
-
-#[derive(Debug, Args)]
 struct BlueprintSaveArgs {
     /// id of the blueprint, "latest", or "target"
     blueprint_id: BlueprintIdOpt,
@@ -1344,6 +1366,51 @@ fn cmd_sled_set(
                 )))
             }
         }
+        SledSetCommand::MupdateOverride(SledSetMupdateOverrideArgs {
+            source:
+                SledMupdateOverrideSource { mupdate_override_id, with_error },
+        }) => {
+            let (desc, prev) = if with_error {
+                let prev =
+                    system.description_mut().sled_set_mupdate_override_error(
+                        sled_id,
+                        "reconfigurator-cli simulated mupdate-override error"
+                            .to_owned(),
+                    )?;
+                ("error".to_owned(), prev)
+            } else {
+                let mupdate_override_id =
+                    mupdate_override_id.expect("clap ensures that this is set");
+                let prev = system.description_mut().sled_set_mupdate_override(
+                    sled_id,
+                    mupdate_override_id.into(),
+                )?;
+                let desc = match mupdate_override_id {
+                    MupdateOverrideUuidOpt::Set(id) => id.to_string(),
+                    MupdateOverrideUuidOpt::Unset => "unset".to_owned(),
+                };
+                (desc, prev)
+            };
+
+            let prev_desc = match prev {
+                Ok(Some(id)) => id.to_string(),
+                Ok(None) => "unset".to_owned(),
+                Err(_) => "error".to_owned(),
+            };
+
+            sim.commit_and_bump(
+                format!(
+                    "reconfigurator-cli sled-set-mupdate-override: {}: {} -> {}",
+                    sled_id, prev_desc, desc,
+                ),
+                state,
+            );
+
+            Ok(Some(format!(
+                "set sled {} mupdate override: {} -> {}",
+                sled_id, prev_desc, desc,
+            )))
+        }
     }
 }
 
@@ -1461,6 +1528,24 @@ fn cmd_inventory_generate(
         state,
     );
     Ok(Some(rv))
+}
+
+fn cmd_inventory_show(
+    sim: &mut ReconfiguratorSim,
+    args: InventoryShowArgs,
+) -> anyhow::Result<Option<String>> {
+    let state = sim.current_state();
+    let system = state.system();
+    let resolved = system.resolve_collection_id(args.collection_id.into())?;
+    let collection = system.get_collection(&resolved)?;
+
+    let mut display = collection.display();
+    if let Some(filter) = &args.filter {
+        display.apply_cli_filter(filter);
+    }
+    display.show_long_strings(args.show_long_strings);
+
+    Ok(Some(display.to_string()))
 }
 
 fn cmd_blueprint_list(

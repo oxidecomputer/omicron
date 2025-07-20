@@ -85,6 +85,7 @@ use dns_service_client::DnsError;
 use id_map::IdMap;
 use internal_dns_resolver::Resolver as DnsResolver;
 use internal_dns_types::names::ServiceName;
+use itertools::Itertools;
 use nexus_client::{
     Client as NexusClient, Error as NexusError, types as NexusTypes,
 };
@@ -101,7 +102,12 @@ use nexus_types::deployment::{
     BlueprintSledConfig, OximeterReadMode, PendingMgsUpdates,
 };
 use nexus_types::external_api::views::SledState;
-use omicron_common::address::{COCKROACH_ADMIN_PORT, get_sled_address};
+use ntp_admin_client::{
+    Client as NtpAdminClient, Error as NtpAdminError, types::TimeSync,
+};
+use omicron_common::address::{
+    COCKROACH_ADMIN_PORT, NTP_ADMIN_PORT, get_sled_address,
+};
 use omicron_common::api::external::Generation;
 use omicron_common::api::internal::shared::ExternalPortDiscovery;
 use omicron_common::api::internal::shared::LldpAdminStatus;
@@ -128,7 +134,6 @@ use sled_agent_types::rack_init::{
 };
 use sled_agent_types::rack_ops::RssStep;
 use sled_agent_types::sled::StartSledAgentRequest;
-use sled_agent_types::time_sync::TimeSync;
 use sled_hardware_types::underlay::BootstrapInterface;
 use slog::Logger;
 use slog_error_chain::InlineErrorChain;
@@ -207,6 +212,9 @@ pub enum SetupServiceError {
 
     #[error("Error making HTTP request to Nexus: {0}")]
     NexusApi(#[from] NexusError<NexusTypes::Error>),
+
+    #[error("Error making HTTP request to NTP Admin Server")]
+    NtpAdminApi(#[from] NtpAdminError<ntp_admin_client::types::Error>),
 
     #[error("Error contacting ddmd: {0}")]
     DdmError(#[from] DdmError),
@@ -692,27 +700,11 @@ impl ServiceInner {
 
     async fn sled_timesync(
         &self,
-        sled_address: &SocketAddrV6,
+        client: &NtpAdminClient,
     ) -> Result<TimeSync, SetupServiceError> {
-        let dur = std::time::Duration::from_secs(60);
+        info!(client.inner(), "Checking time synchronization");
 
-        let client = reqwest::ClientBuilder::new()
-            .connect_timeout(dur)
-            .timeout(dur)
-            .build()
-            .map_err(SetupServiceError::HttpClient)?;
-        let client = SledAgentClient::new_with_client(
-            &format!("http://{}", sled_address),
-            client,
-            self.log.new(o!("SledAgentClient" => sled_address.to_string())),
-        );
-
-        info!(
-            self.log,
-            "Checking time synchronization for {}...", sled_address
-        );
-
-        let ts = client.timesync_get().await?.into_inner();
+        let ts = client.timesync().await?.into_inner();
         Ok(TimeSync {
             sync: ts.sync,
             ref_id: ts.ref_id,
@@ -725,7 +717,7 @@ impl ServiceInner {
 
     async fn wait_for_timesync(
         &self,
-        sled_addresses: &Vec<SocketAddrV6>,
+        ntp_admin_clients: &Vec<NtpAdminClient>,
     ) -> Result<(), SetupServiceError> {
         info!(self.log, "Waiting for rack time synchronization");
 
@@ -733,9 +725,12 @@ impl ServiceInner {
             let mut synced_peers = 0;
             let mut sync = true;
 
-            for sled_address in sled_addresses {
-                if let Ok(ts) = self.sled_timesync(sled_address).await {
-                    info!(self.log, "Timesync for {} {:?}", sled_address, ts);
+            for ntp_client in ntp_admin_clients {
+                if let Ok(ts) = self.sled_timesync(ntp_client).await {
+                    info!(
+                        ntp_client.inner(),
+                        "Timesync accessed"; "timesync" => ?ts
+                    );
                     if !ts.sync {
                         sync = false;
                     } else {
@@ -752,7 +747,7 @@ impl ServiceInner {
                 Err(BackoffError::transient(format!(
                     "Time is synchronized on {}/{} sleds",
                     synced_peers,
-                    sled_addresses.len()
+                    ntp_admin_clients.len()
                 )))
             }
         };
@@ -1364,14 +1359,51 @@ impl ServiceInner {
 
         // Wait until time is synchronized on all sleds before proceeding.
         rss_step.update(RssStep::WaitForTimeSync);
-        let sled_addresses: Vec<_> = sled_plan
-            .sleds
+        let ntp_addresses: Vec<_> = service_plan
+            .services
             .values()
-            .map(|initialization_request| {
-                get_sled_address(initialization_request.body.subnet)
+            .map(|sled_config| {
+                sled_config
+                    .zones
+                    .iter()
+                    .filter_map(|zone_config| match &zone_config.zone_type {
+                        BlueprintZoneType::BoundaryNtp(
+                            blueprint_zone_type::BoundaryNtp {
+                                address, ..
+                            },
+                        )
+                        | BlueprintZoneType::InternalNtp(
+                            blueprint_zone_type::InternalNtp { address },
+                        ) => {
+                            let mut ntp_admin_addr = *address;
+                            ntp_admin_addr.set_port(NTP_ADMIN_PORT);
+                            Some(ntp_admin_addr)
+                        }
+                        _ => None,
+                    })
+                    .exactly_one()
+                    .expect("Multiple NTP zones detected on a sled")
             })
             .collect();
-        self.wait_for_timesync(&sled_addresses).await?;
+
+        let ntp_clients = ntp_addresses
+            .into_iter()
+            .map(|address| {
+                let dur = std::time::Duration::from_secs(60);
+                let client = reqwest::ClientBuilder::new()
+                    .connect_timeout(dur)
+                    .timeout(dur)
+                    .build()
+                    .map_err(SetupServiceError::HttpClient)?;
+                let client = NtpAdminClient::new_with_client(
+                    &format!("http://{}", address),
+                    client,
+                    self.log.new(o!("NtpAdminClient" => address.to_string())),
+                );
+                Ok(client)
+            })
+            .collect::<Result<Vec<_>, SetupServiceError>>()?;
+        self.wait_for_timesync(&ntp_clients).await?;
 
         info!(self.log, "Finished setting up Internal DNS and NTP");
 

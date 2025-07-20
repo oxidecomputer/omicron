@@ -4,8 +4,8 @@
 
 use chrono::{DateTime, Utc};
 use nexus_db_schema::schema::console_session;
-use omicron_uuid_kinds::ConsoleSessionKind;
-use omicron_uuid_kinds::ConsoleSessionUuid;
+use nexus_types::external_api::views;
+use omicron_uuid_kinds::{ConsoleSessionKind, ConsoleSessionUuid, GenericUuid};
 use uuid::Uuid;
 
 use crate::typed_uuid::DbTypedUuid;
@@ -36,5 +36,15 @@ impl ConsoleSession {
 
     pub fn id(&self) -> ConsoleSessionUuid {
         self.id.0
+    }
+}
+
+impl From<ConsoleSession> for views::ConsoleSession {
+    fn from(session: ConsoleSession) -> Self {
+        Self {
+            id: session.id.into_untyped_uuid(),
+            time_created: session.time_created,
+            time_last_used: session.time_last_used,
+        }
     }
 }

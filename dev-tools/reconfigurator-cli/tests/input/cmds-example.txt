@@ -52,6 +52,7 @@ load-example --seed test-basic --nsleds 3 --sled-policy 1:non-provisionable --sl
 
 blueprint-list
 blueprint-show latest
+inventory-show latest
 
 # Plan a blueprint run -- this will cause zones and disks on the expunged
 # sled to be expunged.
