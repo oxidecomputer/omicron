@@ -645,6 +645,7 @@ pub struct SupportBundleInfo {
     pub time_created: DateTime<Utc>,
     pub reason_for_creation: String,
     pub reason_for_failure: Option<String>,
+    pub user_comment: Option<String>,
     pub state: SupportBundleState,
 }
 

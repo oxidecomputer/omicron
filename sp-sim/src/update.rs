@@ -29,10 +29,6 @@ use sha3::Digest;
 use sha3::Sha3_256;
 use tokio::sync::mpsc;
 
-// How long do we take to hash host flash? Real SPs take a handful of seconds;
-// we'll pick something similar.
-const TIME_TO_HASH_HOST_PHASE_1: Duration = Duration::from_secs(5);
-
 pub(crate) struct SimSpUpdate {
     /// tracks the state of any ongoing simulated update
     ///
@@ -53,7 +49,7 @@ pub(crate) struct SimSpUpdate {
     /// us to default to `TIME_TO_HASH_HOST_PHASE_1` (e.g., for running sp-sim
     /// as a part of `omicron-dev`) while giving tests that want explicit
     /// control the ability to precisely trigger completion of hashing.
-    phase1_hash_policy: HostFlashHashPolicy,
+    phase1_hash_policy: HostFlashHashPolicyInner,
 
     /// records whether a change to the stage0 "active slot" has been requested
     pending_stage0_update: bool,
@@ -78,6 +74,7 @@ impl SimSpUpdate {
     pub(crate) fn new(
         baseboard_kind: BaseboardKind,
         no_stage0_caboose: bool,
+        phase1_hash_policy: HostFlashHashPolicy,
     ) -> Self {
         const SP_GITC0: &str = "ffffffff";
         const SP_GITC1: &str = "fefefefe";
@@ -194,9 +191,7 @@ impl SimSpUpdate {
             last_rot_update_data: None,
             last_host_phase1_update_data: BTreeMap::new(),
             phase1_hash_state: BTreeMap::new(),
-            phase1_hash_policy: HostFlashHashPolicy::Timer(
-                TIME_TO_HASH_HOST_PHASE_1,
-            ),
+            phase1_hash_policy: phase1_hash_policy.0,
 
             pending_stage0_update: false,
 
@@ -211,14 +206,11 @@ impl SimSpUpdate {
         }
     }
 
-    /// Instead of host phase 1 hashing completing after a few seconds, return a
-    /// handle that can be used to explicitly trigger completion.
-    pub(crate) fn set_phase1_hash_policy_explicit_control(
+    pub(crate) fn set_phase1_hash_policy(
         &mut self,
-    ) -> HostFlashHashCompletionSender {
-        let (tx, rx) = mpsc::unbounded_channel();
-        self.phase1_hash_policy = HostFlashHashPolicy::Channel(rx);
-        HostFlashHashCompletionSender(tx)
+        policy: HostFlashHashPolicy,
+    ) {
+        self.phase1_hash_policy = policy.0;
     }
 
     pub(crate) fn sp_update_prepare(
@@ -493,28 +485,23 @@ impl SimSpUpdate {
         &mut self,
         slot: u16,
     ) -> Result<(), SpError> {
+        self.check_host_flash_state_and_policy(slot);
         match self
             .phase1_hash_state
-            .entry(slot)
-            .or_insert(HostFlashHashState::NeverHashed)
+            .get_mut(&slot)
+            .expect("check_host_flash_state_and_policy always inserts")
         {
-            // No current hash; record our start time so we can emulate hashing
-            // taking a few seconds.
+            // Already hashed; this is a no-op.
+            HostFlashHashState::Hashed(_) => Ok(()),
+            // No current hash; record our start time.
             state @ (HostFlashHashState::NeverHashed
             | HostFlashHashState::HashInvalidated) => {
                 *state = HostFlashHashState::HashStarted(Instant::now());
                 Ok(())
             }
-            // Already hashed; this is a no-op.
-            HostFlashHashState::Hashed(_) => Ok(()),
-            // Still hashing; check and see if it's done. This is either an
-            // error (if we're still hashing) or a no-op (if we're done).
-            HostFlashHashState::HashStarted(started) => {
-                let started = *started;
-                self.finalize_host_flash_hash_if_sufficient_time_elapsed(
-                    slot, started,
-                )?;
-                Ok(())
+            // Still hashing; this is an error.
+            HostFlashHashState::HashStarted(_) => {
+                Err(SpError::Hf(HfError::HashInProgress))
             }
         }
     }
@@ -523,51 +510,68 @@ impl SimSpUpdate {
         &mut self,
         slot: u16,
     ) -> Result<[u8; 32], SpError> {
+        self.check_host_flash_state_and_policy(slot);
         match self
             .phase1_hash_state
-            .entry(slot)
-            .or_insert(HostFlashHashState::NeverHashed)
+            .get_mut(&slot)
+            .expect("check_host_flash_state_and_policy always inserts")
         {
+            HostFlashHashState::Hashed(hash) => Ok(*hash),
             HostFlashHashState::NeverHashed => {
                 Err(SpError::Hf(HfError::HashUncalculated))
             }
-            HostFlashHashState::HashStarted(started) => {
-                let started = *started;
-                self.finalize_host_flash_hash_if_sufficient_time_elapsed(
-                    slot, started,
-                )
+            HostFlashHashState::HashStarted(_) => {
+                Err(SpError::Hf(HfError::HashInProgress))
             }
-            HostFlashHashState::Hashed(hash) => Ok(*hash),
             HostFlashHashState::HashInvalidated => {
                 Err(SpError::Hf(HfError::RecalculateHash))
             }
         }
     }
 
-    fn finalize_host_flash_hash_if_sufficient_time_elapsed(
-        &mut self,
-        slot: u16,
-        started: Instant,
-    ) -> Result<[u8; 32], SpError> {
-        match &mut self.phase1_hash_policy {
-            HostFlashHashPolicy::Timer(duration) => {
-                if started.elapsed() < *duration {
-                    return Err(SpError::Hf(HfError::HashInProgress));
-                }
-            }
-            HostFlashHashPolicy::Channel(rx) => {
-                if rx.try_recv().is_err() {
-                    return Err(SpError::Hf(HfError::HashInProgress));
-                }
-            }
+    fn check_host_flash_state_and_policy(&mut self, slot: u16) {
+        let state = self
+            .phase1_hash_state
+            .entry(slot)
+            .or_insert(HostFlashHashState::NeverHashed);
+
+        // If we've already hashed this slot, we're done.
+        if matches!(state, HostFlashHashState::Hashed(_)) {
+            return;
         }
 
-        let data = self.last_host_phase1_update_data(slot);
-        let data = data.as_deref().unwrap_or(&[]);
-        let hash = Sha256::digest(&data).into();
-        self.phase1_hash_state.insert(slot, HostFlashHashState::Hashed(hash));
+        // Should we hash the flash now? It depends on our state + policy.
+        let should_hash = match (&mut self.phase1_hash_policy, state) {
+            // If we want to always assume contents are hashed, compute that
+            // hash _unless_ the contents have changed (in which case a client
+            // would need to send us an explicit "start hashing" request).
+            (
+                HostFlashHashPolicyInner::AssumeAlreadyHashed,
+                HostFlashHashState::HashInvalidated,
+            ) => false,
+            (HostFlashHashPolicyInner::AssumeAlreadyHashed, _) => true,
+            // If we're timer based, only hash if the timer has elapsed.
+            (
+                HostFlashHashPolicyInner::Timer(timeout),
+                HostFlashHashState::HashStarted(started),
+            ) => *timeout >= started.elapsed(),
+            (HostFlashHashPolicyInner::Timer(_), _) => false,
+            // If we're channel based, only hash if we've gotten a request to
+            // start hashing and there's a message in the channel.
+            (
+                HostFlashHashPolicyInner::Channel(rx),
+                HostFlashHashState::HashStarted(_),
+            ) => rx.try_recv().is_ok(),
+            (HostFlashHashPolicyInner::Channel(_), _) => false,
+        };
 
-        Ok(hash)
+        if should_hash {
+            let data = self.last_host_phase1_update_data(slot);
+            let data = data.as_deref().unwrap_or(&[]);
+            let hash = Sha256::digest(&data).into();
+            self.phase1_hash_state
+                .insert(slot, HostFlashHashState::Hashed(hash));
+        }
     }
 
     pub(crate) fn get_component_caboose_value(
@@ -784,14 +788,48 @@ fn fake_fwid_compute(data: &[u8]) -> Fwid {
 
 #[derive(Debug, Clone, Copy)]
 enum HostFlashHashState {
+    Hashed([u8; 32]),
     NeverHashed,
     HashStarted(Instant),
-    Hashed([u8; 32]),
     HashInvalidated,
 }
 
+/// Policy controlling how `sp-sim` behaves when asked to flash its host phase 1
+/// contents.
 #[derive(Debug)]
-enum HostFlashHashPolicy {
+pub struct HostFlashHashPolicy(HostFlashHashPolicyInner);
+
+impl HostFlashHashPolicy {
+    /// Always return computed hashes when asked.
+    ///
+    /// This emulates an SP that has previously computed its phase 1 flash hash
+    /// and whose contents haven't changed. Most Nexus tests should use this
+    /// policy by default to allow inventory collections to complete promptly.
+    pub fn assume_already_hashed() -> Self {
+        Self(HostFlashHashPolicyInner::AssumeAlreadyHashed)
+    }
+
+    /// Return `HashInProgress` for `timeout` after hashing has started before
+    /// completing it successfully.
+    pub fn timer(timeout: Duration) -> Self {
+        Self(HostFlashHashPolicyInner::Timer(timeout))
+    }
+
+    /// Returns a channel that allows the caller to control when hashing
+    /// completes.
+    pub fn channel() -> (Self, HostFlashHashCompletionSender) {
+        let (tx, rx) = mpsc::unbounded_channel();
+        (
+            Self(HostFlashHashPolicyInner::Channel(rx)),
+            HostFlashHashCompletionSender(tx),
+        )
+    }
+}
+
+#[derive(Debug)]
+enum HostFlashHashPolicyInner {
+    /// always assume hashing has already been computed
+    AssumeAlreadyHashed,
     /// complete hashing after `Duration` has elapsed
     Timer(Duration),
     /// complete hashing if there's a message in this channel

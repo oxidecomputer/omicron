@@ -2650,7 +2650,10 @@ CREATE TABLE IF NOT EXISTS omicron.public.support_bundle (
 
     -- The Nexus which is in charge of collecting the support bundle,
     -- and later managing its storage.
-    assigned_nexus UUID
+    assigned_nexus UUID,
+
+    user_comment TEXT
+
 );
 
 -- The "UNIQUE" part of this index helps enforce that we allow one support bundle
@@ -3148,7 +3151,7 @@ CREATE TABLE IF NOT EXISTS omicron.public.switch_port_settings_route_config (
     dst INET,
     gw INET,
     vid INT4,
-    local_pref INT8,
+    rib_priority INT2,
 
     /* TODO https://github.com/oxidecomputer/omicron/issues/3013 */
     PRIMARY KEY (port_settings_id, interface_name, dst, gw)
@@ -6246,7 +6249,7 @@ INSERT INTO omicron.public.db_metadata (
     version,
     target_version
 ) VALUES
-    (TRUE, NOW(), NOW(), '165.0.0', NULL)
+    (TRUE, NOW(), NOW(), '167.0.0', NULL)
 ON CONFLICT DO NOTHING;
 
 COMMIT;

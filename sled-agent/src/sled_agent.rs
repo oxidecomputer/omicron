@@ -56,7 +56,6 @@ use sled_agent_config_reconciler::{
     ConfigReconcilerHandle, ConfigReconcilerSpawnToken, InternalDisksReceiver,
     InternalDisksWithBootDisk, LedgerNewConfigError, LedgerTaskError,
     ReconcilerInventory, SledAgentArtifactStore, SledAgentFacilities,
-    TimeSyncStatus,
 };
 use sled_agent_types::disk::DiskStateRequested;
 use sled_agent_types::early_networking::EarlyNetworkConfig;
@@ -65,7 +64,6 @@ use sled_agent_types::instance::{
     VmmStateRequested, VmmUnregisterResponse,
 };
 use sled_agent_types::sled::{BaseboardId, StartSledAgentRequest};
-use sled_agent_types::time_sync::TimeSync;
 use sled_agent_types::zone_bundle::{
     BundleUtilization, CleanupContext, CleanupCount, CleanupPeriod,
     PriorityOrder, StorageLimit, ZoneBundleCause, ZoneBundleMetadata,
@@ -1002,22 +1000,6 @@ impl SledAgent {
             .port_manager
             .unset_virtual_nic_host(mapping)
             .map_err(Error::from)
-    }
-
-    /// Gets the sled's current time synchronization state
-    pub async fn timesync_get(&self) -> Result<TimeSync, Error> {
-        let status = self.inner.config_reconciler.timesync_status();
-
-        // TODO-cleanup we could give a more specific error cause in the
-        // `FailedToGetSyncStatus` case.
-        match status {
-            TimeSyncStatus::NotYetChecked
-            | TimeSyncStatus::ConfiguredToSkip
-            | TimeSyncStatus::FailedToGetSyncStatus(_) => {
-                Err(Error::TimeNotSynchronized)
-            }
-            TimeSyncStatus::TimeSync(time_sync) => Ok(time_sync),
-        }
     }
 
     pub async fn ensure_scrimlet_host_ports(

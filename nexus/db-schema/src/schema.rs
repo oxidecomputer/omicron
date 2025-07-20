@@ -202,7 +202,7 @@ table! {
         dst -> Inet,
         gw -> Inet,
         vid -> Nullable<Int4>,
-        local_pref -> Nullable<Int2>,
+        rib_priority -> Nullable<Int2>,
     }
 }
 
@@ -1470,6 +1470,7 @@ table! {
         dataset_id -> Uuid,
 
         assigned_nexus -> Nullable<Uuid>,
+        user_comment -> Nullable<Text>,
     }
 }
 
