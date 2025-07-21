@@ -23,6 +23,7 @@ use nexus_sled_agent_shared::inventory::{
     ConfigReconcilerInventoryStatus, HostPhase2DesiredContents,
     OmicronSledConfig, OmicronZoneImageSource, OrphanedDataset,
 };
+use omicron_common::disk::M2Slot;
 use omicron_uuid_kinds::{
     DatasetUuid, OmicronZoneUuid, PhysicalDiskUuid, ZpoolUuid,
 };
@@ -366,7 +367,38 @@ fn display_devices(
             write!(f, " (cubby {})", sp.sp_slot)?;
         }
         writeln!(f, "")?;
-        writeln!(f, "    found at: {} from {}", sp.time_collected, sp.source)?;
+        writeln!(
+            f,
+            "    found at: {} from {}",
+            sp.time_collected
+                .to_rfc3339_opts(SecondsFormat::Millis, /* use_z */ true),
+            sp.source
+        )?;
+
+        #[derive(Tabled)]
+        #[tabled(rename_all = "SCREAMING_SNAKE_CASE")]
+        struct HostPhase1FlashHashRow {
+            slot: String,
+            hash: String,
+        }
+
+        writeln!(f, "    host phase 1 hashes:")?;
+        let host_phase1_hash_rows: Vec<_> = M2Slot::iter()
+            .filter_map(|s| {
+                collection
+                    .host_phase_1_flash_hash_for(s, baseboard_id)
+                    .map(|h| (s, h))
+            })
+            .map(|(slot, phase1)| HostPhase1FlashHashRow {
+                slot: format!("{slot:?}"),
+                hash: phase1.hash.to_string(),
+            })
+            .collect();
+        let table = tabled::Table::new(host_phase1_hash_rows)
+            .with(tabled::settings::Style::empty())
+            .with(tabled::settings::Padding::new(0, 1, 0, 0))
+            .to_string();
+        writeln!(f, "{}", textwrap::indent(&table.to_string(), "        "))?;
 
         #[derive(Tabled)]
         #[tabled(rename_all = "SCREAMING_SNAKE_CASE")]

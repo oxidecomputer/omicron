@@ -3618,6 +3618,7 @@ dependencies = [
  "serde_json",
  "slog",
  "thiserror 2.0.12",
+ "tokio",
  "uuid",
 ]
 
@@ -6799,6 +6800,7 @@ dependencies = [
  "omicron-workspace-hack",
  "petname",
  "slog",
+ "strum 0.27.1",
  "swrite",
  "sync-ptr",
  "thiserror 2.0.12",
@@ -6865,6 +6867,7 @@ version = "0.1.0"
 dependencies = [
  "async-trait",
  "nexus-config",
+ "nexus-db-queries",
  "nexus-sled-agent-shared",
  "nexus-types",
  "omicron-common",
@@ -6922,6 +6925,7 @@ dependencies = [
  "serde_urlencoded",
  "sled-agent-client",
  "slog",
+ "slog-error-chain",
  "tokio",
  "tokio-postgres",
  "tokio-util",
