@@ -4,19 +4,18 @@
 
 //! Parameter to Node API calls that allows interaction with the system at large
 
-use crate::{Envelope, PeerMsg, PersistentState, PlatformId};
-use std::time::Instant;
+use crate::{Envelope, PeerMsg, PeerMsgKind, PersistentState, PlatformId};
+use std::collections::BTreeSet;
 
 /// An API shared by [`NodeCallerCtx`] and [`NodeHandlerCtx`]
 pub trait NodeCommonCtx {
     fn platform_id(&self) -> &PlatformId;
-    fn now(&self) -> Instant;
     fn persistent_state(&self) -> &PersistentState;
+    fn connected(&self) -> &BTreeSet<PlatformId>;
 }
 
 /// An API for an [`NodeCtx`] usable from a [`crate::Node`]
 pub trait NodeCallerCtx: NodeCommonCtx {
-    fn set_time(&mut self, now: Instant);
     fn num_envelopes(&self) -> usize;
     fn drain_envelopes(&mut self) -> impl Iterator<Item = Envelope>;
     fn envelopes(&self) -> impl Iterator<Item = &Envelope>;
@@ -33,20 +32,28 @@ pub trait NodeCallerCtx: NodeCommonCtx {
 
 /// An API for an [`NodeCtx`] usable from inside FSM states
 pub trait NodeHandlerCtx: NodeCommonCtx {
-    fn send(&mut self, to: PlatformId, msg: PeerMsg);
+    fn send(&mut self, to: PlatformId, msg: PeerMsgKind);
 
     /// Attempt to update the persistent state inside the callback `f`. If
     /// the state is updated, then `f` should return `true`, otherwise it should
     /// return `false`.
+    ///
+    /// Returns the same value as `f`.
     ///
     /// IMPORTANT: This method sets a bit indicating whether or not the
     /// underlying `PersistentState` was mutated, for use by callers. This
     /// method can safely be called multiple times. If any call mutates the
     /// persistent state, then the bit will remain set. The bit is only cleared
     /// when a caller calls `persistent_state_change_check_and_reset`.
-    fn update_persistent_state<F>(&mut self, f: F)
+    fn update_persistent_state<F>(&mut self, f: F) -> bool
     where
         F: FnOnce(&mut PersistentState) -> bool;
+
+    /// Add a peer to the connected set
+    fn add_connection(&mut self, id: PlatformId);
+
+    /// Remove a peer from the connected set
+    fn remove_connection(&mut self, id: &PlatformId);
 }
 
 /// Common parameter to [`crate::Node`] methods
@@ -70,8 +77,8 @@ pub struct NodeCtx {
     /// Outgoing messages destined for other peers
     outgoing: Vec<Envelope>,
 
-    /// The current time
-    now: Instant,
+    /// Connected peer nodes
+    connected: BTreeSet<PlatformId>,
 }
 
 impl NodeCtx {
@@ -81,7 +88,7 @@ impl NodeCtx {
             persistent_state: PersistentState::empty(),
             persistent_state_changed: false,
             outgoing: Vec::new(),
-            now: Instant::now(),
+            connected: BTreeSet::new(),
         }
     }
 }
@@ -91,41 +98,49 @@ impl NodeCommonCtx for NodeCtx {
         &self.platform_id
     }
 
-    fn now(&self) -> Instant {
-        self.now
-    }
-
     fn persistent_state(&self) -> &PersistentState {
         &self.persistent_state
+    }
+
+    fn connected(&self) -> &BTreeSet<PlatformId> {
+        &self.connected
     }
 }
 
 impl NodeHandlerCtx for NodeCtx {
-    fn send(&mut self, to: PlatformId, msg: PeerMsg) {
+    fn send(&mut self, to: PlatformId, msg_kind: PeerMsgKind) {
+        let rack_id = self.persistent_state.rack_id().expect("rack id exists");
         self.outgoing.push(Envelope {
             to,
             from: self.platform_id.clone(),
-            msg,
+            msg: PeerMsg { rack_id, kind: msg_kind },
         });
     }
 
-    fn update_persistent_state<F>(&mut self, f: F)
+    fn update_persistent_state<F>(&mut self, f: F) -> bool
     where
         F: FnOnce(&mut PersistentState) -> bool,
     {
         // We don't ever revert from true to false, which allows calling this
         // method multiple times in handler context.
         if f(&mut self.persistent_state) {
-            self.persistent_state_changed = true
+            self.persistent_state_changed = true;
+            true
+        } else {
+            false
         }
+    }
+
+    fn add_connection(&mut self, id: PlatformId) {
+        self.connected.insert(id);
+    }
+
+    fn remove_connection(&mut self, id: &PlatformId) {
+        self.connected.remove(id);
     }
 }
 
 impl NodeCallerCtx for NodeCtx {
-    fn set_time(&mut self, now: Instant) {
-        self.now = now;
-    }
-
     fn num_envelopes(&self) -> usize {
         self.outgoing.len()
     }
