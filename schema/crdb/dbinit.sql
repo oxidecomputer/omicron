@@ -2650,7 +2650,10 @@ CREATE TABLE IF NOT EXISTS omicron.public.support_bundle (
 
     -- The Nexus which is in charge of collecting the support bundle,
     -- and later managing its storage.
-    assigned_nexus UUID
+    assigned_nexus UUID,
+
+    user_comment TEXT
+
 );
 
 -- The "UNIQUE" part of this index helps enforce that we allow one support bundle
@@ -3148,7 +3151,7 @@ CREATE TABLE IF NOT EXISTS omicron.public.switch_port_settings_route_config (
     dst INET,
     gw INET,
     vid INT4,
-    local_pref INT8,
+    rib_priority INT2,
 
     /* TODO https://github.com/oxidecomputer/omicron/issues/3013 */
     PRIMARY KEY (port_settings_id, interface_name, dst, gw)
@@ -4725,6 +4728,31 @@ CREATE TABLE IF NOT EXISTS omicron.public.bp_pending_mgs_update_sp (
     PRIMARY KEY(blueprint_id, hw_baseboard_id)
 );
 
+-- Blueprint information related to pending RoT upgrades.
+CREATE TABLE IF NOT EXISTS omicron.public.bp_pending_mgs_update_rot (
+    -- Foreign key into the `blueprint` table
+    blueprint_id UUID,
+    -- identify of the device to be updated
+    -- (foreign key into the `hw_baseboard_id` table)
+    hw_baseboard_id UUID NOT NULL,
+    -- location of this device according to MGS
+    sp_type omicron.public.sp_type NOT NULL,
+    sp_slot INT4 NOT NULL,
+    -- artifact to be deployed to this device
+    artifact_sha256 STRING(64) NOT NULL,
+    artifact_version STRING(64) NOT NULL,
+
+    -- RoT-specific details
+    expected_active_slot omicron.public.hw_rot_slot NOT NULL,
+    expected_active_version STRING NOT NULL,
+    expected_inactive_version STRING, -- NULL means invalid (no version expected)
+    expected_persistent_boot_preference omicron.public.hw_rot_slot NOT NULL,
+    expected_pending_persistent_boot_preference omicron.public.hw_rot_slot,
+    expected_transient_boot_preference omicron.public.hw_rot_slot,
+
+    PRIMARY KEY(blueprint_id, hw_baseboard_id)
+);
+
 -- Mapping of Omicron zone ID to CockroachDB node ID. This isn't directly used
 -- by the blueprint tables above, but is used by the more general Reconfigurator
 -- system along with them (e.g., to decommission expunged CRDB nodes).
@@ -6230,7 +6258,7 @@ INSERT INTO omicron.public.db_metadata (
     version,
     target_version
 ) VALUES
-    (TRUE, NOW(), NOW(), '165.0.0', NULL)
+    (TRUE, NOW(), NOW(), '168.0.0', NULL)
 ON CONFLICT DO NOTHING;
 
 COMMIT;

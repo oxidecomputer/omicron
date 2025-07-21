@@ -56,3 +56,18 @@ impl From<StartupOptions> for HostStartupOptions {
         }
     }
 }
+
+#[derive(Serialize, Deserialize, JsonSchema)]
+#[serde(tag = "status", rename_all = "snake_case")]
+pub enum ComponentFirmwareHashStatus {
+    /// The hash is not available; the client must issue a separate request to
+    /// begin calculating the hash.
+    HashNotCalculated,
+    /// The hash is currently being calculated; the client should sleep briefly
+    /// then check again.
+    ///
+    /// We expect this operation to take a handful of seconds in practice.
+    HashInProgress,
+    /// The hash of the given firmware slot.
+    Hashed { sha256: [u8; 32] },
+}
