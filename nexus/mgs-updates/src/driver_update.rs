@@ -28,6 +28,7 @@ use std::time::Duration;
 use std::time::Instant;
 use thiserror::Error;
 use tokio::sync::watch;
+use tufaceous_artifact::ArtifactKind;
 use uuid::Uuid;
 
 /// How long may the status remain unchanged without us treating this as a
@@ -139,6 +140,21 @@ impl SpComponentUpdate {
                     // is the staging area for the bootloader and in this context
                     // means "the inactive slot".
                     firmware_slot: 1,
+                    update_id,
+                }
+            }
+            PendingMgsUpdateDetails::HostPhase1(details) => {
+                SpComponentUpdate {
+                    log: log.clone(),
+                    component: SpComponent::HOST_CPU_BOOT_FLASH,
+                    target_sp_type: request.sp_type,
+                    target_sp_slot: request.slot_id,
+                    // Like the SP, we request an update to the inactive slot.
+                    firmware_slot: details
+                        .expected_active_slot
+                        .slot
+                        .toggled()
+                        .to_mgs_firmware_slot(),
                     update_id,
                 }
             }
@@ -632,15 +648,40 @@ async fn wait_for_update_done(
             // Check if we're done.
             Ok(PrecheckStatus::UpdateComplete) => return Ok(()),
 
-            // An incorrect version in the "inactive" slot, incorrect active slot,
-            // or non-empty pending_persistent_boot_preference/transient_boot_preference
-            // are normal during the upgrade. We have no reason to think these won't
-            // converge so we proceed with waiting.
+            // Many error statuses are normal during the upgrade:
+            //
+            // * incorrect version or artifact in the "inactive" slot
+            // * incorrect active slot
+            // * incorrect active host phase 2 artifact (this is written by
+            //   sled-agent, and must be done before we pass precheck)
+            // * non-empty pending_persistent_boot_preference
+            // * non-empty transient_boot_preference
+            // * failure to fetch inventory from sled-agent (host OS only)
+            // * failure to determine an active slot artifact
+            //
+            // We have no reason to think these won't converge, so we proceed
+            // with waiting.
             Err(PrecheckError::GatewayClientError(_))
             | Err(PrecheckError::WrongInactiveVersion { .. })
-            | Err(PrecheckError::WrongActiveSlot { .. })
+            | Err(PrecheckError::WrongInactiveArtifact { .. })
+            | Err(PrecheckError::WrongActiveRotSlot { .. })
+            | Err(PrecheckError::WrongActiveHostOsSlot { .. })
             | Err(PrecheckError::EphemeralRotBootPreferenceSet)
+            | Err(PrecheckError::SledAgentInventory { .. })
+            | Err(PrecheckError::SledAgentInventoryMissingLastReconciliation)
+            | Err(PrecheckError::DeterminingActiveArtifact { .. })
+            | Err(PrecheckError::DeterminingActiveHostOsSlot { .. })
             | Ok(PrecheckStatus::ReadyForUpdate) => {
+                if before.elapsed() >= timeout {
+                    return Err(UpdateWaitError::Timeout(timeout));
+                }
+
+                tokio::time::sleep(PROGRESS_POLL_INTERVAL).await;
+                continue;
+            }
+            Err(PrecheckError::WrongActiveArtifact { kind, .. })
+                if kind == ArtifactKind::HOST_PHASE_2 =>
+            {
                 if before.elapsed() >= timeout {
                     return Err(UpdateWaitError::Timeout(timeout));
                 }
@@ -651,6 +692,7 @@ async fn wait_for_update_done(
 
             Err(error @ PrecheckError::WrongDevice { .. })
             | Err(error @ PrecheckError::WrongActiveVersion { .. })
+            | Err(error @ PrecheckError::WrongActiveArtifact { .. })
             | Err(error @ PrecheckError::RotCommunicationFailed { .. }) => {
                 // Stop trying to make this update happen.  It's not going to
                 // happen.

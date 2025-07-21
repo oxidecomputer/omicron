@@ -23,6 +23,7 @@ qorb.workspace = true
 repo-depot-client.workspace = true
 reqwest.workspace = true
 sha2.workspace = true
+sled-agent-client.workspace = true
 slog.workspace = true
 slog-error-chain.workspace = true
 thiserror.workspace = true

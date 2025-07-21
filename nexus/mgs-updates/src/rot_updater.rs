@@ -295,7 +295,7 @@ impl SpComponentUpdateHelper for ReconfiguratorRotUpdater {
             // If the active slot does not match the expected active slot, it is possible
             // another update is happening. Bail out.
             if expected_active_slot.slot() != active {
-                return Err(PrecheckError::WrongActiveSlot {
+                return Err(PrecheckError::WrongActiveRotSlot {
                     expected: expected_active_slot.slot, found: *active
                 })
             }
@@ -383,14 +383,19 @@ impl SpComponentUpdateHelper for ReconfiguratorRotUpdater {
             mgs_clients
                 .try_all_serially(log, move |mgs_client| async move {
                     let inactive_slot = match &update.details {
-                        PendingMgsUpdateDetails::Rot { expected_active_slot, .. } => {
-                            expected_active_slot.slot().toggled().to_u16()
-                        },
+                        PendingMgsUpdateDetails::Rot {
+                            expected_active_slot,
+                            ..
+                        } => expected_active_slot.slot().toggled().to_u16(),
                         PendingMgsUpdateDetails::Sp { .. }
-                        | PendingMgsUpdateDetails::RotBootloader { .. } => unreachable!(
-                            "pending MGS update details within ReconfiguratorRotUpdater \
-                            will always be for the RoT"
-                        )
+                        | PendingMgsUpdateDetails::RotBootloader { .. }
+                        | PendingMgsUpdateDetails::HostPhase1(_) => {
+                            unreachable!(
+                                "pending MGS update details within \
+                                 ReconfiguratorRotUpdater \
+                                 will always be for the RoT"
+                            )
+                        }
                     };
                     let persist = true;
                     mgs_client
@@ -399,7 +404,7 @@ impl SpComponentUpdateHelper for ReconfiguratorRotUpdater {
                             update.slot_id,
                             &SpComponent::ROT.to_string(),
                             persist,
-                            &SpComponentFirmwareSlot { slot: inactive_slot }
+                            &SpComponentFirmwareSlot { slot: inactive_slot },
                         )
                         .await?;
                     Ok(())
@@ -408,17 +413,19 @@ impl SpComponentUpdateHelper for ReconfiguratorRotUpdater {
 
             debug!(log, "attempting to reset device");
             mgs_clients
-            .try_all_serially(log, move |mgs_client| async move {
-                mgs_client
-                    .sp_component_reset(
-                        update.sp_type,
-                        update.slot_id,
-                        &SpComponent::ROT.to_string(),
-                    )
-                    .await?;
-                Ok(())
-            }).await?;
+                .try_all_serially(log, move |mgs_client| async move {
+                    mgs_client
+                        .sp_component_reset(
+                            update.sp_type,
+                            update.slot_id,
+                            &SpComponent::ROT.to_string(),
+                        )
+                        .await?;
+                    Ok(())
+                })
+                .await?;
             Ok(())
-        }.boxed()
+        }
+        .boxed()
     }
 }

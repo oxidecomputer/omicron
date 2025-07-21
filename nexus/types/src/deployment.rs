@@ -1455,12 +1455,17 @@ pub enum PendingMgsUpdateDetails {
         /// expected contents of the stage 0 next
         expected_stage0_next_version: ExpectedVersion,
     },
+    /// the host OS is being updated
+    ///
+    /// We write the phase 1 via MGS, and have a precheck condition that
+    /// sled-agent has already written the matching phase 2.
+    HostPhase1(PendingMgsUpdateHostPhase1Details),
 }
 
 impl slog::KV for PendingMgsUpdateDetails {
     fn serialize(
         &self,
-        _record: &slog::Record,
+        record: &slog::Record,
         serializer: &mut dyn slog::Serializer,
     ) -> slog::Result {
         match self {
@@ -1525,7 +1530,104 @@ impl slog::KV for PendingMgsUpdateDetails {
                     &format!("{:?}", expected_stage0_next_version),
                 )
             }
+            PendingMgsUpdateDetails::HostPhase1(details) => {
+                serializer.emit_str(Key::from("component"), "host_phase_1")?;
+                slog::KV::serialize(details, record, serializer)
+            }
         }
+    }
+}
+
+/// Describes the host-phase-1-specific details of a PendingMgsUpdate
+#[derive(
+    Clone, Debug, Eq, PartialEq, JsonSchema, Deserialize, Serialize, Diffable,
+)]
+#[serde(rename_all = "snake_case")]
+pub struct PendingMgsUpdateHostPhase1Details {
+    // TODO-john comments
+    pub expected_active_slot: ExpectedActiveHostOsSlot,
+    pub expected_inactive_artifact: ExpectedInactiveHostOsArtifact,
+    pub sled_agent_address: SocketAddrV6,
+}
+
+impl slog::KV for PendingMgsUpdateHostPhase1Details {
+    fn serialize(
+        &self,
+        record: &slog::Record,
+        serializer: &mut dyn slog::Serializer,
+    ) -> slog::Result {
+        let Self {
+            expected_active_slot,
+            expected_inactive_artifact,
+            sled_agent_address,
+        } = self;
+        serializer.emit_str(
+            Key::from("sled_agent_address"),
+            &sled_agent_address.to_string(),
+        )?;
+
+        slog::KV::serialize(expected_active_slot, record, serializer)?;
+        slog::KV::serialize(expected_inactive_artifact, record, serializer)
+    }
+}
+
+#[derive(
+    Clone, Debug, Eq, PartialEq, JsonSchema, Deserialize, Serialize, Diffable,
+)]
+#[serde(rename_all = "snake_case")]
+pub struct ExpectedActiveHostOsSlot {
+    // TODO-john comments
+    pub slot: M2Slot,
+    pub phase_1: ArtifactHash,
+    pub phase_2: ArtifactHash,
+}
+
+impl slog::KV for ExpectedActiveHostOsSlot {
+    fn serialize(
+        &self,
+        _record: &slog::Record,
+        serializer: &mut dyn slog::Serializer,
+    ) -> slog::Result {
+        let Self { slot, phase_1, phase_2 } = self;
+        serializer.emit_str(Key::from("active_slot"), &format!("{slot:?}"))?;
+        serializer.emit_str(
+            Key::from("active_phase_1_artifact"),
+            &phase_1.to_string(),
+        )?;
+        serializer.emit_str(
+            Key::from("active_phase_2_artifact"),
+            &phase_2.to_string(),
+        )?;
+        Ok(())
+    }
+}
+
+#[derive(
+    Clone, Debug, Eq, PartialEq, JsonSchema, Deserialize, Serialize, Diffable,
+)]
+#[serde(rename_all = "snake_case")]
+pub struct ExpectedInactiveHostOsArtifact {
+    // TODO-john comments
+    pub phase_1: ArtifactHash,
+    pub phase_2: ExpectedArtifact,
+}
+
+impl slog::KV for ExpectedInactiveHostOsArtifact {
+    fn serialize(
+        &self,
+        _record: &slog::Record,
+        serializer: &mut dyn slog::Serializer,
+    ) -> slog::Result {
+        let Self { phase_1, phase_2 } = self;
+        serializer.emit_str(
+            Key::from("inactive_phase_1_artifact"),
+            &phase_1.to_string(),
+        )?;
+        serializer.emit_str(
+            Key::from("inactive_phase_2_artifact"),
+            &phase_2.to_string(),
+        )?;
+        Ok(())
     }
 }
 
@@ -1558,6 +1660,47 @@ impl fmt::Display for ExpectedVersion {
         match self {
             ExpectedVersion::NoValidVersion => f.write_str("invalid"),
             ExpectedVersion::Version(v) => v.fmt(f),
+        }
+    }
+}
+
+/// Describes the artifact that we expect to find in some firmware slot
+#[derive(
+    Clone,
+    Copy,
+    Debug,
+    Eq,
+    PartialEq,
+    JsonSchema,
+    Deserialize,
+    Serialize,
+    Diffable,
+)]
+#[serde(tag = "kind", content = "artifact", rename_all = "snake_case")]
+pub enum ExpectedArtifact {
+    /// We expect to find _no_ valid artifact in this slot
+    NoValidArtifact,
+    /// We expect to find the specified artifact in this slot
+    Artifact(ArtifactHash),
+}
+
+impl FromStr for ExpectedArtifact {
+    type Err = <ArtifactHash as FromStr>::Err;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        if s == "invalid" {
+            Ok(Self::NoValidArtifact)
+        } else {
+            Ok(Self::Artifact(s.parse()?))
+        }
+    }
+}
+
+impl fmt::Display for ExpectedArtifact {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::NoValidArtifact => f.write_str("invalid"),
+            Self::Artifact(v) => v.fmt(f),
         }
     }
 }
