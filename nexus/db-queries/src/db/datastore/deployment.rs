@@ -1999,7 +1999,8 @@ impl DataStore {
             "noximeter_policy" => noximeter_policy,
             "npending_mgs_updates_sp" => npending_mgs_updates_sp,
             "npending_mgs_updates_rot" => npending_mgs_updates_rot,
-            "npending_mgs_updates_rot_bootloader" => npending_mgs_updates_rot_bootloader,
+            "npending_mgs_updates_rot_bootloader" =>
+            npending_mgs_updates_rot_bootloader,
         );
 
         Ok(())
