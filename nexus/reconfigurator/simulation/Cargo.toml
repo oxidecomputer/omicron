@@ -21,6 +21,7 @@ omicron-uuid-kinds.workspace = true
 omicron-workspace-hack.workspace = true
 petname = { workspace = true, default-features = false }
 slog.workspace = true
+strum.workspace = true
 swrite.workspace = true
 sync-ptr.workspace = true
 thiserror.workspace = true
