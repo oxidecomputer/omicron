@@ -103,8 +103,8 @@ impl PartialOrd for crate::types::SpIdentifier {
 
 #[derive(Debug, thiserror::Error)]
 pub enum HostPhase1HashError {
-    #[error("timed out waiting for hash calculation")]
-    Timeout,
+    #[error("timed out after {0:?} waiting for hash calculation")]
+    Timeout(Duration),
     #[error("hash calculation failed (phase1 written while hashing?)")]
     ContentsModifiedWhileHashing,
     #[error("failed to send request to {kind}")]
@@ -201,7 +201,7 @@ impl Client {
         loop {
             tokio::time::sleep(SLEEP_BETWEEN_POLLS).await;
             if start.elapsed() > timeout {
-                return Err(HostPhase1HashError::Timeout);
+                return Err(HostPhase1HashError::Timeout(timeout));
             }
             match self
                 .sp_component_hash_firmware_get(

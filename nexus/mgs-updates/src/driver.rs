@@ -10,6 +10,7 @@ use crate::driver_update::ApplyUpdateError;
 use crate::driver_update::PROGRESS_TIMEOUT;
 use crate::driver_update::SpComponentUpdate;
 use crate::driver_update::apply_update;
+use crate::host_phase1_updater::ReconfiguratorHostPhase1Updater;
 use crate::rot_bootloader_updater::ReconfiguratorRotBootloaderUpdater;
 use crate::rot_updater::ReconfiguratorRotUpdater;
 use crate::sp_updater::ReconfiguratorSpUpdater;
@@ -20,6 +21,7 @@ use id_map::IdMap;
 use id_map::IdMappable;
 use iddqd::IdOrdMap;
 use nexus_types::deployment::PendingMgsUpdate;
+use nexus_types::deployment::PendingMgsUpdateDetails;
 use nexus_types::deployment::PendingMgsUpdates;
 use nexus_types::internal_api::views::CompletedAttempt;
 use nexus_types::internal_api::views::InProgressUpdateStatus;
@@ -309,27 +311,33 @@ impl MgsUpdateDriver {
             _,
             Box<dyn SpComponentUpdateHelper + Send + Sync>,
         ) = match &request.details {
-            nexus_types::deployment::PendingMgsUpdateDetails::Sp { .. } => {
+            PendingMgsUpdateDetails::Sp { .. } => {
                 let sp_update =
                     SpComponentUpdate::from_request(&log, &request, update_id);
 
                 (sp_update, Box::new(ReconfiguratorSpUpdater {}))
             }
-            nexus_types::deployment::PendingMgsUpdateDetails::Rot {
-                ..
-            } => {
+            PendingMgsUpdateDetails::Rot { .. } => {
                 let sp_update =
                     SpComponentUpdate::from_request(&log, &request, update_id);
 
                 (sp_update, Box::new(ReconfiguratorRotUpdater {}))
             }
-            nexus_types::deployment::PendingMgsUpdateDetails::RotBootloader {
-                ..
-            } => {
+            PendingMgsUpdateDetails::RotBootloader { .. } => {
                 let sp_update =
                     SpComponentUpdate::from_request(&log, &request, update_id);
 
                 (sp_update, Box::new(ReconfiguratorRotBootloaderUpdater {}))
+            }
+            PendingMgsUpdateDetails::HostPhase1(details) => {
+                let sp_update =
+                    SpComponentUpdate::from_request(&log, &request, update_id);
+                (
+                    sp_update,
+                    Box::new(ReconfiguratorHostPhase1Updater::new(
+                        details.clone(),
+                    )),
+                )
             }
         };
 

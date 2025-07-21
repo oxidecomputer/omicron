@@ -11,13 +11,18 @@ use futures::future::BoxFuture;
 use gateway_client::types::SpType;
 use gateway_client::types::SpUpdateStatus;
 use gateway_types::rot::RotSlot;
+use nexus_types::deployment::ExpectedArtifact;
 use nexus_types::deployment::ExpectedVersion;
 use nexus_types::deployment::PendingMgsUpdate;
+use omicron_common::disk::M2Slot;
 use slog::Logger;
 use slog::{debug, error, info, warn};
+use std::net::SocketAddrV6;
 use std::time::Duration;
 use thiserror::Error;
 use tokio::sync::watch;
+use tufaceous_artifact::ArtifactHash;
+use tufaceous_artifact::ArtifactKind;
 use tufaceous_artifact::ArtifactVersion;
 use uuid::Uuid;
 
@@ -25,6 +30,8 @@ use uuid::Uuid;
 pub(crate) const STATUS_POLL_INTERVAL: Duration = Duration::from_secs(3);
 
 type GatewayClientError = gateway_client::Error<gateway_client::types::Error>;
+type SledAgentClientError =
+    sled_agent_client::Error<sled_agent_client::types::Error>;
 
 /// Error type returned when an update to a component managed by the SP fails.
 ///
@@ -290,6 +297,13 @@ pub enum PrecheckError {
     #[error("communicating with RoT: {message:?}")]
     RotCommunicationFailed { message: String },
 
+    #[error("fetching inventory from sled-agent at {address}")]
+    SledAgentInventory {
+        address: SocketAddrV6,
+        #[source]
+        err: SledAgentClientError,
+    },
+
     #[error(
         "in {sp_type} slot {slot_id}, expected to find \
          part {expected_part:?} serial {expected_serial:?}, but found \
@@ -304,8 +318,10 @@ pub enum PrecheckError {
         found_serial: String,
     },
 
-    #[error("expected to find active slot {expected:?}, but found {found:?}")]
-    WrongActiveSlot { expected: RotSlot, found: RotSlot },
+    #[error(
+        "expected to find active RoT slot {expected:?}, but found {found:?}"
+    )]
+    WrongActiveRotSlot { expected: RotSlot, found: RotSlot },
 
     #[error(
         "expected to find active version {:?}, but found {found:?}",
@@ -314,9 +330,52 @@ pub enum PrecheckError {
     WrongActiveVersion { expected: ArtifactVersion, found: String },
 
     #[error(
+        "expected to find active {kind} artifact {expected}, but found {found:?}"
+    )]
+    WrongActiveArtifact {
+        kind: ArtifactKind,
+        expected: ArtifactHash,
+        found: ArtifactHash,
+    },
+
+    #[error(
+        "expected to find active kind artifact {expected}, but failed \
+         to fetch current artifact: {err}"
+    )]
+    DeterminingActiveArtifact {
+        kind: ArtifactKind,
+        expected: ArtifactHash,
+        err: String,
+    },
+
+    #[error(
         "expected to find inactive version {expected:?}, but found {found:?}"
     )]
     WrongInactiveVersion { expected: ExpectedVersion, found: FoundVersion },
+
+    #[error(
+        "expected to find inactive {kind} artifact {expected}, \
+         but found {found:?}"
+    )]
+    WrongInactiveArtifact {
+        kind: ArtifactKind,
+        expected: ExpectedArtifact,
+        found: FoundArtifact,
+    },
+
+    #[error("inventory missing `last_reconciliation` result")]
+    SledAgentInventoryMissingLastReconciliation,
+
+    #[error(
+        "expected to find active host OS slot {expected:?}, but found {found:?}"
+    )]
+    WrongActiveHostOsSlot { expected: M2Slot, found: M2Slot },
+
+    #[error(
+        "expected to find active host OS slot {expected:?}, but inventory \
+         reported an error: {err}"
+    )]
+    DeterminingActiveHostOsSlot { expected: M2Slot, err: String },
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -370,6 +429,45 @@ impl FoundVersion {
             | (ExpectedVersion::Version(_), FoundVersion::Version(_)) => {
                 return Err(PrecheckError::WrongInactiveVersion {
                     expected: expected.clone(),
+                    found: self.clone(),
+                });
+            }
+        };
+
+        Ok(())
+    }
+}
+
+#[derive(Debug, Clone)]
+pub enum FoundArtifact {
+    MissingArtifact,
+    Artifact(ArtifactHash),
+}
+
+impl FoundArtifact {
+    pub fn matches(
+        &self,
+        expected: &ExpectedArtifact,
+        kind: ArtifactKind,
+    ) -> Result<(), PrecheckError> {
+        match (expected, &self) {
+            // expected garbage, found garbage
+            (
+                ExpectedArtifact::NoValidArtifact,
+                FoundArtifact::MissingArtifact,
+            ) => (),
+            // expected a specific artifact and found it
+            (
+                ExpectedArtifact::Artifact(artifact),
+                FoundArtifact::Artifact(found),
+            ) if artifact == found => (),
+            // anything else is a mismatch
+            (ExpectedArtifact::NoValidArtifact, FoundArtifact::Artifact(_))
+            | (ExpectedArtifact::Artifact(_), FoundArtifact::MissingArtifact)
+            | (ExpectedArtifact::Artifact(_), FoundArtifact::Artifact(_)) => {
+                return Err(PrecheckError::WrongInactiveArtifact {
+                    kind,
+                    expected: *expected,
                     found: self.clone(),
                 });
             }

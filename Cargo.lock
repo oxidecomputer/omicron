@@ -6588,6 +6588,7 @@ dependencies = [
  "repo-depot-client",
  "reqwest",
  "sha2",
+ "sled-agent-client",
  "slog",
  "slog-error-chain",
  "sp-sim",

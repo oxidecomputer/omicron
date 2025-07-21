@@ -619,11 +619,28 @@ impl DiskManagementError {
     Deserialize,
     Serialize,
     JsonSchema,
+    Diffable,
     strum::EnumIter,
 )]
 pub enum M2Slot {
     A,
     B,
+}
+
+impl M2Slot {
+    pub fn toggled(self) -> Self {
+        match self {
+            Self::A => Self::B,
+            Self::B => Self::A,
+        }
+    }
+
+    pub fn to_mgs_firmware_slot(self) -> u16 {
+        match self {
+            Self::A => 0,
+            Self::B => 1,
+        }
+    }
 }
 
 impl fmt::Display for M2Slot {
