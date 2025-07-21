@@ -1440,6 +1440,10 @@ KEEPER MEMBERSHIP
     no membership retrieved
 
 
+COCKROACH STATUS
+    no cockroach status retrieved
+
+
 
 
 > # Plan a blueprint run -- this will cause zones and disks on the expunged
