@@ -1,0 +1,28 @@
+# Load an example system.
+
+load-example --nsleds 3 --ndisks-per-sled 1
+
+# Create a TUF repository from a fake manifest. We're going to use this
+# repository to test out the minimum release generation flow.
+tuf-assemble ../../update-common/manifests/fake.toml
+set target-release repo-1.0.0.zip
+
+# Update the install dataset on this sled to the target release.
+# (This populates the zone manifest, used for no-op conversions from
+# install dataset to artifact down the road.)
+sled-update-install-dataset serial0 --to-target-release
+# Simulate a mupdate on sled 0 by setting the mupdate override field to a
+# new UUID (generated using uuidgen).
+sled-set serial0 mupdate-override 6123eac1-ec5b-42ba-b73f-9845105a9971
+
+# On sled 1, simulate an error obtaining the mupdate override.
+sled-set serial1 mupdate-override --with-error
+
+# Simulate a mupdate on sled 2 as well.
+sled-set serial2 mupdate-override 203fa72c-85c1-466a-8ed3-338ee029530d
+
+# Generate an inventory and display it.
+#
+# TODO: in the future, we'll plan against this inventory.
+inventory-generate
+inventory-show latest
