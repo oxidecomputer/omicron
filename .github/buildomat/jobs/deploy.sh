@@ -414,6 +414,22 @@ until grep "Handoff to Nexus is complete" /var/svc/log/oxide-sled-agent:default.
 done
 echo "Waited for handoff: ${retry}s"
 
+# Wait for at least one collection. We check for "greater than 1" line of output
+# because we always get the table header; 2 or more lines indicate 1 or more
+# collections.
+retry=0
+INVENTORY_COLLECTION_COUNT=$(pfexec zlogin oxz_switch /opt/oxide/omdb/bin/omdb db inventory collections list | wc -l)
+until [[ "${INVENTORY_COLLECTION_COUNT}" -gt 1 ]]; do
+	if [[ $retry -gt 300 ]]; then
+		echo "Failed to handoff to Nexus after 300 seconds"
+		exit 1
+	fi
+	sleep 1
+	retry=$((retry + 1))
+	INVENTORY_COLLECTION_COUNT=$(pfexec zlogin oxz_switch /opt/oxide/omdb/bin/omdb db inventory collections list | wc -l)
+done
+echo "Waited for inventory collection: ${retry}s"
+
 # Wait for the number of expected U2 zpools
 retry=0
 ACTUAL_ZPOOL_COUNT=$(pfexec zlogin oxz_switch /opt/oxide/omdb/bin/omdb db zpool list -i | wc -l)
