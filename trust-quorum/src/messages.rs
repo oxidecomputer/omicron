@@ -9,7 +9,7 @@ use crate::{Configuration, Epoch, PlatformId, Threshold};
 use gfss::shamir::Share;
 use omicron_uuid_kinds::RackUuid;
 use serde::{Deserialize, Serialize};
-use std::{collections::BTreeSet, time::Duration};
+use std::collections::BTreeSet;
 
 /// A request from nexus informing a node to start coordinating a
 /// reconfiguration.
@@ -20,9 +20,6 @@ pub struct ReconfigureMsg {
     pub last_committed_epoch: Option<Epoch>,
     pub members: BTreeSet<PlatformId>,
     pub threshold: Threshold,
-
-    // The timeout before we send a follow up request to a peer
-    pub retry_timeout: Duration,
 }
 
 /// Messages sent between trust quorum members over a sprockets channel
