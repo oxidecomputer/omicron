@@ -6336,6 +6336,7 @@ dependencies = [
  "expectorate",
  "futures",
  "gateway-client",
+ "gateway-types",
  "hyper-rustls",
  "id-map",
  "iddqd",

@@ -2791,7 +2791,7 @@ fn after_165_0_0<'a>(ctx: &'a MigrationContext<'a>) -> BoxFuture<'a, ()> {
     })
 }
 
-fn before_167_0_0<'a>(ctx: &'a MigrationContext<'a>) -> BoxFuture<'a, ()> {
+fn before_168_0_0<'a>(ctx: &'a MigrationContext<'a>) -> BoxFuture<'a, ()> {
     Box::pin(async move {
         // Create test data in inv_sled_config_reconciler table before the new columns are added.
         ctx.client
@@ -2808,7 +2808,7 @@ fn before_167_0_0<'a>(ctx: &'a MigrationContext<'a>) -> BoxFuture<'a, ()> {
     })
 }
 
-fn after_167_0_0<'a>(ctx: &'a MigrationContext<'a>) -> BoxFuture<'a, ()> {
+fn after_168_0_0<'a>(ctx: &'a MigrationContext<'a>) -> BoxFuture<'a, ()> {
     Box::pin(async move {
         // After the migration, the new columns should exist and be NULL for existing rows.
         let rows = ctx
@@ -2986,8 +2986,8 @@ fn get_migration_checks() -> BTreeMap<Version, DataMigrationFns> {
         DataMigrationFns::new().before(before_165_0_0).after(after_165_0_0),
     );
     map.insert(
-        Version::new(167, 0, 0),
-        DataMigrationFns::new().before(before_167_0_0).after(after_167_0_0),
+        Version::new(168, 0, 0),
+        DataMigrationFns::new().before(before_168_0_0).after(after_168_0_0),
     );
 
     map
