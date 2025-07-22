@@ -14,8 +14,6 @@ internal DNS generations: 1
 external DNS generations: 1
 target number of Nexus instances: default
 target release (generation 1): unset
-chicken switches:
-    add zones with mupdate override:   false
 
 
 
@@ -97,8 +95,6 @@ target release (generation 2): 1.0.0 (system-update-v1.0.0.zip)
     artifact: 04e4a7fdb84acca92c8fd3235e26d64ea61bef8a5f98202589fd346989c5720a switch_rot_image_a (fake-switch-rot version 1.0.0)
     artifact: 04e4a7fdb84acca92c8fd3235e26d64ea61bef8a5f98202589fd346989c5720a switch_rot_image_b (fake-switch-rot version 1.0.0)
     artifact: 005ea358f1cd316df42465b1e3a0334ea22cc0c0442cf9ddf9b42fbf49780236 switch_rot_bootloader (fake-switch-rot-bootloader version 1.0.0)
-chicken switches:
-    add zones with mupdate override:   false
 
 
 
@@ -119,8 +115,6 @@ internal DNS generations:
 external DNS generations: 
 target number of Nexus instances: default
 target release (generation 1): unset
-chicken switches:
-    add zones with mupdate override:   false
 
 
 > load saved.out
@@ -174,8 +168,6 @@ target release (generation 2): 1.0.0 (system-update-v1.0.0.zip)
     artifact: 04e4a7fdb84acca92c8fd3235e26d64ea61bef8a5f98202589fd346989c5720a switch_rot_image_a (fake-switch-rot version 1.0.0)
     artifact: 04e4a7fdb84acca92c8fd3235e26d64ea61bef8a5f98202589fd346989c5720a switch_rot_image_b (fake-switch-rot version 1.0.0)
     artifact: 005ea358f1cd316df42465b1e3a0334ea22cc0c0442cf9ddf9b42fbf49780236 switch_rot_bootloader (fake-switch-rot-bootloader version 1.0.0)
-chicken switches:
-    add zones with mupdate override:   false
 
 
 

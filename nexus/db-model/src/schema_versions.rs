@@ -28,8 +28,8 @@ static KNOWN_VERSIONS: LazyLock<Vec<KnownVersion>> = LazyLock::new(|| {
         // |  leaving the first copy as an example for the next person.
         // v
         // KnownVersion::new(next_int, "unique-dirname-with-the-sql-files"),
-        KnownVersion::new(170, "add-zones-with-mupdate-override"),
-        KnownVersion::new(169, "inv-clear-mupdate-override"),
+        KnownVersion::new(170, "add-pending-mgs-updates-rot-bootloader"),
+        KnownVersion::new(169, "inv-ntp-timesync"),
         KnownVersion::new(168, "add-inv-host-phase-1-flash-hash"),
         KnownVersion::new(167, "add-pending-mgs-updates-rot"),
         KnownVersion::new(166, "bundle-user-comment"),

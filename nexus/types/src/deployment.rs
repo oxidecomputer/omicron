@@ -75,14 +75,8 @@ mod zone_type;
 use crate::inventory::BaseboardId;
 pub use blueprint_diff::BlueprintDiffSummary;
 use blueprint_display::BpPendingMgsUpdates;
-pub use chicken_switches::PlannerChickenSwitches;
-pub use chicken_switches::PlannerChickenSwitchesDiff;
-pub use chicken_switches::PlannerChickenSwitchesDisplay;
 pub use chicken_switches::ReconfiguratorChickenSwitches;
-pub use chicken_switches::ReconfiguratorChickenSwitchesDisplay;
 pub use chicken_switches::ReconfiguratorChickenSwitchesParam;
-pub use chicken_switches::ReconfiguratorChickenSwitchesView;
-pub use chicken_switches::ReconfiguratorChickenSwitchesViewDisplay;
 pub use clickhouse::ClickhouseClusterConfig;
 use gateway_client::types::SpType;
 use gateway_types::rot::RotSlot;
@@ -1327,8 +1321,9 @@ impl Serialize for PendingMgsUpdates {
     where
         S: serde::Serializer,
     {
+        let Self { by_baseboard } = self;
         // iddqd serializes as a list of items, so just defer to it.
-        self.by_baseboard.serialize(serializer)
+        by_baseboard.serialize(serializer)
     }
 }
 

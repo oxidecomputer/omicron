@@ -33,7 +33,6 @@ define_enums! {
     BpZoneDispositionEnum => "bp_zone_disposition",
     BpZoneImageSourceEnum => "bp_zone_image_source",
     CabooseWhichEnum => "caboose_which",
-    ClearMupdateOverrideBootSuccessEnum => "clear_mupdate_override_boot_success",
     ClickhouseModeEnum => "clickhouse_mode",
     DatasetKindEnum => "dataset_kind",
     DnsGroupEnum => "dns_group",

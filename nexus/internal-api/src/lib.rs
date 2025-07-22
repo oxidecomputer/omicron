@@ -13,8 +13,8 @@ use http::Response;
 use nexus_types::{
     deployment::{
         Blueprint, BlueprintMetadata, BlueprintTarget, BlueprintTargetSet,
-        ClickhousePolicy, OximeterReadPolicy,
-        ReconfiguratorChickenSwitchesParam, ReconfiguratorChickenSwitchesView,
+        ClickhousePolicy, OximeterReadPolicy, ReconfiguratorChickenSwitches,
+        ReconfiguratorChickenSwitchesParam,
     },
     external_api::{
         headers::RangeRequest,
@@ -496,7 +496,7 @@ pub trait NexusInternalApi {
     }]
     async fn reconfigurator_chicken_switches_show_current(
         rqctx: RequestContext<Self::Context>,
-    ) -> Result<HttpResponseOk<ReconfiguratorChickenSwitchesView>, HttpError>;
+    ) -> Result<HttpResponseOk<ReconfiguratorChickenSwitches>, HttpError>;
 
     /// Get the chicken switches at `version` if it exists
     #[endpoint {
@@ -506,7 +506,7 @@ pub trait NexusInternalApi {
     async fn reconfigurator_chicken_switches_show(
         rqctx: RequestContext<Self::Context>,
         path_params: Path<VersionPathParam>,
-    ) -> Result<HttpResponseOk<ReconfiguratorChickenSwitchesView>, HttpError>;
+    ) -> Result<HttpResponseOk<ReconfiguratorChickenSwitches>, HttpError>;
 
     /// Update the chicken switches at the latest versions
     #[endpoint {

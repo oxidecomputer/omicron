@@ -51,7 +51,7 @@ impl<'a> BlueprintDiffSummary<'a> {
     }
 
     /// Return a struct that can be used to display the diff.
-    pub fn display<'b>(&'b self) -> BlueprintDiffDisplay<'a, 'b> {
+    pub fn display(&self) -> BlueprintDiffDisplay<'a, '_> {
         BlueprintDiffDisplay::new(self)
     }
 
@@ -661,9 +661,7 @@ pub struct BpDiffZones {
 impl BpDiffZones {
     /// Convert from our diff summary to our display compatibility layer
     /// from the prior version of code.
-    pub fn from_diff_summary<'a, 'b>(
-        summary: &'b BlueprintDiffSummary<'a>,
-    ) -> Self {
+    pub fn from_diff_summary(summary: &BlueprintDiffSummary<'_>) -> Self {
         let mut diffs = BpDiffZones::default();
         for sled_id in summary.all_sled_ids() {
             if let Some(added) = summary.added_zones(&sled_id) {
@@ -879,9 +877,7 @@ pub struct BpDiffPhysicalDisks<'a> {
 }
 
 impl<'a> BpDiffPhysicalDisks<'a> {
-    pub fn from_diff_summary<'b>(
-        summary: &'b BlueprintDiffSummary<'a>,
-    ) -> Self {
+    pub fn from_diff_summary(summary: &BlueprintDiffSummary<'a>) -> Self {
         let mut diffs = BpDiffPhysicalDisks::default();
         for sled_id in summary.all_sled_ids() {
             if let Some(added) = summary.added_disks(&sled_id) {
@@ -1144,9 +1140,7 @@ pub struct BpDiffDatasets {
 }
 
 impl BpDiffDatasets {
-    pub fn from_diff_summary<'a, 'b>(
-        summary: &'b BlueprintDiffSummary<'a>,
-    ) -> Self {
+    pub fn from_diff_summary(summary: &BlueprintDiffSummary<'_>) -> Self {
         let mut diffs = BpDiffDatasets::default();
         for sled_id in summary.all_sled_ids() {
             if let Some(added) = summary.added_datasets(&sled_id) {

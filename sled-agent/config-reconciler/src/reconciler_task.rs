@@ -13,7 +13,6 @@ use illumos_utils::zpool::PathInPool;
 use illumos_utils::zpool::ZpoolOrRamdisk;
 use key_manager::StorageKeyRequester;
 use nexus_sled_agent_shared::inventory::BootPartitionContents as BootPartitionContentsInventory;
-use nexus_sled_agent_shared::inventory::ClearMupdateOverrideInventory;
 use nexus_sled_agent_shared::inventory::ConfigReconcilerInventory;
 use nexus_sled_agent_shared::inventory::ConfigReconcilerInventoryResult;
 use nexus_sled_agent_shared::inventory::ConfigReconcilerInventoryStatus;
@@ -214,7 +213,6 @@ struct LatestReconciliationResult {
     zones_inventory: BTreeMap<OmicronZoneUuid, ConfigReconcilerInventoryResult>,
     timesync_status: TimeSyncStatus,
     boot_partitions: BootPartitionContentsInventory,
-    clear_mupdate_override: Option<ClearMupdateOverrideInventory>,
 }
 
 impl LatestReconciliationResult {
@@ -226,7 +224,6 @@ impl LatestReconciliationResult {
             orphaned_datasets: self.orphaned_datasets.clone(),
             zones: self.zones_inventory.clone(),
             boot_partitions: self.boot_partitions.clone(),
-            clear_mupdate_override: self.clear_mupdate_override.clone(),
         }
     }
 
@@ -427,23 +424,6 @@ impl ReconcilerTask {
             }
         };
 
-        let internal_disks = self.internal_disks_rx.current();
-
-        // Reconcile the mupdate override field. This can be done independently
-        // of the other parts of reconciliation (and this doesn't have to block
-        // other parts of reconciliation), but the argument for this is somewhat
-        // non-trivial. See
-        // https://rfd.shared.oxide.computer/rfd/556#sa_reconciler_error_handling.
-        let clear_mupdate_override =
-            if let Some(override_id) = sled_config.remove_mupdate_override {
-                Some(
-                    sled_agent_facilities
-                        .clear_mupdate_override(override_id, &internal_disks),
-                )
-            } else {
-                None
-            };
-
         // Reconcile any changes to our boot partitions. This is typically a
         // no-op; if we've successfully read both boot partitions in a previous
         // reconciliation and don't have new contents to write, it will just
@@ -451,7 +431,7 @@ impl ReconcilerTask {
         let boot_partitions = self
             .boot_partitions
             .reconcile(
-                &internal_disks,
+                &self.internal_disks_rx.current(),
                 &sled_config.host_phase_2,
                 sled_agent_artifact_store,
                 &self.log,
@@ -582,8 +562,6 @@ impl ReconcilerTask {
             zones_inventory: self.zones.to_inventory(),
             timesync_status,
             boot_partitions: boot_partitions.into_inventory(),
-            clear_mupdate_override: clear_mupdate_override
-                .map(|v| v.to_inventory()),
         };
         self.reconciler_result_tx.send_modify(|r| {
             r.status = ReconcilerTaskStatus::Idle {

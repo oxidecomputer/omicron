@@ -12,10 +12,8 @@ use crate::zone_manifest::AllZoneManifests;
 use camino::Utf8PathBuf;
 use illumos_utils::running_zone::ZoneImageFileSource;
 use nexus_sled_agent_shared::inventory::OmicronZoneImageSource;
-use omicron_uuid_kinds::MupdateOverrideUuid;
 use sled_agent_config_reconciler::InternalDisks;
 use sled_agent_config_reconciler::InternalDisksWithBootDisk;
-use sled_agent_types::zone_images::ClearMupdateOverrideResult;
 use sled_agent_types::zone_images::MupdateOverrideReadError;
 use sled_agent_types::zone_images::ResolverStatus;
 use slog::error;
@@ -85,20 +83,6 @@ impl ZoneImageSourceResolver {
                 inner.file_source_for(zone_type, image_source, internal_disks)
             }
         }
-    }
-
-    /// Clears out the mupdate override field and files on disk.
-    pub fn clear_mupdate_override(
-        &self,
-        override_id: MupdateOverrideUuid,
-        internal_disks: &InternalDisks,
-    ) -> ClearMupdateOverrideResult {
-        let mut inner = self.inner.lock().unwrap();
-        let ret =
-            inner.mupdate_overrides.clear_override(override_id, internal_disks);
-
-        ret.log_to(&inner.log);
-        ret
     }
 }
 

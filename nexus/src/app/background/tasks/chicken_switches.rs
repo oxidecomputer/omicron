@@ -10,7 +10,7 @@ use futures::FutureExt;
 use futures::future::BoxFuture;
 use nexus_auth::context::OpContext;
 use nexus_db_queries::db::DataStore;
-use nexus_types::deployment::ReconfiguratorChickenSwitchesView;
+use nexus_types::deployment::ReconfiguratorChickenSwitches;
 use serde_json::json;
 use std::sync::Arc;
 use tokio::sync::watch;
@@ -18,20 +18,17 @@ use tokio::sync::watch;
 /// Background task that tracks reconfigurator chicken switches from the DB
 pub struct ChickenSwitchesLoader {
     datastore: Arc<DataStore>,
-    tx: watch::Sender<ReconfiguratorChickenSwitchesView>,
-    rx: watch::Receiver<ReconfiguratorChickenSwitchesView>,
+    tx: watch::Sender<ReconfiguratorChickenSwitches>,
+    rx: watch::Receiver<ReconfiguratorChickenSwitches>,
 }
 
 impl ChickenSwitchesLoader {
     pub fn new(datastore: Arc<DataStore>) -> Self {
-        let (tx, rx) =
-            watch::channel(ReconfiguratorChickenSwitchesView::default());
+        let (tx, rx) = watch::channel(ReconfiguratorChickenSwitches::default());
         Self { datastore, tx, rx }
     }
 
-    pub fn watcher(
-        &self,
-    ) -> watch::Receiver<ReconfiguratorChickenSwitchesView> {
+    pub fn watcher(&self) -> watch::Receiver<ReconfiguratorChickenSwitches> {
         self.rx.clone()
     }
 }
@@ -76,10 +73,7 @@ impl BackgroundTask for ChickenSwitchesLoader {
 mod test {
     use super::*;
     use nexus_test_utils_macros::nexus_test;
-    use nexus_types::deployment::{
-        PlannerChickenSwitches, ReconfiguratorChickenSwitches,
-        ReconfiguratorChickenSwitchesParam,
-    };
+    use nexus_types::deployment::ReconfiguratorChickenSwitchesParam;
 
     type ControlPlaneTestContext =
         nexus_test_utils::ControlPlaneTestContext<crate::Server>;
@@ -98,10 +92,7 @@ mod test {
         assert_eq!(out["chicken_switches_updated"], false);
         let switches = ReconfiguratorChickenSwitchesParam {
             version: 1,
-            switches: ReconfiguratorChickenSwitches {
-                planner_enabled: true,
-                planner_switches: PlannerChickenSwitches::default(),
-            },
+            planner_enabled: true,
         };
         datastore
             .reconfigurator_chicken_switches_insert_latest_version(
@@ -115,10 +106,7 @@ mod test {
         assert_eq!(out["chicken_switches_updated"], false);
         let switches = ReconfiguratorChickenSwitchesParam {
             version: 2,
-            switches: ReconfiguratorChickenSwitches {
-                planner_enabled: false,
-                planner_switches: PlannerChickenSwitches::default(),
-            },
+            planner_enabled: false,
         };
         datastore
             .reconfigurator_chicken_switches_insert_latest_version(

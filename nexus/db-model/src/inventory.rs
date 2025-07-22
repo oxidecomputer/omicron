@@ -34,7 +34,7 @@ use nexus_db_schema::schema::{
     inv_last_reconciliation_disk_result,
     inv_last_reconciliation_orphaned_dataset,
     inv_last_reconciliation_zone_result, inv_mupdate_override_non_boot,
-    inv_nvme_disk_firmware, inv_omicron_sled_config,
+    inv_ntp_timesync, inv_nvme_disk_firmware, inv_omicron_sled_config,
     inv_omicron_sled_config_dataset, inv_omicron_sled_config_disk,
     inv_omicron_sled_config_zone, inv_omicron_sled_config_zone_nic,
     inv_physical_disk, inv_root_of_trust, inv_root_of_trust_page,
@@ -43,8 +43,6 @@ use nexus_db_schema::schema::{
 };
 use nexus_sled_agent_shared::inventory::BootImageHeader;
 use nexus_sled_agent_shared::inventory::BootPartitionDetails;
-use nexus_sled_agent_shared::inventory::ClearMupdateOverrideBootSuccessInventory;
-use nexus_sled_agent_shared::inventory::ClearMupdateOverrideInventory;
 use nexus_sled_agent_shared::inventory::ConfigReconcilerInventoryStatus;
 use nexus_sled_agent_shared::inventory::HostPhase2DesiredContents;
 use nexus_sled_agent_shared::inventory::HostPhase2DesiredSlots;
@@ -63,7 +61,7 @@ use nexus_sled_agent_shared::inventory::{
 };
 use nexus_types::inventory::{
     BaseboardId, Caboose, CockroachStatus, Collection, NvmeFirmware,
-    PowerState, RotPage, RotSlot,
+    PowerState, RotPage, RotSlot, TimeSync,
 };
 use omicron_common::api::external;
 use omicron_common::api::internal::shared::NetworkInterface;
@@ -1000,8 +998,6 @@ pub struct InvSledConfigReconciler {
     boot_disk_error: Option<String>,
     pub boot_partition_a_error: Option<String>,
     pub boot_partition_b_error: Option<String>,
-    #[diesel(embed)]
-    pub clear_mupdate_override: InvClearMupdateOverride,
 }
 
 impl InvSledConfigReconciler {
@@ -1012,7 +1008,6 @@ impl InvSledConfigReconciler {
         boot_disk: Result<M2Slot, String>,
         boot_partition_a_error: Option<String>,
         boot_partition_b_error: Option<String>,
-        clear_mupdate_override: InvClearMupdateOverride,
     ) -> Self {
         // TODO-cleanup We should use `HwM2Slot` instead of integers for this
         // column: https://github.com/oxidecomputer/omicron/issues/8642
@@ -1030,7 +1025,6 @@ impl InvSledConfigReconciler {
             boot_disk_error,
             boot_partition_a_error,
             boot_partition_b_error,
-            clear_mupdate_override,
         }
     }
 
@@ -1066,104 +1060,6 @@ impl InvSledConfigReconciler {
                     self.sled_id,
                 );
             }
-        }
-    }
-}
-
-// See [`nexus_sled_agent_shared::inventory::DbClearMupdateOverrideBootSuccess`].
-impl_enum_type!(
-    ClearMupdateOverrideBootSuccessEnum:
-
-    #[derive(Copy, Clone, Debug, AsExpression, FromSqlRow, PartialEq)]
-    pub enum DbClearMupdateOverrideBootSuccess;
-
-    // Enum values
-    Cleared => b"cleared"
-    NoOverride => b"no-override"
-);
-
-impl From<ClearMupdateOverrideBootSuccessInventory>
-    for DbClearMupdateOverrideBootSuccess
-{
-    fn from(value: ClearMupdateOverrideBootSuccessInventory) -> Self {
-        match value {
-            ClearMupdateOverrideBootSuccessInventory::Cleared => Self::Cleared,
-            ClearMupdateOverrideBootSuccessInventory::NoOverride => {
-                Self::NoOverride
-            }
-        }
-    }
-}
-
-impl From<DbClearMupdateOverrideBootSuccess>
-    for ClearMupdateOverrideBootSuccessInventory
-{
-    fn from(value: DbClearMupdateOverrideBootSuccess) -> Self {
-        match value {
-            DbClearMupdateOverrideBootSuccess::Cleared => Self::Cleared,
-            DbClearMupdateOverrideBootSuccess::NoOverride => Self::NoOverride,
-        }
-    }
-}
-
-/// See [`nexus_sled_agent_shared::inventory::ClearMupdateOverrideInventory`].
-#[derive(Queryable, Clone, Debug, Selectable, Insertable)]
-#[diesel(table_name = inv_sled_config_reconciler)]
-pub struct InvClearMupdateOverride {
-    #[diesel(column_name = clear_mupdate_override_boot_success)]
-    pub boot_success: Option<DbClearMupdateOverrideBootSuccess>,
-
-    #[diesel(column_name = clear_mupdate_override_boot_error)]
-    pub boot_error: Option<String>,
-
-    #[diesel(column_name = clear_mupdate_override_non_boot_message)]
-    pub non_boot_message: Option<String>,
-}
-
-impl InvClearMupdateOverride {
-    pub fn new(
-        clear_mupdate_override: Option<&ClearMupdateOverrideInventory>,
-    ) -> Self {
-        let boot_success = clear_mupdate_override.and_then(|inv| {
-            inv.boot_disk_result.as_ref().ok().map(|v| v.clone().into())
-        });
-        let boot_error = clear_mupdate_override
-            .and_then(|inv| inv.boot_disk_result.as_ref().err().cloned());
-        let non_boot_message =
-            clear_mupdate_override.map(|inv| inv.non_boot_message.clone());
-
-        Self { boot_success, boot_error, non_boot_message }
-    }
-
-    pub fn into_inventory(
-        self,
-    ) -> anyhow::Result<Option<ClearMupdateOverrideInventory>> {
-        match self {
-            Self {
-                boot_success: Some(success),
-                boot_error: None,
-                non_boot_message: Some(non_boot_message),
-            } => Ok(Some(ClearMupdateOverrideInventory {
-                boot_disk_result: Ok(success.into()),
-                non_boot_message,
-            })),
-            Self {
-                boot_success: None,
-                boot_error: Some(boot_error),
-                non_boot_message: Some(non_boot_message),
-            } => Ok(Some(ClearMupdateOverrideInventory {
-                boot_disk_result: Err(boot_error),
-                non_boot_message,
-            })),
-            Self {
-                boot_success: None,
-                boot_error: None,
-                non_boot_message: None,
-            } => Ok(None),
-            this => Err(anyhow!(
-                "inv_sled_config_reconciler CHECK constraint violated: \
-                 clear mupdate override columns are not consistent: {this:?}"
-            )),
         }
     }
 }
@@ -2934,6 +2830,33 @@ impl TryFrom<InvCockroachStatus> for CockroachStatus {
                 })
                 .transpose()?,
         })
+    }
+}
+
+#[derive(Queryable, Clone, Debug, Selectable, Insertable)]
+#[diesel(table_name = inv_ntp_timesync)]
+pub struct InvNtpTimesync {
+    pub inv_collection_id: DbTypedUuid<CollectionKind>,
+    pub zone_id: DbTypedUuid<OmicronZoneKind>,
+    pub synced: bool,
+}
+
+impl InvNtpTimesync {
+    pub fn new(
+        inv_collection_id: CollectionUuid,
+        timesync: &TimeSync,
+    ) -> Result<Self, anyhow::Error> {
+        Ok(Self {
+            inv_collection_id: inv_collection_id.into(),
+            zone_id: timesync.zone_id.into(),
+            synced: timesync.synced,
+        })
+    }
+}
+
+impl From<InvNtpTimesync> for nexus_types::inventory::TimeSync {
+    fn from(value: InvNtpTimesync) -> Self {
+        Self { zone_id: value.zone_id.into(), synced: value.synced }
     }
 }
 

@@ -143,11 +143,6 @@ impl<'a> Planner<'a> {
     }
 
     pub fn plan(mut self) -> Result<Blueprint, Error> {
-        debug!(
-            self.log,
-            "running planner with chicken switches";
-            self.input.chicken_switches(),
-        );
         self.check_input_validity()?;
         self.do_plan()?;
         Ok(self.blueprint.build())

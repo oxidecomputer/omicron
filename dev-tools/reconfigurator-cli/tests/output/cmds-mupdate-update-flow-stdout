@@ -182,7 +182,6 @@ LEDGERED SLED CONFIG
     slot A details UNAVAILABLE: constructed via debug_assume_success()
     slot B details UNAVAILABLE: constructed via debug_assume_success()
     last reconciled config: matches ledgered config
-        error reading mupdate override, so sled agent didn't attempt to clear it
         no orphaned datasets
         all disks reconciled successfully
         all datasets reconciled successfully
@@ -289,7 +288,6 @@ LEDGERED SLED CONFIG
     slot A details UNAVAILABLE: constructed via debug_assume_success()
     slot B details UNAVAILABLE: constructed via debug_assume_success()
     last reconciled config: matches ledgered config
-        mupdate override present, but sled agent was not instructed to clear it
         no orphaned datasets
         all disks reconciled successfully
         all datasets reconciled successfully
@@ -385,7 +383,6 @@ LEDGERED SLED CONFIG
     slot A details UNAVAILABLE: constructed via debug_assume_success()
     slot B details UNAVAILABLE: constructed via debug_assume_success()
     last reconciled config: matches ledgered config
-        mupdate override present, but sled agent was not instructed to clear it
         no orphaned datasets
         all disks reconciled successfully
         all datasets reconciled successfully

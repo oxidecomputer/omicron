@@ -19,8 +19,8 @@ use nexus_db_errors::ErrorHandler;
 use nexus_db_errors::public_error_from_diesel;
 use nexus_db_model::ReconfiguratorChickenSwitches as DbReconfiguratorChickenSwitches;
 use nexus_db_model::SqlU32;
+use nexus_types::deployment::ReconfiguratorChickenSwitches;
 use nexus_types::deployment::ReconfiguratorChickenSwitchesParam;
-use nexus_types::deployment::ReconfiguratorChickenSwitchesView;
 use omicron_common::api::external::DataPageParams;
 use omicron_common::api::external::Error;
 use omicron_common::api::external::ListResultVec;
@@ -30,7 +30,7 @@ impl DataStore {
         &self,
         opctx: &OpContext,
         pagparams: &DataPageParams<'_, SqlU32>,
-    ) -> ListResultVec<ReconfiguratorChickenSwitchesView> {
+    ) -> ListResultVec<ReconfiguratorChickenSwitches> {
         use nexus_db_schema::schema::reconfigurator_chicken_switches;
 
         opctx
@@ -49,14 +49,14 @@ impl DataStore {
 
         Ok(switches
             .into_iter()
-            .map(ReconfiguratorChickenSwitchesView::from)
+            .map(ReconfiguratorChickenSwitches::from)
             .collect())
     }
 
     pub async fn reconfigurator_chicken_switches_get_latest(
         &self,
         opctx: &OpContext,
-    ) -> Result<Option<ReconfiguratorChickenSwitchesView>, Error> {
+    ) -> Result<Option<ReconfiguratorChickenSwitches>, Error> {
         opctx.authorize(authz::Action::Read, &authz::BLUEPRINT_CONFIG).await?;
         let conn = self.pool_connection_authorized(opctx).await?;
         use nexus_db_schema::schema::reconfigurator_chicken_switches::dsl;
@@ -75,7 +75,7 @@ impl DataStore {
         &self,
         opctx: &OpContext,
         version: u32,
-    ) -> Result<Option<ReconfiguratorChickenSwitchesView>, Error> {
+    ) -> Result<Option<ReconfiguratorChickenSwitches>, Error> {
         opctx.authorize(authz::Action::Read, &authz::BLUEPRINT_CONFIG).await?;
         let conn = self.pool_connection_authorized(opctx).await?;
         use nexus_db_schema::schema::reconfigurator_chicken_switches::dsl;
@@ -101,10 +101,11 @@ impl DataStore {
         opctx: &OpContext,
         switches: ReconfiguratorChickenSwitchesParam,
     ) -> Result<(), Error> {
-        let ReconfiguratorChickenSwitchesParam { version, switches } = switches;
-        let switches = ReconfiguratorChickenSwitchesView {
+        let ReconfiguratorChickenSwitchesParam { version, planner_enabled } =
+            switches;
+        let switches = ReconfiguratorChickenSwitches {
             version,
-            switches,
+            planner_enabled,
             time_modified: chrono::Utc::now(),
         };
 
@@ -134,7 +135,7 @@ impl DataStore {
     async fn insert_latest_version_internal(
         &self,
         opctx: &OpContext,
-        switches: &ReconfiguratorChickenSwitchesView,
+        switches: &ReconfiguratorChickenSwitches,
     ) -> Result<usize, Error> {
         if switches.version < 1 {
             return Err(Error::invalid_request(
@@ -144,20 +145,16 @@ impl DataStore {
 
         sql_query(
             r"INSERT INTO reconfigurator_chicken_switches
-                (version, planner_enabled, time_modified,
-                 add_zones_with_mupdate_override)
-              SELECT $1, $2, $3, $4
+                (version, planner_enabled, time_modified)
+              SELECT $1, $2, $3
               WHERE $1 - 1 IN (
                   SELECT COALESCE(MAX(version), 0)
                   FROM reconfigurator_chicken_switches
               )",
         )
         .bind::<sql_types::BigInt, SqlU32>(switches.version.into())
-        .bind::<sql_types::Bool, _>(switches.switches.planner_enabled)
+        .bind::<sql_types::Bool, _>(switches.planner_enabled)
         .bind::<sql_types::Timestamptz, _>(switches.time_modified)
-        .bind::<sql_types::Bool, _>(
-            switches.switches.planner_switches.add_zones_with_mupdate_override,
-        )
         .execute_async(&*self.pool_connection_authorized(opctx).await?)
         .await
         .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))
@@ -167,9 +164,6 @@ impl DataStore {
 mod tests {
     use super::*;
     use crate::db::pub_test_utils::TestDatabase;
-    use nexus_types::deployment::{
-        PlannerChickenSwitches, ReconfiguratorChickenSwitches,
-    };
     use omicron_test_utils::dev;
 
     #[tokio::test]
@@ -195,10 +189,7 @@ mod tests {
         // Fail to insert a swtiches with version 0
         let mut switches = ReconfiguratorChickenSwitchesParam {
             version: 0,
-            switches: ReconfiguratorChickenSwitches {
-                planner_enabled: false,
-                planner_switches: PlannerChickenSwitches::default(),
-            },
+            planner_enabled: false,
         };
 
         assert!(
@@ -273,7 +264,7 @@ mod tests {
 
         // Inserting version 4 should work
         switches.version = 4;
-        switches.switches.planner_enabled = true;
+        switches.planner_enabled = true;
         assert!(
             datastore
                 .reconfigurator_chicken_switches_insert_latest_version(
@@ -290,7 +281,7 @@ mod tests {
             .unwrap()
             .unwrap();
         assert_eq!(switches.version, read.version);
-        assert_eq!(switches.switches, read.switches);
+        assert_eq!(switches.planner_enabled, read.planner_enabled);
 
         // Getting version 4 should work
         let read = datastore
@@ -299,7 +290,7 @@ mod tests {
             .unwrap()
             .unwrap();
         assert_eq!(switches.version, read.version);
-        assert_eq!(switches.switches, read.switches);
+        assert_eq!(switches.planner_enabled, read.planner_enabled);
 
         // Getting version 5 should fail, as it doesn't exist
         assert!(
@@ -322,9 +313,9 @@ mod tests {
             let switches = &history[i - 1];
             assert_eq!(switches.version, i as u32);
             if i != 4 {
-                assert_eq!(switches.switches.planner_enabled, false);
+                assert_eq!(switches.planner_enabled, false);
             } else {
-                assert_eq!(switches.switches.planner_enabled, true);
+                assert_eq!(switches.planner_enabled, true);
             }
         }
 

@@ -203,27 +203,6 @@ async fn test_omdb_success_cases(cptestctx: &ControlPlaneTestContext) {
         &["nexus", "background-tasks", "show", "dns_internal"],
         &["nexus", "background-tasks", "show", "dns_external"],
         &["nexus", "background-tasks", "show", "all"],
-        // chicken switches: show and set
-        &["nexus", "chicken-switches", "show", "current"],
-        &[
-            "-w",
-            "nexus",
-            "chicken-switches",
-            "set",
-            "--planner-enabled",
-            "true",
-        ],
-        &[
-            "-w",
-            "nexus",
-            "chicken-switches",
-            "set",
-            "--add-zones-with-mupdate-override",
-            "false",
-        ],
-        // After the set commands above, we should see chicken switches
-        // populated.
-        &["nexus", "chicken-switches", "show", "current"],
         &["nexus", "sagas", "list"],
         &["--destructive", "nexus", "sagas", "demo-create"],
         &["nexus", "sagas", "list"],

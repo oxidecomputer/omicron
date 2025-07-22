@@ -17,8 +17,6 @@ internal DNS generations: 1
 external DNS generations: 1
 target number of Nexus instances: default
 target release (generation 1): unset
-chicken switches:
-    add zones with mupdate override:   false
 
 
 
@@ -1191,7 +1189,6 @@ LEDGERED SLED CONFIG
     slot A details UNAVAILABLE: constructed via debug_assume_success()
     slot B details UNAVAILABLE: constructed via debug_assume_success()
     last reconciled config: matches ledgered config
-        no mupdate override to clear
         no orphaned datasets
         all disks reconciled successfully
         all datasets reconciled successfully
@@ -1299,7 +1296,6 @@ LEDGERED SLED CONFIG
     slot A details UNAVAILABLE: constructed via debug_assume_success()
     slot B details UNAVAILABLE: constructed via debug_assume_success()
     last reconciled config: matches ledgered config
-        no mupdate override to clear
         no orphaned datasets
         all disks reconciled successfully
         all datasets reconciled successfully
@@ -1500,7 +1496,6 @@ LEDGERED SLED CONFIG
     slot A details UNAVAILABLE: constructed via debug_assume_success()
     slot B details UNAVAILABLE: constructed via debug_assume_success()
     last reconciled config: matches ledgered config
-        no mupdate override to clear
         no orphaned datasets
         all disks reconciled successfully
         all datasets reconciled successfully
@@ -1762,23 +1757,6 @@ external DNS:
     name: ns3                                                (records: 1)
         A    198.51.100.3
 
-
-
-
-> # Set chicken switches.
-> set chicken-switches --add-zones-with-mupdate-override false
-no changes to chicken switches:
-    add zones with mupdate override:   false
-
-
-> set chicken-switches --add-zones-with-mupdate-override true
-chicken switches updated:
-*   add zones with mupdate override:   false -> true
-
-
-> set chicken-switches --add-zones-with-mupdate-override true
-no changes to chicken switches:
-    add zones with mupdate override:   true
 
 
 
