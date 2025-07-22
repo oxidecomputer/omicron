@@ -3736,6 +3736,12 @@ CREATE TABLE IF NOT EXISTS omicron.public.inv_sled_agent (
     PRIMARY KEY (inv_collection_id, sled_id)
 );
 
+CREATE TYPE IF NOT EXISTS omicron.public.clear_mupdate_override_boot_success
+AS ENUM (
+    'cleared',
+    'no-override'
+);
+
 CREATE TABLE IF NOT EXISTS omicron.public.inv_sled_config_reconciler (
     -- where this observation came from
     -- (foreign key into `inv_collection` table)
@@ -3772,6 +3778,37 @@ CREATE TABLE IF NOT EXISTS omicron.public.inv_sled_config_reconciler (
     -- for the given slot. As above 0=a and 1=b.
     boot_partition_a_error TEXT,
     boot_partition_b_error TEXT,
+
+    -- Success clearing the mupdate override.
+    clear_mupdate_override_boot_success omicron.public.clear_mupdate_override_boot_success,
+    -- Error clearing the mupdate override.
+    clear_mupdate_override_boot_error TEXT,
+
+    -- A message describing the result clearing the mupdate override on the
+    -- non-boot disk.
+    clear_mupdate_override_non_boot_message TEXT,
+
+    -- Three cases:
+    --
+    -- 1. No clear_mupdate_override instruction was passed in. All three
+    --    columns are NULL.
+    -- 2. Clearing the override was successful. boot_success is NOT NULL,
+    --    boot_error is NULL, and non_boot_message is NOT NULL.
+    -- 3. Clearing the override failed. boot_success is NULL, boot_error is
+    --    NOT NULL, and non_boot_message is NOT NULL.
+    CONSTRAINT clear_mupdate_override_consistency CHECK (
+        (clear_mupdate_override_boot_success IS NULL
+         AND clear_mupdate_override_boot_error IS NULL
+         AND clear_mupdate_override_non_boot_message IS NULL)
+    OR
+        (clear_mupdate_override_boot_success IS NOT NULL
+         AND clear_mupdate_override_boot_error IS NULL
+         AND clear_mupdate_override_non_boot_message IS NOT NULL)
+    OR
+        (clear_mupdate_override_boot_success IS NULL
+         AND clear_mupdate_override_boot_error IS NOT NULL
+         AND clear_mupdate_override_non_boot_message IS NOT NULL)
+    ),
 
     PRIMARY KEY (inv_collection_id, sled_id)
 );
@@ -4307,7 +4344,10 @@ CREATE TABLE IF NOT EXISTS omicron.public.reconfigurator_chicken_switches (
     planner_enabled BOOL NOT NULL DEFAULT FALSE,
 
     -- The time at which the configuration for a version was set
-    time_modified TIMESTAMPTZ NOT NULL
+    time_modified TIMESTAMPTZ NOT NULL,
+
+    -- Whether to add zones while the system has detected a mupdate override.
+    add_zones_with_mupdate_override BOOL NOT NULL
 );
 
 /*
@@ -6266,7 +6306,7 @@ INSERT INTO omicron.public.db_metadata (
     version,
     target_version
 ) VALUES
-    (TRUE, NOW(), NOW(), '168.0.0', NULL)
+    (TRUE, NOW(), NOW(), '170.0.0', NULL)
 ON CONFLICT DO NOTHING;
 
 COMMIT;

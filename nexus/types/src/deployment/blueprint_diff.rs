@@ -51,7 +51,7 @@ impl<'a> BlueprintDiffSummary<'a> {
     }
 
     /// Return a struct that can be used to display the diff.
-    pub fn display(&'a self) -> BlueprintDiffDisplay<'a> {
+    pub fn display<'b>(&'b self) -> BlueprintDiffDisplay<'a, 'b> {
         BlueprintDiffDisplay::new(self)
     }
 
@@ -255,7 +255,7 @@ impl<'a> BlueprintDiffSummary<'a> {
 
     /// Iterate over all modified zones on a sled
     pub fn modified_zones(
-        &'a self,
+        &self,
         sled_id: &SledUuid,
     ) -> Option<(BpDiffZonesModified, BpDiffZoneErrors)> {
         // Then check if the sled is modified and there are any modified zones
@@ -364,7 +364,7 @@ impl<'a> BlueprintDiffSummary<'a> {
 
     /// Iterate over all modified disks on a sled
     pub fn modified_disks(
-        &'a self,
+        &self,
         sled_id: &SledUuid,
     ) -> Option<(BpDiffPhysicalDisksModified<'a>, BpDiffPhysicalDiskErrors)>
     {
@@ -450,7 +450,7 @@ impl<'a> BlueprintDiffSummary<'a> {
 
     /// Iterate over all modified datasets on a sled
     pub fn modified_datasets(
-        &'a self,
+        &self,
         sled_id: &SledUuid,
     ) -> Option<(BpDiffDatasetsModified, BpDiffDatasetErrors)> {
         // Check if the sled is modified and there are any modified datasets
@@ -661,8 +661,8 @@ pub struct BpDiffZones {
 impl BpDiffZones {
     /// Convert from our diff summary to our display compatibility layer
     /// from the prior version of code.
-    pub fn from_diff_summary<'a>(
-        summary: &'a BlueprintDiffSummary<'a>,
+    pub fn from_diff_summary<'a, 'b>(
+        summary: &'b BlueprintDiffSummary<'a>,
     ) -> Self {
         let mut diffs = BpDiffZones::default();
         for sled_id in summary.all_sled_ids() {
@@ -879,7 +879,9 @@ pub struct BpDiffPhysicalDisks<'a> {
 }
 
 impl<'a> BpDiffPhysicalDisks<'a> {
-    pub fn from_diff_summary(summary: &'a BlueprintDiffSummary<'a>) -> Self {
+    pub fn from_diff_summary<'b>(
+        summary: &'b BlueprintDiffSummary<'a>,
+    ) -> Self {
         let mut diffs = BpDiffPhysicalDisks::default();
         for sled_id in summary.all_sled_ids() {
             if let Some(added) = summary.added_disks(&sled_id) {
@@ -1142,8 +1144,8 @@ pub struct BpDiffDatasets {
 }
 
 impl BpDiffDatasets {
-    pub fn from_diff_summary<'a>(
-        summary: &'a BlueprintDiffSummary<'a>,
+    pub fn from_diff_summary<'a, 'b>(
+        summary: &'b BlueprintDiffSummary<'a>,
     ) -> Self {
         let mut diffs = BpDiffDatasets::default();
         for sled_id in summary.all_sled_ids() {
@@ -1597,7 +1599,7 @@ pub struct BpDiffHostPhase2<'a> {
 
 impl<'a> BpDiffHostPhase2<'a> {
     /// Convert from our diff summary to our display compatibility layer
-    pub fn from_diff_summary(summary: &'a BlueprintDiffSummary<'a>) -> Self {
+    pub fn from_diff_summary(summary: &BlueprintDiffSummary<'a>) -> Self {
         let sleds = &summary.diff.sleds;
         Self {
             added: sleds
@@ -1648,15 +1650,15 @@ impl<'a> BpDiffHostPhase2<'a> {
 
 /// Differences in pending MGS updates
 #[derive(Debug)]
-pub struct BpDiffPendingMgsUpdates<'a> {
-    pub diff: &'a PendingMgsUpdatesDiff<'a>,
+pub struct BpDiffPendingMgsUpdates<'a, 'b> {
+    pub diff: &'b PendingMgsUpdatesDiff<'a>,
 }
 
-impl<'a> BpDiffPendingMgsUpdates<'a> {
+impl<'a, 'b> BpDiffPendingMgsUpdates<'a, 'b> {
     /// Convert from our diff summary to our display compatibility layer
     pub fn from_diff_summary(
-        summary: &'a BlueprintDiffSummary<'a>,
-    ) -> BpDiffPendingMgsUpdates<'a> {
+        summary: &'b BlueprintDiffSummary<'a>,
+    ) -> BpDiffPendingMgsUpdates<'a, 'b> {
         BpDiffPendingMgsUpdates { diff: &summary.diff.pending_mgs_updates }
     }
 
@@ -1672,23 +1674,23 @@ impl<'a> BpDiffPendingMgsUpdates<'a> {
         let mut rows = vec![];
         let mut has_changed = false;
         let map = &self.diff.by_baseboard;
-        for update in map.unchanged_values() {
+        for update in map.unchanged() {
             rows.push(BpTableRow::from_strings(
                 BpDiffState::Unchanged,
                 update.to_bp_table_values(),
             ))
         }
-        for (_, update) in &map.removed {
+        for update in &map.removed {
             has_changed = true;
             rows.push(BpTableRow::from_strings(
                 BpDiffState::Removed,
                 update.to_bp_table_values(),
             ));
         }
-        for update in map.modified_values() {
+        for update in map.modified() {
             has_changed = true;
-            let u1 = &update.before;
-            let u2 = &update.after;
+            let u1 = update.before();
+            let u2 = update.after();
 
             let sp_type = BpTableColumn::new(&u1.sp_type, &u2.sp_type);
             let slot_id = BpTableColumn::new(&u1.slot_id, &u2.slot_id);
@@ -1725,7 +1727,7 @@ impl<'a> BpDiffPendingMgsUpdates<'a> {
                 ],
             ));
         }
-        for (_, update) in &map.added {
+        for update in &map.added {
             has_changed = true;
             rows.push(BpTableRow::from_strings(
                 BpDiffState::Added,
@@ -1746,8 +1748,8 @@ impl<'a> BpDiffPendingMgsUpdates<'a> {
 /// Returned by [`BlueprintDiffSummary::display()`].
 #[derive(Debug)]
 #[must_use = "this struct does nothing unless displayed"]
-pub struct BlueprintDiffDisplay<'diff> {
-    summary: &'diff BlueprintDiffSummary<'diff>,
+pub struct BlueprintDiffDisplay<'diff, 'b> {
+    summary: &'b BlueprintDiffSummary<'diff>,
     // These structures are intermediate structures that we generate displayable
     // tables from.
     before_meta: BlueprintMetadata,
@@ -1756,12 +1758,12 @@ pub struct BlueprintDiffDisplay<'diff> {
     disks: BpDiffPhysicalDisks<'diff>,
     datasets: BpDiffDatasets,
     host_phase_2: BpDiffHostPhase2<'diff>,
-    pending_mgs_updates: BpDiffPendingMgsUpdates<'diff>,
+    pending_mgs_updates: BpDiffPendingMgsUpdates<'diff, 'b>,
 }
 
-impl<'diff> BlueprintDiffDisplay<'diff> {
+impl<'diff, 'b> BlueprintDiffDisplay<'diff, 'b> {
     #[inline]
-    fn new(summary: &'diff BlueprintDiffSummary<'diff>) -> Self {
+    fn new(summary: &'b BlueprintDiffSummary<'diff>) -> Self {
         let before_meta = summary.before.metadata();
         let after_meta = summary.after.metadata();
         let zones = BpDiffZones::from_diff_summary(summary);
@@ -1944,7 +1946,7 @@ impl<'diff> BlueprintDiffDisplay<'diff> {
     }
 }
 
-impl fmt::Display for BlueprintDiffDisplay<'_> {
+impl fmt::Display for BlueprintDiffDisplay<'_, '_> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let summary = self.summary;
         let before_metadata = self.summary.before.metadata();

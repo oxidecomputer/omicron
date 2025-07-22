@@ -143,6 +143,11 @@ impl<'a> Planner<'a> {
     }
 
     pub fn plan(mut self) -> Result<Blueprint, Error> {
+        debug!(
+            self.log,
+            "running planner with chicken switches";
+            self.input.chicken_switches(),
+        );
         self.check_input_validity()?;
         self.do_plan()?;
         Ok(self.blueprint.build())
@@ -3459,7 +3464,7 @@ pub(crate) mod test {
 
     #[track_caller]
     fn assert_all_zones_expunged<'a>(
-        summary: &'a BlueprintDiffSummary<'a>,
+        summary: &BlueprintDiffSummary<'a>,
         expunged_sled_id: SledUuid,
         desc: &str,
     ) {
@@ -5263,35 +5268,37 @@ pub(crate) mod test {
             .plan()
             .unwrap_or_else(|_| panic!("can't re-plan after {i} iterations"));
 
-            let summary = blueprint.diff_since_blueprint(&parent);
-            eprintln!("diff to {blueprint_name}: {}", summary.display());
-            for sled in summary.diff.sleds.modified_values_diff() {
-                if i % 2 == 1 {
-                    assert!(sled.zones.added.is_empty());
-                    assert!(sled.zones.removed.is_empty());
-                    assert_eq!(
-                        sled.zones
-                            .common
-                            .iter()
-                            .filter(|(_, z)| matches!(
-                                z.after.zone_type,
-                                BlueprintZoneType::CruciblePantry(_)
-                            ) && matches!(
-                                z.after.disposition,
-                                BlueprintZoneDisposition::Expunged { .. }
-                            ))
-                            .count(),
-                        1
-                    );
-                } else {
-                    assert!(sled.zones.removed.is_empty());
-                    assert_eq!(sled.zones.added.len(), 1);
-                    let added = sled.zones.added.values().next().unwrap();
-                    assert!(matches!(
-                        &added.zone_type,
-                        BlueprintZoneType::CruciblePantry(_)
-                    ));
-                    assert_eq!(added.image_source, image_source);
+            {
+                let summary = blueprint.diff_since_blueprint(&parent);
+                eprintln!("diff to {blueprint_name}: {}", summary.display());
+                for sled in summary.diff.sleds.modified_values_diff() {
+                    if i % 2 == 1 {
+                        assert!(sled.zones.added.is_empty());
+                        assert!(sled.zones.removed.is_empty());
+                        assert_eq!(
+                            sled.zones
+                                .common
+                                .iter()
+                                .filter(|(_, z)| matches!(
+                                    z.after.zone_type,
+                                    BlueprintZoneType::CruciblePantry(_)
+                                ) && matches!(
+                                    z.after.disposition,
+                                    BlueprintZoneDisposition::Expunged { .. }
+                                ))
+                                .count(),
+                            1
+                        );
+                    } else {
+                        assert!(sled.zones.removed.is_empty());
+                        assert_eq!(sled.zones.added.len(), 1);
+                        let added = sled.zones.added.values().next().unwrap();
+                        assert!(matches!(
+                            &added.zone_type,
+                            BlueprintZoneType::CruciblePantry(_)
+                        ));
+                        assert_eq!(added.image_source, image_source);
+                    }
                 }
             }
 
@@ -5343,20 +5350,22 @@ pub(crate) mod test {
             .plan()
             .unwrap_or_else(|_| panic!("can't re-plan after {i} iterations"));
 
-            let summary = blueprint.diff_since_blueprint(&parent);
-            for sled in summary.diff.sleds.modified_values_diff() {
-                if i % 2 == 1 {
-                    assert!(sled.zones.added.is_empty());
-                    assert!(sled.zones.removed.is_empty());
-                } else {
-                    assert!(sled.zones.removed.is_empty());
-                    assert_eq!(sled.zones.added.len(), 1);
-                    let added = sled.zones.added.values().next().unwrap();
-                    assert!(matches!(
-                        &added.zone_type,
-                        BlueprintZoneType::Nexus(_)
-                    ));
-                    assert_eq!(added.image_source, image_source);
+            {
+                let summary = blueprint.diff_since_blueprint(&parent);
+                for sled in summary.diff.sleds.modified_values_diff() {
+                    if i % 2 == 1 {
+                        assert!(sled.zones.added.is_empty());
+                        assert!(sled.zones.removed.is_empty());
+                    } else {
+                        assert!(sled.zones.removed.is_empty());
+                        assert_eq!(sled.zones.added.len(), 1);
+                        let added = sled.zones.added.values().next().unwrap();
+                        assert!(matches!(
+                            &added.zone_type,
+                            BlueprintZoneType::Nexus(_)
+                        ));
+                        assert_eq!(added.image_source, image_source);
+                    }
                 }
             }
 
@@ -5422,10 +5431,12 @@ pub(crate) mod test {
         .plan()
         .unwrap_or_else(|_| panic!("can't plan to include Cockroach nodes"));
 
-        let summary = new_blueprint.diff_since_blueprint(&blueprint);
-        assert_eq!(summary.total_zones_added(), COCKROACHDB_REDUNDANCY);
-        assert_eq!(summary.total_zones_removed(), 0);
-        assert_eq!(summary.total_zones_modified(), 0);
+        {
+            let summary = new_blueprint.diff_since_blueprint(&blueprint);
+            assert_eq!(summary.total_zones_added(), COCKROACHDB_REDUNDANCY);
+            assert_eq!(summary.total_zones_removed(), 0);
+            assert_eq!(summary.total_zones_modified(), 0);
+        }
         blueprint = new_blueprint;
         update_collection_from_blueprint(&mut example, &blueprint);
 
@@ -5781,28 +5792,30 @@ pub(crate) mod test {
             .plan()
             .unwrap_or_else(|_| panic!("can't re-plan after {i} iterations"));
 
-            let summary = blueprint.diff_since_blueprint(&parent);
-            if summary.total_zones_added() == 0
-                && summary.total_zones_removed() == 0
-                && summary.total_zones_modified() == 0
             {
-                assert!(
-                    blueprint
-                        .all_omicron_zones(
-                            BlueprintZoneDisposition::is_in_service
-                        )
-                        .all(|(_, zone)| zone.image_source == image_source),
-                    "failed to update all zones"
-                );
+                let summary = blueprint.diff_since_blueprint(&parent);
+                if summary.total_zones_added() == 0
+                    && summary.total_zones_removed() == 0
+                    && summary.total_zones_modified() == 0
+                {
+                    assert!(
+                        blueprint
+                            .all_omicron_zones(
+                                BlueprintZoneDisposition::is_in_service
+                            )
+                            .all(|(_, zone)| zone.image_source == image_source),
+                        "failed to update all zones"
+                    );
 
-                assert_eq!(
-                    i, EXP_PLANNING_ITERATIONS,
-                    "expected {EXP_PLANNING_ITERATIONS} iterations but converged in {i}"
-                );
-                println!("planning converged after {i} iterations");
+                    assert_eq!(
+                        i, EXP_PLANNING_ITERATIONS,
+                        "expected {EXP_PLANNING_ITERATIONS} iterations but converged in {i}"
+                    );
+                    println!("planning converged after {i} iterations");
 
-                logctx.cleanup_successful();
-                return;
+                    logctx.cleanup_successful();
+                    return;
+                }
             }
 
             parent = blueprint;
