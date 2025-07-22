@@ -4,6 +4,7 @@
 
 //! Interactively manage SP updates from the command line
 
+use anyhow::bail;
 use anyhow::Context;
 use anyhow::anyhow;
 use clap::Args;
@@ -17,7 +18,10 @@ use gateway_types::rot::RotSlot;
 use internal_dns_types::names::ServiceName;
 use nexus_mgs_updates::ArtifactCache;
 use nexus_mgs_updates::MgsUpdateDriver;
+use nexus_types::deployment::ExpectedActiveHostOsSlot;
 use nexus_types::deployment::ExpectedActiveRotSlot;
+use nexus_types::deployment::ExpectedArtifact;
+use nexus_types::deployment::ExpectedInactiveHostOsArtifact;
 use nexus_types::deployment::ExpectedVersion;
 use nexus_types::deployment::PendingMgsUpdate;
 use nexus_types::deployment::PendingMgsUpdateDetails;
@@ -25,12 +29,14 @@ use nexus_types::deployment::PendingMgsUpdateHostPhase1Details;
 use nexus_types::deployment::PendingMgsUpdates;
 use nexus_types::internal_api::views::MgsUpdateDriverStatus;
 use nexus_types::inventory::BaseboardId;
+use omicron_common::disk::M2Slot;
 use omicron_repl_utils::run_repl_on_stdin;
 use qorb::resolver::Resolver;
 use qorb::resolvers::fixed::FixedResolver;
 use slog::{info, o, warn};
 use std::collections::BTreeMap;
 use std::net::SocketAddr;
+use std::net::SocketAddrV6;
 use std::sync::Arc;
 use std::time::Duration;
 use swrite::SWrite;
@@ -452,6 +458,14 @@ enum Component {
         #[arg(long, short = 'i')]
         expected_stage0_next_version: ExpectedVersion,
     },
+    HostPhase1 {
+        expected_active_slot: M2Slot,
+        expected_slot_a_phase_1: ArtifactHash,
+        expected_slot_a_phase_2: ExpectedArtifact,
+        expected_slot_b_phase_1: ArtifactHash,
+        expected_slot_b_phase_2: ExpectedArtifact,
+        sled_agent_address: SocketAddrV6,
+    },
 }
 
 fn cmd_set(
@@ -519,6 +533,53 @@ fn cmd_set(
                 expected_stage0_version,
                 expected_stage0_next_version,
             },
+            Component::HostPhase1 {
+                expected_active_slot,
+                expected_slot_a_phase_1,
+                expected_slot_a_phase_2,
+                expected_slot_b_phase_1,
+                expected_slot_b_phase_2,
+                sled_agent_address,
+            } => {
+                let (active_phase_1, inactive_phase_1) =
+                    match expected_active_slot {
+                        M2Slot::A => {
+                            (expected_slot_a_phase_1, expected_slot_b_phase_1)
+                        }
+                        M2Slot::B => {
+                            (expected_slot_b_phase_1, expected_slot_a_phase_1)
+                        }
+                    };
+                let (active_phase_2, inactive_phase_2) =
+                    match expected_active_slot {
+                        M2Slot::A => {
+                            (expected_slot_a_phase_2, expected_slot_b_phase_2)
+                        }
+                        M2Slot::B => {
+                            (expected_slot_b_phase_2, expected_slot_a_phase_2)
+                        }
+                    };
+                let details = PendingMgsUpdateHostPhase1Details {
+                    expected_active_slot: ExpectedActiveHostOsSlot {
+                        slot: expected_active_slot,
+                        phase_1: active_phase_1,
+                        phase_2: match active_phase_2 {
+                            ExpectedArtifact::NoValidArtifact => bail!(
+                                "must provide phase 2 artifact hash for \
+                                 active slot ({expected_active_slot})"
+                            ),
+                            ExpectedArtifact::Artifact(hash) => hash,
+                        },
+                    },
+                    expected_inactive_artifact:
+                        ExpectedInactiveHostOsArtifact {
+                            phase_1: inactive_phase_1,
+                            phase_2: inactive_phase_2,
+                        },
+                    sled_agent_address,
+                };
+                PendingMgsUpdateDetails::HostPhase1(details)
+            }
         },
         artifact_hash: args.artifact_hash,
         artifact_version: ArtifactVersion::new(args.version)

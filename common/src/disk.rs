@@ -652,6 +652,21 @@ impl fmt::Display for M2Slot {
     }
 }
 
+impl FromStr for M2Slot {
+    type Err = String;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        match s {
+            "a" | "A" => Ok(Self::A),
+            "b" | "B" => Ok(Self::B),
+            _ => Err(format!(
+                "unrecognized value {s} for M2 slot. \
+                 Must be one of `a`, `A`, `b`, or `B`",
+            )),
+        }
+    }
+}
+
 impl TryFrom<i64> for M2Slot {
     type Error = anyhow::Error;
 
