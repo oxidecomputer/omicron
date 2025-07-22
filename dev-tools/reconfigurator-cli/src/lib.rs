@@ -6,8 +6,9 @@
 
 use anyhow::{Context, anyhow, bail};
 use camino::{Utf8Path, Utf8PathBuf};
-use clap::ValueEnum;
+use clap::{ArgAction, ValueEnum};
 use clap::{Args, Parser, Subcommand};
+use daft::Diffable;
 use iddqd::IdOrdMap;
 use indent_write::fmt::IndentWriter;
 use internal_dns_types::diff::DnsDiff;
@@ -26,7 +27,6 @@ use nexus_reconfigurator_simulation::{BlueprintId, CollectionId, SimState};
 use nexus_reconfigurator_simulation::{SimStateBuilder, SimTufRepoSource};
 use nexus_reconfigurator_simulation::{SimTufRepoDescription, Simulator};
 use nexus_sled_agent_shared::inventory::ZoneKind;
-use nexus_types::deployment::BlueprintHostPhase2DesiredContents;
 use nexus_types::deployment::PlanningInput;
 use nexus_types::deployment::SledFilter;
 use nexus_types::deployment::execution;
@@ -34,6 +34,9 @@ use nexus_types::deployment::execution::blueprint_external_dns_config;
 use nexus_types::deployment::execution::blueprint_internal_dns_config;
 use nexus_types::deployment::{Blueprint, UnstableReconfiguratorState};
 use nexus_types::deployment::{BlueprintArtifactVersion, PendingMgsUpdate};
+use nexus_types::deployment::{
+    BlueprintHostPhase2DesiredContents, PlannerChickenSwitches,
+};
 use nexus_types::deployment::{BlueprintZoneDisposition, ExpectedVersion};
 use nexus_types::deployment::{
     BlueprintZoneImageSource, PendingMgsUpdateDetails,
@@ -63,7 +66,7 @@ use std::fmt::{self, Write};
 use std::io::IsTerminal;
 use std::num::ParseIntError;
 use std::str::FromStr;
-use swrite::{SWrite, swriteln};
+use swrite::{SWrite, swrite, swriteln};
 use tabled::Tabled;
 use tufaceous_artifact::ArtifactHash;
 use tufaceous_artifact::ArtifactVersion;
@@ -1052,6 +1055,37 @@ enum SetArgs {
         /// TUF repo containing release artifacts
         filename: Utf8PathBuf,
     },
+    /// planner chicken switches
+    ChickenSwitches(SetChickenSwitchesArgs),
+}
+
+#[derive(Debug, Args)]
+struct SetChickenSwitchesArgs {
+    #[clap(flatten)]
+    switches: ChickenSwitchesOpts,
+}
+
+// Define the switches separately so we can use `group(required = true, multiple
+// = true).`
+#[derive(Debug, Clone, Args)]
+#[group(required = true, multiple = true)]
+pub struct ChickenSwitchesOpts {
+    #[clap(long, action = ArgAction::Set)]
+    add_zones_with_mupdate_override: Option<bool>,
+}
+
+impl ChickenSwitchesOpts {
+    fn update_if_modified(
+        &self,
+        current: &PlannerChickenSwitches,
+    ) -> Option<PlannerChickenSwitches> {
+        let new = PlannerChickenSwitches {
+            add_zones_with_mupdate_override: self
+                .add_zones_with_mupdate_override
+                .unwrap_or(current.add_zones_with_mupdate_override),
+        };
+        (new != *current).then_some(new)
+    }
 }
 
 #[derive(Debug, Args)]
@@ -2222,6 +2256,14 @@ fn cmd_show(sim: &mut ReconfiguratorSim) -> anyhow::Result<Option<String>> {
             );
         }
     }
+    swriteln!(s, "chicken switches:");
+    // No need for swriteln! here because .display() adds its own newlines at
+    // the end.
+    swrite!(
+        s,
+        "{}",
+        state.system().description().get_chicken_switches().display()
+    );
 
     Ok(Some(s))
 }
@@ -2267,6 +2309,20 @@ fn cmd_set(
                 TargetReleaseDescription::TufRepo(description),
             );
             format!("set target release based on {}", filename)
+        }
+        SetArgs::ChickenSwitches(args) => {
+            let current =
+                state.system_mut().description().get_chicken_switches();
+            if let Some(new) = args.switches.update_if_modified(&current) {
+                state.system_mut().description_mut().set_chicken_switches(new);
+                let diff = current.diff(&new);
+                format!("chicken switches updated:\n{}", diff.display())
+            } else {
+                format!(
+                    "no changes to chicken switches:\n{}",
+                    current.display()
+                )
+            }
         }
     };
 
