@@ -71,8 +71,8 @@ use nexus_db_model::{
 };
 use nexus_db_model::{HwPowerState, InvZoneManifestNonBoot};
 use nexus_db_model::{HwRotSlot, InvMupdateOverrideNonBoot};
-use nexus_db_schema::enums::HwM2SlotEnum;
 use nexus_db_model::{InvCaboose, InvClearMupdateOverride};
+use nexus_db_schema::enums::HwM2SlotEnum;
 use nexus_db_schema::enums::HwRotSlotEnum;
 use nexus_db_schema::enums::RotImageErrorEnum;
 use nexus_db_schema::enums::RotPageWhichEnum;
