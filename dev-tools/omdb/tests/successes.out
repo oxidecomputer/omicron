@@ -1429,12 +1429,12 @@ EXECUTING COMMAND: omdb ["nexus", "chicken-switches", "show", "current"]
 termination: Exited(0)
 ---------------------------------------------
 stdout:
-Reconfigurator Chicken Switches: 
+Reconfigurator chicken switches:
     version: 2
-    modified time: 2025-07-20 03:11:17.302303 UTC
+    modified time: <REDACTED_TIMESTAMP>
     planner enabled: true
     planner switches:
-        add zones with mupdate override: false
+        add zones with mupdate override:   false
 ---------------------------------------------
 stderr:
 note: using Nexus URL http://127.0.0.1:REDACTED_PORT/

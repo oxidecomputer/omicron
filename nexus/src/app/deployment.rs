@@ -135,7 +135,7 @@ impl super::Nexus {
             .reconfigurator_chicken_switches_get_latest(opctx)
             .await?
             .map_or_else(PlannerChickenSwitches::default, |switches| {
-                switches.planner_switches
+                switches.switches.planner_switches
             });
 
         let planning_input =

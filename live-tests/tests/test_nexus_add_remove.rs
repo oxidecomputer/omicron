@@ -28,7 +28,7 @@ use slog::{debug, info};
 use std::net::SocketAddrV6;
 use std::time::Duration;
 
-// TODO-coverage This test could check other stuff: 
+// TODO-coverage This test could check other stuff:
 //
 // - that after adding:
 //   - the new Nexus appears in external DNS
@@ -49,7 +49,9 @@ async fn test_nexus_add_remove(lc: &LiveTestContext) {
         .reconfigurator_chicken_switches_get_latest(opctx)
         .await
         .expect("obtained latest chicken switches")
-        .map_or_else(PlannerChickenSwitches::default, |cs| cs.planner_switches);
+        .map_or_else(PlannerChickenSwitches::default, |cs| {
+            cs.switches.planner_switches
+        });
     let planning_input =
         PlanningInputFromDb::assemble(&opctx, &datastore, chicken_switches)
             .await

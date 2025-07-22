@@ -17,6 +17,7 @@ use iddqd::IdOrdMap;
 use omicron_common::update::MupdateOverrideInfo;
 use omicron_uuid_kinds::InternalZpoolUuid;
 use omicron_uuid_kinds::MupdateOverrideUuid;
+use sled_agent_config_reconciler::InternalDisks;
 use sled_agent_config_reconciler::InternalDisksWithBootDisk;
 use sled_agent_types::zone_images::ArcIoError;
 use sled_agent_types::zone_images::ClearMupdateOverrideBootError;
@@ -96,33 +97,43 @@ impl AllMupdateOverrides {
     pub(crate) fn clear_override(
         &mut self,
         override_id: MupdateOverrideUuid,
-        internal_disks: InternalDisksWithBootDisk,
+        internal_disks: &InternalDisks,
     ) -> ClearMupdateOverrideResult {
         let boot_disk_result = match self.boot_disk_override.clone() {
-            Ok(Some(info)) if info.mupdate_uuid == override_id => {
-                // Remove the override from the boot disk (which is fallible)
-                // before clearing it in-memory (which is infallible).
-                match fs::remove_file(&self.boot_disk_path) {
-                    Ok(()) => {
-                        // Remove the in-memory override.
-                        self.boot_disk_override = Ok(None);
-                        Ok(ClearMupdateOverrideBootSuccess::Cleared(info))
-                    }
-                    Err(error) => {
-                        Err(ClearMupdateOverrideBootError::RemoveError {
-                            path: self.boot_disk_path.clone(),
-                            error: ArcIoError::new(error),
-                        })
-                    }
-                }
-            }
             Ok(Some(info)) => {
-                // The override ID does not match the boot disk override, so we
-                // shouldn't clear it.
-                Err(ClearMupdateOverrideBootError::IdMismatch {
-                    actual: info.mupdate_uuid,
-                    provided: override_id,
-                })
+                if info.mupdate_uuid == override_id {
+                    if internal_disks.boot_disk_zpool_id().is_none() {
+                        // The boot disk is currently missing, so we can't clear
+                        // it.
+                        Err(ClearMupdateOverrideBootError::BootDiskMissing)
+                    } else {
+                        // Remove the override from the boot disk (which is
+                        // fallible) before clearing it in-memory (which is
+                        // infallible).
+                        match fs::remove_file(&self.boot_disk_path) {
+                            Ok(()) => {
+                                // Remove the in-memory override.
+                                self.boot_disk_override = Ok(None);
+                                Ok(ClearMupdateOverrideBootSuccess::Cleared(
+                                    info,
+                                ))
+                            }
+                            Err(error) => Err(
+                                ClearMupdateOverrideBootError::RemoveError {
+                                    path: self.boot_disk_path.clone(),
+                                    error: ArcIoError::new(error),
+                                },
+                            ),
+                        }
+                    }
+                } else {
+                    // The override ID does not match the boot disk override, so
+                    // we shouldn't clear it.
+                    Err(ClearMupdateOverrideBootError::IdMismatch {
+                        actual: info.mupdate_uuid,
+                        provided: override_id,
+                    })
+                }
             }
             Ok(None) => {
                 // There is no override on the boot disk, which indicates that
@@ -478,6 +489,7 @@ mod tests {
     use super::*;
 
     use crate::test_utils::make_internal_disks_rx;
+    use crate::test_utils::make_internal_disks_rx_without_boot_disk;
 
     use camino::Utf8Path;
     use camino_tempfile_ext::prelude::*;
@@ -919,8 +931,8 @@ mod tests {
         let mut overrides =
             AllMupdateOverrides::read_all(&logctx.log, &internal_disks);
 
-        let result =
-            overrides.clear_override(info.mupdate_uuid, internal_disks);
+        let result = overrides
+            .clear_override(info.mupdate_uuid, internal_disks.as_inner());
 
         // The boot disk should be cleared.
         assert_eq!(
@@ -971,7 +983,8 @@ mod tests {
 
         // Use a different UUID to cause an error clearing the override.
         let other_uuid = MupdateOverrideUuid::new_v4();
-        let result = overrides.clear_override(other_uuid, internal_disks);
+        let result =
+            overrides.clear_override(other_uuid, internal_disks.as_inner());
 
         // The boot disk should get an ID mismatch error.
         assert_eq!(
@@ -1023,8 +1036,8 @@ mod tests {
         let mut overrides =
             AllMupdateOverrides::read_all(&logctx.log, &internal_disks);
 
-        let result =
-            overrides.clear_override(info.mupdate_uuid, internal_disks);
+        let result = overrides
+            .clear_override(info.mupdate_uuid, internal_disks.as_inner());
 
         // The boot disk should be cleared.
         assert_eq!(
@@ -1044,6 +1057,63 @@ mod tests {
                 }
             }
         );
+
+        logctx.cleanup_successful();
+    }
+
+    /// Test clearing the override file with the boot disk not being present in
+    /// the newest `InternalDisks`.
+    #[test]
+    fn clear_boot_not_present() {
+        let logctx = LogContext::new(
+            "mupdate_override_clear_boot_not_present",
+            &ConfigLogging::StderrTerminal { level: ConfigLoggingLevel::Debug },
+        );
+        let dir = Utf8TempDir::new().unwrap();
+        let cx = WriteInstallDatasetContext::new_basic();
+        let info = cx.override_info();
+        cx.write_to(&dir.child(&BOOT_PATHS.install_dataset)).unwrap();
+        cx.write_to(&dir.child(&NON_BOOT_PATHS.install_dataset)).unwrap();
+
+        // Build the `AllMupdateOverrides` with both disks present.
+        let internal_disks_with_both =
+            make_internal_disks_rx(dir.path(), BOOT_UUID, &[NON_BOOT_UUID])
+                .current_with_boot_disk();
+        let mut overrides = AllMupdateOverrides::read_all(
+            &logctx.log,
+            &internal_disks_with_both,
+        );
+
+        // Try to clear the override with the boot disk missing.
+        let internal_disks_no_boot = make_internal_disks_rx_without_boot_disk(
+            dir.path(),
+            &[NON_BOOT_UUID],
+        )
+        .current();
+        let result = overrides
+            .clear_override(info.mupdate_uuid, &internal_disks_no_boot);
+
+        // The boot disk should return a BootDiskMissing error.
+        assert_eq!(
+            result.boot_disk_result,
+            Err(ClearMupdateOverrideBootError::BootDiskMissing),
+        );
+
+        // The non-boot disk should not be altered due to the boot disk error.
+        assert_eq!(
+            result.non_boot_disk_info,
+            id_ord_map! {
+                ClearMupdateOverrideNonBootInfo {
+                    zpool_id: NON_BOOT_UUID,
+                    path: Some(dir.path().join(&NON_BOOT_PATHS.mupdate_override_json)),
+                    result: ClearMupdateOverrideNonBootResult::BootDiskError,
+                }
+            }
+        );
+
+        // Verify that both files still exist.
+        assert!(dir.child(&BOOT_PATHS.mupdate_override_json).exists());
+        assert!(dir.child(&NON_BOOT_PATHS.mupdate_override_json).exists());
 
         logctx.cleanup_successful();
     }
@@ -1082,8 +1152,8 @@ mod tests {
             )
         );
 
-        let result =
-            overrides.clear_override(info.mupdate_uuid, internal_disks);
+        let result = overrides
+            .clear_override(info.mupdate_uuid, internal_disks.as_inner());
 
         // The boot disk should be cleared.
         assert_eq!(
@@ -1140,7 +1210,8 @@ mod tests {
 
         // Use a different UUID to cause a mismatch.
         let other_uuid = MupdateOverrideUuid::new_v4();
-        let result = overrides.clear_override(other_uuid, internal_disks);
+        let result =
+            overrides.clear_override(other_uuid, internal_disks.as_inner());
 
         // The boot disk should get an ID mismatch error.
         assert_eq!(
@@ -1215,7 +1286,8 @@ mod tests {
         );
 
         let some_uuid = MupdateOverrideUuid::new_v4();
-        let result = overrides.clear_override(some_uuid, internal_disks);
+        let result =
+            overrides.clear_override(some_uuid, internal_disks.as_inner());
 
         // The boot disk should return NoOverride.
         assert_eq!(
@@ -1286,8 +1358,8 @@ mod tests {
             )
         );
 
-        let result =
-            overrides.clear_override(info.mupdate_uuid, internal_disks);
+        let result = overrides
+            .clear_override(info.mupdate_uuid, internal_disks.as_inner());
 
         // The boot disk should be cleared.
         assert_eq!(
@@ -1345,7 +1417,8 @@ mod tests {
 
         // Use a different UUID to cause a mismatch on the boot disk.
         let other_uuid = MupdateOverrideUuid::new_v4();
-        let result = overrides.clear_override(other_uuid, internal_disks);
+        let result =
+            overrides.clear_override(other_uuid, internal_disks.as_inner());
 
         // The boot disk should get an ID mismatch error.
         assert_eq!(
@@ -1409,7 +1482,8 @@ mod tests {
         ));
 
         let other_uuid = MupdateOverrideUuid::new_v4();
-        let result = overrides.clear_override(other_uuid, internal_disks);
+        let result =
+            overrides.clear_override(other_uuid, internal_disks.as_inner());
 
         // The boot disk should return a read error.
         assert!(matches!(
@@ -1467,8 +1541,8 @@ mod tests {
             MupdateOverrideNonBootResult::ReadError(_)
         ));
 
-        let result =
-            overrides.clear_override(info.mupdate_uuid, internal_disks);
+        let result = overrides
+            .clear_override(info.mupdate_uuid, internal_disks.as_inner());
 
         // The boot disk should be cleared.
         assert_eq!(
@@ -1533,8 +1607,10 @@ mod tests {
         let internal_disks_boot_only =
             make_internal_disks_rx(dir.path(), BOOT_UUID, &[])
                 .current_with_boot_disk();
-        let result = overrides
-            .clear_override(info.mupdate_uuid, internal_disks_boot_only);
+        let result = overrides.clear_override(
+            info.mupdate_uuid,
+            internal_disks_boot_only.as_inner(),
+        );
 
         // The boot disk should be cleared.
         assert_eq!(
@@ -1596,8 +1672,10 @@ mod tests {
         let internal_disks_with_both =
             make_internal_disks_rx(dir.path(), BOOT_UUID, &[NON_BOOT_UUID])
                 .current_with_boot_disk();
-        let result = overrides
-            .clear_override(info.mupdate_uuid, internal_disks_with_both);
+        let result = overrides.clear_override(
+            info.mupdate_uuid,
+            internal_disks_with_both.as_inner(),
+        );
 
         // The boot disk should be cleared.
         assert_eq!(
@@ -1643,8 +1721,8 @@ mod tests {
             ReadOnlyDirDropGuard::new(&dir.child(&BOOT_PATHS.install_dataset))
                 .unwrap();
 
-        let result =
-            overrides.clear_override(info.mupdate_uuid, internal_disks);
+        let result = overrides
+            .clear_override(info.mupdate_uuid, internal_disks.as_inner());
 
         // The boot disk should return a RemoveError.
         assert!(matches!(

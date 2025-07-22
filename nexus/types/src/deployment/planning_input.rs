@@ -166,6 +166,10 @@ impl PlanningInput {
         &self.policy.old_repo
     }
 
+    pub fn chicken_switches(&self) -> &PlannerChickenSwitches {
+        &self.policy.chicken_switches
+    }
+
     pub fn service_ip_pool_ranges(&self) -> &[IpRange] {
         &self.policy.service_ip_pool_ranges
     }

@@ -258,7 +258,7 @@ impl PlanningInputFromDb<'_> {
             oximeter_read_policy: self.oximeter_read_policy.clone(),
             tuf_repo: self.tuf_repo.clone(),
             old_repo: self.old_repo.clone(),
-            chicken_switches: self.chicken_switches.clone(),
+            chicken_switches: self.chicken_switches,
         };
         let mut builder = PlanningInputBuilder::new(
             policy,
@@ -379,7 +379,7 @@ pub async fn reconfigurator_state_load(
         .reconfigurator_chicken_switches_get_latest(opctx)
         .await?
         .map_or_else(PlannerChickenSwitches::default, |switches| {
-            switches.planner_switches
+            switches.switches.planner_switches
         });
     let planning_input =
         PlanningInputFromDb::assemble(opctx, datastore, chicken_switches)

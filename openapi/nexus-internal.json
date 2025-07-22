@@ -687,7 +687,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/ReconfiguratorChickenSwitches"
+                  "$ref": "#/components/schemas/ReconfiguratorChickenSwitchesView"
                 }
               }
             }
@@ -748,7 +748,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/ReconfiguratorChickenSwitches"
+                  "$ref": "#/components/schemas/ReconfiguratorChickenSwitchesView"
                 }
               }
             }
@@ -6733,6 +6733,35 @@
           },
           "planner_switches": {
             "$ref": "#/components/schemas/PlannerChickenSwitches"
+          }
+        },
+        "required": [
+          "planner_enabled",
+          "planner_switches"
+        ]
+      },
+      "ReconfiguratorChickenSwitchesParam": {
+        "type": "object",
+        "properties": {
+          "switches": {
+            "$ref": "#/components/schemas/ReconfiguratorChickenSwitches"
+          },
+          "version": {
+            "type": "integer",
+            "format": "uint32",
+            "minimum": 0
+          }
+        },
+        "required": [
+          "switches",
+          "version"
+        ]
+      },
+      "ReconfiguratorChickenSwitchesView": {
+        "type": "object",
+        "properties": {
+          "switches": {
+            "$ref": "#/components/schemas/ReconfiguratorChickenSwitches"
           },
           "time_modified": {
             "type": "string",
@@ -6745,30 +6774,8 @@
           }
         },
         "required": [
-          "planner_enabled",
-          "planner_switches",
+          "switches",
           "time_modified",
-          "version"
-        ]
-      },
-      "ReconfiguratorChickenSwitchesParam": {
-        "type": "object",
-        "properties": {
-          "planner_enabled": {
-            "type": "boolean"
-          },
-          "planner_switches": {
-            "$ref": "#/components/schemas/PlannerChickenSwitches"
-          },
-          "version": {
-            "type": "integer",
-            "format": "uint32",
-            "minimum": 0
-          }
-        },
-        "required": [
-          "planner_enabled",
-          "planner_switches",
           "version"
         ]
       },

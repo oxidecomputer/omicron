@@ -107,13 +107,12 @@ impl Connection {
     /// This will connect to the server and exchange the initial handshake
     /// messages.
     pub async fn new(address: SocketAddr) -> Result<Self, Error> {
+        let addr = address.ip();
         let stream = TcpStream::connect(address).await?;
         let address = stream.local_addr()?;
         let (reader, writer) = stream.into_split();
-        let mut reader =
-            FramedRead::new(reader, Decoder { addr: address.ip() });
-        let mut writer =
-            FramedWrite::new(writer, Encoder { addr: address.ip() });
+        let mut reader = FramedRead::new(reader, Decoder { addr });
+        let mut writer = FramedWrite::new(writer, Encoder { addr });
         let server_info =
             Self::exchange_hello(&mut reader, &mut writer).await?;
         Ok(Self {

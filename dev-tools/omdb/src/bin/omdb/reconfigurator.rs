@@ -26,6 +26,7 @@ use nexus_types::deployment::Blueprint;
 use nexus_types::deployment::BlueprintMetadata;
 use nexus_types::deployment::PlannerChickenSwitches;
 use nexus_types::deployment::ReconfiguratorChickenSwitches;
+use nexus_types::deployment::ReconfiguratorChickenSwitchesView;
 use nexus_types::deployment::UnstableReconfiguratorState;
 use omicron_common::api::external::Error;
 use omicron_common::api::external::LookupType;
@@ -409,11 +410,16 @@ async fn cmd_reconfigurator_chicken_switches_history(
     let rows: Vec<_> = history
         .into_iter()
         .map(|s| {
-            let ReconfiguratorChickenSwitches {
+            let ReconfiguratorChickenSwitchesView {
                 version,
-                planner_enabled,
-                planner_switches:
-                    PlannerChickenSwitches { add_zones_with_mupdate_override },
+                switches:
+                    ReconfiguratorChickenSwitches {
+                        planner_enabled,
+                        planner_switches:
+                            PlannerChickenSwitches {
+                                add_zones_with_mupdate_override,
+                            },
+                    },
                 time_modified,
             } = s;
             SwitchesRow {

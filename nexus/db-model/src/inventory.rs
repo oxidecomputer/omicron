@@ -30,7 +30,7 @@ use nexus_db_schema::schema::inv_zone_manifest_zone;
 use nexus_db_schema::schema::{
     hw_baseboard_id, inv_caboose, inv_clickhouse_keeper_membership,
     inv_cockroachdb_status, inv_collection, inv_collection_error, inv_dataset,
-    inv_last_reconciliation_dataset_result,
+    inv_host_phase_1_flash_hash, inv_last_reconciliation_dataset_result,
     inv_last_reconciliation_disk_result,
     inv_last_reconciliation_orphaned_dataset,
     inv_last_reconciliation_zone_result, inv_mupdate_override_non_boot,
@@ -156,6 +156,36 @@ impl From<HwRotSlot> for RotSlot {
         match value {
             HwRotSlot::A => RotSlot::A,
             HwRotSlot::B => RotSlot::B,
+        }
+    }
+}
+
+// See [`M2Slot`].
+impl_enum_type!(
+    HwM2SlotEnum:
+
+    #[derive(Copy, Clone, Debug, AsExpression, FromSqlRow, PartialEq)]
+    pub enum HwM2Slot;
+
+    // Enum values
+    A => b"A"
+    B => b"B"
+);
+
+impl From<HwM2Slot> for M2Slot {
+    fn from(value: HwM2Slot) -> Self {
+        match value {
+            HwM2Slot::A => Self::A,
+            HwM2Slot::B => Self::B,
+        }
+    }
+}
+
+impl From<M2Slot> for HwM2Slot {
+    fn from(value: M2Slot) -> Self {
+        match value {
+            M2Slot::A => Self::A,
+            M2Slot::B => Self::B,
         }
     }
 }
@@ -754,6 +784,19 @@ impl From<InvRootOfTrust> for nexus_types::inventory::RotState {
     }
 }
 
+/// See [`nexus_types::inventory::HostPhase1FlashHash`].
+#[derive(Queryable, Clone, Debug, Selectable)]
+#[diesel(table_name = inv_host_phase_1_flash_hash)]
+pub struct InvHostPhase1FlashHash {
+    pub inv_collection_id: Uuid,
+    pub hw_baseboard_id: Uuid,
+    pub time_collected: DateTime<Utc>,
+    pub source: String,
+
+    pub slot: HwM2Slot,
+    pub hash: ArtifactHash,
+}
+
 /// See [`nexus_types::inventory::CabooseFound`].
 #[derive(Queryable, Clone, Debug, Selectable)]
 #[diesel(table_name = inv_caboose)]
@@ -971,6 +1014,8 @@ impl InvSledConfigReconciler {
         boot_partition_b_error: Option<String>,
         clear_mupdate_override: InvClearMupdateOverride,
     ) -> Self {
+        // TODO-cleanup We should use `HwM2Slot` instead of integers for this
+        // column: https://github.com/oxidecomputer/omicron/issues/8642
         let (boot_disk_slot, boot_disk_error) = match boot_disk {
             Ok(M2Slot::A) => (Some(SqlU8(0)), None),
             Ok(M2Slot::B) => (Some(SqlU8(1)), None),

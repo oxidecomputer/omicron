@@ -29,8 +29,8 @@ use nexus_types::deployment::BlueprintTarget;
 use nexus_types::deployment::BlueprintTargetSet;
 use nexus_types::deployment::ClickhousePolicy;
 use nexus_types::deployment::OximeterReadPolicy;
-use nexus_types::deployment::ReconfiguratorChickenSwitches;
 use nexus_types::deployment::ReconfiguratorChickenSwitchesParam;
+use nexus_types::deployment::ReconfiguratorChickenSwitchesView;
 use nexus_types::external_api::headers::RangeRequest;
 use nexus_types::external_api::params::PhysicalDiskPath;
 use nexus_types::external_api::params::SledSelector;
@@ -865,7 +865,8 @@ impl NexusInternalApi for NexusInternalApiImpl {
 
     async fn reconfigurator_chicken_switches_show_current(
         rqctx: RequestContext<Self::Context>,
-    ) -> Result<HttpResponseOk<ReconfiguratorChickenSwitches>, HttpError> {
+    ) -> Result<HttpResponseOk<ReconfiguratorChickenSwitchesView>, HttpError>
+    {
         let apictx = &rqctx.context().context;
         let handler = async {
             let datastore = &apictx.nexus.datastore();
@@ -891,7 +892,8 @@ impl NexusInternalApi for NexusInternalApiImpl {
     async fn reconfigurator_chicken_switches_show(
         rqctx: RequestContext<Self::Context>,
         path_params: Path<VersionPathParam>,
-    ) -> Result<HttpResponseOk<ReconfiguratorChickenSwitches>, HttpError> {
+    ) -> Result<HttpResponseOk<ReconfiguratorChickenSwitchesView>, HttpError>
+    {
         let apictx = &rqctx.context().context;
         let handler = async {
             let datastore = &apictx.nexus.datastore();

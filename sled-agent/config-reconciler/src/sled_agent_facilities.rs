@@ -18,7 +18,7 @@ use sled_agent_types::zone_images::ResolverStatus;
 use std::future::Future;
 use tufaceous_artifact::ArtifactHash;
 
-use crate::InternalDisksWithBootDisk;
+use crate::InternalDisks;
 
 pub trait SledAgentFacilities: Send + Sync + 'static {
     /// The underlay VNIC interface in the global zone.
@@ -48,7 +48,7 @@ pub trait SledAgentFacilities: Send + Sync + 'static {
     fn clear_mupdate_override(
         &self,
         override_id: MupdateOverrideUuid,
-        internal_disks: InternalDisksWithBootDisk,
+        internal_disks: &InternalDisks,
     ) -> ClearMupdateOverrideResult;
 
     /// Stop tracking metrics for a zone's datalinks.

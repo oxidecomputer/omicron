@@ -55,6 +55,7 @@ progenitor::generate_api!(
         PlannerChickenSwitches = nexus_types::deployment::PlannerChickenSwitches,
         ReconfiguratorChickenSwitches = nexus_types::deployment::ReconfiguratorChickenSwitches,
         ReconfiguratorChickenSwitchesParam = nexus_types::deployment::ReconfiguratorChickenSwitchesParam,
+        ReconfiguratorChickenSwitchesView = nexus_types::deployment::ReconfiguratorChickenSwitchesView,
         RecoverySiloConfig = nexus_sled_agent_shared::recovery_silo::RecoverySiloConfig,
         Srv = nexus_types::internal_api::params::Srv,
         TypedUuidForBlueprintKind = omicron_uuid_kinds::BlueprintUuid,
