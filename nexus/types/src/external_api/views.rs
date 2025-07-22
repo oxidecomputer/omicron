@@ -1567,7 +1567,7 @@ pub struct AuditLogEntry {
     pub id: Uuid,
 
     /// When the request was received
-    pub time_initialized: DateTime<Utc>,
+    pub time_started: DateTime<Utc>,
 
     /// Request ID for tracing requests through the system
     pub request_id: String,

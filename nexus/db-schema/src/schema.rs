@@ -2669,7 +2669,7 @@ allow_tables_to_appear_in_same_query!(user_data_export, snapshot, image);
 table! {
     audit_log (id) {
         id -> Uuid,
-        time_initialized -> Timestamptz,
+        time_started -> Timestamptz,
         request_id -> Text,
         request_uri -> Text,
         operation_id -> Text,
@@ -2688,7 +2688,7 @@ table! {
 table! {
     audit_log_complete (id) {
         id -> Uuid,
-        time_initialized -> Timestamptz,
+        time_started -> Timestamptz,
         request_id -> Text,
         request_uri -> Text,
         operation_id -> Text,

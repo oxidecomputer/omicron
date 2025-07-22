@@ -18,7 +18,8 @@ use uuid::Uuid;
 #[diesel(table_name = audit_log)]
 pub struct AuditLogEntryInit {
     pub id: Uuid,
-    pub time_initialized: DateTime<Utc>,
+    /// Time operation started and audit log entry was initialized
+    pub time_started: DateTime<Utc>,
     pub request_id: String,
     /// The API endpoint being logged, e.g., `project_create`
     pub request_uri: String,
@@ -46,7 +47,7 @@ pub struct AuditLogEntryInit {
 #[diesel(table_name = audit_log_complete)]
 pub struct AuditLogEntry {
     pub id: Uuid,
-    pub time_initialized: DateTime<Utc>,
+    pub time_started: DateTime<Utc>,
     pub request_id: String,
     pub request_uri: String,
     pub operation_id: String,
@@ -82,7 +83,7 @@ impl AuditLogEntryInit {
     ) -> Self {
         Self {
             id: Uuid::new_v4(),
-            time_initialized: Utc::now(),
+            time_started: Utc::now(),
             request_id,
             request_uri,
             operation_id,
@@ -123,7 +124,7 @@ impl From<AuditLogEntry> for views::AuditLogEntry {
     fn from(entry: AuditLogEntry) -> Self {
         Self {
             id: entry.id,
-            time_initialized: entry.time_initialized,
+            time_started: entry.time_started,
             request_id: entry.request_id,
             request_uri: entry.request_uri,
             operation_id: entry.operation_id,

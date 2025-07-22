@@ -28,7 +28,7 @@ impl DataStore {
     ///
     /// ## Why we must sort by time_completed
     ///
-    /// Sorting by `time_completed` and not `time_initialized` is essential.
+    /// Sorting by `time_completed` and not `time_started` is essential.
     /// Consider the following sequence of events:
     ///
     ///   t0   Entry A initialized
@@ -41,7 +41,7 @@ impl DataStore {
     /// So A represents a request that came in before B, but A is completed
     /// _after_ B. `audit_log_complete` is a view consisting only of audit
     /// log entries that have non-null `time_completed`. If we sorted by
-    /// `time_initialized`, and at t3 we fetch the audit log for `t0 <= t < t3`,
+    /// `time_started`, and at t3 we fetch the audit log for `t0 <= t < t3`,
     /// we would get log entry B only, because it has a completed time and A
     /// does not. But if we make that same request again at t5, we now get both
     /// A and B, and A appears in the log _before_ B! We can't have that: if
