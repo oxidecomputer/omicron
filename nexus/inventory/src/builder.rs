@@ -25,6 +25,7 @@ use nexus_types::inventory::CabooseFound;
 use nexus_types::inventory::CabooseWhich;
 use nexus_types::inventory::CockroachStatus;
 use nexus_types::inventory::Collection;
+use nexus_types::inventory::HostPhase1FlashHash;
 use nexus_types::inventory::RotPage;
 use nexus_types::inventory::RotPageFound;
 use nexus_types::inventory::RotPageWhich;
@@ -35,12 +36,14 @@ use nexus_types::inventory::Zpool;
 use omicron_cockroach_metrics::CockroachMetric;
 use omicron_cockroach_metrics::NodeId;
 use omicron_cockroach_metrics::PrometheusMetrics;
+use omicron_common::disk::M2Slot;
 use omicron_uuid_kinds::CollectionKind;
 use std::collections::BTreeMap;
 use std::collections::BTreeSet;
 use std::hash::Hash;
 use std::sync::Arc;
 use thiserror::Error;
+use tufaceous_artifact::ArtifactHash;
 use typed_rng::TypedUuidRng;
 
 /// Describes an operational error encountered during the collection process
@@ -111,6 +114,8 @@ pub struct CollectionBuilder {
     cabooses: BTreeSet<Arc<Caboose>>,
     rot_pages: BTreeSet<Arc<RotPage>>,
     sps: BTreeMap<Arc<BaseboardId>, ServiceProcessor>,
+    host_phase_1_flash_hashes:
+        BTreeMap<M2Slot, BTreeMap<Arc<BaseboardId>, HostPhase1FlashHash>>,
     rots: BTreeMap<Arc<BaseboardId>, RotState>,
     cabooses_found:
         BTreeMap<CabooseWhich, BTreeMap<Arc<BaseboardId>, CabooseFound>>,
@@ -144,6 +149,7 @@ impl CollectionBuilder {
             cabooses: BTreeSet::new(),
             rot_pages: BTreeSet::new(),
             sps: BTreeMap::new(),
+            host_phase_1_flash_hashes: BTreeMap::new(),
             rots: BTreeMap::new(),
             cabooses_found: BTreeMap::new(),
             rot_pages_found: BTreeMap::new(),
@@ -166,6 +172,7 @@ impl CollectionBuilder {
             cabooses: self.cabooses,
             rot_pages: self.rot_pages,
             sps: self.sps,
+            host_phase_1_flash_hashes: self.host_phase_1_flash_hashes,
             rots: self.rots,
             cabooses_found: self.cabooses_found,
             rot_pages_found: self.rot_pages_found,
@@ -301,6 +308,73 @@ impl CollectionBuilder {
         }
 
         Some(baseboard)
+    }
+
+    /// Returns true if we already found the host phase 1 flash hash for `slot`
+    /// for baseboard `baseboard`
+    ///
+    /// This is used to avoid requesting it multiple times (from multiple MGS
+    /// instances).
+    pub fn found_host_phase_1_flash_hash_already(
+        &self,
+        baseboard: &BaseboardId,
+        slot: M2Slot,
+    ) -> bool {
+        self.host_phase_1_flash_hashes
+            .get(&slot)
+            .map(|map| map.contains_key(baseboard))
+            .unwrap_or(false)
+    }
+
+    /// Record the given host phase 1 flash hash found for the given baseboard
+    ///
+    /// The baseboard must previously have been reported using
+    /// `found_sp_state()`.
+    ///
+    /// `source` is an arbitrary string for debugging that describes the MGS
+    /// that reported this data (generally a URL string).
+    pub fn found_host_phase_1_flash_hash(
+        &mut self,
+        baseboard: &BaseboardId,
+        slot: M2Slot,
+        source: &str,
+        hash: ArtifactHash,
+    ) -> Result<(), CollectorBug> {
+        let (baseboard, _) =
+            self.sps.get_key_value(baseboard).ok_or_else(|| {
+                anyhow!(
+                    "reporting host phase 1 flash hash for unknown baseboard: \
+                    {baseboard:?} ({slot:?}: {hash})",
+                )
+            })?;
+        let by_id = self
+            .host_phase_1_flash_hashes
+            .entry(slot)
+            .or_insert_with(BTreeMap::new);
+        if let Some(previous) = by_id.insert(
+            baseboard.clone(),
+            HostPhase1FlashHash {
+                time_collected: now_db_precision(),
+                source: source.to_owned(),
+                slot,
+                hash,
+            },
+        ) {
+            let error = if previous.hash == hash {
+                anyhow!("reported multiple times (same value)")
+            } else {
+                anyhow!(
+                    "reported host phase 1 flash hash \
+                     (previously {}, now {hash})",
+                    previous.hash,
+                )
+            };
+            Err(CollectorBug::from(
+                error.context(format!("baseboard {baseboard:?} slot {slot:?}")),
+            ))
+        } else {
+            Ok(())
+        }
     }
 
     /// Returns true if we already found the caboose for `which` for baseboard
