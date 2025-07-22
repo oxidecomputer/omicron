@@ -94,7 +94,6 @@ peg-runtime = { version = "0.8.5", default-features = false, features = ["std"] 
 pem-rfc7468 = { version = "0.7.0", default-features = false, features = ["std"] }
 percent-encoding = { version = "2.3.1" }
 petgraph = { version = "0.6.5", features = ["serde-1"] }
-phf = { version = "0.11.2" }
 phf_shared = { version = "0.11.2" }
 pkcs8 = { version = "0.10.2", default-features = false, features = ["encryption", "pem", "std"] }
 portable-atomic = { version = "1.11.0" }
@@ -103,8 +102,9 @@ ppv-lite86 = { version = "0.2.20", default-features = false, features = ["simd",
 predicates = { version = "3.1.3" }
 proc-macro2 = { version = "1.0.95" }
 rand-274715c4dabd11b0 = { package = "rand", version = "0.9.1" }
-rand-c38e5c1d305a1b54 = { package = "rand", version = "0.8.5", features = ["small_rng"] }
-rand_chacha = { version = "0.9.0", default-features = false, features = ["std"] }
+rand-c38e5c1d305a1b54 = { package = "rand", version = "0.8.5" }
+rand_chacha-274715c4dabd11b0 = { package = "rand_chacha", version = "0.9.0", default-features = false, features = ["std"] }
+rand_chacha-468e82937335b1c9 = { package = "rand_chacha", version = "0.3.1", default-features = false, features = ["std"] }
 regex = { version = "1.11.1" }
 regex-automata = { version = "0.4.8", default-features = false, features = ["dfa", "hybrid", "meta", "nfa", "perf", "unicode"] }
 regex-syntax = { version = "0.8.5" }
@@ -230,7 +230,6 @@ peg-runtime = { version = "0.8.5", default-features = false, features = ["std"] 
 pem-rfc7468 = { version = "0.7.0", default-features = false, features = ["std"] }
 percent-encoding = { version = "2.3.1" }
 petgraph = { version = "0.6.5", features = ["serde-1"] }
-phf = { version = "0.11.2" }
 phf_shared = { version = "0.11.2" }
 pkcs8 = { version = "0.10.2", default-features = false, features = ["encryption", "pem", "std"] }
 portable-atomic = { version = "1.11.0" }
@@ -239,8 +238,9 @@ ppv-lite86 = { version = "0.2.20", default-features = false, features = ["simd",
 predicates = { version = "3.1.3" }
 proc-macro2 = { version = "1.0.95" }
 rand-274715c4dabd11b0 = { package = "rand", version = "0.9.1" }
-rand-c38e5c1d305a1b54 = { package = "rand", version = "0.8.5", features = ["small_rng"] }
-rand_chacha = { version = "0.9.0", default-features = false, features = ["std"] }
+rand-c38e5c1d305a1b54 = { package = "rand", version = "0.8.5" }
+rand_chacha-274715c4dabd11b0 = { package = "rand_chacha", version = "0.9.0", default-features = false, features = ["std"] }
+rand_chacha-468e82937335b1c9 = { package = "rand_chacha", version = "0.3.1", default-features = false, features = ["std"] }
 regex = { version = "1.11.1" }
 regex-automata = { version = "0.4.8", default-features = false, features = ["dfa", "hybrid", "meta", "nfa", "perf", "unicode"] }
 regex-syntax = { version = "0.8.5" }
@@ -355,7 +355,6 @@ dof = { version = "0.3.0", default-features = false, features = ["des"] }
 getrandom-468e82937335b1c9 = { package = "getrandom", version = "0.3.1", default-features = false, features = ["std"] }
 hyper-rustls = { version = "0.27.7", features = ["http2", "ring", "webpki-tokio"] }
 hyper-util = { version = "0.1.14", features = ["client-proxy", "client-proxy-system", "full"] }
-indicatif = { version = "0.17.11", features = ["rayon"] }
 itertools-5ef9efb8ec2df382 = { package = "itertools", version = "0.12.1" }
 mio = { version = "1.0.2", features = ["net", "os-ext"] }
 rustix = { version = "0.38.37", features = ["event", "fs", "net", "pipe", "process", "stdio", "system", "termios", "time"] }
@@ -370,7 +369,6 @@ dof = { version = "0.3.0", default-features = false, features = ["des"] }
 getrandom-468e82937335b1c9 = { package = "getrandom", version = "0.3.1", default-features = false, features = ["std"] }
 hyper-rustls = { version = "0.27.7", features = ["http2", "ring", "webpki-tokio"] }
 hyper-util = { version = "0.1.14", features = ["client-proxy", "client-proxy-system", "full"] }
-indicatif = { version = "0.17.11", features = ["rayon"] }
 itertools-5ef9efb8ec2df382 = { package = "itertools", version = "0.12.1" }
 mio = { version = "1.0.2", features = ["net", "os-ext"] }
 rustix = { version = "0.38.37", features = ["event", "fs", "net", "pipe", "process", "stdio", "system", "termios", "time"] }

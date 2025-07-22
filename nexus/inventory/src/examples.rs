@@ -652,6 +652,13 @@ pub fn representative() -> Representative {
         },
     );
 
+    builder
+        .found_ntp_timesync(nexus_types::inventory::TimeSync {
+            zone_id: omicron_uuid_kinds::OmicronZoneUuid::new_v4(),
+            synced: true,
+        })
+        .unwrap();
+
     Representative {
         builder,
         sleds: [sled1_bb, sled2_bb, sled3_bb, sled4_bb],
