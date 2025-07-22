@@ -421,7 +421,7 @@ retry=0
 INVENTORY_COLLECTION_COUNT=$(pfexec zlogin oxz_switch /opt/oxide/omdb/bin/omdb db inventory collections list | wc -l)
 until [[ "${INVENTORY_COLLECTION_COUNT}" -gt 1 ]]; do
 	if [[ $retry -gt 300 ]]; then
-		echo "Failed to handoff to Nexus after 300 seconds"
+		echo "Failed to wait for inventory collection after 300 seconds"
 		exit 1
 	fi
 	sleep 1
