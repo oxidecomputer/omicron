@@ -100,6 +100,9 @@ impl ReconfiguratorChickenSwitches {
     }
 }
 
+// Allow the clippy::derivable_impls lint: spell out the default values for
+// these chicken switches for clarity.
+#[expect(clippy::derivable_impls)]
 impl Default for ReconfiguratorChickenSwitches {
     fn default() -> Self {
         Self {
