@@ -202,7 +202,7 @@ table! {
         dst -> Inet,
         gw -> Inet,
         vid -> Nullable<Int4>,
-        local_pref -> Nullable<Int2>,
+        rib_priority -> Nullable<Int2>,
     }
 }
 
@@ -1470,6 +1470,7 @@ table! {
         dataset_id -> Uuid,
 
         assigned_nexus -> Nullable<Uuid>,
+        user_comment -> Nullable<Text>,
     }
 }
 
@@ -1554,6 +1555,18 @@ table! {
         slot_b_error -> Nullable<crate::enums::RotImageErrorEnum>,
         stage0_error -> Nullable<crate::enums::RotImageErrorEnum>,
         stage0next_error -> Nullable<crate::enums::RotImageErrorEnum>,
+    }
+}
+
+table! {
+    inv_host_phase_1_flash_hash (inv_collection_id, hw_baseboard_id, slot) {
+        inv_collection_id -> Uuid,
+        hw_baseboard_id -> Uuid,
+        time_collected -> Timestamptz,
+        source -> Text,
+
+        slot -> crate::enums::HwM2SlotEnum,
+        hash -> Text,
     }
 }
 
@@ -2090,6 +2103,23 @@ table! {
         artifact_version -> Text,
         expected_active_version -> Text,
         expected_inactive_version -> Nullable<Text>,
+    }
+}
+
+table! {
+    bp_pending_mgs_update_rot (blueprint_id, hw_baseboard_id) {
+        blueprint_id -> Uuid,
+        hw_baseboard_id -> Uuid,
+        sp_type -> crate::enums::SpTypeEnum,
+        sp_slot -> Int4,
+        artifact_sha256 -> Text,
+        artifact_version -> Text,
+        expected_active_slot -> crate::enums::HwRotSlotEnum,
+        expected_active_version -> Text,
+        expected_inactive_version -> Nullable<Text>,
+        expected_persistent_boot_preference -> crate::enums::HwRotSlotEnum,
+        expected_pending_persistent_boot_preference -> Nullable<crate::enums::HwRotSlotEnum>,
+        expected_transient_boot_preference -> Nullable<crate::enums::HwRotSlotEnum>,
     }
 }
 

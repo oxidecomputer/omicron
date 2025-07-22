@@ -96,6 +96,7 @@ path_param!(CertificatePath, certificate, "certificate");
 
 id_path_param!(SupportBundlePath, bundle_id, "support bundle");
 id_path_param!(GroupPath, group_id, "group");
+id_path_param!(UserPath, user_id, "user");
 id_path_param!(TokenPath, token_id, "token");
 id_path_param!(TufTrustRootPath, trust_root_id, "trust root");
 
@@ -156,6 +157,18 @@ pub struct SupportBundleFilePath {
 
     /// The file within the bundle to download
     pub file: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+pub struct SupportBundleCreate {
+    /// User comment for the support bundle
+    pub user_comment: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+pub struct SupportBundleUpdate {
+    /// User comment for the support bundle
+    pub user_comment: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, PartialEq)]
@@ -2003,8 +2016,8 @@ pub struct Route {
     /// VLAN id the gateway is reachable over.
     pub vid: Option<u16>,
 
-    /// Local preference for route. Higher preference indictes precedence
-    /// within and across protocols.
+    /// Route RIB priority. Higher priority indicates precedence within and across
+    /// protocols.
     pub rib_priority: Option<u8>,
 }
 

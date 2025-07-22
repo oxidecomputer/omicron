@@ -64,7 +64,11 @@ pub const NEXUS_TECHPORT_EXTERNAL_PORT: u16 = 12228;
 /// interface(s).
 pub const WICKETD_NEXUS_PROXY_PORT: u16 = 12229;
 
+/// The port on which NTP runs
 pub const NTP_PORT: u16 = 123;
+
+/// The port on which the NTP admin service exposes an HTTP interface
+pub const NTP_ADMIN_PORT: u16 = 10123;
 
 /// The length for all VPC IPv6 prefixes
 pub const VPC_IPV6_PREFIX_LENGTH: u8 = 48;

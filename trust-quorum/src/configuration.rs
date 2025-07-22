@@ -4,7 +4,7 @@
 
 //! A configuration of a trust quroum at a given epoch
 
-use crate::crypto::{EncryptedRackSecret, RackSecret, Salt, Sha3_256Digest};
+use crate::crypto::{EncryptedRackSecrets, RackSecret, Sha3_256Digest};
 use crate::validators::ValidatedReconfigureMsg;
 use crate::{Epoch, PlatformId, Threshold};
 use gfss::shamir::{Share, SplitError};
@@ -47,8 +47,8 @@ pub struct Configuration {
     /// The number of sleds required to reconstruct the rack secret
     pub threshold: Threshold,
 
-    // There is no previous configuration for the initial configuration
-    pub previous_configuration: Option<PreviousConfiguration>,
+    // There are no encrypted rack secrets for the initial configuration
+    pub encrypted_rack_secrets: Option<EncryptedRackSecrets>,
 }
 
 impl IdOrdItem for Configuration {
@@ -105,34 +105,9 @@ impl Configuration {
                 coordinator,
                 members,
                 threshold: reconfigure_msg.threshold(),
-                previous_configuration: None,
+                encrypted_rack_secrets: None,
             },
             shares,
         ))
     }
-}
-
-/// Information for the last committed configuration that is necessary to track
-/// in the next `Configuration`.
-#[derive(
-    Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize,
-)]
-pub struct PreviousConfiguration {
-    /// The epoch of the last committed configuration
-    pub epoch: Epoch,
-
-    /// Is the previous configuration LRTQ?
-    pub is_lrtq: bool,
-
-    /// The encrypted rack secret for the last committed epoch
-    ///
-    /// This allows us to derive old encryption keys so they can be rotated
-    pub encrypted_last_committed_rack_secret: EncryptedRackSecret,
-
-    /// A random value used to derive the key to encrypt the rack secret from
-    /// the last committed epoch.
-    ///
-    /// We only encrypt the rack secret once and so we use a nonce of all zeros.
-    /// This is why there is no corresponding `nonce` field.
-    pub encrypted_last_committed_rack_secret_salt: Salt,
 }

@@ -115,6 +115,10 @@ label = "Nexus"
 packages = [ "omicron-nexus" ]
 
 [[deployment_units]]
+label = "NTP"
+packages = [ "omicron-ntp-admin" ]
+
+[[deployment_units]]
 label = "Oximeter"
 packages = [ "oximeter-collector" ]
 
@@ -211,6 +215,17 @@ notes = """
 This is the server running inside CockroachDB zones that performs \
 configuration and monitoring that requires the `cockroach` CLI.
 """
+
+[[apis]]
+client_package_name = "ntp-admin-client"
+label = "NTP Admin"
+server_package_name = "ntp-admin-api"
+versioned_how = "server"
+notes = """
+This is the server running inside NTP zones that performs \
+monitoring on 'chrony'.
+"""
+
 
 [[apis]]
 client_package_name = "crucible-agent-client"

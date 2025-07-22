@@ -21,6 +21,7 @@ use nexus_sled_agent_shared::inventory::Inventory;
 use nexus_sled_agent_shared::inventory::InventoryDataset;
 use nexus_sled_agent_shared::inventory::InventoryDisk;
 use nexus_sled_agent_shared::inventory::InventoryZpool;
+use nexus_sled_agent_shared::inventory::MupdateOverrideBootInventory;
 use nexus_sled_agent_shared::inventory::OmicronSledConfig;
 use nexus_sled_agent_shared::inventory::SledRole;
 use nexus_sled_agent_shared::inventory::ZoneImageResolverInventory;
@@ -57,18 +58,22 @@ use omicron_common::api::external::ByteCount;
 use omicron_common::api::external::Generation;
 use omicron_common::disk::DiskIdentity;
 use omicron_common::disk::DiskVariant;
+use omicron_common::disk::M2Slot;
 use omicron_common::policy::INTERNAL_DNS_REDUNDANCY;
 use omicron_common::policy::NEXUS_REDUNDANCY;
+use omicron_uuid_kinds::MupdateOverrideUuid;
 use omicron_uuid_kinds::SledUuid;
 use omicron_uuid_kinds::ZpoolUuid;
 use std::collections::BTreeMap;
 use std::collections::BTreeSet;
 use std::fmt;
 use std::fmt::Debug;
+use std::mem;
 use std::net::Ipv4Addr;
 use std::net::Ipv6Addr;
 use std::sync::Arc;
 use std::time::Duration;
+use tufaceous_artifact::ArtifactHash;
 use tufaceous_artifact::ArtifactVersion;
 
 /// Describes an actual or synthetic Oxide rack for planning and testing
@@ -665,6 +670,36 @@ impl SystemDescription {
         Ok(sled.rot_slot_b_caboose().map(|c| c.version.as_ref()))
     }
 
+    /// Set a sled's mupdate override field.
+    ///
+    /// Returns the previous value, or previous error if set.
+    pub fn sled_set_mupdate_override(
+        &mut self,
+        sled_id: SledUuid,
+        mupdate_override: Option<MupdateOverrideUuid>,
+    ) -> anyhow::Result<Result<Option<MupdateOverrideUuid>, String>> {
+        let sled = self.sleds.get_mut(&sled_id).with_context(|| {
+            format!("attempted to access sled {} not found in system", sled_id)
+        })?;
+        let sled = Arc::make_mut(sled);
+        Ok(sled.set_mupdate_override(Ok(mupdate_override)))
+    }
+
+    /// Set a sled's mupdate override field to an error.
+    ///
+    /// Returns the previous value, or previous error if set.
+    pub fn sled_set_mupdate_override_error(
+        &mut self,
+        sled_id: SledUuid,
+        message: String,
+    ) -> anyhow::Result<Result<Option<MupdateOverrideUuid>, String>> {
+        let sled = self.sleds.get_mut(&sled_id).with_context(|| {
+            format!("attempted to access sled {} not found in system", sled_id)
+        })?;
+        let sled = Arc::make_mut(sled);
+        Ok(sled.set_mupdate_override(Err(message)))
+    }
+
     pub fn set_tuf_repo(&mut self, tuf_repo: TufRepoPolicy) {
         self.tuf_repo = tuf_repo;
     }
@@ -726,6 +761,18 @@ impl SystemDescription {
                     part_number: sp_state.model.clone(),
                     serial_number: sp_state.serial_number.clone(),
                 };
+
+                for (m2_slot, hash) in s.sp_host_phase_1_hash_flash() {
+                    builder
+                        .found_host_phase_1_flash_hash(
+                            &baseboard_id,
+                            m2_slot,
+                            "fake MGS 1",
+                            hash,
+                        )
+                        .context("recording SP host phase 1 flash hash")?;
+                }
+
                 if let Some(active) = &s.sp_active_caboose() {
                     builder
                         .found_caboose(
@@ -971,6 +1018,7 @@ pub struct SledHwInventory<'a> {
     pub baseboard_id: &'a BaseboardId,
     pub sp: &'a nexus_types::inventory::ServiceProcessor,
     pub rot: &'a nexus_types::inventory::RotState,
+    pub sp_host_phase_1_hash_flash: BTreeMap<M2Slot, ArtifactHash>,
     pub sp_active: Option<Arc<nexus_types::inventory::Caboose>>,
     pub sp_inactive: Option<Arc<nexus_types::inventory::Caboose>>,
     pub rot_slot_a: Option<Arc<nexus_types::inventory::Caboose>>,
@@ -990,6 +1038,7 @@ pub struct Sled {
     policy: SledPolicy,
     state: SledState,
     resources: SledResources,
+    sp_host_phase_1_hash_flash: BTreeMap<M2Slot, ArtifactHash>,
     sp_active_caboose: Option<Arc<nexus_types::inventory::Caboose>>,
     sp_inactive_caboose: Option<Arc<nexus_types::inventory::Caboose>>,
     rot_slot_a_caboose: Option<Arc<nexus_types::inventory::Caboose>>,
@@ -1142,6 +1191,12 @@ impl Sled {
             policy,
             state: SledState::Active,
             resources: SledResources { subnet: sled_subnet, zpools },
+            sp_host_phase_1_hash_flash: [
+                (M2Slot::A, ArtifactHash([1; 32])),
+                (M2Slot::B, ArtifactHash([2; 32])),
+            ]
+            .into_iter()
+            .collect(),
             sp_active_caboose: Some(Arc::new(Self::default_sp_caboose(
                 String::from("0.0.1"),
             ))),
@@ -1180,6 +1235,10 @@ impl Sled {
             })
             .unwrap_or(Baseboard::Unknown);
 
+        let sp_host_phase_1_hash_flash = inventory_sp
+            .as_ref()
+            .map(|hw| hw.sp_host_phase_1_hash_flash.clone())
+            .unwrap_or_default();
         let sp_active_caboose =
             inventory_sp.as_ref().and_then(|hw| hw.sp_active.clone());
         let sp_inactive_caboose =
@@ -1297,6 +1356,7 @@ impl Sled {
             policy: sled_policy,
             state: sled_state,
             resources: sled_resources,
+            sp_host_phase_1_hash_flash,
             sp_active_caboose,
             sp_inactive_caboose,
             rot_slot_a_caboose,
@@ -1325,6 +1385,14 @@ impl Sled {
 
     pub fn sp_state(&self) -> Option<&(u16, SpState)> {
         self.inventory_sp.as_ref()
+    }
+
+    pub fn sp_host_phase_1_hash_flash(
+        &self,
+    ) -> impl Iterator<Item = (M2Slot, ArtifactHash)> + '_ {
+        self.sp_host_phase_1_hash_flash
+            .iter()
+            .map(|(&slot, &hash)| (slot, hash))
     }
 
     fn sled_agent_inventory(&self) -> &Inventory {
@@ -1470,6 +1538,30 @@ impl Sled {
             version: version.to_string(),
             sign: None,
         }
+    }
+
+    /// Set the mupdate override field for a sled, returning the previous value.
+    fn set_mupdate_override(
+        &mut self,
+        mupdate_override_id: Result<Option<MupdateOverrideUuid>, String>,
+    ) -> Result<Option<MupdateOverrideUuid>, String> {
+        // We don't alter the non-boot override because it's not used in this process.
+        let inv = match mupdate_override_id {
+            Ok(Some(id)) => Ok(Some(MupdateOverrideBootInventory {
+                mupdate_override_id: id,
+            })),
+            Ok(None) => Ok(None),
+            Err(message) => Err(message),
+        };
+        let prev = mem::replace(
+            &mut self
+                .inventory_sled_agent
+                .zone_image_resolver
+                .mupdate_override
+                .boot_override,
+            inv,
+        );
+        prev.map(|prev| prev.map(|prev| prev.mupdate_override_id))
     }
 }
 

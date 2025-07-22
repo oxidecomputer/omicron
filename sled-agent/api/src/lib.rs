@@ -42,7 +42,6 @@ use sled_agent_types::{
         VmmPutStateResponse, VmmUnregisterResponse,
     },
     sled::AddSledRequest,
-    time_sync::TimeSync,
     zone_bundle::{
         BundleUtilization, CleanupContext, CleanupCount, PriorityOrder,
         ZoneBundleId, ZoneBundleMetadata,
@@ -476,14 +475,6 @@ pub trait SledAgentApi {
     async fn list_v2p(
         rqctx: RequestContext<Self::Context>,
     ) -> Result<HttpResponseOk<Vec<VirtualNetworkInterfaceHost>>, HttpError>;
-
-    #[endpoint {
-        method = GET,
-        path = "/timesync",
-    }]
-    async fn timesync_get(
-        rqctx: RequestContext<Self::Context>,
-    ) -> Result<HttpResponseOk<TimeSync>, HttpError>;
 
     #[endpoint {
         method = POST,

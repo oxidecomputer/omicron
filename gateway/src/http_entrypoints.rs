@@ -23,8 +23,10 @@ use dropshot::WebsocketEndpointResult;
 use dropshot::WebsocketUpgrade;
 use futures::TryFutureExt;
 use gateway_api::*;
+use gateway_messages::HfError;
 use gateway_messages::RotBootInfo;
 use gateway_messages::SpComponent;
+use gateway_messages::SpError;
 use gateway_sp_comms::HostPhase2Provider;
 use gateway_sp_comms::VersionedSpState;
 use gateway_sp_comms::error::CommunicationError;
@@ -36,6 +38,7 @@ use gateway_types::component::SpComponentList;
 use gateway_types::component::SpIdentifier;
 use gateway_types::component::SpState;
 use gateway_types::component_details::SpComponentDetails;
+use gateway_types::host::ComponentFirmwareHashStatus;
 use gateway_types::host::HostStartupOptions;
 use gateway_types::ignition::SpIgnitionInfo;
 use gateway_types::rot::RotCfpa;
@@ -532,6 +535,93 @@ impl GatewayApi for GatewayImpl {
             })?;
 
             Ok(HttpResponseOk(status.into()))
+        };
+        apictx.latencies.instrument_dropshot_handler(&rqctx, handler).await
+    }
+
+    async fn sp_component_hash_firmware_start(
+        rqctx: RequestContext<Self::Context>,
+        path: Path<PathSpComponentFirmwareSlot>,
+    ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
+        let apictx = rqctx.context();
+
+        let PathSpComponentFirmwareSlot { sp, component, firmware_slot } =
+            path.into_inner();
+        let sp_id = sp.into();
+        let handler = async {
+            let sp = apictx.mgmt_switch.sp(sp_id)?;
+            let component = component_from_str(&component)?;
+
+            if component != SpComponent::HOST_CPU_BOOT_FLASH {
+                return Err(HttpError::for_bad_request(
+                    Some("RequestUnsupportedForComponent".to_string()),
+                    "Only the host boot flash can be hashed".into(),
+                ));
+            }
+
+            // The SP (reasonably!) returns a `HashInProgress` error if we try
+            // to start hashing while hashing is being calculated, but we're
+            // presenting an idempotent "start hashing if it isn't started"
+            // endpoint instead. Swallow that error.
+            match sp.start_host_flash_hash(firmware_slot).await {
+                Ok(())
+                | Err(CommunicationError::SpError(SpError::Hf(
+                    HfError::HashInProgress,
+                ))) => Ok(HttpResponseUpdatedNoContent()),
+                Err(err) => {
+                    Err(SpCommsError::SpCommunicationFailed { sp: sp_id, err }
+                        .into())
+                }
+            }
+        };
+        apictx.latencies.instrument_dropshot_handler(&rqctx, handler).await
+    }
+
+    async fn sp_component_hash_firmware_get(
+        rqctx: RequestContext<Self::Context>,
+        path: Path<PathSpComponentFirmwareSlot>,
+    ) -> Result<HttpResponseOk<ComponentFirmwareHashStatus>, HttpError> {
+        let apictx = rqctx.context();
+
+        let PathSpComponentFirmwareSlot { sp, component, firmware_slot } =
+            path.into_inner();
+        let sp_id = sp.into();
+        let handler = async {
+            let sp = apictx.mgmt_switch.sp(sp_id)?;
+            let component = component_from_str(&component)?;
+
+            if component != SpComponent::HOST_CPU_BOOT_FLASH {
+                return Err(HttpError::for_bad_request(
+                    Some("RequestUnsupportedForComponent".to_string()),
+                    "Only the host boot flash can be hashed".into(),
+                ));
+            }
+
+            let status = match sp.get_host_flash_hash(firmware_slot).await {
+                // success
+                Ok(sha256) => ComponentFirmwareHashStatus::Hashed { sha256 },
+
+                // expected failure: hash needs to be calculated (or
+                // recalculated; either way the client operation is the same)
+                Err(CommunicationError::SpError(SpError::Hf(
+                    HfError::HashUncalculated | HfError::RecalculateHash,
+                ))) => ComponentFirmwareHashStatus::HashNotCalculated,
+
+                // expected failure: hashing is currently in progress; client
+                // needs to wait and try again later
+                Err(CommunicationError::SpError(SpError::Hf(
+                    HfError::HashInProgress,
+                ))) => ComponentFirmwareHashStatus::HashInProgress,
+
+                // other errors are failures
+                Err(err) => {
+                    return Err(HttpError::from(
+                        SpCommsError::SpCommunicationFailed { sp: sp_id, err },
+                    ));
+                }
+            };
+
+            Ok(HttpResponseOk(status))
         };
         apictx.latencies.instrument_dropshot_handler(&rqctx, handler).await
     }
