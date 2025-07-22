@@ -1955,7 +1955,7 @@ mod test {
         // Trivial case: empty map
         let empty = PendingMgsUpdates::new();
         let empty_serialized = serde_json::to_string(&empty).unwrap();
-        assert_eq!(empty_serialized, "[]");
+        assert_eq!(empty_serialized, r#"{"by_baseboard":[]}"#);
         let empty_deserialized: PendingMgsUpdates =
             serde_json::from_str(&empty_serialized).unwrap();
         assert!(empty.is_empty());
