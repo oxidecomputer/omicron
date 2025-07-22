@@ -97,8 +97,8 @@ async fn test_audit_log_list(ctx: &ControlPlaneTestContext) {
     assert_eq!(e1.source_ip.to_string(), "127.0.0.1");
     assert_eq!(e1.user_agent, None); // no user agent passed by default
     assert_eq!(e1.access_method, Some("spoof".to_string()));
-    assert!(e1.time_initialized >= t1 && e1.time_initialized <= t2);
-    assert!(e1.time_completed > e1.time_initialized);
+    assert!(e1.time_started >= t1 && e1.time_started <= t2);
+    assert!(e1.time_completed > e1.time_started);
     assert_eq!(
         e1.actor,
         views::AuditLogEntryActor::SiloUser {
@@ -113,8 +113,8 @@ async fn test_audit_log_list(ctx: &ControlPlaneTestContext) {
     assert_eq!(e2.source_ip.to_string(), "127.0.0.1");
     assert_eq!(e2.user_agent, None); // no user agent passed by default
     assert_eq!(e2.access_method, None);
-    assert!(e2.time_initialized >= t2 && e2.time_initialized <= t3);
-    assert!(e2.time_completed > e2.time_initialized);
+    assert!(e2.time_started >= t2 && e2.time_started <= t3);
+    assert!(e2.time_completed > e2.time_started);
 
     // login attempts are unauthenticated (until the user is authenticated)
     // assert_eq!(e2.actor, views::AuditLogEntryActor::Unauthenticated);
@@ -151,8 +151,8 @@ async fn test_audit_log_list(ctx: &ControlPlaneTestContext) {
     assert_eq!(e3.source_ip.to_string(), "127.0.0.1");
     assert_eq!(e3.user_agent.as_ref().unwrap(), "A pretend user agent string");
     assert_eq!(e3.access_method, Some("session_cookie".to_string()));
-    assert!(e3.time_initialized >= t3 && e3.time_initialized <= t4);
-    assert!(e3.time_completed > e3.time_initialized);
+    assert!(e3.time_started >= t3 && e3.time_started <= t4);
+    assert!(e3.time_completed > e3.time_started);
     assert_eq!(
         e3.actor,
         views::AuditLogEntryActor::SiloUser {
@@ -252,8 +252,8 @@ async fn test_audit_log_login_local(ctx: &ControlPlaneTestContext) {
         e1.error_message,
         Some("credentials missing or invalid".to_string())
     );
-    assert!(e1.time_initialized >= t1 && e1.time_initialized <= t2);
-    assert!(e1.time_completed > e1.time_initialized);
+    assert!(e1.time_started >= t1 && e1.time_started <= t2);
+    assert!(e1.time_completed > e1.time_started);
 
     // Verify second entry (successful login)
     assert_eq!(e2.request_uri, "/v1/login/test-silo/local");
@@ -262,8 +262,8 @@ async fn test_audit_log_login_local(ctx: &ControlPlaneTestContext) {
     assert_eq!(e2.http_status_code, 204);
     assert_eq!(e2.error_code, None);
     assert_eq!(e2.error_message, None);
-    assert!(e2.time_initialized >= t2 && e2.time_initialized <= t3);
-    assert!(e2.time_completed > e2.time_initialized);
+    assert!(e2.time_started >= t2 && e2.time_started <= t3);
+    assert!(e2.time_completed > e2.time_started);
 
     // Time filtering works
     let audit_log = fetch_log(client, t2, Some(t2)).await;

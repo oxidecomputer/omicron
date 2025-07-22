@@ -1,7 +1,7 @@
 CREATE VIEW IF NOT EXISTS omicron.public.audit_log_complete AS
-SELECT 
+SELECT
     id,
-    time_initialized,
+    time_started,
     request_id,
     request_uri,
     operation_id,

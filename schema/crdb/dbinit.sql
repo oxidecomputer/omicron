@@ -5769,7 +5769,7 @@ CREATE UNIQUE INDEX IF NOT EXISTS one_record_per_volume_resource_usage on omicro
 
 CREATE TABLE IF NOT EXISTS omicron.public.audit_log (
     id UUID PRIMARY KEY,
-    time_initialized TIMESTAMPTZ NOT NULL,
+    time_started TIMESTAMPTZ NOT NULL,
     -- request IDs are UUIDs but let's give them a little extra space
     -- https://github.com/oxidecomputer/dropshot/blob/83f78e7/dropshot/src/server.rs#L743
     request_id STRING(63) NOT NULL,
@@ -5814,9 +5814,9 @@ CREATE UNIQUE INDEX IF NOT EXISTS audit_log_by_time_completed
 -- and most likely mark them with a special third status that is neither success
 -- nor failure.
 CREATE VIEW IF NOT EXISTS omicron.public.audit_log_complete AS
-SELECT 
+SELECT
     id,
-    time_initialized,
+    time_started,
     request_id,
     request_uri,
     operation_id,

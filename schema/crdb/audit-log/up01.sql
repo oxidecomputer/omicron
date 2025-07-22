@@ -1,6 +1,6 @@
 CREATE TABLE IF NOT EXISTS omicron.public.audit_log (
     id UUID PRIMARY KEY,
-    time_initialized TIMESTAMPTZ NOT NULL,
+    time_started TIMESTAMPTZ NOT NULL,
     -- request IDs are UUIDs but let's give them a little extra space
     -- https://github.com/oxidecomputer/dropshot/blob/83f78e7/dropshot/src/server.rs#L743
     request_id STRING(63) NOT NULL,
