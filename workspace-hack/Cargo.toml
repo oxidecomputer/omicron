@@ -94,7 +94,6 @@ peg-runtime = { version = "0.8.5", default-features = false, features = ["std"] 
 pem-rfc7468 = { version = "0.7.0", default-features = false, features = ["std"] }
 percent-encoding = { version = "2.3.1" }
 petgraph = { version = "0.6.5", features = ["serde-1"] }
-phf = { version = "0.11.2" }
 phf_shared = { version = "0.11.2" }
 pkcs8 = { version = "0.10.2", default-features = false, features = ["encryption", "pem", "std"] }
 portable-atomic = { version = "1.11.0" }
@@ -103,8 +102,9 @@ ppv-lite86 = { version = "0.2.20", default-features = false, features = ["simd",
 predicates = { version = "3.1.3" }
 proc-macro2 = { version = "1.0.95" }
 rand-274715c4dabd11b0 = { package = "rand", version = "0.9.1" }
-rand-c38e5c1d305a1b54 = { package = "rand", version = "0.8.5", features = ["small_rng"] }
-rand_chacha = { version = "0.9.0", default-features = false, features = ["std"] }
+rand-c38e5c1d305a1b54 = { package = "rand", version = "0.8.5" }
+rand_chacha-274715c4dabd11b0 = { package = "rand_chacha", version = "0.9.0", default-features = false, features = ["std"] }
+rand_chacha-468e82937335b1c9 = { package = "rand_chacha", version = "0.3.1", default-features = false, features = ["std"] }
 regex = { version = "1.11.1" }
 regex-automata = { version = "0.4.8", default-features = false, features = ["dfa", "hybrid", "meta", "nfa", "perf", "unicode"] }
 regex-syntax = { version = "0.8.5" }
@@ -230,7 +230,6 @@ peg-runtime = { version = "0.8.5", default-features = false, features = ["std"] 
 pem-rfc7468 = { version = "0.7.0", default-features = false, features = ["std"] }
 percent-encoding = { version = "2.3.1" }
 petgraph = { version = "0.6.5", features = ["serde-1"] }
-phf = { version = "0.11.2" }
 phf_shared = { version = "0.11.2" }
 pkcs8 = { version = "0.10.2", default-features = false, features = ["encryption", "pem", "std"] }
 portable-atomic = { version = "1.11.0" }
@@ -239,8 +238,9 @@ ppv-lite86 = { version = "0.2.20", default-features = false, features = ["simd",
 predicates = { version = "3.1.3" }
 proc-macro2 = { version = "1.0.95" }
 rand-274715c4dabd11b0 = { package = "rand", version = "0.9.1" }
-rand-c38e5c1d305a1b54 = { package = "rand", version = "0.8.5", features = ["small_rng"] }
-rand_chacha = { version = "0.9.0", default-features = false, features = ["std"] }
+rand-c38e5c1d305a1b54 = { package = "rand", version = "0.8.5" }
+rand_chacha-274715c4dabd11b0 = { package = "rand_chacha", version = "0.9.0", default-features = false, features = ["std"] }
+rand_chacha-468e82937335b1c9 = { package = "rand_chacha", version = "0.3.1", default-features = false, features = ["std"] }
 regex = { version = "1.11.1" }
 regex-automata = { version = "0.4.8", default-features = false, features = ["dfa", "hybrid", "meta", "nfa", "perf", "unicode"] }
 regex-syntax = { version = "0.8.5" }
