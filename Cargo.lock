@@ -10869,6 +10869,7 @@ dependencies = [
  "qorb",
  "serde_json",
  "slog",
+ "swrite",
  "tokio",
  "tufaceous-artifact",
 ]
