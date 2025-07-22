@@ -5,7 +5,8 @@
 # improvements or bugfixes that are present in newer versions of nextest.
 nextest-version = { required = "0.9.98", recommended = "0.9.98" }
 
-experimental = ["setup-scripts"]
+experimental = ["setup-scripts", "wrapper-scripts"]
+
 
 [[profile.default.scripts]]
 # Exclude omicron-dev tests from crdb-seed as we explicitly want to simulate an
@@ -78,3 +79,12 @@ default-filter = 'package(omicron-live-tests)'
 [[profile.live-tests.overrides]]
 filter = 'package(omicron-live-tests)'
 test-group = 'live-tests'
+
+[scripts.wrapper.pfexec]
+command = 'pfexec'
+
+[[profile.default.scripts]]
+filter = 'package(sled-hardware) and test(compare_nvme_to_blkdev_nodes)'
+run-wrapper = 'pfexec'
+platform = { host = 'cfg(target_os = "illumos")' }
+
