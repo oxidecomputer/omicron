@@ -18,6 +18,7 @@ use futures::FutureExt as _;
 use futures::future::BoxFuture;
 use gateway_client::HostPhase1HashError;
 use gateway_client::SpComponent;
+use gateway_client::types::PowerState;
 use gateway_client::types::SpComponentFirmwareSlot;
 use gateway_client::types::SpIdentifier;
 use gateway_client::types::SpType;
@@ -38,6 +39,7 @@ use uuid::Uuid;
 
 // TODO-john explain
 const PHASE_1_HASHING_TIMEOUT: Duration = Duration::from_secs(60);
+const POWER_CYCLE_SLEEP: Duration = Duration::from_secs(1);
 
 type GatewayClientError = gateway_client::Error<gateway_client::types::Error>;
 
@@ -260,6 +262,10 @@ impl ReconfiguratorHostPhase1Updater {
                 log,
             )
             .await?;
+        debug!(
+            log, "found active slot phase 1 artifact";
+            "hash" => %found_active_artifact,
+        );
 
         // If the version in the currently-active slot matches the one we're
         // trying to set, then there's nothing to do.
@@ -291,6 +297,10 @@ impl ReconfiguratorHostPhase1Updater {
                 log,
             )
             .await?;
+        debug!(
+            log, "found inactive slot phase 1 artifact";
+            "hash" => %found_inactive_artifact,
+        );
 
         if found_inactive_artifact == expected_inactive_artifact {
             Ok(PrecheckStatus::ReadyForUpdate)
@@ -371,6 +381,10 @@ impl ReconfiguratorHostPhase1Updater {
             .last_reconciliation
             .ok_or(PrecheckError::SledAgentInventoryMissingLastReconciliation)?
             .boot_partitions;
+        debug!(
+            log, "got phase 2 inventory details from sled-agent";
+            "inventory" => ?sled_inventory,
+        );
 
         // Confirm the expected active slot (i.e., the slot we booted from) and
         match (sled_inventory.boot_disk, expected_active_slot.slot) {
@@ -433,13 +447,64 @@ impl ReconfiguratorHostPhase1Updater {
         )
     }
 
-    async fn post_update_impl<'a>(
-        &'a self,
-        log: &'a slog::Logger,
-        mgs_clients: &'a mut MgsClients,
-        update: &'a PendingMgsUpdate,
+    async fn post_update_impl(
+        &self,
+        log: &slog::Logger,
+        mgs_clients: &mut MgsClients,
+        update: &PendingMgsUpdate,
     ) -> Result<(), PostUpdateError> {
-        todo!()
+        debug!(log, "attempting to set active slot");
+        let new_active_slot = self
+            .details
+            .expected_active_slot
+            .slot
+            .toggled()
+            .to_mgs_firmware_slot();
+        mgs_clients
+            .try_all_serially(log, |mgs_client| async move {
+                let persist = true;
+                mgs_client
+                    .sp_component_active_slot_set(
+                        update.sp_type,
+                        update.slot_id,
+                        SpComponent::HOST_CPU_BOOT_FLASH.const_as_str(),
+                        persist,
+                        &SpComponentFirmwareSlot { slot: new_active_slot },
+                    )
+                    .await
+            })
+            .await?;
+
+        debug!(log, "attempting to put sled in A2");
+        mgs_clients
+            .try_all_serially(log, |mgs_client| async move {
+                mgs_client
+                    .sp_power_state_set(
+                        update.sp_type,
+                        update.slot_id,
+                        PowerState::A2,
+                    )
+                    .await
+            })
+            .await?;
+
+        debug!(log, "sleeping briefly before powering sled back on");
+        tokio::time::sleep(POWER_CYCLE_SLEEP).await;
+
+        debug!(log, "attempting to put sled in A2");
+        mgs_clients
+            .try_all_serially(log, |mgs_client| async move {
+                mgs_client
+                    .sp_power_state_set(
+                        update.sp_type,
+                        update.slot_id,
+                        PowerState::A0,
+                    )
+                    .await
+            })
+            .await?;
+
+        Ok(())
     }
 }
 
