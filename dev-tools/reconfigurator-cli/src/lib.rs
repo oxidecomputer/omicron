@@ -521,6 +521,7 @@ struct SledUpdateRotArgs {
     slot_b: Option<ExpectedVersion>,
 }
 
+#[derive(Debug, Args)]
 struct SledSetMupdateOverrideArgs {
     #[clap(flatten)]
     source: SledMupdateOverrideSource,
