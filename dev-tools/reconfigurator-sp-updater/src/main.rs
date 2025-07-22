@@ -4,9 +4,9 @@
 
 //! Interactively manage SP updates from the command line
 
-use anyhow::bail;
 use anyhow::Context;
 use anyhow::anyhow;
+use anyhow::bail;
 use clap::Args;
 use clap::ColorChoice;
 use clap::Parser;
