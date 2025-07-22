@@ -1912,6 +1912,14 @@ table! {
     }
 }
 
+table! {
+    inv_ntp_timesync (inv_collection_id, zone_id) {
+        inv_collection_id -> Uuid,
+        zone_id -> Uuid,
+        synced -> Bool,
+    }
+}
+
 /* blueprints */
 
 table! {
