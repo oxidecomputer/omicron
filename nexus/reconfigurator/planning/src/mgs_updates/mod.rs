@@ -213,7 +213,8 @@ fn mgs_update_status(
             ))
         }
         PendingMgsUpdateDetails::Rot { .. }
-        | PendingMgsUpdateDetails::RotBootloader { .. } => {
+        | PendingMgsUpdateDetails::RotBootloader { .. }
+        | PendingMgsUpdateDetails::HostPhase1(_) => {
             return Err(MgsUpdateStatusError::NotYetImplemented);
         }
     };
