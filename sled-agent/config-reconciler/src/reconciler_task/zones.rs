@@ -1038,7 +1038,7 @@ fn config_differs_only_by_image_source(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::InternalDisksWithBootDisk;
+    use crate::InternalDisks;
     use crate::dataset_serialization_task::DatasetEnsureError;
     use anyhow::anyhow;
     use assert_matches::assert_matches;
@@ -1287,7 +1287,7 @@ mod tests {
         fn clear_mupdate_override(
             &self,
             _override_id: MupdateOverrideUuid,
-            _internal_disks: InternalDisksWithBootDisk,
+            _internal_disks: &InternalDisks,
         ) -> ClearMupdateOverrideResult {
             // TODO: In the future, we'll probably want to model this better and
             // not just return no-override.

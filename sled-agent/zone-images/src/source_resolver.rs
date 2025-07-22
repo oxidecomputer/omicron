@@ -91,7 +91,7 @@ impl ZoneImageSourceResolver {
     pub fn clear_mupdate_override(
         &self,
         override_id: MupdateOverrideUuid,
-        internal_disks: InternalDisksWithBootDisk,
+        internal_disks: &InternalDisks,
     ) -> ClearMupdateOverrideResult {
         let mut inner = self.inner.lock().unwrap();
         let ret =

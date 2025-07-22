@@ -813,6 +813,8 @@ pub enum ClearMupdateOverrideBootSuccess {
 
 #[derive(Clone, Debug, Error, PartialEq)]
 pub enum ClearMupdateOverrideBootError {
+    #[error("boot disk not found in internal disks")]
+    BootDiskMissing,
     #[error(
         "mismatch between override ID on boot disk ({actual}) \
          and provided ID ({provided})"

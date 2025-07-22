@@ -427,6 +427,8 @@ impl ReconcilerTask {
             }
         };
 
+        let internal_disks = self.internal_disks_rx.current();
+
         // Reconcile the mupdate override field. This can be done independently
         // of the other parts of reconciliation (and this doesn't have to block
         // other parts of reconciliation), but the argument for this is somewhat
@@ -434,11 +436,9 @@ impl ReconcilerTask {
         // https://rfd.shared.oxide.computer/rfd/556#sa_reconciler_error_handling.
         let clear_mupdate_override =
             if let Some(override_id) = sled_config.remove_mupdate_override {
-                let internal_disks =
-                    self.internal_disks_rx.wait_for_boot_disk().await;
                 Some(
                     sled_agent_facilities
-                        .clear_mupdate_override(override_id, internal_disks),
+                        .clear_mupdate_override(override_id, &internal_disks),
                 )
             } else {
                 None
@@ -451,7 +451,7 @@ impl ReconcilerTask {
         let boot_partitions = self
             .boot_partitions
             .reconcile(
-                &self.internal_disks_rx.current(),
+                &internal_disks,
                 &sled_config.host_phase_2,
                 sled_agent_artifact_store,
                 &self.log,

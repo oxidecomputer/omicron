@@ -33,6 +33,7 @@
 
 use async_trait::async_trait;
 use nexus_config::NexusConfig;
+use nexus_db_queries::db;
 use nexus_types::deployment::Blueprint;
 use nexus_types::internal_api::params::{
     PhysicalDiskPutRequest, ZpoolPutRequest,
@@ -43,6 +44,7 @@ use omicron_common::disk::DatasetKind;
 use omicron_uuid_kinds::DatasetUuid;
 use slog::Logger;
 use std::net::{SocketAddr, SocketAddrV6};
+use std::sync::Arc;
 
 #[async_trait]
 pub trait NexusServer: Send + Sync + 'static {
@@ -80,6 +82,8 @@ pub trait NexusServer: Send + Sync + 'static {
             omicron_common::api::internal::nexus::Certificate,
         >,
     ) -> Self;
+
+    fn datastore(&self) -> &Arc<db::DataStore>;
 
     async fn get_http_server_external_address(&self) -> SocketAddr;
     async fn get_http_server_techport_address(&self) -> SocketAddr;

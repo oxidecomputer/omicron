@@ -53,8 +53,8 @@ use omicron_uuid_kinds::{
     GenericUuid, MupdateOverrideUuid, PropolisUuid, SledUuid,
 };
 use sled_agent_config_reconciler::{
-    ConfigReconcilerHandle, ConfigReconcilerSpawnToken, InternalDisksReceiver,
-    InternalDisksWithBootDisk, LedgerNewConfigError, LedgerTaskError,
+    ConfigReconcilerHandle, ConfigReconcilerSpawnToken, InternalDisks,
+    InternalDisksReceiver, LedgerNewConfigError, LedgerTaskError,
     ReconcilerInventory, SledAgentArtifactStore, SledAgentFacilities,
 };
 use sled_agent_types::disk::DiskStateRequested;
@@ -1324,7 +1324,7 @@ impl SledAgentFacilities for ReconcilerFacilities {
     fn clear_mupdate_override(
         &self,
         override_id: MupdateOverrideUuid,
-        internal_disks: InternalDisksWithBootDisk,
+        internal_disks: &InternalDisks,
     ) -> ClearMupdateOverrideResult {
         self.service_manager
             .zone_image_resolver()

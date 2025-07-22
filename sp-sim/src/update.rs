@@ -46,9 +46,9 @@ pub(crate) struct SimSpUpdate {
     /// state of hashing each of the host phase1 slots
     phase1_hash_state: BTreeMap<u16, HostFlashHashState>,
     /// how do we decide when we're done hashing host phase1 slots? this allows
-    /// us to default to `TIME_TO_HASH_HOST_PHASE_1` (e.g., for running sp-sim
-    /// as a part of `omicron-dev`) while giving tests that want explicit
-    /// control the ability to precisely trigger completion of hashing.
+    /// us to default to "instant" (e.g., for running sp-sim as a part of
+    /// `omicron-dev`) while giving tests that want explicit control the ability
+    /// to precisely trigger completion of hashing.
     phase1_hash_policy: HostFlashHashPolicyInner,
 
     /// records whether a change to the stage0 "active slot" has been requested

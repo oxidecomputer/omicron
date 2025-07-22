@@ -1013,12 +1013,78 @@ parent:    02697f74-b14a-4418-90f0-c28b2a3a6aa9
  PENDING MGS-MANAGED UPDATES: 0
 
 
-> inventory-show latest
+> inventory-show latest all
 collection: 9e187896-7809-46d0-9210-d75be1b3c4d4
 collector:  example
 started:    <REDACTED_TIMESTAMP>
 done:       <REDACTED_TIMESTAMP>
 errors:     0
+
+Sled serial0
+    part number: model0
+    power:    A2
+    revision: 0
+    MGS slot: Sled 0 (cubby 0)
+    found at: <REDACTED_TIMESTAMP> from fake MGS 1
+    host phase 1 hashes:
+        SLOT HASH                                                             
+        A    0101010101010101010101010101010101010101010101010101010101010101 
+        B    0202020202020202020202020202020202020202020202020202020202020202 
+    cabooses:
+        SLOT    BOARD       NAME        VERSION GIT_COMMIT SIGN 
+        SpSlot0 SimGimletSp SimGimletSp 0.0.1   unknown    n/a  
+    RoT pages:
+        SLOT DATA_BASE64 
+    RoT: active slot: slot A
+    RoT: persistent boot preference: slot A
+    RoT: pending persistent boot preference: -
+    RoT: transient boot preference: -
+    RoT: slot A SHA3-256: slotAdigest1
+    RoT: slot B SHA3-256: slotBdigest1
+
+Sled serial1
+    part number: model1
+    power:    A2
+    revision: 0
+    MGS slot: Sled 1 (cubby 1)
+    found at: <REDACTED_TIMESTAMP> from fake MGS 1
+    host phase 1 hashes:
+        SLOT HASH                                                             
+        A    0101010101010101010101010101010101010101010101010101010101010101 
+        B    0202020202020202020202020202020202020202020202020202020202020202 
+    cabooses:
+        SLOT    BOARD       NAME        VERSION GIT_COMMIT SIGN 
+        SpSlot0 SimGimletSp SimGimletSp 0.0.1   unknown    n/a  
+    RoT pages:
+        SLOT DATA_BASE64 
+    RoT: active slot: slot A
+    RoT: persistent boot preference: slot A
+    RoT: pending persistent boot preference: -
+    RoT: transient boot preference: -
+    RoT: slot A SHA3-256: slotAdigest1
+    RoT: slot B SHA3-256: slotBdigest1
+
+Sled serial2
+    part number: model2
+    power:    A2
+    revision: 0
+    MGS slot: Sled 2 (cubby 2)
+    found at: <REDACTED_TIMESTAMP> from fake MGS 1
+    host phase 1 hashes:
+        SLOT HASH                                                             
+        A    0101010101010101010101010101010101010101010101010101010101010101 
+        B    0202020202020202020202020202020202020202020202020202020202020202 
+    cabooses:
+        SLOT    BOARD       NAME        VERSION GIT_COMMIT SIGN 
+        SpSlot0 SimGimletSp SimGimletSp 0.0.1   unknown    n/a  
+    RoT pages:
+        SLOT DATA_BASE64 
+    RoT: active slot: slot A
+    RoT: persistent boot preference: slot A
+    RoT: pending persistent boot preference: -
+    RoT: transient boot preference: -
+    RoT: slot A SHA3-256: slotAdigest1
+    RoT: slot B SHA3-256: slotBdigest1
 
 SLED AGENTS
 
