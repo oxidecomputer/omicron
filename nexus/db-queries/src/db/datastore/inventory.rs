@@ -45,6 +45,7 @@ use nexus_db_model::InvLastReconciliationDatasetResult;
 use nexus_db_model::InvLastReconciliationDiskResult;
 use nexus_db_model::InvLastReconciliationOrphanedDataset;
 use nexus_db_model::InvLastReconciliationZoneResult;
+use nexus_db_model::InvNtpTimesync;
 use nexus_db_model::InvNvmeDiskFirmware;
 use nexus_db_model::InvOmicronSledConfig;
 use nexus_db_model::InvOmicronSledConfigDataset;
@@ -97,6 +98,7 @@ use nexus_types::inventory::CockroachStatus;
 use nexus_types::inventory::Collection;
 use nexus_types::inventory::PhysicalDiskFirmware;
 use nexus_types::inventory::SledAgent;
+use nexus_types::inventory::TimeSync;
 use omicron_cockroach_metrics::NodeId as CockroachNodeId;
 use omicron_common::api::external::Error;
 use omicron_common::api::external::InternalContext;
@@ -386,6 +388,13 @@ impl DataStore {
             .map(|(node_id, status)| {
                 InvCockroachStatus::new(collection_id, node_id.clone(), status)
             })
+            .collect::<Result<Vec<_>, _>>()
+            .map_err(|e| Error::internal_error(&e.to_string()))?;
+
+        let inv_ntp_timesync_records: Vec<InvNtpTimesync> = collection
+            .ntp_timesync
+            .iter()
+            .map(|timesync| InvNtpTimesync::new(collection_id, timesync))
             .collect::<Result<Vec<_>, _>>()
             .map_err(|e| Error::internal_error(&e.to_string()))?;
 
@@ -1498,6 +1507,14 @@ impl DataStore {
                     .await?;
             }
 
+            // Insert the NTP info we've observed
+            if !inv_ntp_timesync_records.is_empty() {
+                use nexus_db_schema::schema::inv_ntp_timesync::dsl;
+                diesel::insert_into(dsl::inv_ntp_timesync)
+                    .values(inv_ntp_timesync_records)
+                    .execute_async(&conn)
+                    .await?;
+            }
 
             // Finally, insert the list of errors.
             {
@@ -1789,6 +1806,7 @@ impl DataStore {
             nerrors: usize,
             nclickhouse_keeper_membership: usize,
             ncockroach_status: usize,
+            nntp_timesync: usize,
         }
 
         let NumRowsDeleted {
@@ -1820,6 +1838,7 @@ impl DataStore {
             nerrors,
             nclickhouse_keeper_membership,
             ncockroach_status,
+            nntp_timesync,
         } =
             self.transaction_retry_wrapper("inventory_delete_collection")
                 .transaction(&conn, |conn| async move {
@@ -2086,6 +2105,17 @@ impl DataStore {
                         .execute_async(&conn)
                         .await?
                     };
+                    // Remove rows for NTP timesync
+                    let nntp_timesync = {
+                        use nexus_db_schema::schema::inv_ntp_timesync::dsl;
+                        diesel::delete(
+                            dsl::inv_ntp_timesync.filter(
+                                dsl::inv_collection_id.eq(db_collection_id),
+                            ),
+                        )
+                        .execute_async(&conn)
+                        .await?
+                    };
 
                     Ok(NumRowsDeleted {
                         ncollections,
@@ -2116,6 +2146,7 @@ impl DataStore {
                         nerrors,
                         nclickhouse_keeper_membership,
                         ncockroach_status,
+                        nntp_timesync,
                     })
                 })
                 .await
@@ -2157,6 +2188,7 @@ impl DataStore {
             "nerrors" => nerrors,
             "nclickhouse_keeper_membership" => nclickhouse_keeper_membership,
             "ncockroach_status" => ncockroach_status,
+            "nntp_timesync" => nntp_timesync,
         );
 
         Ok(())
@@ -3587,6 +3619,25 @@ impl DataStore {
                 .collect::<Result<BTreeMap<_, _>, Error>>()?
         };
 
+        // Load TimeSync statuses
+        let ntp_timesync = {
+            use nexus_db_schema::schema::inv_ntp_timesync::dsl;
+
+            let records: Vec<InvNtpTimesync> = dsl::inv_ntp_timesync
+                .filter(dsl::inv_collection_id.eq(db_id))
+                .select(InvNtpTimesync::as_select())
+                .load_async(&*conn)
+                .await
+                .map_err(|e| {
+                    public_error_from_diesel(e, ErrorHandler::Server)
+                })?;
+
+            records
+                .into_iter()
+                .map(|record| TimeSync::from(record))
+                .collect::<IdOrdMap<_>>()
+        };
+
         // Finally, build up the sled-agent map using the sled agent and
         // omicron zone rows. A for loop is easier to understand than into_iter
         // + filter_map + return Result + collect.
@@ -3834,6 +3885,7 @@ impl DataStore {
             sled_agents,
             clickhouse_keeper_cluster_membership,
             cockroach_status,
+            ntp_timesync,
         })
     }
 }
