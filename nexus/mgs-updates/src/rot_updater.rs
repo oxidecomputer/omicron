@@ -277,7 +277,7 @@ impl SpComponentUpdateHelper for ReconfiguratorRotUpdater {
                     .sp_component_caboose_get(
                         update.sp_type,
                         update.slot_id,
-                        &SpComponent::ROT.to_string(),
+                        SpComponent::ROT.const_as_str(),
                         active.to_u16(),
                     )
                     .await
@@ -327,7 +327,7 @@ impl SpComponentUpdateHelper for ReconfiguratorRotUpdater {
                         .sp_component_caboose_get(
                             update.sp_type,
                             update.slot_id,
-                            &SpComponent::ROT.to_string(),
+                            SpComponent::ROT.const_as_str(),
                             expected_active_slot.slot().toggled().to_u16(),
                         )
                         .await
@@ -402,7 +402,7 @@ impl SpComponentUpdateHelper for ReconfiguratorRotUpdater {
                         .sp_component_active_slot_set(
                             update.sp_type,
                             update.slot_id,
-                            &SpComponent::ROT.to_string(),
+                            SpComponent::ROT.const_as_str(),
                             persist,
                             &SpComponentFirmwareSlot { slot: inactive_slot },
                         )
@@ -418,7 +418,7 @@ impl SpComponentUpdateHelper for ReconfiguratorRotUpdater {
                         .sp_component_reset(
                             update.sp_type,
                             update.slot_id,
-                            &SpComponent::ROT.to_string(),
+                            SpComponent::ROT.const_as_str(),
                         )
                         .await?;
                     Ok(())
