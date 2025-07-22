@@ -1258,10 +1258,15 @@ impl fmt::Display for BlueprintHostPhase2DesiredContents {
     }
 }
 
-#[derive(Clone, Debug, Eq, PartialEq, JsonSchema, Diffable)]
+#[derive(
+    Clone, Debug, Eq, PartialEq, Deserialize, Serialize, JsonSchema, Diffable,
+)]
 pub struct PendingMgsUpdates {
     // The IdOrdMap key is the baseboard_id. Only one outstanding MGS-managed
     // update is allowed for a given baseboard.
+    //
+    // Note that keys aren't strings so this can't be serialized as a JSON map,
+    // but IdOrdMap serializes as an array.
     by_baseboard: IdOrdMap<PendingMgsUpdate>,
 }
 
@@ -1310,32 +1315,6 @@ impl<'a> IntoIterator for &'a PendingMgsUpdates {
     type IntoIter = iddqd::id_ord_map::Iter<'a, PendingMgsUpdate>;
     fn into_iter(self) -> Self::IntoIter {
         self.by_baseboard.iter()
-    }
-}
-
-// `PendingMgsUpdates` is serialized as a sequence of `PendingMgsUpdate` objects
-// rather than a map.  (A map would not directly work because the keys here are
-// themselves objects, but JSON requires that they be strings.)
-impl Serialize for PendingMgsUpdates {
-    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
-    where
-        S: serde::Serializer,
-    {
-        let Self { by_baseboard } = self;
-        // iddqd serializes as a list of items, so just defer to it.
-        by_baseboard.serialize(serializer)
-    }
-}
-
-// See the note on the `Serialize` impl above.
-impl<'de> Deserialize<'de> for PendingMgsUpdates {
-    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
-    where
-        D: serde::Deserializer<'de>,
-    {
-        let by_baseboard =
-            IdOrdMap::<PendingMgsUpdate>::deserialize(deserializer)?;
-        Ok(Self { by_baseboard })
     }
 }
 
