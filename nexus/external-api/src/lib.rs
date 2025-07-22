@@ -3440,15 +3440,15 @@ pub trait NexusExternalApi {
     /// View audit log
     ///
     /// A single item in the audit log represents both the beginning and
-    /// end of the logged operation (represented by `time_initialized` and
+    /// end of the logged operation (represented by `time_started` and
     /// `time_completed`) so that clients do not have to find multiple entries
     /// and match them up by request ID to get the full picture of an operation.
     /// Because timestamps may not be unique, entries have also have a unique
     /// `id` that can be used to deduplicate items fetched from overlapping
     /// time intervals.
     ///
-    /// Note that entries are immutable and are ordered by `time_completed`, not
-    /// `time_initialized`, in order to ensure stable results. If you request
+    /// Note that entries are immutable and are ordered by `time_completed`,
+    /// not `time_started`, in order to ensure stable results. If you request
     /// entries from `t0 <= time_completed < t1` and `t1` is in the past, you
     /// can be confident that the resulting list is complete, i.e., requesting
     /// the same range again later will always produce the same list. We do not
