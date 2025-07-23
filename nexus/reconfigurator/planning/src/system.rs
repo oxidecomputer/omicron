@@ -31,6 +31,7 @@ use nexus_types::deployment::CockroachDbClusterVersion;
 use nexus_types::deployment::CockroachDbSettings;
 use nexus_types::deployment::ExpectedVersion;
 use nexus_types::deployment::OximeterReadPolicy;
+use nexus_types::deployment::PlannerChickenSwitches;
 use nexus_types::deployment::PlanningInputBuilder;
 use nexus_types::deployment::Policy;
 use nexus_types::deployment::SledDetails;
@@ -117,6 +118,7 @@ pub struct SystemDescription {
     oximeter_read_policy: OximeterReadPolicy,
     tuf_repo: TufRepoPolicy,
     old_repo: TufRepoPolicy,
+    chicken_switches: PlannerChickenSwitches,
 }
 
 impl SystemDescription {
@@ -198,6 +200,8 @@ impl SystemDescription {
             oximeter_read_policy: OximeterReadPolicy::new(1),
             tuf_repo: TufRepoPolicy::initial(),
             old_repo: TufRepoPolicy::initial(),
+            chicken_switches:
+                PlannerChickenSwitches::default_for_system_description(),
         }
     }
 
@@ -574,6 +578,21 @@ impl SystemDescription {
         self.tuf_repo = tuf_repo;
     }
 
+    /// Get the planner's chicken switches.
+    pub fn get_chicken_switches(&self) -> PlannerChickenSwitches {
+        self.chicken_switches
+    }
+
+    /// Set the planner's chicken switches.
+    ///
+    /// Returns the previous value.
+    pub fn set_chicken_switches(
+        &mut self,
+        switches: PlannerChickenSwitches,
+    ) -> PlannerChickenSwitches {
+        mem::replace(&mut self.chicken_switches, switches)
+    }
+
     pub fn set_target_release(
         &mut self,
         description: TargetReleaseDescription,
@@ -713,6 +732,7 @@ impl SystemDescription {
             oximeter_read_policy: self.oximeter_read_policy.clone(),
             tuf_repo: self.tuf_repo.clone(),
             old_repo: self.old_repo.clone(),
+            chicken_switches: self.chicken_switches,
         };
         let mut builder = PlanningInputBuilder::new(
             policy,

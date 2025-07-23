@@ -687,7 +687,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/ReconfiguratorChickenSwitches"
+                  "$ref": "#/components/schemas/ReconfiguratorChickenSwitchesView"
                 }
               }
             }
@@ -748,7 +748,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/ReconfiguratorChickenSwitches"
+                  "$ref": "#/components/schemas/ReconfiguratorChickenSwitchesView"
                 }
               }
             }
@@ -6282,6 +6282,18 @@
           "ok"
         ]
       },
+      "PlannerChickenSwitches": {
+        "type": "object",
+        "properties": {
+          "add_zones_with_mupdate_override": {
+            "description": "Whether to add zones even if a mupdate override is present.\n\nOnce Nexus-driven update is active on a customer system, we must not add new zones while the system is recovering from a MUPdate. But that would require customers to upload a TUF repo before adding a new sled, even though Nexus-driven update is not active (as of r16).\n\nThis switch, which is currently on by default, allows us to add zones even if we've detected a recent MUPdate on the system. We will want to turn it off as part of enabling Nexus-driven update.",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "add_zones_with_mupdate_override"
+        ]
+      },
       "PortConfigV2": {
         "type": "object",
         "properties": {
@@ -6728,6 +6740,38 @@
           "planner_enabled": {
             "type": "boolean"
           },
+          "planner_switches": {
+            "$ref": "#/components/schemas/PlannerChickenSwitches"
+          }
+        },
+        "required": [
+          "planner_enabled",
+          "planner_switches"
+        ]
+      },
+      "ReconfiguratorChickenSwitchesParam": {
+        "type": "object",
+        "properties": {
+          "switches": {
+            "$ref": "#/components/schemas/ReconfiguratorChickenSwitches"
+          },
+          "version": {
+            "type": "integer",
+            "format": "uint32",
+            "minimum": 0
+          }
+        },
+        "required": [
+          "switches",
+          "version"
+        ]
+      },
+      "ReconfiguratorChickenSwitchesView": {
+        "type": "object",
+        "properties": {
+          "switches": {
+            "$ref": "#/components/schemas/ReconfiguratorChickenSwitches"
+          },
           "time_modified": {
             "type": "string",
             "format": "date-time"
@@ -6739,25 +6783,8 @@
           }
         },
         "required": [
-          "planner_enabled",
+          "switches",
           "time_modified",
-          "version"
-        ]
-      },
-      "ReconfiguratorChickenSwitchesParam": {
-        "type": "object",
-        "properties": {
-          "planner_enabled": {
-            "type": "boolean"
-          },
-          "version": {
-            "type": "integer",
-            "format": "uint32",
-            "minimum": 0
-          }
-        },
-        "required": [
-          "planner_enabled",
           "version"
         ]
       },
