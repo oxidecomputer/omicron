@@ -3105,10 +3105,10 @@ CREATE TABLE IF NOT EXISTS omicron.public.lldp_link_config (
     chassis_id STRING(63),
     system_name STRING(63),
     system_description STRING(612),
-    management_ip TEXT,
     time_created TIMESTAMPTZ NOT NULL,
     time_modified TIMESTAMPTZ NOT NULL,
-    time_deleted TIMESTAMPTZ
+    time_deleted TIMESTAMPTZ,
+    management_ip INET
 );
 
 CREATE TABLE IF NOT EXISTS omicron.public.tx_eq_config (
@@ -6295,7 +6295,7 @@ INSERT INTO omicron.public.db_metadata (
     version,
     target_version
 ) VALUES
-    (TRUE, NOW(), NOW(), '170.0.0', NULL)
+    (TRUE, NOW(), NOW(), '171.0.0', NULL)
 ON CONFLICT DO NOTHING;
 
 COMMIT;
