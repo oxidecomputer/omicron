@@ -77,6 +77,46 @@ certificate "test-signer-a1" {
     }
 }
 
+key-pair "test-signer-a2" {
+    p384
+}
+
+entity "test-signer-a2" {
+    country-name "US"
+    organization-name "Oxide Computer Company"
+    common-name "test-platformid-1 Signer Staging A2"
+}
+
+certificate "test-signer-a2" {
+    issuer-certificate "test-root-a"
+    issuer-key "test-root-a"
+
+    subject-entity "test-signer-a2"
+    subject-key "test-signer-a2"
+
+    digest-algorithm "sha-384"
+    not-after "9999-12-31T23:59:59Z"
+    serial-number "01"
+
+    extensions {
+        subject-key-identifier critical=false
+        authority-key-identifier critical=false {
+            key-id
+        }
+
+        basic-constraints critical=true ca=true
+        key-usage critical=true {
+            key-cert-sign
+            crl-sign
+        }
+        certificate-policies critical=true {
+            oana-platform-identity
+            tcg-dice-kp-identity-init
+            tcg-dice-kp-attest-init
+            tcg-dice-kp-eca
+        }
+    }
+}
 /// Device 1
 key-pair "test-platformid-1" {
     ed25519
@@ -126,7 +166,7 @@ key-pair "test-deviceid-1" {
 entity "test-deviceid-1" {
     country-name "US"
     organization-name "Oxide Computer Company"
-    common-name "test-deviceid-1"
+    common-name "/C=US/O=Oxide Computer Company/CN=test-deviceid-1"
 }
 
 certificate "test-deviceid-1" {
@@ -167,7 +207,7 @@ key-pair "test-sprockets-auth-1" {
 entity "test-sprockets-auth-1" {
     country-name "US"
     organization-name "Oxide Computer Company"
-    common-name "test-sprockets-auth-1"
+    common-name "/C=US/O=Oxide Computer Company/CN=test-sprockets-auth-1"
 }
 
 certificate "test-sprockets-auth-1" {
@@ -200,58 +240,6 @@ certificate "test-sprockets-auth-1" {
         }
     }
 }
-
-// TODO: sprockets reverses this cert chain before passing it to rustls
-certificate-list "test-sprockets-auth-1" \
-    "test-signer-a1" \
-    "test-platformid-1" \
-    "test-deviceid-1" \
-    "test-sprockets-auth-1"
-
-key-pair "test-alias-1" {
-    ed25519
-}
-
-entity "test-alias-1" {
-    country-name "US"
-    organization-name "Oxide Computer Company"
-    common-name "alias"
-}
-
-certificate "test-alias-1" {
-    issuer-certificate "test-deviceid-1"
-    issuer-key "test-deviceid-1"
-
-    subject-entity "test-alias-1"
-    subject-key "test-alias-1"
-
-    not-after "9999-12-31T23:59:59Z"
-    serial-number "00"
-
-    extensions {
-        basic-constraints critical=true ca=false
-        key-usage critical=true {
-            digital-signature
-        }
-        certificate-policies critical=true {
-            tcg-dice-kp-attest-init
-        }
-        dice-tcb-info critical=true {
-            fwid-list {
-                fwid {
-                    digest-algorithm "sha3-256"
-                    digest "72fa8f8ea84a42251031366002cbb36281d0131f78cd680436116a720cdd9de5"
-                }
-            }
-        }
-    }
-}
-
-certificate-list "test-alias-1" \
-    "test-alias-1" \
-    "test-deviceid-1" \
-    "test-platformid-1" \
-    "test-signer-a1"
 
 /// Device 2
 
@@ -303,7 +291,7 @@ key-pair "test-deviceid-2" {
 entity "test-deviceid-2" {
     country-name "US"
     organization-name "Oxide Computer Company"
-    common-name "test-deviceid-2"
+    common-name "/C=US/O=Oxide Computer Company/CN=test-deviceid-2"
 }
 
 certificate "test-deviceid-2" {
@@ -344,7 +332,7 @@ key-pair "test-sprockets-auth-2" {
 entity "test-sprockets-auth-2" {
     country-name "US"
     organization-name "Oxide Computer Company"
-    common-name "test-sprockets-auth-2"
+    common-name "/C=US/O=Oxide Computer Company/CN=test-sprockets-auth-2"
 }
 
 certificate "test-sprockets-auth-2" {
@@ -378,54 +366,3 @@ certificate "test-sprockets-auth-2" {
     }
 }
 
-// TODO: sprockets reverses this cert chain before passing it to rustls
-certificate-list "test-sprockets-auth-2" \
-    "test-signer-a1" \
-    "test-platformid-2" \
-    "test-deviceid-2" \
-    "test-sprockets-auth-2"
-
-key-pair "test-alias-2" {
-    ed25519
-}
-
-entity "test-alias-2" {
-    country-name "US"
-    organization-name "Oxide Computer Company"
-    common-name "alias"
-}
-
-certificate "test-alias-2" {
-    issuer-certificate "test-deviceid-2"
-    issuer-key "test-deviceid-2"
-
-    subject-entity "test-alias-2"
-    subject-key "test-alias-2"
-
-    not-after "9999-12-31T23:59:59Z"
-    serial-number "00"
-
-    extensions {
-        basic-constraints critical=true ca=false
-        key-usage critical=true {
-            digital-signature
-        }
-        certificate-policies critical=true {
-            tcg-dice-kp-attest-init
-        }
-        dice-tcb-info critical=true {
-            fwid-list {
-                fwid {
-                    digest-algorithm "sha3-256"
-                    digest "72fa8f8ea84a42251031366002cbb36281d0131f78cd680436116a720cdd9de5"
-                }
-            }
-        }
-    }
-}
-
-certificate-list "test-alias-2" \
-    "test-alias-2" \
-    "test-deviceid-2" \
-    "test-platformid-2" \
-    "test-signer-a1"

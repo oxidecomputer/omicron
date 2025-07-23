@@ -51,10 +51,6 @@ zones = [
     { kind = "fake", artifact_name = "nexus",                file_name = "nexus.tar.gz",             size = "128KiB" },
     { kind = "fake", artifact_name = "oximeter",             file_name = "oximeter.tar.gz",          size = "128KiB" },
 ]
-measurement_corpus = [
-    { kind = "fake", artifact_name = "sp_corpus", file_name = "sp.cbor", size = "1MiB" },
-    { kind = "fake", artifact_name = "rot_corpus", file_name = " rot.cbor", size = "1MiB" },
-]
 
 [[artifact.psc_sp]]
 name = "fake-psc-sp"
