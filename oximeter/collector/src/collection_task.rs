@@ -7,6 +7,7 @@
 // Copyright 2025 Oxide Computer Company
 
 use crate::agent::CollectionTaskSenderWrapper;
+use crate::probes;
 use crate::self_stats;
 use chrono::DateTime;
 use chrono::Utc;
@@ -84,6 +85,9 @@ async fn perform_collection(
 ) -> SingleCollectionResult {
     let start = Instant::now();
     debug!(log, "collecting from producer");
+    probes::collection__start!(|| {
+        (producer.id.to_string(), producer.address.to_string())
+    });
     let res = client
         .get(format!("http://{}/{}", producer.address, producer.id))
         .send()
@@ -128,6 +132,24 @@ async fn perform_collection(
             Err(self_stats::FailureReason::Unreachable)
         }
     };
+    probes::collection__done!(|| {
+        (
+            producer.id.to_string(),
+            result
+                .as_ref()
+                .map(|list| {
+                    list.iter()
+                        .map(|item| match item {
+                            ProducerResultsItem::Ok(samples) => {
+                                u64::try_from(samples.len()).unwrap_or_default()
+                            }
+                            ProducerResultsItem::Err(_) => 0,
+                        })
+                        .sum::<u64>()
+                })
+                .map_err(|e| e.to_string()),
+        )
+    });
     SingleCollectionResult { result, duration: start.elapsed() }
 }
 

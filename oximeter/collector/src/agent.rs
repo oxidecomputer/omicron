@@ -12,6 +12,7 @@ use crate::ProducerEndpoint;
 use crate::collection_task::CollectionTaskHandle;
 use crate::collection_task::CollectionTaskOutput;
 use crate::collection_task::ForcedCollectionError;
+use crate::probes;
 use crate::results_sink;
 use crate::self_stats;
 use anyhow::anyhow;
@@ -368,6 +369,14 @@ impl OximeterAgent {
                 }
             }
         }
+        probes::producer__registered!(|| {
+            (
+                self.id.to_string(),
+                id.to_string(),
+                info.address.to_string(),
+                format!("{:?}", info.interval),
+            )
+        });
     }
 
     /// Enqueue requests to forces collection from all producers.
@@ -432,6 +441,9 @@ impl OximeterAgent {
             "removed collection task from set";
             "producer_id" => %id,
         );
+        probes::producer__deleted!(|| {
+            (self.id.to_string(), task.details().id.to_string())
+        });
         task.shutdown();
     }
 
@@ -756,6 +768,7 @@ mod tests {
     // Test that we count successful collections from a target correctly.
     #[tokio::test]
     async fn test_self_stat_collection_count() {
+        usdt::register_probes().unwrap();
         let logctx = test_setup_log("test_self_stat_collection_count");
         let log = &logctx.log;
 
@@ -827,6 +840,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_self_stat_unreachable_counter() {
+        usdt::register_probes().unwrap();
         let logctx = test_setup_log("test_self_stat_unreachable_counter");
         let log = &logctx.log;
 
@@ -889,6 +903,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_self_stat_error_counter() {
+        usdt::register_probes().unwrap();
         let logctx = test_setup_log("test_self_stat_error_counter");
         let log = &logctx.log;
 
@@ -993,6 +1008,7 @@ mod tests {
 
     #[tokio::test]
     async fn verify_producer_details() {
+        usdt::register_probes().unwrap();
         let logctx = test_setup_log("verify_producer_details");
         let log = &logctx.log;
 
@@ -1076,6 +1092,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_updated_producer_is_still_collected_from() {
+        usdt::register_probes().unwrap();
         let logctx =
             test_setup_log("test_updated_producer_is_still_collected_from");
         let log = &logctx.log;
