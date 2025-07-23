@@ -10,17 +10,21 @@ use crate::builder::InventoryError;
 use anyhow::Context;
 use gateway_client::types::GetCfpaParams;
 use gateway_client::types::RotCfpaSlot;
+use gateway_client::types::SpType;
 use gateway_messages::SpComponent;
 use nexus_types::inventory::CabooseWhich;
 use nexus_types::inventory::Collection;
 use nexus_types::inventory::RotPage;
 use nexus_types::inventory::RotPageWhich;
 use omicron_cockroach_metrics::CockroachClusterAdminClient;
+use omicron_common::disk::M2Slot;
+use omicron_uuid_kinds::OmicronZoneUuid;
 use slog::Logger;
 use slog::o;
 use slog::{debug, error};
 use std::time::Duration;
 use strum::IntoEnumIterator;
+use tufaceous_artifact::ArtifactHash;
 
 /// connection and request timeout used for Sled Agent HTTP client
 const SLED_AGENT_TIMEOUT: Duration = Duration::from_secs(60);
@@ -31,6 +35,7 @@ pub struct Collector<'a> {
     mgs_clients: Vec<gateway_client::Client>,
     keeper_admin_clients: Vec<clickhouse_admin_keeper_client::Client>,
     cockroach_admin_client: &'a CockroachClusterAdminClient,
+    ntp_admin_clients: Vec<(OmicronZoneUuid, ntp_admin_client::Client)>,
     sled_agent_lister: &'a (dyn SledAgentEnumerator + Send + Sync),
     in_progress: CollectionBuilder,
 }
@@ -41,6 +46,7 @@ impl<'a> Collector<'a> {
         mgs_clients: Vec<gateway_client::Client>,
         keeper_admin_clients: Vec<clickhouse_admin_keeper_client::Client>,
         cockroach_admin_client: &'a CockroachClusterAdminClient,
+        ntp_admin_clients: Vec<(OmicronZoneUuid, ntp_admin_client::Client)>,
         sled_agent_lister: &'a (dyn SledAgentEnumerator + Send + Sync),
         log: slog::Logger,
     ) -> Self {
@@ -49,6 +55,7 @@ impl<'a> Collector<'a> {
             mgs_clients,
             keeper_admin_clients,
             cockroach_admin_client,
+            ntp_admin_clients,
             sled_agent_lister,
             in_progress: CollectionBuilder::new(creator),
         }
@@ -73,6 +80,7 @@ impl<'a> Collector<'a> {
 
         self.collect_all_mgs().await;
         self.collect_all_sled_agents().await;
+        self.collect_all_timesync().await;
         self.collect_all_keepers().await;
         self.collect_all_cockroach().await;
 
@@ -175,6 +183,66 @@ impl<'a> Collector<'a> {
                 // reported already.  Move on.
                 continue;
             };
+
+            // For sled SPs, for each host phase 1 slot, attempt to collect its
+            // hash, if it hasn't been collected already. Generally, we'd only
+            // get here for the first MGS client.  Assuming that one succeeds,
+            // the other(s) will skip this loop.
+            if matches!(sp.type_, SpType::Sled) {
+                for slot in M2Slot::iter() {
+                    const PHASE1_HASH_TIMEOUT: Duration =
+                        Duration::from_secs(30);
+
+                    if in_progress.found_host_phase_1_flash_hash_already(
+                        &baseboard_id,
+                        slot,
+                    ) {
+                        continue;
+                    }
+
+                    let phase1_slot = match slot {
+                        M2Slot::A => 0,
+                        M2Slot::B => 1,
+                    };
+
+                    let result = client
+                        .host_phase_1_flash_hash_calculate_with_timeout(
+                            sp,
+                            phase1_slot,
+                            PHASE1_HASH_TIMEOUT,
+                        )
+                        .await
+                        .with_context(|| {
+                            format!(
+                                "MGS {:?}: SP {sp:?}: phase 1 slot {slot:?}",
+                                client.baseurl(),
+                            )
+                        });
+                    let hash = match result {
+                        Err(error) => {
+                            in_progress
+                                .found_error(InventoryError::from(error));
+                            continue;
+                        }
+                        Ok(hash) => hash,
+                    };
+                    if let Err(error) = in_progress
+                        .found_host_phase_1_flash_hash(
+                            &baseboard_id,
+                            slot,
+                            client.baseurl(),
+                            ArtifactHash(hash),
+                        )
+                    {
+                        error!(
+                            log,
+                            "error reporting host phase 1 flash hash: \
+                             {baseboard_id:?} {slot:?} {:?}: {error:#}",
+                            client.baseurl(),
+                        );
+                    }
+                }
+            }
 
             // For each kind of caboose that we care about, if it hasn't been
             // fetched already, fetch it and record it.  Generally, we'd only
@@ -365,6 +433,56 @@ impl<'a> Collector<'a> {
         };
 
         self.in_progress.found_sled_inventory(&sled_agent_url, inventory)
+    }
+
+    /// Collect timesync status from all sleds
+    async fn collect_all_timesync(&mut self) {
+        for (zone_id, client) in &self.ntp_admin_clients {
+            if let Err(err) = Self::collect_one_timesync(
+                &self.log,
+                *zone_id,
+                client,
+                &mut self.in_progress,
+            )
+            .await
+            {
+                error!(
+                    &self.log,
+                    "timesync collection error";
+                    "zone_id" => ?zone_id,
+                    slog_error_chain::InlineErrorChain::new(err.as_ref())
+                );
+            }
+        }
+    }
+
+    async fn collect_one_timesync(
+        log: &slog::Logger,
+        zone_id: OmicronZoneUuid,
+        client: &ntp_admin_client::Client,
+        in_progress: &mut CollectionBuilder,
+    ) -> Result<(), anyhow::Error> {
+        let sled_agent_url = client.baseurl();
+        debug!(&log, "begin collection from NTP admin (timesync)";
+            "sled_agent_url" => client.baseurl(),
+            "zone_id" => ?zone_id
+        );
+
+        let maybe_ident = client.timesync().await.with_context(|| {
+            format!("Sled Agent {:?}: timesync", &sled_agent_url)
+        });
+        let timesync = match maybe_ident {
+            Ok(timesync) => nexus_types::inventory::TimeSync {
+                zone_id,
+                synced: timesync.into_inner().sync,
+            },
+            Err(error) => {
+                in_progress.found_error(InventoryError::from(error));
+                return Ok(());
+            }
+        };
+
+        in_progress.found_ntp_timesync(timesync)
     }
 
     /// Collect inventory from about keepers from all `ClickhouseAdminKeeper`
@@ -833,6 +951,7 @@ mod test {
         // We don't have any mocks for this, and it's unclear how much value
         // there would be in providing them at this juncture.
         let keeper_clients = Vec::new();
+        let ntp_clients = Vec::new();
         // Configure the mock server as a backend for the CockroachDB client
         let timeout = Duration::from_secs(15);
         let crdb_cluster =
@@ -844,6 +963,7 @@ mod test {
             vec![mgs_client],
             keeper_clients,
             &crdb_cluster,
+            ntp_clients,
             &sled_enum,
             log.clone(),
         );
@@ -916,6 +1036,7 @@ mod test {
         // We don't have any mocks for this, and it's unclear how much value
         // there would be in providing them at this juncture.
         let keeper_clients = Vec::new();
+        let ntp_clients = Vec::new();
         let timeout = Duration::from_secs(15);
         let crdb_cluster =
             CockroachClusterAdminClient::new(log.clone(), timeout);
@@ -926,6 +1047,7 @@ mod test {
             mgs_clients,
             keeper_clients,
             &crdb_cluster,
+            ntp_clients,
             &sled_enum,
             log.clone(),
         );
@@ -969,6 +1091,7 @@ mod test {
         // We don't have any mocks for this, and it's unclear how much value
         // there would be in providing them at this juncture.
         let keeper_clients = Vec::new();
+        let ntp_clients = Vec::new();
         let timeout = Duration::from_secs(15);
         let crdb_cluster =
             CockroachClusterAdminClient::new(log.clone(), timeout);
@@ -979,6 +1102,7 @@ mod test {
             mgs_clients,
             keeper_clients,
             &crdb_cluster,
+            ntp_clients,
             &sled_enum,
             log.clone(),
         );
@@ -1027,6 +1151,7 @@ mod test {
         // We don't have any mocks for this, and it's unclear how much value
         // there would be in providing them at this juncture.
         let keeper_clients = Vec::new();
+        let ntp_clients = Vec::new();
         let timeout = Duration::from_secs(15);
         let crdb_cluster =
             CockroachClusterAdminClient::new(log.clone(), timeout);
@@ -1037,6 +1162,7 @@ mod test {
             vec![mgs_client],
             keeper_clients,
             &crdb_cluster,
+            ntp_clients,
             &sled_enum,
             log.clone(),
         );

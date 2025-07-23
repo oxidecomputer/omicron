@@ -9,7 +9,6 @@ use anyhow::Context;
 use anyhow::ensure;
 use futures::FutureExt;
 use futures::future::BoxFuture;
-use internal_dns_resolver::ResolveError;
 use internal_dns_types::names::ServiceName;
 use nexus_db_queries::context::OpContext;
 use nexus_db_queries::db::DataStore;
@@ -164,37 +163,64 @@ async fn inventory_activate(
                 clickhouse_admin_keeper_client::Client::new(&url, log)
             })
             .collect::<Vec<_>>(),
-        Err(err) => match err {
-            // When DNS resolution fails because no clickhouse-keeper-admin
-            // servers have been found, we allow this and move on. This is
-            // because multi-node clickhouse may not be enabled, and therefore
-            // there will not be any clickhouse-keeper-admin servers to find.
-            //
-            // In the long term, we expect multi-node clickhouse to always
-            // be enabled, and therefore we may want to bubble up any error
-            // we find, including `NotFound`. However, since we must enable
-            // multi-node clickhouse via reconfigurator, and not RSS, we may
-            // find ourselves with a small gap early on where the names don't
-            // yet exist. This would block the rest of inventory collection if
-            // we early return. We may be able to resolve this problem at rack
-            // handoff time, but it's worth considering whether we want to error
-            // here in case a gap remains.
-            //
-            // See https://github.com/oxidecomputer/omicron/issues/7005
-            ResolveError::NotFound(_) | ResolveError::NotFoundByString(_) => {
-                vec![]
-            }
-            ResolveError::Resolve(hickory_err)
-                if is_no_records_found(&hickory_err) =>
-            {
-                vec![]
-            }
-            _ => {
-                return Err(err)
-                    .context("looking up clickhouse-admin-keeper addresses");
-            }
-        },
+        // When DNS resolution fails because no clickhouse-keeper-admin
+        // servers have been found, we allow this and move on. This is
+        // because multi-node clickhouse may not be enabled, and therefore
+        // there will not be any clickhouse-keeper-admin servers to find.
+        //
+        // In the long term, we expect multi-node clickhouse to always
+        // be enabled, and therefore we may want to bubble up any error
+        // we find, including `NotFound`. However, since we must enable
+        // multi-node clickhouse via reconfigurator, and not RSS, we may
+        // find ourselves with a small gap early on where the names don't
+        // yet exist. This would block the rest of inventory collection if
+        // we early return. We may be able to resolve this problem at rack
+        // handoff time, but it's worth considering whether we want to error
+        // here in case a gap remains.
+        //
+        // See https://github.com/oxidecomputer/omicron/issues/7005
+        Err(err) if err.is_not_found() => vec![],
+        Err(err) => {
+            return Err(err)
+                .context("looking up clickhouse-admin-keeper addresses");
+        }
     };
+
+    // Find ntp-admin servers if there are any.
+    let boundary_ntp_admin_zone_addrs = match resolver
+        .lookup_all_socket_and_zone_v6(ServiceName::BoundaryNtp)
+        .await
+    {
+        Ok(addrs) => addrs,
+        Err(err) if err.is_not_found() => vec![],
+        Err(err) => {
+            return Err(err).context("looking up boundary NTP addresses");
+        }
+    };
+    let internal_ntp_admin_zone_addrs = match resolver
+        .lookup_all_socket_and_zone_v6(ServiceName::InternalNtp)
+        .await
+    {
+        Ok(addrs) => addrs,
+        Err(err) if err.is_not_found() => vec![],
+        Err(err) => {
+            return Err(err).context("looking up internal NTP addresses");
+        }
+    };
+
+    let ntp_admin_clients = boundary_ntp_admin_zone_addrs
+        .into_iter()
+        .chain(internal_ntp_admin_zone_addrs.into_iter())
+        .map(|(zone_uuid, mut addr)| {
+            // TODO(https://github.com/oxidecomputer/omicron/issues/8602):
+            // If we could look up all NTP Admin services, we could skip
+            // this port hard-coding.
+            addr.set_port(omicron_common::address::NTP_ADMIN_PORT);
+            let url = format!("http://{}", addr);
+            let log = opctx.log.new(o!("ntp_admin_url" => url.clone()));
+            (zone_uuid, ntp_admin_client::Client::new(&url, log))
+        })
+        .collect();
 
     // Update CockroachDB cluster backends.
     let cockroach_addresses = resolver
@@ -224,6 +250,7 @@ async fn inventory_activate(
         mgs_clients,
         keeper_admin_clients,
         cockroach_admin_client,
+        ntp_admin_clients,
         &sled_enum,
         opctx.log.clone(),
     );
@@ -237,20 +264,6 @@ async fn inventory_activate(
         .context("saving inventory to database")?;
 
     Ok(collection)
-}
-
-fn is_no_records_found(err: &hickory_resolver::ResolveError) -> bool {
-    match err.kind() {
-        hickory_resolver::ResolveErrorKind::Proto(proto_error) => {
-            match proto_error.kind() {
-                hickory_resolver::proto::ProtoErrorKind::NoRecordsFound {
-                    ..
-                } => true,
-                _ => false,
-            }
-        }
-        _ => false,
-    }
 }
 
 /// Determine which sleds to inventory based on what's in the database
@@ -355,8 +368,14 @@ mod test {
             assert!(num_collections > 0);
 
             // Regardless of the activation source, we should have at
-            // most `nkeep + 1` collections.
-            assert!(num_collections <= nkeep + 1);
+            // most `nkeep + 2` collections: at most `nkeep + 1` from
+            // our collection, and at most one more if we lose the race
+            // with Nexus and it happens to insert another collection
+            // after we pruned down to `nkeep`.
+            assert!(
+                num_collections <= nkeep + 2,
+                "expected {num_collections} <= {nkeep} + 2"
+            );
 
             // Filter down to just the collections we activated. (This could be
             // empty if Nexus shoved several collections in!)

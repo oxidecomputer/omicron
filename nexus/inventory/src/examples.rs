@@ -216,6 +216,35 @@ pub fn representative() -> Representative {
         )
         .unwrap();
 
+    // Report some phase 1 hashes.
+    //
+    // We'll report hashes for both slots for sled 1, only a hash for slot B on
+    // sled 2, and no hashes for sled 3.
+    builder
+        .found_host_phase_1_flash_hash(
+            &sled1_bb,
+            M2Slot::A,
+            "fake MGS 1",
+            ArtifactHash([1; 32]),
+        )
+        .unwrap();
+    builder
+        .found_host_phase_1_flash_hash(
+            &sled1_bb,
+            M2Slot::B,
+            "fake MGS 1",
+            ArtifactHash([2; 32]),
+        )
+        .unwrap();
+    builder
+        .found_host_phase_1_flash_hash(
+            &sled2_bb,
+            M2Slot::B,
+            "fake MGS 1",
+            ArtifactHash([3; 32]),
+        )
+        .unwrap();
+
     // Report some cabooses.
 
     // We'll use the same cabooses for most of these components, although
@@ -622,6 +651,13 @@ pub fn representative() -> Representative {
             )]),
         },
     );
+
+    builder
+        .found_ntp_timesync(nexus_types::inventory::TimeSync {
+            zone_id: omicron_uuid_kinds::OmicronZoneUuid::new_v4(),
+            synced: true,
+        })
+        .unwrap();
 
     Representative {
         builder,
