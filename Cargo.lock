@@ -6186,6 +6186,7 @@ version = "0.1.0"
 dependencies = [
  "chrono",
  "futures",
+ "iddqd",
  "nexus-sled-agent-shared",
  "nexus-types",
  "omicron-common",
