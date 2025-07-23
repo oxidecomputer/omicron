@@ -37,20 +37,7 @@ generated inventory collection eb0796d5-ab8a-4f7b-a884-b4aeacb8ab51 from configu
 > # we added has no disks.
 > blueprint-plan dbcbd3d6-41ff-48ae-ac0b-1becc9b2fd21 eb0796d5-ab8a-4f7b-a884-b4aeacb8ab51
 INFO skipping noop image source check for all sleds, reason: no target release is currently set
-INFO skipping sled (no zpools in service), sled_id: 00320471-945d-413c-85e7-03e091a70b3c
-INFO sufficient BoundaryNtp zones exist in plan, desired_count: 0, current_count: 0
-INFO sufficient Clickhouse zones exist in plan, desired_count: 1, current_count: 1
-INFO sufficient ClickhouseKeeper zones exist in plan, desired_count: 0, current_count: 0
-INFO sufficient ClickhouseServer zones exist in plan, desired_count: 0, current_count: 0
-INFO sufficient CockroachDb zones exist in plan, desired_count: 0, current_count: 0
-INFO sufficient CruciblePantry zones exist in plan, desired_count: 3, current_count: 3
-INFO sufficient InternalDns zones exist in plan, desired_count: 3, current_count: 3
-INFO sufficient ExternalDns zones exist in plan, desired_count: 3, current_count: 3
-INFO sufficient Nexus zones exist in plan, desired_count: 3, current_count: 3
-INFO sufficient Oximeter zones exist in plan, desired_count: 0, current_count: 0
 WARN cannot issue more SP updates (no current artifacts)
-INFO all zones up-to-date
-INFO will ensure cockroachdb setting, setting: cluster.preserve_downgrade_option, value: DoNotModify
 generated blueprint 8da82a8e-bf97-4fbd-8ddd-9f6462732cf1 based on parent blueprint dbcbd3d6-41ff-48ae-ac0b-1becc9b2fd21
 
 > blueprint-show 8da82a8e-bf97-4fbd-8ddd-9f6462732cf1
