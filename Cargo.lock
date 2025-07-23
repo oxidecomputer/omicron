@@ -6495,6 +6495,7 @@ dependencies = [
  "httpmock",
  "id-map",
  "iddqd",
+ "itertools 0.14.0",
  "nexus-sled-agent-shared",
  "nexus-types",
  "ntp-admin-client",

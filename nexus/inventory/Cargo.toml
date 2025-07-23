@@ -22,6 +22,7 @@ gateway-messages.workspace = true
 gateway-types.workspace = true
 id-map.workspace = true
 iddqd.workspace = true
+itertools.workspace = true
 nexus-sled-agent-shared.workspace = true
 nexus-types.workspace = true
 ntp-admin-client.workspace = true
