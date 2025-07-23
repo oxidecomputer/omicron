@@ -422,7 +422,7 @@ impl CollectionTaskHandle {
 
     /// Return the current producer endpoint information
     pub(crate) fn producer_info(&self) -> ProducerEndpoint {
-        self.notifiers.producer_info_tx.borrow().clone()
+        *self.notifiers.producer_info_tx.borrow()
     }
 }
 
