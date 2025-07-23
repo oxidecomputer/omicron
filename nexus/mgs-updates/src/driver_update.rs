@@ -1453,7 +1453,9 @@ mod test {
             let message = InlineErrorChain::new(error).to_string();
             eprintln!("{}", message);
             assert!(
-                message.contains("expected to find active slot B, but found A")
+                message.contains(
+                    "expected to find active RoT slot B, but found A"
+                )
             );
 
             // No changes should have been made in this case.
