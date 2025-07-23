@@ -250,6 +250,9 @@ pub enum SetupServiceError {
 
     #[error("Rack initialization was interrupted. Clean-slate required")]
     RackInitInterrupted,
+
+    #[error("Measurement Error: {0}")]
+    MeasurementError(crate::bootstrap::measurements::MeasurementError),
 }
 
 // The workload / information allocated to a single sled.
