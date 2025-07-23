@@ -91,7 +91,7 @@ Repo Depot API (client: repo-depot-client)
     consumed by: omicron-sled-agent (omicron/sled-agent) via 1 path
 
 Sled Agent (client: sled-agent-client)
-    consumed by: omicron-nexus (omicron/nexus) via 7 paths
+    consumed by: omicron-nexus (omicron/nexus) via 8 paths
 
 Wicketd (client: wicketd-client)
 
