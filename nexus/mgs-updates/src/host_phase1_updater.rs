@@ -37,8 +37,19 @@ use tufaceous_artifact::ArtifactHash;
 use tufaceous_artifact::ArtifactKind;
 use uuid::Uuid;
 
-// TODO-john explain
+// Hashing the current phase 1 contents on the SP is an asynchronous operation:
+// we request a hash and then poll until the hashing completes. We have to pick
+// some timeout to give up on polling. In practice we expect this hashing to
+// take a few seconds, so set something very generous here that would indicate
+// something very wrong.
 const PHASE_1_HASHING_TIMEOUT: Duration = Duration::from_secs(60);
+
+// To reset the host, we have to tell the SP to go to PowerState::A2 then back
+// to PowerState::A0. We sleep briefly in between those transitions. (It's not
+// clear to me whether we _need_ to do this; presumably the SP should enforce
+// that if so? But this is copied from how `pilot sp cycle` is implemented.) We
+// could also consider implementing a more idempotent "reset" operation on the
+// SP side.
 const POWER_CYCLE_SLEEP: Duration = Duration::from_secs(1);
 
 type GatewayClientError = gateway_client::Error<gateway_client::types::Error>;
@@ -333,7 +344,16 @@ impl ReconfiguratorHostPhase1Updater {
                     )
                     .await
                 {
-                    // TODO-john explain
+                    // The return types here are a little weird;
+                    // `try_all_serially()` requires us to return a `Result<T,
+                    // GatewayClientError>`, but
+                    // `host_phase_1_flash_hash_calculate_with_timeout()`
+                    // returns a `HostPhase1HashError`; its `RequestError`
+                    // variant _contains_ a `GatewayClientError`. We convert
+                    // that specific variant into its `GatewayClientError`, and
+                    // return a `Result<Result<_, HostPhase1HashError>,
+                    // GatewayClientError>. We unpack the inner result in a
+                    // `match` after `try_all_serially()`.
                     Ok(hash) => Ok(Ok(hash)),
                     Err(HostPhase1HashError::RequestError { err, .. }) => {
                         Err(err)
@@ -433,12 +453,21 @@ impl ReconfiguratorHostPhase1Updater {
 
         let found_inactive = match inactive {
             Ok(details) => FoundArtifact::Artifact(details.artifact_hash),
-            // TODO-john This is wrong: All we have is a string here, and
-            // there are various errors that might mean "no valid artifact"
-            // (e.g., failing to parse the image header, failing to validate
-            // the sha256 contained in the header) and various other errors
-            // that indicate some other kind of problem (e.g., transient I/O
-            // errors). We need to check which kind it is.
+            // TODO-correctness There are many reasons sled-agent could report
+            // an error in a phase 2 slot, including a couple cases where we
+            // definitely want to convert the error to
+            // `FoundArtifact::MissingArtifact`:
+            //
+            // 1. it couldn't parse the image header
+            // 2. it parsed the image header, but the contents of the rest of
+            //    the slot didn't match the image header's description (it
+            //    contains a hash of the rest of the data in the slot)
+            //
+            // There are a variety of other errors possible, though, from
+            // garden variety I/O errors to "there is no physical disk present
+            // in this slot". Do we need to distinguish these from the
+            // "indicative of a missing artifact" cases above? At the moment all
+            // we get from inventory is a string...
             Err(_) => FoundArtifact::MissingArtifact,
         };
         found_inactive.matches(
