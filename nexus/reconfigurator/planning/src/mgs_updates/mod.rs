@@ -356,50 +356,10 @@ fn mgs_update_status_sp(
     // still matches what we saw when we configured this update.  If not, then
     // this update cannot proceed as currently configured.  It will fail its
     // precondition check.
-    //
-    // This logic is more complex than for the active slot because unlike the
-    // active slot, it's possible for both the found contents and the expected
-    // contents to be missing and that's not necessarily an error.
-    match (found_inactive_version, expected_inactive_version) {
-        (Some(_), ExpectedVersion::NoValidVersion) => {
-            // We expected nothing in the inactive slot, but found something.
-            MgsUpdateStatus::Impossible
-        }
-        (Some(found), ExpectedVersion::Version(expected)) => {
-            if found == expected.as_str() {
-                // We found something in the inactive slot that matches what we
-                // expected.
-                MgsUpdateStatus::NotDone
-            } else {
-                // We found something in the inactive slot that differs from
-                // what we expected.
-                MgsUpdateStatus::Impossible
-            }
-        }
-        (None, ExpectedVersion::Version(_)) => {
-            // We expected something in the inactive slot, but found nothing.
-            // This case is tricky because we can't tell from the inventory
-            // whether we transiently failed to fetch the caboose for some
-            // reason or whether the caboose is actually garbage.  We choose to
-            // assume that it's actually garbage, which would mean that this
-            // update as-configured is impossible.  This will cause us to
-            // generate a new update that expects garbage in the inactive slot.
-            // If we're right, great.  If we're wrong, then *that* update will
-            // be impossible to complete, but we should fix this again if the
-            // transient error goes away.
-            //
-            // If we instead assumed that this was a transient error, we'd do
-            // nothing here instead.  But if the caboose was really missing,
-            // then we'd get stuck forever waiting for something that would
-            // never happen.
-            MgsUpdateStatus::Impossible
-        }
-        (None, ExpectedVersion::NoValidVersion) => {
-            // We expected nothing in the inactive slot and found nothing there.
-            // No problem!
-            MgsUpdateStatus::NotDone
-        }
-    }
+    mgs_update_status_inactive_versions(
+        found_inactive_version,
+        expected_inactive_version,
+    )
 }
 
 struct RotUpdateState {
@@ -468,7 +428,16 @@ fn mgs_update_status_rot(
     // still matches what we saw when we configured this update.  If not, then
     // this update cannot proceed as currently configured.  It will fail its
     // precondition check.
-    //
+    mgs_update_status_inactive_versions(
+        found_inactive_version,
+        expected_inactive_version,
+    )
+}
+
+fn mgs_update_status_inactive_versions(
+    found_inactive_version: Option<&str>,
+    expected_inactive_version: &ExpectedVersion,
+) -> MgsUpdateStatus {
     // This logic is more complex than for the active slot because unlike the
     // active slot, it's possible for both the found contents and the expected
     // contents to be missing and that's not necessarily an error.
@@ -733,6 +702,7 @@ fn try_make_update_rot(
             //
             // - "name" matching the board name (found above from caboose)
             // - "kind" matching one of the known RoT kinds
+            // - "rkth" verified against the CMPA/CFPA found in inventory
 
             if a.id.name != *board {
                 return false;
@@ -779,9 +749,9 @@ fn try_make_update_rot(
 
     if matching_artifacts.len() > 1 {
         // This should be impossible unless we shipped a TUF repo with more
-        // than 1 artifact for the same board and slot that verifies against the
-        // RoT's CMPA/CFPA. But it doesn't prevent us from picking one and
-        // proceeding. Make a note and proceed.
+        // than 1 artifact for the same board and root key table hash (RKTH)
+        // that can be verified afgainst the RoT's CMPA/CFPA. But it doesn't
+        // prevent us from picking one and proceeding. Make a note and proceed.
         error!(log, "found more than one matching artifact for RoT update");
     }
 
