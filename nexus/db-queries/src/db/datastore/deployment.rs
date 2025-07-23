@@ -3182,6 +3182,37 @@ mod tests {
         // Treat this blueprint as the initial blueprint for the system.
         blueprint.parent_blueprint_id = None;
 
+        // -----------------------------------------------------------------
+        // Populate minimal Clickhouse cluster configuration so the blueprint
+        // exercises the `bp_clickhouse_*` tables (issue #8455).
+        // -----------------------------------------------------------------
+        if blueprint.clickhouse_cluster_config.is_none() {
+            // Pick the first in-service zone as the placement for both a
+            // keeper and a server.  For test purposes we only need a single
+            // entry in each map.
+            let zone_id_opt = blueprint
+                .all_omicron_zones(|d| d.is_in_service())
+                .next()
+                .map(|(_, z)| z.id);
+
+            if let Some(zone_id) = zone_id_opt {
+                use clickhouse_admin_types::{KeeperId, ServerId};
+                use nexus_types::deployment::ClickhouseClusterConfig;
+
+                let mut cfg = ClickhouseClusterConfig::new(
+                    format!("cluster-{test_name}"),
+                    "test-secret".into(),
+                );
+                cfg.max_used_keeper_id = KeeperId::from(1u64);
+                cfg.max_used_server_id = ServerId::from(1u64);
+
+                cfg.keepers.insert(zone_id, KeeperId::from(1u64));
+                cfg.servers.insert(zone_id, ServerId::from(1u64));
+
+                blueprint.clickhouse_cluster_config = Some(cfg);
+            }
+        }
+
         (collection, planning_input, blueprint)
     }
 
@@ -3283,6 +3314,9 @@ mod tests {
             blueprint_list_all_ids(&opctx, &datastore).await,
             [blueprint1.id]
         );
+
+        // Ensure every bp_* table received at least one row for this blueprint (issue #8455).
+        ensure_blueprint_fully_populated(&datastore, blueprint1.id).await;
 
         // Check the number of blueprint elements against our collection.
         assert_eq!(
@@ -4578,5 +4612,93 @@ mod tests {
             "expected all zones to be in service, \
              found these zones not in service: {not_in_service:?}"
         );
+    }
+
+    // Verify that every blueprint-related table contains ≥1 row for `blueprint_id`.
+    // Complements `ensure_blueprint_fully_deleted`.
+    async fn ensure_blueprint_fully_populated(
+        datastore: &DataStore,
+        blueprint_id: BlueprintUuid,
+    ) {
+        let conn = datastore.pool_connection_for_tests().await.unwrap();
+
+        macro_rules! query_count {
+            ($table:ident, $blueprint_id_col:ident) => {{
+                use nexus_db_schema::schema::$table::dsl;
+                let result = dsl::$table
+                    .filter(
+                        dsl::$blueprint_id_col
+                            .eq(to_db_typed_uuid(blueprint_id)),
+                    )
+                    .count()
+                    .get_result_async(&*conn)
+                    .await;
+                (stringify!($table), result)
+            }};
+        }
+
+        // Tables prefixed with `bp_` that are *not* specific to a single blueprint
+        // and therefore intentionally ignored.
+        let tables_ignored: BTreeSet<_> = ["bp_target"].into_iter().collect();
+
+        let mut tables_checked = BTreeSet::new();
+        for (table_name, result) in [
+            query_count!(blueprint, id),
+            query_count!(bp_sled_metadata, blueprint_id),
+            query_count!(bp_omicron_dataset, blueprint_id),
+            query_count!(bp_omicron_physical_disk, blueprint_id),
+            query_count!(bp_omicron_zone, blueprint_id),
+            query_count!(bp_omicron_zone_nic, blueprint_id),
+            query_count!(bp_clickhouse_cluster_config, blueprint_id),
+            query_count!(bp_clickhouse_keeper_zone_id_to_node_id, blueprint_id),
+            query_count!(bp_clickhouse_server_zone_id_to_node_id, blueprint_id),
+            query_count!(bp_oximeter_read_policy, blueprint_id),
+            query_count!(bp_pending_mgs_update_sp, blueprint_id),
+            query_count!(bp_pending_mgs_update_rot, blueprint_id),
+            query_count!(bp_pending_mgs_update_rot_bootloader, blueprint_id),
+        ] {
+            let count: i64 = result.unwrap();
+
+            // Pending MGS update tables are only populated when the blueprint includes firmware updates.
+            //  The representative blueprint doesn't, so allow zero rows for these tables.
+            if matches!(
+                table_name,
+                "bp_pending_mgs_update_sp"
+                    | "bp_pending_mgs_update_rot"
+                    | "bp_pending_mgs_update_rot_bootloader"
+            ) {
+                tables_checked.insert(table_name);
+                continue;
+            }
+
+            assert!(
+                count > 0,
+                "expected at least one row for blueprint {blueprint_id} in table {table_name}, found 0",
+            );
+            tables_checked.insert(table_name);
+        }
+
+        // Detect new added blueprint tables so the test fails loudly until the helper is updated.
+        let mut query = QueryBuilder::new();
+        query.sql(
+            "SELECT table_name FROM information_schema.tables WHERE table_name LIKE 'bp\\_%'",
+        );
+        let tables_unchecked: Vec<String> = query
+            .query::<diesel::sql_types::Text>()
+            .load_async(&*conn)
+            .await
+            .expect("Failed to query information_schema for tables")
+            .into_iter()
+            .filter(|f: &String| {
+                let t = f.as_str();
+                !tables_ignored.contains(t) && !tables_checked.contains(t)
+            })
+            .collect();
+        if !tables_unchecked.is_empty() {
+            panic!(
+                "found blueprint-related table(s) not covered by ensure_blueprint_fully_populated(): {}",
+                tables_unchecked.join(", ")
+            );
+        }
     }
 }
