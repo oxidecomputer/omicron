@@ -1917,6 +1917,14 @@ table! {
     }
 }
 
+table! {
+    inv_ntp_timesync (inv_collection_id, zone_id) {
+        inv_collection_id -> Uuid,
+        zone_id -> Uuid,
+        synced -> Bool,
+    }
+}
+
 /* blueprints */
 
 table! {
@@ -2095,6 +2103,19 @@ table! {
         blueprint_id -> Uuid,
         version -> Int8,
         oximeter_read_mode -> crate::enums::OximeterReadModeEnum,
+    }
+}
+
+table! {
+    bp_pending_mgs_update_rot_bootloader (blueprint_id, hw_baseboard_id) {
+        blueprint_id -> Uuid,
+        hw_baseboard_id -> Uuid,
+        sp_type -> crate::enums::SpTypeEnum,
+        sp_slot -> Int4,
+        artifact_sha256 -> Text,
+        artifact_version -> Text,
+        expected_stage0_version -> Text,
+        expected_stage0_next_version -> Nullable<Text>,
     }
 }
 

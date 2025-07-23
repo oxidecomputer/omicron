@@ -4674,12 +4674,6 @@
           "$ref": "#/components/schemas/BlueprintZoneConfig"
         }
       },
-      "IdMapPendingMgsUpdate": {
-        "type": "object",
-        "additionalProperties": {
-          "$ref": "#/components/schemas/PendingMgsUpdate"
-        }
-      },
       "ImportExportPolicy": {
         "description": "Define policy relating to the import and export of prefixes from a BGP peer.",
         "oneOf": [
@@ -6191,7 +6185,22 @@
         "type": "object",
         "properties": {
           "by_baseboard": {
-            "$ref": "#/components/schemas/IdMapPendingMgsUpdate"
+            "title": "IdOrdMap",
+            "x-rust-type": {
+              "crate": "iddqd",
+              "parameters": [
+                {
+                  "$ref": "#/components/schemas/PendingMgsUpdate"
+                }
+              ],
+              "path": "iddqd::IdOrdMap",
+              "version": "*"
+            },
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/PendingMgsUpdate"
+            },
+            "uniqueItems": true
           }
         },
         "required": [

@@ -22,6 +22,9 @@ use blueprint_display::BpDatasetsTableSchema;
 use blueprint_display::BpHostPhase2TableSchema;
 use blueprint_display::BpTableColumn;
 use daft::Diffable;
+use iddqd::IdOrdItem;
+use iddqd::IdOrdMap;
+use iddqd::id_upcast;
 use nexus_sled_agent_shared::inventory::HostPhase2DesiredContents;
 use nexus_sled_agent_shared::inventory::HostPhase2DesiredSlots;
 use nexus_sled_agent_shared::inventory::OmicronSledConfig;
@@ -49,12 +52,12 @@ use omicron_uuid_kinds::ZpoolUuid;
 use schemars::JsonSchema;
 use serde::Deserialize;
 use serde::Serialize;
-use serde::ser::SerializeSeq;
 use slog::Key;
 use std::collections::BTreeMap;
 use std::fmt;
 use std::net::Ipv6Addr;
 use std::net::SocketAddrV6;
+use std::sync::Arc;
 use strum::EnumIter;
 use tufaceous_artifact::ArtifactHash;
 use tufaceous_artifact::ArtifactVersion;
@@ -115,7 +118,6 @@ pub use planning_input::TargetReleaseDescription;
 pub use planning_input::TufRepoContentsError;
 pub use planning_input::TufRepoPolicy;
 pub use planning_input::ZpoolFilter;
-use std::sync::Arc;
 pub use zone_type::BlueprintZoneType;
 pub use zone_type::DurableDataset;
 pub use zone_type::blueprint_zone_type;
@@ -125,8 +127,6 @@ use blueprint_display::{
     BpTable, BpTableData, BpTableRow, KvList, constants::*,
 };
 use id_map::{IdMap, IdMappable};
-use serde::de::SeqAccess;
-use serde::de::Visitor;
 use std::str::FromStr;
 
 /// Describes a complete set of software and configuration for the system
@@ -1264,16 +1264,21 @@ impl fmt::Display for BlueprintHostPhase2DesiredContents {
     }
 }
 
-#[derive(Clone, Debug, Eq, PartialEq, JsonSchema, Diffable)]
+#[derive(
+    Clone, Debug, Eq, PartialEq, Deserialize, Serialize, JsonSchema, Diffable,
+)]
 pub struct PendingMgsUpdates {
-    // The IdMap key is the baseboard_id.  Only one outstanding MGS-managed
+    // The IdOrdMap key is the baseboard_id. Only one outstanding MGS-managed
     // update is allowed for a given baseboard.
-    by_baseboard: IdMap<PendingMgsUpdate>,
+    //
+    // Note that keys aren't strings so this can't be serialized as a JSON map,
+    // but IdOrdMap serializes as an array.
+    by_baseboard: IdOrdMap<PendingMgsUpdate>,
 }
 
 impl PendingMgsUpdates {
     pub fn new() -> PendingMgsUpdates {
-        PendingMgsUpdates { by_baseboard: IdMap::new() }
+        PendingMgsUpdates { by_baseboard: IdOrdMap::new() }
     }
 
     pub fn iter(&self) -> impl Iterator<Item = &PendingMgsUpdate> {
@@ -1288,20 +1293,17 @@ impl PendingMgsUpdates {
         self.by_baseboard.is_empty()
     }
 
-    pub fn contains_key(&self, key: &Arc<BaseboardId>) -> bool {
+    pub fn contains_key(&self, key: &BaseboardId) -> bool {
         self.by_baseboard.contains_key(key)
     }
 
-    pub fn get(
-        &self,
-        baseboard_id: &Arc<BaseboardId>,
-    ) -> Option<&PendingMgsUpdate> {
+    pub fn get(&self, baseboard_id: &BaseboardId) -> Option<&PendingMgsUpdate> {
         self.by_baseboard.get(baseboard_id)
     }
 
     pub fn remove(
         &mut self,
-        baseboard_id: &Arc<BaseboardId>,
+        baseboard_id: &BaseboardId,
     ) -> Option<PendingMgsUpdate> {
         self.by_baseboard.remove(baseboard_id)
     }
@@ -1310,67 +1312,15 @@ impl PendingMgsUpdates {
         &mut self,
         update: PendingMgsUpdate,
     ) -> Option<PendingMgsUpdate> {
-        self.by_baseboard.insert(update)
+        self.by_baseboard.insert_overwrite(update)
     }
 }
 
 impl<'a> IntoIterator for &'a PendingMgsUpdates {
     type Item = &'a PendingMgsUpdate;
-    type IntoIter = std::collections::btree_map::Values<
-        'a,
-        Arc<BaseboardId>,
-        PendingMgsUpdate,
-    >;
+    type IntoIter = iddqd::id_ord_map::Iter<'a, PendingMgsUpdate>;
     fn into_iter(self) -> Self::IntoIter {
         self.by_baseboard.iter()
-    }
-}
-
-// `PendingMgsUpdates` is serialized as a sequence of `PendingMgsUpdate` objects
-// rather than a map.  (A map would not directly work because the keys here are
-// themselves objects, but JSON requires that they be strings.)
-impl Serialize for PendingMgsUpdates {
-    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
-    where
-        S: serde::Serializer,
-    {
-        let mut seq = serializer.serialize_seq(Some(self.len()))?;
-        for item in self {
-            seq.serialize_element(item)?;
-        }
-        seq.end()
-    }
-}
-
-// See the note on the `Serialize` impl above.
-impl<'de> Deserialize<'de> for PendingMgsUpdates {
-    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
-    where
-        D: serde::Deserializer<'de>,
-    {
-        struct MyVisitor;
-
-        impl<'de> Visitor<'de> for MyVisitor {
-            type Value = PendingMgsUpdates;
-            fn expecting(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
-                formatter.write_str("a sequence of objects")
-            }
-            fn visit_seq<A>(
-                self,
-                mut seq: A,
-            ) -> Result<PendingMgsUpdates, A::Error>
-            where
-                A: SeqAccess<'de>,
-            {
-                let mut map = PendingMgsUpdates::new();
-                while let Some(u) = seq.next_element()? {
-                    map.insert(u);
-                }
-                Ok(map)
-            }
-        }
-
-        deserializer.deserialize_seq(MyVisitor)
     }
 }
 
@@ -1418,11 +1368,12 @@ impl slog::KV for PendingMgsUpdate {
     }
 }
 
-impl IdMappable for PendingMgsUpdate {
-    type Id = Arc<BaseboardId>;
-    fn id(&self) -> Self::Id {
-        self.baseboard_id.clone()
+impl IdOrdItem for PendingMgsUpdate {
+    type Key<'a> = &'a BaseboardId;
+    fn key(&self) -> Self::Key<'_> {
+        &*self.baseboard_id
     }
+    id_upcast!();
 }
 
 impl PendingMgsUpdate {
@@ -1996,20 +1947,21 @@ pub struct UnstableReconfiguratorState {
 
 #[cfg(test)]
 mod test {
+    use std::sync::Arc;
+
     use super::ExpectedVersion;
     use super::PendingMgsUpdate;
     use super::PendingMgsUpdateDetails;
     use super::PendingMgsUpdates;
     use crate::inventory::BaseboardId;
     use gateway_client::types::SpType;
-    use std::sync::Arc;
 
     #[test]
     fn test_serialize_pending_mgs_updates() {
         // Trivial case: empty map
         let empty = PendingMgsUpdates::new();
         let empty_serialized = serde_json::to_string(&empty).unwrap();
-        assert_eq!(empty_serialized, "[]");
+        assert_eq!(empty_serialized, r#"{"by_baseboard":[]}"#);
         let empty_deserialized: PendingMgsUpdates =
             serde_json::from_str(&empty_serialized).unwrap();
         assert!(empty.is_empty());

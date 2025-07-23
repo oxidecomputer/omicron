@@ -357,9 +357,11 @@ async fn cmd_reconfigurator_history(
                     assert_eq!(previous_blueprint.id, previous.id);
                     let current_blueprint =
                         blueprint_load(opctx, datastore, target_id).await?;
-                    let diff = current_blueprint
-                        .diff_since_blueprint(&previous_blueprint);
-                    println!("{}", diff.display());
+                    {
+                        let diff = current_blueprint
+                            .diff_since_blueprint(&previous_blueprint);
+                        println!("{}", diff.display());
+                    }
                     prev_blueprint = Some(current_blueprint);
                 }
                 _ => {

@@ -166,15 +166,19 @@ impl BlueprintPlanner {
         };
 
         // Compare the new blueprint to its parent.
-        let summary = blueprint.diff_since_blueprint(&parent);
-        if !summary.has_changes() {
-            // Blueprint is unchanged, do nothing.
-            info!(
-                &opctx.log,
-                "blueprint unchanged from current target";
-                "parent_blueprint_id" => %parent_blueprint_id,
-            );
-            return BlueprintPlannerStatus::Unchanged { parent_blueprint_id };
+        {
+            let summary = blueprint.diff_since_blueprint(&parent);
+            if !summary.has_changes() {
+                // Blueprint is unchanged, do nothing.
+                info!(
+                    &opctx.log,
+                    "blueprint unchanged from current target";
+                    "parent_blueprint_id" => %parent_blueprint_id,
+                );
+                return BlueprintPlannerStatus::Unchanged {
+                    parent_blueprint_id,
+                };
+            }
         }
 
         // We have a fresh blueprint; save it.

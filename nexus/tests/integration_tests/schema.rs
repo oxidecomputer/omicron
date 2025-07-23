@@ -2791,7 +2791,7 @@ fn after_165_0_0<'a>(ctx: &'a MigrationContext<'a>) -> BoxFuture<'a, ()> {
     })
 }
 
-fn before_169_0_0<'a>(ctx: &'a MigrationContext<'a>) -> BoxFuture<'a, ()> {
+fn before_171_0_0<'a>(ctx: &'a MigrationContext<'a>) -> BoxFuture<'a, ()> {
     Box::pin(async move {
         // Create test data in inv_sled_config_reconciler table before the new columns are added.
         ctx.client
@@ -2804,11 +2804,11 @@ fn before_169_0_0<'a>(ctx: &'a MigrationContext<'a>) -> BoxFuture<'a, ()> {
                 &[],
             )
             .await
-            .expect("failed to insert pre-migration rows for 169");
+            .expect("inserted pre-migration rows for 171");
     })
 }
 
-fn after_169_0_0<'a>(ctx: &'a MigrationContext<'a>) -> BoxFuture<'a, ()> {
+fn after_171_0_0<'a>(ctx: &'a MigrationContext<'a>) -> BoxFuture<'a, ()> {
     Box::pin(async move {
         // After the migration, the new columns should exist and be NULL for existing rows.
         let rows = ctx
@@ -2823,9 +2823,7 @@ fn after_169_0_0<'a>(ctx: &'a MigrationContext<'a>) -> BoxFuture<'a, ()> {
                 &[],
             )
             .await
-            .expect(
-                "failed to query post-migration inv_sled_config_reconciler",
-            );
+            .expect("queried post-migration inv_sled_config_reconciler");
         assert_eq!(rows.len(), 1);
 
         // All new columns should be NULL for existing rows.
@@ -2855,7 +2853,7 @@ fn after_169_0_0<'a>(ctx: &'a MigrationContext<'a>) -> BoxFuture<'a, ()> {
                 &[],
             )
             .await
-            .expect("failed to insert row with all NULL clear_mupdate_override columns");
+            .expect("inserted row with all NULL clear_mupdate_override columns");
 
         // Case 2: Success case (boot_success NOT NULL, boot_error NULL, non_boot_message NOT NULL).
         ctx.client
@@ -2871,7 +2869,7 @@ fn after_169_0_0<'a>(ctx: &'a MigrationContext<'a>) -> BoxFuture<'a, ()> {
                 &[],
             )
             .await
-            .expect("failed to insert row with success case clear_mupdate_override columns");
+            .expect("inserted row with success case clear_mupdate_override columns");
 
         // Case 3: Error case (boot_success NULL, boot_error NOT NULL, non_boot_message NOT NULL).
         ctx.client
@@ -2887,7 +2885,7 @@ fn after_169_0_0<'a>(ctx: &'a MigrationContext<'a>) -> BoxFuture<'a, ()> {
                 &[],
             )
             .await
-            .expect("failed to insert row with error case clear_mupdate_override columns");
+            .expect("inserted row with error case clear_mupdate_override columns");
     })
 }
 
@@ -2986,8 +2984,8 @@ fn get_migration_checks() -> BTreeMap<Version, DataMigrationFns> {
         DataMigrationFns::new().before(before_165_0_0).after(after_165_0_0),
     );
     map.insert(
-        Version::new(169, 0, 0),
-        DataMigrationFns::new().before(before_169_0_0).after(after_169_0_0),
+        Version::new(171, 0, 0),
+        DataMigrationFns::new().before(before_171_0_0).after(after_171_0_0),
     );
 
     map

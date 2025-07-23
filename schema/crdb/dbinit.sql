@@ -4327,6 +4327,14 @@ CREATE TABLE IF NOT EXISTS omicron.public.inv_cockroachdb_status (
     PRIMARY KEY (inv_collection_id, node_id)
 );
 
+CREATE TABLE IF NOT EXISTS omicron.public.inv_ntp_timesync (
+    inv_collection_id UUID NOT NULL,
+    zone_id UUID NOT NULL,
+    synced BOOL NOT NULL,
+
+    PRIMARY KEY (inv_collection_id, zone_id)
+);
+
 /*
  * Various runtime configuration switches for reconfigurator
  *
@@ -4753,6 +4761,27 @@ CREATE TABLE IF NOT EXISTS omicron.public.bp_oximeter_read_policy (
 
     -- Which clickhouse installation should oximeter read from.
     oximeter_read_mode omicron.public.oximeter_read_mode NOT NULL
+);
+
+-- Blueprint information related to pending RoT bootloader upgrades.
+CREATE TABLE IF NOT EXISTS omicron.public.bp_pending_mgs_update_rot_bootloader (
+    -- Foreign key into the `blueprint` table
+    blueprint_id UUID,
+    -- identify of the device to be updated
+    -- (foreign key into the `hw_baseboard_id` table)
+    hw_baseboard_id UUID NOT NULL,
+    -- location of this device according to MGS
+    sp_type omicron.public.sp_type NOT NULL,
+    sp_slot INT4 NOT NULL,
+    -- artifact to be deployed to this device
+    artifact_sha256 STRING(64) NOT NULL,
+    artifact_version STRING(64) NOT NULL,
+
+    -- RoT bootloader-specific details
+    expected_stage0_version STRING NOT NULL,
+    expected_stage0_next_version STRING, -- NULL means invalid (no version expected)
+
+    PRIMARY KEY(blueprint_id, hw_baseboard_id)
 );
 
 -- Blueprint information related to pending SP upgrades.
@@ -6306,7 +6335,7 @@ INSERT INTO omicron.public.db_metadata (
     version,
     target_version
 ) VALUES
-    (TRUE, NOW(), NOW(), '170.0.0', NULL)
+    (TRUE, NOW(), NOW(), '172.0.0', NULL)
 ON CONFLICT DO NOTHING;
 
 COMMIT;

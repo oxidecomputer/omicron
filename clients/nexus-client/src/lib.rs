@@ -23,6 +23,7 @@ progenitor::generate_api!(
         slog::debug!(log, "client response"; "result" => ?result);
     }),
     crates = {
+        "iddqd" = "*",
         "oxnet" = "0.1.0",
     },
     replace = {
@@ -52,6 +53,7 @@ progenitor::generate_api!(
         OmicronPhysicalDisksConfig = omicron_common::disk::OmicronPhysicalDisksConfig,
         OximeterReadMode = nexus_types::deployment::OximeterReadMode,
         OximeterReadPolicy = nexus_types::deployment::OximeterReadPolicy,
+        PendingMgsUpdate = nexus_types::deployment::PendingMgsUpdate,
         PlannerChickenSwitches = nexus_types::deployment::PlannerChickenSwitches,
         ReconfiguratorChickenSwitches = nexus_types::deployment::ReconfiguratorChickenSwitches,
         ReconfiguratorChickenSwitchesParam = nexus_types::deployment::ReconfiguratorChickenSwitchesParam,

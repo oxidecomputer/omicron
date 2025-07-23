@@ -34,7 +34,7 @@ use nexus_db_schema::schema::{
     inv_last_reconciliation_disk_result,
     inv_last_reconciliation_orphaned_dataset,
     inv_last_reconciliation_zone_result, inv_mupdate_override_non_boot,
-    inv_nvme_disk_firmware, inv_omicron_sled_config,
+    inv_ntp_timesync, inv_nvme_disk_firmware, inv_omicron_sled_config,
     inv_omicron_sled_config_dataset, inv_omicron_sled_config_disk,
     inv_omicron_sled_config_zone, inv_omicron_sled_config_zone_nic,
     inv_physical_disk, inv_root_of_trust, inv_root_of_trust_page,
@@ -63,7 +63,7 @@ use nexus_sled_agent_shared::inventory::{
 };
 use nexus_types::inventory::{
     BaseboardId, Caboose, CockroachStatus, Collection, NvmeFirmware,
-    PowerState, RotPage, RotSlot,
+    PowerState, RotPage, RotSlot, TimeSync,
 };
 use omicron_common::api::external;
 use omicron_common::api::internal::shared::NetworkInterface;
@@ -2934,6 +2934,33 @@ impl TryFrom<InvCockroachStatus> for CockroachStatus {
                 })
                 .transpose()?,
         })
+    }
+}
+
+#[derive(Queryable, Clone, Debug, Selectable, Insertable)]
+#[diesel(table_name = inv_ntp_timesync)]
+pub struct InvNtpTimesync {
+    pub inv_collection_id: DbTypedUuid<CollectionKind>,
+    pub zone_id: DbTypedUuid<OmicronZoneKind>,
+    pub synced: bool,
+}
+
+impl InvNtpTimesync {
+    pub fn new(
+        inv_collection_id: CollectionUuid,
+        timesync: &TimeSync,
+    ) -> Result<Self, anyhow::Error> {
+        Ok(Self {
+            inv_collection_id: inv_collection_id.into(),
+            zone_id: timesync.zone_id.into(),
+            synced: timesync.synced,
+        })
+    }
+}
+
+impl From<InvNtpTimesync> for nexus_types::inventory::TimeSync {
+    fn from(value: InvNtpTimesync) -> Self {
+        Self { zone_id: value.zone_id.into(), synced: value.synced }
     }
 }
 
