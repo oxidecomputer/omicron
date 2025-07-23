@@ -285,6 +285,9 @@ struct TopLevelArgs {
     command: Commands,
 }
 
+// Clippy wants us to box `SetArgs`, but that makes matches slightly more
+// awkward. This is just a dev/test tool; big variants are fine.
+#[allow(clippy::large_enum_variant)]
 #[derive(Debug, Subcommand)]
 enum Commands {
     /// Show configured updates

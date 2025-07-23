@@ -5,6 +5,11 @@
 //! Module containing implementation details shared amongst all MGS-to-SP-driven
 //! updates.
 
+use crate::host_phase1_updater::ReconfiguratorHostPhase1Updater;
+use crate::rot_bootloader_updater::ReconfiguratorRotBootloaderUpdater;
+use crate::rot_updater::ReconfiguratorRotUpdater;
+use crate::sp_updater::ReconfiguratorSpUpdater;
+
 use super::MgsClients;
 use super::UpdateProgress;
 use futures::future::BoxFuture;
@@ -14,6 +19,7 @@ use gateway_types::rot::RotSlot;
 use nexus_types::deployment::ExpectedArtifact;
 use nexus_types::deployment::ExpectedVersion;
 use nexus_types::deployment::PendingMgsUpdate;
+use nexus_types::deployment::PendingMgsUpdateDetails;
 use omicron_common::disk::M2Slot;
 use slog::Logger;
 use slog::{debug, error, info, warn};
@@ -275,6 +281,31 @@ pub trait SpComponentUpdateHelper {
         mgs_clients: &'a mut MgsClients,
         update: &'a PendingMgsUpdate,
     ) -> BoxFuture<'a, Result<(), PostUpdateError>>;
+}
+
+/// Extension methods to assist with `SpComponentUpdateHelper` trait objects
+pub struct SpComponentUpdateHelperExt;
+
+impl SpComponentUpdateHelperExt {
+    /// Construct a new trait object for the given update
+    pub fn new_boxed(
+        details: &PendingMgsUpdateDetails,
+    ) -> Box<dyn SpComponentUpdateHelper + Send + Sync> {
+        match details {
+            PendingMgsUpdateDetails::Sp { .. } => {
+                Box::new(ReconfiguratorSpUpdater {})
+            }
+            PendingMgsUpdateDetails::Rot { .. } => {
+                Box::new(ReconfiguratorRotUpdater {})
+            }
+            PendingMgsUpdateDetails::RotBootloader { .. } => {
+                Box::new(ReconfiguratorRotBootloaderUpdater {})
+            }
+            PendingMgsUpdateDetails::HostPhase1(details) => {
+                Box::new(ReconfiguratorHostPhase1Updater::new(details.clone()))
+            }
+        }
+    }
 }
 
 /// Describes the live state of the component before the update begins

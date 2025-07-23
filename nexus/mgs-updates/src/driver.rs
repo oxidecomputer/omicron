@@ -5,15 +5,11 @@
 //! Drive one or more in-progress MGS-managed updates
 
 use crate::ArtifactCache;
-use crate::SpComponentUpdateHelper;
+use crate::common_sp_update::SpComponentUpdateHelperExt;
 use crate::driver_update::ApplyUpdateError;
 use crate::driver_update::PROGRESS_TIMEOUT;
 use crate::driver_update::SpComponentUpdate;
 use crate::driver_update::apply_update;
-use crate::host_phase1_updater::ReconfiguratorHostPhase1Updater;
-use crate::rot_bootloader_updater::ReconfiguratorRotBootloaderUpdater;
-use crate::rot_updater::ReconfiguratorRotUpdater;
-use crate::sp_updater::ReconfiguratorSpUpdater;
 use futures::FutureExt;
 use futures::future::BoxFuture;
 use futures::stream::FuturesUnordered;
@@ -21,7 +17,6 @@ use id_map::IdMap;
 use id_map::IdMappable;
 use iddqd::IdOrdMap;
 use nexus_types::deployment::PendingMgsUpdate;
-use nexus_types::deployment::PendingMgsUpdateDetails;
 use nexus_types::deployment::PendingMgsUpdates;
 use nexus_types::internal_api::views::CompletedAttempt;
 use nexus_types::internal_api::views::InProgressUpdateStatus;
@@ -307,39 +302,9 @@ impl MgsUpdateDriver {
         ));
         info!(&log, "begin update attempt for baseboard");
 
-        let (sp_update, updater): (
-            _,
-            Box<dyn SpComponentUpdateHelper + Send + Sync>,
-        ) = match &request.details {
-            PendingMgsUpdateDetails::Sp { .. } => {
-                let sp_update =
-                    SpComponentUpdate::from_request(&log, &request, update_id);
-
-                (sp_update, Box::new(ReconfiguratorSpUpdater {}))
-            }
-            PendingMgsUpdateDetails::Rot { .. } => {
-                let sp_update =
-                    SpComponentUpdate::from_request(&log, &request, update_id);
-
-                (sp_update, Box::new(ReconfiguratorRotUpdater {}))
-            }
-            PendingMgsUpdateDetails::RotBootloader { .. } => {
-                let sp_update =
-                    SpComponentUpdate::from_request(&log, &request, update_id);
-
-                (sp_update, Box::new(ReconfiguratorRotBootloaderUpdater {}))
-            }
-            PendingMgsUpdateDetails::HostPhase1(details) => {
-                let sp_update =
-                    SpComponentUpdate::from_request(&log, &request, update_id);
-                (
-                    sp_update,
-                    Box::new(ReconfiguratorHostPhase1Updater::new(
-                        details.clone(),
-                    )),
-                )
-            }
-        };
+        let sp_update =
+            SpComponentUpdate::from_request(&log, request, update_id);
+        let updater = SpComponentUpdateHelperExt::new_boxed(&request.details);
 
         let baseboard_id = baseboard_id.clone();
         let nattempts_done = internal_request.nattempts_done;

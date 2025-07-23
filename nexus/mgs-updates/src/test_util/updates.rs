@@ -7,15 +7,12 @@
 //! These are factored to make it easy to write a variety of different kinds of
 //! tests without having to put together too much boilerplate in each test.
 
-use crate::SpComponentUpdateHelper;
+use crate::common_sp_update::SpComponentUpdateHelperExt;
 use crate::driver::UpdateAttemptStatusUpdater;
 use crate::driver_update::ApplyUpdateError;
 use crate::driver_update::PROGRESS_TIMEOUT;
 use crate::driver_update::SpComponentUpdate;
 use crate::driver_update::apply_update;
-use crate::rot_bootloader_updater::ReconfiguratorRotBootloaderUpdater;
-use crate::rot_updater::ReconfiguratorRotUpdater;
-use crate::sp_updater::ReconfiguratorSpUpdater;
 use crate::test_util::cabooses_equal;
 use crate::test_util::sp_test_state::SpTestState;
 use crate::test_util::step_through::StepResult;
@@ -229,19 +226,8 @@ impl UpdateDescription<'_> {
                 &request,
                 update_id,
             );
-            let sp_update_helper: Box<
-                dyn SpComponentUpdateHelper + Send + Sync,
-            > = match request.details {
-                PendingMgsUpdateDetails::Sp { .. } => {
-                    Box::new(ReconfiguratorSpUpdater {})
-                }
-                PendingMgsUpdateDetails::Rot { .. } => {
-                    Box::new(ReconfiguratorRotUpdater {})
-                }
-                PendingMgsUpdateDetails::RotBootloader { .. } => {
-                    Box::new(ReconfiguratorRotBootloaderUpdater {})
-                }
-            };
+            let sp_update_helper =
+                SpComponentUpdateHelperExt::new_boxed(&request.details);
             apply_update(
                 artifact_cache,
                 &sp_update,
