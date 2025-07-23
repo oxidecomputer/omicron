@@ -5871,10 +5871,18 @@ pub(crate) mod test {
             panic!("can't plan to include boundary NTP: {err}")
         });
 
-        let summary = new_blueprint.diff_since_blueprint(&blueprint);
-        assert_eq!(summary.total_zones_added(), BOUNDARY_NTP_REDUNDANCY - 1);
-        assert_eq!(summary.total_zones_removed(), 0);
-        assert_eq!(summary.total_zones_modified(), BOUNDARY_NTP_REDUNDANCY - 1);
+        {
+            let summary = new_blueprint.diff_since_blueprint(&blueprint);
+            assert_eq!(
+                summary.total_zones_added(),
+                BOUNDARY_NTP_REDUNDANCY - 1
+            );
+            assert_eq!(summary.total_zones_removed(), 0);
+            assert_eq!(
+                summary.total_zones_modified(),
+                BOUNDARY_NTP_REDUNDANCY - 1
+            );
+        }
         blueprint = new_blueprint;
         update_collection_from_blueprint(&mut example, &blueprint);
 
@@ -5899,10 +5907,15 @@ pub(crate) mod test {
         .expect("can't create planner");
         let new_blueprint = planner.plan().expect("planning succeeded");
         verify_blueprint(&new_blueprint);
-        let summary = new_blueprint.diff_since_blueprint(&blueprint);
-        assert_eq!(summary.total_zones_added(), 0);
-        assert_eq!(summary.total_zones_removed(), 0);
-        assert_eq!(summary.total_zones_modified(), BOUNDARY_NTP_REDUNDANCY - 1);
+        {
+            let summary = new_blueprint.diff_since_blueprint(&blueprint);
+            assert_eq!(summary.total_zones_added(), 0);
+            assert_eq!(summary.total_zones_removed(), 0);
+            assert_eq!(
+                summary.total_zones_modified(),
+                BOUNDARY_NTP_REDUNDANCY - 1
+            );
+        }
         blueprint = new_blueprint;
         update_collection_from_blueprint(&mut example, &blueprint);
 
@@ -6118,15 +6131,17 @@ pub(crate) mod test {
         .with_rng(PlannerRng::from_seed((TEST_NAME, "bp_ntp")))
         .plan()
         .expect("plan for trivial TUF repo");
-        let summary = new_blueprint.diff_since_blueprint(&blueprint);
-        eprintln!(
-            "diff between blueprints (should be expunging boundary NTP using install dataset):\n{}",
-            summary.display()
-        );
+        {
+            let summary = new_blueprint.diff_since_blueprint(&blueprint);
+            eprintln!(
+                "diff between blueprints (should be expunging boundary NTP using install dataset):\n{}",
+                summary.display()
+            );
 
-        assert_eq!(summary.total_zones_added(), 0);
-        assert_eq!(summary.total_zones_removed(), 0);
-        assert_eq!(summary.total_zones_modified(), 1);
+            assert_eq!(summary.total_zones_added(), 0);
+            assert_eq!(summary.total_zones_removed(), 0);
+            assert_eq!(summary.total_zones_modified(), 1);
+        }
         blueprint = new_blueprint;
         update_collection_from_blueprint(&mut example, &blueprint);
         set_valid_looking_timesync(&mut example.collection);
@@ -6164,15 +6179,17 @@ pub(crate) mod test {
         .with_rng(PlannerRng::from_seed((TEST_NAME, "bp_ntp")))
         .plan()
         .expect("plan for trivial TUF repo");
-        let summary = new_blueprint.diff_since_blueprint(&blueprint);
-        eprintln!(
-            "diff between blueprints (should be adding one internal NTP and promoting another to boundary):\n{}",
-            summary.display()
-        );
+        {
+            let summary = new_blueprint.diff_since_blueprint(&blueprint);
+            eprintln!(
+                "diff between blueprints (should be adding one internal NTP and promoting another to boundary):\n{}",
+                summary.display()
+            );
 
-        assert_eq!(summary.total_zones_added(), 2);
-        assert_eq!(summary.total_zones_removed(), 0);
-        assert_eq!(summary.total_zones_modified(), 2);
+            assert_eq!(summary.total_zones_added(), 2);
+            assert_eq!(summary.total_zones_removed(), 0);
+            assert_eq!(summary.total_zones_modified(), 2);
+        }
         blueprint = new_blueprint;
         update_collection_from_blueprint(&mut example, &blueprint);
         set_valid_looking_timesync(&mut example.collection);
@@ -6201,15 +6218,17 @@ pub(crate) mod test {
         .with_rng(PlannerRng::from_seed((TEST_NAME, "bp_ntp")))
         .plan()
         .expect("plan for trivial TUF repo");
-        let summary = new_blueprint.diff_since_blueprint(&blueprint);
-        eprintln!(
-            "diff between blueprints (should be expunging another boundary NTP):\n{}",
-            summary.display()
-        );
+        {
+            let summary = new_blueprint.diff_since_blueprint(&blueprint);
+            eprintln!(
+                "diff between blueprints (should be expunging another boundary NTP):\n{}",
+                summary.display()
+            );
 
-        assert_eq!(summary.total_zones_added(), 0);
-        assert_eq!(summary.total_zones_removed(), 0);
-        assert_eq!(summary.total_zones_modified(), 2);
+            assert_eq!(summary.total_zones_added(), 0);
+            assert_eq!(summary.total_zones_removed(), 0);
+            assert_eq!(summary.total_zones_modified(), 2);
+        }
         blueprint = new_blueprint;
         update_collection_from_blueprint(&mut example, &blueprint);
         set_valid_looking_timesync(&mut example.collection);
@@ -6239,15 +6258,17 @@ pub(crate) mod test {
         .with_rng(PlannerRng::from_seed((TEST_NAME, "bp_ntp")))
         .plan()
         .expect("plan for trivial TUF repo");
-        let summary = new_blueprint.diff_since_blueprint(&blueprint);
-        eprintln!(
-            "diff between blueprints (should be adding promoting internal -> boundary NTP):\n{}",
-            summary.display()
-        );
+        {
+            let summary = new_blueprint.diff_since_blueprint(&blueprint);
+            eprintln!(
+                "diff between blueprints (should be adding promoting internal -> boundary NTP):\n{}",
+                summary.display()
+            );
 
-        assert_eq!(summary.total_zones_added(), 2);
-        assert_eq!(summary.total_zones_removed(), 0);
-        assert_eq!(summary.total_zones_modified(), 1);
+            assert_eq!(summary.total_zones_added(), 2);
+            assert_eq!(summary.total_zones_removed(), 0);
+            assert_eq!(summary.total_zones_modified(), 1);
+        }
         blueprint = new_blueprint;
         update_collection_from_blueprint(&mut example, &blueprint);
         set_valid_looking_timesync(&mut example.collection);
@@ -6273,15 +6294,17 @@ pub(crate) mod test {
         .with_rng(PlannerRng::from_seed((TEST_NAME, "bp_ntp")))
         .plan()
         .expect("plan for trivial TUF repo");
-        let summary = new_blueprint.diff_since_blueprint(&blueprint);
-        eprintln!(
-            "diff between blueprints (should be adding wrapping up internal NTP expungement):\n{}",
-            summary.display()
-        );
+        {
+            let summary = new_blueprint.diff_since_blueprint(&blueprint);
+            eprintln!(
+                "diff between blueprints (should be adding wrapping up internal NTP expungement):\n{}",
+                summary.display()
+            );
 
-        assert_eq!(summary.total_zones_added(), 0);
-        assert_eq!(summary.total_zones_removed(), 0);
-        assert_eq!(summary.total_zones_modified(), 1);
+            assert_eq!(summary.total_zones_added(), 0);
+            assert_eq!(summary.total_zones_removed(), 0);
+            assert_eq!(summary.total_zones_modified(), 1);
+        }
         blueprint = new_blueprint;
         update_collection_from_blueprint(&mut example, &blueprint);
         set_valid_looking_timesync(&mut example.collection);
