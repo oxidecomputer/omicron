@@ -9,6 +9,8 @@ use nexus_db_queries::context::OpContext;
 use omicron_common::api::external::{
     CreateResult, DataPageParams, ListResultVec, UpdateResult,
 };
+use omicron_common::backoff;
+use std::time::Duration;
 use uuid::Uuid;
 
 use crate::context::ApiContext;
@@ -64,7 +66,9 @@ impl super::Nexus {
         self.db_datastore.audit_log_entry_init(opctx, entry).await
     }
 
-    // set duration and result on an existing entry
+    /// Complete an existing audit log entry with result info like end time,
+    /// HTTP status code, error message, etc. Note we retry write failures
+    /// because we really want this to go through.
     pub(crate) async fn audit_log_entry_complete<R: HttpResponse>(
         &self,
         opctx: &OpContext,
@@ -87,6 +91,34 @@ impl super::Nexus {
             error_code,
             error_message,
         );
-        self.db_datastore.audit_log_entry_complete(opctx, &entry, update).await
+
+        // Should retry at roughly 250ms, 750ms, 1750ms (plus however long the
+        // tries take). We really want this write to go through.
+        let backoff = backoff::ExponentialBackoffBuilder::new()
+            .with_multiplier(2.0)
+            .with_initial_interval(Duration::from_millis(250))
+            .with_max_elapsed_time(Some(Duration::from_secs(5)))
+            .build();
+
+        let mut count = 0;
+        backoff::retry_notify(
+            backoff,
+            || async {
+                self.db_datastore
+                    .audit_log_entry_complete(opctx, &entry, update.clone())
+                    .await
+                    .map_err(backoff::BackoffError::transient)
+            },
+            |error, delay| {
+                let id = entry.id;
+                count += 1;
+                error!(
+                    self.log,
+                    "failed to complete audit log entry {id}. retry {count} in {delay:?}";
+                    "error" => ?error
+                );
+            },
+        )
+        .await
     }
 }
