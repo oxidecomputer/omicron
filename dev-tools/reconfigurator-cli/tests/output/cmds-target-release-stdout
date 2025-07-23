@@ -205,6 +205,7 @@ INFO sufficient InternalDns zones exist in plan, desired_count: 3, current_count
 INFO sufficient ExternalDns zones exist in plan, desired_count: 3, current_count: 3
 INFO sufficient Nexus zones exist in plan, desired_count: 3, current_count: 3
 INFO sufficient Oximeter zones exist in plan, desired_count: 0, current_count: 0
+WARN cannot configure RoT bootloader update for board (missing stage0 caboose from inventory), serial_number: serial0, part_number: model0
 INFO configuring SP update, artifact_version: 1.0.0, artifact_hash: 7e6667e646ad001b54c8365a3d309c03f89c59102723d38d01697ee8079fe670, expected_inactive_version: NoValidVersion, expected_active_version: 0.0.1, component: sp, sp_slot: 0, sp_type: Sled, serial_number: serial0, part_number: model0
 INFO reached maximum number of pending SP updates, max: 1
 INFO will ensure cockroachdb setting, setting: cluster.preserve_downgrade_option, value: DoNotModify
@@ -577,7 +578,9 @@ INFO sufficient ExternalDns zones exist in plan, desired_count: 3, current_count
 INFO sufficient Nexus zones exist in plan, desired_count: 3, current_count: 3
 INFO sufficient Oximeter zones exist in plan, desired_count: 0, current_count: 0
 INFO SP update completed (will remove it and re-evaluate board), artifact_version: 1.0.0, artifact_hash: 7e6667e646ad001b54c8365a3d309c03f89c59102723d38d01697ee8079fe670, expected_inactive_version: NoValidVersion, expected_active_version: 0.0.1, component: sp, sp_slot: 0, sp_type: Sled, serial_number: serial0, part_number: model0
+WARN cannot configure RoT bootloader update for board (missing stage0 caboose from inventory), serial_number: serial0, part_number: model0
 INFO skipping board for SP update, serial_number: serial0, part_number: model0
+WARN cannot configure RoT bootloader update for board (missing stage0 caboose from inventory), serial_number: serial1, part_number: model1
 INFO configuring SP update, artifact_version: 1.0.0, artifact_hash: 7e6667e646ad001b54c8365a3d309c03f89c59102723d38d01697ee8079fe670, expected_inactive_version: NoValidVersion, expected_active_version: 0.0.1, component: sp, sp_slot: 1, sp_type: Sled, serial_number: serial1, part_number: model1
 INFO reached maximum number of pending SP updates, max: 1
 INFO will ensure cockroachdb setting, setting: cluster.preserve_downgrade_option, value: DoNotModify
@@ -773,6 +776,7 @@ INFO sufficient ExternalDns zones exist in plan, desired_count: 3, current_count
 INFO sufficient Nexus zones exist in plan, desired_count: 3, current_count: 3
 INFO sufficient Oximeter zones exist in plan, desired_count: 0, current_count: 0
 INFO SP update impossible (will remove it and re-evaluate board), artifact_version: 1.0.0, artifact_hash: 7e6667e646ad001b54c8365a3d309c03f89c59102723d38d01697ee8079fe670, expected_inactive_version: NoValidVersion, expected_active_version: 0.0.1, component: sp, sp_slot: 1, sp_type: Sled, serial_number: serial1, part_number: model1
+WARN cannot configure RoT bootloader update for board (missing stage0 caboose from inventory), serial_number: serial1, part_number: model1
 INFO configuring SP update, artifact_version: 1.0.0, artifact_hash: 7e6667e646ad001b54c8365a3d309c03f89c59102723d38d01697ee8079fe670, expected_inactive_version: Version(ArtifactVersion("0.5.0")), expected_active_version: 0.0.1, component: sp, sp_slot: 1, sp_type: Sled, serial_number: serial1, part_number: model1
 INFO reached maximum number of pending SP updates, max: 1
 INFO will ensure cockroachdb setting, setting: cluster.preserve_downgrade_option, value: DoNotModify
@@ -967,8 +971,11 @@ INFO sufficient ExternalDns zones exist in plan, desired_count: 3, current_count
 INFO sufficient Nexus zones exist in plan, desired_count: 3, current_count: 3
 INFO sufficient Oximeter zones exist in plan, desired_count: 0, current_count: 0
 INFO SP update completed (will remove it and re-evaluate board), artifact_version: 1.0.0, artifact_hash: 7e6667e646ad001b54c8365a3d309c03f89c59102723d38d01697ee8079fe670, expected_inactive_version: Version(ArtifactVersion("0.5.0")), expected_active_version: 0.0.1, component: sp, sp_slot: 1, sp_type: Sled, serial_number: serial1, part_number: model1
+WARN cannot configure RoT bootloader update for board (missing stage0 caboose from inventory), serial_number: serial1, part_number: model1
 INFO skipping board for SP update, serial_number: serial1, part_number: model1
+WARN cannot configure RoT bootloader update for board (missing stage0 caboose from inventory), serial_number: serial0, part_number: model0
 INFO skipping board for SP update, serial_number: serial0, part_number: model0
+WARN cannot configure RoT bootloader update for board (missing stage0 caboose from inventory), serial_number: serial2, part_number: model2
 INFO configuring SP update, artifact_version: 1.0.0, artifact_hash: 7e6667e646ad001b54c8365a3d309c03f89c59102723d38d01697ee8079fe670, expected_inactive_version: NoValidVersion, expected_active_version: 0.0.1, component: sp, sp_slot: 2, sp_type: Sled, serial_number: serial2, part_number: model2
 INFO ran out of boards for SP update
 INFO will ensure cockroachdb setting, setting: cluster.preserve_downgrade_option, value: DoNotModify
@@ -1163,8 +1170,11 @@ INFO sufficient ExternalDns zones exist in plan, desired_count: 3, current_count
 INFO sufficient Nexus zones exist in plan, desired_count: 3, current_count: 3
 INFO sufficient Oximeter zones exist in plan, desired_count: 0, current_count: 0
 INFO SP update completed (will remove it and re-evaluate board), artifact_version: 1.0.0, artifact_hash: 7e6667e646ad001b54c8365a3d309c03f89c59102723d38d01697ee8079fe670, expected_inactive_version: NoValidVersion, expected_active_version: 0.0.1, component: sp, sp_slot: 2, sp_type: Sled, serial_number: serial2, part_number: model2
+WARN cannot configure RoT bootloader update for board (missing stage0 caboose from inventory), serial_number: serial2, part_number: model2
 INFO skipping board for SP update, serial_number: serial2, part_number: model2
+WARN cannot configure RoT bootloader update for board (missing stage0 caboose from inventory), serial_number: serial0, part_number: model0
 INFO skipping board for SP update, serial_number: serial0, part_number: model0
+WARN cannot configure RoT bootloader update for board (missing stage0 caboose from inventory), serial_number: serial1, part_number: model1
 INFO skipping board for SP update, serial_number: serial1, part_number: model1
 INFO ran out of boards for SP update
 INFO updating zone image source in-place, sled_id: 2b8f0cb3-0295-4b3c-bc58-4fe88b57112c, zone_id: 353b3b65-20f7-48c3-88f7-495bd5d31545, kind: Clickhouse, image_source: artifact: version 1.0.0
