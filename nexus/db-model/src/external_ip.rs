@@ -29,6 +29,8 @@ use nexus_types::external_api::views;
 use nexus_types::inventory::SourceNatConfig;
 use omicron_common::api::external::Error;
 use omicron_common::api::external::IdentityMetadata;
+use omicron_common::api::external::L4Port;
+use omicron_common::api::external::L4PortRange;
 use omicron_common::api::internal::shared::SourceNatConfigError;
 use omicron_uuid_kinds::ExternalIpUuid;
 use omicron_uuid_kinds::GenericUuid;
@@ -533,9 +535,25 @@ impl TryFrom<ExternalIp> for views::ExternalIp {
                 ip: ip.ip.ip(),
                 ip_pool_id: ip.ip_pool_id,
             }),
-            IpKind::SNat => Err(Error::internal_error(
-                "SNAT IP addresses should not be exposed in the API",
-            )),
+            IpKind::SNat => {
+                let convert_port = |p: SqlU16| -> Result<L4Port, Self::Error> {
+                    std::num::NonZeroU16::try_from(*p)
+                        .map_err(|_| {
+                            Error::internal_error(
+                                "Invalid port for SNAT IP address: {p}",
+                            )
+                        })
+                        .map(L4Port)
+                };
+                Ok(views::ExternalIp::SNat(views::SNatIp {
+                    ip: ip.ip.ip(),
+                    ports: L4PortRange {
+                        first: convert_port(ip.first_port)?,
+                        last: convert_port(ip.last_port)?,
+                    },
+                    ip_pool_id: ip.ip_pool_id,
+                }))
+            }
         }
     }
 }

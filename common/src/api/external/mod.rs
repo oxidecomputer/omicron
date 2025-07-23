@@ -2058,7 +2058,6 @@ impl FromStr for L4PortRange {
                     .parse::<NonZeroU16>()
                     .map_err(|e| L4PortRangeError::Value(right.into(), e))?
                     .into();
-
                 Ok(L4PortRange { first, last })
             }
         }

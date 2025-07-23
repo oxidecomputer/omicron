@@ -237,6 +237,7 @@ pub enum ServiceUsingCertificate {
 )]
 #[serde(rename_all = "snake_case")]
 pub enum IpKind {
+    SNat,
     Ephemeral,
     Floating,
 }
