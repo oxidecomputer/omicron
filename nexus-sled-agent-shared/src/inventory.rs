@@ -1286,6 +1286,11 @@ impl OmicronZoneType {
         }
     }
 
+    /// Identifies whether this is a boundary NTP zone
+    pub fn is_boundary_ntp(&self) -> bool {
+        matches!(self, OmicronZoneType::BoundaryNtp { .. })
+    }
+
     /// Identifies whether this is a Nexus zone
     pub fn is_nexus(&self) -> bool {
         match self {
