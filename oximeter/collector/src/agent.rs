@@ -347,7 +347,7 @@ impl OximeterAgent {
                 // Only update the endpoint information if it's actually
                 // different, to avoid indefinitely delaying the collection
                 // timer from expiring.
-                if value.get().producer == info {
+                if value.get().producer_info() == info {
                     trace!(
                         self.log,
                         "ignoring request to update existing metric \
@@ -407,7 +407,7 @@ impl OximeterAgent {
             .unwrap()
             .range((start, Bound::Unbounded))
             .take(limit)
-            .map(|(_id, task)| task.producer)
+            .map(|(_id, task)| task.producer_info())
             .collect()
     }
 

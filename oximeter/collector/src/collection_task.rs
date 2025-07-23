@@ -23,18 +23,14 @@ use slog::o;
 use slog::trace;
 use slog::warn;
 use slog_error_chain::InlineErrorChain;
-use std::sync::Arc;
 use std::time::Duration;
-use tokio::sync::Notify;
 use tokio::sync::mpsc;
 use tokio::sync::mpsc::error::TrySendError;
+use tokio::sync::oneshot;
 use tokio::sync::watch;
 use tokio::time::Instant;
 use tokio::time::Interval;
 use tokio::time::interval;
-
-#[cfg(test)]
-use tokio::sync::oneshot;
 
 /// Error returned when a forced collection fails.
 #[derive(Clone, Copy, Debug)]
@@ -184,7 +180,7 @@ struct CollectionResponse {
 /// Task that actually performs collections from the producer.
 async fn collection_loop(
     log: Logger,
-    shutdown: Arc<Notify>,
+    mut shutdown: oneshot::Receiver<()>,
     mut producer_info_rx: watch::Receiver<ProducerEndpoint>,
     mut forced_collection_rx: mpsc::Receiver<ForcedCollectionRequest>,
     mut timer_collection_rx: mpsc::Receiver<CollectionStartTimes>,
@@ -201,7 +197,7 @@ async fn collection_loop(
         // either the forced- or timer-collection queue.
         trace!(log, "top of inner collection loop, waiting for next request");
         let (was_forced_collection, start_time) = tokio::select! {
-            _ = shutdown.notified() => {
+            _ = &mut shutdown => {
                 debug!(
                     log,
                     "collection task asked to shutdown, exiting",
@@ -250,7 +246,7 @@ async fn collection_loop(
             tokio::select! {
                 biased;
 
-                _ = shutdown.notified() => {
+                _ = &mut shutdown => {
                     debug!(
                         log,
                         "collection task asked to shutdown, exiting",
@@ -326,8 +322,6 @@ pub(crate) struct CollectionTaskOutput {
 /// Handle to the task which collects metric data from a single producer.
 #[derive(Debug)]
 pub struct CollectionTaskHandle {
-    /// Information about the producer we're currently collecting from.
-    pub producer: ProducerEndpoint,
     // Notification mechanisms used to control the actual collection task.
     notifiers: CollectionTaskNotifiers,
     log: Logger,
@@ -352,7 +346,7 @@ impl CollectionTaskHandle {
             "component" => "collection-task-handle",
             "producer_id" => producer.id.to_string(),
         ));
-        Self { notifiers, producer, log }
+        Self { notifiers, log }
     }
 
     /// Notify the task to update its producer endpoint information.
@@ -378,14 +372,16 @@ impl CollectionTaskHandle {
             );
             return;
         }
-        self.producer = new_info;
         debug!(self.log, "notified collection task of new producer endpoint");
     }
 
     /// Ask the collection task to shutdown.
-    pub fn shutdown(&self) {
-        self.notifiers.shutdown.notify_one();
-        debug!(self.log, "notified collection task to shut down");
+    pub fn shutdown(self) {
+        if self.notifiers.shutdown.send(()).is_err() {
+            warn!(self.log, "failed to notify collection task to shut down");
+        } else {
+            debug!(self.log, "notified collection task to shut down");
+        }
     }
 
     /// Return a receiver to fetch current statistics from this task.
@@ -423,6 +419,11 @@ impl CollectionTaskHandle {
                 TrySendError::Closed(_) => ForcedCollectionError::Closed,
             })
     }
+
+    /// Return the current producer endpoint information
+    pub(crate) fn producer_info(&self) -> ProducerEndpoint {
+        self.notifiers.producer_info_tx.borrow().clone()
+    }
 }
 
 /// Helper type used to simplify control flow in the main `CollectionTask::run`
@@ -434,7 +435,7 @@ type TaskAction = std::ops::ControlFlow<()>;
 #[derive(Debug)]
 pub(crate) struct CollectionTaskNotifiers {
     /// Notify the collection task to shutdown.
-    pub shutdown: Arc<Notify>,
+    pub shutdown: oneshot::Sender<()>,
     /// Sender to notify the collection task about changes to the producer's
     /// endpoint information.
     pub producer_info_tx: watch::Sender<ProducerEndpoint>,
@@ -535,13 +536,13 @@ impl CollectionTask {
         // updating self-stats and last-collection details.
         let (result_tx, result_rx) = mpsc::channel(N_QUEUED_RESULTS);
 
-        // Mechanism to notify the inner `collecion_loop` to exit.
-        let shutdown = Arc::new(Notify::new());
+        // Mechanism to notify the inner `collection_loop` to exit.
+        let (shutdown_tx, shutdown_rx) = oneshot::channel();
 
         // Task running the actual collections in a loop.
         tokio::task::spawn(collection_loop(
             log.clone(),
-            shutdown.clone(),
+            shutdown_rx,
             producer_info_rx.clone(),
             forced_collection_rx,
             timer_collection_rx,
@@ -550,7 +551,7 @@ impl CollectionTask {
 
         // Construct ourself, and return our controlling input queue.
         let notifiers = CollectionTaskNotifiers {
-            shutdown,
+            shutdown: shutdown_tx,
             producer_details_rx,
             producer_info_tx,
             task_tx,
