@@ -4552,6 +4552,27 @@
           "request_id"
         ]
       },
+      "ExpectedActiveHostOsSlot": {
+        "type": "object",
+        "properties": {
+          "phase_1": {
+            "type": "string",
+            "format": "hex string (32 bytes)"
+          },
+          "phase_2": {
+            "type": "string",
+            "format": "hex string (32 bytes)"
+          },
+          "slot": {
+            "$ref": "#/components/schemas/M2Slot"
+          }
+        },
+        "required": [
+          "phase_1",
+          "phase_2",
+          "slot"
+        ]
+      },
       "ExpectedActiveRotSlot": {
         "description": "Describes the expected active RoT slot, and the version we expect to find for it",
         "type": "object",
@@ -4566,6 +4587,62 @@
         "required": [
           "slot",
           "version"
+        ]
+      },
+      "ExpectedArtifact": {
+        "description": "Describes the artifact that we expect to find in some firmware slot",
+        "oneOf": [
+          {
+            "description": "We expect to find _no_ valid artifact in this slot",
+            "type": "object",
+            "properties": {
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "no_valid_artifact"
+                ]
+              }
+            },
+            "required": [
+              "kind"
+            ]
+          },
+          {
+            "description": "We expect to find the specified artifact in this slot",
+            "type": "object",
+            "properties": {
+              "artifact": {
+                "type": "string",
+                "format": "hex string (32 bytes)"
+              },
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "artifact"
+                ]
+              }
+            },
+            "required": [
+              "artifact",
+              "kind"
+            ]
+          }
+        ]
+      },
+      "ExpectedInactiveHostOsArtifact": {
+        "type": "object",
+        "properties": {
+          "phase_1": {
+            "type": "string",
+            "format": "hex string (32 bytes)"
+          },
+          "phase_2": {
+            "$ref": "#/components/schemas/ExpectedArtifact"
+          }
+        },
+        "required": [
+          "phase_1",
+          "phase_2"
         ]
       },
       "ExpectedVersion": {
@@ -5263,6 +5340,14 @@
         },
         "required": [
           "status"
+        ]
+      },
+      "M2Slot": {
+        "description": "Describes an M.2 slot, often in the context of writing a system image to it.",
+        "type": "string",
+        "enum": [
+          "A",
+          "B"
         ]
       },
       "MacAddr": {
@@ -6177,6 +6262,33 @@
               "component",
               "expected_stage0_next_version",
               "expected_stage0_version"
+            ]
+          },
+          {
+            "description": "the host OS is being updated\n\nWe write the phase 1 via MGS, and have a precheck condition that sled-agent has already written the matching phase 2.",
+            "type": "object",
+            "properties": {
+              "component": {
+                "type": "string",
+                "enum": [
+                  "host_phase1"
+                ]
+              },
+              "expected_active_slot": {
+                "$ref": "#/components/schemas/ExpectedActiveHostOsSlot"
+              },
+              "expected_inactive_artifact": {
+                "$ref": "#/components/schemas/ExpectedInactiveHostOsArtifact"
+              },
+              "sled_agent_address": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "component",
+              "expected_active_slot",
+              "expected_inactive_artifact",
+              "sled_agent_address"
             ]
           }
         ]
