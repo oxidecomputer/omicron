@@ -592,11 +592,12 @@ impl BundleCollection {
             })?;
 
             // Only stream at most "transfer_chunk_size" bytes at once
-            let remaining = std::cmp::min(
+            let chunk_size = std::cmp::min(
                 self.transfer_chunk_size.get(),
                 total_len - offset,
             );
-            let limited_file = file.take(remaining);
+
+            let limited_file = file.take(chunk_size);
             let stream = tokio_util::io::ReaderStream::new(limited_file);
             let body = reqwest::Body::wrap_stream(stream);
 
@@ -605,16 +606,16 @@ impl BundleCollection {
                 "Streaming bundle chunk";
                 "bundle" => %self.bundle.id,
                 "offset" => offset,
-                "length" => remaining,
+                "length" => chunk_size,
             );
 
             sled_client.support_bundle_transfer(
                 &zpool, &dataset, &support_bundle, offset, body
             ).await.with_context(|| {
-                format!("Failed to transfer bundle: {remaining}@{offset} of {total_len} to sled")
+                format!("Failed to transfer bundle: {chunk_size}@{offset} of {total_len} to sled")
             })?;
 
-            offset += self.transfer_chunk_size.get();
+            offset += chunk_size;
         }
 
         sled_client
@@ -1561,7 +1562,7 @@ mod test {
             .expect("Bundle should definitely be in db by this point");
         assert_eq!(observed_bundle.state, SupportBundleState::Active);
 
-        // Download a file from the bundle, to verify that it was trasnferred
+        // Download a file from the bundle, to verify that it was transferred
         // successfully.
         let head = false;
         let range = None;

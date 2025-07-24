@@ -591,7 +591,12 @@ impl<'a> SupportBundleManager<'a> {
         return Ok(digest.as_slice() == expected.as_ref());
     }
 
-    // A helper function which streams the contents of a bundle to a file.
+    // A helper function which streams the contents of a bundle to a file,
+    // and flushes it to the filesystem.
+    //
+    // Note that this doesn't necessarily "sync" it to the underlying disk,
+    // but that's fine -- we just want to make sure the next call to "finalize"
+    // will reliably see what we last wrote.
     async fn stream_bundle(
         mut tmp_file: tokio::fs::File,
         stream: impl Stream<Item = Result<Bytes, HttpError>>,
@@ -603,6 +608,18 @@ impl<'a> SupportBundleManager<'a> {
             let chunk = chunk?;
             tmp_file.write_all(&chunk).await?;
         }
+
+        // From the tokio docs:
+        //
+        // > A file will not be closed immediately when it goes out of scope if
+        // > there are any IO operations that have not yet completed. To ensure
+        // > that a file is closed immediately when it is dropped, you should
+        // > call flush before dropping it.
+        //
+        // It is possible, although uncommon, for us to write to this file,
+        // drop the handle to it, and for it to have not been fully written to
+        // storage.
+        tmp_file.flush().await?;
         Ok(())
     }
 
@@ -726,9 +743,7 @@ impl<'a> SupportBundleManager<'a> {
             .open(&support_bundle_path_tmp)
             .await?;
 
-        tmp_file
-            .seek(tokio::io::SeekFrom::Current(i64::try_from(offset)?))
-            .await?;
+        tmp_file.seek(tokio::io::SeekFrom::Start(offset)).await?;
 
         if let Err(err) = Self::stream_bundle(tmp_file, stream).await {
             warn!(log, "Failed to write bundle to storage"; "error" => ?err);
@@ -743,7 +758,7 @@ impl<'a> SupportBundleManager<'a> {
         info!(log, "Bundle written successfully");
         let metadata = SupportBundleMetadata {
             support_bundle_id,
-            state: SupportBundleState::Complete,
+            state: SupportBundleState::Incomplete,
         };
         Ok(metadata)
     }
@@ -1551,26 +1566,31 @@ mod tests {
             .expect("Should have started creation");
 
         // Split the zipfile into halves, so we can transfer it in two chunks
-        let len1 = zipfile_data.len() / 2;
-        let stream1 = stream::once(async {
-            Ok(Bytes::copy_from_slice(&zipfile_data.as_slice()[..len1]))
-        });
-        let stream2 = stream::once(async {
-            Ok(Bytes::copy_from_slice(&zipfile_data.as_slice()[len1..]))
-        });
+        let total_len = zipfile_data.len();
+        let chunk_size = total_len / 2;
 
-        mgr.transfer(zpool_id, dataset_id, support_bundle_id, 0, stream1)
+        let mut offset = 0;
+        while offset < total_len {
+            let end_offset = std::cmp::min(offset + chunk_size, total_len);
+            let chunk = &zipfile_data[offset..end_offset];
+
+            let stream =
+                stream::once(async move { Ok(Bytes::copy_from_slice(chunk)) });
+
+            mgr.transfer(
+                zpool_id,
+                dataset_id,
+                support_bundle_id,
+                offset as u64,
+                stream,
+            )
             .await
-            .expect("Should have transferred bundle (part1)");
-        mgr.transfer(
-            zpool_id,
-            dataset_id,
-            support_bundle_id,
-            len1 as u64,
-            stream2,
-        )
-        .await
-        .expect("Should have transferred bundle (part2)");
+            .unwrap_or_else(|_| {
+                panic!("Should have transferred chunk at offset {}", offset)
+            });
+
+            offset = end_offset;
+        }
         let bundle = mgr
             .finalize(zpool_id, dataset_id, support_bundle_id, hash)
             .await
