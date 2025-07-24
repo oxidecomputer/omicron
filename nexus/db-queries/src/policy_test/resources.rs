@@ -78,6 +78,7 @@ pub async fn make_resources(
     builder.new_resource(authz::UPDATE_TRUST_ROOT_LIST);
     builder.new_resource(authz::TARGET_RELEASE_CONFIG);
     builder.new_resource(authz::ALERT_CLASS_LIST);
+    builder.new_resource(authz::AUDIT_LOG);
 
     // Silo/organization/project hierarchy
     make_silo(&mut builder, "silo1", main_silo_id, true).await;
