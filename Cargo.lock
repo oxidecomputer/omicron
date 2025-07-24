@@ -8176,16 +8176,18 @@ dependencies = [
  "clap",
  "dropshot",
  "futures",
+ "libc",
  "omicron-workspace-hack",
  "oxide-tokio-rt",
  "repo-depot-api",
  "serde_json",
+ "signal-hook-tokio",
  "slog",
  "slog-error-chain",
  "tokio",
- "tough",
+ "tokio-util",
  "tufaceous-artifact",
- "tufaceous-lib",
+ "update-common",
 ]
 
 [[package]]
