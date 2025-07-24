@@ -58,6 +58,9 @@ impl super::Nexus {
                 .headers()
                 .get("User-Agent")
                 .and_then(|value| value.to_str().ok())
+                // User agent is truncated for the DB because it can
+                // theoretically be very long, but almost never contains useful
+                // info past the beginning.
                 .map(|s| safe_truncate(s, 255).to_string()),
             actor.map(|a| a.actor_id()),
             actor.and_then(|a| a.silo_id()),

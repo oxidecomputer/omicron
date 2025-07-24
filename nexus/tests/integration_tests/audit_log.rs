@@ -44,7 +44,6 @@ async fn test_audit_log_list(ctx: &ControlPlaneTestContext) {
     let client = &ctx.external_client;
 
     let t0: DateTime<Utc> = "2024-01-01T00:00:00Z".parse().unwrap();
-    // let t_future: DateTime<Utc> = "2099-01-01T00:00:00Z".parse().unwrap();
 
     let audit_log = fetch_log(client, t0, None).await;
     assert_eq!(audit_log.items.len(), 0);
@@ -59,15 +58,14 @@ async fn test_audit_log_list(ctx: &ControlPlaneTestContext) {
     let audit_log = fetch_log(client, t0, None).await;
     assert_eq!(audit_log.items.len(), 1);
 
-    // we have to do this rigmarole for this request in order to get the
-    // user agent header in there and to use a session cookie to test the
-    // access_method field
-
     // this this creates its own entry
     let session_cookie = create_console_session(ctx).await;
 
     let t3 = Utc::now(); // after second entry
 
+    // we have to do this rigmarole instead of using create_project in order to
+    // get the user agent header in there and to use a session cookie to test
+    // the access_method field
     let body = &params::ProjectCreate {
         identity: IdentityMetadataCreateParams {
             name: "test-proj2".parse().unwrap(),

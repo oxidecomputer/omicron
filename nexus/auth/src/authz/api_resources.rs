@@ -465,8 +465,8 @@ impl AuthorizedResource for AuditLog {
         roleset: &'fut mut RoleSet,
     ) -> futures::future::BoxFuture<'fut, Result<(), Error>> {
         // There are no roles on the AuditLog, only permissions. But we still
-        // need to load the Fleet-related roles to verify that the actor's role
-        // on the Fleet (possibly conferred from a Silo role).
+        // need to load the Fleet-related roles to verify that the actor has the
+        // viewer role on the Fleet (possibly conferred from a Silo role).
         load_roles_for_resource_tree(&FLEET, opctx, authn, roleset).boxed()
     }
 
