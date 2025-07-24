@@ -424,10 +424,7 @@ mod tests {
         // `by_id` should contain one entry for every `KnownArtifactKind`
         // (except `Zone`)...
         let mut expected_kinds: BTreeSet<_> = KnownArtifactKind::iter()
-            .filter(|k| {
-                !matches!(k, KnownArtifactKind::Zone)
-                    && !matches!(k, KnownArtifactKind::MeasurementCorpus)
-            })
+            .filter(|k| !matches!(k, KnownArtifactKind::Zone))
             .map(ArtifactKind::from)
             .collect();
         assert_eq!(

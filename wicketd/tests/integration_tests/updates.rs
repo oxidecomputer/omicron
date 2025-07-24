@@ -97,10 +97,7 @@ async fn test_updates() {
     // We should have an artifact for every known artifact kind (except
     // `Zone`)...
     let expected_kinds: BTreeSet<_> = KnownArtifactKind::iter()
-        .filter(|k| {
-            !matches!(k, KnownArtifactKind::Zone)
-                && !matches!(k, KnownArtifactKind::MeasurementCorpus)
-        })
+        .filter(|k| !matches!(k, KnownArtifactKind::Zone))
         .map(ArtifactKind::from)
         .collect();
 

@@ -8192,7 +8192,9 @@ impl NexusExternalApi for NexusExternalApiImpl {
             Ok(HttpResponseOk(ResultsPage::new(
                 alert_classes,
                 &EmptyScanParams {},
-                |class: &views::AlertClass, _| class.name.clone(),
+                |class: &views::AlertClass, _| params::AlertClassPage {
+                    last_seen: class.name.clone(),
+                },
             )?))
         };
         apictx
