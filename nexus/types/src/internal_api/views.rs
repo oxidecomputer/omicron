@@ -397,7 +397,9 @@ impl Display for MgsUpdateDriverStatusDisplay<'_> {
             // Ignore units smaller than a millisecond.
             let elapsed = Duration::from_millis(
                 u64::try_from(
-                    (status.time_started - Utc::now()).num_milliseconds(),
+                    Utc::now()
+                        .signed_duration_since(status.time_started)
+                        .num_milliseconds(),
                 )
                 .unwrap_or(0),
             );
