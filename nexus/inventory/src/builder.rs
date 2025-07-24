@@ -669,6 +669,45 @@ impl CollectionBuilder {
                 "Internal DNS server reported generation status multiple times",
             )
     }
+
+    /// Returns all zones of a kind from the ledgers of observed sleds
+    pub fn ledgered_zones_of_kind(
+        &self,
+        kind: nexus_sled_agent_shared::inventory::ZoneKind,
+    ) -> impl Iterator<
+        Item = &nexus_sled_agent_shared::inventory::OmicronZoneConfig,
+    > + '_ {
+        self.sleds.iter().flat_map(move |sled| {
+            sled.ledgered_sled_config.as_ref().into_iter().flat_map(
+                move |sled_config| {
+                    sled_config.zones.iter().filter(move |zone_config| {
+                        zone_config.zone_type.kind() == kind
+                    })
+                },
+            )
+        })
+    }
+
+    /// Returns zones from the last reconciled ledger of observed sleds
+    ///
+    /// Does not actually consider whether or not the zone was successfully
+    /// created by the sled reconciliation process
+    pub fn last_reconciled_zones_of_kind(
+        &self,
+        kind: nexus_sled_agent_shared::inventory::ZoneKind,
+    ) -> impl Iterator<
+        Item = &nexus_sled_agent_shared::inventory::OmicronZoneConfig,
+    > + '_ {
+        self.sleds.iter().flat_map(move |sled| {
+            sled.last_reconciliation.as_ref().into_iter().flat_map(
+                move |sled_config| {
+                    sled_config.last_reconciled_config.zones.iter().filter(
+                        move |zone_config| zone_config.zone_type.kind() == kind,
+                    )
+                },
+            )
+        })
+    }
 }
 
 /// Returns the current time, truncated to the previous microsecond.

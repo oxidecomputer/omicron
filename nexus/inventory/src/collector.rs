@@ -12,17 +12,22 @@ use gateway_client::types::GetCfpaParams;
 use gateway_client::types::RotCfpaSlot;
 use gateway_client::types::SpType;
 use gateway_messages::SpComponent;
+use itertools::Itertools;
+use nexus_sled_agent_shared::inventory::OmicronZoneType;
+use nexus_sled_agent_shared::inventory::ZoneKind;
 use nexus_types::inventory::CabooseWhich;
 use nexus_types::inventory::Collection;
 use nexus_types::inventory::InternalDnsGenerationStatus;
 use nexus_types::inventory::RotPage;
 use nexus_types::inventory::RotPageWhich;
 use omicron_cockroach_metrics::CockroachClusterAdminClient;
+use omicron_common::address::NTP_ADMIN_PORT;
 use omicron_common::disk::M2Slot;
 use omicron_uuid_kinds::OmicronZoneUuid;
 use slog::Logger;
 use slog::o;
 use slog::{debug, error};
+use std::net::SocketAddrV6;
 use std::time::Duration;
 use strum::IntoEnumIterator;
 use tufaceous_artifact::ArtifactHash;
@@ -36,21 +41,16 @@ pub struct Collector<'a> {
     mgs_clients: Vec<gateway_client::Client>,
     keeper_admin_clients: Vec<clickhouse_admin_keeper_client::Client>,
     cockroach_admin_client: &'a CockroachClusterAdminClient,
-    ntp_admin_clients: Vec<(OmicronZoneUuid, ntp_admin_client::Client)>,
-    dns_service_clients: Vec<(OmicronZoneUuid, dns_service_client::Client)>,
     sled_agent_lister: &'a (dyn SledAgentEnumerator + Send + Sync),
     in_progress: CollectionBuilder,
 }
 
 impl<'a> Collector<'a> {
-    #[allow(clippy::too_many_arguments)]
     pub fn new(
         creator: &str,
         mgs_clients: Vec<gateway_client::Client>,
         keeper_admin_clients: Vec<clickhouse_admin_keeper_client::Client>,
         cockroach_admin_client: &'a CockroachClusterAdminClient,
-        ntp_admin_clients: Vec<(OmicronZoneUuid, ntp_admin_client::Client)>,
-        dns_service_clients: Vec<(OmicronZoneUuid, dns_service_client::Client)>,
         sled_agent_lister: &'a (dyn SledAgentEnumerator + Send + Sync),
         log: slog::Logger,
     ) -> Self {
@@ -59,8 +59,6 @@ impl<'a> Collector<'a> {
             mgs_clients,
             keeper_admin_clients,
             cockroach_admin_client,
-            ntp_admin_clients,
-            dns_service_clients,
             sled_agent_lister,
             in_progress: CollectionBuilder::new(creator),
         }
@@ -85,13 +83,12 @@ impl<'a> Collector<'a> {
 
         self.collect_all_mgs().await;
         self.collect_all_sled_agents().await;
-        self.collect_all_timesync().await;
         self.collect_all_keepers().await;
         self.collect_all_cockroach().await;
 
-        // TODO(https://github.com/oxidecomputer/omicron/issues/8546): Collect
-        // NTP timesync statuses
-
+        // The following must be called after "collect_all_sled_agents",
+        // or they'll see an empty set of services.
+        self.collect_all_timesync().await;
         self.collect_all_dns_generations().await;
 
         debug!(&self.log, "finished collection");
@@ -441,11 +438,39 @@ impl<'a> Collector<'a> {
 
     /// Collect timesync status from all sleds
     async fn collect_all_timesync(&mut self) {
-        for (zone_id, client) in &self.ntp_admin_clients {
+        let ntp_admin_clients: Vec<_> = self
+            .in_progress
+            .ledgered_zones_of_kind(ZoneKind::InternalNtp)
+            .chain(
+                self.in_progress.ledgered_zones_of_kind(ZoneKind::BoundaryNtp),
+            )
+            // Also observe (and "union") the results from the reconciler, just
+            // in case it's lagging behind the last stored ledger. If these
+            // services are still up, we'll try to contact them.
+            .chain(
+                self.in_progress
+                    .last_reconciled_zones_of_kind(ZoneKind::BoundaryNtp),
+            )
+            .chain(
+                self.in_progress
+                    .last_reconciled_zones_of_kind(ZoneKind::InternalNtp),
+            )
+            .unique_by(|z| z.id)
+            .map(|cfg| {
+                let ip = cfg.zone_type.underlay_ip();
+                let addr = SocketAddrV6::new(ip, NTP_ADMIN_PORT, 0, 0);
+                let url = format!("http://{addr}");
+                let log = self.log.new(o!("ntp_admin_url" => url.clone()));
+
+                (cfg.id, ntp_admin_client::Client::new(&url, log))
+            })
+            .collect();
+
+        for (zone_id, client) in ntp_admin_clients {
             if let Err(err) = Self::collect_one_timesync(
                 &self.log,
-                *zone_id,
-                client,
+                zone_id,
+                &client,
                 &mut self.in_progress,
             )
             .await
@@ -561,12 +586,37 @@ impl<'a> Collector<'a> {
     /// Collect DNS generation status from all internal DNS servers
     async fn collect_all_dns_generations(&mut self) {
         debug!(&self.log, "begin collection from internal DNS servers");
+        let internal_dns_clients: Vec<_> = self
+            .in_progress
+            .ledgered_zones_of_kind(ZoneKind::InternalDns)
+            // Also observe (and "union") the results from the reconciler, just
+            // in case it's lagging behind the last stored ledger. If these
+            // services are still up, we'll try to contact them.
+            .chain(
+                self.in_progress
+                    .last_reconciled_zones_of_kind(ZoneKind::InternalDns),
+            )
+            .unique_by(|z| z.id)
+            .map(|cfg| {
+                let OmicronZoneType::InternalDns { http_address, .. } =
+                    cfg.zone_type
+                else {
+                    // Panic safety: This would be a bug in "ledgered_zones_of_kind";
+                    // we just asked for Internal DNS zones exclusively.
+                    panic!("Unexpected zone type returned");
+                };
+                let url = format!("http://{http_address}");
+                let log = self.log.new(o!("internal_dns_url" => url.clone()));
 
-        for (zone_id, client) in &self.dns_service_clients {
+                (cfg.id, dns_service_client::Client::new(&url, log))
+            })
+            .collect();
+
+        for (zone_id, client) in internal_dns_clients {
             if let Err(err) = Self::collect_one_dns_generation(
                 &self.log,
-                *zone_id,
-                client,
+                zone_id,
+                &client,
                 &mut self.in_progress,
             )
             .await
@@ -1006,8 +1056,6 @@ mod test {
         // We don't have any mocks for this, and it's unclear how much value
         // there would be in providing them at this juncture.
         let keeper_clients = Vec::new();
-        let ntp_clients = Vec::new();
-        let dns_clients = Vec::new();
         // Configure the mock server as a backend for the CockroachDB client
         let timeout = Duration::from_secs(15);
         let crdb_cluster =
@@ -1019,8 +1067,6 @@ mod test {
             vec![mgs_client],
             keeper_clients,
             &crdb_cluster,
-            ntp_clients,
-            dns_clients,
             &sled_enum,
             log.clone(),
         );
@@ -1093,8 +1139,6 @@ mod test {
         // We don't have any mocks for this, and it's unclear how much value
         // there would be in providing them at this juncture.
         let keeper_clients = Vec::new();
-        let ntp_clients = Vec::new();
-        let dns_clients = Vec::new();
         let timeout = Duration::from_secs(15);
         let crdb_cluster =
             CockroachClusterAdminClient::new(log.clone(), timeout);
@@ -1105,8 +1149,6 @@ mod test {
             mgs_clients,
             keeper_clients,
             &crdb_cluster,
-            ntp_clients,
-            dns_clients,
             &sled_enum,
             log.clone(),
         );
@@ -1150,8 +1192,6 @@ mod test {
         // We don't have any mocks for this, and it's unclear how much value
         // there would be in providing them at this juncture.
         let keeper_clients = Vec::new();
-        let ntp_clients = Vec::new();
-        let dns_clients = Vec::new();
         let timeout = Duration::from_secs(15);
         let crdb_cluster =
             CockroachClusterAdminClient::new(log.clone(), timeout);
@@ -1162,8 +1202,6 @@ mod test {
             mgs_clients,
             keeper_clients,
             &crdb_cluster,
-            ntp_clients,
-            dns_clients,
             &sled_enum,
             log.clone(),
         );
@@ -1212,8 +1250,6 @@ mod test {
         // We don't have any mocks for this, and it's unclear how much value
         // there would be in providing them at this juncture.
         let keeper_clients = Vec::new();
-        let ntp_clients = Vec::new();
-        let dns_clients = Vec::new();
         let timeout = Duration::from_secs(15);
         let crdb_cluster =
             CockroachClusterAdminClient::new(log.clone(), timeout);
@@ -1224,8 +1260,6 @@ mod test {
             vec![mgs_client],
             keeper_clients,
             &crdb_cluster,
-            ntp_clients,
-            dns_clients,
             &sled_enum,
             log.clone(),
         );
