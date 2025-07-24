@@ -241,6 +241,27 @@ async fn inventory_activate(
 
     cockroach_admin_client.update_backends(admin_addresses.as_slice()).await;
 
+    // Find internal DNS servers if there are any.
+    let internal_dns_zone_addrs = match resolver
+        .lookup_all_socket_and_zone_v6(ServiceName::InternalDns)
+        .await
+    {
+        Ok(addrs) => addrs,
+        Err(err) if err.is_not_found() => vec![],
+        Err(err) => {
+            return Err(err).context("looking up internal DNS addresses");
+        }
+    };
+
+    let dns_service_clients = internal_dns_zone_addrs
+        .into_iter()
+        .map(|(zone_uuid, addr)| {
+            let url = format!("http://{}", addr);
+            let log = opctx.log.new(o!("dns_service_url" => url.clone()));
+            (zone_uuid, dns_service_client::Client::new(&url, log))
+        })
+        .collect();
+
     // Create an enumerator to find sled agents.
     let sled_enum = DbSledAgentEnumerator { opctx, datastore };
 
@@ -251,6 +272,7 @@ async fn inventory_activate(
         keeper_admin_clients,
         cockroach_admin_client,
         ntp_admin_clients,
+        dns_service_clients,
         &sled_enum,
         opctx.log.clone(),
     );

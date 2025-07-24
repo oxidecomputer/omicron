@@ -14,6 +14,7 @@ use gateway_client::types::SpType;
 use gateway_messages::SpComponent;
 use nexus_types::inventory::CabooseWhich;
 use nexus_types::inventory::Collection;
+use nexus_types::inventory::InternalDnsGenerationStatus;
 use nexus_types::inventory::RotPage;
 use nexus_types::inventory::RotPageWhich;
 use omicron_cockroach_metrics::CockroachClusterAdminClient;
@@ -36,17 +37,20 @@ pub struct Collector<'a> {
     keeper_admin_clients: Vec<clickhouse_admin_keeper_client::Client>,
     cockroach_admin_client: &'a CockroachClusterAdminClient,
     ntp_admin_clients: Vec<(OmicronZoneUuid, ntp_admin_client::Client)>,
+    dns_service_clients: Vec<(OmicronZoneUuid, dns_service_client::Client)>,
     sled_agent_lister: &'a (dyn SledAgentEnumerator + Send + Sync),
     in_progress: CollectionBuilder,
 }
 
 impl<'a> Collector<'a> {
+    #[allow(clippy::too_many_arguments)]
     pub fn new(
         creator: &str,
         mgs_clients: Vec<gateway_client::Client>,
         keeper_admin_clients: Vec<clickhouse_admin_keeper_client::Client>,
         cockroach_admin_client: &'a CockroachClusterAdminClient,
         ntp_admin_clients: Vec<(OmicronZoneUuid, ntp_admin_client::Client)>,
+        dns_service_clients: Vec<(OmicronZoneUuid, dns_service_client::Client)>,
         sled_agent_lister: &'a (dyn SledAgentEnumerator + Send + Sync),
         log: slog::Logger,
     ) -> Self {
@@ -56,6 +60,7 @@ impl<'a> Collector<'a> {
             keeper_admin_clients,
             cockroach_admin_client,
             ntp_admin_clients,
+            dns_service_clients,
             sled_agent_lister,
             in_progress: CollectionBuilder::new(creator),
         }
@@ -87,8 +92,7 @@ impl<'a> Collector<'a> {
         // TODO(https://github.com/oxidecomputer/omicron/issues/8546): Collect
         // NTP timesync statuses
 
-        // TODO(https://github.com/oxidecomputer/omicron/issues/8544): Collect
-        // DNS generations
+        self.collect_all_dns_generations().await;
 
         debug!(&self.log, "finished collection");
 
@@ -553,6 +557,57 @@ impl<'a> Collector<'a> {
             self.in_progress.found_cockroach_metrics(node_id, metrics);
         }
     }
+
+    /// Collect DNS generation status from all internal DNS servers
+    async fn collect_all_dns_generations(&mut self) {
+        debug!(&self.log, "begin collection from internal DNS servers");
+
+        for (zone_id, client) in &self.dns_service_clients {
+            if let Err(err) = Self::collect_one_dns_generation(
+                &self.log,
+                *zone_id,
+                client,
+                &mut self.in_progress,
+            )
+            .await
+            {
+                error!(
+                    &self.log,
+                    "DNS generation collection error";
+                    "zone_id" => ?zone_id,
+                    "error" => ?err,
+                );
+            }
+        }
+
+        debug!(&self.log, "finished collection from internal DNS servers");
+    }
+
+    async fn collect_one_dns_generation(
+        log: &slog::Logger,
+        zone_id: OmicronZoneUuid,
+        client: &dns_service_client::Client,
+        in_progress: &mut CollectionBuilder,
+    ) -> Result<(), anyhow::Error> {
+        debug!(&log, "begin collection from DNS server";
+            "zone_id" => ?zone_id
+        );
+
+        let config = client.dns_config_get().await.with_context(|| {
+            format!("DNS server {:?}: dns_config_get", client.baseurl())
+        })?;
+
+        let generation_status = InternalDnsGenerationStatus {
+            zone_id,
+            generation: config.into_inner().generation,
+        };
+
+        in_progress.found_internal_dns_generation_status(generation_status)?;
+
+        debug!(&log, "finished collection from DNS server"; "zone_id" => ?zone_id);
+
+        Ok(())
+    }
 }
 
 #[cfg(test)]
@@ -952,6 +1007,7 @@ mod test {
         // there would be in providing them at this juncture.
         let keeper_clients = Vec::new();
         let ntp_clients = Vec::new();
+        let dns_clients = Vec::new();
         // Configure the mock server as a backend for the CockroachDB client
         let timeout = Duration::from_secs(15);
         let crdb_cluster =
@@ -964,6 +1020,7 @@ mod test {
             keeper_clients,
             &crdb_cluster,
             ntp_clients,
+            dns_clients,
             &sled_enum,
             log.clone(),
         );
@@ -1037,6 +1094,7 @@ mod test {
         // there would be in providing them at this juncture.
         let keeper_clients = Vec::new();
         let ntp_clients = Vec::new();
+        let dns_clients = Vec::new();
         let timeout = Duration::from_secs(15);
         let crdb_cluster =
             CockroachClusterAdminClient::new(log.clone(), timeout);
@@ -1048,6 +1106,7 @@ mod test {
             keeper_clients,
             &crdb_cluster,
             ntp_clients,
+            dns_clients,
             &sled_enum,
             log.clone(),
         );
@@ -1092,6 +1151,7 @@ mod test {
         // there would be in providing them at this juncture.
         let keeper_clients = Vec::new();
         let ntp_clients = Vec::new();
+        let dns_clients = Vec::new();
         let timeout = Duration::from_secs(15);
         let crdb_cluster =
             CockroachClusterAdminClient::new(log.clone(), timeout);
@@ -1103,6 +1163,7 @@ mod test {
             keeper_clients,
             &crdb_cluster,
             ntp_clients,
+            dns_clients,
             &sled_enum,
             log.clone(),
         );
@@ -1152,6 +1213,7 @@ mod test {
         // there would be in providing them at this juncture.
         let keeper_clients = Vec::new();
         let ntp_clients = Vec::new();
+        let dns_clients = Vec::new();
         let timeout = Duration::from_secs(15);
         let crdb_cluster =
             CockroachClusterAdminClient::new(log.clone(), timeout);
@@ -1163,6 +1225,7 @@ mod test {
             keeper_clients,
             &crdb_cluster,
             ntp_clients,
+            dns_clients,
             &sled_enum,
             log.clone(),
         );

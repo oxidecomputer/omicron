@@ -6485,6 +6485,7 @@ dependencies = [
  "clickhouse-admin-keeper-client",
  "clickhouse-admin-server-client",
  "clickhouse-admin-types",
+ "dns-service-client",
  "expectorate",
  "futures",
  "gateway-client",
