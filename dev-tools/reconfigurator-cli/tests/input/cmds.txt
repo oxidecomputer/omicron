@@ -13,6 +13,18 @@ sled-add 90c1102a-b9f5-4d88-92a2-60d54a2d98cc
 sled-add 04ef3330-c682-4a08-8def-fcc4bef31bcd --policy non-provisionable
 sled-list
 
+sled-update-rot dde1c0e2-b10d-4621-b420-f179f7a7a00a
+sled-update-rot dde1c0e2-b10d-4621-b420-f179f7a7a00a --slot-a 1.0.0
+sled-show dde1c0e2-b10d-4621-b420-f179f7a7a00a
+sled-update-rot dde1c0e2-b10d-4621-b420-f179f7a7a00a --slot-b 2.0.0
+sled-show dde1c0e2-b10d-4621-b420-f179f7a7a00a
+sled-update-rot dde1c0e2-b10d-4621-b420-f179f7a7a00a --slot-a 3.0.0
+sled-show dde1c0e2-b10d-4621-b420-f179f7a7a00a
+sled-update-rot dde1c0e2-b10d-4621-b420-f179f7a7a00a --slot-a 4.0.0 --slot-b invalid
+sled-show dde1c0e2-b10d-4621-b420-f179f7a7a00a
+sled-update-rot dde1c0e2-b10d-4621-b420-f179f7a7a00a --slot-a 4.0.0 --slot-b 5.0.0
+sled-show dde1c0e2-b10d-4621-b420-f179f7a7a00a
+
 sled-update-sp dde1c0e2-b10d-4621-b420-f179f7a7a00a
 sled-update-sp dde1c0e2-b10d-4621-b420-f179f7a7a00a --active 1.0.0
 sled-show dde1c0e2-b10d-4621-b420-f179f7a7a00a

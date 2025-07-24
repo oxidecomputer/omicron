@@ -1,4 +1,11 @@
 error: the following required arguments were not provided:
+  --slot-a <SLOT_A>
+  --slot-b <SLOT_B>
+
+Usage: sled-update-rot --slot-a <SLOT_A> --slot-b <SLOT_B> <SLED_ID>
+
+For more information, try '--help'.
+error: the following required arguments were not provided:
   --active <ACTIVE>
   --inactive <INACTIVE>
 
