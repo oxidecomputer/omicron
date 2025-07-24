@@ -525,7 +525,8 @@ fn try_make_update_rot_bootloader(
                     | KnownArtifactKind::SwitchRot
                     | KnownArtifactKind::GimletSp
                     | KnownArtifactKind::PscSp
-                    | KnownArtifactKind::SwitchSp,
+                    | KnownArtifactKind::SwitchSp
+                    | KnownArtifactKind::MeasurementCorpus,
                 ) => false,
             }
 
