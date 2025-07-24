@@ -1577,7 +1577,8 @@ impl slog::KV for PendingMgsUpdateHostPhase1Details {
 #[serde(rename_all = "snake_case")]
 pub struct ExpectedActiveHostOsSlot {
     // TODO-john comments
-    pub slot: M2Slot,
+    pub phase_1_slot: M2Slot,
+    pub boot_disk: M2Slot,
     pub phase_1: ArtifactHash,
     pub phase_2: ArtifactHash,
 }
@@ -1588,8 +1589,13 @@ impl slog::KV for ExpectedActiveHostOsSlot {
         _record: &slog::Record,
         serializer: &mut dyn slog::Serializer,
     ) -> slog::Result {
-        let Self { slot, phase_1, phase_2 } = self;
-        serializer.emit_str(Key::from("active_slot"), &format!("{slot:?}"))?;
+        let Self { phase_1_slot, boot_disk, phase_1, phase_2 } = self;
+        serializer.emit_str(
+            Key::from("active_phase_1_slot"),
+            &format!("{phase_1_slot:?}"),
+        )?;
+        serializer
+            .emit_str(Key::from("boot_disk"), &format!("{boot_disk:?}"))?;
         serializer.emit_str(
             Key::from("active_phase_1_artifact"),
             &phase_1.to_string(),
