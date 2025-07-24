@@ -1425,6 +1425,55 @@ impl ServiceManager {
             .install()
             .await?;
 
+        let running_zone = match &request {
+            ZoneArgs::Omicron(config) => {
+                self.boot_omicron_zone(config, installed_zone).await?
+            }
+            ZoneArgs::Switch(config) => {
+                self.boot_switch_zone(
+                    config,
+                    installed_zone,
+                    &links_need_link_local,
+                    bootstrap_name_and_address,
+                    &device_names,
+                )
+                .await?
+            }
+        };
+
+        // Now that we've booted the zone, we'll notify the sled-agent about:
+        //
+        // - Its control VNIC (all zones have one)
+        // - Any bootstrap network VNIC (only the switch zone has one)
+        // - Any OPTE ports (instance zones, or Oxide zones with external
+        // connectivity).
+        //
+        // Note that we'll almost always have started the sled-agent at this
+        // point. The only exception is the switch zone, during bootstrapping
+        // but before we've either run RSS or unlocked the rack. In both those
+        // cases, we have a `StartSledAgentRequest`, and so a metrics queue.
+        if let Some(queue) = self.maybe_metrics_queue() {
+            match queue.track_zone_links(&running_zone) {
+                Ok(_) => debug!(self.inner.log, "Tracking zone datalinks"),
+                Err(errors) => {
+                    error!(
+                        self.inner.log,
+                        "Failed to track one or more links in the zone, \
+                        some metrics will not be produced";
+                        "zone_name" => running_zone.name(),
+                        "errors" => ?errors,
+                    );
+                }
+            }
+        }
+        Ok(running_zone)
+    }
+
+    async fn boot_omicron_zone(
+        &self,
+        config: &OmicronZoneConfig,
+        installed_zone: InstalledZone,
+    ) -> Result<RunningZone, Error> {
         let disabled_ssh_service = ServiceBuilder::new("network/ssh")
             .add_instance(ServiceInstanceBuilder::new("default").disable());
 
@@ -1436,11 +1485,11 @@ impl ServiceManager {
             ServiceBuilder::new("network/dns/client")
                 .add_instance(ServiceInstanceBuilder::new("default"));
 
-        let running_zone = match &request {
-            ZoneArgs::Omicron(OmicronZoneConfig {
+        let running_zone = match config {
+            OmicronZoneConfig {
                 zone_type: OmicronZoneType::Clickhouse { address, .. },
                 ..
-            }) => {
+            } => {
                 let Some(info) = self.inner.sled_info.get() else {
                     return Err(Error::SledAgentNotReady);
                 };
@@ -1522,10 +1571,10 @@ impl ServiceManager {
                 RunningZone::boot(installed_zone).await?
             }
 
-            ZoneArgs::Omicron(OmicronZoneConfig {
+            OmicronZoneConfig {
                 zone_type: OmicronZoneType::ClickhouseServer { address, .. },
                 ..
-            }) => {
+            } => {
                 let Some(info) = self.inner.sled_info.get() else {
                     return Err(Error::SledAgentNotReady);
                 };
@@ -1607,10 +1656,10 @@ impl ServiceManager {
                 RunningZone::boot(installed_zone).await?
             }
 
-            ZoneArgs::Omicron(OmicronZoneConfig {
+            OmicronZoneConfig {
                 zone_type: OmicronZoneType::ClickhouseKeeper { address, .. },
                 ..
-            }) => {
+            } => {
                 let Some(info) = self.inner.sled_info.get() else {
                     return Err(Error::SledAgentNotReady);
                 };
@@ -1685,11 +1734,11 @@ impl ServiceManager {
                 RunningZone::boot(installed_zone).await?
             }
 
-            ZoneArgs::Omicron(OmicronZoneConfig {
+            OmicronZoneConfig {
                 id: zone_id,
                 zone_type: OmicronZoneType::CockroachDb { address, .. },
                 ..
-            }) => {
+            } => {
                 let Some(info) = self.inner.sled_info.get() else {
                     return Err(Error::SledAgentNotReady);
                 };
@@ -1761,10 +1810,10 @@ impl ServiceManager {
                 RunningZone::boot(installed_zone).await?
             }
 
-            ZoneArgs::Omicron(OmicronZoneConfig {
+            OmicronZoneConfig {
                 zone_type: OmicronZoneType::Crucible { address, dataset },
                 ..
-            }) => {
+            } => {
                 let Some(info) = self.inner.sled_info.get() else {
                     return Err(Error::SledAgentNotReady);
                 };
@@ -1814,10 +1863,10 @@ impl ServiceManager {
                 RunningZone::boot(installed_zone).await?
             }
 
-            ZoneArgs::Omicron(OmicronZoneConfig {
+            OmicronZoneConfig {
                 zone_type: OmicronZoneType::CruciblePantry { address },
                 ..
-            }) => {
+            } => {
                 let Some(info) = self.inner.sled_info.get() else {
                     return Err(Error::SledAgentNotReady);
                 };
@@ -1857,11 +1906,11 @@ impl ServiceManager {
                     .map_err(|err| Error::io("crucible pantry profile", err))?;
                 RunningZone::boot(installed_zone).await?
             }
-            ZoneArgs::Omicron(OmicronZoneConfig {
+            OmicronZoneConfig {
                 id,
                 zone_type: OmicronZoneType::Oximeter { address },
                 ..
-            }) => {
+            } => {
                 let Some(info) = self.inner.sled_info.get() else {
                     return Err(Error::SledAgentNotReady);
                 };
@@ -1894,7 +1943,7 @@ impl ServiceManager {
                     })?;
                 RunningZone::boot(installed_zone).await?
             }
-            ZoneArgs::Omicron(OmicronZoneConfig {
+            OmicronZoneConfig {
                 zone_type:
                     OmicronZoneType::ExternalDns {
                         http_address,
@@ -1903,7 +1952,7 @@ impl ServiceManager {
                         ..
                     },
                 ..
-            }) => {
+            } => {
                 let Some(info) = self.inner.sled_info.get() else {
                     return Err(Error::SledAgentNotReady);
                 };
@@ -1953,7 +2002,7 @@ impl ServiceManager {
                     })?;
                 RunningZone::boot(installed_zone).await?
             }
-            ZoneArgs::Omicron(OmicronZoneConfig {
+            OmicronZoneConfig {
                 zone_type:
                     OmicronZoneType::BoundaryNtp {
                         address,
@@ -1963,7 +2012,7 @@ impl ServiceManager {
                         ..
                     },
                 ..
-            }) => {
+            } => {
                 let Some(info) = self.inner.sled_info.get() else {
                     return Err(Error::SledAgentNotReady);
                 };
@@ -2057,10 +2106,10 @@ impl ServiceManager {
 
                 RunningZone::boot(installed_zone).await?
             }
-            ZoneArgs::Omicron(OmicronZoneConfig {
+            OmicronZoneConfig {
                 zone_type: OmicronZoneType::InternalNtp { address },
                 ..
-            }) => {
+            } => {
                 let Some(info) = self.inner.sled_info.get() else {
                     return Err(Error::SledAgentNotReady);
                 };
@@ -2134,7 +2183,7 @@ impl ServiceManager {
 
                 RunningZone::boot(installed_zone).await?
             }
-            ZoneArgs::Omicron(OmicronZoneConfig {
+            OmicronZoneConfig {
                 zone_type:
                     OmicronZoneType::InternalDns {
                         http_address,
@@ -2144,7 +2193,7 @@ impl ServiceManager {
                         ..
                     },
                 ..
-            }) => {
+            } => {
                 let underlay_ips = if http_address.ip() == dns_address.ip() {
                     vec![*http_address.ip()]
                 } else {
@@ -2225,7 +2274,7 @@ impl ServiceManager {
                     })?;
                 RunningZone::boot(installed_zone).await?
             }
-            ZoneArgs::Omicron(OmicronZoneConfig {
+            OmicronZoneConfig {
                 zone_type:
                     OmicronZoneType::Nexus {
                         internal_address,
@@ -2235,7 +2284,7 @@ impl ServiceManager {
                     },
                 id,
                 ..
-            }) => {
+            } => {
                 let Some(info) = self.inner.sled_info.get() else {
                     return Err(Error::SledAgentNotReady);
                 };
@@ -2369,7 +2418,29 @@ impl ServiceManager {
                     })?;
                 RunningZone::boot(installed_zone).await?
             }
-            ZoneArgs::Switch(SwitchZoneConfig { id, services, addresses }) => {
+        };
+
+        Ok(running_zone)
+    }
+
+    async fn boot_switch_zone(
+        &self,
+        config: &SwitchZoneConfig,
+        installed_zone: InstalledZone,
+        links_need_link_local: &[bool],
+        bootstrap_name_and_address: Option<(String, Ipv6Addr)>,
+        device_names: &[String],
+    ) -> Result<RunningZone, Error> {
+        // Temporary double-indent to avoid breaking blame.
+        {
+            {
+                let SwitchZoneConfig { id, services, addresses } = config;
+
+                let disabled_dns_client_service = ServiceBuilder::new(
+                    "network/dns/client",
+                )
+                .add_instance(ServiceInstanceBuilder::new("default").disable());
+
                 let info = self.inner.sled_info.get();
 
                 let gw_addr = match info {
@@ -2420,7 +2491,7 @@ impl ServiceManager {
                 for (link, needs_link_local) in
                     installed_zone.links().iter().zip(links_need_link_local)
                 {
-                    if needs_link_local {
+                    if *needs_link_local {
                         switch_zone_setup_config = switch_zone_setup_config
                             .add_property(
                                 "link_local_links",
@@ -3081,36 +3152,9 @@ impl ServiceManager {
                     .map_err(|err| {
                         Error::io("Failed to setup Switch zone profile", err)
                     })?;
-                RunningZone::boot(installed_zone).await?
-            }
-        };
-
-        // Now that we've booted the zone, we'll notify the sled-agent about:
-        //
-        // - Its control VNIC (all zones have one)
-        // - Any bootstrap network VNIC (only the switch zone has one)
-        // - Any OPTE ports (instance zones, or Oxide zones with external
-        // connectivity).
-        //
-        // Note that we'll almost always have started the sled-agent at this
-        // point. The only exception is the switch zone, during bootstrapping
-        // but before we've either run RSS or unlocked the rack. In both those
-        // cases, we have a `StartSledAgentRequest`, and so a metrics queue.
-        if let Some(queue) = self.maybe_metrics_queue() {
-            match queue.track_zone_links(&running_zone) {
-                Ok(_) => debug!(self.inner.log, "Tracking zone datalinks"),
-                Err(errors) => {
-                    error!(
-                        self.inner.log,
-                        "Failed to track one or more links in the zone, \
-                        some metrics will not be produced";
-                        "zone_name" => running_zone.name(),
-                        "errors" => ?errors,
-                    );
-                }
+                Ok(RunningZone::boot(installed_zone).await?)
             }
         }
-        Ok(running_zone)
     }
 
     // Attempt to start a single Omicron zone.
