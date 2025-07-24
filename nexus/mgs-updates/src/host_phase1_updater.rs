@@ -354,7 +354,31 @@ impl ReconfiguratorHostPhase1Updater {
             sled_agent_address: _,
         } = &self.details;
 
-        // Confirm the currently-active slot matches what we expect.
+        // Fetch the active phase 1 slot's current phase 1.
+        let expected_active_artifact = expected_active_slot.phase_1;
+        let expected_inactive_artifact = expected_inactive_artifact.phase_1;
+        let found_active_artifact = self
+            .precheck_fetch_phase_1(
+                mgs_clients,
+                target_sp,
+                expected_active_slot.phase_1_slot.to_mgs_firmware_slot(),
+                expected_active_artifact,
+                log,
+            )
+            .await?;
+        debug!(
+            log, "found active phase 1 slot artifact";
+            "hash" => %found_active_artifact,
+        );
+
+        // If the version in the currently-active slot matches the one we're
+        // trying to set, then there's nothing to do.
+        if found_active_artifact == update.artifact_hash {
+            return Ok(PrecheckStatus::UpdateComplete);
+        }
+
+        // Otherwise, confirm the currently-active slot matches what we
+        // expect...
         {
             let expected_active_slot =
                 expected_active_slot.phase_1_slot.to_mgs_firmware_slot();
@@ -378,34 +402,11 @@ impl ReconfiguratorHostPhase1Updater {
             }
         }
 
-        // Fetch the active phase 1 slot's current phase 1.
-        let expected_active_artifact = expected_active_slot.phase_1;
-        let expected_inactive_artifact = expected_inactive_artifact.phase_1;
-        let found_active_artifact = self
-            .precheck_fetch_phase_1(
-                mgs_clients,
-                target_sp,
-                expected_active_slot.phase_1_slot.to_mgs_firmware_slot(),
-                expected_active_artifact,
-                log,
-            )
-            .await?;
-        debug!(
-            log, "found active phase 1 slot artifact";
-            "hash" => %found_active_artifact,
-        );
-
-        // If the version in the currently-active slot matches the one we're
-        // trying to set, then there's nothing to do.
-        if found_active_artifact == update.artifact_hash {
-            return Ok(PrecheckStatus::UpdateComplete);
-        }
-        // Otherwise, if the version in the currently active slot does not
-        // match what we expect to find, bail out.  It may be that somebody
-        // else has come along and completed a subsequent update and we
-        // don't want to roll that back.  (If for some reason we *do* want
-        // to do this update, the planner will have to notice that what's
-        // here is wrong and update the blueprint.)
+        // ... and that the version in the currently active slot matches what we
+        // expect to find.  It may be that somebody else has come along and
+        // completed a subsequent update and we don't want to roll that back.
+        // (If for some reason we *do* want to do this update, the planner will
+        // have to notice that what's here is wrong and update the blueprint.)
         if found_active_artifact != expected_active_artifact {
             return Err(PrecheckError::WrongActiveArtifact {
                 kind: ArtifactKind::HOST_PHASE_1,
