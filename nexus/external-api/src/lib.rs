@@ -3437,6 +3437,9 @@ pub trait NexusExternalApi {
 
     // Audit logging
 
+    // See datastore/audit_log.rs for a more detailed explanation of why we sort
+    // by time_completed.
+
     /// View audit log
     ///
     /// A single item in the audit log represents both the beginning and
@@ -3447,12 +3450,12 @@ pub trait NexusExternalApi {
     /// `id` that can be used to deduplicate items fetched from overlapping
     /// time intervals.
     ///
-    /// Note that entries are immutable and are ordered by `time_completed`,
-    /// not `time_started`, in order to ensure stable results. If you request
-    /// entries from `t0 <= time_completed < t1` and `t1` is in the past, you
-    /// can be confident that the resulting list is complete, i.e., requesting
-    /// the same range again later will always produce the same list. We do not
-    /// include items in the audit log response until they are marked completed.
+    /// Audit log entries are designed to be immutable: once you see an entry,
+    /// fetching it again will never get you a different result. The list is
+    /// ordered by `time_completed`, not `time_started`. If you fetch the audit
+    /// log for a time range that is fully in the past, the resulting list is
+    /// guaranteed to be complete, i.e., fetching the same timespan again later
+    /// will always produce the same set of entries.
     #[endpoint {
         method = GET,
         path = "/v1/system/audit-log",
