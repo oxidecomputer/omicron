@@ -36,6 +36,8 @@ INFO added artifact, name: internal-dns, kind: zone, version: 1.0.0, hash: ffbf1
 INFO added artifact, name: ntp, kind: zone, version: 1.0.0, hash: 67593d686ed04a1709f93972b71f4ebc148a9362120f65d239943e814a9a7439, length: 1681
 INFO added artifact, name: nexus, kind: zone, version: 1.0.0, hash: 0e32b4a3e5d3668bb1d6a16fb06b74dc60b973fa479dcee0aae3adbb52bf1388, length: 1682
 INFO added artifact, name: oximeter, kind: zone, version: 1.0.0, hash: 048d8fe8cdef5b175aad714d0f148aa80ce36c9114ac15ce9d02ed3d37877a77, length: 1682
+INFO added artifact, name: sp_corpus, kind: measurement_corpus, version: 1.0.0, hash: ac95be27f1d2ef747290b76b83a1e6b162f344451387477b04a0e74bc7be17a6, length: 11913
+INFO added artifact, name: rot_corpus, kind: measurement_corpus, version: 1.0.0, hash: 8a354560e17a992a46bc73a37556f0f9c090c570adaa85537ae5994b1986fd50, length: 11913
 INFO added artifact, name: fake-psc-sp, kind: psc_sp, version: 1.0.0, hash: f896cf5b19ca85864d470ad8587f980218bff3954e7f52bbd999699cd0f9635b, length: 744
 INFO added artifact, name: fake-psc-rot, kind: psc_rot_image_a, version: 1.0.0, hash: 179eb660ebc92e28b6748b6af03d9f998d6131319edd4654a1e948454c62551b, length: 750
 INFO added artifact, name: fake-psc-rot, kind: psc_rot_image_b, version: 1.0.0, hash: 179eb660ebc92e28b6748b6af03d9f998d6131319edd4654a1e948454c62551b, length: 750
@@ -182,6 +184,8 @@ LEDGERED SLED CONFIG
     slot A details UNAVAILABLE: constructed via debug_assume_success()
     slot B details UNAVAILABLE: constructed via debug_assume_success()
     last reconciled config: matches ledgered config
+    no information from NTP for this sled
+        error reading mupdate override, so sled agent didn't attempt to clear it
         no orphaned datasets
         all disks reconciled successfully
         all datasets reconciled successfully
@@ -288,6 +292,8 @@ LEDGERED SLED CONFIG
     slot A details UNAVAILABLE: constructed via debug_assume_success()
     slot B details UNAVAILABLE: constructed via debug_assume_success()
     last reconciled config: matches ledgered config
+    no information from NTP for this sled
+        mupdate override present, but sled agent was not instructed to clear it
         no orphaned datasets
         all disks reconciled successfully
         all datasets reconciled successfully
@@ -383,6 +389,8 @@ LEDGERED SLED CONFIG
     slot A details UNAVAILABLE: constructed via debug_assume_success()
     slot B details UNAVAILABLE: constructed via debug_assume_success()
     last reconciled config: matches ledgered config
+    no information from NTP for this sled
+        mupdate override present, but sled agent was not instructed to clear it
         no orphaned datasets
         all disks reconciled successfully
         all datasets reconciled successfully

@@ -49,11 +49,13 @@ use omicron_common::backoff::{
     BackoffError, retry_notify, retry_policy_internal_service_aggressive,
 };
 use omicron_ddm_admin_client::Client as DdmAdminClient;
-use omicron_uuid_kinds::{GenericUuid, PropolisUuid, SledUuid};
+use omicron_uuid_kinds::{
+    GenericUuid, MupdateOverrideUuid, PropolisUuid, SledUuid,
+};
 use sled_agent_config_reconciler::{
-    ConfigReconcilerHandle, ConfigReconcilerSpawnToken, InternalDisksReceiver,
-    LedgerNewConfigError, LedgerTaskError, ReconcilerInventory,
-    SledAgentArtifactStore, SledAgentFacilities,
+    ConfigReconcilerHandle, ConfigReconcilerSpawnToken, InternalDisks,
+    InternalDisksReceiver, LedgerNewConfigError, LedgerTaskError,
+    ReconcilerInventory, SledAgentArtifactStore, SledAgentFacilities,
 };
 use sled_agent_types::disk::DiskStateRequested;
 use sled_agent_types::early_networking::EarlyNetworkConfig;
@@ -66,7 +68,9 @@ use sled_agent_types::zone_bundle::{
     BundleUtilization, CleanupContext, CleanupCount, CleanupPeriod,
     PriorityOrder, StorageLimit, ZoneBundleCause, ZoneBundleMetadata,
 };
-use sled_agent_types::zone_images::ResolverStatus;
+use sled_agent_types::zone_images::{
+    ClearMupdateOverrideResult, ResolverStatus,
+};
 use sled_diagnostics::SledDiagnosticsCmdError;
 use sled_diagnostics::SledDiagnosticsCmdOutput;
 use sled_hardware::{HardwareManager, MemoryReservations, underlay};
@@ -721,6 +725,14 @@ impl SledAgent {
         self.sprockets.clone()
     }
 
+    pub async fn corpus(&self) -> Result<Vec<Utf8PathBuf>, AddSledError> {
+        crate::bootstrap::measurements::sled_new_measurement_paths(
+            &self.inner.config_reconciler.internal_disks_rx(),
+        )
+        .await
+        .map_err(AddSledError::MeasurementError)
+    }
+
     /// Trigger a request to Nexus informing it that the current sled exists,
     /// with information about the existing set of hardware.
     pub(crate) async fn notify_nexus_about_self(&self, log: &Logger) {
@@ -1204,12 +1216,15 @@ pub enum AddSledError {
         sled_id: Baseboard,
         err: crate::bootstrap::client::Error,
     },
+    #[error("Measurement error: {0}")]
+    MeasurementError(crate::bootstrap::measurements::MeasurementError),
 }
 
 /// Add a sled to an initialized rack.
 pub async fn sled_add(
     log: Logger,
     sprockets_config: SprocketsConfig,
+    corpus: Vec<Utf8PathBuf>,
     sled_id: BaseboardId,
     request: StartSledAgentRequest,
 ) -> Result<(), AddSledError> {
@@ -1270,6 +1285,7 @@ pub async fn sled_add(
     let client = crate::bootstrap::client::Client::new(
         bootstrap_addr,
         sprockets_config,
+        corpus,
         log.new(o!("BootstrapAgentClient" => bootstrap_addr.to_string())),
     );
 
@@ -1315,6 +1331,16 @@ impl SledAgentFacilities for ReconcilerFacilities {
 
     fn zone_image_resolver_status(&self) -> ResolverStatus {
         self.service_manager.zone_image_resolver().status()
+    }
+
+    fn clear_mupdate_override(
+        &self,
+        override_id: MupdateOverrideUuid,
+        internal_disks: &InternalDisks,
+    ) -> ClearMupdateOverrideResult {
+        self.service_manager
+            .zone_image_resolver()
+            .clear_mupdate_override(override_id, internal_disks)
     }
 
     fn metrics_untrack_zone_links(

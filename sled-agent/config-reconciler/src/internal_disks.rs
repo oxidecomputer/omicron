@@ -324,6 +324,14 @@ impl InternalDisks {
         })
     }
 
+    pub fn non_boot_disk_zpool_ids(
+        &self,
+    ) -> impl Iterator<Item = InternalZpoolUuid> + '_ {
+        self.disks
+            .iter()
+            .filter_map(|disk| (!disk.is_boot_disk()).then_some(disk.zpool_id))
+    }
+
     pub(crate) fn boot_image_raw_devfs_path(
         &self,
         slot: M2Slot,
@@ -335,6 +343,13 @@ impl InternalDisks {
                 None
             }
         })
+    }
+
+    /// Returns all `INSTALL_DATASET` paths within available M.2 disks.
+    pub fn all_install_datasets(
+        &self,
+    ) -> impl ExactSizeIterator<Item = Utf8PathBuf> + '_ {
+        self.all_datasets(INSTALL_DATASET)
     }
 
     /// Returns all `CONFIG_DATASET` paths within available M.2 disks.
@@ -412,6 +427,10 @@ impl InternalDisksWithBootDisk {
         }
     }
 
+    pub fn as_inner(&self) -> &InternalDisks {
+        &self.inner
+    }
+
     pub fn boot_disk_id(&self) -> &Arc<DiskIdentity> {
         &self.boot_disk().id.identity
     }
@@ -431,19 +450,22 @@ impl InternalDisksWithBootDisk {
         )
     }
 
+    pub fn non_boot_disk_zpool_ids(
+        &self,
+    ) -> impl Iterator<Item = InternalZpoolUuid> + '_ {
+        self.inner.non_boot_disk_zpool_ids()
+    }
+
     pub fn non_boot_disk_install_datasets(
         &self,
     ) -> impl Iterator<Item = (InternalZpoolUuid, Utf8PathBuf)> + '_ {
-        self.inner.disks.iter().filter(|disk| disk.id != self.boot_disk).map(
-            |disk| {
-                let dataset = ZpoolName::Internal(disk.zpool_id)
-                    .dataset_mountpoint(
-                        &self.inner.mount_config.root,
-                        INSTALL_DATASET,
-                    );
-                (disk.zpool_id, dataset)
-            },
-        )
+        self.non_boot_disk_zpool_ids().map(|zpool_id| {
+            let dataset = ZpoolName::Internal(zpool_id).dataset_mountpoint(
+                &self.inner.mount_config.root,
+                INSTALL_DATASET,
+            );
+            (zpool_id, dataset)
+        })
     }
 }
 
