@@ -38,19 +38,6 @@ pub(crate) async fn fetch_hubris_artifacts(
 
     fs::create_dir_all(&output_dir).await?;
 
-    // We need to remove our old downloaded corpus to make sure nothing else
-    // gets added to the repo unexpectedly. This should only really be a
-    // issue with local builds
-    if std::fs::exists(&output_dir.join("measurement_corpus"))
-        .context("failed to check `measurement_corpus`")?
-    {
-        std::fs::remove_dir_all(&output_dir.join("measurement_corpus"))
-            .context("failed to remove `measurement_corpus")?;
-    }
-    fs::create_dir_all(&output_dir.join("measurement_corpus"))
-        .await
-        .context("Failed to create `measurement_corpus`")?;
-
     // This could be parallelized with FuturesUnordered but in practice this
     // takes less time than OS builds.
 
@@ -119,22 +106,6 @@ pub(crate) async fn fetch_hubris_artifacts(
                     }
                 }
             }
-            if let Some(corpus) = hash_manifest.corpus {
-                let hash = match corpus {
-                    Source::File(file) => file.hash,
-                    _ => anyhow::bail!(
-                        "Unexpected file type: should be a single file, not an RoT"
-                    ),
-                };
-                let data =
-                    fetch_hash(&logger, base_url, &client, &hash).await?;
-                fs::write(
-                    output_dir.join("measurement_corpus").join(hash),
-                    data,
-                )
-                .await
-                .context("failed to write file {hash}")?;
-            }
         }
     }
 
@@ -189,9 +160,6 @@ async fn fetch_hash(
 struct Manifest {
     #[serde(rename = "artifact")]
     artifacts: HashMap<KnownArtifactKind, Vec<Artifact>>,
-    // Add a default for backwards compatibility
-    #[serde(rename = "measurement_corpus")]
-    corpus: Option<Source>,
 }
 
 #[derive(Deserialize)]
