@@ -53,6 +53,34 @@ pub use http_entrypoints::oximeter_api;
 pub use standalone::Server as StandaloneNexus;
 pub use standalone::standalone_nexus_api;
 
+#[usdt::provider(provider = "oximeter")]
+mod probes {
+    /// Fires when a producer is registered or updated.
+    ///
+    /// The interval is given in milliseconds.
+    fn producer__registered(
+        collector_id: &str,
+        producer_id: &str,
+        addr: &str,
+        interval: u64,
+    ) {
+    }
+
+    /// Fires when a new producer is deleted.
+    fn producer__deleted(collector_id: &str, producer_id: &str) {}
+
+    /// Fires just before starting a collection from a producer.
+    fn collection__start(producer_id: &str, addr: &str) {}
+
+    /// Fires just after a successful collection from a producer, with the
+    /// number of samples collected.
+    fn collection__done(producer_id: &str, n_samples: u64) {}
+
+    /// Fires just after a failed collection from a producer, with an error
+    /// message describing the failure.
+    fn collection__failed(producer_id: &str, msg: &str) {}
+}
+
 /// Errors collecting metric data
 #[derive(Debug, Error)]
 pub enum Error {
