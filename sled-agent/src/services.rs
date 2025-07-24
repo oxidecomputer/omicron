@@ -2431,324 +2431,286 @@ impl ServiceManager {
         bootstrap_name_and_address: Option<(String, Ipv6Addr)>,
         device_names: &[String],
     ) -> Result<RunningZone, Error> {
-        // Temporary double-indent to avoid breaking blame.
-        {
-            {
-                let SwitchZoneConfig { id, services, addresses } = config;
+        let SwitchZoneConfig { id, services, addresses } = config;
 
-                let disabled_dns_client_service = ServiceBuilder::new(
-                    "network/dns/client",
-                )
+        let disabled_dns_client_service =
+            ServiceBuilder::new("network/dns/client")
                 .add_instance(ServiceInstanceBuilder::new("default").disable());
 
-                let info = self.inner.sled_info.get();
+        let info = self.inner.sled_info.get();
 
-                let gw_addr = match info {
-                    Some(i) => Some(&i.underlay_address),
-                    None => None,
-                };
+        let gw_addr = match info {
+            Some(i) => Some(&i.underlay_address),
+            None => None,
+        };
 
-                let nw_setup_service = Self::zone_network_setup_install(
-                    gw_addr,
-                    &installed_zone,
-                    addresses,
-                )?;
+        let nw_setup_service = Self::zone_network_setup_install(
+            gw_addr,
+            &installed_zone,
+            addresses,
+        )?;
 
-                let sidecar_revision = match &self.inner.sidecar_revision {
-                    SidecarRevision::Physical(rev) => rev.to_string(),
-                    SidecarRevision::SoftZone(rev)
-                    | SidecarRevision::SoftPropolis(rev) => format!(
-                        "softnpu_front_{}_rear_{}",
-                        rev.front_port_count, rev.rear_port_count
-                    ),
-                };
+        let sidecar_revision = match &self.inner.sidecar_revision {
+            SidecarRevision::Physical(rev) => rev.to_string(),
+            SidecarRevision::SoftZone(rev)
+            | SidecarRevision::SoftPropolis(rev) => format!(
+                "softnpu_front_{}_rear_{}",
+                rev.front_port_count, rev.rear_port_count
+            ),
+        };
 
-                // Define all services in the switch zone
-                let mut mgs_service = ServiceBuilder::new("oxide/mgs");
-                let mut wicketd_service = ServiceBuilder::new("oxide/wicketd");
-                let mut switch_zone_setup_service =
-                    ServiceBuilder::new("oxide/switch_zone_setup");
-                let mut dendrite_service =
-                    ServiceBuilder::new("oxide/dendrite");
-                let mut tfport_service = ServiceBuilder::new("oxide/tfport");
-                let mut lldpd_service = ServiceBuilder::new("oxide/lldpd");
-                let mut pumpkind_service =
-                    ServiceBuilder::new("oxide/pumpkind");
-                let mut mgd_service = ServiceBuilder::new("oxide/mgd");
-                let mut mg_ddm_service = ServiceBuilder::new("oxide/mg-ddm");
-                let mut uplink_service = ServiceBuilder::new("oxide/uplink");
+        // Define all services in the switch zone
+        let mut mgs_service = ServiceBuilder::new("oxide/mgs");
+        let mut wicketd_service = ServiceBuilder::new("oxide/wicketd");
+        let mut switch_zone_setup_service =
+            ServiceBuilder::new("oxide/switch_zone_setup");
+        let mut dendrite_service = ServiceBuilder::new("oxide/dendrite");
+        let mut tfport_service = ServiceBuilder::new("oxide/tfport");
+        let mut lldpd_service = ServiceBuilder::new("oxide/lldpd");
+        let mut pumpkind_service = ServiceBuilder::new("oxide/pumpkind");
+        let mut mgd_service = ServiceBuilder::new("oxide/mgd");
+        let mut mg_ddm_service = ServiceBuilder::new("oxide/mg-ddm");
+        let mut uplink_service = ServiceBuilder::new("oxide/uplink");
 
-                let mut switch_zone_setup_config =
-                    PropertyGroupBuilder::new("config").add_property(
-                        "gz_local_link_addr",
+        let mut switch_zone_setup_config = PropertyGroupBuilder::new("config")
+            .add_property(
+                "gz_local_link_addr",
+                "astring",
+                &format!(
+                    "{}",
+                    self.inner.global_zone_bootstrap_link_local_address
+                ),
+            );
+
+        for (link, needs_link_local) in
+            installed_zone.links().iter().zip(links_need_link_local)
+        {
+            if *needs_link_local {
+                switch_zone_setup_config = switch_zone_setup_config
+                    .add_property("link_local_links", "astring", link.name());
+            }
+        }
+
+        if let Some((bootstrap_name, bootstrap_address)) =
+            bootstrap_name_and_address.as_ref()
+        {
+            switch_zone_setup_config = switch_zone_setup_config
+                .add_property("link_local_links", "astring", bootstrap_name)
+                .add_property(
+                    "bootstrap_addr",
+                    "astring",
+                    &format!("{bootstrap_address}"),
+                )
+                .add_property("bootstrap_vnic", "astring", bootstrap_name);
+        }
+
+        // Set properties for each service
+        for service in services {
+            match service {
+                SwitchService::ManagementGatewayService => {
+                    info!(self.inner.log, "Setting up MGS service");
+                    let mut mgs_config = PropertyGroupBuilder::new("config")
+                        // Always tell MGS to listen on localhost so wicketd
+                        // can contact it even before we have an underlay
+                        // network.
+                        .add_property(
+                            "address",
+                            "astring",
+                            &format!("[::1]:{MGS_PORT}"),
+                        )
+                        .add_property("id", "astring", &id.to_string());
+
+                    if let Some(i) = info {
+                        mgs_config = mgs_config.add_property(
+                            "rack_id",
+                            "astring",
+                            &i.rack_id.to_string(),
+                        );
+                    }
+
+                    if let Some(address) = addresses.get(0) {
+                        // Don't use localhost twice
+                        if *address != Ipv6Addr::LOCALHOST {
+                            mgs_config = mgs_config.add_property(
+                                "address",
+                                "astring",
+                                &format!("[{address}]:{MGS_PORT}"),
+                            );
+                        }
+                    }
+                    mgs_service = mgs_service.add_instance(
+                        ServiceInstanceBuilder::new("default")
+                            .add_property_group(mgs_config),
+                    );
+                }
+                SwitchService::SpSim => {
+                    info!(self.inner.log, "Setting up Simulated SP service");
+                }
+                SwitchService::Wicketd { baseboard } => {
+                    info!(self.inner.log, "Setting up wicketd service");
+                    // If we're launching the switch zone, we'll have a
+                    // bootstrap_address based on our call to
+                    // `self.bootstrap_address_needed` (which always
+                    // gives us an address for the switch zone. If we
+                    // _don't_ have a bootstrap address, someone has
+                    // requested wicketd in a non-switch zone; return an
+                    // error.
+                    let Some((_, bootstrap_address)) =
+                        bootstrap_name_and_address
+                    else {
+                        return Err(Error::BadServiceRequest {
+                            service: "wicketd".to_string(),
+                            message: concat!(
+                                "missing bootstrap address: ",
+                                "wicketd can only be started in the ",
+                                "switch zone",
+                            )
+                            .to_string(),
+                        });
+                    };
+
+                    let mut wicketd_config = PropertyGroupBuilder::new(
+                        "config",
+                    )
+                    .add_property(
+                        "address",
+                        "astring",
+                        &format!("[::1]:{WICKETD_PORT}"),
+                    )
+                    .add_property(
+                        "artifact-address",
                         "astring",
                         &format!(
-                            "{}",
-                            self.inner.global_zone_bootstrap_link_local_address
+                            "[{bootstrap_address}]:{BOOTSTRAP_ARTIFACT_PORT}"
                         ),
+                    )
+                    .add_property(
+                        "baseboard-file",
+                        "astring",
+                        SWITCH_ZONE_BASEBOARD_FILE,
+                    )
+                    .add_property(
+                        "mgs-address",
+                        "astring",
+                        &format!("[::1]:{MGS_PORT}"),
+                    )
+                    // We intentionally bind `nexus-proxy-address` to
+                    // `::` so wicketd will serve this on all
+                    // interfaces, particularly the tech port
+                    // interfaces, allowing external clients to connect
+                    // to this Nexus proxy.
+                    .add_property(
+                        "nexus-proxy-address",
+                        "astring",
+                        &format!("[::]:{WICKETD_NEXUS_PROXY_PORT}"),
                     );
 
-                for (link, needs_link_local) in
-                    installed_zone.links().iter().zip(links_need_link_local)
-                {
-                    if *needs_link_local {
-                        switch_zone_setup_config = switch_zone_setup_config
-                            .add_property(
-                                "link_local_links",
-                                "astring",
-                                link.name(),
-                            );
-                    }
-                }
+                    if let Some(i) = info {
+                        let rack_subnet =
+                            Ipv6Subnet::<AZ_PREFIX>::new(i.underlay_address);
 
-                if let Some((bootstrap_name, bootstrap_address)) =
-                    bootstrap_name_and_address.as_ref()
-                {
-                    switch_zone_setup_config = switch_zone_setup_config
-                        .add_property(
-                            "link_local_links",
+                        wicketd_config = wicketd_config.add_property(
+                            "rack-subnet",
                             "astring",
-                            bootstrap_name,
-                        )
-                        .add_property(
-                            "bootstrap_addr",
+                            &rack_subnet.net().addr().to_string(),
+                        );
+                    }
+
+                    wicketd_service = wicketd_service.add_instance(
+                        ServiceInstanceBuilder::new("default")
+                            .add_property_group(wicketd_config),
+                    );
+
+                    let baseboard_info = serde_json::to_string(&baseboard)?;
+
+                    switch_zone_setup_config =
+                        switch_zone_setup_config.clone().add_property(
+                            "baseboard_info",
                             "astring",
-                            &format!("{bootstrap_address}"),
-                        )
-                        .add_property(
-                            "bootstrap_vnic",
-                            "astring",
-                            bootstrap_name,
+                            &baseboard_info,
                         );
                 }
+                SwitchService::Dendrite { asic } => {
+                    info!(self.inner.log, "Setting up dendrite service");
+                    let mut dendrite_config =
+                        PropertyGroupBuilder::new("config");
 
-                // Set properties for each service
-                for service in services {
-                    match service {
-                        SwitchService::ManagementGatewayService => {
-                            info!(self.inner.log, "Setting up MGS service");
-                            let mut mgs_config =
-                                PropertyGroupBuilder::new("config")
-                                    // Always tell MGS to listen on localhost so wicketd
-                                    // can contact it even before we have an underlay
-                                    // network.
-                                    .add_property(
-                                        "address",
-                                        "astring",
-                                        &format!("[::1]:{MGS_PORT}"),
-                                    )
-                                    .add_property(
-                                        "id",
-                                        "astring",
-                                        &id.to_string(),
-                                    );
+                    if let Some(i) = info {
+                        dendrite_config =
+                            add_sled_ident_properties(dendrite_config, i)
+                    };
 
-                            if let Some(i) = info {
-                                mgs_config = mgs_config.add_property(
-                                    "rack_id",
-                                    "astring",
-                                    &i.rack_id.to_string(),
-                                );
-                            }
-
-                            if let Some(address) = addresses.get(0) {
-                                // Don't use localhost twice
-                                if *address != Ipv6Addr::LOCALHOST {
-                                    mgs_config = mgs_config.add_property(
-                                        "address",
-                                        "astring",
-                                        &format!("[{address}]:{MGS_PORT}"),
-                                    );
-                                }
-                            }
-                            mgs_service = mgs_service.add_instance(
-                                ServiceInstanceBuilder::new("default")
-                                    .add_property_group(mgs_config),
-                            );
-                        }
-                        SwitchService::SpSim => {
-                            info!(
-                                self.inner.log,
-                                "Setting up Simulated SP service"
-                            );
-                        }
-                        SwitchService::Wicketd { baseboard } => {
-                            info!(self.inner.log, "Setting up wicketd service");
-                            // If we're launching the switch zone, we'll have a
-                            // bootstrap_address based on our call to
-                            // `self.bootstrap_address_needed` (which always
-                            // gives us an address for the switch zone. If we
-                            // _don't_ have a bootstrap address, someone has
-                            // requested wicketd in a non-switch zone; return an
-                            // error.
-                            let Some((_, bootstrap_address)) =
-                                bootstrap_name_and_address
-                            else {
-                                return Err(Error::BadServiceRequest {
-                                    service: "wicketd".to_string(),
-                                    message: concat!(
-                                        "missing bootstrap address: ",
-                                        "wicketd can only be started in the ",
-                                        "switch zone",
-                                    )
-                                    .to_string(),
-                                });
-                            };
-
-                            let mut wicketd_config =
-                                PropertyGroupBuilder::new("config")
-                                    .add_property(
-                                        "address",
-                                        "astring",
-                                        &format!("[::1]:{WICKETD_PORT}"),
-                                    )
-                                    .add_property(
-                                        "artifact-address",
-                                        "astring",
-                                        &format!("[{bootstrap_address}]:{BOOTSTRAP_ARTIFACT_PORT}"),
-                                    )
-                                    .add_property(
-                                        "baseboard-file",
-                                        "astring",
-                                        SWITCH_ZONE_BASEBOARD_FILE,
-                                    )
-                                    .add_property(
-                                        "mgs-address",
-                                        "astring",
-                                        &format!("[::1]:{MGS_PORT}"),
-                                    )
-                                    // We intentionally bind `nexus-proxy-address` to
-                                    // `::` so wicketd will serve this on all
-                                    // interfaces, particularly the tech port
-                                    // interfaces, allowing external clients to connect
-                                    // to this Nexus proxy.
-                                    .add_property(
-                                        "nexus-proxy-address",
-                                        "astring",
-                                        &format!("[::]:{WICKETD_NEXUS_PROXY_PORT}"),
-                                    );
-
-                            if let Some(i) = info {
-                                let rack_subnet = Ipv6Subnet::<AZ_PREFIX>::new(
-                                    i.underlay_address,
-                                );
-
-                                wicketd_config = wicketd_config.add_property(
-                                    "rack-subnet",
-                                    "astring",
-                                    &rack_subnet.net().addr().to_string(),
-                                );
-                            }
-
-                            wicketd_service = wicketd_service.add_instance(
-                                ServiceInstanceBuilder::new("default")
-                                    .add_property_group(wicketd_config),
-                            );
-
-                            let baseboard_info =
-                                serde_json::to_string(&baseboard)?;
-
-                            switch_zone_setup_config =
-                                switch_zone_setup_config.clone().add_property(
-                                    "baseboard_info",
-                                    "astring",
-                                    &baseboard_info,
-                                );
-                        }
-                        SwitchService::Dendrite { asic } => {
-                            info!(
-                                self.inner.log,
-                                "Setting up dendrite service"
-                            );
-                            let mut dendrite_config =
-                                PropertyGroupBuilder::new("config");
-
-                            if let Some(i) = info {
-                                dendrite_config = add_sled_ident_properties(
-                                    dendrite_config,
-                                    i,
-                                )
-                            };
-
-                            for address in addresses {
+                    for address in addresses {
+                        dendrite_config = dendrite_config.add_property(
+                            "address",
+                            "astring",
+                            &format!("[{}]:{}", address, DENDRITE_PORT),
+                        );
+                        if *address != Ipv6Addr::LOCALHOST {
+                            let az_prefix =
+                                Ipv6Subnet::<AZ_PREFIX>::new(*address);
+                            for addr in Resolver::servers_from_subnet(az_prefix)
+                            {
                                 dendrite_config = dendrite_config.add_property(
-                                    "address",
+                                    "dns_server",
                                     "astring",
-                                    &format!("[{}]:{}", address, DENDRITE_PORT),
+                                    &format!("{addr}"),
                                 );
-                                if *address != Ipv6Addr::LOCALHOST {
-                                    let az_prefix =
-                                        Ipv6Subnet::<AZ_PREFIX>::new(*address);
-                                    for addr in
-                                        Resolver::servers_from_subnet(az_prefix)
-                                    {
-                                        dendrite_config = dendrite_config
-                                            .add_property(
-                                                "dns_server",
-                                                "astring",
-                                                &format!("{addr}"),
-                                            );
-                                    }
-                                }
                             }
+                        }
+                    }
 
-                            match asic {
-                                DendriteAsic::TofinoAsic => {
-                                    // There should be exactly one device_name
-                                    // associated with this zone: the /dev path
-                                    // for the tofino ASIC.
-                                    let dev_cnt = device_names.len();
-                                    if dev_cnt == 1 {
-                                        dendrite_config = dendrite_config
-                                            .add_property(
-                                                "dev_path",
-                                                "astring",
-                                                &device_names[0].clone(),
-                                            );
-                                    } else {
-                                        return Err(Error::SwitchZone(
-                                            anyhow::anyhow!(
-                                                "{dev_cnt} devices needed \
+                    match asic {
+                        DendriteAsic::TofinoAsic => {
+                            // There should be exactly one device_name
+                            // associated with this zone: the /dev path
+                            // for the tofino ASIC.
+                            let dev_cnt = device_names.len();
+                            if dev_cnt == 1 {
+                                dendrite_config = dendrite_config.add_property(
+                                    "dev_path",
+                                    "astring",
+                                    &device_names[0].clone(),
+                                );
+                            } else {
+                                return Err(Error::SwitchZone(
+                                    anyhow::anyhow!(
+                                        "{dev_cnt} devices needed \
                                                     for tofino asic"
-                                            ),
-                                        ));
-                                    }
-                                    dendrite_config = dendrite_config
+                                    ),
+                                ));
+                            }
+                            dendrite_config = dendrite_config
                                         .add_property(
                                             "port_config",
                                             "astring",
                                             "/opt/oxide/dendrite/misc/sidecar_config.toml",
                                         )
                                         .add_property("board_rev", "astring", &sidecar_revision);
-                                }
-                                DendriteAsic::TofinoStub => {
-                                    dendrite_config = dendrite_config
-                                        .add_property(
-                                            "port_config",
-                                            "astring",
-                                            "/opt/oxide/dendrite/misc/model_config.toml",
-                                        );
-                                }
-                                asic @ (DendriteAsic::SoftNpuZone
-                                | DendriteAsic::SoftNpuPropolisDevice) => {
-                                    let s = match self.inner.sidecar_revision {
-                                        SidecarRevision::SoftZone(ref s) => s,
-                                        SidecarRevision::SoftPropolis(
-                                            ref s,
-                                        ) => s,
-                                        _ => {
-                                            return Err(
-                                                Error::SidecarRevision(
-                                                    anyhow::anyhow!(
-                                                        "expected soft sidecar \
+                        }
+                        DendriteAsic::TofinoStub => {
+                            dendrite_config = dendrite_config.add_property(
+                                "port_config",
+                                "astring",
+                                "/opt/oxide/dendrite/misc/model_config.toml",
+                            );
+                        }
+                        asic @ (DendriteAsic::SoftNpuZone
+                        | DendriteAsic::SoftNpuPropolisDevice) => {
+                            let s = match self.inner.sidecar_revision {
+                                SidecarRevision::SoftZone(ref s) => s,
+                                SidecarRevision::SoftPropolis(ref s) => s,
+                                _ => {
+                                    return Err(Error::SidecarRevision(
+                                        anyhow::anyhow!(
+                                            "expected soft sidecar \
                                                     revision"
-                                                    ),
-                                                ),
-                                            );
-                                        }
-                                    };
+                                        ),
+                                    ));
+                                }
+                            };
 
-                                    dendrite_config = dendrite_config
+                            dendrite_config = dendrite_config
                                         .add_property(
                                             "front_ports",
                                             "astring",
@@ -2765,396 +2727,347 @@ impl ServiceManager {
                                             "/opt/oxide/dendrite/misc/softnpu_single_sled_config.toml",
                                         );
 
-                                    if asic == &DendriteAsic::SoftNpuZone {
-                                        dendrite_config = dendrite_config
-                                            .add_property(
-                                                "mgmt", "astring", "uds",
-                                            )
-                                            .add_property(
-                                                "uds_path",
-                                                "astring",
-                                                "/opt/softnpu/stuff",
-                                            );
-                                    }
-
-                                    if asic
-                                        == &DendriteAsic::SoftNpuPropolisDevice
-                                    {
-                                        dendrite_config = dendrite_config
-                                            .add_property(
-                                                "mgmt", "astring", "uart",
-                                            );
-                                    }
-                                }
-                            }
-
-                            dendrite_service = dendrite_service.add_instance(
-                                ServiceInstanceBuilder::new("default")
-                                    .add_property_group(dendrite_config),
-                            );
-                        }
-                        SwitchService::Tfport { pkt_source, asic } => {
-                            info!(self.inner.log, "Setting up tfport service");
-
-                            let mut tfport_config =
-                                PropertyGroupBuilder::new("config");
-
-                            tfport_config = tfport_config
-                                .add_property(
-                                    "dpd_host",
-                                    "astring",
-                                    &format!("[{}]", Ipv6Addr::LOCALHOST),
-                                )
-                                .add_property(
-                                    "dpd_port",
-                                    "astring",
-                                    &format!("{}", DENDRITE_PORT),
-                                );
-
-                            if let Some(i) = info {
-                                tfport_config =
-                                    add_sled_ident_properties(tfport_config, i);
-                            }
-
-                            for address in addresses {
-                                tfport_config = tfport_config.add_property(
-                                    "listen_address",
-                                    "astring",
-                                    &format!("[{}]:{}", address, TFPORTD_PORT),
-                                );
-                            }
-
-                            let is_gimlet = is_gimlet().map_err(|e| {
-                                Error::Underlay(
-                                    underlay::Error::SystemDetection(e),
-                                )
-                            })?;
-
-                            if is_gimlet {
-                                // Collect the prefixes for each techport.
-                                let nameaddr =
-                                    bootstrap_name_and_address.as_ref();
-                                let techport_prefixes = match nameaddr {
-                                    Some((_, addr)) => {
-                                        Self::bootstrap_addr_to_techport_prefixes(addr)
-                                    }
-                                    None => {
-                                        return Err(Error::BadServiceRequest {
-                                            service: "tfport".into(),
-                                            message: "bootstrap addr missing"
-                                                .into(),
-                                        });
-                                    }
-                                };
-
-                                for (i, prefix) in
-                                    techport_prefixes.into_iter().enumerate()
-                                {
-                                    // Each `prefix` is an `Ipv6Subnet`
-                                    // including a netmask.  Stringify just the
-                                    // network address, without the mask.
-                                    tfport_config = tfport_config.add_property(
-                                        &format!("techport{i}_prefix"),
-                                        "astring",
-                                        prefix.net().addr().to_string(),
-                                    )
-                                }
-                            };
-
-                            if is_gimlet
-                                || asic == &DendriteAsic::SoftNpuPropolisDevice
-                                || asic == &DendriteAsic::TofinoAsic
-                            {
-                                tfport_config = tfport_config.add_property(
-                                    "pkt_source",
-                                    "astring",
-                                    pkt_source,
-                                );
-                            };
-
                             if asic == &DendriteAsic::SoftNpuZone {
-                                tfport_config = tfport_config.add_property(
-                                    "flags",
-                                    "astring",
-                                    "--sync-only",
-                                );
-                            }
-
-                            tfport_service = tfport_service.add_instance(
-                                ServiceInstanceBuilder::new("default")
-                                    .add_property_group(tfport_config),
-                            );
-                        }
-                        SwitchService::Lldpd { baseboard } => {
-                            info!(self.inner.log, "Setting up lldpd service");
-
-                            let mut lldpd_config =
-                                PropertyGroupBuilder::new("config")
+                                dendrite_config = dendrite_config
+                                    .add_property("mgmt", "astring", "uds")
                                     .add_property(
-                                        "board_rev",
+                                        "uds_path",
                                         "astring",
-                                        &sidecar_revision,
-                                    );
-
-                            match baseboard {
-                                Baseboard::Gimlet {
-                                    identifier, model, ..
-                                }
-                                | Baseboard::Pc { identifier, model, .. } => {
-                                    lldpd_config = lldpd_config
-                                        .add_property(
-                                            "scrimlet_id",
-                                            "astring",
-                                            identifier,
-                                        )
-                                        .add_property(
-                                            "scrimlet_model",
-                                            "astring",
-                                            model,
-                                        );
-                                }
-                                Baseboard::Unknown => {}
-                            }
-
-                            for address in addresses {
-                                lldpd_config = lldpd_config.add_property(
-                                    "address",
-                                    "astring",
-                                    &format!("[{}]:{}", address, LLDP_PORT),
-                                );
-                            }
-
-                            lldpd_service = lldpd_service.add_instance(
-                                ServiceInstanceBuilder::new("default")
-                                    .add_property_group(lldpd_config),
-                            );
-                        }
-                        SwitchService::Pumpkind { asic } => {
-                            // The pumpkin daemon is only needed when running on
-                            // with real sidecar.
-                            if asic == &DendriteAsic::TofinoAsic {
-                                info!(
-                                    self.inner.log,
-                                    "Setting up pumpkind service"
-                                );
-                                let pumpkind_config =
-                                    PropertyGroupBuilder::new("config")
-                                        .add_property(
-                                            "mode", "astring", "switch",
-                                        );
-
-                                pumpkind_service = pumpkind_service
-                                    .add_instance(
-                                        ServiceInstanceBuilder::new("default")
-                                            .add_property_group(
-                                                pumpkind_config,
-                                            ),
-                                    );
-                            } else {
-                                pumpkind_service = pumpkind_service
-                                    .add_instance(
-                                        ServiceInstanceBuilder::new("default")
-                                            .disable(),
-                                    );
-                            }
-                        }
-                        SwitchService::Uplink => {
-                            // Nothing to do here - this service is special and
-                            // configured in
-                            // `ensure_switch_zone_uplinks_configured`
-                            uplink_service = uplink_service.add_instance(
-                                ServiceInstanceBuilder::new("default"),
-                            );
-                        }
-                        SwitchService::Mgd => {
-                            info!(self.inner.log, "Setting up mgd service");
-
-                            let mut mgd_config =
-                                PropertyGroupBuilder::new("config");
-
-                            if let Some(i) = info {
-                                mgd_config = mgd_config
-                                    .add_property(
-                                        "sled_uuid",
-                                        "astring",
-                                        &i.config
-                                            .sled_identifiers
-                                            .sled_id
-                                            .to_string(),
-                                    )
-                                    .add_property(
-                                        "rack_uuid",
-                                        "astring",
-                                        &i.rack_id.to_string(),
+                                        "/opt/softnpu/stuff",
                                     );
                             }
 
-                            for address in addresses {
-                                if *address != Ipv6Addr::LOCALHOST {
-                                    let az_prefix =
-                                        Ipv6Subnet::<AZ_PREFIX>::new(*address);
-                                    for addr in
-                                        Resolver::servers_from_subnet(az_prefix)
-                                    {
-                                        mgd_config = mgd_config.add_property(
-                                            "dns_servers",
-                                            "astring",
-                                            &format!("{addr}"),
-                                        );
-                                    }
-                                    break;
-                                }
+                            if asic == &DendriteAsic::SoftNpuPropolisDevice {
+                                dendrite_config = dendrite_config
+                                    .add_property("mgmt", "astring", "uart");
                             }
-
-                            mgd_service = mgd_service.add_instance(
-                                ServiceInstanceBuilder::new("default")
-                                    .add_property_group(mgd_config),
-                            );
-                        }
-                        SwitchService::MgDdm { mode } => {
-                            info!(self.inner.log, "Setting up mg-ddm service");
-
-                            let mut mg_ddm_config =
-                                PropertyGroupBuilder::new("config")
-                                    .add_property("mode", "astring", mode)
-                                    .add_property(
-                                        "dendrite", "astring", "true",
-                                    );
-
-                            if let Some(i) = info {
-                                mg_ddm_config = mg_ddm_config
-                                    .add_property(
-                                        "sled_uuid",
-                                        "astring",
-                                        &i.config
-                                            .sled_identifiers
-                                            .sled_id
-                                            .to_string(),
-                                    )
-                                    .add_property(
-                                        "rack_uuid",
-                                        "astring",
-                                        &i.rack_id.to_string(),
-                                    );
-                            }
-
-                            for address in addresses {
-                                if *address != Ipv6Addr::LOCALHOST {
-                                    let az_prefix =
-                                        Ipv6Subnet::<AZ_PREFIX>::new(*address);
-                                    for addr in
-                                        Resolver::servers_from_subnet(az_prefix)
-                                    {
-                                        mg_ddm_config = mg_ddm_config
-                                            .add_property(
-                                                "dns_servers",
-                                                "astring",
-                                                &format!("{addr}"),
-                                            );
-                                    }
-                                    break;
-                                }
-                            }
-
-                            let is_gimlet = is_gimlet().map_err(|e| {
-                                Error::Underlay(
-                                    underlay::Error::SystemDetection(e),
-                                )
-                            })?;
-
-                            let maghemite_interfaces: Vec<AddrObject> =
-                                if is_gimlet {
-                                    (0..32)
-                                        .map(|i| {
-                                            // See the `tfport_name` function
-                                            // for how tfportd names the
-                                            // addrconf it creates.  Right now,
-                                            // that's `tfportrear[0-31]_0` for
-                                            // all rear ports, which is what
-                                            // we're directing ddmd to listen
-                                            // for advertisements on.
-                                            //
-                                            // This may grow in a multi-rack
-                                            // future to include a subset of
-                                            // "front" ports too, when racks are
-                                            // cabled together.
-                                            AddrObject::new(
-                                                &format!("tfportrear{}_0", i),
-                                                IPV6_LINK_LOCAL_ADDROBJ_NAME,
-                                            )
-                                            .unwrap()
-                                        })
-                                        .collect()
-                                } else {
-                                    self.inner
-                                        .switch_zone_maghemite_links
-                                        .iter()
-                                        .map(|i| {
-                                            AddrObject::new(
-                                                &i.to_string(),
-                                                IPV6_LINK_LOCAL_ADDROBJ_NAME,
-                                            )
-                                            .unwrap()
-                                        })
-                                        .collect()
-                                };
-
-                            for i in maghemite_interfaces {
-                                mg_ddm_config = mg_ddm_config.add_property(
-                                    "interfaces",
-                                    "astring",
-                                    &i.to_string(),
-                                );
-                            }
-
-                            if is_gimlet {
-                                mg_ddm_config = mg_ddm_config
-                                    .add_property(
-                                        "dpd_host", "astring", "[::1]",
-                                    )
-                                    .add_property(
-                                        "dpd_port",
-                                        "astring",
-                                        &DENDRITE_PORT.to_string(),
-                                    )
-                            }
-
-                            mg_ddm_service = mg_ddm_service.add_instance(
-                                ServiceInstanceBuilder::new("default")
-                                    .add_property_group(mg_ddm_config),
-                            );
                         }
                     }
-                }
 
-                switch_zone_setup_service = switch_zone_setup_service
-                    .add_instance(
+                    dendrite_service = dendrite_service.add_instance(
                         ServiceInstanceBuilder::new("default")
-                            .add_property_group(switch_zone_setup_config),
+                            .add_property_group(dendrite_config),
                     );
+                }
+                SwitchService::Tfport { pkt_source, asic } => {
+                    info!(self.inner.log, "Setting up tfport service");
 
-                let profile = ProfileBuilder::new("omicron")
-                    .add_service(nw_setup_service)
-                    .add_service(disabled_dns_client_service)
-                    .add_service(mgs_service)
-                    .add_service(wicketd_service)
-                    .add_service(switch_zone_setup_service)
-                    .add_service(dendrite_service)
-                    .add_service(tfport_service)
-                    .add_service(lldpd_service)
-                    .add_service(pumpkind_service)
-                    .add_service(mgd_service)
-                    .add_service(mg_ddm_service)
-                    .add_service(uplink_service);
-                profile
-                    .add_to_zone(&self.inner.log, &installed_zone)
-                    .await
-                    .map_err(|err| {
-                        Error::io("Failed to setup Switch zone profile", err)
+                    let mut tfport_config = PropertyGroupBuilder::new("config");
+
+                    tfport_config = tfport_config
+                        .add_property(
+                            "dpd_host",
+                            "astring",
+                            &format!("[{}]", Ipv6Addr::LOCALHOST),
+                        )
+                        .add_property(
+                            "dpd_port",
+                            "astring",
+                            &format!("{}", DENDRITE_PORT),
+                        );
+
+                    if let Some(i) = info {
+                        tfport_config =
+                            add_sled_ident_properties(tfport_config, i);
+                    }
+
+                    for address in addresses {
+                        tfport_config = tfport_config.add_property(
+                            "listen_address",
+                            "astring",
+                            &format!("[{}]:{}", address, TFPORTD_PORT),
+                        );
+                    }
+
+                    let is_gimlet = is_gimlet().map_err(|e| {
+                        Error::Underlay(underlay::Error::SystemDetection(e))
                     })?;
-                Ok(RunningZone::boot(installed_zone).await?)
+
+                    if is_gimlet {
+                        // Collect the prefixes for each techport.
+                        let nameaddr = bootstrap_name_and_address.as_ref();
+                        let techport_prefixes = match nameaddr {
+                            Some((_, addr)) => {
+                                Self::bootstrap_addr_to_techport_prefixes(addr)
+                            }
+                            None => {
+                                return Err(Error::BadServiceRequest {
+                                    service: "tfport".into(),
+                                    message: "bootstrap addr missing".into(),
+                                });
+                            }
+                        };
+
+                        for (i, prefix) in
+                            techport_prefixes.into_iter().enumerate()
+                        {
+                            // Each `prefix` is an `Ipv6Subnet`
+                            // including a netmask.  Stringify just the
+                            // network address, without the mask.
+                            tfport_config = tfport_config.add_property(
+                                &format!("techport{i}_prefix"),
+                                "astring",
+                                prefix.net().addr().to_string(),
+                            )
+                        }
+                    };
+
+                    if is_gimlet
+                        || asic == &DendriteAsic::SoftNpuPropolisDevice
+                        || asic == &DendriteAsic::TofinoAsic
+                    {
+                        tfport_config = tfport_config.add_property(
+                            "pkt_source",
+                            "astring",
+                            pkt_source,
+                        );
+                    };
+
+                    if asic == &DendriteAsic::SoftNpuZone {
+                        tfport_config = tfport_config.add_property(
+                            "flags",
+                            "astring",
+                            "--sync-only",
+                        );
+                    }
+
+                    tfport_service = tfport_service.add_instance(
+                        ServiceInstanceBuilder::new("default")
+                            .add_property_group(tfport_config),
+                    );
+                }
+                SwitchService::Lldpd { baseboard } => {
+                    info!(self.inner.log, "Setting up lldpd service");
+
+                    let mut lldpd_config = PropertyGroupBuilder::new("config")
+                        .add_property(
+                            "board_rev",
+                            "astring",
+                            &sidecar_revision,
+                        );
+
+                    match baseboard {
+                        Baseboard::Gimlet { identifier, model, .. }
+                        | Baseboard::Pc { identifier, model, .. } => {
+                            lldpd_config = lldpd_config
+                                .add_property(
+                                    "scrimlet_id",
+                                    "astring",
+                                    identifier,
+                                )
+                                .add_property(
+                                    "scrimlet_model",
+                                    "astring",
+                                    model,
+                                );
+                        }
+                        Baseboard::Unknown => {}
+                    }
+
+                    for address in addresses {
+                        lldpd_config = lldpd_config.add_property(
+                            "address",
+                            "astring",
+                            &format!("[{}]:{}", address, LLDP_PORT),
+                        );
+                    }
+
+                    lldpd_service = lldpd_service.add_instance(
+                        ServiceInstanceBuilder::new("default")
+                            .add_property_group(lldpd_config),
+                    );
+                }
+                SwitchService::Pumpkind { asic } => {
+                    // The pumpkin daemon is only needed when running on
+                    // with real sidecar.
+                    if asic == &DendriteAsic::TofinoAsic {
+                        info!(self.inner.log, "Setting up pumpkind service");
+                        let pumpkind_config =
+                            PropertyGroupBuilder::new("config")
+                                .add_property("mode", "astring", "switch");
+
+                        pumpkind_service = pumpkind_service.add_instance(
+                            ServiceInstanceBuilder::new("default")
+                                .add_property_group(pumpkind_config),
+                        );
+                    } else {
+                        pumpkind_service = pumpkind_service.add_instance(
+                            ServiceInstanceBuilder::new("default").disable(),
+                        );
+                    }
+                }
+                SwitchService::Uplink => {
+                    // Nothing to do here - this service is special and
+                    // configured in
+                    // `ensure_switch_zone_uplinks_configured`
+                    uplink_service = uplink_service
+                        .add_instance(ServiceInstanceBuilder::new("default"));
+                }
+                SwitchService::Mgd => {
+                    info!(self.inner.log, "Setting up mgd service");
+
+                    let mut mgd_config = PropertyGroupBuilder::new("config");
+
+                    if let Some(i) = info {
+                        mgd_config = mgd_config
+                            .add_property(
+                                "sled_uuid",
+                                "astring",
+                                &i.config.sled_identifiers.sled_id.to_string(),
+                            )
+                            .add_property(
+                                "rack_uuid",
+                                "astring",
+                                &i.rack_id.to_string(),
+                            );
+                    }
+
+                    for address in addresses {
+                        if *address != Ipv6Addr::LOCALHOST {
+                            let az_prefix =
+                                Ipv6Subnet::<AZ_PREFIX>::new(*address);
+                            for addr in Resolver::servers_from_subnet(az_prefix)
+                            {
+                                mgd_config = mgd_config.add_property(
+                                    "dns_servers",
+                                    "astring",
+                                    &format!("{addr}"),
+                                );
+                            }
+                            break;
+                        }
+                    }
+
+                    mgd_service = mgd_service.add_instance(
+                        ServiceInstanceBuilder::new("default")
+                            .add_property_group(mgd_config),
+                    );
+                }
+                SwitchService::MgDdm { mode } => {
+                    info!(self.inner.log, "Setting up mg-ddm service");
+
+                    let mut mg_ddm_config = PropertyGroupBuilder::new("config")
+                        .add_property("mode", "astring", mode)
+                        .add_property("dendrite", "astring", "true");
+
+                    if let Some(i) = info {
+                        mg_ddm_config = mg_ddm_config
+                            .add_property(
+                                "sled_uuid",
+                                "astring",
+                                &i.config.sled_identifiers.sled_id.to_string(),
+                            )
+                            .add_property(
+                                "rack_uuid",
+                                "astring",
+                                &i.rack_id.to_string(),
+                            );
+                    }
+
+                    for address in addresses {
+                        if *address != Ipv6Addr::LOCALHOST {
+                            let az_prefix =
+                                Ipv6Subnet::<AZ_PREFIX>::new(*address);
+                            for addr in Resolver::servers_from_subnet(az_prefix)
+                            {
+                                mg_ddm_config = mg_ddm_config.add_property(
+                                    "dns_servers",
+                                    "astring",
+                                    &format!("{addr}"),
+                                );
+                            }
+                            break;
+                        }
+                    }
+
+                    let is_gimlet = is_gimlet().map_err(|e| {
+                        Error::Underlay(underlay::Error::SystemDetection(e))
+                    })?;
+
+                    let maghemite_interfaces: Vec<AddrObject> = if is_gimlet {
+                        (0..32)
+                            .map(|i| {
+                                // See the `tfport_name` function
+                                // for how tfportd names the
+                                // addrconf it creates.  Right now,
+                                // that's `tfportrear[0-31]_0` for
+                                // all rear ports, which is what
+                                // we're directing ddmd to listen
+                                // for advertisements on.
+                                //
+                                // This may grow in a multi-rack
+                                // future to include a subset of
+                                // "front" ports too, when racks are
+                                // cabled together.
+                                AddrObject::new(
+                                    &format!("tfportrear{}_0", i),
+                                    IPV6_LINK_LOCAL_ADDROBJ_NAME,
+                                )
+                                .unwrap()
+                            })
+                            .collect()
+                    } else {
+                        self.inner
+                            .switch_zone_maghemite_links
+                            .iter()
+                            .map(|i| {
+                                AddrObject::new(
+                                    &i.to_string(),
+                                    IPV6_LINK_LOCAL_ADDROBJ_NAME,
+                                )
+                                .unwrap()
+                            })
+                            .collect()
+                    };
+
+                    for i in maghemite_interfaces {
+                        mg_ddm_config = mg_ddm_config.add_property(
+                            "interfaces",
+                            "astring",
+                            &i.to_string(),
+                        );
+                    }
+
+                    if is_gimlet {
+                        mg_ddm_config = mg_ddm_config
+                            .add_property("dpd_host", "astring", "[::1]")
+                            .add_property(
+                                "dpd_port",
+                                "astring",
+                                &DENDRITE_PORT.to_string(),
+                            )
+                    }
+
+                    mg_ddm_service = mg_ddm_service.add_instance(
+                        ServiceInstanceBuilder::new("default")
+                            .add_property_group(mg_ddm_config),
+                    );
+                }
             }
         }
+
+        switch_zone_setup_service = switch_zone_setup_service.add_instance(
+            ServiceInstanceBuilder::new("default")
+                .add_property_group(switch_zone_setup_config),
+        );
+
+        let profile = ProfileBuilder::new("omicron")
+            .add_service(nw_setup_service)
+            .add_service(disabled_dns_client_service)
+            .add_service(mgs_service)
+            .add_service(wicketd_service)
+            .add_service(switch_zone_setup_service)
+            .add_service(dendrite_service)
+            .add_service(tfport_service)
+            .add_service(lldpd_service)
+            .add_service(pumpkind_service)
+            .add_service(mgd_service)
+            .add_service(mg_ddm_service)
+            .add_service(uplink_service);
+        profile.add_to_zone(&self.inner.log, &installed_zone).await.map_err(
+            |err| Error::io("Failed to setup Switch zone profile", err),
+        )?;
+        Ok(RunningZone::boot(installed_zone).await?)
     }
 
     // Attempt to start a single Omicron zone.
