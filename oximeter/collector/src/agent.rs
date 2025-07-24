@@ -374,7 +374,7 @@ impl OximeterAgent {
                 self.id.to_string(),
                 id.to_string(),
                 info.address.to_string(),
-                format!("{:?}", info.interval),
+                u64::try_from(info.interval.as_millis()).unwrap_or(u64::MAX),
             )
         });
     }

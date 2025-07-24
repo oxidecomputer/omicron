@@ -32,6 +32,7 @@ use tokio::sync::watch;
 use tokio::time::Instant;
 use tokio::time::Interval;
 use tokio::time::interval;
+use uuid::Uuid;
 
 /// Error returned when a forced collection fails.
 #[derive(Clone, Copy, Debug)]
@@ -132,25 +133,38 @@ async fn perform_collection(
             Err(self_stats::FailureReason::Unreachable)
         }
     };
-    probes::collection__done!(|| {
-        (
-            producer.id.to_string(),
-            result
-                .as_ref()
-                .map(|list| {
-                    list.iter()
-                        .map(|item| match item {
-                            ProducerResultsItem::Ok(samples) => {
-                                u64::try_from(samples.len()).unwrap_or_default()
-                            }
-                            ProducerResultsItem::Err(_) => 0,
-                        })
-                        .sum::<u64>()
-                })
-                .map_err(|e| e.to_string()),
-        )
-    });
+    emit_dtrace_probes(&producer.id, result.as_ref());
     SingleCollectionResult { result, duration: start.elapsed() }
+}
+
+// NOTE: We have some non-zero disabled-probe cost here, because we're deciding
+// which probe to fire based on the success / failure of the collection.
+#[inline(always)]
+fn emit_dtrace_probes(
+    producer_id: &Uuid,
+    result: Result<&Vec<ProducerResultsItem>, &self_stats::FailureReason>,
+) {
+    match result {
+        Ok(list) => {
+            probes::collection__done!(|| {
+                let n_samples = list
+                    .iter()
+                    .map(|item| match item {
+                        ProducerResultsItem::Ok(samples) => {
+                            u64::try_from(samples.len()).unwrap_or_default()
+                        }
+                        ProducerResultsItem::Err(_) => 0,
+                    })
+                    .sum::<u64>();
+                (producer_id.to_string(), n_samples)
+            });
+        }
+        Err(reason) => {
+            probes::collection__failed!(|| {
+                (producer_id.to_string(), reason.to_string())
+            });
+        }
+    }
 }
 
 // The type of one collection task run to completion.

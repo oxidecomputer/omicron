@@ -56,11 +56,13 @@ pub use standalone::standalone_nexus_api;
 #[usdt::provider(provider = "oximeter")]
 mod probes {
     /// Fires when a producer is registered or updated.
+    ///
+    /// The interval is given in milliseconds.
     fn producer__registered(
         collector_id: &str,
         producer_id: &str,
         addr: &str,
-        interval: &str,
+        interval: u64,
     ) {
     }
 
@@ -70,12 +72,13 @@ mod probes {
     /// Fires just before starting a collection from a producer.
     fn collection__start(producer_id: &str, addr: &str) {}
 
-    /// Fires just after finishing a collection from a producer.
-    ///
-    /// Details about the collection are in the last argument. If the colleciton
-    /// succeeded, the number of samples is included. If the collection failed,
-    /// a failure reason is included.
-    fn collection__done(producer_id: &str, details: Result<u64, String>) {}
+    /// Fires just after a successful collection from a producer, with the
+    /// number of samples collected.
+    fn collection__done(producer_id: &str, n_samples: u64) {}
+
+    /// Fires just after a failed collection from a producer, with an error
+    /// message describing the failure.
+    fn collection__failed(producer_id: &str, msg: &str) {}
 }
 
 /// Errors collecting metric data
