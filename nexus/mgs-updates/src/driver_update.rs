@@ -28,7 +28,6 @@ use std::time::Duration;
 use std::time::Instant;
 use thiserror::Error;
 use tokio::sync::watch;
-use tufaceous_artifact::ArtifactKind;
 use uuid::Uuid;
 
 /// How long may the status remain unchanged without us treating this as a
@@ -147,7 +146,7 @@ impl SpComponentUpdate {
                     // Like the SP, we request an update to the inactive slot.
                     firmware_slot: details
                         .expected_active_slot
-                        .slot
+                        .phase_1_slot
                         .toggled()
                         .to_mgs_firmware_slot(),
                     update_id,
@@ -695,7 +694,7 @@ async fn wait_for_update_done(
             | Err(PrecheckError::WrongInactiveVersion { .. })
             | Err(PrecheckError::WrongInactiveArtifact { .. })
             | Err(PrecheckError::WrongActiveRotSlot { .. })
-            | Err(PrecheckError::WrongActiveHostOsSlot { .. })
+            | Err(PrecheckError::WrongActiveHostPhase1Slot { .. })
             | Err(PrecheckError::EphemeralRotBootPreferenceSet)
             | Err(PrecheckError::SledAgentInventory { .. })
             | Err(PrecheckError::SledAgentInventoryMissingLastReconciliation)
@@ -709,21 +708,14 @@ async fn wait_for_update_done(
                 tokio::time::sleep(PROGRESS_POLL_INTERVAL).await;
                 continue;
             }
-            Err(PrecheckError::WrongActiveArtifact { kind, .. })
-                if kind == ArtifactKind::HOST_PHASE_2 =>
-            {
-                if before.elapsed() >= timeout {
-                    return Err(UpdateWaitError::Timeout(timeout));
-                }
 
-                tokio::time::sleep(PROGRESS_POLL_INTERVAL).await;
-                continue;
-            }
-
-            Err(error @ PrecheckError::WrongDevice { .. })
-            | Err(error @ PrecheckError::WrongActiveVersion { .. })
-            | Err(error @ PrecheckError::WrongActiveArtifact { .. })
-            | Err(error @ PrecheckError::RotCommunicationFailed { .. }) => {
+            Err(
+                error @ (PrecheckError::WrongDevice { .. }
+                | PrecheckError::WrongActiveVersion { .. }
+                | PrecheckError::WrongActiveArtifact { .. }
+                | PrecheckError::WrongHostOsBootDisk { .. }
+                | PrecheckError::RotCommunicationFailed { .. }),
+            ) => {
                 // Stop trying to make this update happen.  It's not going to
                 // happen.
                 return Err(UpdateWaitError::Indeterminate(error));

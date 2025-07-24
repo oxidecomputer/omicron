@@ -374,13 +374,15 @@ fn cmd_config(
                     sled_agent_address,
                 },
             ) => {
-                swriteln!(s,"        preconditions: expected active slot {:?}
+                swriteln!(s,"        preconditions: expected active phase 1 slot {:?}
+                                                    expected boot disk {:?}
                                                     expected active phase 1 artifact {}
                                                     expected active phase 2 artifact {}
                                                     expected inactive phase 1 artifact {}
                                                     expected inactive phase 2 artifact {}
                                                     sled_agent_address {}",
-                    expected_active_slot.slot,
+                    expected_active_slot.phase_1_slot,
+                    expected_active_slot.boot_disk,
                     expected_active_slot.phase_1,
                     expected_active_slot.phase_2,
                     expected_inactive_artifact.phase_1,
@@ -462,11 +464,19 @@ enum Component {
         expected_stage0_next_version: ExpectedVersion,
     },
     HostPhase1 {
+        #[arg(long)]
         expected_active_slot: M2Slot,
+        #[arg(long)]
+        expected_boot_disk: M2Slot,
+        #[arg(long)]
         expected_slot_a_phase_1: ArtifactHash,
+        #[arg(long)]
         expected_slot_a_phase_2: ExpectedArtifact,
+        #[arg(long)]
         expected_slot_b_phase_1: ArtifactHash,
+        #[arg(long)]
         expected_slot_b_phase_2: ExpectedArtifact,
+        #[arg(long)]
         sled_agent_address: SocketAddrV6,
     },
 }
@@ -538,6 +548,7 @@ fn cmd_set(
             },
             Component::HostPhase1 {
                 expected_active_slot,
+                expected_boot_disk,
                 expected_slot_a_phase_1,
                 expected_slot_a_phase_2,
                 expected_slot_b_phase_1,
@@ -564,7 +575,8 @@ fn cmd_set(
                     };
                 let details = PendingMgsUpdateHostPhase1Details {
                     expected_active_slot: ExpectedActiveHostOsSlot {
-                        slot: expected_active_slot,
+                        phase_1_slot: expected_active_slot,
+                        boot_disk: expected_boot_disk,
                         phase_1: active_phase_1,
                         phase_2: match active_phase_2 {
                             ExpectedArtifact::NoValidArtifact => bail!(

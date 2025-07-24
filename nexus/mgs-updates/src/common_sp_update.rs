@@ -398,9 +398,15 @@ pub enum PrecheckError {
     SledAgentInventoryMissingLastReconciliation,
 
     #[error(
-        "expected to find active host OS slot {expected:?}, but found {found:?}"
+        "expected to find active host phase 1 slot {expected}, \
+         but found {found}"
     )]
-    WrongActiveHostOsSlot { expected: M2Slot, found: M2Slot },
+    WrongActiveHostPhase1Slot { expected: u16, found: u16 },
+
+    #[error(
+        "expected to find host OS boot disk {expected:?}, but found {found:?}"
+    )]
+    WrongHostOsBootDisk { expected: M2Slot, found: M2Slot },
 
     #[error(
         "expected to find active host OS slot {expected:?}, but inventory \

@@ -3,6 +3,104 @@
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 //! Module containing types for updating host OS phase1 images via MGS.
+//!
+//! Reconfigurator-driven OS updates are complicated because it has to
+//! coordinate sled-agent writing the paired phase 2 _before_ we reboot the sled
+//! with a new phase 1. To walk through a typical update, we'll describe three
+//! OS versions:
+//!
+//! X1, X2 (phase 1 and phase2 of the version we want to upgrade to)
+//! Y1, Y2 (current phase 1 and phase 2 of the active slot)
+//! Z1, Z2 (current phase 1 and phase 2 of the inactive slot)
+//!
+//! We have two different meanings of "the active slot":
+//!
+//! 1. The active phase 1 slot as controlled by the SP; the value of this
+//!    determines which slot will be used the next time the sled boots.
+//! 2. The boot disk as reported by sled-agent; the value of this is a record of
+//!    which slot was used the last time the sled booted.
+//!
+//! Assume without loss of generality that the current active slot (in both
+//! meanings) is A. These are the steps we go through:
+//!
+//! 1. Initial sled state:
+//!    - active phase 1 slot: A
+//!    - boot disk: A
+//!    - slot A contains Y1+Y2
+//!    - slot B contains Z1+Z2
+//!
+//! 2. The planner decides to upgrade this sled. It generates a new blueprint
+//!    with two changes:
+//!
+//!    * The sled config sets the desired phase 2 for slot B to X2 (i.e., we
+//!      want to write the new phase 2 to the currently-inactive slot)
+//!
+//!    * Insert a `PendingMgsUpdate` for phase 1, written by
+//!      `ReconfiguratorHostPhase1Updater` in this module, with these values:
+//!      - expected phase 1 active slot: A
+//!      - expected boot disk: A
+//!      - expected active slot phase 1: Y1
+//!      - expected active slot phase 2: Y2
+//!      - expected inactive slot phase 1: Z1
+//!      - expected inactive slot phase 2: X2
+//!
+//! 3. If we run our precheck now, we will return a
+//!    `WrongInactiveArtifact(Phase2)`, because the inactive slot's phase 2 is
+//!    currently Z2, but we don't begin the phase 1 update until it becomes X2.
+//!
+//! 4. sled-agent writes X2 to the inactive slot phase 2; the state of the sled
+//!    is now:
+//!
+//!    - active phase 1 slot: A
+//!    - boot disk: A
+//!    - slot A contains Y1+Y2
+//!    - slot B contains Z1+X2 (note: mismatched! this is expected, and our
+//!      active slo tis still set to A, so if we reboot in this state everything
+//!      is fine and we'll come up on version Y)
+//!
+//! 5. Our precheck will now return `ReadyForUpdate`, and we'll start writing
+//!    X1 to the inactive slot phase 1. This behaves similarly to updating an
+//!    SP: if we try to precheck while writing phase 1, we'll get a
+//!    `WrongInactiveArtifact(Phase1)` (because we'll see a hash of a
+//!    partially-written artifact).
+//!
+//! 6. Our phase 1 write completes; the state of the sled is now:
+//!
+//!    - active phase 1 slot: A
+//!    - boot disk: A
+//!    - slot A contains Y1+Y2
+//!    - slot B contains X1+X2
+//!
+//!    A precheck at this point will return `WrongInactiveArtifact`, as X1 no
+//!    longer matches the expected value Z1.
+//!
+//! 7. We run our post_update. This has three substeps; it's important to
+//!    separate these out to ensure we handle takeovers correctly if the Nexus
+//!    driving the update dies partway through post_update.
+//!
+//!    * We set the active phase 1 slot to B; the state of the sled is now:
+//!
+//!      - active phase 1 slot: B
+//!      - boot disk: A
+//!      - slot A contains Y1+Y2
+//!      - slot B contains X1+X2
+//!
+//!      A precheck from this point forward will return
+//!      `WrongActiveHostPhase1Slot`.
+//!
+//!    * We power off the host (i.e., go to PowerState::A2). This does not
+//!      change the state of the sled, except that we can no longer talk to
+//!      sled-agent and therefore no longer have a report of the boot disk.
+//!
+//!    * We power on the host (i.e., go to PowerState::A0). Once it comes back,
+//!      the state of the sled will be:
+//!
+//!      - active phase 1 slot: B
+//!      - boot disk: B
+//!      - slot A contains Y1+Y2
+//!      - slot B contains X1+X2
+//!
+//!      and the upgrade will be complete.
 
 use super::MgsClients;
 use super::SpComponentUpdateError;
@@ -250,31 +348,50 @@ impl ReconfiguratorHostPhase1Updater {
             });
         }
 
-        // Verify expected phase 2 contents against sled-agent.
-        self.precheck_phase_2(log).await?;
-
-        // Fetch the active slot's current phase 1.
         let PendingMgsUpdateHostPhase1Details {
             expected_active_slot,
             expected_inactive_artifact,
             sled_agent_address: _,
         } = &self.details;
-        let active_slot = expected_active_slot.slot.to_mgs_firmware_slot();
-        let inactive_slot =
-            expected_active_slot.slot.toggled().to_mgs_firmware_slot();
+
+        // Confirm the currently-active slot matches what we expect.
+        {
+            let expected_active_slot =
+                expected_active_slot.phase_1_slot.to_mgs_firmware_slot();
+            let actual_active_slot = mgs_clients
+                .try_all_serially(log, |mgs_client| async move {
+                    mgs_client
+                        .sp_component_active_slot_get(
+                            update.sp_type,
+                            update.slot_id,
+                            SpComponent::HOST_CPU_BOOT_FLASH.const_as_str(),
+                        )
+                        .await
+                })
+                .await?
+                .slot;
+            if expected_active_slot != actual_active_slot {
+                return Err(PrecheckError::WrongActiveHostPhase1Slot {
+                    expected: expected_active_slot,
+                    found: actual_active_slot,
+                });
+            }
+        }
+
+        // Fetch the active phase 1 slot's current phase 1.
         let expected_active_artifact = expected_active_slot.phase_1;
         let expected_inactive_artifact = expected_inactive_artifact.phase_1;
         let found_active_artifact = self
             .precheck_fetch_phase_1(
                 mgs_clients,
                 target_sp,
-                active_slot,
+                expected_active_slot.phase_1_slot.to_mgs_firmware_slot(),
                 expected_active_artifact,
                 log,
             )
             .await?;
         debug!(
-            log, "found active slot phase 1 artifact";
+            log, "found active phase 1 slot artifact";
             "hash" => %found_active_artifact,
         );
 
@@ -299,11 +416,13 @@ impl ReconfiguratorHostPhase1Updater {
 
         // For the same reason, check that the version in the inactive slot
         // matches what we expect to find.
+        let expected_inactive_slot =
+            expected_active_slot.phase_1_slot.toggled();
         let found_inactive_artifact = self
             .precheck_fetch_phase_1(
                 mgs_clients,
                 target_sp,
-                inactive_slot,
+                expected_inactive_slot.to_mgs_firmware_slot(),
                 expected_inactive_artifact,
                 log,
             )
@@ -314,6 +433,11 @@ impl ReconfiguratorHostPhase1Updater {
         );
 
         if found_inactive_artifact == expected_inactive_artifact {
+            // Everything looks good as far as phase 1 preconditions are
+            // concerned; also confirm that our phase 2 preconditions are
+            // satisfied by contacting sled-agent.
+            self.precheck_phase_2(log).await?;
+
             Ok(PrecheckStatus::ReadyForUpdate)
         } else {
             Err(PrecheckError::WrongInactiveArtifact {
@@ -406,11 +530,11 @@ impl ReconfiguratorHostPhase1Updater {
             "inventory" => ?sled_inventory,
         );
 
-        // Confirm the expected active slot (i.e., the slot we booted from) and
-        match (sled_inventory.boot_disk, expected_active_slot.slot) {
+        // Confirm the expected boot disk.
+        match (sled_inventory.boot_disk, expected_active_slot.boot_disk) {
             (Ok(found), expected) if found == expected => (),
             (Ok(found), expected) => {
-                return Err(PrecheckError::WrongActiveHostOsSlot {
+                return Err(PrecheckError::WrongHostOsBootDisk {
                     expected,
                     found,
                 });
@@ -427,7 +551,7 @@ impl ReconfiguratorHostPhase1Updater {
         // can't proceed: either our update has become impossible due to other
         // changes (requires replanning), or we're waiting for sled-agent to
         // write the phase 2 we expect.
-        let (active, inactive) = match expected_active_slot.slot {
+        let (active, inactive) = match expected_active_slot.boot_disk {
             M2Slot::A => (sled_inventory.slot_a, sled_inventory.slot_b),
             M2Slot::B => (sled_inventory.slot_b, sled_inventory.slot_a),
         };
@@ -486,7 +610,7 @@ impl ReconfiguratorHostPhase1Updater {
         let new_active_slot = self
             .details
             .expected_active_slot
-            .slot
+            .phase_1_slot
             .toggled()
             .to_mgs_firmware_slot();
         mgs_clients
