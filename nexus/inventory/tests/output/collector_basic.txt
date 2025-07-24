@@ -95,8 +95,14 @@ sled agents found:
         host_phase_2.slot_a: CurrentContents
         host_phase_2.slot_b: CurrentContents
         zone 8b88a56f-3eb6-4d80-ba42-75d867bc427d type oximeter
-    no completed reconciliation
-    reconciler task not yet run
+    last reconciled config:
+        generation: 3
+        remove_mupdate_override: None
+        host_phase_2.slot_a: CurrentContents
+        host_phase_2.slot_b: CurrentContents
+        zone 8b88a56f-3eb6-4d80-ba42-75d867bc427d type oximeter
+    result for zone 8b88a56f-3eb6-4d80-ba42-75d867bc427d: Ok
+    reconciler task idle
   sled 9cb9b78f-5614-440c-b66d-e8e81fab69b0 (Scrimlet)
     baseboard Some(BaseboardId { part_number: "sim-gimlet", serial_number: "sim-9cb9b78f-5614-440c-b66d-e8e81fab69b0" })
     ledgered sled config:
@@ -105,7 +111,13 @@ sled agents found:
         host_phase_2.slot_a: CurrentContents
         host_phase_2.slot_b: CurrentContents
         zone 5125277f-0988-490b-ac01-3bba20cc8f07 type oximeter
-    no completed reconciliation
-    reconciler task not yet run
+    last reconciled config:
+        generation: 3
+        remove_mupdate_override: None
+        host_phase_2.slot_a: CurrentContents
+        host_phase_2.slot_b: CurrentContents
+        zone 5125277f-0988-490b-ac01-3bba20cc8f07 type oximeter
+    result for zone 5125277f-0988-490b-ac01-3bba20cc8f07: Ok
+    reconciler task idle
 
 errors:
