@@ -25,6 +25,18 @@ sled-show dde1c0e2-b10d-4621-b420-f179f7a7a00a
 sled-update-sp dde1c0e2-b10d-4621-b420-f179f7a7a00a --active 4.0.0 --inactive 5.0.0
 sled-show dde1c0e2-b10d-4621-b420-f179f7a7a00a
 
+sled-update-rot-bootloader dde1c0e2-b10d-4621-b420-f179f7a7a00a
+sled-update-rot-bootloader dde1c0e2-b10d-4621-b420-f179f7a7a00a --stage0 1.0.0
+sled-show dde1c0e2-b10d-4621-b420-f179f7a7a00a
+sled-update-rot-bootloader dde1c0e2-b10d-4621-b420-f179f7a7a00a --stage0-next 2.0.0
+sled-show dde1c0e2-b10d-4621-b420-f179f7a7a00a
+sled-update-rot-bootloader dde1c0e2-b10d-4621-b420-f179f7a7a00a --stage0 3.0.0
+sled-show dde1c0e2-b10d-4621-b420-f179f7a7a00a
+sled-update-rot-bootloader dde1c0e2-b10d-4621-b420-f179f7a7a00a --stage0 4.0.0 --stage0-next invalid
+sled-show dde1c0e2-b10d-4621-b420-f179f7a7a00a
+sled-update-rot-bootloader dde1c0e2-b10d-4621-b420-f179f7a7a00a --stage0 4.0.0 --stage0-next 5.0.0
+sled-show dde1c0e2-b10d-4621-b420-f179f7a7a00a
+
 inventory-generate
 inventory-list
 
