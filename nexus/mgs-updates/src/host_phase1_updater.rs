@@ -354,50 +354,53 @@ impl ReconfiguratorHostPhase1Updater {
             sled_agent_address: _,
         } = &self.details;
 
-        // Fetch the active phase 1 slot's current phase 1.
-        let expected_active_artifact = expected_active_slot.phase_1;
-        let expected_inactive_artifact = expected_inactive_artifact.phase_1;
-        let found_active_artifact = self
+        // Fetch the current phase 1 active slot.
+        let current_active_slot = mgs_clients
+            .try_all_serially(log, |mgs_client| async move {
+                mgs_client
+                    .sp_component_active_slot_get(
+                        update.sp_type,
+                        update.slot_id,
+                        SpComponent::HOST_CPU_BOOT_FLASH.const_as_str(),
+                    )
+                    .await
+            })
+            .await?
+            .slot;
+        debug!(
+            log, "found currently-active phase 1 slot";
+            "slot" => %current_active_slot,
+        );
+
+        // Fetch the hash of the current phase 1 active slot.
+        let current_active_slot_hash = self
             .precheck_fetch_phase_1(
                 mgs_clients,
                 target_sp,
-                expected_active_slot.phase_1_slot.to_mgs_firmware_slot(),
-                expected_active_artifact,
+                current_active_slot,
                 log,
             )
             .await?;
         debug!(
-            log, "found active phase 1 slot artifact";
-            "hash" => %found_active_artifact,
+            log, "found currently-active phase 1 artifact";
+            "hash" => %current_active_slot_hash,
         );
 
         // If the version in the currently-active slot matches the one we're
         // trying to set, then there's nothing to do.
-        if found_active_artifact == update.artifact_hash {
+        if current_active_slot_hash == update.artifact_hash {
             return Ok(PrecheckStatus::UpdateComplete);
         }
 
         // Otherwise, confirm the currently-active slot matches what we
         // expect...
         {
-            let expected_active_slot =
+            let expected_active_mgs_slot =
                 expected_active_slot.phase_1_slot.to_mgs_firmware_slot();
-            let actual_active_slot = mgs_clients
-                .try_all_serially(log, |mgs_client| async move {
-                    mgs_client
-                        .sp_component_active_slot_get(
-                            update.sp_type,
-                            update.slot_id,
-                            SpComponent::HOST_CPU_BOOT_FLASH.const_as_str(),
-                        )
-                        .await
-                })
-                .await?
-                .slot;
-            if expected_active_slot != actual_active_slot {
+            if current_active_slot != expected_active_mgs_slot {
                 return Err(PrecheckError::WrongActiveHostPhase1Slot {
-                    expected: expected_active_slot,
-                    found: actual_active_slot,
+                    expected: expected_active_mgs_slot,
+                    found: current_active_slot,
                 });
             }
         }
@@ -407,11 +410,11 @@ impl ReconfiguratorHostPhase1Updater {
         // completed a subsequent update and we don't want to roll that back.
         // (If for some reason we *do* want to do this update, the planner will
         // have to notice that what's here is wrong and update the blueprint.)
-        if found_active_artifact != expected_active_artifact {
+        if current_active_slot_hash != expected_active_slot.phase_1 {
             return Err(PrecheckError::WrongActiveArtifact {
                 kind: ArtifactKind::HOST_PHASE_1,
-                expected: expected_active_artifact,
-                found: found_active_artifact,
+                expected: expected_active_slot.phase_1,
+                found: current_active_slot_hash,
             });
         }
 
@@ -424,7 +427,6 @@ impl ReconfiguratorHostPhase1Updater {
                 mgs_clients,
                 target_sp,
                 expected_inactive_slot.to_mgs_firmware_slot(),
-                expected_inactive_artifact,
                 log,
             )
             .await?;
@@ -433,18 +435,18 @@ impl ReconfiguratorHostPhase1Updater {
             "hash" => %found_inactive_artifact,
         );
 
-        if found_inactive_artifact == expected_inactive_artifact {
+        if found_inactive_artifact == expected_inactive_artifact.phase_1 {
             // Everything looks good as far as phase 1 preconditions are
             // concerned; also confirm that our phase 2 preconditions are
             // satisfied by contacting sled-agent.
-            self.precheck_phase_2(log).await?;
+            self.precheck_phase_2_via_sled_agent(log).await?;
 
             Ok(PrecheckStatus::ReadyForUpdate)
         } else {
             Err(PrecheckError::WrongInactiveArtifact {
                 kind: ArtifactKind::HOST_PHASE_1,
                 expected: ExpectedArtifact::Artifact(
-                    expected_inactive_artifact,
+                    expected_inactive_artifact.phase_1,
                 ),
                 found: FoundArtifact::Artifact(found_inactive_artifact),
             })
@@ -456,7 +458,6 @@ impl ReconfiguratorHostPhase1Updater {
         mgs_clients: &mut MgsClients,
         target_sp: SpIdentifier,
         target_slot: u16,
-        expected_artifact: ArtifactHash,
         log: &Logger,
     ) -> Result<ArtifactHash, PrecheckError> {
         match mgs_clients
@@ -494,13 +495,12 @@ impl ReconfiguratorHostPhase1Updater {
             }
             Err(err) => Err(PrecheckError::DeterminingActiveArtifact {
                 kind: ArtifactKind::HOST_PHASE_1,
-                expected: expected_artifact,
                 err: InlineErrorChain::new(&err).to_string(),
             }),
         }
     }
 
-    async fn precheck_phase_2(
+    async fn precheck_phase_2_via_sled_agent(
         &self,
         log: &Logger,
     ) -> Result<(), PrecheckError> {
@@ -556,24 +556,21 @@ impl ReconfiguratorHostPhase1Updater {
             M2Slot::A => (sled_inventory.slot_a, sled_inventory.slot_b),
             M2Slot::B => (sled_inventory.slot_b, sled_inventory.slot_a),
         };
-        let active = active.map(|s| s.artifact_hash);
-
-        match (active, expected_active_slot.phase_2) {
-            (Ok(found), expected) if found == expected => (),
-            (Ok(found), expected) => {
-                return Err(PrecheckError::WrongActiveArtifact {
-                    kind: ArtifactKind::HOST_PHASE_2,
-                    expected,
-                    found,
-                });
-            }
-            (Err(err), expected) => {
+        let active = match active {
+            Ok(details) => details.artifact_hash,
+            Err(err) => {
                 return Err(PrecheckError::DeterminingActiveArtifact {
                     kind: ArtifactKind::HOST_PHASE_2,
-                    expected,
                     err,
                 });
             }
+        };
+        if active != expected_active_slot.phase_2 {
+            return Err(PrecheckError::WrongActiveArtifact {
+                kind: ArtifactKind::HOST_PHASE_2,
+                expected: expected_active_slot.phase_2,
+                found: active,
+            });
         }
 
         let found_inactive = match inactive {

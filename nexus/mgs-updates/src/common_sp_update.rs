@@ -369,15 +369,8 @@ pub enum PrecheckError {
         found: ArtifactHash,
     },
 
-    #[error(
-        "expected to find active kind artifact {expected}, but failed \
-         to fetch current artifact: {err}"
-    )]
-    DeterminingActiveArtifact {
-        kind: ArtifactKind,
-        expected: ArtifactHash,
-        err: String,
-    },
+    #[error("failed to determine current active {kind} artifact: {err}")]
+    DeterminingActiveArtifact { kind: ArtifactKind, err: String },
 
     #[error(
         "expected to find inactive version {expected:?}, but found {found:?}"
