@@ -36,9 +36,11 @@ use omicron_common::api::external::ByteCount;
 pub use omicron_common::api::internal::shared::NetworkInterface;
 pub use omicron_common::api::internal::shared::NetworkInterfaceKind;
 pub use omicron_common::api::internal::shared::SourceNatConfig;
+use omicron_common::disk::M2Slot;
 pub use omicron_common::zpool_name::ZpoolName;
 use omicron_uuid_kinds::CollectionUuid;
 use omicron_uuid_kinds::DatasetUuid;
+use omicron_uuid_kinds::OmicronZoneUuid;
 use omicron_uuid_kinds::SledUuid;
 use omicron_uuid_kinds::ZpoolUuid;
 use schemars::JsonSchema;
@@ -49,6 +51,11 @@ use std::collections::BTreeSet;
 use std::net::SocketAddrV6;
 use std::sync::Arc;
 use strum::EnumIter;
+use tufaceous_artifact::ArtifactHash;
+
+mod display;
+
+pub use display::*;
 
 /// Results of collecting hardware/software inventory from various Omicron
 /// components
@@ -99,6 +106,14 @@ pub struct Collection {
     /// table.
     #[serde_as(as = "Vec<(_, _)>")]
     pub sps: BTreeMap<Arc<BaseboardId>, ServiceProcessor>,
+    /// all host phase 1 flash hashes, keyed first by the phase 1 slot, then the
+    /// baseboard id of the sled where they were found
+    ///
+    /// In practice, these will be inserted into the
+    /// `inv_host_phase_1_flash_hash` table.
+    #[serde_as(as = "BTreeMap<_, Vec<(_, _)>>")]
+    pub host_phase_1_flash_hashes:
+        BTreeMap<M2Slot, BTreeMap<Arc<BaseboardId>, HostPhase1FlashHash>>,
     /// all roots of trust, keyed by baseboard id
     ///
     /// In practice, these will be inserted into the `inv_root_of_trust` table.
@@ -153,9 +168,24 @@ pub struct Collection {
     /// The status of our cockroachdb cluster, keyed by node identifier
     pub cockroach_status:
         BTreeMap<omicron_cockroach_metrics::NodeId, CockroachStatus>,
+
+    /// The status of time synchronization
+    pub ntp_timesync: IdOrdMap<TimeSync>,
+    /// The generation status of internal DNS servers
+    pub internal_dns_generation_status: IdOrdMap<InternalDnsGenerationStatus>,
 }
 
 impl Collection {
+    pub fn host_phase_1_flash_hash_for(
+        &self,
+        slot: M2Slot,
+        baseboard_id: &BaseboardId,
+    ) -> Option<&HostPhase1FlashHash> {
+        self.host_phase_1_flash_hashes
+            .get(&slot)
+            .and_then(|by_bb| by_bb.get(baseboard_id))
+    }
+
     pub fn caboose_for(
         &self,
         which: CabooseWhich,
@@ -228,6 +258,15 @@ impl Collection {
             .iter()
             .max_by_key(|membership| membership.leader_committed_log_index)
             .map(|membership| (membership.clone()))
+    }
+
+    /// Return a type which can be used to display a collection in a
+    /// human-readable format.
+    ///
+    /// The return [`CollectionDisplay`] has several knobs that can be tweaked
+    /// to display part or all of a collection.
+    pub fn display(&self) -> CollectionDisplay<'_> {
+        CollectionDisplay::new(self)
     }
 }
 
@@ -371,6 +410,18 @@ pub struct RotState {
     pub slot_b_error: Option<RotImageError>,
     pub stage0_error: Option<RotImageError>,
     pub stage0next_error: Option<RotImageError>,
+}
+
+/// Describes a host phase 1 flash hash found from a service processor
+/// during collection
+#[derive(
+    Clone, Debug, Ord, Eq, PartialOrd, PartialEq, Deserialize, Serialize,
+)]
+pub struct HostPhase1FlashHash {
+    pub time_collected: DateTime<Utc>,
+    pub source: String,
+    pub slot: M2Slot,
+    pub hash: ArtifactHash,
 }
 
 /// Describes which caboose this is (which component, which slot)
@@ -605,8 +656,46 @@ impl IdOrdItem for SledAgent {
     id_upcast!();
 }
 
-#[derive(Clone, Default, Debug, PartialEq, Eq, Deserialize, Serialize)]
+#[derive(
+    Clone, Default, Debug, Hash, PartialEq, Eq, Deserialize, Serialize,
+)]
 pub struct CockroachStatus {
     pub ranges_underreplicated: Option<u64>,
     pub liveness_live_nodes: Option<u64>,
+}
+
+/// Inventory representation of whether an NTP service reports time to be synced
+#[derive(Clone, Debug, PartialEq, Eq, Deserialize, JsonSchema, Serialize)]
+pub struct TimeSync {
+    /// Zone ID of the NTP admin server contacted
+    pub zone_id: OmicronZoneUuid,
+
+    /// Whether or not the service claims time is synchronized
+    pub synced: bool,
+}
+
+impl IdOrdItem for TimeSync {
+    type Key<'a> = OmicronZoneUuid;
+    fn key(&self) -> Self::Key<'_> {
+        self.zone_id
+    }
+    id_upcast!();
+}
+
+#[derive(
+    Clone, Debug, Diffable, Serialize, Deserialize, JsonSchema, PartialEq, Eq,
+)]
+pub struct InternalDnsGenerationStatus {
+    /// Zone ID of the internal DNS server contacted
+    pub zone_id: OmicronZoneUuid,
+    /// Generation number of the DNS configuration
+    pub generation: omicron_common::api::external::Generation,
+}
+
+impl IdOrdItem for InternalDnsGenerationStatus {
+    type Key<'a> = OmicronZoneUuid;
+    fn key(&self) -> Self::Key<'_> {
+        self.zone_id
+    }
+    id_upcast!();
 }

@@ -37,7 +37,11 @@ async fn native_impl(
     conn: &Arc<Mutex<Connection>>,
     query: &str,
 ) {
-    conn.lock().await.query(query).await.expect("Expected to run query");
+    conn.lock()
+        .await
+        .query(uuid::Uuid::new_v4(), query)
+        .await
+        .expect("Expected to run query");
 }
 
 /// Setup the native query benchmark.

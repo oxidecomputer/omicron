@@ -28,7 +28,9 @@ use similar_asserts;
 use slog::Logger;
 use slog_error_chain::InlineErrorChain;
 use std::collections::BTreeMap;
+use std::collections::HashMap;
 use std::net::IpAddr;
+use std::str::FromStr;
 use std::sync::Mutex;
 use tokio::time::Duration;
 use tokio::time::timeout;
@@ -2650,6 +2652,243 @@ mod migration_156 {
     }
 }
 
+const BP_OXIMETER_READ_POLICY_ID_0: &str =
+    "5cb42909-d94a-4903-be72-330eea0325d9";
+const BP_OXIMETER_READ_POLICY_ID_1: &str =
+    "142b62c2-9348-4530-9eed-7077351fb94b";
+const BP_OXIMETER_READ_POLICY_ID_2: &str =
+    "3b5b7861-03aa-420a-a057-0a14347dc4c0";
+const BP_OXIMETER_READ_POLICY_ID_3: &str =
+    "de7ab4c0-30d4-4e9e-b620-3a959a9d59dd";
+
+// Insert two blueprints and 4 oximeter read policies, two of which do not have
+// a corresponding blueprint
+fn before_164_0_0<'a>(ctx: &'a MigrationContext<'a>) -> BoxFuture<'a, ()> {
+    Box::pin(async move {
+        ctx.client
+            .batch_execute(
+                &format!("
+        INSERT INTO omicron.public.blueprint
+          (id, parent_blueprint_id, time_created, creator, comment, internal_dns_version, external_dns_version, cockroachdb_fingerprint, cockroachdb_setting_preserve_downgrade, target_release_minimum_generation)
+        VALUES
+          (
+            '{BP_OXIMETER_READ_POLICY_ID_0}', NULL, now(), 'bob', 'hi', 1, 1, 'fingerprint', NULL, 1
+          ),
+          (
+            '{BP_OXIMETER_READ_POLICY_ID_1}', NULL, now(), 'bab', 'hi', 1, 1, 'fingerprint', NULL, 1
+          );
+
+        INSERT INTO omicron.public.bp_oximeter_read_policy
+          (blueprint_id, version, oximeter_read_mode)
+        VALUES
+          ('{BP_OXIMETER_READ_POLICY_ID_0}', 1, 'cluster'),
+          ('{BP_OXIMETER_READ_POLICY_ID_1}', 2, 'cluster'),
+          ('{BP_OXIMETER_READ_POLICY_ID_2}', 3, 'cluster'),
+          ('{BP_OXIMETER_READ_POLICY_ID_3}', 4, 'cluster')
+        "),
+            )
+            .await
+            .expect("failed to insert pre-migration rows for 163");
+    })
+}
+
+// Validate that rows that do not have a corresponding blueprint are gone
+fn after_164_0_0<'a>(ctx: &'a MigrationContext<'a>) -> BoxFuture<'a, ()> {
+    Box::pin(async move {
+        let rows = ctx
+            .client
+            .query(
+                "SELECT blueprint_id FROM omicron.public.bp_oximeter_read_policy ORDER BY blueprint_id;",
+                &[],
+            )
+            .await
+            .expect("failed to query post-migration bp_oximeter_read_policy table");
+        assert_eq!(rows.len(), 2);
+
+        let id_1: Uuid = (&rows[0]).get::<&str, Uuid>("blueprint_id");
+        assert_eq!(id_1.to_string(), BP_OXIMETER_READ_POLICY_ID_1);
+
+        let id_2: Uuid = (&rows[1]).get::<&str, Uuid>("blueprint_id");
+        assert_eq!(id_2.to_string(), BP_OXIMETER_READ_POLICY_ID_0);
+    })
+}
+
+const PORT_SETTINGS_ID_165_0: &str = "1e700b64-79e0-4515-9771-bcc2391b6d4d";
+const PORT_SETTINGS_ID_165_1: &str = "c6b015ff-1c98-474f-b9e9-dfc30546094f";
+const PORT_SETTINGS_ID_165_2: &str = "8b777d9b-62a3-4c4d-b0b7-314315c2a7fc";
+const PORT_SETTINGS_ID_165_3: &str = "7c675e89-74b1-45da-9577-cf75f028107a";
+const PORT_SETTINGS_ID_165_4: &str = "e2413d63-9307-4918-b9c4-bce959c63042";
+const PORT_SETTINGS_ID_165_5: &str = "05df929f-1596-42f4-b78f-aebb5d7028c4";
+
+// Insert records using the `local_pref` column before it's renamed and its
+// database type is changed from INT8 to INT2. The receiving Rust type is u8
+// so 2 records are outside the u8 range, 2 records are at the edge of the u8
+// range, and 1 record is within the u8 range.
+fn before_165_0_0<'a>(ctx: &'a MigrationContext<'a>) -> BoxFuture<'a, ()> {
+    Box::pin(async move {
+        ctx.client
+            .batch_execute(&format!("
+                INSERT INTO omicron.public.switch_port_settings_route_config
+                  (port_settings_id, interface_name, dst, gw, vid, local_pref)
+                VALUES
+                  (
+                    '{PORT_SETTINGS_ID_165_0}', 'phy0', '0.0.0.0/0', '0.0.0.0', NULL, -1
+                  ),
+                  (
+                    '{PORT_SETTINGS_ID_165_1}', 'phy0', '0.0.0.0/0', '0.0.0.0', NULL, 0
+                  ),
+                  (
+                    '{PORT_SETTINGS_ID_165_2}', 'phy0', '0.0.0.0/0', '0.0.0.0', NULL, 128
+                  ),
+                  (
+                    '{PORT_SETTINGS_ID_165_3}', 'phy0', '0.0.0.0/0', '0.0.0.0', NULL, 255
+                  ),
+                  (
+                    '{PORT_SETTINGS_ID_165_4}', 'phy0', '0.0.0.0/0', '0.0.0.0', NULL, 256
+                  ),
+                  (
+                    '{PORT_SETTINGS_ID_165_5}', 'phy0', '0.0.0.0/0', '0.0.0.0', NULL, NULL
+                  );
+              "),
+            )
+            .await
+            .expect("failed to insert pre-migration rows for 165");
+    })
+}
+
+// Query the records using the new `rib_priority` column and assert that the
+// values were correctly clamped within the u8 range.
+fn after_165_0_0<'a>(ctx: &'a MigrationContext<'a>) -> BoxFuture<'a, ()> {
+    Box::pin(async move {
+        let rows = ctx
+            .client
+            .query(
+                "SELECT * FROM omicron.public.switch_port_settings_route_config;",
+                &[],
+            )
+            .await
+            .expect("failed to query post-migration switch_port_settings_route_config table");
+        assert_eq!(rows.len(), 6);
+
+        let records: HashMap<Uuid, Option<i16>> = HashMap::from([
+            (Uuid::from_str(PORT_SETTINGS_ID_165_0).unwrap(), Some(0)),
+            (Uuid::from_str(PORT_SETTINGS_ID_165_1).unwrap(), Some(0)),
+            (Uuid::from_str(PORT_SETTINGS_ID_165_2).unwrap(), Some(128)),
+            (Uuid::from_str(PORT_SETTINGS_ID_165_3).unwrap(), Some(255)),
+            (Uuid::from_str(PORT_SETTINGS_ID_165_4).unwrap(), Some(255)),
+            (Uuid::from_str(PORT_SETTINGS_ID_165_5).unwrap(), None),
+        ]);
+
+        for row in rows {
+            let port_settings_id = row.get::<&str, Uuid>("port_settings_id");
+            let rib_priority_got = row.get::<&str, Option<i16>>("rib_priority");
+
+            let rib_priority_want = records
+                .get(&port_settings_id)
+                .expect("unexpected port_settings_id value when querying switch_port_settings_route_config");
+            assert_eq!(rib_priority_got, *rib_priority_want);
+        }
+    })
+}
+
+fn before_171_0_0<'a>(ctx: &'a MigrationContext<'a>) -> BoxFuture<'a, ()> {
+    Box::pin(async move {
+        // Create test data in inv_sled_config_reconciler table before the new columns are added.
+        ctx.client
+            .execute(
+                "INSERT INTO omicron.public.inv_sled_config_reconciler
+                 (inv_collection_id, sled_id, last_reconciled_config, boot_disk_slot)
+                 VALUES
+                 ('11111111-1111-1111-1111-111111111111', '22222222-2222-2222-2222-222222222222',
+                  '33333333-3333-3333-3333-333333333333', 0);",
+                &[],
+            )
+            .await
+            .expect("inserted pre-migration rows for 171");
+    })
+}
+
+fn after_171_0_0<'a>(ctx: &'a MigrationContext<'a>) -> BoxFuture<'a, ()> {
+    Box::pin(async move {
+        // After the migration, the new columns should exist and be NULL for existing rows.
+        let rows = ctx
+            .client
+            .query(
+                "SELECT
+                   clear_mupdate_override_boot_success,
+                   clear_mupdate_override_boot_error,
+                   clear_mupdate_override_non_boot_message
+                 FROM omicron.public.inv_sled_config_reconciler
+                 WHERE sled_id = '22222222-2222-2222-2222-222222222222';",
+                &[],
+            )
+            .await
+            .expect("queried post-migration inv_sled_config_reconciler");
+        assert_eq!(rows.len(), 1);
+
+        // All new columns should be NULL for existing rows.
+        let boot_success: Option<AnySqlType> =
+            (&rows[0]).get("clear_mupdate_override_boot_success");
+        assert!(boot_success.is_none());
+
+        let boot_error: Option<String> =
+            (&rows[0]).get("clear_mupdate_override_boot_error");
+        assert!(boot_error.is_none());
+
+        let non_boot_message: Option<String> =
+            (&rows[0]).get("clear_mupdate_override_non_boot_message");
+        assert!(non_boot_message.is_none());
+
+        // Test that the constraint allows valid combinations.
+        // Case 1: All NULL (should work).
+        ctx.client
+            .execute(
+                "INSERT INTO omicron.public.inv_sled_config_reconciler
+                 (inv_collection_id, sled_id, last_reconciled_config, boot_disk_slot,
+                  clear_mupdate_override_boot_success, clear_mupdate_override_boot_error,
+                  clear_mupdate_override_non_boot_message)
+                 VALUES
+                 ('aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa', '33333333-3333-3333-3333-333333333333',
+                  'bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb', 1, NULL, NULL, NULL);",
+                &[],
+            )
+            .await
+            .expect("inserted row with all NULL clear_mupdate_override columns");
+
+        // Case 2: Success case (boot_success NOT NULL, boot_error NULL, non_boot_message NOT NULL).
+        ctx.client
+            .execute(
+                "INSERT INTO omicron.public.inv_sled_config_reconciler
+                 (inv_collection_id, sled_id, last_reconciled_config, boot_disk_slot,
+                  clear_mupdate_override_boot_success, clear_mupdate_override_boot_error,
+                  clear_mupdate_override_non_boot_message)
+                 VALUES
+                 ('cccccccc-cccc-cccc-cccc-cccccccccccc', '44444444-4444-4444-4444-444444444444',
+                  'dddddddd-dddd-dddd-dddd-dddddddddddd', 0,
+                  'cleared', NULL, 'Non-boot disk cleared successfully');",
+                &[],
+            )
+            .await
+            .expect("inserted row with success case clear_mupdate_override columns");
+
+        // Case 3: Error case (boot_success NULL, boot_error NOT NULL, non_boot_message NOT NULL).
+        ctx.client
+            .execute(
+                "INSERT INTO omicron.public.inv_sled_config_reconciler
+                 (inv_collection_id, sled_id, last_reconciled_config, boot_disk_slot,
+                  clear_mupdate_override_boot_success, clear_mupdate_override_boot_error,
+                  clear_mupdate_override_non_boot_message)
+                 VALUES
+                 ('eeeeeeee-eeee-eeee-eeee-eeeeeeeeeeee', '55555555-5555-5555-5555-555555555555',
+                  'ffffffff-ffff-ffff-ffff-ffffffffffff', 1,
+                  NULL, 'Failed to clear mupdate override', 'Non-boot disk operation failed');",
+                &[],
+            )
+            .await
+            .expect("inserted row with error case clear_mupdate_override columns");
+    })
+}
+
 // Lazily initializes all migration checks. The combination of Rust function
 // pointers and async makes defining a static table fairly painful, so we're
 // using lazy initialization instead.
@@ -2735,6 +2974,18 @@ fn get_migration_checks() -> BTreeMap<Version, DataMigrationFns> {
         DataMigrationFns::new()
             .before(migration_156::before)
             .after(migration_156::after),
+    );
+    map.insert(
+        Version::new(164, 0, 0),
+        DataMigrationFns::new().before(before_164_0_0).after(after_164_0_0),
+    );
+    map.insert(
+        Version::new(165, 0, 0),
+        DataMigrationFns::new().before(before_165_0_0).after(after_165_0_0),
+    );
+    map.insert(
+        Version::new(171, 0, 0),
+        DataMigrationFns::new().before(before_171_0_0).after(after_171_0_0),
     );
 
     map

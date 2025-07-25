@@ -5,6 +5,7 @@
 //! Inventory types shared between Nexus and sled-agent.
 
 use std::collections::BTreeMap;
+use std::fmt::{self, Write};
 use std::net::{IpAddr, Ipv6Addr, SocketAddr, SocketAddrV6};
 use std::time::Duration;
 
@@ -16,6 +17,7 @@ use id_map::IdMappable;
 use iddqd::IdOrdItem;
 use iddqd::IdOrdMap;
 use iddqd::id_upcast;
+use indent_write::fmt::IndentWriter;
 use omicron_common::disk::{DatasetKind, DatasetName, M2Slot};
 use omicron_common::ledger::Ledgerable;
 use omicron_common::snake_case_result;
@@ -141,6 +143,10 @@ pub struct ConfigReconcilerInventory {
     pub orphaned_datasets: IdOrdMap<OrphanedDataset>,
     pub zones: BTreeMap<OmicronZoneUuid, ConfigReconcilerInventoryResult>,
     pub boot_partitions: BootPartitionContents,
+    /// The result of clearing the mupdate override field.
+    ///
+    /// `None` if `remove_mupdate_override` was not provided in the sled config.
+    pub clear_mupdate_override: Option<ClearMupdateOverrideInventory>,
 }
 
 impl ConfigReconcilerInventory {
@@ -198,6 +204,17 @@ impl ConfigReconcilerInventory {
             .iter()
             .map(|z| (z.id, ConfigReconcilerInventoryResult::Ok))
             .collect();
+        let clear_mupdate_override = config.remove_mupdate_override.map(|_| {
+            ClearMupdateOverrideInventory {
+                boot_disk_result: Ok(
+                    ClearMupdateOverrideBootSuccessInventory::Cleared,
+                ),
+                non_boot_message: "mupdate override successfully cleared \
+                                   on non-boot disks"
+                    .to_owned(),
+            }
+        });
+
         Self {
             last_reconciled_config: config,
             external_disks,
@@ -214,6 +231,7 @@ impl ConfigReconcilerInventory {
                     slot_b: Err(err),
                 }
             },
+            clear_mupdate_override,
         }
     }
 }
@@ -275,6 +293,37 @@ impl IdOrdItem for OrphanedDataset {
     id_upcast!();
 }
 
+/// Status of clearing the mupdate override in the inventory.
+#[derive(Clone, Debug, PartialEq, Eq, Deserialize, JsonSchema, Serialize)]
+pub struct ClearMupdateOverrideInventory {
+    /// The result of clearing the mupdate override on the boot disk.
+    #[serde(with = "snake_case_result")]
+    #[schemars(
+        schema_with = "SnakeCaseResult::<ClearMupdateOverrideBootSuccessInventory, String>::json_schema"
+    )]
+    pub boot_disk_result:
+        Result<ClearMupdateOverrideBootSuccessInventory, String>,
+
+    /// What happened on non-boot disks.
+    ///
+    /// We aren't modeling this out in more detail, because we plan to not try
+    /// and keep ledgered data in sync across both disks in the future.
+    pub non_boot_message: String,
+}
+
+/// Status of clearing the mupdate override on the boot disk.
+#[derive(Clone, Debug, PartialEq, Eq, Deserialize, JsonSchema, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ClearMupdateOverrideBootSuccessInventory {
+    /// The mupdate override was successfully cleared.
+    Cleared,
+
+    /// No mupdate override was found.
+    ///
+    /// This is considered a success for idempotency reasons.
+    NoOverride,
+}
+
 #[derive(Clone, Debug, PartialEq, Eq, Deserialize, JsonSchema, Serialize)]
 #[serde(tag = "result", rename_all = "snake_case")]
 pub enum ConfigReconcilerInventoryResult {
@@ -331,6 +380,38 @@ impl ZoneImageResolverInventory {
             mupdate_override: MupdateOverrideInventory::new_fake(),
         }
     }
+
+    /// Returns a displayer for this inventory.
+    pub fn display(&self) -> ZoneImageResolverInventoryDisplay<'_> {
+        ZoneImageResolverInventoryDisplay { inner: self }
+    }
+}
+
+/// Displayer for a [`ZoneImageResolverInventory`]
+pub struct ZoneImageResolverInventoryDisplay<'a> {
+    inner: &'a ZoneImageResolverInventory,
+}
+
+impl fmt::Display for ZoneImageResolverInventoryDisplay<'_> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let ZoneImageResolverInventory { zone_manifest, mupdate_override } =
+            self.inner;
+
+        writeln!(f, "zone manifest:")?;
+        let mut indented = IndentWriter::new("    ", f);
+        // Use write! rather than writeln! because zone_manifest.display()
+        // always produces a newline at the end.
+        write!(indented, "{}", zone_manifest.display())?;
+        let f = indented.into_inner();
+
+        writeln!(f, "mupdate override:")?;
+        let mut indented = IndentWriter::new("    ", f);
+        // Use write! rather than writeln! because mupdate_override.display()
+        // always produces a newline at the end.
+        write!(indented, "{}", mupdate_override.display())?;
+
+        Ok(())
+    }
 }
 
 /// Inventory representation of a zone manifest.
@@ -366,6 +447,60 @@ impl ZoneManifestInventory {
             non_boot_status: IdOrdMap::new(),
         }
     }
+
+    /// Returns a displayer for this inventory.
+    pub fn display(&self) -> ZoneManifestInventoryDisplay<'_> {
+        ZoneManifestInventoryDisplay { inner: self }
+    }
+}
+
+/// Displayer for a [`ZoneManifestInventory`]
+#[derive(Clone, Debug)]
+pub struct ZoneManifestInventoryDisplay<'a> {
+    inner: &'a ZoneManifestInventory,
+}
+
+impl fmt::Display for ZoneManifestInventoryDisplay<'_> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let mut f = f;
+
+        let ZoneManifestInventory {
+            boot_disk_path,
+            boot_inventory,
+            non_boot_status,
+        } = self.inner;
+        writeln!(f, "path on boot disk: {}", boot_disk_path)?;
+
+        match boot_inventory {
+            Ok(boot_inventory) => {
+                writeln!(f, "boot disk inventory:")?;
+                let mut indented = IndentWriter::new("    ", f);
+                // Use write! rather than writeln! because
+                // boot_inventory.display() always ends with a newline.
+                write!(indented, "{}", boot_inventory.display())?;
+                f = indented.into_inner();
+            }
+            Err(error) => {
+                writeln!(
+                    f,
+                    "error obtaining zone manifest on boot disk: {error}"
+                )?;
+            }
+        }
+
+        if non_boot_status.is_empty() {
+            writeln!(f, "no non-boot disks")?;
+        } else {
+            writeln!(f, "non-boot disk status:")?;
+            for non_boot in non_boot_status {
+                let mut indented = IndentWriter::new_skip_initial("    ", f);
+                writeln!(indented, "  - {}", non_boot.display())?;
+                f = indented.into_inner();
+            }
+        }
+
+        Ok(())
+    }
 }
 
 /// Inventory representation of zone artifacts on the boot disk.
@@ -398,6 +533,43 @@ impl ZoneManifestBootInventory {
             artifacts: IdOrdMap::new(),
         }
     }
+
+    /// Returns a displayer for this inventory.
+    pub fn display(&self) -> ZoneManifestBootInventoryDisplay {
+        ZoneManifestBootInventoryDisplay { inner: self }
+    }
+}
+
+/// Displayer for a [`ZoneManifestBootInventory`].
+#[derive(Clone, Debug)]
+pub struct ZoneManifestBootInventoryDisplay<'a> {
+    inner: &'a ZoneManifestBootInventory,
+}
+
+impl fmt::Display for ZoneManifestBootInventoryDisplay<'_> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let mut f = f;
+
+        let ZoneManifestBootInventory { source, artifacts } = self.inner;
+        writeln!(f, "manifest generated by {}", source)?;
+        if artifacts.is_empty() {
+            writeln!(
+                f,
+                "no artifacts in install dataset \
+                 (this should only be seen in simulated systems)"
+            )?;
+        } else {
+            writeln!(f, "artifacts in install dataset:")?;
+
+            for artifact in artifacts {
+                let mut indented = IndentWriter::new_skip_initial("    ", f);
+                writeln!(indented, "  - {}", artifact.display())?;
+                f = indented.into_inner();
+            }
+        }
+
+        Ok(())
+    }
 }
 
 /// Inventory representation of a single zone artifact on a boot disk.
@@ -428,12 +600,50 @@ pub struct ZoneArtifactInventory {
     pub status: Result<(), String>,
 }
 
+impl ZoneArtifactInventory {
+    /// Returns a displayer for this inventory.
+    pub fn display(&self) -> ZoneArtifactInventoryDisplay<'_> {
+        ZoneArtifactInventoryDisplay { inner: self }
+    }
+}
+
 impl IdOrdItem for ZoneArtifactInventory {
     type Key<'a> = &'a str;
     fn key(&self) -> Self::Key<'_> {
         &self.file_name
     }
+
     id_upcast!();
+}
+
+/// Displayer for [`ZoneArtifactInventory`].
+#[derive(Clone, Debug)]
+pub struct ZoneArtifactInventoryDisplay<'a> {
+    inner: &'a ZoneArtifactInventory,
+}
+
+impl fmt::Display for ZoneArtifactInventoryDisplay<'_> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let ZoneArtifactInventory {
+            file_name,
+            // We don't show the path here because surrounding code typically
+            // displays the path. We could make this controllable in the future
+            // via a method on `ZoneArtifactInventoryDisplay`.
+            path: _,
+            expected_size,
+            expected_hash,
+            status,
+        } = self.inner;
+        write!(
+            f,
+            "{file_name} (expected {expected_size} bytes \
+             with hash {expected_hash}): ",
+        )?;
+        match status {
+            Ok(()) => write!(f, "ok"),
+            Err(message) => write!(f, "error: {message}"),
+        }
+    }
 }
 
 /// Inventory representation of a zone manifest on a non-boot disk.
@@ -465,12 +675,42 @@ pub struct ZoneManifestNonBootInventory {
     pub message: String,
 }
 
+impl ZoneManifestNonBootInventory {
+    /// Returns a displayer for this inventory.
+    pub fn display(&self) -> ZoneManifestNonBootInventoryDisplay<'_> {
+        ZoneManifestNonBootInventoryDisplay { inner: self }
+    }
+}
+
 impl IdOrdItem for ZoneManifestNonBootInventory {
     type Key<'a> = InternalZpoolUuid;
     fn key(&self) -> Self::Key<'_> {
         self.zpool_id
     }
     id_upcast!();
+}
+
+/// Displayer for a [`ZoneManifestNonBootInventory`].
+#[derive(Clone, Debug)]
+pub struct ZoneManifestNonBootInventoryDisplay<'a> {
+    inner: &'a ZoneManifestNonBootInventory,
+}
+
+impl fmt::Display for ZoneManifestNonBootInventoryDisplay<'_> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let ZoneManifestNonBootInventory {
+            // The zpool ID is part of the path, so displaying it is redundant.
+            zpool_id: _,
+            path,
+            is_valid,
+            message,
+        } = self.inner;
+        write!(
+            f,
+            "{path} ({}): {message}",
+            if *is_valid { "valid" } else { "invalid" },
+        )
+    }
 }
 
 /// Inventory representation of MUPdate override status.
@@ -509,6 +749,59 @@ impl MupdateOverrideInventory {
             non_boot_status: IdOrdMap::new(),
         }
     }
+
+    /// Returns a displayer for this inventory.
+    pub fn display(&self) -> MupdateOverrideInventoryDisplay<'_> {
+        MupdateOverrideInventoryDisplay { inner: self }
+    }
+}
+
+/// A displayer for [`MupdateOverrideInventory`].
+#[derive(Clone, Debug)]
+pub struct MupdateOverrideInventoryDisplay<'a> {
+    inner: &'a MupdateOverrideInventory,
+}
+
+impl fmt::Display for MupdateOverrideInventoryDisplay<'_> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let mut f = f;
+
+        let MupdateOverrideInventory {
+            boot_disk_path,
+            boot_override,
+            non_boot_status,
+        } = self.inner;
+
+        writeln!(f, "path on boot disk: {boot_disk_path}")?;
+        match boot_override {
+            Ok(Some(boot_override)) => {
+                writeln!(
+                    f,
+                    "override on boot disk: {}",
+                    boot_override.display()
+                )?;
+            }
+            Ok(None) => {
+                writeln!(f, "no override on boot disk")?;
+            }
+            Err(error) => {
+                writeln!(f, "error obtaining override on boot disk: {error}")?;
+            }
+        }
+
+        if non_boot_status.is_empty() {
+            writeln!(f, "no non-boot disks")?;
+        } else {
+            writeln!(f, "non-boot disk status:")?;
+            for non_boot in non_boot_status {
+                let mut indented = IndentWriter::new_skip_initial("    ", f);
+                writeln!(indented, "  - {}", non_boot.display())?;
+                f = indented.into_inner();
+            }
+        }
+
+        Ok(())
+    }
 }
 
 /// Inventory representation of the MUPdate override on the boot disk.
@@ -520,6 +813,25 @@ pub struct MupdateOverrideBootInventory {
     /// During a MUPdate, each sled gets a MUPdate override ID. (The ID is
     /// shared across boot disks and non-boot disks, though.)
     pub mupdate_override_id: MupdateOverrideUuid,
+}
+
+impl MupdateOverrideBootInventory {
+    /// Returns a displayer for this inventory.
+    pub fn display(&self) -> MupdateOverrideBootInventoryDisplay<'_> {
+        MupdateOverrideBootInventoryDisplay { inner: self }
+    }
+}
+
+#[derive(Clone, Debug)]
+pub struct MupdateOverrideBootInventoryDisplay<'a> {
+    inner: &'a MupdateOverrideBootInventory,
+}
+
+impl fmt::Display for MupdateOverrideBootInventoryDisplay<'_> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let MupdateOverrideBootInventory { mupdate_override_id } = self.inner;
+        write!(f, "{}", mupdate_override_id)
+    }
 }
 
 /// Inventory representation of the MUPdate override on a non-boot disk.
@@ -552,12 +864,42 @@ pub struct MupdateOverrideNonBootInventory {
     pub message: String,
 }
 
+impl MupdateOverrideNonBootInventory {
+    /// Returns a displayer for this inventory.
+    pub fn display(&self) -> MupdateOverrideNonBootInventoryDisplay<'_> {
+        MupdateOverrideNonBootInventoryDisplay { inner: self }
+    }
+}
+
 impl IdOrdItem for MupdateOverrideNonBootInventory {
     type Key<'a> = InternalZpoolUuid;
     fn key(&self) -> Self::Key<'_> {
         self.zpool_id
     }
     id_upcast!();
+}
+
+/// Displayer for a [`MupdateOverrideNonBootInventory`].
+#[derive(Clone, Debug)]
+pub struct MupdateOverrideNonBootInventoryDisplay<'a> {
+    inner: &'a MupdateOverrideNonBootInventory,
+}
+
+impl fmt::Display for MupdateOverrideNonBootInventoryDisplay<'_> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let MupdateOverrideNonBootInventory {
+            // The zpool ID is part of the path, so displaying it is redundant.
+            zpool_id: _,
+            path,
+            is_valid,
+            message,
+        } = self.inner;
+        write!(
+            f,
+            "{path} ({}): {message}",
+            if *is_valid { "valid" } else { "invalid" },
+        )
+    }
 }
 
 /// Describes the role of the sled within the rack.
@@ -942,6 +1284,11 @@ impl OmicronZoneType {
             | OmicronZoneType::Nexus { .. }
             | OmicronZoneType::Oximeter { .. } => false,
         }
+    }
+
+    /// Identifies whether this is a boundary NTP zone
+    pub fn is_boundary_ntp(&self) -> bool {
+        matches!(self, OmicronZoneType::BoundaryNtp { .. })
     }
 
     /// Identifies whether this is a Nexus zone

@@ -19,6 +19,7 @@ use futures::future::BoxFuture;
 use futures::stream::FuturesUnordered;
 use gateway_client::Client as MgsClient;
 use gateway_client::types::SpIdentifier;
+use gateway_client::types::SpIgnition;
 use internal_dns_resolver::Resolver;
 use internal_dns_types::names::ServiceName;
 use nexus_db_model::SupportBundle;
@@ -1100,14 +1101,10 @@ async fn save_all_sp_dumps(
         })
         .context("failed to resolve address of MGS")?;
 
-    let all_sps = mgs_client
-        .sp_all_ids()
-        .await
-        .context("failed to get list of SPs from MGS")?
-        .into_inner();
+    let available_sps = get_available_sps(&mgs_client).await?;
 
     let mut tasks = ParallelTaskSet::new();
-    for sp in all_sps {
+    for sp in available_sps {
         let mgs_client = mgs_client.clone();
         let sp_dumps_dir = sp_dumps_dir.to_owned();
 
@@ -1130,6 +1127,29 @@ async fn save_all_sp_dumps(
     }
 
     Ok(())
+}
+
+/// Use MGS ignition info to find active SPs.
+async fn get_available_sps(
+    mgs_client: &MgsClient,
+) -> anyhow::Result<Vec<SpIdentifier>> {
+    let ignition_info = mgs_client
+        .ignition_list()
+        .await
+        .context("failed to get ignition info from MGS")?
+        .into_inner();
+
+    let mut active_sps = Vec::new();
+    for info in ignition_info {
+        if let SpIgnition::Yes { power, flt_sp, .. } = info.details {
+            // Only return SPs that are powered on and are not in a faulted state.
+            if power && !flt_sp {
+                active_sps.push(info.id);
+            }
+        }
+    }
+
+    Ok(active_sps)
 }
 
 /// Fetch and save task dumps from a single SP.
@@ -1434,7 +1454,12 @@ mod test {
         // Assign a bundle to ourselves. We expect to collect it on
         // the next call to "collect_bundle".
         let bundle = datastore
-            .support_bundle_create(&opctx, "For collection testing", nexus.id())
+            .support_bundle_create(
+                &opctx,
+                "For collection testing",
+                nexus.id(),
+                None,
+            )
             .await
             .expect("Couldn't allocate a support bundle");
         assert_eq!(bundle.state, SupportBundleState::Collecting);
@@ -1494,7 +1519,12 @@ mod test {
             TestDataset::setup(cptestctx, &datastore, &opctx, 1).await;
 
         let bundle = datastore
-            .support_bundle_create(&opctx, "For collection testing", nexus.id())
+            .support_bundle_create(
+                &opctx,
+                "For collection testing",
+                nexus.id(),
+                None,
+            )
             .await
             .expect("Couldn't allocate a support bundle");
         assert_eq!(bundle.state, SupportBundleState::Collecting);
@@ -1574,11 +1604,21 @@ mod test {
 
         // Assign two bundles to ourselves.
         let bundle1 = datastore
-            .support_bundle_create(&opctx, "For collection testing", nexus.id())
+            .support_bundle_create(
+                &opctx,
+                "For collection testing",
+                nexus.id(),
+                None,
+            )
             .await
             .expect("Couldn't allocate a support bundle");
         let bundle2 = datastore
-            .support_bundle_create(&opctx, "For collection testing", nexus.id())
+            .support_bundle_create(
+                &opctx,
+                "For collection testing",
+                nexus.id(),
+                None,
+            )
             .await
             .expect("Couldn't allocate a second support bundle");
 
@@ -1659,7 +1699,12 @@ mod test {
         // If we delete the bundle before we start collection, we can delete it
         // immediately.
         let bundle = datastore
-            .support_bundle_create(&opctx, "For collection testing", nexus.id())
+            .support_bundle_create(
+                &opctx,
+                "For collection testing",
+                nexus.id(),
+                None,
+            )
             .await
             .expect("Couldn't allocate a support bundle");
         assert_eq!(bundle.state, SupportBundleState::Collecting);
@@ -1718,7 +1763,12 @@ mod test {
 
         // We can allocate a support bundle and collect it
         let bundle = datastore
-            .support_bundle_create(&opctx, "For collection testing", nexus.id())
+            .support_bundle_create(
+                &opctx,
+                "For collection testing",
+                nexus.id(),
+                None,
+            )
             .await
             .expect("Couldn't allocate a support bundle");
         assert_eq!(bundle.state, SupportBundleState::Collecting);
@@ -1791,7 +1841,12 @@ mod test {
         // We can allocate a support bundle, though we'll fail it before it gets
         // collected.
         let bundle = datastore
-            .support_bundle_create(&opctx, "For collection testing", nexus.id())
+            .support_bundle_create(
+                &opctx,
+                "For collection testing",
+                nexus.id(),
+                None,
+            )
             .await
             .expect("Couldn't allocate a support bundle");
         assert_eq!(bundle.state, SupportBundleState::Collecting);
@@ -1855,7 +1910,12 @@ mod test {
 
         // We can allocate a support bundle and collect it
         let bundle = datastore
-            .support_bundle_create(&opctx, "For collection testing", nexus.id())
+            .support_bundle_create(
+                &opctx,
+                "For collection testing",
+                nexus.id(),
+                None,
+            )
             .await
             .expect("Couldn't allocate a support bundle");
         assert_eq!(bundle.state, SupportBundleState::Collecting);
@@ -1935,7 +1995,12 @@ mod test {
 
         // We can allocate a support bundle and collect it
         let bundle = datastore
-            .support_bundle_create(&opctx, "For collection testing", nexus.id())
+            .support_bundle_create(
+                &opctx,
+                "For collection testing",
+                nexus.id(),
+                None,
+            )
             .await
             .expect("Couldn't allocate a support bundle");
         assert_eq!(bundle.state, SupportBundleState::Collecting);

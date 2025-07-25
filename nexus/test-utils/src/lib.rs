@@ -33,6 +33,7 @@ use nexus_config::InternalDns;
 use nexus_config::MgdConfig;
 use nexus_config::NUM_INITIAL_RESERVED_IP_ADDRESSES;
 use nexus_config::NexusConfig;
+use nexus_db_queries::context::OpContext;
 use nexus_db_queries::db::pub_test_utils::crdb;
 use nexus_sled_agent_shared::inventory::HostPhase2DesiredSlots;
 use nexus_sled_agent_shared::inventory::OmicronSledConfig;
@@ -79,6 +80,7 @@ use omicron_common::disk::CompressionAlgorithm;
 use omicron_common::zpool_name::ZpoolName;
 use omicron_sled_agent::sim;
 use omicron_test_utils::dev;
+use omicron_test_utils::dev::poll;
 use omicron_test_utils::dev::poll::{CondCheckError, wait_for_condition};
 use omicron_uuid_kinds::BlueprintUuid;
 use omicron_uuid_kinds::DatasetUuid;
@@ -95,6 +97,7 @@ use sled_agent_client::types::EarlyNetworkConfig;
 use sled_agent_client::types::EarlyNetworkConfigBody;
 use sled_agent_client::types::RackNetworkConfigV2;
 use slog::{Logger, debug, error, o};
+use slog_error_chain::InlineErrorChain;
 use std::collections::BTreeMap;
 use std::collections::HashMap;
 use std::fmt::Debug;
@@ -224,6 +227,46 @@ impl<N: NexusServer> ControlPlaneTestContext<N> {
 
     pub fn wildcard_silo_dns_name(&self) -> String {
         format!("*.sys.{}", self.external_dns_zone_name)
+    }
+
+    /// Wait until at least one inventory collection has been inserted into the
+    /// datastore.
+    ///
+    /// # Panics
+    ///
+    /// Panics if an inventory collection is not found within `timeout`.
+    pub async fn wait_for_at_least_one_inventory_collection(
+        &self,
+        timeout: Duration,
+    ) {
+        let datastore = self.server.datastore();
+        let opctx =
+            OpContext::for_tests(self.logctx.log.clone(), datastore.clone());
+
+        match wait_for_condition(
+            || async {
+                match datastore.inventory_get_latest_collection(&opctx).await {
+                    Ok(Some(_)) => Ok(()),
+                    Ok(None) => Err(CondCheckError::NotYet),
+                    Err(err) => Err(CondCheckError::Failed(err)),
+                }
+            },
+            &Duration::from_millis(500),
+            &timeout,
+        )
+        .await
+        {
+            Ok(()) => (),
+            Err(poll::Error::TimedOut(elapsed)) => {
+                panic!("no inventory collection found within {elapsed:?}");
+            }
+            Err(poll::Error::PermanentError(err)) => {
+                panic!(
+                    "failed waiting for inventory collection: {}",
+                    InlineErrorChain::new(&err)
+                );
+            }
+        }
     }
 
     pub async fn teardown(mut self) {
@@ -2074,7 +2117,6 @@ async fn wait_for_producer_impl(
         || async {
             if oximeter
                 .list_producers(None, usize::MAX)
-                .await
                 .iter()
                 .any(|p| p.id == producer_id)
             {

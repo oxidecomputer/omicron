@@ -33,6 +33,7 @@ use nexus_sled_agent_shared::inventory::SledRole;
 use nexus_sled_agent_shared::inventory::ZoneImageResolverInventory;
 use nexus_types::inventory::BaseboardId;
 use nexus_types::inventory::CabooseWhich;
+use nexus_types::inventory::InternalDnsGenerationStatus;
 use nexus_types::inventory::RotPage;
 use nexus_types::inventory::RotPageWhich;
 use nexus_types::inventory::ZpoolName;
@@ -213,6 +214,35 @@ pub fn representative() -> Representative {
                 },
                 serial_number: String::from("s2"),
             },
+        )
+        .unwrap();
+
+    // Report some phase 1 hashes.
+    //
+    // We'll report hashes for both slots for sled 1, only a hash for slot B on
+    // sled 2, and no hashes for sled 3.
+    builder
+        .found_host_phase_1_flash_hash(
+            &sled1_bb,
+            M2Slot::A,
+            "fake MGS 1",
+            ArtifactHash([1; 32]),
+        )
+        .unwrap();
+    builder
+        .found_host_phase_1_flash_hash(
+            &sled1_bb,
+            M2Slot::B,
+            "fake MGS 1",
+            ArtifactHash([2; 32]),
+        )
+        .unwrap();
+    builder
+        .found_host_phase_1_flash_hash(
+            &sled2_bb,
+            M2Slot::B,
+            "fake MGS 1",
+            ArtifactHash([3; 32]),
         )
         .unwrap();
 
@@ -623,6 +653,20 @@ pub fn representative() -> Representative {
         },
     );
 
+    builder
+        .found_ntp_timesync(nexus_types::inventory::TimeSync {
+            zone_id: omicron_uuid_kinds::OmicronZoneUuid::new_v4(),
+            synced: true,
+        })
+        .unwrap();
+
+    builder
+        .found_internal_dns_generation_status(InternalDnsGenerationStatus {
+            zone_id: omicron_uuid_kinds::OmicronZoneUuid::new_v4(),
+            generation: 1.into(),
+        })
+        .unwrap();
+
     Representative {
         builder,
         sleds: [sled1_bb, sled2_bb, sled3_bb, sled4_bb],
@@ -845,6 +889,7 @@ pub fn zone_image_resolver(
                 },
             },
         },
+        image_directory_override: None,
     };
 
     status.to_inventory()

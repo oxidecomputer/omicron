@@ -16,6 +16,7 @@ members = [
     "clients/gateway-client",
     "clients/installinator-client",
     "clients/nexus-client",
+    "clients/ntp-admin-client",
     "clients/oxide-client",
     "clients/oximeter-client",
     "clients/repo-depot-client",
@@ -104,6 +105,9 @@ members = [
     "nexus/test-utils-macros",
     "nexus/test-utils",
     "nexus/types",
+    "ntp-admin",
+    "ntp-admin/api",
+    "ntp-admin/types",
     "oximeter/api",
     "oximeter/collector",
     "oximeter/db",
@@ -168,6 +172,7 @@ default-members = [
     "clients/gateway-client",
     "clients/installinator-client",
     "clients/nexus-client",
+    "clients/ntp-admin-client",
     "clients/oxide-client",
     "clients/oximeter-client",
     "clients/repo-depot-client",
@@ -258,6 +263,9 @@ default-members = [
     "nexus/test-utils-macros",
     "nexus/test-utils",
     "nexus/types",
+    "ntp-admin",
+    "ntp-admin/api",
+    "ntp-admin/types",
     "oximeter/api",
     "oximeter/collector",
     "oximeter/db",
@@ -374,7 +382,7 @@ cargo_metadata = "0.20.0"
 chacha20poly1305 = "0.10.1"
 cfg-if = "1.0"
 chrono = { version = "0.4", features = [ "serde" ] }
-chrono-tz = "0.10.3"
+chrono-tz = { version = "0.10.4", features = [ "serde" ] }
 ciborium = "0.2.2"
 clap = { version = "4.5", features = ["cargo", "derive", "env", "wrap_help"] }
 clickana = { path = "dev-tools/clickana" }
@@ -477,13 +485,13 @@ hyper = "1.6.0"
 hyper-util = "0.1.14"
 hyper-rustls = "0.27.7"
 hyper-staticfile = "0.10.1"
-iddqd = { version = "0.3.8", features = ["daft", "serde", "schemars08"] }
+iddqd = { version = "0.3.9", features = ["daft", "serde", "schemars08"] }
 id-map = { path = "id-map" }
 illumos-utils = { path = "illumos-utils" }
 iana-time-zone = "0.1.63"
 indent_write = "2.2.0"
 indexmap = "2.10.0"
-indicatif = { version = "0.17.11", features = ["rayon"] }
+indicatif = { version = "0.18.0", features = ["rayon"] }
 indoc = "2.0.6"
 installinator = { path = "installinator" }
 installinator-api = { path = "installinator-api" }
@@ -511,6 +519,9 @@ lldp_protocol = { git = "https://github.com/oxidecomputer/lldp", package = "prot
 macaddr = { version = "1.0.1", features = ["serde_std"] }
 maplit = "1.0.2"
 newtype_derive = "0.1.6"
+ntp-admin-api = { path = "ntp-admin/api" }
+ntp-admin-client = { path = "clients/ntp-admin-client" }
+ntp-admin-types = { path = "ntp-admin/types" }
 mg-admin-client = { git = "https://github.com/oxidecomputer/maghemite", rev = "fa5f15cdcd5864161a929e2ec01534f70dfba216" }
 ddm-admin-client = { git = "https://github.com/oxidecomputer/maghemite", rev = "fa5f15cdcd5864161a929e2ec01534f70dfba216" }
 multimap = "0.10.1"
@@ -556,6 +567,7 @@ omicron-common = { path = "common" }
 omicron-dev-lib = { path = "dev-tools/omicron-dev-lib" }
 omicron-gateway = { path = "gateway" }
 omicron-nexus = { path = "nexus" }
+omicron-ntp-admin = { path = "ntp-admin" }
 omicron-omdb = { path = "dev-tools/omdb" }
 omicron-package = { path = "package" }
 omicron-passwords = { path = "passwords" }
@@ -568,7 +580,7 @@ omicron-workspace-hack = "0.1.0"
 omicron-zone-package = "0.12.2"
 oxide-client = { path = "clients/oxide-client" }
 oxide-tokio-rt = "0.1.2"
-oxide-vpc = { git = "https://github.com/oxidecomputer/opte", rev = "23cebf3b1c911f09c203f7df50cc06bf780338e5", features = [ "api", "std" ] }
+oxide-vpc = { git = "https://github.com/oxidecomputer/opte", rev = "2d095de2258aa0653d669b72c741f26e608c81a6", features = [ "api", "std" ] }
 oxlog = { path = "dev-tools/oxlog" }
 oxnet = "0.1.2"
 once_cell = "1.21.3"
@@ -578,7 +590,7 @@ openapiv3 = "2.2.0"
 # must match samael's crate!
 openssl = "0.10"
 openssl-sys = "0.9"
-opte-ioctl = { git = "https://github.com/oxidecomputer/opte", rev = "23cebf3b1c911f09c203f7df50cc06bf780338e5" }
+opte-ioctl = { git = "https://github.com/oxidecomputer/opte", rev = "2d095de2258aa0653d669b72c741f26e608c81a6" }
 oso = "0.27"
 owo-colors = "4.2.2"
 oximeter = { path = "oximeter/oximeter" }
@@ -722,7 +734,7 @@ term = "0.7"
 termios = "0.3"
 termtree = "0.5.1"
 textwrap = { version = "0.16.2", features = [ "terminal_size" ] }
-test-strategy = "0.4.1"
+test-strategy = "0.4.3"
 thiserror = "2.0"
 tofino = { git = "https://github.com/oxidecomputer/tofino", branch = "main" }
 tokio = "1.45.1"

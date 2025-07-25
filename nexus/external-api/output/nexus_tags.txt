@@ -62,6 +62,7 @@ support_bundle_head                      HEAD     /experimental/v1/system/suppor
 support_bundle_head_file                 HEAD     /experimental/v1/system/support-bundles/{bundle_id}/download/{file}
 support_bundle_index                     GET      /experimental/v1/system/support-bundles/{bundle_id}/index
 support_bundle_list                      GET      /experimental/v1/system/support-bundles
+support_bundle_update                    PUT      /experimental/v1/system/support-bundles/{bundle_id}
 support_bundle_view                      GET      /experimental/v1/system/support-bundles/{bundle_id}
 system_update_get_repository             GET      /v1/system/update/repository/{system_version}
 system_update_put_repository             PUT      /v1/system/update/repository
@@ -157,6 +158,10 @@ group_view                               GET      /v1/groups/{group_id}
 policy_update                            PUT      /v1/policy
 policy_view                              GET      /v1/policy
 user_list                                GET      /v1/users
+user_logout                              POST     /v1/users/{user_id}/logout
+user_session_list                        GET      /v1/users/{user_id}/sessions
+user_token_list                          GET      /v1/users/{user_id}/access-tokens
+user_view                                GET      /v1/users/{user_id}
 utilization_view                         GET      /v1/utilization
 
 API operations found with tag "snapshots"
