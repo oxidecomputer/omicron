@@ -8185,6 +8185,7 @@ dependencies = [
  "toml 0.8.23",
  "tufaceous-artifact",
  "tufaceous-lib",
+ "update-common",
 ]
 
 [[package]]
