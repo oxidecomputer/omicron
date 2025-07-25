@@ -296,7 +296,7 @@ cookie = { version = "0.18.1", default-features = false, features = ["percent-en
 dof = { version = "0.3.0", default-features = false, features = ["des"] }
 getrandom-468e82937335b1c9 = { package = "getrandom", version = "0.3.1", default-features = false, features = ["std"] }
 hyper-rustls = { version = "0.27.7", features = ["http2", "ring", "webpki-tokio"] }
-hyper-util = { version = "0.1.14", features = ["client-proxy", "client-proxy-system", "full"] }
+hyper-util = { version = "0.1.16", features = ["full"] }
 linux-raw-sys = { version = "0.4.14", default-features = false, features = ["elf", "errno", "general", "if_ether", "ioctl", "net", "netlink", "no_std", "prctl", "std", "system", "xdp"] }
 mio = { version = "1.0.2", features = ["net", "os-ext"] }
 rustix-d585fab2519d2d1 = { package = "rustix", version = "0.38.37", features = ["event", "fs", "net", "pipe", "process", "stdio", "system", "termios", "time"] }
@@ -308,7 +308,7 @@ cookie = { version = "0.18.1", default-features = false, features = ["percent-en
 dof = { version = "0.3.0", default-features = false, features = ["des"] }
 getrandom-468e82937335b1c9 = { package = "getrandom", version = "0.3.1", default-features = false, features = ["std"] }
 hyper-rustls = { version = "0.27.7", features = ["http2", "ring", "webpki-tokio"] }
-hyper-util = { version = "0.1.14", features = ["client-proxy", "client-proxy-system", "full"] }
+hyper-util = { version = "0.1.16", features = ["full"] }
 linux-raw-sys = { version = "0.4.14", default-features = false, features = ["elf", "errno", "general", "if_ether", "ioctl", "net", "netlink", "no_std", "prctl", "std", "system", "xdp"] }
 mio = { version = "1.0.2", features = ["net", "os-ext"] }
 rustix-d585fab2519d2d1 = { package = "rustix", version = "0.38.37", features = ["event", "fs", "net", "pipe", "process", "stdio", "system", "termios", "time"] }
@@ -319,7 +319,7 @@ bitflags-f595c2ba2a3f28df = { package = "bitflags", version = "2.9.1", default-f
 cookie = { version = "0.18.1", default-features = false, features = ["percent-encode"] }
 getrandom-468e82937335b1c9 = { package = "getrandom", version = "0.3.1", default-features = false, features = ["std"] }
 hyper-rustls = { version = "0.27.7", features = ["http2", "ring", "webpki-tokio"] }
-hyper-util = { version = "0.1.14", features = ["client-proxy", "client-proxy-system", "full"] }
+hyper-util = { version = "0.1.16", features = ["full"] }
 mio = { version = "1.0.2", features = ["net", "os-ext"] }
 rustix-d585fab2519d2d1 = { package = "rustix", version = "0.38.37", features = ["event", "fs", "net", "pipe", "process", "stdio", "system", "termios", "time"] }
 rustix-dff4ba8e3ae991db = { package = "rustix", version = "1.0.7", features = ["fs", "stdio", "termios"] }
@@ -329,7 +329,7 @@ bitflags-f595c2ba2a3f28df = { package = "bitflags", version = "2.9.1", default-f
 cookie = { version = "0.18.1", default-features = false, features = ["percent-encode"] }
 getrandom-468e82937335b1c9 = { package = "getrandom", version = "0.3.1", default-features = false, features = ["std"] }
 hyper-rustls = { version = "0.27.7", features = ["http2", "ring", "webpki-tokio"] }
-hyper-util = { version = "0.1.14", features = ["client-proxy", "client-proxy-system", "full"] }
+hyper-util = { version = "0.1.16", features = ["full"] }
 mio = { version = "1.0.2", features = ["net", "os-ext"] }
 rustix-d585fab2519d2d1 = { package = "rustix", version = "0.38.37", features = ["event", "fs", "net", "pipe", "process", "stdio", "system", "termios", "time"] }
 rustix-dff4ba8e3ae991db = { package = "rustix", version = "1.0.7", features = ["fs", "stdio", "termios"] }
@@ -339,7 +339,7 @@ bitflags-f595c2ba2a3f28df = { package = "bitflags", version = "2.9.1", default-f
 cookie = { version = "0.18.1", default-features = false, features = ["percent-encode"] }
 getrandom-468e82937335b1c9 = { package = "getrandom", version = "0.3.1", default-features = false, features = ["std"] }
 hyper-rustls = { version = "0.27.7", features = ["http2", "ring", "webpki-tokio"] }
-hyper-util = { version = "0.1.14", features = ["client-proxy", "client-proxy-system", "full"] }
+hyper-util = { version = "0.1.16", features = ["full"] }
 mio = { version = "1.0.2", features = ["net", "os-ext"] }
 rustix-d585fab2519d2d1 = { package = "rustix", version = "0.38.37", features = ["event", "fs", "net", "pipe", "process", "stdio", "system", "termios", "time"] }
 rustix-dff4ba8e3ae991db = { package = "rustix", version = "1.0.7", features = ["fs", "stdio", "termios"] }
@@ -349,7 +349,7 @@ bitflags-f595c2ba2a3f28df = { package = "bitflags", version = "2.9.1", default-f
 cookie = { version = "0.18.1", default-features = false, features = ["percent-encode"] }
 getrandom-468e82937335b1c9 = { package = "getrandom", version = "0.3.1", default-features = false, features = ["std"] }
 hyper-rustls = { version = "0.27.7", features = ["http2", "ring", "webpki-tokio"] }
-hyper-util = { version = "0.1.14", features = ["client-proxy", "client-proxy-system", "full"] }
+hyper-util = { version = "0.1.16", features = ["full"] }
 mio = { version = "1.0.2", features = ["net", "os-ext"] }
 rustix-d585fab2519d2d1 = { package = "rustix", version = "0.38.37", features = ["event", "fs", "net", "pipe", "process", "stdio", "system", "termios", "time"] }
 rustix-dff4ba8e3ae991db = { package = "rustix", version = "1.0.7", features = ["fs", "stdio", "termios"] }
@@ -360,7 +360,7 @@ cookie = { version = "0.18.1", default-features = false, features = ["percent-en
 dof = { version = "0.3.0", default-features = false, features = ["des"] }
 getrandom-468e82937335b1c9 = { package = "getrandom", version = "0.3.1", default-features = false, features = ["std"] }
 hyper-rustls = { version = "0.27.7", features = ["http2", "ring", "webpki-tokio"] }
-hyper-util = { version = "0.1.14", features = ["client-proxy", "client-proxy-system", "full"] }
+hyper-util = { version = "0.1.16", features = ["full"] }
 itertools-5ef9efb8ec2df382 = { package = "itertools", version = "0.12.1" }
 mio = { version = "1.0.2", features = ["net", "os-ext"] }
 rustix-d585fab2519d2d1 = { package = "rustix", version = "0.38.37", features = ["event", "fs", "net", "pipe", "process", "stdio", "system", "termios", "time"] }
@@ -375,7 +375,7 @@ cookie = { version = "0.18.1", default-features = false, features = ["percent-en
 dof = { version = "0.3.0", default-features = false, features = ["des"] }
 getrandom-468e82937335b1c9 = { package = "getrandom", version = "0.3.1", default-features = false, features = ["std"] }
 hyper-rustls = { version = "0.27.7", features = ["http2", "ring", "webpki-tokio"] }
-hyper-util = { version = "0.1.14", features = ["client-proxy", "client-proxy-system", "full"] }
+hyper-util = { version = "0.1.16", features = ["full"] }
 itertools-5ef9efb8ec2df382 = { package = "itertools", version = "0.12.1" }
 mio = { version = "1.0.2", features = ["net", "os-ext"] }
 rustix-d585fab2519d2d1 = { package = "rustix", version = "0.38.37", features = ["event", "fs", "net", "pipe", "process", "stdio", "system", "termios", "time"] }
