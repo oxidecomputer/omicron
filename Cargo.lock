@@ -6638,6 +6638,7 @@ dependencies = [
  "iddqd",
  "internal-dns-resolver",
  "internal-dns-types",
+ "nexus-sled-agent-shared",
  "nexus-types",
  "omicron-common",
  "omicron-test-utils",

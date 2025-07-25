@@ -402,10 +402,12 @@ pub enum PrecheckError {
     WrongHostOsBootDisk { expected: M2Slot, found: M2Slot },
 
     #[error(
-        "expected to find active host OS slot {expected:?}, but inventory \
-         reported an error: {err}"
+        "active phase 1 slot {phase1:?} does not match boot disk {boot_disk:?}"
     )]
-    DeterminingActiveHostOsSlot { expected: M2Slot, err: String },
+    MismatchedHostOsActiveSlot { phase1: u16, boot_disk: M2Slot },
+
+    #[error("inventory reported an error determining boot disk: {err}")]
+    DeterminingHostOsBootDisk { err: String },
 }
 
 #[derive(Debug, thiserror::Error)]

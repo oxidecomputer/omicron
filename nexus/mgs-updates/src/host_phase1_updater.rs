@@ -85,12 +85,23 @@
 //!      - slot A contains Y1+Y2
 //!      - slot B contains X1+X2
 //!
-//!      A precheck from this point forward will return
-//!      `WrongActiveHostPhase1Slot`.
+//!      At this point, technically the phase 1 update alone is done, in the way
+//!      that other MGS-driven updates are done: the currently-active slot (B)
+//!      now contains the new version (X1). However, we must not return
+//!      `UpdateComplete` from precheck yet, so that we can handle Nexus dying
+//!      before we finish each of the next two steps. To handle this, once the
+//!      phase 1 update looks complete, we also query the sled-agent to check
+//!      that its boot disk matches the currently-active slot. A precheck at
+//!      this point will fail with `MismatchedHostOsActiveSlot`, because the
+//!      sled's boot disk (A) doesn't match the active phase 1 slot (B).
 //!
 //!    * We power off the host (i.e., go to PowerState::A2). This does not
 //!      change the state of the sled, except that we can no longer talk to
 //!      sled-agent and therefore no longer have a report of the boot disk.
+//!
+//!      A precheck at this point will fail with `SledAgentInventory`, because
+//!      we won't be able to fetch inventory from sled-agent on a powered-off
+//!      sled.
 //!
 //!    * We power on the host (i.e., go to PowerState::A0). Once it comes back,
 //!      the state of the sled will be:
@@ -120,6 +131,7 @@ use gateway_client::types::PowerState;
 use gateway_client::types::SpComponentFirmwareSlot;
 use gateway_client::types::SpIdentifier;
 use gateway_client::types::SpType;
+use nexus_sled_agent_shared::inventory::BootPartitionContents;
 use nexus_types::deployment::ExpectedArtifact;
 use nexus_types::deployment::PendingMgsUpdate;
 use nexus_types::deployment::PendingMgsUpdateHostPhase1Details;
@@ -387,8 +399,13 @@ impl ReconfiguratorHostPhase1Updater {
         );
 
         // If the version in the currently-active slot matches the one we're
-        // trying to set, then there's nothing to do.
+        // trying to set, the the phase 1 update is complete. We need to confirm
+        // that we've finished `post_update()` though (i.e., we've rebooted the
+        // sled); contact sled agent and confirm it booted from this same active
+        // slot.
         if current_active_slot_hash == update.artifact_hash {
+            self.confirm_sled_agent_boot_disk_matches(current_active_slot, log)
+                .await?;
             return Ok(PrecheckStatus::UpdateComplete);
         }
 
@@ -500,28 +517,17 @@ impl ReconfiguratorHostPhase1Updater {
         }
     }
 
-    async fn precheck_phase_2_via_sled_agent(
+    async fn get_boot_partition_inventory_from_sled_agent(
         &self,
         log: &Logger,
-    ) -> Result<(), PrecheckError> {
-        let PendingMgsUpdateHostPhase1Details {
-            expected_active_slot,
-            expected_inactive_artifact,
-            sled_agent_address,
-        } = &self.details;
-
-        // Fetch the current inventory from sled-agent.
-        let sled_agent = SledAgentClient::new(
-            &format!("http://{sled_agent_address}"),
-            log.clone(),
-        );
+    ) -> Result<BootPartitionContents, PrecheckError> {
+        let address = self.details.sled_agent_address;
+        let sled_agent =
+            SledAgentClient::new(&format!("http://{address}"), log.clone());
         let sled_inventory = sled_agent
             .inventory()
             .await
-            .map_err(|err| PrecheckError::SledAgentInventory {
-                address: *sled_agent_address,
-                err,
-            })?
+            .map_err(|err| PrecheckError::SledAgentInventory { address, err })?
             .into_inner()
             .last_reconciliation
             .ok_or(PrecheckError::SledAgentInventoryMissingLastReconciliation)?
@@ -530,6 +536,42 @@ impl ReconfiguratorHostPhase1Updater {
             log, "got phase 2 inventory details from sled-agent";
             "inventory" => ?sled_inventory,
         );
+        Ok(sled_inventory)
+    }
+
+    async fn confirm_sled_agent_boot_disk_matches(
+        &self,
+        active_phase1_slot: u16,
+        log: &Logger,
+    ) -> Result<(), PrecheckError> {
+        let sled_inventory =
+            self.get_boot_partition_inventory_from_sled_agent(log).await?;
+
+        match sled_inventory.boot_disk {
+            Ok(slot) if slot.to_mgs_firmware_slot() == active_phase1_slot => {
+                Ok(())
+            }
+            Ok(slot) => Err(PrecheckError::MismatchedHostOsActiveSlot {
+                phase1: active_phase1_slot,
+                boot_disk: slot,
+            }),
+            Err(err) => Err(PrecheckError::DeterminingHostOsBootDisk { err }),
+        }
+    }
+
+    async fn precheck_phase_2_via_sled_agent(
+        &self,
+        log: &Logger,
+    ) -> Result<(), PrecheckError> {
+        let PendingMgsUpdateHostPhase1Details {
+            expected_active_slot,
+            expected_inactive_artifact,
+            ..
+        } = &self.details;
+
+        // Fetch the current inventory from sled-agent.
+        let sled_inventory =
+            self.get_boot_partition_inventory_from_sled_agent(log).await?;
 
         // Confirm the expected boot disk.
         match (sled_inventory.boot_disk, expected_active_slot.boot_disk) {
@@ -540,11 +582,8 @@ impl ReconfiguratorHostPhase1Updater {
                     found,
                 });
             }
-            (Err(err), expected) => {
-                return Err(PrecheckError::DeterminingActiveHostOsSlot {
-                    expected,
-                    err,
-                });
+            (Err(err), _) => {
+                return Err(PrecheckError::DeterminingHostOsBootDisk { err });
             }
         }
 

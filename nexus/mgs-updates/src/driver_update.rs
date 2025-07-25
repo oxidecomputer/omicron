@@ -698,8 +698,9 @@ async fn wait_for_update_done(
             | Err(PrecheckError::EphemeralRotBootPreferenceSet)
             | Err(PrecheckError::SledAgentInventory { .. })
             | Err(PrecheckError::SledAgentInventoryMissingLastReconciliation)
+            | Err(PrecheckError::MismatchedHostOsActiveSlot { .. })
             | Err(PrecheckError::DeterminingActiveArtifact { .. })
-            | Err(PrecheckError::DeterminingActiveHostOsSlot { .. })
+            | Err(PrecheckError::DeterminingHostOsBootDisk { .. })
             | Ok(PrecheckStatus::ReadyForUpdate) => {
                 if before.elapsed() >= timeout {
                     return Err(UpdateWaitError::Timeout(timeout));
