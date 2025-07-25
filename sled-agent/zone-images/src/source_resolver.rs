@@ -237,8 +237,8 @@ mod tests {
                         .artifact_in_install_dataset()
                         .to_string(),
                     search_paths: vec![
+                        dir.path().join(&BOOT_PATHS.install_dataset),
                         Utf8PathBuf::from(RAMDISK_IMAGE_PATH),
-                        dir.path().join(&BOOT_PATHS.install_dataset)
                     ]
                 },
             },

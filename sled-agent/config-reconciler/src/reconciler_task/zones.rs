@@ -1303,7 +1303,7 @@ impl ResolverStatusExt for ResolverStatus {
                     log,
                     self,
                     zone_kind,
-                    &internal_disks,
+                    internal_disks,
                     |path| search_paths.push(path),
                 );
 
