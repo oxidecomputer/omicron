@@ -3,15 +3,39 @@
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 //! Runtime configuration for reconfigurator
-//!
-use std::fmt;
+
+use std::fmt::{self, Write};
 
 use chrono::{DateTime, TimeZone, Utc};
 use daft::Diffable;
+use indent_write::fmt::IndentWriter;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
 use crate::deployment::blueprint_display::{BpDiffState, KvList, KvPair};
+
+macro_rules! diff_row {
+    ($diff:expr, $member:ident, $label:expr) => {
+        if $diff.$member.before == $diff.$member.after {
+            KvPair::new(
+                BpDiffState::Unchanged,
+                $label,
+                super::blueprint_display::linear_table_unchanged(
+                    &$diff.$member.after,
+                ),
+            )
+        } else {
+            KvPair::new(
+                BpDiffState::Modified,
+                $label,
+                super::blueprint_display::linear_table_modified(
+                    &$diff.$member.before,
+                    &$diff.$member.after,
+                ),
+            )
+        }
+    };
+}
 
 #[derive(
     Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema,
@@ -87,7 +111,15 @@ impl fmt::Display for ReconfiguratorChickenSwitchesViewDisplay<'_> {
 }
 
 #[derive(
-    Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema,
+    Clone,
+    Copy,
+    Debug,
+    Diffable,
+    PartialEq,
+    Eq,
+    Serialize,
+    Deserialize,
+    JsonSchema,
 )]
 pub struct ReconfiguratorChickenSwitches {
     pub planner_enabled: bool,
@@ -129,6 +161,33 @@ impl fmt::Display for ReconfiguratorChickenSwitchesDisplay<'_> {
         // use IndentWriter here -- and it adds its own newlines so we don't
         // need to add any more.
         write!(f, "{}", planner_switches.display())?;
+
+        Ok(())
+    }
+}
+
+impl<'a> ReconfiguratorChickenSwitchesDiff<'a> {
+    pub fn display(&self) -> ReconfiguratorChickenSwitchesDiffDisplay<'a, '_> {
+        ReconfiguratorChickenSwitchesDiffDisplay { diff: self }
+    }
+}
+
+pub struct ReconfiguratorChickenSwitchesDiffDisplay<'a, 'b> {
+    diff: &'b ReconfiguratorChickenSwitchesDiff<'a>,
+}
+
+impl fmt::Display for ReconfiguratorChickenSwitchesDiffDisplay<'_, '_> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let list = KvList::new(
+            None,
+            vec![diff_row!(self.diff, planner_enabled, "planner enabled")],
+        );
+        // No need for writeln! here because KvList adds its own newlines.
+        write!(f, "{list}")?;
+
+        let mut indented = IndentWriter::new("    ", f);
+        writeln!(indented, "planner switches:")?;
+        write!(indented, "{}", self.diff.planner_switches.display())?;
 
         Ok(())
     }
@@ -229,32 +288,10 @@ pub struct PlannerChickenSwitchesDiffDisplay<'a, 'b> {
 
 impl fmt::Display for PlannerChickenSwitchesDiffDisplay<'_, '_> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        macro_rules! diff_row {
-            ($member:ident, $label:expr) => {
-                if self.diff.$member.before == self.diff.$member.after {
-                    KvPair::new(
-                        BpDiffState::Unchanged,
-                        $label,
-                        super::blueprint_display::linear_table_unchanged(
-                            &self.diff.$member.after,
-                        ),
-                    )
-                } else {
-                    KvPair::new(
-                        BpDiffState::Modified,
-                        $label,
-                        super::blueprint_display::linear_table_modified(
-                            &self.diff.$member.before,
-                            &self.diff.$member.after,
-                        ),
-                    )
-                }
-            };
-        }
-
         let list = KvList::new(
             None,
             vec![diff_row!(
+                self.diff,
                 add_zones_with_mupdate_override,
                 "add zones with mupdate override"
             )],

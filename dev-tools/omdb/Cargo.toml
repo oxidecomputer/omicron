@@ -22,6 +22,7 @@ crossterm.workspace = true
 crucible-agent-client.workspace = true
 crucible-pantry-client.workspace = true
 csv.workspace = true
+daft.workspace = true
 diesel.workspace = true
 dropshot.workspace = true
 dyn-clone.workspace = true

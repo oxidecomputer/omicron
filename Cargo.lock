@@ -7972,6 +7972,7 @@ dependencies = [
  "crucible-agent-client",
  "crucible-pantry-client",
  "csv",
+ "daft",
  "diesel",
  "dropshot",
  "dyn-clone",
