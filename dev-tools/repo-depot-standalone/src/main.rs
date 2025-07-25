@@ -22,7 +22,7 @@ use libc::SIGINT;
 use repo_depot_api::ArtifactPathParams;
 use repo_depot_api::RepoDepotApi;
 use signal_hook_tokio::Signals;
-use slog::{Logger, info, warn};
+use slog::info;
 use slog_error_chain::InlineErrorChain;
 use std::collections::BTreeMap;
 use std::net::SocketAddr;
@@ -109,7 +109,7 @@ impl RepoDepotStandalone {
             )
             .await
             .with_context(|| format!("load {:?}", repo_path))?;
-            ctx.load_repo(plan, &log)
+            ctx.load_repo(plan)
                 .context("loading artifacts from repository at {repo_path}")?;
             info!(&log, "loaded Omicron TUF repository"; "path" => %repo_path);
         }
@@ -157,11 +157,7 @@ impl RepoMetadata {
         RepoMetadata { repos: Vec::new(), targets_by_hash: BTreeMap::new() }
     }
 
-    pub fn load_repo(
-        &mut self,
-        plan: ArtifactsWithPlan,
-        log: &Logger,
-    ) -> anyhow::Result<()> {
+    pub fn load_repo(&mut self, plan: ArtifactsWithPlan) -> anyhow::Result<()> {
         let repo_index = self.repos.len();
 
         for artifact_meta in &plan.description().artifacts {
@@ -171,19 +167,12 @@ impl RepoMetadata {
                 kind: artifact_id.kind.clone(),
                 hash: artifact_hash,
             };
-            if let Some((_, old_hash_id)) = self
-                .targets_by_hash
-                .insert(artifact_meta.hash, (repo_index, artifact_hash_id))
-            {
-                warn!(
-                    log,
-                    "artifact hash found multiple times";
-                    "hash" => %artifact_hash,
-                    "new_kind" => %artifact_id.kind,
-                    "name" => %artifact_id.name,
-                    "old_kind" => %old_hash_id.kind,
-                );
-            }
+
+            // Some hashes appear multiple times, whether in the same repo or
+            // different repos.  That's fine.  They all have the same contents
+            // so we can serve any of them when this hash is requested.
+            self.targets_by_hash
+                .insert(artifact_meta.hash, (repo_index, artifact_hash_id));
         }
 
         self.repos.push(plan);
@@ -199,7 +188,12 @@ impl RepoMetadata {
         let repo = &self.repos[*repo_index];
         Some(
             repo.get_by_hash(artifact_hash_id)
-                .expect("find SHA in repo that we recorded has this SHA")
+                .unwrap_or_else(|| {
+                    panic!(
+                        "artifact hash unexpectedly missing from the repo that \
+                         we recorded having found it in"
+                    )
+                })
                 .reader_stream()
                 .await,
         )
