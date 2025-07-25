@@ -6,13 +6,11 @@
 
 use crate::NodeHandlerCtx;
 use crate::crypto::{LrtqShare, Sha3_256Digest, ShareDigestLrtq};
-use crate::messages::PeerMsg;
 use crate::validators::{ReconfigurationError, ValidatedReconfigureMsg};
 use crate::{Configuration, Epoch, PeerMsgKind, PlatformId};
 use gfss::shamir::Share;
 use slog::{Logger, o, warn};
 use std::collections::{BTreeMap, BTreeSet};
-use std::time::Instant;
 
 /// The state of a reconfiguration coordinator.
 ///
@@ -29,10 +27,6 @@ use std::time::Instant;
 pub struct CoordinatorState {
     log: Logger,
 
-    /// When the reconfiguration started
-    #[expect(unused)]
-    start_time: Instant,
-
     /// A copy of the message used to start this reconfiguration
     reconfigure_msg: ValidatedReconfigureMsg,
 
@@ -42,9 +36,6 @@ pub struct CoordinatorState {
 
     /// What is the coordinator currently doing
     op: CoordinatorOperation,
-
-    /// When to resend prepare messages next
-    retry_deadline: Instant,
 }
 
 impl CoordinatorState {
@@ -54,7 +45,6 @@ impl CoordinatorState {
     /// `PrepareMsg` so that it can be persisted.
     pub fn new_uninitialized(
         log: Logger,
-        now: Instant,
         msg: ValidatedReconfigureMsg,
     ) -> Result<(CoordinatorState, Configuration, Share), ReconfigurationError>
     {
@@ -81,7 +71,7 @@ impl CoordinatorState {
             prepare_acks: BTreeSet::new(),
         };
 
-        let state = CoordinatorState::new(log, now, msg, config.clone(), op);
+        let state = CoordinatorState::new(log, msg, config.clone(), op);
 
         // Safety: Construction of a `ValidatedReconfigureMsg` ensures that
         // `my_platform_id` is part of the new configuration and has a share.
@@ -92,7 +82,6 @@ impl CoordinatorState {
     /// A reconfiguration from one group to another
     pub fn new_reconfiguration(
         log: Logger,
-        now: Instant,
         msg: ValidatedReconfigureMsg,
         last_committed_config: &Configuration,
     ) -> Result<CoordinatorState, ReconfigurationError> {
@@ -107,7 +96,7 @@ impl CoordinatorState {
             new_shares,
         };
 
-        Ok(CoordinatorState::new(log, now, msg, config, op))
+        Ok(CoordinatorState::new(log, msg, config, op))
     }
 
     // Intentionally private!
@@ -116,26 +105,25 @@ impl CoordinatorState {
     // more specific, and perform validation of arguments.
     fn new(
         log: Logger,
-        now: Instant,
         reconfigure_msg: ValidatedReconfigureMsg,
         configuration: Configuration,
         op: CoordinatorOperation,
     ) -> CoordinatorState {
-        // We want to send any pending messages immediately
-        let retry_deadline = now;
         CoordinatorState {
             log: log.new(o!("component" => "tq-coordinator-state")),
-            start_time: now,
             reconfigure_msg,
             configuration,
             op,
-            retry_deadline,
         }
     }
 
     // Return the `ValidatedReconfigureMsg` that started this reconfiguration
     pub fn reconfigure_msg(&self) -> &ValidatedReconfigureMsg {
         &self.reconfigure_msg
+    }
+
+    pub fn op(&self) -> &CoordinatorOperation {
+        &self.op
     }
 
     // Send any required messages as a reconfiguration coordinator
@@ -147,13 +135,40 @@ impl CoordinatorState {
     // will return a copy of it.
     //
     // This method is "in progress" - allow unused parameters for now
-    #[expect(unused)]
     pub fn send_msgs(&mut self, ctx: &mut impl NodeHandlerCtx) {
-        let now = ctx.now();
-        if now < self.retry_deadline {
-            return;
+        match &self.op {
+            #[expect(unused)]
+            CoordinatorOperation::CollectShares {
+                epoch,
+                members,
+                collected_shares,
+                ..
+            } => {}
+            #[expect(unused)]
+            CoordinatorOperation::CollectLrtqShares { members, shares } => {}
+            CoordinatorOperation::Prepare { prepares, .. } => {
+                for (platform_id, (config, share)) in
+                    prepares.clone().into_iter()
+                {
+                    if ctx.connected().contains(&platform_id) {
+                        ctx.send(
+                            platform_id,
+                            PeerMsgKind::Prepare { config, share },
+                        );
+                    }
+                }
+            }
         }
-        self.retry_deadline = now + self.reconfigure_msg.retry_timeout();
+    }
+
+    // Send any required messages to a newly connected node
+    // This method is "in progress" - allow unused parameters for now
+    #[expect(unused)]
+    pub fn send_msgs_to(
+        &mut self,
+        ctx: &mut impl NodeHandlerCtx,
+        to: PlatformId,
+    ) {
         match &self.op {
             CoordinatorOperation::CollectShares {
                 epoch,
@@ -164,14 +179,12 @@ impl CoordinatorState {
             CoordinatorOperation::CollectLrtqShares { members, shares } => {}
             CoordinatorOperation::Prepare { prepares, prepare_acks } => {
                 let rack_id = self.reconfigure_msg.rack_id();
-                for (platform_id, (config, share)) in
-                    prepares.clone().into_iter()
-                {
+                if let Some((config, share)) = prepares.get(&to) {
                     ctx.send(
-                        platform_id,
-                        PeerMsg {
-                            rack_id,
-                            kind: PeerMsgKind::Prepare { config, share },
+                        to,
+                        PeerMsgKind::Prepare {
+                            config: config.clone(),
+                            share: share.clone(),
                         },
                     );
                 }
@@ -217,7 +230,6 @@ impl CoordinatorState {
 /// What should the coordinator be doing?
 pub enum CoordinatorOperation {
     // We haven't started implementing this yet
-    #[expect(unused)]
     CollectShares {
         epoch: Epoch,
         members: BTreeMap<PlatformId, Sha3_256Digest>,
@@ -226,7 +238,6 @@ pub enum CoordinatorOperation {
     },
     // We haven't started implementing this yet
     // Epoch is always 0
-    #[allow(unused)]
     CollectLrtqShares {
         members: BTreeMap<PlatformId, ShareDigestLrtq>,
         shares: BTreeMap<PlatformId, LrtqShare>,
@@ -248,6 +259,16 @@ impl CoordinatorOperation {
                 "collect lrtq shares"
             }
             CoordinatorOperation::Prepare { .. } => "prepare",
+        }
+    }
+
+    /// Return the members that have acked prepares, if the current operation
+    /// is `Prepare`. Otherwise return an empty set.
+    pub fn acked_prepares(&self) -> BTreeSet<PlatformId> {
+        if let CoordinatorOperation::Prepare { prepare_acks, .. } = self {
+            prepare_acks.clone()
+        } else {
+            BTreeSet::new()
         }
     }
 }

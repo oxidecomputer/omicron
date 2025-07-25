@@ -12,6 +12,7 @@ bcs.workspace = true
 bootstore.workspace = true
 camino.workspace = true
 chacha20poly1305.workspace = true
+daft.workspace = true
 derive_more.workspace = true
 gfss.workspace = true
 hex.workspace = true

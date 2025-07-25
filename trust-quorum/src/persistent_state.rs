@@ -45,7 +45,7 @@ impl PersistentState {
     }
 
     pub fn rack_id(&self) -> Option<RackUuid> {
-        self.latest_committed_configuration().map(|c| c.rack_id).or_else(|| {
+        self.latest_config().map(|c| c.rack_id).or_else(|| {
             self.lrtq
                 .as_ref()
                 .map(|pkg| RackUuid::from_untyped_uuid(pkg.rack_uuid))
@@ -86,6 +86,11 @@ impl PersistentState {
     /// Return the key share for lrtq if one exists
     pub fn lrtq_key_share(&self) -> Option<LrtqShare> {
         self.lrtq.as_ref().map(|p| p.share.clone().into())
+    }
+
+    // Do we have a configuration and share for this epoch?
+    pub fn has_prepared(&self, epoch: Epoch) -> bool {
+        self.configs.contains_key(&epoch) && self.shares.contains_key(&epoch)
     }
 }
 
