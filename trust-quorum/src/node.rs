@@ -201,6 +201,9 @@ impl Node {
             PeerMsgKind::GetShare(epoch) => {
                 self.handle_get_share(ctx, from, epoch);
             }
+            PeerMsgKind::Share { epoch, share } => {
+                self.handle_share(ctx, from, epoch, share);
+            }
             _ => todo!(
                 "cannot handle message variant yet - not implemented: {msg:?}"
             ),
@@ -250,9 +253,11 @@ impl Node {
             ctx.persistent_state().latest_committed_configuration()
         {
             if latest_committed_config.epoch > epoch {
-                info!(self.log,
-                    concat!("Received 'GetShare'` from stale node. ",
-                        "Responded with 'CommitAdvance'"
+                info!(
+                    self.log,
+                    concat!(
+                        "Received 'GetShare'` from stale node. ",
+                        "Responded with 'CommitAdvance'."
                     );
                     "from" => %from,
                     "latest_committed_epoch" => %latest_committed_config.epoch,
@@ -275,7 +280,9 @@ impl Node {
         // See RFD 238 section 5.3.3
         //
         if let Some(share) = ctx.persistent_state().shares.get(&epoch) {
-            info!(self.log, "Received 'GetShare'. Responded with 'Share'.";
+            info!(
+                self.log,
+                "Received 'GetShare'. Responded with 'Share'.";
                 "from" => %from,
                 "epoch" => %epoch
             );
@@ -284,7 +291,28 @@ impl Node {
             // TODO: We may want to return a `NoSuchShare(epoch)` reply if we don't
             // have the share, but it's not strictly necessary. It would only be for
             // logging/debugging purposes at the requester.
-            info!(self.log, "Received 'GetShare', but it's missing.";
+            info!(
+                self.log,
+                "Received 'GetShare', but it's missing.";
+                "from" => %from,
+                "epoch" => %epoch
+            );
+        }
+    }
+
+    fn handle_share(
+        &mut self,
+        ctx: &mut impl NodeHandlerCtx,
+        from: PlatformId,
+        epoch: Epoch,
+        share: Share,
+    ) {
+        if let Some(cs) = &mut self.coordinator_state {
+            cs.handle_share(ctx, from, epoch, share);
+        } else {
+            warn!(
+                self.log,
+                "Received share when not coordinating";
                 "from" => %from,
                 "epoch" => %epoch
             );
