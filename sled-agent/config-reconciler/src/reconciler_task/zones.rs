@@ -1340,22 +1340,88 @@ impl ResolverStatusExt for ResolverStatus {
                 }
             }
             OmicronZoneImageSource::Artifact { hash } => {
-                // TODO: implement mupdate override here.
-                //
-                // Search both artifact datasets. This iterator starts with the
-                // dataset for the boot disk (if it exists), and then is followed
-                // by all other disks.
-                let search_paths =
-                    internal_disks.all_artifact_datasets().collect();
-                OmicronZoneFileSource {
-                    // TODO: with mupdate overrides, return InstallDataset here
-                    location: OmicronZoneImageLocation::Artifact {
-                        hash: Ok(*hash),
-                    },
-                    file_source: ZoneImageFileSource {
-                        file_name: hash.to_string(),
-                        search_paths,
-                    },
+                match self.mupdate_override.boot_disk_override.as_ref() {
+                    Ok(Some(override_info)) => {
+                        // A mupdate override is currently active. Use the
+                        // install dataset hash as the location.
+                        let mut search_paths = Vec::new();
+                        let install_dataset_hash = install_dataset_hash(
+                            log,
+                            self,
+                            zone_kind,
+                            &internal_disks,
+                            |path| {
+                                search_paths.push(path);
+                            },
+                        );
+
+                        // Do *not* add the RAM disk to search_paths, because
+                        // the only situation where that happens is in a
+                        // particular development workflow (a4x2) which does not
+                        // support MUPdates.
+
+                        debug!(
+                            log,
+                            "mupdate override active, \
+                             redirecting Artifact source to InstallDataset";
+                            "artifact_hash" => %hash,
+                            "mupdate_override_id" => %override_info.mupdate_uuid,
+                            "install_dataset_hash" => ?install_dataset_hash,
+                            "search_paths" => ?search_paths,
+                        );
+
+                        OmicronZoneFileSource {
+                            location:
+                                OmicronZoneImageLocation::InstallDataset {
+                                    hash: install_dataset_hash,
+                                },
+                            file_source: ZoneImageFileSource {
+                                file_name: zone_kind
+                                    .artifact_in_install_dataset()
+                                    .to_owned(),
+                                search_paths,
+                            },
+                        }
+                    }
+                    Ok(None) => {
+                        // Search both artifact datasets. This iterator starts with the
+                        // dataset for the boot disk (if it exists), and then is followed
+                        // by all other disks.
+                        let search_paths =
+                            internal_disks.all_artifact_datasets().collect();
+                        OmicronZoneFileSource {
+                            // TODO: with mupdate overrides, return InstallDataset here
+                            location: OmicronZoneImageLocation::Artifact {
+                                hash: Ok(*hash),
+                            },
+                            file_source: ZoneImageFileSource {
+                                file_name: hash.to_string(),
+                                search_paths,
+                            },
+                        }
+                    }
+                    Err(error) => {
+                        // An error occurred while obtaining the mupdate
+                        // override. Bubble this up along with an empty
+                        // search_paths (which will always fail).
+                        error!(
+                            log,
+                            "error obtaining mupdate override with \
+                             Artifact source -- returning empty search \
+                             paths which will always fail";
+                            "zone_kind" => zone_kind.report_str(),
+                            "error" => InlineErrorChain::new(error),
+                        );
+                        OmicronZoneFileSource {
+                            location: OmicronZoneImageLocation::Artifact {
+                                hash: Err(error.clone()),
+                            },
+                            file_source: ZoneImageFileSource {
+                                file_name: hash.to_string(),
+                                search_paths: Vec::new(),
+                            },
+                        }
+                    }
                 }
             }
         }

@@ -4,7 +4,8 @@
 
 use std::{collections::HashMap, fmt};
 
-use iddqd::{IdOrdItem, IdOrdMap, id_upcast};
+use anyhow::anyhow;
+use iddqd::{IdOrdItem, IdOrdMap, id_ord_map::RefMut, id_upcast};
 use nexus_sled_agent_shared::inventory::{ZoneKind, ZoneManifestBootInventory};
 use nexus_types::{
     deployment::{
@@ -145,9 +146,41 @@ impl NoopConvertInfo {
             }
         }
     }
+
+    /// Return a mutable reference to [`NoopConvertSledInfo`] for the given
+    /// sled.
+    ///
+    /// Returns `Err(Error::Planner)` if the sled ID wasn't found.
+    pub(crate) fn sled_info_mut(
+        &mut self,
+        sled_id: SledUuid,
+    ) -> Result<NoopConvertSledInfoMut<'_>, Error> {
+        match self {
+            Self::GlobalIneligible(_) => {
+                Ok(NoopConvertSledInfoMut::GlobalIneligible(
+                    NoopConvertGlobalIneligibleReason::NoTargetRelease,
+                ))
+            }
+            Self::GlobalEligible { sleds } => {
+                let Some(sled_info) = sleds.get_mut(&sled_id) else {
+                    return Err(Error::Planner(anyhow!(
+                        "tried to get noop convert zone info \
+                         for unknown sled {sled_id}"
+                    )));
+                };
+                Ok(NoopConvertSledInfoMut::Ok(sled_info))
+            }
+        }
+    }
 }
 
-#[derive(Clone, Debug)]
+#[derive(Debug)]
+pub(crate) enum NoopConvertSledInfoMut<'a> {
+    Ok(RefMut<'a, NoopConvertSledInfo>),
+    GlobalIneligible(NoopConvertGlobalIneligibleReason),
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
 pub(crate) enum NoopConvertGlobalIneligibleReason {
     /// No target release was set.
     NoTargetRelease,
@@ -254,7 +287,7 @@ impl NoopConvertSledEligible {
     }
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Eq, PartialEq)]
 pub(crate) struct NoopConvertZoneCounts {
     pub(crate) num_total: usize,
     pub(crate) num_already_artifact: usize,
@@ -263,7 +296,7 @@ pub(crate) struct NoopConvertZoneCounts {
 }
 
 impl NoopConvertZoneCounts {
-    fn new(zones: &IdOrdMap<NoopConvertZoneInfo>) -> Self {
+    pub(crate) fn new(zones: &IdOrdMap<NoopConvertZoneInfo>) -> Self {
         let mut num_already_artifact = 0;
         let mut num_eligible = 0;
         let mut num_ineligible = 0;
@@ -295,7 +328,7 @@ impl NoopConvertZoneCounts {
     }
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Eq, PartialEq)]
 pub(crate) enum NoopConvertSledIneligibleReason {
     /// This sled is missing from inventory.
     NotInInventory,
@@ -314,7 +347,6 @@ pub(crate) enum NoopConvertSledIneligibleReason {
         /// If the mupdate override is changed, a sled can transition from
         /// ineligible to eligible, or vice versa. We build and retain the zone
         /// map for easy state transitions.
-        #[expect(unused)]
         zones: IdOrdMap<NoopConvertZoneInfo>,
     },
 }
@@ -337,7 +369,7 @@ impl fmt::Display for NoopConvertSledIneligibleReason {
     }
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Eq, PartialEq)]
 pub(crate) struct NoopConvertZoneInfo {
     pub(crate) zone_id: OmicronZoneUuid,
     pub(crate) kind: ZoneKind,
@@ -492,14 +524,14 @@ impl IdOrdItem for NoopConvertZoneInfo {
     id_upcast!();
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Eq, PartialEq)]
 pub(crate) enum NoopConvertZoneStatus {
     AlreadyArtifact { version: BlueprintArtifactVersion, hash: ArtifactHash },
     Ineligible(NoopConvertZoneIneligibleReason),
     Eligible(BlueprintZoneImageSource),
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Eq, PartialEq)]
 pub(crate) enum NoopConvertZoneIneligibleReason {
     NotInManifest,
     ArtifactError { message: String },

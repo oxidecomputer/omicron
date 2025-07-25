@@ -352,7 +352,7 @@ mod test {
             {
                 blueprint_id
             }
-            _ => panic!("expected new target blueprint"),
+            other => panic!("expected new target blueprint, found {other:?}"),
         };
 
         // Load and check the new target blueprint.
