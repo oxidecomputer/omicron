@@ -705,6 +705,86 @@ impl UpdateStatus {
     }
 }
 
+// XXX-dap TODO-doc
+#[derive(Debug, Clone, Serialize, JsonSchema)]
+pub struct QuiesceStatus {
+    pub state: QuiesceState,
+    pub sagas_running: IdOrdMap<RunningSagaInfo>,
+}
+
+// XXX-dap TODO-doc
+#[derive(Debug, Clone, Serialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+#[serde(tag = "state", content = "quiesce_details")]
+pub enum QuiesceState {
+    /// Normal operation
+    Running,
+    /// New sagas disallowed, but some may be running.
+    WaitingForSagas {
+        time_requested: DateTime<Utc>,
+        #[serde(skip)]
+        time_waiting_for_sagas: Instant,
+    },
+    /// No sagas running, but some database connections may be held.
+    WaitingForDb {
+        time_requested: DateTime<Utc>,
+        #[serde(skip)]
+        time_waiting_for_sagas: Instant,
+        duration_waiting_for_sagas: Duration,
+        #[serde(skip)]
+        time_waiting_for_db: Instant,
+    },
+    /// Nexus has no sagas running and is not using the database
+    Quiesced {
+        time_requested: DateTime<Utc>,
+        time_quiesced: DateTime<Utc>,
+        duration_waiting_for_sagas: Duration,
+        duration_waiting_for_db: Duration,
+        duration_total: Duration,
+    },
+}
+
+impl QuiesceState {
+    pub fn running() -> QuiesceState {
+        QuiesceState::Running
+    }
+
+    pub fn quiescing(&self) -> bool {
+        match self {
+            QuiesceState::Running => false,
+            QuiesceState::WaitingForSagas { .. }
+            | QuiesceState::WaitingForDb { .. }
+            | QuiesceState::Quiesced { .. } => true,
+        }
+    }
+
+    pub fn fully_quiesced(&self) -> bool {
+        match self {
+            QuiesceState::Running
+            | QuiesceState::WaitingForSagas { .. }
+            | QuiesceState::WaitingForDb { .. } => false,
+            QuiesceState::Quiesced { .. } => true,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, JsonSchema)]
+pub struct RunningSagaInfo {
+    pub saga_id: steno::SagaId,
+    pub saga_name: steno::SagaName,
+    pub time_started: DateTime<Utc>,
+}
+
+impl IdOrdItem for RunningSagaInfo {
+    type Key<'a> = &'a steno::SagaId;
+
+    fn key(&self) -> Self::Key<'_> {
+        &self.saga_id
+    }
+
+    id_upcast!();
+}
+
 #[cfg(test)]
 mod test {
     use super::CompletedAttempt;
