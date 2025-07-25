@@ -1117,14 +1117,9 @@ fn does_new_config_require_zone_restart(
                 hash: Err(desired_error),
             },
         ) => {
-            // If the zone is currently running, then it must have been started
-            // from the ramdisk (Omicron zones are stored on the ramdisk with
-            // a4x2, so an error is expected in that case). Err means we're
-            // going to start the new zone from the install dataset as well. Log
-            // a warning, but otherwise don't bounce the zone.
-            //
-            // TODO: a4x2 should probably populate the install dataset rather
-            // than using the ramdisk.
+            // Err means we're going to start the desired zone from the ramdisk
+            // (if it is at all successful). Log a warning, but otherwise don't
+            // bounce the zone.
             warn!(
                 log,
                 "existing zone running from ramdisk, and desired zone \
