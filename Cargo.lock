@@ -12332,6 +12332,7 @@ dependencies = [
  "camino",
  "camino-tempfile-ext",
  "iddqd",
+ "nexus-sled-agent-shared",
  "omicron-common",
  "omicron-uuid-kinds",
  "omicron-workspace-hack",
