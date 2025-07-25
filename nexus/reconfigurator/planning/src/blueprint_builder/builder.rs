@@ -1244,9 +1244,8 @@ impl<'a> BlueprintBuilder<'a> {
             .input
             .sled_lookup(SledFilter::InService, sled_id)
             .map_err(|error| Error::Planner(anyhow!(error)))?;
-        // TODO: simplify down to &BaseboardId
-        let baseboard_id = Arc::new(sled_details.baseboard_id.clone());
-        let pending_mgs_update = self.pending_mgs_updates.entry(baseboard_id);
+        let pending_mgs_update =
+            self.pending_mgs_updates.entry(&sled_details.baseboard_id);
         let noop_sled_info = noop_info.sled_info_mut(sled_id)?;
 
         editor

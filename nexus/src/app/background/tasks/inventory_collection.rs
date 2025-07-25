@@ -9,7 +9,6 @@ use anyhow::Context;
 use anyhow::ensure;
 use futures::FutureExt;
 use futures::future::BoxFuture;
-use internal_dns_resolver::ResolveError;
 use internal_dns_types::names::ServiceName;
 use nexus_db_queries::context::OpContext;
 use nexus_db_queries::db::DataStore;
@@ -164,36 +163,27 @@ async fn inventory_activate(
                 clickhouse_admin_keeper_client::Client::new(&url, log)
             })
             .collect::<Vec<_>>(),
-        Err(err) => match err {
-            // When DNS resolution fails because no clickhouse-keeper-admin
-            // servers have been found, we allow this and move on. This is
-            // because multi-node clickhouse may not be enabled, and therefore
-            // there will not be any clickhouse-keeper-admin servers to find.
-            //
-            // In the long term, we expect multi-node clickhouse to always
-            // be enabled, and therefore we may want to bubble up any error
-            // we find, including `NotFound`. However, since we must enable
-            // multi-node clickhouse via reconfigurator, and not RSS, we may
-            // find ourselves with a small gap early on where the names don't
-            // yet exist. This would block the rest of inventory collection if
-            // we early return. We may be able to resolve this problem at rack
-            // handoff time, but it's worth considering whether we want to error
-            // here in case a gap remains.
-            //
-            // See https://github.com/oxidecomputer/omicron/issues/7005
-            ResolveError::NotFound(_) | ResolveError::NotFoundByString(_) => {
-                vec![]
-            }
-            ResolveError::Resolve(hickory_err)
-                if is_no_records_found(&hickory_err) =>
-            {
-                vec![]
-            }
-            _ => {
-                return Err(err)
-                    .context("looking up clickhouse-admin-keeper addresses");
-            }
-        },
+        // When DNS resolution fails because no clickhouse-keeper-admin
+        // servers have been found, we allow this and move on. This is
+        // because multi-node clickhouse may not be enabled, and therefore
+        // there will not be any clickhouse-keeper-admin servers to find.
+        //
+        // In the long term, we expect multi-node clickhouse to always
+        // be enabled, and therefore we may want to bubble up any error
+        // we find, including `NotFound`. However, since we must enable
+        // multi-node clickhouse via reconfigurator, and not RSS, we may
+        // find ourselves with a small gap early on where the names don't
+        // yet exist. This would block the rest of inventory collection if
+        // we early return. We may be able to resolve this problem at rack
+        // handoff time, but it's worth considering whether we want to error
+        // here in case a gap remains.
+        //
+        // See https://github.com/oxidecomputer/omicron/issues/7005
+        Err(err) if err.is_not_found() => vec![],
+        Err(err) => {
+            return Err(err)
+                .context("looking up clickhouse-admin-keeper addresses");
+        }
     };
 
     // Update CockroachDB cluster backends.
@@ -237,20 +227,6 @@ async fn inventory_activate(
         .context("saving inventory to database")?;
 
     Ok(collection)
-}
-
-fn is_no_records_found(err: &hickory_resolver::ResolveError) -> bool {
-    match err.kind() {
-        hickory_resolver::ResolveErrorKind::Proto(proto_error) => {
-            match proto_error.kind() {
-                hickory_resolver::proto::ProtoErrorKind::NoRecordsFound {
-                    ..
-                } => true,
-                _ => false,
-            }
-        }
-        _ => false,
-    }
 }
 
 /// Determine which sleds to inventory based on what's in the database
@@ -355,8 +331,14 @@ mod test {
             assert!(num_collections > 0);
 
             // Regardless of the activation source, we should have at
-            // most `nkeep + 1` collections.
-            assert!(num_collections <= nkeep + 1);
+            // most `nkeep + 2` collections: at most `nkeep + 1` from
+            // our collection, and at most one more if we lose the race
+            // with Nexus and it happens to insert another collection
+            // after we pruned down to `nkeep`.
+            assert!(
+                num_collections <= nkeep + 2,
+                "expected {num_collections} <= {nkeep} + 2"
+            );
 
             // Filter down to just the collections we activated. (This could be
             // empty if Nexus shoved several collections in!)

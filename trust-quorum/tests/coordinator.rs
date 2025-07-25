@@ -16,8 +16,8 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::time::{Duration, Instant};
 use test_strategy::{Arbitrary, proptest};
 use trust_quorum::{
-    Envelope, Epoch, Node, PeerMsg, PeerMsgKind, PersistentState, PlatformId,
-    ReconfigureMsg, Threshold,
+    Epoch, Node, NodeCallerCtx, NodeCommonCtx, NodeCtx, PeerMsg, PeerMsgKind,
+    PersistentState, PlatformId, ReconfigureMsg, Threshold,
 };
 
 /// The system under test
@@ -25,21 +25,19 @@ pub struct Sut {
     // The coordinator node which is the system under test (SUT)
     pub node: Node,
 
-    // The saved persistent state returned by the last Node operation
-    pub persistent_state: PersistentState,
+    // The context passed to `Node` api operations
+    pub ctx: NodeCtx,
 }
 
 impl Sut {
     pub fn action_coordinate_reconfiguration(
         &mut self,
-        now: Instant,
-        outbox: &mut Vec<Envelope>,
         msg: ReconfigureMsg,
-    ) -> Result<Option<PersistentState>, TestCaseError> {
+    ) -> Result<(), TestCaseError> {
         // We only generate valid configurations when calling this method. Any
         // failure of this method should be considered a test failure.
-        let output = self.node.coordinate_reconfiguration(now, outbox, msg)?;
-        Ok(output)
+        self.node.coordinate_reconfiguration(&mut self.ctx, msg)?;
+        Ok(())
     }
 }
 
@@ -184,11 +182,9 @@ struct TestState {
 
 impl TestState {
     pub fn new(log: Logger, coordinator_id: PlatformId) -> TestState {
+        let mut ctx = NodeCtx::new(coordinator_id);
         TestState {
-            sut: Sut {
-                node: Node::new(log, coordinator_id, PersistentState::empty()),
-                persistent_state: PersistentState::empty(),
-            },
+            sut: Sut { node: Node::new(log, &mut ctx), ctx },
             model: Model::new(),
             network_msgs: BTreeMap::new(),
             delivered_msgs: BTreeMap::new(),
@@ -199,46 +195,35 @@ impl TestState {
         &mut self,
         msg: ReconfigureMsg,
     ) -> Result<(), TestCaseError> {
-        let mut outbox = Vec::new();
-
         // Update the model state
         self.model.action_coordinate_reconfiguration(msg.clone());
+
+        // Save the prior persistent state before we coordinate and possibly
+        // mutate it
+        let prior_persistent_state = self.sut.ctx.persistent_state().clone();
 
         // Update the SUT state
         //
         // We only generate valid configurations when calling this method. Any
         // failure of this method should be considered a test failure.
-        let output = self.sut.action_coordinate_reconfiguration(
-            self.model.now,
-            &mut outbox,
-            msg,
-        )?;
+        self.sut.action_coordinate_reconfiguration(msg)?;
 
-        match output {
-            Some(persistent_state) => {
-                // The request succeeded
-                self.assert_persistent_state_after_coordinate_reconfiguration(
-                    &persistent_state,
-                )?;
+        if self.sut.ctx.persistent_state_change_check_and_reset() {
+            // The request succeeded
+            self.assert_persistent_state_after_coordinate_reconfiguration(
+                prior_persistent_state,
+            )?;
 
-                // We validated our persistent state is correct. Save it and
-                // move on.
-                self.sut.persistent_state = persistent_state;
+            // The correct messages were sent
+            self.assert_envelopes_after_coordinate_reconfiguration()?;
 
-                // The correct messages were sent
-                self.assert_envelopes_after_coordinate_reconfiguration(
-                    &outbox,
-                )?;
-
-                // We validated our messages. Let's put them into our test state
-                // as "in-flight".
-                self.send(outbox.into_iter());
-            }
-            None => {
-                // The request is idempotent
-                // No action should have been taken
-                prop_assert!(outbox.is_empty());
-            }
+            // We validated our messages. Let's put them into our test state
+            // as "in-flight".
+            self.send_all_msgs();
+        } else {
+            // The request is idempotent
+            // No action should have been taken
+            prop_assert_eq!(self.sut.ctx.num_envelopes(), 0);
         }
 
         Ok(())
@@ -327,11 +312,10 @@ impl TestState {
         &mut self,
         time_jump: Duration,
     ) -> Result<(), TestCaseError> {
-        let mut outbox = Vec::new();
-
         // Tell our model and the SUT that time has advanced
         let timer_expired = self.model.advance_time(time_jump);
-        self.sut.node.tick(self.model.now, &mut outbox);
+        self.sut.ctx.set_time(self.model.now);
+        self.sut.node.tick(&mut self.sut.ctx);
 
         // If time has advanced past the coordinator's retry deadline
         // then we must see if we expected any retries to be sent.
@@ -341,7 +325,7 @@ impl TestState {
 
             // We aren't coordinating
             if members.is_empty() {
-                prop_assert!(outbox.is_empty());
+                prop_assert_eq!(self.sut.ctx.num_envelopes(), 0);
                 return Ok(());
             }
 
@@ -350,17 +334,17 @@ impl TestState {
                 // has not received acks for.
                 let expected: BTreeSet<_> =
                     members.difference(acked_members).collect();
-                for envelope in &outbox {
+                for envelope in self.sut.ctx.envelopes() {
                     prop_assert!(expected.contains(&envelope.to));
                 }
             } else {
                 // We aren't waiting on acks, so won't retry sending prepares
-                prop_assert!(outbox.is_empty());
+                prop_assert_eq!(self.sut.ctx.num_envelopes(), 0);
             }
         }
 
         // Put any output messages onto the network
-        self.send(outbox.into_iter());
+        self.send_all_msgs();
 
         Ok(())
     }
@@ -379,15 +363,9 @@ impl TestState {
         // In any case, we don't keep enough state at the fake follower replicas
         // to check this.
         let reply = PeerMsg { rack_id, kind: PeerMsgKind::PrepareAck(epoch) };
-        let mut outbox = Vec::new();
-        let output = self.sut.node.handle(
-            self.model.now,
-            &mut outbox,
-            from.clone(),
-            reply,
-        );
-        prop_assert!(output.is_none());
-        prop_assert!(outbox.is_empty());
+        self.sut.node.handle(&mut self.sut.ctx, from.clone(), reply);
+        prop_assert!(!self.sut.ctx.persistent_state_change_check_and_reset());
+        prop_assert_eq!(self.sut.ctx.num_envelopes(), 0);
 
         // Also update the model state
         self.model.ack_prepare(from.clone(), epoch);
@@ -401,13 +379,13 @@ impl TestState {
         Ok(())
     }
 
-    /// Ensure that the output of `Node::coordinate_reconfiguration`
-    /// is valid given the `TestState`.
+    /// Ensure that the `PersistentState` modified as a result of
+    /// `Node::coordinate_reconfiguration` is valid given the `TestState`.
     ///
     /// This is essentially a "postcondition" check.
     fn assert_persistent_state_after_coordinate_reconfiguration(
         &self,
-        persistent_state: &PersistentState,
+        prior_persistent_state: PersistentState,
     ) -> Result<(), TestCaseError> {
         let sut = &self.sut;
         let msg = &self
@@ -419,33 +397,40 @@ impl TestState {
             ))?
             .msg;
 
-        prop_assert!(persistent_state.lrtq.is_none());
+        // We aren't using lrtq
+        prop_assert!(prior_persistent_state.lrtq.is_none());
+
+        // No commits have occurred
         prop_assert_eq!(
-            &sut.persistent_state.commits,
-            &persistent_state.commits
-        );
-        prop_assert!(persistent_state.expunged.is_none());
-        prop_assert_eq!(
-            sut.persistent_state.configs.len() + 1,
-            persistent_state.configs.len()
+            &sut.ctx.persistent_state().commits,
+            &prior_persistent_state.commits
         );
 
+        prop_assert!(prior_persistent_state.expunged.is_none());
+
+        // A new configuration has been added
         prop_assert_eq!(
-            persistent_state.latest_config().unwrap().epoch,
-            msg.epoch
+            sut.ctx.persistent_state().configs.len(),
+            prior_persistent_state.configs.len() + 1
         );
 
-        let config = persistent_state.configuration(msg.epoch).unwrap();
+        // The configuration epoch has advanced by 1
+        let prior_config_epoch =
+            prior_persistent_state.latest_config().map_or(0, |c| c.epoch.0);
+        prop_assert_eq!(prior_config_epoch + 1, msg.epoch.0);
+
+        // Our persistent state has been appropriately updated with a new config
+        let config =
+            sut.ctx.persistent_state().configuration(msg.epoch).unwrap();
         prop_assert_eq!(config.epoch, msg.epoch);
         for member in config.members.keys() {
             prop_assert!(msg.members.contains(member));
         }
         prop_assert_eq!(config.threshold, msg.threshold);
 
-        prop_assert_eq!(
-            config.previous_configuration.as_ref().map(|c| c.epoch),
-            msg.last_committed_epoch
-        );
+        if msg.last_committed_epoch.is_some() {
+            prop_assert!(config.encrypted_rack_secrets.is_some());
+        }
 
         Ok(())
     }
@@ -453,10 +438,9 @@ impl TestState {
     /// Verify the expected messages are sent after calling
     /// `Node::coordinate_reconfiguration`.
     fn assert_envelopes_after_coordinate_reconfiguration(
-        &self,
-        outbox: &[Envelope],
+        &mut self,
     ) -> Result<(), TestCaseError> {
-        let sut = &self.sut;
+        let sut = &mut self.sut;
         let msg = &self
             .model
             .coordinator_state
@@ -466,7 +450,12 @@ impl TestState {
             ))?
             .msg;
 
-        let config = sut.persistent_state.configuration(msg.epoch).unwrap();
+        let config = sut
+            .ctx
+            .persistent_state()
+            .configuration(msg.epoch)
+            .unwrap()
+            .clone();
 
         // Ensure the members of the configuration match the model msg
         prop_assert_eq!(
@@ -475,15 +464,15 @@ impl TestState {
         );
 
         // The coordinator should send messages to every node but itself
-        assert_eq!(outbox.len(), config.members.len() - 1);
-        for envelope in outbox {
+        assert_eq!(sut.ctx.num_envelopes(), config.members.len() - 1);
+        for envelope in sut.ctx.drain_envelopes() {
             assert_matches!(
                 &envelope.msg,
                 PeerMsg{
                     kind: PeerMsgKind::Prepare{config: prepare_config, .. },
                     ..} =>
                 {
-                    assert_eq!(*config, *prepare_config);
+                    assert_eq!(config, *prepare_config);
                 }
             );
             prop_assert_eq!(&envelope.from, &config.coordinator);
@@ -496,8 +485,8 @@ impl TestState {
         Ok(())
     }
 
-    fn send(&mut self, envelopes: impl Iterator<Item = Envelope>) {
-        for envelope in envelopes {
+    fn send_all_msgs(&mut self) {
+        for envelope in self.sut.ctx.drain_envelopes() {
             let msgs = self.network_msgs.entry(envelope.to).or_default();
             msgs.push(envelope.msg);
         }

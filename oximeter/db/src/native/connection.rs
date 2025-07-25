@@ -2,7 +2,7 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 //
-// Copyright 2024 Oxide Computer Company
+// Copyright 2025 Oxide Computer Company
 
 //! A connection and pool for talking to the ClickHouse server.
 
@@ -107,11 +107,12 @@ impl Connection {
     /// This will connect to the server and exchange the initial handshake
     /// messages.
     pub async fn new(address: SocketAddr) -> Result<Self, Error> {
+        let addr = address.ip();
         let stream = TcpStream::connect(address).await?;
         let address = stream.local_addr()?;
         let (reader, writer) = stream.into_split();
-        let mut reader = FramedRead::new(reader, Decoder);
-        let mut writer = FramedWrite::new(writer, Encoder);
+        let mut reader = FramedRead::new(reader, Decoder { addr });
+        let mut writer = FramedWrite::new(writer, Encoder { addr });
         let server_info =
             Self::exchange_hello(&mut reader, &mut writer).await?;
         Ok(Self {
@@ -141,7 +142,10 @@ impl Connection {
         let hello = match reader.next().await {
             Some(Ok(ServerPacket::Hello(hello))) => hello,
             Some(Ok(packet)) => {
-                probes::unexpected__server__packet!(|| packet.kind());
+                probes::unexpected__server__packet!(|| (
+                    writer.encoder().addr.to_string(),
+                    packet.kind()
+                ));
                 return Err(Error::UnexpectedPacket(packet.kind()));
             }
             Some(Err(e)) => return Err(e),
@@ -173,12 +177,15 @@ impl Connection {
         match self.reader.next().await {
             Some(Ok(ServerPacket::Pong)) => Ok(()),
             Some(Ok(packet)) => {
-                probes::unexpected__server__packet!(|| packet.kind());
+                probes::unexpected__server__packet!(|| (
+                    self.address.ip().to_string(),
+                    packet.kind()
+                ));
                 Err(Error::UnexpectedPacket(packet.kind()))
             }
             Some(Err(e)) => Err(e),
             None => {
-                probes::disconnected!(|| ());
+                probes::disconnected!(|| self.address.ip().to_string());
                 Err(Error::Disconnected)
             }
         }
@@ -197,9 +204,10 @@ impl Connection {
                 match self.reader.next().await {
                     Some(Ok(ServerPacket::EndOfStream)) => break Ok(true),
                     Some(Ok(other_packet)) => {
-                        probes::unexpected__server__packet!(
-                            || other_packet.kind()
-                        );
+                        probes::unexpected__server__packet!(|| (
+                            self.address.ip().to_string(),
+                            other_packet.kind()
+                        ));
                     }
                     Some(Err(e)) => break Err(e),
                     None => break Err(Error::Disconnected),
@@ -214,15 +222,20 @@ impl Connection {
     /// Send a SQL query that inserts data.
     pub async fn insert(
         &mut self,
+        query_id: Uuid,
         query: &str,
         block: Block,
     ) -> Result<QueryResult, Error> {
-        self.query_inner(query, Some(block)).await
+        self.query_inner(query_id, query, Some(block)).await
     }
 
     /// Send a SQL query, without any data.
-    pub async fn query(&mut self, query: &str) -> Result<QueryResult, Error> {
-        self.query_inner(query, None).await
+    pub async fn query(
+        &mut self,
+        query_id: Uuid,
+        query: &str,
+    ) -> Result<QueryResult, Error> {
+        self.query_inner(query_id, query, None).await
     }
 
     // Send a SQL query, possibly with data.
@@ -236,11 +249,12 @@ impl Connection {
     // provide data if and only if the query requires it.
     async fn query_inner(
         &mut self,
+        query_id: Uuid,
         query: &str,
         maybe_data: Option<Block>,
     ) -> Result<QueryResult, Error> {
         let mut query_result = QueryResult {
-            id: Uuid::new_v4(),
+            id: query_id,
             progress: Progress::default(),
             data: None,
             profile_info: None,
@@ -248,7 +262,6 @@ impl Connection {
         };
         let query = Query::new(query_result.id, self.address, query);
         self.writer.send(ClientPacket::Query(Box::new(query))).await?;
-        probes::packet__sent!(|| "Query");
         self.outstanding_query = true;
 
         // If we have data to send, wait for the server to send an empty block
@@ -264,27 +277,10 @@ impl Connection {
                             | ServerPacket::EndOfStream =>
                         {
                             let kind = packet.kind();
-                            probes::unexpected__server__packet!(|| kind);
+                            probes::unexpected__server__packet!(|| (self.address.ip().to_string(), kind));
                             break Err(Error::UnexpectedPacket(kind));
                         }
                         ServerPacket::Data(block) => {
-                            probes::data__packet__received!(|| {
-                                (
-                                    block.n_columns(),
-                                    block.n_rows(),
-                                    block
-                                        .columns
-                                        .iter()
-                                        .map(|(name, col)| {
-                                            (
-                                                name.clone(),
-                                                col.data_type.to_string(),
-                                            )
-                                        })
-                                        .collect::<Vec<_>>(),
-                                )
-                            });
-
                             // Similar to when selecting data, the server sends
                             // a block with zero rows that describes the table
                             // structure, so any block with a non-zero number of
@@ -351,26 +347,13 @@ impl Connection {
                     | ServerPacket::Pong
                     | ServerPacket::TableColumns(_) => {
                         let kind = packet.kind();
-                        probes::unexpected__server__packet!(|| kind);
+                        probes::unexpected__server__packet!(|| (
+                            self.address.ip().to_string(),
+                            kind
+                        ));
                         break Err(Error::UnexpectedPacket(kind));
                     }
                     ServerPacket::Data(block) => {
-                        probes::data__packet__received!(|| {
-                            (
-                                block.n_columns(),
-                                block.n_rows(),
-                                block
-                                    .columns
-                                    .iter()
-                                    .map(|(name, col)| {
-                                        (
-                                            name.clone(),
-                                            col.data_type.to_string(),
-                                        )
-                                    })
-                                    .collect::<Vec<_>>(),
-                            )
-                        });
                         // Empty blocks are sent twice: the beginning of the
                         // query so that the client knows the table structure,
                         // and then the end to signal the last data transfer.
@@ -419,6 +402,7 @@ mod tests {
     use std::sync::Arc;
     use tokio::sync::Mutex;
     use tokio::sync::oneshot;
+    use uuid::Uuid;
 
     #[tokio::test]
     async fn test_exchange_hello() {
@@ -440,7 +424,10 @@ mod tests {
         let mut conn =
             Connection::new(db.native_address().into()).await.unwrap();
         let data = conn
-            .query("SELECT number FROM system.numbers LIMIT 10;")
+            .query(
+                Uuid::new_v4(),
+                "SELECT number FROM system.numbers LIMIT 10;",
+            )
             .await
             .expect("Should have run query");
         println!("{data:#?}");
@@ -467,7 +454,7 @@ mod tests {
         let mut conn =
             Connection::new(db.native_address().into()).await.unwrap();
         let data = conn
-            .query("SELECT toNullable(number) as number FROM system.numbers LIMIT 10;")
+            .query(Uuid::new_v4(), "SELECT toNullable(number) as number FROM system.numbers LIMIT 10;")
             .await
             .expect("Should have run query");
         println!("{data:#?}");
@@ -503,7 +490,10 @@ mod tests {
         let mut conn =
             Connection::new(db.native_address().into()).await.unwrap();
         let data = conn
-            .query("SELECT arrayJoin([[4, 5, 6], [7, 8]]) AS arr;")
+            .query(
+                Uuid::new_v4(),
+                "SELECT arrayJoin([[4, 5, 6], [7, 8]]) AS arr;",
+            )
             .await
             .expect("Should have run query");
         println!("{data:#?}");
@@ -540,7 +530,7 @@ mod tests {
         let mut conn =
             Connection::new(db.native_address().into()).await.unwrap();
         let data = conn
-            .query("SELECT [1, NULL] AS arr;")
+            .query(Uuid::new_v4(), "SELECT [1, NULL] AS arr;")
             .await
             .expect("Should have run query");
         println!("{data:#?}");
@@ -627,7 +617,7 @@ mod tests {
             let mut conn = conn_.lock().await;
             const QUERY: &str = "select count(*) from system.numbers";
             println!("query task: unning query: '{QUERY}'");
-            let res = conn.query(QUERY);
+            let res = conn.query(Uuid::new_v4(), QUERY);
             tokio::select! {
                 query_result = res => {
                     println!("query task: uery future awaited");
@@ -654,7 +644,7 @@ mod tests {
         const QUERY: &str = "select now() as timestamp";
         println!("test task: running '{QUERY}'");
         let result = c
-            .query(QUERY)
+            .query(Uuid::new_v4(), QUERY)
             .await
             .expect("New query after cancel should have worked");
         let Some(block) = &result.data else {
@@ -677,9 +667,12 @@ mod tests {
             .expect("Failed to start ClickHouse");
         let mut conn =
             Connection::new(db.native_address().into()).await.unwrap();
-        conn.query("CREATE TABLE tmp (x UInt8, name String) ENGINE = Memory")
-            .await
-            .expect("Failed to create test table");
+        conn.query(
+            Uuid::new_v4(),
+            "CREATE TABLE tmp (x UInt8, name String) ENGINE = Memory",
+        )
+        .await
+        .expect("Failed to create test table");
 
         let block = Block {
             name: String::new(),
@@ -701,12 +694,16 @@ mod tests {
             ]),
         };
         let _ = conn
-            .insert("INSERT INTO tmp FORMAT Native", block.clone())
+            .insert(
+                Uuid::new_v4(),
+                "INSERT INTO tmp FORMAT Native",
+                block.clone(),
+            )
             .await
             .expect("Should have inserted data");
 
         let result = conn
-            .query("SELECT * FROM tmp")
+            .query(Uuid::new_v4(), "SELECT * FROM tmp")
             .await
             .expect("Failed to select data");
         let actual_block =
@@ -727,7 +724,7 @@ mod tests {
             .expect("Failed to start ClickHouse");
         let mut conn =
             Connection::new(db.native_address().into()).await.unwrap();
-        conn.query("CREATE TABLE tmp (x UUID) ENGINE = Memory")
+        conn.query(Uuid::new_v4(), "CREATE TABLE tmp (x UUID) ENGINE = Memory")
             .await
             .expect("Failed to create test table");
 
@@ -742,11 +739,15 @@ mod tests {
             )]),
         };
         let _ = conn
-            .insert("INSERT INTO tmp FORMAT Native", block.clone())
+            .insert(
+                Uuid::new_v4(),
+                "INSERT INTO tmp FORMAT Native",
+                block.clone(),
+            )
             .await
             .expect("Should have inserted data");
         let result = conn
-            .query("SELECT toString(x) AS x FROM tmp")
+            .query(Uuid::new_v4(), "SELECT toString(x) AS x FROM tmp")
             .await
             .expect("Failed to select data");
         let actual_block =

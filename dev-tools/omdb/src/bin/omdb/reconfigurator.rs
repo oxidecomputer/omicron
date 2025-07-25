@@ -24,7 +24,9 @@ use nexus_db_queries::db::datastore::SQL_BATCH_SIZE;
 use nexus_db_queries::db::pagination::Paginator;
 use nexus_types::deployment::Blueprint;
 use nexus_types::deployment::BlueprintMetadata;
+use nexus_types::deployment::PlannerChickenSwitches;
 use nexus_types::deployment::ReconfiguratorChickenSwitches;
+use nexus_types::deployment::ReconfiguratorChickenSwitchesView;
 use nexus_types::deployment::UnstableReconfiguratorState;
 use omicron_common::api::external::Error;
 use omicron_common::api::external::LookupType;
@@ -355,9 +357,11 @@ async fn cmd_reconfigurator_history(
                     assert_eq!(previous_blueprint.id, previous.id);
                     let current_blueprint =
                         blueprint_load(opctx, datastore, target_id).await?;
-                    let diff = current_blueprint
-                        .diff_since_blueprint(&previous_blueprint);
-                    println!("{}", diff.display());
+                    {
+                        let diff = current_blueprint
+                            .diff_since_blueprint(&previous_blueprint);
+                        println!("{}", diff.display());
+                    }
                     prev_blueprint = Some(current_blueprint);
                 }
                 _ => {
@@ -401,20 +405,30 @@ async fn cmd_reconfigurator_chicken_switches_history(
     struct SwitchesRow {
         version: String,
         planner_enabled: String,
+        add_zones_with_mupdate_override: String,
         time_modified: String,
     }
 
     let rows: Vec<_> = history
         .into_iter()
         .map(|s| {
-            let ReconfiguratorChickenSwitches {
+            let ReconfiguratorChickenSwitchesView {
                 version,
-                planner_enabled,
+                switches:
+                    ReconfiguratorChickenSwitches {
+                        planner_enabled,
+                        planner_switches:
+                            PlannerChickenSwitches {
+                                add_zones_with_mupdate_override,
+                            },
+                    },
                 time_modified,
             } = s;
             SwitchesRow {
                 version: version.to_string(),
                 planner_enabled: planner_enabled.to_string(),
+                add_zones_with_mupdate_override:
+                    add_zones_with_mupdate_override.to_string(),
                 time_modified: time_modified.to_string(),
             }
         })

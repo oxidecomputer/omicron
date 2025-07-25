@@ -250,6 +250,10 @@ static SETUP_REQUESTS: LazyLock<Vec<SetupReq>> = LazyLock::new(|| {
                 &*DEMO_SILO_USER_ID_GET_URL,
                 &*DEMO_SILO_USER_ID_DELETE_URL,
                 &*DEMO_SILO_USER_ID_SET_PASSWORD_URL,
+                &*DEMO_SILO_USER_ID_IN_SILO_URL,
+                &*DEMO_SILO_USER_TOKEN_LIST_URL,
+                &*DEMO_SILO_USER_SESSION_LIST_URL,
+                &*DEMO_SILO_USER_LOGOUT_URL,
             ],
         },
         // Create the default IP pool
@@ -393,7 +397,12 @@ static SETUP_REQUESTS: LazyLock<Vec<SetupReq>> = LazyLock::new(|| {
         // Create a Support Bundle
         SetupReq::Post {
             url: &SUPPORT_BUNDLES_URL,
-            body: serde_json::to_value(()).unwrap(),
+            body: serde_json::to_value(
+                &nexus_types::external_api::params::SupportBundleCreate {
+                    user_comment: None,
+                },
+            )
+            .unwrap(),
             id_routes: vec!["/experimental/v1/system/support-bundles/{id}"],
         },
         // Create a trusted root for updates

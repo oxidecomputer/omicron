@@ -33,7 +33,7 @@ use illumos_utils::running_zone::RunningZone;
 use illumos_utils::zpool::PathInPool;
 use itertools::Itertools as _;
 use nexus_sled_agent_shared::inventory::{
-    Inventory, OmicronSledConfig, OmicronZoneConfig, SledRole,
+    Inventory, OmicronSledConfig, SledRole,
 };
 use omicron_common::address::{
     Ipv6Subnet, SLED_PREFIX, get_sled_address, get_switch_zone_address,
@@ -49,11 +49,13 @@ use omicron_common::backoff::{
     BackoffError, retry_notify, retry_policy_internal_service_aggressive,
 };
 use omicron_ddm_admin_client::Client as DdmAdminClient;
-use omicron_uuid_kinds::{GenericUuid, PropolisUuid, SledUuid};
+use omicron_uuid_kinds::{
+    GenericUuid, MupdateOverrideUuid, PropolisUuid, SledUuid,
+};
 use sled_agent_config_reconciler::{
-    ConfigReconcilerHandle, ConfigReconcilerSpawnToken, InternalDisksReceiver,
-    LedgerNewConfigError, LedgerTaskError, ReconcilerInventory,
-    SledAgentArtifactStore, SledAgentFacilities, TimeSyncStatus,
+    ConfigReconcilerHandle, ConfigReconcilerSpawnToken, InternalDisks,
+    InternalDisksReceiver, LedgerNewConfigError, LedgerTaskError,
+    ReconcilerInventory, SledAgentArtifactStore, SledAgentFacilities,
 };
 use sled_agent_types::disk::DiskStateRequested;
 use sled_agent_types::early_networking::EarlyNetworkConfig;
@@ -62,12 +64,13 @@ use sled_agent_types::instance::{
     VmmStateRequested, VmmUnregisterResponse,
 };
 use sled_agent_types::sled::{BaseboardId, StartSledAgentRequest};
-use sled_agent_types::time_sync::TimeSync;
 use sled_agent_types::zone_bundle::{
     BundleUtilization, CleanupContext, CleanupCount, CleanupPeriod,
     PriorityOrder, StorageLimit, ZoneBundleCause, ZoneBundleMetadata,
 };
-use sled_agent_types::zone_images::ResolverStatus;
+use sled_agent_types::zone_images::{
+    ClearMupdateOverrideResult, PreparedOmicronZone, ResolverStatus,
+};
 use sled_diagnostics::SledDiagnosticsCmdError;
 use sled_diagnostics::SledDiagnosticsCmdOutput;
 use sled_hardware::{HardwareManager, MemoryReservations, underlay};
@@ -999,22 +1002,6 @@ impl SledAgent {
             .map_err(Error::from)
     }
 
-    /// Gets the sled's current time synchronization state
-    pub async fn timesync_get(&self) -> Result<TimeSync, Error> {
-        let status = self.inner.config_reconciler.timesync_status();
-
-        // TODO-cleanup we could give a more specific error cause in the
-        // `FailedToGetSyncStatus` case.
-        match status {
-            TimeSyncStatus::NotYetChecked
-            | TimeSyncStatus::ConfiguredToSkip
-            | TimeSyncStatus::FailedToGetSyncStatus(_) => {
-                Err(Error::TimeNotSynchronized)
-            }
-            TimeSyncStatus::TimeSync(time_sync) => Ok(time_sync),
-        }
-    }
-
     pub async fn ensure_scrimlet_host_ports(
         &self,
         uplinks: Vec<HostPortConfig>,
@@ -1320,18 +1307,28 @@ impl SledAgentFacilities for ReconcilerFacilities {
 
     async fn start_omicron_zone(
         &self,
-        zone_config: &OmicronZoneConfig,
+        prepared_zone: PreparedOmicronZone<'_>,
         zone_root_path: PathInPool,
     ) -> anyhow::Result<RunningZone> {
         let zone = self
             .service_manager
-            .start_omicron_zone(zone_config, zone_root_path)
+            .start_omicron_zone(prepared_zone, zone_root_path)
             .await?;
         Ok(zone)
     }
 
     fn zone_image_resolver_status(&self) -> ResolverStatus {
         self.service_manager.zone_image_resolver().status()
+    }
+
+    fn clear_mupdate_override(
+        &self,
+        override_id: MupdateOverrideUuid,
+        internal_disks: &InternalDisks,
+    ) -> ClearMupdateOverrideResult {
+        self.service_manager
+            .zone_image_resolver()
+            .clear_mupdate_override(override_id, internal_disks)
     }
 
     fn metrics_untrack_zone_links(

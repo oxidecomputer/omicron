@@ -77,6 +77,7 @@ pub use ledger::LedgerTaskError;
 pub use raw_disks::RawDisksSender;
 pub use reconciler_task::CurrentlyManagedZpools;
 pub use reconciler_task::CurrentlyManagedZpoolsReceiver;
+pub use reconciler_task::ResolverStatusExt;
 pub use reconciler_task::TimeSyncError;
 pub use reconciler_task::TimeSyncStatus;
 pub use sled_agent_facilities::SledAgentArtifactStore;

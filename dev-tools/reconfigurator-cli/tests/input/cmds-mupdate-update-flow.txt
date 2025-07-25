@@ -35,6 +35,8 @@ sled-set serial2 mupdate-override 203fa72c-85c1-466a-8ed3-338ee029530d
 
 # Generate a new inventory and plan against that.
 inventory-generate
+inventory-show latest
+inventory-generate
 blueprint-plan latest latest
 
 # Diff the blueprints. This diff should show:

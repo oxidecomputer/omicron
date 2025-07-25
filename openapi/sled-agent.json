@@ -1464,29 +1464,6 @@
         }
       }
     },
-    "/timesync": {
-      "get": {
-        "operationId": "timesync_get",
-        "responses": {
-          "200": {
-            "description": "successful operation",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/TimeSync"
-                }
-              }
-            }
-          },
-          "4XX": {
-            "$ref": "#/components/responses/Error"
-          },
-          "5XX": {
-            "$ref": "#/components/responses/Error"
-          }
-        }
-      }
-    },
     "/v2p": {
       "get": {
         "summary": "List v2p mappings present on sled",
@@ -3142,6 +3119,79 @@
           }
         ]
       },
+      "ClearMupdateOverrideBootSuccessInventory": {
+        "description": "Status of clearing the mupdate override on the boot disk.",
+        "oneOf": [
+          {
+            "description": "The mupdate override was successfully cleared.",
+            "type": "string",
+            "enum": [
+              "cleared"
+            ]
+          },
+          {
+            "description": "No mupdate override was found.\n\nThis is considered a success for idempotency reasons.",
+            "type": "string",
+            "enum": [
+              "no_override"
+            ]
+          }
+        ]
+      },
+      "ClearMupdateOverrideInventory": {
+        "description": "Status of clearing the mupdate override in the inventory.",
+        "type": "object",
+        "properties": {
+          "boot_disk_result": {
+            "description": "The result of clearing the mupdate override on the boot disk.",
+            "x-rust-type": {
+              "crate": "std",
+              "parameters": [
+                {
+                  "$ref": "#/components/schemas/ClearMupdateOverrideBootSuccessInventory"
+                },
+                {
+                  "type": "string"
+                }
+              ],
+              "path": "::std::result::Result",
+              "version": "*"
+            },
+            "oneOf": [
+              {
+                "type": "object",
+                "properties": {
+                  "ok": {
+                    "$ref": "#/components/schemas/ClearMupdateOverrideBootSuccessInventory"
+                  }
+                },
+                "required": [
+                  "ok"
+                ]
+              },
+              {
+                "type": "object",
+                "properties": {
+                  "err": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "err"
+                ]
+              }
+            ]
+          },
+          "non_boot_message": {
+            "description": "What happened on non-boot disks.\n\nWe aren't modeling this out in more detail, because we plan to not try and keep ledgered data in sync across both disks in the future.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "boot_disk_result",
+          "non_boot_message"
+        ]
+      },
       "ComponentV0": {
         "oneOf": [
           {
@@ -3581,6 +3631,15 @@
         "properties": {
           "boot_partitions": {
             "$ref": "#/components/schemas/BootPartitionContents"
+          },
+          "clear_mupdate_override": {
+            "nullable": true,
+            "description": "The result of clearing the mupdate override field.\n\n`None` if `remove_mupdate_override` was not provided in the sled config.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/ClearMupdateOverrideInventory"
+              }
+            ]
           },
           "datasets": {
             "type": "object",
@@ -7324,50 +7383,6 @@
         },
         "required": [
           "uplinks"
-        ]
-      },
-      "TimeSync": {
-        "type": "object",
-        "properties": {
-          "correction": {
-            "description": "The current offset between the NTP clock and system clock.",
-            "type": "number",
-            "format": "double"
-          },
-          "ip_addr": {
-            "description": "The NTP reference IP address.",
-            "type": "string",
-            "format": "ip"
-          },
-          "ref_id": {
-            "description": "The NTP reference ID.",
-            "type": "integer",
-            "format": "uint32",
-            "minimum": 0
-          },
-          "ref_time": {
-            "description": "The NTP reference time (i.e. what chrony thinks the current time is, not necessarily the current system time).",
-            "type": "number",
-            "format": "double"
-          },
-          "stratum": {
-            "description": "The NTP stratum (our upstream's stratum plus one).",
-            "type": "integer",
-            "format": "uint8",
-            "minimum": 0
-          },
-          "sync": {
-            "description": "The synchronization state of the sled, true when the system clock and the NTP clock are in sync (to within a small window).",
-            "type": "boolean"
-          }
-        },
-        "required": [
-          "correction",
-          "ip_addr",
-          "ref_id",
-          "ref_time",
-          "stratum",
-          "sync"
         ]
       },
       "TxEqConfig": {
