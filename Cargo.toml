@@ -401,7 +401,7 @@ const_format = "0.2.34"
 cookie = "0.18"
 criterion = { version = "0.6.0", features = [ "async_tokio" ] }
 crossbeam = "0.8"
-crossterm = { version = "0.28.1", features = ["event-stream"] }
+crossterm = { version = "0.29.0", features = ["event-stream"] }
 # NOTE: if you change the pinned revision of the `crucible` dependencies, you
 # must also update the references in package-manifest.toml to match the new
 # revision.
