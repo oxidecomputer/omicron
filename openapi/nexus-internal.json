@@ -4555,22 +4555,26 @@
       "ExpectedActiveHostOsSlot": {
         "type": "object",
         "properties": {
+          "boot_disk": {
+            "$ref": "#/components/schemas/M2Slot"
+          },
           "phase_1": {
             "type": "string",
             "format": "hex string (32 bytes)"
           },
+          "phase_1_slot": {
+            "$ref": "#/components/schemas/M2Slot"
+          },
           "phase_2": {
             "type": "string",
             "format": "hex string (32 bytes)"
-          },
-          "slot": {
-            "$ref": "#/components/schemas/M2Slot"
           }
         },
         "required": [
+          "boot_disk",
           "phase_1",
-          "phase_2",
-          "slot"
+          "phase_1_slot",
+          "phase_2"
         ]
       },
       "ExpectedActiveRotSlot": {
