@@ -16,6 +16,7 @@ use nexus_client::types::SagaState;
 use nexus_inventory::CollectionBuilder;
 use nexus_reconfigurator_planning::blueprint_builder::BlueprintBuilder;
 use nexus_reconfigurator_planning::planner::Planner;
+use nexus_reconfigurator_planning::planner::PlannerRng;
 use nexus_reconfigurator_preparation::PlanningInputFromDb;
 use nexus_sled_agent_shared::inventory::ZoneKind;
 use nexus_types::deployment::BlueprintZoneDisposition;
@@ -256,6 +257,7 @@ async fn test_nexus_add_remove(lc: &LiveTestContext) {
         &planning_input,
         "live test suite",
         &latest_collection,
+        PlannerRng::from_entropy(),
     )
     .expect("constructing planner");
     let new_blueprint = planner.plan().expect("creating blueprint");

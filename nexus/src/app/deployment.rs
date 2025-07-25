@@ -7,6 +7,7 @@
 use nexus_db_queries::authz;
 use nexus_db_queries::context::OpContext;
 use nexus_reconfigurator_planning::planner::Planner;
+use nexus_reconfigurator_planning::planner::PlannerRng;
 use nexus_reconfigurator_preparation::PlanningInputFromDb;
 use nexus_types::deployment::Blueprint;
 use nexus_types::deployment::BlueprintMetadata;
@@ -176,6 +177,7 @@ impl super::Nexus {
             &planning_context.planning_input,
             &planning_context.creator,
             &inventory,
+            PlannerRng::from_entropy(),
         )
         .map_err(|error| {
             Error::internal_error(&format!(

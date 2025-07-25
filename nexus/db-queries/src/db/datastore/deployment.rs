@@ -2354,6 +2354,7 @@ mod tests {
     use nexus_reconfigurator_planning::blueprint_builder::EnsureMultiple;
     use nexus_reconfigurator_planning::example::ExampleSystemBuilder;
     use nexus_reconfigurator_planning::example::example;
+    use nexus_reconfigurator_planning::planner::PlannerRng;
     use nexus_types::deployment::BlueprintArtifactVersion;
     use nexus_types::deployment::BlueprintHostPhase2DesiredContents;
     use nexus_types::deployment::BlueprintHostPhase2DesiredSlots;
@@ -2742,6 +2743,7 @@ mod tests {
             &planning_input,
             &collection,
             "test",
+            PlannerRng::from_entropy(),
         )
         .expect("failed to create builder");
 
@@ -3083,6 +3085,7 @@ mod tests {
             &planning_input,
             &collection,
             "dummy",
+            PlannerRng::from_entropy(),
         )
         .expect("failed to create builder")
         .build();
@@ -3160,6 +3163,7 @@ mod tests {
             &EMPTY_PLANNING_INPUT,
             &collection,
             "test2",
+            PlannerRng::from_entropy(),
         )
         .expect("failed to create builder")
         .build();
@@ -3169,6 +3173,7 @@ mod tests {
             &EMPTY_PLANNING_INPUT,
             &collection,
             "test3",
+            PlannerRng::from_entropy(),
         )
         .expect("failed to create builder")
         .build();
@@ -3269,6 +3274,7 @@ mod tests {
             &EMPTY_PLANNING_INPUT,
             &collection,
             "test3",
+            PlannerRng::from_entropy(),
         )
         .expect("failed to create builder")
         .build();
@@ -3314,6 +3320,7 @@ mod tests {
             &EMPTY_PLANNING_INPUT,
             &collection,
             "test2",
+            PlannerRng::from_entropy(),
         )
         .expect("failed to create builder")
         .build();
@@ -3546,6 +3553,7 @@ mod tests {
             &example_system.input,
             &example_system.collection,
             &format!("{test_name}-2"),
+            PlannerRng::from_entropy(),
         )
         .expect("failed to create builder")
         .build();

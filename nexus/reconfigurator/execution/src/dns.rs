@@ -323,6 +323,7 @@ mod test {
     use nexus_inventory::now_db_precision;
     use nexus_reconfigurator_planning::blueprint_builder::BlueprintBuilder;
     use nexus_reconfigurator_planning::example::ExampleSystemBuilder;
+    use nexus_reconfigurator_planning::planner::PlannerRng;
     use nexus_reconfigurator_preparation::PlanningInputFromDb;
     use nexus_sled_agent_shared::inventory::OmicronZoneConfig;
     use nexus_sled_agent_shared::inventory::OmicronZoneImageSource;
@@ -1522,6 +1523,7 @@ mod test {
             &planning_input,
             &collection,
             "test suite",
+            PlannerRng::from_entropy(),
         )
         .unwrap();
         let sled_id =

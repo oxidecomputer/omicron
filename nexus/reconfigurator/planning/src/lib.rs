@@ -11,5 +11,4 @@ pub mod blueprint_editor;
 pub mod example;
 pub mod mgs_updates;
 pub mod planner;
-pub mod reports;
 pub mod system;

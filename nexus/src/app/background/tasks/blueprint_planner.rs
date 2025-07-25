@@ -11,6 +11,7 @@ use nexus_auth::authz;
 use nexus_db_queries::context::OpContext;
 use nexus_db_queries::db::DataStore;
 use nexus_reconfigurator_planning::planner::Planner;
+use nexus_reconfigurator_planning::planner::PlannerRng;
 use nexus_reconfigurator_preparation::PlanningInputFromDb;
 use nexus_types::deployment::ReconfiguratorChickenSwitches;
 use nexus_types::deployment::{Blueprint, BlueprintTarget};
@@ -135,6 +136,7 @@ impl BlueprintPlanner {
             &input,
             "blueprint_planner",
             &collection,
+            PlannerRng::from_entropy(),
         ) {
             Ok(planner) => planner,
             Err(error) => {
