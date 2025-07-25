@@ -35,8 +35,8 @@ use tufaceous_artifact::ArtifactHash;
 use uuid::Uuid;
 
 use crate::inventory::{
-    CabooseWhich, Collection, Dataset, PhysicalDisk, RotPageWhich, SledAgent,
-    Zpool,
+    CabooseWhich, Collection, Dataset, InternalDnsGenerationStatus,
+    PhysicalDisk, RotPageWhich, SledAgent, TimeSync, Zpool,
 };
 
 /// Code to display inventory collections.
@@ -695,6 +695,20 @@ fn display_sleds(
                 indented = IndentWriter::new("    ", f);
             }
 
+            if let Some(config) = ledgered_sled_config.as_ref() {
+                display_ntp_status(
+                    config,
+                    &collection.ntp_timesync,
+                    &mut indented,
+                )?;
+
+                display_internal_dns_status(
+                    config,
+                    &collection.internal_dns_generation_status,
+                    &mut indented,
+                )?;
+            }
+
             {
                 let mut indent2 = IndentWriter::new("    ", &mut indented);
 
@@ -841,6 +855,27 @@ fn display_sleds(
     Ok(())
 }
 
+fn display_ntp_status(
+    ledgered_sled_config: &OmicronSledConfig,
+    ntp_timesync: &IdOrdMap<TimeSync>,
+    f: &mut dyn fmt::Write,
+) -> fmt::Result {
+    let timesync = ledgered_sled_config
+        .zones
+        .keys()
+        .find_map(|zone_id| ntp_timesync.get(zone_id));
+
+    match timesync {
+        None => writeln!(f, "no information from NTP for this sled")?,
+        Some(ts) if ts.synced => {
+            writeln!(f, "NTP reports that time is synced")?
+        }
+        Some(_) => writeln!(f, "NTP reports that time is NOT synced")?,
+    };
+
+    Ok(())
+}
+
 fn display_boot_partition_contents(
     boot_partitions: &BootPartitionContents,
     f: &mut dyn fmt::Write,
@@ -875,6 +910,21 @@ fn display_boot_partition_contents(
         }
     }
 
+    Ok(())
+}
+
+fn display_internal_dns_status(
+    ledgered_sled_config: &OmicronSledConfig,
+    internal_dns_generation_status: &IdOrdMap<InternalDnsGenerationStatus>,
+    f: &mut dyn fmt::Write,
+) -> fmt::Result {
+    let internal_dns_generation_status = ledgered_sled_config
+        .zones
+        .keys()
+        .find_map(|zone_id| internal_dns_generation_status.get(zone_id));
+    if let Some(st) = internal_dns_generation_status {
+        writeln!(f, "Internal DNS generation: {}", st.generation)?
+    }
     Ok(())
 }
 

@@ -1904,6 +1904,7 @@ table! {
         version -> Int8,
         planner_enabled -> Bool,
         time_modified -> Timestamptz,
+        add_zones_with_mupdate_override -> Bool,
     }
 }
 
@@ -1921,6 +1922,14 @@ table! {
         inv_collection_id -> Uuid,
         zone_id -> Uuid,
         synced -> Bool,
+    }
+}
+
+table! {
+    inv_internal_dns (inv_collection_id, zone_id) {
+        inv_collection_id -> Uuid,
+        zone_id -> Uuid,
+        generation -> Int8,
     }
 }
 
