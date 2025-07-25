@@ -42,6 +42,7 @@ use sled_agent_types::zone_images::RunningZoneImageLocation;
 use sled_agent_types::zone_images::ZoneImageLocationError;
 use sled_storage::config::MountConfig;
 use slog::Logger;
+use slog::debug;
 use slog::error;
 use slog::info;
 use slog::warn;
@@ -194,6 +195,16 @@ impl OmicronZones {
                         let prepared_desired_zone = zone_facilities
                             .prepare_omicron_zone(log, desired_config);
 
+                        debug!(
+                            log,
+                            "obtained desired location for zone, \
+                             determining whether to restart it";
+                            "zone" => &zone_name,
+                            "existing-location" => ?existing_location,
+                            "desired-file-source" =>
+                                ?prepared_desired_zone.file_source(),
+                        );
+
                         if does_new_config_require_zone_restart(
                             &z.config,
                             existing_location,
@@ -204,7 +215,7 @@ impl OmicronZones {
                                 log,
                                 "starting shutdown of running zone; config \
                                  has changed";
-                                "zone" => zone_name,
+                                "zone" => &zone_name,
                                 "old-config" => ?z.config,
                                 "new-config" => ?desired_config,
                             );
@@ -373,6 +384,14 @@ impl OmicronZones {
         // Build up the futures for starting each zone.
         let start_futures = zones_to_start.map(|zone| {
             let prepared_zone = zone_facilities.prepare_omicron_zone(log, zone);
+
+            debug!(
+                log,
+                "obtained file source for zone, going to start it";
+                "zone_name" => prepared_zone.config().zone_name(),
+                "file_source" => ?prepared_zone.file_source(),
+            );
+
             self.start_single_zone(
                 prepared_zone,
                 sled_agent_facilities,
