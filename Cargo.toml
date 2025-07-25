@@ -378,7 +378,7 @@ camino = { version = "1.1", features = ["serde1"] }
 camino-tempfile = "1.4.1"
 camino-tempfile-ext = { version = "0.3.2", features = ["assert-color"] }
 cancel-safe-futures = "0.1.5"
-cargo_metadata = "0.20.0"
+cargo_metadata = "0.21.0"
 chacha20poly1305 = "0.10.1"
 cfg-if = "1.0"
 chrono = { version = "0.4", features = [ "serde" ] }
@@ -401,7 +401,7 @@ const_format = "0.2.34"
 cookie = "0.18"
 criterion = { version = "0.6.0", features = [ "async_tokio" ] }
 crossbeam = "0.8"
-crossterm = { version = "0.28.1", features = ["event-stream"] }
+crossterm = { version = "0.29.0", features = ["event-stream"] }
 # NOTE: if you change the pinned revision of the `crucible` dependencies, you
 # must also update the references in package-manifest.toml to match the new
 # revision.
@@ -461,7 +461,7 @@ gateway-types = { path = "gateway-types" }
 gethostname = "0.5.0"
 gfss = { path = "trust-quorum/gfss" }
 glob = "0.3.2"
-guppy = "0.17.19"
+guppy = "0.17.20"
 headers = "0.4.1"
 heck = "0.5"
 hex = "0.4.3"

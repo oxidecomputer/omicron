@@ -85,11 +85,11 @@ impl WriteInstallDatasetContext {
         Self {
             // The zones are picked arbitrarily for our unit tests.
             zones: [
-                ZoneContents::new(ZoneKind::CockroachDb, b"cockroachdb"),
-                ZoneContents::new(ZoneKind::Clickhouse, b"clickhouse"),
-                ZoneContents::new(ZoneKind::Crucible, b"crucible"),
-                ZoneContents::new(ZoneKind::InternalDns, b"internal_dns"),
-                ZoneContents::new(ZoneKind::Nexus, b"nexus"),
+                ZoneContents::new(ZoneKind::CockroachDb, b"fake cockroachdb"),
+                ZoneContents::new(ZoneKind::Clickhouse, b"fake clickhouse"),
+                ZoneContents::new(ZoneKind::Crucible, b"fake crucible"),
+                ZoneContents::new(ZoneKind::InternalDns, b"fake internal_dns"),
+                ZoneContents::new(ZoneKind::Nexus, b"fake nexus"),
             ]
             .into_iter()
             .collect(),
