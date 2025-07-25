@@ -190,18 +190,37 @@ impl<'a> Planner<'a> {
         // result for that step.
         self.do_plan_noop_image_source(noop_info)?;
 
-        if self.input.chicken_switches().add_zones_with_mupdate_override {
-            if plan_mupdate_override_res == UpdateStepResult::Waiting {
+        // Perform do_plan_add either if plan_mupdate_override_res says to
+        // continue, or if the chicken switch is true.
+        match (
+            plan_mupdate_override_res,
+            self.input.chicken_switches().add_zones_with_mupdate_override,
+        ) {
+            (UpdateStepResult::ContinueToNextStep, _) => {
+                self.do_plan_add()?;
+            }
+            (UpdateStepResult::Waiting, true) => {
                 info!(
                     self.log,
                     "add_zones_with_mupdate_override chicken switch \
-                     set to true, so "
+                     is true, so running do_plan_add even though \
+                     plan_mupdate_override returned Waiting",
+                );
+                self.do_plan_add()?;
+            }
+            (UpdateStepResult::Waiting, false) => {
+                info!(
+                    self.log,
+                    "plan_mupdate_override returned Waiting, and \
+                     add_zones_with_mupdate_override chicken switch \
+                     is false, so skipping do_plan_add",
                 );
             }
-        } else if let UpdateStepResult::ContinueToNextStep =
-            plan_mupdate_override_res
+        }
+
+        // Perform other steps only if plan_mupdate_override says to continue.
+        if let UpdateStepResult::ContinueToNextStep = plan_mupdate_override_res
         {
-            self.do_plan_add()?;
             // If do_plan_mupdate_override returns Waiting, we don't plan *any*
             // additional steps until the system has recovered.
             if let UpdateStepResult::ContinueToNextStep =
