@@ -15,22 +15,20 @@ use serde::{Deserialize, Serialize};
 use crate::deployment::blueprint_display::{BpDiffState, KvList, KvPair};
 
 macro_rules! diff_row {
-    ($diff:expr, $member:ident, $label:expr) => {
-        if $diff.$member.before == $diff.$member.after {
+    ($diff:expr, $label:expr) => {
+        if $diff.before == $diff.after {
             KvPair::new(
                 BpDiffState::Unchanged,
                 $label,
-                super::blueprint_display::linear_table_unchanged(
-                    &$diff.$member.after,
-                ),
+                super::blueprint_display::linear_table_unchanged(&$diff.after),
             )
         } else {
             KvPair::new(
                 BpDiffState::Modified,
                 $label,
                 super::blueprint_display::linear_table_modified(
-                    &$diff.$member.before,
-                    &$diff.$member.after,
+                    &$diff.before,
+                    &$diff.after,
                 ),
             )
         }
@@ -178,16 +176,21 @@ pub struct ReconfiguratorChickenSwitchesDiffDisplay<'a, 'b> {
 
 impl fmt::Display for ReconfiguratorChickenSwitchesDiffDisplay<'_, '_> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let ReconfiguratorChickenSwitchesDiff {
+            planner_enabled,
+            planner_switches,
+        } = self.diff;
+
         let list = KvList::new(
             None,
-            vec![diff_row!(self.diff, planner_enabled, "planner enabled")],
+            vec![diff_row!(planner_enabled, "planner enabled")],
         );
         // No need for writeln! here because KvList adds its own newlines.
         write!(f, "{list}")?;
 
         let mut indented = IndentWriter::new("    ", f);
         writeln!(indented, "planner switches:")?;
-        write!(indented, "{}", self.diff.planner_switches.display())?;
+        write!(indented, "{}", planner_switches.display())?;
 
         Ok(())
     }
@@ -288,10 +291,12 @@ pub struct PlannerChickenSwitchesDiffDisplay<'a, 'b> {
 
 impl fmt::Display for PlannerChickenSwitchesDiffDisplay<'_, '_> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let PlannerChickenSwitchesDiff { add_zones_with_mupdate_override } =
+            self.diff;
+
         let list = KvList::new(
             None,
             vec![diff_row!(
-                self.diff,
                 add_zones_with_mupdate_override,
                 "add zones with mupdate override"
             )],
