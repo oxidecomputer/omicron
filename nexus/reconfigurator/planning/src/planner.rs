@@ -200,7 +200,7 @@ impl<'a> Planner<'a> {
                 self.do_plan_add()?;
             }
             (UpdateStepResult::Waiting, true) => {
-                info!(
+                debug!(
                     self.log,
                     "add_zones_with_mupdate_override chicken switch \
                      is true, so running do_plan_add even though \
@@ -209,7 +209,7 @@ impl<'a> Planner<'a> {
                 self.do_plan_add()?;
             }
             (UpdateStepResult::Waiting, false) => {
-                info!(
+                debug!(
                     self.log,
                     "plan_mupdate_override returned Waiting, and \
                      add_zones_with_mupdate_override chicken switch \
