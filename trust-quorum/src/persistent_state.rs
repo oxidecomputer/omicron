@@ -22,6 +22,8 @@ pub struct PersistentState {
     // data it read from disk. This allows us to upgrade from LRTQ.
     pub lrtq: Option<LrtqShareData>,
     pub configs: IdOrdMap<Configuration>,
+
+    // Our own key shares per configuration
     pub shares: BTreeMap<Epoch, Share>,
     pub commits: BTreeSet<Epoch>,
 
@@ -80,6 +82,18 @@ impl PersistentState {
         self.latest_committed_epoch().map(|epoch| {
             // There *must* be a configuration if we have a commit
             self.configuration(epoch).expect("missing prepare")
+        })
+    }
+
+    pub fn latest_committed_config_and_share(
+        &self,
+    ) -> Option<(&Configuration, &Share)> {
+        self.latest_committed_epoch().map(|epoch| {
+            // There *must* be a configuration and share if we have a commit
+            (
+                self.configs.get(&epoch).expect("latest config exists"),
+                self.shares.get(&epoch).expect("latest share exists"),
+            )
         })
     }
 
