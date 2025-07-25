@@ -10,8 +10,9 @@ use iddqd::{IdOrdItem, IdOrdMap, id_upcast};
 use omicron_test_utils::dev::test_setup_log;
 use omicron_uuid_kinds::RackUuid;
 use prop::sample::Index;
-use proptest::collection::btree_set;
+use proptest::collection::{btree_set, size_range};
 use proptest::prelude::*;
+use proptest::sample::Selector;
 use slog::{Logger, info, o};
 use std::collections::{BTreeMap, BTreeSet};
 use test_strategy::{Arbitrary, proptest};
@@ -165,6 +166,19 @@ impl NexusState {
     pub fn latest_config_mut(&mut self) -> RefMut<'_, NexusConfig> {
         self.configs.iter_mut().last().expect("at least one config")
     }
+
+    pub fn last_committed_config(&self) -> Option<&NexusConfig> {
+        // IdOrdMap doesn't allow reverse iteration.
+        // We therefore iterate through all configs to find the latest committed one.
+        // We could track this out of band but that leaves more room for error.
+        let mut found: Option<&NexusConfig> = None;
+        for c in &self.configs {
+            if c.op == NexusOp::Committed {
+                found = Some(c)
+            }
+        }
+        found
+    }
 }
 
 /// Faults in our system. It's useful to keep these self contained and not
@@ -257,6 +271,18 @@ struct TestState {
     /// If an epoch got skipped due to a crashed coordinator then there will not
     /// be a configuration for that epoch.
     pub all_coordinated_configs: IdOrdMap<Configuration>,
+
+    /// Expunged nodes cannot be added to a cluster. We never reuse nodes in
+    /// this test. We include nodes here that may not know yet that they have
+    /// been expunged in the `Sut`.
+    pub expunged: BTreeSet<PlatformId>,
+
+    /// Keep track of the number of generated `Action`s that get skipped
+    ///
+    /// Because we generate actions up front, we don't know if they are valid or
+    /// not to run during the test. This results in quite a few discards, and we
+    /// track them for help in refining the test.
+    pub skipped_actions: usize,
 }
 
 impl TestState {
@@ -271,6 +297,8 @@ impl TestState {
             member_universe: member_universe(),
             faults: Faults::default(),
             all_coordinated_configs: IdOrdMap::new(),
+            expunged: BTreeSet::new(),
+            skipped_actions: 0,
         }
     }
 
@@ -321,11 +349,12 @@ impl TestState {
         }
     }
 
-    /// Send the first `ReconfigureMsg` from `Nexus` to the coordinator node
+    /// Send the latest `ReconfigureMsg` from `Nexus` to the coordinator node
     ///
     /// If the node is not available, then abort the configuration at nexus
-    pub fn send_initial_reconfigure_msg(&mut self) {
+    pub fn send_reconfigure_msg(&mut self) {
         let (coordinator, msg) = self.nexus.reconfigure_msg_for_latest_config();
+        let epoch_to_config = msg.epoch;
         if self.faults.crashed_nodes.contains(coordinator) {
             // We must abort the configuration. This mimics a timeout.
             self.nexus.abort_reconfiguration();
@@ -335,8 +364,23 @@ impl TestState {
                 .nodes
                 .get_mut(coordinator)
                 .expect("coordinator exists");
+
             node.coordinate_reconfiguration(ctx, msg)
                 .expect("valid configuration");
+
+            // Do we have a `Configuration` for this epoch yet?
+            //
+            // For most reconfigurations, shares for the last committed
+            // configuration must be retrieved before the configuration is
+            // generated and saved in the persistent state.
+            let latest_persisted_config =
+                ctx.persistent_state().latest_config().expect("config exists");
+            if latest_persisted_config.epoch == epoch_to_config {
+                // Save the configuration for later
+                self.all_coordinated_configs
+                    .insert_unique(latest_persisted_config.clone())
+                    .expect("unique");
+            }
         }
     }
 
@@ -383,16 +427,6 @@ impl TestState {
             assert!(ctx.persistent_state_change_check_and_reset());
             assert!(ctx.persistent_state().has_prepared(msg.epoch));
             assert!(ctx.persistent_state().latest_committed_epoch().is_none());
-
-            // Save the configuration for later
-            self.all_coordinated_configs
-                .insert_unique(
-                    ctx.persistent_state()
-                        .latest_config()
-                        .expect("config exists")
-                        .clone(),
-                )
-                .expect("unique");
         }
 
         Ok(())
@@ -423,33 +457,44 @@ impl TestState {
         actions: Vec<Action>,
     ) -> Result<(), TestCaseError> {
         for action in actions {
-            match action {
+            let skipped = match action {
                 Action::DeliverEnvelopes(indices) => {
                     self.action_deliver_envelopes(indices)
                 }
-                Action::PollPrepareAcks => {
-                    self.action_poll_prepare_acks();
-                }
-                Action::Commit(indices) => {
-                    self.action_commit(indices);
-                }
+                Action::PollPrepareAcks => self.action_poll_prepare_acks(),
+                Action::Commit(indices) => self.action_commit(indices),
                 Action::DeliverNexusReplies(n) => {
-                    self.action_deliver_nexus_replies(n);
+                    self.action_deliver_nexus_replies(n)
                 }
-            }
+                Action::Reconfigure {
+                    num_added_nodes,
+                    removed_nodes,
+                    threshold,
+                    coordinator,
+                } => self.action_reconfigure(
+                    num_added_nodes,
+                    removed_nodes,
+                    threshold,
+                    coordinator,
+                ),
+            };
 
-            self.check_invariants()?;
+            if skipped {
+                self.skipped_actions += 1;
+            } else {
+                self.check_invariants()?;
+            }
         }
         Ok(())
     }
 
     // Deliver network messages to generated destinations
-    fn action_deliver_envelopes(&mut self, indices: Vec<Index>) {
+    fn action_deliver_envelopes(&mut self, indices: Vec<Index>) -> bool {
         let destinations: Vec<_> =
             self.bootstrap_network.keys().cloned().collect();
         if destinations.is_empty() {
             // nothing to do
-            return;
+            return true;
         }
         for index in indices {
             let id = index.get(&destinations);
@@ -460,6 +505,38 @@ impl TestState {
                     self.sut.nodes.get_mut(id).expect("destination exists");
                 node.handle(ctx, envelope.from, envelope.msg);
 
+                // If this is the first time we've seen a configuration, track it
+                //
+                // We have to do this here because for reconfigurations, shares
+                // for the last committed reconfiguration are gathered before
+                // the config is created. We don't know exactly when config
+                // generation occurs, but know that it happens after envelopes
+                // are delivered, except for configurations that don't have
+                // a last committed config. This is normally the initial
+                // configuration, but can be later ones if the initial config
+                // is aborted.
+                if ctx.persistent_state_change_check_and_reset() {
+                    if let Some(latest_config) =
+                        ctx.persistent_state().latest_config()
+                    {
+                        if !self
+                            .all_coordinated_configs
+                            .contains_key(&latest_config.epoch)
+                        {
+                            // The coordinator must be the first node to create
+                            // the configuration.
+                            assert_eq!(
+                                &latest_config.coordinator,
+                                ctx.platform_id()
+                            );
+
+                            self.all_coordinated_configs
+                                .insert_unique(latest_config.clone())
+                                .expect("unique config");
+                        }
+                    }
+                }
+
                 // Send any messages as a result of handling this message
                 send_envelopes(ctx, &mut self.bootstrap_network);
             }
@@ -467,15 +544,17 @@ impl TestState {
 
         // Remove any destinations with zero messages in-flight
         self.bootstrap_network.retain(|_, msgs| !msgs.is_empty());
+
+        false
     }
 
     // Call `Node::commit_reconfiguration` for nodes that have prepared and have
     // not yet acked their commit.
-    fn action_commit(&mut self, indices: Vec<Index>) {
+    fn action_commit(&mut self, indices: Vec<Index>) -> bool {
         let rack_id = self.nexus.rack_id;
         let latest_config = self.nexus.latest_config();
         if latest_config.op != NexusOp::Committed {
-            return;
+            return true;
         }
         let committable: Vec<_> = latest_config
             .prepared_members
@@ -484,7 +563,8 @@ impl TestState {
 
         if committable.is_empty() {
             // All members have committed
-            return;
+            self.skipped_actions += 1;
+            return true;
         }
 
         // We shouldn't be calling commit twice or sending multiple replies
@@ -508,9 +588,10 @@ impl TestState {
         for from in committed {
             self.underlay_network.push(NexusReply::CommitAck { from, epoch });
         }
+        false
     }
 
-    fn action_deliver_nexus_replies(&mut self, n: usize) {
+    fn action_deliver_nexus_replies(&mut self, n: usize) -> bool {
         let mut config = self.nexus.latest_config_mut();
         let n = usize::min(n, self.underlay_network.len());
         for reply in self.underlay_network.drain(0..n) {
@@ -522,15 +603,16 @@ impl TestState {
                 }
             }
         }
+        false
     }
 
     /// Poll the coordinator for acks if nexus is preparing, and commit
     /// if enough acks have been received.
-    fn action_poll_prepare_acks(&mut self) {
+    fn action_poll_prepare_acks(&mut self) -> bool {
         let mut latest_config = self.nexus.latest_config_mut();
         if latest_config.op != NexusOp::Preparing {
             // No point in checking. Commit or abort has occurred.
-            return;
+            return true;
         }
 
         // If the coordinator has crashed then Nexus should abort.
@@ -540,7 +622,6 @@ impl TestState {
         }
 
         // Lookup the coordinator node
-        //
         let (coordinator, ctx) = self
             .sut
             .nodes
@@ -554,7 +635,7 @@ impl TestState {
             .latest_config()
             .map_or(Epoch(0), |c| c.epoch);
         if coordinator_epoch != latest_config.epoch {
-            return;
+            return true;
         }
 
         // Poll the coordinator for acks.
@@ -581,7 +662,166 @@ impl TestState {
             );
 
             latest_config.op = NexusOp::Committed;
+
+            let new_members = latest_config.members.clone();
+            let new_epoch = latest_config.epoch;
+
+            // Expunge any removed nodes from the last committed configuration
+            if let Some(last_committed_epoch) =
+                latest_config.last_committed_epoch
+            {
+                // Release our mutable borrow
+                drop(latest_config);
+
+                let last_committed_config = self
+                    .nexus
+                    .configs
+                    .get(&last_committed_epoch)
+                    .expect("config exists");
+
+                let expunged = last_committed_config
+                    .members
+                    .difference(&new_members)
+                    .cloned();
+
+                for e in expunged {
+                    info!(
+                        self.log,
+                        "expunged node";
+                        "epoch" => %new_epoch,
+                        "platform_id" => %e);
+                    self.expunged.insert(e);
+                }
+            }
         }
+        false
+    }
+
+    fn action_reconfigure(
+        &mut self,
+        num_added_nodes: usize,
+        removed_nodes: Vec<Selector>,
+        threshold: Index,
+        coordinator: Selector,
+    ) -> bool {
+        let latest_epoch = self.nexus.latest_config().epoch;
+        let last_committed_config = self.nexus.last_committed_config();
+        // We must leave at least one node available to coordinate between the
+        // new and old configurations.
+        let (new_members, coordinator) = match last_committed_config {
+            Some(c) => {
+                let possible_num_nodes_to_add = usize::min(
+                    num_added_nodes,
+                    MAX_CLUSTER_SIZE - c.members.len(),
+                );
+
+                // How many nodes can we add taking into account expunged nodes
+                // and the existing cluster?
+                let num_nodes_to_add = usize::min(
+                    MEMBER_UNIVERSE_SIZE
+                        - c.members.len()
+                        - self.expunged.len(),
+                    possible_num_nodes_to_add,
+                );
+
+                // What is the max number of nodes that we can remove such that:
+                //  * 1 node is in both the new and old cluster
+                //  * The total number of nodes in the new cluster is
+                //    >= MIN_CLUSTER_SIZE
+                let max_nodes_to_remove = (c.members.len() - 1
+                    + num_nodes_to_add)
+                    .saturating_sub(MIN_CLUSTER_SIZE);
+
+                // Find a potential coordinator node
+                //
+                // We can only start a reconfiguration if Nexus has an
+                // acknowledgement that at least one node has seen the commit.
+                if c.committed_members.is_empty() {
+                    return true;
+                }
+                let coordinator =
+                    coordinator.select(c.committed_members.iter());
+
+                // First, find the set of nodes to remove
+                let mut nodes_to_remove = BTreeSet::new();
+                for s in removed_nodes {
+                    // The same selection can be chosen more than once. so we
+                    // must add the extra check rather than shrinking the length
+                    // of the `removed_nodes` iterator with `take`.;
+                    if nodes_to_remove.len() == max_nodes_to_remove {
+                        break;
+                    }
+                    let node = s.select(c.members.iter());
+                    if node != coordinator {
+                        nodes_to_remove.insert(node.clone());
+                    }
+                }
+
+                // Then find the set of nodes to add
+                //
+                // Just pick the first set of nodes in `member_universe`
+                // that are not in the current membership and not expunged.
+                let mut nodes_to_add = BTreeSet::new();
+                for id in self.member_universe.iter() {
+                    if nodes_to_add.len() == num_nodes_to_add {
+                        break;
+                    }
+                    if !self.expunged.contains(id) && !c.members.contains(id) {
+                        nodes_to_add.insert(id.clone());
+                    }
+                }
+
+                // Finally, create our new membership
+                let mut new_members = c.members.clone();
+                for id in nodes_to_remove {
+                    new_members.remove(&id);
+                }
+                for id in nodes_to_add {
+                    new_members.insert(id);
+                }
+                (new_members, coordinator.clone())
+            }
+            None => {
+                // We are generating a new config
+                if num_added_nodes < MIN_CLUSTER_SIZE {
+                    // Nothing to do here.
+                    return true;
+                }
+                // Pick the first `num_added_nodes` from member_universe
+                // It's as good a choice as any and deterministic
+                let new_members: BTreeSet<_> = self
+                    .member_universe
+                    .iter()
+                    .take(num_added_nodes)
+                    .cloned()
+                    .collect();
+
+                // There is no last committed configuration then we can go ahead and
+                // choose any node. We just pick the first one for simplicity and determinism.
+                let coordinator =
+                    coordinator.select(new_members.iter()).clone();
+                (new_members, coordinator)
+            }
+        };
+        let threshold =
+            Threshold(usize::max(2, threshold.index(new_members.len())) as u8);
+        let epoch = latest_epoch.next();
+
+        // Find a coordinator from the last committed configurarion that has
+        // acknowledged the commit from Nexus. If there isn't a node that
+        // acknowledged the commit, then we can't reconfigure yet.
+        //
+        let last_committed_epoch = last_committed_config.map(|c| c.epoch);
+        let nexus_config = NexusConfig::new(
+            epoch,
+            last_committed_epoch,
+            coordinator,
+            new_members,
+            threshold,
+        );
+        self.nexus.configs.insert_unique(nexus_config).expect("new config");
+        self.send_reconfigure_msg();
+        false
     }
 
     /// At every point during the running of the test, invariants over the system
@@ -593,6 +833,7 @@ impl TestState {
         self.invariant_all_nodes_have_same_configuration_per_epoch()?;
         self.invariant_nodes_have_prepared_if_coordinator_has_acks()?;
         self.invariant_nodes_have_committed_if_nexus_has_acks()?;
+        self.invariant_nodes_not_coordinating_and_computing_key_share_simultaneously()?;
         Ok(())
     }
 
@@ -636,19 +877,26 @@ impl TestState {
                 .nodes
                 .get(&latest_config.coordinator)
                 .expect("node exists");
-            let acked =
-                node.get_coordinator_state().map_or(BTreeSet::new(), |cs| {
+
+            let (acked, coordinating_epoch) = node
+                .get_coordinator_state()
+                .map_or((BTreeSet::new(), Epoch(0)), |cs| {
                     if let CoordinatorOperation::Prepare {
                         prepare_acks, ..
                     } = cs.op()
                     {
-                        prepare_acks.clone()
+                        (prepare_acks.clone(), cs.reconfigure_msg().epoch())
                     } else {
-                        BTreeSet::new()
+                        (BTreeSet::new(), Epoch(0))
                     }
                 });
+            // Make sure the coordinator actually is coordinating for this epoch
+            if coordinating_epoch != latest_config.epoch {
+                return Ok(());
+            }
             (acked, latest_config.epoch)
         };
+        // Make sure the coordinator actually is coordinating for this epoch
 
         for id in acked {
             let (_, ctx) = self.sut.nodes.get(&id).expect("node exists");
@@ -681,6 +929,30 @@ impl TestState {
 
         Ok(())
     }
+
+    // A node cannot be coordinating a reconfiguration and computing a key share
+    // at the same time. The following two conditions based on local knowledge
+    // are mutually exclusive.
+    //
+    // * If a node is coordinating a reconfiguration then they are creating the
+    //   key shares for the newest configuration and have a key share for the
+    //   latest committed configuration.
+    // * If a node is computing a key share it means that they don't have the a
+    //   key share for the latest committed configuration that they know of.
+    fn invariant_nodes_not_coordinating_and_computing_key_share_simultaneously(
+        &self,
+    ) -> Result<(), TestCaseError> {
+        for (id, (node, _)) in &self.sut.nodes {
+            prop_assert!(
+                !(node.get_coordinator_state().is_some()
+                    && node.is_computing_key_share()),
+                "Coordinating and computing key share on node {}",
+                id
+            );
+        }
+
+        Ok(())
+    }
 }
 
 /// Broken out of `TestState` to alleviate borrow checker woes
@@ -697,6 +969,7 @@ fn send_envelopes(
 
 // A high-level set of generated actions to drive the test forward.
 #[derive(Debug, Arbitrary)]
+#[allow(clippy::large_enum_variant)]
 pub enum Action {
     /// For each indexed member deliver an in-flight bootstrap network msg if
     /// there is one.
@@ -705,8 +978,10 @@ pub enum Action {
     /// `test_state.bootstrap_network`.
     ///
     /// We may deliver more than one message to each member.
-    #[weight(50)]
-    DeliverEnvelopes(Vec<Index>),
+    #[weight(4)]
+    DeliverEnvelopes(
+        #[any(size_range(1..MAX_DELIVERED_ENVELOPES).lift())] Vec<Index>,
+    ),
 
     /// Have Nexus poll the coordinator for the latest configuration if it is
     /// still being prepared.
@@ -715,25 +990,44 @@ pub enum Action {
     /// simulates recording this information in CRDB. If Nexus has witnessed
     /// that enough nodes have acked prepares then it changes the config
     /// operation to committed.
-    #[weight(10)]
+    #[weight(4)]
     PollPrepareAcks,
 
     /// If the current configuration at nexus is marked `NexusOp::Committed`
     /// then call `Node::commit_configuration` for each indexed
     /// node in `NexusConfig::prepared_members` that is not also in
     /// `NexusConfig::committed_members`.
-    #[weight(5)]
-    Commit(Vec<Index>),
+    #[weight(4)]
+    Commit(#[any(size_range(1..MAX_CONCURRENT_COMMITS).lift())] Vec<Index>),
 
     /// Deliver in-flight messages to Nexus from the underlay network
-    #[weight(5)]
+    #[weight(4)]
     DeliverNexusReplies(#[strategy(1..10usize)] usize),
+
+    /// Generate a new configuration by adding a number of *new* (non-expunged)
+    /// nodes to the cluster from `member_universe` and removing the specific
+    /// nodes in the current cluster given by the indices `removed_nodes`.
+    #[weight(1)]
+    Reconfigure {
+        #[strategy(0..MAX_ADDED_NODES)]
+        num_added_nodes: usize,
+        #[any(size_range(0..MAX_REMOVED_NODES).lift())]
+        removed_nodes: Vec<Selector>,
+        threshold: Index,
+        coordinator: Selector,
+    },
 }
 
 const MIN_CLUSTER_SIZE: usize = 3;
-const MAX_CLUSTER_SIZE: usize = 32;
-const MEMBER_UNIVERSE_SIZE: usize = 64;
+const MAX_CLUSTER_SIZE: usize = 20;
+const MEMBER_UNIVERSE_SIZE: usize = 40;
 const MAX_INITIAL_DOWN_NODES: usize = 5;
+const MAX_ADDED_NODES: usize = 5;
+const MAX_REMOVED_NODES: usize = 3;
+const MAX_DELIVERED_ENVELOPES: usize = 20;
+const MAX_CONCURRENT_COMMITS: usize = 10;
+const MIN_ACTIONS: usize = 100;
+const MAX_ACTIONS: usize = 1000;
 
 /// Information about configurations used at test generation time
 #[derive(Debug, Clone, Arbitrary)]
@@ -779,19 +1073,20 @@ pub struct TestInput {
     // disconnected from every other node.
     #[strategy(btree_set(0..=MEMBER_UNIVERSE_SIZE, 0..MAX_INITIAL_DOWN_NODES))]
     initial_down_nodes: BTreeSet<usize>,
+    #[any(size_range(MIN_ACTIONS..MAX_ACTIONS).lift())]
     actions: Vec<Action>,
 }
 
 #[proptest]
-fn test_coordinator_behavior_from_empty_state(input: TestInput) {
-    let logctx = test_setup_log("coordinator_behavior_from_empty_state");
+fn test_trust_quorum_protocol(input: TestInput) {
+    let logctx = test_setup_log("test_trust_quorum_protocol");
 
     let mut state = TestState::new(logctx.log.clone());
 
     // Perform the initial setup
     state.create_nexus_initial_config(input.initial_config);
     state.setup_initial_connections(input.initial_down_nodes);
-    state.send_initial_reconfigure_msg();
+    state.send_reconfigure_msg();
 
     // Check the results of the initial setup
     state.postcondition_initial_configuration()?;
@@ -802,5 +1097,11 @@ fn test_coordinator_behavior_from_empty_state(input: TestInput) {
     // Start executing the actions
     state.run_actions(input.actions)?;
 
-    logctx.cleanup_successful();
+    info!(
+        state.log,
+        "Test complete";
+        "skipped_actions" => state.skipped_actions
+    );
+
+    //    logctx.cleanup_successful();
 }
