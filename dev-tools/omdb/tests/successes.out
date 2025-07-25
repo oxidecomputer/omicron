@@ -1411,7 +1411,10 @@ EXECUTING COMMAND: omdb ["-w", "nexus", "chicken-switches", "set", "--planner-en
 termination: Exited(0)
 ---------------------------------------------
 stdout:
-Chicken switches updated at version 1
+chicken switches updated to version 1:
+    planner enabled: true
+    planner switches:
+        add zones with mupdate override:   true
 ---------------------------------------------
 stderr:
 note: using Nexus URL http://127.0.0.1:REDACTED_PORT/
@@ -1420,7 +1423,10 @@ EXECUTING COMMAND: omdb ["-w", "nexus", "chicken-switches", "set", "--add-zones-
 termination: Exited(0)
 ---------------------------------------------
 stdout:
-Chicken switches updated at version 2
+chicken switches updated to version 2:
+    planner enabled:   true (unchanged)
+    planner switches:
+    *   add zones with mupdate override:   true -> false
 ---------------------------------------------
 stderr:
 note: using Nexus URL http://127.0.0.1:REDACTED_PORT/
