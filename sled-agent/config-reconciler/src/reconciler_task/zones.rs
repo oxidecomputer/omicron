@@ -1289,12 +1289,12 @@ impl ResolverStatusExt for ResolverStatus {
             OmicronZoneImageSource::InstallDataset => {
                 let file_name = zone_kind.artifact_in_install_dataset();
 
-                // There's always at least one image path.
-                let mut zone_image_paths = Vec::with_capacity(1);
+                // There's always at least one image path (the RAM disk below).
+                let mut search_paths = Vec::with_capacity(1);
 
                 // Inject an image path if requested by a test.
                 if let Some(path) = &self.image_directory_override {
-                    zone_image_paths.push(path.clone());
+                    search_paths.push(path.clone());
                 };
 
                 // Any zones not part of the RAM disk are managed via the zone
@@ -1304,19 +1304,19 @@ impl ResolverStatusExt for ResolverStatus {
                     self,
                     zone_kind,
                     &internal_disks,
-                    |path| zone_image_paths.push(path),
+                    |path| search_paths.push(path),
                 );
 
                 // Look for the image in the RAM disk as a fallback. Note that
                 // install dataset images are not stored on the RAM disk in
                 // production, just in development or test workflows.
-                zone_image_paths.push(Utf8PathBuf::from(RAMDISK_IMAGE_PATH));
+                search_paths.push(Utf8PathBuf::from(RAMDISK_IMAGE_PATH));
 
                 OmicronZoneFileSource {
                     location: OmicronZoneImageLocation::InstallDataset { hash },
                     file_source: ZoneImageFileSource {
                         file_name: file_name.to_owned(),
-                        search_paths: zone_image_paths,
+                        search_paths,
                     },
                 }
             }

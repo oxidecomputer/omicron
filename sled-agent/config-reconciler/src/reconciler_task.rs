@@ -466,6 +466,8 @@ impl ReconcilerTask {
 
         // Obtain the resolver status. This will be used to account for mupdate
         // overrides and errors.
+        //
+        // This status is obtained after remove_mupdate_override is processed.
         let resolver_status =
             sled_agent_facilities.zone_image_resolver_status();
 

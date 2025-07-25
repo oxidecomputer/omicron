@@ -325,7 +325,7 @@ impl IdOrdItem for ZoneContents {
     id_upcast!();
 }
 
-/// An error caused by [`make_error_cases`].
+/// An error caused by [`WriteInstallDatasetContext::make_error_cases`].
 #[derive(Clone, Debug, PartialEq)]
 pub struct ZoneContentError {
     zone_kind: ZoneKind,
