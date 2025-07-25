@@ -42,6 +42,7 @@ use sled_agent_types::zone_images::RunningZoneImageLocation;
 use sled_agent_types::zone_images::ZoneImageLocationError;
 use sled_storage::config::MountConfig;
 use slog::Logger;
+use slog::debug;
 use slog::error;
 use slog::info;
 use slog::warn;
@@ -194,6 +195,16 @@ impl OmicronZones {
                         let prepared_desired_zone = zone_facilities
                             .prepare_omicron_zone(log, desired_config);
 
+                        debug!(
+                            log,
+                            "obtained desired location for zone, \
+                             determining whether to restart it";
+                            "zone" => &zone_name,
+                            "existing-location" => ?existing_location,
+                            "desired-file-source" =>
+                                ?prepared_desired_zone.file_source(),
+                        );
+
                         if does_new_config_require_zone_restart(
                             &z.config,
                             existing_location,
@@ -204,7 +215,7 @@ impl OmicronZones {
                                 log,
                                 "starting shutdown of running zone; config \
                                  has changed";
-                                "zone" => zone_name,
+                                "zone" => &zone_name,
                                 "old-config" => ?z.config,
                                 "new-config" => ?desired_config,
                             );
@@ -373,6 +384,14 @@ impl OmicronZones {
         // Build up the futures for starting each zone.
         let start_futures = zones_to_start.map(|zone| {
             let prepared_zone = zone_facilities.prepare_omicron_zone(log, zone);
+
+            debug!(
+                log,
+                "obtained file source for zone, going to start it";
+                "zone_name" => prepared_zone.config().zone_name(),
+                "file_source" => ?prepared_zone.file_source(),
+            );
+
             self.start_single_zone(
                 prepared_zone,
                 sled_agent_facilities,
@@ -1322,11 +1341,11 @@ impl ResolverStatusExt for ResolverStatus {
             }
             OmicronZoneImageSource::Artifact { hash } => {
                 match self.mupdate_override.boot_disk_override.as_ref() {
-                    Ok(Some(_)) => {
+                    Ok(Some(override_info)) => {
                         // A mupdate override is currently active. Use the
                         // install dataset hash as the location.
                         let mut search_paths = Vec::new();
-                        let hash = install_dataset_hash(
+                        let install_dataset_hash = install_dataset_hash(
                             log,
                             self,
                             zone_kind,
@@ -1341,10 +1360,20 @@ impl ResolverStatusExt for ResolverStatus {
                         // particular development workflow (a4x2) which does not
                         // support MUPdates.
 
+                        debug!(
+                            log,
+                            "mupdate override active, \
+                             redirecting Artifact source to InstallDataset";
+                            "artifact_hash" => %hash,
+                            "mupdate_override_id" => %override_info.mupdate_uuid,
+                            "install_dataset_hash" => ?install_dataset_hash,
+                            "search_paths" => ?search_paths,
+                        );
+
                         OmicronZoneFileSource {
                             location:
                                 OmicronZoneImageLocation::InstallDataset {
-                                    hash,
+                                    hash: install_dataset_hash,
                                 },
                             file_source: ZoneImageFileSource {
                                 file_name: zone_kind

@@ -362,7 +362,13 @@ fn compute_size_and_hash(
     let mut buffer = [0u8; 8192];
     let mut total_bytes_read = 0;
     loop {
-        let bytes_read = f.read(&mut buffer)?;
+        let bytes_read = match f.read(&mut buffer) {
+            Ok(n) => n,
+            Err(error) if error.kind() == io::ErrorKind::Interrupted => {
+                continue;
+            }
+            Err(error) => return Err(error),
+        };
         if bytes_read == 0 {
             break;
         }
