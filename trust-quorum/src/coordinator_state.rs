@@ -9,7 +9,7 @@ use crate::crypto::{LrtqShare, Sha3_256Digest, ShareDigestLrtq};
 use crate::validators::{ReconfigurationError, ValidatedReconfigureMsg};
 use crate::{Configuration, Epoch, PeerMsgKind, PlatformId};
 use gfss::shamir::Share;
-use slog::{Logger, o, warn};
+use slog::{Logger, info, o, warn};
 use std::collections::{BTreeMap, BTreeSet};
 
 /// The state of a reconfiguration coordinator.
@@ -68,8 +68,15 @@ impl CoordinatorState {
         }
         let op = CoordinatorOperation::Prepare {
             prepares,
-            prepare_acks: BTreeSet::new(),
+            // Always include ourself
+            prepare_acks: BTreeSet::from([msg.coordinator_id().clone()]),
         };
+
+        info!(
+            log,
+            "Starting coordination on uninitialized node";
+            "epoch" => %config.epoch
+        );
 
         let state = CoordinatorState::new(log, msg, config.clone(), op);
 
@@ -83,16 +90,28 @@ impl CoordinatorState {
     pub fn new_reconfiguration(
         log: Logger,
         msg: ValidatedReconfigureMsg,
-        last_committed_config: &Configuration,
+        latest_committed_config: &Configuration,
+        our_latest_committed_share: Share,
     ) -> Result<CoordinatorState, ReconfigurationError> {
         let (config, new_shares) = Configuration::new(&msg)?;
+
+        info!(
+            log,
+            "Starting coordination on existing node";
+            "epoch" => %config.epoch,
+            "last_committed_epoch" => %latest_committed_config.epoch
+        );
 
         // We must collect shares from the last configuration
         // so we can recompute the old rack secret.
         let op = CoordinatorOperation::CollectShares {
-            epoch: last_committed_config.epoch,
-            members: last_committed_config.members.clone(),
-            collected_shares: BTreeMap::new(),
+            old_epoch: latest_committed_config.epoch,
+            old_members: latest_committed_config.members.clone(),
+            // Always include ourself
+            old_collected_shares: BTreeMap::from([(
+                msg.coordinator_id().clone(),
+                our_latest_committed_share,
+            )]),
             new_shares,
         };
 
@@ -117,7 +136,7 @@ impl CoordinatorState {
         }
     }
 
-    // Return the `ValidatedReconfigureMsg` that started this reconfiguration
+    /// Return the `ValidatedReconfigureMsg` that started this reconfiguration
     pub fn reconfigure_msg(&self) -> &ValidatedReconfigureMsg {
         &self.reconfigure_msg
     }
@@ -126,24 +145,31 @@ impl CoordinatorState {
         &self.op
     }
 
-    // Send any required messages as a reconfiguration coordinator
-    //
-    // This varies depending upon the current `CoordinatorState`.
-    //
-    // In some cases a `PrepareMsg` will be added locally to the
-    // `PersistentState`, requiring persistence from the caller. In this case we
-    // will return a copy of it.
-    //
-    // This method is "in progress" - allow unused parameters for now
+    /// Send any required messages as a reconfiguration coordinator
+    ///
+    /// This varies depending upon the current `CoordinatorState`.
     pub fn send_msgs(&mut self, ctx: &mut impl NodeHandlerCtx) {
         match &self.op {
-            #[expect(unused)]
             CoordinatorOperation::CollectShares {
-                epoch,
-                members,
-                collected_shares,
+                old_epoch,
+                old_members,
+                old_collected_shares,
                 ..
-            } => {}
+            } => {
+                // Send to all connected members in the last committed
+                // configuration that we haven't yet collected shares from.
+                let destinations: Vec<_> = old_members
+                    .keys()
+                    .filter(|&m| {
+                        !old_collected_shares.contains_key(m)
+                            && ctx.connected().contains(m)
+                    })
+                    .cloned()
+                    .collect();
+                for to in destinations {
+                    ctx.send(to, PeerMsgKind::GetShare(*old_epoch));
+                }
+            }
             #[expect(unused)]
             CoordinatorOperation::CollectLrtqShares { members, shares } => {}
             CoordinatorOperation::Prepare { prepares, .. } => {
@@ -171,9 +197,9 @@ impl CoordinatorState {
     ) {
         match &self.op {
             CoordinatorOperation::CollectShares {
-                epoch,
-                members,
-                collected_shares,
+                old_epoch,
+                old_members,
+                old_collected_shares,
                 ..
             } => {}
             CoordinatorOperation::CollectLrtqShares { members, shares } => {}
@@ -231,9 +257,12 @@ impl CoordinatorState {
 pub enum CoordinatorOperation {
     // We haven't started implementing this yet
     CollectShares {
-        epoch: Epoch,
-        members: BTreeMap<PlatformId, Sha3_256Digest>,
-        collected_shares: BTreeMap<PlatformId, Share>,
+        old_epoch: Epoch,
+        old_members: BTreeMap<PlatformId, Sha3_256Digest>,
+        old_collected_shares: BTreeMap<PlatformId, Share>,
+
+        // These are new shares that the coordinator created that we carry along
+        // until we get to `CoordinatorOperation::Prepare`
         new_shares: BTreeMap<PlatformId, Share>,
     },
     // We haven't started implementing this yet

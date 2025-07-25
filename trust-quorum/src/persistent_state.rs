@@ -83,6 +83,18 @@ impl PersistentState {
         })
     }
 
+    pub fn latest_committed_config_and_share(
+        &self,
+    ) -> Option<(&Configuration, &Share)> {
+        self.latest_committed_epoch().map(|epoch| {
+            // There *must* be a configuration and share if we have a commit
+            (
+                self.configs.get(&epoch).expect("latest config exists"),
+                self.shares.get(&epoch).expect("latest share exists"),
+            )
+        })
+    }
+
     /// Return the key share for lrtq if one exists
     pub fn lrtq_key_share(&self) -> Option<LrtqShare> {
         self.lrtq.as_ref().map(|p| p.share.clone().into())

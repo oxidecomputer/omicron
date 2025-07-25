@@ -198,6 +198,9 @@ impl Node {
             PeerMsgKind::Prepare { config, share } => {
                 self.handle_prepare(ctx, from, config, share);
             }
+            PeerMsgKind::GetShare(epoch) => {
+                self.handle_get_share(ctx, from, epoch);
+            }
             _ => todo!(
                 "cannot handle message variant yet - not implemented: {msg:?}"
             ),
@@ -233,6 +236,57 @@ impl Node {
                   "Received prepare ack when not coordinating";
                    "from" => %from,
                    "acked_epoch" => %epoch
+            );
+        }
+    }
+
+    fn handle_get_share(
+        &mut self,
+        ctx: &mut impl NodeHandlerCtx,
+        from: PlatformId,
+        epoch: Epoch,
+    ) {
+        if let Some(latest_committed_config) =
+            ctx.persistent_state().latest_committed_configuration()
+        {
+            if latest_committed_config.epoch > epoch {
+                info!(self.log,
+                    concat!("Received 'GetShare'` from stale node. ",
+                        "Responded with 'CommitAdvance'"
+                    );
+                    "from" => %from,
+                    "latest_committed_epoch" => %latest_committed_config.epoch,
+                    "requested_epoch" => %epoch
+                );
+                ctx.send(
+                    from,
+                    PeerMsgKind::CommitAdvance(latest_committed_config.clone()),
+                );
+                return;
+            }
+        }
+
+        // If we have the share for the requested epoch, we always return it. We
+        // know that it is at least as new as the last committed epoch. We might
+        // not have learned about the configuration being committed yet, but
+        // other nodes have and may need the share to unlock when the control
+        // plane is not up yet.
+        //
+        // See RFD 238 section 5.3.3
+        //
+        if let Some(share) = ctx.persistent_state().shares.get(&epoch) {
+            info!(self.log, "Received 'GetShare'. Responded with 'Share'.";
+                "from" => %from,
+                "epoch" => %epoch
+            );
+            ctx.send(from, PeerMsgKind::Share { epoch, share: share.clone() });
+        } else {
+            // TODO: We may want to return a `NoSuchShare(epoch)` reply if we don't
+            // have the share, but it's not strictly necessary. It would only be for
+            // logging/debugging purposes at the requester.
+            info!(self.log, "Received 'GetShare', but it's missing.";
+                "from" => %from,
+                "epoch" => %epoch
             );
         }
     }
@@ -344,10 +398,12 @@ impl Node {
         ctx: &mut impl NodeHandlerCtx,
         msg: ValidatedReconfigureMsg,
     ) -> Result<(), ReconfigurationError> {
+        let log = self.log.new(o!("component" => "tq-coordinator-state"));
+
         // We have no committed configuration or lrtq ledger
         if ctx.persistent_state().is_uninitialized() {
             let (coordinator_state, my_config, my_share) =
-                CoordinatorState::new_uninitialized(self.log.clone(), msg)?;
+                CoordinatorState::new_uninitialized(log, msg)?;
             self.coordinator_state = Some(coordinator_state);
             ctx.update_persistent_state(move |ps| {
                 ps.shares.insert(my_config.epoch, my_share);
@@ -359,13 +415,16 @@ impl Node {
         }
 
         // We have a committed configuration that is not LRTQ
-        let config =
-            ctx.persistent_state().latest_committed_configuration().unwrap();
+        let (config, our_share) = ctx
+            .persistent_state()
+            .latest_committed_config_and_share()
+            .expect("committed configuration exists");
 
         self.coordinator_state = Some(CoordinatorState::new_reconfiguration(
-            self.log.clone(),
+            log,
             msg,
-            &config,
+            config,
+            our_share.clone(),
         )?);
 
         Ok(())
