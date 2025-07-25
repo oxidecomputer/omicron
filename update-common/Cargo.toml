@@ -20,6 +20,7 @@ futures.workspace = true
 hex.workspace = true
 hubtools.workspace = true
 omicron-common.workspace = true
+rats-corim.workspace = true
 sha2.workspace = true
 slog.workspace = true
 thiserror.workspace = true

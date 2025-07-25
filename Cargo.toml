@@ -647,6 +647,7 @@ rand_distr = "0.4.3"
 rand_seeder = "0.3.0"
 range-requests = { path = "range-requests" }
 ratatui = "0.29.0"
+rats-corim = { git = "https://github.com/oxidecomputer/rats-corim.git", rev = "ec7da731e284f8801a7bbc0f4f0a2623f51ef137" }
 rayon = "1.10"
 rcgen = "0.12.1"
 reconfigurator-cli = { path = "dev-tools/reconfigurator-cli" }
@@ -710,7 +711,7 @@ slog-term = "2.9.1"
 smf = "0.2"
 socket2 = { version = "0.5", features = ["all"] }
 sp-sim = { path = "sp-sim" }
-sprockets-tls = { git = "https://github.com/oxidecomputer/sprockets.git", rev = "6d31fa63217c6a51061dc4afa1ebe175a0021981" }
+sprockets-tls = { git = "https://github.com/oxidecomputer/sprockets.git", rev = "7b63ccb979288408fb772aa6d15f4a324497c754" }
 sqlformat = "0.3.5"
 sqlparser = { version = "0.45.0", features = [ "visitor" ] }
 static_assertions = "1.1.0"
@@ -747,10 +748,10 @@ toml_edit = "0.22.27"
 tough = { version = "0.20.0", features = [ "http" ] }
 transceiver-controller = { git = "https://github.com/oxidecomputer/transceiver-control", features = [ "api-traits" ] }
 trybuild = "1.0.105"
-tufaceous = { git = "https://github.com/oxidecomputer/tufaceous", branch = "main" }
-tufaceous-artifact = { git = "https://github.com/oxidecomputer/tufaceous", branch = "main", features = ["proptest", "schemars"] }
-tufaceous-brand-metadata = { git = "https://github.com/oxidecomputer/tufaceous", branch = "main" }
-tufaceous-lib = { git = "https://github.com/oxidecomputer/tufaceous", branch = "main" }
+tufaceous = { git = "https://github.com/oxidecomputer/tufaceous", branch = "correct_fake" }
+tufaceous-artifact = { git = "https://github.com/oxidecomputer/tufaceous", branch = "correct_fake", features = ["proptest", "schemars"] }
+tufaceous-brand-metadata = { git = "https://github.com/oxidecomputer/tufaceous", branch = "correct_fake" }
+tufaceous-lib = { git = "https://github.com/oxidecomputer/tufaceous", branch = "correct_fake" }
 tui-tree-widget = "0.23.1"
 typed-rng = { path = "typed-rng" }
 typify = "0.3.0"
