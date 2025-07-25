@@ -277,6 +277,9 @@ parent:    df06bb57-ad42-4431-9206-abff322896c7
 
  PENDING MGS-MANAGED UPDATES: 0
 
+Report on planning run for blueprint 7f976e0d-d2a5-4eeb-9e82-c82bc2824aba:
+
+
 
 
 > # Now make another blueprint, starting by adding a new sled and removing sled 6.
@@ -664,6 +667,9 @@ parent:    afb09faf-a586-4483-9289-04d4f1d8ba23
     target release min gen:   2
 
  PENDING MGS-MANAGED UPDATES: 0
+
+Report on planning run for blueprint ce365dff-2cdb-4f35-a186-b15e20e1e700:
+
 
 
 > blueprint-diff afb09faf-a586-4483-9289-04d4f1d8ba23 latest

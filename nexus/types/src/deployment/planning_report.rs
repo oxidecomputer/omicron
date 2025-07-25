@@ -10,6 +10,7 @@ use super::BlueprintZoneImageSource;
 use super::CockroachDbPreserveDowngrade;
 use super::PendingMgsUpdates;
 
+use daft::Diffable;
 use omicron_common::policy::COCKROACHDB_REDUNDANCY;
 use omicron_uuid_kinds::BlueprintUuid;
 use omicron_uuid_kinds::MupdateOverrideUuid;
@@ -17,6 +18,7 @@ use omicron_uuid_kinds::OmicronZoneUuid;
 use omicron_uuid_kinds::PhysicalDiskUuid;
 use omicron_uuid_kinds::SledUuid;
 use omicron_uuid_kinds::ZpoolUuid;
+use schemars::JsonSchema;
 use serde::Deserialize;
 use serde::Serialize;
 
@@ -40,7 +42,9 @@ use std::fmt;
 /// Only successful planning runs are currently covered by this report.
 /// Failures to plan (i.e., to generate a valid blueprint) are represented
 /// by `nexus-reconfigurator-planning::blueprint_builder::Error`.
-#[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
+#[derive(
+    Clone, Debug, Deserialize, Serialize, PartialEq, Eq, Diffable, JsonSchema,
+)]
 #[must_use = "an unread report is not actionable"]
 pub struct PlanningReport {
     /// The blueprint produced by the planning run this report describes.
@@ -54,6 +58,23 @@ pub struct PlanningReport {
     pub add: PlanningAddStepReport,
     pub zone_updates: PlanningZoneUpdatesStepReport,
     pub cockroachdb_settings: PlanningCockroachdbSettingsStepReport,
+}
+
+impl PlanningReport {
+    pub fn new(blueprint_id: BlueprintUuid) -> Self {
+        Self {
+            blueprint_id,
+            expunge: PlanningExpungeStepReport::new(),
+            decommission: PlanningDecommissionStepReport::new(),
+            noop_image_source: PlanningNoopImageSourceStepReport::new(),
+            mgs_updates: PlanningMgsUpdatesStepReport::new(
+                PendingMgsUpdates::new(),
+            ),
+            add: PlanningAddStepReport::new(),
+            zone_updates: PlanningZoneUpdatesStepReport::new(),
+            cockroachdb_settings: PlanningCockroachdbSettingsStepReport::new(),
+        }
+    }
 }
 
 impl fmt::Display for PlanningReport {
@@ -80,7 +101,9 @@ impl fmt::Display for PlanningReport {
     }
 }
 
-#[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
+#[derive(
+    Clone, Debug, Deserialize, Serialize, PartialEq, Eq, Diffable, JsonSchema,
+)]
 pub struct PlanningExpungeStepReport {
     /// Expunged disks not present in the parent blueprint.
     pub orphan_disks: BTreeMap<SledUuid, PhysicalDiskUuid>,
@@ -109,7 +132,9 @@ impl fmt::Display for PlanningExpungeStepReport {
     }
 }
 
-#[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
+#[derive(
+    Clone, Debug, Deserialize, Serialize, PartialEq, Eq, Diffable, JsonSchema,
+)]
 pub struct PlanningDecommissionStepReport {
     /// Decommissioned sleds that unexpectedly appeared as commissioned.
     pub zombie_sleds: Vec<SledUuid>,
@@ -141,7 +166,9 @@ impl fmt::Display for PlanningDecommissionStepReport {
     }
 }
 
-#[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
+#[derive(
+    Clone, Debug, Deserialize, Serialize, PartialEq, Eq, Diffable, JsonSchema,
+)]
 pub struct PlanningNoopImageSourceStepReport {
     pub no_target_release: bool,
     pub skipped_sleds:
@@ -232,7 +259,9 @@ impl fmt::Display for PlanningNoopImageSourceStepReport {
     }
 }
 
-#[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
+#[derive(
+    Clone, Debug, Deserialize, Serialize, PartialEq, Eq, Diffable, JsonSchema,
+)]
 pub enum PlanningNoopImageSourceSkipSledReason {
     AllZonesAlreadyArtifact(usize),
     SledNotInInventory,
@@ -266,7 +295,9 @@ impl fmt::Display for PlanningNoopImageSourceSkipSledReason {
     }
 }
 
-#[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
+#[derive(
+    Clone, Debug, Deserialize, Serialize, PartialEq, Eq, Diffable, JsonSchema,
+)]
 pub enum PlanningNoopImageSourceSkipZoneReason {
     ZoneNotInManifest {
         zone_kind: String,
@@ -304,7 +335,9 @@ impl fmt::Display for PlanningNoopImageSourceSkipZoneReason {
     }
 }
 
-#[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
+#[derive(
+    Clone, Debug, Deserialize, Serialize, PartialEq, Eq, Diffable, JsonSchema,
+)]
 pub struct PlanningMgsUpdatesStepReport {
     pub pending_mgs_updates: PendingMgsUpdates,
 }
@@ -339,7 +372,9 @@ impl fmt::Display for PlanningMgsUpdatesStepReport {
     }
 }
 
-#[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
+#[derive(
+    Clone, Debug, Deserialize, Serialize, PartialEq, Eq, Diffable, JsonSchema,
+)]
 pub struct PlanningAddStepReport {
     pub sleds_with_no_zpools_for_ntp_zone: BTreeSet<SledUuid>,
     pub sleds_waiting_for_ntp_zone: BTreeSet<SledUuid>,
@@ -465,7 +500,9 @@ impl fmt::Display for PlanningAddStepReport {
     }
 }
 
-#[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
+#[derive(
+    Clone, Debug, Deserialize, Serialize, PartialEq, Eq, Diffable, JsonSchema,
+)]
 pub struct PlanningZoneUpdatesStepReport {
     /// What are we waiting on to start zone updates?
     pub waiting_on: Option<ZoneUpdatesWaitingOn>,
@@ -581,7 +618,9 @@ impl fmt::Display for PlanningZoneUpdatesStepReport {
     }
 }
 
-#[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
+#[derive(
+    Clone, Debug, Deserialize, Serialize, PartialEq, Eq, Diffable, JsonSchema,
+)]
 pub enum ZoneUpdatesWaitingOn {
     /// Waiting on discretionary zone placement.
     DiscretionaryZones,
@@ -601,7 +640,9 @@ impl ZoneUpdatesWaitingOn {
     }
 }
 
-#[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
+#[derive(
+    Clone, Debug, Deserialize, Serialize, PartialEq, Eq, Diffable, JsonSchema,
+)]
 pub enum ZoneUnsafeToShutdown {
     Cockroachdb(CockroachdbUnsafeToShutdown),
 }
@@ -614,7 +655,9 @@ impl fmt::Display for ZoneUnsafeToShutdown {
     }
 }
 
-#[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
+#[derive(
+    Clone, Debug, Deserialize, Serialize, PartialEq, Eq, Diffable, JsonSchema,
+)]
 pub enum CockroachdbUnsafeToShutdown {
     MissingLiveNodesStat,
     MissingUnderreplicatedStat,
@@ -651,7 +694,9 @@ impl fmt::Display for CockroachdbUnsafeToShutdown {
     }
 }
 
-#[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
+#[derive(
+    Clone, Debug, Deserialize, Serialize, PartialEq, Eq, Diffable, JsonSchema,
+)]
 pub struct PlanningCockroachdbSettingsStepReport {
     pub preserve_downgrade: CockroachDbPreserveDowngrade,
 }

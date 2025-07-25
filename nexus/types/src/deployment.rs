@@ -239,12 +239,17 @@ pub struct Blueprint {
     /// when this blueprint was generated (for debugging)
     #[daft(ignore)]
     pub time_created: chrono::DateTime<chrono::Utc>,
+
     /// identity of the component that generated the blueprint (for debugging)
     /// This would generally be the Uuid of a Nexus instance.
     pub creator: String,
+
     /// human-readable string describing why this blueprint was created
     /// (for debugging)
     pub comment: String,
+
+    /// Report on the planning session that resulted in this blueprint
+    pub report: PlanningReport,
 }
 
 impl Blueprint {
@@ -638,6 +643,7 @@ impl fmt::Display for BlueprintDisplay<'_> {
             time_created: _,
             creator: _,
             comment: _,
+            report,
         } = self.blueprint;
 
         writeln!(f, "blueprint  {}", id)?;
@@ -749,6 +755,8 @@ impl fmt::Display for BlueprintDisplay<'_> {
                 )
             )?;
         }
+
+        writeln!(f, "\n{report}")?;
 
         Ok(())
     }

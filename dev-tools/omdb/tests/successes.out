@@ -1568,6 +1568,9 @@ parent:    <none>
 
  PENDING MGS-MANAGED UPDATES: 0
 
+Report on planning run for blueprint ......<REDACTED_BLUEPRINT_ID>.......:
+
+
 ---------------------------------------------
 stderr:
 note: using Nexus URL http://127.0.0.1:REDACTED_PORT/
@@ -1687,6 +1690,9 @@ parent:    <none>
     target release min gen:   1
 
  PENDING MGS-MANAGED UPDATES: 0
+
+Report on planning run for blueprint ......<REDACTED_BLUEPRINT_ID>.......:
+
 
 ---------------------------------------------
 stderr:

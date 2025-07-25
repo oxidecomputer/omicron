@@ -324,3 +324,10 @@ parent:    516e80a3-b362-4fac-bd3c-4559717120dd
     target release min gen:   1
 
  PENDING MGS-MANAGED UPDATES: 0
+
+Report on planning run for blueprint 1ac2d88f-27dd-4506-8585-6b2be832528e:
+* Discretionary zones placed:
+  * on sled d67ce8f0-a691-4010-b414-420d82e80527: crucible_pantry, nexus zones
+  * on sled fefcf4cf-f7e7-46b3-b629-058526ce440e: clickhouse, internal_dns zones
+* Zone updates waiting on discretionary zones
+

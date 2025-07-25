@@ -350,6 +350,7 @@ mod test {
     use nexus_types::deployment::OximeterReadMode;
     use nexus_types::deployment::OximeterReadPolicy;
     use nexus_types::deployment::PendingMgsUpdates;
+    use nexus_types::deployment::PlanningReport;
     use nexus_types::deployment::SledFilter;
     use nexus_types::deployment::TufRepoPolicy;
     use nexus_types::deployment::blueprint_zone_type;
@@ -707,8 +708,9 @@ mod test {
 
         let dns_empty = dns_config_empty();
         let initial_dns_generation = dns_empty.generation;
+        let blueprint_id = BlueprintUuid::new_v4();
         let mut blueprint = Blueprint {
-            id: BlueprintUuid::new_v4(),
+            id: blueprint_id,
             sleds: blueprint_sleds,
             pending_mgs_updates: PendingMgsUpdates::new(),
             cockroachdb_setting_preserve_downgrade:
@@ -724,6 +726,7 @@ mod test {
             time_created: now_db_precision(),
             creator: "test-suite".to_string(),
             comment: "test blueprint".to_string(),
+            report: PlanningReport::new(blueprint_id),
         };
 
         // To make things slightly more interesting, let's add a zone that's

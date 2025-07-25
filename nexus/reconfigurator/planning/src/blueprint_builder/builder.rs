@@ -45,6 +45,7 @@ use nexus_types::deployment::OmicronZoneExternalSnatIp;
 use nexus_types::deployment::OximeterReadMode;
 use nexus_types::deployment::PendingMgsUpdates;
 use nexus_types::deployment::PlanningInput;
+use nexus_types::deployment::PlanningReport;
 use nexus_types::deployment::SledFilter;
 use nexus_types::deployment::SledResources;
 use nexus_types::deployment::TufRepoContentsError;
@@ -434,13 +435,14 @@ pub struct BlueprintBuilder<'a> {
     sled_editors: BTreeMap<SledUuid, SledEditor>,
     cockroachdb_setting_preserve_downgrade: CockroachDbPreserveDowngrade,
     target_release_minimum_generation: Generation,
+    report: Option<PlanningReport>,
 
     creator: String,
     operations: Vec<Operation>,
     comments: Vec<String>,
     pending_mgs_updates: PendingMgsUpdates,
 
-    // Random number generator for new UUIDs
+    /// Random number generator for new UUIDs
     rng: PlannerRng,
 }
 
@@ -490,8 +492,10 @@ impl<'a> BlueprintBuilder<'a> {
             .collect::<BTreeMap<_, _>>();
         let num_sleds = sleds.len();
 
+        let id = rng.next_blueprint();
+        let report = PlanningReport::new(id);
         Blueprint {
-            id: rng.next_blueprint(),
+            id,
             sleds,
             pending_mgs_updates: PendingMgsUpdates::new(),
             parent_blueprint_id: None,
@@ -507,6 +511,7 @@ impl<'a> BlueprintBuilder<'a> {
             time_created: now_db_precision(),
             creator: creator.to_owned(),
             comment: format!("starting blueprint with {num_sleds} empty sleds"),
+            report,
         }
     }
 
@@ -578,6 +583,7 @@ impl<'a> BlueprintBuilder<'a> {
             pending_mgs_updates: parent_blueprint.pending_mgs_updates.clone(),
             target_release_minimum_generation: parent_blueprint
                 .target_release_minimum_generation,
+            report: None,
             creator: creator.to_owned(),
             operations: Vec::new(),
             comments: Vec::new(),
@@ -771,6 +777,9 @@ impl<'a> BlueprintBuilder<'a> {
                 .chain(self.operations.iter().map(|op| op.to_string()))
                 .collect::<Vec<String>>()
                 .join(", "),
+            report: self
+                .report
+                .unwrap_or_else(|| PlanningReport::new(blueprint_id)),
         }
     }
 

@@ -392,6 +392,9 @@ parent:    02697f74-b14a-4418-90f0-c28b2a3a6aa9
 
  PENDING MGS-MANAGED UPDATES: 0
 
+Report on planning run for blueprint ade5749d-bdf3-4fab-a8ae-00bea01b3a5a:
+
+
 
 
 > inventory-generate
@@ -499,6 +502,9 @@ parent:    02697f74-b14a-4418-90f0-c28b2a3a6aa9
     target release min gen:   1
 
  PENDING MGS-MANAGED UPDATES: 0
+
+Report on planning run for blueprint ade5749d-bdf3-4fab-a8ae-00bea01b3a5a:
+
 
 
 
@@ -998,6 +1004,9 @@ parent:    02697f74-b14a-4418-90f0-c28b2a3a6aa9
     target release min gen:   1
 
  PENDING MGS-MANAGED UPDATES: 0
+
+Report on planning run for blueprint ade5749d-bdf3-4fab-a8ae-00bea01b3a5a:
+
 
 
 

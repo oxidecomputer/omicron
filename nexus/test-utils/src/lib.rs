@@ -55,6 +55,7 @@ use nexus_types::deployment::OmicronZoneExternalFloatingAddr;
 use nexus_types::deployment::OmicronZoneExternalFloatingIp;
 use nexus_types::deployment::OmicronZoneExternalSnatIp;
 use nexus_types::deployment::OximeterReadMode;
+use nexus_types::deployment::PlanningReport;
 use nexus_types::deployment::blueprint_zone_type;
 use nexus_types::external_api::views::SledState;
 use nexus_types::internal_api::params::DnsConfigParams;
@@ -913,8 +914,9 @@ impl<'a, N: NexusServer> ControlPlaneTestContextBuilder<'a, N> {
             .blueprint_sleds
             .take()
             .expect("should have already made blueprint sled configs");
+        let id = BlueprintUuid::new_v4();
         let blueprint = Blueprint {
-            id: BlueprintUuid::new_v4(),
+            id,
             sleds,
             pending_mgs_updates: PendingMgsUpdates::new(),
             parent_blueprint_id: None,
@@ -932,6 +934,7 @@ impl<'a, N: NexusServer> ControlPlaneTestContextBuilder<'a, N> {
             time_created: Utc::now(),
             creator: "nexus-test-utils".to_string(),
             comment: "initial test blueprint".to_string(),
+            report: PlanningReport::new(id),
         };
 
         self.initial_blueprint_id = Some(blueprint.id);

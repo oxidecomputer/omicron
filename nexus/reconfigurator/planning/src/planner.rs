@@ -138,17 +138,9 @@ impl<'a> Planner<'a> {
 
     pub fn plan(mut self) -> Result<Blueprint, Error> {
         let checked = self.check_input_validity()?;
-        let _ = self.do_plan(checked)?;
-        Ok(self.blueprint.build())
-    }
-
-    pub fn plan_and_report(
-        mut self,
-    ) -> Result<(Blueprint, PlanningReport), Error> {
-        let checked = self.check_input_validity()?;
         let report = self.do_plan(checked)?;
-        let blueprint = self.blueprint.build();
-        Ok((blueprint, report))
+        self.blueprint.set_report(report);
+        Ok(self.blueprint.build())
     }
 
     fn check_input_validity(&self) -> Result<InputChecked, Error> {
@@ -5792,7 +5784,7 @@ pub(crate) mod test {
             update_collection_from_blueprint(&mut example, &parent);
 
             let blueprint_name = format!("blueprint{i}");
-            let (blueprint, report) = Planner::new_based_on(
+            let blueprint = Planner::new_based_on(
                 log.clone(),
                 &parent,
                 &input,
@@ -5801,11 +5793,11 @@ pub(crate) mod test {
                 PlannerRng::from_seed((TEST_NAME, &blueprint_name)),
             )
             .expect("can't create planner")
-            .plan_and_report()
+            .plan()
             .unwrap_or_else(|_| panic!("can't re-plan after {i} iterations"));
 
-            eprintln!("{report}\n");
-            assert_eq!(report.blueprint_id, blueprint.id);
+            assert_eq!(blueprint.report.blueprint_id, blueprint.id);
+            eprintln!("{}\n", blueprint.report);
             // TODO: more report testing
 
             let summary = blueprint.diff_since_blueprint(&parent);

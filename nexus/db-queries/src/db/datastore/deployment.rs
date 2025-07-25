@@ -75,6 +75,7 @@ use nexus_types::deployment::ExpectedVersion;
 use nexus_types::deployment::OximeterReadMode;
 use nexus_types::deployment::PendingMgsUpdateDetails;
 use nexus_types::deployment::PendingMgsUpdates;
+use nexus_types::deployment::PlanningReport;
 use nexus_types::inventory::BaseboardId;
 use omicron_common::api::external::DataPageParams;
 use omicron_common::api::external::Error;
@@ -1349,6 +1350,9 @@ impl DataStore {
             }
         }
 
+        // FIXME: Once reports are stored in the database, read them out here.
+        let report = PlanningReport::new(blueprint_id);
+
         Ok(Blueprint {
             id: blueprint_id,
             pending_mgs_updates,
@@ -1365,6 +1369,7 @@ impl DataStore {
             time_created,
             creator,
             comment,
+            report,
         })
     }
 
