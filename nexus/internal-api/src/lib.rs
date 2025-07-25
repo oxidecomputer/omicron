@@ -29,7 +29,7 @@ use nexus_types::{
         },
         views::{
             BackgroundTask, DemoSaga, Ipv4NatEntryView, MgsUpdateDriverStatus,
-            Saga, UpdateStatus,
+            QuiesceStatus, Saga, UpdateStatus,
         },
     },
 };
@@ -740,6 +740,28 @@ pub trait NexusInternalApi {
         rqctx: RequestContext<Self::Context>,
         policy: TypedBody<OximeterReadPolicy>,
     ) -> Result<HttpResponseUpdatedNoContent, HttpError>;
+
+    /// Begin quiescing this Nexus instance
+    ///
+    /// This causes no new sagas to be started and eventually causes no database
+    /// connections to become available.  This is a one-way trip.  There's no
+    /// unquiescing Nexus.
+    #[endpoint {
+        method = POST,
+        path = "/quiesce"
+    }]
+    async fn quiesce_start(
+        rqctx: RequestContext<Self::Context>,
+    ) -> Result<HttpResponseUpdatedNoContent, HttpError>;
+
+    /// Check whether Nexus is running normally, quiescing, or fully quiesced.
+    #[endpoint {
+        method = GET,
+        path = "/quiesce"
+    }]
+    async fn quiesce_get(
+        rqctx: RequestContext<Self::Context>,
+    ) -> Result<HttpResponseOk<QuiesceStatus>, HttpError>;
 }
 
 /// Path parameters for Sled Agent requests (internal API)

@@ -1635,6 +1635,46 @@
         }
       }
     },
+    "/quiesce": {
+      "get": {
+        "summary": "Check whether Nexus is running normally, quiescing, or fully quiesced.",
+        "operationId": "quiesce_get",
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/QuiesceStatus"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      },
+      "post": {
+        "summary": "Begin quiescing this Nexus instance",
+        "description": "This causes no new sagas to be started and eventually causes no database connections to become available.  This is a one-way trip.  There's no unquiescing Nexus.",
+        "operationId": "quiesce_start",
+        "responses": {
+          "204": {
+            "description": "resource updated"
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
     "/racks/{rack_id}/initialization-complete": {
       "put": {
         "summary": "Report that the Rack Setup Service initialization is complete",
@@ -4656,6 +4696,28 @@
         "format": "uint8",
         "minimum": 0
       },
+      "HeldDbClaimInfo": {
+        "type": "object",
+        "properties": {
+          "debug": {
+            "type": "string"
+          },
+          "held_since": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "id": {
+            "type": "integer",
+            "format": "uint64",
+            "minimum": 0
+          }
+        },
+        "required": [
+          "debug",
+          "held_since",
+          "id"
+        ]
+      },
       "IdMapBlueprintDatasetConfig": {
         "type": "object",
         "additionalProperties": {
@@ -6580,6 +6642,179 @@
           "lease_duration"
         ]
       },
+      "QuiesceState": {
+        "oneOf": [
+          {
+            "description": "Normal operation",
+            "type": "object",
+            "properties": {
+              "state": {
+                "type": "string",
+                "enum": [
+                  "running"
+                ]
+              }
+            },
+            "required": [
+              "state"
+            ]
+          },
+          {
+            "description": "New sagas disallowed, but some may be running.",
+            "type": "object",
+            "properties": {
+              "quiesce_details": {
+                "type": "object",
+                "properties": {
+                  "time_requested": {
+                    "type": "string",
+                    "format": "date-time"
+                  }
+                },
+                "required": [
+                  "time_requested"
+                ]
+              },
+              "state": {
+                "type": "string",
+                "enum": [
+                  "waiting_for_sagas"
+                ]
+              }
+            },
+            "required": [
+              "quiesce_details",
+              "state"
+            ]
+          },
+          {
+            "description": "No sagas running, but some database connections may be held.",
+            "type": "object",
+            "properties": {
+              "quiesce_details": {
+                "type": "object",
+                "properties": {
+                  "duration_waiting_for_sagas": {
+                    "$ref": "#/components/schemas/Duration"
+                  },
+                  "time_requested": {
+                    "type": "string",
+                    "format": "date-time"
+                  }
+                },
+                "required": [
+                  "duration_waiting_for_sagas",
+                  "time_requested"
+                ]
+              },
+              "state": {
+                "type": "string",
+                "enum": [
+                  "waiting_for_db"
+                ]
+              }
+            },
+            "required": [
+              "quiesce_details",
+              "state"
+            ]
+          },
+          {
+            "description": "Nexus has no sagas running and is not using the database",
+            "type": "object",
+            "properties": {
+              "quiesce_details": {
+                "type": "object",
+                "properties": {
+                  "duration_total": {
+                    "$ref": "#/components/schemas/Duration"
+                  },
+                  "duration_waiting_for_db": {
+                    "$ref": "#/components/schemas/Duration"
+                  },
+                  "duration_waiting_for_sagas": {
+                    "$ref": "#/components/schemas/Duration"
+                  },
+                  "time_quiesced": {
+                    "type": "string",
+                    "format": "date-time"
+                  },
+                  "time_requested": {
+                    "type": "string",
+                    "format": "date-time"
+                  }
+                },
+                "required": [
+                  "duration_total",
+                  "duration_waiting_for_db",
+                  "duration_waiting_for_sagas",
+                  "time_quiesced",
+                  "time_requested"
+                ]
+              },
+              "state": {
+                "type": "string",
+                "enum": [
+                  "quiesced"
+                ]
+              }
+            },
+            "required": [
+              "quiesce_details",
+              "state"
+            ]
+          }
+        ]
+      },
+      "QuiesceStatus": {
+        "type": "object",
+        "properties": {
+          "db_claims": {
+            "title": "IdOrdMap",
+            "x-rust-type": {
+              "crate": "iddqd",
+              "parameters": [
+                {
+                  "$ref": "#/components/schemas/HeldDbClaimInfo"
+                }
+              ],
+              "path": "iddqd::IdOrdMap",
+              "version": "*"
+            },
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/HeldDbClaimInfo"
+            },
+            "uniqueItems": true
+          },
+          "sagas_running": {
+            "title": "IdOrdMap",
+            "x-rust-type": {
+              "crate": "iddqd",
+              "parameters": [
+                {
+                  "$ref": "#/components/schemas/RunningSagaInfo"
+                }
+              ],
+              "path": "iddqd::IdOrdMap",
+              "version": "*"
+            },
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/RunningSagaInfo"
+            },
+            "uniqueItems": true
+          },
+          "state": {
+            "$ref": "#/components/schemas/QuiesceState"
+          }
+        },
+        "required": [
+          "db_claims",
+          "sagas_running",
+          "state"
+        ]
+      },
       "RackInitializationRequest": {
         "type": "object",
         "properties": {
@@ -6963,6 +7198,27 @@
         "required": [
           "destination",
           "nexthop"
+        ]
+      },
+      "RunningSagaInfo": {
+        "type": "object",
+        "properties": {
+          "saga_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "saga_name": {
+            "type": "string"
+          },
+          "time_started": {
+            "type": "string",
+            "format": "date-time"
+          }
+        },
+        "required": [
+          "saga_id",
+          "saga_name",
+          "time_started"
         ]
       },
       "Saga": {

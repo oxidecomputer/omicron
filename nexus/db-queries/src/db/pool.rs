@@ -8,27 +8,32 @@
 use super::Config as DbConfig;
 use crate::db::pool_connection::{DieselPgConnector, DieselPgConnectorArgs};
 
+use chrono::Utc;
+use iddqd::IdOrdMap;
 use internal_dns_resolver::QorbResolver;
 use internal_dns_types::names::ServiceName;
-use nexus_db_lookup::DbConnection;
+use nexus_db_lookup::{AsyncConnection, DataStoreConnection};
+use nexus_types::internal_api::views::HeldDbClaimInfo;
+use omicron_common::api::external::Error;
 use qorb::backend;
 use qorb::policy::Policy;
 use qorb::resolver::{AllBackends, Resolver};
 use slog::Logger;
+use std::backtrace::Backtrace;
 use std::collections::BTreeMap;
 use std::sync::Arc;
+use std::sync::atomic::{AtomicU64, Ordering};
 use tokio::sync::watch;
-
-type QorbConnection = async_bb8_diesel::Connection<DbConnection>;
-type QorbPool = qorb::pool::Pool<QorbConnection>;
 
 /// Wrapper around a database connection pool.
 ///
 /// Expected to be used as the primary interface to the database.
 pub struct Pool {
-    inner: QorbPool,
+    next_id: AtomicU64,
+    inner: qorb::pool::Pool<AsyncConnection>,
     log: Logger,
     terminated: std::sync::atomic::AtomicBool,
+    quiesce: watch::Sender<Quiesce>,
 }
 
 // Provides an alternative to the DNS resolver for cases where we want to
@@ -62,7 +67,7 @@ fn make_single_host_resolver(
 
 fn make_postgres_connector(
     log: &Logger,
-) -> qorb::backend::SharedConnector<QorbConnection> {
+) -> qorb::backend::SharedConnector<AsyncConnection> {
     // Create postgres connections.
     //
     // We're currently relying on the DieselPgConnector doing the following:
@@ -101,11 +106,7 @@ impl Pool {
                 err.into_inner()
             }
         };
-        Pool {
-            inner,
-            log: log.clone(),
-            terminated: std::sync::atomic::AtomicBool::new(false),
-        }
+        Self::new_common(inner, log.clone())
     }
 
     /// Creates a new qorb-backed connection pool to a single instance of the
@@ -134,11 +135,7 @@ impl Pool {
                 err.into_inner()
             }
         };
-        Pool {
-            inner,
-            log: log.clone(),
-            terminated: std::sync::atomic::AtomicBool::new(false),
-        }
+        Self::new_common(inner, log.clone())
     }
 
     /// Creates a new qorb-backed connection pool which returns an error
@@ -173,18 +170,89 @@ impl Pool {
                 err.into_inner()
             }
         };
+        Self::new_common(inner, log.clone())
+    }
+
+    fn new_common(
+        inner: qorb::pool::Pool<AsyncConnection>,
+        log: Logger,
+    ) -> Self {
+        let (quiesce, _) = watch::channel(Quiesce {
+            new_claims_allowed: ClaimsAllowed::Allowed,
+            claims_held: IdOrdMap::new(),
+        });
         Pool {
+            next_id: AtomicU64::new(0),
             inner,
-            log: log.clone(),
+            log,
             terminated: std::sync::atomic::AtomicBool::new(false),
+            quiesce,
         }
     }
 
     /// Returns a connection from the pool
-    pub async fn claim(
-        &self,
-    ) -> anyhow::Result<qorb::claim::Handle<QorbConnection>> {
-        Ok(self.inner.claim().await?)
+    pub async fn claim(&self) -> Result<DataStoreConnection, Error> {
+        let id = self.next_id.fetch_add(1, Ordering::SeqCst);
+        let held_since = Utc::now();
+        let debug = Backtrace::force_capture().to_string();
+        let allowed = self.quiesce.send_if_modified(|q| {
+            if let ClaimsAllowed::Disallowed = q.new_claims_allowed {
+                false
+            } else {
+                q.claims_held
+                    .insert_unique(HeldDbClaimInfo { id, held_since, debug })
+                    .expect("claim should not be present yet");
+                true
+            }
+        });
+        if !allowed {
+            return Err(Error::unavail(
+                "no new database claims allowed (quiescing/quiesced)",
+            ));
+        }
+
+        let claim_releaser = ClaimReleaser::new(id, self.quiesce.clone());
+        self.inner
+            .claim()
+            .await
+            .map(|qorb_claim| {
+                DataStoreConnection::new(qorb_claim, Box::new(claim_releaser))
+            })
+            .map_err(|err| {
+                Error::unavail(&format!(
+                    "Failed to access DB connection: {err}"
+                ))
+            })
+    }
+
+    /// Disables creation of all new database claims
+    ///
+    /// This is currently a one-way trip.  The pool cannot be un-quiesced.
+    pub fn quiesce(&self) {
+        // Log this before changing the config to make sure this message
+        // appears before messages from code paths that saw this change.
+        info!(&self.log, "starting db pool quiesce");
+        self.quiesce.send_modify(|q| {
+            q.new_claims_allowed = ClaimsAllowed::Disallowed;
+        });
+    }
+
+    /// Wait for all outstanding claims to be released
+    pub async fn wait_for_quiesced(&self) {
+        let mut rx = self.quiesce.subscribe();
+        // unwrap(): this can only fail if the tx side is dropped, but that
+        // can't happen because we have a reference to it via `self`.
+        rx.wait_for(|q| {
+            q.new_claims_allowed == ClaimsAllowed::Disallowed
+                && q.claims_held.is_empty()
+        })
+        .await
+        .unwrap();
+    }
+
+    /// Returns information about held db claims
+    pub fn claims_held(&self) -> IdOrdMap<HeldDbClaimInfo> {
+        self.quiesce.borrow().claims_held.clone()
     }
 
     /// Stops the qorb background tasks, and causes all future claims to fail
@@ -212,6 +280,46 @@ impl Drop for Pool {
                  should be cancelled, but they may briefly still be initializing connections"
             );
         }
+    }
+}
+
+/// DataStore quiesce configuration and state
+#[derive(Debug, Clone)]
+pub(crate) struct Quiesce {
+    new_claims_allowed: ClaimsAllowed,
+    claims_held: IdOrdMap<HeldDbClaimInfo>,
+}
+
+/// Policy determining whether new database claims are allowed
+///
+/// This is used by Nexus quiesce to disallow creating new database connections
+/// when we're trying to quiesce Nexus.
+#[derive(Debug, Clone, Copy, Eq, PartialEq)]
+pub(crate) enum ClaimsAllowed {
+    /// New claims may be made (normal condition)
+    Allowed,
+    /// New claims may not be made (happens during quiesce)
+    Disallowed,
+}
+
+struct ClaimReleaser {
+    id: u64,
+    tracker: watch::Sender<Quiesce>,
+}
+
+impl ClaimReleaser {
+    fn new(id: u64, tracker: watch::Sender<Quiesce>) -> ClaimReleaser {
+        ClaimReleaser { id, tracker }
+    }
+}
+
+impl Drop for ClaimReleaser {
+    fn drop(&mut self) {
+        self.tracker.send_modify(|q| {
+            q.claims_held
+                .remove(&self.id)
+                .expect("claim should still be present");
+        });
     }
 }
 
