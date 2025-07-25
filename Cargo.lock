@@ -54,15 +54,15 @@ dependencies = [
 
 [[package]]
 name = "ahash"
-version = "0.8.11"
+version = "0.8.12"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e89da841a80418a9b391ebaea17f5c112ffaaa96f621d2c285b5174da76b9011"
+checksum = "5a15f179cd60c4584b8a8c596927aadc462e27f2ca70c04e0071964a73ba7a75"
 dependencies = [
  "cfg-if",
- "getrandom 0.2.15",
+ "getrandom 0.3.1",
  "once_cell",
  "version_check",
- "zerocopy 0.7.35",
+ "zerocopy 0.8.26",
 ]
 
 [[package]]
@@ -525,21 +525,17 @@ dependencies = [
 
 [[package]]
 name = "attest-data"
-version = "0.4.0"
-source = "git+https://github.com/oxidecomputer/dice-util?rev=4b408edc1d00f108ddf635415d783e6f12fe9641#4b408edc1d00f108ddf635415d783e6f12fe9641"
+version = "0.3.0"
+source = "git+https://github.com/oxidecomputer/dice-util?rev=3cc953c8d0ace2f20cbcf3920b0771d25301960a#3cc953c8d0ace2f20cbcf3920b0771d25301960a"
 dependencies = [
- "const-oid",
- "der",
- "getrandom 0.3.3",
- "hex",
+ "getrandom 0.2.15",
  "hubpack",
- "rats-corim",
  "salty",
  "serde",
  "serde_with",
  "sha3",
  "static_assertions",
- "thiserror 2.0.12",
+ "thiserror 1.0.69",
 ]
 
 [[package]]
@@ -721,7 +717,7 @@ dependencies = [
  "bitflags 2.9.1",
  "cexpr",
  "clang-sys",
- "itertools 0.10.5",
+ "itertools 0.12.1",
  "lazy_static",
  "lazycell",
  "log",
@@ -744,7 +740,7 @@ dependencies = [
  "bitflags 2.9.1",
  "cexpr",
  "clang-sys",
- "itertools 0.10.5",
+ "itertools 0.13.0",
  "log",
  "prettyplease",
  "proc-macro2",
@@ -915,7 +911,7 @@ dependencies = [
  "camino-tempfile",
  "chacha20poly1305",
  "ciborium",
- "derive_more",
+ "derive_more 0.99.20",
  "hex",
  "hkdf",
  "omicron-common",
@@ -948,7 +944,7 @@ dependencies = [
  "omicron-common",
  "omicron-uuid-kinds",
  "omicron-workspace-hack",
- "schemars 0.8.22",
+ "schemars",
  "serde",
  "sled-agent-types",
  "sled-hardware-types",
@@ -966,7 +962,7 @@ dependencies = [
  "progenitor 0.10.0",
  "regress",
  "reqwest",
- "schemars 0.8.22",
+ "schemars",
  "serde",
  "serde_json",
  "sled-hardware-types",
@@ -1119,15 +1115,15 @@ dependencies = [
 
 [[package]]
 name = "cargo-util-schemas"
-version = "0.2.0"
+version = "0.8.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e63d2780ac94487eb9f1fea7b0d56300abc9eb488800854ca217f102f5caccca"
+checksum = "7dc1a6f7b5651af85774ae5a34b4e8be397d9cf4bc063b7e6dbd99a841837830"
 dependencies = [
  "semver 1.0.26",
  "serde",
  "serde-untagged",
  "serde-value",
- "thiserror 1.0.69",
+ "thiserror 2.0.12",
  "toml 0.8.23",
  "unicode-xid",
  "url",
@@ -1149,9 +1145,9 @@ dependencies = [
 
 [[package]]
 name = "cargo_metadata"
-version = "0.20.0"
+version = "0.21.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "4f7835cfc6135093070e95eb2b53e5d9b5c403dc3a6be6040ee026270aa82502"
+checksum = "5cfca2aaa699835ba88faf58a06342a314a950d2b9686165e038286c30316868"
 dependencies = [
  "camino",
  "cargo-platform 0.2.0",
@@ -1242,11 +1238,11 @@ dependencies = [
 
 [[package]]
 name = "cfg-expr"
-version = "0.18.0"
+version = "0.20.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "1a2b34126159980f92da2a08bdec0694fd80fb5eb9e48aff25d20a0d8dfa710d"
+checksum = "0d0390889d58f934f01cd49736275b4c2da15bcfc328c78ff2349907e6cabf22"
 dependencies = [
- "smallvec 1.15.0",
+ "smallvec 1.15.1",
  "target-lexicon",
 ]
 
@@ -1387,9 +1383,9 @@ dependencies = [
 
 [[package]]
 name = "clap"
-version = "4.5.40"
+version = "4.5.41"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "40b6887a1d8685cebccf115538db5c0efe625ccac9696ad45c409d96566e910f"
+checksum = "be92d32e80243a54711e5d7ce823c35c41c9d929dc4ab58e1276f625841aadf9"
 dependencies = [
  "clap_builder",
  "clap_derive",
@@ -1397,9 +1393,9 @@ dependencies = [
 
 [[package]]
 name = "clap_builder"
-version = "4.5.40"
+version = "4.5.41"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e0c66c08ce9f0c698cbce5c0279d0bb6ac936d8674174fe48f736533b964f59e"
+checksum = "707eab41e9622f9139419d573eca0900137718000c517d47da73045f54331c3d"
 dependencies = [
  "anstream",
  "anstyle",
@@ -1410,9 +1406,9 @@ dependencies = [
 
 [[package]]
 name = "clap_derive"
-version = "4.5.40"
+version = "4.5.41"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d2c7947ae4cc3d851207c1adb5b5e260ff0cca11446b1d6d1423788e442257ce"
+checksum = "ef4f52386a59ca4c860f7393bcf8abd8dfd91ecccc0f774635ff68e92eeef491"
 dependencies = [
  "heck 0.5.0",
  "proc-macro2",
@@ -1442,7 +1438,7 @@ dependencies = [
  "omicron-workspace-hack",
  "oxide-tokio-rt",
  "ratatui",
- "schemars 0.8.22",
+ "schemars",
  "serde_json",
  "slog",
  "slog-async",
@@ -1462,7 +1458,7 @@ dependencies = [
  "omicron-common",
  "omicron-uuid-kinds",
  "omicron-workspace-hack",
- "schemars 0.8.22",
+ "schemars",
  "serde",
 ]
 
@@ -1476,7 +1472,7 @@ dependencies = [
  "omicron-workspace-hack",
  "progenitor 0.10.0",
  "reqwest",
- "schemars 0.8.22",
+ "schemars",
  "serde",
  "slog",
 ]
@@ -1491,7 +1487,7 @@ dependencies = [
  "omicron-workspace-hack",
  "progenitor 0.10.0",
  "reqwest",
- "schemars 0.8.22",
+ "schemars",
  "serde",
  "slog",
 ]
@@ -1506,7 +1502,7 @@ dependencies = [
  "omicron-workspace-hack",
  "progenitor 0.10.0",
  "reqwest",
- "schemars 0.8.22",
+ "schemars",
  "serde",
  "slog",
 ]
@@ -1532,12 +1528,12 @@ dependencies = [
  "camino-tempfile",
  "chrono",
  "daft",
- "derive_more",
+ "derive_more 0.99.20",
  "expectorate",
  "itertools 0.14.0",
  "omicron-common",
  "omicron-workspace-hack",
- "schemars 0.8.22",
+ "schemars",
  "serde",
  "serde_json",
  "slog",
@@ -1569,8 +1565,8 @@ dependencies = [
  "anyhow",
  "camino",
  "clap",
- "derive_more",
- "schemars 0.8.22",
+ "derive_more 0.99.20",
+ "schemars",
  "serde",
  "serde_json",
  "thiserror 1.0.69",
@@ -1611,7 +1607,7 @@ dependencies = [
  "omicron-common",
  "omicron-uuid-kinds",
  "omicron-workspace-hack",
- "schemars 0.8.22",
+ "schemars",
  "serde",
 ]
 
@@ -1624,7 +1620,7 @@ dependencies = [
  "omicron-workspace-hack",
  "progenitor 0.10.0",
  "reqwest",
- "schemars 0.8.22",
+ "schemars",
  "serde",
  "slog",
 ]
@@ -1638,7 +1634,7 @@ dependencies = [
  "omicron-common",
  "omicron-workspace-hack",
  "proptest",
- "schemars 0.8.22",
+ "schemars",
  "serde",
  "test-strategy",
  "thiserror 2.0.12",
@@ -1657,7 +1653,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "117725a109d387c937a1533ce01b450cbde6b88abceea8473c4d7a85853cda3c"
 dependencies = [
  "lazy_static",
- "windows-sys 0.48.0",
+ "windows-sys 0.59.0",
 ]
 
 [[package]]
@@ -1670,7 +1666,7 @@ dependencies = [
  "oximeter 0.1.0 (git+https://github.com/oxidecomputer/omicron?branch=main)",
  "oxnet",
  "rand 0.8.5",
- "schemars 0.8.22",
+ "schemars",
  "serde",
  "serde_json",
  "slog",
@@ -1689,7 +1685,7 @@ source = "git+https://github.com/oxidecomputer/lldp#82fbc8c9747eb9f74dde0f92ae77
 dependencies = [
  "anyhow",
  "dpd-client",
- "schemars 0.8.22",
+ "schemars",
  "serde",
  "serde_json",
  "slog",
@@ -1787,6 +1783,15 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "6245d59a3e82a7fc217c5828a6692dbc6dfb63a0c8c90495621f7b9d79704a0e"
 
 [[package]]
+name = "convert_case"
+version = "0.7.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "bb402b8d4c85569410425650ce3eddc7d698ed96d39a73f941b08fb63082f1e7"
+dependencies = [
+ "unicode-segmentation",
+]
+
+[[package]]
 name = "cookie"
 version = "0.18.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1840,12 +1845,6 @@ name = "core-foundation-sys"
 version = "0.8.7"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "773648b94d0e5d620f64f280777445740e61fe701025087ec8b57f45c791888b"
-
-[[package]]
-name = "corncobs"
-version = "0.1.3"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f9236877021b66ad90f833d8a73a7acb702b985b64c5986682d9f1f1a184f0fb"
 
 [[package]]
 name = "cpufeatures"
@@ -2008,6 +2007,25 @@ dependencies = [
 ]
 
 [[package]]
+name = "crossterm"
+version = "0.29.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "d8b9f2e4c67f833b660cdb0a3523065869fb35570177239812ed4c905aeff87b"
+dependencies = [
+ "bitflags 2.9.1",
+ "crossterm_winapi",
+ "derive_more 2.0.1",
+ "document-features",
+ "futures-core",
+ "mio",
+ "parking_lot 0.12.3",
+ "rustix 1.0.7",
+ "signal-hook",
+ "signal-hook-mio",
+ "winapi",
+]
+
+[[package]]
 name = "crossterm_winapi"
 version = "0.9.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2027,7 +2045,7 @@ dependencies = [
  "percent-encoding",
  "progenitor 0.10.0",
  "reqwest",
- "schemars 0.8.22",
+ "schemars",
  "serde",
  "serde_json",
 ]
@@ -2039,7 +2057,7 @@ source = "git+https://github.com/oxidecomputer/crucible?rev=e164393a88e7b6259889
 dependencies = [
  "base64 0.22.1",
  "crucible-workspace-hack",
- "schemars 0.8.22",
+ "schemars",
  "serde",
  "serde_json",
  "uuid",
@@ -2056,7 +2074,7 @@ dependencies = [
  "dropshot",
  "nix 0.29.0",
  "rustls-pemfile 1.0.4",
- "schemars 0.8.22",
+ "schemars",
  "serde",
  "serde_json",
  "slog",
@@ -2085,7 +2103,7 @@ dependencies = [
  "percent-encoding",
  "progenitor 0.10.0",
  "reqwest",
- "schemars 0.8.22",
+ "schemars",
  "serde",
  "serde_json",
  "uuid",
@@ -2411,9 +2429,9 @@ dependencies = [
 
 [[package]]
 name = "der"
-version = "0.7.10"
+version = "0.7.9"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e7c1832837b905bbfb5101e07cc24c8deddf52f93225eee6ead5f4d63d53ddcb"
+checksum = "f55bf8e7b65898637379c1b74eb1551107c8294ed26d855ceb9fd1a09cfc9bc0"
 dependencies = [
  "const-oid",
  "der_derive",
@@ -2440,7 +2458,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "b42b6fa04a440b495c8b04d0e71b707c585f83cb9cb28cf8cd0d976c315e31b4"
 dependencies = [
  "powerfmt",
- "serde",
 ]
 
 [[package]]
@@ -2514,10 +2531,31 @@ version = "0.99.20"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "6edb4b64a43d977b8e99788fe3a04d483834fba1215a7e02caa415b626497f7f"
 dependencies = [
- "convert_case",
+ "convert_case 0.4.0",
  "proc-macro2",
  "quote",
  "rustc_version 0.4.1",
+ "syn 2.0.104",
+]
+
+[[package]]
+name = "derive_more"
+version = "2.0.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "093242cf7570c207c83073cf82f79706fe7b8317e98620a47d5be7c3d8497678"
+dependencies = [
+ "derive_more-impl",
+]
+
+[[package]]
+name = "derive_more-impl"
+version = "2.0.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "bda628edc44c4bb645fbe0f758797143e4e07926f7ebf4e9bdfbd3d2ce621df3"
+dependencies = [
+ "convert_case 0.7.1",
+ "proc-macro2",
+ "quote",
  "syn 2.0.104",
 ]
 
@@ -2557,37 +2595,19 @@ dependencies = [
 ]
 
 [[package]]
-name = "dice-mfg-msgs"
-version = "0.2.1"
-source = "git+https://github.com/oxidecomputer/dice-util?rev=4b408edc1d00f108ddf635415d783e6f12fe9641#4b408edc1d00f108ddf635415d783e6f12fe9641"
-dependencies = [
- "const-oid",
- "corncobs",
- "hubpack",
- "serde",
- "serde-big-array",
- "thiserror 2.0.12",
- "x509-cert",
- "zerocopy 0.8.26",
-]
-
-[[package]]
 name = "dice-verifier"
-version = "0.3.0-pre0"
-source = "git+https://github.com/oxidecomputer/dice-util?rev=4b408edc1d00f108ddf635415d783e6f12fe9641#4b408edc1d00f108ddf635415d783e6f12fe9641"
+version = "0.2.0"
+source = "git+https://github.com/oxidecomputer/dice-util?rev=3cc953c8d0ace2f20cbcf3920b0771d25301960a#3cc953c8d0ace2f20cbcf3920b0771d25301960a"
 dependencies = [
+ "anyhow",
  "attest-data",
  "const-oid",
  "ed25519-dalek",
- "env_logger 0.11.8",
- "hubpack",
- "libipcc",
+ "env_logger 0.11.5",
  "log",
  "p384",
- "rats-corim",
+ "pem-rfc7468",
  "sha3",
- "tempfile",
- "thiserror 2.0.12",
  "x509-cert",
 ]
 
@@ -2748,7 +2768,7 @@ dependencies = [
  "pretty-hex 0.4.1",
  "progenitor 0.10.0",
  "reqwest",
- "schemars 0.8.22",
+ "schemars",
  "semver 1.0.26",
  "serde",
  "serde_json",
@@ -2774,7 +2794,7 @@ dependencies = [
  "internal-dns-types",
  "omicron-workspace-hack",
  "openapi-manager-types",
- "schemars 0.8.22",
+ "schemars",
  "semver 1.0.26",
  "serde",
 ]
@@ -2790,7 +2810,7 @@ dependencies = [
  "omicron-workspace-hack",
  "progenitor 0.10.0",
  "reqwest",
- "schemars 0.8.22",
+ "schemars",
  "serde",
  "slog",
 ]
@@ -2803,9 +2823,9 @@ checksum = "fea41bba32d969b513997752735605054bc0dfa92b4c56bf1189f2e174be7a10"
 
 [[package]]
 name = "document-features"
-version = "0.2.10"
+version = "0.2.11"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "cb6969eaabd2421f8a2775cfd2471a2b634372b4a25d41e3bd647b79912850a0"
+checksum = "95249b50c6c185bee49034bcb378a49dc2b5dff0be90ff6616d31d64febab05d"
 dependencies = [
  "litrs",
 ]
@@ -2839,7 +2859,7 @@ dependencies = [
  "progenitor 0.9.1",
  "regress",
  "reqwest",
- "schemars 0.8.22",
+ "schemars",
  "serde",
  "serde_json",
  "slog",
@@ -2876,7 +2896,7 @@ dependencies = [
  "percent-encoding",
  "rustls 0.22.4",
  "rustls-pemfile 2.2.0",
- "schemars 0.8.22",
+ "schemars",
  "scopeguard",
  "semver 1.0.26",
  "serde",
@@ -3139,9 +3159,9 @@ dependencies = [
 
 [[package]]
 name = "env_logger"
-version = "0.11.8"
+version = "0.11.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "13c863f0904021b108aa8b2f55046443e6b1ebde8fd4a15c399893aae4fa069f"
+checksum = "e13fa619b91fb2381732789fc5de83b45675e882f66623b7d8cb4f643017018d"
 dependencies = [
  "env_filter",
  "log",
@@ -3170,7 +3190,7 @@ dependencies = [
  "dropshot",
  "omicron-uuid-kinds",
  "omicron-workspace-hack",
- "schemars 0.8.22",
+ "schemars",
  "serde",
  "serde_json",
  "thiserror 2.0.12",
@@ -3598,7 +3618,7 @@ dependencies = [
  "omicron-common",
  "omicron-uuid-kinds",
  "omicron-workspace-hack",
- "schemars 0.8.22",
+ "schemars",
  "serde",
  "uuid",
 ]
@@ -3644,7 +3664,7 @@ dependencies = [
  "progenitor 0.10.0",
  "rand 0.8.5",
  "reqwest",
- "schemars 0.8.22",
+ "schemars",
  "serde",
  "serde_json",
  "slog",
@@ -3749,7 +3769,7 @@ dependencies = [
  "omicron-common",
  "omicron-uuid-kinds",
  "omicron-workspace-hack",
- "schemars 0.8.22",
+ "schemars",
  "serde",
  "tufaceous-artifact",
  "uuid",
@@ -3804,14 +3824,14 @@ dependencies = [
 
 [[package]]
 name = "getrandom"
-version = "0.3.3"
+version = "0.3.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "26145e563e54f2cadc477553f1ec5ee650b00862f0a58bcd12cbdc5f0ea2d2f4"
+checksum = "43a49c392881ce6d5c3b8cb70f98717b7c07aabbdff06687b9030dbfbe2725f8"
 dependencies = [
  "cfg-if",
  "libc",
- "r-efi",
- "wasi 0.14.2+wasi-0.2.4",
+ "wasi 0.13.3+wasi-0.2.2",
+ "windows-targets 0.52.6",
 ]
 
 [[package]]
@@ -3925,14 +3945,13 @@ dependencies = [
 
 [[package]]
 name = "guppy"
-version = "0.17.19"
+version = "0.17.20"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "81dfbb4e91461d20334e04ea276ec826d62f4509ccd641db47d4ae15277dbb03"
+checksum = "7eadc0c380d2c5f421758a5838ce593687da4a47d1dcf1169bf3bad629b764e7"
 dependencies = [
  "ahash",
  "camino",
- "cargo-util-schemas",
- "cargo_metadata 0.20.0",
+ "cargo_metadata 0.21.0",
  "cfg-if",
  "debug-ignore",
  "fixedbitset 0.5.7",
@@ -3942,11 +3961,11 @@ dependencies = [
  "nested",
  "once_cell",
  "pathdiff",
- "petgraph 0.7.1",
+ "petgraph 0.8.2",
  "semver 1.0.26",
  "serde",
  "serde_json",
- "smallvec 1.15.0",
+ "smallvec 1.15.1",
  "static_assertions",
  "target-spec",
 ]
@@ -4224,7 +4243,7 @@ dependencies = [
  "parking_lot 0.12.3",
  "rand 0.8.5",
  "resolv-conf",
- "smallvec 1.15.0",
+ "smallvec 1.15.1",
  "thiserror 1.0.69",
  "tokio",
  "tracing",
@@ -4245,7 +4264,7 @@ dependencies = [
  "parking_lot 0.12.3",
  "rand 0.9.1",
  "resolv-conf",
- "smallvec 1.15.0",
+ "smallvec 1.15.1",
  "thiserror 2.0.12",
  "tokio",
  "tracing",
@@ -4505,7 +4524,7 @@ dependencies = [
  "httpdate",
  "itoa",
  "pin-project-lite",
- "smallvec 1.15.0",
+ "smallvec 1.15.1",
  "tokio",
  "want",
 ]
@@ -4670,7 +4689,7 @@ dependencies = [
  "icu_normalizer_data",
  "icu_properties",
  "icu_provider",
- "smallvec 1.15.0",
+ "smallvec 1.15.1",
  "utf16_iter",
  "utf8_iter",
  "write16",
@@ -4740,7 +4759,7 @@ dependencies = [
  "derive-where",
  "omicron-workspace-hack",
  "proptest",
- "schemars 0.8.22",
+ "schemars",
  "serde",
  "serde_json",
  "test-strategy",
@@ -4759,7 +4778,7 @@ dependencies = [
  "hashbrown 0.15.4",
  "ref-cast",
  "rustc-hash 2.1.1",
- "schemars 0.8.22",
+ "schemars",
  "serde",
  "serde_json",
 ]
@@ -4777,7 +4796,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "686f825264d630750a544639377bae737628043f20d38bbc029e8f29ea968a7e"
 dependencies = [
  "idna_adapter",
- "smallvec 1.15.0",
+ "smallvec 1.15.1",
  "utf8_iter",
 ]
 
@@ -4854,7 +4873,7 @@ dependencies = [
  "oxlog",
  "oxnet",
  "regress",
- "schemars 0.8.22",
+ "schemars",
  "serde",
  "serde_json",
  "slog",
@@ -4893,7 +4912,6 @@ checksum = "bd070e393353796e801d209ad339e89596eb4c8d430d18ede6a1cced8fafbd99"
 dependencies = [
  "autocfg",
  "hashbrown 0.12.3",
- "serde",
 ]
 
 [[package]]
@@ -5070,7 +5088,7 @@ dependencies = [
  "omicron-common",
  "omicron-uuid-kinds",
  "omicron-workspace-hack",
- "schemars 0.8.22",
+ "schemars",
  "serde",
  "slog",
  "tufaceous-artifact",
@@ -5088,7 +5106,7 @@ dependencies = [
  "progenitor 0.10.0",
  "regress",
  "reqwest",
- "schemars 0.8.22",
+ "schemars",
  "serde",
  "serde_json",
  "slog",
@@ -5106,7 +5124,7 @@ dependencies = [
  "omicron-common",
  "omicron-workspace-hack",
  "proptest",
- "schemars 0.8.22",
+ "schemars",
  "serde",
  "serde_json",
  "serde_with",
@@ -5183,7 +5201,7 @@ dependencies = [
  "omicron-common",
  "omicron-uuid-kinds",
  "omicron-workspace-hack",
- "schemars 0.8.22",
+ "schemars",
  "serde",
  "serde_json",
 ]
@@ -5237,7 +5255,7 @@ version = "0.21.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "cf370abdafd54d13e54a620e8c3e1145f28e46cc9d704bc6d94414559df41763"
 dependencies = [
- "schemars 0.8.22",
+ "schemars",
  "serde",
 ]
 
@@ -5573,7 +5591,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "4979f22fdb869068da03c9f7528f8297c6fd2606bc3a4affe42e6a823fdb8da4"
 dependencies = [
  "cfg-if",
- "windows-targets 0.48.5",
+ "windows-targets 0.52.6",
 ]
 
 [[package]]
@@ -5763,7 +5781,7 @@ dependencies = [
  "progenitor 0.9.1",
  "protocol",
  "reqwest",
- "schemars 0.8.22",
+ "schemars",
  "serde",
  "serde_json",
  "slog",
@@ -5984,7 +6002,7 @@ dependencies = [
  "percent-encoding",
  "progenitor 0.9.1",
  "reqwest",
- "schemars 0.8.22",
+ "schemars",
  "serde",
  "serde_json",
  "slog",
@@ -6064,7 +6082,7 @@ dependencies = [
  "parking_lot 0.12.3",
  "portable-atomic",
  "rustc_version 0.4.1",
- "smallvec 1.15.0",
+ "smallvec 1.15.1",
  "tagptr",
  "thiserror 1.0.69",
  "uuid",
@@ -6150,7 +6168,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "a17d82edb1c8a6c20c238747ae7aae9181133e766bc92cd2556fdd764407d0d1"
 dependencies = [
  "proptest",
- "schemars 0.8.22",
+ "schemars",
  "serde",
  "uuid",
 ]
@@ -6227,7 +6245,7 @@ dependencies = [
  "progenitor 0.10.0",
  "regress",
  "reqwest",
- "schemars 0.8.22",
+ "schemars",
  "serde",
  "serde_json",
  "slog",
@@ -6247,7 +6265,7 @@ dependencies = [
  "omicron-uuid-kinds",
  "omicron-workspace-hack",
  "pretty_assertions",
- "schemars 0.8.22",
+ "schemars",
  "serde",
  "serde_json",
  "serde_with",
@@ -6346,7 +6364,7 @@ dependencies = [
  "rand 0.8.5",
  "ref-cast",
  "regex",
- "schemars 0.8.22",
+ "schemars",
  "semver 1.0.26",
  "serde",
  "serde_json",
@@ -6429,7 +6447,7 @@ dependencies = [
  "ref-cast",
  "regex",
  "rustls 0.22.4",
- "schemars 0.8.22",
+ "schemars",
  "semver 1.0.26",
  "serde",
  "serde_json",
@@ -6499,7 +6517,7 @@ dependencies = [
  "omicron-common",
  "omicron-uuid-kinds",
  "omicron-workspace-hack",
- "schemars 0.8.22",
+ "schemars",
  "serde",
  "uuid",
 ]
@@ -6515,6 +6533,7 @@ dependencies = [
  "clickhouse-admin-keeper-client",
  "clickhouse-admin-server-client",
  "clickhouse-admin-types",
+ "dns-service-client",
  "expectorate",
  "futures",
  "gateway-client",
@@ -6524,6 +6543,7 @@ dependencies = [
  "httpmock",
  "id-map",
  "iddqd",
+ "itertools 0.14.0",
  "nexus-sled-agent-shared",
  "nexus-types",
  "ntp-admin-client",
@@ -6899,7 +6919,7 @@ dependencies = [
  "omicron-passwords",
  "omicron-uuid-kinds",
  "omicron-workspace-hack",
- "schemars 0.8.22",
+ "schemars",
  "serde",
  "serde_json",
  "sled-hardware-types",
@@ -7003,7 +7023,7 @@ dependencies = [
  "cookie",
  "daft",
  "derive-where",
- "derive_more",
+ "derive_more 0.99.20",
  "dropshot",
  "futures",
  "gateway-client",
@@ -7031,7 +7051,7 @@ dependencies = [
  "parse-display",
  "proptest",
  "regex",
- "schemars 0.8.22",
+ "schemars",
  "semver 1.0.26",
  "serde",
  "serde_json",
@@ -7058,7 +7078,7 @@ version = "0.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "77a5d83df9f36fe23f0c3648c6bbb8b0298bb5f1939c8f2704431371f4b84d43"
 dependencies = [
- "smallvec 1.15.0",
+ "smallvec 1.15.1",
 ]
 
 [[package]]
@@ -7143,7 +7163,7 @@ dependencies = [
  "omicron-common",
  "omicron-uuid-kinds",
  "omicron-workspace-hack",
- "schemars 0.8.22",
+ "schemars",
  "serde",
 ]
 
@@ -7155,7 +7175,7 @@ dependencies = [
  "omicron-workspace-hack",
  "progenitor 0.10.0",
  "reqwest",
- "schemars 0.8.22",
+ "schemars",
  "serde",
  "slog",
 ]
@@ -7168,7 +7188,7 @@ dependencies = [
  "omicron-common",
  "omicron-workspace-hack",
  "proptest",
- "schemars 0.8.22",
+ "schemars",
  "serde",
  "test-strategy",
  "thiserror 2.0.12",
@@ -7231,7 +7251,7 @@ dependencies = [
  "num-traits",
  "rand 0.8.5",
  "serde",
- "smallvec 1.15.0",
+ "smallvec 1.15.1",
  "zeroize",
 ]
 
@@ -7441,7 +7461,7 @@ dependencies = [
  "oxide-tokio-rt",
  "oximeter-db",
  "oximeter-test-utils",
- "schemars 0.8.22",
+ "schemars",
  "serde",
  "serde_json",
  "slog",
@@ -7485,7 +7505,7 @@ dependencies = [
  "pq-sys",
  "proptest",
  "reqwest",
- "schemars 0.8.22",
+ "schemars",
  "serde",
  "serde_json",
  "slog",
@@ -7553,7 +7573,7 @@ dependencies = [
  "rand 0.8.5",
  "regress",
  "reqwest",
- "schemars 0.8.22",
+ "schemars",
  "semver 1.0.26",
  "serde",
  "serde_human_bytes",
@@ -7659,7 +7679,7 @@ dependencies = [
  "oximeter 0.1.0",
  "oximeter-instruments",
  "oximeter-producer",
- "schemars 0.8.22",
+ "schemars",
  "serde",
  "serde_json",
  "signal-hook",
@@ -7720,7 +7740,7 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "camino",
- "cargo_metadata 0.20.0",
+ "cargo_metadata 0.21.0",
  "clap",
  "expectorate",
  "newtype_derive",
@@ -7860,7 +7880,7 @@ dependencies = [
  "rustls 0.22.4",
  "rustls-pemfile 2.2.0",
  "samael",
- "schemars 0.8.22",
+ "schemars",
  "semver 1.0.26",
  "serde",
  "serde_json",
@@ -7920,7 +7940,7 @@ dependencies = [
  "pq-sys",
  "proptest",
  "reqwest",
- "schemars 0.8.22",
+ "schemars",
  "serde",
  "serde_json",
  "slog",
@@ -7948,7 +7968,7 @@ dependencies = [
  "camino-tempfile",
  "chrono",
  "clap",
- "crossterm",
+ "crossterm 0.29.0",
  "crucible-agent-client",
  "crucible-pantry-client",
  "csv",
@@ -7965,6 +7985,7 @@ dependencies = [
  "http",
  "humantime",
  "iddqd",
+ "indent_write",
  "indicatif 0.18.0",
  "internal-dns-resolver",
  "internal-dns-types",
@@ -8027,7 +8048,7 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "camino",
- "cargo_metadata 0.20.0",
+ "cargo_metadata 0.21.0",
  "clap",
  "dev-tools-common",
  "expectorate",
@@ -8071,7 +8092,7 @@ dependencies = [
  "omicron-workspace-hack",
  "rand 0.8.5",
  "rust-argon2",
- "schemars 0.8.22",
+ "schemars",
  "secrecy 0.10.3",
  "serde",
  "serde_with",
@@ -8084,7 +8105,7 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "camino",
- "cargo_metadata 0.20.0",
+ "cargo_metadata 0.21.0",
  "fs-err 3.1.1",
  "omicron-workspace-hack",
  "serde",
@@ -8129,7 +8150,7 @@ dependencies = [
  "anyhow",
  "camino",
  "camino-tempfile",
- "cargo_metadata 0.20.0",
+ "cargo_metadata 0.21.0",
  "chrono",
  "clap",
  "fs-err 3.1.1",
@@ -8219,7 +8240,7 @@ dependencies = [
  "clickhouse-admin-types",
  "cockroach-admin-client",
  "crucible-agent-client",
- "derive_more",
+ "derive_more 0.99.20",
  "display-error-chain",
  "dns-server",
  "dns-service-client",
@@ -8277,7 +8298,7 @@ dependencies = [
  "repo-depot-api",
  "repo-depot-client",
  "reqwest",
- "schemars 0.8.22",
+ "schemars",
  "serde",
  "serde_human_bytes",
  "serde_json",
@@ -8370,7 +8391,7 @@ dependencies = [
  "newtype-uuid",
  "paste",
  "proptest",
- "schemars 0.8.22",
+ "schemars",
 ]
 
 [[package]]
@@ -8400,7 +8421,7 @@ dependencies = [
  "cookie",
  "crossbeam-epoch",
  "crossbeam-utils",
- "crossterm",
+ "crossterm 0.28.1",
  "crypto-common",
  "curve25519-dalek",
  "daft",
@@ -8426,10 +8447,9 @@ dependencies = [
  "gateway-messages",
  "generic-array",
  "getrandom 0.2.15",
- "getrandom 0.3.3",
+ "getrandom 0.3.1",
  "group",
  "hashbrown 0.15.4",
- "heck 0.4.1",
  "hickory-proto 0.25.2",
  "hmac",
  "hyper",
@@ -8441,6 +8461,8 @@ dependencies = [
  "ipnet",
  "ipnetwork",
  "itertools 0.10.5",
+ "itertools 0.12.1",
+ "itertools 0.13.0",
  "lalrpop-util",
  "lazy_static",
  "libc",
@@ -8480,20 +8502,19 @@ dependencies = [
  "rsa",
  "rustc-hash 2.1.1",
  "rustix 0.38.37",
+ "rustix 1.0.7",
  "rustls 0.23.19",
  "rustls-webpki 0.102.8",
- "schemars 0.8.22",
+ "schemars",
  "scopeguard",
  "semver 1.0.26",
  "serde",
  "serde_json",
- "serde_with",
  "sha1",
  "sha2",
- "sha3",
  "similar",
  "slog",
- "smallvec 1.15.0",
+ "smallvec 1.15.1",
  "spin",
  "string_cache",
  "strum 0.26.3",
@@ -8889,7 +8910,7 @@ dependencies = [
  "dropshot",
  "omicron-common",
  "omicron-workspace-hack",
- "schemars 0.8.22",
+ "schemars",
  "serde",
  "uuid",
 ]
@@ -8939,7 +8960,7 @@ dependencies = [
  "qorb",
  "rand 0.8.5",
  "reqwest",
- "schemars 0.8.22",
+ "schemars",
  "semver 1.0.26",
  "serde",
  "serde_json",
@@ -8953,6 +8974,7 @@ dependencies = [
  "thiserror 2.0.12",
  "tokio",
  "toml 0.8.23",
+ "usdt",
  "uuid",
 ]
 
@@ -8974,7 +8996,7 @@ dependencies = [
  "clickward",
  "const_format",
  "criterion",
- "crossterm",
+ "crossterm 0.29.0",
  "debug-ignore",
  "display-error-chain",
  "dropshot",
@@ -9003,7 +9025,7 @@ dependencies = [
  "regex",
  "reqwest",
  "rustyline",
- "schemars 0.8.22",
+ "schemars",
  "serde",
  "serde_json",
  "slog",
@@ -9039,7 +9061,7 @@ dependencies = [
  "omicron-workspace-hack",
  "oximeter 0.1.0",
  "rand 0.8.5",
- "schemars 0.8.22",
+ "schemars",
  "serde",
  "slog",
  "slog-async",
@@ -9085,7 +9107,7 @@ dependencies = [
  "omicron-test-utils",
  "omicron-workspace-hack",
  "oximeter 0.1.0",
- "schemars 0.8.22",
+ "schemars",
  "serde",
  "serde_json",
  "slog",
@@ -9109,7 +9131,7 @@ dependencies = [
  "prettyplease",
  "proc-macro2",
  "quote",
- "schemars 0.8.22",
+ "schemars",
  "serde",
  "slog-error-chain",
  "syn 2.0.104",
@@ -9130,7 +9152,7 @@ dependencies = [
  "prettyplease",
  "proc-macro2",
  "quote",
- "schemars 0.8.22",
+ "schemars",
  "serde",
  "slog-error-chain",
  "syn 2.0.104",
@@ -9196,7 +9218,7 @@ dependencies = [
  "rand_distr",
  "regex",
  "rstest",
- "schemars 0.8.22",
+ "schemars",
  "serde",
  "serde_json",
  "strum 0.27.1",
@@ -9218,7 +9240,7 @@ dependencies = [
  "omicron-workspace-hack",
  "parse-display",
  "regex",
- "schemars 0.8.22",
+ "schemars",
  "serde",
  "strum 0.26.3",
  "thiserror 1.0.69",
@@ -9248,7 +9270,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "80e1dc143c5a701f879552428910f357df8bd725575087cc713088fdfeafe812"
 dependencies = [
  "ipnetwork",
- "schemars 0.8.22",
+ "schemars",
  "serde",
  "serde_json",
 ]
@@ -9263,7 +9285,7 @@ dependencies = [
  "num",
  "omicron-workspace-hack",
  "oximeter-types 0.1.0",
- "schemars 0.8.22",
+ "schemars",
  "serde",
 ]
 
@@ -9281,9 +9303,9 @@ dependencies = [
 
 [[package]]
 name = "p384"
-version = "0.13.1"
+version = "0.13.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "fe42f1670a52a47d448f14b6a5c61dd78fce51856e68edaa38f7ae3a46b8d6b6"
+checksum = "70786f51bcc69f6a4c0360e063a4cac5419ef7c5cd5b3c99ad70f3be5ba79209"
 dependencies = [
  "ecdsa",
  "elliptic-curve",
@@ -9395,7 +9417,7 @@ dependencies = [
  "instant",
  "libc",
  "redox_syscall 0.2.16",
- "smallvec 1.15.0",
+ "smallvec 1.15.1",
  "winapi",
 ]
 
@@ -9408,7 +9430,7 @@ dependencies = [
  "cfg-if",
  "libc",
  "redox_syscall 0.5.7",
- "smallvec 1.15.0",
+ "smallvec 1.15.1",
  "windows-targets 0.52.6",
 ]
 
@@ -9495,7 +9517,7 @@ version = "0.8.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "6c7fabb0b56aba5d2eb3fa9b1547c187f21f8c051295a7b97a50be6a9332f4cb"
 dependencies = [
- "smallvec 1.15.0",
+ "smallvec 1.15.1",
 ]
 
 [[package]]
@@ -9636,16 +9658,6 @@ dependencies = [
  "indexmap 2.10.0",
  "serde",
  "serde_derive",
-]
-
-[[package]]
-name = "petgraph"
-version = "0.7.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "3672b37090dbd86368a4145bc067582552b29c27377cad4e0a306c97f9bd7772"
-dependencies = [
- "fixedbitset 0.5.7",
- "indexmap 2.10.0",
 ]
 
 [[package]]
@@ -10219,7 +10231,7 @@ dependencies = [
  "proc-macro2",
  "quote",
  "regex",
- "schemars 0.8.22",
+ "schemars",
  "serde",
  "serde_json",
  "syn 2.0.104",
@@ -10241,7 +10253,7 @@ dependencies = [
  "proc-macro2",
  "quote",
  "regex",
- "schemars 0.8.22",
+ "schemars",
  "serde",
  "serde_json",
  "syn 2.0.104",
@@ -10263,7 +10275,7 @@ dependencies = [
  "proc-macro2",
  "quote",
  "regex",
- "schemars 0.8.22",
+ "schemars",
  "serde",
  "serde_json",
  "syn 2.0.104",
@@ -10282,7 +10294,7 @@ dependencies = [
  "proc-macro2",
  "progenitor-impl 0.8.0",
  "quote",
- "schemars 0.8.22",
+ "schemars",
  "serde",
  "serde_json",
  "serde_tokenstream",
@@ -10300,7 +10312,7 @@ dependencies = [
  "proc-macro2",
  "progenitor-impl 0.9.1",
  "quote",
- "schemars 0.8.22",
+ "schemars",
  "serde",
  "serde_json",
  "serde_tokenstream",
@@ -10318,7 +10330,7 @@ dependencies = [
  "proc-macro2",
  "progenitor-impl 0.10.0",
  "quote",
- "schemars 0.8.22",
+ "schemars",
  "serde",
  "serde_json",
  "serde_tokenstream",
@@ -10340,7 +10352,7 @@ dependencies = [
  "propolis_api_types",
  "rand 0.8.5",
  "reqwest",
- "schemars 0.8.22",
+ "schemars",
  "serde",
  "serde_json",
  "slog",
@@ -10361,7 +10373,7 @@ dependencies = [
  "progenitor 0.8.0",
  "rand 0.8.5",
  "reqwest",
- "schemars 0.8.22",
+ "schemars",
  "serde",
  "serde_json",
  "slog",
@@ -10388,7 +10400,7 @@ dependencies = [
  "propolis_types",
  "rand 0.8.5",
  "reqwest",
- "schemars 0.8.22",
+ "schemars",
  "semver 1.0.26",
  "serde",
  "serde_json",
@@ -10422,7 +10434,7 @@ source = "git+https://github.com/oxidecomputer/propolis?rev=c03bd1a29c775acfc65d
 dependencies = [
  "crucible-client-types",
  "propolis_types",
- "schemars 0.8.22",
+ "schemars",
  "serde",
  "thiserror 1.0.69",
  "uuid",
@@ -10433,7 +10445,7 @@ name = "propolis_types"
 version = "0.0.0"
 source = "git+https://github.com/oxidecomputer/propolis?rev=c03bd1a29c775acfc65de561b8fc436e2459a633#c03bd1a29c775acfc65de561b8fc436e2459a633"
 dependencies = [
- "schemars 0.8.22",
+ "schemars",
  "serde",
 ]
 
@@ -10463,7 +10475,7 @@ version = "0.1.0"
 source = "git+https://github.com/oxidecomputer/lldp#82fbc8c9747eb9f74dde0f92ae77ec67f65652c4"
 dependencies = [
  "anyhow",
- "schemars 0.8.22",
+ "schemars",
  "serde",
  "thiserror 1.0.69",
 ]
@@ -10579,12 +10591,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "r-efi"
-version = "5.3.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "69cdb34c158ceb288df11e18b4bd39de994f6657d83847bdffdbd7f346754b0f"
-
-[[package]]
 name = "r2d2"
 version = "0.8.10"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -10667,7 +10673,7 @@ version = "0.9.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "7a509b1a2ffbe92afab0e55c8fd99dea1c280e8171bd2d88682bb20bc41cbc2c"
 dependencies = [
- "getrandom 0.3.3",
+ "getrandom 0.3.1",
  "zerocopy 0.8.26",
 ]
 
@@ -10727,7 +10733,7 @@ dependencies = [
  "bitflags 2.9.1",
  "cassowary",
  "compact_str",
- "crossterm",
+ "crossterm 0.28.1",
  "indoc 2.0.6",
  "instability",
  "itertools 0.13.0",
@@ -10737,21 +10743,6 @@ dependencies = [
  "unicode-segmentation",
  "unicode-truncate",
  "unicode-width 0.2.0",
-]
-
-[[package]]
-name = "rats-corim"
-version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/rats-corim#bb4a08dd507514f98c54f5fc67eadf14a0705f4e"
-dependencies = [
- "ciborium",
- "ciborium-io",
- "clap",
- "hex",
- "serde",
- "serde_with",
- "strum 0.26.3",
- "thiserror 2.0.12",
 ]
 
 [[package]]
@@ -10797,6 +10788,7 @@ dependencies = [
  "chrono",
  "clap",
  "colored",
+ "daft",
  "datatest-stable",
  "dropshot",
  "expectorate",
@@ -10899,7 +10891,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "b5cdfab7494d13ebfb6ce64828648518205d3ce8541ef1f94a27887f29d2d50b"
 dependencies = [
  "chrono",
- "crossterm",
+ "crossterm 0.28.1",
  "fd-lock",
  "itertools 0.13.0",
  "nu-ansi-term 0.50.1",
@@ -10998,7 +10990,7 @@ version = "0.1.0"
 dependencies = [
  "dropshot",
  "omicron-workspace-hack",
- "schemars 0.8.22",
+ "schemars",
  "serde",
  "tufaceous-artifact",
 ]
@@ -11010,7 +11002,7 @@ dependencies = [
  "omicron-workspace-hack",
  "progenitor 0.10.0",
  "reqwest",
- "schemars 0.8.22",
+ "schemars",
  "serde",
  "slog",
 ]
@@ -11627,30 +11619,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "schemars"
-version = "0.9.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "4cd191f9397d57d581cddd31014772520aa448f65ef991055d7f61582c65165f"
-dependencies = [
- "dyn-clone",
- "ref-cast",
- "serde",
- "serde_json",
-]
-
-[[package]]
-name = "schemars"
-version = "1.0.4"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "82d20c4491bc164fa2f6c5d44565947a52ad80b9505d8e36f8d54c27c739fcd0"
-dependencies = [
- "dyn-clone",
- "ref-cast",
- "serde",
- "serde_json",
-]
-
-[[package]]
 name = "schemars_derive"
 version = "0.8.22"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -11992,10 +11960,6 @@ dependencies = [
  "base64 0.22.1",
  "chrono",
  "hex",
- "indexmap 1.9.3",
- "indexmap 2.10.0",
- "schemars 0.9.0",
- "schemars 1.0.4",
  "serde",
  "serde_derive",
  "serde_json",
@@ -12216,7 +12180,7 @@ dependencies = [
  "omicron-common",
  "omicron-uuid-kinds",
  "omicron-workspace-hack",
- "schemars 0.8.22",
+ "schemars",
  "serde",
  "sled-agent-types",
  "sled-diagnostics",
@@ -12241,7 +12205,7 @@ dependencies = [
  "propolis-client 0.1.0 (git+https://github.com/oxidecomputer/propolis?rev=c03bd1a29c775acfc65de561b8fc436e2459a633)",
  "regress",
  "reqwest",
- "schemars 0.8.22",
+ "schemars",
  "serde",
  "serde_json",
  "sled-agent-types",
@@ -12261,7 +12225,7 @@ dependencies = [
  "camino-tempfile",
  "chrono",
  "debug-ignore",
- "derive_more",
+ "derive_more 0.99.20",
  "dropshot",
  "either",
  "expectorate",
@@ -12279,7 +12243,7 @@ dependencies = [
  "omicron-uuid-kinds",
  "omicron-workspace-hack",
  "proptest",
- "schemars 0.8.22",
+ "schemars",
  "scopeguard",
  "serde",
  "serde_json",
@@ -12317,7 +12281,7 @@ dependencies = [
  "oxnet",
  "propolis-client 0.1.0 (git+https://github.com/oxidecomputer/propolis?rev=c03bd1a29c775acfc65de561b8fc436e2459a633)",
  "rcgen",
- "schemars 0.8.22",
+ "schemars",
  "serde",
  "serde_human_bytes",
  "serde_json",
@@ -12398,7 +12362,7 @@ dependencies = [
  "parallel-task-set",
  "rand 0.8.5",
  "regex",
- "schemars 0.8.22",
+ "schemars",
  "serde",
  "sled-storage",
  "slog",
@@ -12427,7 +12391,7 @@ dependencies = [
  "omicron-uuid-kinds",
  "omicron-workspace-hack",
  "rand 0.8.5",
- "schemars 0.8.22",
+ "schemars",
  "serde",
  "sled-hardware-types",
  "slog",
@@ -12446,7 +12410,7 @@ dependencies = [
  "macaddr",
  "omicron-common",
  "omicron-workspace-hack",
- "schemars 0.8.22",
+ "schemars",
  "serde",
 ]
 
@@ -12460,7 +12424,7 @@ dependencies = [
  "camino-tempfile",
  "cfg-if",
  "debug-ignore",
- "derive_more",
+ "derive_more 0.99.20",
  "expectorate",
  "futures",
  "glob",
@@ -12471,7 +12435,7 @@ dependencies = [
  "omicron-uuid-kinds",
  "omicron-workspace-hack",
  "rand 0.8.5",
- "schemars 0.8.22",
+ "schemars",
  "serde",
  "serde_json",
  "sled-hardware",
@@ -12620,9 +12584,9 @@ dependencies = [
 
 [[package]]
 name = "smallvec"
-version = "1.15.0"
+version = "1.15.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "8917285742e9f3e1683f0a9c4e6b57960b7314d0b08d30d1ecd426713ee2eee9"
+checksum = "67b1b7a3b5fe4f1376887184045fcf45c69e92af734b7aaddc05fb777b6fbd03"
 
 [[package]]
 name = "smawk"
@@ -12694,7 +12658,7 @@ version = "0.8.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "03c3c6b7927ffe7ecaa769ee0e3994da3b8cafc8f444578982c83ecb161af917"
 dependencies = [
- "heck 0.4.1",
+ "heck 0.5.0",
  "proc-macro2",
  "quote",
  "syn 2.0.104",
@@ -12763,17 +12727,15 @@ dependencies = [
 [[package]]
 name = "sprockets-tls"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/sprockets.git?rev=7b63ccb979288408fb772aa6d15f4a324497c754#7b63ccb979288408fb772aa6d15f4a324497c754"
+source = "git+https://github.com/oxidecomputer/sprockets.git?rev=6d31fa63217c6a51061dc4afa1ebe175a0021981#6d31fa63217c6a51061dc4afa1ebe175a0021981"
 dependencies = [
  "anyhow",
  "attest-data",
  "camino",
  "cfg-if",
  "clap",
- "dice-mfg-msgs",
  "dice-verifier",
  "ed25519-dalek",
- "hubpack",
  "libipcc",
  "pem-rfc7468",
  "rustls 0.23.19",
@@ -12899,7 +12861,7 @@ dependencies = [
  "lazy_static",
  "newtype_derive",
  "petgraph 0.6.5",
- "schemars 0.8.22",
+ "schemars",
  "serde",
  "serde_json",
  "slog",
@@ -13059,7 +13021,7 @@ dependencies = [
  "async-trait",
  "bytes",
  "camino",
- "crossterm",
+ "crossterm 0.28.1",
  "ratatui",
  "tokio",
  "zip 4.2.0",
@@ -13242,9 +13204,9 @@ checksum = "e502f78cdbb8ba4718f566c418c52bc729126ffd16baee5baa718cf25dd5a69a"
 
 [[package]]
 name = "target-spec"
-version = "3.4.2"
+version = "3.5.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "49424d0fdcba4406e46d1cea3014c4d1987263790b8e5d1be45c4509c9d52553"
+checksum = "53928b291de23967df6740f2e584bb68101890f63d730292c0a5205092c8e0fa"
 dependencies = [
  "cfg-expr",
  "guppy-workspace-hack",
@@ -13264,7 +13226,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "e8a64e3985349f2441a1a9ef0b853f869006c3855f2cda6862a94d26ebb9d6a1"
 dependencies = [
  "fastrand",
- "getrandom 0.3.3",
+ "getrandom 0.3.1",
  "once_cell",
  "rustix 1.0.7",
  "windows-sys 0.59.0",
@@ -13924,7 +13886,7 @@ dependencies = [
  "once_cell",
  "regex",
  "sharded-slab",
- "smallvec 1.15.0",
+ "smallvec 1.15.1",
  "thread_local",
  "tracing",
  "tracing-core",
@@ -13941,7 +13903,7 @@ dependencies = [
  "hubpack",
  "itertools 0.14.0",
  "nix 0.29.0",
- "schemars 0.8.22",
+ "schemars",
  "serde",
  "slog",
  "slog-async",
@@ -13965,7 +13927,7 @@ dependencies = [
  "hubpack",
  "itertools 0.14.0",
  "nix 0.29.0",
- "schemars 0.8.22",
+ "schemars",
  "serde",
  "slog",
  "slog-async",
@@ -13984,7 +13946,7 @@ name = "transceiver-decode"
 version = "0.1.0"
 source = "git+https://github.com/oxidecomputer/transceiver-control?branch=main#f3cb309c2bd2c03423467fd93992e9033ae3133c"
 dependencies = [
- "schemars 0.8.22",
+ "schemars",
  "serde",
  "static_assertions",
  "thiserror 2.0.12",
@@ -13996,7 +13958,7 @@ name = "transceiver-decode"
 version = "0.1.0"
 source = "git+https://github.com/oxidecomputer/transceiver-control#4aac6125a8e6cefbb71d9f8a3d1fe6704207d476"
 dependencies = [
- "schemars 0.8.22",
+ "schemars",
  "serde",
  "static_assertions",
  "thiserror 2.0.12",
@@ -14011,7 +13973,7 @@ dependencies = [
  "bitflags 2.9.1",
  "clap",
  "hubpack",
- "schemars 0.8.22",
+ "schemars",
  "serde",
  "thiserror 2.0.12",
 ]
@@ -14024,7 +13986,7 @@ dependencies = [
  "bitflags 2.9.1",
  "clap",
  "hubpack",
- "schemars 0.8.22",
+ "schemars",
  "serde",
  "thiserror 2.0.12",
 ]
@@ -14038,7 +14000,7 @@ dependencies = [
  "bootstore",
  "camino",
  "chacha20poly1305",
- "derive_more",
+ "derive_more 0.99.20",
  "gfss",
  "hex",
  "hkdf",
@@ -14087,7 +14049,7 @@ dependencies = [
 [[package]]
 name = "tufaceous"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/tufaceous?branch=main#ef54b566bce2c98c9c01a411a6553a2c29cb518d"
+source = "git+https://github.com/oxidecomputer/tufaceous?branch=main#c269f5704d39eb4234e67e18be10d424ef23ac77"
 dependencies = [
  "anyhow",
  "camino",
@@ -14108,12 +14070,12 @@ dependencies = [
 [[package]]
 name = "tufaceous-artifact"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/tufaceous?branch=main#ef54b566bce2c98c9c01a411a6553a2c29cb518d"
+source = "git+https://github.com/oxidecomputer/tufaceous?branch=main#c269f5704d39eb4234e67e18be10d424ef23ac77"
 dependencies = [
  "daft",
  "hex",
  "proptest",
- "schemars 0.8.22",
+ "schemars",
  "semver 1.0.26",
  "serde",
  "serde_human_bytes",
@@ -14125,7 +14087,7 @@ dependencies = [
 [[package]]
 name = "tufaceous-brand-metadata"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/tufaceous?branch=main#ef54b566bce2c98c9c01a411a6553a2c29cb518d"
+source = "git+https://github.com/oxidecomputer/tufaceous?branch=main#c269f5704d39eb4234e67e18be10d424ef23ac77"
 dependencies = [
  "semver 1.0.26",
  "serde",
@@ -14137,7 +14099,7 @@ dependencies = [
 [[package]]
 name = "tufaceous-lib"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/tufaceous?branch=main#ef54b566bce2c98c9c01a411a6553a2c29cb518d"
+source = "git+https://github.com/oxidecomputer/tufaceous?branch=main#c269f5704d39eb4234e67e18be10d424ef23ac77"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -14303,7 +14265,7 @@ dependencies = [
  "proc-macro2",
  "quote",
  "regress",
- "schemars 0.8.22",
+ "schemars",
  "semver 1.0.26",
  "serde",
  "serde_json",
@@ -14323,7 +14285,7 @@ dependencies = [
  "proc-macro2",
  "quote",
  "regress",
- "schemars 0.8.22",
+ "schemars",
  "semver 1.0.26",
  "serde",
  "serde_json",
@@ -14343,7 +14305,7 @@ dependencies = [
  "proc-macro2",
  "quote",
  "regress",
- "schemars 0.8.22",
+ "schemars",
  "semver 1.0.26",
  "serde",
  "serde_json",
@@ -14360,7 +14322,7 @@ checksum = "785e2cdcef0df8160fdd762ed548a637aaec1e83704fdbc14da0df66013ee8d0"
 dependencies = [
  "proc-macro2",
  "quote",
- "schemars 0.8.22",
+ "schemars",
  "semver 1.0.26",
  "serde",
  "serde_json",
@@ -14377,7 +14339,7 @@ checksum = "68b5780d745920ed73c5b7447496a9b5c42ed2681a9b70859377aec423ecf02b"
 dependencies = [
  "proc-macro2",
  "quote",
- "schemars 0.8.22",
+ "schemars",
  "semver 1.0.26",
  "serde",
  "serde_json",
@@ -14394,7 +14356,7 @@ checksum = "0ff5799be156e4f635c348c6051d165e1c59997827155133351a8c4d333d9841"
 dependencies = [
  "proc-macro2",
  "quote",
- "schemars 0.8.22",
+ "schemars",
  "semver 1.0.26",
  "serde",
  "serde_json",
@@ -14594,7 +14556,7 @@ dependencies = [
  "omicron-workspace-hack",
  "owo-colors",
  "petgraph 0.8.2",
- "schemars 0.8.22",
+ "schemars",
  "serde",
  "serde_json",
  "serde_with",
@@ -14713,7 +14675,7 @@ version = "1.17.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "3cf4199d1e5d15ddd86a694e4d0dffa9c323ce759fea589f00fef9d81cc1931d"
 dependencies = [
- "getrandom 0.3.3",
+ "getrandom 0.3.1",
  "js-sys",
  "serde",
  "wasm-bindgen",
@@ -14858,9 +14820,9 @@ checksum = "9c8d87e72b64a3b4db28d11ce29237c246188f4f51057d65a7eab63b7987e423"
 
 [[package]]
 name = "wasi"
-version = "0.14.2+wasi-0.2.4"
+version = "0.13.3+wasi-0.2.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "9683f9a5a998d873c0d21fcbe3c083009670149a8fab228644b8bd36b2c48cb3"
+checksum = "26816d2e1a4a36a2940b96c5296ce403917633dff8f3440e9b236ed6f6bacad2"
 dependencies = [
  "wit-bindgen-rt",
 ]
@@ -15016,7 +14978,7 @@ dependencies = [
  "camino",
  "ciborium",
  "clap",
- "crossterm",
+ "crossterm 0.29.0",
  "expectorate",
  "futures",
  "hex",
@@ -15073,7 +15035,7 @@ dependencies = [
  "omicron-workspace-hack",
  "owo-colors",
  "oxnet",
- "schemars 0.8.22",
+ "schemars",
  "serde",
  "serde_json",
  "sha2",
@@ -15096,7 +15058,7 @@ dependencies = [
  "camino",
  "ciborium",
  "clap",
- "crossterm",
+ "crossterm 0.29.0",
  "omicron-workspace-hack",
  "oxide-tokio-rt",
  "reedline",
@@ -15163,7 +15125,7 @@ dependencies = [
  "oxnet",
  "rand 0.8.5",
  "reqwest",
- "schemars 0.8.22",
+ "schemars",
  "semver 1.0.26",
  "serde",
  "serde_json",
@@ -15208,7 +15170,7 @@ dependencies = [
  "omicron-passwords",
  "omicron-uuid-kinds",
  "omicron-workspace-hack",
- "schemars 0.8.22",
+ "schemars",
  "semver 1.0.26",
  "serde",
  "sled-hardware-types",
@@ -15229,7 +15191,7 @@ dependencies = [
  "progenitor 0.10.0",
  "regress",
  "reqwest",
- "schemars 0.8.22",
+ "schemars",
  "semver 1.0.26",
  "serde",
  "serde_json",
@@ -15269,7 +15231,7 @@ version = "0.1.9"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "cf221c93e13a30d793f7645a0e7762c55d169dbb0a49671918a2319d289b10bb"
 dependencies = [
- "windows-sys 0.48.0",
+ "windows-sys 0.59.0",
 ]
 
 [[package]]
@@ -15656,9 +15618,9 @@ dependencies = [
 
 [[package]]
 name = "wit-bindgen-rt"
-version = "0.39.0"
+version = "0.33.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "6f42320e61fe2cfd34354ecb597f86f413484a798ba44a8ca1165c58d42da6c1"
+checksum = "3268f3d866458b787f390cf61f4bbb563b922d091359f9608842999eaee3943c"
 dependencies = [
  "bitflags 2.9.1",
 ]
@@ -15729,7 +15691,7 @@ dependencies = [
  "anyhow",
  "camino",
  "camino-tempfile",
- "cargo_metadata 0.20.0",
+ "cargo_metadata 0.21.0",
  "cargo_toml",
  "clap",
  "dev-tools-common",

@@ -251,8 +251,6 @@ pub enum WriteError {
         #[source]
         error: Box<NestedEngineError<ControlPlaneZonesSpec>>,
     },
-    #[error("error creating directory: {error}")]
-    CreateDirError { error: std::io::Error },
 }
 
 impl From<NestedEngineError<ControlPlaneZonesSpec>> for WriteError {
@@ -298,12 +296,6 @@ pub enum ControlPlaneZonesStepId {
 
     /// Writing the MUPdate override file.
     MupdateOverride,
-
-    /// Creating Measurement directory
-    CreateMeasurementDir,
-
-    /// Writing a measurement corpus
-    MeasurementCorpus { name: String },
 
     /// Writing the zone manifest.
     ZoneManifest,

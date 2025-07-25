@@ -7,7 +7,6 @@
 use crate::bootstrap::rss_handle::RssHandle;
 use crate::rack_setup::service::SetupServiceError;
 use bootstore::schemes::v0 as bootstore;
-use camino::Utf8PathBuf;
 use omicron_uuid_kinds::RackInitUuid;
 use omicron_uuid_kinds::RackResetUuid;
 use sled_agent_config_reconciler::InternalDisksReceiver;
@@ -219,7 +218,6 @@ impl RssAccess {
         parent_log: &Logger,
         sprockets: SprocketsConfig,
         global_zone_bootstrap_ip: Ipv6Addr,
-        corpus: Vec<Utf8PathBuf>,
     ) -> Result<RackResetUuid, RssAccessError> {
         let mut status = self.status.lock().unwrap();
 
@@ -257,7 +255,6 @@ impl RssAccess {
                     let result = rack_reset(
                         &parent_log,
                         sprockets,
-                        corpus,
                         global_zone_bootstrap_ip,
                     )
                     .await;
@@ -351,14 +348,8 @@ async fn rack_initialize(
 async fn rack_reset(
     parent_log: &Logger,
     sprockets: SprocketsConfig,
-    corpus: Vec<Utf8PathBuf>,
     global_zone_bootstrap_ip: Ipv6Addr,
 ) -> Result<(), SetupServiceError> {
-    RssHandle::run_rss_reset(
-        parent_log,
-        global_zone_bootstrap_ip,
-        sprockets,
-        corpus,
-    )
-    .await
+    RssHandle::run_rss_reset(parent_log, global_zone_bootstrap_ip, sprockets)
+        .await
 }

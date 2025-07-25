@@ -4,7 +4,7 @@
 
 //! Oximeter collector server HTTP API
 
-// Copyright 2024 Oxide Computer Company
+// Copyright 2025 Oxide Computer Company
 
 use crate::OximeterAgent;
 use dropshot::ApiDescription;
@@ -43,7 +43,7 @@ impl OximeterApi for OximeterApiImpl {
             WhichPage::First(..) => None,
             WhichPage::Next(ProducerPage { id }) => Some(*id),
         };
-        let producers = agent.list_producers(start, limit).await;
+        let producers = agent.list_producers(start, limit);
         ResultsPage::new(
             producers,
             &EmptyScanParams {},
@@ -60,7 +60,6 @@ impl OximeterApi for OximeterApiImpl {
         let producer_id = path.into_inner().producer_id;
         agent
             .producer_details(producer_id)
-            .await
             .map_err(HttpError::from)
             .map(HttpResponseOk)
     }
@@ -71,11 +70,8 @@ impl OximeterApi for OximeterApiImpl {
     ) -> Result<HttpResponseDeleted, HttpError> {
         let agent = request_context.context();
         let producer_id = path.into_inner().producer_id;
-        agent
-            .delete_producer(producer_id)
-            .await
-            .map_err(HttpError::from)
-            .map(|_| HttpResponseDeleted())
+        agent.delete_producer(producer_id);
+        Ok(HttpResponseDeleted())
     }
 
     async fn collector_info(

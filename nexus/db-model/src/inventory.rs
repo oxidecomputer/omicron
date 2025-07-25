@@ -30,7 +30,8 @@ use nexus_db_schema::schema::inv_zone_manifest_zone;
 use nexus_db_schema::schema::{
     hw_baseboard_id, inv_caboose, inv_clickhouse_keeper_membership,
     inv_cockroachdb_status, inv_collection, inv_collection_error, inv_dataset,
-    inv_host_phase_1_flash_hash, inv_last_reconciliation_dataset_result,
+    inv_host_phase_1_flash_hash, inv_internal_dns,
+    inv_last_reconciliation_dataset_result,
     inv_last_reconciliation_disk_result,
     inv_last_reconciliation_orphaned_dataset,
     inv_last_reconciliation_zone_result, inv_mupdate_override_non_boot,
@@ -62,8 +63,9 @@ use nexus_sled_agent_shared::inventory::{
     OmicronZoneDataset, OmicronZoneImageSource, OmicronZoneType,
 };
 use nexus_types::inventory::{
-    BaseboardId, Caboose, CockroachStatus, Collection, NvmeFirmware,
-    PowerState, RotPage, RotSlot, TimeSync,
+    BaseboardId, Caboose, CockroachStatus, Collection,
+    InternalDnsGenerationStatus, NvmeFirmware, PowerState, RotPage, RotSlot,
+    TimeSync,
 };
 use omicron_common::api::external;
 use omicron_common::api::internal::shared::NetworkInterface;
@@ -2961,6 +2963,36 @@ impl InvNtpTimesync {
 impl From<InvNtpTimesync> for nexus_types::inventory::TimeSync {
     fn from(value: InvNtpTimesync) -> Self {
         Self { zone_id: value.zone_id.into(), synced: value.synced }
+    }
+}
+
+#[derive(Queryable, Clone, Debug, Selectable, Insertable)]
+#[diesel(table_name = inv_internal_dns)]
+pub struct InvInternalDns {
+    pub inv_collection_id: DbTypedUuid<CollectionKind>,
+    pub zone_id: DbTypedUuid<OmicronZoneKind>,
+    pub generation: Generation,
+}
+
+impl InvInternalDns {
+    pub fn new(
+        inv_collection_id: CollectionUuid,
+        status: &InternalDnsGenerationStatus,
+    ) -> Result<Self, anyhow::Error> {
+        Ok(Self {
+            inv_collection_id: inv_collection_id.into(),
+            zone_id: status.zone_id.into(),
+            generation: Generation(status.generation),
+        })
+    }
+}
+
+impl From<InvInternalDns> for InternalDnsGenerationStatus {
+    fn from(value: InvInternalDns) -> Self {
+        Self {
+            zone_id: value.zone_id.into(),
+            generation: value.generation.into(),
+        }
     }
 }
 

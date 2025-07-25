@@ -15,37 +15,38 @@ pub struct ReconfiguratorChickenSwitches {
     pub version: SqlU32,
     pub planner_enabled: bool,
     pub time_modified: DateTime<Utc>,
+    pub add_zones_with_mupdate_override: bool,
 }
 
-impl ReconfiguratorChickenSwitches {
-    pub fn new(version: u32, planner_enabled: bool) -> Self {
-        Self {
-            version: version.into(),
-            planner_enabled,
-            time_modified: Utc::now(),
-        }
-    }
-}
-
-impl From<deployment::ReconfiguratorChickenSwitches>
+impl From<deployment::ReconfiguratorChickenSwitchesView>
     for ReconfiguratorChickenSwitches
 {
-    fn from(value: deployment::ReconfiguratorChickenSwitches) -> Self {
+    fn from(value: deployment::ReconfiguratorChickenSwitchesView) -> Self {
         Self {
             version: value.version.into(),
-            planner_enabled: value.planner_enabled,
+            planner_enabled: value.switches.planner_enabled,
             time_modified: value.time_modified,
+            add_zones_with_mupdate_override: value
+                .switches
+                .planner_switches
+                .add_zones_with_mupdate_override,
         }
     }
 }
 
 impl From<ReconfiguratorChickenSwitches>
-    for deployment::ReconfiguratorChickenSwitches
+    for deployment::ReconfiguratorChickenSwitchesView
 {
     fn from(value: ReconfiguratorChickenSwitches) -> Self {
         Self {
             version: value.version.into(),
-            planner_enabled: value.planner_enabled,
+            switches: deployment::ReconfiguratorChickenSwitches {
+                planner_enabled: value.planner_enabled,
+                planner_switches: deployment::PlannerChickenSwitches {
+                    add_zones_with_mupdate_override: value
+                        .add_zones_with_mupdate_override,
+                },
+            },
             time_modified: value.time_modified,
         }
     }
