@@ -15,6 +15,7 @@ use camino_tempfile_ext::{
     prelude::*,
 };
 use iddqd::{IdOrdItem, IdOrdMap, id_upcast};
+use nexus_sled_agent_shared::inventory::ZoneKind;
 use omicron_common::update::{
     MupdateOverrideInfo, OmicronZoneFileMetadata, OmicronZoneManifest,
     OmicronZoneManifestSource,
@@ -82,12 +83,13 @@ impl WriteInstallDatasetContext {
     /// errors.
     pub fn new_basic() -> Self {
         Self {
+            // The zones are picked arbitrarily for our unit tests.
             zones: [
-                ZoneContents::new("zone1.tar.gz", b"zone1"),
-                ZoneContents::new("zone2.tar.gz", b"zone2"),
-                ZoneContents::new("zone3.tar.gz", b"zone3"),
-                ZoneContents::new("zone4.tar.gz", b"zone4"),
-                ZoneContents::new("zone5.tar.gz", b"zone5"),
+                ZoneContents::new(ZoneKind::CockroachDb, b"cockroachdb"),
+                ZoneContents::new(ZoneKind::Clickhouse, b"clickhouse"),
+                ZoneContents::new(ZoneKind::Crucible, b"crucible"),
+                ZoneContents::new(ZoneKind::InternalDns, b"internal_dns"),
+                ZoneContents::new(ZoneKind::Nexus, b"nexus"),
             ]
             .into_iter()
             .collect(),
@@ -99,16 +101,17 @@ impl WriteInstallDatasetContext {
 
     /// Makes a number of error cases for testing.
     pub fn make_error_cases(&mut self) {
-        // zone1.tar.gz is valid.
-        // For zone2.tar.gz, change the size.
-        self.zones.get_mut("zone2.tar.gz").unwrap().json_size = 1024;
-        // For zone3.tar.gz, change the hash.
-        self.zones.get_mut("zone3.tar.gz").unwrap().json_hash =
+        // cockroachdb.tar.gz is valid.
+        // For clickhouse, change the size.
+        self.zones.get_mut(&ZoneKind::Clickhouse).unwrap().json_size = 1024;
+        // For crucible, change the hash.
+        self.zones.get_mut(&ZoneKind::Crucible).unwrap().json_hash =
             ArtifactHash([0; 32]);
-        // Don't write out zone4 but include it in the JSON.
-        self.zones.get_mut("zone4.tar.gz").unwrap().write_to_disk = false;
-        // Write out zone5 but don't include it in the JSON.
-        self.zones.get_mut("zone5.tar.gz").unwrap().include_in_json = false;
+        // Don't write out internal DNS but include it in the JSON.
+        self.zones.get_mut(&ZoneKind::InternalDns).unwrap().write_to_disk =
+            false;
+        // Write out nexus but don't include it in the JSON.
+        self.zones.get_mut(&ZoneKind::Nexus).unwrap().include_in_json = false;
     }
 
     /// Set to false to not write out the zone manifest to disk.
@@ -141,7 +144,10 @@ impl WriteInstallDatasetContext {
                 .iter()
                 .filter_map(|zone| {
                     zone.include_in_json.then(|| OmicronZoneFileMetadata {
-                        file_name: zone.file_name.clone(),
+                        file_name: zone
+                            .zone_kind
+                            .artifact_in_install_dataset()
+                            .to_owned(),
                         file_size: zone.json_size,
                         hash: zone.json_hash,
                     })
@@ -176,7 +182,8 @@ impl WriteInstallDatasetContext {
     pub fn write_to(&self, dir: &ChildPath) -> Result<(), FixtureError> {
         for zone in &self.zones {
             if zone.write_to_disk {
-                dir.child(&zone.file_name).write_binary(&zone.contents)?;
+                dir.child(zone.zone_kind.artifact_in_install_dataset())
+                    .write_binary(&zone.contents)?;
             }
         }
 
@@ -202,7 +209,7 @@ impl WriteInstallDatasetContext {
 
 #[derive(Clone, Debug)]
 pub struct ZoneContents {
-    file_name: String,
+    zone_kind: ZoneKind,
     contents: Vec<u8>,
     // json_size and json_hash are stored separately, so tests can tweak
     // them before writing out the override info.
@@ -213,11 +220,11 @@ pub struct ZoneContents {
 }
 
 impl ZoneContents {
-    fn new(file_name: &str, contents: &[u8]) -> Self {
+    fn new(zone_kind: ZoneKind, contents: &[u8]) -> Self {
         let size = contents.len() as u64;
         let hash = compute_hash(contents);
         Self {
-            file_name: file_name.to_string(),
+            zone_kind,
             contents: contents.to_vec(),
             json_size: size,
             json_hash: hash,
@@ -243,9 +250,12 @@ impl ZoneContents {
             }
         };
 
+        let file_name = self.zone_kind.artifact_in_install_dataset().to_owned();
+        let path = dir.join(&file_name);
+
         ZoneManifestArtifactResult {
-            file_name: self.file_name.clone(),
-            path: dir.join(&self.file_name),
+            file_name,
+            path,
             expected_size: self.json_size,
             expected_hash: self.json_hash,
             status,
@@ -254,10 +264,10 @@ impl ZoneContents {
 }
 
 impl IdOrdItem for ZoneContents {
-    type Key<'a> = &'a str;
+    type Key<'a> = ZoneKind;
 
     fn key(&self) -> Self::Key<'_> {
-        &self.file_name
+        self.zone_kind
     }
 
     id_upcast!();
