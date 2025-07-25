@@ -785,9 +785,20 @@ impl SledAgentApi for SledAgentImpl {
             ));
         }
 
+        let corpus = sa.corpus().await.map_err(|e| {
+            let message = format!("Failed to add sled to rack cluster: {e}");
+            HttpError {
+                status_code: ErrorStatusCode::INTERNAL_SERVER_ERROR,
+                error_code: None,
+                external_message: message.clone(),
+                internal_message: message,
+                headers: None,
+            }
+        })?;
         crate::sled_agent::sled_add(
             sa.logger().clone(),
             sa.sprockets().clone(),
+            corpus,
             request.sled_id,
             request.start_request,
         )

@@ -36,6 +36,8 @@ INFO added artifact, name: internal-dns, kind: zone, version: 1.0.0, hash: ffbf1
 INFO added artifact, name: ntp, kind: zone, version: 1.0.0, hash: 67593d686ed04a1709f93972b71f4ebc148a9362120f65d239943e814a9a7439, length: 1681
 INFO added artifact, name: nexus, kind: zone, version: 1.0.0, hash: 0e32b4a3e5d3668bb1d6a16fb06b74dc60b973fa479dcee0aae3adbb52bf1388, length: 1682
 INFO added artifact, name: oximeter, kind: zone, version: 1.0.0, hash: 048d8fe8cdef5b175aad714d0f148aa80ce36c9114ac15ce9d02ed3d37877a77, length: 1682
+INFO added artifact, name: sp_corpus, kind: measurement_corpus, version: 1.0.0, hash: a7dc1f77638e4fffd33e79e417f15b32470dcbba7717c0a0a7ae9dc29965eb8f, length: 115
+INFO added artifact, name: rot_corpus, kind: measurement_corpus, version: 1.0.0, hash: 8e674746b5bc59839528c9dfc357a619826403fc0efba3b4ae6cea7d3a311522, length: 116
 INFO added artifact, name: fake-psc-sp, kind: psc_sp, version: 1.0.0, hash: f896cf5b19ca85864d470ad8587f980218bff3954e7f52bbd999699cd0f9635b, length: 744
 INFO added artifact, name: fake-psc-rot, kind: psc_rot_image_a, version: 1.0.0, hash: 179eb660ebc92e28b6748b6af03d9f998d6131319edd4654a1e948454c62551b, length: 750
 INFO added artifact, name: fake-psc-rot, kind: psc_rot_image_b, version: 1.0.0, hash: 179eb660ebc92e28b6748b6af03d9f998d6131319edd4654a1e948454c62551b, length: 750

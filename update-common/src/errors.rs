@@ -166,6 +166,8 @@ pub enum RepositoryError {
         #[source]
         error: std::io::Error,
     },
+    #[error("error from Corim")]
+    Corim(#[source] rats_corim::Error),
 }
 
 impl RepositoryError {
@@ -211,7 +213,8 @@ impl RepositoryError {
             | RepositoryError::ReadHubrisCabooseNameUtf8(_)
             | RepositoryError::MultipleVersionsPresent { .. }
             | RepositoryError::MultipleBoardsPresent { .. }
-            | RepositoryError::CabooseMismatch { .. } => {
+            | RepositoryError::CabooseMismatch { .. }
+            | RepositoryError::Corim(_) => {
                 HttpError::for_bad_request(None, message)
             }
 

@@ -38,6 +38,7 @@ use tufaceous_artifact::ArtifactHashId;
 use tufaceous_artifact::ArtifactKind;
 use tufaceous_artifact::ArtifactVersion;
 use tufaceous_artifact::KnownArtifactKind;
+use tufaceous_lib::ControlPlaneEntry;
 use tufaceous_lib::ControlPlaneZoneImages;
 use tufaceous_lib::HostPhaseImages;
 use tufaceous_lib::RotArchives;
@@ -256,9 +257,9 @@ impl<'a> UpdatePlanBuilder<'a> {
                 )
                 .await
             }
-            KnownArtifactKind::Zone => {
+            KnownArtifactKind::Zone | KnownArtifactKind::MeasurementCorpus => {
                 // We don't currently support repos with already split-out
-                // zones.
+                // zones and manifest.
                 self.add_unknown_artifact(artifact_id, artifact_hash, stream)
                     .await
             }
@@ -286,7 +287,8 @@ impl<'a> UpdatePlanBuilder<'a> {
             | KnownArtifactKind::SwitchRot
             | KnownArtifactKind::GimletRotBootloader
             | KnownArtifactKind::PscRotBootloader
-            | KnownArtifactKind::SwitchRotBootloader => unreachable!(),
+            | KnownArtifactKind::SwitchRotBootloader
+            | KnownArtifactKind::MeasurementCorpus => unreachable!(),
         };
 
         let mut stream = std::pin::pin!(stream);
@@ -379,7 +381,8 @@ impl<'a> UpdatePlanBuilder<'a> {
             | KnownArtifactKind::SwitchRot
             | KnownArtifactKind::GimletSp
             | KnownArtifactKind::PscSp
-            | KnownArtifactKind::SwitchSp => unreachable!(),
+            | KnownArtifactKind::SwitchSp
+            | KnownArtifactKind::MeasurementCorpus => unreachable!(),
         };
 
         let mut stream = std::pin::pin!(stream);
@@ -474,7 +477,8 @@ impl<'a> UpdatePlanBuilder<'a> {
             | KnownArtifactKind::SwitchSp
             | KnownArtifactKind::GimletRotBootloader
             | KnownArtifactKind::SwitchRotBootloader
-            | KnownArtifactKind::PscRotBootloader => unreachable!(),
+            | KnownArtifactKind::PscRotBootloader
+            | KnownArtifactKind::MeasurementCorpus => unreachable!(),
         };
 
         let (rot_a_data, rot_b_data) = Self::extract_nested_artifact_pair(
@@ -913,33 +917,67 @@ impl<'a> UpdatePlanBuilder<'a> {
         &mut self,
         reader: impl io::Read,
     ) -> Result<(), RepositoryError> {
-        ControlPlaneZoneImages::extract_into(reader, |_, reader| {
+        ControlPlaneZoneImages::extract_into(reader, |_, kind, reader| {
+            let known_kind = match kind {
+                ControlPlaneEntry::Zone => KnownArtifactKind::Zone,
+                ControlPlaneEntry::MeasurementCorpus => {
+                    KnownArtifactKind::MeasurementCorpus
+                }
+            };
             let mut out = self.extracted_artifacts.new_tempfile()?;
             io::copy(reader, &mut out)?;
             let data = self
                 .extracted_artifacts
-                .store_tempfile(KnownArtifactKind::Zone.into(), out)?;
+                .store_tempfile(known_kind.into(), out)?;
 
-            // Read the zone name and version from the `oxide.json` at the root
-            // of the zone.
-            let data_clone = data.clone();
-            let file = Handle::current().block_on(async move {
-                std::io::Result::Ok(data_clone.file().await?.into_std().await)
-            })?;
-            let mut tar = tar::Archive::new(flate2::read::GzDecoder::new(file));
-            let metadata =
-                tufaceous_brand_metadata::Metadata::read_from_tar(&mut tar)?;
-            let info = metadata.layer_info()?;
+            let (name, version) = match kind {
+                ControlPlaneEntry::Zone => {
+                    // Read the zone name and version from the `oxide.json` at the root
+                    // of the zone.
+                    let data_clone = data.clone();
+                    let file = Handle::current().block_on(async move {
+                        std::io::Result::Ok(
+                            data_clone.file().await?.into_std().await,
+                        )
+                    })?;
+                    let mut tar =
+                        tar::Archive::new(flate2::read::GzDecoder::new(file));
+                    let metadata =
+                        tufaceous_brand_metadata::Metadata::read_from_tar(
+                            &mut tar,
+                        )?;
+                    let info = metadata.layer_info()?;
+                    (
+                        info.pkg.clone(),
+                        ArtifactVersion::new(info.version.to_string())?,
+                    )
+                }
+                ControlPlaneEntry::MeasurementCorpus => {
+                    let data_clone = data.clone();
 
-            let artifact_id = ArtifactId {
-                name: info.pkg.clone(),
-                version: ArtifactVersion::new(info.version.to_string())?,
-                kind: KnownArtifactKind::Zone.into(),
+                    // This is a CBOR
+                    let corim = rats_corim::Corim::from_file(
+                        data_clone.file_path().into(),
+                    )
+                    .map_err(RepositoryError::Corim)?;
+                    (
+                        corim.id.clone(),
+                        ArtifactVersion::new(
+                            corim
+                                .get_version()
+                                .map_err(RepositoryError::Corim)?
+                                .clone(),
+                        )?,
+                    )
+                }
             };
+
+            let artifact_id =
+                ArtifactId { name, version, kind: known_kind.into() };
             self.record_extracted_artifact(
                 artifact_id,
                 data,
-                KnownArtifactKind::Zone.into(),
+                known_kind.into(),
                 self.log,
             )?;
             Ok(())
@@ -2075,7 +2113,8 @@ mod tests {
                 | KnownArtifactKind::SwitchRot
                 | KnownArtifactKind::SwitchRotBootloader
                 | KnownArtifactKind::GimletRotBootloader
-                | KnownArtifactKind::PscRotBootloader => {}
+                | KnownArtifactKind::PscRotBootloader
+                | KnownArtifactKind::MeasurementCorpus => {}
             }
         }
 

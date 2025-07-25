@@ -69,6 +69,10 @@ impl ExtractedArtifactDataHandle {
         self.hash_id.hash
     }
 
+    pub fn file_path(&self) -> Utf8PathBuf {
+        path_for_artifact(&self.tempdir, &self.hash_id)
+    }
+
     /// Opens the file for this artifact.
     ///
     /// This can fail due to I/O errors outside our control (e.g., something
