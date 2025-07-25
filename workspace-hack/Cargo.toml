@@ -18,7 +18,7 @@ workspace = true
 
 ### BEGIN HAKARI SECTION
 [dependencies]
-ahash = { version = "0.8.11" }
+ahash = { version = "0.8.12" }
 aho-corasick = { version = "1.1.3" }
 anyhow = { version = "1.0.98", features = ["backtrace"] }
 aws-lc-rs = { version = "1.12.4", features = ["prebuilt-nasm"] }
@@ -65,7 +65,6 @@ generic-array = { version = "0.14.7", default-features = false, features = ["mor
 getrandom-6f8ce4dd05d13bba = { package = "getrandom", version = "0.2.15", default-features = false, features = ["js", "rdrand", "std"] }
 group = { version = "0.13.0", default-features = false, features = ["alloc"] }
 hashbrown = { version = "0.15.4" }
-heck = { version = "0.4.1" }
 hickory-proto = { version = "0.25.2", features = ["serde", "text-parsing"] }
 hmac = { version = "0.12.1", default-features = false, features = ["reset"] }
 hyper = { version = "1.6.0", features = ["full"] }
@@ -123,7 +122,7 @@ sha1 = { version = "0.10.6", features = ["oid"] }
 sha2 = { version = "0.10.9", features = ["oid"] }
 similar = { version = "2.7.0", features = ["bytes", "inline", "unicode"] }
 slog = { version = "2.7.0", features = ["dynamic-keys", "max_level_trace", "release_max_level_debug", "release_max_level_trace"] }
-smallvec = { version = "1.15.0", default-features = false, features = ["const_new"] }
+smallvec = { version = "1.15.1", default-features = false, features = ["const_new"] }
 spin = { version = "0.9.8" }
 string_cache = { version = "0.8.9" }
 strum-2f80eeee3b1b6c7e = { package = "strum", version = "0.26.3", features = ["derive"] }
@@ -147,14 +146,14 @@ usdt = { version = "0.5.0" }
 usdt-impl = { version = "0.5.0", default-features = false, features = ["asm", "des"] }
 uuid = { version = "1.17.0", features = ["serde", "v4"] }
 x509-cert = { version = "0.2.5" }
-zerocopy-c38e5c1d305a1b54 = { package = "zerocopy", version = "0.8.26", default-features = false, features = ["derive"] }
+zerocopy-c38e5c1d305a1b54 = { package = "zerocopy", version = "0.8.26", default-features = false, features = ["derive", "simd"] }
 zerocopy-ca01ad9e24f5d932 = { package = "zerocopy", version = "0.7.35", features = ["derive", "simd"] }
 zeroize = { version = "1.8.1", features = ["std", "zeroize_derive"] }
 zip-164d15cefe24d7eb = { package = "zip", version = "4.2.0", default-features = false, features = ["bzip2", "deflate", "zstd"] }
 zip-3b31131e45eafb45 = { package = "zip", version = "0.6.6", default-features = false, features = ["bzip2", "deflate"] }
 
 [build-dependencies]
-ahash = { version = "0.8.11" }
+ahash = { version = "0.8.12" }
 aho-corasick = { version = "1.1.3" }
 anyhow = { version = "1.0.98", features = ["backtrace"] }
 aws-lc-rs = { version = "1.12.4", features = ["prebuilt-nasm"] }
@@ -202,7 +201,6 @@ generic-array = { version = "0.14.7", default-features = false, features = ["mor
 getrandom-6f8ce4dd05d13bba = { package = "getrandom", version = "0.2.15", default-features = false, features = ["js", "rdrand", "std"] }
 group = { version = "0.13.0", default-features = false, features = ["alloc"] }
 hashbrown = { version = "0.15.4" }
-heck = { version = "0.4.1" }
 hickory-proto = { version = "0.25.2", features = ["serde", "text-parsing"] }
 hmac = { version = "0.12.1", default-features = false, features = ["reset"] }
 hyper = { version = "1.6.0", features = ["full"] }
@@ -260,7 +258,7 @@ sha1 = { version = "0.10.6", features = ["oid"] }
 sha2 = { version = "0.10.9", features = ["oid"] }
 similar = { version = "2.7.0", features = ["bytes", "inline", "unicode"] }
 slog = { version = "2.7.0", features = ["dynamic-keys", "max_level_trace", "release_max_level_debug", "release_max_level_trace"] }
-smallvec = { version = "1.15.0", default-features = false, features = ["const_new"] }
+smallvec = { version = "1.15.1", default-features = false, features = ["const_new"] }
 spin = { version = "0.9.8" }
 string_cache = { version = "0.8.9" }
 strum-2f80eeee3b1b6c7e = { package = "strum", version = "0.26.3", features = ["derive"] }
@@ -286,7 +284,7 @@ usdt = { version = "0.5.0" }
 usdt-impl = { version = "0.5.0", default-features = false, features = ["asm", "des"] }
 uuid = { version = "1.17.0", features = ["serde", "v4"] }
 x509-cert = { version = "0.2.5" }
-zerocopy-c38e5c1d305a1b54 = { package = "zerocopy", version = "0.8.26", default-features = false, features = ["derive"] }
+zerocopy-c38e5c1d305a1b54 = { package = "zerocopy", version = "0.8.26", default-features = false, features = ["derive", "simd"] }
 zerocopy-ca01ad9e24f5d932 = { package = "zerocopy", version = "0.7.35", features = ["derive", "simd"] }
 zeroize = { version = "1.8.1", features = ["std", "zeroize_derive"] }
 zip-164d15cefe24d7eb = { package = "zip", version = "4.2.0", default-features = false, features = ["bzip2", "deflate", "zstd"] }

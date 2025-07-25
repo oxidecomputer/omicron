@@ -54,15 +54,15 @@ dependencies = [
 
 [[package]]
 name = "ahash"
-version = "0.8.11"
+version = "0.8.12"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e89da841a80418a9b391ebaea17f5c112ffaaa96f621d2c285b5174da76b9011"
+checksum = "5a15f179cd60c4584b8a8c596927aadc462e27f2ca70c04e0071964a73ba7a75"
 dependencies = [
  "cfg-if",
- "getrandom 0.2.15",
+ "getrandom 0.3.1",
  "once_cell",
  "version_check",
- "zerocopy 0.7.35",
+ "zerocopy 0.8.26",
 ]
 
 [[package]]
@@ -1130,6 +1130,22 @@ dependencies = [
 ]
 
 [[package]]
+name = "cargo-util-schemas"
+version = "0.8.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "7dc1a6f7b5651af85774ae5a34b4e8be397d9cf4bc063b7e6dbd99a841837830"
+dependencies = [
+ "semver 1.0.26",
+ "serde",
+ "serde-untagged",
+ "serde-value",
+ "thiserror 2.0.12",
+ "toml 0.8.23",
+ "unicode-xid",
+ "url",
+]
+
+[[package]]
 name = "cargo_metadata"
 version = "0.18.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1151,7 +1167,22 @@ checksum = "4f7835cfc6135093070e95eb2b53e5d9b5c403dc3a6be6040ee026270aa82502"
 dependencies = [
  "camino",
  "cargo-platform 0.2.0",
- "cargo-util-schemas",
+ "cargo-util-schemas 0.2.0",
+ "semver 1.0.26",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.12",
+]
+
+[[package]]
+name = "cargo_metadata"
+version = "0.21.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "5cfca2aaa699835ba88faf58a06342a314a950d2b9686165e038286c30316868"
+dependencies = [
+ "camino",
+ "cargo-platform 0.2.0",
+ "cargo-util-schemas 0.8.2",
  "semver 1.0.26",
  "serde",
  "serde_json",
@@ -1238,11 +1269,11 @@ dependencies = [
 
 [[package]]
 name = "cfg-expr"
-version = "0.18.0"
+version = "0.20.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "1a2b34126159980f92da2a08bdec0694fd80fb5eb9e48aff25d20a0d8dfa710d"
+checksum = "0d0390889d58f934f01cd49736275b4c2da15bcfc328c78ff2349907e6cabf22"
 dependencies = [
- "smallvec 1.15.0",
+ "smallvec 1.15.1",
  "target-lexicon",
 ]
 
@@ -1653,7 +1684,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "117725a109d387c937a1533ce01b450cbde6b88abceea8473c4d7a85853cda3c"
 dependencies = [
  "lazy_static",
- "windows-sys 0.48.0",
+ "windows-sys 0.59.0",
 ]
 
 [[package]]
@@ -3896,14 +3927,13 @@ dependencies = [
 
 [[package]]
 name = "guppy"
-version = "0.17.19"
+version = "0.17.20"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "81dfbb4e91461d20334e04ea276ec826d62f4509ccd641db47d4ae15277dbb03"
+checksum = "7eadc0c380d2c5f421758a5838ce593687da4a47d1dcf1169bf3bad629b764e7"
 dependencies = [
  "ahash",
  "camino",
- "cargo-util-schemas",
- "cargo_metadata 0.20.0",
+ "cargo_metadata 0.21.0",
  "cfg-if",
  "debug-ignore",
  "fixedbitset 0.5.7",
@@ -3913,11 +3943,11 @@ dependencies = [
  "nested",
  "once_cell",
  "pathdiff",
- "petgraph 0.7.1",
+ "petgraph 0.8.2",
  "semver 1.0.26",
  "serde",
  "serde_json",
- "smallvec 1.15.0",
+ "smallvec 1.15.1",
  "static_assertions",
  "target-spec",
 ]
@@ -4195,7 +4225,7 @@ dependencies = [
  "parking_lot 0.12.3",
  "rand 0.8.5",
  "resolv-conf",
- "smallvec 1.15.0",
+ "smallvec 1.15.1",
  "thiserror 1.0.69",
  "tokio",
  "tracing",
@@ -4216,7 +4246,7 @@ dependencies = [
  "parking_lot 0.12.3",
  "rand 0.9.1",
  "resolv-conf",
- "smallvec 1.15.0",
+ "smallvec 1.15.1",
  "thiserror 2.0.12",
  "tokio",
  "tracing",
@@ -4476,7 +4506,7 @@ dependencies = [
  "httpdate",
  "itoa",
  "pin-project-lite",
- "smallvec 1.15.0",
+ "smallvec 1.15.1",
  "tokio",
  "want",
 ]
@@ -4641,7 +4671,7 @@ dependencies = [
  "icu_normalizer_data",
  "icu_properties",
  "icu_provider",
- "smallvec 1.15.0",
+ "smallvec 1.15.1",
  "utf16_iter",
  "utf8_iter",
  "write16",
@@ -4748,7 +4778,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "686f825264d630750a544639377bae737628043f20d38bbc029e8f29ea968a7e"
 dependencies = [
  "idna_adapter",
- "smallvec 1.15.0",
+ "smallvec 1.15.1",
  "utf8_iter",
 ]
 
@@ -5543,7 +5573,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "4979f22fdb869068da03c9f7528f8297c6fd2606bc3a4affe42e6a823fdb8da4"
 dependencies = [
  "cfg-if",
- "windows-targets 0.48.5",
+ "windows-targets 0.52.6",
 ]
 
 [[package]]
@@ -6034,7 +6064,7 @@ dependencies = [
  "parking_lot 0.12.3",
  "portable-atomic",
  "rustc_version 0.4.1",
- "smallvec 1.15.0",
+ "smallvec 1.15.1",
  "tagptr",
  "thiserror 1.0.69",
  "uuid",
@@ -7030,7 +7060,7 @@ version = "0.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "77a5d83df9f36fe23f0c3648c6bbb8b0298bb5f1939c8f2704431371f4b84d43"
 dependencies = [
- "smallvec 1.15.0",
+ "smallvec 1.15.1",
 ]
 
 [[package]]
@@ -7203,7 +7233,7 @@ dependencies = [
  "num-traits",
  "rand 0.8.5",
  "serde",
- "smallvec 1.15.0",
+ "smallvec 1.15.1",
  "zeroize",
 ]
 
@@ -8400,7 +8430,6 @@ dependencies = [
  "getrandom 0.3.1",
  "group",
  "hashbrown 0.15.4",
- "heck 0.4.1",
  "hickory-proto 0.25.2",
  "hmac",
  "hyper",
@@ -8464,7 +8493,7 @@ dependencies = [
  "sha2",
  "similar",
  "slog",
- "smallvec 1.15.0",
+ "smallvec 1.15.1",
  "spin",
  "string_cache",
  "strum 0.26.3",
@@ -9367,7 +9396,7 @@ dependencies = [
  "instant",
  "libc",
  "redox_syscall 0.2.16",
- "smallvec 1.15.0",
+ "smallvec 1.15.1",
  "winapi",
 ]
 
@@ -9380,7 +9409,7 @@ dependencies = [
  "cfg-if",
  "libc",
  "redox_syscall 0.5.7",
- "smallvec 1.15.0",
+ "smallvec 1.15.1",
  "windows-targets 0.52.6",
 ]
 
@@ -9467,7 +9496,7 @@ version = "0.8.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "6c7fabb0b56aba5d2eb3fa9b1547c187f21f8c051295a7b97a50be6a9332f4cb"
 dependencies = [
- "smallvec 1.15.0",
+ "smallvec 1.15.1",
 ]
 
 [[package]]
@@ -9608,16 +9637,6 @@ dependencies = [
  "indexmap 2.10.0",
  "serde",
  "serde_derive",
-]
-
-[[package]]
-name = "petgraph"
-version = "0.7.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "3672b37090dbd86368a4145bc067582552b29c27377cad4e0a306c97f9bd7772"
-dependencies = [
- "fixedbitset 0.5.7",
- "indexmap 2.10.0",
 ]
 
 [[package]]
@@ -12544,9 +12563,9 @@ dependencies = [
 
 [[package]]
 name = "smallvec"
-version = "1.15.0"
+version = "1.15.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "8917285742e9f3e1683f0a9c4e6b57960b7314d0b08d30d1ecd426713ee2eee9"
+checksum = "67b1b7a3b5fe4f1376887184045fcf45c69e92af734b7aaddc05fb777b6fbd03"
 
 [[package]]
 name = "smawk"
@@ -12618,7 +12637,7 @@ version = "0.8.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "03c3c6b7927ffe7ecaa769ee0e3994da3b8cafc8f444578982c83ecb161af917"
 dependencies = [
- "heck 0.4.1",
+ "heck 0.5.0",
  "proc-macro2",
  "quote",
  "syn 2.0.104",
@@ -13164,9 +13183,9 @@ checksum = "e502f78cdbb8ba4718f566c418c52bc729126ffd16baee5baa718cf25dd5a69a"
 
 [[package]]
 name = "target-spec"
-version = "3.4.2"
+version = "3.5.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "49424d0fdcba4406e46d1cea3014c4d1987263790b8e5d1be45c4509c9d52553"
+checksum = "53928b291de23967df6740f2e584bb68101890f63d730292c0a5205092c8e0fa"
 dependencies = [
  "cfg-expr",
  "guppy-workspace-hack",
@@ -13846,7 +13865,7 @@ dependencies = [
  "once_cell",
  "regex",
  "sharded-slab",
- "smallvec 1.15.0",
+ "smallvec 1.15.1",
  "thread_local",
  "tracing",
  "tracing-core",
@@ -15191,7 +15210,7 @@ version = "0.1.9"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "cf221c93e13a30d793f7645a0e7762c55d169dbb0a49671918a2319d289b10bb"
 dependencies = [
- "windows-sys 0.48.0",
+ "windows-sys 0.59.0",
 ]
 
 [[package]]
