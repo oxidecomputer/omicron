@@ -118,11 +118,15 @@ async fn test_port_settings_basic_crud(ctx: &ControlPlaneTestContext) {
     let lldp_params = LldpLinkConfigCreate {
         enabled: true,
         link_name: Some("Link Name".into()),
-        link_description: Some("link_ Dscription".into()),
+        link_description: Some("link description".into()),
         chassis_id: Some("Chassis ID".into()),
         system_name: Some("System Name".into()),
         system_description: Some("System description".into()),
-        management_ip: None,
+        management_ip: Some(
+            "203.0.113.10"
+                .parse()
+                .expect("management_ip should be a valid address"),
+        ),
     };
 
     // links
