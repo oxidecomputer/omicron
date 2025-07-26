@@ -73,11 +73,6 @@ const PROGRESS_POLL_INTERVAL: Duration = Duration::from_secs(10);
 /// Timeout for repeat attempts
 pub const DEFAULT_RETRY_TIMEOUT: Duration = Duration::from_secs(60);
 
-/// How long to wait after resetting the device before expecting it to come up
-// 120 seconds is chosen as a generous overestimate, based on reports that
-// Sidecar SPs have been observed to take as many as 30 seconds to reset.
-const RESET_TIMEOUT: Duration = Duration::from_secs(120);
-
 /// Parameters describing a request to update one SP-managed component
 ///
 /// This is similar in spirit to the `SpComponentUpdater` trait but uses a
@@ -139,6 +134,21 @@ impl SpComponentUpdate {
                     // is the staging area for the bootloader and in this context
                     // means "the inactive slot".
                     firmware_slot: 1,
+                    update_id,
+                }
+            }
+            PendingMgsUpdateDetails::HostPhase1(details) => {
+                SpComponentUpdate {
+                    log: log.clone(),
+                    component: SpComponent::HOST_CPU_BOOT_FLASH,
+                    target_sp_type: request.sp_type,
+                    target_sp_slot: request.slot_id,
+                    // Like the SP, we request an update to the inactive slot.
+                    firmware_slot: details
+                        .expected_active_slot
+                        .phase_1_slot
+                        .toggled()
+                        .to_mgs_firmware_slot(),
                     update_id,
                 }
             }
@@ -407,7 +417,7 @@ pub(crate) async fn apply_update(
         update_helper,
         &mut mgs_clients,
         update,
-        RESET_TIMEOUT,
+        post_update_timeout(update),
     )
     .await
     {
@@ -599,6 +609,41 @@ enum UpdateWaitError {
     Indeterminate(#[source] PrecheckError),
 }
 
+// Timeouts, timeouts: always wrong!
+//
+// We have to pick some maximum time we're willing to wait for the `post_update`
+// hook to complete. In general this hook is responsible for resetting the
+// updated target to cause it to boot into its new version, but the details vary
+// wildly by device type (e.g., resetting the RoT requires multiple resets) and
+// the expected amount of time also varies wildly (e.g., resetting a gimlet SP
+// takes a few seconds, resetting a sidecar SP can take 10s of seconds,
+// resetting a sled after a host OS update takes minutes).
+fn post_update_timeout(update: &PendingMgsUpdate) -> Duration {
+    match &update.details {
+        PendingMgsUpdateDetails::Sp { .. } => {
+            // We're resetting an SP; use a generous timeout for sleds and power
+            // shelf controllers (which should take a few seconds) and an even
+            // more generaous timeout for switches (which we've seen take 10-20
+            // seconds in practice).
+            match update.sp_type {
+                SpType::Sled | SpType::Power => Duration::from_secs(60),
+                SpType::Switch => Duration::from_secs(120),
+            }
+        }
+        PendingMgsUpdateDetails::Rot { .. }
+        | PendingMgsUpdateDetails::RotBootloader { .. } => {
+            // Resetting the RoT and the bootloader should be quick (a few
+            // seconds each).
+            Duration::from_secs(60)
+        }
+        PendingMgsUpdateDetails::HostPhase1(..) => {
+            // Resetting a sled takes minutes (mostly DRAM training); give
+            // something very generous here to wait for it to come back.
+            Duration::from_secs(10 * 60)
+        }
+    }
+}
+
 /// Waits for the specified update to completely finish (by polling)
 ///
 /// "Finish" here means that the component is online in the final state
@@ -632,14 +677,29 @@ async fn wait_for_update_done(
             // Check if we're done.
             Ok(PrecheckStatus::UpdateComplete) => return Ok(()),
 
-            // An incorrect version in the "inactive" slot, incorrect active slot,
-            // or non-empty pending_persistent_boot_preference/transient_boot_preference
-            // are normal during the upgrade. We have no reason to think these won't
-            // converge so we proceed with waiting.
+            // Many error statuses are normal during the upgrade:
+            //
+            // * incorrect version or artifact in the "inactive" slot
+            // * incorrect active slot
+            // * incorrect active host phase 2 artifact (this is written by
+            //   sled-agent, and must be done before we pass precheck)
+            // * non-empty pending_persistent_boot_preference
+            // * non-empty transient_boot_preference
+            // * failure to fetch inventory from sled-agent (host OS only)
+            // * failure to determine an active slot artifact
+            //
+            // We have no reason to think these won't converge, so we proceed
+            // with waiting.
             Err(PrecheckError::GatewayClientError(_))
             | Err(PrecheckError::WrongInactiveVersion { .. })
-            | Err(PrecheckError::WrongActiveSlot { .. })
+            | Err(PrecheckError::WrongInactiveArtifact { .. })
+            | Err(PrecheckError::WrongActiveRotSlot { .. })
+            | Err(PrecheckError::WrongActiveHostPhase1Slot { .. })
             | Err(PrecheckError::EphemeralRotBootPreferenceSet)
+            | Err(PrecheckError::SledAgentInventory { .. })
+            | Err(PrecheckError::SledAgentInventoryMissingLastReconciliation)
+            | Err(PrecheckError::DeterminingActiveArtifact { .. })
+            | Err(PrecheckError::DeterminingActiveHostOsSlot { .. })
             | Ok(PrecheckStatus::ReadyForUpdate) => {
                 if before.elapsed() >= timeout {
                     return Err(UpdateWaitError::Timeout(timeout));
@@ -649,9 +709,13 @@ async fn wait_for_update_done(
                 continue;
             }
 
-            Err(error @ PrecheckError::WrongDevice { .. })
-            | Err(error @ PrecheckError::WrongActiveVersion { .. })
-            | Err(error @ PrecheckError::RotCommunicationFailed { .. }) => {
+            Err(
+                error @ (PrecheckError::WrongDevice { .. }
+                | PrecheckError::WrongActiveVersion { .. }
+                | PrecheckError::WrongActiveArtifact { .. }
+                | PrecheckError::WrongHostOsBootDisk { .. }
+                | PrecheckError::RotCommunicationFailed { .. }),
+            ) => {
                 // Stop trying to make this update happen.  It's not going to
                 // happen.
                 return Err(UpdateWaitError::Indeterminate(error));
@@ -1381,7 +1445,9 @@ mod test {
             let message = InlineErrorChain::new(error).to_string();
             eprintln!("{}", message);
             assert!(
-                message.contains("expected to find active slot B, but found A")
+                message.contains(
+                    "expected to find active RoT slot B, but found A"
+                )
             );
 
             // No changes should have been made in this case.

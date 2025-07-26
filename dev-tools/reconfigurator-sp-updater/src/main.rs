@@ -6,6 +6,7 @@
 
 use anyhow::Context;
 use anyhow::anyhow;
+use anyhow::bail;
 use clap::Args;
 use clap::ColorChoice;
 use clap::Parser;
@@ -17,22 +18,29 @@ use gateway_types::rot::RotSlot;
 use internal_dns_types::names::ServiceName;
 use nexus_mgs_updates::ArtifactCache;
 use nexus_mgs_updates::MgsUpdateDriver;
+use nexus_types::deployment::ExpectedActiveHostOsSlot;
 use nexus_types::deployment::ExpectedActiveRotSlot;
+use nexus_types::deployment::ExpectedArtifact;
+use nexus_types::deployment::ExpectedInactiveHostOsArtifact;
 use nexus_types::deployment::ExpectedVersion;
 use nexus_types::deployment::PendingMgsUpdate;
 use nexus_types::deployment::PendingMgsUpdateDetails;
+use nexus_types::deployment::PendingMgsUpdateHostPhase1Details;
 use nexus_types::deployment::PendingMgsUpdates;
 use nexus_types::internal_api::views::MgsUpdateDriverStatus;
 use nexus_types::inventory::BaseboardId;
+use omicron_common::disk::M2Slot;
 use omicron_repl_utils::run_repl_on_stdin;
 use qorb::resolver::Resolver;
 use qorb::resolvers::fixed::FixedResolver;
 use slog::{info, o, warn};
 use std::collections::BTreeMap;
-use std::fmt::Write;
 use std::net::SocketAddr;
+use std::net::SocketAddrV6;
 use std::sync::Arc;
 use std::time::Duration;
+use swrite::SWrite;
+use swrite::swriteln;
 use tokio::sync::watch;
 use tufaceous_artifact::ArtifactHash;
 use tufaceous_artifact::ArtifactVersion;
@@ -277,6 +285,9 @@ struct TopLevelArgs {
     command: Commands,
 }
 
+// Clippy wants us to box `SetArgs`, but that makes matches slightly more
+// awkward. This is just a dev/test tool; big variants are fine.
+#[allow(clippy::large_enum_variant)]
 #[derive(Debug, Subcommand)]
 enum Commands {
     /// Show configured updates
@@ -295,33 +306,34 @@ fn cmd_config(
     let configured = updater_state.requests_tx.borrow();
 
     let mut s = String::new();
-    writeln!(&mut s, "configured updates ({}):", configured.len())?;
+    swriteln!(s, "configured updates ({}):", configured.len());
     for update in &*configured {
         let baseboard_id = &update.baseboard_id;
-        writeln!(
-            &mut s,
+        swriteln!(
+            s,
             "    part {} serial {} (type {:?} slot {}):",
             baseboard_id.part_number,
             baseboard_id.serial_number,
             update.sp_type,
             update.slot_id,
-        )?;
-        writeln!(&mut s, "        artifact hash: {}", update.artifact_hash)?;
-        writeln!(
-            &mut s,
+        );
+        swriteln!(s, "        artifact hash: {}", update.artifact_hash);
+        swriteln!(
+            s,
             "        user-provided artifact version: {}",
             update.artifact_version,
-        )?;
+        );
         match &update.details {
             PendingMgsUpdateDetails::Sp {
                 expected_active_version,
                 expected_inactive_version,
             } => {
-                writeln!(
-                    &mut s,
+                swriteln!(
+                    s,
                     "        preconditions: active slot {:?}, inactive slot {:?}",
-                    expected_active_version, expected_inactive_version,
-                )?;
+                    expected_active_version,
+                    expected_inactive_version,
+                );
             }
             PendingMgsUpdateDetails::Rot {
                 expected_active_slot,
@@ -330,8 +342,8 @@ fn cmd_config(
                 expected_pending_persistent_boot_preference,
                 expected_transient_boot_preference,
             } => {
-                writeln!(
-                    &mut s,
+                swriteln!(
+                    s,
                     "        preconditions: expected active slot {:?}
                                             expected active version {:?}
                                             expected inactive version {:?}
@@ -342,21 +354,45 @@ fn cmd_config(
                     expected_inactive_version, expected_persistent_boot_preference,
                     expected_pending_persistent_boot_preference,
                     expected_transient_boot_preference,
-                )?;
+                );
             }
             PendingMgsUpdateDetails::RotBootloader {
                 expected_stage0_version,
                 expected_stage0_next_version,
             } => {
-                writeln!(
-                    &mut s,
+                swriteln!(
+                    s,
                     "        preconditions: stage 0 {:?}, stage 0 next {:?}",
-                    expected_stage0_version, expected_stage0_next_version,
-                )?;
+                    expected_stage0_version,
+                    expected_stage0_next_version,
+                );
+            }
+            PendingMgsUpdateDetails::HostPhase1(
+                PendingMgsUpdateHostPhase1Details {
+                    expected_active_slot,
+                    expected_inactive_artifact,
+                    sled_agent_address,
+                },
+            ) => {
+                swriteln!(s,"        preconditions: expected active phase 1 slot {:?}
+                                                    expected boot disk {:?}
+                                                    expected active phase 1 artifact {}
+                                                    expected active phase 2 artifact {}
+                                                    expected inactive phase 1 artifact {}
+                                                    expected inactive phase 2 artifact {}
+                                                    sled_agent_address {}",
+                    expected_active_slot.phase_1_slot,
+                    expected_active_slot.boot_disk,
+                    expected_active_slot.phase_1,
+                    expected_active_slot.phase_2,
+                    expected_inactive_artifact.phase_1,
+                    expected_inactive_artifact.phase_2,
+                    sled_agent_address,
+                );
             }
         }
 
-        writeln!(&mut s)?;
+        swriteln!(s);
     }
 
     Ok(Some(s))
@@ -427,6 +463,22 @@ enum Component {
         #[arg(long, short = 'i')]
         expected_stage0_next_version: ExpectedVersion,
     },
+    HostPhase1 {
+        #[arg(long)]
+        expected_active_slot: M2Slot,
+        #[arg(long)]
+        expected_boot_disk: M2Slot,
+        #[arg(long)]
+        expected_slot_a_phase_1: ArtifactHash,
+        #[arg(long)]
+        expected_slot_a_phase_2: ExpectedArtifact,
+        #[arg(long)]
+        expected_slot_b_phase_1: ArtifactHash,
+        #[arg(long)]
+        expected_slot_b_phase_2: ExpectedArtifact,
+        #[arg(long)]
+        sled_agent_address: SocketAddrV6,
+    },
 }
 
 fn cmd_set(
@@ -494,6 +546,55 @@ fn cmd_set(
                 expected_stage0_version,
                 expected_stage0_next_version,
             },
+            Component::HostPhase1 {
+                expected_active_slot,
+                expected_boot_disk,
+                expected_slot_a_phase_1,
+                expected_slot_a_phase_2,
+                expected_slot_b_phase_1,
+                expected_slot_b_phase_2,
+                sled_agent_address,
+            } => {
+                let (active_phase_1, inactive_phase_1) =
+                    match expected_active_slot {
+                        M2Slot::A => {
+                            (expected_slot_a_phase_1, expected_slot_b_phase_1)
+                        }
+                        M2Slot::B => {
+                            (expected_slot_b_phase_1, expected_slot_a_phase_1)
+                        }
+                    };
+                let (active_phase_2, inactive_phase_2) =
+                    match expected_active_slot {
+                        M2Slot::A => {
+                            (expected_slot_a_phase_2, expected_slot_b_phase_2)
+                        }
+                        M2Slot::B => {
+                            (expected_slot_b_phase_2, expected_slot_a_phase_2)
+                        }
+                    };
+                let details = PendingMgsUpdateHostPhase1Details {
+                    expected_active_slot: ExpectedActiveHostOsSlot {
+                        phase_1_slot: expected_active_slot,
+                        boot_disk: expected_boot_disk,
+                        phase_1: active_phase_1,
+                        phase_2: match active_phase_2 {
+                            ExpectedArtifact::NoValidArtifact => bail!(
+                                "must provide phase 2 artifact hash for \
+                                 active slot ({expected_active_slot})"
+                            ),
+                            ExpectedArtifact::Artifact(hash) => hash,
+                        },
+                    },
+                    expected_inactive_artifact:
+                        ExpectedInactiveHostOsArtifact {
+                            phase_1: inactive_phase_1,
+                            phase_2: inactive_phase_2,
+                        },
+                    sled_agent_address,
+                };
+                PendingMgsUpdateDetails::HostPhase1(details)
+            }
         },
         artifact_hash: args.artifact_hash,
         artifact_version: ArtifactVersion::new(args.version)
