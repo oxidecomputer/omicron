@@ -44,6 +44,7 @@ use nexus_types::external_api::views::FloatingIp;
 use nexus_types::identity::Resource;
 use omicron_common::address::IpRange;
 use omicron_common::address::Ipv4Range;
+use omicron_common::address::NUM_SOURCE_NAT_PORTS;
 use omicron_common::api::external::ByteCount;
 use omicron_common::api::external::IdentityMetadataCreateParams;
 use omicron_common::api::external::IdentityMetadataUpdateParams;
@@ -1221,6 +1222,43 @@ async fn test_external_ip_attach_ephemeral_at_pool_exhaustion(
     )
     .await;
     assert_eq!(eph_resp_2, eph_resp);
+}
+
+#[nexus_test]
+async fn can_list_instance_snat_ip(cptestctx: &ControlPlaneTestContext) {
+    let client = &cptestctx.external_client;
+
+    let pool = create_default_ip_pool(&client).await;
+    let _project = create_project(client, PROJECT_NAME).await;
+
+    // Create a running instance with only an SNAT IP address.
+    let instance_name = INSTANCE_NAMES[0];
+    let instance =
+        instance_for_external_ips(client, instance_name, true, false, &[])
+            .await;
+    let url = format!("/v1/instances/{}/external-ips", instance.identity.id);
+    let ips = NexusRequest::object_get(client, &url)
+        .authn_as(AuthnMode::PrivilegedUser)
+        .execute()
+        .await
+        .unwrap_or_else(|e| {
+            panic!("failed to make \"get\" request to {url}: {e}")
+        })
+        .parsed_body::<Vec<views::ExternalIp>>()
+        .unwrap_or_else(|e| {
+            panic!("failed to make \"get\" request to {url}: {e}")
+        });
+    assert_eq!(
+        ips.len(),
+        1,
+        "Instance should have been created with only 1 IP"
+    );
+    let views::ExternalIp::SNat(snat) = &ips[0] else {
+        panic!("Expected an SNAT external IP, found {:?}", &ips[0]);
+    };
+    assert_eq!(snat.ip_pool_id, pool.identity.id);
+    assert_eq!(snat.ports.first.0.get(), 1);
+    assert_eq!(snat.ports.last.0.get(), NUM_SOURCE_NAT_PORTS);
 }
 
 pub async fn floating_ip_get(

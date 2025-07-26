@@ -17886,6 +17886,42 @@
       "ExternalIp": {
         "oneOf": [
           {
+            "description": "A source NAT IP address.\n\nSNAT addresses are ephemeral addresses used only for outbound connectivity.",
+            "type": "object",
+            "properties": {
+              "ip": {
+                "description": "The IP address.",
+                "type": "string",
+                "format": "ip"
+              },
+              "ip_pool_id": {
+                "description": "ID of the IP Pool from which the address is taken.",
+                "type": "string",
+                "format": "uuid"
+              },
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "s_nat"
+                ]
+              },
+              "ports": {
+                "description": "The range of ports usable with the IP address.",
+                "allOf": [
+                  {
+                    "$ref": "#/components/schemas/L4PortRange"
+                  }
+                ]
+              }
+            },
+            "required": [
+              "ip",
+              "ip_pool_id",
+              "kind",
+              "ports"
+            ]
+          },
+          {
             "type": "object",
             "properties": {
               "ip": {

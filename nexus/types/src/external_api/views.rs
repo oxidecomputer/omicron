@@ -15,8 +15,8 @@ use chrono::Utc;
 use daft::Diffable;
 use omicron_common::api::external::{
     AffinityPolicy, AllowedSourceIps as ExternalAllowedSourceIps, ByteCount,
-    Digest, Error, FailureDomain, IdentityMetadata, InstanceState, Name,
-    ObjectIdentity, SimpleIdentity, SimpleIdentityOrName,
+    Digest, Error, FailureDomain, IdentityMetadata, InstanceState, L4PortRange,
+    Name, ObjectIdentity, SimpleIdentity, SimpleIdentityOrName,
 };
 use omicron_uuid_kinds::{AlertReceiverUuid, AlertUuid};
 use oxnet::{Ipv4Net, Ipv6Net};
@@ -502,6 +502,7 @@ pub struct IpPoolRange {
 #[derive(Debug, Clone, Deserialize, PartialEq, Serialize, JsonSchema)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum ExternalIp {
+    SNat(SNatIp),
     Ephemeral { ip: IpAddr, ip_pool_id: Uuid },
     Floating(FloatingIp),
 }
@@ -509,6 +510,7 @@ pub enum ExternalIp {
 impl ExternalIp {
     pub fn ip(&self) -> IpAddr {
         match self {
+            Self::SNat(snat) => snat.ip,
             Self::Ephemeral { ip, .. } => *ip,
             Self::Floating(float) => float.ip,
         }
@@ -516,10 +518,24 @@ impl ExternalIp {
 
     pub fn kind(&self) -> IpKind {
         match self {
+            Self::SNat(_) => IpKind::SNat,
             Self::Ephemeral { .. } => IpKind::Ephemeral,
             Self::Floating(_) => IpKind::Floating,
         }
     }
+}
+
+/// A source NAT IP address.
+///
+/// SNAT addresses are ephemeral addresses used only for outbound connectivity.
+#[derive(Debug, Clone, Deserialize, PartialEq, Serialize, JsonSchema)]
+pub struct SNatIp {
+    /// The IP address.
+    pub ip: IpAddr,
+    /// The range of ports usable with the IP address.
+    pub ports: L4PortRange,
+    /// ID of the IP Pool from which the address is taken.
+    pub ip_pool_id: Uuid,
 }
 
 /// A Floating IP is a well-known IP address which can be attached
@@ -553,9 +569,11 @@ impl TryFrom<ExternalIp> for FloatingIp {
 
     fn try_from(value: ExternalIp) -> Result<Self, Self::Error> {
         match value {
-            ExternalIp::Ephemeral { .. } => Err(Error::internal_error(
-                "tried to convert an ephemeral IP into a floating IP",
-            )),
+            ExternalIp::SNat(_) | ExternalIp::Ephemeral { .. } => {
+                Err(Error::internal_error(
+                    "tried to convert an SNAT or ephemeral IP into a floating IP",
+                ))
+            }
             ExternalIp::Floating(v) => Ok(v),
         }
     }
