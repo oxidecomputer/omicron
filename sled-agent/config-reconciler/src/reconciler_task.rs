@@ -57,6 +57,7 @@ use self::zones::OmicronZones;
 
 pub use self::external_disks::CurrentlyManagedZpools;
 pub use self::external_disks::CurrentlyManagedZpoolsReceiver;
+pub use self::zones::ResolverStatusExt;
 pub use self::zones::TimeSyncError;
 pub use self::zones::TimeSyncStatus;
 
@@ -463,11 +464,20 @@ impl ReconcilerTask {
         // managing disks, then remove any orphaned datasets.
         // ---
 
-        // First, shut down zones if needed.
+        // Obtain the resolver status. This will be used to account for mupdate
+        // overrides and errors.
+        //
+        // This status is obtained after remove_mupdate_override is processed.
+        let resolver_status =
+            sled_agent_facilities.zone_image_resolver_status();
+
+        // Shut down zones if needed.
         let zone_shutdown_result = self
             .zones
             .shut_down_zones_if_needed(
                 &sled_config.zones,
+                &resolver_status,
+                &internal_disks,
                 sled_agent_facilities,
                 &self.log,
             )
@@ -545,6 +555,8 @@ impl ReconcilerTask {
                 self.zones
                     .start_zones_if_needed(
                         &sled_config.zones,
+                        &resolver_status,
+                        &internal_disks,
                         sled_agent_facilities,
                         timesync_status.is_synchronized(),
                         &self.datasets,

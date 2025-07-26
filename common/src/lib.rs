@@ -31,6 +31,7 @@ pub mod progenitor_operation_retry;
 pub mod snake_case_result;
 pub mod update;
 pub mod vlan;
+pub mod zone_images;
 pub mod zpool_name;
 
 /// A type that allows adding file and line numbers to log messages
