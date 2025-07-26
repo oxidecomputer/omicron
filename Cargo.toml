@@ -653,7 +653,7 @@ reconfigurator-cli = { path = "dev-tools/reconfigurator-cli" }
 reedline = "0.40.0"
 ref-cast = "1.0"
 regex = "1.11.1"
-regress = "0.10.3"
+regress = "0.10.4"
 repo-depot-api = { path = "sled-agent/repo-depot-api" }
 repo-depot-client = { path = "clients/repo-depot-client" }
 reqwest = { version = "0.12.22", default-features = false }
