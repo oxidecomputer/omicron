@@ -110,6 +110,7 @@ tokio-postgres = { workspace = true, features = ["with-serde_json-1"] }
 tokio-util = { workspace = true, features = ["codec"] }
 tough.workspace = true
 tufaceous-artifact.workspace = true
+usdt.workspace = true
 uuid.workspace = true
 
 nexus-auth.workspace = true

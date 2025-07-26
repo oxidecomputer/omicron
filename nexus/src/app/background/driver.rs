@@ -7,6 +7,8 @@
 //! None of this file is specific to Nexus or any of the specific background
 //! tasks in Nexus, although the design is pretty bespoke for what Nexus needs.
 
+use crate::app::background::probes;
+
 use super::BackgroundTask;
 use super::TaskName;
 use assert_matches::assert_matches;
@@ -129,6 +131,7 @@ impl Driver {
             name.clone(),
         )]));
         let task_exec = TaskExec::new(
+            &name,
             taskdef.period,
             taskdef.task_impl,
             activator.clone(),
@@ -189,6 +192,7 @@ impl Driver {
     /// If the task is currently running, it will be activated again when it
     /// finishes.
     pub(super) fn activate(&self, task: &TaskName) {
+        probes::background__task__activate!(|| task.as_str());
         self.task_required(task).activator.activate();
     }
 
@@ -234,6 +238,8 @@ pub struct TaskDefinition<'a, N: ToString, D: ToString> {
 /// Encapsulates state needed by the background tokio task to manage activation
 /// of the background task
 struct TaskExec {
+    /// the name of this background task
+    name: String,
     /// how often the background task should be activated
     period: Duration,
     /// impl of the background task
@@ -251,13 +257,23 @@ struct TaskExec {
 
 impl TaskExec {
     fn new(
+        name: impl ToString,
         period: Duration,
         imp: Box<dyn BackgroundTask>,
         activation: Activator,
         opctx: OpContext,
         status_tx: watch::Sender<TaskStatus>,
     ) -> TaskExec {
-        TaskExec { period, imp, activation, opctx, status_tx, iteration: 0 }
+        let name = name.to_string();
+        TaskExec {
+            name,
+            period,
+            imp,
+            activation,
+            opctx,
+            status_tx,
+            iteration: 0,
+        }
     }
 
     /// Body of the tokio task that manages activation of this background task
@@ -318,9 +334,15 @@ impl TaskExec {
         });
 
         // Do it!
+        probes::background__task__activate__start!(|| {
+            (&self.name, self.iteration, format!("{reason:?}"))
+        });
         let details = self.imp.activate(&self.opctx).await;
         let details_str = serde_json::to_string(&details).unwrap_or_else(|e| {
             format!("<<failed to serialize task status: {}>>", e)
+        });
+        probes::background__task__activate__done!(|| {
+            (&self.name, self.iteration, &details_str)
         });
 
         let elapsed = start_instant.elapsed();
