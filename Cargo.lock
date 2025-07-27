@@ -9265,9 +9265,9 @@ dependencies = [
 
 [[package]]
 name = "oxnet"
-version = "0.1.2"
+version = "0.1.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "80e1dc143c5a701f879552428910f357df8bd725575087cc713088fdfeafe812"
+checksum = "8200429754152e6379fbb1dd06eea90156c3b67591f6e31d08e787d010ef0168"
 dependencies = [
  "ipnetwork",
  "schemars",
