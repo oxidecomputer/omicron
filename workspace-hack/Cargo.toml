@@ -131,7 +131,7 @@ subtle = { version = "2.6.1" }
 syn-f595c2ba2a3f28df = { package = "syn", version = "2.0.104", features = ["extra-traits", "fold", "full", "visit", "visit-mut"] }
 thiserror = { version = "2.0.12" }
 time = { version = "0.3.36", features = ["formatting", "local-offset", "macros", "parsing"] }
-tokio = { version = "1.45.1", features = ["full", "test-util"] }
+tokio = { version = "1.47.0", features = ["full", "test-util"] }
 tokio-postgres = { version = "0.7.13", features = ["with-chrono-0_4", "with-serde_json-1", "with-uuid-1"] }
 tokio-rustls = { version = "0.26.0", default-features = false, features = ["logging", "ring", "tls12"] }
 tokio-stream = { version = "0.1.17", features = ["net", "sync"] }
@@ -269,7 +269,7 @@ syn-f595c2ba2a3f28df = { package = "syn", version = "2.0.104", features = ["extr
 thiserror = { version = "2.0.12" }
 time = { version = "0.3.36", features = ["formatting", "local-offset", "macros", "parsing"] }
 time-macros = { version = "0.2.18", default-features = false, features = ["formatting", "parsing"] }
-tokio = { version = "1.45.1", features = ["full", "test-util"] }
+tokio = { version = "1.47.0", features = ["full", "test-util"] }
 tokio-postgres = { version = "0.7.13", features = ["with-chrono-0_4", "with-serde_json-1", "with-uuid-1"] }
 tokio-rustls = { version = "0.26.0", default-features = false, features = ["logging", "ring", "tls12"] }
 tokio-stream = { version = "0.1.17", features = ["net", "sync"] }
