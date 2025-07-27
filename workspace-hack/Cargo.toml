@@ -126,7 +126,7 @@ smallvec = { version = "1.15.1", default-features = false, features = ["const_ne
 spin = { version = "0.9.8" }
 string_cache = { version = "0.8.9" }
 strum-2f80eeee3b1b6c7e = { package = "strum", version = "0.26.3", features = ["derive"] }
-strum-754bda37e0fb3874 = { package = "strum", version = "0.27.1", features = ["derive"] }
+strum-754bda37e0fb3874 = { package = "strum", version = "0.27.2", features = ["derive"] }
 subtle = { version = "2.6.1" }
 syn-f595c2ba2a3f28df = { package = "syn", version = "2.0.104", features = ["extra-traits", "fold", "full", "visit", "visit-mut"] }
 thiserror = { version = "2.0.12" }
@@ -262,7 +262,7 @@ smallvec = { version = "1.15.1", default-features = false, features = ["const_ne
 spin = { version = "0.9.8" }
 string_cache = { version = "0.8.9" }
 strum-2f80eeee3b1b6c7e = { package = "strum", version = "0.26.3", features = ["derive"] }
-strum-754bda37e0fb3874 = { package = "strum", version = "0.27.1", features = ["derive"] }
+strum-754bda37e0fb3874 = { package = "strum", version = "0.27.2", features = ["derive"] }
 subtle = { version = "2.6.1" }
 syn-dff4ba8e3ae991db = { package = "syn", version = "1.0.109", features = ["extra-traits", "fold", "full", "visit"] }
 syn-f595c2ba2a3f28df = { package = "syn", version = "2.0.104", features = ["extra-traits", "fold", "full", "visit", "visit-mut"] }
