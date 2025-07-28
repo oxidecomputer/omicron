@@ -9,6 +9,7 @@ use crate::check_allow_destructive::DestructiveOperationToken;
 use clap::ArgAction;
 use clap::Args;
 use clap::Subcommand;
+use daft::Diffable;
 use http::StatusCode;
 use indent_write::io::IndentWriter;
 use nexus_types::deployment::PlannerChickenSwitches;
@@ -169,7 +170,7 @@ async fn chicken_switches_set(
     args: &ChickenSwitchesSetArgs,
     _destruction_token: DestructiveOperationToken,
 ) -> Result<(), anyhow::Error> {
-    let switches = match client
+    let (current_switches, new_switches) = match client
         .reconfigurator_chicken_switches_show_current()
         .await
     {
@@ -183,24 +184,30 @@ async fn chicken_switches_set(
             let switches = switches.into_inner();
             // Future switches should use the following pattern, and only update
             // the current switch values if a setting changed.
-            let Some(switches) = args
+            let Some(new_switches) = args
                 .switches
                 .update_if_modified(&switches.switches, next_version)
             else {
-                println!("No modifications made to current switch values");
+                println!("no modifications made to current switch values:");
+                let stdout = io::stdout();
+                let mut indented = IndentWriter::new("    ", stdout.lock());
+                // No need for writeln! here because .display() adds its own
+                // newlines.
+                write!(indented, "{}", switches.display()).unwrap();
                 return Ok(());
             };
-            switches
+            (Some(switches), new_switches)
         }
         Err(err) => {
             if err.status() == Some(StatusCode::NOT_FOUND) {
                 let default_switches = ReconfiguratorChickenSwitches::default();
                 // In this initial case, the operator expects that we always set
                 // switches.
-                ReconfiguratorChickenSwitchesParam {
+                let new_switches = ReconfiguratorChickenSwitchesParam {
                     version: 1,
                     switches: args.switches.update(&default_switches),
-                }
+                };
+                (None, new_switches)
             } else {
                 eprintln!("error: {:#}", err);
                 return Ok(());
@@ -208,8 +215,26 @@ async fn chicken_switches_set(
         }
     };
 
-    client.reconfigurator_chicken_switches_set(&switches).await?;
-    println!("Chicken switches updated at version {}", switches.version);
+    client.reconfigurator_chicken_switches_set(&new_switches).await?;
+    println!("chicken switches updated to version {}:", new_switches.version);
+    match current_switches {
+        Some(current_switches) => {
+            // ReconfiguratorChickenSwitchesDiffDisplay does its own
+            // indentation, so more isn't required.
+            print!(
+                "{}",
+                current_switches
+                    .switches
+                    .diff(&new_switches.switches)
+                    .display(),
+            );
+        }
+        None => {
+            let stdout = io::stdout();
+            let mut indented = IndentWriter::new("    ", stdout.lock());
+            write!(indented, "{}", new_switches.switches.display()).unwrap();
+        }
+    }
 
     Ok(())
 }
