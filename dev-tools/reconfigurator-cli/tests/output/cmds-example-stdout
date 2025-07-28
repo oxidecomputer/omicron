@@ -42,10 +42,10 @@ T ENA ID                                   PARENT                               
 sled 2eb69596-f081-4e2d-9425-9994926e0832 (in service, active)
 serial serial1
 subnet fd00:1122:3344:102::/64
-RoT bootloader stage 0 version:   Some("0.0.1")
-RoT bootloader stage 0 next version: None
 SP active version:   Some("0.0.1")
 SP inactive version: None
+RoT bootloader stage 0 version:   Some("0.0.1")
+RoT bootloader stage 0 next version: None
 RoT active slot: A
 RoT slot A version: Some("0.0.2")
 RoT slot B version: None
@@ -435,10 +435,10 @@ T ENA ID                                   PARENT                               
 sled 89d02b1b-478c-401a-8e28-7a26f74fa41b (in service, active)
 serial serial0
 subnet fd00:1122:3344:101::/64
-RoT bootloader stage 0 version:   Some("0.0.1")
-RoT bootloader stage 0 next version: None
 SP active version:   Some("0.0.1")
 SP inactive version: None
+RoT bootloader stage 0 version:   Some("0.0.1")
+RoT bootloader stage 0 next version: None
 RoT active slot: A
 RoT slot A version: Some("0.0.2")
 RoT slot B version: None
