@@ -2,7 +2,7 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-use crate::{InstanceMinimumCpuPlatform, SledCpuFamily};
+use crate::{InstanceCpuPlatform, SledCpuFamily};
 
 use super::impl_enum_type;
 use serde::{Deserialize, Serialize};
@@ -50,11 +50,11 @@ impl VmmCpuPlatform {
     }
 }
 
-impl From<InstanceMinimumCpuPlatform> for VmmCpuPlatform {
-    fn from(value: InstanceMinimumCpuPlatform) -> Self {
+impl From<InstanceCpuPlatform> for VmmCpuPlatform {
+    fn from(value: InstanceCpuPlatform) -> Self {
         match value {
-            InstanceMinimumCpuPlatform::AmdMilan => Self::AmdMilan,
-            InstanceMinimumCpuPlatform::AmdTurin => Self::AmdTurin,
+            InstanceCpuPlatform::AmdMilan => Self::AmdMilan,
+            InstanceCpuPlatform::AmdTurin => Self::AmdTurin,
         }
     }
 }

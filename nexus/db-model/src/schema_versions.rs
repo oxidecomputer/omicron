@@ -28,7 +28,7 @@ static KNOWN_VERSIONS: LazyLock<Vec<KnownVersion>> = LazyLock::new(|| {
         // |  leaving the first copy as an example for the next person.
         // v
         // KnownVersion::new(next_int, "unique-dirname-with-the-sql-files"),
-        KnownVersion::new(175, "add-instance-minimum-cpu-platform"),
+        KnownVersion::new(175, "add-instance-cpu-platform"),
         KnownVersion::new(174, "sled-cpu-family"),
         KnownVersion::new(173, "inv-internal-dns"),
         KnownVersion::new(172, "add-zones-with-mupdate-override"),

@@ -189,8 +189,8 @@ CREATE TYPE IF NOT EXISTS omicron.public.sled_state AS ENUM (
 
 -- The model of CPU installed in a particular sled, discovered by sled-agent
 -- and reported to Nexus. This determines what VMs can run on a sled: instances
--- that require a specific minimum CPU platform can only run on sleds whose
--- CPUs support all the features of that platform.
+-- that require a specific CPU platform can only run on sleds whose CPUs support
+-- all the features of that platform.
 CREATE TYPE IF NOT EXISTS omicron.public.sled_cpu_family AS ENUM (
     -- Sled-agent didn't recognize the sled's CPU.
     'unknown',
@@ -1194,7 +1194,7 @@ CREATE TYPE IF NOT EXISTS omicron.public.instance_auto_restart AS ENUM (
      'best_effort'
 );
 
-CREATE TYPE IF NOT EXISTS omicron.public.instance_min_cpu_platform AS ENUM (
+CREATE TYPE IF NOT EXISTS omicron.public.instance_cpu_platform AS ENUM (
   'amd_milan',
   'amd_turin'
 );
@@ -1312,18 +1312,16 @@ CREATE TABLE IF NOT EXISTS omicron.public.instance (
     intended_state omicron.public.instance_intended_state NOT NULL,
 
     /*
-     * The minimum required CPU platform for this instance. If set, the
-     * instance's VMs may make use of all the CPU features supplied by their
-     * minimum platform, but in exchange they may only run on sleds whose
-     * CPUs support all of those features.
+     * The required CPU platform for this instance. If set, the instance's VMs
+     * may see additional features present in that platform, but in exchange
+     * they may only run on sleds whose CPUs support all of those features.
      *
-     * If this is NULL, the control plane ignores CPU constraints when
-     * selecting a sled for this instance. Then, once it has selected a
-     * sled, it supplies a "lowest common denominator" CPU platform that
-     * is compatible with that sled to maximize the number of sleds the VM
-     * can migrate to.
+     * If this is NULL, the control plane ignores CPU constraints when selecting
+     * a sled for this instance. Then, once it has selected a sled, it supplies
+     * a "lowest common denominator" CPU platform that is compatible with that
+     * sled to maximize the number of sleds the VM can migrate to.
      */
-    min_cpu_platform omicron.public.instance_min_cpu_platform,
+    cpu_platform omicron.public.instance_cpu_platform,
 
     CONSTRAINT vmm_iff_active_propolis CHECK (
         ((state = 'vmm') AND (active_propolis_id IS NOT NULL)) OR

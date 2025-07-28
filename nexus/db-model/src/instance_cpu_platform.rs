@@ -8,7 +8,7 @@ use super::impl_enum_type;
 use serde::{Deserialize, Serialize};
 
 impl_enum_type!(
-    InstanceMinimumCpuPlatformEnum:
+    InstanceCpuPlatformEnum:
 
     #[derive(
         Copy,
@@ -20,15 +20,15 @@ impl_enum_type!(
         Serialize,
         Deserialize
     )]
-    pub enum InstanceMinimumCpuPlatform;
+    pub enum InstanceCpuPlatform;
 
     AmdMilan => b"amd_milan"
     AmdTurin => b"amd_turin"
 );
 
-impl InstanceMinimumCpuPlatform {
+impl InstanceCpuPlatform {
     /// Returns a slice containing the set of sled CPU families that can
-    /// accommodate an instance with this minimum CPU platform.
+    /// accommodate an instance with this CPU platform.
     pub fn compatible_sled_cpu_families(&self) -> &'static [SledCpuFamily] {
         match self {
             // Turin-based sleds have a superset of the features made available
@@ -41,13 +41,11 @@ impl InstanceMinimumCpuPlatform {
     }
 }
 
-impl From<omicron_common::api::external::InstanceMinimumCpuPlatform>
-    for InstanceMinimumCpuPlatform
+impl From<omicron_common::api::external::InstanceCpuPlatform>
+    for InstanceCpuPlatform
 {
-    fn from(
-        value: omicron_common::api::external::InstanceMinimumCpuPlatform,
-    ) -> Self {
-        use omicron_common::api::external::InstanceMinimumCpuPlatform as ApiPlatform;
+    fn from(value: omicron_common::api::external::InstanceCpuPlatform) -> Self {
+        use omicron_common::api::external::InstanceCpuPlatform as ApiPlatform;
         match value {
             ApiPlatform::AmdMilan => Self::AmdMilan,
             ApiPlatform::AmdTurin => Self::AmdTurin,
@@ -55,13 +53,13 @@ impl From<omicron_common::api::external::InstanceMinimumCpuPlatform>
     }
 }
 
-impl From<InstanceMinimumCpuPlatform>
-    for omicron_common::api::external::InstanceMinimumCpuPlatform
+impl From<InstanceCpuPlatform>
+    for omicron_common::api::external::InstanceCpuPlatform
 {
-    fn from(value: InstanceMinimumCpuPlatform) -> Self {
+    fn from(value: InstanceCpuPlatform) -> Self {
         match value {
-            InstanceMinimumCpuPlatform::AmdMilan => Self::AmdMilan,
-            InstanceMinimumCpuPlatform::AmdTurin => Self::AmdTurin,
+            InstanceCpuPlatform::AmdMilan => Self::AmdMilan,
+            InstanceCpuPlatform::AmdTurin => Self::AmdTurin,
         }
     }
 }

@@ -390,7 +390,7 @@ mod test {
                     external_ips: Vec::new(),
                     disks: Vec::new(),
                     boot_disk: None,
-                    min_cpu_platform: None,
+                    cpu_platform: None,
                     ssh_public_keys: None,
                     start: state == InstanceState::Vmm,
                     auto_restart_policy,

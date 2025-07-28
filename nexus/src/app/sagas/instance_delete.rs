@@ -235,7 +235,7 @@ mod test {
             boot_disk: Some(params::InstanceDiskAttachment::Attach(
                 params::InstanceDiskAttach { name: DISK_NAME.parse().unwrap() },
             )),
-            min_cpu_platform: None,
+            cpu_platform: None,
             disks: Vec::new(),
             start: false,
             auto_restart_policy: Default::default(),
