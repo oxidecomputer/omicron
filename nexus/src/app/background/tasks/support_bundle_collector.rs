@@ -27,6 +27,7 @@ use nexus_db_model::SupportBundleState;
 use nexus_db_queries::authz;
 use nexus_db_queries::context::OpContext;
 use nexus_db_queries::db::DataStore;
+use nexus_db_queries::db::datastore::EreportFilters;
 use nexus_types::deployment::SledFilter;
 use nexus_types::identity::Asset;
 use nexus_types::internal_api::background::SupportBundleCleanupReport;
@@ -84,11 +85,20 @@ struct BundleRequest {
     //
     // Typically, this is CHUNK_SIZE, but can be modified for testing.
     transfer_chunk_size: NonZeroU64,
+
+    ereport_query: Option<EreportFilters>,
 }
 
 impl Default for BundleRequest {
     fn default() -> Self {
-        Self { skip_sled_info: false, transfer_chunk_size: CHUNK_SIZE }
+        Self {
+            skip_sled_info: false,
+            transfer_chunk_size: CHUNK_SIZE,
+            ereport_query: Some(EreportFilters {
+                start_time: Some(chrono::Utc::now() - chrono::Days::new(7)),
+                ..EreportFilters::default()
+            }),
+        }
     }
 }
 
@@ -859,6 +869,10 @@ impl BundleCollection {
         }
         return Ok(());
     }
+    
+    async fn collect_ereports(&self, path: Utf8PathBuf) -> Result<(), Error> {
+        
+    }
 }
 
 impl BackgroundTask for SupportBundleCollector {
@@ -1543,6 +1557,7 @@ mod test {
         let request = BundleRequest {
             skip_sled_info: true,
             transfer_chunk_size: NonZeroU64::new(16).unwrap(),
+            ereport_query: None,
         };
 
         let report = collector
