@@ -33,6 +33,7 @@ use nexus_sled_agent_shared::inventory::SledRole;
 use nexus_sled_agent_shared::inventory::ZoneImageResolverInventory;
 use nexus_types::inventory::BaseboardId;
 use nexus_types::inventory::CabooseWhich;
+use nexus_types::inventory::InternalDnsGenerationStatus;
 use nexus_types::inventory::RotPage;
 use nexus_types::inventory::RotPageWhich;
 use nexus_types::inventory::ZpoolName;
@@ -651,6 +652,20 @@ pub fn representative() -> Representative {
             )]),
         },
     );
+
+    builder
+        .found_ntp_timesync(nexus_types::inventory::TimeSync {
+            zone_id: omicron_uuid_kinds::OmicronZoneUuid::new_v4(),
+            synced: true,
+        })
+        .unwrap();
+
+    builder
+        .found_internal_dns_generation_status(InternalDnsGenerationStatus {
+            zone_id: omicron_uuid_kinds::OmicronZoneUuid::new_v4(),
+            generation: 1.into(),
+        })
+        .unwrap();
 
     Representative {
         builder,

@@ -19,9 +19,10 @@ use indent_write::fmt::IndentWriter;
 use itertools::Itertools;
 use nexus_sled_agent_shared::inventory::{
     BootImageHeader, BootPartitionContents, BootPartitionDetails,
-    ConfigReconcilerInventory, ConfigReconcilerInventoryResult,
-    ConfigReconcilerInventoryStatus, HostPhase2DesiredContents,
-    OmicronSledConfig, OmicronZoneImageSource, OrphanedDataset,
+    ClearMupdateOverrideBootSuccessInventory, ConfigReconcilerInventory,
+    ConfigReconcilerInventoryResult, ConfigReconcilerInventoryStatus,
+    HostPhase2DesiredContents, OmicronSledConfig, OmicronZoneImageSource,
+    OrphanedDataset,
 };
 use omicron_common::disk::M2Slot;
 use omicron_uuid_kinds::{
@@ -34,8 +35,8 @@ use tufaceous_artifact::ArtifactHash;
 use uuid::Uuid;
 
 use crate::inventory::{
-    CabooseWhich, Collection, Dataset, PhysicalDisk, RotPageWhich, SledAgent,
-    Zpool,
+    CabooseWhich, Collection, Dataset, InternalDnsGenerationStatus,
+    PhysicalDisk, RotPageWhich, SledAgent, TimeSync, Zpool,
 };
 
 /// Code to display inventory collections.
@@ -674,6 +675,7 @@ fn display_sleds(
                 orphaned_datasets,
                 zones,
                 boot_partitions,
+                clear_mupdate_override,
             } = last_reconciliation;
 
             display_boot_partition_contents(boot_partitions, &mut indented)?;
@@ -693,8 +695,81 @@ fn display_sleds(
                 indented = IndentWriter::new("    ", f);
             }
 
+            if let Some(config) = ledgered_sled_config.as_ref() {
+                display_ntp_status(
+                    config,
+                    &collection.ntp_timesync,
+                    &mut indented,
+                )?;
+
+                display_internal_dns_status(
+                    config,
+                    &collection.internal_dns_generation_status,
+                    &mut indented,
+                )?;
+            }
+
             {
                 let mut indent2 = IndentWriter::new("    ", &mut indented);
+
+                if let Some(clear_mupdate_override) = clear_mupdate_override {
+                    match &clear_mupdate_override.boot_disk_result {
+                        Ok(ClearMupdateOverrideBootSuccessInventory::Cleared) => {
+                            writeln!(
+                                indent2,
+                                "cleared mupdate override on boot disk",
+                            )?;
+                        }
+                        Ok(
+                            ClearMupdateOverrideBootSuccessInventory::NoOverride,
+                        ) => {
+                            writeln!(
+                                indent2,
+                                "attempted to clear mupdate override \
+                                 on boot disk, but no override was set",
+                            )?;
+                        }
+                        Err(message) => {
+                            writeln!(
+                                indent2,
+                                "failed to clear mupdate override on boot disk: {}",
+                                message
+                            )?;
+                        }
+                    }
+                    writeln!(
+                        indent2,
+                        "clear mupdate override on non-boot disk:"
+                    )?;
+
+                    let mut indent3 = IndentWriter::new("  ", &mut indent2);
+                    writeln!(
+                        indent3,
+                        "{}",
+                        clear_mupdate_override.non_boot_message
+                    )?;
+                } else {
+                    match &zone_image_resolver.mupdate_override.boot_override {
+                        Ok(Some(_)) => {
+                            writeln!(
+                                indent2,
+                                "mupdate override present, but sled agent was not \
+                                 instructed to clear it"
+                            )?;
+                        }
+                        Ok(None) => {
+                            writeln!(indent2, "no mupdate override to clear")?;
+                        }
+                        Err(_) => {
+                            writeln!(
+                                indent2,
+                                "error reading mupdate override, so sled agent \
+                                 didn't attempt to clear it"
+                            )?;
+                        }
+                    }
+                }
+
                 if orphaned_datasets.is_empty() {
                     writeln!(indent2, "no orphaned datasets")?;
                 } else {
@@ -780,6 +855,27 @@ fn display_sleds(
     Ok(())
 }
 
+fn display_ntp_status(
+    ledgered_sled_config: &OmicronSledConfig,
+    ntp_timesync: &IdOrdMap<TimeSync>,
+    f: &mut dyn fmt::Write,
+) -> fmt::Result {
+    let timesync = ledgered_sled_config
+        .zones
+        .keys()
+        .find_map(|zone_id| ntp_timesync.get(zone_id));
+
+    match timesync {
+        None => writeln!(f, "no information from NTP for this sled")?,
+        Some(ts) if ts.synced => {
+            writeln!(f, "NTP reports that time is synced")?
+        }
+        Some(_) => writeln!(f, "NTP reports that time is NOT synced")?,
+    };
+
+    Ok(())
+}
+
 fn display_boot_partition_contents(
     boot_partitions: &BootPartitionContents,
     f: &mut dyn fmt::Write,
@@ -814,6 +910,21 @@ fn display_boot_partition_contents(
         }
     }
 
+    Ok(())
+}
+
+fn display_internal_dns_status(
+    ledgered_sled_config: &OmicronSledConfig,
+    internal_dns_generation_status: &IdOrdMap<InternalDnsGenerationStatus>,
+    f: &mut dyn fmt::Write,
+) -> fmt::Result {
+    let internal_dns_generation_status = ledgered_sled_config
+        .zones
+        .keys()
+        .find_map(|zone_id| internal_dns_generation_status.get(zone_id));
+    if let Some(st) = internal_dns_generation_status {
+        writeln!(f, "Internal DNS generation: {}", st.generation)?
+    }
     Ok(())
 }
 

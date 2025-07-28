@@ -12,15 +12,22 @@ use gateway_client::types::GetCfpaParams;
 use gateway_client::types::RotCfpaSlot;
 use gateway_client::types::SpType;
 use gateway_messages::SpComponent;
+use itertools::Itertools;
+use nexus_sled_agent_shared::inventory::OmicronZoneType;
+use nexus_sled_agent_shared::inventory::ZoneKind;
 use nexus_types::inventory::CabooseWhich;
 use nexus_types::inventory::Collection;
+use nexus_types::inventory::InternalDnsGenerationStatus;
 use nexus_types::inventory::RotPage;
 use nexus_types::inventory::RotPageWhich;
 use omicron_cockroach_metrics::CockroachClusterAdminClient;
+use omicron_common::address::NTP_ADMIN_PORT;
 use omicron_common::disk::M2Slot;
+use omicron_uuid_kinds::OmicronZoneUuid;
 use slog::Logger;
 use slog::o;
 use slog::{debug, error};
+use std::net::SocketAddrV6;
 use std::time::Duration;
 use strum::IntoEnumIterator;
 use tufaceous_artifact::ArtifactHash;
@@ -79,11 +86,10 @@ impl<'a> Collector<'a> {
         self.collect_all_keepers().await;
         self.collect_all_cockroach().await;
 
-        // TODO(https://github.com/oxidecomputer/omicron/issues/8546): Collect
-        // NTP timesync statuses
-
-        // TODO(https://github.com/oxidecomputer/omicron/issues/8544): Collect
-        // DNS generations
+        // The following must be called after "collect_all_sled_agents",
+        // or they'll see an empty set of services.
+        self.collect_all_timesync().await;
+        self.collect_all_dns_generations().await;
 
         debug!(&self.log, "finished collection");
 
@@ -430,6 +436,84 @@ impl<'a> Collector<'a> {
         self.in_progress.found_sled_inventory(&sled_agent_url, inventory)
     }
 
+    /// Collect timesync status from all sleds
+    async fn collect_all_timesync(&mut self) {
+        let ntp_admin_clients: Vec<_> = self
+            .in_progress
+            .ledgered_zones_of_kind(ZoneKind::InternalNtp)
+            .chain(
+                self.in_progress.ledgered_zones_of_kind(ZoneKind::BoundaryNtp),
+            )
+            // Also observe (and "union") the results from the reconciler, just
+            // in case it's lagging behind the last stored ledger. If these
+            // services are still up, we'll try to contact them.
+            .chain(
+                self.in_progress
+                    .last_reconciled_zones_of_kind(ZoneKind::BoundaryNtp),
+            )
+            .chain(
+                self.in_progress
+                    .last_reconciled_zones_of_kind(ZoneKind::InternalNtp),
+            )
+            .unique_by(|z| z.id)
+            .map(|cfg| {
+                let ip = cfg.zone_type.underlay_ip();
+                let addr = SocketAddrV6::new(ip, NTP_ADMIN_PORT, 0, 0);
+                let url = format!("http://{addr}");
+                let log = self.log.new(o!("ntp_admin_url" => url.clone()));
+
+                (cfg.id, ntp_admin_client::Client::new(&url, log))
+            })
+            .collect();
+
+        for (zone_id, client) in ntp_admin_clients {
+            if let Err(err) = Self::collect_one_timesync(
+                &self.log,
+                zone_id,
+                &client,
+                &mut self.in_progress,
+            )
+            .await
+            {
+                error!(
+                    &self.log,
+                    "timesync collection error";
+                    "zone_id" => ?zone_id,
+                    slog_error_chain::InlineErrorChain::new(err.as_ref())
+                );
+            }
+        }
+    }
+
+    async fn collect_one_timesync(
+        log: &slog::Logger,
+        zone_id: OmicronZoneUuid,
+        client: &ntp_admin_client::Client,
+        in_progress: &mut CollectionBuilder,
+    ) -> Result<(), anyhow::Error> {
+        let sled_agent_url = client.baseurl();
+        debug!(&log, "begin collection from NTP admin (timesync)";
+            "sled_agent_url" => client.baseurl(),
+            "zone_id" => ?zone_id
+        );
+
+        let maybe_ident = client.timesync().await.with_context(|| {
+            format!("Sled Agent {:?}: timesync", &sled_agent_url)
+        });
+        let timesync = match maybe_ident {
+            Ok(timesync) => nexus_types::inventory::TimeSync {
+                zone_id,
+                synced: timesync.into_inner().sync,
+            },
+            Err(error) => {
+                in_progress.found_error(InventoryError::from(error));
+                return Ok(());
+            }
+        };
+
+        in_progress.found_ntp_timesync(timesync)
+    }
+
     /// Collect inventory from about keepers from all `ClickhouseAdminKeeper`
     /// clients
     async fn collect_all_keepers(&mut self) {
@@ -497,6 +581,82 @@ impl<'a> Collector<'a> {
         for (node_id, metrics) in metrics_results {
             self.in_progress.found_cockroach_metrics(node_id, metrics);
         }
+    }
+
+    /// Collect DNS generation status from all internal DNS servers
+    async fn collect_all_dns_generations(&mut self) {
+        debug!(&self.log, "begin collection from internal DNS servers");
+        let internal_dns_clients: Vec<_> = self
+            .in_progress
+            .ledgered_zones_of_kind(ZoneKind::InternalDns)
+            // Also observe (and "union") the results from the reconciler, just
+            // in case it's lagging behind the last stored ledger. If these
+            // services are still up, we'll try to contact them.
+            .chain(
+                self.in_progress
+                    .last_reconciled_zones_of_kind(ZoneKind::InternalDns),
+            )
+            .unique_by(|z| z.id)
+            .map(|cfg| {
+                let OmicronZoneType::InternalDns { http_address, .. } =
+                    cfg.zone_type
+                else {
+                    // Panic safety: This would be a bug in "ledgered_zones_of_kind";
+                    // we just asked for Internal DNS zones exclusively.
+                    panic!("Unexpected zone type returned");
+                };
+                let url = format!("http://{http_address}");
+                let log = self.log.new(o!("internal_dns_url" => url.clone()));
+
+                (cfg.id, dns_service_client::Client::new(&url, log))
+            })
+            .collect();
+
+        for (zone_id, client) in internal_dns_clients {
+            if let Err(err) = Self::collect_one_dns_generation(
+                &self.log,
+                zone_id,
+                &client,
+                &mut self.in_progress,
+            )
+            .await
+            {
+                error!(
+                    &self.log,
+                    "DNS generation collection error";
+                    "zone_id" => ?zone_id,
+                    "error" => ?err,
+                );
+            }
+        }
+
+        debug!(&self.log, "finished collection from internal DNS servers");
+    }
+
+    async fn collect_one_dns_generation(
+        log: &slog::Logger,
+        zone_id: OmicronZoneUuid,
+        client: &dns_service_client::Client,
+        in_progress: &mut CollectionBuilder,
+    ) -> Result<(), anyhow::Error> {
+        debug!(&log, "begin collection from DNS server";
+            "zone_id" => ?zone_id
+        );
+
+        let config = client.dns_config_get().await.with_context(|| {
+            format!("DNS server {:?}: dns_config_get", client.baseurl())
+        })?;
+
+        let generation_status = InternalDnsGenerationStatus {
+            zone_id,
+            generation: config.into_inner().generation,
+        };
+
+        in_progress.found_internal_dns_generation_status(generation_status)?;
+
+        debug!(&log, "finished collection from DNS server"; "zone_id" => ?zone_id);
+
+        Ok(())
     }
 }
 

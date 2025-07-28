@@ -17,6 +17,7 @@ camino.workspace = true
 chrono.workspace = true
 clap.workspace = true
 colored.workspace = true
+daft.workspace = true
 humantime.workspace = true
 iddqd.workspace = true
 indent_write.workspace = true

@@ -772,6 +772,12 @@ impl SimSystemBuilderInner {
                 .and_then(|baseboard_id| {
                     let inv_sp = primary_collection.sps.get(baseboard_id);
                     let inv_rot = primary_collection.rots.get(baseboard_id);
+                    let stage0 = primary_collection
+                        .caboose_for(CabooseWhich::Stage0, baseboard_id)
+                        .map(|c| c.caboose.clone());
+                    let stage0_next = primary_collection
+                        .caboose_for(CabooseWhich::Stage0Next, baseboard_id)
+                        .map(|c| c.caboose.clone());
                     let sp_host_phase_1_hash_flash = M2Slot::iter()
                         .filter_map(|slot| {
                             let found = primary_collection
@@ -799,6 +805,8 @@ impl SimSystemBuilderInner {
                             baseboard_id: &baseboard_id,
                             sp: inv_sp,
                             rot: inv_rot,
+                            stage0,
+                            stage0_next,
                             sp_host_phase_1_hash_flash,
                             sp_active,
                             sp_inactive,

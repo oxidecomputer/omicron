@@ -26,12 +26,14 @@ use nexus_types::inventory::CabooseWhich;
 use nexus_types::inventory::CockroachStatus;
 use nexus_types::inventory::Collection;
 use nexus_types::inventory::HostPhase1FlashHash;
+use nexus_types::inventory::InternalDnsGenerationStatus;
 use nexus_types::inventory::RotPage;
 use nexus_types::inventory::RotPageFound;
 use nexus_types::inventory::RotPageWhich;
 use nexus_types::inventory::RotState;
 use nexus_types::inventory::ServiceProcessor;
 use nexus_types::inventory::SledAgent;
+use nexus_types::inventory::TimeSync;
 use nexus_types::inventory::Zpool;
 use omicron_cockroach_metrics::CockroachMetric;
 use omicron_cockroach_metrics::NodeId;
@@ -125,6 +127,8 @@ pub struct CollectionBuilder {
     clickhouse_keeper_cluster_membership:
         BTreeSet<ClickhouseKeeperClusterMembership>,
     cockroach_status: BTreeMap<NodeId, CockroachStatus>,
+    ntp_timesync: IdOrdMap<TimeSync>,
+    internal_dns_generation_status: IdOrdMap<InternalDnsGenerationStatus>,
     // CollectionBuilderRng is taken by value, rather than passed in as a
     // mutable ref, to encourage a tree-like structure where each RNG is
     // generally independent.
@@ -156,6 +160,8 @@ impl CollectionBuilder {
             sleds: IdOrdMap::new(),
             clickhouse_keeper_cluster_membership: BTreeSet::new(),
             cockroach_status: BTreeMap::new(),
+            ntp_timesync: IdOrdMap::new(),
+            internal_dns_generation_status: IdOrdMap::new(),
             rng: CollectionBuilderRng::from_entropy(),
         }
     }
@@ -180,6 +186,8 @@ impl CollectionBuilder {
             clickhouse_keeper_cluster_membership: self
                 .clickhouse_keeper_cluster_membership,
             cockroach_status: self.cockroach_status,
+            ntp_timesync: self.ntp_timesync,
+            internal_dns_generation_status: self.internal_dns_generation_status,
         }
     }
 
@@ -624,6 +632,17 @@ impl CollectionBuilder {
         self.clickhouse_keeper_cluster_membership.insert(membership);
     }
 
+    /// Record information about timesync
+    pub fn found_ntp_timesync(
+        &mut self,
+        timesync: TimeSync,
+    ) -> Result<(), anyhow::Error> {
+        self.ntp_timesync
+            .insert_unique(timesync)
+            .map_err(|err| err.into_owned())
+            .context("NTP service reported time multiple times")
+    }
+
     /// Record metrics from a CockroachDB node
     pub fn found_cockroach_metrics(
         &mut self,
@@ -636,6 +655,58 @@ impl CollectionBuilder {
         status.liveness_live_nodes =
             metrics.get_metric_unsigned(CockroachMetric::LivenessLiveNodes);
         self.cockroach_status.insert(node_id, status);
+    }
+
+    /// Record information about internal DNS generation status
+    pub fn found_internal_dns_generation_status(
+        &mut self,
+        status: InternalDnsGenerationStatus,
+    ) -> Result<(), anyhow::Error> {
+        self.internal_dns_generation_status
+            .insert_unique(status)
+            .map_err(|err| err.into_owned())
+            .context(
+                "Internal DNS server reported generation status multiple times",
+            )
+    }
+
+    /// Returns all zones of a kind from the ledgers of observed sleds
+    pub fn ledgered_zones_of_kind(
+        &self,
+        kind: nexus_sled_agent_shared::inventory::ZoneKind,
+    ) -> impl Iterator<
+        Item = &nexus_sled_agent_shared::inventory::OmicronZoneConfig,
+    > + '_ {
+        self.sleds.iter().flat_map(move |sled| {
+            sled.ledgered_sled_config.as_ref().into_iter().flat_map(
+                move |sled_config| {
+                    sled_config.zones.iter().filter(move |zone_config| {
+                        zone_config.zone_type.kind() == kind
+                    })
+                },
+            )
+        })
+    }
+
+    /// Returns zones from the last reconciled ledger of observed sleds
+    ///
+    /// Does not actually consider whether or not the zone was successfully
+    /// created by the sled reconciliation process
+    pub fn last_reconciled_zones_of_kind(
+        &self,
+        kind: nexus_sled_agent_shared::inventory::ZoneKind,
+    ) -> impl Iterator<
+        Item = &nexus_sled_agent_shared::inventory::OmicronZoneConfig,
+    > + '_ {
+        self.sleds.iter().flat_map(move |sled| {
+            sled.last_reconciliation.as_ref().into_iter().flat_map(
+                move |sled_config| {
+                    sled_config.last_reconciled_config.zones.iter().filter(
+                        move |zone_config| zone_config.zone_type.kind() == kind,
+                    )
+                },
+            )
+        })
     }
 }
 
@@ -695,6 +766,9 @@ mod test {
         assert!(collection.cabooses_found.is_empty());
         assert!(collection.rot_pages_found.is_empty());
         assert!(collection.clickhouse_keeper_cluster_membership.is_empty());
+        assert!(collection.cockroach_status.is_empty());
+        assert!(collection.ntp_timesync.is_empty());
+        assert!(collection.internal_dns_generation_status.is_empty());
     }
 
     // Simple test of a single, fairly typical collection that contains just

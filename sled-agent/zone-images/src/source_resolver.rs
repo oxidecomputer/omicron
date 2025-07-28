@@ -12,8 +12,10 @@ use crate::zone_manifest::AllZoneManifests;
 use camino::Utf8PathBuf;
 use illumos_utils::running_zone::ZoneImageFileSource;
 use nexus_sled_agent_shared::inventory::OmicronZoneImageSource;
+use omicron_uuid_kinds::MupdateOverrideUuid;
 use sled_agent_config_reconciler::InternalDisks;
 use sled_agent_config_reconciler::InternalDisksWithBootDisk;
+use sled_agent_types::zone_images::ClearMupdateOverrideResult;
 use sled_agent_types::zone_images::MupdateOverrideReadError;
 use sled_agent_types::zone_images::ResolverStatus;
 use slog::error;
@@ -83,6 +85,20 @@ impl ZoneImageSourceResolver {
                 inner.file_source_for(zone_type, image_source, internal_disks)
             }
         }
+    }
+
+    /// Clears out the mupdate override field and files on disk.
+    pub fn clear_mupdate_override(
+        &self,
+        override_id: MupdateOverrideUuid,
+        internal_disks: &InternalDisks,
+    ) -> ClearMupdateOverrideResult {
+        let mut inner = self.inner.lock().unwrap();
+        let ret =
+            inner.mupdate_overrides.clear_override(override_id, internal_disks);
+
+        ret.log_to(&inner.log);
+        ret
     }
 }
 
@@ -212,6 +228,7 @@ mod tests {
 
     use camino_tempfile_ext::prelude::*;
     use dropshot::{ConfigLogging, ConfigLoggingLevel, test_util::LogContext};
+    use nexus_sled_agent_shared::inventory::ZoneKind;
     use sled_agent_zone_images_examples::{
         BOOT_PATHS, BOOT_UUID, WriteInstallDatasetContext,
     };
@@ -236,16 +253,16 @@ mod tests {
         // RAM disk image sources should work as expected.
         let ramdisk_source = resolver
             .file_source_for(
-                "zone1",
+                "switch",
                 &ZoneImageSource::Ramdisk,
                 internal_disks_rx.current(),
             )
             .unwrap();
-        assert_eq!(ramdisk_source, ramdisk_file_source("zone1"));
+        assert_eq!(ramdisk_source, ramdisk_file_source("switch"));
 
         let file_source = resolver
             .file_source_for(
-                "zone1",
+                ZoneKind::CockroachDb.zone_prefix(),
                 &ZoneImageSource::Omicron(
                     OmicronZoneImageSource::InstallDataset,
                 ),
@@ -258,7 +275,9 @@ mod tests {
         assert_eq!(
             file_source,
             ZoneImageFileSource {
-                file_name: install_dataset_file_name("zone1"),
+                file_name: ZoneKind::CockroachDb
+                    .artifact_in_install_dataset()
+                    .to_owned(),
                 search_paths: vec![Utf8PathBuf::from(RAMDISK_IMAGE_PATH)]
             }
         );
@@ -289,17 +308,17 @@ mod tests {
         // The resolver should not fail for ramdisk images.
         let file_source = resolver
             .file_source_for(
-                "fake-zone",
+                "switch",
                 &ZoneImageSource::Ramdisk,
                 internal_disks_rx.current(),
             )
             .unwrap();
-        assert_eq!(file_source, ramdisk_file_source("fake-zone"));
+        assert_eq!(file_source, ramdisk_file_source("switch"));
 
-        // zone1.tar.gz is valid.
+        // The cockroach zone is valid.
         let file_source = resolver
             .file_source_for(
-                "zone1",
+                ZoneKind::CockroachDb.zone_prefix(),
                 &ZoneImageSource::Omicron(
                     OmicronZoneImageSource::InstallDataset,
                 ),
@@ -309,7 +328,9 @@ mod tests {
         assert_eq!(
             file_source,
             ZoneImageFileSource {
-                file_name: "zone1.tar.gz".to_string(),
+                file_name: ZoneKind::CockroachDb
+                    .artifact_in_install_dataset()
+                    .to_string(),
                 search_paths: vec![
                     Utf8PathBuf::from(RAMDISK_IMAGE_PATH),
                     dir.path().join(&BOOT_PATHS.install_dataset)
@@ -317,12 +338,17 @@ mod tests {
             },
         );
 
-        // zone2, zone3, zone4 and zone5 aren't valid, and none of them will
-        // return the install dataset path.
-        for zone_name in ["zone2", "zone3", "zone4", "zone5"] {
+        // Clickhouse, Crucible, InternalDns and Nexus aren't valid, and none of
+        // them will return the install dataset path.
+        for zone_kind in [
+            ZoneKind::Clickhouse,
+            ZoneKind::Crucible,
+            ZoneKind::InternalDns,
+            ZoneKind::Nexus,
+        ] {
             let file_source = resolver
                 .file_source_for(
-                    zone_name,
+                    zone_kind.zone_prefix(),
                     &ZoneImageSource::Omicron(
                         OmicronZoneImageSource::InstallDataset,
                     ),
@@ -332,7 +358,9 @@ mod tests {
             assert_eq!(
                 file_source,
                 ZoneImageFileSource {
-                    file_name: install_dataset_file_name(zone_name),
+                    file_name: zone_kind
+                        .artifact_in_install_dataset()
+                        .to_owned(),
                     search_paths: vec![Utf8PathBuf::from(RAMDISK_IMAGE_PATH)]
                 }
             );

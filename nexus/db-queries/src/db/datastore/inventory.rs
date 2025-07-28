@@ -32,7 +32,6 @@ use nexus_db_errors::public_error_from_diesel;
 use nexus_db_errors::public_error_from_diesel_lookup;
 use nexus_db_model::ArtifactHash;
 use nexus_db_model::HwM2Slot;
-use nexus_db_model::InvCaboose;
 use nexus_db_model::InvClickhouseKeeperMembership;
 use nexus_db_model::InvCockroachStatus;
 use nexus_db_model::InvCollection;
@@ -41,10 +40,12 @@ use nexus_db_model::InvConfigReconcilerStatus;
 use nexus_db_model::InvConfigReconcilerStatusKind;
 use nexus_db_model::InvDataset;
 use nexus_db_model::InvHostPhase1FlashHash;
+use nexus_db_model::InvInternalDns;
 use nexus_db_model::InvLastReconciliationDatasetResult;
 use nexus_db_model::InvLastReconciliationDiskResult;
 use nexus_db_model::InvLastReconciliationOrphanedDataset;
 use nexus_db_model::InvLastReconciliationZoneResult;
+use nexus_db_model::InvNtpTimesync;
 use nexus_db_model::InvNvmeDiskFirmware;
 use nexus_db_model::InvOmicronSledConfig;
 use nexus_db_model::InvOmicronSledConfigDataset;
@@ -72,6 +73,7 @@ use nexus_db_model::{
 };
 use nexus_db_model::{HwPowerState, InvZoneManifestNonBoot};
 use nexus_db_model::{HwRotSlot, InvMupdateOverrideNonBoot};
+use nexus_db_model::{InvCaboose, InvClearMupdateOverride};
 use nexus_db_schema::enums::HwM2SlotEnum;
 use nexus_db_schema::enums::HwRotSlotEnum;
 use nexus_db_schema::enums::RotImageErrorEnum;
@@ -95,8 +97,10 @@ use nexus_sled_agent_shared::inventory::ZoneManifestNonBootInventory;
 use nexus_types::inventory::BaseboardId;
 use nexus_types::inventory::CockroachStatus;
 use nexus_types::inventory::Collection;
+use nexus_types::inventory::InternalDnsGenerationStatus;
 use nexus_types::inventory::PhysicalDiskFirmware;
 use nexus_types::inventory::SledAgent;
+use nexus_types::inventory::TimeSync;
 use omicron_cockroach_metrics::NodeId as CockroachNodeId;
 use omicron_common::api::external::Error;
 use omicron_common::api::external::InternalContext;
@@ -386,6 +390,20 @@ impl DataStore {
             .map(|(node_id, status)| {
                 InvCockroachStatus::new(collection_id, node_id.clone(), status)
             })
+            .collect::<Result<Vec<_>, _>>()
+            .map_err(|e| Error::internal_error(&e.to_string()))?;
+
+        let inv_ntp_timesync_records: Vec<InvNtpTimesync> = collection
+            .ntp_timesync
+            .iter()
+            .map(|timesync| InvNtpTimesync::new(collection_id, timesync))
+            .collect::<Result<Vec<_>, _>>()
+            .map_err(|e| Error::internal_error(&e.to_string()))?;
+
+        let inv_internal_dns_records: Vec<InvInternalDns> = collection
+            .internal_dns_generation_status
+            .iter()
+            .map(|status| InvInternalDns::new(collection_id, status))
             .collect::<Result<Vec<_>, _>>()
             .map_err(|e| Error::internal_error(&e.to_string()))?;
 
@@ -1498,6 +1516,23 @@ impl DataStore {
                     .await?;
             }
 
+            // Insert the NTP info we've observed
+            if !inv_ntp_timesync_records.is_empty() {
+                use nexus_db_schema::schema::inv_ntp_timesync::dsl;
+                diesel::insert_into(dsl::inv_ntp_timesync)
+                    .values(inv_ntp_timesync_records)
+                    .execute_async(&conn)
+                    .await?;
+            }
+
+            // Insert the internal DNS generation status we've observed
+            if !inv_internal_dns_records.is_empty() {
+                use nexus_db_schema::schema::inv_internal_dns::dsl;
+                diesel::insert_into(dsl::inv_internal_dns)
+                    .values(inv_internal_dns_records)
+                    .execute_async(&conn)
+                    .await?;
+            }
 
             // Finally, insert the list of errors.
             {
@@ -1789,6 +1824,8 @@ impl DataStore {
             nerrors: usize,
             nclickhouse_keeper_membership: usize,
             ncockroach_status: usize,
+            nntp_timesync: usize,
+            ninternal_dns: usize,
         }
 
         let NumRowsDeleted {
@@ -1820,6 +1857,8 @@ impl DataStore {
             nerrors,
             nclickhouse_keeper_membership,
             ncockroach_status,
+            nntp_timesync,
+            ninternal_dns,
         } =
             self.transaction_retry_wrapper("inventory_delete_collection")
                 .transaction(&conn, |conn| async move {
@@ -2086,6 +2125,29 @@ impl DataStore {
                         .execute_async(&conn)
                         .await?
                     };
+                    // Remove rows for NTP timesync
+                    let nntp_timesync = {
+                        use nexus_db_schema::schema::inv_ntp_timesync::dsl;
+                        diesel::delete(
+                            dsl::inv_ntp_timesync.filter(
+                                dsl::inv_collection_id.eq(db_collection_id),
+                            ),
+                        )
+                        .execute_async(&conn)
+                        .await?
+                    };
+
+                    // Remove rows for internal DNS
+                    let ninternal_dns = {
+                        use nexus_db_schema::schema::inv_internal_dns::dsl;
+                        diesel::delete(
+                            dsl::inv_internal_dns.filter(
+                                dsl::inv_collection_id.eq(db_collection_id),
+                            ),
+                        )
+                        .execute_async(&conn)
+                        .await?
+                    };
 
                     Ok(NumRowsDeleted {
                         ncollections,
@@ -2116,6 +2178,8 @@ impl DataStore {
                         nerrors,
                         nclickhouse_keeper_membership,
                         ncockroach_status,
+                        nntp_timesync,
+                        ninternal_dns,
                     })
                 })
                 .await
@@ -2157,6 +2221,8 @@ impl DataStore {
             "nerrors" => nerrors,
             "nclickhouse_keeper_membership" => nclickhouse_keeper_membership,
             "ncockroach_status" => ncockroach_status,
+            "nntp_timesync" => nntp_timesync,
+            "ninternal_dns" => ninternal_dns,
         );
 
         Ok(())
@@ -3587,6 +3653,46 @@ impl DataStore {
                 .collect::<Result<BTreeMap<_, _>, Error>>()?
         };
 
+        // Load TimeSync statuses
+        let ntp_timesync = {
+            use nexus_db_schema::schema::inv_ntp_timesync::dsl;
+
+            let records: Vec<InvNtpTimesync> = dsl::inv_ntp_timesync
+                .filter(dsl::inv_collection_id.eq(db_id))
+                .select(InvNtpTimesync::as_select())
+                .load_async(&*conn)
+                .await
+                .map_err(|e| {
+                    public_error_from_diesel(e, ErrorHandler::Server)
+                })?;
+
+            records
+                .into_iter()
+                .map(|record| TimeSync::from(record))
+                .collect::<IdOrdMap<_>>()
+        };
+
+        // Load internal DNS generation status
+        let internal_dns_generation_status: IdOrdMap<
+            InternalDnsGenerationStatus,
+        > = {
+            use nexus_db_schema::schema::inv_internal_dns::dsl;
+
+            let records: Vec<InvInternalDns> = dsl::inv_internal_dns
+                .filter(dsl::inv_collection_id.eq(db_id))
+                .select(InvInternalDns::as_select())
+                .load_async(&*conn)
+                .await
+                .map_err(|e| {
+                    public_error_from_diesel(e, ErrorHandler::Server)
+                })?;
+
+            records
+                .into_iter()
+                .map(|record| InternalDnsGenerationStatus::from(record))
+                .collect::<IdOrdMap<_>>()
+        };
+
         // Finally, build up the sled-agent map using the sled agent and
         // omicron zone rows. A for loop is easier to understand than into_iter
         // + filter_map + return Result + collect.
@@ -3683,6 +3789,13 @@ impl DataStore {
                         BootPartitionContents { boot_disk, slot_a, slot_b }
                     };
 
+                    let clear_mupdate_override = reconciler
+                        .clear_mupdate_override
+                        .into_inventory()
+                        .map_err(|err| {
+                            Error::internal_error(&format!("{err:#}"))
+                        })?;
+
                     Ok::<_, Error>(ConfigReconcilerInventory {
                         last_reconciled_config,
                         external_disks: last_reconciliation_disk_results
@@ -3699,6 +3812,7 @@ impl DataStore {
                             .remove(&sled_id)
                             .unwrap_or_default(),
                         boot_partitions,
+                        clear_mupdate_override,
                     })
                 })
                 .transpose()?;
@@ -3834,6 +3948,8 @@ impl DataStore {
             sled_agents,
             clickhouse_keeper_cluster_membership,
             cockroach_status,
+            ntp_timesync,
+            internal_dns_generation_status,
         })
     }
 }
@@ -3920,6 +4036,9 @@ impl ConfigReconcilerRows {
                     )?
                 };
             last_reconciliation_config_id = Some(last_reconciled_config);
+            let clear_mupdate_override = InvClearMupdateOverride::new(
+                last_reconciliation.clear_mupdate_override.as_ref(),
+            );
 
             self.config_reconcilers.push(InvSledConfigReconciler::new(
                 collection_id,
@@ -3938,6 +4057,7 @@ impl ConfigReconcilerRows {
                     .as_ref()
                     .err()
                     .cloned(),
+                clear_mupdate_override,
             ));
 
             // Boot partition _errors_ are kept in `InvSledConfigReconciler`
@@ -4186,10 +4306,13 @@ mod test {
     use nexus_inventory::examples::Representative;
     use nexus_inventory::examples::representative;
     use nexus_inventory::now_db_precision;
-    use nexus_sled_agent_shared::inventory::BootImageHeader;
     use nexus_sled_agent_shared::inventory::BootPartitionContents;
     use nexus_sled_agent_shared::inventory::BootPartitionDetails;
     use nexus_sled_agent_shared::inventory::OrphanedDataset;
+    use nexus_sled_agent_shared::inventory::{
+        BootImageHeader, ClearMupdateOverrideBootSuccessInventory,
+        ClearMupdateOverrideInventory,
+    };
     use nexus_sled_agent_shared::inventory::{
         ConfigReconcilerInventory, ConfigReconcilerInventoryResult,
         ConfigReconcilerInventoryStatus, OmicronZoneImageSource,
@@ -5051,6 +5174,15 @@ mod test {
                             artifact_size: 456789,
                         }),
                     },
+                    clear_mupdate_override: Some(
+                        ClearMupdateOverrideInventory {
+                            boot_disk_result: Ok(
+                                ClearMupdateOverrideBootSuccessInventory::Cleared,
+                            ),
+                            non_boot_message: "simulated non-boot message"
+                                .to_owned(),
+                        },
+                    ),
                 }
             });
 

@@ -40,6 +40,7 @@ use omicron_common::disk::M2Slot;
 pub use omicron_common::zpool_name::ZpoolName;
 use omicron_uuid_kinds::CollectionUuid;
 use omicron_uuid_kinds::DatasetUuid;
+use omicron_uuid_kinds::OmicronZoneUuid;
 use omicron_uuid_kinds::SledUuid;
 use omicron_uuid_kinds::ZpoolUuid;
 use schemars::JsonSchema;
@@ -167,6 +168,11 @@ pub struct Collection {
     /// The status of our cockroachdb cluster, keyed by node identifier
     pub cockroach_status:
         BTreeMap<omicron_cockroach_metrics::NodeId, CockroachStatus>,
+
+    /// The status of time synchronization
+    pub ntp_timesync: IdOrdMap<TimeSync>,
+    /// The generation status of internal DNS servers
+    pub internal_dns_generation_status: IdOrdMap<InternalDnsGenerationStatus>,
 }
 
 impl Collection {
@@ -669,4 +675,40 @@ impl IdOrdItem for SledAgent {
 pub struct CockroachStatus {
     pub ranges_underreplicated: Option<u64>,
     pub liveness_live_nodes: Option<u64>,
+}
+
+/// Inventory representation of whether an NTP service reports time to be synced
+#[derive(Clone, Debug, PartialEq, Eq, Deserialize, JsonSchema, Serialize)]
+pub struct TimeSync {
+    /// Zone ID of the NTP admin server contacted
+    pub zone_id: OmicronZoneUuid,
+
+    /// Whether or not the service claims time is synchronized
+    pub synced: bool,
+}
+
+impl IdOrdItem for TimeSync {
+    type Key<'a> = OmicronZoneUuid;
+    fn key(&self) -> Self::Key<'_> {
+        self.zone_id
+    }
+    id_upcast!();
+}
+
+#[derive(
+    Clone, Debug, Diffable, Serialize, Deserialize, JsonSchema, PartialEq, Eq,
+)]
+pub struct InternalDnsGenerationStatus {
+    /// Zone ID of the internal DNS server contacted
+    pub zone_id: OmicronZoneUuid,
+    /// Generation number of the DNS configuration
+    pub generation: omicron_common::api::external::Generation,
+}
+
+impl IdOrdItem for InternalDnsGenerationStatus {
+    type Key<'a> = OmicronZoneUuid;
+    fn key(&self) -> Self::Key<'_> {
+        self.zone_id
+    }
+    id_upcast!();
 }
