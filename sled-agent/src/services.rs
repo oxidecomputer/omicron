@@ -1317,7 +1317,6 @@ impl ServiceManager {
         filesystems: &[zone::Fs],
         data_links: &[String],
     ) -> Result<RunningZone, Error> {
-        // TODO: ^^^^^^ return a local wrapper over RunningZone
         let device_names = Self::devices_needed(&request)?;
         let (bootstrap_vnic, bootstrap_name_and_address) =
             match self.bootstrap_address_needed(&request).await? {

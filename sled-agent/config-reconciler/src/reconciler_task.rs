@@ -445,6 +445,13 @@ impl ReconcilerTask {
                 None
             };
 
+        // Obtain the resolver status. This will be used to account for mupdate
+        // overrides, as well as errors while reading this information.
+        //
+        // This status is obtained after remove_mupdate_override is processed.
+        let resolver_status =
+            sled_agent_facilities.zone_image_resolver_status();
+
         // Reconcile any changes to our boot partitions. This is typically a
         // no-op; if we've successfully read both boot partitions in a previous
         // reconciliation and don't have new contents to write, it will just
@@ -452,6 +459,7 @@ impl ReconcilerTask {
         let boot_partitions = self
             .boot_partitions
             .reconcile(
+                &resolver_status,
                 &internal_disks,
                 &sled_config.host_phase_2,
                 sled_agent_artifact_store,
@@ -464,14 +472,7 @@ impl ReconcilerTask {
         // managing disks, then remove any orphaned datasets.
         // ---
 
-        // Obtain the resolver status. This will be used to account for mupdate
-        // overrides and errors.
-        //
-        // This status is obtained after remove_mupdate_override is processed.
-        let resolver_status =
-            sled_agent_facilities.zone_image_resolver_status();
-
-        // Shut down zones if needed.
+        // First, shut down zones if needed.
         let zone_shutdown_result = self
             .zones
             .shut_down_zones_if_needed(

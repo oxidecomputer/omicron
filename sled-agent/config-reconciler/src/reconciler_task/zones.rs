@@ -1372,7 +1372,7 @@ where
     F: FnMut(Utf8PathBuf),
 {
     // XXX: we ask for the boot zpool to be passed in here. But
-    // `AllZoneImages` also caches the boot zpool. How should we
+    // `ResolverStatus` also caches the boot zpool. How should we
     // reconcile the two?
     let hash = if let Some(path) = internal_disks.boot_disk_install_dataset() {
         let hash = resolver_status.zone_manifest.zone_hash(zone_kind);
