@@ -21,8 +21,8 @@ use crate::db::model::Instance;
 use crate::db::model::InstanceAutoRestart;
 use crate::db::model::InstanceAutoRestartPolicy;
 use crate::db::model::InstanceCpuCount;
+use crate::db::model::InstanceCpuPlatform;
 use crate::db::model::InstanceIntendedState;
-use crate::db::model::InstanceMinimumCpuPlatform;
 use crate::db::model::InstanceRuntimeState;
 use crate::db::model::InstanceState;
 use crate::db::model::InstanceUpdate;
@@ -266,7 +266,7 @@ impl From<InstanceAndActiveVmm> for external::Instance {
                 .parse()
                 .expect("found invalid hostname in the database"),
             boot_disk_id: value.instance.boot_disk_id,
-            min_cpu_platform: value.instance.min_cpu_platform.map(Into::into),
+            cpu_platform: value.instance.cpu_platform.map(Into::into),
             runtime: external::InstanceRuntimeState {
                 run_state: value.effective_state(),
                 time_run_state_updated,
@@ -1098,7 +1098,7 @@ impl DataStore {
                     auto_restart_policy,
                     ncpus,
                     memory,
-                    min_cpu_platform,
+                    cpu_platform,
                 } = update.clone();
                 async move {
                     // Set the auto-restart policy.
@@ -1118,7 +1118,7 @@ impl DataStore {
                         &authz_instance,
                         ncpus,
                         memory,
-                        min_cpu_platform,
+                        cpu_platform,
                     )
                     .await?;
 
@@ -1302,7 +1302,7 @@ impl DataStore {
         authz_instance: &authz::Instance,
         ncpus: InstanceCpuCount,
         memory: ByteCount,
-        min_cpu_platform: Option<InstanceMinimumCpuPlatform>,
+        cpu_platform: Option<InstanceCpuPlatform>,
     ) -> Result<(), diesel::result::Error> {
         use nexus_db_schema::schema::instance::dsl as instance_dsl;
 
@@ -1314,20 +1314,20 @@ impl DataStore {
                     .eq_any(InstanceState::NOT_INCARNATED_STATES),
             );
 
-        let query = if min_cpu_platform.is_some() {
+        let query = if cpu_platform.is_some() {
             query.filter(
                 instance_dsl::ncpus
                     .ne(ncpus)
                     .or(instance_dsl::memory.ne(memory))
-                    .or(instance_dsl::min_cpu_platform.ne(min_cpu_platform))
-                    .or(instance_dsl::min_cpu_platform.is_null()),
+                    .or(instance_dsl::cpu_platform.ne(cpu_platform))
+                    .or(instance_dsl::cpu_platform.is_null()),
             )
         } else {
             query.filter(
                 instance_dsl::ncpus
                     .ne(ncpus)
                     .or(instance_dsl::memory.ne(memory))
-                    .or(instance_dsl::min_cpu_platform.is_not_null()),
+                    .or(instance_dsl::cpu_platform.is_not_null()),
             )
         };
 
@@ -1335,15 +1335,15 @@ impl DataStore {
             .set((
                 instance_dsl::ncpus.eq(ncpus),
                 instance_dsl::memory.eq(memory),
-                instance_dsl::min_cpu_platform.eq(min_cpu_platform),
+                instance_dsl::cpu_platform.eq(cpu_platform),
             ))
             .check_if_exists::<Instance>(authz_instance.id())
             .execute_and_check(&conn)
             .await?;
         match r.status {
             UpdateStatus::NotUpdatedButExists => {
-                if (r.found.ncpus, r.found.memory, r.found.min_cpu_platform)
-                    == (ncpus, memory, min_cpu_platform)
+                if (r.found.ncpus, r.found.memory, r.found.cpu_platform)
+                    == (ncpus, memory, cpu_platform)
                 {
                     // Not updated, because the update is no change..
                     return Ok(());
@@ -1365,7 +1365,7 @@ impl DataStore {
                     "instance_id" => %r.found.id(),
                     "new ncpus" => ?ncpus,
                     "new memory" => ?memory,
-                    "new CPU platform" => ?min_cpu_platform,
+                    "new CPU platform" => ?cpu_platform,
                 );
                 return Err(err.bail(Error::internal_error(
                     "unable to change instance CPU or memory",
@@ -2255,7 +2255,7 @@ mod tests {
                         external_ips: Vec::new(),
                         disks: Vec::new(),
                         boot_disk: None,
-                        min_cpu_platform: None,
+                        cpu_platform: None,
                         ssh_public_keys: None,
                         start: false,
                         auto_restart_policy: Default::default(),

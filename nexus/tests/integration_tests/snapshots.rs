@@ -145,7 +145,7 @@ async fn test_snapshot_basic(cptestctx: &ControlPlaneTestContext) {
             boot_disk: Some(params::InstanceDiskAttachment::Attach(
                 params::InstanceDiskAttach { name: base_disk_name.clone() },
             )),
-            min_cpu_platform: None,
+            cpu_platform: None,
             disks: Vec::new(),
             external_ips: vec![],
             start: true,
@@ -352,7 +352,7 @@ async fn test_snapshot_stopped_instance(cptestctx: &ControlPlaneTestContext) {
             boot_disk: Some(params::InstanceDiskAttachment::Attach(
                 params::InstanceDiskAttach { name: base_disk_name.clone() },
             )),
-            min_cpu_platform: None,
+            cpu_platform: None,
             disks: Vec::new(),
             external_ips: vec![],
             start: false,
