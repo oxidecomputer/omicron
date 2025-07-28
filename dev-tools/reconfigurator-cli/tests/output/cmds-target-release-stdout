@@ -198,6 +198,11 @@ INFO performed noop image source checks on sled, sled_id: d81c6a84-79b8-4958-ae4
 INFO configuring SP update, artifact_version: 1.0.0, artifact_hash: 7e6667e646ad001b54c8365a3d309c03f89c59102723d38d01697ee8079fe670, expected_inactive_version: NoValidVersion, expected_active_version: 0.0.1, component: sp, sp_slot: 0, sp_type: Sled, serial_number: serial0, part_number: model0
 INFO reached maximum number of pending SP updates, max: 1
 generated blueprint 8da82a8e-bf97-4fbd-8ddd-9f6462732cf1 based on parent blueprint dbcbd3d6-41ff-48ae-ac0b-1becc9b2fd21
+Planning report for blueprint 8da82a8e-bf97-4fbd-8ddd-9f6462732cf1:
+* 1 pending MGS update:
+  * model0:serial0: Sp { expected_active_version: ArtifactVersion("0.0.1"), expected_inactive_version: NoValidVersion }
+* Zone updates waiting on pending MGS updates (RoT / SP / Host OS / etc.)
+
 
 > blueprint-diff dbcbd3d6-41ff-48ae-ac0b-1becc9b2fd21 8da82a8e-bf97-4fbd-8ddd-9f6462732cf1
 from: blueprint dbcbd3d6-41ff-48ae-ac0b-1becc9b2fd21
@@ -372,6 +377,11 @@ INFO performed noop image source checks on sled, sled_id: d81c6a84-79b8-4958-ae4
 INFO SP update not yet completed (will keep it), artifact_version: 1.0.0, artifact_hash: 7e6667e646ad001b54c8365a3d309c03f89c59102723d38d01697ee8079fe670, expected_inactive_version: NoValidVersion, expected_active_version: 0.0.1, component: sp, sp_slot: 0, sp_type: Sled, serial_number: serial0, part_number: model0
 INFO reached maximum number of pending SP updates, max: 1
 generated blueprint 58d5e830-0884-47d8-a7cd-b2b3751adeb4 based on parent blueprint 8da82a8e-bf97-4fbd-8ddd-9f6462732cf1
+Planning report for blueprint 58d5e830-0884-47d8-a7cd-b2b3751adeb4:
+* 1 pending MGS update:
+  * model0:serial0: Sp { expected_active_version: ArtifactVersion("0.0.1"), expected_inactive_version: NoValidVersion }
+* Zone updates waiting on pending MGS updates (RoT / SP / Host OS / etc.)
+
 
 > blueprint-diff 8da82a8e-bf97-4fbd-8ddd-9f6462732cf1 58d5e830-0884-47d8-a7cd-b2b3751adeb4
 from: blueprint 8da82a8e-bf97-4fbd-8ddd-9f6462732cf1
@@ -549,6 +559,11 @@ INFO skipping board for SP update, serial_number: serial0, part_number: model0
 INFO configuring SP update, artifact_version: 1.0.0, artifact_hash: 7e6667e646ad001b54c8365a3d309c03f89c59102723d38d01697ee8079fe670, expected_inactive_version: NoValidVersion, expected_active_version: 0.0.1, component: sp, sp_slot: 1, sp_type: Sled, serial_number: serial1, part_number: model1
 INFO reached maximum number of pending SP updates, max: 1
 generated blueprint af934083-59b5-4bf6-8966-6fb5292c29e1 based on parent blueprint 58d5e830-0884-47d8-a7cd-b2b3751adeb4
+Planning report for blueprint af934083-59b5-4bf6-8966-6fb5292c29e1:
+* 1 pending MGS update:
+  * model1:serial1: Sp { expected_active_version: ArtifactVersion("0.0.1"), expected_inactive_version: NoValidVersion }
+* Zone updates waiting on pending MGS updates (RoT / SP / Host OS / etc.)
+
 
 > blueprint-diff 58d5e830-0884-47d8-a7cd-b2b3751adeb4 af934083-59b5-4bf6-8966-6fb5292c29e1
 from: blueprint 58d5e830-0884-47d8-a7cd-b2b3751adeb4
@@ -733,6 +748,11 @@ INFO SP update impossible (will remove it and re-evaluate board), artifact_versi
 INFO configuring SP update, artifact_version: 1.0.0, artifact_hash: 7e6667e646ad001b54c8365a3d309c03f89c59102723d38d01697ee8079fe670, expected_inactive_version: Version(ArtifactVersion("0.5.0")), expected_active_version: 0.0.1, component: sp, sp_slot: 1, sp_type: Sled, serial_number: serial1, part_number: model1
 INFO reached maximum number of pending SP updates, max: 1
 generated blueprint df06bb57-ad42-4431-9206-abff322896c7 based on parent blueprint af934083-59b5-4bf6-8966-6fb5292c29e1
+Planning report for blueprint df06bb57-ad42-4431-9206-abff322896c7:
+* 1 pending MGS update:
+  * model1:serial1: Sp { expected_active_version: ArtifactVersion("0.0.1"), expected_inactive_version: Version(ArtifactVersion("0.5.0")) }
+* Zone updates waiting on pending MGS updates (RoT / SP / Host OS / etc.)
+
 
 > blueprint-diff af934083-59b5-4bf6-8966-6fb5292c29e1 df06bb57-ad42-4431-9206-abff322896c7
 from: blueprint af934083-59b5-4bf6-8966-6fb5292c29e1
@@ -918,6 +938,11 @@ INFO skipping board for SP update, serial_number: serial0, part_number: model0
 INFO configuring SP update, artifact_version: 1.0.0, artifact_hash: 7e6667e646ad001b54c8365a3d309c03f89c59102723d38d01697ee8079fe670, expected_inactive_version: NoValidVersion, expected_active_version: 0.0.1, component: sp, sp_slot: 2, sp_type: Sled, serial_number: serial2, part_number: model2
 INFO ran out of boards for SP update
 generated blueprint 7f976e0d-d2a5-4eeb-9e82-c82bc2824aba based on parent blueprint df06bb57-ad42-4431-9206-abff322896c7
+Planning report for blueprint 7f976e0d-d2a5-4eeb-9e82-c82bc2824aba:
+* 1 pending MGS update:
+  * model2:serial2: Sp { expected_active_version: ArtifactVersion("0.0.1"), expected_inactive_version: NoValidVersion }
+* Zone updates waiting on pending MGS updates (RoT / SP / Host OS / etc.)
+
 
 > blueprint-diff df06bb57-ad42-4431-9206-abff322896c7 7f976e0d-d2a5-4eeb-9e82-c82bc2824aba
 from: blueprint df06bb57-ad42-4431-9206-abff322896c7
@@ -1103,6 +1128,36 @@ INFO skipping board for SP update, serial_number: serial0, part_number: model0
 INFO skipping board for SP update, serial_number: serial1, part_number: model1
 INFO ran out of boards for SP update
 generated blueprint 9034c710-3e57-45f3-99e5-4316145e87ac based on parent blueprint 7f976e0d-d2a5-4eeb-9e82-c82bc2824aba
+Planning report for blueprint 9034c710-3e57-45f3-99e5-4316145e87ac:
+* 1 out-of-date zone updated in-place:
+  * sled 2b8f0cb3-0295-4b3c-bc58-4fe88b57112c, zone 353b3b65-20f7-48c3-88f7-495bd5d31545 (clickhouse)
+* 25 remaining out-of-date zones:
+  * sled 2b8f0cb3-0295-4b3c-bc58-4fe88b57112c, zone 353b3b65-20f7-48c3-88f7-495bd5d31545 (clickhouse): install dataset → artifact: version 1.0.0
+  * sled 2b8f0cb3-0295-4b3c-bc58-4fe88b57112c, zone 466a9f29-62bf-4e63-924a-b9efdb86afec (nexus): install dataset → artifact: version 1.0.0
+  * sled 2b8f0cb3-0295-4b3c-bc58-4fe88b57112c, zone 62620961-fc4a-481e-968b-f5acbac0dc63 (internal_ntp): install dataset → artifact: version 1.0.0
+  * sled 2b8f0cb3-0295-4b3c-bc58-4fe88b57112c, zone 6c3ae381-04f7-41ea-b0ac-74db387dbc3a (external_dns): install dataset → artifact: version 1.0.0
+  * sled 2b8f0cb3-0295-4b3c-bc58-4fe88b57112c, zone 86a22a56-0168-453d-9df1-cb2a7c64b5d3 (crucible): install dataset → artifact: version 1.0.0
+  * sled 2b8f0cb3-0295-4b3c-bc58-4fe88b57112c, zone 99e2f30b-3174-40bf-a78a-90da8abba8ca (internal_dns): install dataset → artifact: version 1.0.0
+  * sled 2b8f0cb3-0295-4b3c-bc58-4fe88b57112c, zone ad6a3a03-8d0f-4504-99a4-cbf73d69b973 (crucible_pantry): install dataset → artifact: version 1.0.0
+  * sled 2b8f0cb3-0295-4b3c-bc58-4fe88b57112c, zone bd354eef-d8a6-4165-9124-283fb5e46d77 (crucible): install dataset → artifact: version 1.0.0
+  * sled 2b8f0cb3-0295-4b3c-bc58-4fe88b57112c, zone e2fdefe7-95b2-4fd2-ae37-56929a06d58c (crucible): install dataset → artifact: version 1.0.0
+  * sled 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6, zone 058fd5f9-60a8-4e11-9302-15172782e17d (crucible): install dataset → artifact: version 1.0.0
+  * sled 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6, zone 0c71b3b2-6ceb-4e8f-b020-b08675e83038 (nexus): install dataset → artifact: version 1.0.0
+  * sled 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6, zone 427ec88f-f467-42fa-9bbb-66a91a36103c (internal_dns): install dataset → artifact: version 1.0.0
+  * sled 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6, zone 5199c033-4cf9-4ab6-8ae7-566bd7606363 (crucible): install dataset → artifact: version 1.0.0
+  * sled 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6, zone 6444f8a5-6465-4f0b-a549-1993c113569c (internal_ntp): install dataset → artifact: version 1.0.0
+  * sled 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6, zone 803bfb63-c246-41db-b0da-d3b87ddfc63d (external_dns): install dataset → artifact: version 1.0.0
+  * sled 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6, zone ba4994a8-23f9-4b1a-a84f-a08d74591389 (crucible_pantry): install dataset → artifact: version 1.0.0
+  * sled 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6, zone dfac80b4-a887-430a-ae87-a4e065dba787 (crucible): install dataset → artifact: version 1.0.0
+  * sled d81c6a84-79b8-4958-ae41-ea46c9b19763, zone 3eeb8d49-eb1a-43f8-bb64-c2338421c2c6 (nexus): install dataset → artifact: version 1.0.0
+  * sled d81c6a84-79b8-4958-ae41-ea46c9b19763, zone 694bd14f-cb24-4be4-bb19-876e79cda2c8 (crucible): install dataset → artifact: version 1.0.0
+  * sled d81c6a84-79b8-4958-ae41-ea46c9b19763, zone 75b220ba-a0f4-4872-8202-dc7c87f062d0 (crucible_pantry): install dataset → artifact: version 1.0.0
+  * sled d81c6a84-79b8-4958-ae41-ea46c9b19763, zone 7c252b64-c5af-4ec1-989e-9a03f3b0f111 (crucible): install dataset → artifact: version 1.0.0
+  * sled d81c6a84-79b8-4958-ae41-ea46c9b19763, zone ea5b4030-b52f-44b2-8d70-45f15f987d01 (internal_dns): install dataset → artifact: version 1.0.0
+  * sled d81c6a84-79b8-4958-ae41-ea46c9b19763, zone f10a4fb9-759f-4a65-b25e-5794ad2d07d8 (internal_ntp): install dataset → artifact: version 1.0.0
+  * sled d81c6a84-79b8-4958-ae41-ea46c9b19763, zone f55647d4-5500-4ad3-893a-df45bd50d622 (crucible): install dataset → artifact: version 1.0.0
+  * sled d81c6a84-79b8-4958-ae41-ea46c9b19763, zone f6ec9c67-946a-4da3-98d5-581f72ce8bf0 (external_dns): install dataset → artifact: version 1.0.0
+
 
 > blueprint-diff 7f976e0d-d2a5-4eeb-9e82-c82bc2824aba 9034c710-3e57-45f3-99e5-4316145e87ac
 from: blueprint 7f976e0d-d2a5-4eeb-9e82-c82bc2824aba

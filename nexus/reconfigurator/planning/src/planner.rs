@@ -535,9 +535,9 @@ impl<'a> Planner<'a> {
             if zone_counts.num_install_dataset() == 0 {
                 report.skip_sled(
                     sled.sled_id,
-                    SkipSledReason::AllZonesAlreadyArtifact(
-                        zone_counts.num_total,
-                    ),
+                    SkipSledReason::AllZonesAlreadyArtifact {
+                        num_total: zone_counts.num_total,
+                    },
                 );
                 continue;
             }
@@ -751,9 +751,7 @@ impl<'a> Planner<'a> {
                     )?,
                 )? == Ensure::Added
                 {
-                    report
-                        .sleds_missing_crucible_zone
-                        .insert((sled_id, *zpool_id));
+                    report.missing_crucible_zone(sled_id, *zpool_id);
                     ncrucibles_added += 1;
                 }
             }
@@ -963,9 +961,10 @@ impl<'a> Planner<'a> {
         let num_zones_to_add =
             target_count.saturating_sub(num_existing_kind_zones);
         if num_zones_to_add == 0 {
-            report.sufficient_zones_exist.insert(
-                ZoneKind::from(zone_kind).report_str().to_owned(),
-                (target_count, num_existing_kind_zones),
+            report.sufficient_zones_exist(
+                ZoneKind::from(zone_kind).report_str(),
+                target_count,
+                num_existing_kind_zones,
             );
         }
         num_zones_to_add
@@ -992,9 +991,10 @@ impl<'a> Planner<'a> {
                     // (albeit unlikely?) we're in a weird state where we need
                     // more sleds or disks to come online, and we may need to be
                     // able to produce blueprints to achieve that status.
-                    report.out_of_eligible_sleds.insert(
-                        ZoneKind::from(kind).report_str().to_owned(),
-                        (i, num_zones_to_add),
+                    report.out_of_eligible_sleds(
+                        ZoneKind::from(kind).report_str(),
+                        i,
+                        num_zones_to_add,
                     );
                     break;
                 }
@@ -1037,9 +1037,10 @@ impl<'a> Planner<'a> {
                     .blueprint
                     .sled_add_zone_oximeter(sled_id, image_source)?,
             };
-            report
-                .discretionary_zones_placed
-                .push((sled_id, ZoneKind::from(kind).report_str().to_owned()));
+            report.discretionary_zone_placed(
+                sled_id,
+                ZoneKind::from(kind).report_str(),
+            );
         }
 
         Ok(())
@@ -1113,7 +1114,8 @@ impl<'a> Planner<'a> {
 
         // ... or if there are still pending updates for the RoT / SP /
         // Host OS / etc.
-        if mgs_updates.any_updates_pending() {
+        // TODO This is not quite right.  See oxidecomputer/omicron#8285.
+        if !mgs_updates.is_empty() {
             report.waiting_on(ZoneUpdatesWaitingOn::PendingMgsUpdates);
             return Ok(report);
         }
@@ -1282,7 +1284,10 @@ impl<'a> Planner<'a> {
                     })
             })
             .collect::<Vec<_>>();
-        report.out_of_date_zones.extend(out_of_date_zones.iter().cloned());
+
+        for (sled_id, zone, desired_image) in out_of_date_zones.iter() {
+            report.out_of_date_zone(*sled_id, zone, desired_image.clone());
+        }
 
         // Of the out-of-date zones, filter out zones that can't be updated yet,
         // either because they're not ready or because it wouldn't be safe to
@@ -1354,7 +1359,7 @@ impl<'a> Planner<'a> {
                     zone.zone_type.kind(),
                     zone.id
                 ));
-                report.updated_zones.push((sled_id, zone.clone()));
+                report.updated_zone(sled_id, &zone);
                 self.blueprint.sled_set_zone_source(
                     sled_id,
                     zone.id,
@@ -1373,7 +1378,7 @@ impl<'a> Planner<'a> {
                     zone.zone_type.kind(),
                     zone.id
                 ));
-                report.expunged_zones.push((sled_id, zone.clone()));
+                report.expunged_zone(sled_id, zone);
                 self.blueprint.sled_expunge_zone(sled_id, zone.id)?;
             }
         }
@@ -1500,7 +1505,7 @@ impl<'a> Planner<'a> {
         // We return false regardless of `zone_kind` if there are still
         // pending updates for components earlier in the update ordering
         // than zones: RoT bootloader / RoT / SP / Host OS.
-        if mgs_updates.any_updates_pending() {
+        if !mgs_updates.is_empty() {
             return Ok(false);
         }
 
@@ -1564,7 +1569,10 @@ impl<'a> Planner<'a> {
                 // We must hear from all nodes
                 let all_statuses = &self.inventory.cockroach_status;
                 if all_statuses.len() < COCKROACHDB_REDUNDANCY {
-                    report.unsafe_zone(zone, Cockroachdb(NotEnoughNodes));
+                    report.unsafe_zone(
+                        zone,
+                        Cockroachdb { reason: NotEnoughNodes },
+                    );
                     return false;
                 }
 
@@ -1576,30 +1584,34 @@ impl<'a> Planner<'a> {
                     else {
                         report.unsafe_zone(
                             zone,
-                            Cockroachdb(MissingUnderreplicatedStat),
+                            Cockroachdb { reason: MissingUnderreplicatedStat },
                         );
                         return false;
                     };
                     if ranges_underreplicated != 0 {
                         report.unsafe_zone(
                             zone,
-                            Cockroachdb(UnderreplicatedRanges(
-                                ranges_underreplicated,
-                            )),
+                            Cockroachdb {
+                                reason: UnderreplicatedRanges {
+                                    n: ranges_underreplicated,
+                                },
+                            },
                         );
                         return false;
                     }
                     let Some(live_nodes) = status.liveness_live_nodes else {
                         report.unsafe_zone(
                             zone,
-                            Cockroachdb(MissingLiveNodesStat),
+                            Cockroachdb { reason: MissingLiveNodesStat },
                         );
                         return false;
                     };
                     if live_nodes < COCKROACHDB_REDUNDANCY as u64 {
                         report.unsafe_zone(
                             zone,
-                            Cockroachdb(NotEnoughLiveNodes(live_nodes)),
+                            Cockroachdb {
+                                reason: NotEnoughLiveNodes { live_nodes },
+                            },
                         );
                         return false;
                     }

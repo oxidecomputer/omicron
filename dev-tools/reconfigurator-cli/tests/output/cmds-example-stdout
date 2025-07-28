@@ -392,7 +392,7 @@ parent:    02697f74-b14a-4418-90f0-c28b2a3a6aa9
 
  PENDING MGS-MANAGED UPDATES: 0
 
-Report on planning run for blueprint ade5749d-bdf3-4fab-a8ae-00bea01b3a5a:
+Nothing to report on planning for blueprint ade5749d-bdf3-4fab-a8ae-00bea01b3a5a.
 
 
 
@@ -503,7 +503,7 @@ parent:    02697f74-b14a-4418-90f0-c28b2a3a6aa9
 
  PENDING MGS-MANAGED UPDATES: 0
 
-Report on planning run for blueprint ade5749d-bdf3-4fab-a8ae-00bea01b3a5a:
+Nothing to report on planning for blueprint ade5749d-bdf3-4fab-a8ae-00bea01b3a5a.
 
 
 
@@ -534,6 +534,14 @@ T ENA ID                                   PARENT                               
 INFO skipping noop image source check for all sleds, reason: no target release is currently set
 WARN cannot issue more SP updates (no current artifacts)
 generated blueprint 86db3308-f817-4626-8838-4085949a6a41 based on parent blueprint ade5749d-bdf3-4fab-a8ae-00bea01b3a5a
+Planning report for blueprint 86db3308-f817-4626-8838-4085949a6a41:
+* Discretionary zone placement waiting for NTP zones on sleds: 89d02b1b-478c-401a-8e28-7a26f74fa41b
+* Missing NTP zone on sled 89d02b1b-478c-401a-8e28-7a26f74fa41b
+* Only placed 0/1 desired clickhouse zones
+* Only placed 0/3 desired crucible_pantry zones
+* Only placed 0/3 desired internal_dns zones
+* Only placed 0/3 desired nexus zones
+
 
 > blueprint-list
 T ENA ID                                   PARENT                               TIME_CREATED             
@@ -1005,7 +1013,7 @@ parent:    02697f74-b14a-4418-90f0-c28b2a3a6aa9
 
  PENDING MGS-MANAGED UPDATES: 0
 
-Report on planning run for blueprint ade5749d-bdf3-4fab-a8ae-00bea01b3a5a:
+Nothing to report on planning for blueprint ade5749d-bdf3-4fab-a8ae-00bea01b3a5a.
 
 
 
@@ -1016,6 +1024,8 @@ Report on planning run for blueprint ade5749d-bdf3-4fab-a8ae-00bea01b3a5a:
 INFO skipping noop image source check for all sleds, reason: no target release is currently set
 WARN cannot issue more SP updates (no current artifacts)
 generated blueprint 86db3308-f817-4626-8838-4085949a6a41 based on parent blueprint ade5749d-bdf3-4fab-a8ae-00bea01b3a5a
+Nothing to report on planning for blueprint 86db3308-f817-4626-8838-4085949a6a41.
+
 
 > blueprint-diff ade5749d-bdf3-4fab-a8ae-00bea01b3a5a latest
 from: blueprint ade5749d-bdf3-4fab-a8ae-00bea01b3a5a

@@ -75,28 +75,46 @@ impl PlanningReport {
             cockroachdb_settings: PlanningCockroachdbSettingsStepReport::new(),
         }
     }
+
+    pub fn is_empty(&self) -> bool {
+        self.expunge.is_empty()
+            && self.decommission.is_empty()
+            && self.noop_image_source.is_empty()
+            && self.mgs_updates.is_empty()
+            && self.add.is_empty()
+            && self.zone_updates.is_empty()
+            && self.cockroachdb_settings.is_empty()
+    }
 }
 
 impl fmt::Display for PlanningReport {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        let Self {
-            blueprint_id,
-            expunge,
-            decommission,
-            noop_image_source,
-            mgs_updates,
-            add,
-            zone_updates,
-            cockroachdb_settings,
-        } = self;
-        writeln!(f, "Report on planning run for blueprint {blueprint_id}:")?;
-        expunge.fmt(f)?;
-        decommission.fmt(f)?;
-        noop_image_source.fmt(f)?;
-        mgs_updates.fmt(f)?;
-        add.fmt(f)?;
-        zone_updates.fmt(f)?;
-        cockroachdb_settings.fmt(f)?;
+        if self.is_empty() {
+            writeln!(
+                f,
+                "Nothing to report on planning for blueprint {}.",
+                self.blueprint_id,
+            )?;
+        } else {
+            let Self {
+                blueprint_id,
+                expunge,
+                decommission,
+                noop_image_source,
+                mgs_updates,
+                add,
+                zone_updates,
+                cockroachdb_settings,
+            } = self;
+            writeln!(f, "Planning report for blueprint {blueprint_id}:")?;
+            expunge.fmt(f)?;
+            decommission.fmt(f)?;
+            noop_image_source.fmt(f)?;
+            mgs_updates.fmt(f)?;
+            add.fmt(f)?;
+            zone_updates.fmt(f)?;
+            cockroachdb_settings.fmt(f)?;
+        }
         Ok(())
     }
 }
@@ -112,6 +130,10 @@ pub struct PlanningExpungeStepReport {
 impl PlanningExpungeStepReport {
     pub fn new() -> Self {
         Self { orphan_disks: BTreeMap::new() }
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.orphan_disks.is_empty()
     }
 }
 
@@ -144,17 +166,20 @@ impl PlanningDecommissionStepReport {
     pub fn new() -> Self {
         Self { zombie_sleds: Vec::new() }
     }
+
+    pub fn is_empty(&self) -> bool {
+        self.zombie_sleds.is_empty()
+    }
 }
 
 impl fmt::Display for PlanningDecommissionStepReport {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         let Self { zombie_sleds } = self;
         if !zombie_sleds.is_empty() {
-            let n = zombie_sleds.len();
-            let s = if n == 1 { "" } else { "s" };
+            let (n, s) = plural_vec(zombie_sleds);
             writeln!(
                 f,
-                "* decommissioned sled{s} returned by `SledFilter::Commissioned`: {}",
+                "* {n} decommissioned sled{s} returned by `SledFilter::Commissioned`: {}",
                 zombie_sleds
                     .iter()
                     .map(|sled_id| format!("{sled_id}"))
@@ -166,6 +191,16 @@ impl fmt::Display for PlanningDecommissionStepReport {
     }
 }
 
+/// How many of the total install-dataset zones were noop-converted to use
+/// the artifact store on a particular sled.
+#[derive(
+    Clone, Debug, Deserialize, Serialize, PartialEq, Eq, Diffable, JsonSchema,
+)]
+pub struct PlanningNoopImageSourceConvertedZones {
+    pub num_eligible: usize,
+    pub num_dataset: usize,
+}
+
 #[derive(
     Clone, Debug, Deserialize, Serialize, PartialEq, Eq, Diffable, JsonSchema,
 )]
@@ -175,7 +210,8 @@ pub struct PlanningNoopImageSourceStepReport {
         BTreeMap<SledUuid, PlanningNoopImageSourceSkipSledReason>,
     pub skipped_zones:
         BTreeMap<OmicronZoneUuid, PlanningNoopImageSourceSkipZoneReason>,
-    pub converted_zones: BTreeMap<SledUuid, (usize, usize)>,
+    pub converted_zones:
+        BTreeMap<SledUuid, PlanningNoopImageSourceConvertedZones>,
 }
 
 impl PlanningNoopImageSourceStepReport {
@@ -186,6 +222,13 @@ impl PlanningNoopImageSourceStepReport {
             skipped_zones: BTreeMap::new(),
             converted_zones: BTreeMap::new(),
         }
+    }
+
+    pub fn is_empty(&self) -> bool {
+        !self.no_target_release
+            && self.skipped_sleds.is_empty()
+            && self.skipped_zones.is_empty()
+            && self.converted_zones.is_empty()
     }
 
     pub fn skip_sled(
@@ -210,7 +253,10 @@ impl PlanningNoopImageSourceStepReport {
         num_eligible: usize,
         num_dataset: usize,
     ) {
-        self.converted_zones.insert(sled_id, (num_eligible, num_dataset));
+        self.converted_zones.insert(
+            sled_id,
+            PlanningNoopImageSourceConvertedZones { num_eligible, num_dataset },
+        );
     }
 }
 
@@ -237,20 +283,16 @@ impl fmt::Display for PlanningNoopImageSourceStepReport {
             )?;
         }
 
-        // Very noisy in tests.
-        // for (zone_id, reason) in skipped_zones.iter() {
-        //     writeln!(
-        //         f,
-        //         "* Skipping noop image source check for zone {zone_id}: {reason}"
-        //     )?;
-        // }
-
-        for (sled_id, (m, n)) in converted_zones.iter() {
-            if *m > 0 && *n > 0 {
+        for (
+            sled_id,
+            PlanningNoopImageSourceConvertedZones { num_eligible, num_dataset },
+        ) in converted_zones.iter()
+        {
+            if *num_eligible > 0 && *num_dataset > 0 {
                 writeln!(
                     f,
-                    "* Noop converting {m}/{n} install-dataset zones to artifact store \
-                   on sled {sled_id}",
+                    "* Noop converting {num_eligible}/{num_dataset} install-dataset zones \
+                       to artifact store on sled {sled_id}",
                 )?;
             }
         }
@@ -262,30 +304,31 @@ impl fmt::Display for PlanningNoopImageSourceStepReport {
 #[derive(
     Clone, Debug, Deserialize, Serialize, PartialEq, Eq, Diffable, JsonSchema,
 )]
+#[serde(rename_all = "snake_case", tag = "type")]
 pub enum PlanningNoopImageSourceSkipSledReason {
-    AllZonesAlreadyArtifact(usize),
+    AllZonesAlreadyArtifact { num_total: usize },
     SledNotInInventory,
-    ErrorRetrievingZoneManifest(String),
-    RemoveMupdateOverride(MupdateOverrideUuid),
+    ErrorRetrievingZoneManifest { error: String },
+    RemoveMupdateOverride { id: MupdateOverrideUuid },
 }
 
 impl fmt::Display for PlanningNoopImageSourceSkipSledReason {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match self {
-            Self::AllZonesAlreadyArtifact(n) => {
-                write!(f, "all {n} zones are already from artifacts")
+            Self::AllZonesAlreadyArtifact { num_total } => {
+                write!(f, "all {num_total} zones are already from artifacts")
             }
             Self::SledNotInInventory => {
                 write!(f, "sled not present in latest inventory collection")
             }
-            Self::ErrorRetrievingZoneManifest(error) => {
+            Self::ErrorRetrievingZoneManifest { error } => {
                 write!(
                     f,
                     "sled-agent encountered error retrieving zone manifest \
                      (this is abnormal): {error}"
                 )
             }
-            Self::RemoveMupdateOverride(id) => {
+            Self::RemoveMupdateOverride { id } => {
                 write!(
                     f,
                     "blueprint has get_remove_mupdate_override set for sled: {id}",
@@ -298,6 +341,7 @@ impl fmt::Display for PlanningNoopImageSourceSkipSledReason {
 #[derive(
     Clone, Debug, Deserialize, Serialize, PartialEq, Eq, Diffable, JsonSchema,
 )]
+#[serde(rename_all = "snake_case", tag = "type")]
 pub enum PlanningNoopImageSourceSkipZoneReason {
     ZoneNotInManifest {
         zone_kind: String,
@@ -347,9 +391,8 @@ impl PlanningMgsUpdatesStepReport {
         Self { pending_mgs_updates }
     }
 
-    // TODO This is not quite right.  See oxidecomputer/omicron#8285.
-    pub fn any_updates_pending(&self) -> bool {
-        !self.pending_mgs_updates.is_empty()
+    pub fn is_empty(&self) -> bool {
+        self.pending_mgs_updates.is_empty()
     }
 }
 
@@ -358,7 +401,7 @@ impl fmt::Display for PlanningMgsUpdatesStepReport {
         let Self { pending_mgs_updates } = self;
         if !pending_mgs_updates.is_empty() {
             let n = pending_mgs_updates.len();
-            let s = if n == 1 { "" } else { "s" };
+            let s = plural(n);
             writeln!(f, "* {n} pending MGS update{s}:")?;
             for update in pending_mgs_updates.iter() {
                 writeln!(
@@ -372,6 +415,25 @@ impl fmt::Display for PlanningMgsUpdatesStepReport {
     }
 }
 
+/// How many discretionary zones we actually placed out of how many we
+/// wanted to place.
+#[derive(
+    Clone, Debug, Deserialize, Serialize, PartialEq, Eq, Diffable, JsonSchema,
+)]
+pub struct PlanningAddOutOfEligibleSleds {
+    pub placed: usize,
+    pub wanted_to_place: usize,
+}
+
+/// We have at least the minimum required number of zones of a given kind.
+#[derive(
+    Clone, Debug, Deserialize, Serialize, PartialEq, Eq, Diffable, JsonSchema,
+)]
+pub struct PlanningAddSufficientZonesExist {
+    pub target_count: usize,
+    pub num_existing: usize,
+}
+
 #[derive(
     Clone, Debug, Deserialize, Serialize, PartialEq, Eq, Diffable, JsonSchema,
 )]
@@ -380,18 +442,19 @@ pub struct PlanningAddStepReport {
     pub sleds_waiting_for_ntp_zone: BTreeSet<SledUuid>,
     pub sleds_getting_ntp_and_discretionary_zones: BTreeSet<SledUuid>,
     pub sleds_missing_ntp_zone: BTreeSet<SledUuid>,
-    pub sleds_missing_crucible_zone: BTreeSet<(SledUuid, ZpoolUuid)>,
+    pub sleds_missing_crucible_zone: BTreeMap<SledUuid, Vec<ZpoolUuid>>,
 
     /// Discretionary zone kind → (placed, wanted to place)
-    pub out_of_eligible_sleds: BTreeMap<String, (usize, usize)>,
+    pub out_of_eligible_sleds: BTreeMap<String, PlanningAddOutOfEligibleSleds>,
 
     /// Discretionary zone kind → (wanted to place, num existing)
-    pub sufficient_zones_exist: BTreeMap<String, (usize, usize)>,
+    pub sufficient_zones_exist:
+        BTreeMap<String, PlanningAddSufficientZonesExist>,
 
-    /// List of (Sled ID, kind of discretionary zone placed there) pairs.
+    /// Sled ID → kinds of discretionary zones placed there
     // TODO: make `sled_add_zone_*` methods return the added zone config
     // so that we can report it here.
-    pub discretionary_zones_placed: Vec<(SledUuid, String)>,
+    pub discretionary_zones_placed: BTreeMap<SledUuid, Vec<String>>,
 }
 
 impl PlanningAddStepReport {
@@ -401,15 +464,71 @@ impl PlanningAddStepReport {
             sleds_waiting_for_ntp_zone: BTreeSet::new(),
             sleds_getting_ntp_and_discretionary_zones: BTreeSet::new(),
             sleds_missing_ntp_zone: BTreeSet::new(),
-            sleds_missing_crucible_zone: BTreeSet::new(),
+            sleds_missing_crucible_zone: BTreeMap::new(),
             out_of_eligible_sleds: BTreeMap::new(),
             sufficient_zones_exist: BTreeMap::new(),
-            discretionary_zones_placed: Vec::new(),
+            discretionary_zones_placed: BTreeMap::new(),
         }
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.sleds_with_no_zpools_for_ntp_zone.is_empty()
+            && self.sleds_waiting_for_ntp_zone.is_empty()
+            && self.sleds_getting_ntp_and_discretionary_zones.is_empty()
+            && self.sleds_missing_ntp_zone.is_empty()
+            && self.sleds_missing_crucible_zone.is_empty()
+            && self.out_of_eligible_sleds.is_empty()
+            && self.discretionary_zones_placed.is_empty()
     }
 
     pub fn any_discretionary_zones_placed(&self) -> bool {
         !self.discretionary_zones_placed.is_empty()
+    }
+
+    pub fn missing_crucible_zone(
+        &mut self,
+        sled_id: SledUuid,
+        zpool_id: ZpoolUuid,
+    ) {
+        self.sleds_missing_crucible_zone
+            .entry(sled_id)
+            .and_modify(|pools| pools.push(zpool_id))
+            .or_insert_with(|| vec![zpool_id]);
+    }
+
+    pub fn out_of_eligible_sleds(
+        &mut self,
+        zone_kind: &str,
+        placed: usize,
+        wanted_to_place: usize,
+    ) {
+        self.out_of_eligible_sleds.insert(
+            zone_kind.to_owned(),
+            PlanningAddOutOfEligibleSleds { placed, wanted_to_place },
+        );
+    }
+
+    pub fn sufficient_zones_exist(
+        &mut self,
+        zone_kind: &str,
+        target_count: usize,
+        num_existing: usize,
+    ) {
+        self.sufficient_zones_exist.insert(
+            zone_kind.to_owned(),
+            PlanningAddSufficientZonesExist { target_count, num_existing },
+        );
+    }
+
+    pub fn discretionary_zone_placed(
+        &mut self,
+        sled_id: SledUuid,
+        zone_kind: &str,
+    ) {
+        self.discretionary_zones_placed
+            .entry(sled_id)
+            .and_modify(|kinds| kinds.push(zone_kind.to_owned()))
+            .or_insert_with(|| vec![zone_kind.to_owned()]);
     }
 }
 
@@ -467,37 +586,47 @@ impl fmt::Display for PlanningAddStepReport {
             writeln!(f, "* Missing NTP zone on sled {sled_id}",)?;
         }
 
-        for (sled_id, zpool_id) in sleds_missing_crucible_zone {
-            writeln!(
-                f,
-                "* Missing Crucible zone for sled {sled_id}, zpool {zpool_id}",
-            )?;
+        for (sled_id, zpools) in sleds_missing_crucible_zone {
+            for zpool_id in zpools {
+                writeln!(
+                    f,
+                    "* Missing Crucible zone for sled {sled_id}, zpool {zpool_id}",
+                )?;
+            }
         }
 
-        for (kind, (placed, desired)) in out_of_eligible_sleds.iter() {
+        for (kind, PlanningAddOutOfEligibleSleds { placed, wanted_to_place }) in
+            out_of_eligible_sleds.iter()
+        {
             writeln!(
                 f,
-                "* Only placed {placed}/{desired} desired {kind} zones"
+                "* Only placed {placed}/{wanted_to_place} desired {kind} zones"
             )?;
         }
-
-        // Noisy in tests.
-        // for (kind, (desired, existing)) in sufficient_zones_exist.iter() {
-        //     writeln!(
-        //         f,
-        //         "* Sufficient {kind} zones exist in plan: {desired}/{existing}"
-        //     )?;
-        // }
 
         if !discretionary_zones_placed.is_empty() {
             writeln!(f, "* Discretionary zones placed:")?;
-            for (sled_id, kind) in discretionary_zones_placed.iter() {
-                writeln!(f, "  * a {kind} zone on sled {sled_id}")?;
+            for (sled_id, kinds) in discretionary_zones_placed.iter() {
+                let (n, s) = plural_vec(kinds);
+                writeln!(
+                    f,
+                    "  * {n} zone{s} on sled {sled_id}: {}",
+                    kinds.join(", ")
+                )?;
             }
         }
 
         Ok(())
     }
+}
+
+/// We have at least the minimum required number of zones of a given kind.
+#[derive(
+    Clone, Debug, Deserialize, Serialize, PartialEq, Eq, Diffable, JsonSchema,
+)]
+pub struct PlanningOutOfDateZone {
+    pub zone_config: BlueprintZoneConfig,
+    pub desired_image_source: BlueprintZoneImageSource,
 }
 
 #[derive(
@@ -507,28 +636,71 @@ pub struct PlanningZoneUpdatesStepReport {
     /// What are we waiting on to start zone updates?
     pub waiting_on: Option<ZoneUpdatesWaitingOn>,
 
-    /// (Sled ID, zone, desired image)
-    pub out_of_date_zones:
-        Vec<(SledUuid, BlueprintZoneConfig, BlueprintZoneImageSource)>,
-
-    pub expunged_zones: Vec<(SledUuid, BlueprintZoneConfig)>,
-    pub updated_zones: Vec<(SledUuid, BlueprintZoneConfig)>,
-    pub unsafe_zones: Vec<(BlueprintZoneConfig, ZoneUnsafeToShutdown)>,
+    pub out_of_date_zones: BTreeMap<SledUuid, Vec<PlanningOutOfDateZone>>,
+    pub expunged_zones: BTreeMap<SledUuid, Vec<BlueprintZoneConfig>>,
+    pub updated_zones: BTreeMap<SledUuid, Vec<BlueprintZoneConfig>>,
+    pub unsafe_zones: BTreeMap<BlueprintZoneConfig, ZoneUnsafeToShutdown>,
 }
 
 impl PlanningZoneUpdatesStepReport {
     pub fn new() -> Self {
         Self {
             waiting_on: None,
-            out_of_date_zones: Vec::new(),
-            expunged_zones: Vec::new(),
-            updated_zones: Vec::new(),
-            unsafe_zones: Vec::new(),
+            out_of_date_zones: BTreeMap::new(),
+            expunged_zones: BTreeMap::new(),
+            updated_zones: BTreeMap::new(),
+            unsafe_zones: BTreeMap::new(),
         }
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.waiting_on.is_none()
+            && self.out_of_date_zones.is_empty()
+            && self.expunged_zones.is_empty()
+            && self.updated_zones.is_empty()
+            && self.unsafe_zones.is_empty()
     }
 
     pub fn waiting_on(&mut self, waiting_on: ZoneUpdatesWaitingOn) {
         self.waiting_on = Some(waiting_on);
+    }
+
+    pub fn out_of_date_zone(
+        &mut self,
+        sled_id: SledUuid,
+        zone_config: &BlueprintZoneConfig,
+        desired_image_source: BlueprintZoneImageSource,
+    ) {
+        let out_of_date = PlanningOutOfDateZone {
+            zone_config: zone_config.to_owned(),
+            desired_image_source,
+        };
+        self.out_of_date_zones
+            .entry(sled_id)
+            .and_modify(|zones| zones.push(out_of_date.clone()))
+            .or_insert_with(|| vec![out_of_date]);
+    }
+
+    pub fn expunged_zone(
+        &mut self,
+        sled_id: SledUuid,
+        zone_config: &BlueprintZoneConfig,
+    ) {
+        self.expunged_zones
+            .entry(sled_id)
+            .and_modify(|zones| zones.push(zone_config.to_owned()))
+            .or_insert_with(|| vec![zone_config.to_owned()]);
+    }
+
+    pub fn updated_zone(
+        &mut self,
+        sled_id: SledUuid,
+        zone_config: &BlueprintZoneConfig,
+    ) {
+        self.updated_zones
+            .entry(sled_id)
+            .and_modify(|zones| zones.push(zone_config.to_owned()))
+            .or_insert_with(|| vec![zone_config.to_owned()]);
     }
 
     pub fn unsafe_zone(
@@ -536,7 +708,7 @@ impl PlanningZoneUpdatesStepReport {
         zone: &BlueprintZoneConfig,
         reason: ZoneUnsafeToShutdown,
     ) {
-        self.unsafe_zones.push((zone.clone(), reason))
+        self.unsafe_zones.insert(zone.clone(), reason);
     }
 }
 
@@ -555,53 +727,61 @@ impl fmt::Display for PlanningZoneUpdatesStepReport {
         }
 
         if !expunged_zones.is_empty() {
-            let n = out_of_date_zones.len();
-            let s = if n == 1 { "" } else { "s" };
-            writeln!(f, "* Out-of-date zone{s} expunged:")?;
-            for (sled_id, zone) in expunged_zones.iter() {
-                writeln!(
-                    f,
-                    "  * sled {}, zone {} ({})",
-                    sled_id,
-                    zone.id,
-                    zone.zone_type.kind().report_str(),
-                )?;
+            let (n, s) = plural_map_of_vec(expunged_zones);
+            writeln!(f, "* {n} out-of-date zone{s} expunged:")?;
+            for (sled_id, zones) in expunged_zones.iter() {
+                for zone in zones {
+                    writeln!(
+                        f,
+                        "  * sled {}, zone {} ({})",
+                        sled_id,
+                        zone.id,
+                        zone.zone_type.kind().report_str(),
+                    )?;
+                }
             }
         }
 
         if !updated_zones.is_empty() {
-            let n = out_of_date_zones.len();
-            let s = if n == 1 { "" } else { "s" };
-            writeln!(f, "* Out-of-date zone{s} updated in-place:")?;
-            for (sled_id, zone) in updated_zones.iter() {
-                writeln!(
-                    f,
-                    "  * sled {}, zone {} ({})",
-                    sled_id,
-                    zone.id,
-                    zone.zone_type.kind().report_str(),
-                )?;
+            let (n, s) = plural_map_of_vec(updated_zones);
+            writeln!(f, "* {n} out-of-date zone{s} updated in-place:")?;
+            for (sled_id, zones) in updated_zones.iter() {
+                for zone in zones {
+                    writeln!(
+                        f,
+                        "  * sled {}, zone {} ({})",
+                        sled_id,
+                        zone.id,
+                        zone.zone_type.kind().report_str(),
+                    )?;
+                }
             }
         }
 
         if !out_of_date_zones.is_empty() {
-            let n = out_of_date_zones.len();
-            let s = if n == 1 { "" } else { "s" };
-            writeln!(f, "* {n} out-of-date zone{s}:")?;
-            for (sled, zone, _image_source) in out_of_date_zones.iter() {
-                writeln!(
-                    f,
-                    "  * sled {}, zone {} ({})", // TODO: current → desired image source
-                    sled,
-                    zone.id,
-                    zone.zone_type.kind().report_str(),
-                )?;
+            let (n, s) = plural_map_of_vec(out_of_date_zones);
+            writeln!(f, "* {n} remaining out-of-date zone{s}:")?;
+            for (sled_id, zones) in out_of_date_zones.iter() {
+                for PlanningOutOfDateZone {
+                    zone_config,
+                    desired_image_source,
+                } in zones
+                {
+                    writeln!(
+                        f,
+                        "  * sled {}, zone {} ({}): {} → {}",
+                        sled_id,
+                        zone_config.id,
+                        zone_config.zone_type.kind().report_str(),
+                        zone_config.image_source,
+                        desired_image_source,
+                    )?;
+                }
             }
         }
 
         if !unsafe_zones.is_empty() {
-            let n = unsafe_zones.len();
-            let s = if n == 1 { "" } else { "s" };
+            let (n, s) = plural_map(unsafe_zones);
             writeln!(f, "* {n} zone{s} not ready to shut down safely:")?;
             for (zone, reason) in unsafe_zones.iter() {
                 writeln!(
@@ -621,6 +801,7 @@ impl fmt::Display for PlanningZoneUpdatesStepReport {
 #[derive(
     Clone, Debug, Deserialize, Serialize, PartialEq, Eq, Diffable, JsonSchema,
 )]
+#[serde(rename_all = "snake_case", tag = "type")]
 pub enum ZoneUpdatesWaitingOn {
     /// Waiting on discretionary zone placement.
     DiscretionaryZones,
@@ -643,14 +824,15 @@ impl ZoneUpdatesWaitingOn {
 #[derive(
     Clone, Debug, Deserialize, Serialize, PartialEq, Eq, Diffable, JsonSchema,
 )]
+#[serde(rename_all = "snake_case", tag = "type")]
 pub enum ZoneUnsafeToShutdown {
-    Cockroachdb(CockroachdbUnsafeToShutdown),
+    Cockroachdb { reason: CockroachdbUnsafeToShutdown },
 }
 
 impl fmt::Display for ZoneUnsafeToShutdown {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match self {
-            Self::Cockroachdb(reason) => write!(f, "{reason}"),
+            Self::Cockroachdb { reason } => write!(f, "{reason}"),
         }
     }
 }
@@ -658,12 +840,13 @@ impl fmt::Display for ZoneUnsafeToShutdown {
 #[derive(
     Clone, Debug, Deserialize, Serialize, PartialEq, Eq, Diffable, JsonSchema,
 )]
+#[serde(rename_all = "snake_case", tag = "type")]
 pub enum CockroachdbUnsafeToShutdown {
     MissingLiveNodesStat,
     MissingUnderreplicatedStat,
-    NotEnoughLiveNodes(u64),
+    NotEnoughLiveNodes { live_nodes: u64 },
     NotEnoughNodes,
-    UnderreplicatedRanges(u64),
+    UnderreplicatedRanges { n: u64 },
 }
 
 impl fmt::Display for CockroachdbUnsafeToShutdown {
@@ -673,14 +856,14 @@ impl fmt::Display for CockroachdbUnsafeToShutdown {
             Self::MissingUnderreplicatedStat => {
                 write!(f, "missing ranges_underreplicated stat")
             }
-            Self::NotEnoughLiveNodes(n) => {
+            Self::NotEnoughLiveNodes { live_nodes } => {
                 write!(
                     f,
-                    "not enough live nodes: {n} < {COCKROACHDB_REDUNDANCY}"
+                    "not enough live nodes: {live_nodes} < {COCKROACHDB_REDUNDANCY}"
                 )
             }
             Self::NotEnoughNodes => write!(f, "not enough nodes"),
-            Self::UnderreplicatedRanges(n) => {
+            Self::UnderreplicatedRanges { n } => {
                 if *n > 0 {
                     write!(f, "{n} > 0 underreplicated ranges")
                 } else {
@@ -705,15 +888,17 @@ impl PlanningCockroachdbSettingsStepReport {
     pub fn new() -> Self {
         Self { preserve_downgrade: CockroachDbPreserveDowngrade::DoNotModify }
     }
+
+    pub fn is_empty(&self) -> bool {
+        self.preserve_downgrade == CockroachDbPreserveDowngrade::DoNotModify
+    }
 }
 
 impl fmt::Display for PlanningCockroachdbSettingsStepReport {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        let PlanningCockroachdbSettingsStepReport { preserve_downgrade } = self;
-        if !matches!(
-            preserve_downgrade,
-            CockroachDbPreserveDowngrade::DoNotModify,
-        ) {
+        if !self.is_empty() {
+            let PlanningCockroachdbSettingsStepReport { preserve_downgrade } =
+                self;
             writeln!(
                 f,
                 "* Will ensure cockroachdb setting: {preserve_downgrade}"
@@ -721,4 +906,23 @@ impl fmt::Display for PlanningCockroachdbSettingsStepReport {
         }
         Ok(())
     }
+}
+
+fn plural(n: usize) -> &'static str {
+    if n == 1 { "" } else { "s" }
+}
+
+fn plural_vec<V>(vec: &Vec<V>) -> (usize, &'static str) {
+    let n = vec.len();
+    (n, plural(n))
+}
+
+fn plural_map<K, V>(map: &BTreeMap<K, V>) -> (usize, &'static str) {
+    let n = map.len();
+    (n, plural(n))
+}
+
+fn plural_map_of_vec<K, V>(map: &BTreeMap<K, Vec<V>>) -> (usize, &'static str) {
+    let n = map.values().map(|v| v.len()).sum();
+    (n, plural(n))
 }

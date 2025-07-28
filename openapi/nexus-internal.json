@@ -2507,6 +2507,14 @@
               }
             ]
           },
+          "report": {
+            "description": "Report on the planning session that resulted in this blueprint",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/PlanningReport"
+              }
+            ]
+          },
           "sleds": {
             "description": "A map of sled id -> desired configuration of the sled.",
             "type": "object",
@@ -2539,6 +2547,7 @@
           "oximeter_read_mode",
           "oximeter_read_version",
           "pending_mgs_updates",
+          "report",
           "sleds",
           "target_release_minimum_generation",
           "time_created"
@@ -3713,6 +3722,92 @@
             "required": [
               "action",
               "data"
+            ]
+          }
+        ]
+      },
+      "CockroachdbUnsafeToShutdown": {
+        "oneOf": [
+          {
+            "type": "object",
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "missing_live_nodes_stat"
+                ]
+              }
+            },
+            "required": [
+              "type"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "missing_underreplicated_stat"
+                ]
+              }
+            },
+            "required": [
+              "type"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "live_nodes": {
+                "type": "integer",
+                "format": "uint64",
+                "minimum": 0
+              },
+              "type": {
+                "type": "string",
+                "enum": [
+                  "not_enough_live_nodes"
+                ]
+              }
+            },
+            "required": [
+              "live_nodes",
+              "type"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "not_enough_nodes"
+                ]
+              }
+            },
+            "required": [
+              "type"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "n": {
+                "type": "integer",
+                "format": "uint64",
+                "minimum": 0
+              },
+              "type": {
+                "type": "string",
+                "enum": [
+                  "underreplicated_ranges"
+                ]
+              }
+            },
+            "required": [
+              "n",
+              "type"
             ]
           }
         ]
@@ -6219,6 +6314,493 @@
           "ok"
         ]
       },
+      "PlanningAddOutOfEligibleSleds": {
+        "description": "How many discretionary zones we actually placed out of how many we wanted to place.",
+        "type": "object",
+        "properties": {
+          "placed": {
+            "type": "integer",
+            "format": "uint",
+            "minimum": 0
+          },
+          "wanted_to_place": {
+            "type": "integer",
+            "format": "uint",
+            "minimum": 0
+          }
+        },
+        "required": [
+          "placed",
+          "wanted_to_place"
+        ]
+      },
+      "PlanningAddStepReport": {
+        "type": "object",
+        "properties": {
+          "discretionary_zones_placed": {
+            "description": "Sled ID → kinds of discretionary zones placed there",
+            "type": "object",
+            "additionalProperties": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            }
+          },
+          "out_of_eligible_sleds": {
+            "description": "Discretionary zone kind → (placed, wanted to place)",
+            "type": "object",
+            "additionalProperties": {
+              "$ref": "#/components/schemas/PlanningAddOutOfEligibleSleds"
+            }
+          },
+          "sleds_getting_ntp_and_discretionary_zones": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/TypedUuidForSledKind"
+            },
+            "uniqueItems": true
+          },
+          "sleds_missing_crucible_zone": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "array",
+              "items": {
+                "$ref": "#/components/schemas/TypedUuidForZpoolKind"
+              }
+            }
+          },
+          "sleds_missing_ntp_zone": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/TypedUuidForSledKind"
+            },
+            "uniqueItems": true
+          },
+          "sleds_waiting_for_ntp_zone": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/TypedUuidForSledKind"
+            },
+            "uniqueItems": true
+          },
+          "sleds_with_no_zpools_for_ntp_zone": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/TypedUuidForSledKind"
+            },
+            "uniqueItems": true
+          },
+          "sufficient_zones_exist": {
+            "description": "Discretionary zone kind → (wanted to place, num existing)",
+            "type": "object",
+            "additionalProperties": {
+              "$ref": "#/components/schemas/PlanningAddSufficientZonesExist"
+            }
+          }
+        },
+        "required": [
+          "discretionary_zones_placed",
+          "out_of_eligible_sleds",
+          "sleds_getting_ntp_and_discretionary_zones",
+          "sleds_missing_crucible_zone",
+          "sleds_missing_ntp_zone",
+          "sleds_waiting_for_ntp_zone",
+          "sleds_with_no_zpools_for_ntp_zone",
+          "sufficient_zones_exist"
+        ]
+      },
+      "PlanningAddSufficientZonesExist": {
+        "description": "We have at least the minimum required number of zones of a given kind.",
+        "type": "object",
+        "properties": {
+          "num_existing": {
+            "type": "integer",
+            "format": "uint",
+            "minimum": 0
+          },
+          "target_count": {
+            "type": "integer",
+            "format": "uint",
+            "minimum": 0
+          }
+        },
+        "required": [
+          "num_existing",
+          "target_count"
+        ]
+      },
+      "PlanningCockroachdbSettingsStepReport": {
+        "type": "object",
+        "properties": {
+          "preserve_downgrade": {
+            "$ref": "#/components/schemas/CockroachDbPreserveDowngrade"
+          }
+        },
+        "required": [
+          "preserve_downgrade"
+        ]
+      },
+      "PlanningDecommissionStepReport": {
+        "type": "object",
+        "properties": {
+          "zombie_sleds": {
+            "description": "Decommissioned sleds that unexpectedly appeared as commissioned.",
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/TypedUuidForSledKind"
+            }
+          }
+        },
+        "required": [
+          "zombie_sleds"
+        ]
+      },
+      "PlanningExpungeStepReport": {
+        "type": "object",
+        "properties": {
+          "orphan_disks": {
+            "description": "Expunged disks not present in the parent blueprint.",
+            "type": "object",
+            "additionalProperties": {
+              "$ref": "#/components/schemas/TypedUuidForPhysicalDiskKind"
+            }
+          }
+        },
+        "required": [
+          "orphan_disks"
+        ]
+      },
+      "PlanningMgsUpdatesStepReport": {
+        "type": "object",
+        "properties": {
+          "pending_mgs_updates": {
+            "$ref": "#/components/schemas/PendingMgsUpdates"
+          }
+        },
+        "required": [
+          "pending_mgs_updates"
+        ]
+      },
+      "PlanningNoopImageSourceConvertedZones": {
+        "description": "How many of the total install-dataset zones were noop-converted to use the artifact store on a particular sled.",
+        "type": "object",
+        "properties": {
+          "num_dataset": {
+            "type": "integer",
+            "format": "uint",
+            "minimum": 0
+          },
+          "num_eligible": {
+            "type": "integer",
+            "format": "uint",
+            "minimum": 0
+          }
+        },
+        "required": [
+          "num_dataset",
+          "num_eligible"
+        ]
+      },
+      "PlanningNoopImageSourceSkipSledReason": {
+        "oneOf": [
+          {
+            "type": "object",
+            "properties": {
+              "num_total": {
+                "type": "integer",
+                "format": "uint",
+                "minimum": 0
+              },
+              "type": {
+                "type": "string",
+                "enum": [
+                  "all_zones_already_artifact"
+                ]
+              }
+            },
+            "required": [
+              "num_total",
+              "type"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "sled_not_in_inventory"
+                ]
+              }
+            },
+            "required": [
+              "type"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "error": {
+                "type": "string"
+              },
+              "type": {
+                "type": "string",
+                "enum": [
+                  "error_retrieving_zone_manifest"
+                ]
+              }
+            },
+            "required": [
+              "error",
+              "type"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "id": {
+                "$ref": "#/components/schemas/TypedUuidForMupdateOverrideKind"
+              },
+              "type": {
+                "type": "string",
+                "enum": [
+                  "remove_mupdate_override"
+                ]
+              }
+            },
+            "required": [
+              "id",
+              "type"
+            ]
+          }
+        ]
+      },
+      "PlanningNoopImageSourceSkipZoneReason": {
+        "oneOf": [
+          {
+            "type": "object",
+            "properties": {
+              "file_name": {
+                "type": "string"
+              },
+              "type": {
+                "type": "string",
+                "enum": [
+                  "zone_not_in_manifest"
+                ]
+              },
+              "zone_kind": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "file_name",
+              "type",
+              "zone_kind"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "error": {
+                "type": "string"
+              },
+              "file_name": {
+                "type": "string"
+              },
+              "type": {
+                "type": "string",
+                "enum": [
+                  "invalid_artifact"
+                ]
+              },
+              "zone_kind": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "error",
+              "file_name",
+              "type",
+              "zone_kind"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "artifact_hash": {
+                "type": "string",
+                "format": "hex string (32 bytes)"
+              },
+              "file_name": {
+                "type": "string"
+              },
+              "type": {
+                "type": "string",
+                "enum": [
+                  "artifact_not_in_repo"
+                ]
+              },
+              "zone_kind": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "artifact_hash",
+              "file_name",
+              "type",
+              "zone_kind"
+            ]
+          }
+        ]
+      },
+      "PlanningNoopImageSourceStepReport": {
+        "type": "object",
+        "properties": {
+          "converted_zones": {
+            "type": "object",
+            "additionalProperties": {
+              "$ref": "#/components/schemas/PlanningNoopImageSourceConvertedZones"
+            }
+          },
+          "no_target_release": {
+            "type": "boolean"
+          },
+          "skipped_sleds": {
+            "type": "object",
+            "additionalProperties": {
+              "$ref": "#/components/schemas/PlanningNoopImageSourceSkipSledReason"
+            }
+          },
+          "skipped_zones": {
+            "type": "object",
+            "additionalProperties": {
+              "$ref": "#/components/schemas/PlanningNoopImageSourceSkipZoneReason"
+            }
+          }
+        },
+        "required": [
+          "converted_zones",
+          "no_target_release",
+          "skipped_sleds",
+          "skipped_zones"
+        ]
+      },
+      "PlanningOutOfDateZone": {
+        "description": "We have at least the minimum required number of zones of a given kind.",
+        "type": "object",
+        "properties": {
+          "desired_image_source": {
+            "$ref": "#/components/schemas/BlueprintZoneImageSource"
+          },
+          "zone_config": {
+            "$ref": "#/components/schemas/BlueprintZoneConfig"
+          }
+        },
+        "required": [
+          "desired_image_source",
+          "zone_config"
+        ]
+      },
+      "PlanningReport": {
+        "description": "A full blueprint planning report. Other than the blueprint ID, each field corresponds to a step in the update planner, i.e., a subroutine of `omicron_nexus::reconfigurator::planning::Planner::do_plan`.\n\nThe intent of a planning report is to capture information useful to an operator or developer about the planning process itself, especially if it has become \"stuck\" (unable to proceed with an update). It is *not* a summary of the plan (blueprint), but rather a description of non-fatal conditions the planner is waiting on, unexpected or invalid configurations encountered during planning, etc. The planner may make internal decisions based on the step reports; the intent is that an operator may make administrative decisions based on the full report.\n\nOnly successful planning runs are currently covered by this report. Failures to plan (i.e., to generate a valid blueprint) are represented by `nexus-reconfigurator-planning::blueprint_builder::Error`.",
+        "type": "object",
+        "properties": {
+          "add": {
+            "$ref": "#/components/schemas/PlanningAddStepReport"
+          },
+          "blueprint_id": {
+            "description": "The blueprint produced by the planning run this report describes.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/TypedUuidForBlueprintKind"
+              }
+            ]
+          },
+          "cockroachdb_settings": {
+            "$ref": "#/components/schemas/PlanningCockroachdbSettingsStepReport"
+          },
+          "decommission": {
+            "$ref": "#/components/schemas/PlanningDecommissionStepReport"
+          },
+          "expunge": {
+            "$ref": "#/components/schemas/PlanningExpungeStepReport"
+          },
+          "mgs_updates": {
+            "$ref": "#/components/schemas/PlanningMgsUpdatesStepReport"
+          },
+          "noop_image_source": {
+            "$ref": "#/components/schemas/PlanningNoopImageSourceStepReport"
+          },
+          "zone_updates": {
+            "$ref": "#/components/schemas/PlanningZoneUpdatesStepReport"
+          }
+        },
+        "required": [
+          "add",
+          "blueprint_id",
+          "cockroachdb_settings",
+          "decommission",
+          "expunge",
+          "mgs_updates",
+          "noop_image_source",
+          "zone_updates"
+        ]
+      },
+      "PlanningZoneUpdatesStepReport": {
+        "type": "object",
+        "properties": {
+          "expunged_zones": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "array",
+              "items": {
+                "$ref": "#/components/schemas/BlueprintZoneConfig"
+              }
+            }
+          },
+          "out_of_date_zones": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "array",
+              "items": {
+                "$ref": "#/components/schemas/PlanningOutOfDateZone"
+              }
+            }
+          },
+          "unsafe_zones": {
+            "type": "object",
+            "additionalProperties": {
+              "$ref": "#/components/schemas/ZoneUnsafeToShutdown"
+            }
+          },
+          "updated_zones": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "array",
+              "items": {
+                "$ref": "#/components/schemas/BlueprintZoneConfig"
+              }
+            }
+          },
+          "waiting_on": {
+            "nullable": true,
+            "description": "What are we waiting on to start zone updates?",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/ZoneUpdatesWaitingOn"
+              }
+            ]
+          }
+        },
+        "required": [
+          "expunged_zones",
+          "out_of_date_zones",
+          "unsafe_zones",
+          "updated_zones"
+        ]
+      },
       "PortConfigV2": {
         "type": "object",
         "properties": {
@@ -7975,6 +8557,62 @@
           "version",
           "zone_id",
           "zone_type"
+        ]
+      },
+      "ZoneUnsafeToShutdown": {
+        "oneOf": [
+          {
+            "type": "object",
+            "properties": {
+              "reason": {
+                "$ref": "#/components/schemas/CockroachdbUnsafeToShutdown"
+              },
+              "type": {
+                "type": "string",
+                "enum": [
+                  "cockroachdb"
+                ]
+              }
+            },
+            "required": [
+              "reason",
+              "type"
+            ]
+          }
+        ]
+      },
+      "ZoneUpdatesWaitingOn": {
+        "oneOf": [
+          {
+            "description": "Waiting on discretionary zone placement.",
+            "type": "object",
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "discretionary_zones"
+                ]
+              }
+            },
+            "required": [
+              "type"
+            ]
+          },
+          {
+            "description": "Waiting on updates to RoT / SP / Host OS / etc.",
+            "type": "object",
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "pending_mgs_updates"
+                ]
+              }
+            },
+            "required": [
+              "type"
+            ]
+          }
         ]
       },
       "ZpoolName": {

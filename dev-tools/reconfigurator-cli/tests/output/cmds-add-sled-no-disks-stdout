@@ -39,6 +39,9 @@ generated inventory collection eb0796d5-ab8a-4f7b-a884-b4aeacb8ab51 from configu
 INFO skipping noop image source check for all sleds, reason: no target release is currently set
 WARN cannot issue more SP updates (no current artifacts)
 generated blueprint 8da82a8e-bf97-4fbd-8ddd-9f6462732cf1 based on parent blueprint dbcbd3d6-41ff-48ae-ac0b-1becc9b2fd21
+Planning report for blueprint 8da82a8e-bf97-4fbd-8ddd-9f6462732cf1:
+* No zpools in service for NTP zones on sleds: 00320471-945d-413c-85e7-03e091a70b3c
+
 
 > blueprint-show 8da82a8e-bf97-4fbd-8ddd-9f6462732cf1
 blueprint  8da82a8e-bf97-4fbd-8ddd-9f6462732cf1
@@ -270,7 +273,7 @@ parent:    dbcbd3d6-41ff-48ae-ac0b-1becc9b2fd21
 
  PENDING MGS-MANAGED UPDATES: 0
 
-Report on planning run for blueprint 8da82a8e-bf97-4fbd-8ddd-9f6462732cf1:
+Planning report for blueprint 8da82a8e-bf97-4fbd-8ddd-9f6462732cf1:
 * No zpools in service for NTP zones on sleds: 00320471-945d-413c-85e7-03e091a70b3c
 
 
