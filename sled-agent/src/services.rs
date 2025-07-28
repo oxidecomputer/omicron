@@ -2396,6 +2396,9 @@ impl ServiceManager {
                 file.write_all(config_str.as_bytes())
                     .await
                     .map_err(|err| Error::io_path(&config_path, err))?;
+                file.flush()
+                    .await
+                    .map_err(|err| Error::io_path(&config_path, err))?;
 
                 let nexus_config = PropertyGroupBuilder::new("config");
                 let nexus_service = ServiceBuilder::new("oxide/nexus")
