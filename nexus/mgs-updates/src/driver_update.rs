@@ -726,6 +726,9 @@ async fn wait_for_update_done(
 }
 
 #[cfg(test)]
+mod test_host_phase_1;
+
+#[cfg(test)]
 mod test {
     use super::ApplyUpdateError;
     use crate::test_util::test_artifacts::TestArtifacts;

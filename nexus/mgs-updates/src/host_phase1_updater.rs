@@ -129,7 +129,6 @@ use gateway_client::HostPhase1HashError;
 use gateway_client::SpComponent;
 use gateway_client::types::PowerState;
 use gateway_client::types::SpComponentFirmwareSlot;
-use gateway_client::types::SpIdentifier;
 use gateway_client::types::SpType;
 use nexus_sled_agent_shared::inventory::BootPartitionContents;
 use nexus_types::deployment::ExpectedArtifact;
@@ -338,11 +337,9 @@ impl ReconfiguratorHostPhase1Updater {
         update: &PendingMgsUpdate,
     ) -> Result<PrecheckStatus, PrecheckError> {
         // Verify that the device is the one we think it is.
-        let target_sp =
-            SpIdentifier { type_: update.sp_type, slot: update.slot_id };
         let state = mgs_clients
             .try_all_serially(log, move |mgs_client| async move {
-                mgs_client.sp_get(target_sp.type_, target_sp.slot).await
+                mgs_client.sp_get(update.sp_type, update.slot_id).await
             })
             .await?
             .into_inner();
@@ -388,7 +385,8 @@ impl ReconfiguratorHostPhase1Updater {
         let current_active_slot_hash = self
             .precheck_fetch_phase_1(
                 mgs_clients,
-                target_sp,
+                update.sp_type,
+                update.slot_id,
                 current_active_slot,
                 log,
             )
@@ -442,7 +440,8 @@ impl ReconfiguratorHostPhase1Updater {
         let found_inactive_artifact = self
             .precheck_fetch_phase_1(
                 mgs_clients,
-                target_sp,
+                update.sp_type,
+                update.slot_id,
                 expected_inactive_slot.to_mgs_firmware_slot(),
                 log,
             )
@@ -473,7 +472,8 @@ impl ReconfiguratorHostPhase1Updater {
     async fn precheck_fetch_phase_1(
         &self,
         mgs_clients: &mut MgsClients,
-        target_sp: SpIdentifier,
+        sp_type: SpType,
+        sp_slot: u16,
         target_slot: u16,
         log: &Logger,
     ) -> Result<ArtifactHash, PrecheckError> {
@@ -481,7 +481,8 @@ impl ReconfiguratorHostPhase1Updater {
             .try_all_serially(log, move |mgs_client| async move {
                 match mgs_client
                     .host_phase_1_flash_hash_calculate_with_timeout(
-                        target_sp,
+                        sp_type,
+                        sp_slot,
                         target_slot,
                         PHASE_1_HASHING_TIMEOUT,
                     )

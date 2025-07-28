@@ -43,6 +43,8 @@ pub(crate) struct SimSpUpdate {
     /// data from the last completed phase1 update for each slot (exposed for
     /// testing)
     last_host_phase1_update_data: BTreeMap<u16, Box<[u8]>>,
+    /// current active phase 1 slot
+    phase1_active_slot: u16,
     /// state of hashing each of the host phase1 slots
     phase1_hash_state: BTreeMap<u16, HostFlashHashState>,
     /// how do we decide when we're done hashing host phase1 slots? this allows
@@ -190,6 +192,7 @@ impl SimSpUpdate {
             last_sp_update_data: None,
             last_rot_update_data: None,
             last_host_phase1_update_data: BTreeMap::new(),
+            phase1_active_slot: 0,
             phase1_hash_state: BTreeMap::new(),
             phase1_hash_policy: phase1_hash_policy.0,
 
@@ -625,7 +628,10 @@ impl SimSpUpdate {
                     Err(SpError::RequestUnsupportedForComponent)
                 }
             }
-            SpComponent::HOST_CPU_BOOT_FLASH => Ok(()),
+            SpComponent::HOST_CPU_BOOT_FLASH => {
+                self.phase1_active_slot = slot;
+                Ok(())
+            }
             _ => {
                 // The real SP returns `RequestUnsupportedForComponent` for
                 // anything other than the RoT and host boot flash, including
@@ -642,11 +648,15 @@ impl SimSpUpdate {
         match component {
             // The only active component for SP is slot 0.
             SpComponent::SP_ITSELF => Ok(0),
+            // The only active component is stage0
+            SpComponent::STAGE0 => Ok(0),
+
+            // These slots can be controlled
             SpComponent::ROT => Ok(rot_slot_id_to_u16(
                 self.rot_state.persistent_boot_preference,
             )),
-            // The only active component is stage0
-            SpComponent::STAGE0 => Ok(0),
+            SpComponent::HOST_CPU_BOOT_FLASH => Ok(self.phase1_active_slot),
+
             _ => Err(SpError::RequestUnsupportedForComponent),
         }
     }

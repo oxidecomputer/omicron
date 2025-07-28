@@ -14,6 +14,7 @@ use crate::driver_update::PROGRESS_TIMEOUT;
 use crate::driver_update::SpComponentUpdate;
 use crate::driver_update::apply_update;
 use crate::test_util::cabooses_equal;
+use crate::test_util::host_phase_2_test_state::HostPhase2State;
 use crate::test_util::sp_test_state::SpTestState;
 use crate::test_util::step_through::StepResult;
 use crate::test_util::step_through::StepThrough;
@@ -22,17 +23,23 @@ use futures::FutureExt;
 use gateway_client::types::SpType;
 use gateway_test_utils::setup::GatewayTestContext;
 use gateway_types::rot::RotSlot;
+use nexus_types::deployment::ExpectedActiveHostOsSlot;
 use nexus_types::deployment::ExpectedActiveRotSlot;
+use nexus_types::deployment::ExpectedArtifact;
+use nexus_types::deployment::ExpectedInactiveHostOsArtifact;
 use nexus_types::deployment::ExpectedVersion;
 use nexus_types::deployment::PendingMgsUpdate;
 use nexus_types::deployment::PendingMgsUpdateDetails;
+use nexus_types::deployment::PendingMgsUpdateHostPhase1Details;
 use nexus_types::internal_api::views::InProgressUpdateStatus;
 use nexus_types::internal_api::views::MgsUpdateDriverStatus;
 use nexus_types::internal_api::views::UpdateAttemptStatus;
 use nexus_types::internal_api::views::UpdateCompletedHow;
 use nexus_types::inventory::BaseboardId;
+use omicron_common::disk::M2Slot;
 use omicron_uuid_kinds::SpUpdateUuid;
 use slog::debug;
+use slog_error_chain::InlineErrorChain;
 use std::sync::Arc;
 use std::time::Duration;
 use tokio::sync::watch;
@@ -54,6 +61,15 @@ pub enum ExpectedSpComponent {
     RotBootloader {
         override_expected_stage0: Option<ArtifactVersion>,
         override_expected_stage0_next: Option<ExpectedVersion>,
+    },
+    HostPhase1 {
+        host_phase_2_state: watch::Receiver<HostPhase2State>,
+        override_expected_phase_1_slot: Option<M2Slot>,
+        override_expected_boot_disk: Option<M2Slot>,
+        override_expected_active_phase_1: Option<ArtifactHash>,
+        override_expected_active_phase_2: Option<ArtifactHash>,
+        override_expected_inactive_phase_1: Option<ArtifactHash>,
+        override_expected_inactive_phase_2: Option<ExpectedArtifact>,
     },
 }
 
@@ -166,6 +182,56 @@ impl UpdateDescription<'_> {
                     expected_stage0_version,
                     expected_stage0_next_version,
                 }
+            }
+            ExpectedSpComponent::HostPhase1 {
+                host_phase_2_state,
+                override_expected_phase_1_slot,
+                override_expected_boot_disk,
+                override_expected_active_phase_1,
+                override_expected_active_phase_2,
+                override_expected_inactive_phase_1,
+                override_expected_inactive_phase_2,
+            } => {
+                let expected_active_phase_1_slot =
+                    override_expected_phase_1_slot.unwrap_or_else(|| {
+                        sp1.expect_host_phase_1_active_slot()
+                    });
+                let expected_active_phase_1_hash =
+                    override_expected_active_phase_1.unwrap_or_else(|| {
+                        sp1.expect_host_phase_1_active_hash()
+                    });
+                let expected_inactive_phase_1_hash =
+                    override_expected_inactive_phase_1.unwrap_or_else(|| {
+                        sp1.expect_host_phase_1_inactive_hash()
+                    });
+                let host_phase_2_state = *host_phase_2_state.borrow();
+                let expected_boot_disk = override_expected_boot_disk
+                    .unwrap_or_else(|| host_phase_2_state.boot_disk);
+                let expected_active_phase_2_hash =
+                    override_expected_active_phase_2.unwrap_or_else(|| {
+                        host_phase_2_state.active_slot_artifact()
+                    });
+                let expected_inactive_phase_2_artifact =
+                    override_expected_inactive_phase_2.unwrap_or_else(|| {
+                        host_phase_2_state.inactive_slot_artifact()
+                    });
+                PendingMgsUpdateDetails::HostPhase1(
+                    PendingMgsUpdateHostPhase1Details {
+                        expected_active_slot: ExpectedActiveHostOsSlot {
+                            phase_1_slot: expected_active_phase_1_slot,
+                            boot_disk: expected_boot_disk,
+                            phase_1: expected_active_phase_1_hash,
+                            phase_2: expected_active_phase_2_hash,
+                        },
+                        expected_inactive_artifact:
+                            ExpectedInactiveHostOsArtifact {
+                                phase_1: expected_inactive_phase_1_hash,
+                                phase_2: expected_inactive_phase_2_artifact,
+                            },
+                        sled_agent_address: host_phase_2_state
+                            .sled_agent_address,
+                    },
+                )
             }
         };
 
@@ -402,12 +468,17 @@ impl FinishedUpdateAttempt {
 
     /// Asserts various conditions associated with successful SP updates.
     pub fn expect_sp_success(&self, expected_result: UpdateCompletedHow) {
-        let how = match self.result {
-            Ok(how) if how == expected_result => how,
-            _ => {
+        let how = match &self.result {
+            Ok(how) if *how == expected_result => *how,
+            Ok(ok) => {
                 panic!(
-                    "unexpected result from apply_update(): {:?}",
-                    self.result,
+                    "unexpected kind of success from apply_update(): {ok:?}",
+                );
+            }
+            Err(err) => {
+                panic!(
+                    "unexpected error from apply_update(): {}",
+                    InlineErrorChain::new(&err),
                 );
             }
         };

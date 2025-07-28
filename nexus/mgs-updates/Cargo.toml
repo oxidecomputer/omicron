@@ -39,11 +39,16 @@ omicron-workspace-hack.workspace = true
 [dev-dependencies]
 anyhow.workspace = true
 assert_matches.workspace = true
+camino.workspace = true
 dropshot.workspace = true
 gateway-messages.workspace = true
 gateway-test-utils.workspace = true
+http.workspace = true
 hubtools.workspace = true
 omicron-test-utils.workspace = true
 rand.workspace = true
 repo-depot-api.workspace = true
+sled-agent-api.workspace = true
+sled-agent-types.workspace = true
+sled-diagnostics.workspace = true
 sp-sim.workspace = true

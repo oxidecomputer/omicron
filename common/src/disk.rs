@@ -641,6 +641,14 @@ impl M2Slot {
             Self::B => 1,
         }
     }
+
+    pub fn from_mgs_firmware_slot(slot: u16) -> Option<Self> {
+        match slot {
+            0 => Some(Self::A),
+            1 => Some(Self::B),
+            _ => None,
+        }
+    }
 }
 
 impl fmt::Display for M2Slot {
