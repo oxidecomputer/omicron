@@ -29,7 +29,10 @@ platforms = [
 # Write out exact versions rather than a semver range. (Defaults to false.)
 exact-versions = true
 
-[traversal-excludes]
+# Use final-excludes rather than traversal-excludes because we'd like to unify
+# features across builds performed by rust-analyzer (with `--workspace`) and
+# those performed on the command line (without `--workspace`).
+[final-excludes]
 workspace-members = [
     # Exclude dev-tools-common and xtask because they need to be built quickly.
     "dev-tools-common",
