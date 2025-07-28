@@ -496,7 +496,7 @@ impl super::Nexus {
 }
 
 /// Yields the CPUID configuration to use for a VMM that specifies the supplied
-/// minimum CPU `platform`.
+/// CPU `platform`.
 //
 // This is a free function (and not an `Into` impl on `VmmCpuPlatform`) to keep
 // all of the gnarly CPUID details out of the DB model crate, which defines that

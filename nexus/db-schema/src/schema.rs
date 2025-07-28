@@ -424,7 +424,7 @@ table! {
         auto_restart_policy -> Nullable<crate::enums::InstanceAutoRestartPolicyEnum>,
         auto_restart_cooldown -> Nullable<Interval>,
         boot_disk_id -> Nullable<Uuid>,
-        min_cpu_platform -> Nullable<crate::enums::InstanceMinimumCpuPlatformEnum>,
+        cpu_platform -> Nullable<crate::enums::InstanceCpuPlatformEnum>,
         time_state_updated -> Timestamptz,
         state_generation -> Int8,
         active_propolis_id -> Nullable<Uuid>,

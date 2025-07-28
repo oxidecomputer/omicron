@@ -362,7 +362,7 @@ impl super::Nexus {
             memory,
             auto_restart_policy,
             boot_disk,
-            min_cpu_platform,
+            cpu_platform,
         } = params;
 
         check_instance_cpu_memory_sizes(*ncpus, *memory)?;
@@ -389,14 +389,14 @@ impl super::Nexus {
         let auto_restart_policy = auto_restart_policy.map(Into::into);
         let ncpus = (*ncpus).into();
         let memory = (*memory).into();
-        let min_cpu_platform = min_cpu_platform.map(Into::into);
+        let cpu_platform = cpu_platform.map(Into::into);
 
         let update = InstanceUpdate {
             boot_disk_id,
             auto_restart_policy,
             ncpus,
             memory,
-            min_cpu_platform,
+            cpu_platform,
         };
         self.datastore()
             .instance_reconfigure(opctx, &authz_instance, update)
@@ -2474,7 +2474,7 @@ mod tests {
             external_ips: vec![],
             disks: vec![],
             boot_disk: None,
-            min_cpu_platform: None,
+            cpu_platform: None,
             ssh_public_keys: None,
             start: false,
             auto_restart_policy: Default::default(),

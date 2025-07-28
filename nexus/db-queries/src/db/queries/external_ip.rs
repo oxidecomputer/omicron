@@ -1003,7 +1003,7 @@ mod tests {
                 external_ips: vec![],
                 disks: vec![],
                 boot_disk: None,
-                min_cpu_platform: None,
+                cpu_platform: None,
                 start: false,
                 auto_restart_policy: Default::default(),
                 anti_affinity_groups: Vec::new(),

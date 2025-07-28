@@ -1087,7 +1087,7 @@ pub(in crate::db::datastore) mod test {
     use nexus_db_model::PhysicalDiskPolicy;
     use nexus_db_model::PhysicalDiskState;
     use nexus_db_model::{Generation, SledCpuFamily};
-    use nexus_db_model::{InstanceMinimumCpuPlatform, PhysicalDisk};
+    use nexus_db_model::{InstanceCpuPlatform, PhysicalDisk};
     use nexus_types::identity::Asset;
     use nexus_types::identity::Resource;
     use omicron_common::api::external;
@@ -1475,7 +1475,7 @@ pub(in crate::db::datastore) mod test {
         groups: Vec<GroupName>,
         force_onto_sled: Option<SledUuid>,
         resources: db::model::Resources,
-        min_cpu_platform: Option<db::model::InstanceMinimumCpuPlatform>,
+        cpu_platform: Option<db::model::InstanceCpuPlatform>,
     }
 
     struct FindTargetsOutput {
@@ -1492,7 +1492,7 @@ pub(in crate::db::datastore) mod test {
                 groups: vec![],
                 force_onto_sled: None,
                 resources: small_resource_request(),
-                min_cpu_platform: None,
+                cpu_platform: None,
             }
         }
 
@@ -1505,7 +1505,7 @@ pub(in crate::db::datastore) mod test {
             assert!(self.force_onto_sled.is_none());
 
             let families =
-                self.min_cpu_platform.map(|p| p.compatible_sled_cpu_families());
+                self.cpu_platform.map(|p| p.compatible_sled_cpu_families());
 
             sled_find_targets_query(self.id, &self.resources, families)
                 .get_results_async::<(
@@ -2673,14 +2673,13 @@ pub(in crate::db::datastore) mod test {
         }
 
         let mut test_instance = Instance::new();
-        for platform in [None, Some(InstanceMinimumCpuPlatform::AmdMilan)] {
-            test_instance.min_cpu_platform = platform;
+        for platform in [None, Some(InstanceCpuPlatform::AmdMilan)] {
+            test_instance.cpu_platform = platform;
             let possible_sleds = test_instance.find_targets(&datastore).await;
             assert_eq!(possible_sleds.len(), 4);
         }
 
-        test_instance.min_cpu_platform =
-            Some(InstanceMinimumCpuPlatform::AmdTurin);
+        test_instance.cpu_platform = Some(InstanceCpuPlatform::AmdTurin);
         let possible_sleds = test_instance.find_targets(&datastore).await;
         assert_eq!(possible_sleds.len(), 2);
 

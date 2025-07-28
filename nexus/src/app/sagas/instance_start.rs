@@ -164,10 +164,9 @@ async fn sis_alloc_server(
 
     let mut constraint_builder =
         db::model::SledReservationConstraintBuilder::new();
-    if let Some(min_cpu_platform) = params.db_instance.min_cpu_platform.as_ref()
-    {
+    if let Some(cpu_platform) = params.db_instance.cpu_platform.as_ref() {
         constraint_builder = constraint_builder
-            .cpu_families(min_cpu_platform.compatible_sled_cpu_families());
+            .cpu_families(cpu_platform.compatible_sled_cpu_families());
     }
 
     let resource = super::instance_common::reserve_vmm_resources(
@@ -219,13 +218,13 @@ async fn sis_create_vmm_record(
     let sled_id = sagactx.lookup::<SledUuid>("sled_id")?;
     let propolis_ip = sagactx.lookup::<Ipv6Addr>("propolis_ip")?;
 
-    // If the instance supplied a minimum CPU platform, record that as the VMM's
+    // If the instance supplied a CPU platform, record that as the VMM's
     // required platform, irrespective of what sled was picked. (This allows a
-    // VM to land on a "better" sled than its minimum requirement and migrate
-    // back to a minimum-required sled later.)
+    // VM to land on a "better" sled than its requirement and migrate back to a
+    // minimum-allowed-by-requirement sled later.)
     //
-    // If the instance didn't supply a minimum CPU platform, select one for this
-    // VMM by looking up the chosen sled and selecting the "minimum compatible
+    // If the instance didn't supply a CPU platform, select one for this VMM by
+    // looking up the chosen sled and selecting the "minimum compatible
     // platform" for sleds of that lineage. This maximizes the number of sleds
     // that can host the VMM if it needs to migrate in the future. Selecting the
     // sled first and then deriving the platform is meant to support
@@ -235,7 +234,7 @@ async fn sis_create_vmm_record(
     // computation selects the most compatible platform that can run on sleds
     // with CPUs from that vendor.
     let cpu_platform =
-        if let Some(cpu_platform) = params.db_instance.min_cpu_platform {
+        if let Some(cpu_platform) = params.db_instance.cpu_platform {
             cpu_platform.into()
         } else {
             let (.., sled) = osagactx
@@ -885,7 +884,7 @@ mod test {
                 external_ips: vec![],
                 disks: vec![],
                 boot_disk: None,
-                min_cpu_platform: None,
+                cpu_platform: None,
                 start: false,
                 auto_restart_policy: Default::default(),
                 anti_affinity_groups: Vec::new(),
