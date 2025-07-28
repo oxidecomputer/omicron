@@ -777,58 +777,6 @@ impl ControlPlaneZoneWriteContext<'_> {
                 .register();
         }
 
-        engine
-            .new_step(
-                WriteComponent::ControlPlane,
-                ControlPlaneZonesStepId::CreateMeasurementDir,
-                "Creating measurement directory".to_string(),
-                async move |_cx| {
-                    if !std::fs::exists(
-                        self.output_directory.join("measurements"),
-                    )
-                    .map_err(|error| WriteError::CreateDirError { error })?
-                    {
-                        std::fs::create_dir(
-                            self.output_directory.join("measurements"),
-                        )
-                        .map_err(|error| {
-                            WriteError::CreateDirError { error }
-                        })?;
-                    }
-                    StepSuccess::new(()).into()
-                },
-            )
-            .register();
-
-        for (name, data) in &self.zones.measurement_corpus {
-            let out_path =
-                self.output_directory.join("measurements").join(name);
-            transport = engine
-                .new_step(
-                    WriteComponent::ControlPlane,
-                    ControlPlaneZonesStepId::MeasurementCorpus {
-                        name: name.clone(),
-                    },
-                    format!("Writing measurement corpus {name}"),
-                    async move |cx| {
-                        let transport = transport.into_value(cx.token()).await;
-                        write_artifact_impl(
-                            WriteComponent::ControlPlane,
-                            slot,
-                            data.clone().into(),
-                            &out_path,
-                            transport,
-                            &cx,
-                        )
-                        .await?;
-
-                        StepSuccess::new(transport).into()
-                    },
-                )
-                .register();
-        }
-
-        // XXX here is where we can write the corpus
         // `fsync()` the directory to ensure the directory entries for all the
         // files we just created are written to disk.
         let output_directory = self.output_directory.to_path_buf();
@@ -1179,12 +1127,10 @@ mod tests {
         data1: Vec<Vec<u8>>,
         #[strategy(prop::collection::vec(prop::collection::vec(any::<u8>(), 0..8192), 0..16))]
         data2: Vec<Vec<u8>>,
-        #[strategy(prop::collection::vec(prop::collection::vec(any::<u8>(), 0..8192), 0..16))]
-        data3: Vec<Vec<u8>>,
         #[strategy(WriteOps::strategy())] write_ops: WriteOps,
     ) {
         with_test_runtime(async move {
-            proptest_write_artifact_impl(data1, data2, data3, write_ops)
+            proptest_write_artifact_impl(data1, data2, write_ops)
                 .await
                 .expect("test failed");
         })
@@ -1263,7 +1209,6 @@ mod tests {
     async fn proptest_write_artifact_impl(
         data1: Vec<Vec<u8>>,
         data2: Vec<Vec<u8>>,
-        data3: Vec<Vec<u8>>,
         write_ops: WriteOps,
     ) -> Result<()> {
         let logctx = test_setup_log("test_write_artifact");
@@ -1274,15 +1219,10 @@ mod tests {
         let destination_control_plane =
             tempdir_path.join("test-control-plane.bin");
 
-        let destination_corpus =
-            tempdir_path.join("measurements").join("test-corpus.bin");
-
         let mut artifact_host: BufList =
             data1.into_iter().map(Bytes::from).collect();
         let mut artifact_control_plane: BufList =
             data2.into_iter().map(Bytes::from).collect();
-        let mut artifact_corpus: BufList =
-            data3.into_iter().map(Bytes::from).collect();
 
         let host_id = ArtifactHashId {
             kind: ArtifactKind::HOST_PHASE_2,
@@ -1346,10 +1286,6 @@ mod tests {
             zones: vec![(
                 destination_control_plane.file_name().unwrap().to_string(),
                 artifact_control_plane.iter().flatten().copied().collect(),
-            )],
-            measurement_corpus: vec![(
-                destination_corpus.file_name().unwrap().to_string(),
-                artifact_corpus.iter().flatten().copied().collect(),
             )],
         };
 
@@ -1480,30 +1416,6 @@ mod tests {
 
         let bytes = artifact_control_plane
             .copy_to_bytes(artifact_control_plane.num_bytes());
-        assert_eq!(buf, bytes, "bytes written to disk match");
-
-        // Read the corpus artifact from disk and ensure it is correct.
-        let mut file = tokio::fs::File::open(&destination_corpus)
-            .await
-            .with_context(|| {
-                format!(
-                    "failed to open {destination_corpus} to verify contents"
-                )
-            })?;
-        let mut buf = Vec::with_capacity(artifact_corpus.num_bytes());
-        let read_num_bytes =
-            file.read_to_end(&mut buf).await.with_context(|| {
-                format!(
-                    "failed to read {destination_control_plane} into memory"
-                )
-            })?;
-        assert_eq!(
-            read_num_bytes,
-            artifact_corpus.num_bytes(),
-            "read num_bytes matches"
-        );
-
-        let bytes = artifact_corpus.copy_to_bytes(artifact_corpus.num_bytes());
         assert_eq!(buf, bytes, "bytes written to disk match");
 
         logctx.cleanup_successful();

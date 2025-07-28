@@ -493,6 +493,43 @@ impl SystemDescription {
         Ok(prev)
     }
 
+    /// Update the RoT bootloader versions reported for a sled.
+    ///
+    /// Where `None` is provided, no changes are made.
+    pub fn sled_update_rot_bootloader_versions(
+        &mut self,
+        sled_id: SledUuid,
+        stage0_version: Option<ArtifactVersion>,
+        stage0_next_version: Option<ExpectedVersion>,
+    ) -> anyhow::Result<&mut Self> {
+        let sled = self.sleds.get_mut(&sled_id).with_context(|| {
+            format!("attempted to access sled {} not found in system", sled_id)
+        })?;
+        let sled = Arc::make_mut(sled);
+        sled.set_rot_bootloader_versions(stage0_version, stage0_next_version);
+        Ok(self)
+    }
+
+    pub fn sled_stage0_version(
+        &self,
+        sled_id: SledUuid,
+    ) -> anyhow::Result<Option<&str>> {
+        let sled = self.sleds.get(&sled_id).with_context(|| {
+            format!("attempted to access sled {} not found in system", sled_id)
+        })?;
+        Ok(sled.stage0_caboose().map(|c| c.version.as_ref()))
+    }
+
+    pub fn sled_stage0_next_version(
+        &self,
+        sled_id: SledUuid,
+    ) -> anyhow::Result<Option<&str>> {
+        let sled = self.sleds.get(&sled_id).with_context(|| {
+            format!("attempted to access sled {} not found in system", sled_id)
+        })?;
+        Ok(sled.stage0_next_caboose().map(|c| c.version.as_ref()))
+    }
+
     /// Update the SP versions reported for a sled.
     ///
     /// Where `None` is provided, no changes are made.
@@ -650,6 +687,43 @@ impl SystemDescription {
                     part_number: sp_state.model.clone(),
                     serial_number: sp_state.serial_number.clone(),
                 };
+                if let Some(stage0) = s.stage0_caboose() {
+                    builder
+                        .found_caboose(
+                            &baseboard_id,
+                            CabooseWhich::Stage0,
+                            "fake MGS 1",
+                            SpComponentCaboose {
+                                board: stage0.board.clone(),
+                                epoch: None,
+                                git_commit: stage0.git_commit.clone(),
+                                name: stage0.name.clone(),
+                                sign: stage0.sign.clone(),
+                                version: stage0.version.clone(),
+                            },
+                        )
+                        .context("recording RoT bootloader stage0 caboose")?;
+                }
+
+                if let Some(stage0_next) = s.stage0_next_caboose() {
+                    builder
+                        .found_caboose(
+                            &baseboard_id,
+                            CabooseWhich::Stage0Next,
+                            "fake MGS 1",
+                            SpComponentCaboose {
+                                board: stage0_next.board.clone(),
+                                epoch: None,
+                                git_commit: stage0_next.git_commit.clone(),
+                                name: stage0_next.name.clone(),
+                                sign: stage0_next.sign.clone(),
+                                version: stage0_next.version.clone(),
+                            },
+                        )
+                        .context(
+                            "recording RoT bootloader stage0_next caboose",
+                        )?;
+                }
 
                 for (m2_slot, hash) in s.sp_host_phase_1_hash_flash() {
                     builder
@@ -872,6 +946,8 @@ pub struct SledHwInventory<'a> {
     pub baseboard_id: &'a BaseboardId,
     pub sp: &'a nexus_types::inventory::ServiceProcessor,
     pub rot: &'a nexus_types::inventory::RotState,
+    pub stage0: Option<Arc<nexus_types::inventory::Caboose>>,
+    pub stage0_next: Option<Arc<nexus_types::inventory::Caboose>>,
     pub sp_host_phase_1_hash_flash: BTreeMap<M2Slot, ArtifactHash>,
     pub sp_active: Option<Arc<nexus_types::inventory::Caboose>>,
     pub sp_inactive: Option<Arc<nexus_types::inventory::Caboose>>,
@@ -890,6 +966,8 @@ pub struct Sled {
     policy: SledPolicy,
     state: SledState,
     resources: SledResources,
+    stage0_caboose: Option<Arc<nexus_types::inventory::Caboose>>,
+    stage0_next_caboose: Option<Arc<nexus_types::inventory::Caboose>>,
     sp_host_phase_1_hash_flash: BTreeMap<M2Slot, ArtifactHash>,
     sp_active_caboose: Option<Arc<nexus_types::inventory::Caboose>>,
     sp_inactive_caboose: Option<Arc<nexus_types::inventory::Caboose>>,
@@ -1041,6 +1119,10 @@ impl Sled {
             policy,
             state: SledState::Active,
             resources: SledResources { subnet: sled_subnet, zpools },
+            stage0_caboose: Some(Arc::new(
+                Self::default_rot_bootloader_caboose(String::from("0.0.1")),
+            )),
+            stage0_next_caboose: None,
             sp_host_phase_1_hash_flash: [
                 (M2Slot::A, ArtifactHash([1; 32])),
                 (M2Slot::B, ArtifactHash([2; 32])),
@@ -1081,6 +1163,10 @@ impl Sled {
             })
             .unwrap_or(Baseboard::Unknown);
 
+        let stage0_caboose =
+            inventory_sp.as_ref().and_then(|hw| hw.stage0.clone());
+        let stage0_next_caboose =
+            inventory_sp.as_ref().and_then(|hw| hw.stage0_next.clone());
         let sp_host_phase_1_hash_flash = inventory_sp
             .as_ref()
             .map(|hw| hw.sp_host_phase_1_hash_flash.clone())
@@ -1198,6 +1284,8 @@ impl Sled {
             policy: sled_policy,
             state: sled_state,
             resources: sled_resources,
+            stage0_caboose,
+            stage0_next_caboose,
             sp_host_phase_1_hash_flash,
             sp_active_caboose,
             sp_inactive_caboose,
@@ -1247,6 +1335,14 @@ impl Sled {
         self.sp_inactive_caboose.as_deref()
     }
 
+    fn stage0_caboose(&self) -> Option<&Caboose> {
+        self.stage0_caboose.as_deref()
+    }
+
+    fn stage0_next_caboose(&self) -> Option<&Caboose> {
+        self.stage0_next_caboose.as_deref()
+    }
+
     fn set_zone_manifest(
         &mut self,
         boot_inventory: Result<ZoneManifestBootInventory, String>,
@@ -1255,6 +1351,52 @@ impl Sled {
             .zone_image_resolver
             .zone_manifest
             .boot_inventory = boot_inventory;
+    }
+
+    /// Update the reported RoT bootloader versions
+    ///
+    /// If either field is `None`, that field is _unchanged_.
+    // Note that this means there's no way to _unset_ the version.
+    fn set_rot_bootloader_versions(
+        &mut self,
+        stage0_version: Option<ArtifactVersion>,
+        stage0_next_version: Option<ExpectedVersion>,
+    ) {
+        if let Some(stage0_version) = stage0_version {
+            match &mut self.stage0_caboose {
+                Some(caboose) => {
+                    Arc::make_mut(caboose).version = stage0_version.to_string()
+                }
+                new @ None => {
+                    *new =
+                        Some(Arc::new(Self::default_rot_bootloader_caboose(
+                            stage0_version.to_string(),
+                        )));
+                }
+            }
+        }
+
+        if let Some(stage0_next_version) = stage0_next_version {
+            match stage0_next_version {
+                ExpectedVersion::NoValidVersion => {
+                    self.stage0_next_caboose = None;
+                }
+                ExpectedVersion::Version(v) => {
+                    match &mut self.stage0_next_caboose {
+                        Some(caboose) => {
+                            Arc::make_mut(caboose).version = v.to_string()
+                        }
+                        new @ None => {
+                            *new = Some(Arc::new(
+                                Self::default_rot_bootloader_caboose(
+                                    v.to_string(),
+                                ),
+                            ));
+                        }
+                    }
+                }
+            }
+        }
     }
 
     /// Update the reported SP versions
@@ -1297,6 +1439,17 @@ impl Sled {
                     }
                 }
             }
+        }
+    }
+
+    fn default_rot_bootloader_caboose(version: String) -> Caboose {
+        let board = sp_sim::SIM_ROT_STAGE0_BOARD.to_string();
+        Caboose {
+            board: board.clone(),
+            git_commit: String::from("unknown"),
+            name: board,
+            version: version.to_string(),
+            sign: None,
         }
     }
 

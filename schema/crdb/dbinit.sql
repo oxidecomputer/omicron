@@ -4335,6 +4335,13 @@ CREATE TABLE IF NOT EXISTS omicron.public.inv_ntp_timesync (
     PRIMARY KEY (inv_collection_id, zone_id)
 );
 
+CREATE TABLE IF NOT EXISTS omicron.public.inv_internal_dns (
+    inv_collection_id UUID NOT NULL,
+    zone_id UUID NOT NULL,
+    generation INT8 NOT NULL,
+    PRIMARY KEY (inv_collection_id, zone_id)
+);
+
 /*
  * Various runtime configuration switches for reconfigurator
  *
@@ -6335,7 +6342,7 @@ INSERT INTO omicron.public.db_metadata (
     version,
     target_version
 ) VALUES
-    (TRUE, NOW(), NOW(), '172.0.0', NULL)
+    (TRUE, NOW(), NOW(), '173.0.0', NULL)
 ON CONFLICT DO NOTHING;
 
 COMMIT;

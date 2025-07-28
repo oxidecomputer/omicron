@@ -5,3 +5,10 @@ error: the following required arguments were not provided:
 Usage: sled-update-sp --active <ACTIVE> --inactive <INACTIVE> <SLED_ID>
 
 For more information, try '--help'.
+error: the following required arguments were not provided:
+  --stage0 <STAGE0>
+  --stage0-next <STAGE0_NEXT>
+
+Usage: sled-update-rot-bootloader --stage0 <STAGE0> --stage0-next <STAGE0_NEXT> <SLED_ID>
+
+For more information, try '--help'.

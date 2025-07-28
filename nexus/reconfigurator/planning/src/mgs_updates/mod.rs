@@ -666,8 +666,7 @@ fn try_make_update_sp(
                     | KnownArtifactKind::SwitchRot
                     | KnownArtifactKind::GimletRotBootloader
                     | KnownArtifactKind::PscRotBootloader
-                    | KnownArtifactKind::SwitchRotBootloader
-                    | KnownArtifactKind::MeasurementCorpus,
+                    | KnownArtifactKind::SwitchRotBootloader,
                 ) => false,
             }
         })

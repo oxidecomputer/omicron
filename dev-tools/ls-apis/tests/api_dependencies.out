@@ -32,7 +32,7 @@ Maghemite DDM Admin (client: ddm-admin-client)
     consumed by: wicketd (omicron/wicketd) via 1 path
 
 DNS Server (client: dns-service-client)
-    consumed by: omicron-nexus (omicron/nexus) via 1 path
+    consumed by: omicron-nexus (omicron/nexus) via 2 paths
     consumed by: omicron-sled-agent (omicron/sled-agent) via 1 path
 
 Dendrite DPD (client: dpd-client)

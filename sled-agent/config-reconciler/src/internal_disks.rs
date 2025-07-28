@@ -345,13 +345,6 @@ impl InternalDisks {
         })
     }
 
-    /// Returns all `INSTALL_DATASET` paths within available M.2 disks.
-    pub fn all_install_datasets(
-        &self,
-    ) -> impl ExactSizeIterator<Item = Utf8PathBuf> + '_ {
-        self.all_datasets(INSTALL_DATASET)
-    }
-
     /// Returns all `CONFIG_DATASET` paths within available M.2 disks.
     pub fn all_config_datasets(
         &self,
