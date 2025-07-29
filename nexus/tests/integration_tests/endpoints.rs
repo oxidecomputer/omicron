@@ -401,15 +401,6 @@ pub static DEMO_DISK_CREATE: LazyLock<params::DiskCreate> =
             ),
         }
     });
-pub static DEMO_DISK_METRICS_URL: LazyLock<String> = LazyLock::new(|| {
-    format!(
-        "/v1/disks/{}/metrics/activated?start_time={:?}&end_time={:?}&{}",
-        *DEMO_DISK_NAME,
-        Utc::now(),
-        Utc::now(),
-        *DEMO_PROJECT_SELECTOR,
-    )
-});
 
 // Related to importing blocks from an external source
 pub static DEMO_IMPORT_DISK_NAME: LazyLock<Name> =
@@ -2047,12 +2038,6 @@ pub static VERIFY_ENDPOINTS: LazyLock<Vec<VerifyEndpoint>> = LazyLock::new(
                     AllowedMethod::Get,
                     AllowedMethod::Delete,
                 ],
-            },
-            VerifyEndpoint {
-                url: &DEMO_DISK_METRICS_URL,
-                visibility: Visibility::Protected,
-                unprivileged_access: UnprivilegedAccess::None,
-                allowed_methods: vec![AllowedMethod::Get],
             },
             VerifyEndpoint {
                 url: &DEMO_INSTANCE_DISKS_URL,
