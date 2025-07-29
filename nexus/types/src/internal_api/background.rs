@@ -555,6 +555,9 @@ pub struct ReadOnlyRegionReplacementStartStatus {
 
 #[derive(Serialize, Deserialize, Default, Debug, PartialEq, Eq)]
 pub struct SpEreportIngesterStatus {
+    /// If `true`, then ereport ingestion has been explicitly disabled by
+    /// the config file.
+    pub disabled: bool,
     pub sps: Vec<SpEreporterStatus>,
     pub errors: Vec<String>,
 }
