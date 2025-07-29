@@ -1305,7 +1305,7 @@ async fn can_list_instance_snat_ip(cptestctx: &ControlPlaneTestContext) {
         1,
         "Instance should have been created with exactly 1 IP"
     );
-    let oxide_client::types::ExternalIp::SNat {
+    let oxide_client::types::ExternalIp::Snat {
         ip,
         ip_pool_id,
         first_port,

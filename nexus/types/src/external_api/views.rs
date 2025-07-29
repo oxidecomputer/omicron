@@ -504,7 +504,10 @@ pub struct IpPoolRange {
 pub enum ExternalIp {
     #[serde(rename = "snat")]
     SNat(SNatIp),
-    Ephemeral { ip: IpAddr, ip_pool_id: Uuid },
+    Ephemeral {
+        ip: IpAddr,
+        ip_pool_id: Uuid,
+    },
     Floating(FloatingIp),
 }
 
