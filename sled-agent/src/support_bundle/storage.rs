@@ -836,7 +836,23 @@ impl<'a> SupportBundleManager<'a> {
         }
 
         // Finalize the transfer of the bundle
-        tokio::fs::rename(support_bundle_path_tmp, support_bundle_path).await?;
+        tokio::fs::rename(&support_bundle_path_tmp, &support_bundle_path)
+            .await?;
+
+        // Sync the data (and parent directory) to durable storage.
+        //
+        // The ordering of these "sync" calls doesn't matter *too* much, because
+        // Nexus won't mark the support bundle as ready unless the call to
+        // "finalize" returns successfully. If we crash while any of these files
+        // are only partially written, the checksum would prevent corrupted
+        // bundles from being used.
+        tokio::fs::File::open(&support_bundle_path).await?.sync_all().await?;
+        if let Some(parent) = support_bundle_path.parent() {
+            // This really should never be "None"; there will always be a parent
+            // directory.
+            tokio::fs::File::open(parent).await?.sync_all().await?;
+        }
+
         return Ok(metadata);
     }
 
