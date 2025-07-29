@@ -8,9 +8,9 @@
 //! set of zones and is able to mutate it in place during reconciliation.
 
 use crate::InternalDisks;
+use crate::ResolverStatusExt;
 use crate::SledAgentFacilities;
 use crate::TimeSyncConfig;
-use camino::Utf8PathBuf;
 use futures::FutureExt as _;
 use futures::future;
 use id_map::IdMap;
@@ -24,22 +24,16 @@ use illumos_utils::zone::DeleteAddressError;
 use illumos_utils::zone::Zones;
 use nexus_sled_agent_shared::inventory::ConfigReconcilerInventoryResult;
 use nexus_sled_agent_shared::inventory::OmicronZoneConfig;
-use nexus_sled_agent_shared::inventory::OmicronZoneImageSource;
 use nexus_sled_agent_shared::inventory::OmicronZoneType;
-use nexus_sled_agent_shared::inventory::ZoneKind;
 use ntp_admin_client::types::TimeSync;
 use omicron_common::address::Ipv6Subnet;
-use omicron_common::zone_images::ZoneImageFileSource;
 use omicron_uuid_kinds::OmicronZoneUuid;
 use sled_agent_types::zone_bundle::ZoneBundleCause;
 use sled_agent_types::zone_images::MupdateOverrideReadError;
-use sled_agent_types::zone_images::OmicronZoneFileSource;
 use sled_agent_types::zone_images::OmicronZoneImageLocation;
 use sled_agent_types::zone_images::PreparedOmicronZone;
-use sled_agent_types::zone_images::RAMDISK_IMAGE_PATH;
 use sled_agent_types::zone_images::ResolverStatus;
 use sled_agent_types::zone_images::RunningZoneImageLocation;
-use sled_agent_types::zone_images::ZoneImageLocationError;
 use sled_storage::config::MountConfig;
 use slog::Logger;
 use slog::error;
@@ -50,7 +44,6 @@ use std::borrow::Cow;
 use std::collections::BTreeMap;
 use std::num::NonZeroUsize;
 use std::sync::Arc;
-use tufaceous_artifact::ArtifactHash;
 
 use super::OmicronDatasets;
 use super::datasets::ZoneDatasetDependencyError;
@@ -1264,149 +1257,6 @@ fn config_differs_only_by_image_source(
         && zone_type1 == zone_type2
 }
 
-/// An extension trait for `ResolverStatus`.
-///
-/// This trait only exists because it refers to types that aren't available
-/// within `sled-agent-types`.
-pub trait ResolverStatusExt {
-    /// Look up the file source for an Omicron zone.
-    fn omicron_file_source(
-        &self,
-        log: &slog::Logger,
-        zone_kind: ZoneKind,
-        image_source: &OmicronZoneImageSource,
-        internal_disks: &InternalDisks,
-    ) -> OmicronZoneFileSource;
-
-    /// Prepare an Omicron zone for installation.
-    fn prepare_omicron_zone<'a>(
-        &self,
-        log: &slog::Logger,
-        zone_config: &'a OmicronZoneConfig,
-        internal_disks: &InternalDisks,
-    ) -> PreparedOmicronZone<'a> {
-        let file_source = self.omicron_file_source(
-            log,
-            zone_config.zone_type.kind(),
-            &zone_config.image_source,
-            internal_disks,
-        );
-        PreparedOmicronZone::new(zone_config, file_source)
-    }
-}
-
-impl ResolverStatusExt for ResolverStatus {
-    fn omicron_file_source(
-        &self,
-        log: &slog::Logger,
-        zone_kind: ZoneKind,
-        image_source: &OmicronZoneImageSource,
-        internal_disks: &InternalDisks,
-    ) -> OmicronZoneFileSource {
-        match image_source {
-            OmicronZoneImageSource::InstallDataset => {
-                let file_name = zone_kind.artifact_in_install_dataset();
-
-                // There's always at least one image path (the RAM disk below).
-                let mut search_paths = Vec::with_capacity(1);
-
-                // Inject an image path if requested by a test.
-                if let Some(path) = &self.image_directory_override {
-                    search_paths.push(path.clone());
-                };
-
-                // Any zones not part of the RAM disk are managed via the zone
-                // manifest.
-                let hash = install_dataset_hash(
-                    log,
-                    self,
-                    zone_kind,
-                    internal_disks,
-                    |path| search_paths.push(path),
-                );
-
-                // Look for the image in the RAM disk as a fallback. Note that
-                // install dataset images are not stored on the RAM disk in
-                // production, just in development or test workflows.
-                search_paths.push(Utf8PathBuf::from(RAMDISK_IMAGE_PATH));
-
-                OmicronZoneFileSource {
-                    location: OmicronZoneImageLocation::InstallDataset { hash },
-                    file_source: ZoneImageFileSource {
-                        file_name: file_name.to_owned(),
-                        search_paths,
-                    },
-                }
-            }
-            OmicronZoneImageSource::Artifact { hash } => {
-                // TODO: implement mupdate override here.
-                //
-                // Search both artifact datasets. This iterator starts with the
-                // dataset for the boot disk (if it exists), and then is followed
-                // by all other disks.
-                let search_paths =
-                    internal_disks.all_artifact_datasets().collect();
-                OmicronZoneFileSource {
-                    // TODO: with mupdate overrides, return InstallDataset here
-                    location: OmicronZoneImageLocation::Artifact {
-                        hash: Ok(*hash),
-                    },
-                    file_source: ZoneImageFileSource {
-                        file_name: hash.to_string(),
-                        search_paths,
-                    },
-                }
-            }
-        }
-    }
-}
-
-fn install_dataset_hash<F>(
-    log: &slog::Logger,
-    resolver_status: &ResolverStatus,
-    zone_kind: ZoneKind,
-    internal_disks: &InternalDisks,
-    mut search_paths_cb: F,
-) -> Result<ArtifactHash, ZoneImageLocationError>
-where
-    F: FnMut(Utf8PathBuf),
-{
-    // XXX: we ask for the boot zpool to be passed in here. But
-    // `ResolverStatus` also caches the boot zpool. How should we
-    // reconcile the two?
-    let hash = if let Some(path) = internal_disks.boot_disk_install_dataset() {
-        let hash = resolver_status.zone_manifest.zone_hash(zone_kind);
-        match hash {
-            Ok(hash) => {
-                search_paths_cb(path);
-                Ok(hash)
-            }
-            Err(error) => {
-                error!(
-                    log,
-                    "zone {} not found in the boot disk zone manifest, \
-                     not returning it as a source",
-                    zone_kind.report_str();
-                    "file_name" => zone_kind.artifact_in_install_dataset(),
-                    "error" => InlineErrorChain::new(&error),
-                );
-                Err(ZoneImageLocationError::ZoneHash(error))
-            }
-        }
-    } else {
-        // The boot disk is not available, so we cannot add the
-        // install dataset path from it.
-        error!(
-            log,
-            "boot disk install dataset not available, \
-             not returning it as a source";
-            "zone_kind" => zone_kind.report_str(),
-        );
-        Err(ZoneImageLocationError::BootDiskMissing)
-    };
-    hash
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1434,6 +1284,7 @@ mod tests {
     use omicron_common::disk::SharedDatasetConfig;
     use omicron_common::update::OmicronZoneManifest;
     use omicron_common::update::OmicronZoneManifestSource;
+    use omicron_common::zone_images::ZoneImageFileSource;
     use omicron_test_utils::dev;
     use omicron_uuid_kinds::DatasetUuid;
     use omicron_uuid_kinds::MupdateOverrideUuid;
@@ -1443,6 +1294,7 @@ mod tests {
     use sled_agent_types::zone_images::MupdateOverrideStatus;
     use sled_agent_types::zone_images::OmicronZoneFileSource;
     use sled_agent_types::zone_images::ResolverStatus;
+    use sled_agent_types::zone_images::ZoneImageLocationError;
     use sled_agent_types::zone_images::ZoneManifestArtifactsResult;
     use sled_agent_types::zone_images::ZoneManifestStatus;
     use sled_agent_zone_images_examples::deserialize_error;

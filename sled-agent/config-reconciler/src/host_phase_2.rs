@@ -6,6 +6,7 @@
 //! partitions.
 
 use crate::InternalDisks;
+use crate::ResolverStatusExt;
 use crate::SledAgentArtifactStore;
 use camino::Utf8Path;
 use camino::Utf8PathBuf;
@@ -135,16 +136,10 @@ impl BootPartitionReconciler {
         artifact_store: &T,
         log: &Logger,
     ) -> BootPartitionContents {
-        let prepared_slot_a = HostPhase2PreparedContents::new(
-            &desired.slot_a,
-            resolver_status,
-            log,
-        );
-        let prepared_slot_b = HostPhase2PreparedContents::new(
-            &desired.slot_b,
-            resolver_status,
-            log,
-        );
+        let prepared_slot_a =
+            resolver_status.prepare_host_phase_2_contents(log, &desired.slot_a);
+        let prepared_slot_b =
+            resolver_status.prepare_host_phase_2_contents(log, &desired.slot_b);
 
         let (slot_a, slot_b) = futures::join!(
             Self::reconcile_slot::<_, RawDiskReader, RawDiskWriter>(
@@ -348,28 +343,18 @@ impl BootPartitionReconciler {
     }
 }
 
-enum HostPhase2PreparedContents<'a> {
+pub enum HostPhase2PreparedContents<'a> {
     /// No mupdate override was found, so the desired host phase 2 contents were
     /// used.
     NoMupdateOverride(&'a HostPhase2DesiredContents),
 
     /// A mupdate override was found, so the contents are always set to
     /// `CurrentContents`.
-    #[expect(unused)]
     WithMupdateOverride,
 }
 
 impl<'a> HostPhase2PreparedContents<'a> {
-    fn new(
-        desired: &'a HostPhase2DesiredContents,
-        #[expect(unused)] resolver_status: &ResolverStatus,
-        #[expect(unused)] log: &Logger,
-    ) -> Self {
-        // TODO: Implement mupdate override logic.
-        HostPhase2PreparedContents::NoMupdateOverride(desired)
-    }
-
-    fn desired_contents(&self) -> &'a HostPhase2DesiredContents {
+    pub fn desired_contents(&self) -> &'a HostPhase2DesiredContents {
         match self {
             Self::NoMupdateOverride(contents) => contents,
             Self::WithMupdateOverride => {

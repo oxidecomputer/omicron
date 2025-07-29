@@ -57,7 +57,6 @@ use self::zones::OmicronZones;
 
 pub use self::external_disks::CurrentlyManagedZpools;
 pub use self::external_disks::CurrentlyManagedZpoolsReceiver;
-pub use self::zones::ResolverStatusExt;
 pub use self::zones::TimeSyncError;
 pub use self::zones::TimeSyncStatus;
 
