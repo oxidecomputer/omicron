@@ -20,6 +20,7 @@ use sled_agent_types::zone_images::ResolverStatus;
 use sled_hardware::PooledDiskError;
 use slog::Logger;
 use slog::info;
+use slog::o;
 use slog::warn;
 use slog_error_chain::InlineErrorChain;
 use std::io;
@@ -136,10 +137,14 @@ impl BootPartitionReconciler {
         artifact_store: &T,
         log: &Logger,
     ) -> BootPartitionContents {
-        let prepared_slot_a =
-            resolver_status.prepare_host_phase_2_contents(log, &desired.slot_a);
-        let prepared_slot_b =
-            resolver_status.prepare_host_phase_2_contents(log, &desired.slot_b);
+        let prepared_slot_a = resolver_status.prepare_host_phase_2_contents(
+            &log.new(o!("slot" => "A")),
+            &desired.slot_a,
+        );
+        let prepared_slot_b = resolver_status.prepare_host_phase_2_contents(
+            &log.new(o!("slot" => "B")),
+            &desired.slot_b,
+        );
 
         let (slot_a, slot_b) = futures::join!(
             Self::reconcile_slot::<_, RawDiskReader, RawDiskWriter>(
