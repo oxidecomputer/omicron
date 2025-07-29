@@ -822,6 +822,7 @@ pub struct SpEreportIngesterConfig {
     /// necessary.
     ///
     /// Default: Off
+    #[serde(default)]
     pub disable: bool,
 }
 
