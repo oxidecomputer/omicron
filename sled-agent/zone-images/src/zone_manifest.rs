@@ -91,12 +91,6 @@ impl AllZoneManifests {
         }
     }
 
-    pub(crate) fn boot_disk_result(
-        &self,
-    ) -> &Result<ZoneManifestArtifactsResult, ZoneManifestReadError> {
-        &self.boot_disk_result
-    }
-
     fn log_results(&self, log: &slog::Logger) {
         let log = log.new(o!(
             "component" => "zone_manifest",
@@ -368,7 +362,13 @@ fn compute_size_and_hash(
     let mut buffer = [0u8; 8192];
     let mut total_bytes_read = 0;
     loop {
-        let bytes_read = f.read(&mut buffer)?;
+        let bytes_read = match f.read(&mut buffer) {
+            Ok(n) => n,
+            Err(error) if error.kind() == io::ErrorKind::Interrupted => {
+                continue;
+            }
+            Err(error) => return Err(error),
+        };
         if bytes_read == 0 {
             break;
         }

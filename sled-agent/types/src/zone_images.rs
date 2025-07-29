@@ -11,6 +11,7 @@ use nexus_sled_agent_shared::inventory::ClearMupdateOverrideInventory;
 use nexus_sled_agent_shared::inventory::MupdateOverrideBootInventory;
 use nexus_sled_agent_shared::inventory::MupdateOverrideInventory;
 use nexus_sled_agent_shared::inventory::MupdateOverrideNonBootInventory;
+use nexus_sled_agent_shared::inventory::OmicronZoneConfig;
 use nexus_sled_agent_shared::inventory::ZoneArtifactInventory;
 use nexus_sled_agent_shared::inventory::ZoneImageResolverInventory;
 use nexus_sled_agent_shared::inventory::ZoneKind;
@@ -20,6 +21,7 @@ use nexus_sled_agent_shared::inventory::ZoneManifestNonBootInventory;
 use omicron_common::update::{
     MupdateOverrideInfo, OmicronZoneManifest, OmicronZoneManifestSource,
 };
+use omicron_common::zone_images::ZoneImageFileSource;
 use omicron_uuid_kinds::InternalZpoolUuid;
 use omicron_uuid_kinds::MupdateOverrideUuid;
 use slog::{error, info, o, warn};
@@ -27,6 +29,9 @@ use slog_error_chain::InlineErrorChain;
 use swrite::{SWrite, swriteln};
 use thiserror::Error;
 use tufaceous_artifact::ArtifactHash;
+
+/// The location to look for images shipped with the RAM disk.
+pub const RAMDISK_IMAGE_PATH: &str = "/opt/oxide";
 
 /// Current status of the zone image resolver.
 #[derive(Clone, Debug)]
@@ -36,6 +41,11 @@ pub struct ResolverStatus {
 
     /// The mupdate override status.
     pub mupdate_override: MupdateOverrideStatus,
+
+    /// The image directory override, if any.
+    ///
+    /// This is injected by tests.
+    pub image_directory_override: Option<Utf8PathBuf>,
 }
 
 impl ResolverStatus {
@@ -124,7 +134,7 @@ impl ZoneManifestStatus {
     }
 }
 
-#[derive(Debug, thiserror::Error)]
+#[derive(Clone, Debug, thiserror::Error, PartialEq)]
 pub enum ZoneManifestZoneHashError {
     #[error("error reading boot disk")]
     ReadBootDisk(#[source] ZoneManifestReadError),
@@ -1089,6 +1099,144 @@ pub enum InstallMetadataReadError {
         #[source]
         error: ArcIoError,
     },
+}
+
+/// An Omicron zone that is ready to be started.
+///
+/// This consists of the zone's configuration, as well as an image source for
+/// the zone.
+#[derive(Clone, Debug)]
+pub struct PreparedOmicronZone<'a> {
+    /// The zone's configuration.
+    config: &'a OmicronZoneConfig,
+
+    /// The file source of the zone.
+    file_source: OmicronZoneFileSource,
+}
+
+impl<'a> PreparedOmicronZone<'a> {
+    /// Creates a new `PreparedOmicronZone` from the given configuration and
+    /// file source.
+    pub fn new(
+        config: &'a OmicronZoneConfig,
+        file_source: OmicronZoneFileSource,
+    ) -> Self {
+        Self { config, file_source }
+    }
+
+    /// Returns the zone's configuration.
+    pub fn config(&self) -> &'a OmicronZoneConfig {
+        self.config
+    }
+
+    /// Returns the file source of the zone.
+    pub fn file_source(&self) -> &OmicronZoneFileSource {
+        &self.file_source
+    }
+}
+
+/// Contains information about the location of an Omicron zone image file after
+/// being resolved by a `ZoneImageSourceResolver`.
+#[derive(Clone, Debug, PartialEq)]
+pub struct OmicronZoneFileSource {
+    /// The actual source from which the zone image was resolved.
+    ///
+    /// This is usually derived from the provided `OmicronZoneImageSource`, but
+    /// it may be a different source if a mupdate override is active.
+    pub location: OmicronZoneImageLocation,
+
+    /// The file name and search locations.
+    pub file_source: ZoneImageFileSource,
+}
+
+/// The location of an Omicron zone image after mupdate overrides have been
+/// considered, along with the hash corresponding to the zone.
+///
+/// Part of [`OmicronZoneFileSource`].
+#[derive(Clone, Debug, PartialEq)]
+pub enum OmicronZoneImageLocation {
+    /// The zone was looked up from the artifact store.
+    Artifact {
+        /// The hash of the zone image as provided, or an error reading the
+        /// mupdate override file.
+        ///
+        /// If the mupdate override file couldn't be read, we don't know whether
+        /// to start the zone from the artifact or the install dataset -- and
+        /// out of caution, we will refuse to start the zone entirely.
+        hash: Result<ArtifactHash, MupdateOverrideReadError>,
+    },
+
+    /// We attempted to look the zone up from the install dataset.
+    InstallDataset {
+        /// The hash of the zone image as found in the zone manifest, or an
+        /// error that occurred while looking up the zone from the install
+        /// dataset.
+        hash: Result<ArtifactHash, ZoneImageLocationError>,
+    },
+}
+
+impl OmicronZoneImageLocation {
+    /// Returns a [`RunningZoneImageLocation`], or `None` if it is impossible
+    /// to start the zone.
+    pub fn to_running(
+        &self,
+    ) -> Result<RunningZoneImageLocation, MupdateOverrideReadError> {
+        match self {
+            OmicronZoneImageLocation::Artifact { hash: Ok(hash) } => {
+                Ok(RunningZoneImageLocation::Artifact { hash: *hash })
+            }
+            OmicronZoneImageLocation::Artifact { hash: Err(error) } => {
+                // In this case, it's impossible to start the zone.
+                Err(error.clone())
+            }
+            OmicronZoneImageLocation::InstallDataset { hash: Ok(hash) } => {
+                Ok(RunningZoneImageLocation::InstallDataset { hash: *hash })
+            }
+            OmicronZoneImageLocation::InstallDataset { hash: Err(_) } => {
+                // In this case, if we can start the zone at all, it must be
+                // from the RAM disk.
+                Ok(RunningZoneImageLocation::Ramdisk)
+            }
+        }
+    }
+}
+
+/// The location of a running Omicron zone.
+///
+/// This is a stripped-down variant of [`OmicronZoneImageLocation`], with only
+/// success variants reported.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub enum RunningZoneImageLocation {
+    /// The zone was an Omicron zone, and was looked up from the artifact store.
+    Artifact {
+        /// The hash of the zone image.
+        hash: ArtifactHash,
+    },
+
+    /// The zone was run from the install dataset.
+    InstallDataset {
+        /// The hash of the zone image as found in the zone manifest.
+        hash: ArtifactHash,
+    },
+
+    /// The zone was run from the RAM disk.
+    ///
+    /// This can only happen with install-dataset zones in test scenarios such
+    /// as a4x2. In production, this should never happen.
+    Ramdisk,
+}
+
+/// An error that occurred while looking up a zone image from the install
+/// dataset.
+#[derive(Clone, Debug, PartialEq, Error)]
+pub enum ZoneImageLocationError {
+    /// An error occurred while looking up the zone hash.
+    #[error("error looking up zone hash from zone manifest")]
+    ZoneHash(#[source] ZoneManifestZoneHashError),
+
+    /// The boot disk is unavailable.
+    #[error("boot disk missing")]
+    BootDiskMissing,
 }
 
 /// An `io::Error` wrapper that implements `Clone` and `PartialEq`.

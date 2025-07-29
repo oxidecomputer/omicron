@@ -889,6 +889,7 @@ pub fn zone_image_resolver(
                 },
             },
         },
+        image_directory_override: None,
     };
 
     status.to_inventory()

@@ -12272,6 +12272,7 @@ dependencies = [
  "sha2",
  "sled-agent-api",
  "sled-agent-types",
+ "sled-agent-zone-images-examples",
  "sled-hardware",
  "sled-storage",
  "slog",
@@ -12344,6 +12345,7 @@ dependencies = [
  "sled-storage",
  "slog",
  "slog-error-chain",
+ "thiserror 2.0.12",
  "tufaceous-artifact",
 ]
 

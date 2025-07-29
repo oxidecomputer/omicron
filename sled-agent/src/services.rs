@@ -92,10 +92,11 @@ use omicron_common::backoff::{
 use omicron_common::disk::{DatasetKind, DatasetName};
 use omicron_ddm_admin_client::DdmError;
 use omicron_uuid_kinds::OmicronZoneUuid;
-use sled_agent_config_reconciler::InternalDisksReceiver;
 use sled_agent_types::sled::SWITCH_ZONE_BASEBOARD_FILE;
-use sled_agent_types::zone_images::MupdateOverrideReadError;
-use sled_agent_zone_images::{ZoneImageSource, ZoneImageSourceResolver};
+use sled_agent_types::zone_images::{
+    MupdateOverrideReadError, PreparedOmicronZone,
+};
+use sled_agent_zone_images::{ZoneImageSourceResolver, ramdisk_file_source};
 use sled_hardware::DendriteAsic;
 use sled_hardware::SledMode;
 use sled_hardware::is_gimlet;
@@ -481,7 +482,7 @@ impl illumos_utils::smf_helper::Service for SwitchService {
 /// Describes either an Omicron-managed zone or the switch zone, used for
 /// functions that operate on either one or the other
 enum ZoneArgs<'a> {
-    Omicron(&'a OmicronZoneConfig),
+    Omicron(PreparedOmicronZone<'a>),
     Switch(&'a SwitchZoneConfig),
 }
 
@@ -489,7 +490,9 @@ impl<'a> ZoneArgs<'a> {
     /// If this is an Omicron zone, return its type
     pub fn omicron_type(&self) -> Option<&'a OmicronZoneType> {
         match self {
-            ZoneArgs::Omicron(zone_config) => Some(&zone_config.zone_type),
+            ZoneArgs::Omicron(prepared_zone) => {
+                Some(&prepared_zone.config().zone_type)
+            }
             ZoneArgs::Switch(_) => None,
         }
     }
@@ -566,7 +569,6 @@ pub struct ServiceManagerInner {
     sled_info: OnceLock<SledAgentInfo>,
     switch_zone_bootstrap_address: Ipv6Addr,
     zone_image_resolver: ZoneImageSourceResolver,
-    internal_disks_rx: InternalDisksReceiver,
     system_api: Box<dyn SystemApi>,
 }
 
@@ -694,7 +696,6 @@ impl ServiceManager {
     /// - `switch_zone_maghemite_links`: List of physical links on which
     ///    maghemite should listen.
     /// - `zone_image_resolver`: how to find Omicron zone images
-    /// - `internal_disks_rx`: watch channel for changes to internal disks
     #[allow(clippy::too_many_arguments)]
     pub(crate) fn new(
         log: &Logger,
@@ -704,7 +705,6 @@ impl ServiceManager {
         sidecar_revision: SidecarRevision,
         switch_zone_maghemite_links: Vec<PhysicalLink>,
         zone_image_resolver: ZoneImageSourceResolver,
-        internal_disks_rx: InternalDisksReceiver,
     ) -> Self {
         Self::new_inner(
             log,
@@ -714,7 +714,6 @@ impl ServiceManager {
             sidecar_revision,
             switch_zone_maghemite_links,
             zone_image_resolver,
-            internal_disks_rx,
             RealSystemApi::new(),
         )
     }
@@ -728,7 +727,6 @@ impl ServiceManager {
         sidecar_revision: SidecarRevision,
         switch_zone_maghemite_links: Vec<PhysicalLink>,
         zone_image_resolver: ZoneImageSourceResolver,
-        internal_disks_rx: InternalDisksReceiver,
         system_api: Box<dyn SystemApi>,
     ) -> Self {
         let log = log.new(o!("component" => "ServiceManager"));
@@ -761,7 +759,6 @@ impl ServiceManager {
                 switch_zone_bootstrap_address: bootstrap_networking
                     .switch_zone_bootstrap_ip,
                 zone_image_resolver,
-                internal_disks_rx,
                 system_api,
             }),
         }
@@ -1343,11 +1340,12 @@ impl ServiceManager {
         // dataset into the zone. Additionally, construct a "unique enough" name
         // so we can create multiple zones of this type without collision.
         let unique_name = match &request {
-            ZoneArgs::Omicron(zone_config) => Some(zone_config.id),
+            ZoneArgs::Omicron(prepared_zone) => Some(prepared_zone.config().id),
             ZoneArgs::Switch(_) => None,
         };
         let datasets: Vec<_> = match &request {
-            ZoneArgs::Omicron(zone_config) => zone_config
+            ZoneArgs::Omicron(prepared_zone) => prepared_zone
+                .config()
                 .dataset_name()
                 .map(|n| zone::Dataset { name: n.full_name() })
                 .into_iter()
@@ -1361,8 +1359,8 @@ impl ServiceManager {
             .collect();
 
         let zone_type_str = match &request {
-            ZoneArgs::Omicron(zone_config) => {
-                zone_config.zone_type.kind().zone_prefix()
+            ZoneArgs::Omicron(prepared_zone) => {
+                prepared_zone.config().zone_type.kind().zone_prefix()
             }
             ZoneArgs::Switch(_) => "switch",
         };
@@ -1378,21 +1376,13 @@ impl ServiceManager {
         // (Currently, only the switch zone goes through this code path. Other
         // ramdisk zones like the probe zone construct the file source
         // directly.)
-        let image_source = match &request {
-            ZoneArgs::Omicron(zone_config) => {
-                ZoneImageSource::Omicron(zone_config.image_source.clone())
+
+        let file_source = match &request {
+            ZoneArgs::Omicron(prepared_zone) => {
+                prepared_zone.file_source().file_source.clone()
             }
-            ZoneArgs::Switch(_) => ZoneImageSource::Ramdisk,
+            ZoneArgs::Switch(_) => ramdisk_file_source(zone_type_str),
         };
-        let file_source = self
-            .inner
-            .zone_image_resolver
-            .file_source_for(
-                zone_type_str,
-                &image_source,
-                self.inner.internal_disks_rx.current(),
-            )
-            .map_err(|error| Error::MupdateOverrideRead(error))?;
 
         // We use the fake initialiser for testing
         let mut zone_builder = match self.inner.system_api.fake_install_dir() {
@@ -1426,8 +1416,9 @@ impl ServiceManager {
             .await?;
 
         let running_zone = match &request {
-            ZoneArgs::Omicron(config) => {
-                self.boot_omicron_zone(config, installed_zone).await?
+            ZoneArgs::Omicron(prepared_zone) => {
+                self.boot_omicron_zone(prepared_zone.config(), installed_zone)
+                    .await?
             }
             ZoneArgs::Switch(config) => {
                 self.boot_switch_zone(
@@ -3082,7 +3073,7 @@ impl ServiceManager {
     //   mounted appropriately
     pub(crate) async fn start_omicron_zone(
         &self,
-        zone: &OmicronZoneConfig,
+        zone: PreparedOmicronZone<'_>,
         zone_root_path: PathInPool,
     ) -> Result<RunningZone, Error> {
         let runtime = self
