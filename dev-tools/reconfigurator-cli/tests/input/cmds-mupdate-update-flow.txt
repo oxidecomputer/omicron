@@ -36,7 +36,6 @@ sled-set serial2 mupdate-override 203fa72c-85c1-466a-8ed3-338ee029530d
 # Generate a new inventory and plan against that.
 inventory-generate
 inventory-show latest
-inventory-generate
 blueprint-plan latest latest
 
 # Diff the blueprints. This diff should show:
@@ -115,6 +114,28 @@ blueprint-diff latest
 set target-release repo-2.0.0.zip
 blueprint-plan latest latest
 blueprint-show latest
+blueprint-diff latest
+
+# Test that the add-zones-with-mupdate-override chicken switch works as
+# expected. We do this by:
+# * setting the mupdate override on a sled
+# * adding a new sled
+#
+# With the chicken switch disabled (the current state), the planner will
+# not proceed with adding new zones. But with the chicken switch enabled,
+# new zones will be added.
+sled-set serial0 mupdate-override c8fba912-63ae-473a-9115-0495d10fb3bc
+sled-add c3bc4c6d-fdde-4fc4-8493-89d2a1e5ee6b
+inventory-generate
+
+# This will *not* generate the datasets and internal NTP zone on the new
+# sled.
+blueprint-plan latest latest
+blueprint-diff latest
+
+# This *will* generate the datasets and internal NTP zone on the new sled.
+set chicken-switches --add-zones-with-mupdate-override true
+blueprint-plan latest latest
 blueprint-diff latest
 
 # Set the target release minimum generation to a large value -- we're going to
