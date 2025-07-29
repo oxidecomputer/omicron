@@ -391,10 +391,15 @@ pub enum PrecheckError {
     SledAgentInventoryMissingLastReconciliation,
 
     #[error(
+        "invalid host phase 1 slot reported by SP (expected 0 or 1, got {slot})"
+    )]
+    InvalidHostPhase1Slot { slot: u16 },
+
+    #[error(
         "expected to find active host phase 1 slot {expected}, \
          but found {found}"
     )]
-    WrongActiveHostPhase1Slot { expected: u16, found: u16 },
+    WrongActiveHostPhase1Slot { expected: M2Slot, found: M2Slot },
 
     #[error(
         "expected to find host OS boot disk {expected:?}, but found {found:?}"
@@ -404,7 +409,7 @@ pub enum PrecheckError {
     #[error(
         "active phase 1 slot {phase1:?} does not match boot disk {boot_disk:?}"
     )]
-    MismatchedHostOsActiveSlot { phase1: u16, boot_disk: M2Slot },
+    MismatchedHostOsActiveSlot { phase1: M2Slot, boot_disk: M2Slot },
 
     #[error("inventory reported an error determining boot disk: {err}")]
     DeterminingHostOsBootDisk { err: String },

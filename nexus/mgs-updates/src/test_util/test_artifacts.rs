@@ -24,8 +24,8 @@ type InMemoryRepoDepotServerContext = Arc<ArtifactData>;
 ///
 /// `TestArtifacts` does a few things:
 ///
-/// - it creates some specific useful test artifacts: SP images for SimGimlet
-///   and SimSidecar
+/// - it creates some specific useful test artifacts (SP, RoT, and host OS
+///   images)
 /// - it provides the hashes and cabooses used for these images
 /// - it serves these images via an in-memory Repo Depot server
 ///
@@ -38,6 +38,8 @@ pub struct TestArtifacts {
     pub rot_sidecar_artifact_hash: ArtifactHash,
     pub rot_bootloader_gimlet_artifact_hash: ArtifactHash,
     pub rot_bootloader_sidecar_artifact_hash: ArtifactHash,
+    pub host_phase_1_artifact_hash: ArtifactHash,
+    pub host_phase_2_artifact_hash: ArtifactHash,
     pub artifact_cache: Arc<ArtifactCache>,
     deployed_cabooses: BTreeMap<ArtifactHash, hubtools::Caboose>,
     resolver: FixedResolver,
@@ -56,11 +58,8 @@ impl TestArtifacts {
         let mut builder = HubrisArchiveBuilder::with_fake_image();
         builder.write_caboose(sp_gimlet_artifact_caboose.as_slice()).unwrap();
         let sp_gimlet_artifact = builder.build_to_vec().unwrap();
-        let sp_gimlet_artifact_hash = {
-            let mut digest = sha2::Sha256::default();
-            digest.update(&sp_gimlet_artifact);
-            ArtifactHash(digest.finalize().into())
-        };
+        let sp_gimlet_artifact_hash =
+            ArtifactHash(sha2::Sha256::digest(&sp_gimlet_artifact).into());
 
         // Make an SP update artifact for SimSidecar
         let sp_sidecar_artifact_caboose = CabooseBuilder::default()
@@ -72,11 +71,8 @@ impl TestArtifacts {
         let mut builder = HubrisArchiveBuilder::with_fake_image();
         builder.write_caboose(sp_sidecar_artifact_caboose.as_slice()).unwrap();
         let sp_sidecar_artifact = builder.build_to_vec().unwrap();
-        let sp_sidecar_artifact_hash = {
-            let mut digest = sha2::Sha256::default();
-            digest.update(&sp_sidecar_artifact);
-            ArtifactHash(digest.finalize().into())
-        };
+        let sp_sidecar_artifact_hash =
+            ArtifactHash(sha2::Sha256::digest(&sp_sidecar_artifact).into());
 
         // Make an RoT update artifact for SimGimlet.
         let rot_gimlet_artifact_caboose = CabooseBuilder::default()
@@ -88,11 +84,8 @@ impl TestArtifacts {
         let mut builder = HubrisArchiveBuilder::with_fake_image();
         builder.write_caboose(rot_gimlet_artifact_caboose.as_slice()).unwrap();
         let rot_gimlet_artifact = builder.build_to_vec().unwrap();
-        let rot_gimlet_artifact_hash = {
-            let mut digest = sha2::Sha256::default();
-            digest.update(&rot_gimlet_artifact);
-            ArtifactHash(digest.finalize().into())
-        };
+        let rot_gimlet_artifact_hash =
+            ArtifactHash(sha2::Sha256::digest(&rot_gimlet_artifact).into());
 
         // Make an RoT update artifact for SimSidecar
         let rot_sidecar_artifact_caboose = CabooseBuilder::default()
@@ -104,11 +97,8 @@ impl TestArtifacts {
         let mut builder = HubrisArchiveBuilder::with_fake_image();
         builder.write_caboose(rot_sidecar_artifact_caboose.as_slice()).unwrap();
         let rot_sidecar_artifact = builder.build_to_vec().unwrap();
-        let rot_sidecar_artifact_hash = {
-            let mut digest = sha2::Sha256::default();
-            digest.update(&rot_sidecar_artifact);
-            ArtifactHash(digest.finalize().into())
-        };
+        let rot_sidecar_artifact_hash =
+            ArtifactHash(sha2::Sha256::digest(&rot_sidecar_artifact).into());
 
         // Make an RoT bootloader update artifact for SimGimlet.
         let rot_bootloader_gimlet_artifact_caboose = CabooseBuilder::default()
@@ -122,11 +112,9 @@ impl TestArtifacts {
             .write_caboose(rot_bootloader_gimlet_artifact_caboose.as_slice())
             .unwrap();
         let rot_bootloader_gimlet_artifact = builder.build_to_vec().unwrap();
-        let rot_bootloader_gimlet_artifact_hash = {
-            let mut digest = sha2::Sha256::default();
-            digest.update(&rot_bootloader_gimlet_artifact);
-            ArtifactHash(digest.finalize().into())
-        };
+        let rot_bootloader_gimlet_artifact_hash = ArtifactHash(
+            sha2::Sha256::digest(&rot_bootloader_gimlet_artifact).into(),
+        );
 
         // Make an RoT bootloader update artifact for SimSidecar
         let rot_bootloader_sidecar_artifact_caboose = CabooseBuilder::default()
@@ -140,11 +128,21 @@ impl TestArtifacts {
             .write_caboose(rot_bootloader_sidecar_artifact_caboose.as_slice())
             .unwrap();
         let rot_bootloader_sidecar_artifact = builder.build_to_vec().unwrap();
-        let rot_bootloader_sidecar_artifact_hash = {
-            let mut digest = sha2::Sha256::default();
-            digest.update(&rot_bootloader_sidecar_artifact);
-            ArtifactHash(digest.finalize().into())
-        };
+        let rot_bootloader_sidecar_artifact_hash = ArtifactHash(
+            sha2::Sha256::digest(&rot_bootloader_sidecar_artifact).into(),
+        );
+
+        // Make fake host OS phase 1 and phase 2 images. These do not have
+        // cabooses, and the phase 1 is entirely opaque (so we just use
+        // completely bogus data here). Real phase 2 images do have a header
+        // that sled-agent reads, but none of our MGS update tests need that, so
+        // we use completely bogus data for phase 2 too.
+        let host_phase_1_artifact = b"nexus-mgs-updates test phase 1".to_vec();
+        let host_phase_2_artifact = b"nexus-mgs-updates test phase 1".to_vec();
+        let host_phase_1_artifact_hash =
+            ArtifactHash(sha2::Sha256::digest(&host_phase_1_artifact).into());
+        let host_phase_2_artifact_hash =
+            ArtifactHash(sha2::Sha256::digest(&host_phase_2_artifact).into());
 
         // Assemble a map of artifact hash to artifact contents.
         let artifact_data = [
@@ -160,6 +158,8 @@ impl TestArtifacts {
                 rot_bootloader_sidecar_artifact_hash,
                 rot_bootloader_sidecar_artifact,
             ),
+            (host_phase_1_artifact_hash, host_phase_1_artifact),
+            (host_phase_2_artifact_hash, host_phase_2_artifact),
         ]
         .into_iter()
         .collect();
@@ -211,8 +211,10 @@ impl TestArtifacts {
             rot_sidecar_artifact_hash,
             rot_bootloader_gimlet_artifact_hash,
             rot_bootloader_sidecar_artifact_hash,
-            deployed_cabooses,
+            host_phase_1_artifact_hash,
+            host_phase_2_artifact_hash,
             artifact_cache,
+            deployed_cabooses,
             resolver,
             repo_depot_server,
         })

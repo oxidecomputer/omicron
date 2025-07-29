@@ -35,6 +35,9 @@ async fn run_one_successful_host_phase_1_update(
     artifact_hash: &ArtifactHash,
     expected_result: UpdateCompletedHow,
 ) {
+    phase2ctx
+        .set_inactive_slot_phase_2_hash(artifacts.host_phase_2_artifact_hash);
+
     let desc = UpdateDescription {
         gwtestctx,
         artifacts,
@@ -78,7 +81,7 @@ async fn basic() {
         &artifacts,
         SpType::Sled,
         1,
-        &artifacts.sp_gimlet_artifact_hash,
+        &artifacts.host_phase_1_artifact_hash,
         UpdateCompletedHow::CompletedUpdate,
     )
     .await;

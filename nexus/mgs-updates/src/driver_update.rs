@@ -715,6 +715,7 @@ async fn wait_for_update_done(
                 | PrecheckError::WrongActiveVersion { .. }
                 | PrecheckError::WrongActiveArtifact { .. }
                 | PrecheckError::WrongHostOsBootDisk { .. }
+                | PrecheckError::InvalidHostPhase1Slot { .. }
                 | PrecheckError::RotCommunicationFailed { .. }),
             ) => {
                 // Stop trying to make this update happen.  It's not going to

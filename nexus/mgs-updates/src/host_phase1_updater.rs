@@ -364,18 +364,22 @@ impl ReconfiguratorHostPhase1Updater {
         } = &self.details;
 
         // Fetch the current phase 1 active slot.
-        let current_active_slot = mgs_clients
-            .try_all_serially(log, |mgs_client| async move {
-                mgs_client
-                    .sp_component_active_slot_get(
-                        update.sp_type,
-                        update.slot_id,
-                        SpComponent::HOST_CPU_BOOT_FLASH.const_as_str(),
-                    )
-                    .await
-            })
-            .await?
-            .slot;
+        let current_active_slot = {
+            let slot = mgs_clients
+                .try_all_serially(log, |mgs_client| async move {
+                    mgs_client
+                        .sp_component_active_slot_get(
+                            update.sp_type,
+                            update.slot_id,
+                            SpComponent::HOST_CPU_BOOT_FLASH.const_as_str(),
+                        )
+                        .await
+                })
+                .await?
+                .slot;
+            M2Slot::from_mgs_firmware_slot(slot)
+                .ok_or(PrecheckError::InvalidHostPhase1Slot { slot })?
+        };
         debug!(
             log, "found currently-active phase 1 slot";
             "slot" => %current_active_slot,
@@ -410,8 +414,7 @@ impl ReconfiguratorHostPhase1Updater {
         // Otherwise, confirm the currently-active slot matches what we
         // expect...
         {
-            let expected_active_mgs_slot =
-                expected_active_slot.phase_1_slot.to_mgs_firmware_slot();
+            let expected_active_mgs_slot = expected_active_slot.phase_1_slot;
             if current_active_slot != expected_active_mgs_slot {
                 return Err(PrecheckError::WrongActiveHostPhase1Slot {
                     expected: expected_active_mgs_slot,
@@ -442,7 +445,7 @@ impl ReconfiguratorHostPhase1Updater {
                 mgs_clients,
                 update.sp_type,
                 update.slot_id,
-                expected_inactive_slot.to_mgs_firmware_slot(),
+                expected_inactive_slot,
                 log,
             )
             .await?;
@@ -474,7 +477,7 @@ impl ReconfiguratorHostPhase1Updater {
         mgs_clients: &mut MgsClients,
         sp_type: SpType,
         sp_slot: u16,
-        target_slot: u16,
+        target_slot: M2Slot,
         log: &Logger,
     ) -> Result<ArtifactHash, PrecheckError> {
         match mgs_clients
@@ -483,7 +486,7 @@ impl ReconfiguratorHostPhase1Updater {
                     .host_phase_1_flash_hash_calculate_with_timeout(
                         sp_type,
                         sp_slot,
-                        target_slot,
+                        target_slot.to_mgs_firmware_slot(),
                         PHASE_1_HASHING_TIMEOUT,
                     )
                     .await
@@ -542,16 +545,14 @@ impl ReconfiguratorHostPhase1Updater {
 
     async fn confirm_sled_agent_boot_disk_matches(
         &self,
-        active_phase1_slot: u16,
+        active_phase1_slot: M2Slot,
         log: &Logger,
     ) -> Result<(), PrecheckError> {
         let sled_inventory =
             self.get_boot_partition_inventory_from_sled_agent(log).await?;
 
         match sled_inventory.boot_disk {
-            Ok(slot) if slot.to_mgs_firmware_slot() == active_phase1_slot => {
-                Ok(())
-            }
+            Ok(slot) if slot == active_phase1_slot => Ok(()),
             Ok(slot) => Err(PrecheckError::MismatchedHostOsActiveSlot {
                 phase1: active_phase1_slot,
                 boot_disk: slot,
