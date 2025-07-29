@@ -192,7 +192,6 @@ impl Driver {
     /// If the task is currently running, it will be activated again when it
     /// finishes.
     pub(super) fn activate(&self, task: &TaskName) {
-        probes::background__task__activate!(|| task.as_str());
         self.task_required(task).activator.activate();
     }
 

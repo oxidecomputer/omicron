@@ -169,9 +169,6 @@ impl TaskName {
 
 #[usdt::provider(provider = "nexus")]
 mod probes {
-    /// Fires just before explicitly activating the named background task.
-    fn background__task__activate(task_name: &str) {}
-
     /// Fires just before running the activate method of the named task.
     fn background__task__activate__start(
         task_name: &str,
