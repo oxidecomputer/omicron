@@ -81,6 +81,8 @@ pub use chicken_switches::PlannerChickenSwitches;
 pub use chicken_switches::PlannerChickenSwitchesDiff;
 pub use chicken_switches::PlannerChickenSwitchesDisplay;
 pub use chicken_switches::ReconfiguratorChickenSwitches;
+pub use chicken_switches::ReconfiguratorChickenSwitchesDiff;
+pub use chicken_switches::ReconfiguratorChickenSwitchesDiffDisplay;
 pub use chicken_switches::ReconfiguratorChickenSwitchesDisplay;
 pub use chicken_switches::ReconfiguratorChickenSwitchesParam;
 pub use chicken_switches::ReconfiguratorChickenSwitchesView;

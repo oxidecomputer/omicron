@@ -120,9 +120,13 @@ mod tests {
 
     use camino_tempfile_ext::prelude::*;
     use dropshot::{ConfigLogging, ConfigLoggingLevel, test_util::LogContext};
-    use nexus_sled_agent_shared::inventory::ZoneKind;
+    use nexus_sled_agent_shared::inventory::{
+        HostPhase2DesiredContents, ZoneKind,
+    };
     use omicron_common::zone_images::ZoneImageFileSource;
-    use sled_agent_config_reconciler::ResolverStatusExt;
+    use sled_agent_config_reconciler::{
+        HostPhase2PreparedContents, ResolverStatusExt,
+    };
     use sled_agent_types::zone_images::{
         MupdateOverrideReadError, OmicronZoneFileSource,
         OmicronZoneImageLocation, RAMDISK_IMAGE_PATH, ZoneImageLocationError,
@@ -283,11 +287,12 @@ mod tests {
         logctx.cleanup_successful();
     }
 
-    /// Test source resolver behavior when there's a mupdate override in place.
+    /// Test file source and prepare behavior when there's a mupdate override in
+    /// place.
     #[test]
-    fn file_source_with_mupdate_override() {
+    fn lookup_with_mupdate_override() {
         let logctx = LogContext::new(
-            "source_resolver_file_source_with_mupdate_override",
+            "lookup_with_mupdate_override",
             &ConfigLogging::StderrTerminal { level: ConfigLoggingLevel::Debug },
         );
 
@@ -312,6 +317,8 @@ mod tests {
             // The hash isn't important here.
             hash: ArtifactHash([0; 32]),
         };
+
+        // Look up the file source.
         let file_source = status.omicron_file_source(
             &logctx.log,
             ZoneKind::CockroachDb,
@@ -343,15 +350,42 @@ mod tests {
             }
         );
 
+        // Look up host phase 2 contents.
+        let prepared_contents = status.prepare_host_phase_2_contents(
+            &logctx.log,
+            &HostPhase2DesiredContents::CurrentContents,
+        );
+        assert_eq!(
+            prepared_contents,
+            HostPhase2PreparedContents::WithMupdateOverride
+        );
+        assert_eq!(
+            prepared_contents.desired_contents(),
+            &HostPhase2DesiredContents::CurrentContents
+        );
+
+        let desired =
+            HostPhase2DesiredContents::Artifact { hash: ArtifactHash([2; 32]) };
+        let prepared_contents =
+            status.prepare_host_phase_2_contents(&logctx.log, &desired);
+        assert_eq!(
+            prepared_contents,
+            HostPhase2PreparedContents::WithMupdateOverride,
+        );
+        assert_eq!(
+            prepared_contents.desired_contents(),
+            &HostPhase2DesiredContents::CurrentContents
+        );
+
         logctx.cleanup_successful();
     }
 
     /// Test source resolver behavior when an error occurred while obtaining the
     /// mupdate override.
     #[test]
-    fn file_source_with_mupdate_override_error() {
+    fn lookup_with_mupdate_override_error() {
         let logctx = LogContext::new(
-            "source_resolver_file_source_with_mupdate_override_error",
+            "lookup_with_mupdate_override_error",
             &ConfigLogging::StderrTerminal { level: ConfigLoggingLevel::Debug },
         );
 
@@ -439,6 +473,33 @@ mod tests {
                     ],
                 },
             }
+        );
+
+        // Look up host phase 2 contents.
+        let prepared_contents = status.prepare_host_phase_2_contents(
+            &logctx.log,
+            &HostPhase2DesiredContents::CurrentContents,
+        );
+        assert_eq!(
+            prepared_contents,
+            HostPhase2PreparedContents::WithMupdateOverride
+        );
+        assert_eq!(
+            prepared_contents.desired_contents(),
+            &HostPhase2DesiredContents::CurrentContents
+        );
+
+        let desired =
+            HostPhase2DesiredContents::Artifact { hash: ArtifactHash([2; 32]) };
+        let prepared_contents =
+            status.prepare_host_phase_2_contents(&logctx.log, &desired);
+        assert_eq!(
+            prepared_contents,
+            HostPhase2PreparedContents::WithMupdateOverride,
+        );
+        assert_eq!(
+            prepared_contents.desired_contents(),
+            &HostPhase2DesiredContents::CurrentContents
         );
 
         logctx.cleanup_successful();
