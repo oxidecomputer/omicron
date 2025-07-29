@@ -816,7 +816,7 @@ pub struct SpEreportIngesterConfig {
     #[serde_as(as = "DurationSeconds<u64>")]
     pub period_secs: Duration,
 
-    /// disable inventory collection altogether
+    /// disable ereport collection altogether
     ///
     /// This is an emergency lever for support / operations.  It should never be
     /// necessary.
