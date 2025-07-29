@@ -278,8 +278,14 @@ impl OpContext {
         );
         let id = usdt::UniqueId::new();
         probes::authz__start!(|| {
+            let request_id = self
+                .metadata
+                .get("request_id")
+                .cloned()
+                .unwrap_or_else(|| String::from("none"));
             (
                 &id,
+                request_id,
                 format!("{:?}", self.authn.actor()),
                 format!("{action:?}"),
                 format!("{resource:?}"),

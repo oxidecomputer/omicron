@@ -5,37 +5,38 @@
  * includes the scheme, method, URI, duration, and the result of the
  * authn attempt. Here is an example of the output:
  * 
- * scheme=spoof method=POST URI=/v1/system/ip-pools/default/silos result=Authenticated(Details { actor: Actor::SiloUser { silo_user_id: 001de000-05e4-4000-8000-000000004007, silo_id: 001de000-5110-4000-8000-000000000000, .. } }) duration=23961us
- * scheme=spoof method=POST URI=/v1/projects result=Authenticated(Details { actor: Actor::SiloUser { silo_user_id: 001de000-05e4-4000-8000-000000004007, silo_id: 001de000-5110-4000-8000-000000000000, .. } }) duration=31087us
- * scheme=spoof method=DELETE URI=/v1/disks/disky-mcdiskface?project=springfield-squidport result=Authenticated(Details { actor: Actor::SiloUser { silo_user_id: 001de000-05e4-4000-8000-000000004007, silo_id: 001de000-5110-4000-8000-000000000000, .. } }) duration=1033288us
- * scheme=spoof method=POST URI=/v1/instances?project=carcosa result=Authenticated(Details { actor: Actor::SiloUser { silo_user_id: 001de000-05e4-4000-8000-000000004007, silo_id: 001de000-5110-4000-8000-000000000000, .. } }) duration=14631us
- * scheme=spoof method=POST URI=/v1/disks?project=springfield-squidport result=Authenticated(Details { actor: Actor::SiloUser { silo_user_id: 001de000-05e4-4000-8000-000000004007, silo_id: 001de000-5110-4000-8000-000000000000, .. } }) duration=25946us
+ * scheme=spoof method=DELETE request_id=5fbe4092-1e91-4802-b4ae-0d1c969ed2b7 URI=/v1/disks/disky-mcdiskface?project=springfield-squidport result=Authenticated(Details { actor: Actor::SiloUser { silo_user_id: 001de000-05e4-4000-8000-000000004007, silo_id: 001de000-5110-4000-8000-000000000000, .. } }) duration=24811us
+ * scheme=spoof method=POST request_id=641abbe8-5d16-4f4a-92cf-4b624be557d5 URI=/v1/disks?project=springfield-squidport result=Authenticated(Details { actor: Actor::SiloUser { silo_user_id: 001de000-05e4-4000-8000-000000004007, silo_id: 001de000-5110-4000-8000-000000000000, .. } }) duration=23130us
+ * scheme=spoof method=DELETE request_id=cd21ecb1-0c6b-440d-a2bc-1842121db5bd URI=/v1/disks/disky-mcdiskface?project=springfield-squidport result=Authenticated(Details { actor: Actor::SiloUser { silo_user_id: 001de000-05e4-4000-8000-000000004007, silo_id: 001de000-5110-4000-8000-000000000000, .. } }) duration=20129us
  */
 
 #pragma D option strsize=4k
 
 nexus*:::authn-start
 {
-        ts[arg0] = timestamp;
-        schemes[arg0] = copyinstr(arg1);
-        methods[arg0] = copyinstr(arg2);
-        uris[arg0] = copyinstr(arg3);
+        this->rqid = copyinstr(arg0);
+        ts[this->rqid] = timestamp;
+        schemes[this->rqid] = copyinstr(arg1);
+        methods[this->rqid] = copyinstr(arg2);
+        uris[this->rqid] = copyinstr(arg3);
 }
 
 nexus*:::authn-done
-/ts[arg0]/
+/ts[copyinstr(arg0)]/
 {
-        this->t = (timestamp - ts[arg0]) / 1000;
+        this->rqid = copyinstr(arg0);
+        this->t = (timestamp - ts[this->rqid]) / 1000;
         printf(
-            "scheme=%s method=%s URI=%s result=%s duration=%dus\n",
-            schemes[arg0],
-            methods[arg0],
-            uris[arg0],
+            "scheme=%s method=%s request_id=%s URI=%s result=%s duration=%dus\n",
+            schemes[this->rqid],
+            methods[this->rqid],
+            this->rqid,
+            uris[this->rqid],
             copyinstr(arg1),
             this->t
         );
-        ts[arg0] = 0;
-        schemes[arg0] = 0;
-        methods[arg0] = 0;
-        uris[arg0] = 0;
+        ts[this->rqid] = 0;
+        schemes[this->rqid] = 0;
+        methods[this->rqid] = 0;
+        uris[this->rqid] = 0;
 }

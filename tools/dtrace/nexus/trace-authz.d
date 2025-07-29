@@ -5,10 +5,10 @@
  * includes the actor, action, and resource, along with the duration
  * and result of the authz attempt. Here is an example of the output:
  *
- * actor=Some(Actor::SiloUser { silo_user_id: 8b0bc366-958e-43af-a35c-8cb6867a6939, silo_id: 37ab44ad-213c-482d-acf4-98e6a978199d, .. }) action=Query resource=Database result=Ok(()) duration=1351us
- * actor=Some(Actor::SiloUser { silo_user_id: 001de000-05e4-4000-8000-000000004007, silo_id: 001de000-5110-4000-8000-000000000000, .. }) action=Query resource=Database result=Ok(()) duration=657us
- * actor=Some(Actor::SiloUser { silo_user_id: 001de000-05e4-4000-8000-000000004007, silo_id: 001de000-5110-4000-8000-000000000000, .. }) action=Query resource=Database result=Ok(()) duration=1640us
- * actor=Some(Actor::UserBuiltin { user_builtin_id: 001de000-05e4-4000-8000-000000000002, .. }) action=Read resource=DnsConfig result=Ok(()) duration=12268us
+ * request_id=none actor=Some(Actor::UserBuiltin { user_builtin_id: 001de000-05e4-4000-8000-000000000003, .. }) action=Query resource=Database result=Ok(()) duration=980us
+ * request_id=none actor=Some(Actor::UserBuiltin { user_builtin_id: 001de000-05e4-4000-8000-000000000002, .. }) action=Query resource=Database result=Ok(()) duration=1067us
+ * request_id=464df995-d044-4c23-a474-3ad3272a0de1 actor=Some(Actor::SiloUser { silo_user_id: 001de000-05e4-4000-8000-000000004007, silo_id: 001de000-5110-4000-8000-000000000000, .. }) action=Query resource=Database result=Ok(()) duration=881us
+ * request_id=none actor=Some(Actor::UserBuiltin { user_builtin_id: 001de000-05e4-4000-8000-000000000002, .. }) action=Query resource=Database result=Ok(()) duration=841us
  *
  */
 
@@ -17,9 +17,10 @@
 nexus*:::authz-start
 {
         ts[arg0] = timestamp;
-        actors[arg0] = copyinstr(arg1);
-        actions[arg0] = copyinstr(arg2);
-        resources[arg0] = copyinstr(arg3);
+        rqids[arg0] = copyinstr(arg1);
+        actors[arg0] = copyinstr(arg2);
+        actions[arg0] = copyinstr(arg3);
+        resources[arg0] = copyinstr(arg4);
 }
 
 nexus*:::authz-done
@@ -27,7 +28,8 @@ nexus*:::authz-done
 {
         t = (timestamp - ts[arg0]);
         printf(
-            "actor=%s action=%s resource=%s result=%s duration=%dus\n",
+            "request_id=%s actor=%s action=%s resource=%s result=%s duration=%dus\n",
+            rqids[arg0],
             actors[arg0],
             actions[arg0],
             resources[arg0],
@@ -35,6 +37,7 @@ nexus*:::authz-done
             t / 1000
         );
         ts[arg0] = 0;
+        rqids[arg0] = 0;
         actors[arg0] = 0;
         actions[arg0] = 0;
         resources[arg0] = 0;

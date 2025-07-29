@@ -14,20 +14,15 @@ extern crate slog;
 mod probes {
     /// Fires just before attempting to authenticate a request using the given
     /// scheme.
-    fn authn__start(
-        id: &usdt::UniqueId,
-        scheme: &str,
-        method: &str,
-        uri: &str,
-    ) {
-    }
+    fn authn__start(request_id: &str, scheme: &str, method: &str, uri: &str) {}
 
     /// Fires just after completing the authentication, with the result.
-    fn authn__done(id: &usdt::UniqueId, result: &str) {}
+    fn authn__done(request_id: &str, result: &str) {}
 
     /// Fires just before attempting to authorize an action on a resource.
     fn authz__start(
         id: &usdt::UniqueId,
+        request_id: &str,
         actor: &str,
         action: &str,
         resource: &str,
