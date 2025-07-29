@@ -53,12 +53,9 @@ pub trait ResolverStatusExt {
 
     fn prepare_host_phase_2_contents<'a>(
         &self,
-        #[expect(unused)] log: &slog::Logger,
+        log: &slog::Logger,
         desired: &'a HostPhase2DesiredContents,
-    ) -> HostPhase2PreparedContents<'a> {
-        // TODO: Implement mupdate override logic.
-        HostPhase2PreparedContents::NoMupdateOverride(desired)
-    }
+    ) -> HostPhase2PreparedContents<'a>;
 }
 
 impl ResolverStatusExt for ResolverStatus {
@@ -124,6 +121,15 @@ impl ResolverStatusExt for ResolverStatus {
                 }
             }
         }
+    }
+
+    fn prepare_host_phase_2_contents<'a>(
+        &self,
+        #[expect(unused)] log: &slog::Logger,
+        desired: &'a HostPhase2DesiredContents,
+    ) -> HostPhase2PreparedContents<'a> {
+        // TODO: Implement mupdate override logic.
+        HostPhase2PreparedContents::NoMupdateOverride(desired)
     }
 }
 
