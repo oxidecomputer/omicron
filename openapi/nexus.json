@@ -17908,7 +17908,7 @@
               "kind": {
                 "type": "string",
                 "enum": [
-                  "s_nat"
+                  "snat"
                 ]
               },
               "last_port": {

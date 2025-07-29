@@ -502,6 +502,7 @@ pub struct IpPoolRange {
 #[derive(Debug, Clone, Deserialize, PartialEq, Serialize, JsonSchema)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum ExternalIp {
+    #[serde(rename = "snat")]
     SNat(SNatIp),
     Ephemeral { ip: IpAddr, ip_pool_id: Uuid },
     Floating(FloatingIp),
