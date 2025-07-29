@@ -112,10 +112,10 @@ async fn test_port_settings_basic_crud(ctx: &ControlPlaneTestContext) {
             description: "just a port".into(),
         });
 
-    let link_name =
+    let link0_name =
         Name::from_str("phy0").expect("phy0 should be a valid name");
 
-    let lldp_params = LldpLinkConfigCreate {
+    let lldp0_params = LldpLinkConfigCreate {
         enabled: true,
         link_name: Some("Link Name".into()),
         link_description: Some("link description".into()),
@@ -129,25 +129,53 @@ async fn test_port_settings_basic_crud(ctx: &ControlPlaneTestContext) {
         ),
     };
 
+    let link1_name =
+        Name::from_str("phy1").expect("phy1 should be a valid name");
+
+    let lldp1_params = LldpLinkConfigCreate {
+        enabled: true,
+        link_name: Some("Link Name 2".into()),
+        link_description: Some("link description".into()),
+        chassis_id: Some("Chassis ID".into()),
+        system_name: Some("System Name".into()),
+        system_description: Some("System description".into()),
+        management_ip: Some(
+            "203.0.113.10"
+                .parse()
+                .expect("management_ip should be a valid address"),
+        ),
+    };
+
     // links
     settings.links.push(LinkConfigCreate {
-        link_name: link_name.clone(),
+        link_name: link0_name.clone(),
         mtu: 4700,
-        lldp: lldp_params.clone(),
+        lldp: lldp0_params.clone(),
         fec: Some(LinkFec::None),
         speed: LinkSpeed::Speed100G,
         autoneg: false,
         tx_eq: None,
     });
+
+    settings.links.push(LinkConfigCreate {
+        link_name: link1_name.clone(),
+        mtu: 4700,
+        lldp: lldp1_params.clone(),
+        fec: Some(LinkFec::None),
+        speed: LinkSpeed::Speed100G,
+        autoneg: false,
+        tx_eq: None,
+    });
+
     // interfaces
     settings.interfaces.push(SwitchInterfaceConfigCreate {
-        link_name: link_name.clone(),
+        link_name: link0_name.clone(),
         v6_enabled: true,
         kind: SwitchInterfaceKind::Primary,
     });
     // routes
     settings.routes.push(RouteConfig {
-        link_name: link_name.clone(),
+        link_name: link0_name.clone(),
         routes: vec![Route {
             dst: "1.2.3.0/24".parse().unwrap(),
             gw: "1.2.3.4".parse().unwrap(),
@@ -157,7 +185,7 @@ async fn test_port_settings_basic_crud(ctx: &ControlPlaneTestContext) {
     });
     // addresses
     settings.addresses.push(AddressConfig {
-        link_name: link_name.clone(),
+        link_name: link0_name.clone(),
         addresses: vec![Address {
             address: "203.0.113.10/24".parse().unwrap(),
             vlan_id: None,
@@ -177,7 +205,7 @@ async fn test_port_settings_basic_crud(ctx: &ControlPlaneTestContext) {
     .parsed_body()
     .unwrap();
 
-    assert_eq!(created.links.len(), 1);
+    assert_eq!(created.links.len(), 2);
     assert_eq!(created.routes.len(), 1);
     assert_eq!(created.addresses.len(), 1);
 
@@ -186,7 +214,14 @@ async fn test_port_settings_basic_crud(ctx: &ControlPlaneTestContext) {
     assert_eq!(link0.mtu, 4700);
 
     let lldp0 = link0.lldp_link_config.clone().unwrap();
-    assert_eq!(lldp0, lldp_params);
+    assert_eq!(lldp0, lldp0_params);
+
+    let link1 = &created.links[1];
+    assert_eq!(&link1.link_name.to_string(), "phy1");
+    assert_eq!(link1.mtu, 4700);
+
+    let lldp1 = link1.lldp_link_config.clone().unwrap();
+    assert_eq!(lldp1, lldp1_params);
 
     let ifx0 = &created.interfaces[0];
     assert_eq!(&ifx0.interface_name.to_string(), "phy0");
@@ -212,7 +247,7 @@ async fn test_port_settings_basic_crud(ctx: &ControlPlaneTestContext) {
     .parsed_body()
     .unwrap();
 
-    assert_eq!(roundtrip.links.len(), 1);
+    assert_eq!(roundtrip.links.len(), 2);
     assert_eq!(roundtrip.routes.len(), 1);
     assert_eq!(roundtrip.addresses.len(), 1);
 
@@ -221,7 +256,14 @@ async fn test_port_settings_basic_crud(ctx: &ControlPlaneTestContext) {
     assert_eq!(link0.mtu, 4700);
 
     let lldp0 = link0.lldp_link_config.clone().unwrap();
-    assert_eq!(lldp0, lldp_params);
+    assert_eq!(lldp0, lldp0_params);
+
+    let link1 = &roundtrip.links[1];
+    assert_eq!(&link1.link_name.to_string(), "phy1");
+    assert_eq!(link1.mtu, 4700);
+
+    let lldp1 = link1.lldp_link_config.clone().unwrap();
+    assert_eq!(lldp1, lldp1_params);
 
     let ifx0 = &roundtrip.interfaces[0];
     assert_eq!(&ifx0.interface_name.to_string(), "phy0");
@@ -263,7 +305,7 @@ async fn test_port_settings_basic_crud(ctx: &ControlPlaneTestContext) {
 
     // Update port settings. Should not see conflict.
     settings.bgp_peers.push(BgpPeerConfig {
-        link_name: link_name.clone(),
+        link_name: link0_name.clone(),
         peers: vec![BgpPeer {
             bgp_config: NameOrId::Name("as47".parse().unwrap()),
             interface_name: "phy0".parse().unwrap(),
