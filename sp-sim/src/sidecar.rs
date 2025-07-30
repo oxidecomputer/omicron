@@ -904,7 +904,7 @@ impl SpHandler for Handler {
             gateway_messages::PowerStateTransition::Changed => {
                 self.power_state_changes.fetch_add(1, Ordering::Relaxed);
             }
-            gateway_messages::PowerStateTransition::Unchanged => ()
+            gateway_messages::PowerStateTransition::Unchanged => (),
         }
         Ok(transition)
     }

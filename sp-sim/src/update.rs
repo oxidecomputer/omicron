@@ -483,10 +483,7 @@ impl SimSpUpdate {
         self.last_rot_update_data.clone()
     }
 
-    pub(crate) fn host_phase1_data(
-        &self,
-        slot: u16,
-    ) -> Option<Vec<u8>> {
+    pub(crate) fn host_phase1_data(&self, slot: u16) -> Option<Vec<u8>> {
         match slot {
             0 => Some(self.phase1_slot_0_data.clone()),
             1 => Some(self.phase1_slot_1_data.clone()),

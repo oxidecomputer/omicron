@@ -170,10 +170,7 @@ impl SimulatedSp for Gimlet {
         handler.update_state.last_rot_update_data()
     }
 
-    async fn host_phase1_data(
-        &self,
-        slot: u16,
-    ) -> Option<Vec<u8>> {
+    async fn host_phase1_data(&self, slot: u16) -> Option<Vec<u8>> {
         let handler = self.handler.as_ref()?;
         let handler = handler.lock().await;
         handler.update_state.host_phase1_data(slot)
@@ -1289,7 +1286,7 @@ impl SpHandler for Handler {
             PowerStateTransition::Changed => {
                 self.power_state_changes.fetch_add(1, Ordering::Relaxed);
             }
-            PowerStateTransition::Unchanged => ()
+            PowerStateTransition::Unchanged => (),
         }
 
         Ok(transition)
