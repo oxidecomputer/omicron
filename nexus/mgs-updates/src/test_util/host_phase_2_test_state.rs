@@ -12,17 +12,18 @@ use nexus_types::deployment::ExpectedArtifact;
 use omicron_common::disk::M2Slot;
 use omicron_uuid_kinds::SledUuid;
 use slog::Logger;
+use sp_sim::GimletPowerState;
 use std::net::SocketAddr;
 use std::net::SocketAddrV6;
 use tokio::sync::watch;
 use tufaceous_artifact::ArtifactHash;
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug)]
 pub struct HostPhase2State {
     pub sled_agent_address: SocketAddrV6,
-    pub boot_disk: M2Slot,
     pub slot_a_artifact: ExpectedArtifact,
     pub slot_b_artifact: ExpectedArtifact,
+    sp_sim_power_state: watch::Receiver<GimletPowerState>,
 }
 
 impl HostPhase2State {
@@ -48,9 +49,16 @@ impl HostPhase2State {
     ) -> (ExpectedArtifact, ExpectedArtifact) {
         let a = self.slot_a_artifact;
         let b = self.slot_b_artifact;
-        match self.boot_disk {
+        match self.boot_disk().expect("sp-sim should be powered on") {
             M2Slot::A => (a, b),
             M2Slot::B => (b, a),
+        }
+    }
+
+    fn boot_disk(&self) -> Option<M2Slot> {
+        match *self.sp_sim_power_state.borrow() {
+            GimletPowerState::A2 => None,
+            GimletPowerState::A0(slot) => Some(slot),
         }
     }
 }
@@ -61,15 +69,18 @@ pub struct HostPhase2TestContext {
 }
 
 impl HostPhase2TestContext {
-    pub fn new(log: &Logger) -> anyhow::Result<Self> {
+    pub fn new(
+        log: &Logger,
+        sp_sim_power_state: watch::Receiver<GimletPowerState>,
+    ) -> anyhow::Result<Self> {
         let (state, state_rx) = watch::channel(HostPhase2State {
             // We'll fill this in correctly once we start the dropshot server
             // below. We have to construct this first to give it the receiving
             // half of this watch channel in its server context.
             sled_agent_address: "[::]:0".parse().unwrap(),
-            boot_disk: M2Slot::A,
             slot_a_artifact: ExpectedArtifact::Artifact(ArtifactHash([0; 32])),
             slot_b_artifact: ExpectedArtifact::Artifact(ArtifactHash([1; 32])),
+            sp_sim_power_state,
         });
 
         let sled_agent_server = {
@@ -103,7 +114,11 @@ impl HostPhase2TestContext {
 
     pub fn set_inactive_slot_phase_2_hash(&self, hash: ArtifactHash) {
         self.state.send_modify(|st| {
-            let inactive = match st.boot_disk.toggled() {
+            let inactive = match st
+                .boot_disk()
+                .expect("sp-sim should be powered on")
+                .toggled()
+            {
                 M2Slot::A => &mut st.slot_a_artifact,
                 M2Slot::B => &mut st.slot_b_artifact,
             };
@@ -217,10 +232,34 @@ mod api_impl {
             rqctx: RequestContext<Self::Context>,
         ) -> Result<HttpResponseOk<Inventory>, HttpError> {
             let ctx = rqctx.context();
-            let state = *ctx.state.borrow();
+
+            let (
+                sled_agent_address,
+                boot_disk,
+                slot_a_artifact,
+                slot_b_artifact,
+            ) = {
+                let state = ctx.state.borrow();
+                (
+                    state.sled_agent_address,
+                    state.boot_disk(),
+                    state.slot_a_artifact,
+                    state.slot_b_artifact,
+                )
+            };
+
+            // If we have no boot disk, we're supposed to be powered off. We
+            // can't (easily) just fail to respond like a real powered-off sled,
+            // but we can at least return an error.
+            let Some(boot_disk) = boot_disk else {
+                return Err(HttpError::for_unavail(
+                    None,
+                    "sled is supposed to be powered off".to_string(),
+                ));
+            };
 
             // Construct the `boot_partitions` inventory field (the one our
-            // tests really care about) from our current `state`.
+            // tests really care about) from our current state.
             let make_details = |artifact| match artifact {
                 ExpectedArtifact::NoValidArtifact => {
                     Err("no valid artifact".to_string())
@@ -239,9 +278,9 @@ mod api_impl {
                 }),
             };
             let boot_partitions = BootPartitionContents {
-                boot_disk: Ok(state.boot_disk),
-                slot_a: make_details(state.slot_a_artifact),
-                slot_b: make_details(state.slot_b_artifact),
+                boot_disk: Ok(boot_disk),
+                slot_a: make_details(slot_a_artifact),
+                slot_b: make_details(slot_b_artifact),
             };
 
             // The rest of the inventory fields are irrelevant; fill them in
@@ -260,7 +299,7 @@ mod api_impl {
 
             Ok(HttpResponseOk(Inventory {
                 sled_id: ctx.id,
-                sled_agent_address: state.sled_agent_address,
+                sled_agent_address,
                 sled_role: ctx.role,
                 baseboard: ctx.baseboard.clone(),
                 usable_hardware_threads: 64,

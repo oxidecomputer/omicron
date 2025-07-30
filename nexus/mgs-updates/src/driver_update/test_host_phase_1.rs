@@ -26,17 +26,46 @@ use slog_error_chain::InlineErrorChain;
 use std::time::Duration;
 use tufaceous_artifact::ArtifactHash;
 
+struct HostPhase2TestContexts {
+    sleds: Vec<HostPhase2TestContext>,
+}
+
+impl HostPhase2TestContexts {
+    fn new(gwtestctx: &GatewayTestContext) -> Self {
+        let sleds = gwtestctx
+            .simrack
+            .gimlets
+            .iter()
+            .map(|sp| {
+                HostPhase2TestContext::new(
+                    &gwtestctx.logctx.log,
+                    sp.power_state_rx()
+                        .expect("simulated sleds should have power states"),
+                )
+                .expect("created host phase 2 test context")
+            })
+            .collect();
+        Self { sleds }
+    }
+
+    async fn teardown(self) {
+        for sled in self.sleds {
+            sled.teardown().await;
+        }
+    }
+}
+
 async fn run_one_successful_host_phase_1_update(
     gwtestctx: &GatewayTestContext,
-    phase2ctx: &HostPhase2TestContext,
+    phase2ctx: &HostPhase2TestContexts,
     artifacts: &TestArtifacts,
     sp_type: SpType,
     slot_id: u16,
     artifact_hash: &ArtifactHash,
     expected_result: UpdateCompletedHow,
 ) {
-    phase2ctx
-        .set_inactive_slot_phase_2_hash(artifacts.host_phase_2_artifact_hash);
+    assert_matches!(sp_type, SpType::Sled);
+    let host_phase_2_state = phase2ctx.sleds[usize::from(slot_id)].state_rx();
 
     let desc = UpdateDescription {
         gwtestctx,
@@ -46,7 +75,7 @@ async fn run_one_successful_host_phase_1_update(
         artifact_hash,
         override_baseboard_id: None,
         override_expected_sp_component: ExpectedSpComponent::HostPhase1 {
-            host_phase_2_state: phase2ctx.state_rx(),
+            host_phase_2_state,
             override_expected_phase_1_slot: None,
             override_expected_boot_disk: None,
             override_expected_active_phase_1: None,
@@ -59,7 +88,7 @@ async fn run_one_successful_host_phase_1_update(
 
     let in_progress = desc.setup().await;
     let finished = in_progress.finish().await;
-    finished.expect_sp_success(expected_result);
+    finished.expect_host_phase_1_success(expected_result);
 }
 
 /// Tests several happy-path cases of updating a host OS phase 1
@@ -71,8 +100,10 @@ async fn basic() {
     )
     .await;
     let log = &gwtestctx.logctx.log;
-    let phase2ctx = HostPhase2TestContext::new(log).unwrap();
     let artifacts = TestArtifacts::new(log).await.unwrap();
+
+    // Create a fake host phase 2 context for each simulated sled.
+    let phase2ctx = HostPhase2TestContexts::new(&gwtestctx);
 
     // Basic case: normal update
     run_one_successful_host_phase_1_update(

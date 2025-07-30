@@ -221,9 +221,13 @@ impl UpdateDescription<'_> {
                     override_expected_inactive_phase_1.unwrap_or_else(|| {
                         sp1.expect_host_phase_1_inactive_hash()
                     });
-                let host_phase_2_state = *host_phase_2_state.borrow();
+                let host_phase_2_state = host_phase_2_state.borrow();
                 let expected_boot_disk = override_expected_boot_disk
-                    .unwrap_or_else(|| host_phase_2_state.boot_disk);
+                    .unwrap_or_else(|| {
+                        // Without an override, assume the sled booted from the
+                        // currently-active phase 1 slot.
+                        expected_active_phase_1_slot
+                    });
                 let expected_active_phase_2_hash =
                     override_expected_active_phase_2.unwrap_or_else(|| {
                         host_phase_2_state.active_slot_artifact()
@@ -347,6 +351,7 @@ impl UpdateDescription<'_> {
             slot_id: self.slot_id,
             mgs_client: self.gwtestctx.client(),
             sp1,
+            deployed_artifact: *self.artifact_hash,
             deployed_caboose: deployed_caboose.cloned(),
         }
     }
@@ -368,6 +373,7 @@ pub struct InProgressAttempt {
     // Parameters of the update itself
     sp_type: SpType,
     slot_id: u16,
+    deployed_artifact: ArtifactHash,
     deployed_caboose: Option<hubtools::Caboose>,
 
     // Status of the driver
@@ -465,6 +471,7 @@ impl InProgressAttempt {
             self.sp_type,
             self.slot_id,
             self.sp1,
+            self.deployed_artifact,
             self.deployed_caboose,
             result,
             self.mgs_client,
@@ -478,6 +485,7 @@ impl InProgressAttempt {
 #[must_use]
 pub struct FinishedUpdateAttempt {
     result: Result<UpdateCompletedHow, ApplyUpdateError>,
+    deployed_artifact: ArtifactHash,
     deployed_caboose: Option<hubtools::Caboose>,
     sp1: SpTestState,
     sp2: SpTestState,
@@ -488,6 +496,7 @@ impl FinishedUpdateAttempt {
         sp_type: SpType,
         slot_id: u16,
         sp1: SpTestState,
+        deployed_artifact: ArtifactHash,
         deployed_caboose: Option<hubtools::Caboose>,
         result: Result<UpdateCompletedHow, ApplyUpdateError>,
         mgs_client: gateway_client::Client,
@@ -495,7 +504,13 @@ impl FinishedUpdateAttempt {
         let sp2 = SpTestState::load(&mgs_client, sp_type, slot_id)
             .await
             .expect("SP state after update");
-        FinishedUpdateAttempt { result, deployed_caboose, sp1, sp2 }
+        FinishedUpdateAttempt {
+            result,
+            deployed_artifact,
+            deployed_caboose,
+            sp1,
+            sp2,
+        }
     }
 
     /// Asserts various conditions associated with successful SP updates.
@@ -675,5 +690,73 @@ impl FinishedUpdateAttempt {
         };
 
         assert_error(error, &self.sp1, &self.sp2);
+    }
+
+    /// Asserts various conditions associated with successful host phase 1
+    /// updates.
+    pub fn expect_host_phase_1_success(
+        &self,
+        expected_result: UpdateCompletedHow,
+    ) {
+        let how = match &self.result {
+            Ok(how) if *how == expected_result => *how,
+            Ok(ok) => {
+                panic!(
+                    "unexpected kind of success from apply_update(): {ok:?}",
+                );
+            }
+            Err(err) => {
+                panic!(
+                    "unexpected error from apply_update(): {}",
+                    InlineErrorChain::new(&err),
+                );
+            }
+        };
+
+        eprintln!("apply_update() -> {:?}", how);
+        let sp1 = &self.sp1;
+        let sp2 = &self.sp2;
+
+        // The active slot's artifact should match the artifact we wanted to
+        // deploy.
+        assert_eq!(
+            sp2.expect_host_phase_1_active_hash(),
+            self.deployed_artifact,
+        );
+
+        // SP information should not have changed.
+        assert_eq!(sp1.caboose_sp_active, sp2.caboose_sp_active);
+        assert_eq!(
+            sp1.expect_caboose_sp_inactive(),
+            sp2.expect_caboose_sp_inactive()
+        );
+        assert_eq!(sp1.sp_state, sp2.sp_state);
+        assert_eq!(sp1.sp_boot_info, sp2.sp_boot_info);
+
+        // RoT information should not have changed.
+        assert_eq!(sp1.sp_boot_info, sp2.sp_boot_info);
+        assert_eq!(sp1.expect_caboose_rot_a(), sp2.expect_caboose_rot_a());
+        assert_eq!(sp1.expect_caboose_rot_b(), sp2.expect_caboose_rot_b());
+
+        if how == UpdateCompletedHow::FoundNoChangesNeeded {
+            // The active slot should not have been toggled.
+            assert_eq!(
+                sp1.expect_host_phase_1_active_slot(),
+                sp2.expect_host_phase_1_active_slot(),
+            );
+        } else {
+            // The active slot should have been toggled.
+            assert_eq!(
+                sp1.expect_host_phase_1_active_slot().toggled(),
+                sp2.expect_host_phase_1_active_slot(),
+            );
+
+            // The previously active artifact should now be the inactive
+            // artifact.
+            assert_eq!(
+                sp1.expect_host_phase_1_active_hash(),
+                sp2.expect_host_phase_1_inactive_hash()
+            );
+        }
     }
 }

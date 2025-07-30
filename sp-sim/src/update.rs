@@ -24,6 +24,7 @@ use gateway_messages::UpdateChunk;
 use gateway_messages::UpdateId;
 use gateway_messages::UpdateInProgressStatus;
 use hubtools::RawHubrisImage;
+use omicron_common::disk::M2Slot;
 use sha2::Sha256;
 use sha3::Digest;
 use sha3::Sha3_256;
@@ -629,8 +630,12 @@ impl SimSpUpdate {
                 }
             }
             SpComponent::HOST_CPU_BOOT_FLASH => {
-                self.phase1_active_slot = slot;
-                Ok(())
+                if M2Slot::from_mgs_firmware_slot(slot).is_some() {
+                    self.phase1_active_slot = slot;
+                    Ok(())
+                } else {
+                    Err(SpError::InvalidSlotForComponent)
+                }
             }
             _ => {
                 // The real SP returns `RequestUnsupportedForComponent` for

@@ -17,6 +17,7 @@ pub use config::Config;
 use gateway_messages::SpPort;
 use gateway_types::component::SpState;
 pub use gimlet::Gimlet;
+pub use gimlet::GimletPowerState;
 pub use gimlet::SIM_GIMLET_BOARD;
 pub use gimlet::SimSpHandledRequest;
 pub use server::logger;

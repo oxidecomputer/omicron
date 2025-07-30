@@ -48,6 +48,7 @@ use gateway_messages::{ComponentDetails, Message, MgsError, StartupOptions};
 use gateway_messages::{DiscoverResponse, IgnitionState, PowerState};
 use gateway_messages::{MessageKind, version};
 use gateway_types::component::SpState;
+use omicron_common::disk::M2Slot;
 use slog::{Logger, debug, error, info, warn};
 use std::cell::Cell;
 use std::collections::HashMap;
@@ -86,6 +87,22 @@ pub enum SimSpHandledRequest {
     NotImplemented,
 }
 
+/// Current power state and, if in A0, which M2 slot is currently active.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum GimletPowerState {
+    A2,
+    A0(M2Slot),
+}
+
+impl From<GimletPowerState> for PowerState {
+    fn from(value: GimletPowerState) -> Self {
+        match value {
+            GimletPowerState::A2 => Self::A2,
+            GimletPowerState::A0(_) => Self::A0,
+        }
+    }
+}
+
 pub struct Gimlet {
     local_addrs: Option<[SocketAddrV6; 2]>,
     ereport_addrs: Option<[SocketAddrV6; 2]>,
@@ -95,6 +112,7 @@ pub struct Gimlet {
     inner_tasks: Vec<JoinHandle<()>>,
     responses_sent_count: Option<watch::Receiver<usize>>,
     last_request_handled: Arc<Mutex<Option<SimSpHandledRequest>>>,
+    power_state_rx: Option<watch::Receiver<GimletPowerState>>,
 }
 
 impl Drop for Gimlet {
@@ -235,6 +253,7 @@ impl Gimlet {
                 inner_tasks,
                 responses_sent_count: None,
                 last_request_handled,
+                power_state_rx: None,
             });
         };
 
@@ -374,6 +393,8 @@ impl Gimlet {
             }
         }
         let local_addrs = [servers[0].local_addr(), servers[1].local_addr()];
+        let (power_state, power_state_rx) =
+            watch::channel(GimletPowerState::A0(M2Slot::A));
         let (inner, handler, responses_sent_count) = UdpTask::new(
             servers,
             ereport_servers,
@@ -382,6 +403,7 @@ impl Gimlet {
             attached_mgs,
             gimlet.common.serial_number.clone(),
             incoming_console_tx,
+            power_state,
             commands_rx,
             Arc::clone(&last_request_handled),
             log,
@@ -400,7 +422,12 @@ impl Gimlet {
             inner_tasks,
             responses_sent_count: Some(responses_sent_count),
             last_request_handled,
+            power_state_rx: Some(power_state_rx),
         })
+    }
+
+    pub fn power_state_rx(&self) -> Option<watch::Receiver<GimletPowerState>> {
+        self.power_state_rx.clone()
     }
 
     pub fn serial_console_addr(&self, component: &str) -> Option<SocketAddrV6> {
@@ -625,6 +652,7 @@ impl UdpTask {
         attached_mgs: AttachedMgsSerialConsole,
         serial_number: String,
         incoming_serial_console: HashMap<SpComponent, UnboundedSender<Vec<u8>>>,
+        power_state: watch::Sender<GimletPowerState>,
         commands: mpsc::UnboundedReceiver<Command>,
         last_request_handled: Arc<Mutex<Option<SimSpHandledRequest>>>,
         log: Logger,
@@ -637,6 +665,7 @@ impl UdpTask {
             components,
             attached_mgs,
             incoming_serial_console,
+            power_state,
             log.clone(),
             old_rot_state,
             update_state,
@@ -782,7 +811,7 @@ struct Handler {
 
     attached_mgs: AttachedMgsSerialConsole,
     incoming_serial_console: HashMap<SpComponent, UnboundedSender<Vec<u8>>>,
-    power_state: PowerState,
+    power_state: watch::Sender<GimletPowerState>,
     startup_options: StartupOptions,
     update_state: SimSpUpdate,
     reset_pending: Option<SpComponent>,
@@ -801,11 +830,13 @@ struct Handler {
 }
 
 impl Handler {
+    #[allow(clippy::too_many_arguments)]
     fn new(
         serial_number: String,
         components: Vec<SpComponentConfig>,
         attached_mgs: AttachedMgsSerialConsole,
         incoming_serial_console: HashMap<SpComponent, UnboundedSender<Vec<u8>>>,
+        power_state: watch::Sender<GimletPowerState>,
         log: Logger,
         old_rot_state: bool,
         update_state: SimSpUpdate,
@@ -835,10 +866,10 @@ impl Handler {
             serial_number,
             attached_mgs,
             incoming_serial_console,
-            power_state: PowerState::A2,
             startup_options: StartupOptions::empty(),
             update_state,
             reset_pending: None,
+            power_state,
             last_request_handled: None,
             should_fail_to_respond_signal: None,
             old_rot_state,
@@ -859,7 +890,7 @@ impl Handler {
             model,
             revision: 0,
             base_mac_address: [0; 6],
-            power_state: self.power_state,
+            power_state: self.power_state.borrow().clone().into(),
             rot: Ok(rot_state_v2(self.update_state.rot_state())),
         }
     }
@@ -1195,11 +1226,12 @@ impl SpHandler for Handler {
     }
 
     fn power_state(&mut self) -> Result<PowerState, SpError> {
+        let power_state = *self.power_state.borrow();
         debug!(
             &self.log, "received power state";
-            "power_state" => ?self.power_state,
+            "power_state" => ?power_state,
         );
-        Ok(self.power_state)
+        Ok(power_state.into())
     }
 
     fn set_power_state(
@@ -1207,7 +1239,8 @@ impl SpHandler for Handler {
         sender: Sender<Self::VLanId>,
         power_state: PowerState,
     ) -> Result<PowerStateTransition, SpError> {
-        let transition = if power_state != self.power_state {
+        let prev_power_state = *self.power_state.borrow();
+        let transition = if power_state != prev_power_state.into() {
             PowerStateTransition::Changed
         } else {
             PowerStateTransition::Unchanged
@@ -1216,11 +1249,27 @@ impl SpHandler for Handler {
         debug!(
             &self.log, "received set power state";
             "sender" => ?sender,
-            "prev_power_state" => ?self.power_state,
+            "prev_power_state" => ?power_state,
             "power_state" => ?power_state,
             "transition" => ?transition,
         );
-        self.power_state = power_state;
+
+        let new_power_state = match power_state {
+            PowerState::A0 => {
+                let slot = self
+                    .update_state
+                    .component_get_active_slot(SpComponent::HOST_CPU_BOOT_FLASH)
+                    .expect("can always get active slot for valid component");
+                let slot = M2Slot::from_mgs_firmware_slot(slot)
+                    .expect("sp-sim ensures host slot is always valid");
+                GimletPowerState::A0(slot)
+            }
+            PowerState::A1 | PowerState::A2 => GimletPowerState::A2,
+        };
+        self.power_state.send_modify(|s| {
+            *s = new_power_state;
+        });
+
         Ok(transition)
     }
 
