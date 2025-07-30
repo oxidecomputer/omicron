@@ -4593,46 +4593,6 @@
           "version"
         ]
       },
-      "ExpectedArtifact": {
-        "description": "Describes the artifact that we expect to find in some firmware slot",
-        "oneOf": [
-          {
-            "description": "We expect to find _no_ valid artifact in this slot",
-            "type": "object",
-            "properties": {
-              "kind": {
-                "type": "string",
-                "enum": [
-                  "no_valid_artifact"
-                ]
-              }
-            },
-            "required": [
-              "kind"
-            ]
-          },
-          {
-            "description": "We expect to find the specified artifact in this slot",
-            "type": "object",
-            "properties": {
-              "artifact": {
-                "type": "string",
-                "format": "hex string (32 bytes)"
-              },
-              "kind": {
-                "type": "string",
-                "enum": [
-                  "artifact"
-                ]
-              }
-            },
-            "required": [
-              "artifact",
-              "kind"
-            ]
-          }
-        ]
-      },
       "ExpectedInactiveHostOsArtifact": {
         "type": "object",
         "properties": {
@@ -4641,7 +4601,8 @@
             "format": "hex string (32 bytes)"
           },
           "phase_2": {
-            "$ref": "#/components/schemas/ExpectedArtifact"
+            "type": "string",
+            "format": "hex string (32 bytes)"
           }
         },
         "required": [
