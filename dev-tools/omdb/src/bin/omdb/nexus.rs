@@ -2787,7 +2787,7 @@ fn print_task_sp_ereport_ingester(details: &serde_json::Value) {
     use nexus_types::internal_api::background::SpEreportIngesterStatus;
     use nexus_types::internal_api::background::SpEreporterStatus;
 
-    let SpEreportIngesterStatus { sps, errors } =
+    let SpEreportIngesterStatus { sps, errors, disabled } =
         match serde_json::from_value(details.clone()) {
             Err(error) => {
                 eprintln!(
@@ -2813,9 +2813,19 @@ fn print_task_sp_ereport_ingester(details: &serde_json::Value) {
         }
     }
 
-    print_ereporter_status_totals(sps.iter().map(|sp| &sp.status));
+    if disabled {
+        println!("    SP ereport ingestion explicitly disabled by config!");
+    } else {
+        print_ereporter_status_totals(sps.iter().map(|sp| &sp.status));
+    }
 
     if !sps.is_empty() {
+        if disabled {
+            println!(
+                "/!\\ WEIRD: SP ereport ingestion disabled by config, but \
+                 some SP statuses were recorded!"
+            )
+        }
         println!("\n    service processors:");
         for SpEreporterStatus { sp_type, slot, status } in &sps {
             println!(

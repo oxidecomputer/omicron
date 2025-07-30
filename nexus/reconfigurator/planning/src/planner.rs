@@ -1468,24 +1468,15 @@ impl<'a> Planner<'a> {
                 warn!(log, "no inventory found for in-service sled");
                 continue;
             };
-            let action = match &inv_sled
-                .zone_image_resolver
-                .mupdate_override
-                .boot_override
-            {
-                Ok(inv_mupdate_override) => {
-                    self.blueprint.sled_ensure_mupdate_override(
-                        sled_id,
-                        inv_mupdate_override
-                            .as_ref()
-                            .map(|inv| inv.mupdate_override_id),
-                        noop_info,
-                    )?
-                }
-                Err(message) => EnsureMupdateOverrideAction::GetOverrideError {
-                    message: message.clone(),
-                },
-            };
+            let action = self.blueprint.sled_ensure_mupdate_override(
+                sled_id,
+                inv_sled
+                    .zone_image_resolver
+                    .mupdate_override
+                    .boot_override
+                    .as_ref(),
+                noop_info,
+            )?;
             action.log_to(&log);
             actions_by_sled.insert(sled_id, action);
         }
@@ -1581,27 +1572,34 @@ impl<'a> Planner<'a> {
         //   for the system to recover and don't start new zones on *any* sleds,
         //   or perform any further updates.
         //
-        // This condition is level-triggered on the following conditions:
+        // This decision is level-triggered on the following conditions:
         //
         // 1. If the planning input's target release generation is less than the
         //    minimum generation set in the blueprint, the operator hasn't set a
         //    new generation in the blueprint -- we should wait to decide what
         //    to do until the operator provides an indication.
         //
-        // 2. If any sleds have a mupdate override set in the blueprint, then
-        //    we're still recovering from a MUPdate. If that is the case, we
-        //    don't want to add zones on *any* sled.
+        // 2. If any sleds have the `remove_mupdate_override` field set in the
+        //    blueprint (which is downstream of the inventory reporting the
+        //    presence of a mupdate override), then we need to wait until the
+        //    `remove_mupdate_override` field is cleared. Until that happens,
+        //    we don't want to add zones on *any* sled.
         //
         //    This might seem overly conservative (why block zone additions on
         //    *all* sleds if *any* are currently recovering from a MUPdate?),
         //    but is probably correct for the medium term: we want to minimize
         //    the number of different versions of services running at any time.
         //
-        //    There's some potential to relax this in the future (e.g. by
-        //    matching up the zone manifest with the target release to compute
-        //    the number of versions running at a given time), but that's a
-        //    non-trivial optimization that we should probably defer until we
-        //    see its necessity.
+        // 3. If any sleds had errors obtaining mupdate override info, the
+        //    system is in a corrupt state. The planner will not take any
+        //    actions until the error is resolved.
+        //
+        // 4. (TODO: https://github.com/oxidecomputer/omicron/issues/8726)
+        //    If any sleds' deployment units aren't at known versions after
+        //    noop image source changes have been considered, then we shouldn't
+        //    proceed with adding or updating zones. Again, this is driven
+        //    primarily by the desire to minimize the number of versions of
+        //    system software running at any time.
         //
         // What does "any sleds" mean in this context? We don't need to care
         // about decommissioned or expunged sleds, so we consider in-service
@@ -1640,6 +1638,32 @@ impl<'a> Planner<'a> {
                 ));
             }
         }
+
+        // Condition 3 above.
+        {
+            // XXX: This doesn't consider sleds that aren't present in this
+            // inventory run. It probably should. Would likely require storing
+            // some state on the blueprint.
+            let sleds_with_mupdate_override_errors: BTreeSet<_> =
+                actions_by_sled
+                    .iter()
+                    .filter_map(|(sled_id, action)| {
+                        matches!(
+                            action,
+                            EnsureMupdateOverrideAction::GetOverrideError { .. }
+                        )
+                        .then_some(*sled_id)
+                    })
+                    .collect();
+            if !sleds_with_mupdate_override_errors.is_empty() {
+                reasons.push(format!(
+                    "sleds have mupdate override errors: {}",
+                    sleds_with_mupdate_override_errors.iter().join(", ")
+                ));
+            }
+        }
+
+        // TODO: implement condition 4 above.
 
         if !reasons.is_empty() {
             let reasons = reasons.join("; ");

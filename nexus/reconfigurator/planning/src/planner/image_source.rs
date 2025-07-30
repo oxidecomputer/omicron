@@ -241,6 +241,9 @@ impl NoopConvertSledStatus {
                     }
                     NoopConvertSledIneligibleReason::ManifestError {
                         ..
+                    }
+                    | NoopConvertSledIneligibleReason::MupdateOverrideError {
+                        ..
                     } => {
                         warn!(
                             log,
@@ -328,6 +331,7 @@ impl NoopConvertZoneCounts {
     }
 }
 
+/// The reason a sled is ineligible for noop image source conversions.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub(crate) enum NoopConvertSledIneligibleReason {
     /// This sled is missing from inventory.
@@ -349,6 +353,15 @@ pub(crate) enum NoopConvertSledIneligibleReason {
         /// map for easy state transitions.
         zones: IdOrdMap<NoopConvertZoneInfo>,
     },
+
+    /// An error was obtained while retrieving mupdate override information.
+    ///
+    /// In this case, the system is in an indeterminate state: we do not alter
+    /// zone image sources in any way.
+    MupdateOverrideError {
+        /// The error message.
+        message: String,
+    },
 }
 
 impl fmt::Display for NoopConvertSledIneligibleReason {
@@ -363,6 +376,13 @@ impl fmt::Display for NoopConvertSledIneligibleReason {
                     f,
                     "remove_mupdate_override is set in the blueprint \
                      ({mupdate_override_id})",
+                )
+            }
+            Self::MupdateOverrideError { message } => {
+                write!(
+                    f,
+                    "error retrieving mupdate override information: {}",
+                    message
                 )
             }
         }

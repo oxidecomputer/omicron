@@ -29,11 +29,9 @@ impl HostPhase2Editor {
     ) -> BlueprintHostPhase2DesiredSlots {
         let BlueprintHostPhase2DesiredSlots { slot_a, slot_b } = host_phase_2;
         let previous = BlueprintHostPhase2DesiredSlots {
-            slot_a: self.slot_a.value().clone(),
-            slot_b: self.slot_b.value().clone(),
+            slot_a: self.slot_a.set_value(slot_a).into_owned(),
+            slot_b: self.slot_b.set_value(slot_b).into_owned(),
         };
-        self.slot_a.set_value(slot_a);
-        self.slot_b.set_value(slot_b);
         previous
     }
 

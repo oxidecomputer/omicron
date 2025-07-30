@@ -29,6 +29,7 @@ use iddqd::IdOrdMap;
 use iddqd::id_upcast;
 use itertools::Either;
 use nexus_inventory::now_db_precision;
+use nexus_sled_agent_shared::inventory::MupdateOverrideBootInventory;
 use nexus_sled_agent_shared::inventory::OmicronZoneDataset;
 use nexus_sled_agent_shared::inventory::ZoneKind;
 use nexus_types::deployment::Blueprint;
@@ -1230,7 +1231,12 @@ impl<'a> BlueprintBuilder<'a> {
     pub(crate) fn sled_ensure_mupdate_override(
         &mut self,
         sled_id: SledUuid,
-        inv_mupdate_override_id: Option<MupdateOverrideUuid>,
+        // inv_mupdate_override_info has a weird type (not Option<&T>, not &str)
+        // because this is what `Result::as_ref` returns.
+        inv_mupdate_override_info: Result<
+            &Option<MupdateOverrideBootInventory>,
+            &String,
+        >,
         noop_info: &mut NoopConvertInfo,
     ) -> Result<EnsureMupdateOverrideAction, Error> {
         let editor = self.sled_editors.get_mut(&sled_id).ok_or_else(|| {
@@ -1250,7 +1256,7 @@ impl<'a> BlueprintBuilder<'a> {
 
         editor
             .ensure_mupdate_override(
-                inv_mupdate_override_id,
+                inv_mupdate_override_info,
                 pending_mgs_update,
                 noop_sled_info,
             )
@@ -2351,7 +2357,7 @@ pub(crate) enum EnsureMupdateOverrideAction {
     /// taken.
     NoAction {
         /// The mupdate override currently in place.
-        mupdate_override: Option<MupdateOverrideUuid>,
+        mupdate_override_id: Option<MupdateOverrideUuid>,
     },
     /// Inventory had an override that didn't match what was in the blueprint,
     /// so the blueprint was updated to match the inventory.
@@ -2383,19 +2389,30 @@ pub(crate) enum EnsureMupdateOverrideAction {
         /// The reason the blueprint override was not cleared.
         reason: BpMupdateOverrideNotClearedReason,
     },
-    /// Sled Agent encountered an error occurred retrieving the mupdate
-    /// override
-    /// from the inventory.
+    /// Sled Agent encountered an error retrieving the mupdate override from the
+    /// inventory.
+    ///
+    /// In this case, the blueprint's `remove_mupdate_override` field and zone
+    /// image sources are not altered, but pending MGS and host phase 2 updates
+    /// are cleared.
     GetOverrideError {
         /// An error message.
         message: String,
+        /// The current blueprint override value, left unchanged.
+        bp_override: Option<MupdateOverrideUuid>,
+        /// The pending MGS update that was cleared, if any.
+        prev_mgs_update: Option<Box<PendingMgsUpdate>>,
+        /// The previous host phase 2 contents.
+        prev_host_phase_2: BlueprintHostPhase2DesiredSlots,
     },
 }
 
 impl EnsureMupdateOverrideAction {
     pub fn log_to(&self, log: &slog::Logger) {
         match self {
-            EnsureMupdateOverrideAction::NoAction { mupdate_override } => {
+            EnsureMupdateOverrideAction::NoAction {
+                mupdate_override_id: mupdate_override,
+            } => {
                 debug!(
                     log,
                     "no mupdate override action taken, current value left unchanged";
@@ -2409,61 +2426,9 @@ impl EnsureMupdateOverrideAction {
                 prev_mgs_update,
                 prev_host_phase_2,
             } => {
-                let mut zones_desc = String::new();
-                if zones.is_empty() {
-                    zones_desc.push_str("(none)");
-                } else {
-                    // Add a newline before the first zone -- it makes it easier
-                    // to read in log output.
-                    zones_desc.push('\n');
-                    for zone in zones {
-                        swriteln!(zones_desc, "  - {}", zone);
-                    }
-                }
-
-                let mut host_phase_2_desc = String::from("\n");
-                let BlueprintHostPhase2DesiredSlots { slot_a, slot_b } =
-                    prev_host_phase_2;
-                match slot_a {
-                    BlueprintHostPhase2DesiredContents::CurrentContents => {
-                        swriteln!(
-                            host_phase_2_desc,
-                            "  - host phase 2 slot A: current contents (unchanged)"
-                        );
-                    }
-                    BlueprintHostPhase2DesiredContents::Artifact {
-                        version,
-                        hash,
-                    } => {
-                        swriteln!(
-                            host_phase_2_desc,
-                            "  - host phase 2 slot A: updated from artifact \
-                             (version {}, hash {}) to preserving current contents",
-                            version,
-                            hash
-                        );
-                    }
-                }
-                match slot_b {
-                    BlueprintHostPhase2DesiredContents::CurrentContents => {
-                        swriteln!(
-                            host_phase_2_desc,
-                            "  - host phase 2 slot B: current contents (unchanged)"
-                        );
-                    }
-                    BlueprintHostPhase2DesiredContents::Artifact {
-                        version,
-                        hash,
-                    } => {
-                        swriteln!(
-                            host_phase_2_desc,
-                            "  - host phase 2 slot B: updated from artifact \
-                             (version {}, hash {}) to preserving current contents",
-                            version,
-                            hash
-                        );
-                    }
-                }
+                let zones_desc = zones_desc(zones);
+                let host_phase_2_desc =
+                    host_phase_2_to_current_contents_desc(prev_host_phase_2);
 
                 info!(
                     log,
@@ -2510,16 +2475,101 @@ impl EnsureMupdateOverrideAction {
                     "reason" => %reason,
                 );
             }
-            EnsureMupdateOverrideAction::GetOverrideError { message } => {
+            EnsureMupdateOverrideAction::GetOverrideError {
+                message,
+                bp_override,
+                prev_mgs_update,
+                prev_host_phase_2,
+            } => {
+                let host_phase_2_desc =
+                    host_phase_2_to_current_contents_desc(prev_host_phase_2);
                 error!(
                     log,
                     "error getting mupdate override info for sled, \
-                     not altering blueprint override";
+                     not altering blueprint override, but cleared \
+                     pending host phase 2 updates if any";
                     "message" => %message,
+                    "bp_override" => ?bp_override,
+                    "prev_host_phase_2" => %host_phase_2_desc,
                 );
+                if let Some(prev_mgs_update) = prev_mgs_update {
+                    info!(
+                        log,
+                        "previous MGS update cleared because there was an \
+                         error obtaining mupdate override info";
+                        prev_mgs_update,
+                    );
+                } else {
+                    info!(
+                        log,
+                        "no previous MGS update found, so no action taken \
+                         as part of updating blueprint because there was an \
+                         error obtaining mupdate override info",
+                    );
+                }
             }
         }
     }
+}
+
+fn zones_desc(zones: &IdOrdMap<EnsureMupdateOverrideUpdatedZone>) -> String {
+    let mut zones_desc = String::new();
+    if zones.is_empty() {
+        zones_desc.push_str("(none)");
+    } else {
+        // Add a newline before the first zone -- it makes it easier
+        // to read in log output.
+        zones_desc.push('\n');
+        for zone in zones {
+            swriteln!(zones_desc, "  - {}", zone);
+        }
+    }
+    zones_desc
+}
+
+/// Return a description string that represents changing the host phase 2
+/// contents from the provided value to `CurrentContents`.
+fn host_phase_2_to_current_contents_desc(
+    host_phase_2: &BlueprintHostPhase2DesiredSlots,
+) -> String {
+    let mut host_phase_2_desc = String::from("\n");
+    let BlueprintHostPhase2DesiredSlots { slot_a, slot_b } = host_phase_2;
+    match slot_a {
+        BlueprintHostPhase2DesiredContents::CurrentContents => {
+            swriteln!(
+                host_phase_2_desc,
+                "  - host phase 2 slot A: current contents (unchanged)"
+            );
+        }
+        BlueprintHostPhase2DesiredContents::Artifact { version, hash } => {
+            swriteln!(
+                host_phase_2_desc,
+                "  - host phase 2 slot A: updated from artifact \
+                 (version {}, hash {}) to preserving current contents",
+                version,
+                hash
+            );
+        }
+    }
+    match slot_b {
+        BlueprintHostPhase2DesiredContents::CurrentContents => {
+            swriteln!(
+                host_phase_2_desc,
+                "  - host phase 2 slot B: current contents (unchanged)"
+            );
+        }
+        BlueprintHostPhase2DesiredContents::Artifact { version, hash } => {
+            swriteln!(
+                host_phase_2_desc,
+                "  - host phase 2 slot B: updated from artifact \
+                 (version {}, hash {}) to preserving current contents",
+                version,
+                hash
+            );
+        }
+    }
+
+    host_phase_2_desc
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]

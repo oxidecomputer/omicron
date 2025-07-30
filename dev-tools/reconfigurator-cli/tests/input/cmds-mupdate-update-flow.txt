@@ -27,8 +27,12 @@ sled-set serial0 mupdate-override 6123eac1-ec5b-42ba-b73f-9845105a9971
 # On sled 1, simulate an error obtaining the mupdate override.
 sled-set serial1 mupdate-override --with-error
 
-# Also set its SP update, which will not be cleared.
+# Also set SP and host phase 2 updates on this sled. They will be cleared
+# because of the error (which reflects the reality that Sled Agent is not
+# going to proceed with updates until the situation is resolved).
 blueprint-edit latest set-sp-update serial1 e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855 newest sp newer older
+blueprint-edit latest set-host-phase2 serial1 A artifact 1.0.0 3a9607047b03ccaab6d222249d890e93ca51b94ad631c7ca38be74cba60802ff
+blueprint-edit latest set-host-phase2 serial1 B artifact 1.0.0 044d45ad681b44e89c10e056cabdedf19fd8b1e54bc95e6622bcdd23f16bc8f2
 
 # Simulate a mupdate on sled 2 as well.
 sled-set serial2 mupdate-override 203fa72c-85c1-466a-8ed3-338ee029530d
@@ -101,17 +105,24 @@ sled-set serial2 mupdate-override unset
 # remove_mupdate_override to be unset. But no further planning steps will
 # happen because the target release generation is not new enough.
 #
-# TODO: we want to block remove_mupdate_override unsets until the
-# target release is uploaded and all install-dataset zones have been
-# converted to artifact ones.
+# TODO: we want to block further planning steps until the target release is
+# uploaded and all install-dataset zones have been converted to artifact ones.
 inventory-generate
 blueprint-plan latest latest
 blueprint-show latest
 blueprint-diff latest
 
-# Now set the target release -- with this, the rest of the planner starts
-# working again.
+# Now set the target release -- at this point, we're still waiting on the
+# sled with the mupdate override error to be cleared.
 set target-release repo-2.0.0.zip
+blueprint-plan latest latest
+blueprint-show latest
+blueprint-diff latest
+
+# Now clear the mupdate override error. At this point, the rest of the
+# planner starts working.
+sled-set serial1 mupdate-override unset
+inventory-generate
 blueprint-plan latest latest
 blueprint-show latest
 blueprint-diff latest
