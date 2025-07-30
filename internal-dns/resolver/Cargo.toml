@@ -25,6 +25,7 @@ anyhow.workspace = true
 assert_matches.workspace = true
 dropshot.workspace = true
 dns-server.workspace = true
+dns-server-api.workspace = true
 dns-service-client.workspace = true
 expectorate.workspace = true
 omicron-test-utils.workspace = true
