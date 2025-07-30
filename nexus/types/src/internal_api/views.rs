@@ -788,13 +788,13 @@ impl IdOrdItem for RunningSagaInfo {
 
 #[derive(Debug, Clone, Serialize, JsonSchema)]
 pub struct HeldDbClaimInfo {
-    pub id: u128,
+    pub id: u64,
     pub held_since: DateTime<Utc>,
     pub debug: String,
 }
 
 impl IdOrdItem for HeldDbClaimInfo {
-    type Key<'a> = &'a u128;
+    type Key<'a> = &'a u64;
 
     fn key(&self) -> Self::Key<'_> {
         &self.id

@@ -140,7 +140,6 @@ pub use sled::SledTransition;
 pub use sled::TransitionError;
 pub use support_bundle::SupportBundleExpungementReport;
 pub use switch_port::SwitchPortSettingsCombinedResult;
-use tokio::sync::watch;
 pub use user_data_export::*;
 pub use virtual_provisioning_collection::StorageType;
 pub use vmm::VmmStateUpdateResult;
@@ -185,31 +184,11 @@ impl<U, T> RunnableQuery<U> for T where
 {
 }
 
-/// DataStore quiesce configuration and state
-#[derive(Debug, Clone)]
-pub(crate) struct Quiesce {
-    new_claims_allowed: ClaimsAllowed,
-    claims_held: IdOrdMap<HeldDbClaimInfo>,
-}
-
-/// Policy determining whether new database claims are allowed
-///
-/// This is used by Nexus quiesce to disallow creating new database connections
-/// when we're trying to quiesce Nexus.
-#[derive(Debug, Clone, Copy, Eq, PartialEq)]
-pub(crate) enum ClaimsAllowed {
-    /// New claims may be made (normal condition)
-    Allowed,
-    /// New claims may not be made (happens during quiesce)
-    Disallowed,
-}
-
 pub struct DataStore {
     log: Logger,
     pool: Arc<Pool>,
     virtual_provisioning_collection_producer: crate::provisioning::Producer,
     transaction_retry_producer: crate::transaction_retry::Producer,
-    quiesce: watch::Sender<Quiesce>,
 }
 
 // The majority of `DataStore`'s methods live in our submodules as a concession
@@ -222,10 +201,6 @@ impl DataStore {
     /// of this method can construct a Datastore which does not understand
     /// the underlying CockroachDB schema. Data corruption could result.
     pub fn new_unchecked(log: Logger, pool: Arc<Pool>) -> Self {
-        let (quiesce, _) = watch::channel(Quiesce {
-            new_claims_allowed: ClaimsAllowed::Allowed,
-            claims_held: IdOrdMap::new(),
-        });
         DataStore {
             log,
             pool,
@@ -233,7 +208,6 @@ impl DataStore {
                 crate::provisioning::Producer::new(),
             transaction_retry_producer: crate::transaction_retry::Producer::new(
             ),
-            quiesce,
         }
     }
 
@@ -327,30 +301,17 @@ impl DataStore {
     ///
     /// This is currently a one-way trip.  The DataStore cannot be un-quiesced.
     pub fn quiesce(&self) {
-        // Log this before changing the config to make sure this message
-        // appears before messages from code paths that saw this change.
-        info!(&self.log, "starting DataStore quiesce");
-        self.quiesce.send_modify(|q| {
-            q.new_claims_allowed = ClaimsAllowed::Disallowed;
-        });
+        self.pool.quiesce();
     }
 
     /// Wait for all outstanding claims to be released
     pub async fn wait_for_quiesced(&self) {
-        let mut rx = self.quiesce.subscribe();
-        // unwrap(): this can only fail if the tx side is dropped, but that
-        // can't happen because we have a reference to it via `self`.
-        rx.wait_for(|q| {
-            q.new_claims_allowed == ClaimsAllowed::Disallowed
-                && q.claims_held.is_empty()
-        })
-        .await
-        .unwrap();
+        self.pool.wait_for_quiesced().await;
     }
 
     /// Returns information about held db claims
     pub fn claims_held(&self) -> IdOrdMap<HeldDbClaimInfo> {
-        self.quiesce.borrow().claims_held.clone()
+        self.pool.claims_held()
     }
 
     /// Terminates the underlying pool, stopping it from connecting to backends.
@@ -415,9 +376,7 @@ impl DataStore {
     pub(super) async fn pool_connection_unauthorized(
         &self,
     ) -> Result<DataStoreConnection, Error> {
-        Ok(self.pool.claim().await.map_err(|err| {
-            Error::unavail(&format!("Failed to access DB connection: {err}"))
-        })?
+        self.pool.claim().await
     }
 
     /// For testing only. This isn't cfg(test) because nexus needs access to it.

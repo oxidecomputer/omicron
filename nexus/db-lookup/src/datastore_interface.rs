@@ -8,6 +8,7 @@ use diesel::PgConnection;
 use diesel_dtrace::DTraceConnection;
 use nexus_auth::context::OpContext;
 use omicron_common::api::external::Error;
+use std::any::Any;
 
 /// The interface between lookups and the Nexus datastore.
 #[async_trait::async_trait]
@@ -50,23 +51,19 @@ where
 pub type DbConnection = DTraceConnection<PgConnection>;
 pub type AsyncConnection = async_bb8_diesel::Connection<DbConnection>;
 
-trait Releaser {
-    fn claim_released(&self, id: u64);
-}
-
 pub struct DataStoreConnection {
-    id: u64,
     inner: qorb::claim::Handle<AsyncConnection>,
-    releaser: Arc<dyn Releaser + Send + 'static>,
+    // XXX-dap TODO-cleanup TODO-doc
+    #[allow(dead_code)]
+    releaser: Box<dyn Any + Send + Sync + 'static>,
 }
 
 impl DataStoreConnection {
-    fn new(
-        id: u64,
+    pub fn new(
         inner: qorb::claim::Handle<AsyncConnection>,
-        releaser: Arc<dyn Releaser>,
+        releaser: Box<dyn Any + Send + Sync + 'static>,
     ) -> DataStoreConnection {
-        DataStoreConnection { id, inner, releaser }
+        DataStoreConnection { inner, releaser }
     }
 }
 
@@ -78,14 +75,7 @@ impl std::ops::Deref for DataStoreConnection {
 }
 
 impl std::ops::DerefMut for DataStoreConnection {
-    type Target = AsyncConnection;
-    fn deref_mut(&self) -> &Self::Target {
+    fn deref_mut(&mut self) -> &mut Self::Target {
         self.inner.deref_mut()
-    }
-}
-
-impl Drop for DataStoreConnection {
-    fn drop(&mut self) {
-        self.releaser.claim_released(self, id);
     }
 }
