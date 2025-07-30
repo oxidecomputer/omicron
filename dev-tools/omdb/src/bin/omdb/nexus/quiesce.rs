@@ -119,6 +119,18 @@ async fn quiesce_show(
         );
     }
 
+    println!("database connections held: {}", quiesce.db_claims.len());
+    for claim in &quiesce.db_claims {
+        println!(
+            "    claim {} held since {} ({} ago)",
+            claim.id,
+            claim.held_since,
+            format_time_delta(Utc::now() - claim.held_since),
+        );
+        println!("    acquired by:");
+        println!("{}", textwrap::indent(&claim.debug, "        "));
+    }
+
     Ok(())
 }
 

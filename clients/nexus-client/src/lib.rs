@@ -98,6 +98,16 @@ impl IdOrdItem for types::RunningSagaInfo {
     id_upcast!();
 }
 
+impl IdOrdItem for types::HeldDbClaimInfo {
+    type Key<'a> = &'a u64;
+
+    fn key(&self) -> Self::Key<'_> {
+        &self.id
+    }
+
+    id_upcast!();
+}
+
 impl omicron_common::api::external::ClientError for types::Error {
     fn message(&self) -> String {
         self.message.clone()

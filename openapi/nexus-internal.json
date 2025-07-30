@@ -4696,6 +4696,28 @@
         "format": "uint8",
         "minimum": 0
       },
+      "HeldDbClaimInfo": {
+        "type": "object",
+        "properties": {
+          "debug": {
+            "type": "string"
+          },
+          "held_since": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "id": {
+            "type": "integer",
+            "format": "uint64",
+            "minimum": 0
+          }
+        },
+        "required": [
+          "debug",
+          "held_since",
+          "id"
+        ]
+      },
       "IdMapBlueprintDatasetConfig": {
         "type": "object",
         "additionalProperties": {
@@ -6747,6 +6769,24 @@
       "QuiesceStatus": {
         "type": "object",
         "properties": {
+          "db_claims": {
+            "title": "IdOrdMap",
+            "x-rust-type": {
+              "crate": "iddqd",
+              "parameters": [
+                {
+                  "$ref": "#/components/schemas/HeldDbClaimInfo"
+                }
+              ],
+              "path": "iddqd::IdOrdMap",
+              "version": "*"
+            },
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/HeldDbClaimInfo"
+            },
+            "uniqueItems": true
+          },
           "sagas_running": {
             "title": "IdOrdMap",
             "x-rust-type": {
@@ -6770,6 +6810,7 @@
           }
         },
         "required": [
+          "db_claims",
           "sagas_running",
           "state"
         ]
