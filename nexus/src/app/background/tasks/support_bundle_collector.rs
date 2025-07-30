@@ -51,6 +51,7 @@ use std::num::NonZeroU64;
 use std::sync::Arc;
 use tokio::io::AsyncReadExt;
 use tokio::io::AsyncSeekExt;
+use tokio::io::AsyncWriteExt;
 use tokio::io::SeekFrom;
 use tufaceous_artifact::ArtifactHash;
 use zip::ZipArchive;
@@ -592,11 +593,12 @@ impl BundleCollection {
             })?;
 
             // Only stream at most "transfer_chunk_size" bytes at once
-            let remaining = std::cmp::min(
+            let chunk_size = std::cmp::min(
                 self.transfer_chunk_size.get(),
                 total_len - offset,
             );
-            let limited_file = file.take(remaining);
+
+            let limited_file = file.take(chunk_size);
             let stream = tokio_util::io::ReaderStream::new(limited_file);
             let body = reqwest::Body::wrap_stream(stream);
 
@@ -605,16 +607,16 @@ impl BundleCollection {
                 "Streaming bundle chunk";
                 "bundle" => %self.bundle.id,
                 "offset" => offset,
-                "length" => remaining,
+                "length" => chunk_size,
             );
 
             sled_client.support_bundle_transfer(
                 &zpool, &dataset, &support_bundle, offset, body
             ).await.with_context(|| {
-                format!("Failed to transfer bundle: {remaining}@{offset} of {total_len} to sled")
+                format!("Failed to transfer bundle: {chunk_size}@{offset} of {total_len} to sled")
             })?;
 
-            offset += self.transfer_chunk_size.get();
+            offset += chunk_size;
         }
 
         sled_client
@@ -982,7 +984,7 @@ async fn save_zone_log_zip_or_error(
         Ok(res) => {
             let bytestream = res.into_inner();
             let output_dir = path.join(format!("logs/{zone}"));
-            let output_file = output_dir.join("logs.zip");
+            let output_path = output_dir.join("logs.zip");
 
             // Ensure the logs output directory exists.
             tokio::fs::create_dir_all(&output_dir).await.with_context(
@@ -990,8 +992,8 @@ async fn save_zone_log_zip_or_error(
             )?;
 
             let mut file =
-                tokio::fs::File::create(&output_file).await.with_context(
-                    || format!("failed to create file: {output_file}"),
+                tokio::fs::File::create(&output_path).await.with_context(
+                    || format!("failed to create file: {output_path}"),
                 )?;
 
             let stream = bytestream.into_inner().map(|chunk| {
@@ -999,12 +1001,13 @@ async fn save_zone_log_zip_or_error(
             });
             let mut reader = tokio_util::io::StreamReader::new(stream);
             let _nbytes = tokio::io::copy(&mut reader, &mut file).await?;
+            file.flush().await?;
 
             // Unpack the zip so we don't end up with zip files inside of our
             // final zip
-            let zipfile = output_file.clone();
+            let zipfile_path = output_path.clone();
             tokio::task::spawn_blocking(move || {
-                extract_zip_file(&output_dir, &zipfile)
+                extract_zip_file(&output_dir, &zipfile_path)
             })
             .await
             .map_err(|join_error| {
@@ -1013,12 +1016,12 @@ async fn save_zone_log_zip_or_error(
             })??;
 
             // Cleanup the zip file since we no longer need it
-            if let Err(e) = tokio::fs::remove_file(&output_file).await {
+            if let Err(e) = tokio::fs::remove_file(&output_path).await {
                 error!(
                     logger,
                     "failed to cleanup temporary logs zip file";
                     "error" => %e,
-                    "file" => %output_file,
+                    "file" => %output_path,
 
                 );
             }
@@ -1561,7 +1564,7 @@ mod test {
             .expect("Bundle should definitely be in db by this point");
         assert_eq!(observed_bundle.state, SupportBundleState::Active);
 
-        // Download a file from the bundle, to verify that it was trasnferred
+        // Download a file from the bundle, to verify that it was transferred
         // successfully.
         let head = false;
         let range = None;

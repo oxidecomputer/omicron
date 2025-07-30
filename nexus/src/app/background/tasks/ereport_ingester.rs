@@ -31,6 +31,7 @@ use std::sync::Arc;
 
 pub struct SpEreportIngester {
     resolver: internal_dns_resolver::Resolver,
+    disabled: bool,
     inner: Ingester,
 }
 
@@ -58,8 +59,9 @@ impl SpEreportIngester {
         datastore: Arc<DataStore>,
         resolver: internal_dns_resolver::Resolver,
         nexus_id: OmicronZoneUuid,
+        disabled: bool,
     ) -> Self {
-        Self { resolver, inner: Ingester { datastore, nexus_id } }
+        Self { resolver, inner: Ingester { datastore, nexus_id }, disabled }
     }
 
     async fn actually_activate(
@@ -67,6 +69,14 @@ impl SpEreportIngester {
         opctx: &OpContext,
     ) -> SpEreportIngesterStatus {
         let mut status = SpEreportIngesterStatus::default();
+        if self.disabled {
+            status.disabled = true;
+            slog::trace!(
+                &opctx.log,
+                "SP ereport ingestion disabled, doing nothing",
+            );
+            return status;
+        }
         // Find MGS clients.
         // TODO(eliza): reuse the same client across activations; qorb, etc.
         let mgs_clients = {
@@ -478,6 +488,7 @@ mod tests {
             datastore.clone(),
             nexus.internal_resolver.clone(),
             nexus.id(),
+            false,
         );
 
         let activation1 = ingester.actually_activate(&opctx).await;
