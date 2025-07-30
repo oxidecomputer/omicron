@@ -235,6 +235,7 @@ mod tests {
                         external_ips: Vec::new(),
                         disks: Vec::new(),
                         boot_disk: None,
+                        cpu_platform: None,
                         ssh_public_keys: None,
                         start: false,
                         auto_restart_policy: Default::default(),
