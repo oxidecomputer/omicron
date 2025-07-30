@@ -153,7 +153,8 @@ impl MemoryReservations {
 /// Detects the current sled's CPU family using the CPUID instruction.
 ///
 /// TODO: Ideally we would call into libtopo and pass along the information
-/// identified there. See https://github.com/oxidecomputer/omicron/issues/8732.
+/// identified there. See
+/// <https://github.com/oxidecomputer/omicron/issues/8732>.
 ///
 /// Everything here is duplicative with CPU identification done by the kernel.
 /// You'll even find a very similar (but much more comprehensive) AMD family

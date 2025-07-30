@@ -95,7 +95,7 @@ pub struct Sled {
     /// and more precise than a more general report of microarchitecture. We
     /// likely should include much more about the sled's CPU alongside this for
     /// those broader questions and reporting (see
-    /// https://github.com/oxidecomputer/omicron/issues/8730 for examples).
+    /// <https://github.com/oxidecomputer/omicron/issues/8730> for examples).
     pub cpu_family: SledCpuFamily,
 }
 
