@@ -48,5 +48,44 @@ where
 // If a more natural location becomes available in the future, consider moving
 // these aliases there.
 pub type DbConnection = DTraceConnection<PgConnection>;
-pub type DataStoreConnection =
-    qorb::claim::Handle<async_bb8_diesel::Connection<DbConnection>>;
+pub type AsyncConnection = async_bb8_diesel::Connection<DbConnection>;
+
+trait Releaser {
+    fn claim_released(&self, id: u64);
+}
+
+pub struct DataStoreConnection {
+    id: u64,
+    inner: qorb::claim::Handle<AsyncConnection>,
+    releaser: Arc<dyn Releaser + Send + 'static>,
+}
+
+impl DataStoreConnection {
+    fn new(
+        id: u64,
+        inner: qorb::claim::Handle<AsyncConnection>,
+        releaser: Arc<dyn Releaser>,
+    ) -> DataStoreConnection {
+        DataStoreConnection { id, inner, releaser }
+    }
+}
+
+impl std::ops::Deref for DataStoreConnection {
+    type Target = AsyncConnection;
+    fn deref(&self) -> &Self::Target {
+        self.inner.deref()
+    }
+}
+
+impl std::ops::DerefMut for DataStoreConnection {
+    type Target = AsyncConnection;
+    fn deref_mut(&self) -> &Self::Target {
+        self.inner.deref_mut()
+    }
+}
+
+impl Drop for DataStoreConnection {
+    fn drop(&mut self) {
+        self.releaser.claim_released(self, id);
+    }
+}

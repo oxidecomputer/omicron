@@ -12,7 +12,7 @@ use super::datastore::DbClaimsAllowed;
 use chrono::Utc;
 use internal_dns_resolver::QorbResolver;
 use internal_dns_types::names::ServiceName;
-use nexus_db_lookup::DbConnection;
+use nexus_db_lookup::{AsyncConnection, DataStoreConnection, DbConnection};
 use nexus_types::internal_api::views::HeldDbClaimInfo;
 use omicron_common::api::external::Error;
 use qorb::backend;
@@ -21,19 +21,16 @@ use qorb::resolver::{AllBackends, Resolver};
 use slog::Logger;
 use std::collections::BTreeMap;
 use std::sync::Arc;
-use std::sync::atomic::{AtomicU128, Ordering};
+use std::sync::atomic::{AtomicU64, Ordering};
+use std::time::Instant;
 use tokio::sync::watch;
-
-type QorbConnection = async_bb8_diesel::Connection<DbConnection>;
-type QorbPool = qorb::pool::Pool<QorbConnection>;
-pub type PoolConnection = TrackedClaim;
 
 /// Wrapper around a database connection pool.
 ///
 /// Expected to be used as the primary interface to the database.
 pub struct Pool {
-    next_id: AtomicU128,
-    inner: QorbPool,
+    next_id: AtomicU64,
+    inner: qorb::pool::Pool<AsyncConnection>,
     log: Logger,
     terminated: std::sync::atomic::AtomicBool,
 }
@@ -69,7 +66,7 @@ fn make_single_host_resolver(
 
 fn make_postgres_connector(
     log: &Logger,
-) -> qorb::backend::SharedConnector<QorbConnection> {
+) -> qorb::backend::SharedConnector<AsyncConnection> {
     // Create postgres connections.
     //
     // We're currently relying on the DieselPgConnector doing the following:
@@ -109,7 +106,7 @@ impl Pool {
             }
         };
         Pool {
-            next_id: AtomicU128::new(0),
+            next_id: AtomicU64::new(0),
             inner,
             log: log.clone(),
             terminated: std::sync::atomic::AtomicBool::new(false),
@@ -189,16 +186,43 @@ impl Pool {
     }
 
     /// Returns a connection from the pool
-    pub async fn claim(&self) -> Result<PoolConnection, Error> {
-        let qorb_claim = self.inner.claim().await.map_err(|err| {
-            Error::unavail(&format!("Failed to access DB connection: {err}"))
-        })?;
-        let tracked = TrackedClaim::new(
-            self.next_id.fetch_add(1, Ordering::SeqCst),
-            qorb_claim,
-            self.quiesce,
-        )?;
-        Ok(tracked)
+    pub async fn claim(&self) -> Result<DataStoreConnection, Error> {
+        let id = self.next_id.fetch_add(1, Ordering::SeqCst);
+        let held_since = Utc::now();
+        let debug = String::new("dummy"); // XXX-dap
+        let allowed = self.quiesce.send_if_modified(|q| {
+            if let ClaimsAllowed::Disallowed = q.new_claims_allowed {
+                false
+            } else {
+                q.claims_held
+                    .insert_unique(HeldDbClaimInfo { id, held_since, debug })
+                    .expect("claim should not be present yet");
+                true
+            }
+        });
+        if !allowed {
+            return Err(Error::unavail(
+                "no new database claims allowed (quiescing/quiesced)",
+            ));
+        }
+
+        match self.inner.claim().await {
+            Err(error) => {
+                self.quiesce.send_modify(|q| {
+                    q.claims_held
+                        .remove(&id)
+                        .expect("claim should still be present");
+                });
+                Err(Error::unavail(&format!(
+                    "Failed to access DB connection: {err}"
+                )))
+            }
+            Ok(qorb_claim) => Ok(DataStoreConnection::new(
+                id,
+                qorb_claim,
+                self.quiesce.clone(),
+            )),
+        }
     }
 
     /// Stops the qorb background tasks, and causes all future claims to fail
@@ -229,62 +253,7 @@ impl Drop for Pool {
     }
 }
 
-struct TrackedClaim {
-    id: u128,
-    inner: qorb::claim::Handle<QorbConnection>,
-    tracker: watch::Sender<super::DataStore::Quiesce>,
-}
-
-impl TrackedClaim {
-    fn new(
-        id: u128,
-        inner: qorb::claim::Handle<QorbConnection>,
-        tracker: watch::Sender<super::DataStore::Quiesce>,
-    ) -> Result<TrackedClaim, Error> {
-        let allowed = tracker.send_if_modified(|q| {
-            if q.new_claims_allowed != DbClaimsAllowed::Allowed {
-                return false;
-            }
-
-            q.claims_held
-                .insert_unique(HeldDbClaimInfo {
-                    id,
-                    held_since: Utc::now(),
-                    debug: String::from("dummy"), // XXX-dap
-                })
-                .expect("claim should not be present yet");
-        });
-
-        if allowed {
-            Ok(TrackedClaim { id, inner, tracker })
-        } else {
-            Err(Error::for_unavail(
-                "new database claims not allowed (quiescing)",
-            ))
-        }
-    }
-}
-
-impl std::ops::Deref for TrackedClaim {
-    type Target = QorbConnection;
-    fn deref(&self) -> &Self::Target {
-        self.inner.deref()
-    }
-}
-
-impl std::ops::DerefMut for TrackedClaim {
-    type Target = QorbConnection;
-    fn deref(&self) -> &Self::Target {
-        self.inner.deref_mut()
-    }
-}
-
-impl Drop for TrackedClaim {
-    fn drop(&mut self) {
-        self.tracker.send_modify(|q| {
-            q.claims_held.remove(self.id).expect("claim should be present");
-        });
-    }
+impl Releaser for Arc<Quiesce> {
 }
 
 #[cfg(test)]

@@ -188,7 +188,7 @@ impl<U, T> RunnableQuery<U> for T where
 /// DataStore quiesce configuration and state
 #[derive(Debug, Clone)]
 pub(crate) struct Quiesce {
-    new_claims_allowed: DbClaimsAllowed,
+    new_claims_allowed: ClaimsAllowed,
     claims_held: IdOrdMap<HeldDbClaimInfo>,
 }
 
@@ -197,7 +197,7 @@ pub(crate) struct Quiesce {
 /// This is used by Nexus quiesce to disallow creating new database connections
 /// when we're trying to quiesce Nexus.
 #[derive(Debug, Clone, Copy, Eq, PartialEq)]
-pub(crate) enum DbClaimsAllowed {
+pub(crate) enum ClaimsAllowed {
     /// New claims may be made (normal condition)
     Allowed,
     /// New claims may not be made (happens during quiesce)
@@ -223,7 +223,7 @@ impl DataStore {
     /// the underlying CockroachDB schema. Data corruption could result.
     pub fn new_unchecked(log: Logger, pool: Arc<Pool>) -> Self {
         let (quiesce, _) = watch::channel(Quiesce {
-            new_claims_allowed: DbClaimsAllowed::Allowed,
+            new_claims_allowed: ClaimsAllowed::Allowed,
             claims_held: IdOrdMap::new(),
         });
         DataStore {
@@ -331,7 +331,7 @@ impl DataStore {
         // appears before messages from code paths that saw this change.
         info!(&self.log, "starting DataStore quiesce");
         self.quiesce.send_modify(|q| {
-            q.new_claims_allowed = DbClaimsAllowed::Disallowed;
+            q.new_claims_allowed = ClaimsAllowed::Disallowed;
         });
     }
 
@@ -341,7 +341,7 @@ impl DataStore {
         // unwrap(): this can only fail if the tx side is dropped, but that
         // can't happen because we have a reference to it via `self`.
         rx.wait_for(|q| {
-            q.new_claims_allowed == DbClaimsAllowed::Disallowed
+            q.new_claims_allowed == ClaimsAllowed::Disallowed
                 && q.claims_held.is_empty()
         })
         .await
@@ -404,7 +404,7 @@ impl DataStore {
         opctx: &OpContext,
     ) -> Result<DataStoreConnection, Error> {
         opctx.authorize(authz::Action::Query, &authz::DATABASE).await?;
-        self.pool_connection_unauthorize().await
+        self.pool_connection_unauthorized().await
     }
 
     /// Returns an unauthorized connection to a connection from the database
@@ -415,7 +415,9 @@ impl DataStore {
     pub(super) async fn pool_connection_unauthorized(
         &self,
     ) -> Result<DataStoreConnection, Error> {
-        Ok(self.pool.claim().await)
+        Ok(self.pool.claim().await.map_err(|err| {
+            Error::unavail(&format!("Failed to access DB connection: {err}"))
+        })?
     }
 
     /// For testing only. This isn't cfg(test) because nexus needs access to it.
