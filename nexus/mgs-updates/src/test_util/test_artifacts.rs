@@ -39,7 +39,6 @@ pub struct TestArtifacts {
     pub rot_bootloader_gimlet_artifact_hash: ArtifactHash,
     pub rot_bootloader_sidecar_artifact_hash: ArtifactHash,
     pub host_phase_1_artifact_hash: ArtifactHash,
-    pub host_phase_2_artifact_hash: ArtifactHash,
     pub artifact_cache: Arc<ArtifactCache>,
     deployed_cabooses: BTreeMap<ArtifactHash, hubtools::Caboose>,
     resolver: FixedResolver,
@@ -132,14 +131,11 @@ impl TestArtifacts {
             sha2::Sha256::digest(&rot_bootloader_sidecar_artifact).into(),
         );
 
-        // Make fake host OS phase 1 and phase 2 images. These do not have
-        // cabooses, and the phase 1 is entirely opaque (so we just use
-        // completely bogus data here). Real phase 2 images do have a header
-        // that sled-agent reads, but none of our MGS update tests need that, so
-        // we use completely bogus data for phase 2 too.
+        // Make a fake host OS phase 1 image. This is not a hubris archive and
+        // does not have a caboose, and in practice is entirely opaque (so we
+        // just use completely bogus data here).
         let mut host_phase_1_artifact =
             b"nexus-mgs-updates test phase 1".to_vec();
-        let host_phase_2_artifact = b"nexus-mgs-updates test phase 1".to_vec();
 
         // Pad the phase 1 artifact so it's not so small that it uploads in a
         // single UDP packet to the sp simulator. Real images are 32 MiB, and
@@ -150,8 +146,6 @@ impl TestArtifacts {
         host_phase_1_artifact.resize(2048, b'.');
         let host_phase_1_artifact_hash =
             ArtifactHash(sha2::Sha256::digest(&host_phase_1_artifact).into());
-        let host_phase_2_artifact_hash =
-            ArtifactHash(sha2::Sha256::digest(&host_phase_2_artifact).into());
 
         // Assemble a map of artifact hash to artifact contents.
         let artifact_data = [
@@ -168,7 +162,6 @@ impl TestArtifacts {
                 rot_bootloader_sidecar_artifact,
             ),
             (host_phase_1_artifact_hash, host_phase_1_artifact),
-            (host_phase_2_artifact_hash, host_phase_2_artifact),
         ]
         .into_iter()
         .collect();
@@ -221,7 +214,6 @@ impl TestArtifacts {
             rot_bootloader_gimlet_artifact_hash,
             rot_bootloader_sidecar_artifact_hash,
             host_phase_1_artifact_hash,
-            host_phase_2_artifact_hash,
             artifact_cache,
             deployed_cabooses,
             resolver,

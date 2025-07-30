@@ -112,20 +112,6 @@ impl HostPhase2TestContext {
         Ok(Self { state, sled_agent_server })
     }
 
-    pub fn set_inactive_slot_phase_2_hash(&self, hash: ArtifactHash) {
-        self.state.send_modify(|st| {
-            let inactive = match st
-                .boot_disk()
-                .expect("sp-sim should be powered on")
-                .toggled()
-            {
-                M2Slot::A => &mut st.slot_a_artifact,
-                M2Slot::B => &mut st.slot_b_artifact,
-            };
-            *inactive = ExpectedArtifact::Artifact(hash);
-        });
-    }
-
     pub fn state_rx(&self) -> watch::Receiver<HostPhase2State> {
         self.state.subscribe()
     }
