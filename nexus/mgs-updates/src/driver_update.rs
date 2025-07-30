@@ -193,6 +193,48 @@ pub enum ApplyUpdateError {
     WaitError(#[source] PrecheckError),
 }
 
+/// Construct an MGS client.
+//
+// We split this into a prod version and a test version to work around timeout
+// issues in tests. In practice we expect basically all requests to MGS to be
+// fulfilled very quickly, even in tests, but our test infrastructure allows us
+// to _pause_ an update for extended periods of time. If we start an update then
+// happen to pause it as its making an MGS request, leave it paused for more
+// than 15 seconds (the default progenitor client timeout), then try to resume
+// it, we'll immediately fail with a timeout (even though MGS is perfectly
+// responsive!).
+#[cfg(not(test))]
+fn make_mgs_clients(backends: &AllBackends, log: &slog::Logger) -> MgsClients {
+    MgsClients::from_clients(backends.iter().map(|(backend_name, backend)| {
+        gateway_client::Client::new(
+            &format!("http://{}", backend.address),
+            log.new(o!(
+                "mgs_backend_name" => backend_name.0.to_string(),
+                "mgs_backend_addr" => backend.address.to_string(),
+            )),
+        )
+    }))
+}
+#[cfg(test)]
+fn make_mgs_clients(backends: &AllBackends, log: &slog::Logger) -> MgsClients {
+    MgsClients::from_clients(backends.iter().map(|(backend_name, backend)| {
+        let client = reqwest::ClientBuilder::new()
+            .connect_timeout(Duration::from_secs(60))
+            .timeout(Duration::from_secs(60))
+            .build()
+            .unwrap();
+
+        gateway_client::Client::new_with_client(
+            &format!("http://{}", backend.address),
+            client,
+            log.new(o!(
+                "mgs_backend_name" => backend_name.0.to_string(),
+                "mgs_backend_addr" => backend.address.to_string(),
+            )),
+        )
+    }))
+}
+
 /// Makes one complete attempt to apply the specified software update to an SP
 /// component.
 ///
@@ -232,17 +274,7 @@ pub(crate) async fn apply_update(
         if backends.is_empty() {
             return Err(ApplyUpdateError::NoMgsBackends);
         }
-        MgsClients::from_clients(backends.iter().map(
-            |(backend_name, backend)| {
-                gateway_client::Client::new(
-                    &format!("http://{}", backend.address),
-                    log.new(o!(
-                        "mgs_backend_name" => backend_name.0.to_string(),
-                        "mgs_backend_addr" => backend.address.to_string(),
-                    )),
-                )
-            },
-        ))
+        make_mgs_clients(&backends, log)
 
         // It's important that `backends` is dropped at this point.  Otherwise,
         // we'll hold the watch channel lock while we do the long-running

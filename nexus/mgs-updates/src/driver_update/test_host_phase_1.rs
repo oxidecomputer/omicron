@@ -232,3 +232,92 @@ async fn update_watched() {
     phase2ctx.teardown().await;
     gwtestctx.teardown().await;
 }
+
+/// Tests the case where an update takes over from a previously-started one.
+#[tokio::test]
+async fn update_takeover() {
+    let gwtestctx = gateway_test_utils::setup::test_setup_metrics_disabled(
+        "test_host_phase_1_update_takeover",
+        SpPort::One,
+    )
+    .await;
+    let log = &gwtestctx.logctx.log;
+    let artifacts = TestArtifacts::new(log).await.unwrap();
+    let phase2ctx = HostPhase2TestContexts::new(&gwtestctx);
+
+    // See the notes in update_watched(). We start the same way, but this time
+    // we pause the second test once it starts its upload and resume the first
+    // update; it should perform a takeover.
+    let host_phase_2_state = phase2ctx.sleds[1].state_rx();
+
+    let desc1 = UpdateDescription {
+        gwtestctx: &gwtestctx,
+        artifacts: &artifacts,
+        sp_type: SpType::Sled,
+        slot_id: 1,
+        artifact_hash: &artifacts.host_phase_1_artifact_hash,
+        override_baseboard_id: None,
+        override_expected_sp_component: ExpectedSpComponent::HostPhase1 {
+            host_phase_2_state: host_phase_2_state.clone(),
+            override_expected_phase_1_slot: None,
+            override_expected_boot_disk: None,
+            override_expected_active_phase_1: None,
+            override_expected_active_phase_2: None,
+            override_expected_inactive_phase_1: None,
+            override_expected_inactive_phase_2: None,
+        },
+        // This timeout (10 seconds) seeks to balance being long enough to
+        // be relevant without making the tests take too long.  (It's
+        // assumed that 10 seconds here is not a huge deal because this is
+        // mostly idle time and this test is unlikely to be the long pole.)
+        override_progress_timeout: Some(Duration::from_secs(10)),
+    };
+
+    let desc2 = UpdateDescription {
+        gwtestctx: &gwtestctx,
+        artifacts: &artifacts,
+        sp_type: SpType::Sled,
+        slot_id: 1,
+        artifact_hash: &artifacts.host_phase_1_artifact_hash,
+        override_baseboard_id: None,
+        override_expected_sp_component: ExpectedSpComponent::HostPhase1 {
+            host_phase_2_state: host_phase_2_state.clone(),
+            override_expected_phase_1_slot: None,
+            override_expected_boot_disk: None,
+            override_expected_active_phase_1: None,
+            override_expected_active_phase_2: None,
+            override_expected_inactive_phase_1: Some(
+                artifacts.host_phase_1_artifact_hash,
+            ),
+            override_expected_inactive_phase_2: None,
+        },
+        override_progress_timeout: None,
+    };
+
+    let mut in_progress1 = desc1.setup().await;
+    let mut in_progress2 = desc2.setup().await;
+
+    // Start one, but pause it while waiting for the update to upload.
+    in_progress1.run_until_status(UpdateAttemptStatus::UpdateWaiting).await;
+
+    // Start the other.  Pause it at the point where it's also waiting for
+    // the upload to finish.
+    in_progress2.run_until_status(UpdateAttemptStatus::UpdateWaiting).await;
+
+    // This time, resume the first update. It will take over the second one.
+    let finished1 = in_progress1.finish().await;
+    finished1.expect_host_phase_1_success(
+        UpdateCompletedHow::TookOverConcurrentUpdate,
+    );
+
+    // Now resume the second update. It should recognize that a takeover
+    // happened and that an update is completed.
+    //
+    // TODO we should confirm it doesn't reset the host again
+    let finished2 = in_progress2.finish().await;
+    finished2.expect_host_phase_1_success(UpdateCompletedHow::CompletedUpdate);
+
+    artifacts.teardown().await;
+    phase2ctx.teardown().await;
+    gwtestctx.teardown().await;
+}
