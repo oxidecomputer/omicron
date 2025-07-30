@@ -275,6 +275,7 @@ async fn streaming_download(url: &str, path: &Utf8Path) -> Result<()> {
     while let Some(chunk) = response.chunk().await? {
         tarball.write_all(chunk.as_ref()).await?;
     }
+    tarball.flush().await?;
     Ok(())
 }
 

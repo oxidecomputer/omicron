@@ -985,7 +985,10 @@ impl BackgroundTasksInitializer {
             description: "collects error reports from service processors",
             period: config.sp_ereport_ingester.period_secs,
             task_impl: Box::new(ereport_ingester::SpEreportIngester::new(
-                datastore, resolver, nexus_id,
+                datastore,
+                resolver,
+                nexus_id,
+                config.sp_ereport_ingester.disable,
             )),
             opctx: opctx.child(BTreeMap::new()),
             watchers: vec![],
