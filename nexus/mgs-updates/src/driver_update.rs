@@ -420,7 +420,11 @@ pub(crate) async fn apply_update(
         }
     };
 
-    debug!(log, "delivered artifact");
+    debug!(
+        log, "delivered artifact";
+        "our_update" => our_update,
+        "try_reset" => try_reset,
+    );
     status.update(UpdateAttemptStatus::PostUpdate);
 
     if try_reset {

@@ -73,6 +73,9 @@ pub trait SimulatedSp {
     /// request to get the update status.
     async fn current_update_status(&self) -> gateway_messages::UpdateStatus;
 
+    /// Get the number of power state changes this SP has performed.
+    fn power_state_changes(&self) -> usize;
+
     /// Get a watch channel on which this simulated SP will publish a
     /// monotonically increasing count of how many responses it has successfully
     /// sent.

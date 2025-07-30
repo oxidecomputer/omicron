@@ -23,6 +23,7 @@ use nexus_types::internal_api::views::UpdateAttemptStatus;
 use nexus_types::internal_api::views::UpdateCompletedHow;
 use nexus_types::inventory::BaseboardId;
 use slog_error_chain::InlineErrorChain;
+use sp_sim::SimulatedSp;
 use std::time::Duration;
 use tufaceous_artifact::ArtifactHash;
 
@@ -249,6 +250,7 @@ async fn update_takeover() {
     // we pause the second test once it starts its upload and resume the first
     // update; it should perform a takeover.
     let host_phase_2_state = phase2ctx.sleds[1].state_rx();
+    let target_sp_sim = &gwtestctx.simrack.gimlets[1];
 
     let desc1 = UpdateDescription {
         gwtestctx: &gwtestctx,
@@ -294,6 +296,9 @@ async fn update_takeover() {
         override_progress_timeout: None,
     };
 
+    // Before we start, our simulated SP should have 0 power state changes.
+    assert_eq!(target_sp_sim.power_state_changes(), 0);
+
     let mut in_progress1 = desc1.setup().await;
     let mut in_progress2 = desc2.setup().await;
 
@@ -304,18 +309,43 @@ async fn update_takeover() {
     // the upload to finish.
     in_progress2.run_until_status(UpdateAttemptStatus::UpdateWaiting).await;
 
-    // This time, resume the first update. It will take over the second one.
+    // This time, resume the first update. It will see that the second update's
+    // upload has succeeded, wait for it to make progress, see no progress, and
+    // perform a takeover.
     let finished1 = in_progress1.finish().await;
     finished1.expect_host_phase_1_success(
         UpdateCompletedHow::TookOverConcurrentUpdate,
     );
 
+    // This should have caused 2 power state changes (transition to A2 then back
+    // to A0; i.e., perform a host reset).
+    assert_eq!(target_sp_sim.power_state_changes(), 2);
+
     // Now resume the second update. It should recognize that a takeover
     // happened and that an update is completed.
-    //
-    // TODO we should confirm it doesn't reset the host again
     let finished2 = in_progress2.finish().await;
     finished2.expect_host_phase_1_success(UpdateCompletedHow::CompletedUpdate);
+
+    // Finishing this second update should _not_ perform another reset of the
+    // host; it should have realized that the update was already complete.
+    //
+    // However, it currently does. We've gone through this sequence:
+    //
+    // 1. update1 uploads the artifact with its update ID; the SP update status
+    //    is `Completed(update_id_1)`
+    // 2. update2 uploads the artifact with its update ID; the SP update status
+    //    is `Completed(update_id_2)`
+    // 3. update1 waits for update 2 to make progress, then performs a takeover,
+    //    then finishes the update (i.e., reboots the host)
+    // 4. update2 resumes polling the update status; it sees
+    //    `Completed(update_id_2)`, so believe it's still in charge, and so
+    //    performs another host reset.
+    //
+    // Fixing this probably requires some support from the SP: we should tie the
+    // update finialization steps (changing the active slot and power cycling
+    // the host) to the update ID used to deliver the artifact. If we do that,
+    // ideally we could uncomment this assertion.
+    // assert_eq!(target_sp_sim.power_state_changes(), 2);
 
     artifacts.teardown().await;
     phase2ctx.teardown().await;

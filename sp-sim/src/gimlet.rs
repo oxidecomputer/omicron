@@ -55,6 +55,8 @@ use std::collections::HashMap;
 use std::iter;
 use std::net::{SocketAddr, SocketAddrV6};
 use std::pin::Pin;
+use std::sync::atomic::AtomicUsize;
+use std::sync::atomic::Ordering;
 use std::sync::{Arc, Mutex};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::{TcpListener, TcpStream, UdpSocket};
@@ -111,6 +113,7 @@ pub struct Gimlet {
     commands: mpsc::UnboundedSender<Command>,
     inner_tasks: Vec<JoinHandle<()>>,
     responses_sent_count: Option<watch::Receiver<usize>>,
+    power_state_changes: Arc<AtomicUsize>,
     last_request_handled: Arc<Mutex<Option<SimSpHandledRequest>>>,
     power_state_rx: Option<watch::Receiver<GimletPowerState>>,
 }
@@ -184,6 +187,10 @@ impl SimulatedSp for Gimlet {
         handler.lock().await.update_state.status()
     }
 
+    fn power_state_changes(&self) -> usize {
+        self.power_state_changes.load(Ordering::Relaxed)
+    }
+
     fn responses_sent_count(&self) -> Option<watch::Receiver<usize>> {
         self.responses_sent_count.clone()
     }
@@ -254,6 +261,7 @@ impl Gimlet {
                 responses_sent_count: None,
                 last_request_handled,
                 power_state_rx: None,
+                power_state_changes: Arc::new(AtomicUsize::new(0)),
             });
         };
 
@@ -395,6 +403,7 @@ impl Gimlet {
         let local_addrs = [servers[0].local_addr(), servers[1].local_addr()];
         let (power_state, power_state_rx) =
             watch::channel(GimletPowerState::A0(M2Slot::A));
+        let power_state_changes = Arc::new(AtomicUsize::new(0));
         let (inner, handler, responses_sent_count) = UdpTask::new(
             servers,
             ereport_servers,
@@ -409,6 +418,7 @@ impl Gimlet {
             log,
             gimlet.common.old_rot_state,
             update_state,
+            Arc::clone(&power_state_changes),
         );
         inner_tasks
             .push(task::spawn(async move { inner.run().await.unwrap() }));
@@ -423,6 +433,7 @@ impl Gimlet {
             responses_sent_count: Some(responses_sent_count),
             last_request_handled,
             power_state_rx: Some(power_state_rx),
+            power_state_changes,
         })
     }
 
@@ -658,6 +669,7 @@ impl UdpTask {
         log: Logger,
         old_rot_state: bool,
         update_state: SimSpUpdate,
+        power_state_changes: Arc<AtomicUsize>,
     ) -> (Self, Arc<TokioMutex<Handler>>, watch::Receiver<usize>) {
         let [udp0, udp1] = servers;
         let handler = Arc::new(TokioMutex::new(Handler::new(
@@ -669,6 +681,7 @@ impl UdpTask {
             log.clone(),
             old_rot_state,
             update_state,
+            power_state_changes,
         )));
         let responses_sent_count = watch::Sender::new(0);
         let responses_sent_count_rx = responses_sent_count.subscribe();
@@ -812,6 +825,7 @@ struct Handler {
     attached_mgs: AttachedMgsSerialConsole,
     incoming_serial_console: HashMap<SpComponent, UnboundedSender<Vec<u8>>>,
     power_state: watch::Sender<GimletPowerState>,
+    power_state_changes: Arc<AtomicUsize>,
     startup_options: StartupOptions,
     update_state: SimSpUpdate,
     reset_pending: Option<SpComponent>,
@@ -840,6 +854,7 @@ impl Handler {
         log: Logger,
         old_rot_state: bool,
         update_state: SimSpUpdate,
+        power_state_changes: Arc<AtomicUsize>,
     ) -> Self {
         let mut leaked_component_device_strings =
             Vec::with_capacity(components.len());
@@ -874,6 +889,7 @@ impl Handler {
             should_fail_to_respond_signal: None,
             old_rot_state,
             sp_dumps,
+            power_state_changes,
         }
     }
 
@@ -1269,6 +1285,12 @@ impl SpHandler for Handler {
         self.power_state.send_modify(|s| {
             *s = new_power_state;
         });
+        match transition {
+            PowerStateTransition::Changed => {
+                self.power_state_changes.fetch_add(1, Ordering::Relaxed);
+            }
+            PowerStateTransition::Unchanged => ()
+        }
 
         Ok(transition)
     }
