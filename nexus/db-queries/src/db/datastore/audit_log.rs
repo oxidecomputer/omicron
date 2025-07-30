@@ -1,3 +1,7 @@
+// This Source Code Form is subject to the terms of the Mozilla Public
+// License, v. 2.0. If a copy of the MPL was not distributed with this
+// file, You can obtain one at https://mozilla.org/MPL/2.0/.
+
 use super::DataStore;
 use crate::authz;
 use crate::context::OpContext;
@@ -17,10 +21,6 @@ use omicron_common::api::external::ResourceType;
 use omicron_common::api::external::{CreateResult, UpdateResult};
 use uuid::Uuid;
 
-// This Source Code Form is subject to the terms of the Mozilla Public
-// License, v. 2.0. If a copy of the MPL was not distributed with this
-// file, You can obtain one at https://mozilla.org/MPL/2.0/.
-//
 impl DataStore {
     /// List completed audit log rows after start time (inclusive) and before
     /// optional end time (exclusive), i.e., `start_time <= time_completed
@@ -62,18 +62,17 @@ impl DataStore {
         opctx.authorize(authz::Action::ListChildren, &authz::AUDIT_LOG).await?;
 
         use nexus_db_schema::schema::audit_log_complete;
-        let query = paginated_multicolumn(
+        let mut query = paginated_multicolumn(
             audit_log_complete::table,
             (audit_log_complete::time_completed, audit_log_complete::id),
             pagparams,
         )
         .filter(audit_log_complete::time_completed.ge(start_time));
-        let query = match end_time {
-            Some(end) => {
-                query.filter(audit_log_complete::time_completed.lt(end))
-            }
-            None => query,
-        };
+
+        if let Some(end) = end_time {
+            query = query.filter(audit_log_complete::time_completed.lt(end));
+        }
+
         query
             .select(AuditLogEntry::as_select())
             .load_async(&*self.pool_connection_authorized(opctx).await?)

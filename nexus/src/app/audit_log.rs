@@ -56,7 +56,7 @@ impl super::Nexus {
             rqctx
                 .request
                 .headers()
-                .get("User-Agent")
+                .get(http::header::USER_AGENT)
                 .and_then(|value| value.to_str().ok())
                 // User agent is truncated for the DB because it can
                 // theoretically be very long, but almost never contains useful

@@ -43,6 +43,8 @@ pub struct AuditLogEntryInit {
     pub access_method: Option<String>,
 }
 
+/// `audit_log_complete` is a view on `audit_log` filtering for rows with
+/// non-null `time_completed`, not its own table.
 #[derive(Queryable, Selectable, Clone, Debug)]
 #[diesel(table_name = audit_log_complete)]
 pub struct AuditLogEntry {
