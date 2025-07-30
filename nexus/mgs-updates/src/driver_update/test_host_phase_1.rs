@@ -9,6 +9,7 @@
 
 use super::*;
 use crate::test_util::host_phase_2_test_state::HostPhase2TestContext;
+use crate::test_util::sp_test_state::SpTestState;
 use crate::test_util::test_artifacts::TestArtifacts;
 use crate::test_util::updates::ExpectedSpComponent;
 use crate::test_util::updates::UpdateDescription;
@@ -18,10 +19,12 @@ use gateway_messages::SpPort;
 use gateway_test_utils::setup::GatewayTestContext;
 use gateway_types::rot::RotSlot;
 use nexus_types::deployment::ExpectedActiveRotSlot;
+use nexus_types::deployment::ExpectedArtifact;
 use nexus_types::deployment::ExpectedVersion;
 use nexus_types::internal_api::views::UpdateAttemptStatus;
 use nexus_types::internal_api::views::UpdateCompletedHow;
 use nexus_types::inventory::BaseboardId;
+use omicron_common::disk::M2Slot;
 use slog_error_chain::InlineErrorChain;
 use sp_sim::SimulatedSp;
 use std::time::Duration;
@@ -348,6 +351,324 @@ async fn update_takeover() {
     // assert_eq!(target_sp_sim.power_state_changes(), 2);
 
     artifacts.teardown().await;
+    phase2ctx.teardown().await;
+    gwtestctx.teardown().await;
+}
+
+/// Tests a bunch of easy fast-failure cases.
+#[tokio::test]
+async fn basic_failures() {
+    let gwtestctx = gateway_test_utils::setup::test_setup(
+        "test_host_phase_1_basic_failures",
+        SpPort::One,
+    )
+    .await;
+    let log = &gwtestctx.logctx.log;
+    let artifacts = TestArtifacts::new(log).await.unwrap();
+    let phase2ctx = HostPhase2TestContexts::new(&gwtestctx);
+    let host_phase_2_state = phase2ctx.sleds[1].state_rx();
+
+    // We use `fff...fff` as our fake non-matching artifact hash in several
+    // tests below; get the actual artifact hashes reported by our test setup
+    // and ensure none of them match that.
+    let (active_phase_1_hash, inactive_phase_1_hash, phase_1_slot) = {
+        let sp_init = SpTestState::load(&gwtestctx.client(), SpType::Sled, 1)
+            .await
+            .expect("loading initial state");
+        (
+            sp_init.expect_host_phase_1_active_hash(),
+            sp_init.expect_host_phase_1_inactive_hash(),
+            sp_init.expect_host_phase_1_active_slot(),
+        )
+    };
+    let (active_phase_2_hash, inactive_phase_2_hash, boot_disk) = {
+        let sled_init = host_phase_2_state.borrow();
+        let fixme = match sled_init.inactive_slot_artifact() {
+            ExpectedArtifact::NoValidArtifact => todo!(),
+            ExpectedArtifact::Artifact(hash) => hash,
+        };
+        (
+            sled_init.active_slot_artifact(),
+            fixme,
+            sled_init.boot_disk().expect("fake sled has booted"),
+        )
+    };
+    let bad_hash = ArtifactHash([0xff; 32]);
+    assert_ne!(active_phase_1_hash, bad_hash);
+    assert_ne!(active_phase_2_hash, bad_hash);
+    assert_ne!(inactive_phase_1_hash, bad_hash);
+    assert_ne!(inactive_phase_2_hash, bad_hash);
+    assert_eq!(phase_1_slot, M2Slot::A);
+    assert_eq!(boot_disk, M2Slot::A);
+
+    // Test a case of mistaken identity (reported baseboard does not match
+    // the one that we expect).
+    let desc = UpdateDescription {
+        gwtestctx: &gwtestctx,
+        artifacts: &artifacts,
+        sp_type: SpType::Sled,
+        slot_id: 1,
+        artifact_hash: &artifacts.host_phase_1_artifact_hash,
+        override_baseboard_id: Some(BaseboardId {
+            part_number: String::from("i86pc"),
+            serial_number: String::from("SimGimlet0"),
+        }),
+        override_expected_sp_component: ExpectedSpComponent::HostPhase1 {
+            host_phase_2_state: host_phase_2_state.clone(),
+            override_expected_phase_1_slot: None,
+            override_expected_boot_disk: None,
+            override_expected_active_phase_1: None,
+            override_expected_active_phase_2: None,
+            override_expected_inactive_phase_1: None,
+            override_expected_inactive_phase_2: None,
+        },
+        override_progress_timeout: None,
+    };
+
+    desc.setup().await.finish().await.expect_failure(&|error, sp1, sp2| {
+        assert_matches!(error, ApplyUpdateError::PreconditionFailed(..));
+        let message = InlineErrorChain::new(error).to_string();
+        eprintln!("{}", message);
+        assert!(message.contains(
+            "in sled slot 1, expected to find part \"i86pc\" serial \
+                     \"SimGimlet0\", but found part \"i86pc\" serial \
+                     \"SimGimlet01\"",
+        ));
+
+        // No changes should have been made in this case.
+        assert_eq!(sp1, sp2);
+    });
+
+    // Test a case where the active phase 1 slot doesn't match what we expect.
+    let desc = UpdateDescription {
+        gwtestctx: &gwtestctx,
+        artifacts: &artifacts,
+        sp_type: SpType::Sled,
+        slot_id: 1,
+        artifact_hash: &artifacts.host_phase_1_artifact_hash,
+        override_baseboard_id: None,
+        override_expected_sp_component: ExpectedSpComponent::HostPhase1 {
+            host_phase_2_state: host_phase_2_state.clone(),
+            override_expected_phase_1_slot: Some(M2Slot::B),
+            override_expected_boot_disk: None,
+            override_expected_active_phase_1: Some(bad_hash),
+            override_expected_active_phase_2: None,
+            override_expected_inactive_phase_1: None,
+            override_expected_inactive_phase_2: None,
+        },
+        override_progress_timeout: None,
+    };
+
+    desc.setup().await.finish().await.expect_failure(&|error, sp1, sp2| {
+        assert_matches!(error, ApplyUpdateError::PreconditionFailed(..));
+        let message = InlineErrorChain::new(error).to_string();
+        eprintln!("{}", message);
+        assert!(message.contains(
+            "expected to find active host phase 1 slot B, but found A"
+        ));
+
+        // No changes should have been made in this case.
+        assert_eq!(sp1, sp2);
+    });
+
+    // Test a case where the sled boot disk doesn't match what we expect.
+    let desc = UpdateDescription {
+        gwtestctx: &gwtestctx,
+        artifacts: &artifacts,
+        sp_type: SpType::Sled,
+        slot_id: 1,
+        artifact_hash: &artifacts.host_phase_1_artifact_hash,
+        override_baseboard_id: None,
+        override_expected_sp_component: ExpectedSpComponent::HostPhase1 {
+            host_phase_2_state: host_phase_2_state.clone(),
+            override_expected_phase_1_slot: None,
+            override_expected_boot_disk: Some(M2Slot::B),
+            override_expected_active_phase_1: None,
+            override_expected_active_phase_2: None,
+            override_expected_inactive_phase_1: None,
+            override_expected_inactive_phase_2: None,
+        },
+        override_progress_timeout: None,
+    };
+
+    desc.setup().await.finish().await.expect_failure(&|error, sp1, sp2| {
+        assert_matches!(error, ApplyUpdateError::PreconditionFailed(..));
+        let message = InlineErrorChain::new(error).to_string();
+        eprintln!("{}", message);
+        assert!(
+            message
+                .contains("expected to find host OS boot disk B, but found A")
+        );
+
+        // No changes should have been made in this case.
+        assert_eq!(sp1, sp2);
+    });
+
+    // Test a case where the active phase 1 artifact doesn't match what we
+    // expect.
+    let desc = UpdateDescription {
+        gwtestctx: &gwtestctx,
+        artifacts: &artifacts,
+        sp_type: SpType::Sled,
+        slot_id: 1,
+        artifact_hash: &artifacts.host_phase_1_artifact_hash,
+        override_baseboard_id: None,
+        override_expected_sp_component: ExpectedSpComponent::HostPhase1 {
+            host_phase_2_state: host_phase_2_state.clone(),
+            override_expected_phase_1_slot: None,
+            override_expected_boot_disk: None,
+            override_expected_active_phase_1: Some(bad_hash),
+            override_expected_active_phase_2: None,
+            override_expected_inactive_phase_1: None,
+            override_expected_inactive_phase_2: None,
+        },
+        override_progress_timeout: None,
+    };
+
+    desc.setup().await.finish().await.expect_failure(&|error, sp1, sp2| {
+        assert_matches!(error, ApplyUpdateError::PreconditionFailed(..));
+        let message = InlineErrorChain::new(error).to_string();
+        eprintln!("{}", message);
+        assert!(message.contains(&format!(
+            "expected to find active host_phase_1 artifact {bad_hash}, \
+             but found {active_phase_1_hash}"
+        )));
+
+        // No changes should have been made in this case.
+        assert_eq!(sp1, sp2);
+    });
+
+    // Test a case where the inactive phase 1 artifact doesn't match what it
+    // should.
+    let desc = UpdateDescription {
+        gwtestctx: &gwtestctx,
+        artifacts: &artifacts,
+        sp_type: SpType::Sled,
+        slot_id: 1,
+        artifact_hash: &artifacts.host_phase_1_artifact_hash,
+        override_baseboard_id: None,
+        override_expected_sp_component: ExpectedSpComponent::HostPhase1 {
+            host_phase_2_state: host_phase_2_state.clone(),
+            override_expected_phase_1_slot: None,
+            override_expected_boot_disk: None,
+            override_expected_active_phase_1: None,
+            override_expected_active_phase_2: None,
+            override_expected_inactive_phase_1: Some(bad_hash),
+            override_expected_inactive_phase_2: None,
+        },
+        override_progress_timeout: None,
+    };
+
+    desc.setup().await.finish().await.expect_failure(&|error, sp1, sp2| {
+        assert_matches!(error, ApplyUpdateError::PreconditionFailed(..));
+        let message = InlineErrorChain::new(error).to_string();
+        eprintln!("{}", message);
+        assert!(message.contains(&format!(
+            "expected to find inactive host_phase_1 artifact {bad_hash}, \
+             but found Artifact(ArtifactHash(\"{inactive_phase_1_hash}\"))"
+        )));
+
+        // No changes should have been made in this case.
+        assert_eq!(sp1, sp2);
+    });
+
+    // Test a case where the active phase 2 artifact doesn't match what it
+    // should.
+    let desc = UpdateDescription {
+        gwtestctx: &gwtestctx,
+        artifacts: &artifacts,
+        sp_type: SpType::Sled,
+        slot_id: 1,
+        artifact_hash: &artifacts.host_phase_1_artifact_hash,
+        override_baseboard_id: None,
+        override_expected_sp_component: ExpectedSpComponent::HostPhase1 {
+            host_phase_2_state: host_phase_2_state.clone(),
+            override_expected_phase_1_slot: None,
+            override_expected_boot_disk: None,
+            override_expected_active_phase_1: None,
+            override_expected_active_phase_2: Some(bad_hash),
+            override_expected_inactive_phase_1: None,
+            override_expected_inactive_phase_2: None,
+        },
+        override_progress_timeout: None,
+    };
+    desc.setup().await.finish().await.expect_failure(&|error, sp1, sp2| {
+        assert_matches!(error, ApplyUpdateError::PreconditionFailed(..));
+        let message = InlineErrorChain::new(error).to_string();
+        eprintln!("{}", message);
+        assert!(message.contains(&format!(
+            "expected to find active host_phase_2 artifact {bad_hash}, \
+             but found {active_phase_2_hash}"
+        )));
+
+        // No changes should have been made in this case.
+        assert_eq!(sp1, sp2);
+    });
+
+    // Test a case where the inactive phase 2 artifact doesn't match what it
+    // should.
+    let desc = UpdateDescription {
+        gwtestctx: &gwtestctx,
+        artifacts: &artifacts,
+        sp_type: SpType::Sled,
+        slot_id: 1,
+        artifact_hash: &artifacts.host_phase_1_artifact_hash,
+        override_baseboard_id: None,
+        override_expected_sp_component: ExpectedSpComponent::HostPhase1 {
+            host_phase_2_state: host_phase_2_state.clone(),
+            override_expected_phase_1_slot: None,
+            override_expected_boot_disk: None,
+            override_expected_active_phase_1: None,
+            override_expected_active_phase_2: None,
+            override_expected_inactive_phase_1: None,
+            override_expected_inactive_phase_2: Some(
+                ExpectedArtifact::Artifact(bad_hash),
+            ),
+        },
+        override_progress_timeout: None,
+    };
+
+    desc.setup().await.finish().await.expect_failure(&|error, sp1, sp2| {
+        assert_matches!(error, ApplyUpdateError::PreconditionFailed(..));
+        let message = InlineErrorChain::new(error).to_string();
+        eprintln!("{}", message);
+        assert!(message.contains(&format!(
+            "expected to find inactive host_phase_2 artifact {bad_hash}, \
+             but found Artifact(ArtifactHash(\"{inactive_phase_2_hash}\"))"
+        )));
+
+        // No changes should have been made in this case.
+        assert_eq!(sp1, sp2);
+    });
+
+    // Test a case where we fail to fetch the artifact.  We simulate this by
+    // tearing down our artifact server before the update starts.
+    let desc = UpdateDescription {
+        gwtestctx: &gwtestctx,
+        artifacts: &artifacts,
+        sp_type: SpType::Sled,
+        slot_id: 1,
+        artifact_hash: &artifacts.host_phase_1_artifact_hash,
+        override_baseboard_id: None,
+        override_expected_sp_component: ExpectedSpComponent::HostPhase1 {
+            host_phase_2_state: host_phase_2_state.clone(),
+            override_expected_phase_1_slot: None,
+            override_expected_boot_disk: None,
+            override_expected_active_phase_1: None,
+            override_expected_active_phase_2: None,
+            override_expected_inactive_phase_1: None,
+            override_expected_inactive_phase_2: None,
+        },
+        override_progress_timeout: None,
+    };
+    let in_progress = desc.setup().await;
+    artifacts.teardown().await;
+    in_progress.finish().await.expect_failure(&|error, sp1, sp2| {
+        assert_matches!(error, ApplyUpdateError::FetchArtifact(..));
+        // No changes should have been made in this case.
+        assert_eq!(sp1, sp2);
+    });
+
     phase2ctx.teardown().await;
     gwtestctx.teardown().await;
 }

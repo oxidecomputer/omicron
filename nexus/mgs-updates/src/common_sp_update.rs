@@ -361,7 +361,7 @@ pub enum PrecheckError {
     WrongActiveVersion { expected: ArtifactVersion, found: String },
 
     #[error(
-        "expected to find active {kind} artifact {expected}, but found {found:?}"
+        "expected to find active {kind} artifact {expected}, but found {found}"
     )]
     WrongActiveArtifact {
         kind: ArtifactKind,

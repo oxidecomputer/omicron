@@ -55,7 +55,7 @@ impl HostPhase2State {
         }
     }
 
-    fn boot_disk(&self) -> Option<M2Slot> {
+    pub fn boot_disk(&self) -> Option<M2Slot> {
         match *self.sp_sim_power_state.borrow() {
             GimletPowerState::A2 => None,
             GimletPowerState::A0(slot) => Some(slot),
