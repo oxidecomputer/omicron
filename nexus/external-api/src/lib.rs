@@ -1048,24 +1048,6 @@ pub trait NexusExternalApi {
         query_params: Query<params::OptionalProjectSelector>,
     ) -> Result<HttpResponseDeleted, HttpError>;
 
-    /// Fetch disk metrics
-    #[endpoint {
-        method = GET,
-        path = "/v1/disks/{disk}/metrics/{metric}",
-        tags = ["disks"],
-    }]
-    async fn disk_metrics_list(
-        rqctx: RequestContext<Self::Context>,
-        path_params: Path<params::DiskMetricsPath>,
-        query_params: Query<
-            PaginationParams<params::ResourceMetrics, params::ResourceMetrics>,
-        >,
-        selector_params: Query<params::OptionalProjectSelector>,
-    ) -> Result<
-        HttpResponseOk<ResultsPage<oximeter_types::Measurement>>,
-        HttpError,
-    >;
-
     /// Start importing blocks into disk
     ///
     /// Start the process of importing blocks into a disk
