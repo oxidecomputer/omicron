@@ -653,16 +653,18 @@ impl PlanningZoneUpdatesStepReport {
         }
     }
 
+    pub fn waiting_on(waiting_on: ZoneUpdatesWaitingOn) -> Self {
+        let mut new = Self::new();
+        new.waiting_on = Some(waiting_on);
+        new
+    }
+
     pub fn is_empty(&self) -> bool {
         self.waiting_on.is_none()
             && self.out_of_date_zones.is_empty()
             && self.expunged_zones.is_empty()
             && self.updated_zones.is_empty()
             && self.unsafe_zones.is_empty()
-    }
-
-    pub fn waiting_on(&mut self, waiting_on: ZoneUpdatesWaitingOn) {
-        self.waiting_on = Some(waiting_on);
     }
 
     pub fn out_of_date_zone(

@@ -161,7 +161,22 @@ impl<'a> Planner<'a> {
         let noop_image_source = self.do_plan_noop_image_source()?;
         let mgs_updates = self.do_plan_mgs_updates();
         let add = self.do_plan_add(&mgs_updates)?;
-        let zone_updates = self.do_plan_zone_updates(&add, &mgs_updates)?;
+        let zone_updates = if add.any_discretionary_zones_placed() {
+            // Do not update any zones if we've added any discretionary zones
+            // (e.g., in response to policy changes) ...
+            PlanningZoneUpdatesStepReport::waiting_on(
+                ZoneUpdatesWaitingOn::DiscretionaryZones,
+            )
+        } else if !mgs_updates.is_empty() {
+            // ... or if there are still pending updates for the RoT / SP /
+            // Host OS / etc.
+            // TODO This is not quite right.  See oxidecomputer/omicron#8285.
+            PlanningZoneUpdatesStepReport::waiting_on(
+                ZoneUpdatesWaitingOn::PendingMgsUpdates,
+            )
+        } else {
+            self.do_plan_zone_updates(&mgs_updates)?
+        };
         let cockroachdb_settings = self.do_plan_cockroachdb_settings();
         Ok(PlanningReport {
             blueprint_id: self.blueprint.new_blueprint_id(),
@@ -973,7 +988,7 @@ impl<'a> Planner<'a> {
     /// Attempts to place `num_zones_to_add` new zones of `kind`.
     ///
     /// It is not an error if there are too few eligible sleds to start a
-    /// sufficient number of zones; instead, we'll log a warning and start as
+    /// sufficient number of zones; instead, we'll report it and start as
     /// many as we can (up to `num_zones_to_add`).
     fn add_discretionary_zones(
         &mut self,
@@ -1100,38 +1115,15 @@ impl<'a> Planner<'a> {
     /// Update at most one existing zone to use a new image source.
     fn do_plan_zone_updates(
         &mut self,
-        add: &PlanningAddStepReport,
         mgs_updates: &PlanningMgsUpdatesStepReport,
     ) -> Result<PlanningZoneUpdatesStepReport, Error> {
         let mut report = PlanningZoneUpdatesStepReport::new();
 
-        // Do not update any zones if we've added any discretionary zones
-        // (e.g., in response to policy changes) ...
-        if add.any_discretionary_zones_placed() {
-            report.waiting_on(ZoneUpdatesWaitingOn::DiscretionaryZones);
-            return Ok(report);
-        }
-
-        // ... or if there are still pending updates for the RoT / SP /
-        // Host OS / etc.
-        // TODO This is not quite right.  See oxidecomputer/omicron#8285.
-        if !mgs_updates.is_empty() {
-            report.waiting_on(ZoneUpdatesWaitingOn::PendingMgsUpdates);
-            return Ok(report);
-        }
-
-        // We are only interested in non-decommissioned sleds with
-        // running NTP zones (TODO: check time sync).
+        // We are only interested in non-decommissioned sleds.
         let sleds = self
             .input
             .all_sleds(SledFilter::Commissioned)
-            .filter_map(|(sled_id, _details)| {
-                if add.sleds_waiting_for_ntp_zone.contains(&sled_id) {
-                    None
-                } else {
-                    Some(sled_id)
-                }
-            })
+            .map(|(id, _details)| id)
             .collect::<Vec<_>>();
 
         // Wait for zones to appear up-to-date in the inventory.
