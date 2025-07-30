@@ -6,7 +6,6 @@
 
 use anyhow::Context;
 use anyhow::anyhow;
-use anyhow::bail;
 use clap::Args;
 use clap::ColorChoice;
 use clap::Parser;
@@ -20,7 +19,6 @@ use nexus_mgs_updates::ArtifactCache;
 use nexus_mgs_updates::MgsUpdateDriver;
 use nexus_types::deployment::ExpectedActiveHostOsSlot;
 use nexus_types::deployment::ExpectedActiveRotSlot;
-use nexus_types::deployment::ExpectedArtifact;
 use nexus_types::deployment::ExpectedInactiveHostOsArtifact;
 use nexus_types::deployment::ExpectedVersion;
 use nexus_types::deployment::PendingMgsUpdate;
@@ -471,11 +469,11 @@ enum Component {
         #[arg(long)]
         expected_slot_a_phase_1: ArtifactHash,
         #[arg(long)]
-        expected_slot_a_phase_2: ExpectedArtifact,
+        expected_slot_a_phase_2: ArtifactHash,
         #[arg(long)]
         expected_slot_b_phase_1: ArtifactHash,
         #[arg(long)]
-        expected_slot_b_phase_2: ExpectedArtifact,
+        expected_slot_b_phase_2: ArtifactHash,
         #[arg(long)]
         sled_agent_address: SocketAddrV6,
     },
@@ -578,13 +576,7 @@ fn cmd_set(
                         phase_1_slot: expected_active_slot,
                         boot_disk: expected_boot_disk,
                         phase_1: active_phase_1,
-                        phase_2: match active_phase_2 {
-                            ExpectedArtifact::NoValidArtifact => bail!(
-                                "must provide phase 2 artifact hash for \
-                                 active slot ({expected_active_slot})"
-                            ),
-                            ExpectedArtifact::Artifact(hash) => hash,
-                        },
+                        phase_2: active_phase_2,
                     },
                     expected_inactive_artifact:
                         ExpectedInactiveHostOsArtifact {

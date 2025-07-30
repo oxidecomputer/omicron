@@ -903,7 +903,7 @@ impl Handler {
             model,
             revision: 0,
             base_mac_address: [0; 6],
-            power_state: self.power_state.borrow().clone().into(),
+            power_state: (*self.power_state.borrow()).into(),
             rot: Ok(rot_state_v2(self.update_state.rot_state())),
         }
     }
