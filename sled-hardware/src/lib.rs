@@ -151,6 +151,15 @@ impl MemoryReservations {
 }
 
 /// Detects the current sled's CPU family using the CPUID instruction.
+///
+/// TODO: Ideally we would call into libtopo and pass along the information
+/// identified there. See https://github.com/oxidecomputer/omicron/issues/8732.
+///
+/// Everything here is duplicative with CPU identification done by the kernel.
+/// You'll even find a very similar (but much more comprehensive) AMD family
+/// mapping at `amd_revmap` in `usr/src/uts/intel/os/cpuid_subr.c`. But
+/// sled-agent does not yet know about libtopo, getting topo snapshots, walking
+/// them, or any of that, so the parsing is performed again here.
 #[cfg(target_arch = "x86_64")]
 pub fn detect_cpu_family(log: &Logger) -> sled_hardware_types::CpuFamily {
     use core::arch::x86_64::__cpuid_count;
@@ -200,7 +209,7 @@ pub fn detect_cpu_family(log: &Logger) -> sled_hardware_types::CpuFamily {
     // - If the "base" family value is less than 0xF, the "base" model stands.
     //   Otherwise, four additional bits of the model come from eax[19:16].
     //
-    // If the computed family number is 0xF or greater, that implies the "bsae"
+    // If the computed family number is 0xF or greater, that implies the "base"
     // family was 0xF or greater as well.
     let mut model = (leaf_1.eax & 0x000000F0) >> 4;
     if family >= 0xF {
@@ -210,9 +219,12 @@ pub fn detect_cpu_family(log: &Logger) -> sled_hardware_types::CpuFamily {
     info!(
         log,
         "read CPUID leaf 1 to detect CPU family";
-        "values" => ?leaf_1,
-        "family" => family,
-        "model" => model,
+        "leaf1.eax" => format_args!("{:#08x}", leaf_1.eax),
+        "leaf1.ebx" => format_args!("{:#08x}", leaf_1.ebx),
+        "leaf1.ecx" => format_args!("{:#08x}", leaf_1.ecx),
+        "leaf1.edx" => format_args!("{:#08x}", leaf_1.edx),
+        "parsed family" => format_args!("{family:#x}"),
+        "parsed model" => format_args!("{model:#x}"),
     );
 
     // Match on the family/model ranges we've detected. Notably client parts are
