@@ -3409,6 +3409,15 @@ pub struct TufArtifactMeta {
 
     /// The size of the artifact in bytes.
     pub size: u64,
+
+    // TODO-K: This where we want the rkth?
+    // clean up, this approach is a bit shit
+    // maybe put all of caboose information?
+    // maybe use RotSignData?
+    //
+    // If this is an artifact with a signed binary
+    // include the sign.
+    pub sign: Option<Vec<u8>>,
 }
 
 /// Data about a successful TUF repo import into Nexus.

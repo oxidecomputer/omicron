@@ -37,6 +37,13 @@ pub struct ArtifactId {
 
     /// The kind of artifact this is.
     pub kind: ArtifactKind,
+    // TODO-K: This where we want the rkth?
+    // clean up, this approach is a bit shit
+    // maybe put all of caboose information?
+    //
+    // If this is an artifact with a signed binary
+    // include the sign.
+    // pub sign: Option<String>,
 }
 
 /// Used for user-friendly messages.
@@ -52,6 +59,9 @@ impl From<Artifact> for ArtifactId {
             name: artifact.name,
             version: artifact.version,
             kind: artifact.kind,
+            // TODO-K: A drawback of having the sign live here,
+            // is that we'd have to alter Artifact maybe?
+            //sign: artifact.sign,
         }
     }
 }

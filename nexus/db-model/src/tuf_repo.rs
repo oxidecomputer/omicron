@@ -165,6 +165,7 @@ pub struct TufArtifact {
     pub sha256: ArtifactHash,
     artifact_size: i64,
     pub generation_added: Generation,
+    pub sign: Option<Vec<u8>>,
 }
 
 impl TufArtifact {
@@ -184,6 +185,8 @@ impl TufArtifact {
             sha256,
             artifact_size: artifact_size as i64,
             generation_added: generation_added.into(),
+            // TODO-K: Is this what we want?
+            sign: None,
         }
     }
 
@@ -215,6 +218,7 @@ impl TufArtifact {
             },
             hash: self.sha256.into(),
             size: self.artifact_size as u64,
+            sign: self.sign,
         }
     }
 
