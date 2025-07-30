@@ -789,7 +789,7 @@ impl IdOrdItem for RunningSagaInfo {
 #[derive(Debug, Clone, Serialize, JsonSchema)]
 pub struct HeldDbClaimInfo {
     pub id: u128,
-    pub held_for: Duration,
+    pub held_since: DateTime<Utc>,
     pub debug: String,
 }
 

@@ -187,7 +187,7 @@ impl<U, T> RunnableQuery<U> for T where
 
 /// DataStore quiesce configuration and state
 #[derive(Debug, Clone)]
-struct Quiesce {
+pub(crate) struct Quiesce {
     new_claims_allowed: DbClaimsAllowed,
     claims_held: IdOrdMap<HeldDbClaimInfo>,
 }
@@ -197,7 +197,7 @@ struct Quiesce {
 /// This is used by Nexus quiesce to disallow creating new database connections
 /// when we're trying to quiesce Nexus.
 #[derive(Debug, Clone, Copy, Eq, PartialEq)]
-enum DbClaimsAllowed {
+pub(crate) enum DbClaimsAllowed {
     /// New claims may be made (normal condition)
     Allowed,
     /// New claims may not be made (happens during quiesce)
@@ -415,10 +415,7 @@ impl DataStore {
     pub(super) async fn pool_connection_unauthorized(
         &self,
     ) -> Result<DataStoreConnection, Error> {
-        let connection = self.pool.claim().await.map_err(|err| {
-            Error::unavail(&format!("Failed to access DB connection: {err}"))
-        })?;
-        Ok(connection)
+        Ok(self.pool.claim().await)
     }
 
     /// For testing only. This isn't cfg(test) because nexus needs access to it.
