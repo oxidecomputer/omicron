@@ -19,7 +19,6 @@ use gateway_messages::SpPort;
 use gateway_test_utils::setup::GatewayTestContext;
 use gateway_types::rot::RotSlot;
 use nexus_types::deployment::ExpectedActiveRotSlot;
-use nexus_types::deployment::ExpectedArtifact;
 use nexus_types::deployment::ExpectedVersion;
 use nexus_types::internal_api::views::UpdateAttemptStatus;
 use nexus_types::internal_api::views::UpdateCompletedHow;
@@ -383,13 +382,9 @@ async fn basic_failures() {
     };
     let (active_phase_2_hash, inactive_phase_2_hash, boot_disk) = {
         let sled_init = host_phase_2_state.borrow();
-        let fixme = match sled_init.inactive_slot_artifact() {
-            ExpectedArtifact::NoValidArtifact => todo!(),
-            ExpectedArtifact::Artifact(hash) => hash,
-        };
         (
             sled_init.active_slot_artifact(),
-            fixme,
+            sled_init.inactive_slot_artifact(),
             sled_init.boot_disk().expect("fake sled has booted"),
         )
     };
@@ -621,9 +616,7 @@ async fn basic_failures() {
             override_expected_active_phase_1: None,
             override_expected_active_phase_2: None,
             override_expected_inactive_phase_1: None,
-            override_expected_inactive_phase_2: Some(
-                ExpectedArtifact::Artifact(bad_hash),
-            ),
+            override_expected_inactive_phase_2: Some(bad_hash),
         },
         override_progress_timeout: None,
     };

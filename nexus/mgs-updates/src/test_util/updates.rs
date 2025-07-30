@@ -25,7 +25,6 @@ use gateway_test_utils::setup::GatewayTestContext;
 use gateway_types::rot::RotSlot;
 use nexus_types::deployment::ExpectedActiveHostOsSlot;
 use nexus_types::deployment::ExpectedActiveRotSlot;
-use nexus_types::deployment::ExpectedArtifact;
 use nexus_types::deployment::ExpectedInactiveHostOsArtifact;
 use nexus_types::deployment::ExpectedVersion;
 use nexus_types::deployment::PendingMgsUpdate;
@@ -69,7 +68,7 @@ pub enum ExpectedSpComponent {
         override_expected_active_phase_1: Option<ArtifactHash>,
         override_expected_active_phase_2: Option<ArtifactHash>,
         override_expected_inactive_phase_1: Option<ArtifactHash>,
-        override_expected_inactive_phase_2: Option<ExpectedArtifact>,
+        override_expected_inactive_phase_2: Option<ArtifactHash>,
     },
 }
 

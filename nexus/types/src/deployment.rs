@@ -1615,7 +1615,7 @@ impl slog::KV for ExpectedActiveHostOsSlot {
 pub struct ExpectedInactiveHostOsArtifact {
     // TODO-john comments
     pub phase_1: ArtifactHash,
-    pub phase_2: ExpectedArtifact,
+    pub phase_2: ArtifactHash,
 }
 
 impl slog::KV for ExpectedInactiveHostOsArtifact {
@@ -1666,47 +1666,6 @@ impl fmt::Display for ExpectedVersion {
         match self {
             ExpectedVersion::NoValidVersion => f.write_str("invalid"),
             ExpectedVersion::Version(v) => v.fmt(f),
-        }
-    }
-}
-
-/// Describes the artifact that we expect to find in some firmware slot
-#[derive(
-    Clone,
-    Copy,
-    Debug,
-    Eq,
-    PartialEq,
-    JsonSchema,
-    Deserialize,
-    Serialize,
-    Diffable,
-)]
-#[serde(tag = "kind", content = "artifact", rename_all = "snake_case")]
-pub enum ExpectedArtifact {
-    /// We expect to find _no_ valid artifact in this slot
-    NoValidArtifact,
-    /// We expect to find the specified artifact in this slot
-    Artifact(ArtifactHash),
-}
-
-impl FromStr for ExpectedArtifact {
-    type Err = <ArtifactHash as FromStr>::Err;
-
-    fn from_str(s: &str) -> Result<Self, Self::Err> {
-        if s == "invalid" {
-            Ok(Self::NoValidArtifact)
-        } else {
-            Ok(Self::Artifact(s.parse()?))
-        }
-    }
-}
-
-impl fmt::Display for ExpectedArtifact {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            Self::NoValidArtifact => f.write_str("invalid"),
-            Self::Artifact(v) => v.fmt(f),
         }
     }
 }

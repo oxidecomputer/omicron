@@ -16,7 +16,6 @@ use futures::future::BoxFuture;
 use gateway_client::types::SpType;
 use gateway_client::types::SpUpdateStatus;
 use gateway_types::rot::RotSlot;
-use nexus_types::deployment::ExpectedArtifact;
 use nexus_types::deployment::ExpectedVersion;
 use nexus_types::deployment::PendingMgsUpdate;
 use nexus_types::deployment::PendingMgsUpdateDetails;
@@ -383,7 +382,7 @@ pub enum PrecheckError {
     )]
     WrongInactiveArtifact {
         kind: ArtifactKind,
-        expected: ExpectedArtifact,
+        expected: ArtifactHash,
         found: FoundArtifact,
     },
 
@@ -484,33 +483,17 @@ pub enum FoundArtifact {
 impl FoundArtifact {
     pub fn matches(
         &self,
-        expected: &ExpectedArtifact,
+        expected: ArtifactHash,
         kind: ArtifactKind,
     ) -> Result<(), PrecheckError> {
-        match (expected, &self) {
-            // expected garbage, found garbage
-            (
-                ExpectedArtifact::NoValidArtifact,
-                FoundArtifact::MissingArtifact,
-            ) => (),
-            // expected a specific artifact and found it
-            (
-                ExpectedArtifact::Artifact(artifact),
-                FoundArtifact::Artifact(found),
-            ) if artifact == found => (),
-            // anything else is a mismatch
-            (ExpectedArtifact::NoValidArtifact, FoundArtifact::Artifact(_))
-            | (ExpectedArtifact::Artifact(_), FoundArtifact::MissingArtifact)
-            | (ExpectedArtifact::Artifact(_), FoundArtifact::Artifact(_)) => {
-                return Err(PrecheckError::WrongInactiveArtifact {
-                    kind,
-                    expected: *expected,
-                    found: self.clone(),
-                });
-            }
-        };
-
-        Ok(())
+        match self {
+            FoundArtifact::Artifact(hash) if *hash == expected => Ok(()),
+            _ => Err(PrecheckError::WrongInactiveArtifact {
+                kind,
+                expected,
+                found: self.clone(),
+            }),
+        }
     }
 }
 

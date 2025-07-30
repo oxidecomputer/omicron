@@ -131,7 +131,6 @@ use gateway_client::types::PowerState;
 use gateway_client::types::SpComponentFirmwareSlot;
 use gateway_client::types::SpType;
 use nexus_sled_agent_shared::inventory::BootPartitionContents;
-use nexus_types::deployment::ExpectedArtifact;
 use nexus_types::deployment::PendingMgsUpdate;
 use nexus_types::deployment::PendingMgsUpdateHostPhase1Details;
 use omicron_common::disk::M2Slot;
@@ -464,9 +463,7 @@ impl ReconfiguratorHostPhase1Updater {
         } else {
             Err(PrecheckError::WrongInactiveArtifact {
                 kind: ArtifactKind::HOST_PHASE_1,
-                expected: ExpectedArtifact::Artifact(
-                    expected_inactive_artifact.phase_1,
-                ),
+                expected: expected_inactive_artifact.phase_1,
                 found: FoundArtifact::Artifact(found_inactive_artifact),
             })
         }
@@ -634,7 +631,7 @@ impl ReconfiguratorHostPhase1Updater {
             Err(_) => FoundArtifact::MissingArtifact,
         };
         found_inactive.matches(
-            &expected_inactive_artifact.phase_2,
+            expected_inactive_artifact.phase_2,
             ArtifactKind::HOST_PHASE_2,
         )
     }

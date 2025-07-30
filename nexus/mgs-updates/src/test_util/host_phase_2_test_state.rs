@@ -8,7 +8,6 @@ use dropshot::HttpServer;
 use dropshot::ServerBuilder;
 use nexus_sled_agent_shared::inventory::Baseboard;
 use nexus_sled_agent_shared::inventory::SledRole;
-use nexus_types::deployment::ExpectedArtifact;
 use omicron_common::disk::M2Slot;
 use omicron_uuid_kinds::SledUuid;
 use slog::Logger;
@@ -21,32 +20,25 @@ use tufaceous_artifact::ArtifactHash;
 #[derive(Debug)]
 pub struct HostPhase2State {
     pub sled_agent_address: SocketAddrV6,
-    pub slot_a_artifact: ExpectedArtifact,
-    pub slot_b_artifact: ExpectedArtifact,
+    pub slot_a_artifact: ArtifactHash,
+    pub slot_b_artifact: ArtifactHash,
     sp_sim_power_state: watch::Receiver<GimletPowerState>,
 }
 
 impl HostPhase2State {
     pub fn active_slot_artifact(&self) -> ArtifactHash {
         let (active, _inactive) = self.active_inactive_artifacts();
-        match active {
-            ExpectedArtifact::Artifact(hash) => hash,
-            ExpectedArtifact::NoValidArtifact => {
-                panic!("boot disk should have a valid artifact")
-            }
-        }
+        active
     }
 
-    pub fn inactive_slot_artifact(&self) -> ExpectedArtifact {
+    pub fn inactive_slot_artifact(&self) -> ArtifactHash {
         let (_active, inactive) = self.active_inactive_artifacts();
         inactive
     }
 
     // Returns (active, inactive); helper to avoid needing to unpack the
     // active/inactive slot in both of this method's callers.
-    fn active_inactive_artifacts(
-        &self,
-    ) -> (ExpectedArtifact, ExpectedArtifact) {
+    fn active_inactive_artifacts(&self) -> (ArtifactHash, ArtifactHash) {
         let a = self.slot_a_artifact;
         let b = self.slot_b_artifact;
         match self.boot_disk().expect("sp-sim should be powered on") {
@@ -78,8 +70,8 @@ impl HostPhase2TestContext {
             // below. We have to construct this first to give it the receiving
             // half of this watch channel in its server context.
             sled_agent_address: "[::]:0".parse().unwrap(),
-            slot_a_artifact: ExpectedArtifact::Artifact(ArtifactHash([0; 32])),
-            slot_b_artifact: ExpectedArtifact::Artifact(ArtifactHash([1; 32])),
+            slot_a_artifact: ArtifactHash([0; 32]),
+            slot_b_artifact: ArtifactHash([1; 32]),
             sp_sim_power_state,
         });
 
@@ -179,7 +171,6 @@ mod api_impl {
     use nexus_sled_agent_shared::inventory::SledRole;
     use nexus_sled_agent_shared::inventory::ZoneImageResolverInventory;
     use nexus_sled_agent_shared::inventory::ZoneManifestInventory;
-    use nexus_types::deployment::ExpectedArtifact;
     use omicron_common::api::external::Generation;
     use omicron_common::api::internal::nexus::DiskRuntimeState;
     use omicron_common::api::internal::nexus::SledVmmState;
@@ -246,12 +237,9 @@ mod api_impl {
 
             // Construct the `boot_partitions` inventory field (the one our
             // tests really care about) from our current state.
-            let make_details = |artifact| match artifact {
-                ExpectedArtifact::NoValidArtifact => {
-                    Err("no valid artifact".to_string())
-                }
-                ExpectedArtifact::Artifact(hash) => Ok(BootPartitionDetails {
-                    artifact_hash: hash,
+            let make_details = |artifact_hash| {
+                Ok(BootPartitionDetails {
+                    artifact_hash,
                     artifact_size: 1000,
                     header: BootImageHeader {
                         flags: 0,
@@ -261,7 +249,7 @@ mod api_impl {
                         sha256: [0x1d; 32],
                         image_name: "fake header for tests".to_string(),
                     },
-                }),
+                })
             };
             let boot_partitions = BootPartitionContents {
                 boot_disk: Ok(boot_disk),
