@@ -785,6 +785,9 @@ pub enum SledCpuFamily {
 
     /// The sled has an AMD Turin (Zen 5) processor.
     AmdTurin,
+
+    /// The sled has an AMD Turin Dense (Zen 5c) processor.
+    AmdTurinDense,
 }
 
 /// An operator's view of an instance running on a given sled

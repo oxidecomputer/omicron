@@ -262,10 +262,10 @@ pub fn detect_cpu_family(log: &Logger) -> sled_hardware_types::CpuFamily {
         }
         0x1A if model <= 0x0F => CpuFamily::AmdTurin,
         0x1A if model >= 0x10 && model <= 0x1F => {
-            // These are Turin Dense, but from a CPU feature perspective they're
-            // equivalently capable to Turin, so for our purposes they're the
-            // same.
-            CpuFamily::AmdTurin
+            // These are Turin Dense. From a CPU feature perspective they're
+            // equivalently capable to Turin, but they are physically distinct
+            // and sled operators should be able to see that.
+            CpuFamily::AmdTurinDense
         }
         0x1A if model >= 0x40 && model <= 0x4F => {
             // These are client Zen 5 parts aka Granite Ridge. Won't be in a

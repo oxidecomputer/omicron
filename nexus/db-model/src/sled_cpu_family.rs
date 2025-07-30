@@ -23,6 +23,7 @@ impl_enum_type!(
     Unknown => b"unknown"
     AmdMilan => b"amd_milan"
     AmdTurin => b"amd_turin"
+    AmdTurinDense => b"amd_turin_dense"
 );
 
 impl From<nexus_types::internal_api::params::SledCpuFamily> for SledCpuFamily {

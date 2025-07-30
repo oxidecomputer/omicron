@@ -199,7 +199,10 @@ CREATE TYPE IF NOT EXISTS omicron.public.sled_cpu_family AS ENUM (
     'amd_milan',
 
     -- AMD Turin, or lab CPU close enough that sled-agent reported it as one.
-    'amd_turin'
+    'amd_turin',
+
+    -- AMD Turin Dense. There are no "Turin Dense-likes", so this is precise.
+    'amd_turin_dense'
 );
 
 CREATE TABLE IF NOT EXISTS omicron.public.sled (

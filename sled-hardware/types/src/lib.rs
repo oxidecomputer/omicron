@@ -101,4 +101,5 @@ pub enum CpuFamily {
     Unknown,
     AmdMilan,
     AmdTurin,
+    AmdTurinDense,
 }

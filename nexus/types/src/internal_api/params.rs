@@ -46,6 +46,10 @@ pub enum SledCpuFamily {
     /// AMD Turin processors (or very close). Could be an actual Turin in a
     /// Cosmo, or a close-to-Turin client Zen 5 part.
     AmdTurin,
+
+    /// AMD Turin Dense processors. There are no "Turin Dense-like" CPUs unlike
+    /// other cases, so this means a bona fide Zen 5c Turin Dense part.
+    AmdTurinDense,
 }
 
 /// Sent by a sled agent to Nexus to inform about resources
