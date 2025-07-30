@@ -5167,6 +5167,7 @@ dependencies = [
  "anyhow",
  "assert_matches",
  "dns-server",
+ "dns-server-api",
  "dns-service-client",
  "dropshot",
  "expectorate",
@@ -6227,6 +6228,7 @@ dependencies = [
  "strum 0.27.2",
  "thiserror 2.0.12",
  "tokio",
+ "usdt",
  "uuid",
 ]
 
@@ -7923,6 +7925,7 @@ dependencies = [
  "tufaceous-lib",
  "update-common",
  "update-engine",
+ "usdt",
  "uuid",
  "zip 4.2.0",
 ]
@@ -8186,6 +8189,7 @@ dependencies = [
  "toml 0.8.23",
  "tufaceous-artifact",
  "tufaceous-lib",
+ "update-common",
 ]
 
 [[package]]

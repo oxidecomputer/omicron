@@ -13,7 +13,6 @@ use nexus_db_lookup::lookup;
 use nexus_db_model::IpAttachState;
 use nexus_db_queries::authz;
 use nexus_db_queries::context::OpContext;
-use nexus_db_queries::db::model::IpKind;
 use nexus_types::external_api::params;
 use nexus_types::external_api::views;
 use omicron_common::api::external::CreateResult;
@@ -44,9 +43,7 @@ impl super::Nexus {
             .await?
             .into_iter()
             .filter_map(|ip| {
-                if ip.kind == IpKind::SNat
-                    || ip.state != IpAttachState::Attached
-                {
+                if ip.state != IpAttachState::Attached {
                     None
                 } else {
                     Some(ip.try_into().unwrap())

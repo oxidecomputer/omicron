@@ -1641,9 +1641,15 @@ impl<'a> Planner<'a> {
 
         // Condition 3 above.
         {
-            // XXX: This doesn't consider sleds that aren't present in this
-            // inventory run. It probably should. Would likely require storing
-            // some state on the blueprint.
+            // Note: actions_by_sled doesn't consider sleds that aren't present
+            // in this inventory run. This can in very rare cases cause issues
+            // where both (a) a server has an error fetching override
+            // information (should never happen in normal operation) and (b)
+            // there's a blip in inventory data. We consider this an acceptable
+            // risk.
+            //
+            // In the future, we could potentially address this by not
+            // proceeding with steps if any sleds are missing from inventory.
             let sleds_with_mupdate_override_errors: BTreeSet<_> =
                 actions_by_sled
                     .iter()

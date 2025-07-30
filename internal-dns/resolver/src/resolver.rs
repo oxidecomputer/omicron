@@ -878,7 +878,7 @@ mod test {
                     "api-version"
                         .parse::<reqwest::header::HeaderName>()
                         .expect("api-version is a valid header name"),
-                    semver::Version::new(2, 0, 0),
+                    dns_server_api::VERSION_SOA_AND_NS,
                 ),
             )))
             .start()
