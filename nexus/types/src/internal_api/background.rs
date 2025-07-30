@@ -238,14 +238,14 @@ pub struct SupportBundleCollectionReport {
     pub activated_in_db_ok: bool,
 
     /// Status of host OS ereport collection.
-    pub host_ereports: SupportBundleEreportCollection,
+    pub host_ereports: SupportBundleEreportStatus,
 
     /// Status of SP ereport collection.
-    pub sp_ereports: SupportBundleEreportCollection,
+    pub sp_ereports: SupportBundleEreportStatus,
 }
 
 #[derive(Debug, Deserialize, Serialize, PartialEq, Eq)]
-pub enum SupportBundleEreportCollection {
+pub enum SupportBundleEreportStatus {
     /// Ereports were not requested for this bundle.
     NotRequested,
 
@@ -263,8 +263,8 @@ impl SupportBundleCollectionReport {
             listed_in_service_sleds: false,
             listed_sps: false,
             activated_in_db_ok: false,
-            host_ereports: SupportBundleEreportCollection::NotRequested,
-            sp_ereports: SupportBundleEreportCollection::NotRequested,
+            host_ereports: SupportBundleEreportStatus::NotRequested,
+            sp_ereports: SupportBundleEreportStatus::NotRequested,
         }
     }
 }

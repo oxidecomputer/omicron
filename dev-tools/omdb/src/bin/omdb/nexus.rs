@@ -66,7 +66,7 @@ use nexus_types::internal_api::background::RegionSnapshotReplacementStartStatus;
 use nexus_types::internal_api::background::RegionSnapshotReplacementStepStatus;
 use nexus_types::internal_api::background::SupportBundleCleanupReport;
 use nexus_types::internal_api::background::SupportBundleCollectionReport;
-use nexus_types::internal_api::background::SupportBundleEreportCollection;
+use nexus_types::internal_api::background::SupportBundleEreportStatus;
 use nexus_types::internal_api::background::TufArtifactReplicationCounters;
 use nexus_types::internal_api::background::TufArtifactReplicationRequest;
 use nexus_types::internal_api::background::TufArtifactReplicationStatus;
@@ -2436,22 +2436,19 @@ fn print_task_support_bundle_collector(details: &serde_json::Value) {
         }
     }
 
-    fn print_ereport_status(
-        which: &str,
-        status: &SupportBundleEreportCollection,
-    ) {
+    fn print_ereport_status(which: &str, status: &SupportBundleEreportStatus) {
         match status {
-            SupportBundleEreportCollection::NotRequested => {
+            SupportBundleEreportStatus::NotRequested => {
                 println!("      {which} ereport collection was not requested");
             }
-            SupportBundleEreportCollection::Failed { error, n_collected } => {
+            SupportBundleEreportStatus::Failed { error, n_collected } => {
                 println!("      {which} ereport collection failed:");
                 println!(
                     "        ereports collected successfully: {n_collected}"
                 );
                 println!("        error: {error}");
             }
-            SupportBundleEreportCollection::Collected { n_collected } => {
+            SupportBundleEreportStatus::Collected { n_collected } => {
                 println!("      {which} ereports collected: {n_collected}");
             }
         }

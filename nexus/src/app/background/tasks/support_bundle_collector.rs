@@ -35,7 +35,7 @@ use nexus_types::deployment::SledFilter;
 use nexus_types::identity::Asset;
 use nexus_types::internal_api::background::SupportBundleCleanupReport;
 use nexus_types::internal_api::background::SupportBundleCollectionReport;
-use nexus_types::internal_api::background::SupportBundleEreportCollection;
+use nexus_types::internal_api::background::SupportBundleEreportStatus;
 use omicron_common::api::external::DataPageParams;
 use omicron_common::api::external::Error;
 use omicron_common::api::external::LookupType;
@@ -699,7 +699,7 @@ impl BundleCollection {
                         .collect_host_ereports(&filters, &dir, &mut n_collected)
                         .await
                     {
-                        Ok(_) => SupportBundleEreportCollection::Collected {
+                        Ok(_) => SupportBundleEreportStatus::Collected {
                             n_collected,
                         },
                         Err(e) => {
@@ -709,7 +709,7 @@ impl BundleCollection {
                                  ({n_collected} written successfully)";
                                 "err" => ?e,
                             );
-                            SupportBundleEreportCollection::Failed {
+                            SupportBundleEreportStatus::Failed {
                                 n_collected,
                                 error: e.to_string(),
                             }
@@ -726,7 +726,7 @@ impl BundleCollection {
                         .collect_sp_ereports(&filters, &dir, &mut n_collected)
                         .await
                     {
-                        Ok(_) => SupportBundleEreportCollection::Collected {
+                        Ok(_) => SupportBundleEreportStatus::Collected {
                             n_collected,
                         },
                         Err(e) => {
@@ -736,7 +736,7 @@ impl BundleCollection {
                                  written successfully)";
                                 "err" => ?e,
                             );
-                            SupportBundleEreportCollection::Failed {
+                            SupportBundleEreportStatus::Failed {
                                 n_collected,
                                 error: e.to_string(),
                             }
@@ -807,11 +807,10 @@ impl BundleCollection {
                         "Support bundle: host ereport collection task failed";
                         "err" => ?err,
                     );
-                    report.host_ereports =
-                        SupportBundleEreportCollection::Failed {
-                            n_collected: 0,
-                            error: err.to_string(),
-                        };
+                    report.host_ereports = SupportBundleEreportStatus::Failed {
+                        n_collected: 0,
+                        error: err.to_string(),
+                    };
                 }
             }
             match sp {
@@ -822,11 +821,10 @@ impl BundleCollection {
                         "Support bundle: SP ereport collection task failed";
                         "err" => ?err,
                     );
-                    report.host_ereports =
-                        SupportBundleEreportCollection::Failed {
-                            n_collected: 0,
-                            error: err.to_string(),
-                        };
+                    report.host_ereports = SupportBundleEreportStatus::Failed {
+                        n_collected: 0,
+                        error: err.to_string(),
+                    };
                 }
             }
         }
