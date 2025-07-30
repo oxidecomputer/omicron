@@ -66,11 +66,8 @@ pub trait SimulatedSp {
     /// Only returns data after a simulated reset of the RoT.
     async fn last_rot_update_data(&self) -> Option<Box<[u8]>>;
 
-    /// Get the last completed update delivered to the host phase1 flash slot.
-    async fn last_host_phase1_update_data(
-        &self,
-        slot: u16,
-    ) -> Option<Box<[u8]>>;
+    /// Get the current contents of the given host phase 1 slot.
+    async fn host_phase1_data(&self, slot: u16) -> Option<Vec<u8>>;
 
     /// Get the current update status, just as would be returned by an MGS
     /// request to get the update status.

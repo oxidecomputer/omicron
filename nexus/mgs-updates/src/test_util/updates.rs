@@ -699,11 +699,9 @@ impl FinishedUpdateAttempt {
         expected_result: UpdateCompletedHow,
     ) {
         let how = match &self.result {
-            Ok(how) if *how == expected_result => *how,
-            Ok(ok) => {
-                panic!(
-                    "unexpected kind of success from apply_update(): {ok:?}",
-                );
+            Ok(how) => {
+                assert_eq!(*how, expected_result);
+                *how
             }
             Err(err) => {
                 panic!(

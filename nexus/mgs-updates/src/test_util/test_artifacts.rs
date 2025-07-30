@@ -137,8 +137,17 @@ impl TestArtifacts {
         // completely bogus data here). Real phase 2 images do have a header
         // that sled-agent reads, but none of our MGS update tests need that, so
         // we use completely bogus data for phase 2 too.
-        let host_phase_1_artifact = b"nexus-mgs-updates test phase 1".to_vec();
+        let mut host_phase_1_artifact =
+            b"nexus-mgs-updates test phase 1".to_vec();
         let host_phase_2_artifact = b"nexus-mgs-updates test phase 1".to_vec();
+
+        // Pad the phase 1 artifact so it's not so small that it uploads in a
+        // single UDP packet to the sp simulator. Real images are 32 MiB, and
+        // "fits in one packet" interferes with our tests that try to step
+        // through the update process and pause at various points, because we
+        // skip from "upload started" to "upload done" without seeing "upload in
+        // progress".
+        host_phase_1_artifact.resize(2048, b'.');
         let host_phase_1_artifact_hash =
             ArtifactHash(sha2::Sha256::digest(&host_phase_1_artifact).into());
         let host_phase_2_artifact_hash =

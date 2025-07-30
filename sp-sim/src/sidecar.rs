@@ -136,10 +136,7 @@ impl SimulatedSp for Sidecar {
         handler.update_state.last_rot_update_data()
     }
 
-    async fn last_host_phase1_update_data(
-        &self,
-        _slot: u16,
-    ) -> Option<Box<[u8]>> {
+    async fn host_phase1_data(&self, _slot: u16) -> Option<Vec<u8>> {
         // sidecars do not have attached hosts
         None
     }

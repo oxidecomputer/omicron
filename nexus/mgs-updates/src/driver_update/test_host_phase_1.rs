@@ -94,8 +94,8 @@ async fn run_one_successful_host_phase_1_update(
 /// Tests several happy-path cases of updating a host OS phase 1
 #[tokio::test]
 async fn basic() {
-    let gwtestctx = gateway_test_utils::setup::test_setup(
-        "test_sp_update_basic",
+    let gwtestctx = gateway_test_utils::setup::test_setup_metrics_disabled(
+        "test_host_phase_1_basic",
         SpPort::One,
     )
     .await;
@@ -116,6 +116,117 @@ async fn basic() {
         UpdateCompletedHow::CompletedUpdate,
     )
     .await;
+
+    // Basic case: attempted update, found no changes needed
+    run_one_successful_host_phase_1_update(
+        &gwtestctx,
+        &phase2ctx,
+        &artifacts,
+        SpType::Sled,
+        1,
+        &artifacts.host_phase_1_artifact_hash,
+        UpdateCompletedHow::FoundNoChangesNeeded,
+    )
+    .await;
+
+    // Unlike SP/RoT tests, we don't try other `SpType`s; only sleds have host
+    // OS to be updated. We can't even describe the expected preconditions for
+    // such a device, because there's no sled-agent to ask about its current
+    // phase 2 contents.
+
+    artifacts.teardown().await;
+    phase2ctx.teardown().await;
+    gwtestctx.teardown().await;
+}
+
+/// Tests the case where two updates run concurrently.  One notices another
+/// is running and waits for it to complete.
+#[tokio::test]
+async fn update_watched() {
+    let gwtestctx = gateway_test_utils::setup::test_setup_metrics_disabled(
+        "test_host_phase_1_update_watched",
+        SpPort::One,
+    )
+    .await;
+    let log = &gwtestctx.logctx.log;
+    let artifacts = TestArtifacts::new(log).await.unwrap();
+    let phase2ctx = HostPhase2TestContexts::new(&gwtestctx);
+
+    // We're going to start two concurrent update attempts.  The sequence
+    // we want is:
+    //
+    // - update1 get far enough along to upload the phase 1 artifact to MGS, but
+    //   does not finish waiting for it to finish being delivered to the SP.
+    // - update2 runs to completion
+    // - update1 resumes
+    //
+    // It's a little tricky to orchestrate this with the tools we have
+    // available.  The most robust is actually have update2's precondition
+    // reflect that update1 has finished its upload.
+    //
+    // Note that this ordering is different from the analogous test for SP
+    // updates due to different SP behavior: when an SP update image has been
+    // staged, any subsequent update attempts will fail. This is not true of
+    // other components (including this one).
+    let host_phase_2_state = phase2ctx.sleds[1].state_rx();
+
+    let desc1 = UpdateDescription {
+        gwtestctx: &gwtestctx,
+        artifacts: &artifacts,
+        sp_type: SpType::Sled,
+        slot_id: 1,
+        artifact_hash: &artifacts.host_phase_1_artifact_hash,
+        override_baseboard_id: None,
+        override_expected_sp_component: ExpectedSpComponent::HostPhase1 {
+            host_phase_2_state: host_phase_2_state.clone(),
+            override_expected_phase_1_slot: None,
+            override_expected_boot_disk: None,
+            override_expected_active_phase_1: None,
+            override_expected_active_phase_2: None,
+            override_expected_inactive_phase_1: None,
+            override_expected_inactive_phase_2: None,
+        },
+        override_progress_timeout: None,
+    };
+
+    let desc2 = UpdateDescription {
+        gwtestctx: &gwtestctx,
+        artifacts: &artifacts,
+        sp_type: SpType::Sled,
+        slot_id: 1,
+        artifact_hash: &artifacts.host_phase_1_artifact_hash,
+        override_baseboard_id: None,
+        override_expected_sp_component: ExpectedSpComponent::HostPhase1 {
+            host_phase_2_state: host_phase_2_state.clone(),
+            override_expected_phase_1_slot: None,
+            override_expected_boot_disk: None,
+            override_expected_active_phase_1: None,
+            override_expected_active_phase_2: None,
+            override_expected_inactive_phase_1: Some(
+                artifacts.host_phase_1_artifact_hash,
+            ),
+            override_expected_inactive_phase_2: None,
+        },
+        override_progress_timeout: None,
+    };
+
+    let mut in_progress1 = desc1.setup().await;
+    let in_progress2 = desc2.setup().await;
+
+    // Start one, but pause it while waiting for the update to upload.
+    in_progress1.run_until_status(UpdateAttemptStatus::UpdateWaiting).await;
+
+    // Run the other.
+    let finished2 = in_progress2.finish().await;
+
+    // Now finish the first update.
+    let finished1 = in_progress1.finish().await;
+
+    // Both should succeed, but with different codes.
+    finished1.expect_host_phase_1_success(
+        UpdateCompletedHow::WaitedForConcurrentUpdate,
+    );
+    finished2.expect_host_phase_1_success(UpdateCompletedHow::CompletedUpdate);
 
     artifacts.teardown().await;
     phase2ctx.teardown().await;

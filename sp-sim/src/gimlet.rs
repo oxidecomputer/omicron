@@ -167,13 +167,13 @@ impl SimulatedSp for Gimlet {
         handler.update_state.last_rot_update_data()
     }
 
-    async fn last_host_phase1_update_data(
+    async fn host_phase1_data(
         &self,
         slot: u16,
-    ) -> Option<Box<[u8]>> {
+    ) -> Option<Vec<u8>> {
         let handler = self.handler.as_ref()?;
         let handler = handler.lock().await;
-        handler.update_state.last_host_phase1_update_data(slot)
+        handler.update_state.host_phase1_data(slot)
     }
 
     async fn current_update_status(&self) -> gateway_messages::UpdateStatus {
