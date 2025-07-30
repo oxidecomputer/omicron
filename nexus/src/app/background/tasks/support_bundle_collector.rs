@@ -22,16 +22,20 @@ use gateway_client::types::SpIdentifier;
 use gateway_client::types::SpIgnition;
 use internal_dns_resolver::Resolver;
 use internal_dns_types::names::ServiceName;
+use nexus_db_model::Ereport;
 use nexus_db_model::SupportBundle;
 use nexus_db_model::SupportBundleState;
 use nexus_db_queries::authz;
 use nexus_db_queries::context::OpContext;
 use nexus_db_queries::db::DataStore;
+use nexus_db_queries::db::datastore;
 use nexus_db_queries::db::datastore::EreportFilters;
+use nexus_db_queries::db::pagination::Paginator;
 use nexus_types::deployment::SledFilter;
 use nexus_types::identity::Asset;
 use nexus_types::internal_api::background::SupportBundleCleanupReport;
 use nexus_types::internal_api::background::SupportBundleCollectionReport;
+use nexus_types::internal_api::background::SupportBundleEreportCollection;
 use omicron_common::api::external::DataPageParams;
 use omicron_common::api::external::Error;
 use omicron_common::api::external::LookupType;
@@ -53,6 +57,7 @@ use std::sync::Arc;
 use tokio::io::AsyncReadExt;
 use tokio::io::AsyncSeekExt;
 use tokio::io::SeekFrom;
+use tokio_util::task::AbortOnDropHandle;
 use tufaceous_artifact::ArtifactHash;
 use zip::ZipArchive;
 use zip::ZipWriter;
@@ -673,6 +678,78 @@ impl BundleCollection {
         )
         .await?;
 
+        let ereport_collection = if let Some(ref ereport_filters) =
+            self.request.ereport_query
+        {
+            // If ereports are to be included in the bundle, have someone go do
+            // that in the background while we're gathering up other stuff. Note
+            // that the `JoinHandle`s for these tasks are wrapped in
+            // `AbortOnDropHandle`s for cancellation correctness; this ensures
+            // that if collecting the bundle is cancelled and this future is
+            // dropped, the tasks that we've spawned to collect ereports are
+            // aborted as well.
+            let dir = dir.path().join("ereports");
+            let host = AbortOnDropHandle::new(tokio::spawn({
+                let dir = dir.clone();
+                let filters = ereport_filters.clone();
+                let collection = self.clone();
+                async move {
+                    let mut n_collected = 0;
+                    match collection
+                        .collect_host_ereports(&filters, &dir, &mut n_collected)
+                        .await
+                    {
+                        Ok(_) => SupportBundleEreportCollection::Collected {
+                            n_collected,
+                        },
+                        Err(e) => {
+                            warn!(
+                                collection.log,
+                                "Failed to collect host OS ereports \
+                                 ({n_collected} written successfully)";
+                                "err" => ?e,
+                            );
+                            SupportBundleEreportCollection::Failed {
+                                n_collected,
+                                error: e.to_string(),
+                            }
+                        }
+                    }
+                }
+            }));
+            let sp = AbortOnDropHandle::new(tokio::spawn({
+                let filters = ereport_filters.clone();
+                let collection = self.clone();
+                async move {
+                    let mut n_collected = 0;
+                    match collection
+                        .collect_sp_ereports(&filters, &dir, &mut n_collected)
+                        .await
+                    {
+                        Ok(_) => SupportBundleEreportCollection::Collected {
+                            n_collected,
+                        },
+                        Err(e) => {
+                            warn!(
+                                collection.log,
+                                "Failed to collect SP ereports ({n_collected} \
+                                 written successfully)";
+                                "err" => ?e,
+                            );
+                            SupportBundleEreportCollection::Failed {
+                                n_collected,
+                                error: e.to_string(),
+                            }
+                        }
+                    }
+                }
+            }));
+            Some((host, sp))
+        } else {
+            debug!(log, "Support bundle: ereports not requested");
+            None
+        };
+
         let sp_dumps_dir = dir.path().join("sp_task_dumps");
         tokio::fs::create_dir_all(&sp_dumps_dir).await.with_context(|| {
             format!("failed to create SP task dump directory {sp_dumps_dir}")
@@ -720,6 +797,39 @@ impl BundleCollection {
             }
         }
 
+        if let Some((host, sp)) = ereport_collection {
+            let (host, sp) = tokio::join!(host, sp);
+            match host {
+                Ok(status) => report.host_ereports = status,
+                Err(err) => {
+                    warn!(
+                        &self.log,
+                        "Support bundle: host ereport collection task failed";
+                        "err" => ?err,
+                    );
+                    report.host_ereports =
+                        SupportBundleEreportCollection::Failed {
+                            n_collected: 0,
+                            error: err.to_string(),
+                        };
+                }
+            }
+            match sp {
+                Ok(status) => report.sp_ereports = status,
+                Err(err) => {
+                    warn!(
+                        &self.log,
+                        "Support bundle: SP ereport collection task failed";
+                        "err" => ?err,
+                    );
+                    report.host_ereports =
+                        SupportBundleEreportCollection::Failed {
+                            n_collected: 0,
+                            error: err.to_string(),
+                        };
+                }
+            }
+        }
         Ok(report)
     }
 
@@ -869,9 +979,94 @@ impl BundleCollection {
         }
         return Ok(());
     }
-    
-    async fn collect_ereports(&self, path: Utf8PathBuf) -> Result<(), Error> {
-        
+
+    async fn collect_sp_ereports(
+        &self,
+        filters: &EreportFilters,
+        dir: &Utf8Path,
+        ereports_written: &mut usize,
+    ) -> anyhow::Result<()> {
+        let mut paginator = Paginator::new(
+            datastore::SQL_BATCH_SIZE,
+            dropshot::PaginationOrder::Ascending,
+        );
+        while let Some(p) = paginator.next() {
+            let ereports = self
+                .datastore
+                .sp_ereports_fetch_matching(
+                    &self.opctx,
+                    &filters,
+                    &p.current_pagparams(),
+                )
+                .await
+                .map_err(|e| {
+                    e.internal_context("failed to query for SP ereports")
+                })?;
+            paginator = p.found_batch(&ereports, &|ereport| {
+                (ereport.restart_id.into_untyped_uuid(), ereport.ena.into())
+            });
+
+            let n_ereports = ereports.len();
+            for ereport in ereports {
+                write_ereport(ereport.into(), &dir).await?;
+            }
+            *ereports_written += n_ereports;
+            debug!(
+                self.log,
+                "Support bundle: added {n_ereports} SP ereports \
+                 ({ereports_written} total)"
+            );
+        }
+
+        info!(
+            self.log,
+            "Support bundle: collected {} total SP ereports", ereports_written
+        );
+        Ok(())
+    }
+
+    async fn collect_host_ereports(
+        &self,
+        filters: &EreportFilters,
+        dir: &Utf8Path,
+        ereports_written: &mut usize,
+    ) -> anyhow::Result<()> {
+        let mut paginator = Paginator::new(
+            datastore::SQL_BATCH_SIZE,
+            dropshot::PaginationOrder::Ascending,
+        );
+        while let Some(p) = paginator.next() {
+            let ereports = self
+                .datastore
+                .host_ereports_fetch_matching(
+                    &self.opctx,
+                    &filters,
+                    &p.current_pagparams(),
+                )
+                .await
+                .map_err(|e| {
+                    e.internal_context("failed to query for host OS ereports")
+                })?;
+            paginator = p.found_batch(&ereports, &|ereport| {
+                (ereport.restart_id.into_untyped_uuid(), ereport.ena.into())
+            });
+            let n_ereports = ereports.len();
+            for ereport in ereports {
+                write_ereport(ereport.into(), &dir).await?;
+            }
+            *ereports_written += n_ereports;
+            debug!(
+                self.log,
+                "Support bundle: added {n_ereports} host OS ereports \
+                 ({ereports_written} total)"
+            );
+        }
+
+        info!(
+            self.log,
+            "Support bundle: collected {ereports_written} total SP ereports",
+        );
+        Ok(())
     }
 }
 
@@ -916,6 +1111,22 @@ impl BackgroundTask for SupportBundleCollector {
         }
         .boxed()
     }
+}
+
+async fn write_ereport(ereport: Ereport, dir: &Utf8Path) -> anyhow::Result<()> {
+    let sn =
+        ereport.metadata.serial_number.as_deref().unwrap_or("unknown_serial");
+    let dir = dir.join(sn).join(ereport.id.restart_id.to_string());
+    tokio::fs::create_dir_all(&dir)
+        .await
+        .with_context(|| format!("failed to create directory '{dir}'"))?;
+    let file_path = dir.join(format!("{}.json", ereport.id.ena));
+    let json = serde_json::to_vec(&ereport).with_context(|| {
+        format!("failed to serialize ereport '{sn}:{}'", ereport.id)
+    })?;
+    tokio::fs::write(&file_path, json)
+        .await
+        .with_context(|| format!("failed to write {file_path}'"))
 }
 
 // Takes a directory "dir", and zips the contents into a single zipfile.

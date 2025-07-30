@@ -66,6 +66,7 @@ use nexus_types::internal_api::background::RegionSnapshotReplacementStartStatus;
 use nexus_types::internal_api::background::RegionSnapshotReplacementStepStatus;
 use nexus_types::internal_api::background::SupportBundleCleanupReport;
 use nexus_types::internal_api::background::SupportBundleCollectionReport;
+use nexus_types::internal_api::background::SupportBundleEreportCollection;
 use nexus_types::internal_api::background::TufArtifactReplicationCounters;
 use nexus_types::internal_api::background::TufArtifactReplicationRequest;
 use nexus_types::internal_api::background::TufArtifactReplicationStatus;
@@ -2414,6 +2415,8 @@ fn print_task_support_bundle_collector(details: &serde_json::Value) {
                 listed_in_service_sleds,
                 listed_sps,
                 activated_in_db_ok,
+                sp_ereports,
+                host_ereports,
             }) = collection_report
             {
                 println!("    Support Bundle Collection Report:");
@@ -2427,6 +2430,29 @@ fn print_task_support_bundle_collector(details: &serde_json::Value) {
                 println!(
                     "      Bundle was activated in the database: {activated_in_db_ok}"
                 );
+                print_ereport_status("SP", &sp_ereports);
+                print_ereport_status("Host OS", &host_ereports);
+            }
+        }
+    }
+
+    fn print_ereport_status(
+        which: &str,
+        status: &SupportBundleEreportCollection,
+    ) {
+        match status {
+            SupportBundleEreportCollection::NotRequested => {
+                println!("      {which} ereport collection was not requested");
+            }
+            SupportBundleEreportCollection::Failed { error, n_collected } => {
+                println!("      {which} ereport collection failed:");
+                println!(
+                    "        ereports collected successfully: {n_collected}"
+                );
+                println!("        error: {error}");
+            }
+            SupportBundleEreportCollection::Collected { n_collected } => {
+                println!("      {which} ereports collected: {n_collected}");
             }
         }
     }

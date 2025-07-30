@@ -266,7 +266,7 @@ impl DataStore {
                 EreporterRestartBySerial {
                     id: EreporterRestartUuid::from_untyped_uuid(restart_id),
                     reporter_kind: Reporter::Sp {
-                        sp_type,
+                        sp_type: sp_type.into(),
                         slot: sp_slot.into(),
                     },
                     first_seen_at: first_seen.expect(FIRST_SEEN_NOT_NULL),
