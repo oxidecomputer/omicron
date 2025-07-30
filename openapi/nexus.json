@@ -25448,6 +25448,15 @@
               }
             ]
           },
+          "sign": {
+            "nullable": true,
+            "type": "array",
+            "items": {
+              "type": "integer",
+              "format": "uint8",
+              "minimum": 0
+            }
+          },
           "size": {
             "description": "The size of the artifact in bytes.",
             "type": "integer",
