@@ -33,6 +33,7 @@ impl From<nexus_types::internal_api::params::SledCpuFamily> for SledCpuFamily {
             InputFamily::Unknown => Self::Unknown,
             InputFamily::AmdMilan => Self::AmdMilan,
             InputFamily::AmdTurin => Self::AmdTurin,
+            InputFamily::AmdTurinDense => Self::AmdTurinDense,
         }
     }
 }
@@ -43,16 +44,7 @@ impl From<SledCpuFamily> for nexus_types::internal_api::params::SledCpuFamily {
             SledCpuFamily::Unknown => Self::Unknown,
             SledCpuFamily::AmdMilan => Self::AmdMilan,
             SledCpuFamily::AmdTurin => Self::AmdTurin,
-        }
-    }
-}
-
-impl From<SledCpuFamily> for nexus_types::external_api::views::SledCpuFamily {
-    fn from(value: SledCpuFamily) -> Self {
-        match value {
-            SledCpuFamily::Unknown => Self::Unknown,
-            SledCpuFamily::AmdMilan => Self::AmdMilan,
-            SledCpuFamily::AmdTurin => Self::AmdTurin,
+            SledCpuFamily::AmdTurinDense => Self::AmdTurinDense,
         }
     }
 }

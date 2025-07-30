@@ -7292,6 +7292,13 @@
             "enum": [
               "amd_turin"
             ]
+          },
+          {
+            "description": "AMD Turin Dense processors. There are no \"Turin Dense-like\" CPUs unlike other cases, so this means a bona fide Zen 5c Turin Dense part.",
+            "type": "string",
+            "enum": [
+              "amd_turin_dense"
+            ]
           }
         ]
       },

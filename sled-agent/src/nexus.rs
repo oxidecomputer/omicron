@@ -91,6 +91,9 @@ impl ConvertInto<nexus_client::types::SledCpuFamily>
             sled_hardware_types::CpuFamily::AmdTurin => {
                 nexus_client::types::SledCpuFamily::AmdTurin
             }
+            sled_hardware_types::CpuFamily::AmdTurinDense => {
+                nexus_client::types::SledCpuFamily::AmdTurinDense
+            }
         }
     }
 }

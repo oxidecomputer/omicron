@@ -89,6 +89,13 @@ pub struct Sled {
     pub repo_depot_port: SqlU16,
 
     /// The family of this sled's CPU.
+    ///
+    /// This is primarily useful for questions about instance CPU platform
+    /// compatibility; it is too broad for topology-related sled selection
+    /// and more precise than a more general report of microarchitecture. We
+    /// likely should include much more about the sled's CPU alongside this for
+    /// those broader questions and reporting (see
+    /// https://github.com/oxidecomputer/omicron/issues/8730 for examples).
     pub cpu_family: SledCpuFamily,
 }
 
@@ -147,7 +154,6 @@ impl From<Sled> for views::Sled {
             state: sled.state.into(),
             usable_hardware_threads: sled.usable_hardware_threads.0,
             usable_physical_ram: *sled.usable_physical_ram,
-            cpu_family: sled.cpu_family.into(),
         }
     }
 }

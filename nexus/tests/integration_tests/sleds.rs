@@ -15,10 +15,10 @@ use nexus_test_utils::resource_helpers::create_default_ip_pool;
 use nexus_test_utils::resource_helpers::create_instance;
 use nexus_test_utils::resource_helpers::create_project;
 use nexus_test_utils::resource_helpers::objects_list_page_authz;
-use nexus_test_utils::{start_sled_agent, start_sled_agent_with_config};
+use nexus_test_utils::start_sled_agent;
 use nexus_test_utils_macros::nexus_test;
 use nexus_types::external_api::views::SledInstance;
-use nexus_types::external_api::views::{PhysicalDisk, Sled, SledCpuFamily};
+use nexus_types::external_api::views::{PhysicalDisk, Sled};
 use omicron_sled_agent::sim;
 use omicron_test_utils::dev::poll::{CondCheckError, wait_for_condition};
 use omicron_uuid_kinds::GenericUuid;
@@ -60,81 +60,40 @@ async fn test_sleds_list(cptestctx: &ControlPlaneTestContext) {
     assert_eq!(sleds_list(&client, &sleds_url).await.len(), 2);
 
     // Now start a few more sled agents.
-    let mut sas = Vec::new();
-    let nexus_address =
-        cptestctx.server.get_http_server_internal_address().await;
-    let update_directory = Utf8Path::new("/should/not/be/used");
-    let simulated_upstairs = &cptestctx.first_sled_agent().simulated_upstairs;
-
-    for _ in 0..4 {
+    let nsleds = 3;
+    let mut sas = Vec::with_capacity(nsleds);
+    for i in 0..nsleds {
         let sa_id = SledUuid::new_v4();
         let log =
             cptestctx.logctx.log.new(o!( "sled_id" => sa_id.to_string() ));
+        let addr = cptestctx.server.get_http_server_internal_address().await;
+        let update_directory = Utf8Path::new("/should/not/be/used");
         sas.push(
             start_sled_agent(
                 log,
-                nexus_address,
+                addr,
                 sa_id,
                 // Index starts at 2: the `nexus_test` macro already created two
                 // sled agents as part of the ControlPlaneTestContext setup.
-                2 + sas.len() as u16 + 1,
+                2 + i as u16,
                 &update_directory,
                 sim::SimMode::Explicit,
-                &simulated_upstairs,
+                &cptestctx.first_sled_agent().simulated_upstairs,
             )
             .await
             .unwrap(),
         );
     }
 
-    let turin_sled_id = SledUuid::new_v4();
-    let turin_sled_agent_log =
-        cptestctx.logctx.log.new(o!( "sled_id" => turin_sled_id.to_string() ));
-
-    let turin_config = omicron_sled_agent::sim::Config::for_testing(
-        turin_sled_id,
-        omicron_sled_agent::sim::SimMode::Explicit,
-        Some(nexus_address),
-        Some(&update_directory),
-        omicron_sled_agent::sim::ZpoolConfig::None,
-        nexus_client::types::SledCpuFamily::AmdTurin,
-    );
-
-    sas.push(
-        start_sled_agent_with_config(
-            turin_sled_agent_log,
-            &turin_config,
-            2 + sas.len() as u16 + 1,
-            &simulated_upstairs,
-        )
-        .await
-        .unwrap(),
-    );
-
     // List sleds again.
     let sleds_found = sleds_list(&client, &sleds_url).await;
-    assert_eq!(sleds_found.len(), sas.len() + 2);
+    assert_eq!(sleds_found.len(), nsleds + 2);
 
     let sledids_found =
         sleds_found.iter().map(|sv| sv.identity.id).collect::<Vec<Uuid>>();
     let mut sledids_found_sorted = sledids_found.clone();
     sledids_found_sorted.sort();
     assert_eq!(sledids_found, sledids_found_sorted);
-
-    let milans_found = sleds_found
-        .iter()
-        .filter(|sv| sv.cpu_family == SledCpuFamily::AmdMilan)
-        .count();
-    // Simulated sled-agents report Milan processors by default. The two fake
-    // sled-agents created by `#[nexus_test]` as well as the four manually
-    // created above should be counted here.
-    assert_eq!(milans_found, 2 + 4);
-
-    let turins_found = sleds_found
-        .iter()
-        .filter(|sv| sv.cpu_family == SledCpuFamily::AmdTurin)
-        .count();
-    assert_eq!(turins_found, 1);
 
     // Tear down the agents.
     for sa in sas {
