@@ -141,6 +141,6 @@ fn format_duration_ms(duration: Duration) -> String {
 fn format_time_delta(time_delta: TimeDelta) -> String {
     match time_delta.to_std() {
         Ok(d) => format_duration_ms(d),
-        Err(_) => format!("<time delta out of range>"),
+        Err(_) => String::from("<time delta out of range>"),
     }
 }

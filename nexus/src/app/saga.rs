@@ -217,7 +217,7 @@ impl SagaExecutor {
     /// This is currently a one-way trip.  Sagas cannot be un-quiesced.
     pub fn quiesce(&self) {
         // Log this before changing the config to make sure this message
-        // appears before messges from code paths that saw this change.
+        // appears before messages from code paths that saw this change.
         info!(&self.log, "starting saga quiesce");
         self.quiesce.send_modify(|q| {
             q.sagas_allowed = SagasAllowed::Disallowed;

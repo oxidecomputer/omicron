@@ -121,11 +121,13 @@ mod zpool;
 pub use address_lot::AddressLotCreateResult;
 pub use dns::DataStoreDnsTest;
 pub use dns::DnsVersionUpdateBuilder;
+use iddqd::IdOrdMap;
 pub use instance::{
     InstanceAndActiveVmm, InstanceGestalt, InstanceStateComputer,
 };
 pub use inventory::DataStoreInventoryTest;
 use nexus_db_model::AllSchemaVersions;
+use nexus_types::internal_api::views::HeldDbClaimInfo;
 pub use oximeter::CollectorReassignment;
 pub use rack::RackInit;
 pub use rack::SledUnderlayAllocationResult;
@@ -138,6 +140,7 @@ pub use sled::SledTransition;
 pub use sled::TransitionError;
 pub use support_bundle::SupportBundleExpungementReport;
 pub use switch_port::SwitchPortSettingsCombinedResult;
+use tokio::sync::watch;
 pub use user_data_export::*;
 pub use virtual_provisioning_collection::StorageType;
 pub use vmm::VmmStateUpdateResult;
@@ -182,11 +185,31 @@ impl<U, T> RunnableQuery<U> for T where
 {
 }
 
+/// DataStore quiesce configuration and state
+#[derive(Debug, Clone)]
+struct Quiesce {
+    new_claims_allowed: DbClaimsAllowed,
+    claims_held: IdOrdMap<HeldDbClaimInfo>,
+}
+
+/// Policy determining whether new database claims are allowed
+///
+/// This is used by Nexus quiesce to disallow creating new database connections
+/// when we're trying to quiesce Nexus.
+#[derive(Debug, Clone, Copy, Eq, PartialEq)]
+enum DbClaimsAllowed {
+    /// New claims may be made (normal condition)
+    Allowed,
+    /// New claims may not be made (happens during quiesce)
+    Disallowed,
+}
+
 pub struct DataStore {
     log: Logger,
     pool: Arc<Pool>,
     virtual_provisioning_collection_producer: crate::provisioning::Producer,
     transaction_retry_producer: crate::transaction_retry::Producer,
+    quiesce: watch::Sender<Quiesce>,
 }
 
 // The majority of `DataStore`'s methods live in our submodules as a concession
@@ -199,6 +222,10 @@ impl DataStore {
     /// of this method can construct a Datastore which does not understand
     /// the underlying CockroachDB schema. Data corruption could result.
     pub fn new_unchecked(log: Logger, pool: Arc<Pool>) -> Self {
+        let (quiesce, _) = watch::channel(Quiesce {
+            new_claims_allowed: DbClaimsAllowed::Allowed,
+            claims_held: IdOrdMap::new(),
+        });
         DataStore {
             log,
             pool,
@@ -206,6 +233,7 @@ impl DataStore {
                 crate::provisioning::Producer::new(),
             transaction_retry_producer: crate::transaction_retry::Producer::new(
             ),
+            quiesce,
         }
     }
 
@@ -295,6 +323,36 @@ impl DataStore {
         Ok(datastore)
     }
 
+    /// Disables creation of all new database claims
+    ///
+    /// This is currently a one-way trip.  The DataStore cannot be un-quiesced.
+    pub fn quiesce(&self) {
+        // Log this before changing the config to make sure this message
+        // appears before messages from code paths that saw this change.
+        info!(&self.log, "starting DataStore quiesce");
+        self.quiesce.send_modify(|q| {
+            q.new_claims_allowed = DbClaimsAllowed::Disallowed;
+        });
+    }
+
+    /// Wait for all outstanding claims to be released
+    pub async fn wait_for_quiesced(&self) {
+        let mut rx = self.quiesce.subscribe();
+        // unwrap(): this can only fail if the tx side is dropped, but that
+        // can't happen because we have a reference to it via `self`.
+        rx.wait_for(|q| {
+            q.new_claims_allowed == DbClaimsAllowed::Disallowed
+                && q.claims_held.is_empty()
+        })
+        .await
+        .unwrap();
+    }
+
+    /// Returns information about held db claims
+    pub fn claims_held(&self) -> IdOrdMap<HeldDbClaimInfo> {
+        self.quiesce.borrow().claims_held.clone()
+    }
+
     /// Terminates the underlying pool, stopping it from connecting to backends.
     pub async fn terminate(&self) {
         self.pool.terminate().await
@@ -346,10 +404,7 @@ impl DataStore {
         opctx: &OpContext,
     ) -> Result<DataStoreConnection, Error> {
         opctx.authorize(authz::Action::Query, &authz::DATABASE).await?;
-        let connection = self.pool.claim().await.map_err(|err| {
-            Error::unavail(&format!("Failed to access DB connection: {err}"))
-        })?;
-        Ok(connection)
+        self.pool_connection_unauthorize().await
     }
 
     /// Returns an unauthorized connection to a connection from the database

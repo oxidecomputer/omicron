@@ -710,6 +710,7 @@ impl UpdateStatus {
 pub struct QuiesceStatus {
     pub state: QuiesceState,
     pub sagas_running: IdOrdMap<RunningSagaInfo>,
+    pub db_claims: IdOrdMap<HeldDbClaimInfo>,
 }
 
 // XXX-dap TODO-doc
@@ -780,6 +781,23 @@ impl IdOrdItem for RunningSagaInfo {
 
     fn key(&self) -> Self::Key<'_> {
         &self.saga_id
+    }
+
+    id_upcast!();
+}
+
+#[derive(Debug, Clone, Serialize, JsonSchema)]
+pub struct HeldDbClaimInfo {
+    pub id: u128,
+    pub held_for: Duration,
+    pub debug: String,
+}
+
+impl IdOrdItem for HeldDbClaimInfo {
+    type Key<'a> = &'a u128;
+
+    fn key(&self) -> Self::Key<'_> {
+        &self.id
     }
 
     id_upcast!();

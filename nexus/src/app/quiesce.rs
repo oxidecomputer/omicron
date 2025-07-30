@@ -9,6 +9,7 @@ use assert_matches::assert_matches;
 use chrono::Utc;
 use nexus_db_queries::authz;
 use nexus_db_queries::context::OpContext;
+use nexus_db_queries::db::DataStore;
 use nexus_types::internal_api::views::QuiesceState;
 use nexus_types::internal_api::views::QuiesceStatus;
 use omicron_common::api::external::LookupResult;
@@ -34,7 +35,11 @@ impl super::Nexus {
             }
         });
         if started {
-            tokio::spawn(do_quiesce(self.quiesce.clone(), self.sagas.clone()));
+            tokio::spawn(do_quiesce(
+                self.quiesce.clone(),
+                self.sagas.clone(),
+                self.datastore().clone(),
+            ));
         }
         Ok(())
     }
@@ -46,14 +51,15 @@ impl super::Nexus {
         opctx.authorize(authz::Action::Read, &authz::FLEET).await?;
         let state = self.quiesce.borrow().clone();
         let sagas_running = self.sagas.sagas_running();
-        // XXX-dap add datastore
-        Ok(QuiesceStatus { state, sagas_running })
+        let db_claims = self.datastore().claims_held();
+        Ok(QuiesceStatus { state, sagas_running, db_claims })
     }
 }
 
 async fn do_quiesce(
     quiesce: watch::Sender<QuiesceState>,
     saga_exec: Arc<SagaExecutor>,
+    datastore: Arc<DataStore>,
 ) {
     assert_matches!(*quiesce.borrow(), QuiesceState::WaitingForSagas { .. });
     saga_exec.quiesce();
@@ -74,8 +80,8 @@ async fn do_quiesce(
         };
     });
 
-    // XXX-dap do datastore
-
+    datastore.quiesce();
+    datastore.wait_for_quiesced().await;
     quiesce.send_modify(|q| {
         let QuiesceState::WaitingForDb {
             time_requested,
