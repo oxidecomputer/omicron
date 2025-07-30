@@ -19,6 +19,7 @@ use nexus_types::external_api::shared::SupportBundleInfo;
 use nexus_types::external_api::shared::SupportBundleState;
 use nexus_types::internal_api::background::SupportBundleCleanupReport;
 use nexus_types::internal_api::background::SupportBundleCollectionReport;
+use nexus_types::internal_api::background::SupportBundleEreportCollection;
 use omicron_uuid_kinds::SupportBundleUuid;
 use serde::Deserialize;
 use std::io::Cursor;
@@ -492,6 +493,12 @@ async fn test_support_bundle_lifecycle(cptestctx: &ControlPlaneTestContext) {
             listed_in_service_sleds: true,
             listed_sps: true,
             activated_in_db_ok: true,
+            host_ereports: SupportBundleEreportCollection::Collected {
+                n_collected: 0
+            },
+            sp_ereports: SupportBundleEreportCollection::Collected {
+                n_collected: 0
+            }
         })
     );
     let bundle = bundle_get(&client, bundle.id).await.unwrap();
@@ -589,6 +596,12 @@ async fn test_support_bundle_range_requests(
             listed_in_service_sleds: true,
             listed_sps: true,
             activated_in_db_ok: true,
+            host_ereports: SupportBundleEreportCollection::Collected {
+                n_collected: 0
+            },
+            sp_ereports: SupportBundleEreportCollection::Collected {
+                n_collected: 0
+            }
         })
     );
     let bundle = bundle_get(&client, bundle.id).await.unwrap();
