@@ -6,8 +6,9 @@
 
 use anyhow::{Context, anyhow, bail};
 use camino::{Utf8Path, Utf8PathBuf};
-use clap::ValueEnum;
+use clap::{ArgAction, ValueEnum};
 use clap::{Args, Parser, Subcommand};
+use daft::Diffable;
 use iddqd::IdOrdMap;
 use indent_write::fmt::IndentWriter;
 use internal_dns_types::diff::DnsDiff;
@@ -26,7 +27,6 @@ use nexus_reconfigurator_simulation::{BlueprintId, CollectionId, SimState};
 use nexus_reconfigurator_simulation::{SimStateBuilder, SimTufRepoSource};
 use nexus_reconfigurator_simulation::{SimTufRepoDescription, Simulator};
 use nexus_sled_agent_shared::inventory::ZoneKind;
-use nexus_types::deployment::BlueprintHostPhase2DesiredContents;
 use nexus_types::deployment::PlanningInput;
 use nexus_types::deployment::SledFilter;
 use nexus_types::deployment::execution;
@@ -34,6 +34,9 @@ use nexus_types::deployment::execution::blueprint_external_dns_config;
 use nexus_types::deployment::execution::blueprint_internal_dns_config;
 use nexus_types::deployment::{Blueprint, UnstableReconfiguratorState};
 use nexus_types::deployment::{BlueprintArtifactVersion, PendingMgsUpdate};
+use nexus_types::deployment::{
+    BlueprintHostPhase2DesiredContents, PlannerChickenSwitches,
+};
 use nexus_types::deployment::{BlueprintZoneDisposition, ExpectedVersion};
 use nexus_types::deployment::{
     BlueprintZoneImageSource, PendingMgsUpdateDetails,
@@ -41,6 +44,7 @@ use nexus_types::deployment::{
 use nexus_types::deployment::{OmicronZoneNic, TargetReleaseDescription};
 use nexus_types::external_api::views::SledPolicy;
 use nexus_types::external_api::views::SledProvisionPolicy;
+use nexus_types::inventory::CollectionDisplayCliFilter;
 use omicron_common::address::REPO_DEPOT_PORT;
 use omicron_common::api::external::Name;
 use omicron_common::api::external::{Generation, TufRepoDescription};
@@ -62,7 +66,7 @@ use std::fmt::{self, Write};
 use std::io::IsTerminal;
 use std::num::ParseIntError;
 use std::str::FromStr;
-use swrite::{SWrite, swriteln};
+use swrite::{SWrite, swrite, swriteln};
 use tabled::Tabled;
 use tufaceous_artifact::ArtifactHash;
 use tufaceous_artifact::ArtifactVersion;
@@ -231,11 +235,15 @@ fn process_command(
             cmd_sled_update_install_dataset(sim, args)
         }
         Commands::SledUpdateSp(args) => cmd_sled_update_sp(sim, args),
+        Commands::SledUpdateRotBootloader(args) => {
+            cmd_sled_update_rot_bootlaoder(sim, args)
+        }
         Commands::SiloList => cmd_silo_list(sim),
         Commands::SiloAdd(args) => cmd_silo_add(sim, args),
         Commands::SiloRemove(args) => cmd_silo_remove(sim, args),
         Commands::InventoryList => cmd_inventory_list(sim),
         Commands::InventoryGenerate => cmd_inventory_generate(sim),
+        Commands::InventoryShow(args) => cmd_inventory_show(sim, args),
         Commands::BlueprintList => cmd_blueprint_list(sim),
         Commands::BlueprintBlippy(args) => cmd_blueprint_blippy(sim, args),
         Commands::BlueprintEdit(args) => cmd_blueprint_edit(sim, args),
@@ -284,6 +292,8 @@ enum Commands {
     SledSet(SledSetArgs),
     /// update the install dataset on a sled, simulating a mupdate
     SledUpdateInstallDataset(SledUpdateInstallDatasetArgs),
+    /// simulate updating the sled's RoT Bootloader versions
+    SledUpdateRotBootloader(SledUpdateRotBootloaderArgs),
     /// simulate updating the sled's SP versions
     SledUpdateSp(SledUpdateSpArgs),
 
@@ -298,6 +308,8 @@ enum Commands {
     InventoryList,
     /// generates an inventory collection from the configured sleds
     InventoryGenerate,
+    /// show details about an inventory collection
+    InventoryShow(InventoryShowArgs),
 
     /// list all blueprints
     BlueprintList,
@@ -377,6 +389,8 @@ enum SledSetCommand {
     Policy(SledSetPolicyArgs),
     #[clap(flatten)]
     Visibility(SledSetVisibilityCommand),
+    /// set the mupdate override for this sled
+    MupdateOverride(SledSetMupdateOverrideArgs),
 }
 
 #[derive(Debug, Args)]
@@ -485,6 +499,21 @@ struct SledMupdateValidSource {
 }
 
 #[derive(Debug, Args)]
+struct SledUpdateRotBootloaderArgs {
+    /// id of the sled
+    sled_id: SledOpt,
+
+    /// sets the version reported for the RoT bootloader stage0 (active) slot
+    #[clap(long, required_unless_present_any = &["stage0_next"])]
+    stage0: Option<ArtifactVersion>,
+
+    /// sets the version reported for the RoT bootloader stage0_next (inactive)
+    /// slot
+    #[clap(long, required_unless_present_any = &["stage0"])]
+    stage0_next: Option<ExpectedVersion>,
+}
+
+#[derive(Debug, Args)]
 struct SledUpdateSpArgs {
     /// id of the sled
     sled_id: SledOpt,
@@ -496,6 +525,23 @@ struct SledUpdateSpArgs {
     /// sets the version reported for the SP inactive slot
     #[clap(long, required_unless_present_any = &["active"])]
     inactive: Option<ExpectedVersion>,
+}
+
+#[derive(Debug, Args)]
+struct SledSetMupdateOverrideArgs {
+    #[clap(flatten)]
+    source: SledMupdateOverrideSource,
+}
+
+#[derive(Debug, Args)]
+#[group(id = "sled-mupdate-override-source", required = true, multiple = false)]
+struct SledMupdateOverrideSource {
+    /// the new value of the mupdate override, or "unset"
+    mupdate_override_id: Option<MupdateOverrideUuidOpt>,
+
+    /// simulate an error reading the mupdate override
+    #[clap(long, conflicts_with = "mupdate_override_id")]
+    with_error: bool,
 }
 
 #[derive(Debug, Args)]
@@ -511,9 +557,16 @@ struct SiloAddRemoveArgs {
 }
 
 #[derive(Debug, Args)]
-struct InventoryArgs {
-    /// id of the inventory collection to use in planning
-    collection_id: CollectionUuid,
+struct InventoryShowArgs {
+    /// id of the inventory collection to show or "latest"
+    collection_id: CollectionIdOpt,
+
+    /// show long strings in their entirety
+    #[clap(long)]
+    show_long_strings: bool,
+
+    #[clap(subcommand)]
+    filter: Option<CollectionDisplayCliFilter>,
 }
 
 #[derive(Debug, Args)]
@@ -993,14 +1046,6 @@ enum CliDnsGroup {
 }
 
 #[derive(Debug, Args)]
-struct BlueprintDiffInventoryArgs {
-    /// id of the inventory collection
-    collection_id: CollectionUuid,
-    /// id of the blueprint, "latest", or "target"
-    blueprint_id: BlueprintIdOpt,
-}
-
-#[derive(Debug, Args)]
 struct BlueprintSaveArgs {
     /// id of the blueprint, "latest", or "target"
     blueprint_id: BlueprintIdOpt,
@@ -1030,6 +1075,37 @@ enum SetArgs {
         /// TUF repo containing release artifacts
         filename: Utf8PathBuf,
     },
+    /// planner chicken switches
+    ChickenSwitches(SetChickenSwitchesArgs),
+}
+
+#[derive(Debug, Args)]
+struct SetChickenSwitchesArgs {
+    #[clap(flatten)]
+    switches: ChickenSwitchesOpts,
+}
+
+// Define the switches separately so we can use `group(required = true, multiple
+// = true).`
+#[derive(Debug, Clone, Args)]
+#[group(required = true, multiple = true)]
+pub struct ChickenSwitchesOpts {
+    #[clap(long, action = ArgAction::Set)]
+    add_zones_with_mupdate_override: Option<bool>,
+}
+
+impl ChickenSwitchesOpts {
+    fn update_if_modified(
+        &self,
+        current: &PlannerChickenSwitches,
+    ) -> Option<PlannerChickenSwitches> {
+        let new = PlannerChickenSwitches {
+            add_zones_with_mupdate_override: self
+                .add_zones_with_mupdate_override
+                .unwrap_or(current.add_zones_with_mupdate_override),
+        };
+        (new != *current).then_some(new)
+    }
 }
 
 #[derive(Debug, Args)]
@@ -1278,6 +1354,8 @@ fn cmd_sled_show(
     let state = sim.current_state();
     let description = state.system().description();
     let sled_id = args.sled_id.to_sled_id(description)?;
+    let stage0_version = description.sled_stage0_version(sled_id)?;
+    let stage0_next_version = description.sled_stage0_next_version(sled_id)?;
     let sp_active_version = description.sled_sp_active_version(sled_id)?;
     let sp_inactive_version = description.sled_sp_inactive_version(sled_id)?;
     let planning_input = description
@@ -1290,6 +1368,12 @@ fn cmd_sled_show(
     swriteln!(s, "sled {} ({}, {})", sled_id, sled.policy, sled.state);
     swriteln!(s, "serial {}", sled.baseboard_id.serial_number);
     swriteln!(s, "subnet {}", sled_resources.subnet.net());
+    swriteln!(s, "RoT bootloader stage 0 version:   {:?}", stage0_version);
+    swriteln!(
+        s,
+        "RoT bootloader stage 0 next version: {:?}",
+        stage0_next_version
+    );
     swriteln!(s, "SP active version:   {:?}", sp_active_version);
     swriteln!(s, "SP inactive version: {:?}", sp_inactive_version);
     swriteln!(s, "zpools ({}):", sled_resources.zpools.len());
@@ -1344,6 +1428,51 @@ fn cmd_sled_set(
                 )))
             }
         }
+        SledSetCommand::MupdateOverride(SledSetMupdateOverrideArgs {
+            source:
+                SledMupdateOverrideSource { mupdate_override_id, with_error },
+        }) => {
+            let (desc, prev) = if with_error {
+                let prev =
+                    system.description_mut().sled_set_mupdate_override_error(
+                        sled_id,
+                        "reconfigurator-cli simulated mupdate-override error"
+                            .to_owned(),
+                    )?;
+                ("error".to_owned(), prev)
+            } else {
+                let mupdate_override_id =
+                    mupdate_override_id.expect("clap ensures that this is set");
+                let prev = system.description_mut().sled_set_mupdate_override(
+                    sled_id,
+                    mupdate_override_id.into(),
+                )?;
+                let desc = match mupdate_override_id {
+                    MupdateOverrideUuidOpt::Set(id) => id.to_string(),
+                    MupdateOverrideUuidOpt::Unset => "unset".to_owned(),
+                };
+                (desc, prev)
+            };
+
+            let prev_desc = match prev {
+                Ok(Some(id)) => id.to_string(),
+                Ok(None) => "unset".to_owned(),
+                Err(_) => "error".to_owned(),
+            };
+
+            sim.commit_and_bump(
+                format!(
+                    "reconfigurator-cli sled-set-mupdate-override: {}: {} -> {}",
+                    sled_id, prev_desc, desc,
+                ),
+                state,
+            );
+
+            Ok(Some(format!(
+                "set sled {} mupdate override: {} -> {}",
+                sled_id, prev_desc, desc,
+            )))
+        }
     }
 }
 
@@ -1370,6 +1499,48 @@ fn cmd_sled_update_install_dataset(
     Ok(Some(format!(
         "sled {}: install dataset updated: {}",
         sled_id, description.message
+    )))
+}
+
+fn cmd_sled_update_rot_bootlaoder(
+    sim: &mut ReconfiguratorSim,
+    args: SledUpdateRotBootloaderArgs,
+) -> anyhow::Result<Option<String>> {
+    let mut labels = Vec::new();
+    if let Some(stage0) = &args.stage0 {
+        labels.push(format!("stage0 -> {}", stage0));
+    }
+    if let Some(stage0_next) = &args.stage0_next {
+        labels.push(format!("stage0_next -> {}", stage0_next));
+    }
+
+    assert!(
+        !labels.is_empty(),
+        "clap configuration requires that at least one argument is specified"
+    );
+
+    let mut state = sim.current_state().to_mut();
+    let system = state.system_mut();
+    let sled_id = args.sled_id.to_sled_id(system.description())?;
+    system.description_mut().sled_update_rot_bootloader_versions(
+        sled_id,
+        args.stage0,
+        args.stage0_next,
+    )?;
+
+    sim.commit_and_bump(
+        format!(
+            "reconfigurator-cli sled-update-rot-bootloader: {}: {}",
+            sled_id,
+            labels.join(", "),
+        ),
+        state,
+    );
+
+    Ok(Some(format!(
+        "set sled {} RoT bootloader versions: {}",
+        sled_id,
+        labels.join(", ")
     )))
 }
 
@@ -1461,6 +1632,24 @@ fn cmd_inventory_generate(
         state,
     );
     Ok(Some(rv))
+}
+
+fn cmd_inventory_show(
+    sim: &mut ReconfiguratorSim,
+    args: InventoryShowArgs,
+) -> anyhow::Result<Option<String>> {
+    let state = sim.current_state();
+    let system = state.system();
+    let resolved = system.resolve_collection_id(args.collection_id.into())?;
+    let collection = system.get_collection(&resolved)?;
+
+    let mut display = collection.display();
+    if let Some(filter) = &args.filter {
+        display.apply_cli_filter(filter);
+    }
+    display.show_long_strings(args.show_long_strings);
+
+    Ok(Some(display.to_string()))
 }
 
 fn cmd_blueprint_list(
@@ -2137,6 +2326,14 @@ fn cmd_show(sim: &mut ReconfiguratorSim) -> anyhow::Result<Option<String>> {
             );
         }
     }
+    swriteln!(s, "chicken switches:");
+    // No need for swriteln! here because .display() adds its own newlines at
+    // the end.
+    swrite!(
+        s,
+        "{}",
+        state.system().description().get_chicken_switches().display()
+    );
 
     Ok(Some(s))
 }
@@ -2182,6 +2379,20 @@ fn cmd_set(
                 TargetReleaseDescription::TufRepo(description),
             );
             format!("set target release based on {}", filename)
+        }
+        SetArgs::ChickenSwitches(args) => {
+            let current =
+                state.system_mut().description().get_chicken_switches();
+            if let Some(new) = args.switches.update_if_modified(&current) {
+                state.system_mut().description_mut().set_chicken_switches(new);
+                let diff = current.diff(&new);
+                format!("chicken switches updated:\n{}", diff.display())
+            } else {
+                format!(
+                    "no changes to chicken switches:\n{}",
+                    current.display()
+                )
+            }
         }
     };
 

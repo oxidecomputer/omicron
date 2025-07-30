@@ -2788,7 +2788,7 @@ fn print_task_sp_ereport_ingester(details: &serde_json::Value) {
     use nexus_types::internal_api::background::SpEreportIngesterStatus;
     use nexus_types::internal_api::background::SpEreporterStatus;
 
-    let SpEreportIngesterStatus { sps, errors } =
+    let SpEreportIngesterStatus { sps, errors, disabled } =
         match serde_json::from_value(details.clone()) {
             Err(error) => {
                 eprintln!(
@@ -2814,9 +2814,19 @@ fn print_task_sp_ereport_ingester(details: &serde_json::Value) {
         }
     }
 
-    print_ereporter_status_totals(sps.iter().map(|sp| &sp.status));
+    if disabled {
+        println!("    SP ereport ingestion explicitly disabled by config!");
+    } else {
+        print_ereporter_status_totals(sps.iter().map(|sp| &sp.status));
+    }
 
     if !sps.is_empty() {
+        if disabled {
+            println!(
+                "/!\\ WEIRD: SP ereport ingestion disabled by config, but \
+                 some SP statuses were recorded!"
+            )
+        }
         println!("\n    service processors:");
         for SpEreporterStatus { sp_type, slot, status } in &sps {
             println!(
@@ -4010,6 +4020,7 @@ async fn cmd_nexus_support_bundles_list(
         reason_for_creation: String,
         reason_for_failure: String,
         state: String,
+        user_comment: String,
     }
     let rows = support_bundles.into_iter().map(|sb| SupportBundleInfo {
         id: *sb.id,
@@ -4019,6 +4030,7 @@ async fn cmd_nexus_support_bundles_list(
             .reason_for_failure
             .unwrap_or_else(|| "-".to_string()),
         state: format!("{:?}", sb.state),
+        user_comment: sb.user_comment.unwrap_or_else(|| "-".to_string()),
     });
     let table = tabled::Table::new(rows)
         .with(tabled::settings::Style::empty())
@@ -4034,7 +4046,9 @@ async fn cmd_nexus_support_bundles_create(
     _destruction_token: DestructiveOperationToken,
 ) -> Result<(), anyhow::Error> {
     let support_bundle_id = client
-        .support_bundle_create()
+        .support_bundle_create(&nexus_client::types::SupportBundleCreate {
+            user_comment: None,
+        })
         .await
         .context("creating support bundle")?
         .into_inner()

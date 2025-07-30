@@ -16,6 +16,7 @@ use nexus_test_utils_macros::nexus_test;
 use nexus_types::deployment::Blueprint;
 use nexus_types::deployment::SledFilter;
 use nexus_types::deployment::UnstableReconfiguratorState;
+use omicron_common::api::external::SwitchLocation;
 use omicron_test_utils::dev::test_cmds::Redactor;
 use omicron_test_utils::dev::test_cmds::path_to_executable;
 use omicron_test_utils::dev::test_cmds::run_command;
@@ -23,6 +24,7 @@ use slog_error_chain::InlineErrorChain;
 use std::fmt::Write;
 use std::net::IpAddr;
 use std::path::Path;
+use std::time::Duration;
 use subprocess::Exec;
 use uuid::Uuid;
 
@@ -131,17 +133,20 @@ async fn test_omdb_usage_errors() {
 async fn test_omdb_success_cases(cptestctx: &ControlPlaneTestContext) {
     clear_omdb_env();
 
-    let gwtestctx = gateway_test_utils::setup::test_setup(
-        "test_omdb_success_case",
-        gateway_messages::SpPort::One,
-    )
-    .await;
     let cmd_path = path_to_executable(CMD_OMDB);
 
     let postgres_url = cptestctx.database.listen_url();
     let nexus_internal_url =
         format!("http://{}/", cptestctx.internal_client.bind_address);
-    let mgs_url = format!("http://{}/", gwtestctx.client.bind_address);
+    let mgs_url = format!(
+        "http://{}/",
+        cptestctx
+            .gateway
+            .get(&SwitchLocation::Switch0)
+            .expect("nexus_test always sets up MGS on switch 0")
+            .client
+            .bind_address
+    );
     let ox_url = format!("http://{}/", cptestctx.oximeter.server_address());
     let ox_test_producer = cptestctx.producer.address().ip();
     let ch_url = format!("http://{}/", cptestctx.clickhouse.http_address());
@@ -164,6 +169,13 @@ async fn test_omdb_success_cases(cptestctx: &ControlPlaneTestContext) {
             .unwrap(),
     )
     .await;
+
+    // Wait for Nexus to have gathered at least one inventory collection. (We'll
+    // check below that `reconfigurator export` contains at least one, so have
+    // to wait until there's one to export.)
+    cptestctx
+        .wait_for_at_least_one_inventory_collection(Duration::from_secs(60))
+        .await;
 
     let mut output = String::new();
 
@@ -191,6 +203,27 @@ async fn test_omdb_success_cases(cptestctx: &ControlPlaneTestContext) {
         &["nexus", "background-tasks", "show", "dns_internal"],
         &["nexus", "background-tasks", "show", "dns_external"],
         &["nexus", "background-tasks", "show", "all"],
+        // chicken switches: show and set
+        &["nexus", "chicken-switches", "show", "current"],
+        &[
+            "-w",
+            "nexus",
+            "chicken-switches",
+            "set",
+            "--planner-enabled",
+            "true",
+        ],
+        &[
+            "-w",
+            "nexus",
+            "chicken-switches",
+            "set",
+            "--add-zones-with-mupdate-override",
+            "false",
+        ],
+        // After the set commands above, we should see chicken switches
+        // populated.
+        &["nexus", "chicken-switches", "show", "current"],
         &["nexus", "sagas", "list"],
         &["--destructive", "nexus", "sagas", "demo-create"],
         &["nexus", "sagas", "list"],
@@ -319,8 +352,6 @@ async fn test_omdb_success_cases(cptestctx: &ControlPlaneTestContext) {
         &ox_url,
         ox_test_producer,
     );
-
-    gwtestctx.teardown().await;
 }
 
 /// Verify that we properly deal with cases where:

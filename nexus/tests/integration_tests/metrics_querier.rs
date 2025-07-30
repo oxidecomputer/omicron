@@ -244,7 +244,6 @@ impl<'a, N> MetricsQuerier<'a, N> {
                 self.ctx
                     .oximeter
                     .try_force_collect()
-                    .await
                     .expect("sent trigger to force oximeter collection");
 
                 let page = objects_list_page_authz::<U>(
@@ -299,7 +298,6 @@ impl<'a, N> MetricsQuerier<'a, N> {
                 self.ctx
                     .oximeter
                     .try_force_collect()
-                    .await
                     .expect("sent trigger to force oximeter collection");
 
                 let tables = match self

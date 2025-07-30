@@ -28,6 +28,37 @@ pub enum ResolveError {
     NotFoundByString(String),
 }
 
+fn is_no_records_found(err: &hickory_resolver::ResolveError) -> bool {
+    match err.kind() {
+        hickory_resolver::ResolveErrorKind::Proto(proto_error) => {
+            match proto_error.kind() {
+                hickory_resolver::proto::ProtoErrorKind::NoRecordsFound {
+                    ..
+                } => true,
+                _ => false,
+            }
+        }
+        _ => false,
+    }
+}
+
+impl ResolveError {
+    /// Returns "true" if this error indicates the record is not found.
+    pub fn is_not_found(&self) -> bool {
+        match self {
+            ResolveError::NotFound(_) | ResolveError::NotFoundByString(_) => {
+                true
+            }
+            ResolveError::Resolve(hickory_err)
+                if is_no_records_found(&hickory_err) =>
+            {
+                true
+            }
+            _ => false,
+        }
+    }
+}
+
 /// A wrapper around a set of bootstrap DNS addresses, providing a convenient
 /// way to construct a [`qorb::resolvers::dns::DnsResolver`] for specific
 /// services.
@@ -847,7 +878,7 @@ mod test {
                     "api-version"
                         .parse::<reqwest::header::HeaderName>()
                         .expect("api-version is a valid header name"),
-                    semver::Version::new(2, 0, 0),
+                    dns_server_api::VERSION_SOA_AND_NS,
                 ),
             )))
             .start()

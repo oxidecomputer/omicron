@@ -18,6 +18,7 @@ use sha2::Digest;
 use sha2::Sha256;
 use slog::Logger;
 use tokio::io::AsyncReadExt;
+use tufaceous_artifact::ArtifactHash;
 use tufaceous_artifact::ArtifactVersion;
 use tufaceous_artifact::KnownArtifactKind;
 use tufaceous_lib::Key;
@@ -27,6 +28,9 @@ use tufaceous_lib::assemble::DeserializedArtifactSource;
 use tufaceous_lib::assemble::DeserializedControlPlaneZoneSource;
 use tufaceous_lib::assemble::DeserializedManifest;
 use tufaceous_lib::assemble::OmicronRepoAssembler;
+use update_common::artifacts::{
+    ArtifactsWithPlan, ControlPlaneZonesMode, VerificationMode,
+};
 
 pub(crate) async fn build_tuf_repo(
     logger: Logger,
@@ -159,6 +163,39 @@ pub(crate) async fn build_tuf_repo(
         format!("{}\n", hex::encode(&hasher.finalize())),
     )
     .await?;
+
+    // Check that we haven't stepped on any rakes by attempting to generate a
+    // plan from the zip
+    let zip_bytes = std::fs::File::open(&output_dir.join("repo.zip"))
+        .context("error opening archive.zip")?;
+    let repo_hash = ArtifactHash([0u8; 32]);
+    let _ = ArtifactsWithPlan::from_zip(
+        zip_bytes,
+        None,
+        repo_hash,
+        ControlPlaneZonesMode::Split,
+        VerificationMode::BlindlyTrustAnything,
+        &logger,
+    )
+    .await
+    .with_context(|| {
+        "error reading generated TUF repo (split control plane)".to_string()
+    })?;
+
+    let zip_bytes = std::fs::File::open(&output_dir.join("repo.zip"))
+        .context("error opening archive.zip")?;
+    let _ = ArtifactsWithPlan::from_zip(
+        zip_bytes,
+        None,
+        repo_hash,
+        ControlPlaneZonesMode::Composite,
+        VerificationMode::BlindlyTrustAnything,
+        &logger,
+    )
+    .await
+    .with_context(|| {
+        "error reading generated TUF repo (composite control plane)".to_string()
+    })?;
 
     Ok(())
 }

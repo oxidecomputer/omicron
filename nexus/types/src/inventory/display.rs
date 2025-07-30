@@ -7,7 +7,7 @@
 use std::{
     borrow::Cow,
     collections::{BTreeMap, BTreeSet},
-    fmt,
+    fmt::{self, Write},
     sync::LazyLock,
 };
 
@@ -15,23 +15,28 @@ use chrono::SecondsFormat;
 use clap::Subcommand;
 use gateway_client::types::SpType;
 use iddqd::IdOrdMap;
+use indent_write::fmt::IndentWriter;
 use itertools::Itertools;
 use nexus_sled_agent_shared::inventory::{
     BootImageHeader, BootPartitionContents, BootPartitionDetails,
-    ConfigReconcilerInventory, ConfigReconcilerInventoryResult,
-    ConfigReconcilerInventoryStatus, HostPhase2DesiredContents,
-    OmicronSledConfig, OmicronZoneImageSource, OrphanedDataset,
+    ClearMupdateOverrideBootSuccessInventory, ConfigReconcilerInventory,
+    ConfigReconcilerInventoryResult, ConfigReconcilerInventoryStatus,
+    HostPhase2DesiredContents, OmicronSledConfig, OmicronZoneImageSource,
+    OrphanedDataset,
 };
+use omicron_common::disk::M2Slot;
 use omicron_uuid_kinds::{
     DatasetUuid, OmicronZoneUuid, PhysicalDiskUuid, ZpoolUuid,
 };
+use std::collections::HashMap;
 use strum::IntoEnumIterator;
 use tabled::Tabled;
 use tufaceous_artifact::ArtifactHash;
 use uuid::Uuid;
 
 use crate::inventory::{
-    CabooseWhich, Collection, Dataset, PhysicalDisk, RotPageWhich, Zpool,
+    CabooseWhich, Collection, Dataset, InternalDnsGenerationStatus,
+    PhysicalDisk, RotPageWhich, SledAgent, TimeSync, Zpool,
 };
 
 /// Code to display inventory collections.
@@ -41,6 +46,7 @@ pub struct CollectionDisplay<'a> {
     include_sleds: bool,
     include_orphaned_datasets: bool,
     include_clickhouse_keeper_membership: bool,
+    include_cockroach_status: bool,
     long_string_formatter: LongStringFormatter,
 }
 
@@ -53,6 +59,7 @@ impl<'a> CollectionDisplay<'a> {
             include_sleds: true,
             include_orphaned_datasets: true,
             include_clickhouse_keeper_membership: true,
+            include_cockroach_status: true,
             long_string_formatter: LongStringFormatter::new(),
         }
     }
@@ -93,6 +100,15 @@ impl<'a> CollectionDisplay<'a> {
         self
     }
 
+    /// Control display of Cockroach cluster information (defaults to true).
+    pub fn include_cockroach_status(
+        &mut self,
+        include_cockroach_status: bool,
+    ) -> &mut Self {
+        self.include_cockroach_status = include_cockroach_status;
+        self
+    }
+
     /// Show long strings (defaults to false).
     pub fn show_long_strings(&mut self, show_long_strings: bool) -> &mut Self {
         self.long_string_formatter.show_long_strings = show_long_strings;
@@ -110,6 +126,7 @@ impl<'a> CollectionDisplay<'a> {
             .include_clickhouse_keeper_membership(
                 filter.include_keeper_membership(),
             )
+            .include_cockroach_status(filter.include_cockroach_status())
     }
 }
 
@@ -132,6 +149,9 @@ impl fmt::Display for CollectionDisplay<'_> {
         }
         if self.include_clickhouse_keeper_membership {
             display_keeper_membership(&self.collection, f)?;
+        }
+        if self.include_cockroach_status {
+            display_cockroach_status(&self.collection, f)?;
         }
 
         if nerrors > 0 {
@@ -192,6 +212,14 @@ impl CollectionDisplayCliFilter {
     }
 
     fn include_keeper_membership(&self) -> bool {
+        match self {
+            Self::All => true,
+            Self::Sp { .. } => false,
+            Self::OrphanedDatasets => false,
+        }
+    }
+
+    fn include_cockroach_status(&self) -> bool {
         match self {
             Self::All => true,
             Self::Sp { .. } => false,
@@ -340,7 +368,38 @@ fn display_devices(
             write!(f, " (cubby {})", sp.sp_slot)?;
         }
         writeln!(f, "")?;
-        writeln!(f, "    found at: {} from {}", sp.time_collected, sp.source)?;
+        writeln!(
+            f,
+            "    found at: {} from {}",
+            sp.time_collected
+                .to_rfc3339_opts(SecondsFormat::Millis, /* use_z */ true),
+            sp.source
+        )?;
+
+        #[derive(Tabled)]
+        #[tabled(rename_all = "SCREAMING_SNAKE_CASE")]
+        struct HostPhase1FlashHashRow {
+            slot: String,
+            hash: String,
+        }
+
+        writeln!(f, "    host phase 1 hashes:")?;
+        let host_phase1_hash_rows: Vec<_> = M2Slot::iter()
+            .filter_map(|s| {
+                collection
+                    .host_phase_1_flash_hash_for(s, baseboard_id)
+                    .map(|h| (s, h))
+            })
+            .map(|(slot, phase1)| HostPhase1FlashHashRow {
+                slot: format!("{slot:?}"),
+                hash: phase1.hash.to_string(),
+            })
+            .collect();
+        let table = tabled::Table::new(host_phase1_hash_rows)
+            .with(tabled::settings::Style::empty())
+            .with(tabled::settings::Padding::new(0, 1, 0, 0))
+            .to_string();
+        writeln!(f, "{}", textwrap::indent(&table.to_string(), "        "))?;
 
         #[derive(Tabled)]
         #[tabled(rename_all = "SCREAMING_SNAKE_CASE")]
@@ -482,62 +541,83 @@ fn display_sleds(
     collection: &Collection,
     f: &mut dyn fmt::Write,
 ) -> fmt::Result {
+    let mut f = f;
     writeln!(f, "SLED AGENTS")?;
     for sled in &collection.sled_agents {
+        let SledAgent {
+            time_collected,
+            source,
+            sled_id,
+            baseboard_id,
+            sled_agent_address,
+            sled_role,
+            usable_hardware_threads,
+            usable_physical_ram,
+            reservoir_size,
+            disks,
+            zpools,
+            datasets,
+            ledgered_sled_config,
+            reconciler_status,
+            last_reconciliation,
+            zone_image_resolver,
+        } = sled;
+
         writeln!(
             f,
             "\nsled {} (role = {:?}, serial {})",
-            sled.sled_id,
-            sled.sled_role,
-            match &sled.baseboard_id {
+            sled_id,
+            sled_role,
+            match &baseboard_id {
                 Some(baseboard_id) => &baseboard_id.serial_number,
                 None => "unknown",
             },
         )?;
+
+        let mut indented = IndentWriter::new("    ", f);
+
         writeln!(
-            f,
-            "    found at:    {} from {}",
-            sled.time_collected
+            indented,
+            "found at:    {} from {}",
+            time_collected
                 .to_rfc3339_opts(SecondsFormat::Millis, /* use_z */ true),
-            sled.source
+            source
         )?;
-        writeln!(f, "    address:     {}", sled.sled_agent_address)?;
+        writeln!(indented, "address:     {}", sled_agent_address)?;
+        writeln!(indented, "usable hw threads:   {}", usable_hardware_threads)?;
         writeln!(
-            f,
-            "    usable hw threads:   {}",
-            sled.usable_hardware_threads
-        )?;
-        writeln!(
-            f,
-            "    usable memory (GiB): {}",
-            sled.usable_physical_ram.to_whole_gibibytes()
+            indented,
+            "usable memory (GiB): {}",
+            usable_physical_ram.to_whole_gibibytes()
         )?;
         writeln!(
-            f,
-            "    reservoir (GiB):     {}",
-            sled.reservoir_size.to_whole_gibibytes()
+            indented,
+            "reservoir (GiB):     {}",
+            reservoir_size.to_whole_gibibytes()
         )?;
 
-        if !sled.zpools.is_empty() {
-            writeln!(f, "    physical disks:")?;
+        if !zpools.is_empty() {
+            writeln!(indented, "physical disks:")?;
         }
-        for disk in &sled.disks {
+        for disk in disks {
             let PhysicalDisk { identity, variant, slot, .. } = disk;
-            writeln!(f, "      {variant:?}: {identity:?} in {slot}")?;
+            let mut indent2 = IndentWriter::new("  ", &mut indented);
+            writeln!(indent2, "{variant:?}: {identity:?} in {slot}")?;
         }
 
-        if !sled.zpools.is_empty() {
-            writeln!(f, "    zpools")?;
+        if !zpools.is_empty() {
+            writeln!(indented, "zpools")?;
         }
-        for zpool in &sled.zpools {
+        for zpool in zpools {
             let Zpool { id, total_size, .. } = zpool;
-            writeln!(f, "      {id}: total size: {total_size}")?;
+            let mut indent2 = IndentWriter::new("  ", &mut indented);
+            writeln!(indent2, "{id}: total size: {total_size}")?;
         }
 
-        if !sled.datasets.is_empty() {
-            writeln!(f, "    datasets:")?;
+        if !datasets.is_empty() {
+            writeln!(indented, "datasets:")?;
         }
-        for dataset in &sled.datasets {
+        for dataset in datasets {
             let Dataset {
                 id,
                 name,
@@ -554,21 +634,40 @@ fn display_sleds(
                 String::from("none")
             };
 
-            writeln!(f, "      {name} - id: {id}, compression: {compression}")?;
-            writeln!(f, "        available: {available}, used: {used}")?;
-            writeln!(
-                f,
-                "        reservation: {reservation:?}, quota: {quota:?}"
-            )?;
+            {
+                let mut indent2 = IndentWriter::new("  ", &mut indented);
+                writeln!(
+                    indent2,
+                    "{name} - id: {id}, compression: {compression}"
+                )?;
+                let mut indent3 = IndentWriter::new("  ", &mut indent2);
+                writeln!(indent3, "available: {available}, used: {used}")?;
+                writeln!(
+                    indent3,
+                    "reservation: {reservation:?}, quota: {quota:?}"
+                )?;
+            }
         }
 
-        if let Some(config) = &sled.ledgered_sled_config {
+        f = indented.into_inner();
+
+        if let Some(config) = &ledgered_sled_config {
             display_sled_config("LEDGERED", config, f)?;
         } else {
             writeln!(f, "    no ledgered sled config")?;
         }
 
-        if let Some(last_reconciliation) = &sled.last_reconciliation {
+        let mut indented = IndentWriter::new("    ", f);
+
+        writeln!(indented, "zone image resolver status:")?;
+        {
+            let mut indent2 = IndentWriter::new("    ", &mut indented);
+            // Use write! rather than writeln! since zone_image_resolver.display()
+            // always produces a newline at the end.
+            write!(indent2, "{}", zone_image_resolver.display())?;
+        }
+
+        if let Some(last_reconciliation) = &last_reconciliation {
             let ConfigReconcilerInventory {
                 last_reconciled_config,
                 external_disks,
@@ -576,66 +675,147 @@ fn display_sleds(
                 orphaned_datasets,
                 zones,
                 boot_partitions,
+                clear_mupdate_override,
             } = last_reconciliation;
 
-            display_boot_partition_contents("    ", boot_partitions, f)?;
+            display_boot_partition_contents(boot_partitions, &mut indented)?;
 
-            if Some(last_reconciled_config)
-                == sled.ledgered_sled_config.as_ref()
-            {
+            if Some(last_reconciled_config) == ledgered_sled_config.as_ref() {
                 writeln!(
-                    f,
-                    "    last reconciled config: matches ledgered config"
+                    indented,
+                    "last reconciled config: matches ledgered config"
                 )?;
             } else {
+                let f = indented.into_inner();
                 display_sled_config(
                     "LAST RECONCILED CONFIG",
                     &last_reconciled_config,
                     f,
                 )?;
+                indented = IndentWriter::new("    ", f);
             }
-            if orphaned_datasets.is_empty() {
-                writeln!(f, "        no orphaned datasets")?;
-            } else {
-                writeln!(
-                    f,
-                    "        {} orphaned dataset(s):",
-                    orphaned_datasets.len()
+
+            if let Some(config) = ledgered_sled_config.as_ref() {
+                display_ntp_status(
+                    config,
+                    &collection.ntp_timesync,
+                    &mut indented,
                 )?;
-                for orphan in orphaned_datasets {
-                    display_one_orphaned_dataset("            ", orphan, f)?;
-                }
+
+                display_internal_dns_status(
+                    config,
+                    &collection.internal_dns_generation_status,
+                    &mut indented,
+                )?;
             }
-            let disk_errs = collect_config_reconciler_errors(&external_disks);
-            let dataset_errs = collect_config_reconciler_errors(&datasets);
-            let zone_errs = collect_config_reconciler_errors(&zones);
-            for (label, errs) in [
-                ("disk", disk_errs),
-                ("dataset", dataset_errs),
-                ("zone", zone_errs),
-            ] {
-                if errs.is_empty() {
+
+            {
+                let mut indent2 = IndentWriter::new("    ", &mut indented);
+
+                if let Some(clear_mupdate_override) = clear_mupdate_override {
+                    match &clear_mupdate_override.boot_disk_result {
+                        Ok(ClearMupdateOverrideBootSuccessInventory::Cleared) => {
+                            writeln!(
+                                indent2,
+                                "cleared mupdate override on boot disk",
+                            )?;
+                        }
+                        Ok(
+                            ClearMupdateOverrideBootSuccessInventory::NoOverride,
+                        ) => {
+                            writeln!(
+                                indent2,
+                                "attempted to clear mupdate override \
+                                 on boot disk, but no override was set",
+                            )?;
+                        }
+                        Err(message) => {
+                            writeln!(
+                                indent2,
+                                "failed to clear mupdate override on boot disk: {}",
+                                message
+                            )?;
+                        }
+                    }
                     writeln!(
-                        f,
-                        "        all {label}s reconciled successfully"
+                        indent2,
+                        "clear mupdate override on non-boot disk:"
+                    )?;
+
+                    let mut indent3 = IndentWriter::new("  ", &mut indent2);
+                    writeln!(
+                        indent3,
+                        "{}",
+                        clear_mupdate_override.non_boot_message
                     )?;
                 } else {
+                    match &zone_image_resolver.mupdate_override.boot_override {
+                        Ok(Some(_)) => {
+                            writeln!(
+                                indent2,
+                                "mupdate override present, but sled agent was not \
+                                 instructed to clear it"
+                            )?;
+                        }
+                        Ok(None) => {
+                            writeln!(indent2, "no mupdate override to clear")?;
+                        }
+                        Err(_) => {
+                            writeln!(
+                                indent2,
+                                "error reading mupdate override, so sled agent \
+                                 didn't attempt to clear it"
+                            )?;
+                        }
+                    }
+                }
+
+                if orphaned_datasets.is_empty() {
+                    writeln!(indent2, "no orphaned datasets")?;
+                } else {
                     writeln!(
-                        f,
-                        "        {} {label} reconciliation errors:",
-                        errs.len()
+                        indent2,
+                        "{} orphaned dataset(s):",
+                        orphaned_datasets.len()
                     )?;
-                    for err in errs {
-                        writeln!(f, "          {err}")?;
+                    let mut indent3 = IndentWriter::new("    ", &mut indent2);
+                    for orphan in orphaned_datasets {
+                        display_one_orphaned_dataset(orphan, &mut indent3)?;
+                    }
+                }
+                let disk_errs =
+                    collect_config_reconciler_errors(&external_disks);
+                let dataset_errs = collect_config_reconciler_errors(&datasets);
+                let zone_errs = collect_config_reconciler_errors(&zones);
+                for (label, errs) in [
+                    ("disk", disk_errs),
+                    ("dataset", dataset_errs),
+                    ("zone", zone_errs),
+                ] {
+                    if errs.is_empty() {
+                        writeln!(
+                            indent2,
+                            "all {label}s reconciled successfully"
+                        )?;
+                    } else {
+                        writeln!(
+                            indent2,
+                            "{} {label} reconciliation errors:",
+                            errs.len()
+                        )?;
+                        let mut indent3 = IndentWriter::new("  ", &mut indent2);
+                        for err in errs {
+                            writeln!(indent3, "{err}")?;
+                        }
                     }
                 }
             }
         }
 
-        write!(f, "    reconciler task status: ")?;
-        match &sled.reconciler_status {
+        write!(indented, "reconciler task status: ")?;
+        match &reconciler_status {
             ConfigReconcilerInventoryStatus::NotYetRun => {
-                writeln!(f, "not yet run")?;
+                writeln!(indented, "not yet run")?;
             }
             ConfigReconcilerInventoryStatus::Running {
                 config,
@@ -643,20 +823,25 @@ fn display_sleds(
                 running_for,
             } => {
                 writeln!(
-                    f,
+                    indented,
                     "running for {running_for:?} (since {started_at})"
                 )?;
-                if Some(config) == sled.ledgered_sled_config.as_ref() {
-                    writeln!(f, "    reconciling currently-ledgered config")?;
+                if Some(config) == ledgered_sled_config.as_ref() {
+                    writeln!(
+                        indented,
+                        "reconciling currently-ledgered config"
+                    )?;
                 } else {
+                    let f = indented.into_inner();
                     display_sled_config("RECONCILING CONFIG", config, f)?;
+                    indented = IndentWriter::new("    ", f);
                 }
             }
             ConfigReconcilerInventoryStatus::Idle { completed_at, ran_for } => {
                 writeln!(
-                    f,
+                    indented,
                     "idle (finished at {} \
-                     after running for {ran_for:?})",
+                         after running for {ran_for:?})",
                     completed_at.to_rfc3339_opts(
                         SecondsFormat::Millis,
                         /* use_z */ true,
@@ -664,53 +849,86 @@ fn display_sleds(
                 )?;
             }
         }
+
+        f = indented.into_inner();
     }
     Ok(())
 }
 
+fn display_ntp_status(
+    ledgered_sled_config: &OmicronSledConfig,
+    ntp_timesync: &IdOrdMap<TimeSync>,
+    f: &mut dyn fmt::Write,
+) -> fmt::Result {
+    let timesync = ledgered_sled_config
+        .zones
+        .keys()
+        .find_map(|zone_id| ntp_timesync.get(zone_id));
+
+    match timesync {
+        None => writeln!(f, "no information from NTP for this sled")?,
+        Some(ts) if ts.synced => {
+            writeln!(f, "NTP reports that time is synced")?
+        }
+        Some(_) => writeln!(f, "NTP reports that time is NOT synced")?,
+    };
+
+    Ok(())
+}
+
 fn display_boot_partition_contents(
-    indent: &str,
     boot_partitions: &BootPartitionContents,
     f: &mut dyn fmt::Write,
 ) -> fmt::Result {
+    let mut f = f;
+
     let BootPartitionContents { boot_disk, slot_a, slot_b } = &boot_partitions;
-    write!(f, "{indent}boot disk slot: ")?;
+    write!(f, "boot disk slot: ")?;
     match boot_disk {
         Ok(slot) => writeln!(f, "{slot:?}")?,
         Err(err) => writeln!(f, "FAILED TO DETERMINE: {err}")?,
     }
     match slot_a {
         Ok(details) => {
-            writeln!(f, "{indent}slot A details:")?;
-            display_boot_partition_details(
-                &format!("{indent}    "),
-                details,
-                f,
-            )?;
+            writeln!(f, "slot A details:")?;
+            let mut indented = IndentWriter::new("    ", f);
+            display_boot_partition_details(details, &mut indented)?;
+            f = indented.into_inner();
         }
         Err(err) => {
-            writeln!(f, "{indent}slot A details UNAVAILABLE: {err}")?;
+            writeln!(f, "slot A details UNAVAILABLE: {err}")?;
         }
     }
     match slot_b {
         Ok(details) => {
-            writeln!(f, "{indent}slot B details:")?;
-            display_boot_partition_details(
-                &format!("{indent}    "),
-                details,
-                f,
-            )?;
+            writeln!(f, "slot B details:")?;
+            let mut indented = IndentWriter::new("    ", f);
+            display_boot_partition_details(details, &mut indented)?;
         }
         Err(err) => {
-            writeln!(f, "{indent}slot B details UNAVAILABLE: {err}")?;
+            writeln!(f, "slot B details UNAVAILABLE: {err}")?;
         }
     }
 
     Ok(())
 }
 
+fn display_internal_dns_status(
+    ledgered_sled_config: &OmicronSledConfig,
+    internal_dns_generation_status: &IdOrdMap<InternalDnsGenerationStatus>,
+    f: &mut dyn fmt::Write,
+) -> fmt::Result {
+    let internal_dns_generation_status = ledgered_sled_config
+        .zones
+        .keys()
+        .find_map(|zone_id| internal_dns_generation_status.get(zone_id));
+    if let Some(st) = internal_dns_generation_status {
+        writeln!(f, "Internal DNS generation: {}", st.generation)?
+    }
+    Ok(())
+}
+
 fn display_boot_partition_details(
-    indent: &str,
     details: &BootPartitionDetails,
     f: &mut dyn fmt::Write,
 ) -> fmt::Result {
@@ -726,9 +944,9 @@ fn display_boot_partition_details(
         image_name,
     } = header;
 
-    writeln!(f, "{indent}artifact: {artifact_hash} ({artifact_size} bytes)")?;
-    writeln!(f, "{indent}image name: {image_name}")?;
-    writeln!(f, "{indent}phase 2 hash: {}", ArtifactHash(*sha256))?;
+    writeln!(f, "artifact: {artifact_hash} ({artifact_size} bytes)")?;
+    writeln!(f, "image name: {image_name}")?;
+    writeln!(f, "phase 2 hash: {}", ArtifactHash(*sha256))?;
 
     Ok(())
 }
@@ -741,6 +959,7 @@ fn display_orphaned_datasets(
     static EMPTY_SET: LazyLock<IdOrdMap<OrphanedDataset>> =
         LazyLock::new(IdOrdMap::new);
 
+    let mut f = f;
     writeln!(f, "ORPHANED DATASETS")?;
     for sled in &collection.sled_agents {
         writeln!(
@@ -757,24 +976,28 @@ fn display_orphaned_datasets(
             .as_ref()
             .map(|r| &r.orphaned_datasets)
             .unwrap_or(&*EMPTY_SET);
+
+        let mut indented = IndentWriter::new("    ", f);
         if orphaned_datasets.is_empty() {
-            writeln!(f, "    no orphaned datasets")?;
+            writeln!(indented, "no orphaned datasets")?;
         } else {
             writeln!(
-                f,
-                "    {} orphaned dataset(s):",
+                indented,
+                "{} orphaned dataset(s):",
                 orphaned_datasets.len()
             )?;
+            let mut indent2 = IndentWriter::new("    ", &mut indented);
             for orphan in orphaned_datasets {
-                display_one_orphaned_dataset("        ", orphan, f)?;
+                display_one_orphaned_dataset(orphan, &mut indent2)?;
             }
         }
+
+        f = indented.into_inner();
     }
     Ok(())
 }
 
 fn display_one_orphaned_dataset(
-    indent: &str,
     orphan: &OrphanedDataset,
     f: &mut dyn fmt::Write,
 ) -> fmt::Result {
@@ -783,12 +1006,13 @@ fn display_one_orphaned_dataset(
         Some(id) => id as &dyn fmt::Display,
         None => &"none (this is unexpected!)",
     };
-    writeln!(f, "{indent}{}", name.full_name())?;
-    writeln!(f, "{indent}    reason: {reason}")?;
-    writeln!(f, "{indent}    dataset ID: {id}")?;
-    writeln!(f, "{indent}    mounted: {mounted}")?;
-    writeln!(f, "{indent}    available: {available}")?;
-    writeln!(f, "{indent}    used: {used}")?;
+    writeln!(f, "{}", name.full_name())?;
+    let mut indented = IndentWriter::new("    ", f);
+    writeln!(indented, "reason: {reason}")?;
+    writeln!(indented, "dataset ID: {id}")?;
+    writeln!(indented, "mounted: {mounted}")?;
+    writeln!(indented, "available: {available}")?;
+    writeln!(indented, "used: {used}")?;
     Ok(())
 }
 
@@ -821,8 +1045,10 @@ fn display_sled_config(
     } = config;
 
     writeln!(f, "\n{label} SLED CONFIG")?;
-    writeln!(f, "    generation: {}", generation)?;
-    writeln!(f, "    remove_mupdate_override: {remove_mupdate_override:?}")?;
+    let mut indented = IndentWriter::new("    ", f);
+
+    writeln!(indented, "generation: {}", generation)?;
+    writeln!(indented, "remove_mupdate_override: {remove_mupdate_override:?}")?;
 
     let display_host_phase_2_desired = |desired| match desired {
         HostPhase2DesiredContents::CurrentContents => {
@@ -833,18 +1059,18 @@ fn display_sled_config(
         }
     };
     writeln!(
-        f,
-        "    desired host phase 2 slot a: {}",
+        indented,
+        "desired host phase 2 slot a: {}",
         display_host_phase_2_desired(host_phase_2.slot_a)
     )?;
     writeln!(
-        f,
-        "    desired host phase 2 slot b: {}",
+        indented,
+        "desired host phase 2 slot b: {}",
         display_host_phase_2_desired(host_phase_2.slot_b)
     )?;
 
     if disks.is_empty() {
-        writeln!(f, "    disk config empty")?;
+        writeln!(indented, "disk config empty")?;
     } else {
         #[derive(Tabled)]
         #[tabled(rename_all = "SCREAMING_SNAKE_CASE")]
@@ -865,14 +1091,14 @@ fn display_sled_config(
         });
         let table = tabled::Table::new(rows)
             .with(tabled::settings::Style::empty())
-            .with(tabled::settings::Padding::new(8, 1, 0, 0))
+            .with(tabled::settings::Padding::new(4, 1, 0, 0))
             .to_string();
-        writeln!(f, "    DISKS: {}", disks.len())?;
-        writeln!(f, "{table}")?;
+        writeln!(indented, "DISKS: {}", disks.len())?;
+        writeln!(indented, "{table}")?;
     }
 
     if datasets.is_empty() {
-        writeln!(f, "    dataset config empty")?;
+        writeln!(indented, "dataset config empty")?;
     } else {
         #[derive(Tabled)]
         #[tabled(rename_all = "SCREAMING_SNAKE_CASE")]
@@ -901,14 +1127,14 @@ fn display_sled_config(
         });
         let table = tabled::Table::new(rows)
             .with(tabled::settings::Style::empty())
-            .with(tabled::settings::Padding::new(8, 1, 0, 0))
+            .with(tabled::settings::Padding::new(4, 1, 0, 0))
             .to_string();
-        writeln!(f, "    DATASETS: {}", datasets.len())?;
-        writeln!(f, "{table}")?;
+        writeln!(indented, "DATASETS: {}", datasets.len())?;
+        writeln!(indented, "{table}")?;
     }
 
     if zones.is_empty() {
-        writeln!(f, "    zone config empty")?;
+        writeln!(indented, "zone config empty")?;
     } else {
         #[derive(Tabled)]
         #[tabled(rename_all = "SCREAMING_SNAKE_CASE")]
@@ -932,10 +1158,10 @@ fn display_sled_config(
         });
         let table = tabled::Table::new(rows)
             .with(tabled::settings::Style::empty())
-            .with(tabled::settings::Padding::new(8, 1, 0, 0))
+            .with(tabled::settings::Padding::new(4, 1, 0, 0))
             .to_string();
-        writeln!(f, "    ZONES: {}", zones.len())?;
-        writeln!(f, "{table}")?;
+        writeln!(indented, "ZONES: {}", zones.len())?;
+        writeln!(indented, "{table}")?;
     }
 
     Ok(())
@@ -961,6 +1187,53 @@ fn display_keeper_membership(
         writeln!(f, "    no membership retrieved")?;
     }
     writeln!(f, "")?;
+
+    Ok(())
+}
+
+fn display_cockroach_status(
+    collection: &Collection,
+    f: &mut dyn fmt::Write,
+) -> fmt::Result {
+    writeln!(f, "\nCOCKROACH STATUS")?;
+
+    // Under normal conditions, cockroach nodes will report the same data. For
+    // brevity, we will map "status" -> "nodes reporting that status", to avoid
+    // emitting the same information repeatedly for each node.
+    let mut status_to_node: HashMap<_, Vec<_>> = HashMap::new();
+
+    for (node, status) in &collection.cockroach_status {
+        status_to_node.entry(status).or_default().push(node);
+    }
+
+    for (status, nodes) in &status_to_node {
+        writeln!(
+            f,
+            "\n  status from nodes: {}",
+            nodes.iter().map(|n| n.to_string()).join(", ")
+        )?;
+
+        writeln!(
+            f,
+            "\n    ranges underreplicated: {}",
+            status
+                .ranges_underreplicated
+                .map(|r| r.to_string())
+                .unwrap_or_else(|| "<cOULD NOT BE PARSED>".to_string())
+        )?;
+        writeln!(
+            f,
+            "\n    live nodes: {}",
+            status
+                .liveness_live_nodes
+                .map(|r| r.to_string())
+                .unwrap_or_else(|| "<COULD NOT BE PARSED>".to_string())
+        )?;
+    }
+    if status_to_node.is_empty() {
+        writeln!(f, "    no cockroach status retrieved")?;
+    }
+    writeln!(f)?;
 
     Ok(())
 }

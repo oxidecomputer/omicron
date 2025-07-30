@@ -687,7 +687,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/ReconfiguratorChickenSwitches"
+                  "$ref": "#/components/schemas/ReconfiguratorChickenSwitchesView"
                 }
               }
             }
@@ -748,7 +748,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/ReconfiguratorChickenSwitches"
+                  "$ref": "#/components/schemas/ReconfiguratorChickenSwitchesView"
                 }
               }
             }
@@ -911,6 +911,16 @@
       "post": {
         "summary": "Create a new support bundle",
         "operationId": "support_bundle_create",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SupportBundleCreate"
+              }
+            }
+          },
+          "required": true
+        },
         "responses": {
           "201": {
             "description": "successful creation",
@@ -947,6 +957,50 @@
             }
           }
         ],
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SupportBundleInfo"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      },
+      "put": {
+        "summary": "Update a support bundle",
+        "operationId": "support_bundle_update",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "bundle_id",
+            "description": "ID of the support bundle",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SupportBundleUpdate"
+              }
+            }
+          },
+          "required": true
+        },
         "responses": {
           "200": {
             "description": "successful operation",
@@ -4715,12 +4769,6 @@
           "$ref": "#/components/schemas/BlueprintZoneConfig"
         }
       },
-      "IdMapPendingMgsUpdate": {
-        "type": "object",
-        "additionalProperties": {
-          "$ref": "#/components/schemas/PendingMgsUpdate"
-        }
-      },
       "ImportExportPolicy": {
         "description": "Define policy relating to the import and export of prefixes from a BGP peer.",
         "oneOf": [
@@ -6232,7 +6280,22 @@
         "type": "object",
         "properties": {
           "by_baseboard": {
-            "$ref": "#/components/schemas/IdMapPendingMgsUpdate"
+            "title": "IdOrdMap",
+            "x-rust-type": {
+              "crate": "iddqd",
+              "parameters": [
+                {
+                  "$ref": "#/components/schemas/PendingMgsUpdate"
+                }
+              ],
+              "path": "iddqd::IdOrdMap",
+              "version": "*"
+            },
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/PendingMgsUpdate"
+            },
+            "uniqueItems": true
           }
         },
         "required": [
@@ -6314,6 +6377,18 @@
           "ok"
         ]
       },
+      "PlannerChickenSwitches": {
+        "type": "object",
+        "properties": {
+          "add_zones_with_mupdate_override": {
+            "description": "Whether to add zones even if a mupdate override is present.\n\nOnce Nexus-driven update is active on a customer system, we must not add new zones while the system is recovering from a MUPdate. But that would require customers to upload a TUF repo before adding a new sled, even though Nexus-driven update is not active (as of r16).\n\nThis switch, which is currently on by default, allows us to add zones even if we've detected a recent MUPdate on the system. We will want to turn it off as part of enabling Nexus-driven update.",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "add_zones_with_mupdate_override"
+        ]
+      },
       "PlanningAddOutOfEligibleSleds": {
         "description": "How many discretionary zones we actually placed out of how many we wanted to place.",
         "type": "object",
@@ -6384,7 +6459,14 @@
             },
             "uniqueItems": true
           },
-          "sleds_with_no_zpools_for_ntp_zone": {
+          "sleds_without_ntp_zones_in_inventory": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/TypedUuidForSledKind"
+            },
+            "uniqueItems": true
+          },
+          "sleds_without_zpools_for_ntp_zones": {
             "type": "array",
             "items": {
               "$ref": "#/components/schemas/TypedUuidForSledKind"
@@ -6406,7 +6488,8 @@
           "sleds_missing_crucible_zone",
           "sleds_missing_ntp_zone",
           "sleds_waiting_for_ntp_zone",
-          "sleds_with_no_zpools_for_ntp_zone",
+          "sleds_without_ntp_zones_in_inventory",
+          "sleds_without_zpools_for_ntp_zones",
           "sufficient_zones_exist"
         ]
       },
@@ -6718,6 +6801,14 @@
               }
             ]
           },
+          "chicken_switches": {
+            "description": "The set of \"chicken switches\" in effect for this planning run.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/PlannerChickenSwitches"
+              }
+            ]
+          },
           "cockroachdb_settings": {
             "$ref": "#/components/schemas/PlanningCockroachdbSettingsStepReport"
           },
@@ -6740,6 +6831,7 @@
         "required": [
           "add",
           "blueprint_id",
+          "chicken_switches",
           "cockroachdb_settings",
           "decommission",
           "expunge",
@@ -7247,6 +7339,38 @@
           "planner_enabled": {
             "type": "boolean"
           },
+          "planner_switches": {
+            "$ref": "#/components/schemas/PlannerChickenSwitches"
+          }
+        },
+        "required": [
+          "planner_enabled",
+          "planner_switches"
+        ]
+      },
+      "ReconfiguratorChickenSwitchesParam": {
+        "type": "object",
+        "properties": {
+          "switches": {
+            "$ref": "#/components/schemas/ReconfiguratorChickenSwitches"
+          },
+          "version": {
+            "type": "integer",
+            "format": "uint32",
+            "minimum": 0
+          }
+        },
+        "required": [
+          "switches",
+          "version"
+        ]
+      },
+      "ReconfiguratorChickenSwitchesView": {
+        "type": "object",
+        "properties": {
+          "switches": {
+            "$ref": "#/components/schemas/ReconfiguratorChickenSwitches"
+          },
           "time_modified": {
             "type": "string",
             "format": "date-time"
@@ -7258,25 +7382,8 @@
           }
         },
         "required": [
-          "planner_enabled",
+          "switches",
           "time_modified",
-          "version"
-        ]
-      },
-      "ReconfiguratorChickenSwitchesParam": {
-        "type": "object",
-        "properties": {
-          "planner_enabled": {
-            "type": "boolean"
-          },
-          "version": {
-            "type": "integer",
-            "format": "uint32",
-            "minimum": 0
-          }
-        },
-        "required": [
-          "planner_enabled",
           "version"
         ]
       },
@@ -8001,6 +8108,16 @@
           "weight"
         ]
       },
+      "SupportBundleCreate": {
+        "type": "object",
+        "properties": {
+          "user_comment": {
+            "nullable": true,
+            "description": "User comment for the support bundle",
+            "type": "string"
+          }
+        }
+      },
       "SupportBundleInfo": {
         "type": "object",
         "properties": {
@@ -8020,6 +8137,10 @@
           "time_created": {
             "type": "string",
             "format": "date-time"
+          },
+          "user_comment": {
+            "nullable": true,
+            "type": "string"
           }
         },
         "required": [
@@ -8081,6 +8202,16 @@
             ]
           }
         ]
+      },
+      "SupportBundleUpdate": {
+        "type": "object",
+        "properties": {
+          "user_comment": {
+            "nullable": true,
+            "description": "User comment for the support bundle",
+            "type": "string"
+          }
+        }
       },
       "SwitchLocation": {
         "description": "Identifies switch physical location",
@@ -8576,6 +8707,32 @@
             },
             "required": [
               "reason",
+              "type"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "synchronized_count": {
+                "type": "integer",
+                "format": "uint",
+                "minimum": 0
+              },
+              "total_boundary_ntp_zones": {
+                "type": "integer",
+                "format": "uint",
+                "minimum": 0
+              },
+              "type": {
+                "type": "string",
+                "enum": [
+                  "boundary_ntp"
+                ]
+              }
+            },
+            "required": [
+              "synchronized_count",
+              "total_boundary_ntp_zones",
               "type"
             ]
           }

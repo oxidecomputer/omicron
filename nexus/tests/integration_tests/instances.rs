@@ -6451,29 +6451,31 @@ async fn test_instance_attach_several_external_ips(
     .await;
 
     // 1 ephemeral + 7 floating + 1 SNAT
-    assert_ip_pool_utilization(client, "default", 9, 10, 0, 0).await;
+    const N_EXPECTED_IPS: u32 = 9;
+    assert_ip_pool_utilization(client, "default", N_EXPECTED_IPS, 10, 0, 0)
+        .await;
 
     // Verify that all external IPs are visible on the instance and have
     // been allocated in order.
     let external_ips =
         fetch_instance_external_ips(&client, instance_name, PROJECT_NAME).await;
-    assert_eq!(external_ips.len(), 8);
-    eprintln!("{external_ips:?}");
+    eprintln!("{external_ips:#?}");
+    assert_eq!(external_ips.len(), N_EXPECTED_IPS as usize);
+
+    // We've created all the FIPs first, before the instance. The instance gets
+    // an SNAT IP automatically, and then _also_ an Ephemeral IP.
     for (i, eip) in external_ips
         .iter()
         .sorted_unstable_by(|a, b| a.ip().cmp(&b.ip()))
         .enumerate()
     {
-        let last_octet = i + if i != external_ips.len() - 1 {
-            assert_eq!(eip.kind(), IpKind::Floating);
-            1
-        } else {
-            // SNAT will occupy 1.0.0.8 here, since it it alloc'd before
-            // the ephemeral.
-            assert_eq!(eip.kind(), IpKind::Ephemeral);
-            2
+        match i {
+            0..7 => assert_eq!(eip.kind(), IpKind::Floating),
+            7 => assert_eq!(eip.kind(), IpKind::SNat),
+            8 => assert_eq!(eip.kind(), IpKind::Ephemeral),
+            _ => unreachable!(),
         };
-        assert_eq!(eip.ip(), Ipv4Addr::new(10, 0, 0, last_octet as u8));
+        assert_eq!(eip.ip(), Ipv4Addr::new(10, 0, 0, (i + 1) as u8));
     }
 
     // Verify that all floating IPs are bound to their parent instance.

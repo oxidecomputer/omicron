@@ -533,9 +533,12 @@ impl TryFrom<ExternalIp> for views::ExternalIp {
                 ip: ip.ip.ip(),
                 ip_pool_id: ip.ip_pool_id,
             }),
-            IpKind::SNat => Err(Error::internal_error(
-                "SNAT IP addresses should not be exposed in the API",
-            )),
+            IpKind::SNat => Ok(views::ExternalIp::SNat(views::SNatIp {
+                ip: ip.ip.ip(),
+                first_port: u16::from(ip.first_port),
+                last_port: u16::from(ip.last_port),
+                ip_pool_id: ip.ip_pool_id,
+            })),
         }
     }
 }

@@ -26,6 +26,7 @@ illumos-utils.workspace = true
 installinator-common.workspace = true
 key-manager.workspace = true
 nexus-sled-agent-shared.workspace = true
+ntp-admin-client.workspace = true
 omicron-common.workspace = true
 omicron-uuid-kinds.workspace = true
 serde.workspace = true
@@ -53,6 +54,7 @@ proptest.workspace = true
 schemars.workspace = true
 scopeguard.workspace = true
 serde_json.workspace = true
+sled-agent-zone-images-examples.workspace = true
 sled-storage = { workspace = true, features = ["testing"] }
 test-strategy.workspace = true
 xshell.workspace = true

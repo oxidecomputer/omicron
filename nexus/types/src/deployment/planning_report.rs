@@ -9,6 +9,7 @@ use super::BlueprintZoneConfig;
 use super::BlueprintZoneImageSource;
 use super::CockroachDbPreserveDowngrade;
 use super::PendingMgsUpdates;
+use super::PlannerChickenSwitches;
 
 use daft::Diffable;
 use omicron_common::policy::COCKROACHDB_REDUNDANCY;
@@ -50,6 +51,9 @@ pub struct PlanningReport {
     /// The blueprint produced by the planning run this report describes.
     pub blueprint_id: BlueprintUuid,
 
+    /// The set of "chicken switches" in effect for this planning run.
+    pub chicken_switches: PlannerChickenSwitches,
+
     // Step reports.
     pub expunge: PlanningExpungeStepReport,
     pub decommission: PlanningDecommissionStepReport,
@@ -64,6 +68,7 @@ impl PlanningReport {
     pub fn new(blueprint_id: BlueprintUuid) -> Self {
         Self {
             blueprint_id,
+            chicken_switches: PlannerChickenSwitches::default(),
             expunge: PlanningExpungeStepReport::new(),
             decommission: PlanningDecommissionStepReport::new(),
             noop_image_source: PlanningNoopImageSourceStepReport::new(),
@@ -98,6 +103,7 @@ impl fmt::Display for PlanningReport {
         } else {
             let Self {
                 blueprint_id,
+                chicken_switches,
                 expunge,
                 decommission,
                 noop_image_source,
@@ -107,6 +113,13 @@ impl fmt::Display for PlanningReport {
                 cockroachdb_settings,
             } = self;
             writeln!(f, "Planning report for blueprint {blueprint_id}:")?;
+            if *chicken_switches != PlannerChickenSwitches::default() {
+                writeln!(
+                    f,
+                    "Chicken switches:\n{}",
+                    chicken_switches.display()
+                )?;
+            }
             expunge.fmt(f)?;
             decommission.fmt(f)?;
             noop_image_source.fmt(f)?;
@@ -438,7 +451,8 @@ pub struct PlanningAddSufficientZonesExist {
     Clone, Debug, Deserialize, Serialize, PartialEq, Eq, Diffable, JsonSchema,
 )]
 pub struct PlanningAddStepReport {
-    pub sleds_with_no_zpools_for_ntp_zone: BTreeSet<SledUuid>,
+    pub sleds_without_ntp_zones_in_inventory: BTreeSet<SledUuid>,
+    pub sleds_without_zpools_for_ntp_zones: BTreeSet<SledUuid>,
     pub sleds_waiting_for_ntp_zone: BTreeSet<SledUuid>,
     pub sleds_getting_ntp_and_discretionary_zones: BTreeSet<SledUuid>,
     pub sleds_missing_ntp_zone: BTreeSet<SledUuid>,
@@ -460,7 +474,8 @@ pub struct PlanningAddStepReport {
 impl PlanningAddStepReport {
     pub fn new() -> Self {
         Self {
-            sleds_with_no_zpools_for_ntp_zone: BTreeSet::new(),
+            sleds_without_ntp_zones_in_inventory: BTreeSet::new(),
+            sleds_without_zpools_for_ntp_zones: BTreeSet::new(),
             sleds_waiting_for_ntp_zone: BTreeSet::new(),
             sleds_getting_ntp_and_discretionary_zones: BTreeSet::new(),
             sleds_missing_ntp_zone: BTreeSet::new(),
@@ -472,7 +487,8 @@ impl PlanningAddStepReport {
     }
 
     pub fn is_empty(&self) -> bool {
-        self.sleds_with_no_zpools_for_ntp_zone.is_empty()
+        self.sleds_without_ntp_zones_in_inventory.is_empty()
+            && self.sleds_without_zpools_for_ntp_zones.is_empty()
             && self.sleds_waiting_for_ntp_zone.is_empty()
             && self.sleds_getting_ntp_and_discretionary_zones.is_empty()
             && self.sleds_missing_ntp_zone.is_empty()
@@ -535,7 +551,8 @@ impl PlanningAddStepReport {
 impl fmt::Display for PlanningAddStepReport {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         let Self {
-            sleds_with_no_zpools_for_ntp_zone,
+            sleds_without_ntp_zones_in_inventory,
+            sleds_without_zpools_for_ntp_zones,
             sleds_waiting_for_ntp_zone,
             sleds_getting_ntp_and_discretionary_zones,
             sleds_missing_ntp_zone,
@@ -545,11 +562,23 @@ impl fmt::Display for PlanningAddStepReport {
             discretionary_zones_placed,
         } = self;
 
-        if !sleds_with_no_zpools_for_ntp_zone.is_empty() {
+        if !sleds_without_ntp_zones_in_inventory.is_empty() {
+            writeln!(
+                f,
+                "* Waiting for NTP zones to appear in inventory on sleds: {}",
+                sleds_without_ntp_zones_in_inventory
+                    .iter()
+                    .map(|sled_id| format!("{sled_id}"))
+                    .collect::<Vec<String>>()
+                    .join(", ")
+            )?;
+        }
+
+        if !sleds_without_zpools_for_ntp_zones.is_empty() {
             writeln!(
                 f,
                 "* No zpools in service for NTP zones on sleds: {}",
-                sleds_with_no_zpools_for_ntp_zone
+                sleds_without_zpools_for_ntp_zones
                     .iter()
                     .map(|sled_id| format!("{sled_id}"))
                     .collect::<Vec<String>>()
@@ -762,24 +791,7 @@ impl fmt::Display for PlanningZoneUpdatesStepReport {
 
         if !out_of_date_zones.is_empty() {
             let (n, s) = plural_map_of_vec(out_of_date_zones);
-            writeln!(f, "* {n} remaining out-of-date zone{s}:")?;
-            for (sled_id, zones) in out_of_date_zones.iter() {
-                for PlanningOutOfDateZone {
-                    zone_config,
-                    desired_image_source,
-                } in zones
-                {
-                    writeln!(
-                        f,
-                        "  * sled {}, zone {} ({}): {} → {}",
-                        sled_id,
-                        zone_config.id,
-                        zone_config.zone_type.kind().report_str(),
-                        zone_config.image_source,
-                        desired_image_source,
-                    )?;
-                }
-            }
+            writeln!(f, "* {n} remaining out-of-date zone{s}")?;
         }
 
         if !unsafe_zones.is_empty() {
@@ -829,12 +841,17 @@ impl ZoneUpdatesWaitingOn {
 #[serde(rename_all = "snake_case", tag = "type")]
 pub enum ZoneUnsafeToShutdown {
     Cockroachdb { reason: CockroachdbUnsafeToShutdown },
+    BoundaryNtp { total_boundary_ntp_zones: usize, synchronized_count: usize },
 }
 
 impl fmt::Display for ZoneUnsafeToShutdown {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match self {
             Self::Cockroachdb { reason } => write!(f, "{reason}"),
+            Self::BoundaryNtp {
+                total_boundary_ntp_zones: t,
+                synchronized_count: s,
+            } => write!(f, "only {s}/{t} boundary NTP zones are synchronized"),
         }
     }
 }

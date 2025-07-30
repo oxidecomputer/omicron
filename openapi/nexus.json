@@ -365,6 +365,16 @@
         ],
         "summary": "Create a new support bundle",
         "operationId": "support_bundle_create",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SupportBundleCreate"
+              }
+            }
+          },
+          "required": true
+        },
         "responses": {
           "201": {
             "description": "successful creation",
@@ -404,6 +414,53 @@
             }
           }
         ],
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SupportBundleInfo"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      },
+      "put": {
+        "tags": [
+          "experimental"
+        ],
+        "summary": "Update a support bundle",
+        "operationId": "support_bundle_update",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "bundle_id",
+            "description": "ID of the support bundle",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SupportBundleUpdate"
+              }
+            }
+          },
+          "required": true
+        },
         "responses": {
           "200": {
             "description": "successful operation",
@@ -11577,6 +11634,216 @@
         }
       }
     },
+    "/v1/users/{user_id}": {
+      "get": {
+        "tags": [
+          "silos"
+        ],
+        "summary": "Fetch user",
+        "operationId": "user_view",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "user_id",
+            "description": "ID of the user",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/User"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/v1/users/{user_id}/access-tokens": {
+      "get": {
+        "tags": [
+          "silos"
+        ],
+        "summary": "List user's access tokens",
+        "operationId": "user_token_list",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "user_id",
+            "description": "ID of the user",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "description": "Maximum number of items returned by a single call",
+            "schema": {
+              "nullable": true,
+              "type": "integer",
+              "format": "uint32",
+              "minimum": 1
+            }
+          },
+          {
+            "in": "query",
+            "name": "page_token",
+            "description": "Token returned by previous call to retrieve the subsequent page",
+            "schema": {
+              "nullable": true,
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "sort_by",
+            "schema": {
+              "$ref": "#/components/schemas/IdSortMode"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DeviceAccessTokenResultsPage"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "x-dropshot-pagination": {
+          "required": []
+        }
+      }
+    },
+    "/v1/users/{user_id}/logout": {
+      "post": {
+        "tags": [
+          "silos"
+        ],
+        "summary": "Log user out",
+        "description": "Silo admins can use this endpoint to log the specified user out by deleting all of their tokens AND sessions. This cannot be undone.",
+        "operationId": "user_logout",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "user_id",
+            "description": "ID of the user",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "resource updated"
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/v1/users/{user_id}/sessions": {
+      "get": {
+        "tags": [
+          "silos"
+        ],
+        "summary": "List user's console sessions",
+        "operationId": "user_session_list",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "user_id",
+            "description": "ID of the user",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "description": "Maximum number of items returned by a single call",
+            "schema": {
+              "nullable": true,
+              "type": "integer",
+              "format": "uint32",
+              "minimum": 1
+            }
+          },
+          {
+            "in": "query",
+            "name": "page_token",
+            "description": "Token returned by previous call to retrieve the subsequent page",
+            "schema": {
+              "nullable": true,
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "sort_by",
+            "schema": {
+              "$ref": "#/components/schemas/IdSortMode"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ConsoleSessionResultsPage"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "x-dropshot-pagination": {
+          "required": []
+        }
+      }
+    },
     "/v1/utilization": {
       "get": {
         "tags": [
@@ -16165,6 +16432,51 @@
           "items"
         ]
       },
+      "ConsoleSession": {
+        "description": "View of a console session",
+        "type": "object",
+        "properties": {
+          "id": {
+            "description": "A unique, immutable, system-controlled identifier for the session",
+            "type": "string",
+            "format": "uuid"
+          },
+          "time_created": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "time_last_used": {
+            "type": "string",
+            "format": "date-time"
+          }
+        },
+        "required": [
+          "id",
+          "time_created",
+          "time_last_used"
+        ]
+      },
+      "ConsoleSessionResultsPage": {
+        "description": "A single page of results",
+        "type": "object",
+        "properties": {
+          "items": {
+            "description": "list of items on this page of results",
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ConsoleSession"
+            }
+          },
+          "next_page": {
+            "nullable": true,
+            "description": "token used to fetch the next page of results (if any)",
+            "type": "string"
+          }
+        },
+        "required": [
+          "items"
+        ]
+      },
       "Cumulativedouble": {
         "description": "A cumulative or counter data type.",
         "type": "object",
@@ -17573,6 +17885,47 @@
       },
       "ExternalIp": {
         "oneOf": [
+          {
+            "description": "A source NAT IP address.\n\nSNAT addresses are ephemeral addresses used only for outbound connectivity.",
+            "type": "object",
+            "properties": {
+              "first_port": {
+                "description": "The first usable port within the IP address.",
+                "type": "integer",
+                "format": "uint16",
+                "minimum": 0
+              },
+              "ip": {
+                "description": "The IP address.",
+                "type": "string",
+                "format": "ip"
+              },
+              "ip_pool_id": {
+                "description": "ID of the IP Pool from which the address is taken.",
+                "type": "string",
+                "format": "uuid"
+              },
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "snat"
+                ]
+              },
+              "last_port": {
+                "description": "The last usable port within the IP address.",
+                "type": "integer",
+                "format": "uint16",
+                "minimum": 0
+              }
+            },
+            "required": [
+              "first_port",
+              "ip",
+              "ip_pool_id",
+              "kind",
+              "last_port"
+            ]
+          },
           {
             "type": "object",
             "properties": {
@@ -22294,7 +22647,7 @@
           },
           "rib_priority": {
             "nullable": true,
-            "description": "Local preference for route. Higher preference indictes precedence within and across protocols.",
+            "description": "Route RIB priority. Higher priority indicates precedence within and across protocols.",
             "type": "integer",
             "format": "uint8",
             "minimum": 0
@@ -23918,6 +24271,16 @@
           "items"
         ]
       },
+      "SupportBundleCreate": {
+        "type": "object",
+        "properties": {
+          "user_comment": {
+            "nullable": true,
+            "description": "User comment for the support bundle",
+            "type": "string"
+          }
+        }
+      },
       "SupportBundleInfo": {
         "type": "object",
         "properties": {
@@ -23937,6 +24300,10 @@
           "time_created": {
             "type": "string",
             "format": "date-time"
+          },
+          "user_comment": {
+            "nullable": true,
+            "type": "string"
           }
         },
         "required": [
@@ -23998,6 +24365,16 @@
             ]
           }
         ]
+      },
+      "SupportBundleUpdate": {
+        "type": "object",
+        "properties": {
+          "user_comment": {
+            "nullable": true,
+            "description": "User comment for the support bundle",
+            "type": "string"
+          }
+        }
       },
       "Switch": {
         "description": "An operator's view of a Switch.",
@@ -24570,7 +24947,7 @@
           },
           "rib_priority": {
             "nullable": true,
-            "description": "RIB Priority indicating priority within and across protocols.",
+            "description": "Route RIB priority. Higher priority indicates precedence within and across protocols.",
             "type": "integer",
             "format": "uint8",
             "minimum": 0

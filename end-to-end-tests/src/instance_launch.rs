@@ -91,7 +91,8 @@ async fn instance_launch() -> Result<()> {
         .send()
         .await?
         .items
-        .first()
+        .iter()
+        .find(|eip| matches!(eip, ExternalIp::Ephemeral { .. }))
         .context("no external IPs")?
         .clone();
 

@@ -19,8 +19,11 @@ use nexus_types::{
     internal_api::params::{DnsConfigParams, DnsConfigZone},
     inventory::{CabooseWhich, Collection},
 };
-use omicron_common::{address::IpRange, api::external::Generation};
+use omicron_common::{
+    address::IpRange, api::external::Generation, disk::M2Slot,
+};
 use omicron_uuid_kinds::{BlueprintUuid, CollectionUuid, SledUuid};
+use strum::IntoEnumIterator as _;
 
 use crate::{
     LoadSerializedResultBuilder,
@@ -769,6 +772,22 @@ impl SimSystemBuilderInner {
                 .and_then(|baseboard_id| {
                     let inv_sp = primary_collection.sps.get(baseboard_id);
                     let inv_rot = primary_collection.rots.get(baseboard_id);
+                    let stage0 = primary_collection
+                        .caboose_for(CabooseWhich::Stage0, baseboard_id)
+                        .map(|c| c.caboose.clone());
+                    let stage0_next = primary_collection
+                        .caboose_for(CabooseWhich::Stage0Next, baseboard_id)
+                        .map(|c| c.caboose.clone());
+                    let sp_host_phase_1_hash_flash = M2Slot::iter()
+                        .filter_map(|slot| {
+                            let found = primary_collection
+                                .host_phase_1_flash_hash_for(
+                                    slot,
+                                    baseboard_id,
+                                )?;
+                            Some((slot, found.hash))
+                        })
+                        .collect();
                     let sp_active = primary_collection
                         .caboose_for(CabooseWhich::SpSlot0, baseboard_id)
                         .map(|c| c.caboose.clone());
@@ -780,6 +799,9 @@ impl SimSystemBuilderInner {
                             baseboard_id: &baseboard_id,
                             sp: inv_sp,
                             rot: inv_rot,
+                            stage0,
+                            stage0_next,
+                            sp_host_phase_1_hash_flash,
                             sp_active,
                             sp_inactive,
                         })

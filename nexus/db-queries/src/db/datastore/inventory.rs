@@ -30,7 +30,8 @@ use iddqd::IdOrdMap;
 use nexus_db_errors::ErrorHandler;
 use nexus_db_errors::public_error_from_diesel;
 use nexus_db_errors::public_error_from_diesel_lookup;
-use nexus_db_model::InvCaboose;
+use nexus_db_model::ArtifactHash;
+use nexus_db_model::HwM2Slot;
 use nexus_db_model::InvClickhouseKeeperMembership;
 use nexus_db_model::InvCockroachStatus;
 use nexus_db_model::InvCollection;
@@ -38,10 +39,13 @@ use nexus_db_model::InvCollectionError;
 use nexus_db_model::InvConfigReconcilerStatus;
 use nexus_db_model::InvConfigReconcilerStatusKind;
 use nexus_db_model::InvDataset;
+use nexus_db_model::InvHostPhase1FlashHash;
+use nexus_db_model::InvInternalDns;
 use nexus_db_model::InvLastReconciliationDatasetResult;
 use nexus_db_model::InvLastReconciliationDiskResult;
 use nexus_db_model::InvLastReconciliationOrphanedDataset;
 use nexus_db_model::InvLastReconciliationZoneResult;
+use nexus_db_model::InvNtpTimesync;
 use nexus_db_model::InvNvmeDiskFirmware;
 use nexus_db_model::InvOmicronSledConfig;
 use nexus_db_model::InvOmicronSledConfigDataset;
@@ -69,6 +73,8 @@ use nexus_db_model::{
 };
 use nexus_db_model::{HwPowerState, InvZoneManifestNonBoot};
 use nexus_db_model::{HwRotSlot, InvMupdateOverrideNonBoot};
+use nexus_db_model::{InvCaboose, InvClearMupdateOverride};
+use nexus_db_schema::enums::HwM2SlotEnum;
 use nexus_db_schema::enums::HwRotSlotEnum;
 use nexus_db_schema::enums::RotImageErrorEnum;
 use nexus_db_schema::enums::RotPageWhichEnum;
@@ -91,8 +97,10 @@ use nexus_sled_agent_shared::inventory::ZoneManifestNonBootInventory;
 use nexus_types::inventory::BaseboardId;
 use nexus_types::inventory::CockroachStatus;
 use nexus_types::inventory::Collection;
+use nexus_types::inventory::InternalDnsGenerationStatus;
 use nexus_types::inventory::PhysicalDiskFirmware;
 use nexus_types::inventory::SledAgent;
+use nexus_types::inventory::TimeSync;
 use omicron_cockroach_metrics::NodeId as CockroachNodeId;
 use omicron_common::api::external::Error;
 use omicron_common::api::external::InternalContext;
@@ -385,6 +393,20 @@ impl DataStore {
             .collect::<Result<Vec<_>, _>>()
             .map_err(|e| Error::internal_error(&e.to_string()))?;
 
+        let inv_ntp_timesync_records: Vec<InvNtpTimesync> = collection
+            .ntp_timesync
+            .iter()
+            .map(|timesync| InvNtpTimesync::new(collection_id, timesync))
+            .collect::<Result<Vec<_>, _>>()
+            .map_err(|e| Error::internal_error(&e.to_string()))?;
+
+        let inv_internal_dns_records: Vec<InvInternalDns> = collection
+            .internal_dns_generation_status
+            .iter()
+            .map(|status| InvInternalDns::new(collection_id, status))
+            .collect::<Result<Vec<_>, _>>()
+            .map_err(|e| Error::internal_error(&e.to_string()))?;
+
         // This implementation inserts all records associated with the
         // collection in one transaction.  This is primarily for simplicity.  It
         // means we don't have to worry about other readers seeing a
@@ -665,6 +687,76 @@ impl DataStore {
                         _stage0_error,
                         _stage0next_error,
                     ) = rot_dsl::inv_root_of_trust::all_columns();
+                }
+            }
+
+            // Insert rows for the host phase 1 flash hashes that we found.
+            // Like service processors, we do this using INSERT INTO ... SELECT.
+            {
+                use nexus_db_schema::schema::hw_baseboard_id::dsl as baseboard_dsl;
+                use nexus_db_schema::schema::inv_host_phase_1_flash_hash::dsl as phase1_dsl;
+
+                // Squish our map-of-maps down to a flat iterator.
+                //
+                // We can throw away the `_slot` key because the `phase1`
+                // structures also contain their own slot. (Maybe we could use
+                // `iddqd` here instead?)
+                let phase1_hashes = collection
+                    .host_phase_1_flash_hashes
+                    .iter()
+                    .flat_map(|(_slot, by_baseboard)| by_baseboard.iter());
+
+                for (baseboard_id, phase1) in phase1_hashes {
+                    let selection = nexus_db_schema::schema::hw_baseboard_id::table
+                        .select((
+                            db_collection_id
+                                .into_sql::<diesel::sql_types::Uuid>(),
+                            baseboard_dsl::id,
+                            phase1.time_collected
+                                .into_sql::<diesel::sql_types::Timestamptz>(),
+                            phase1.source
+                                .clone()
+                                .into_sql::<diesel::sql_types::Text>(),
+                            HwM2Slot::from(phase1.slot)
+                                .into_sql::<HwM2SlotEnum>(),
+                            ArtifactHash(phase1.hash)
+                                .into_sql::<diesel::sql_types::Text>(),
+                        ))
+                        .filter(
+                            baseboard_dsl::part_number
+                                .eq(baseboard_id.part_number.clone()),
+                        )
+                        .filter(
+                            baseboard_dsl::serial_number
+                                .eq(baseboard_id.serial_number.clone()),
+                        );
+
+                    let _ = diesel::insert_into(
+                        nexus_db_schema::schema::inv_host_phase_1_flash_hash::table,
+                    )
+                    .values(selection)
+                    .into_columns((
+                        phase1_dsl::inv_collection_id,
+                        phase1_dsl::hw_baseboard_id,
+                        phase1_dsl::time_collected,
+                        phase1_dsl::source,
+                        phase1_dsl::slot,
+                        phase1_dsl::hash,
+                    ))
+                    .execute_async(&conn)
+                    .await?;
+
+                    // See the comment in the above block (where we use
+                    // `inv_service_processor::all_columns()`).  The same
+                    // applies here.
+                    let (
+                        _inv_collection_id,
+                        _hw_baseboard_id,
+                        _time_collected,
+                        _source,
+                        _slot,
+                        _hash,
+                    ) = phase1_dsl::inv_host_phase_1_flash_hash::all_columns();
                 }
             }
 
@@ -1424,6 +1516,23 @@ impl DataStore {
                     .await?;
             }
 
+            // Insert the NTP info we've observed
+            if !inv_ntp_timesync_records.is_empty() {
+                use nexus_db_schema::schema::inv_ntp_timesync::dsl;
+                diesel::insert_into(dsl::inv_ntp_timesync)
+                    .values(inv_ntp_timesync_records)
+                    .execute_async(&conn)
+                    .await?;
+            }
+
+            // Insert the internal DNS generation status we've observed
+            if !inv_internal_dns_records.is_empty() {
+                use nexus_db_schema::schema::inv_internal_dns::dsl;
+                diesel::insert_into(dsl::inv_internal_dns)
+                    .values(inv_internal_dns_records)
+                    .execute_async(&conn)
+                    .await?;
+            }
 
             // Finally, insert the list of errors.
             {
@@ -1689,6 +1798,7 @@ impl DataStore {
         struct NumRowsDeleted {
             ncollections: usize,
             nsps: usize,
+            nhost_phase1_flash_hashes: usize,
             nrots: usize,
             ncabooses: usize,
             nrot_pages: usize,
@@ -1714,11 +1824,14 @@ impl DataStore {
             nerrors: usize,
             nclickhouse_keeper_membership: usize,
             ncockroach_status: usize,
+            nntp_timesync: usize,
+            ninternal_dns: usize,
         }
 
         let NumRowsDeleted {
             ncollections,
             nsps,
+            nhost_phase1_flash_hashes,
             nrots,
             ncabooses,
             nrot_pages,
@@ -1744,6 +1857,8 @@ impl DataStore {
             nerrors,
             nclickhouse_keeper_membership,
             ncockroach_status,
+            nntp_timesync,
+            ninternal_dns,
         } =
             self.transaction_retry_wrapper("inventory_delete_collection")
                 .transaction(&conn, |conn| async move {
@@ -1762,6 +1877,16 @@ impl DataStore {
                     let nsps = {
                         use nexus_db_schema::schema::inv_service_processor::dsl;
                         diesel::delete(dsl::inv_service_processor.filter(
+                            dsl::inv_collection_id.eq(db_collection_id),
+                        ))
+                        .execute_async(&conn)
+                        .await?
+                    };
+
+                    // Remove rows for host phase 1 flash hashes.
+                    let nhost_phase1_flash_hashes = {
+                        use nexus_db_schema::schema::inv_host_phase_1_flash_hash::dsl;
+                        diesel::delete(dsl::inv_host_phase_1_flash_hash.filter(
                             dsl::inv_collection_id.eq(db_collection_id),
                         ))
                         .execute_async(&conn)
@@ -2000,10 +2125,34 @@ impl DataStore {
                         .execute_async(&conn)
                         .await?
                     };
+                    // Remove rows for NTP timesync
+                    let nntp_timesync = {
+                        use nexus_db_schema::schema::inv_ntp_timesync::dsl;
+                        diesel::delete(
+                            dsl::inv_ntp_timesync.filter(
+                                dsl::inv_collection_id.eq(db_collection_id),
+                            ),
+                        )
+                        .execute_async(&conn)
+                        .await?
+                    };
+
+                    // Remove rows for internal DNS
+                    let ninternal_dns = {
+                        use nexus_db_schema::schema::inv_internal_dns::dsl;
+                        diesel::delete(
+                            dsl::inv_internal_dns.filter(
+                                dsl::inv_collection_id.eq(db_collection_id),
+                            ),
+                        )
+                        .execute_async(&conn)
+                        .await?
+                    };
 
                     Ok(NumRowsDeleted {
                         ncollections,
                         nsps,
+                        nhost_phase1_flash_hashes,
                         nrots,
                         ncabooses,
                         nrot_pages,
@@ -2029,6 +2178,8 @@ impl DataStore {
                         nerrors,
                         nclickhouse_keeper_membership,
                         ncockroach_status,
+                        nntp_timesync,
+                        ninternal_dns,
                     })
                 })
                 .await
@@ -2040,6 +2191,7 @@ impl DataStore {
             "collection_id" => collection_id.to_string(),
             "ncollections" => ncollections,
             "nsps" => nsps,
+            "nhost_phase1_flash_hashes" => nhost_phase1_flash_hashes,
             "nrots" => nrots,
             "ncabooses" => ncabooses,
             "nrot_pages" => nrot_pages,
@@ -2069,6 +2221,8 @@ impl DataStore {
             "nerrors" => nerrors,
             "nclickhouse_keeper_membership" => nclickhouse_keeper_membership,
             "ncockroach_status" => ncockroach_status,
+            "nntp_timesync" => nntp_timesync,
+            "ninternal_dns" => ninternal_dns,
         );
 
         Ok(())
@@ -2543,6 +2697,70 @@ impl DataStore {
                     })
             })
             .collect::<Result<BTreeMap<_, _>, _>>()?;
+
+        // Fetch records of host phase 1 flash hashes found.
+        let inv_host_phase_1_flash_hash_rows = {
+            use nexus_db_schema::schema::inv_host_phase_1_flash_hash::dsl;
+
+            let mut phase_1s = Vec::new();
+
+            let mut paginator = Paginator::new(
+                batch_size,
+                dropshot::PaginationOrder::Ascending,
+            );
+            while let Some(p) = paginator.next() {
+                let mut batch = paginated_multicolumn(
+                    dsl::inv_host_phase_1_flash_hash,
+                    (dsl::hw_baseboard_id, dsl::slot),
+                    &p.current_pagparams(),
+                )
+                .filter(dsl::inv_collection_id.eq(db_id))
+                .select(InvHostPhase1FlashHash::as_select())
+                .load_async(&*conn)
+                .await
+                .map_err(|e| {
+                    public_error_from_diesel(e, ErrorHandler::Server)
+                })?;
+                paginator = p.found_batch(&batch, &|row| {
+                    (row.hw_baseboard_id, row.slot)
+                });
+                phase_1s.append(&mut batch);
+            }
+
+            phase_1s
+        };
+        // Assemble the lists of host phase 1 flash hashes found.
+        let mut host_phase_1_flash_hashes = BTreeMap::new();
+        for p in inv_host_phase_1_flash_hash_rows {
+            let slot = M2Slot::from(p.slot);
+            let by_baseboard = host_phase_1_flash_hashes
+                .entry(slot)
+                .or_insert_with(BTreeMap::new);
+            let Some(bb) = baseboards_by_id.get(&p.hw_baseboard_id) else {
+                let msg = format!(
+                    "unknown baseboard found in \
+                     inv_host_phase_1_flash_hash: {}",
+                    p.hw_baseboard_id
+                );
+                return Err(Error::internal_error(&msg));
+            };
+
+            let previous = by_baseboard.insert(
+                bb.clone(),
+                nexus_types::inventory::HostPhase1FlashHash {
+                    time_collected: p.time_collected,
+                    source: p.source,
+                    slot,
+                    hash: *p.hash,
+                },
+            );
+            bail_unless!(
+                previous.is_none(),
+                "duplicate host phase 1 flash hash found: {:?} baseboard {:?}",
+                p.slot,
+                p.hw_baseboard_id
+            );
+        }
 
         // Fetch records of cabooses found.
         let inv_caboose_rows = {
@@ -3435,6 +3653,46 @@ impl DataStore {
                 .collect::<Result<BTreeMap<_, _>, Error>>()?
         };
 
+        // Load TimeSync statuses
+        let ntp_timesync = {
+            use nexus_db_schema::schema::inv_ntp_timesync::dsl;
+
+            let records: Vec<InvNtpTimesync> = dsl::inv_ntp_timesync
+                .filter(dsl::inv_collection_id.eq(db_id))
+                .select(InvNtpTimesync::as_select())
+                .load_async(&*conn)
+                .await
+                .map_err(|e| {
+                    public_error_from_diesel(e, ErrorHandler::Server)
+                })?;
+
+            records
+                .into_iter()
+                .map(|record| TimeSync::from(record))
+                .collect::<IdOrdMap<_>>()
+        };
+
+        // Load internal DNS generation status
+        let internal_dns_generation_status: IdOrdMap<
+            InternalDnsGenerationStatus,
+        > = {
+            use nexus_db_schema::schema::inv_internal_dns::dsl;
+
+            let records: Vec<InvInternalDns> = dsl::inv_internal_dns
+                .filter(dsl::inv_collection_id.eq(db_id))
+                .select(InvInternalDns::as_select())
+                .load_async(&*conn)
+                .await
+                .map_err(|e| {
+                    public_error_from_diesel(e, ErrorHandler::Server)
+                })?;
+
+            records
+                .into_iter()
+                .map(|record| InternalDnsGenerationStatus::from(record))
+                .collect::<IdOrdMap<_>>()
+        };
+
         // Finally, build up the sled-agent map using the sled agent and
         // omicron zone rows. A for loop is easier to understand than into_iter
         // + filter_map + return Result + collect.
@@ -3531,6 +3789,13 @@ impl DataStore {
                         BootPartitionContents { boot_disk, slot_a, slot_b }
                     };
 
+                    let clear_mupdate_override = reconciler
+                        .clear_mupdate_override
+                        .into_inventory()
+                        .map_err(|err| {
+                            Error::internal_error(&format!("{err:#}"))
+                        })?;
+
                     Ok::<_, Error>(ConfigReconcilerInventory {
                         last_reconciled_config,
                         external_disks: last_reconciliation_disk_results
@@ -3547,6 +3812,7 @@ impl DataStore {
                             .remove(&sled_id)
                             .unwrap_or_default(),
                         boot_partitions,
+                        clear_mupdate_override,
                     })
                 })
                 .transpose()?;
@@ -3675,12 +3941,15 @@ impl DataStore {
             cabooses: cabooses_by_id.values().cloned().collect(),
             rot_pages: rot_pages_by_id.values().cloned().collect(),
             sps,
+            host_phase_1_flash_hashes,
             rots,
             cabooses_found,
             rot_pages_found,
             sled_agents,
             clickhouse_keeper_cluster_membership,
             cockroach_status,
+            ntp_timesync,
+            internal_dns_generation_status,
         })
     }
 }
@@ -3767,6 +4036,9 @@ impl ConfigReconcilerRows {
                     )?
                 };
             last_reconciliation_config_id = Some(last_reconciled_config);
+            let clear_mupdate_override = InvClearMupdateOverride::new(
+                last_reconciliation.clear_mupdate_override.as_ref(),
+            );
 
             self.config_reconcilers.push(InvSledConfigReconciler::new(
                 collection_id,
@@ -3785,6 +4057,7 @@ impl ConfigReconcilerRows {
                     .as_ref()
                     .err()
                     .cloned(),
+                clear_mupdate_override,
             ));
 
             // Boot partition _errors_ are kept in `InvSledConfigReconciler`
@@ -4033,10 +4306,13 @@ mod test {
     use nexus_inventory::examples::Representative;
     use nexus_inventory::examples::representative;
     use nexus_inventory::now_db_precision;
-    use nexus_sled_agent_shared::inventory::BootImageHeader;
     use nexus_sled_agent_shared::inventory::BootPartitionContents;
     use nexus_sled_agent_shared::inventory::BootPartitionDetails;
     use nexus_sled_agent_shared::inventory::OrphanedDataset;
+    use nexus_sled_agent_shared::inventory::{
+        BootImageHeader, ClearMupdateOverrideBootSuccessInventory,
+        ClearMupdateOverrideInventory,
+    };
     use nexus_sled_agent_shared::inventory::{
         ConfigReconcilerInventory, ConfigReconcilerInventoryResult,
         ConfigReconcilerInventoryStatus, OmicronZoneImageSource,
@@ -4898,6 +5174,15 @@ mod test {
                             artifact_size: 456789,
                         }),
                     },
+                    clear_mupdate_override: Some(
+                        ClearMupdateOverrideInventory {
+                            boot_disk_result: Ok(
+                                ClearMupdateOverrideBootSuccessInventory::Cleared,
+                            ),
+                            non_boot_message: "simulated non-boot message"
+                                .to_owned(),
+                        },
+                    ),
                 }
             });
 

@@ -13,8 +13,8 @@ use http::Response;
 use nexus_types::{
     deployment::{
         Blueprint, BlueprintMetadata, BlueprintTarget, BlueprintTargetSet,
-        ClickhousePolicy, OximeterReadPolicy, ReconfiguratorChickenSwitches,
-        ReconfiguratorChickenSwitchesParam,
+        ClickhousePolicy, OximeterReadPolicy,
+        ReconfiguratorChickenSwitchesParam, ReconfiguratorChickenSwitchesView,
     },
     external_api::{
         headers::RangeRequest,
@@ -496,7 +496,7 @@ pub trait NexusInternalApi {
     }]
     async fn reconfigurator_chicken_switches_show_current(
         rqctx: RequestContext<Self::Context>,
-    ) -> Result<HttpResponseOk<ReconfiguratorChickenSwitches>, HttpError>;
+    ) -> Result<HttpResponseOk<ReconfiguratorChickenSwitchesView>, HttpError>;
 
     /// Get the chicken switches at `version` if it exists
     #[endpoint {
@@ -506,7 +506,7 @@ pub trait NexusInternalApi {
     async fn reconfigurator_chicken_switches_show(
         rqctx: RequestContext<Self::Context>,
         path_params: Path<VersionPathParam>,
-    ) -> Result<HttpResponseOk<ReconfiguratorChickenSwitches>, HttpError>;
+    ) -> Result<HttpResponseOk<ReconfiguratorChickenSwitchesView>, HttpError>;
 
     /// Update the chicken switches at the latest versions
     #[endpoint {
@@ -665,6 +665,7 @@ pub trait NexusInternalApi {
     }]
     async fn support_bundle_create(
         rqctx: RequestContext<Self::Context>,
+        body: TypedBody<params::SupportBundleCreate>,
     ) -> Result<HttpResponseCreated<shared::SupportBundleInfo>, HttpError>;
 
     /// Delete an existing support bundle
@@ -679,6 +680,17 @@ pub trait NexusInternalApi {
         rqctx: RequestContext<Self::Context>,
         path_params: Path<params::SupportBundlePath>,
     ) -> Result<HttpResponseDeleted, HttpError>;
+
+    /// Update a support bundle
+    #[endpoint {
+        method = PUT,
+        path = "/experimental/v1/system/support-bundles/{bundle_id}",
+    }]
+    async fn support_bundle_update(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<params::SupportBundlePath>,
+        body: TypedBody<params::SupportBundleUpdate>,
+    ) -> Result<HttpResponseOk<shared::SupportBundleInfo>, HttpError>;
 
     /// Get all the probes associated with a given sled.
     #[endpoint {

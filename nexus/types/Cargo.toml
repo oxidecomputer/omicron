@@ -25,6 +25,7 @@ humantime.workspace = true
 iddqd.workspace = true
 id-map.workspace = true
 illumos-utils.workspace = true
+indent_write.workspace = true
 ipnetwork.workspace = true
 itertools.workspace = true
 newtype_derive.workspace = true

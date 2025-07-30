@@ -53,17 +53,22 @@ use nexus_db_model::BpOmicronPhysicalDisk;
 use nexus_db_model::BpOmicronZone;
 use nexus_db_model::BpOmicronZoneNic;
 use nexus_db_model::BpOximeterReadPolicy;
+use nexus_db_model::BpPendingMgsUpdateComponent;
+use nexus_db_model::BpPendingMgsUpdateRot;
+use nexus_db_model::BpPendingMgsUpdateRotBootloader;
 use nexus_db_model::BpPendingMgsUpdateSp;
 use nexus_db_model::BpSledMetadata;
 use nexus_db_model::BpTarget;
 use nexus_db_model::DbArtifactVersion;
 use nexus_db_model::DbTypedUuid;
 use nexus_db_model::HwBaseboardId;
+use nexus_db_model::HwRotSlot;
 use nexus_db_model::SpMgsSlot;
 use nexus_db_model::SpType;
 use nexus_db_model::SqlU16;
 use nexus_db_model::TufArtifact;
 use nexus_db_model::to_db_typed_uuid;
+use nexus_db_schema::enums::HwRotSlotEnum;
 use nexus_db_schema::enums::SpTypeEnum;
 use nexus_types::deployment::Blueprint;
 use nexus_types::deployment::BlueprintMetadata;
@@ -84,10 +89,12 @@ use omicron_common::api::external::ListResultVec;
 use omicron_common::api::external::LookupType;
 use omicron_common::api::external::ResourceType;
 use omicron_common::bail_unless;
+use omicron_uuid_kinds::BlueprintKind;
 use omicron_uuid_kinds::BlueprintUuid;
 use omicron_uuid_kinds::GenericUuid;
 use omicron_uuid_kinds::OmicronZoneUuid;
 use omicron_uuid_kinds::SledUuid;
+use omicron_uuid_kinds::TypedUuid;
 use std::collections::BTreeMap;
 use std::collections::BTreeSet;
 use std::sync::Arc;
@@ -510,150 +517,414 @@ impl DataStore {
                 //
                 // This way, we don't need to know the id.  The database looks
                 // it up for us as it does the INSERT.
+                //
+                // For each SP component (SP, RoT, RoT bootloader) we will be
+                // inserting to a different table: bp_pending_mgs_update_sp,
+                // bp_pending_mgs_update_rot, or
+                // bp_pending_mgs_update_rot_bootloader.
 
                 for update in &blueprint.pending_mgs_updates {
                     // Right now, we only implement support for storing SP
                     // updates.
-                    let (expected_active_version, expected_inactive_version) =
-                        match &update.details {
-                            PendingMgsUpdateDetails::Sp {
-                                expected_active_version,
-                                expected_inactive_version,
-                            } => (
-                                expected_active_version,
-                                expected_inactive_version,
-                            ),
-                            PendingMgsUpdateDetails::Rot { .. }
-                            | PendingMgsUpdateDetails::RotBootloader {
-                                ..
-                            } => continue,
-                        };
-
-                    let db_blueprint_id = DbTypedUuid::from(blueprint_id)
-                        .into_sql::<diesel::sql_types::Uuid>(
-                    );
-                    let db_sp_type =
-                        SpType::from(update.sp_type).into_sql::<SpTypeEnum>();
-                    let db_slot_id =
-                        SpMgsSlot::from(SqlU16::from(update.slot_id))
-                            .into_sql::<diesel::sql_types::Int4>();
-                    let db_artifact_hash =
-                        ArtifactHash::from(update.artifact_hash)
-                            .into_sql::<diesel::sql_types::Text>();
-                    let db_artifact_version = DbArtifactVersion::from(
-                        update.artifact_version.clone(),
-                    )
-                    .into_sql::<diesel::sql_types::Text>();
-                    let db_expected_version = DbArtifactVersion::from(
-                        expected_active_version.clone(),
-                    )
-                    .into_sql::<diesel::sql_types::Text>();
-                    let db_expected_inactive_version =
-                        match expected_inactive_version {
-                            ExpectedVersion::NoValidVersion => None,
-                            ExpectedVersion::Version(v) => {
-                                Some(DbArtifactVersion::from(v.clone()))
-                            }
-                        }
-                        .into_sql::<Nullable<diesel::sql_types::Text>>();
-
-                    // Skip formatting several lines to prevent rustfmt bailing
-                    // out.
-                    #[rustfmt::skip]
-                    use nexus_db_schema::schema::hw_baseboard_id::dsl
-                        as baseboard_dsl;
-                    #[rustfmt::skip]
-                    use nexus_db_schema::schema::bp_pending_mgs_update_sp::dsl
-                        as update_dsl;
-                    let selection =
-                        nexus_db_schema::schema::hw_baseboard_id::table
-                            .select((
-                                db_blueprint_id,
-                                baseboard_dsl::id,
-                                db_sp_type,
-                                db_slot_id,
-                                db_artifact_hash,
-                                db_artifact_version,
-                                db_expected_version,
-                                db_expected_inactive_version,
-                            ))
-                            .filter(
-                                baseboard_dsl::part_number.eq(update
-                                    .baseboard_id
-                                    .part_number
-                                    .clone()),
+                    match &update.details {
+                        PendingMgsUpdateDetails::Sp {
+                            expected_active_version,
+                            expected_inactive_version,
+                        } => {
+                            let db_blueprint_id = DbTypedUuid::from(
+                                blueprint_id
+                            ).into_sql::<diesel::sql_types::Uuid>();
+                            let db_sp_type =
+                                SpType::from(update.sp_type).into_sql::<SpTypeEnum>();
+                            let db_slot_id =
+                                SpMgsSlot::from(SqlU16::from(update.slot_id))
+                                    .into_sql::<diesel::sql_types::Int4>();
+                            let db_artifact_hash =
+                                ArtifactHash::from(update.artifact_hash)
+                                    .into_sql::<diesel::sql_types::Text>();
+                            let db_artifact_version = DbArtifactVersion::from(
+                                update.artifact_version.clone(),
                             )
-                            .filter(
-                                baseboard_dsl::serial_number.eq(update
-                                    .baseboard_id
-                                    .serial_number
-                                    .clone()),
-                            );
-                    let count = diesel::insert_into(
-                        update_dsl::bp_pending_mgs_update_sp,
-                    )
-                    .values(selection)
-                    .into_columns((
-                        update_dsl::blueprint_id,
-                        update_dsl::hw_baseboard_id,
-                        update_dsl::sp_type,
-                        update_dsl::sp_slot,
-                        update_dsl::artifact_sha256,
-                        update_dsl::artifact_version,
-                        update_dsl::expected_active_version,
-                        update_dsl::expected_inactive_version,
-                    ))
-                    .execute_async(&conn)
-                    .await?;
-                    if count != 1 {
-                        // This should be impossible in practice.  We will
-                        // insert however many rows matched the `baseboard_id`
-                        // parts of the query above.  It can't be more than one
-                        // 1 because we've filtered on a pair of columns that
-                        // are unique together.  It could only be 0 if the
-                        // baseboard id had never been seen before in an
-                        // inventory collection.  But in that case, how did we
-                        // manage to construct a blueprint with it?
-                        //
-                        // This could happen in the test suite or with
-                        // `reconfigurator-cli`, which both let you create any
-                        // blueprint you like.  In the test suite, the test just
-                        // has to deal with this behavior (e.g., by inserting an
-                        // inventory collection containing this SP).  With
-                        // `reconfigurator-cli`, this amounts to user error.
-                        error!(&opctx.log,
-                            "blueprint insertion: unexpectedly tried to insert \
-                             wrong number of rows into \
-                             bp_pending_mgs_update_sp (aborting transaction)";
-                            "count" => count,
-                            &update.baseboard_id,
-                        );
-                        return Err(TxnError::BadInsertCount {
-                            table_name: "bp_pending_mgs_update_sp",
-                            count,
-                            baseboard_id: update.baseboard_id.clone(),
-                        });
-                    }
+                            .into_sql::<diesel::sql_types::Text>();
+                            let db_expected_version = DbArtifactVersion::from(
+                                expected_active_version.clone(),
+                            )
+                            .into_sql::<diesel::sql_types::Text>();
+                            let db_expected_inactive_version =
+                                match expected_inactive_version {
+                                    ExpectedVersion::NoValidVersion => None,
+                                    ExpectedVersion::Version(v) => {
+                                        Some(DbArtifactVersion::from(v.clone()))
+                                    }
+                                }
+                                .into_sql::<Nullable<diesel::sql_types::Text>>();
 
-                    // This statement is just here to force a compilation error
-                    // if the set of columns in `bp_pending_mgs_update_sp`
-                    // changes because that will affect the correctness of the
-                    // above statement.
-                    //
-                    // If you're here because of a compile error, you might be
-                    // changing the `bp_pending_mgs_update_sp` table.  Update
-                    // the statement below and be sure to update the code above,
-                    // too!
-                    let (
-                        _blueprint_id,
-                        _hw_baseboard_id,
-                        _sp_type,
-                        _sp_slot,
-                        _artifact_sha256,
-                        _artifact_version,
-                        _expected_active_version,
-                        _expected_inactive_version,
-                    ) = update_dsl::bp_pending_mgs_update_sp::all_columns();
+                            // Skip formatting several lines to prevent rustfmt bailing
+                            // out.
+                            #[rustfmt::skip]
+                            use nexus_db_schema::schema::hw_baseboard_id::dsl
+                                as baseboard_dsl;
+                            #[rustfmt::skip]
+                            use nexus_db_schema::schema::bp_pending_mgs_update_sp::dsl
+                                as update_dsl;
+                            let selection =
+                                nexus_db_schema::schema::hw_baseboard_id::table
+                                    .select((
+                                        db_blueprint_id,
+                                        baseboard_dsl::id,
+                                        db_sp_type,
+                                        db_slot_id,
+                                        db_artifact_hash,
+                                        db_artifact_version,
+                                        db_expected_version,
+                                        db_expected_inactive_version,
+                                    ))
+                                    .filter(
+                                        baseboard_dsl::part_number.eq(update
+                                            .baseboard_id
+                                            .part_number
+                                            .clone()),
+                                    )
+                                    .filter(
+                                        baseboard_dsl::serial_number.eq(update
+                                            .baseboard_id
+                                            .serial_number
+                                            .clone()),
+                                    );
+                            let count = diesel::insert_into(
+                                update_dsl::bp_pending_mgs_update_sp,
+                            )
+                            .values(selection)
+                            .into_columns((
+                                update_dsl::blueprint_id,
+                                update_dsl::hw_baseboard_id,
+                                update_dsl::sp_type,
+                                update_dsl::sp_slot,
+                                update_dsl::artifact_sha256,
+                                update_dsl::artifact_version,
+                                update_dsl::expected_active_version,
+                                update_dsl::expected_inactive_version,
+                            ))
+                            .execute_async(&conn)
+                            .await?;
+                            if count != 1 {
+                                // This should be impossible in practice. We
+                                // will insert however many rows matched the
+                                // `baseboard_id` parts of the query above. It
+                                // can't be more than one 1 because we've
+                                // filtered on a pair of columns that are unique
+                                // together. It could only be 0 if the baseboard
+                                // id had never been seen before in an inventory
+                                // collection.  But in that case, how did we
+                                // manage to construct a blueprint with it?
+                                //
+                                // This could happen in the test suite or with
+                                // `reconfigurator-cli`, which both let you
+                                // create any blueprint you like. In the test
+                                // suite, the test just has to deal with this
+                                // behaviour (e.g., by inserting an inventory
+                                // collection containing this SP). With
+                                // `reconfigurator-cli`, this amounts to user
+                                // error.
+                                error!(&opctx.log,
+                                    "blueprint insertion: unexpectedly tried to \
+                                     insert wrong number of rows into \
+                                     bp_pending_mgs_update_sp (aborting transaction)";
+                                    "count" => count,
+                                    &update.baseboard_id,
+                                );
+                                return Err(TxnError::BadInsertCount {
+                                    table_name: "bp_pending_mgs_update_sp",
+                                    count,
+                                    baseboard_id: update.baseboard_id.clone(),
+                                });
+                            }
+
+                            // This statement is just here to force a compilation
+                            // error if the set of columns in
+                            // `bp_pending_mgs_update_sp` changes because that
+                            // will affect the correctness of the above
+                            // statement.
+                            //
+                            // If you're here because of a compile error, you
+                            // might be changing the `bp_pending_mgs_update_sp`
+                            // table. Update the statement below and be sure to
+                            // update the code above, too!
+                            let (
+                                _blueprint_id,
+                                _hw_baseboard_id,
+                                _sp_type,
+                                _sp_slot,
+                                _artifact_sha256,
+                                _artifact_version,
+                                _expected_active_version,
+                                _expected_inactive_version,
+                            ) = update_dsl::bp_pending_mgs_update_sp::all_columns();
+                        },
+                        PendingMgsUpdateDetails::Rot {
+                            expected_active_slot,
+                            expected_inactive_version,
+                            expected_persistent_boot_preference,
+                            expected_pending_persistent_boot_preference,
+                            expected_transient_boot_preference,
+                         } => {
+                            let db_blueprint_id = DbTypedUuid::from(
+                                blueprint_id
+                            ).into_sql::<diesel::sql_types::Uuid>();
+                            let db_sp_type =
+                                SpType::from(update.sp_type).into_sql::<SpTypeEnum>();
+                            let db_slot_id =
+                                SpMgsSlot::from(SqlU16::from(update.slot_id))
+                                    .into_sql::<diesel::sql_types::Int4>();
+                            let db_artifact_hash =
+                                ArtifactHash::from(update.artifact_hash)
+                                    .into_sql::<diesel::sql_types::Text>();
+                            let db_artifact_version = DbArtifactVersion::from(
+                                update.artifact_version.clone(),
+                            )
+                            .into_sql::<diesel::sql_types::Text>();
+                            let db_expected_active_slot = HwRotSlot::from(
+                                *expected_active_slot.slot(),
+                            )
+                            .into_sql::<HwRotSlotEnum>();
+                            let db_expected_active_version = DbArtifactVersion::from(
+                                expected_active_slot.version(),
+                            )
+                            .into_sql::<diesel::sql_types::Text>();
+                            let db_expected_inactive_version =
+                                match expected_inactive_version {
+                                    ExpectedVersion::NoValidVersion => None,
+                                    ExpectedVersion::Version(v) => {
+                                        Some(DbArtifactVersion::from(v.clone()))
+                                    }
+                                }
+                                .into_sql::<Nullable<diesel::sql_types::Text>>();
+                            let db_expected_persistent_boot_preference = HwRotSlot::from(
+                                *expected_persistent_boot_preference
+                            ).into_sql::<HwRotSlotEnum>();
+                            let db_expected_pending_persistent_boot_preference =
+                                expected_pending_persistent_boot_preference.map(
+                                    |p| HwRotSlot::from(p)
+                                ).into_sql::<Nullable<HwRotSlotEnum>>();
+                            let db_expected_transient_boot_preference =
+                                expected_transient_boot_preference.map(
+                                    |p| HwRotSlot::from(p)
+                                ).into_sql::<Nullable<HwRotSlotEnum>>();
+
+                            // Skip formatting several lines to prevent rustfmt bailing
+                            // out.
+                            #[rustfmt::skip]
+                            use nexus_db_schema::schema::hw_baseboard_id::dsl
+                                as baseboard_dsl;
+                            #[rustfmt::skip]
+                            use nexus_db_schema::schema::bp_pending_mgs_update_rot::dsl
+                                as update_dsl;
+                            let selection =
+                                nexus_db_schema::schema::hw_baseboard_id::table
+                                    .select((
+                                        db_blueprint_id,
+                                        baseboard_dsl::id,
+                                        db_sp_type,
+                                        db_slot_id,
+                                        db_artifact_hash,
+                                        db_artifact_version,
+                                        db_expected_active_slot,
+                                        db_expected_active_version,
+                                        db_expected_inactive_version,
+                                        db_expected_persistent_boot_preference,
+                                        db_expected_pending_persistent_boot_preference,
+                                        db_expected_transient_boot_preference,
+                                    ))
+                                    .filter(
+                                        baseboard_dsl::part_number.eq(update
+                                            .baseboard_id
+                                            .part_number
+                                            .clone()),
+                                    )
+                                    .filter(
+                                        baseboard_dsl::serial_number.eq(update
+                                            .baseboard_id
+                                            .serial_number
+                                            .clone()),
+                                    );
+                            let count = diesel::insert_into(
+                                update_dsl::bp_pending_mgs_update_rot,
+                            )
+                            .values(selection)
+                            .into_columns((
+                                update_dsl::blueprint_id,
+                                update_dsl::hw_baseboard_id,
+                                update_dsl::sp_type,
+                                update_dsl::sp_slot,
+                                update_dsl::artifact_sha256,
+                                update_dsl::artifact_version,
+                                update_dsl::expected_active_slot,
+                                update_dsl::expected_active_version,
+                                update_dsl::expected_inactive_version,
+                                update_dsl::expected_persistent_boot_preference,
+                                update_dsl::expected_pending_persistent_boot_preference,
+                                update_dsl::expected_transient_boot_preference,
+                            ))
+                            .execute_async(&conn)
+                            .await?;
+                            if count != 1 {
+                                // As with `PendingMgsUpdateDetails::Sp`, this
+                                // should be impossible in practice.
+                                error!(&opctx.log,
+                                    "blueprint insertion: unexpectedly tried to \
+                                     insert wrong number of rows into \
+                                     bp_pending_mgs_update_rot (aborting transaction)";
+                                    "count" => count,
+                                    &update.baseboard_id,
+                                );
+                                return Err(TxnError::BadInsertCount {
+                                    table_name: "bp_pending_mgs_update_rot",
+                                    count,
+                                    baseboard_id: update.baseboard_id.clone(),
+                                });
+                            }
+
+                            // This statement is just here to force a compilation
+                            // error if the set of columns in
+                            // `bp_pending_mgs_update_rot` changes because that
+                            // will affect the correctness of the above
+                            // statement.
+                            //
+                            // If you're here because of a compile error, you
+                            // might be changing the `bp_pending_mgs_update_rot`
+                            // table. Update the statement below and be sure to
+                            // update the code above, too!
+                            let (
+                                _blueprint_id,
+                                _hw_baseboard_id,
+                                _sp_type,
+                                _sp_slot,
+                                _artifact_sha256,
+                                _artifact_version,
+                                _expected_active_slot,
+                                _expected_active_version,
+                                _expected_inactive_version,
+                                _expected_persistent_boot_preference,
+                                _expected_pending_persistent_boot_preference,
+                                _expected_transient_boot_preference,
+                            ) = update_dsl::bp_pending_mgs_update_rot::all_columns();
+                         },
+                        PendingMgsUpdateDetails::RotBootloader { expected_stage0_version, expected_stage0_next_version } => {
+                            let db_blueprint_id = DbTypedUuid::from(
+                                blueprint_id
+                            ).into_sql::<diesel::sql_types::Uuid>();
+                            let db_sp_type =
+                                SpType::from(update.sp_type).into_sql::<SpTypeEnum>();
+                            let db_slot_id =
+                                SpMgsSlot::from(SqlU16::from(update.slot_id))
+                                    .into_sql::<diesel::sql_types::Int4>();
+                            let db_artifact_hash =
+                                ArtifactHash::from(update.artifact_hash)
+                                    .into_sql::<diesel::sql_types::Text>();
+                            let db_artifact_version = DbArtifactVersion::from(
+                                update.artifact_version.clone(),
+                            )
+                            .into_sql::<diesel::sql_types::Text>();
+                            let db_expected_stage0_version = DbArtifactVersion::from(
+                                expected_stage0_version.clone(),
+                            )
+                            .into_sql::<diesel::sql_types::Text>();
+                            let db_expected_stage0_next_version =
+                                match expected_stage0_next_version {
+                                    ExpectedVersion::NoValidVersion => None,
+                                    ExpectedVersion::Version(v) => {
+                                        Some(DbArtifactVersion::from(v.clone()))
+                                    }
+                                }
+                                .into_sql::<Nullable<diesel::sql_types::Text>>();
+
+                            // Skip formatting several lines to prevent rustfmt bailing
+                            // out.
+                            #[rustfmt::skip]
+                            use nexus_db_schema::schema::hw_baseboard_id::dsl
+                                as baseboard_dsl;
+                            #[rustfmt::skip]
+                            use nexus_db_schema::schema::bp_pending_mgs_update_rot_bootloader::dsl
+                                as update_dsl;
+                            let selection =
+                                nexus_db_schema::schema::hw_baseboard_id::table
+                                    .select((
+                                        db_blueprint_id,
+                                        baseboard_dsl::id,
+                                        db_sp_type,
+                                        db_slot_id,
+                                        db_artifact_hash,
+                                        db_artifact_version,
+                                        db_expected_stage0_version,
+                                        db_expected_stage0_next_version,
+                                    ))
+                                    .filter(
+                                        baseboard_dsl::part_number.eq(update
+                                            .baseboard_id
+                                            .part_number
+                                            .clone()),
+                                    )
+                                    .filter(
+                                        baseboard_dsl::serial_number.eq(update
+                                            .baseboard_id
+                                            .serial_number
+                                            .clone()),
+                                    );
+                            let count = diesel::insert_into(
+                                update_dsl::bp_pending_mgs_update_rot_bootloader,
+                            )
+                            .values(selection)
+                            .into_columns((
+                                update_dsl::blueprint_id,
+                                update_dsl::hw_baseboard_id,
+                                update_dsl::sp_type,
+                                update_dsl::sp_slot,
+                                update_dsl::artifact_sha256,
+                                update_dsl::artifact_version,
+                                update_dsl::expected_stage0_version,
+                                update_dsl::expected_stage0_next_version,
+                            ))
+                            .execute_async(&conn)
+                            .await?;
+                            if count != 1 {
+                                // As with `PendingMgsUpdateDetails::Sp`, this
+                                // should be impossible in practice.
+                                error!(&opctx.log,
+                                    "blueprint insertion: unexpectedly tried to \
+                                     insert wrong number of rows into \
+                                     bp_pending_mgs_update_rot_bootloader (aborting transaction)";
+                                    "count" => count,
+                                    &update.baseboard_id,
+                                );
+                                return Err(TxnError::BadInsertCount {
+                                    table_name: "bp_pending_mgs_update_rot_bootloader",
+                                    count,
+                                    baseboard_id: update.baseboard_id.clone(),
+                                });
+                            }
+
+                            // This statement is just here to force a compilation
+                            // error if the set of columns in
+                            // `bp_pending_mgs_update_rot_bootloader` changes because that
+                            // will affect the correctness of the above
+                            // statement.
+                            //
+                            // If you're here because of a compile error, you
+                            // might be changing the `bp_pending_mgs_update_rot_bootloader`
+                            // table. Update the statement below and be sure to
+                            // update the code above, too!
+                            let (
+                                _blueprint_id,
+                                _hw_baseboard_id,
+                                _sp_type,
+                                _sp_slot,
+                                _artifact_sha256,
+                                _artifact_version,
+                                _expected_stage0_version,
+                                _expected_stage0_next_version,
+                            ) = update_dsl::bp_pending_mgs_update_rot_bootloader::all_columns();
+                        }
+                    };
                 }
 
                 Ok(())
@@ -1256,10 +1527,70 @@ impl DataStore {
             }
         };
 
-        // Load all pending SP updates.
+        // Load all pending RoT bootloader updates.
         //
         // Pagination is a little silly here because we will only allow one at a
         // time in practice for a while, but it's easy enough to do.
+        let mut pending_updates_rot_bootloader = Vec::new();
+        {
+            use nexus_db_schema::schema::bp_pending_mgs_update_rot_bootloader::dsl;
+
+            let mut paginator = Paginator::new(
+                SQL_BATCH_SIZE,
+                dropshot::PaginationOrder::Ascending,
+            );
+            while let Some(p) = paginator.next() {
+                let batch = paginated(
+                    dsl::bp_pending_mgs_update_rot_bootloader,
+                    dsl::hw_baseboard_id,
+                    &p.current_pagparams(),
+                )
+                .filter(dsl::blueprint_id.eq(to_db_typed_uuid(blueprint_id)))
+                .select(BpPendingMgsUpdateRotBootloader::as_select())
+                .load_async(&*conn)
+                .await
+                .map_err(|e| {
+                    public_error_from_diesel(e, ErrorHandler::Server)
+                })?;
+
+                paginator = p.found_batch(&batch, &|d| d.hw_baseboard_id);
+                for row in batch {
+                    pending_updates_rot_bootloader.push(row);
+                }
+            }
+        }
+
+        // Load all pending RoT updates.
+        let mut pending_updates_rot = Vec::new();
+        {
+            use nexus_db_schema::schema::bp_pending_mgs_update_rot::dsl;
+
+            let mut paginator = Paginator::new(
+                SQL_BATCH_SIZE,
+                dropshot::PaginationOrder::Ascending,
+            );
+            while let Some(p) = paginator.next() {
+                let batch = paginated(
+                    dsl::bp_pending_mgs_update_rot,
+                    dsl::hw_baseboard_id,
+                    &p.current_pagparams(),
+                )
+                .filter(dsl::blueprint_id.eq(to_db_typed_uuid(blueprint_id)))
+                .select(BpPendingMgsUpdateRot::as_select())
+                .load_async(&*conn)
+                .await
+                .map_err(|e| {
+                    public_error_from_diesel(e, ErrorHandler::Server)
+                })?;
+
+                paginator = p.found_batch(&batch, &|d| d.hw_baseboard_id);
+                for row in batch {
+                    pending_updates_rot.push(row);
+                }
+            }
+        }
+
+        // Load all pending SP updates.
         let mut pending_updates_sp = Vec::new();
         {
             use nexus_db_schema::schema::bp_pending_mgs_update_sp::dsl;
@@ -1328,26 +1659,29 @@ impl DataStore {
 
         // Combine this information to assemble the set of pending MGS updates.
         let mut pending_mgs_updates = PendingMgsUpdates::new();
+        for row in pending_updates_rot_bootloader {
+            process_update_row(
+                row,
+                &baseboards_by_id,
+                &mut pending_mgs_updates,
+                &blueprint_id,
+            )?;
+        }
+        for row in pending_updates_rot {
+            process_update_row(
+                row,
+                &baseboards_by_id,
+                &mut pending_mgs_updates,
+                &blueprint_id,
+            )?;
+        }
         for row in pending_updates_sp {
-            let Some(baseboard) = baseboards_by_id.get(&row.hw_baseboard_id)
-            else {
-                // This should be impossible.
-                return Err(Error::internal_error(&format!(
-                    "loading blueprint {}: missing baseboard that we should \
-                     have fetched: {}",
-                    blueprint_id, row.hw_baseboard_id
-                )));
-            };
-
-            let update = row.into_generic(baseboard.clone());
-            if let Some(previous) = pending_mgs_updates.insert(update) {
-                // This should be impossible.
-                return Err(Error::internal_error(&format!(
-                    "blueprint {}: found multiple pending updates for \
-                     baseboard {:?}",
-                    blueprint_id, previous.baseboard_id
-                )));
-            }
+            process_update_row(
+                row,
+                &baseboards_by_id,
+                &mut pending_mgs_updates,
+                &blueprint_id,
+            )?;
         }
 
         // FIXME: Once reports are stored in the database, read them out here.
@@ -1404,6 +1738,8 @@ impl DataStore {
             nclickhouse_servers,
             noximeter_policy,
             npending_mgs_updates_sp,
+            npending_mgs_updates_rot,
+            npending_mgs_updates_rot_bootloader,
         ) = self
             .transaction_retry_wrapper("blueprint_delete")
             .transaction(&conn, |conn| {
@@ -1601,6 +1937,36 @@ impl DataStore {
                         .await?
                     };
 
+                    let npending_mgs_updates_rot = {
+                        // Skip rustfmt because it bails out on this long line.
+                        #[rustfmt::skip]
+                        use nexus_db_schema::schema::
+                            bp_pending_mgs_update_rot::dsl;
+                        diesel::delete(
+                            dsl::bp_pending_mgs_update_rot.filter(
+                                dsl::blueprint_id
+                                    .eq(to_db_typed_uuid(blueprint_id)),
+                            ),
+                        )
+                        .execute_async(&conn)
+                        .await?
+                    };
+
+                    let npending_mgs_updates_rot_bootloader = {
+                        // Skip rustfmt because it bails out on this long line.
+                        #[rustfmt::skip]
+                        use nexus_db_schema::schema::
+                            bp_pending_mgs_update_rot_bootloader::dsl;
+                        diesel::delete(
+                            dsl::bp_pending_mgs_update_rot_bootloader.filter(
+                                dsl::blueprint_id
+                                    .eq(to_db_typed_uuid(blueprint_id)),
+                            ),
+                        )
+                        .execute_async(&conn)
+                        .await?
+                    };
+
                     Ok((
                         nblueprints,
                         nsled_metadata,
@@ -1613,6 +1979,8 @@ impl DataStore {
                         nclickhouse_servers,
                         noximeter_policy,
                         npending_mgs_updates_sp,
+                        npending_mgs_updates_rot,
+                        npending_mgs_updates_rot_bootloader,
                     ))
                 }
             })
@@ -1635,6 +2003,9 @@ impl DataStore {
             "nclickhouse_servers" => nclickhouse_servers,
             "noximeter_policy" => noximeter_policy,
             "npending_mgs_updates_sp" => npending_mgs_updates_sp,
+            "npending_mgs_updates_rot" => npending_mgs_updates_rot,
+            "npending_mgs_updates_rot_bootloader" =>
+            npending_mgs_updates_rot_bootloader,
         );
 
         Ok(())
@@ -1976,6 +2347,38 @@ impl DataStore {
 
         Ok(current_target.into())
     }
+}
+
+// Helper to process BpPendingMgsUpdateComponent rows
+fn process_update_row<T>(
+    row: T,
+    baseboards_by_id: &BTreeMap<Uuid, Arc<BaseboardId>>,
+    pending_mgs_updates: &mut PendingMgsUpdates,
+    blueprint_id: &TypedUuid<BlueprintKind>,
+) -> Result<(), Error>
+where
+    T: BpPendingMgsUpdateComponent,
+{
+    let Some(baseboard) = baseboards_by_id.get(row.hw_baseboard_id()) else {
+        // This should be impossible.
+        return Err(Error::internal_error(&format!(
+            "loading blueprint {}: missing baseboard that we should \
+             have fetched: {}",
+            blueprint_id,
+            row.hw_baseboard_id()
+        )));
+    };
+
+    let update = row.into_generic(baseboard.clone());
+    if let Some(previous) = pending_mgs_updates.insert(update) {
+        // This should be impossible.
+        return Err(Error::internal_error(&format!(
+            "blueprint {}: found multiple pending updates for \
+             baseboard {:?}",
+            blueprint_id, previous.baseboard_id
+        )));
+    }
+    Ok(())
 }
 
 // Helper to create an `authz::Blueprint` for a specific blueprint ID
@@ -2352,6 +2755,7 @@ mod tests {
 
     use crate::db::pub_test_utils::TestDatabase;
     use crate::db::raw_query_builder::QueryBuilder;
+    use gateway_types::rot::RotSlot;
     use nexus_inventory::CollectionBuilder;
     use nexus_inventory::now_db_precision;
     use nexus_reconfigurator_planning::blueprint_builder::BlueprintBuilder;
@@ -2368,6 +2772,7 @@ mod tests {
     use nexus_types::deployment::BlueprintZoneDisposition;
     use nexus_types::deployment::BlueprintZoneImageSource;
     use nexus_types::deployment::BlueprintZoneType;
+    use nexus_types::deployment::ExpectedActiveRotSlot;
     use nexus_types::deployment::OmicronZoneExternalFloatingIp;
     use nexus_types::deployment::PendingMgsUpdate;
     use nexus_types::deployment::PlanningInput;
@@ -2476,6 +2881,8 @@ mod tests {
             query_count!(bp_clickhouse_server_zone_id_to_node_id, blueprint_id),
             query_count!(bp_oximeter_read_policy, blueprint_id),
             query_count!(bp_pending_mgs_update_sp, blueprint_id),
+            query_count!(bp_pending_mgs_update_rot, blueprint_id),
+            query_count!(bp_pending_mgs_update_rot_bootloader, blueprint_id),
         ] {
             let count: i64 = result.unwrap();
             assert_eq!(
@@ -3084,7 +3491,7 @@ mod tests {
         // blueprint2 is more interesting in terms of containing a variety of
         // different blueprint structures.  We want to try deleting that.  To do
         // that, we have to create a new blueprint and make that one the target.
-        let blueprint3 = BlueprintBuilder::new_based_on(
+        let mut builder = BlueprintBuilder::new_based_on(
             &logctx.log,
             &blueprint2,
             &planning_input,
@@ -3092,8 +3499,30 @@ mod tests {
             "dummy",
             PlannerRng::from_entropy(),
         )
-        .expect("failed to create builder")
-        .build();
+        .expect("failed to create builder");
+
+        // Configure an RoT update
+        let (baseboard_id, sp) =
+            collection.sps.iter().next().expect("at least one SP");
+        builder.pending_mgs_update_insert(PendingMgsUpdate {
+            baseboard_id: baseboard_id.clone(),
+            sp_type: sp.sp_type,
+            slot_id: sp.sp_slot,
+            details: PendingMgsUpdateDetails::Rot {
+                expected_active_slot: ExpectedActiveRotSlot {
+                    slot: RotSlot::A,
+                    version: "1.0.0".parse().unwrap(),
+                },
+                expected_inactive_version: ExpectedVersion::NoValidVersion,
+                expected_persistent_boot_preference: RotSlot::A,
+                expected_pending_persistent_boot_preference: None,
+                expected_transient_boot_preference: None,
+            },
+            artifact_hash: ArtifactHash([72; 32]),
+            artifact_version: "2.0.0".parse().unwrap(),
+        });
+        let blueprint3 = builder.build();
+        let authz_blueprint3 = authz_blueprint_from_id(blueprint3.id);
         datastore
             .blueprint_insert(&opctx, &blueprint3)
             .await
@@ -3109,6 +3538,49 @@ mod tests {
             .unwrap();
         datastore.blueprint_delete(&opctx, &authz_blueprint2).await.unwrap();
         ensure_blueprint_fully_deleted(&datastore, blueprint2.id).await;
+
+        // We now make sure we can build and insert a blueprint containing an
+        // RoT bootloader Pending MGS update
+        let mut builder = BlueprintBuilder::new_based_on(
+            &logctx.log,
+            &blueprint3,
+            &planning_input,
+            &collection,
+            "dummy",
+            PlannerRng::from_entropy(),
+        )
+        .expect("failed to create builder");
+
+        // Configure an RoT bootloader update
+        let (baseboard_id, sp) =
+            collection.sps.iter().next().expect("at least one SP");
+        builder.pending_mgs_update_insert(PendingMgsUpdate {
+            baseboard_id: baseboard_id.clone(),
+            sp_type: sp.sp_type,
+            slot_id: sp.sp_slot,
+            details: PendingMgsUpdateDetails::RotBootloader {
+                expected_stage0_version: "1.0.0".parse().unwrap(),
+                expected_stage0_next_version: ExpectedVersion::NoValidVersion,
+            },
+            artifact_hash: ArtifactHash([72; 32]),
+            artifact_version: "2.0.0".parse().unwrap(),
+        });
+        let blueprint4 = builder.build();
+        datastore
+            .blueprint_insert(&opctx, &blueprint4)
+            .await
+            .expect("failed to insert blueprint");
+        let bp4_target = BlueprintTarget {
+            target_id: blueprint4.id,
+            enabled: true,
+            time_made_target: now_db_precision(),
+        };
+        datastore
+            .blueprint_target_set_current(&opctx, bp4_target)
+            .await
+            .unwrap();
+        datastore.blueprint_delete(&opctx, &authz_blueprint3).await.unwrap();
+        ensure_blueprint_fully_deleted(&datastore, blueprint3.id).await;
 
         // Clean up.
         db.terminate().await;

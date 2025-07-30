@@ -32,7 +32,9 @@ use crate::{Epoch, Threshold};
 const LRTQ_SHARE_SIZE: usize = 33;
 
 // The size in bytes of a single rack secret
-const SECRET_LEN: usize = 32;
+//
+// Public only for docs
+pub const SECRET_LEN: usize = 32;
 
 // The size in bytes of an `Epoch`
 const EPOCH_LEN: usize = size_of::<Epoch>();

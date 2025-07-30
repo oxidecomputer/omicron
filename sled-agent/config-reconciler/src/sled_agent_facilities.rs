@@ -8,13 +8,17 @@
 use illumos_utils::dladm::EtherstubVnic;
 use illumos_utils::running_zone::RunningZone;
 use illumos_utils::zpool::PathInPool;
-use nexus_sled_agent_shared::inventory::OmicronZoneConfig;
 use omicron_common::address::Ipv6Subnet;
 use omicron_common::address::SLED_PREFIX;
+use omicron_uuid_kinds::MupdateOverrideUuid;
 use sled_agent_types::zone_bundle::ZoneBundleCause;
+use sled_agent_types::zone_images::ClearMupdateOverrideResult;
+use sled_agent_types::zone_images::PreparedOmicronZone;
 use sled_agent_types::zone_images::ResolverStatus;
 use std::future::Future;
 use tufaceous_artifact::ArtifactHash;
+
+use crate::InternalDisks;
 
 pub trait SledAgentFacilities: Send + Sync + 'static {
     /// The underlay VNIC interface in the global zone.
@@ -33,12 +37,21 @@ pub trait SledAgentFacilities: Send + Sync + 'static {
     /// Method to start a zone.
     fn start_omicron_zone(
         &self,
-        zone_config: &OmicronZoneConfig,
+        zone_config: PreparedOmicronZone<'_>,
         zone_root_path: PathInPool,
     ) -> impl Future<Output = anyhow::Result<RunningZone>> + Send;
 
     /// Get the status of the zone image resolver.
+    ///
+    /// This can be used to prepare zones as well as start them.
     fn zone_image_resolver_status(&self) -> ResolverStatus;
+
+    /// Clear out the mupdate override
+    fn clear_mupdate_override(
+        &self,
+        override_id: MupdateOverrideUuid,
+        internal_disks: &InternalDisks,
+    ) -> ClearMupdateOverrideResult;
 
     /// Stop tracking metrics for a zone's datalinks.
     fn metrics_untrack_zone_links(

@@ -4,10 +4,11 @@
 
 //! State of a reconfiguration coordinator inside a [`crate::Node`]
 
+use crate::NodeHandlerCtx;
 use crate::crypto::{LrtqShare, Sha3_256Digest, ShareDigestLrtq};
 use crate::messages::PeerMsg;
 use crate::validators::{ReconfigurationError, ValidatedReconfigureMsg};
-use crate::{Configuration, Envelope, Epoch, PeerMsgKind, PlatformId};
+use crate::{Configuration, Epoch, PeerMsgKind, PlatformId};
 use gfss::shamir::Share;
 use slog::{Logger, o, warn};
 use std::collections::{BTreeMap, BTreeSet};
@@ -147,7 +148,8 @@ impl CoordinatorState {
     //
     // This method is "in progress" - allow unused parameters for now
     #[expect(unused)]
-    pub fn send_msgs(&mut self, now: Instant, outbox: &mut Vec<Envelope>) {
+    pub fn send_msgs(&mut self, ctx: &mut impl NodeHandlerCtx) {
+        let now = ctx.now();
         if now < self.retry_deadline {
             return;
         }
@@ -165,14 +167,13 @@ impl CoordinatorState {
                 for (platform_id, (config, share)) in
                     prepares.clone().into_iter()
                 {
-                    outbox.push(Envelope {
-                        to: platform_id,
-                        from: self.reconfigure_msg.coordinator_id().clone(),
-                        msg: PeerMsg {
+                    ctx.send(
+                        platform_id,
+                        PeerMsg {
                             rack_id,
                             kind: PeerMsgKind::Prepare { config, share },
                         },
-                    });
+                    );
                 }
             }
         }
