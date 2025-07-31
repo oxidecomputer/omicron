@@ -189,7 +189,7 @@ impl SpComponentUpdateHelper for ReconfiguratorSpUpdater {
                         .sp_component_caboose_get(
                             update.sp_type,
                             update.slot_id,
-                            &SpComponent::SP_ITSELF.to_string(),
+                            SpComponent::SP_ITSELF.const_as_str(),
                             0,
                         )
                         .await
@@ -241,7 +241,7 @@ impl SpComponentUpdateHelper for ReconfiguratorSpUpdater {
                         .sp_component_caboose_get(
                             update.sp_type,
                             update.slot_id,
-                            &SpComponent::SP_ITSELF.to_string(),
+                            SpComponent::SP_ITSELF.const_as_str(),
                             1,
                         )
                         .await
@@ -282,7 +282,7 @@ impl SpComponentUpdateHelper for ReconfiguratorSpUpdater {
                         .sp_component_reset(
                             update.sp_type,
                             update.slot_id,
-                            &SpComponent::SP_ITSELF.to_string(),
+                            SpComponent::SP_ITSELF.const_as_str(),
                         )
                         .await?;
                     Ok(())

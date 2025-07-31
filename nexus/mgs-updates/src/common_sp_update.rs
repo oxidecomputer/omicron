@@ -7,12 +7,16 @@
 
 use super::MgsClients;
 use super::UpdateProgress;
+use crate::rot_bootloader_updater::ReconfiguratorRotBootloaderUpdater;
+use crate::rot_updater::ReconfiguratorRotUpdater;
+use crate::sp_updater::ReconfiguratorSpUpdater;
 use futures::future::BoxFuture;
 use gateway_client::types::SpType;
 use gateway_client::types::SpUpdateStatus;
 use gateway_types::rot::RotSlot;
 use nexus_types::deployment::ExpectedVersion;
 use nexus_types::deployment::PendingMgsUpdate;
+use nexus_types::deployment::PendingMgsUpdateDetails;
 use slog::Logger;
 use slog::{debug, error, info, warn};
 use std::time::Duration;
@@ -270,6 +274,28 @@ pub trait SpComponentUpdateHelper {
     ) -> BoxFuture<'a, Result<(), PostUpdateError>>;
 }
 
+/// Extension methods to assist with `SpComponentUpdateHelper` trait objects
+pub struct SpComponentUpdateHelperExt;
+
+impl SpComponentUpdateHelperExt {
+    /// Construct a new trait object for the given update
+    pub fn new_boxed(
+        details: &PendingMgsUpdateDetails,
+    ) -> Box<dyn SpComponentUpdateHelper + Send + Sync> {
+        match details {
+            PendingMgsUpdateDetails::Sp { .. } => {
+                Box::new(ReconfiguratorSpUpdater {})
+            }
+            PendingMgsUpdateDetails::Rot { .. } => {
+                Box::new(ReconfiguratorRotUpdater {})
+            }
+            PendingMgsUpdateDetails::RotBootloader { .. } => {
+                Box::new(ReconfiguratorRotBootloaderUpdater {})
+            }
+        }
+    }
+}
+
 /// Describes the live state of the component before the update begins
 #[derive(Debug)]
 pub enum PrecheckStatus {
@@ -304,8 +330,10 @@ pub enum PrecheckError {
         found_serial: String,
     },
 
-    #[error("expected to find active slot {expected:?}, but found {found:?}")]
-    WrongActiveSlot { expected: RotSlot, found: RotSlot },
+    #[error(
+        "expected to find active RoT slot {expected:?}, but found {found:?}"
+    )]
+    WrongActiveRotSlot { expected: RotSlot, found: RotSlot },
 
     #[error(
         "expected to find active version {:?}, but found {found:?}",
