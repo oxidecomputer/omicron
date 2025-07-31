@@ -9,11 +9,11 @@
 #:  "%/pool/ext/*/crypt/zone/oxz_*/root/var/svc/log/oxide-*.log*",
 #:  "%/pool/ext/*/crypt/zone/oxz_*/root/var/svc/log/system-illumos-*.log*",
 #:  "%/pool/ext/*/crypt/zone/oxz_ntp_*/root/var/log/chrony/*.log*",
-#:  "!/pool/ext/*/crypt/zone/oxz_propolis-server_*/root/var/svc/log/*.log*",
+#:  "%/pool/ext/*/crypt/zone/oxz_propolis-server_*/root/var/svc/log/*.log*",
 #:  "%/pool/ext/*/crypt/debug/global/oxide-sled-agent:default.log.*",
 #:  "%/pool/ext/*/crypt/debug/oxz_*/oxide-*.log.*",
 #:  "%/pool/ext/*/crypt/debug/oxz_*/system-illumos-*.log.*",
-#:  "!/pool/ext/*/crypt/debug/oxz_propolis-server_*/*.log.*",
+#:  "%/pool/ext/*/crypt/debug/oxz_propolis-server_*/*.log.*",
 #:  "/tmp/kstat/*.kstat"
 #: ]
 #: skip_clone = true
