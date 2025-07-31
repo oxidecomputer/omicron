@@ -25,6 +25,7 @@ use gateway_messages::UpdateChunk;
 use gateway_messages::UpdateId;
 use gateway_messages::UpdateInProgressStatus;
 use hubtools::RawHubrisImage;
+use nexus_types::inventory::Caboose;
 use sha2::Sha256;
 use sha3::Digest;
 use sha3::Sha3_256;
@@ -96,164 +97,122 @@ impl SimSpUpdate {
         const STAGE0_VERS0: &str = "0.0.200";
         const STAGE0_VERS1: &str = "0.0.200";
 
+        // If we find in the config preset cabooses we use those. Otherwise, we
+        // can use default values
         let (
-            caboose_sp_active,
-            caboose_sp_inactive,
-            caboose_rot_a,
-            caboose_rot_b,
-            caboose_stage0,
-            caboose_stage0next,
+            sp_active_src,
+            sp_inactive_src,
+            rot_a_src,
+            rot_b_src,
+            stage0_src,
+            stage0_next_src,
         ) = if let Some(c) = &cabooses {
-            let caboose_sp_active = CabooseValue::Caboose(
-                hubtools::CabooseBuilder::default()
-                    .git_commit(c.sp_slot_0.git_commit.clone())
-                    .board(c.sp_slot_0.board.clone())
-                    .name(c.sp_slot_0.name.clone())
-                    .version(c.sp_slot_0.version.clone())
-                    .build(),
-            );
-            let caboose_sp_inactive = CabooseValue::Caboose(
-                hubtools::CabooseBuilder::default()
-                    .git_commit(c.sp_slot_1.git_commit.clone())
-                    .board(c.sp_slot_1.board.clone())
-                    .name(c.sp_slot_1.name.clone())
-                    .version(c.sp_slot_1.version.clone())
-                    .build(),
-            );
-
-            let caboose_rot_a = CabooseValue::Caboose(
-                hubtools::CabooseBuilder::default()
-                    .git_commit(c.rot_slot_a.git_commit.clone())
-                    .board(c.rot_slot_a.board.clone())
-                    .name(c.rot_slot_a.name.clone())
-                    .version(c.rot_slot_a.version.clone())
-                    // TODO-K: fix unwraps
-                    .sign(c.rot_slot_a.sign.clone().unwrap())
-                    .build(),
-            );
-
-            let caboose_rot_b = CabooseValue::Caboose(
-                hubtools::CabooseBuilder::default()
-                    .git_commit(c.rot_slot_b.git_commit.clone())
-                    .board(c.rot_slot_b.board.clone())
-                    .name(c.rot_slot_b.name.clone())
-                    .version(c.rot_slot_b.version.clone())
-                    .sign(c.rot_slot_b.sign.clone().unwrap())
-                    .build(),
-            );
-
-            let (caboose_stage0, caboose_stage0next) = if no_stage0_caboose {
-                (
-                    CabooseValue::InvalidMissingAllKeys,
-                    CabooseValue::InvalidMissingAllKeys,
-                )
-            } else {
-                (
-                    CabooseValue::Caboose(
-                        hubtools::CabooseBuilder::default()
-                            .git_commit(c.stage0.git_commit.clone())
-                            .board(c.stage0.board.clone())
-                            .name(c.stage0.name.clone())
-                            .version(c.stage0.version.clone())
-                            .sign(c.stage0.sign.clone().unwrap())
-                            .build(),
-                    ),
-                    CabooseValue::Caboose(
-                        hubtools::CabooseBuilder::default()
-                            .git_commit(c.stage0_next.git_commit.clone())
-                            .board(c.stage0_next.board.clone())
-                            .name(c.stage0_next.name.clone())
-                            .version(c.stage0_next.version.clone())
-                            .sign(c.stage0_next.sign.clone().unwrap())
-                            .build(),
-                    ),
-                )
-            };
             (
-                caboose_sp_active,
-                caboose_sp_inactive,
-                caboose_rot_a,
-                caboose_rot_b,
-                caboose_stage0,
-                caboose_stage0next,
+                Caboose {
+                    git_commit: c.sp_slot_0.git_commit.clone(),
+                    board: c.sp_slot_0.board.clone(),
+                    name: c.sp_slot_0.name.clone(),
+                    version: c.sp_slot_0.version.clone(),
+                    sign: None,
+                },
+                Caboose {
+                    git_commit: c.sp_slot_1.git_commit.clone(),
+                    board: c.sp_slot_1.board.clone(),
+                    name: c.sp_slot_1.name.clone(),
+                    version: c.sp_slot_1.version.clone(),
+                    sign: None,
+                },
+                Caboose {
+                    git_commit: c.rot_slot_a.git_commit.clone(),
+                    board: c.rot_slot_a.board.clone(),
+                    name: c.rot_slot_a.name.clone(),
+                    version: c.rot_slot_a.version.clone(),
+                    sign: c.rot_slot_a.sign.clone(),
+                },
+                Caboose {
+                    git_commit: c.rot_slot_b.git_commit.clone(),
+                    board: c.rot_slot_b.board.clone(),
+                    name: c.rot_slot_b.name.clone(),
+                    version: c.rot_slot_b.version.clone(),
+                    sign: c.rot_slot_b.sign.clone(),
+                },
+                Caboose {
+                    git_commit: c.stage0.git_commit.clone(),
+                    board: c.stage0.board.clone(),
+                    name: c.stage0.name.clone(),
+                    version: c.stage0.version.clone(),
+                    sign: c.stage0.sign.clone(),
+                },
+                Caboose {
+                    git_commit: c.stage0_next.git_commit.clone(),
+                    board: c.stage0_next.board.clone(),
+                    name: c.stage0_next.name.clone(),
+                    version: c.stage0_next.version.clone(),
+                    sign: c.stage0_next.sign.clone(),
+                },
             )
         } else {
-            let sp_board = baseboard_kind.sp_board();
-            let sp_name = baseboard_kind.sp_name();
-            let rot_name = baseboard_kind.rot_name();
-
-            let caboose_sp_active = CabooseValue::Caboose(
-                hubtools::CabooseBuilder::default()
-                    .git_commit(SP_GITC0)
-                    .board(sp_board)
-                    .name(sp_name)
-                    .version(SP_VERS0)
-                    .build(),
-            );
-            let caboose_sp_inactive = CabooseValue::Caboose(
-                hubtools::CabooseBuilder::default()
-                    .git_commit(SP_GITC1)
-                    .board(sp_board)
-                    .name(sp_name)
-                    .version(SP_VERS1)
-                    .build(),
-            );
-
-            let caboose_rot_a = CabooseValue::Caboose(
-                hubtools::CabooseBuilder::default()
-                    .git_commit(ROT_GITC0)
-                    .board(SIM_ROT_BOARD)
-                    .name(rot_name)
-                    .version(ROT_VERS0)
-                    .sign(ROT_STAGING_DEVEL_SIGN)
-                    .build(),
-            );
-
-            let caboose_rot_b = CabooseValue::Caboose(
-                hubtools::CabooseBuilder::default()
-                    .git_commit(ROT_GITC1)
-                    .board(SIM_ROT_BOARD)
-                    .name(rot_name)
-                    .version(ROT_VERS1)
-                    .sign(ROT_STAGING_DEVEL_SIGN)
-                    .build(),
-            );
-
-            let (caboose_stage0, caboose_stage0next) = if no_stage0_caboose {
-                (
-                    CabooseValue::InvalidMissingAllKeys,
-                    CabooseValue::InvalidMissingAllKeys,
-                )
-            } else {
-                (
-                    CabooseValue::Caboose(
-                        hubtools::CabooseBuilder::default()
-                            .git_commit(STAGE0_GITC0)
-                            .board(SIM_ROT_STAGE0_BOARD)
-                            .name(rot_name)
-                            .version(STAGE0_VERS0)
-                            .sign(ROT_STAGING_DEVEL_SIGN)
-                            .build(),
-                    ),
-                    CabooseValue::Caboose(
-                        hubtools::CabooseBuilder::default()
-                            .git_commit(STAGE0_GITC1)
-                            .board(SIM_ROT_STAGE0_BOARD)
-                            .name(rot_name)
-                            .version(STAGE0_VERS1)
-                            .sign(ROT_STAGING_DEVEL_SIGN)
-                            .build(),
-                    ),
-                )
-            };
+            let sp_board = baseboard_kind.sp_board().to_string();
+            let sp_name = baseboard_kind.sp_name().to_string();
+            let rot_name = baseboard_kind.rot_name().to_string();
             (
-                caboose_sp_active,
-                caboose_sp_inactive,
-                caboose_rot_a,
-                caboose_rot_b,
-                caboose_stage0,
-                caboose_stage0next,
+                Caboose {
+                    git_commit: SP_GITC0.to_string(),
+                    board: sp_board.clone(),
+                    name: sp_name.clone(),
+                    version: SP_VERS0.to_string(),
+                    sign: None,
+                },
+                Caboose {
+                    git_commit: SP_GITC1.to_string(),
+                    board: sp_board.clone(),
+                    name: sp_name.clone(),
+                    version: SP_VERS1.to_string(),
+                    sign: None,
+                },
+                Caboose {
+                    git_commit: ROT_GITC0.to_string(),
+                    board: SIM_ROT_BOARD.to_string(),
+                    name: rot_name.clone(),
+                    version: ROT_VERS0.to_string(),
+                    sign: Some(ROT_STAGING_DEVEL_SIGN.to_string()),
+                },
+                Caboose {
+                    git_commit: ROT_GITC1.to_string(),
+                    board: SIM_ROT_BOARD.to_string(),
+                    name: rot_name.clone(),
+                    version: ROT_VERS1.to_string(),
+                    sign: Some(ROT_STAGING_DEVEL_SIGN.to_string()),
+                },
+                Caboose {
+                    git_commit: STAGE0_GITC0.to_string(),
+                    board: SIM_ROT_STAGE0_BOARD.to_string(),
+                    name: rot_name.clone(),
+                    version: STAGE0_VERS0.to_string(),
+                    sign: Some(ROT_STAGING_DEVEL_SIGN.to_string()),
+                },
+                Caboose {
+                    git_commit: STAGE0_GITC1.to_string(),
+                    board: SIM_ROT_STAGE0_BOARD.to_string(),
+                    name: rot_name.clone(),
+                    version: STAGE0_VERS1.to_string(),
+                    sign: Some(ROT_STAGING_DEVEL_SIGN.to_string()),
+                },
             )
+        };
+
+        let caboose_sp_active = build_caboose(sp_active_src);
+        let caboose_sp_inactive = build_caboose(sp_inactive_src);
+        let caboose_rot_a = build_caboose(rot_a_src);
+        let caboose_rot_b = build_caboose(rot_b_src);
+
+        let (caboose_stage0, caboose_stage0next) = if no_stage0_caboose {
+            (
+                CabooseValue::InvalidMissingAllKeys,
+                CabooseValue::InvalidMissingAllKeys,
+            )
+        } else {
+            (build_caboose(stage0_src), build_caboose(stage0_next_src))
         };
 
         const SLOT_A_DIGEST: [u8; 32] = [0xaa; 32];
@@ -821,6 +780,21 @@ impl CabooseValue {
             CabooseValue::InvalidFailedRead => Err(SpError::CabooseReadError),
         }
     }
+}
+
+// A helper function to build a CabooseValue from Caboose
+fn build_caboose(source: Caboose) -> CabooseValue {
+    let mut builder = hubtools::CabooseBuilder::default()
+        .git_commit(source.git_commit)
+        .board(source.board)
+        .name(source.name)
+        .version(source.version);
+
+    if let Some(sign_str) = source.sign {
+        builder = builder.sign(sign_str);
+    }
+
+    CabooseValue::Caboose(builder.build())
 }
 
 enum UpdateState {

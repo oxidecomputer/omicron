@@ -62,6 +62,7 @@ impl GatewayTestContext {
     }
 }
 
+// TODO-K: load a test config with a specific sp_sim file
 pub fn load_test_config() -> (omicron_gateway::Config, sp_sim::Config) {
     // The test configs are located relative to the directory this file is in.
     // TODO: embed these with include_str! instead?
