@@ -6815,6 +6815,7 @@ dependencies = [
  "sp-sim",
  "static_assertions",
  "strum 0.27.2",
+ "swrite",
  "test-strategy",
  "thiserror 2.0.12",
  "tufaceous-artifact",
