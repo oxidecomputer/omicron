@@ -41,6 +41,7 @@ impl SledCpuFamily {
             Self::Unknown => crate::VmmCpuPlatform::SledDefault,
             Self::AmdMilan => crate::VmmCpuPlatform::AmdMilan,
             Self::AmdTurin => crate::VmmCpuPlatform::AmdMilan,
+            Self::AmdTurinDense => crate::VmmCpuPlatform::AmdMilan,
         }
     }
 }

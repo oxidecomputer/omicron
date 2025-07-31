@@ -1298,6 +1298,12 @@ pub enum InstanceCpuPlatform {
     AmdMilan,
 
     /// An AMD Turin-like CPU platform.
+    // Note that there is only Turin, not Turin Dense - feature-wise there are
+    // collapsed together as the guest-visible platform is the same.
+    // If the two must be distinguished for instance placement, we'll want to
+    // track whatever the motivating constraint is more explicitly. CPU
+    // families, and especially the vendor code names, don't necessarily promise
+    // details about specific processor packaging choices.
     AmdTurin,
 }
 
