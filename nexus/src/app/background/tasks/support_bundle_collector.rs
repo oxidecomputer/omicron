@@ -1064,7 +1064,7 @@ impl BundleCollection {
 
         info!(
             self.log,
-            "Support bundle: collected {ereports_written} total SP ereports",
+            "Support bundle: collected {ereports_written} total host ereports",
         );
         Ok(())
     }
