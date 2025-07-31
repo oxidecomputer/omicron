@@ -25,6 +25,7 @@ use nexus_sled_agent_shared::inventory::MupdateOverrideBootInventory;
 use nexus_sled_agent_shared::inventory::OmicronSledConfig;
 use nexus_sled_agent_shared::inventory::SledRole;
 use nexus_sled_agent_shared::inventory::ZoneImageResolverInventory;
+use nexus_sled_agent_shared::inventory::ZoneKind;
 use nexus_sled_agent_shared::inventory::ZoneManifestBootInventory;
 use nexus_types::deployment::ClickhousePolicy;
 use nexus_types::deployment::CockroachDbClusterVersion;
@@ -773,12 +774,30 @@ impl SystemDescription {
                 }
             }
 
+            let sled_inventory = s.sled_agent_inventory();
             builder
-                .found_sled_inventory(
-                    "fake sled agent",
-                    s.sled_agent_inventory().clone(),
-                )
+                .found_sled_inventory("fake sled agent", sled_inventory.clone())
                 .context("recording sled agent")?;
+
+            // Create responses we'd expect from all internal DNS zones, if
+            // they successfully receive their expected most-recent set of data.
+            if let Some(config) = sled_inventory.ledgered_sled_config.as_ref() {
+                for zone in &config.zones {
+                    if matches!(zone.zone_type.kind(), ZoneKind::InternalDns) {
+                        builder.found_internal_dns_generation_status(
+                            nexus_types::inventory::InternalDnsGenerationStatus {
+                                zone_id: zone.id,
+                                generation: self.internal_dns_version,
+                            }
+                        ).unwrap();
+                    }
+
+                    // TODO: We may want to include responses from Boundary NTP
+                    // and CockroachDb zones here too - but neither of those are
+                    // currently part of the example system, so their synthetic
+                    // responses to inventory collection aren't necessary yet.
+                }
+            }
         }
 
         Ok(builder)
