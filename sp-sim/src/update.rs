@@ -12,6 +12,7 @@ use crate::SIM_GIMLET_BOARD;
 use crate::SIM_ROT_BOARD;
 use crate::SIM_ROT_STAGE0_BOARD;
 use crate::SIM_SIDECAR_BOARD;
+use crate::config::SpCabooses;
 use crate::helpers::rot_slot_id_from_u16;
 use crate::helpers::rot_slot_id_to_u16;
 use gateway_messages::Fwid;
@@ -75,7 +76,7 @@ impl SimSpUpdate {
         baseboard_kind: BaseboardKind,
         no_stage0_caboose: bool,
         phase1_hash_policy: HostFlashHashPolicy,
-        sp_board_name: Option<String>,
+        cabooses: Option<SpCabooses>,
     ) -> Self {
         const SP_GITC0: &str = "ffffffff";
         const SP_GITC1: &str = "fefefefe";
@@ -95,75 +96,163 @@ impl SimSpUpdate {
         const STAGE0_VERS0: &str = "0.0.200";
         const STAGE0_VERS1: &str = "0.0.200";
 
-        // TODO-K: This is where the boards are set?
-        let sp_board = if let Some(b) = sp_board_name  {
-            b
-        } else {baseboard_kind.sp_board().to_string()};
-        let sp_name = baseboard_kind.sp_name();
-        let rot_name = baseboard_kind.rot_name();
+        let (
+            caboose_sp_active,
+            caboose_sp_inactive,
+            caboose_rot_a,
+            caboose_rot_b,
+            caboose_stage0,
+            caboose_stage0next,
+        ) = if let Some(c) = &cabooses {
+            let caboose_sp_active = CabooseValue::Caboose(
+                hubtools::CabooseBuilder::default()
+                    .git_commit(c.sp_slot_0.git_commit.clone())
+                    .board(c.sp_slot_0.board.clone())
+                    .name(c.sp_slot_0.name.clone())
+                    .version(c.sp_slot_0.version.clone())
+                    .build(),
+            );
+            let caboose_sp_inactive = CabooseValue::Caboose(
+                hubtools::CabooseBuilder::default()
+                    .git_commit(c.sp_slot_1.git_commit.clone())
+                    .board(c.sp_slot_1.board.clone())
+                    .name(c.sp_slot_1.name.clone())
+                    .version(c.sp_slot_1.version.clone())
+                    .build(),
+            );
 
-        let caboose_sp_active = CabooseValue::Caboose(
-            hubtools::CabooseBuilder::default()
-                .git_commit(SP_GITC0)
-                .board(&sp_board)
-                .name(sp_name)
-                .version(SP_VERS0)
-                .build(),
-        );
-        let caboose_sp_inactive = CabooseValue::Caboose(
-            hubtools::CabooseBuilder::default()
-                .git_commit(SP_GITC1)
-                .board(&sp_board)
-                .name(sp_name)
-                .version(SP_VERS1)
-                .build(),
-        );
+            let caboose_rot_a = CabooseValue::Caboose(
+                hubtools::CabooseBuilder::default()
+                    .git_commit(c.rot_slot_a.git_commit.clone())
+                    .board(c.rot_slot_a.board.clone())
+                    .name(c.rot_slot_a.name.clone())
+                    .version(c.rot_slot_a.version.clone())
+                    // TODO-K: fix unwraps
+                    .sign(c.rot_slot_a.sign.clone().unwrap())
+                    .build(),
+            );
 
-        let caboose_rot_a = CabooseValue::Caboose(
-            hubtools::CabooseBuilder::default()
-                .git_commit(ROT_GITC0)
-                .board(SIM_ROT_BOARD)
-                .name(rot_name)
-                .version(ROT_VERS0)
-                .sign(ROT_STAGING_DEVEL_SIGN)
-                .build(),
-        );
+            let caboose_rot_b = CabooseValue::Caboose(
+                hubtools::CabooseBuilder::default()
+                    .git_commit(c.rot_slot_b.git_commit.clone())
+                    .board(c.rot_slot_b.board.clone())
+                    .name(c.rot_slot_b.name.clone())
+                    .version(c.rot_slot_b.version.clone())
+                    .sign(c.rot_slot_b.sign.clone().unwrap())
+                    .build(),
+            );
 
-        let caboose_rot_b = CabooseValue::Caboose(
-            hubtools::CabooseBuilder::default()
-                .git_commit(ROT_GITC1)
-                .board(SIM_ROT_BOARD)
-                .name(rot_name)
-                .version(ROT_VERS1)
-                .sign(ROT_STAGING_DEVEL_SIGN)
-                .build(),
-        );
-
-        let (caboose_stage0, caboose_stage0next) = if no_stage0_caboose {
+            let (caboose_stage0, caboose_stage0next) = if no_stage0_caboose {
+                (
+                    CabooseValue::InvalidMissingAllKeys,
+                    CabooseValue::InvalidMissingAllKeys,
+                )
+            } else {
+                (
+                    CabooseValue::Caboose(
+                        hubtools::CabooseBuilder::default()
+                            .git_commit(c.stage0.git_commit.clone())
+                            .board(c.stage0.board.clone())
+                            .name(c.stage0.name.clone())
+                            .version(c.stage0.version.clone())
+                            .sign(c.stage0.sign.clone().unwrap())
+                            .build(),
+                    ),
+                    CabooseValue::Caboose(
+                        hubtools::CabooseBuilder::default()
+                            .git_commit(c.stage0_next.git_commit.clone())
+                            .board(c.stage0_next.board.clone())
+                            .name(c.stage0_next.name.clone())
+                            .version(c.stage0_next.version.clone())
+                            .sign(c.stage0_next.sign.clone().unwrap())
+                            .build(),
+                    ),
+                )
+            };
             (
-                CabooseValue::InvalidMissingAllKeys,
-                CabooseValue::InvalidMissingAllKeys,
+                caboose_sp_active,
+                caboose_sp_inactive,
+                caboose_rot_a,
+                caboose_rot_b,
+                caboose_stage0,
+                caboose_stage0next,
             )
         } else {
+            let sp_board = baseboard_kind.sp_board();
+            let sp_name = baseboard_kind.sp_name();
+            let rot_name = baseboard_kind.rot_name();
+
+            let caboose_sp_active = CabooseValue::Caboose(
+                hubtools::CabooseBuilder::default()
+                    .git_commit(SP_GITC0)
+                    .board(sp_board)
+                    .name(sp_name)
+                    .version(SP_VERS0)
+                    .build(),
+            );
+            let caboose_sp_inactive = CabooseValue::Caboose(
+                hubtools::CabooseBuilder::default()
+                    .git_commit(SP_GITC1)
+                    .board(sp_board)
+                    .name(sp_name)
+                    .version(SP_VERS1)
+                    .build(),
+            );
+
+            let caboose_rot_a = CabooseValue::Caboose(
+                hubtools::CabooseBuilder::default()
+                    .git_commit(ROT_GITC0)
+                    .board(SIM_ROT_BOARD)
+                    .name(rot_name)
+                    .version(ROT_VERS0)
+                    .sign(ROT_STAGING_DEVEL_SIGN)
+                    .build(),
+            );
+
+            let caboose_rot_b = CabooseValue::Caboose(
+                hubtools::CabooseBuilder::default()
+                    .git_commit(ROT_GITC1)
+                    .board(SIM_ROT_BOARD)
+                    .name(rot_name)
+                    .version(ROT_VERS1)
+                    .sign(ROT_STAGING_DEVEL_SIGN)
+                    .build(),
+            );
+
+            let (caboose_stage0, caboose_stage0next) = if no_stage0_caboose {
+                (
+                    CabooseValue::InvalidMissingAllKeys,
+                    CabooseValue::InvalidMissingAllKeys,
+                )
+            } else {
+                (
+                    CabooseValue::Caboose(
+                        hubtools::CabooseBuilder::default()
+                            .git_commit(STAGE0_GITC0)
+                            .board(SIM_ROT_STAGE0_BOARD)
+                            .name(rot_name)
+                            .version(STAGE0_VERS0)
+                            .sign(ROT_STAGING_DEVEL_SIGN)
+                            .build(),
+                    ),
+                    CabooseValue::Caboose(
+                        hubtools::CabooseBuilder::default()
+                            .git_commit(STAGE0_GITC1)
+                            .board(SIM_ROT_STAGE0_BOARD)
+                            .name(rot_name)
+                            .version(STAGE0_VERS1)
+                            .sign(ROT_STAGING_DEVEL_SIGN)
+                            .build(),
+                    ),
+                )
+            };
             (
-                CabooseValue::Caboose(
-                    hubtools::CabooseBuilder::default()
-                        .git_commit(STAGE0_GITC0)
-                        .board(SIM_ROT_STAGE0_BOARD)
-                        .name(rot_name)
-                        .version(STAGE0_VERS0)
-                        .sign(ROT_STAGING_DEVEL_SIGN)
-                        .build(),
-                ),
-                CabooseValue::Caboose(
-                    hubtools::CabooseBuilder::default()
-                        .git_commit(STAGE0_GITC1)
-                        .board(SIM_ROT_STAGE0_BOARD)
-                        .name(rot_name)
-                        .version(STAGE0_VERS1)
-                        .sign(ROT_STAGING_DEVEL_SIGN)
-                        .build(),
-                ),
+                caboose_sp_active,
+                caboose_sp_inactive,
+                caboose_rot_a,
+                caboose_rot_b,
+                caboose_stage0,
+                caboose_stage0next,
             )
         };
 
