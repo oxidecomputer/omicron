@@ -137,7 +137,6 @@ pub struct SpComponentConfig {
     pub sensors: Vec<SensorConfig>,
 }
 
-// TODO-K: Change config here
 /// Configuration of a simulated sidecar SP
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
 pub struct SidecarConfig {
@@ -145,7 +144,6 @@ pub struct SidecarConfig {
     pub common: SpCommonConfig,
 }
 
-// TODO-K: Change config here
 /// Configuration of a simulated gimlet SP
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
 pub struct GimletConfig {

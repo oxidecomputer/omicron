@@ -711,7 +711,6 @@ pub enum BaseboardKind {
 }
 
 impl BaseboardKind {
-    // TODO-K: This is where the boards are set?
     fn sp_board(&self) -> &str {
         match self {
             BaseboardKind::Gimlet => &SIM_GIMLET_BOARD,
