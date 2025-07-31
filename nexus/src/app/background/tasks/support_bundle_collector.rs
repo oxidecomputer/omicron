@@ -1429,7 +1429,8 @@ mod test {
     use omicron_common::disk::SharedDatasetConfig;
     use omicron_common::zpool_name::ZpoolName;
     use omicron_uuid_kinds::{
-        BlueprintUuid, DatasetUuid, PhysicalDiskUuid, SledUuid,
+        BlueprintUuid, DatasetUuid, EreporterRestartUuid, OmicronZoneUuid,
+        PhysicalDiskUuid, SledUuid,
     };
     use uuid::Uuid;
 
@@ -1570,6 +1571,139 @@ mod test {
         id
     }
 
+    async fn make_fake_ereports(datastore: &DataStore, opctx: &OpContext) {
+        use crate::db;
+
+        const SP_SERIAL: &str = "BRM42000069";
+        const HOST_SERIAL: &str = "BRM66600042";
+        const GIMLET_PN: &str = "9130000019";
+        // Make some SP ereports...
+        let sp_restart_id = EreporterRestartUuid::new_v4();
+        datastore.sp_ereports_insert(&opctx, db::model::SpType::Sled, 8, vec![
+            db::model::SpEreport {
+                restart_id: sp_restart_id.into(),
+                ena: ereport_types::Ena(1).into(),
+                time_collected: chrono::Utc::now(),
+                time_deleted: None,
+                collector_id: OmicronZoneUuid::new_v4().into(),
+                sp_type: db::model::SpType::Sled,
+                sp_slot: 8.into(),
+                part_number: Some(GIMLET_PN.to_string()),
+                serial_number: Some(SP_SERIAL.to_string()),
+                class: Some("ereport.fake.whatever".to_string()),
+                report: serde_json::json!({"hello world": true})
+            },
+            db::model::SpEreport {
+                restart_id: sp_restart_id.into(),
+                ena: ereport_types::Ena(2).into(),
+                time_collected: chrono::Utc::now(),
+                time_deleted: None,
+                collector_id: OmicronZoneUuid::new_v4().into(),
+                sp_type: db::model::SpType::Sled,
+                sp_slot: 8.into(),
+                part_number: Some(GIMLET_PN.to_string()),
+                serial_number: Some(SP_SERIAL.to_string()),
+                class: Some("ereport.something.blah".to_string()),
+                report: serde_json::json!({"system_working": "seems to be",})
+            },
+            db::model::SpEreport {
+                restart_id: EreporterRestartUuid::new_v4().into(),
+                ena: ereport_types::Ena(1).into(),
+                time_collected: chrono::Utc::now(),
+                time_deleted: None,
+                collector_id: OmicronZoneUuid::new_v4().into(),
+                sp_type: db::model::SpType::Sled,
+                sp_slot: 8.into(),
+                // Let's do a silly one! No VPD, to make sure that's also
+                // handled correctly.
+                part_number: None,
+                serial_number: None,
+                class: Some("ereport.fake.whatever".to_string()),
+                report: serde_json::json!({"hello_world": true})
+            },
+        ]).await.expect("failed to insert fake SP ereports");
+        // And one from a different serial. N.B. that I made sure the number of
+        // host-OS and SP ereports are different for when we make assertions
+        // about the bundle report.
+        datastore
+            .sp_ereports_insert(
+                &opctx,
+                db::model::SpType::Switch,
+                1,
+                vec![db::model::SpEreport {
+                    restart_id: EreporterRestartUuid::new_v4().into(),
+                    ena: ereport_types::Ena(1).into(),
+                    time_collected: chrono::Utc::now(),
+                    time_deleted: None,
+                    collector_id: OmicronZoneUuid::new_v4().into(),
+                    sp_type: db::model::SpType::Switch,
+                    sp_slot: 1.into(),
+                    part_number: Some("9130000006".to_string()),
+                    serial_number: Some("BRM41000555".to_string()),
+                    class: Some("ereport.fake.whatever".to_string()),
+                    report: serde_json::json!({"im_a_sidecar": true}),
+                }],
+            )
+            .await
+            .expect("failed to insert another fake SP ereport");
+        // And some host OS ones...
+        let sled_id = SledUuid::new_v4();
+        let restart_id = EreporterRestartUuid::new_v4().into();
+        datastore
+            .host_ereports_insert(
+                &opctx,
+                sled_id,
+                vec![
+                    db::model::HostEreport {
+                        restart_id,
+                        ena: ereport_types::Ena(1).into(),
+                        time_collected: chrono::Utc::now(),
+                        time_deleted: None,
+                        collector_id: OmicronZoneUuid::new_v4().into(),
+                        sled_id: sled_id.into(),
+                        sled_serial: HOST_SERIAL.to_string(),
+                        class: Some("ereport.fake.whatever".to_string()),
+                        report: serde_json::json!({"hello_world": true}),
+                    },
+                    db::model::HostEreport {
+                        restart_id,
+                        ena: ereport_types::Ena(2).into(),
+                        time_collected: chrono::Utc::now(),
+                        time_deleted: None,
+                        collector_id: OmicronZoneUuid::new_v4().into(),
+                        sled_id: sled_id.into(),
+                        sled_serial: HOST_SERIAL.to_string(),
+                        class: Some("ereport.fake.whatever.thingy".to_string()),
+                        report: serde_json::json!({"goodbye_world": false}),
+                    },
+                ],
+            )
+            .await
+            .expect("failed to insert fake host OS ereports");
+        // And another one with the same serial but different restart/sled IDs
+        let sled_id = SledUuid::new_v4();
+        datastore
+            .host_ereports_insert(
+                &opctx,
+                sled_id,
+                vec![
+                    db::model::HostEreport {
+                        restart_id: EreporterRestartUuid::new_v4().into(),
+                        ena: ereport_types::Ena(1).into(),
+                        time_collected: chrono::Utc::now(),
+                        time_deleted: None,
+                        collector_id: OmicronZoneUuid::new_v4().into(),
+                        sled_id: sled_id.into(),
+                        sled_serial: HOST_SERIAL.to_string(),
+                        class: Some("ereport.something.hostos_related".to_string()),
+                        report: serde_json::json!({"illumos": "very yes", "whatever": 42}),
+                    },
+                ],
+            )
+            .await
+            .expect("failed to insert another fake host OS ereport");
+    }
+
     struct TestDataset {
         zpool_id: ZpoolUuid,
         dataset_id: DatasetUuid,
@@ -1674,6 +1808,10 @@ mod test {
         let _datasets =
             TestDataset::setup(cptestctx, &datastore, &opctx, 1).await;
 
+        // Make up some ereports so that we can test that they're included in
+        // the bundle.
+        make_fake_ereports(&datastore, &opctx).await;
+
         // Assign a bundle to ourselves. We expect to collect it on
         // the next call to "collect_bundle".
         let bundle = datastore
@@ -1710,6 +1848,14 @@ mod test {
         assert!(report.listed_in_service_sleds);
         assert!(report.listed_sps);
         assert!(report.activated_in_db_ok);
+        assert_eq!(
+            report.host_ereports,
+            SupportBundleEreportStatus::Collected { n_collected: 3 }
+        );
+        assert_eq!(
+            report.sp_ereports,
+            SupportBundleEreportStatus::Collected { n_collected: 4 }
+        );
 
         let observed_bundle = datastore
             .support_bundle_get(&opctx, bundle.id.into())

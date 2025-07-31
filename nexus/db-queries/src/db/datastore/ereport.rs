@@ -383,8 +383,20 @@ impl DataStore {
         sled_id: SledUuid,
     ) -> Result<Option<ereport_types::EreportId>, Error> {
         opctx.authorize(authz::Action::ListChildren, &authz::FLEET).await?;
+        self.host_latest_ereport_id_on_conn(
+            &*self.pool_connection_authorized(opctx).await?,
+            sled_id,
+        )
+        .await
+    }
+
+    async fn host_latest_ereport_id_on_conn(
+        &self,
+        conn: &async_bb8_diesel::Connection<DbConnection>,
+        sled_id: SledUuid,
+    ) -> Result<Option<ereport_types::EreportId>, Error> {
         let id = Self::host_latest_ereport_id_query(sled_id)
-            .get_result_async(&*self.pool_connection_authorized(opctx).await?)
+            .get_result_async(conn)
             .await
             .optional()
             .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))?
@@ -432,6 +444,35 @@ impl DataStore {
             .map_err(|e| {
                 e.internal_context(format!(
                     "failed to refresh latest ereport ID for {sp_type:?} {slot}"
+                ))
+            })?;
+        Ok((created, latest))
+    }
+
+    pub async fn host_ereports_insert(
+        &self,
+        opctx: &OpContext,
+        sled_id: SledUuid,
+        ereports: Vec<HostEreport>,
+    ) -> CreateResult<(usize, Option<ereport_types::EreportId>)> {
+        opctx.authorize(authz::Action::CreateChild, &authz::FLEET).await?;
+        let conn = self.pool_connection_authorized(opctx).await?;
+        let created = diesel::insert_into(host_dsl::host_ereport)
+            .values(ereports)
+            .on_conflict((host_dsl::restart_id, host_dsl::ena))
+            .do_nothing()
+            .execute_async(&*conn)
+            .await
+            .map_err(|e| {
+                public_error_from_diesel(e, ErrorHandler::Server)
+                    .internal_context("failed to insert ereports")
+            })?;
+        let latest = self
+            .host_latest_ereport_id_on_conn(&conn, sled_id)
+            .await
+            .map_err(|e| {
+                e.internal_context(format!(
+                    "failed to refresh latest ereport ID for {sled_id}"
                 ))
             })?;
         Ok((created, latest))
