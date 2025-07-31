@@ -626,6 +626,34 @@ pub enum M2Slot {
     B,
 }
 
+impl M2Slot {
+    /// Flip from `A` to `B` or vice versa.
+    pub fn toggled(self) -> Self {
+        match self {
+            Self::A => Self::B,
+            Self::B => Self::A,
+        }
+    }
+
+    /// Convert this slot to an MGS "firmware slot" index.
+    pub fn to_mgs_firmware_slot(self) -> u16 {
+        match self {
+            Self::A => 0,
+            Self::B => 1,
+        }
+    }
+
+    /// Convert a putative MGS "firmware slot" index to an `M2Slot`, returning
+    /// `None` if `slot` is invalid.
+    pub fn from_mgs_firmware_slot(slot: u16) -> Option<Self> {
+        match slot {
+            0 => Some(Self::A),
+            1 => Some(Self::B),
+            _ => None,
+        }
+    }
+}
+
 impl fmt::Display for M2Slot {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
