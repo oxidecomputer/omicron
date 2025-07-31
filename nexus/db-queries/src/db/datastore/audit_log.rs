@@ -130,7 +130,9 @@ mod tests {
     use super::*;
     use crate::db::pub_test_utils::TestDatabase;
     use assert_matches::assert_matches;
-    use nexus_db_model::AuditLogCompletion;
+    use nexus_db_model::{
+        AuditLogActor, AuditLogCompletion, AuditLogEntryInitParams,
+    };
     use omicron_common::api::external::Error;
     use omicron_test_utils::dev;
     use std::num::NonZeroU32;
@@ -162,24 +164,25 @@ mod tests {
             .expect("retrieve empty audit log");
         assert_eq!(audit_log.len(), 0);
 
-        let entry1 = AuditLogEntryInit::new(
-            "req-1".to_string(),
-            "project_create".to_string(),
-            "https://omicron.com/projects".to_string(),
-            "1.1.1.1".parse().unwrap(),
-            Some("Firefox or whatever".to_string()),
-            None,
-            None,
-            None,
-        );
-        datastore
-            .audit_log_entry_init(opctx, entry1.clone())
+        let entry1_params = AuditLogEntryInitParams {
+            request_id: "req-1".to_string(),
+            operation_id: "project_create".to_string(),
+            request_uri: "https://omicron.com/projects".to_string(),
+            source_ip: "1.1.1.1".parse().unwrap(),
+            user_agent: Some("Firefox or whatever".to_string()),
+            actor: AuditLogActor::Unauthenticated,
+            access_method: None,
+        };
+        let entry1 = datastore
+            .audit_log_entry_init(opctx, entry1_params.clone().into())
             .await
             .expect("init audit log entry");
 
-        // inserting the same entry again blows up
+        // inserting the same entry again blows up (duplicate ID)
+        let mut entry1_duplicate: AuditLogEntryInit = entry1_params.into();
+        entry1_duplicate.id = entry1.id;
         let conflict = datastore
-            .audit_log_entry_init(opctx, entry1.clone())
+            .audit_log_entry_init(opctx, entry1_duplicate)
             .await
             .expect_err("inserting same entry again should error");
         assert_matches!(conflict, Error::ObjectAlreadyExists { .. });
@@ -194,18 +197,17 @@ mod tests {
 
         let t2 = Utc::now();
 
-        let entry2 = AuditLogEntryInit::new(
-            "req-2".to_string(),
-            "project_delete".to_string(),
-            "https://omicron.com/projects/123".to_string(),
-            "1.1.1.1".parse().unwrap(),
-            Some("Chrome???".to_string()),
-            None,
-            None,
-            None,
-        );
+        let entry2_params = AuditLogEntryInitParams {
+            request_id: "req-2".to_string(),
+            operation_id: "project_delete".to_string(),
+            request_uri: "https://omicron.com/projects/123".to_string(),
+            source_ip: "1.1.1.1".parse().unwrap(),
+            user_agent: Some("Chrome???".to_string()),
+            actor: AuditLogActor::Unauthenticated,
+            access_method: None,
+        };
         let entry2 = datastore
-            .audit_log_entry_init(opctx, entry2.clone())
+            .audit_log_entry_init(opctx, entry2_params.clone().into())
             .await
             .expect("init second audit log entry");
 
@@ -293,16 +295,15 @@ mod tests {
 
         let t0 = Utc::now();
 
-        let base = AuditLogEntryInit::new(
-            "req-1".to_string(),
-            "project_create".to_string(),
-            "https://omicron.com/projects".to_string(),
-            "1.1.1.1".parse().unwrap(),
-            Some("Fake-User-Agent".to_string()),
-            None,
-            None,
-            None,
-        );
+        let base_params = AuditLogEntryInitParams {
+            request_id: "req-1".to_string(),
+            operation_id: "project_create".to_string(),
+            request_uri: "https://omicron.com/projects".to_string(),
+            source_ip: "1.1.1.1".parse().unwrap(),
+            user_agent: Some("Fake-User-Agent".to_string()),
+            actor: AuditLogActor::Unauthenticated,
+            access_method: None,
+        };
         // we have to do the from() out here because that's what sets
         // time_completed, and we need them to all have the same time
         let completion =
@@ -317,8 +318,8 @@ mod tests {
 
         // funky order so we can feel really good about the sort order being correct
         for id in [id4, id1, id3, id2] {
-            let entry =
-                AuditLogEntryInit { id: id.parse().unwrap(), ..base.clone() };
+            let mut entry: AuditLogEntryInit = base_params.clone().into();
+            entry.id = id.parse().unwrap();
             let entry = datastore
                 .audit_log_entry_init(opctx, entry)
                 .await

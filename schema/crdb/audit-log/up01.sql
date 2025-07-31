@@ -1,5 +1,5 @@
-CREATE TYPE IF NOT EXISTS omicron.public.audit_log_result_kind AS ENUM (
-    'success',
-    'error', 
-    'timeout'
+CREATE TYPE IF NOT EXISTS omicron.public.audit_log_actor_kind AS ENUM (
+    'user_builtin',
+    'silo_user',
+    'unauthenticated'
 );

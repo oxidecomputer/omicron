@@ -16,6 +16,39 @@ use omicron_common::api::external::Error;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
+/// Actor information for audit log initialization. Inspired by `authn::Actor`
+#[derive(Clone, Debug)]
+pub enum AuditLogActor {
+    UserBuiltin { user_builtin_id: Uuid },
+    SiloUser { silo_user_id: Uuid, silo_id: Uuid },
+    Unauthenticated,
+}
+
+/// Structured params for initializing an audit log entry. See
+/// `AuditLogEntryInitRow` for the flat struct we use for DB inserts.
+#[derive(Clone, Debug)]
+pub struct AuditLogEntryInitParams {
+    pub request_id: String,
+    pub operation_id: String,
+    pub request_uri: String,
+    pub source_ip: IpAddr,
+    pub user_agent: Option<String>,
+    pub actor: AuditLogActor,
+    pub access_method: Option<String>,
+}
+
+impl_enum_type!(
+    AuditLogActorKindEnum:
+
+    #[derive(Clone, Copy, Debug, AsExpression, FromSqlRow, Serialize, Deserialize, PartialEq, Eq)]
+    pub enum AuditLogActorKind;
+
+    // Enum values
+    UserBuiltin => b"user_builtin"
+    SiloUser => b"silo_user"
+    Unauthenticated => b"unauthenticated"
+);
+
 impl_enum_type!(
     AuditLogResultKindEnum:
 
@@ -41,20 +74,53 @@ pub struct AuditLogEntryInit {
     pub source_ip: IpNetwork,
     pub user_agent: Option<String>,
 
-    // TODO: For login attempts, we may want to initialize the row with
-    // a potential actor so we can tell which account is being targeted by failed attempts. For password login, we should have the username on hand to log. For SAML, it's
-    // less clear whether this makes sense because we only get those requests
-    // from the IdP after a successful login on their end, and they're
-    // cryptographically signed. So maybe this only applies to password login.
+    // TODO: For login attempts, we may want to initialize the row with a
+    // potential actor so we can tell which account is being targeted by failed
+    // attempts. For password login, we should have the username on hand to log.
+    // For SAML, it's less clear whether this makes sense because we only get
+    // those requests from the IdP after a successful login on their end, and
+    // they're cryptographically signed. So maybe this only applies to password
+    // login.
 
-    // these are optional because of requests like login attempts, where there
-    // is no actor until after the operation.
+    // see AuditLogActor for the allowed combinations
+    /// Actor kind indicating builtin user, silo user, or unauthenticated
+    pub actor_kind: AuditLogActorKind,
     pub actor_id: Option<Uuid>,
     pub actor_silo_id: Option<Uuid>,
 
     /// API token or session cookie. Optional because it will not be defined
     /// on unauthenticated requests like login attempts.
     pub access_method: Option<String>,
+}
+
+impl From<AuditLogEntryInitParams> for AuditLogEntryInit {
+    fn from(params: AuditLogEntryInitParams) -> Self {
+        let (actor_id, actor_silo_id, actor_kind) = match params.actor {
+            AuditLogActor::UserBuiltin { user_builtin_id } => {
+                (Some(user_builtin_id), None, AuditLogActorKind::UserBuiltin)
+            }
+            AuditLogActor::SiloUser { silo_user_id, silo_id } => {
+                (Some(silo_user_id), Some(silo_id), AuditLogActorKind::SiloUser)
+            }
+            AuditLogActor::Unauthenticated => {
+                (None, None, AuditLogActorKind::Unauthenticated)
+            }
+        };
+
+        Self {
+            id: Uuid::new_v4(),
+            time_started: Utc::now(),
+            request_id: params.request_id,
+            request_uri: params.request_uri,
+            operation_id: params.operation_id,
+            actor_id,
+            actor_silo_id,
+            actor_kind,
+            source_ip: params.source_ip.into(),
+            user_agent: params.user_agent,
+            access_method: params.access_method,
+        }
+    }
 }
 
 /// `audit_log_complete` is a view on `audit_log` filtering for rows with
@@ -71,6 +137,8 @@ pub struct AuditLogEntry {
     pub user_agent: Option<String>,
     pub actor_id: Option<Uuid>,
     pub actor_silo_id: Option<Uuid>,
+    /// Actor kind indicating builtin user, silo user, or unauthenticated
+    pub actor_kind: AuditLogActorKind,
 
     /// The name of the authn scheme used. None if unauthenticated.
     pub access_method: Option<String>,
@@ -86,33 +154,6 @@ pub struct AuditLogEntry {
     pub error_code: Option<String>,
     /// Always present if result is an error
     pub error_message: Option<String>,
-}
-
-impl AuditLogEntryInit {
-    #[allow(clippy::too_many_arguments)]
-    pub fn new(
-        request_id: String,
-        operation_id: String,
-        request_uri: String,
-        source_ip: IpAddr,
-        user_agent: Option<String>,
-        actor_id: Option<Uuid>,
-        actor_silo_id: Option<Uuid>,
-        access_method: Option<String>,
-    ) -> Self {
-        Self {
-            id: Uuid::new_v4(),
-            time_started: Utc::now(),
-            request_id,
-            request_uri,
-            operation_id,
-            actor_id,
-            actor_silo_id,
-            source_ip: source_ip.into(),
-            user_agent,
-            access_method,
-        }
-    }
 }
 
 /// Struct that we can use as a kind of constructor arg for our actual audit
@@ -188,24 +229,31 @@ impl TryFrom<AuditLogEntry> for views::AuditLogEntry {
             operation_id: entry.operation_id,
             source_ip: entry.source_ip.ip(),
             user_agent: entry.user_agent,
-            // TODO: make robust by writing down actor type at DB write time
-            // rather than assuming it based on the presence or absence of user
-            // and silo IDs
-            actor: match (entry.actor_id, entry.actor_silo_id) {
-                (Some(silo_user_id), Some(silo_id)) => {
+            actor: match entry.actor_kind {
+                AuditLogActorKind::UserBuiltin => {
+                    let user_builtin_id = entry.actor_id.ok_or_else(|| {
+                        Error::internal_error(
+                            "UserBuiltin actor missing actor_id",
+                        )
+                    })?;
+                    views::AuditLogEntryActor::UserBuiltin { user_builtin_id }
+                }
+                AuditLogActorKind::SiloUser => {
+                    let silo_user_id = entry.actor_id.ok_or_else(|| {
+                        Error::internal_error("SiloUser actor missing actor_id")
+                    })?;
+                    let silo_id = entry.actor_silo_id.ok_or_else(|| {
+                        Error::internal_error(
+                            "SiloUser actor missing actor_silo_id",
+                        )
+                    })?;
                     views::AuditLogEntryActor::SiloUser {
                         silo_user_id,
                         silo_id,
                     }
                 }
-                (Some(user_builtin_id), None) => {
-                    views::AuditLogEntryActor::UserBuiltin { user_builtin_id }
-                }
-                (None, None) => views::AuditLogEntryActor::Unauthenticated,
-                (None, Some(_)) => {
-                    return Err(Error::internal_error(
-                        "Can't have a silo ID without an actor ID",
-                    ));
+                AuditLogActorKind::Unauthenticated => {
+                    views::AuditLogEntryActor::Unauthenticated
                 }
             },
             access_method: entry.access_method,

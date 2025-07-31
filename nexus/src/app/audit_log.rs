@@ -4,7 +4,10 @@
 
 use chrono::{DateTime, Utc};
 use dropshot::{HttpError, HttpResponse, RequestContext};
-use nexus_db_model::{AuditLogCompletion, AuditLogEntry, AuditLogEntryInit};
+use nexus_db_model::{
+    AuditLogActor, AuditLogCompletion, AuditLogEntry, AuditLogEntryInit,
+    AuditLogEntryInitParams,
+};
 use nexus_db_queries::context::OpContext;
 use omicron_common::api::external::{
     CreateResult, DataPageParams, ListResultVec, UpdateResult,
@@ -47,26 +50,40 @@ impl super::Nexus {
         // extract the relevant fields at the call site.
         rqctx: &RequestContext<ApiContext>,
     ) -> CreateResult<AuditLogEntryInit> {
-        let actor = opctx.authn.actor();
-        let entry = AuditLogEntryInit::new(
-            rqctx.request_id.clone(),
-            rqctx.endpoint.operation_id.clone(),
-            rqctx.request.uri().to_string(),
-            rqctx.request.remote_addr().ip(),
-            rqctx
-                .request
-                .headers()
-                .get(http::header::USER_AGENT)
-                .and_then(|value| value.to_str().ok())
-                // User agent is truncated for the DB because it can
-                // theoretically be very long, but almost never contains useful
-                // info past the beginning.
-                .map(|s| safe_truncate(s, 255).to_string()),
-            actor.map(|a| a.actor_id()),
-            actor.and_then(|a| a.silo_id()),
-            opctx.authn.scheme_used().map(|s| s.to_string()),
-        );
-        self.db_datastore.audit_log_entry_init(opctx, entry).await
+        // for now, this conversion is pretty much 1-1
+        let actor = match opctx.authn.actor() {
+            Some(nexus_auth::authn::Actor::UserBuiltin { user_builtin_id }) => {
+                AuditLogActor::UserBuiltin { user_builtin_id: *user_builtin_id }
+            }
+            Some(nexus_auth::authn::Actor::SiloUser {
+                silo_user_id,
+                silo_id,
+            }) => AuditLogActor::SiloUser {
+                silo_user_id: *silo_user_id,
+                silo_id: *silo_id,
+            },
+            None => AuditLogActor::Unauthenticated,
+        };
+
+        // User agent is truncated for the DB because it can theoretically be
+        // very long, but almost never contains useful info past the beginning.
+        let user_agent = rqctx
+            .request
+            .headers()
+            .get(http::header::USER_AGENT)
+            .and_then(|value| value.to_str().ok())
+            .map(|s| safe_truncate(s, 255).to_string());
+
+        let entry_params = AuditLogEntryInitParams {
+            request_id: rqctx.request_id.clone(),
+            operation_id: rqctx.endpoint.operation_id.clone(),
+            request_uri: rqctx.request.uri().to_string(),
+            source_ip: rqctx.request.remote_addr().ip(),
+            user_agent,
+            actor,
+            access_method: opctx.authn.scheme_used().map(|s| s.to_string()),
+        };
+        self.db_datastore.audit_log_entry_init(opctx, entry_params.into()).await
     }
 
     /// Complete an existing audit log entry with result info like end time,

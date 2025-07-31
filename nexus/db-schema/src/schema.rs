@@ -2697,6 +2697,7 @@ table! {
         user_agent -> Nullable<Text>,
         actor_id -> Nullable<Uuid>,
         actor_silo_id -> Nullable<Uuid>,
+        actor_kind -> crate::enums::AuditLogActorKindEnum,
         access_method -> Nullable<Text>,
         time_completed -> Nullable<Timestamptz>,
         http_status_code -> Nullable<Int4>, // SqlU16
@@ -2717,6 +2718,7 @@ table! {
         user_agent -> Nullable<Text>,
         actor_id -> Nullable<Uuid>,
         actor_silo_id -> Nullable<Uuid>,
+        actor_kind -> crate::enums::AuditLogActorKindEnum,
         access_method -> Nullable<Text>,
         time_completed -> Timestamptz,
         http_status_code -> Nullable<Int4>, // SqlU16
