@@ -4697,6 +4697,7 @@
         "minimum": 0
       },
       "HeldDbClaimInfo": {
+        "description": "Describes an outstanding database claim (for debugging why quiesce is stuck)",
         "type": "object",
         "properties": {
           "debug": {
@@ -6643,6 +6644,7 @@
         ]
       },
       "QuiesceState": {
+        "description": "See [`QuiesceStatus`] for more on Nexus quiescing.\n\nAt any given time, Nexus is always in one of these states:\n\n```text Running             (normal operation) | | quiesce starts v WaitingForSagas     (no new sagas are allowed, but some are still running) | | no more sagas running v WaitingForDb        (no sagas running; no new db connections may be acquired by Nexus at-large, but some are still held) | | no more database connections held v Quiesced            (no sagas running, no database connections in use) ```\n\nQuiescing is (currently) a one-way trip: once a Nexus process starts quiescing, it will never go back to normal operation.  It will never go back to an earlier stage, either.",
         "oneOf": [
           {
             "description": "Normal operation",
@@ -6660,7 +6662,7 @@
             ]
           },
           {
-            "description": "New sagas disallowed, but some may be running.",
+            "description": "New sagas disallowed, but some are still running.",
             "type": "object",
             "properties": {
               "quiesce_details": {
@@ -6688,7 +6690,7 @@
             ]
           },
           {
-            "description": "No sagas running, but some database connections may be held.",
+            "description": "No sagas running, no new database connections may be claimed, but some database connections are still held.",
             "type": "object",
             "properties": {
               "quiesce_details": {
@@ -6767,10 +6769,12 @@
         ]
       },
       "QuiesceStatus": {
+        "description": "Describes whether Nexus is quiescing or quiesced and what, if anything, is blocking the quiesce process\n\n**Quiescing** is the process of draining Nexus of running sagas and stopping all use of the database in preparation for upgrade.  See [`QuiesceState`] for more on the stages involved.",
         "type": "object",
         "properties": {
           "db_claims": {
             "title": "IdOrdMap",
+            "description": "what database claims are currently held (by any part of Nexus)\n\nEntries here prevent transitioning from `WaitingForDb` to `Quiesced`.",
             "x-rust-type": {
               "crate": "iddqd",
               "parameters": [
@@ -6789,6 +6793,7 @@
           },
           "sagas_running": {
             "title": "IdOrdMap",
+            "description": "what sagas are currently running\n\nThis should only be non-empty when state is `Running` or `WaitingForSagas`.  Entries here prevent transitioning from `WaitingForSagas` to `WaitingForDb`.",
             "x-rust-type": {
               "crate": "iddqd",
               "parameters": [
@@ -6806,7 +6811,12 @@
             "uniqueItems": true
           },
           "state": {
-            "$ref": "#/components/schemas/QuiesceState"
+            "description": "what stage of quiescing is Nexus at",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/QuiesceState"
+              }
+            ]
           }
         },
         "required": [
@@ -7201,6 +7211,7 @@
         ]
       },
       "RunningSagaInfo": {
+        "description": "Describes a running saga (for debugging why quiesce is stuck)",
         "type": "object",
         "properties": {
           "saga_id": {

@@ -211,6 +211,10 @@ impl Pool {
             ));
         }
 
+        // `ClaimReleaser` cleans up the entry that we just added to
+        // `claims_held`.  It's important not to add any early return paths
+        // before creating this object because that would leak the reference and
+        // prevent Nexus from quiescing.
         let claim_releaser = ClaimReleaser::new(id, self.quiesce.clone());
         self.inner
             .claim()
@@ -242,12 +246,7 @@ impl Pool {
         let mut rx = self.quiesce.subscribe();
         // unwrap(): this can only fail if the tx side is dropped, but that
         // can't happen because we have a reference to it via `self`.
-        rx.wait_for(|q| {
-            q.new_claims_allowed == ClaimsAllowed::Disallowed
-                && q.claims_held.is_empty()
-        })
-        .await
-        .unwrap();
+        rx.wait_for(|q| q.is_fully_quiesced()).await.unwrap();
     }
 
     /// Returns information about held db claims
@@ -283,11 +282,22 @@ impl Drop for Pool {
     }
 }
 
-/// DataStore quiesce configuration and state
+/// Database quiesce configuration and state
 #[derive(Debug, Clone)]
 pub(crate) struct Quiesce {
+    /// whether new claims are allowed right now
     new_claims_allowed: ClaimsAllowed,
+
+    /// set of claims currently held
     claims_held: IdOrdMap<HeldDbClaimInfo>,
+}
+
+impl Quiesce {
+    /// Returns whether database access is fully (and permanently) quiesced
+    fn is_fully_quiesced(&self) -> bool {
+        matches!(self.new_claims_allowed, ClaimsAllowed::Disallowed)
+            && self.claims_held.is_empty()
+    }
 }
 
 /// Policy determining whether new database claims are allowed
@@ -302,6 +312,11 @@ pub(crate) enum ClaimsAllowed {
     Disallowed,
 }
 
+/// Object used to clean up tracking of a held claim, potentially unblocking
+/// the quiesce process
+///
+/// This gets attached to a `DataStoreConnection`.  When it gets dropped, this
+/// gets dropped.  That's when we clean up the entry in the quiesce state.
 struct ClaimReleaser {
     id: u64,
     tracker: watch::Sender<Quiesce>,

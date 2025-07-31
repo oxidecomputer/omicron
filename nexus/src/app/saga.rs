@@ -169,6 +169,14 @@ struct Quiesce {
     sagas_running: IdOrdMap<RunningSagaInfo>,
 }
 
+impl Quiesce {
+    /// Returns whether sagas are fully and permanently quiesced
+    fn is_fully_quiesced(&self) -> bool {
+        self.sagas_allowed == SagasAllowed::Disallowed
+            && self.sagas_running.is_empty()
+    }
+}
+
 /// Policy determining whether new sagas are allowed to be started
 ///
 /// This is used by Nexus quiesce to disallow creation of new sagas when we're
@@ -229,12 +237,7 @@ impl SagaExecutor {
         let mut rx = self.quiesce.subscribe();
         // unwrap(): this can only fail if the tx side is dropped, but that
         // can't happen because we have a reference to it via `self`.
-        rx.wait_for(|q| {
-            q.sagas_allowed == SagasAllowed::Disallowed
-                && q.sagas_running.is_empty()
-        })
-        .await
-        .unwrap();
+        rx.wait_for(|q| q.is_fully_quiesced()).await.unwrap();
     }
 
     /// Returns information about running sagas (involves a clone)

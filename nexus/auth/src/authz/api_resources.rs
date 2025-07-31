@@ -241,7 +241,7 @@ impl ApiResourceWithRolesType for Fleet {
 
 /// Represents the "quiesce" state of Nexus
 ///
-/// It is essential that checking actions on this resource *not* access the
+/// It is essential that authorizing actions on this resource *not* access the
 /// database because we cannot do that while quiesced and we *do* want to be
 /// able to read and modify the quiesce state while quiesced.
 #[derive(Clone, Copy, Debug, Serialize, Deserialize, PolarClass)]

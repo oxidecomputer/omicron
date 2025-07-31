@@ -23,10 +23,17 @@ pub struct QuiesceArgs {
 #[derive(Debug, Subcommand)]
 pub enum QuiesceCommands {
     /// Show the current Nexus quiesce status
-    Show,
+    Show(QuiesceShowArgs),
 
     /// Start quiescing Nexus
     Start,
+}
+
+#[derive(Debug, Args)]
+struct QuiesceShowArgs {
+    /// Show details about held database connections
+    #[clap(short, long, default_value_t = false)]
+    verbose: bool,
 }
 
 pub async fn cmd_nexus_quiesce(
@@ -35,7 +42,7 @@ pub async fn cmd_nexus_quiesce(
     args: &QuiesceArgs,
 ) -> Result<(), anyhow::Error> {
     match &args.command {
-        QuiesceCommands::Show => quiesce_show(&client).await,
+        QuiesceCommands::Show(args) => quiesce_show(&client, args).await,
         QuiesceCommands::Start => {
             let token = omdb.check_allow_destructive()?;
             quiesce_start(&client, token).await
@@ -45,6 +52,7 @@ pub async fn cmd_nexus_quiesce(
 
 async fn quiesce_show(
     client: &nexus_client::Client,
+    args: &QuiesceShowArgs,
 ) -> Result<(), anyhow::Error> {
     let now = Utc::now();
     let quiesce = client
@@ -127,8 +135,10 @@ async fn quiesce_show(
             claim.held_since,
             format_time_delta(Utc::now() - claim.held_since),
         );
-        println!("    acquired by:");
-        println!("{}", textwrap::indent(&claim.debug, "        "));
+        if args.verbose {
+            println!("    acquired by:");
+            println!("{}", textwrap::indent(&claim.debug, "        "));
+        }
     }
 
     Ok(())
@@ -139,7 +149,7 @@ async fn quiesce_start(
     _token: DestructiveOperationToken,
 ) -> Result<(), anyhow::Error> {
     client.quiesce_start().await.context("quiescing Nexus")?;
-    quiesce_show(client).await
+    quiesce_show(client, &QuiesceShowArgs { verbose: false }).await
 }
 
 fn format_duration_ms(duration: Duration) -> String {
