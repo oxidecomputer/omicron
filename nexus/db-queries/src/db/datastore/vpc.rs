@@ -2967,6 +2967,7 @@ mod tests {
     use nexus_db_fixed_data::vpc_subnet::NEXUS_VPC_SUBNET;
     use nexus_db_model::IncompleteNetworkInterface;
     use nexus_reconfigurator_planning::blueprint_builder::BlueprintBuilder;
+    use nexus_reconfigurator_planning::planner::PlannerRng;
     use nexus_reconfigurator_planning::system::SledBuilder;
     use nexus_reconfigurator_planning::system::SystemDescription;
     use nexus_types::deployment::Blueprint;
@@ -3315,6 +3316,7 @@ mod tests {
                 &planning_input,
                 &collection,
                 "test",
+                PlannerRng::from_entropy(),
             )
             .expect("created blueprint builder");
             for &sled_id in &sled_ids {
@@ -3399,6 +3401,7 @@ mod tests {
                 &planning_input,
                 &collection,
                 "test",
+                PlannerRng::from_entropy(),
             )
             .expect("created blueprint builder");
             for &sled_id in &sled_ids {

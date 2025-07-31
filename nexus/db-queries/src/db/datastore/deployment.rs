@@ -80,6 +80,7 @@ use nexus_types::deployment::ExpectedVersion;
 use nexus_types::deployment::OximeterReadMode;
 use nexus_types::deployment::PendingMgsUpdateDetails;
 use nexus_types::deployment::PendingMgsUpdates;
+use nexus_types::deployment::PlanningReport;
 use nexus_types::inventory::BaseboardId;
 use omicron_common::api::external::DataPageParams;
 use omicron_common::api::external::Error;
@@ -1683,6 +1684,9 @@ impl DataStore {
             )?;
         }
 
+        // FIXME: Once reports are stored in the database, read them out here.
+        let report = PlanningReport::new(blueprint_id);
+
         Ok(Blueprint {
             id: blueprint_id,
             pending_mgs_updates,
@@ -1699,6 +1703,7 @@ impl DataStore {
             time_created,
             creator,
             comment,
+            report,
         })
     }
 
@@ -2758,6 +2763,7 @@ mod tests {
     use nexus_reconfigurator_planning::blueprint_builder::EnsureMultiple;
     use nexus_reconfigurator_planning::example::ExampleSystemBuilder;
     use nexus_reconfigurator_planning::example::example;
+    use nexus_reconfigurator_planning::planner::PlannerRng;
     use nexus_types::deployment::BlueprintArtifactVersion;
     use nexus_types::deployment::BlueprintHostPhase2DesiredContents;
     use nexus_types::deployment::BlueprintHostPhase2DesiredSlots;
@@ -3149,6 +3155,7 @@ mod tests {
             &planning_input,
             &collection,
             "test",
+            PlannerRng::from_entropy(),
         )
         .expect("failed to create builder");
 
@@ -3490,6 +3497,7 @@ mod tests {
             &planning_input,
             &collection,
             "dummy",
+            PlannerRng::from_entropy(),
         )
         .expect("failed to create builder");
 
@@ -3539,6 +3547,7 @@ mod tests {
             &planning_input,
             &collection,
             "dummy",
+            PlannerRng::from_entropy(),
         )
         .expect("failed to create builder");
 
@@ -3631,6 +3640,7 @@ mod tests {
             &EMPTY_PLANNING_INPUT,
             &collection,
             "test2",
+            PlannerRng::from_entropy(),
         )
         .expect("failed to create builder")
         .build();
@@ -3640,6 +3650,7 @@ mod tests {
             &EMPTY_PLANNING_INPUT,
             &collection,
             "test3",
+            PlannerRng::from_entropy(),
         )
         .expect("failed to create builder")
         .build();
@@ -3740,6 +3751,7 @@ mod tests {
             &EMPTY_PLANNING_INPUT,
             &collection,
             "test3",
+            PlannerRng::from_entropy(),
         )
         .expect("failed to create builder")
         .build();
@@ -3785,6 +3797,7 @@ mod tests {
             &EMPTY_PLANNING_INPUT,
             &collection,
             "test2",
+            PlannerRng::from_entropy(),
         )
         .expect("failed to create builder")
         .build();
@@ -4017,6 +4030,7 @@ mod tests {
             &example_system.input,
             &example_system.collection,
             &format!("{test_name}-2"),
+            PlannerRng::from_entropy(),
         )
         .expect("failed to create builder")
         .build();
