@@ -4556,16 +4556,28 @@
         "type": "object",
         "properties": {
           "boot_disk": {
-            "$ref": "#/components/schemas/M2Slot"
+            "description": "Which slot the host OS most recently booted from.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/M2Slot"
+              }
+            ]
           },
           "phase_1": {
+            "description": "The hash of the currently-active phase 1 artifact.\n\nWe should always be able to fetch this. Even if the phase 1 contents themselves have been corrupted (very scary for the active slot!), the SP can still hash those contents.",
             "type": "string",
             "format": "hex string (32 bytes)"
           },
           "phase_1_slot": {
-            "$ref": "#/components/schemas/M2Slot"
+            "description": "Which slot is currently active according to the SP.\n\nThis controls which slot will be used the next time the sled boots; it will _usually_ match `boot_disk`, but differs in the window of time between telling the SP to change which slot to use and the host OS rebooting to actually use that slot.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/M2Slot"
+              }
+            ]
           },
           "phase_2": {
+            "description": "The hash of the currently-active phase 2 artifact.\n\nIt's possible sled-agent won't be able to report this value, but that would indicate that we don't know the version currently running. The planner wouldn't stage an update without knowing the current version, so if something has gone wrong in the meantime we won't proceede either.",
             "type": "string",
             "format": "hex string (32 bytes)"
           }
@@ -4597,10 +4609,12 @@
         "type": "object",
         "properties": {
           "phase_1": {
+            "description": "The hash of the currently-inactive phase 1 artifact.\n\nWe should always be able to fetch this. Even if the phase 1 contents of the inactive slot are entirely bogus, the SP can still hash those contents. can still hash those contents.",
             "type": "string",
             "format": "hex string (32 bytes)"
           },
           "phase_2": {
+            "description": "The hash of the currently-inactive phase 2 artifact.\n\nIt's entirely possible that a sled needing a host OS update has no valid artifact in its inactive slot. However, a precondition for us performing a phase 1 update is that `sled-agent` on the target sled has already written the paired phase 2 artifact to the inactive slot; therefore, we don't need to be able to represent an invalid inactive slot.",
             "type": "string",
             "format": "hex string (32 bytes)"
           }
