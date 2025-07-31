@@ -317,6 +317,10 @@ impl<'a> DatasetsBySledCache<'a> {
 
         let mut by_zpool = BTreeMap::new();
         for dataset in sled_config.datasets.iter() {
+            if dataset.disposition.is_expunged() {
+                continue;
+            }
+
             let by_kind: &mut BTreeMap<_, _> =
                 by_zpool.entry(dataset.pool.id()).or_default();
 
@@ -1257,6 +1261,57 @@ mod tests {
                 report.notes().contains(&note),
                 "did not find expected note {note:?}"
             );
+        }
+
+        logctx.cleanup_successful();
+    }
+
+    #[test]
+    fn test_zpool_with_expunged_duplicate_dataset_kinds() {
+        static TEST_NAME: &str =
+            "test_zpool_with_expunged_duplicate_dataset_kinds";
+        let logctx = test_setup_log(TEST_NAME);
+        let (_, _, mut blueprint) = example(&logctx.log, TEST_NAME);
+
+        let mut by_kind = BTreeMap::new();
+
+        // Loop over the datasets until we find a dataset kind that already
+        // exists on a different zpool, then copy it over.
+        //
+        // When we make the copy, also mark it expunged.
+        //
+        // By marking the dataset expunged, we should not see "duplicate dataset
+        // kind" errors.
+        let mut found_duplicate = false;
+        'outer: for (_, sled_config) in blueprint.sleds.iter_mut() {
+            for mut dataset in sled_config.datasets.iter_mut() {
+                if let Some(prev) =
+                    by_kind.insert(dataset.kind.clone(), dataset.clone())
+                {
+                    dataset.pool = prev.pool;
+                    dataset.disposition = BlueprintDatasetDisposition::Expunged;
+
+                    found_duplicate = true;
+                    break 'outer;
+                }
+            }
+        }
+        assert!(found_duplicate);
+
+        let report =
+            Blippy::new(&blueprint).into_report(BlippyReportSortKey::Kind);
+        eprintln!("{}", report.display());
+        for note in report.notes() {
+            match &note.kind {
+                Kind::Sled { kind, .. } => match kind {
+                    SledKind::ZpoolWithDuplicateDatasetKinds { .. } => {
+                        panic!(
+                            "Saw unexpected duplicate dataset kind note: {note:?}"
+                        );
+                    }
+                    _ => (),
+                },
+            }
         }
 
         logctx.cleanup_successful();

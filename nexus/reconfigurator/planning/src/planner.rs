@@ -1647,6 +1647,84 @@ impl<'a> Planner<'a> {
                 );
                 can_shutdown
             }
+            ZoneKind::InternalDns => {
+                debug!(
+                    self.log,
+                    "Checking if internal DNS zone can be shut down"
+                );
+
+                // Find all internal DNS zones expected to be in-service by our
+                // blueprint.
+                let mut internal_dns_zones = std::collections::HashSet::new();
+                for sled_id in self.blueprint.sled_ids_with_zones() {
+                    for zone in self.blueprint.current_sled_zones(
+                        sled_id,
+                        BlueprintZoneDisposition::is_in_service,
+                    ) {
+                        if zone.zone_type.kind() == ZoneKind::InternalDns {
+                            internal_dns_zones.insert(zone.id);
+                            debug!(
+                                self.log,
+                                "Found internal dns zone in blueprint";
+                                "id" => ?zone.id
+                            );
+                        }
+                    }
+                }
+
+                // Count the number of Internal DNS servers exactly at our
+                // expected generation number.
+                let mut synchronized_internal_dns_count = 0;
+                for status in
+                    self.inventory.internal_dns_generation_status.iter()
+                {
+                    // We only consider zones which we expect to be in-service
+                    // from our blueprint.
+                    debug!(
+                        self.log,
+                        "Found internal dns zone in inventory";
+                        "id" => ?status.zone_id
+                    );
+
+                    // We consider internal DNS servers up-to-date if they have
+                    // a generation number matching what we observed in the DB
+                    // at the start of blueprint generation.
+                    //
+                    // - If we observe an older generation number in inventory,
+                    // the DNS server is out-of-date.
+                    // - If we observe a newer generation number in inventory,
+                    // the value the planner read from the database is
+                    // out-of-date.
+                    //
+                    // Either way, from our perspective, the internal DNS zone
+                    // shouldn't be considered "ready-to-shutdown".
+                    if internal_dns_zones.contains(&status.zone_id)
+                        && status.generation
+                            == self.input.internal_dns_version()
+                    {
+                        synchronized_internal_dns_count += 1;
+                    }
+                }
+
+                // Our goal is to have enough Internal DNS servers running
+                // at a sufficiently up-to-date version such that if the system
+                // powers off and restarts, at least one exists and can get the
+                // control plane back up and running.
+                //
+                // Our INTERNAL_DNS_REDUNDANCY factor is set so that we can
+                // tolerate "at least one upgrade, and at least one failure
+                // during that upgrade window".
+                let can_shutdown =
+                    synchronized_internal_dns_count >= INTERNAL_DNS_REDUNDANCY;
+                info!(
+                    self.log,
+                    "Internal DNS zone shutdown check";
+                    "total_internal_dns_zones" => internal_dns_zones.len(),
+                    "synchronized_count" => synchronized_internal_dns_count,
+                    "can_shutdown" => can_shutdown
+                );
+                can_shutdown
+            }
             _ => true, // other zone kinds have no special safety checks
         }
     }
@@ -1698,6 +1776,7 @@ pub(crate) mod test {
     use nexus_types::external_api::views::SledProvisionPolicy;
     use nexus_types::external_api::views::SledState;
     use nexus_types::inventory::CockroachStatus;
+    use nexus_types::inventory::InternalDnsGenerationStatus;
     use nexus_types::inventory::TimeSync;
     use omicron_common::api::external::Generation;
     use omicron_common::api::external::MacAddr;
@@ -5614,8 +5693,8 @@ pub(crate) mod test {
             TEST_NAME,
         );
 
-        // If we're missing info from even a single node, we
-        // will still refuse to update.
+        // If we don't have valid statuses from enough internal DNS zones, we
+        // will refuse to update.
         example.collection.cockroach_status = create_valid_looking_status();
         example.collection.cockroach_status.pop_first();
         assert_planning_makes_no_changes(
@@ -6341,6 +6420,274 @@ pub(crate) mod test {
         logctx.cleanup_successful();
     }
 
+    #[test]
+    fn test_update_internal_dns() {
+        static TEST_NAME: &str = "update_internal_dns";
+        let logctx = test_setup_log(TEST_NAME);
+        let log = logctx.log.clone();
+
+        // Use our example system.
+        let mut rng = SimRngState::from_seed(TEST_NAME);
+        let (mut example, mut blueprint) = ExampleSystemBuilder::new_with_rng(
+            &logctx.log,
+            rng.next_system_rng(),
+        )
+        .build();
+        verify_blueprint(&blueprint);
+
+        // All zones should be sourced from the install dataset by default.
+        assert!(
+            blueprint
+                .all_omicron_zones(BlueprintZoneDisposition::is_in_service)
+                .all(|(_, z)| matches!(
+                    z.image_source,
+                    BlueprintZoneImageSource::InstallDataset
+                ))
+        );
+
+        // This test "starts" here -- we specify a new TUF repo with an updated
+        // Internal DNS image. We create a new TUF repo where version of
+        // Internal DNS has been updated out of the install dataset.
+        //
+        // The planner should avoid doing this update until it has confirmation
+        // from inventory that the Internal DNS servers are ready.
+
+        let mut input_builder = example.input.clone().into_builder();
+        let version = ArtifactVersion::new_static("1.0.0-freeform")
+            .expect("can't parse artifact version");
+        let fake_hash = ArtifactHash([0; 32]);
+        let image_source = BlueprintZoneImageSource::Artifact {
+            version: BlueprintArtifactVersion::Available {
+                version: version.clone(),
+            },
+            hash: fake_hash,
+        };
+        let artifacts = create_artifacts_at_version(&version);
+        let target_release_generation = Generation::from_u32(2);
+        input_builder.policy_mut().tuf_repo = TufRepoPolicy {
+            target_release_generation,
+            description: TargetReleaseDescription::TufRepo(
+                TufRepoDescription {
+                    repo: TufRepoMeta {
+                        hash: fake_hash,
+                        targets_role_version: 0,
+                        valid_until: Utc::now(),
+                        system_version: Version::new(1, 0, 0),
+                        file_name: String::from(""),
+                    },
+                    artifacts,
+                },
+            ),
+        };
+        example.input = input_builder.build();
+
+        // Manually update all zones except Internal DNS
+        //
+        // We just specified a new TUF repo, everything is going to shift from
+        // the install dataset to this new repo.
+        for mut zone in blueprint
+            .sleds
+            .values_mut()
+            .flat_map(|config| config.zones.iter_mut())
+            .filter(|z| !z.zone_type.is_internal_dns())
+        {
+            zone.image_source = BlueprintZoneImageSource::Artifact {
+                version: BlueprintArtifactVersion::Available {
+                    version: version.clone(),
+                },
+                hash: fake_hash,
+            };
+        }
+        update_collection_from_blueprint(&mut example, &blueprint);
+
+        // Some helper predicates for the assertions below.
+        let is_old_internal_dns = |zone: &BlueprintZoneConfig| -> bool {
+            zone.zone_type.is_internal_dns()
+                && matches!(
+                    zone.image_source,
+                    BlueprintZoneImageSource::InstallDataset
+                )
+        };
+        let is_up_to_date_internal_dns = |zone: &BlueprintZoneConfig| -> bool {
+            zone.zone_type.is_internal_dns()
+                && zone.image_source == image_source
+        };
+        let create_valid_looking_status = |bp: &Blueprint| {
+            let mut result = IdOrdMap::new();
+            for sled in bp.sleds.values() {
+                for zone in &sled.zones {
+                    if zone.zone_type.is_internal_dns() {
+                        result
+                            .insert_unique(InternalDnsGenerationStatus {
+                                zone_id: zone.id,
+                                generation: bp.internal_dns_version,
+                            })
+                            .expect("Observed duplicate Internal DNS zones");
+                    }
+                }
+            }
+            result
+        };
+
+        // If we have missing info in our inventory, the
+        // planner will not update any Internal DNS zones.
+        example.collection.internal_dns_generation_status = IdOrdMap::new();
+        assert_planning_makes_no_changes(
+            &log,
+            &blueprint,
+            &example.input,
+            &example.collection,
+            TEST_NAME,
+        );
+
+        // If we're missing info from even a single zone, we
+        // will still refuse to update.
+        example.collection.internal_dns_generation_status =
+            create_valid_looking_status(&blueprint);
+        let first_zone = example
+            .collection
+            .internal_dns_generation_status
+            .iter()
+            .next()
+            .unwrap()
+            .zone_id;
+        example
+            .collection
+            .internal_dns_generation_status
+            .remove(&first_zone)
+            .expect("Could not remove one status");
+        assert_planning_makes_no_changes(
+            &log,
+            &blueprint,
+            &example.input,
+            &example.collection,
+            TEST_NAME,
+        );
+
+        // If we have any out-of-sync generations in our inventory,
+        // the planner will not update Internal DNS zones.
+        example.collection.internal_dns_generation_status =
+            create_valid_looking_status(&blueprint);
+        // I'd rather have the generation be "too low", but we also reject
+        // generations that are "too far ahead", so this works.
+        example
+            .collection
+            .internal_dns_generation_status
+            .iter_mut()
+            .next()
+            .unwrap()
+            .generation = blueprint.internal_dns_version.next();
+        assert_planning_makes_no_changes(
+            &log,
+            &blueprint,
+            &example.input,
+            &example.collection,
+            TEST_NAME,
+        );
+
+        // Once we have valid DNS statuses, we can start to update Internal DNS
+        // zones.
+        //
+        // We'll update one zone at a time, from the install dataset to the
+        // new TUF repo artifact.
+        for i in 1..=INTERNAL_DNS_REDUNDANCY {
+            example.collection.internal_dns_generation_status =
+                create_valid_looking_status(&blueprint);
+
+            // First blueprint: Remove an internal DNS zone
+
+            println!(
+                "Updating internal DNS {i} of {INTERNAL_DNS_REDUNDANCY} (expunge)"
+            );
+            let new_blueprint = Planner::new_based_on(
+                log.clone(),
+                &blueprint,
+                &example.input,
+                &format!("test_blueprint_internal_dns_{i}_removal"),
+                &example.collection,
+            )
+            .expect("can't create planner")
+            .with_rng(PlannerRng::from_seed((TEST_NAME, "bp_dns")))
+            .plan()
+            .expect("plan for trivial TUF repo");
+            {
+                let summary = new_blueprint.diff_since_blueprint(&blueprint);
+                assert_eq!(summary.total_zones_added(), 0);
+                assert_eq!(summary.total_zones_removed(), 0);
+                assert_eq!(summary.total_zones_modified(), 1);
+            }
+            blueprint = new_blueprint;
+            update_collection_from_blueprint(&mut example, &blueprint);
+            verify_blueprint(&blueprint);
+
+            // Next blueprint: Add an (updated) internal DNS zone back
+
+            println!(
+                "Updating internal DNS {i} of {INTERNAL_DNS_REDUNDANCY} (add)"
+            );
+            let new_blueprint = Planner::new_based_on(
+                log.clone(),
+                &blueprint,
+                &example.input,
+                &format!("test_blueprint_internal_dns_{i}_addition"),
+                &example.collection,
+            )
+            .expect("can't create planner")
+            .with_rng(PlannerRng::from_seed((TEST_NAME, "bp_dns")))
+            .plan()
+            .expect("plan for trivial TUF repo");
+            {
+                let summary = new_blueprint.diff_since_blueprint(&blueprint);
+                assert_eq!(summary.total_zones_added(), 1);
+                assert_eq!(summary.total_zones_removed(), 0);
+                assert_eq!(summary.total_zones_modified(), 1);
+            }
+            blueprint = new_blueprint;
+            update_collection_from_blueprint(&mut example, &blueprint);
+            verify_blueprint(&blueprint);
+
+            assert_eq!(
+                blueprint
+                    .all_omicron_zones(BlueprintZoneDisposition::is_in_service)
+                    .filter(|(_, z)| is_old_internal_dns(z))
+                    .count(),
+                INTERNAL_DNS_REDUNDANCY - i
+            );
+            assert_eq!(
+                blueprint
+                    .all_omicron_zones(BlueprintZoneDisposition::is_in_service)
+                    .filter(|(_, z)| is_up_to_date_internal_dns(z))
+                    .count(),
+                i
+            );
+        }
+
+        // Validate that we have no further changes to make, once all Internal
+        // DNS zones have been updated.
+        example.collection.internal_dns_generation_status =
+            create_valid_looking_status(&blueprint);
+        assert_planning_makes_no_changes(
+            &log,
+            &blueprint,
+            &example.input,
+            &example.collection,
+            TEST_NAME,
+        );
+
+        // Validate that we do not flip back to the install dataset after
+        // performing the update.
+        example.collection.internal_dns_generation_status = IdOrdMap::new();
+        assert_planning_makes_no_changes(
+            &log,
+            &blueprint,
+            &example.input,
+            &example.collection,
+            TEST_NAME,
+        );
+
+        logctx.cleanup_successful();
+    }
+
     /// Ensure that planning to update all zones terminates.
     #[test]
     fn test_update_all_zones() {
@@ -6393,21 +6740,7 @@ pub(crate) mod test {
                         system_version: Version::new(1, 0, 0),
                         file_name: String::from(""),
                     },
-                    artifacts: vec![
-                        // Omit `BoundaryNtp` because it has the same artifact
-                        // name as `InternalNtp`.
-                        fake_zone_artifact!(Clickhouse, version.clone()),
-                        fake_zone_artifact!(ClickhouseKeeper, version.clone()),
-                        fake_zone_artifact!(ClickhouseServer, version.clone()),
-                        fake_zone_artifact!(CockroachDb, version.clone()),
-                        fake_zone_artifact!(Crucible, version.clone()),
-                        fake_zone_artifact!(CruciblePantry, version.clone()),
-                        fake_zone_artifact!(ExternalDns, version.clone()),
-                        fake_zone_artifact!(InternalDns, version.clone()),
-                        fake_zone_artifact!(InternalNtp, version.clone()),
-                        fake_zone_artifact!(Nexus, version.clone()),
-                        fake_zone_artifact!(Oximeter, version.clone()),
-                    ],
+                    artifacts: create_artifacts_at_version(&version),
                 },
             ),
         };

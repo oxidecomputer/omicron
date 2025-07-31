@@ -2800,111 +2800,6 @@
         }
       }
     },
-    "/v1/disks/{disk}/metrics/{metric}": {
-      "get": {
-        "tags": [
-          "disks"
-        ],
-        "summary": "Fetch disk metrics",
-        "operationId": "disk_metrics_list",
-        "parameters": [
-          {
-            "in": "path",
-            "name": "disk",
-            "required": true,
-            "schema": {
-              "$ref": "#/components/schemas/NameOrId"
-            }
-          },
-          {
-            "in": "path",
-            "name": "metric",
-            "required": true,
-            "schema": {
-              "$ref": "#/components/schemas/DiskMetricName"
-            }
-          },
-          {
-            "in": "query",
-            "name": "end_time",
-            "description": "An exclusive end time of metrics.",
-            "schema": {
-              "type": "string",
-              "format": "date-time"
-            }
-          },
-          {
-            "in": "query",
-            "name": "limit",
-            "description": "Maximum number of items returned by a single call",
-            "schema": {
-              "nullable": true,
-              "type": "integer",
-              "format": "uint32",
-              "minimum": 1
-            }
-          },
-          {
-            "in": "query",
-            "name": "order",
-            "description": "Query result order",
-            "schema": {
-              "$ref": "#/components/schemas/PaginationOrder"
-            }
-          },
-          {
-            "in": "query",
-            "name": "page_token",
-            "description": "Token returned by previous call to retrieve the subsequent page",
-            "schema": {
-              "nullable": true,
-              "type": "string"
-            }
-          },
-          {
-            "in": "query",
-            "name": "start_time",
-            "description": "An inclusive start time of metrics.",
-            "schema": {
-              "type": "string",
-              "format": "date-time"
-            }
-          },
-          {
-            "in": "query",
-            "name": "project",
-            "description": "Name or ID of the project",
-            "schema": {
-              "$ref": "#/components/schemas/NameOrId"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "successful operation",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/MeasurementResultsPage"
-                }
-              }
-            }
-          },
-          "4XX": {
-            "$ref": "#/components/responses/Error"
-          },
-          "5XX": {
-            "$ref": "#/components/responses/Error"
-          }
-        },
-        "x-dropshot-pagination": {
-          "required": [
-            "end_time",
-            "start_time"
-          ]
-        }
-      }
-    },
     "/v1/floating-ips": {
       "get": {
         "tags": [
@@ -27543,25 +27438,6 @@
           }
         ]
       },
-      "DiskMetricName": {
-        "type": "string",
-        "enum": [
-          "activated",
-          "flush",
-          "read",
-          "read_bytes",
-          "write",
-          "write_bytes"
-        ]
-      },
-      "PaginationOrder": {
-        "description": "The order in which the client wants to page through the requested collection",
-        "type": "string",
-        "enum": [
-          "ascending",
-          "descending"
-        ]
-      },
       "IdSortMode": {
         "description": "Supported set of sort modes for scanning by id only.\n\nCurrently, we only support scanning in ascending order.",
         "oneOf": [
@@ -27580,6 +27456,14 @@
           "virtual_disk_space_provisioned",
           "cpus_provisioned",
           "ram_provisioned"
+        ]
+      },
+      "PaginationOrder": {
+        "description": "The order in which the client wants to page through the requested collection",
+        "type": "string",
+        "enum": [
+          "ascending",
+          "descending"
         ]
       },
       "NameSortMode": {
