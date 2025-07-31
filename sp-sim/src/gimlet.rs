@@ -1279,6 +1279,11 @@ impl SpHandler for Handler {
                     .expect("sp-sim ensures host slot is always valid");
                 GimletPowerState::A0(slot)
             }
+            // `A1` is a transitory state that we can't even observe on real
+            // devices as of https://github.com/oxidecomputer/hubris/pull/2107.
+            // Our tests really care about "host powered on" (A0) or "host
+            // powered off" (A2), so just squish the transitory state down to
+            // "host powered off".
             PowerState::A1 | PowerState::A2 => GimletPowerState::A2,
         };
         self.power_state.send_modify(|s| {

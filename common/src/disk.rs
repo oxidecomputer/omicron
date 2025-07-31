@@ -627,7 +627,7 @@ pub enum M2Slot {
 }
 
 impl M2Slot {
-    /// Flip which slot is active.
+    /// Flip from `A` to `B` or vice versa.
     pub fn toggled(self) -> Self {
         match self {
             Self::A => Self::B,
