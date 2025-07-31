@@ -5767,6 +5767,15 @@ CREATE UNIQUE INDEX IF NOT EXISTS one_record_per_volume_resource_usage on omicro
     region_snapshot_snapshot_id
 );
 
+CREATE TYPE IF NOT EXISTS omicron.public.audit_log_result_kind AS ENUM (
+    'success',
+    'error', 
+    -- represents the case where we had to clean up a row and artificially
+    -- complete it in order to get it into the log (because entries don't show
+    -- up in the log until they're completed)
+    'timeout'
+);
+
 CREATE TABLE IF NOT EXISTS omicron.public.audit_log (
     id UUID PRIMARY KEY,
     time_started TIMESTAMPTZ NOT NULL,
@@ -5793,7 +5802,30 @@ CREATE TABLE IF NOT EXISTS omicron.public.audit_log (
 
     -- only present on errors
     error_code STRING,
-    error_message STRING
+    error_message STRING,
+    
+    -- result kind indicating success, error, or timeout
+    result_kind omicron.public.audit_log_result_kind,
+
+    -- make sure time_completed and result_kind are either both null or both not
+    CONSTRAINT time_completed_and_result_kind CHECK (
+        (time_completed IS NULL AND result_kind IS NULL)
+        OR (time_completed IS NOT NULL AND result_kind IS NOT NULL)
+    ),
+
+    -- make sure we always have a status code for success and error results.
+    -- in other words, the only times http_status_code is allowed to be null is
+    -- when either there is no result yet or the result is a timeout
+    CONSTRAINT status_code_present_for_success_error CHECK (
+        result_kind = 'timeout'
+        OR result_kind IS NULL
+        OR http_status_code IS NOT NULL
+    ),
+
+    -- when result_kind is error, we always have an error message
+    CONSTRAINT message_present_for_error CHECK (
+        result_kind != 'error' OR error_message IS NOT NULL
+    )
 );
 
 -- When we query the audit log, we filter by time_completed and order by
@@ -5828,9 +5860,12 @@ SELECT
     time_completed,
     http_status_code,
     error_code,
-    error_message
+    error_message,
+    result_kind
 FROM omicron.public.audit_log
-WHERE time_completed IS NOT NULL;
+WHERE
+    time_completed IS NOT NULL
+    AND result_kind IS NOT NULL;
 
 /*
  * Alerts

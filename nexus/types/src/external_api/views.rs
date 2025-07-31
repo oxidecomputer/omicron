@@ -1584,6 +1584,34 @@ pub enum AuditLogEntryActor {
     Unauthenticated,
 }
 
+/// Result of an audit log entry
+#[derive(Debug, Deserialize, Serialize, JsonSchema, PartialEq, Eq)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum AuditLogEntryResult {
+    /// The operation completed successfully
+    Success {
+        /// HTTP status code
+        http_status_code: u16,
+    },
+    /// The operation failed
+    Error {
+        /// HTTP status code
+        http_status_code: u16,
+        error_code: Option<String>,
+        error_message: String,
+    },
+    // Note that the DB model result kind analogous to Unknown is called Timeout
+    // -- The name "Timeout" feels useful to write down for the DB but also
+    // feels like too much of an implementation detail to expose to the user --
+    // it makes it sounds like the operation timed out rather than the audit log
+    // entry itself.
+    /// After the logged operation completed, our attempt to write the result
+    /// to the audit log failed, so it was automatically marked completed later
+    /// by a background job. This does not imply that the operation itself timed
+    /// out or failed, only our attempts to log its result.
+    Unknown,
+}
+
 /// Audit log entry
 #[derive(Debug, Deserialize, Serialize, JsonSchema)]
 pub struct AuditLogEntry {
@@ -1615,10 +1643,6 @@ pub struct AuditLogEntry {
     /// Time operation completed
     pub time_completed: DateTime<Utc>,
 
-    /// HTTP status code
-    pub http_status_code: u16,
-
-    /// Error information if the action failed
-    pub error_code: Option<String>,
-    pub error_message: Option<String>,
+    /// Result of the operation
+    pub result: AuditLogEntryResult,
 }

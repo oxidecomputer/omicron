@@ -78,22 +78,16 @@ impl super::Nexus {
         entry: &AuditLogEntryInit,
         result: &Result<R, HttpError>,
     ) -> UpdateResult<()> {
-        let (status_code, error_code, error_message) = match result {
-            Ok(response) => (response.status_code(), None, None),
-            Err(error) => (
-                error.status_code.as_status(),
-                error.error_code.clone(),
-                // For now we only log the external message. If we want to log
-                // the internal message, we need to make sure that is ok to do.
-                Some(error.external_message.clone()),
-            ),
+        let completion = match result {
+            Ok(response) => AuditLogCompletion::Success {
+                http_status_code: response.status_code().as_u16(),
+            },
+            Err(error) => AuditLogCompletion::Error {
+                http_status_code: error.status_code.as_status().as_u16(),
+                error_code: error.error_code.clone(),
+                error_message: error.external_message.clone(),
+            },
         };
-
-        let update = AuditLogCompletion::new(
-            status_code.as_u16(),
-            error_code,
-            error_message,
-        );
 
         // Should retry at roughly 250ms, 750ms, 1750ms (plus however long the
         // tries take). We really want this write to go through.
@@ -108,7 +102,7 @@ impl super::Nexus {
             backoff,
             || async {
                 self.db_datastore
-                    .audit_log_entry_complete(opctx, &entry, update.clone())
+                    .audit_log_entry_complete(opctx, &entry, completion.clone().into())
                     .await
                     .map_err(backoff::BackoffError::transient)
             },

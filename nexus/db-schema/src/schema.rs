@@ -2701,7 +2701,8 @@ table! {
         time_completed -> Nullable<Timestamptz>,
         http_status_code -> Nullable<Int4>, // SqlU16
         error_code -> Nullable<Text>,
-        error_message -> Nullable<Text>
+        error_message -> Nullable<Text>,
+        result_kind -> Nullable<crate::enums::AuditLogResultKindEnum>,
     }
 }
 
@@ -2718,8 +2719,9 @@ table! {
         actor_silo_id -> Nullable<Uuid>,
         access_method -> Nullable<Text>,
         time_completed -> Timestamptz,
-        http_status_code -> Int4, // SqlU16
+        http_status_code -> Nullable<Int4>, // SqlU16
         error_code -> Nullable<Text>,
-        error_message -> Nullable<Text>
+        error_message -> Nullable<Text>,
+        result_kind -> crate::enums::AuditLogResultKindEnum,
     }
 }

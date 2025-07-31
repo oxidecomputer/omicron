@@ -6,7 +6,7 @@ use super::DataStore;
 use crate::authz;
 use crate::context::OpContext;
 use crate::db;
-use crate::db::model::AuditLogCompletion;
+use crate::db::model::AuditLogCompletionUpdate;
 use crate::db::model::AuditLogEntry;
 use crate::db::model::AuditLogEntryInit;
 use crate::db::pagination::paginated_multicolumn;
@@ -111,7 +111,7 @@ impl DataStore {
         &self,
         opctx: &OpContext,
         entry: &AuditLogEntryInit,
-        completion: AuditLogCompletion,
+        completion: AuditLogCompletionUpdate,
     ) -> UpdateResult<()> {
         use nexus_db_schema::schema::audit_log;
         opctx.authorize(authz::Action::CreateChild, &authz::AUDIT_LOG).await?;
@@ -130,6 +130,7 @@ mod tests {
     use super::*;
     use crate::db::pub_test_utils::TestDatabase;
     use assert_matches::assert_matches;
+    use nexus_db_model::AuditLogCompletion;
     use omicron_common::api::external::Error;
     use omicron_test_utils::dev;
     use std::num::NonZeroU32;
@@ -185,9 +186,9 @@ mod tests {
 
         let t1 = Utc::now();
 
-        let completion = AuditLogCompletion::new(201, None, None);
+        let completion = AuditLogCompletion::Success { http_status_code: 201 };
         datastore
-            .audit_log_entry_complete(opctx, &entry1, completion)
+            .audit_log_entry_complete(opctx, &entry1, completion.into())
             .await
             .expect("complete audit log entry");
 
@@ -219,13 +220,13 @@ mod tests {
         assert_eq!(audit_log[0].request_id, "req-1");
 
         // now complete entry2
-        let completion = AuditLogCompletion::new(
-            400,
-            Some("InvalidRequest".to_string()),
-            Some("Request was invalid".to_string()),
-        );
+        let completion = AuditLogCompletion::Error {
+            http_status_code: 400,
+            error_code: Some("InvalidRequest".to_string()),
+            error_message: "Request was invalid".to_string(),
+        };
         datastore
-            .audit_log_entry_complete(opctx, &entry2.clone(), completion)
+            .audit_log_entry_complete(opctx, &entry2.clone(), completion.into())
             .await
             .expect("complete audit log entry");
 
@@ -238,9 +239,9 @@ mod tests {
             .expect("retrieve audit log");
         assert_eq!(audit_log.len(), 2);
         assert_eq!(audit_log[0].request_id, "req-1");
-        assert_eq!(audit_log[0].http_status_code.0, 201);
+        assert_eq!(audit_log[0].http_status_code.unwrap().0, 201);
         assert_eq!(audit_log[1].request_id, "req-2");
-        assert_eq!(audit_log[1].http_status_code.0, 400);
+        assert_eq!(audit_log[1].http_status_code.unwrap().0, 400);
         assert_eq!(audit_log[1].error_code, Some("InvalidRequest".to_string()));
         assert_eq!(
             audit_log[1].error_message,
@@ -302,7 +303,12 @@ mod tests {
             None,
             None,
         );
-        let completion = AuditLogCompletion::new(201, None, None);
+        // we have to do the from() out here because that's what sets
+        // time_completed, and we need them to all have the same time
+        let completion =
+            AuditLogCompletionUpdate::from(AuditLogCompletion::Success {
+                http_status_code: 201,
+            });
 
         let id1 = "1710a22e-b29b-4cfc-9e79-e8c93be187d7";
         let id2 = "5d25e766-e026-44b4-8b42-5f90f43c26bc";

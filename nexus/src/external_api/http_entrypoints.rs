@@ -7753,7 +7753,10 @@ impl NexusExternalApi for NexusExternalApiImpl {
                 .await?;
             Ok(HttpResponseOk(ScanByTimeAndId::results_page(
                 &query,
-                log_entries.into_iter().map(Into::into).collect(),
+                log_entries
+                    .into_iter()
+                    .map(TryInto::try_into)
+                    .collect::<Result<Vec<_>, _>>()?,
                 &|_, entry: &views::AuditLogEntry| {
                     (entry.time_completed, entry.id)
                 },

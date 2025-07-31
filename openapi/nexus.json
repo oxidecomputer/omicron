@@ -14571,21 +14571,6 @@
           "actor": {
             "$ref": "#/components/schemas/AuditLogEntryActor"
           },
-          "error_code": {
-            "nullable": true,
-            "description": "Error information if the action failed",
-            "type": "string"
-          },
-          "error_message": {
-            "nullable": true,
-            "type": "string"
-          },
-          "http_status_code": {
-            "description": "HTTP status code",
-            "type": "integer",
-            "format": "uint16",
-            "minimum": 0
-          },
           "id": {
             "description": "Unique identifier for the audit log entry",
             "type": "string",
@@ -14602,6 +14587,14 @@
           "request_uri": {
             "description": "Full URL of the request",
             "type": "string"
+          },
+          "result": {
+            "description": "Result of the operation",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/AuditLogEntryResult"
+              }
+            ]
           },
           "source_ip": {
             "description": "IP address that made the request",
@@ -14626,11 +14619,11 @@
         },
         "required": [
           "actor",
-          "http_status_code",
           "id",
           "operation_id",
           "request_id",
           "request_uri",
+          "result",
           "source_ip",
           "time_completed",
           "time_started"
@@ -14688,6 +14681,78 @@
                 "type": "string",
                 "enum": [
                   "unauthenticated"
+                ]
+              }
+            },
+            "required": [
+              "kind"
+            ]
+          }
+        ]
+      },
+      "AuditLogEntryResult": {
+        "description": "Result of an audit log entry",
+        "oneOf": [
+          {
+            "description": "The operation completed successfully",
+            "type": "object",
+            "properties": {
+              "http_status_code": {
+                "description": "HTTP status code",
+                "type": "integer",
+                "format": "uint16",
+                "minimum": 0
+              },
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "success"
+                ]
+              }
+            },
+            "required": [
+              "http_status_code",
+              "kind"
+            ]
+          },
+          {
+            "description": "The operation failed",
+            "type": "object",
+            "properties": {
+              "error_code": {
+                "nullable": true,
+                "type": "string"
+              },
+              "error_message": {
+                "type": "string"
+              },
+              "http_status_code": {
+                "description": "HTTP status code",
+                "type": "integer",
+                "format": "uint16",
+                "minimum": 0
+              },
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "error"
+                ]
+              }
+            },
+            "required": [
+              "error_message",
+              "http_status_code",
+              "kind"
+            ]
+          },
+          {
+            "description": "After the logged operation completed, our attempt to write the result to the audit log failed, so it was automatically marked completed later by a background job. This does not imply that the operation itself timed out or failed, only our attempts to log its result.",
+            "type": "object",
+            "properties": {
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "unknown"
                 ]
               }
             },

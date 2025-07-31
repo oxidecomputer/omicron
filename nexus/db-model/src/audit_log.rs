@@ -6,13 +6,27 @@
 
 use std::net::IpAddr;
 
-use crate::SqlU16;
+use crate::{SqlU16, impl_enum_type};
 use chrono::{DateTime, Utc};
 use diesel::prelude::*;
 use ipnetwork::IpNetwork;
 use nexus_db_schema::schema::{audit_log, audit_log_complete};
 use nexus_types::external_api::views;
+use omicron_common::api::external::Error;
+use serde::{Deserialize, Serialize};
 use uuid::Uuid;
+
+impl_enum_type!(
+    AuditLogResultKindEnum:
+
+    #[derive(Clone, Copy, Debug, AsExpression, FromSqlRow, Serialize, Deserialize, PartialEq, Eq)]
+    pub enum AuditLogResultKind;
+
+    // Enum values
+    Success => b"success"
+    Error => b"error"
+    Timeout => b"timeout"
+);
 
 #[derive(Queryable, Insertable, Selectable, Clone, Debug)]
 #[diesel(table_name = audit_log)]
@@ -64,10 +78,13 @@ pub struct AuditLogEntry {
     // Fields that are not present on init
     /// Time log entry was completed with info about result of operation
     pub time_completed: DateTime<Utc>,
-    pub http_status_code: SqlU16,
-
-    // Error information if the action failed
+    /// Result kind indicating success, error, or timeout
+    pub result_kind: AuditLogResultKind,
+    /// Optional because not present for timeout result
+    pub http_status_code: Option<SqlU16>,
+    /// Optional even if result is an error
     pub error_code: Option<String>,
+    /// Always present if result is an error
     pub error_message: Option<String>,
 }
 
@@ -98,33 +115,72 @@ impl AuditLogEntryInit {
     }
 }
 
+/// Struct that we can use as a kind of constructor arg for our actual audit
+/// log row update struct in order to make sure we're always writing a valid
+/// combination of column values
+#[derive(Clone)]
+pub enum AuditLogCompletion {
+    Success {
+        http_status_code: u16,
+    },
+    Error {
+        http_status_code: u16,
+        error_code: Option<String>,
+        error_message: String,
+    },
+    Timeout,
+}
+
 #[derive(AsChangeset, Clone)]
 #[diesel(table_name = audit_log)]
-pub struct AuditLogCompletion {
+pub struct AuditLogCompletionUpdate {
     pub time_completed: DateTime<Utc>,
-    pub http_status_code: SqlU16,
+    pub result_kind: AuditLogResultKind,
+    pub http_status_code: Option<SqlU16>,
     pub error_code: Option<String>,
     pub error_message: Option<String>,
 }
 
-impl AuditLogCompletion {
-    pub fn new(
-        http_status_code: u16,
-        error_code: Option<String>,
-        error_message: Option<String>,
-    ) -> Self {
-        Self {
-            time_completed: Utc::now(),
-            http_status_code: SqlU16(http_status_code),
-            error_code,
-            error_message,
+impl From<AuditLogCompletion> for AuditLogCompletionUpdate {
+    fn from(completion: AuditLogCompletion) -> Self {
+        let time_completed = Utc::now();
+        match completion {
+            AuditLogCompletion::Success { http_status_code } => Self {
+                time_completed,
+                result_kind: AuditLogResultKind::Success,
+                http_status_code: Some(SqlU16(http_status_code)),
+                error_code: None,
+                error_message: None,
+            },
+            AuditLogCompletion::Error {
+                http_status_code,
+                error_code,
+                error_message,
+            } => Self {
+                time_completed,
+                result_kind: AuditLogResultKind::Error,
+                http_status_code: Some(SqlU16(http_status_code)),
+                error_code,
+                error_message: Some(error_message),
+            },
+            AuditLogCompletion::Timeout => Self {
+                time_completed,
+                result_kind: AuditLogResultKind::Timeout,
+                http_status_code: None,
+                error_code: None,
+                error_message: None,
+            },
         }
     }
 }
 
-impl From<AuditLogEntry> for views::AuditLogEntry {
-    fn from(entry: AuditLogEntry) -> Self {
-        Self {
+/// None of the error cases here should be possible given the DB constraints and
+/// the way we construct these rows when writing them to the database.
+impl TryFrom<AuditLogEntry> for views::AuditLogEntry {
+    type Error = Error;
+
+    fn try_from(entry: AuditLogEntry) -> Result<Self, Self::Error> {
+        Ok(Self {
             id: entry.id,
             time_started: entry.time_started,
             request_id: entry.request_id,
@@ -147,14 +203,44 @@ impl From<AuditLogEntry> for views::AuditLogEntry {
                 }
                 (None, None) => views::AuditLogEntryActor::Unauthenticated,
                 (None, Some(_)) => {
-                    unreachable!("Can't have a silo ID without an actor ID");
+                    return Err(Error::internal_error(
+                        "Can't have a silo ID without an actor ID",
+                    ));
                 }
             },
             access_method: entry.access_method,
             time_completed: entry.time_completed,
-            http_status_code: entry.http_status_code.0,
-            error_code: entry.error_code,
-            error_message: entry.error_message,
-        }
+            result: match entry.result_kind {
+                AuditLogResultKind::Success => {
+                    let http_status_code = entry.http_status_code
+                        .ok_or_else(|| Error::internal_error(
+                            "Audit log success result without http_status_code",
+                        ))?;
+                    views::AuditLogEntryResult::Success {
+                        http_status_code: http_status_code.0,
+                    }
+                }
+                AuditLogResultKind::Error => {
+                    let error_message =
+                        entry.error_message.ok_or_else(|| {
+                            Error::internal_error(
+                                "Audit log error result without error_message",
+                            )
+                        })?;
+                    let http_status_code = entry.http_status_code
+                        .ok_or_else(|| Error::internal_error(
+                            "Audit log error result without http_status_code",
+                        ))?;
+                    views::AuditLogEntryResult::Error {
+                        http_status_code: http_status_code.0,
+                        error_code: entry.error_code,
+                        error_message,
+                    }
+                }
+                AuditLogResultKind::Timeout => {
+                    views::AuditLogEntryResult::Unknown
+                }
+            },
+        })
     }
 }
