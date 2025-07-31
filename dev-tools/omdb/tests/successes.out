@@ -110,8 +110,8 @@ SPs FOUND THROUGH IGNITION
 SERVICE PROCESSOR STATES
 
     TYPE   SLOT MODEL            SERIAL      REV HUBRIS           PWR ROT_ACTIVE 
-    Sled   0    i86pc            SimGimlet00 0   0000000000000000 A2  slot A     
-    Sled   1    i86pc            SimGimlet01 0   0000000000000000 A2  slot A     
+    Sled   0    i86pc            SimGimlet00 0   0000000000000000 A0  slot A     
+    Sled   1    i86pc            SimGimlet01 0   0000000000000000 A0  slot A     
     Switch 0    FAKE_SIM_SIDECAR SimSidecar0 0   0000000000000000 A2  slot A     
     Switch 1    FAKE_SIM_SIDECAR SimSidecar1 0   0000000000000000 A2  slot A     
 
@@ -1394,6 +1394,53 @@ task: "webhook_deliverator"
     already delivered by another Nexus:   0
     in progress by another Nexus:         0
 
+---------------------------------------------
+stderr:
+note: using Nexus URL http://127.0.0.1:REDACTED_PORT/
+=============================================
+EXECUTING COMMAND: omdb ["nexus", "chicken-switches", "show", "current"]
+termination: Exited(0)
+---------------------------------------------
+stdout:
+No chicken switches enabled
+---------------------------------------------
+stderr:
+note: using Nexus URL http://127.0.0.1:REDACTED_PORT/
+=============================================
+EXECUTING COMMAND: omdb ["-w", "nexus", "chicken-switches", "set", "--planner-enabled", "true"]
+termination: Exited(0)
+---------------------------------------------
+stdout:
+chicken switches updated to version 1:
+    planner enabled: true
+    planner switches:
+        add zones with mupdate override:   true
+---------------------------------------------
+stderr:
+note: using Nexus URL http://127.0.0.1:REDACTED_PORT/
+=============================================
+EXECUTING COMMAND: omdb ["-w", "nexus", "chicken-switches", "set", "--add-zones-with-mupdate-override", "false"]
+termination: Exited(0)
+---------------------------------------------
+stdout:
+chicken switches updated to version 2:
+    planner enabled:   true (unchanged)
+    planner switches:
+    *   add zones with mupdate override:   true -> false
+---------------------------------------------
+stderr:
+note: using Nexus URL http://127.0.0.1:REDACTED_PORT/
+=============================================
+EXECUTING COMMAND: omdb ["nexus", "chicken-switches", "show", "current"]
+termination: Exited(0)
+---------------------------------------------
+stdout:
+Reconfigurator chicken switches:
+    version: 2
+    modified time: <REDACTED_TIMESTAMP>
+    planner enabled: true
+    planner switches:
+        add zones with mupdate override:   false
 ---------------------------------------------
 stderr:
 note: using Nexus URL http://127.0.0.1:REDACTED_PORT/

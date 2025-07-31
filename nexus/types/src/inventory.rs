@@ -171,6 +171,8 @@ pub struct Collection {
 
     /// The status of time synchronization
     pub ntp_timesync: IdOrdMap<TimeSync>,
+    /// The generation status of internal DNS servers
+    pub internal_dns_generation_status: IdOrdMap<InternalDnsGenerationStatus>,
 }
 
 impl Collection {
@@ -673,6 +675,24 @@ pub struct TimeSync {
 }
 
 impl IdOrdItem for TimeSync {
+    type Key<'a> = OmicronZoneUuid;
+    fn key(&self) -> Self::Key<'_> {
+        self.zone_id
+    }
+    id_upcast!();
+}
+
+#[derive(
+    Clone, Debug, Diffable, Serialize, Deserialize, JsonSchema, PartialEq, Eq,
+)]
+pub struct InternalDnsGenerationStatus {
+    /// Zone ID of the internal DNS server contacted
+    pub zone_id: OmicronZoneUuid,
+    /// Generation number of the DNS configuration
+    pub generation: omicron_common::api::external::Generation,
+}
+
+impl IdOrdItem for InternalDnsGenerationStatus {
     type Key<'a> = OmicronZoneUuid;
     fn key(&self) -> Self::Key<'_> {
         self.zone_id

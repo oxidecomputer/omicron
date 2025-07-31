@@ -16,6 +16,7 @@ use omicron_common::address::Ipv6Subnet;
 use omicron_common::address::SLED_PREFIX;
 use omicron_common::api::external::MacAddr;
 use omicron_common::disk::DatasetKind;
+use omicron_common::disk::M2Slot;
 use omicron_uuid_kinds::MupdateOverrideUuid;
 use omicron_uuid_kinds::SledUuid;
 use omicron_uuid_kinds::ZpoolUuid;
@@ -183,6 +184,12 @@ pub enum SledKind {
     MupdateOverrideWithArtifactZone {
         mupdate_override_id: MupdateOverrideUuid,
         zone: BlueprintZoneConfig,
+        version: BlueprintArtifactVersion,
+        hash: ArtifactHash,
+    },
+    MupdateOverrideWithHostPhase2Artifact {
+        mupdate_override_id: MupdateOverrideUuid,
+        slot: M2Slot,
         version: BlueprintArtifactVersion,
         hash: ArtifactHash,
     },
@@ -393,6 +400,19 @@ impl fmt::Display for SledKind {
                      but zone {} image source is set to Artifact (version {version}, \
                      hash {hash})",
                     zone.id,
+                )
+            }
+            SledKind::MupdateOverrideWithHostPhase2Artifact {
+                mupdate_override_id,
+                slot,
+                version,
+                hash,
+            } => {
+                write!(
+                    f,
+                    "sled has remove_mupdate_override set ({mupdate_override_id}), \
+                     but host phase 2 slot {slot} image source is set to Artifact \
+                     (version {version}, hash {hash})",
                 )
             }
         }

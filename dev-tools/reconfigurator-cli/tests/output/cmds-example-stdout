@@ -17,6 +17,8 @@ internal DNS generations: 1
 external DNS generations: 1
 target number of Nexus instances: default
 target release (generation 1): unset
+chicken switches:
+    add zones with mupdate override:   false
 
 
 
@@ -40,6 +42,8 @@ T ENA ID                                   PARENT                               
 sled 2eb69596-f081-4e2d-9425-9994926e0832 (in service, active)
 serial serial1
 subnet fd00:1122:3344:102::/64
+RoT bootloader stage 0 version:   Some("0.0.1")
+RoT bootloader stage 0 next version: None
 SP active version:   Some("0.0.1")
 SP inactive version: None
 zpools (10):
@@ -425,6 +429,8 @@ T ENA ID                                   PARENT                               
 sled 89d02b1b-478c-401a-8e28-7a26f74fa41b (in service, active)
 serial serial0
 subnet fd00:1122:3344:101::/64
+RoT bootloader stage 0 version:   Some("0.0.1")
+RoT bootloader stage 0 next version: None
 SP active version:   Some("0.0.1")
 SP inactive version: None
 zpools (4):
@@ -1031,8 +1037,9 @@ Sled serial0
         A    0101010101010101010101010101010101010101010101010101010101010101 
         B    0202020202020202020202020202020202020202020202020202020202020202 
     cabooses:
-        SLOT    BOARD       NAME        VERSION GIT_COMMIT SIGN 
-        SpSlot0 SimGimletSp SimGimletSp 0.0.1   unknown    n/a  
+        SLOT    BOARD        NAME         VERSION GIT_COMMIT SIGN 
+        SpSlot0 SimGimletSp  SimGimletSp  0.0.1   unknown    n/a  
+        Stage0  SimRotStage0 SimRotStage0 0.0.1   unknown    n/a  
     RoT pages:
         SLOT DATA_BASE64 
     RoT: active slot: slot A
@@ -1053,8 +1060,9 @@ Sled serial1
         A    0101010101010101010101010101010101010101010101010101010101010101 
         B    0202020202020202020202020202020202020202020202020202020202020202 
     cabooses:
-        SLOT    BOARD       NAME        VERSION GIT_COMMIT SIGN 
-        SpSlot0 SimGimletSp SimGimletSp 0.0.1   unknown    n/a  
+        SLOT    BOARD        NAME         VERSION GIT_COMMIT SIGN 
+        SpSlot0 SimGimletSp  SimGimletSp  0.0.1   unknown    n/a  
+        Stage0  SimRotStage0 SimRotStage0 0.0.1   unknown    n/a  
     RoT pages:
         SLOT DATA_BASE64 
     RoT: active slot: slot A
@@ -1075,8 +1083,9 @@ Sled serial2
         A    0101010101010101010101010101010101010101010101010101010101010101 
         B    0202020202020202020202020202020202020202020202020202020202020202 
     cabooses:
-        SLOT    BOARD       NAME        VERSION GIT_COMMIT SIGN 
-        SpSlot0 SimGimletSp SimGimletSp 0.0.1   unknown    n/a  
+        SLOT    BOARD        NAME         VERSION GIT_COMMIT SIGN 
+        SpSlot0 SimGimletSp  SimGimletSp  0.0.1   unknown    n/a  
+        Stage0  SimRotStage0 SimRotStage0 0.0.1   unknown    n/a  
     RoT pages:
         SLOT DATA_BASE64 
     RoT: active slot: slot A
@@ -1189,6 +1198,7 @@ LEDGERED SLED CONFIG
     slot A details UNAVAILABLE: constructed via debug_assume_success()
     slot B details UNAVAILABLE: constructed via debug_assume_success()
     last reconciled config: matches ledgered config
+        no mupdate override to clear
         no orphaned datasets
         all disks reconciled successfully
         all datasets reconciled successfully
@@ -1296,6 +1306,7 @@ LEDGERED SLED CONFIG
     slot A details UNAVAILABLE: constructed via debug_assume_success()
     slot B details UNAVAILABLE: constructed via debug_assume_success()
     last reconciled config: matches ledgered config
+        no mupdate override to clear
         no orphaned datasets
         all disks reconciled successfully
         all datasets reconciled successfully
@@ -1496,6 +1507,7 @@ LEDGERED SLED CONFIG
     slot A details UNAVAILABLE: constructed via debug_assume_success()
     slot B details UNAVAILABLE: constructed via debug_assume_success()
     last reconciled config: matches ledgered config
+        no mupdate override to clear
         no orphaned datasets
         all disks reconciled successfully
         all datasets reconciled successfully
@@ -1509,6 +1521,14 @@ KEEPER MEMBERSHIP
 COCKROACH STATUS
     no cockroach status retrieved
 
+
+NTP STATUS
+    No NTP zones reported timesync information
+
+INTERNAL DNS STATUS
+    Zone 4692cc31-6eb6-437c-9634-9688663d06ae: Internal DNS generation @ 1
+    Zone 587da9e8-8fc0-4854-b585-070741a7b00d: Internal DNS generation @ 1
+    Zone ffbf02f0-261d-4723-b613-eb861245acbd: Internal DNS generation @ 1
 
 
 
@@ -1757,6 +1777,23 @@ external DNS:
     name: ns3                                                (records: 1)
         A    198.51.100.3
 
+
+
+
+> # Set chicken switches.
+> set chicken-switches --add-zones-with-mupdate-override false
+no changes to chicken switches:
+    add zones with mupdate override:   false
+
+
+> set chicken-switches --add-zones-with-mupdate-override true
+chicken switches updated:
+*   add zones with mupdate override:   false -> true
+
+
+> set chicken-switches --add-zones-with-mupdate-override true
+no changes to chicken switches:
+    add zones with mupdate override:   true
 
 
 

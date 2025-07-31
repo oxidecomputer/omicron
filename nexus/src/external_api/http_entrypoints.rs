@@ -1921,52 +1921,6 @@ impl NexusExternalApi for NexusExternalApiImpl {
             .await
     }
 
-    async fn disk_metrics_list(
-        rqctx: RequestContext<ApiContext>,
-        path_params: Path<params::DiskMetricsPath>,
-        query_params: Query<
-            PaginationParams<params::ResourceMetrics, params::ResourceMetrics>,
-        >,
-        selector_params: Query<params::OptionalProjectSelector>,
-    ) -> Result<HttpResponseOk<ResultsPage<oximeter_db::Measurement>>, HttpError>
-    {
-        let apictx = rqctx.context();
-        let handler = async {
-            let nexus = &apictx.context.nexus;
-            let path = path_params.into_inner();
-            let query = query_params.into_inner();
-
-            let selector = selector_params.into_inner();
-            let limit = rqctx.page_limit(&query)?;
-            let disk_selector = params::DiskSelector {
-                disk: path.disk,
-                project: selector.project,
-            };
-            let opctx =
-                crate::context::op_context_for_external_api(&rqctx).await?;
-            let (.., authz_disk) = nexus
-                .disk_lookup(&opctx, disk_selector)?
-                .lookup_for(authz::Action::Read)
-                .await?;
-
-            let result = nexus
-                .select_timeseries(
-                    &format!("crucible_upstairs:{}", path.metric),
-                    &[&format!("upstairs_uuid=={}", authz_disk.id())],
-                    query,
-                    limit,
-                )
-                .await?;
-
-            Ok(HttpResponseOk(result))
-        };
-        apictx
-            .context
-            .external_latencies
-            .instrument_dropshot_handler(&rqctx, handler)
-            .await
-    }
-
     async fn disk_bulk_write_import_start(
         rqctx: RequestContext<ApiContext>,
         path_params: Path<params::DiskPath>,
@@ -8192,7 +8146,9 @@ impl NexusExternalApi for NexusExternalApiImpl {
             Ok(HttpResponseOk(ResultsPage::new(
                 alert_classes,
                 &EmptyScanParams {},
-                |class: &views::AlertClass, _| class.name.clone(),
+                |class: &views::AlertClass, _| params::AlertClassPage {
+                    last_seen: class.name.clone(),
+                },
             )?))
         };
         apictx

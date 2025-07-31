@@ -4,10 +4,10 @@
 
 //! Task responsible for collecting from a single producer.
 
-// Copyright 2024 Oxide Computer Company
+// Copyright 2025 Oxide Computer Company
 
-use crate::Error;
 use crate::agent::CollectionTaskSenderWrapper;
+use crate::probes;
 use crate::self_stats;
 use chrono::DateTime;
 use chrono::Utc;
@@ -32,6 +32,7 @@ use tokio::sync::watch;
 use tokio::time::Instant;
 use tokio::time::Interval;
 use tokio::time::interval;
+use uuid::Uuid;
 
 /// Error returned when a forced collection fails.
 #[derive(Clone, Copy, Debug)]
@@ -57,24 +58,15 @@ const N_QUEUED_TASK_MESSAGES: usize = 4;
 /// The number of queued results from our internal collection task.
 const N_QUEUED_RESULTS: usize = 1;
 
-// Messages for controlling a collection task
+// Messages for controlling a collection task.
 #[derive(Debug)]
 enum CollectionMessage {
     // Explicit request that the task collect data from its producer
     ForceCollect,
-    // Request that the task update its interval and the socket address on which it collects data
-    // from its producer.
-    Update(ProducerEndpoint),
-    // Request that the task exit
-    Shutdown,
     // Return the current statistics from a single task.
     #[cfg(test)]
     Statistics {
         reply_tx: oneshot::Sender<self_stats::CollectionTaskStats>,
-    },
-    // Request details from the collection task about its producer.
-    Details {
-        reply_tx: oneshot::Sender<ProducerDetails>,
     },
 }
 
@@ -94,6 +86,9 @@ async fn perform_collection(
 ) -> SingleCollectionResult {
     let start = Instant::now();
     debug!(log, "collecting from producer");
+    probes::collection__start!(|| {
+        (producer.id.to_string(), producer.address.to_string())
+    });
     let res = client
         .get(format!("http://{}/{}", producer.address, producer.id))
         .send()
@@ -138,7 +133,38 @@ async fn perform_collection(
             Err(self_stats::FailureReason::Unreachable)
         }
     };
+    emit_dtrace_probes(&producer.id, result.as_ref());
     SingleCollectionResult { result, duration: start.elapsed() }
+}
+
+// NOTE: We have some non-zero disabled-probe cost here, because we're deciding
+// which probe to fire based on the success / failure of the collection.
+#[inline(always)]
+fn emit_dtrace_probes(
+    producer_id: &Uuid,
+    result: Result<&Vec<ProducerResultsItem>, &self_stats::FailureReason>,
+) {
+    match result {
+        Ok(list) => {
+            probes::collection__done!(|| {
+                let n_samples = list
+                    .iter()
+                    .map(|item| match item {
+                        ProducerResultsItem::Ok(samples) => {
+                            u64::try_from(samples.len()).unwrap_or_default()
+                        }
+                        ProducerResultsItem::Err(_) => 0,
+                    })
+                    .sum::<u64>();
+                (producer_id.to_string(), n_samples)
+            });
+        }
+        Err(reason) => {
+            probes::collection__failed!(|| {
+                (producer_id.to_string(), reason.to_string())
+            });
+        }
+    }
 }
 
 // The type of one collection task run to completion.
@@ -190,6 +216,7 @@ struct CollectionResponse {
 /// Task that actually performs collections from the producer.
 async fn collection_loop(
     log: Logger,
+    mut shutdown: oneshot::Receiver<()>,
     mut producer_info_rx: watch::Receiver<ProducerEndpoint>,
     mut forced_collection_rx: mpsc::Receiver<ForcedCollectionRequest>,
     mut timer_collection_rx: mpsc::Receiver<CollectionStartTimes>,
@@ -206,6 +233,13 @@ async fn collection_loop(
         // either the forced- or timer-collection queue.
         trace!(log, "top of inner collection loop, waiting for next request");
         let (was_forced_collection, start_time) = tokio::select! {
+            _ = &mut shutdown => {
+                debug!(
+                    log,
+                    "collection task asked to shutdown, exiting",
+                );
+                return;
+            }
             maybe_request = forced_collection_rx.recv() => {
                 let Some(ForcedCollectionRequest { start }) = maybe_request else {
                     debug!(
@@ -248,6 +282,13 @@ async fn collection_loop(
             tokio::select! {
                 biased;
 
+                _ = &mut shutdown => {
+                    debug!(
+                        log,
+                        "collection task asked to shutdown, exiting",
+                    );
+                    return;
+                }
                 maybe_update = producer_info_rx.changed() => {
                     match maybe_update {
                         Ok(_) => {
@@ -317,12 +358,8 @@ pub(crate) struct CollectionTaskOutput {
 /// Handle to the task which collects metric data from a single producer.
 #[derive(Debug)]
 pub struct CollectionTaskHandle {
-    /// Information about the producer we're currently collecting from.
-    pub producer: ProducerEndpoint,
-    // Channel used to send messages from the agent to the actual task.
-    //
-    // The task owns the other side.
-    task_tx: mpsc::Sender<CollectionMessage>,
+    // Notification mechanisms used to control the actual collection task.
+    notifiers: CollectionTaskNotifiers,
     log: Logger,
 }
 
@@ -332,103 +369,73 @@ impl CollectionTaskHandle {
     /// This spawns the actual task itself, and returns a handle to it. The
     /// latter is used to send messages to the task, through the handle's
     /// `inbox` field.
-    pub async fn new(
+    pub fn new(
         log: &Logger,
         collector: self_stats::OximeterCollector,
         producer: ProducerEndpoint,
         outbox: CollectionTaskSenderWrapper,
     ) -> Self {
-        let (task, task_tx) =
-            CollectionTask::new(log, collector, producer, outbox).await;
+        let (task, notifiers) =
+            CollectionTask::new(log, collector, producer, outbox);
         tokio::spawn(task.run());
         let log = log.new(o!(
             "component" => "collection-task-handle",
             "producer_id" => producer.id.to_string(),
         ));
-        Self { task_tx, producer, log }
+        Self { notifiers, log }
     }
 
-    /// Ask the task to update its producer endpoint information.
-    ///
-    /// # Panics
-    ///
-    /// This panics if we could not send a message to the internal collection
-    /// task. That only happens when that task has exited.
-    pub async fn update(&mut self, info: ProducerEndpoint) {
-        match self.task_tx.send(CollectionMessage::Update(info)).await {
-            Ok(_) => {
-                trace!(
-                    self.log,
-                    "sent update message to task";
-                    "new_info" => ?info,
-                );
-                self.producer = info;
+    /// Notify the task to update its producer endpoint information.
+    pub fn update(&mut self, new_info: ProducerEndpoint) {
+        let updated_producer_info = |info: &mut ProducerEndpoint| {
+            if new_info == *info {
+                false
+            } else {
+                *info = new_info;
+                true
             }
-            Err(e) => {
-                error!(
-                    self.log,
-                    "failed to send update message to task!";
-                    "error" => InlineErrorChain::new(&e),
-                );
-                panic!("failed to send update message to task: {}", e);
-            }
+        };
+        if !self
+            .notifiers
+            .producer_info_tx
+            .send_if_modified(updated_producer_info)
+        {
+            trace!(
+                self.log,
+                "collection task handle received update with \
+                identical producer information, no \
+                updates will be sent to the collection task"
+            );
+            return;
         }
+        debug!(self.log, "notified collection task of new producer endpoint");
     }
 
     /// Ask the collection task to shutdown.
-    pub async fn shutdown(&self) {
-        match self.task_tx.send(CollectionMessage::Shutdown).await {
-            Ok(_) => trace!(self.log, "sent shutdown message to task"),
-            Err(e) => error!(
-                self.log,
-                "failed to send shutdown message to task!";
-                "error" => InlineErrorChain::new(&e),
-            ),
+    pub fn shutdown(self) {
+        if self.notifiers.shutdown.send(()).is_err() {
+            warn!(self.log, "failed to notify collection task to shut down");
+        } else {
+            debug!(self.log, "notified collection task to shut down");
         }
     }
 
-    /// Return the current statistics from this task.
+    /// Return a receiver to fetch current statistics from this task.
     #[cfg(test)]
-    pub async fn statistics(&self) -> self_stats::CollectionTaskStats {
+    pub fn statistics(
+        &self,
+    ) -> oneshot::Receiver<self_stats::CollectionTaskStats> {
         let (reply_tx, rx) = oneshot::channel();
-        self.task_tx
-            .send(CollectionMessage::Statistics { reply_tx })
-            .await
+        self.notifiers
+            .task_tx
+            .try_send(CollectionMessage::Statistics { reply_tx })
             .expect("Failed to send statistics message");
-        rx.await.expect("Failed to receive statistics")
+        rx
     }
 
     /// Return details about the current producer this task is collecting from.
-    ///
-    /// An error is returned if we either could not send the request to the
-    /// producer because its queue is full, or because the task failed to send
-    /// us the response.
-    ///
-    /// Note that this makes collecting details best-effort -- if the task is
-    /// already doing lots of work and its queue is full, we fail rather than
-    /// block.
-    pub async fn details(&self) -> Result<ProducerDetails, Error> {
-        let (reply_tx, rx) = oneshot::channel();
-        if self
-            .task_tx
-            .try_send(CollectionMessage::Details { reply_tx })
-            .is_err()
-        {
-            return Err(Error::CollectionError(
-                self.producer.id,
-                String::from(
-                    "Failed to send detail request to collection task",
-                ),
-            ));
-        }
-        rx.await.map_err(|_| {
-            Error::CollectionError(
-                self.producer.id,
-                String::from(
-                    "Failed to receive detail response from collection task",
-                ),
-            )
-        })
+    pub fn details(&self) -> ProducerDetails {
+        self.notifiers.producer_details_rx.borrow().clone()
     }
 
     /// Explicitly request that the task collect from its producer.
@@ -440,12 +447,18 @@ impl CollectionTaskHandle {
     pub(crate) fn try_force_collect(
         &self,
     ) -> Result<(), ForcedCollectionError> {
-        self.task_tx.try_send(CollectionMessage::ForceCollect).map_err(|err| {
-            match err {
+        self.notifiers
+            .task_tx
+            .try_send(CollectionMessage::ForceCollect)
+            .map_err(|err| match err {
                 TrySendError::Full(_) => ForcedCollectionError::QueueFull,
                 TrySendError::Closed(_) => ForcedCollectionError::Closed,
-            }
-        })
+            })
+    }
+
+    /// Return the current producer endpoint information
+    pub(crate) fn producer_info(&self) -> ProducerEndpoint {
+        *self.notifiers.producer_info_tx.borrow()
     }
 }
 
@@ -453,23 +466,39 @@ impl CollectionTaskHandle {
 /// method.
 type TaskAction = std::ops::ControlFlow<()>;
 
+/// Notification mechanisms for controlling the actual collection task from the
+/// task handle.
+#[derive(Debug)]
+pub(crate) struct CollectionTaskNotifiers {
+    /// Notify the collection task to shutdown.
+    pub shutdown: oneshot::Sender<()>,
+    /// Sender to notify the collection task about changes to the producer's
+    /// endpoint information.
+    pub producer_info_tx: watch::Sender<ProducerEndpoint>,
+    /// Receiver from which to read updated collection details from the task.
+    pub producer_details_rx: watch::Receiver<ProducerDetails>,
+    /// Channel used to send test / debugging messages to the task.
+    task_tx: mpsc::Sender<CollectionMessage>,
+}
+
 /// Main task used to dispatch messages from the oximeter agent and request
 /// collections from the producer.
 #[derive(Debug)]
 struct CollectionTask {
     log: Logger,
 
-    // The details about past collections from this producer.
-    details: ProducerDetails,
+    // Channel used to update details about past collections from this producer.
+    producer_details_tx: watch::Sender<ProducerDetails>,
+
+    // Channel used to receive notifications of changes to the producer
+    // endpoint.
+    producer_info_rx: watch::Receiver<ProducerEndpoint>,
 
     // Statistics about all collections we've made so far.
     stats: self_stats::CollectionTaskStats,
 
     // Inbox for messages from the controlling task handle.
     inbox: mpsc::Receiver<CollectionMessage>,
-
-    // Watch channel for broadcasting changes about the producer.
-    producer_info_tx: watch::Sender<ProducerEndpoint>,
 
     // Channel for sending forced collection requests.
     forced_collection_tx: mpsc::Sender<ForcedCollectionRequest>,
@@ -497,65 +526,91 @@ impl CollectionTask {
     // This also spawns the internal task which itself manages the collections
     // from our assigned producer. It then creates all the controlling queues
     // for talking to this task and the inner task.
-    async fn new(
+    fn new(
         log: &Logger,
         collector: self_stats::OximeterCollector,
         producer: ProducerEndpoint,
         outbox: CollectionTaskSenderWrapper,
-    ) -> (Self, mpsc::Sender<CollectionMessage>) {
+    ) -> (Self, CollectionTaskNotifiers) {
         // Create our own logger.
         let log = log.new(o!(
             "component" => "collection-task",
             "producer_id" => producer.id.to_string(),
         ));
 
-        // Setup queues for talking between ourselves, our controlling task
-        // handle, and the spawned collection loop itself.
-        let (task_tx, inbox) = mpsc::channel(N_QUEUED_TASK_MESSAGES);
+        // Watch channel for changes to the producer's endpoint information.
+        //
+        // Updates to the producer information are made through the
+        // `CollectionTaskHandle`. Both the `CollectionTask` and inner
+        // `collection_loop` watch for changes to that.
         let (producer_info_tx, producer_info_rx) = watch::channel(producer);
+
+        // Watch channel for changes to the collection details.
+        //
+        // The interior spawned task running `collection_loop` maintains the
+        // sender. We return the receiver to be held by the
+        // `CollectionTaskHandle`. The collection task updates things like the
+        // number of successful collections through this channel.
+        let (producer_details_tx, producer_details_rx) =
+            watch::channel(ProducerDetails::new(&producer));
+
+        // Channel for sending `CollectionMessages`, which are only used in test
+        // settings.
+        let (task_tx, inbox) = mpsc::channel(N_QUEUED_TASK_MESSAGES);
+
+        // Channel for notifying the inner `collection_loop` to collect
+        // on-demand...
         let (forced_collection_tx, forced_collection_rx) =
             mpsc::channel(N_QUEUED_FORCED_COLLECTIONS);
+
+        // ...Or when the timer expires.
         let (timer_collection_tx, timer_collection_rx) =
             mpsc::channel(N_QUEUED_TIMER_COLLECTIONS);
+
+        // Channel on which the `collection_loop` sends collection results. This
+        // `CollectionTask` forwards them to the database insertion tasks, after
+        // updating self-stats and last-collection details.
         let (result_tx, result_rx) = mpsc::channel(N_QUEUED_RESULTS);
+
+        // Mechanism to notify the inner `collection_loop` to exit.
+        let (shutdown_tx, shutdown_rx) = oneshot::channel();
+
+        // Task running the actual collections in a loop.
         tokio::task::spawn(collection_loop(
             log.clone(),
-            producer_info_rx,
+            shutdown_rx,
+            producer_info_rx.clone(),
             forced_collection_rx,
             timer_collection_rx,
             result_tx,
         ));
 
         // Construct ourself, and return our controlling input queue.
-        let details = ProducerDetails::new(&producer);
+        let notifiers = CollectionTaskNotifiers {
+            shutdown: shutdown_tx,
+            producer_details_rx,
+            producer_info_tx,
+            task_tx,
+        };
+
+        // Construct self-collection statistics and our collection times.
         let stats = self_stats::CollectionTaskStats::new(collector, &producer);
-        let collection_timer = Self::timer(producer.interval).await;
-        let self_collection_timer =
-            Self::timer(self_stats::COLLECTION_INTERVAL).await;
+        let collection_timer = interval(producer.interval);
+        let self_collection_timer = interval(self_stats::COLLECTION_INTERVAL);
         let self_ = Self {
             log,
-            details,
+            producer_details_tx,
+            producer_info_rx,
             stats,
             inbox,
             outbox,
-            producer_info_tx,
             forced_collection_tx,
             timer_collection_tx,
             result_rx,
             collection_timer,
             self_collection_timer,
         };
-        (self_, task_tx)
-    }
-
-    /// Helper to construct a timer and tick it.
-    ///
-    /// Since a `tokio::time::interval`'s first tick completes immediately, this
-    /// constructs the timer and then _ticks it_ once.
-    async fn timer(t: Duration) -> Interval {
-        let mut timer = interval(t);
-        timer.tick().await;
-        timer
+        (self_, notifiers)
     }
 
     /// Run the main loop of this collection task.
@@ -566,6 +621,16 @@ impl CollectionTask {
     async fn run(mut self) -> TaskAction {
         loop {
             tokio::select! {
+                res = self.producer_info_rx.changed() => {
+                    if res.is_err() {
+                        error!(
+                            self.log,
+                            "producer info sender dropped!",
+                        );
+                        return TaskAction::Break(());
+                    };
+                    self.update_producer_info().await;
+                }
                 message = self.inbox.recv() => {
                     let Some(message) = message else {
                         debug!(
@@ -604,6 +669,23 @@ impl CollectionTask {
         }
     }
 
+    // Rebuild our timer to reflect the possibly-new collection interval, and
+    // update the self-statistics.
+    async fn update_producer_info(&mut self) {
+        let new_info = *self.producer_info_rx.borrow_and_update();
+        debug!(
+            self.log,
+            "collection task received request to update \
+            its producer information";
+            "interval" => ?new_info.interval,
+            "address" => new_info.address,
+        );
+        self.producer_details_tx
+            .send_modify(|details| details.update(&new_info));
+        self.stats.update(&new_info);
+        self.collection_timer = interval(new_info.interval);
+    }
+
     /// Handle a single message from the task handle.
     ///
     /// This method takes messages from the main oximeter agent, passed through
@@ -614,10 +696,6 @@ impl CollectionTask {
         message: CollectionMessage,
     ) -> TaskAction {
         match message {
-            CollectionMessage::Shutdown => {
-                debug!(self.log, "collection task received shutdown request");
-                return TaskAction::Break(());
-            }
             CollectionMessage::ForceCollect => {
                 debug!(
                     self.log,
@@ -662,54 +740,12 @@ impl CollectionTask {
                                     "forced collection queue full",
                                 ),
                             };
-                            self.details.on_failure(failure);
+                            self.producer_details_tx.send_modify(|details| {
+                                details.on_failure(failure);
+                            });
                         }
                     },
                 }
-            }
-            CollectionMessage::Update(new_info) => {
-                // If the collection interval is shorter than the
-                // interval on which we receive these update messages,
-                // we'll never actually collect anything! Instead, only
-                // do the update if the information has changed. This
-                // should also be guarded against by the main agent, but
-                // we're being cautious here.
-                let updated_producer_info = |info: &mut ProducerEndpoint| {
-                    if new_info == *info {
-                        false
-                    } else {
-                        *info = new_info;
-                        true
-                    }
-                };
-                if !self
-                    .producer_info_tx
-                    .send_if_modified(updated_producer_info)
-                {
-                    trace!(
-                        self.log,
-                        "collection task received update with \
-                        identical producer information, no \
-                        updates will be sent to the collection task"
-                    );
-                    return TaskAction::Continue(());
-                }
-
-                // We have an actual update to the producer information.
-                //
-                // Rebuild our timer to reflect the possibly-new
-                // interval. The collection task has already been
-                // notified above.
-                debug!(
-                    self.log,
-                    "collection task received request to update \
-                    its producer information";
-                    "interval" => ?new_info.interval,
-                    "address" => new_info.address,
-                );
-                self.details.update(&new_info);
-                self.stats.update(&new_info);
-                self.collection_timer = Self::timer(new_info.interval).await;
             }
             #[cfg(test)]
             CollectionMessage::Statistics { reply_tx } => {
@@ -730,20 +766,6 @@ impl CollectionTask {
                 reply_tx
                     .send(self.stats.clone())
                     .expect("failed to send statistics");
-            }
-            CollectionMessage::Details { reply_tx } => {
-                match reply_tx.send(self.details.clone()) {
-                    Ok(_) => trace!(
-                        self.log,
-                        "sent producer details reply to oximeter agent",
-                    ),
-                    Err(e) => error!(
-                        self.log,
-                        "failed to send producer details reply to \
-                        oximeter agent";
-                        "error" => ?e,
-                    ),
-                }
             }
         }
 
@@ -785,7 +807,8 @@ impl CollectionTask {
                     time_collecting,
                     n_samples,
                 };
-                self.details.on_success(success);
+                self.producer_details_tx
+                    .send_modify(|details| details.on_success(success));
                 if self
                     .outbox
                     .send(
@@ -810,7 +833,8 @@ impl CollectionTask {
                     time_collecting,
                     reason: reason.to_string(),
                 };
-                self.details.on_failure(failure);
+                self.producer_details_tx
+                    .send_modify(|details| details.on_failure(failure));
                 self.stats.failures_for_reason(reason).datum.increment();
             }
         }
@@ -841,14 +865,15 @@ impl CollectionTask {
                     time_collecting: Duration::ZERO,
                     reason: String::from("collections in progress"),
                 };
-                self.details.on_failure(failure);
+                self.producer_details_tx
+                    .send_modify(|details| details.on_failure(failure));
                 error!(
                     self.log,
                     "timer-based collection request queue is \
                     full! This may indicate that the producer \
                     has a sampling interval that is too fast \
                     for the amount of data it generates";
-                    "interval" => ?self.producer_info_tx.borrow().interval,
+                    "interval" => ?self.producer_details_tx.borrow().interval,
                 );
                 self.stats
                     .failures_for_reason(

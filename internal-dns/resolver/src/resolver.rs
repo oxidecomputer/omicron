@@ -2,8 +2,6 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-use hickory_resolver::ResolveError as HickoryResolveError;
-use hickory_resolver::ResolveErrorKind as HickoryResolveErrorKind;
 use hickory_resolver::TokioResolver;
 use hickory_resolver::config::{
     LookupIpStrategy, NameServerConfig, ResolveHosts, ResolverConfig,
@@ -11,11 +9,10 @@ use hickory_resolver::config::{
 };
 use hickory_resolver::lookup::SrvLookup;
 use hickory_resolver::name_server::TokioConnectionProvider;
-use internal_dns_types::names::{DNS_ZONE, ServiceName};
+use internal_dns_types::names::ServiceName;
 use omicron_common::address::{
     AZ_PREFIX, DNS_PORT, Ipv6Subnet, get_internal_dns_server_addresses,
 };
-use omicron_uuid_kinds::OmicronZoneUuid;
 use slog::{debug, error, info, trace};
 use std::net::{Ipv6Addr, SocketAddr, SocketAddrV6};
 
@@ -348,40 +345,6 @@ impl Resolver {
         }
     }
 
-    /// Returns the targets of the SRV records for a DNS name with their
-    /// associated zone UUIDs.
-    ///
-    /// Similar to [`Resolver::lookup_all_socket_v6`], but extracts the
-    /// OmicronZoneUuid from DNS target names that follow the pattern
-    /// `{uuid}.host.{DNS_ZONE}`. Returns a list of (OmicronZoneUuid,
-    /// SocketAddrV6) pairs.
-    ///
-    /// Returns an error if any target cannot be parsed as a zone UUID pattern.
-    pub async fn lookup_all_socket_and_zone_v6(
-        &self,
-        service: ServiceName,
-    ) -> Result<Vec<(OmicronZoneUuid, SocketAddrV6)>, ResolveError> {
-        let name = service.srv_name();
-        trace!(self.log, "lookup_all_socket_and_zone_v6 srv"; "dns_name" => &name);
-        let response = self.resolver.srv_lookup(&name).await?;
-        debug!(
-            self.log,
-            "lookup_all_socket_and_zone_v6 srv";
-            "dns_name" => &name,
-            "response" => ?response
-        );
-
-        let results = self
-            .lookup_service_targets_with_zones(response)
-            .await?
-            .collect::<Vec<_>>();
-        if !results.is_empty() {
-            Ok(results)
-        } else {
-            Err(ResolveError::NotFound(service))
-        }
-    }
-
     // Returns an iterator of SocketAddrs for the specified SRV name.
     //
     // Acts on a raw string for compatibility with the reqwest::dns::Resolve
@@ -467,99 +430,6 @@ impl Resolver {
             .flatten()
     }
 
-    /// Similar to [`Resolver::lookup_service_targets`], but extracts zone UUIDs from target names.
-    ///
-    /// Returns an iterator of (OmicronZoneUuid, SocketAddrV6) pairs for targets that match
-    /// the pattern `{uuid}.host.{DNS_ZONE}`. Returns an error if any target doesn't match
-    /// this pattern.
-    async fn lookup_service_targets_with_zones(
-        &self,
-        service_lookup: SrvLookup,
-    ) -> Result<
-        impl Iterator<Item = (OmicronZoneUuid, SocketAddrV6)> + Send,
-        ResolveError,
-    > {
-        let futures =
-            std::iter::repeat((self.log.clone(), self.resolver.clone()))
-                .zip(service_lookup.into_iter())
-                .map(|((log, resolver), srv)| async move {
-                    let target = srv.target();
-                    let port = srv.port();
-                    let target_str = target.to_string();
-                    // Try to parse the zone UUID from the target name
-                    let zone_uuid = match Self::parse_zone_uuid_from_target(&target_str) {
-                        Some(uuid) => uuid,
-                        None => {
-                            error!(
-                                log,
-                                "lookup_service_targets_with_zones: target doesn't match zone pattern";
-                                "target" => ?target_str,
-                            );
-                            return Err((
-                                target.clone(),
-                                HickoryResolveError::from(
-                                    HickoryResolveErrorKind::Message(
-                                        "target doesn't match zone pattern"
-                                    )
-                                )
-                            ));
-                        }
-                    };
-                    trace!(
-                        log,
-                        "lookup_service_targets_with_zones: looking up SRV target";
-                        "name" => ?target,
-                        "zone_uuid" => ?zone_uuid,
-                    );
-                    resolver
-                        .ipv6_lookup(target.clone())
-                        .await
-                        .map(|ips| (ips, port, zone_uuid))
-                        .map_err(|err| (target.clone(), err))
-                });
-        let log = self.log.clone();
-        let results = futures::future::join_all(futures).await;
-        let mut socket_addrs = Vec::new();
-        for result in results {
-            match result {
-                Ok((ips, port, zone_uuid)) => {
-                    // Add all IP addresses for this zone
-                    for aaaa in ips {
-                        socket_addrs.push((
-                            zone_uuid,
-                            SocketAddrV6::new(aaaa.into(), port, 0, 0),
-                        ));
-                    }
-                }
-                Err((target, err)) => {
-                    error!(
-                        log,
-                        "lookup_service_targets_with_zones: failed looking up target";
-                        "name" => ?target,
-                        "error" => ?err,
-                    );
-                    return Err(ResolveError::Resolve(err));
-                }
-            }
-        }
-        Ok(socket_addrs.into_iter())
-    }
-
-    /// Parse a zone UUID from a DNS target name following the pattern `{uuid}.host.{DNS_ZONE}`.
-    fn parse_zone_uuid_from_target(target: &str) -> Option<OmicronZoneUuid> {
-        // Remove trailing dot if present
-        let target = target.strip_suffix('.').unwrap_or(target);
-
-        // Expected format: "{uuid}.host.{DNS_ZONE}"
-        let expected_suffix = format!(".host.{}", DNS_ZONE);
-
-        if let Some(uuid_str) = target.strip_suffix(&expected_suffix) {
-            uuid_str.parse::<OmicronZoneUuid>().ok()
-        } else {
-            None
-        }
-    }
-
     /// Lookup a specific record's IPv6 address
     ///
     /// In general, callers should _not_ be using this function, and instead
@@ -597,7 +467,7 @@ mod test {
     use internal_dns_types::names::DNS_ZONE;
     use internal_dns_types::names::ServiceName;
     use omicron_test_utils::dev::test_setup_log;
-    use omicron_uuid_kinds::{OmicronZoneUuid, SledUuid};
+    use omicron_uuid_kinds::OmicronZoneUuid;
     use slog::{Logger, o};
     use std::collections::HashMap;
     use std::net::Ipv6Addr;
@@ -1008,7 +878,7 @@ mod test {
                     "api-version"
                         .parse::<reqwest::header::HeaderName>()
                         .expect("api-version is a valid header name"),
-                    semver::Version::new(2, 0, 0),
+                    dns_server_api::VERSION_SOA_AND_NS,
                 ),
             )))
             .start()
@@ -1288,79 +1158,6 @@ mod test {
             resolver.lookup_srv(ServiceName::Cockroach).await.unwrap();
         targets.sort();
         assert_eq!(targets, expected_targets);
-
-        dns_server.cleanup_successful();
-        logctx.cleanup_successful();
-    }
-
-    #[tokio::test]
-    async fn lookup_all_socket_and_zone_v6_success_and_failure() {
-        let logctx =
-            test_setup_log("lookup_all_socket_and_zone_v6_success_and_failure");
-        let dns_server = DnsServer::create(&logctx.log).await;
-        let resolver = dns_server.resolver().unwrap();
-
-        // Create DNS config with both zone and sled services
-        let mut dns_config = DnsConfigBuilder::new();
-
-        // Add a zone service (BoundaryNtp) that should succeed
-        let zone_uuid = OmicronZoneUuid::new_v4();
-        let zone_ip = Ipv6Addr::new(0xfd, 0, 0, 0, 0, 0, 0, 0x1);
-        let zone_port = 8080;
-        let zone_host = dns_config.host_zone(zone_uuid, zone_ip).unwrap();
-        dns_config
-            .service_backend_zone(
-                ServiceName::BoundaryNtp,
-                &zone_host,
-                zone_port,
-            )
-            .unwrap();
-
-        // Add a sled service (SledAgent) that should fail
-        let sled_uuid = SledUuid::new_v4();
-        let sled_ip = Ipv6Addr::new(0xfd, 0, 0, 0, 0, 0, 0, 0x2);
-        let sled_port = 8081;
-        let sled_host = dns_config.host_sled(sled_uuid, sled_ip).unwrap();
-        dns_config
-            .service_backend_sled(
-                ServiceName::SledAgent(sled_uuid),
-                &sled_host,
-                sled_port,
-            )
-            .unwrap();
-
-        let dns_config = dns_config.build_full_config_for_initial_generation();
-        dns_server.update(&dns_config).await.unwrap();
-
-        // Test 1: Zone service should succeed
-        let zone_results = resolver
-            .lookup_all_socket_and_zone_v6(ServiceName::BoundaryNtp)
-            .await
-            .expect("Should have been able to look up zone service");
-
-        assert_eq!(zone_results.len(), 1);
-        let (returned_zone_uuid, returned_addr) = &zone_results[0];
-        assert_eq!(*returned_zone_uuid, zone_uuid);
-        assert_eq!(returned_addr.ip(), &zone_ip);
-        assert_eq!(returned_addr.port(), zone_port);
-
-        // Test 2: Sled service should fail (targets don't match zone pattern)
-        let sled_error = resolver
-            .lookup_all_socket_and_zone_v6(ServiceName::SledAgent(sled_uuid))
-            .await
-            .expect_err("Should have failed to look up sled service");
-
-        // The error should be a ResolveError indicating the target doesn't match the zone pattern
-        match sled_error {
-            ResolveError::Resolve(hickory_err) => {
-                assert!(
-                    hickory_err
-                        .to_string()
-                        .contains("target doesn't match zone pattern")
-                );
-            }
-            _ => panic!("Expected ResolveError::Resolve, got {:?}", sled_error),
-        }
 
         dns_server.cleanup_successful();
         logctx.cleanup_successful();

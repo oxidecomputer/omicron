@@ -44,3 +44,27 @@ pub(crate) fn make_internal_disks_rx(
         ),
     )
 }
+
+pub(crate) fn make_internal_disks_rx_without_boot_disk(
+    root: &Utf8Path,
+    other_zpools: &[InternalZpoolUuid],
+) -> InternalDisksReceiver {
+    let fake_from_zpool = |zpool: InternalZpoolUuid| {
+        let identity = DiskIdentity {
+            vendor: "sled-agent-zone-images-test".to_string(),
+            model: "fake-disk".to_string(),
+            serial: zpool.to_string(),
+        };
+        InternalDiskDetails::fake_details(
+            identity, zpool, /* is_boot_disk */ false, None, None,
+        )
+    };
+    let mount_config = MountConfig {
+        root: root.to_path_buf(),
+        synthetic_disk_root: root.to_path_buf(),
+    };
+    InternalDisksReceiver::fake_static(
+        Arc::new(mount_config),
+        other_zpools.iter().copied().map(|pool| fake_from_zpool(pool)),
+    )
+}

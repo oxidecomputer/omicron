@@ -9,10 +9,14 @@ use crate::check_allow_destructive::DestructiveOperationToken;
 use clap::ArgAction;
 use clap::Args;
 use clap::Subcommand;
+use daft::Diffable;
 use http::StatusCode;
-use nexus_client::types::{
-    ReconfiguratorChickenSwitches, ReconfiguratorChickenSwitchesParam,
-};
+use indent_write::io::IndentWriter;
+use nexus_types::deployment::PlannerChickenSwitches;
+use nexus_types::deployment::ReconfiguratorChickenSwitches;
+use nexus_types::deployment::ReconfiguratorChickenSwitchesParam;
+use std::io;
+use std::io::Write;
 use std::num::ParseIntError;
 use std::str::FromStr;
 
@@ -34,8 +38,58 @@ pub enum ChickenSwitchesCommands {
 
 #[derive(Debug, Clone, Args)]
 pub struct ChickenSwitchesSetArgs {
-    #[clap(long, action=ArgAction::Set)]
-    planner_enabled: bool,
+    #[clap(flatten)]
+    switches: ChickenSwitchesOpts,
+}
+
+// Define the switches separately so we can use `group(required = true, multiple
+// = true).`
+#[derive(Debug, Clone, Args)]
+#[group(required = true, multiple = true)]
+pub struct ChickenSwitchesOpts {
+    #[clap(long, action = ArgAction::Set)]
+    planner_enabled: Option<bool>,
+
+    #[clap(long, action = ArgAction::Set)]
+    add_zones_with_mupdate_override: Option<bool>,
+}
+
+impl ChickenSwitchesOpts {
+    /// Returns an updated `ReconfiguratorChickenSwitchesParam` regardless of
+    /// whether any switches were modified.
+    fn update(
+        &self,
+        current: &ReconfiguratorChickenSwitches,
+    ) -> ReconfiguratorChickenSwitches {
+        ReconfiguratorChickenSwitches {
+            planner_enabled: self
+                .planner_enabled
+                .unwrap_or(current.planner_enabled),
+            planner_switches: PlannerChickenSwitches {
+                add_zones_with_mupdate_override: self
+                    .add_zones_with_mupdate_override
+                    .unwrap_or(
+                        current
+                            .planner_switches
+                            .add_zones_with_mupdate_override,
+                    ),
+            },
+        }
+    }
+
+    /// Returns an updated `ReconfiguratorChickenSwitchesParam` if any
+    /// switches were modified, or `None` if no changes were made.
+    fn update_if_modified(
+        &self,
+        current: &ReconfiguratorChickenSwitches,
+        next_version: u32,
+    ) -> Option<ReconfiguratorChickenSwitchesParam> {
+        let new = self.update(current);
+        (&new != current).then(|| ReconfiguratorChickenSwitchesParam {
+            version: next_version,
+            switches: new,
+        })
+    }
 }
 
 #[derive(Debug, Clone, Copy, Args)]
@@ -92,15 +146,12 @@ async fn chicken_switches_show(
 
     match res {
         Ok(switches) => {
-            let ReconfiguratorChickenSwitches {
-                version,
-                planner_enabled,
-                time_modified,
-            } = switches.into_inner();
-            println!("Reconfigurator Chicken Switches: ");
-            println!("    version: {version}");
-            println!("    modified time: {time_modified}");
-            println!("    planner enabled: {planner_enabled}");
+            println!("Reconfigurator chicken switches:");
+            let stdout = io::stdout();
+            let mut indented = IndentWriter::new("    ", stdout.lock());
+            // No need for writeln! here because .display() adds its own
+            // newlines.
+            write!(indented, "{}", switches.display()).unwrap();
         }
         Err(err) => {
             if err.status() == Some(StatusCode::NOT_FOUND) {
@@ -119,12 +170,12 @@ async fn chicken_switches_set(
     args: &ChickenSwitchesSetArgs,
     _destruction_token: DestructiveOperationToken,
 ) -> Result<(), anyhow::Error> {
-    let switches = match client
+    let (current_switches, new_switches) = match client
         .reconfigurator_chicken_switches_show_current()
         .await
     {
         Ok(switches) => {
-            let Some(version) = switches.version.checked_add(1) else {
+            let Some(next_version) = switches.version.checked_add(1) else {
                 eprintln!(
                     "ERROR: Failed to update chicken switches. Max version reached."
                 );
@@ -133,31 +184,30 @@ async fn chicken_switches_set(
             let switches = switches.into_inner();
             // Future switches should use the following pattern, and only update
             // the current switch values if a setting changed.
-            //
-            // We may want to use `Options` in `args` to allow defaulting to
-            // the current setting rather than forcing the user to update all
-            // settings if the number of switches grows significantly. However,
-            // this will not play nice with the `NOT_FOUND` case below.
-            let mut modified = false;
-            if args.planner_enabled != switches.planner_enabled {
-                modified = true;
-            }
-            if modified {
-                ReconfiguratorChickenSwitchesParam {
-                    version,
-                    planner_enabled: args.planner_enabled,
-                }
-            } else {
-                println!("No modifications made to current switch values");
+            let Some(new_switches) = args
+                .switches
+                .update_if_modified(&switches.switches, next_version)
+            else {
+                println!("no modifications made to current switch values:");
+                let stdout = io::stdout();
+                let mut indented = IndentWriter::new("    ", stdout.lock());
+                // No need for writeln! here because .display() adds its own
+                // newlines.
+                write!(indented, "{}", switches.display()).unwrap();
                 return Ok(());
-            }
+            };
+            (Some(switches), new_switches)
         }
         Err(err) => {
             if err.status() == Some(StatusCode::NOT_FOUND) {
-                ReconfiguratorChickenSwitchesParam {
+                let default_switches = ReconfiguratorChickenSwitches::default();
+                // In this initial case, the operator expects that we always set
+                // switches.
+                let new_switches = ReconfiguratorChickenSwitchesParam {
                     version: 1,
-                    planner_enabled: args.planner_enabled,
-                }
+                    switches: args.switches.update(&default_switches),
+                };
+                (None, new_switches)
             } else {
                 eprintln!("error: {:#}", err);
                 return Ok(());
@@ -165,8 +215,26 @@ async fn chicken_switches_set(
         }
     };
 
-    client.reconfigurator_chicken_switches_set(&switches).await?;
-    println!("Chicken switches updated at version {}", switches.version);
+    client.reconfigurator_chicken_switches_set(&new_switches).await?;
+    println!("chicken switches updated to version {}:", new_switches.version);
+    match current_switches {
+        Some(current_switches) => {
+            // ReconfiguratorChickenSwitchesDiffDisplay does its own
+            // indentation, so more isn't required.
+            print!(
+                "{}",
+                current_switches
+                    .switches
+                    .diff(&new_switches.switches)
+                    .display(),
+            );
+        }
+        None => {
+            let stdout = io::stdout();
+            let mut indented = IndentWriter::new("    ", stdout.lock());
+            write!(indented, "{}", new_switches.switches.display()).unwrap();
+        }
+    }
 
     Ok(())
 }

@@ -2117,7 +2117,6 @@ async fn wait_for_producer_impl(
         || async {
             if oximeter
                 .list_producers(None, usize::MAX)
-                .await
                 .iter()
                 .any(|p| p.id == producer_id)
             {

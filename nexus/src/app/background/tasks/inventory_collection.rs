@@ -186,42 +186,6 @@ async fn inventory_activate(
         }
     };
 
-    // Find ntp-admin servers if there are any.
-    let boundary_ntp_admin_zone_addrs = match resolver
-        .lookup_all_socket_and_zone_v6(ServiceName::BoundaryNtp)
-        .await
-    {
-        Ok(addrs) => addrs,
-        Err(err) if err.is_not_found() => vec![],
-        Err(err) => {
-            return Err(err).context("looking up boundary NTP addresses");
-        }
-    };
-    let internal_ntp_admin_zone_addrs = match resolver
-        .lookup_all_socket_and_zone_v6(ServiceName::InternalNtp)
-        .await
-    {
-        Ok(addrs) => addrs,
-        Err(err) if err.is_not_found() => vec![],
-        Err(err) => {
-            return Err(err).context("looking up internal NTP addresses");
-        }
-    };
-
-    let ntp_admin_clients = boundary_ntp_admin_zone_addrs
-        .into_iter()
-        .chain(internal_ntp_admin_zone_addrs.into_iter())
-        .map(|(zone_uuid, mut addr)| {
-            // TODO(https://github.com/oxidecomputer/omicron/issues/8602):
-            // If we could look up all NTP Admin services, we could skip
-            // this port hard-coding.
-            addr.set_port(omicron_common::address::NTP_ADMIN_PORT);
-            let url = format!("http://{}", addr);
-            let log = opctx.log.new(o!("ntp_admin_url" => url.clone()));
-            (zone_uuid, ntp_admin_client::Client::new(&url, log))
-        })
-        .collect();
-
     // Update CockroachDB cluster backends.
     let cockroach_addresses = resolver
         .lookup_all_socket_v6(ServiceName::Cockroach)
@@ -250,7 +214,6 @@ async fn inventory_activate(
         mgs_clients,
         keeper_admin_clients,
         cockroach_admin_client,
-        ntp_admin_clients,
         &sled_enum,
         opctx.log.clone(),
     );
