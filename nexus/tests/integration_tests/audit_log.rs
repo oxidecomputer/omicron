@@ -244,11 +244,13 @@ async fn test_audit_log_login_local(ctx: &ControlPlaneTestContext) {
     assert_eq!(e1.request_uri, "/v1/login/test-silo/local");
     assert_eq!(e1.operation_id, "login_local");
     assert_eq!(e1.source_ip.to_string(), "127.0.0.1");
-    assert_eq!(e1.http_status_code, 401);
-    assert_eq!(e1.error_code, Some("Unauthorized".to_string()));
     assert_eq!(
-        e1.error_message,
-        Some("credentials missing or invalid".to_string())
+        e1.result,
+        views::AuditLogEntryResult::Error {
+            http_status_code: 401,
+            error_code: Some("Unauthorized".to_string()),
+            error_message: "credentials missing or invalid".to_string(),
+        }
     );
     assert!(e1.time_started >= t1 && e1.time_started <= t2);
     assert!(e1.time_completed > e1.time_started);
@@ -257,9 +259,10 @@ async fn test_audit_log_login_local(ctx: &ControlPlaneTestContext) {
     assert_eq!(e2.request_uri, "/v1/login/test-silo/local");
     assert_eq!(e2.operation_id, "login_local");
     assert_eq!(e2.source_ip.to_string(), "127.0.0.1");
-    assert_eq!(e2.http_status_code, 204);
-    assert_eq!(e2.error_code, None);
-    assert_eq!(e2.error_message, None);
+    assert_eq!(
+        e2.result,
+        views::AuditLogEntryResult::Success { http_status_code: 204 }
+    );
     assert!(e2.time_started >= t2 && e2.time_started <= t3);
     assert!(e2.time_completed > e2.time_started);
 
