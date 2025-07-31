@@ -182,8 +182,6 @@ LEDGERED SLED CONFIG
     slot A details UNAVAILABLE: constructed via debug_assume_success()
     slot B details UNAVAILABLE: constructed via debug_assume_success()
     last reconciled config: matches ledgered config
-    no information from NTP for this sled
-    Internal DNS generation: 1
         error reading mupdate override, so sled agent didn't attempt to clear it
         no orphaned datasets
         all disks reconciled successfully
@@ -291,8 +289,6 @@ LEDGERED SLED CONFIG
     slot A details UNAVAILABLE: constructed via debug_assume_success()
     slot B details UNAVAILABLE: constructed via debug_assume_success()
     last reconciled config: matches ledgered config
-    no information from NTP for this sled
-    Internal DNS generation: 1
         mupdate override present, but sled agent was not instructed to clear it
         no orphaned datasets
         all disks reconciled successfully
@@ -389,8 +385,6 @@ LEDGERED SLED CONFIG
     slot A details UNAVAILABLE: constructed via debug_assume_success()
     slot B details UNAVAILABLE: constructed via debug_assume_success()
     last reconciled config: matches ledgered config
-    no information from NTP for this sled
-    Internal DNS generation: 1
         mupdate override present, but sled agent was not instructed to clear it
         no orphaned datasets
         all disks reconciled successfully
@@ -405,5 +399,13 @@ KEEPER MEMBERSHIP
 COCKROACH STATUS
     no cockroach status retrieved
 
+
+NTP STATUS
+    No NTP zones reported timesync information
+
+INTERNAL DNS STATUS
+    Zone 427ec88f-f467-42fa-9bbb-66a91a36103c: Internal DNS generation @ 1
+    Zone 99e2f30b-3174-40bf-a78a-90da8abba8ca: Internal DNS generation @ 1
+    Zone ea5b4030-b52f-44b2-8d70-45f15f987d01: Internal DNS generation @ 1
 
 
