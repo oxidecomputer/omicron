@@ -79,7 +79,7 @@ enum InstallinatorCommand {
     /// Scan hardware to find the target M.2 device.
     DebugHardwareScan(DebugHardwareScan),
     /// Perform the installation.
-    Install(InstallOpts),
+    Install(Box<InstallOpts>),
 }
 
 /// Perform discovery of peers.

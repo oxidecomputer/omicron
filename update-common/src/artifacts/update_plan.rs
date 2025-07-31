@@ -213,8 +213,6 @@ impl<'a> UpdatePlanBuilder<'a> {
         artifact_hash: ArtifactHash,
         stream: impl Stream<Item = Result<bytes::Bytes, tough::error::Error>> + Send,
     ) -> Result<(), RepositoryError> {
-        if artifact_id.kind == ArtifactKind::INSTALLINATOR_DOCUMENT {}
-
         // If we don't know this artifact kind, we'll still serve it up by hash,
         // but we don't do any further processing on it.
         let Some(artifact_kind) = artifact_id.kind.to_known() else {
