@@ -53,7 +53,14 @@ pub type AsyncConnection = async_bb8_diesel::Connection<DbConnection>;
 
 pub struct DataStoreConnection {
     inner: qorb::claim::Handle<AsyncConnection>,
-    // XXX-dap TODO-cleanup TODO-doc
+
+    // `DataStoreConnection` is used by various packages that we'd like to not
+    // depend on `nexus-db-queries` (in order to parallelize compilation).
+    // However, we need to do some datastore-specific work around the lifecycle
+    // of this object (i.e., when it gets instantiated and when it gets
+    // dropped).  To achieve this, the caller in `nexus-db-queries` provides a
+    // `releaser` whose sole purpose is to be dropped when this object is
+    // dropped, allowing it to do the needed cleanup there.
     #[allow(dead_code)]
     releaser: Box<dyn Any + Send + Sync + 'static>,
 }

@@ -56,7 +56,6 @@ use anyhow::Context;
 use chrono::Utc;
 use futures::FutureExt;
 use futures::StreamExt;
-use futures::channel::oneshot;
 use futures::future::BoxFuture;
 use iddqd::IdOrdMap;
 use nexus_db_queries::authz;
@@ -70,6 +69,7 @@ use omicron_common::api::external::LookupResult;
 use omicron_common::api::external::ResourceType;
 use omicron_common::bail_unless;
 use omicron_uuid_kinds::DemoSagaUuid;
+use slog_error_chain::InlineErrorChain;
 use std::sync::Arc;
 use std::sync::OnceLock;
 use steno::SagaDag;
@@ -469,26 +469,48 @@ impl RunnableSaga {
             .map_err(|error| Error::internal_error(&format!("{:#}", error)))?;
 
         // When the saga finishes, we need to update our state to reflect that
-        // it's no longer running.
-        let (tx, rx) = oneshot::channel();
+        // it's no longer running.  We're provided a Future that we can use to
+        // wait for the saga to finish.  We also provide an equivalent Future to
+        // our consumer (in the `RunningSaga` that we return).  It'd be handy to
+        // just hook into that one, but there's a hitch: our consumer is allowed
+        // to drop that Future if they don't care when the saga finishes.  But
+        // we do still care!  So we need to create our own task to poll the
+        // completion future that we were given and pass along the result to the
+        // Future that we provide our consumer.
         let saga_ref = self.saga_ref;
         let fut = self.saga_completion_future;
-        tokio::spawn(async move {
-            // We don't care if the receiver has gone away.  This is just a
-            // notification and they're allowed to ignore it.
-            let _ = tx.send(fut.await);
+
+        // This is the task we spawn off to wait for the saga to finish and
+        // update our state.  (The state update happens when `saga_ref` is
+        // dropped.)
+        let completion_watcher_task = tokio::spawn(async move {
+            let rv = fut.await;
             drop(saga_ref);
+            rv
         });
 
-        Ok(RunningSaga {
-            id: self.id,
-            saga_completion_future: async {
-                // XXX-dap this might go badly if the runtime is shutting down
-                rx.await.expect("spawned task cannot go away before we do")
+        // This is the future we'll provide to the consumer to be notified when
+        // the saga finishes.
+        let saga_completion_future = async move {
+            match completion_watcher_task.await {
+                Ok(rv) => rv,
+                Err(error) => {
+                    // This should be basically impossible.  A panic from the
+                    // task would be a bug.  It's conceivable that it gets
+                    // cancelled if we're in the middle of a shutdown of the
+                    // tokio runtime itself.  That wouldn't really happen in the
+                    // real Nexus but could happen as part of the test suite.
+                    panic!(
+                        "RunnableSaga: failed to wait for completion \
+                         watcher task (is tokio runtime shutting down?): {}",
+                        InlineErrorChain::new(&error),
+                    );
+                }
             }
-            .boxed(),
-            log: self.log,
-        })
+        }
+        .boxed();
+
+        Ok(RunningSaga { id: self.id, saga_completion_future, log: self.log })
     }
 
     /// Start the saga running and wait for it to complete.
@@ -579,7 +601,8 @@ impl StoppedSaga {
     }
 }
 
-// XXX-dap TODO-doc
+/// Handle to a running saga that's used to update our quiesce state when the
+/// saga finishes
 struct RunningSagaReference {
     saga_id: steno::SagaId,
     quiesce: watch::Sender<Quiesce>,
