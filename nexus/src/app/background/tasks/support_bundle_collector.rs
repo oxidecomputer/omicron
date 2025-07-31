@@ -1003,7 +1003,7 @@ impl BundleCollection {
                     e.internal_context("failed to query for SP ereports")
                 })?;
             paginator = p.found_batch(&ereports, &|ereport| {
-                (ereport.restart_id.into_untyped_uuid(), ereport.ena.into())
+                (ereport.restart_id.into_untyped_uuid(), ereport.ena)
             });
 
             let n_ereports = ereports.len();
@@ -1048,7 +1048,7 @@ impl BundleCollection {
                     e.internal_context("failed to query for host OS ereports")
                 })?;
             paginator = p.found_batch(&ereports, &|ereport| {
-                (ereport.restart_id.into_untyped_uuid(), ereport.ena.into())
+                (ereport.restart_id.into_untyped_uuid(), ereport.ena)
             });
             let n_ereports = ereports.len();
             for ereport in ereports {
