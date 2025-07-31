@@ -17,8 +17,8 @@ use omicron_common::FileKv;
 use sha2::{Digest, Sha256};
 use slog::{Drain, error, warn};
 use tufaceous_artifact::{
-    ArtifactHash, ArtifactHashId, ArtifactKind, InstallinatorArtifactKind,
-    InstallinatorDocument,
+    ArtifactHash, ArtifactHashId, InstallinatorArtifactKind,
+    InstallinatorDocument, KnownArtifactKind,
 };
 use tufaceous_lib::ControlPlaneZoneImages;
 use update_engine::StepResult;
@@ -218,7 +218,8 @@ impl InstallOpts {
                         "Downloading installinator document",
                         async move |cx| {
                             let installinator_doc_id = ArtifactHashId {
-                                kind: ArtifactKind::INSTALLINATOR_DOCUMENT,
+                                kind: KnownArtifactKind::InstallinatorDocument
+                                    .into(),
                                 hash,
                             };
                             let installinator_doc = fetch_artifact(

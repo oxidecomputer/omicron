@@ -100,7 +100,6 @@ async fn test_updates() {
     let expected_kinds: BTreeSet<_> = KnownArtifactKind::iter()
         .filter(|k| !matches!(k, KnownArtifactKind::Zone))
         .map(ArtifactKind::from)
-        .chain(std::iter::once(ArtifactKind::INSTALLINATOR_DOCUMENT))
         .collect();
 
     // ... and installable artifacts that replace the top level host,
@@ -452,7 +451,7 @@ async fn installinator_fetch_impl(
             .installinator_doc_hash
             .expect("expected installinator document to be present");
         let installinator_doc_id = ArtifactHashId {
-            kind: ArtifactKind::INSTALLINATOR_DOCUMENT,
+            kind: KnownArtifactKind::InstallinatorDocument.into(),
             hash: installinator_doc_hash,
         };
         assert!(

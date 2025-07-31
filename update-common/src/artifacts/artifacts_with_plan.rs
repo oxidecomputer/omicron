@@ -428,11 +428,10 @@ mod tests {
             .collect();
 
         // `by_id` should contain one entry for every `KnownArtifactKind`
-        // (except `Zone`), as well as `installinator_document`.
+        // (except `Zone`).
         let mut expected_kinds: BTreeSet<_> = KnownArtifactKind::iter()
             .filter(|k| !matches!(k, KnownArtifactKind::Zone))
             .map(ArtifactKind::from)
-            .chain(std::iter::once(ArtifactKind::INSTALLINATOR_DOCUMENT))
             .collect();
         assert_eq!(
             expected_kinds, by_id_kinds,
@@ -516,7 +515,6 @@ mod tests {
         let expected_kinds: BTreeSet<_> = KnownArtifactKind::iter()
             .filter(|k| !matches!(k, KnownArtifactKind::ControlPlane))
             .map(ArtifactKind::from)
-            .chain(std::iter::once(ArtifactKind::INSTALLINATOR_DOCUMENT))
             .collect();
         assert_eq!(
             expected_kinds, by_id_kinds,

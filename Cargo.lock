@@ -14129,7 +14129,7 @@ dependencies = [
 [[package]]
 name = "tufaceous"
 version = "0.1.0"
-source = "git+https://github.com//oxidecomputer/tufaceous?branch=sunshowers%2Fspr%2Fadd-support-for-an-installinator-document#69264b956872266e15508ffe5f4252a7fa3156a9"
+source = "git+https://github.com//oxidecomputer/tufaceous?rev=63eb87709a4854b131212fe0e539776415946bb6#63eb87709a4854b131212fe0e539776415946bb6"
 dependencies = [
  "anyhow",
  "camino",
@@ -14150,7 +14150,7 @@ dependencies = [
 [[package]]
 name = "tufaceous-artifact"
 version = "0.1.0"
-source = "git+https://github.com//oxidecomputer/tufaceous?branch=sunshowers%2Fspr%2Fadd-support-for-an-installinator-document#69264b956872266e15508ffe5f4252a7fa3156a9"
+source = "git+https://github.com//oxidecomputer/tufaceous?rev=63eb87709a4854b131212fe0e539776415946bb6#63eb87709a4854b131212fe0e539776415946bb6"
 dependencies = [
  "daft",
  "hex",
@@ -14167,7 +14167,7 @@ dependencies = [
 [[package]]
 name = "tufaceous-brand-metadata"
 version = "0.1.0"
-source = "git+https://github.com//oxidecomputer/tufaceous?branch=sunshowers%2Fspr%2Fadd-support-for-an-installinator-document#69264b956872266e15508ffe5f4252a7fa3156a9"
+source = "git+https://github.com//oxidecomputer/tufaceous?rev=63eb87709a4854b131212fe0e539776415946bb6#63eb87709a4854b131212fe0e539776415946bb6"
 dependencies = [
  "semver 1.0.26",
  "serde",
@@ -14179,7 +14179,7 @@ dependencies = [
 [[package]]
 name = "tufaceous-lib"
 version = "0.1.0"
-source = "git+https://github.com//oxidecomputer/tufaceous?branch=sunshowers%2Fspr%2Fadd-support-for-an-installinator-document#69264b956872266e15508ffe5f4252a7fa3156a9"
+source = "git+https://github.com//oxidecomputer/tufaceous?rev=63eb87709a4854b131212fe0e539776415946bb6#63eb87709a4854b131212fe0e539776415946bb6"
 dependencies = [
  "anyhow",
  "async-trait",

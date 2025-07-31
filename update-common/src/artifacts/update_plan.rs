@@ -259,6 +259,14 @@ impl<'a> UpdatePlanBuilder<'a> {
             KnownArtifactKind::Trampoline => {
                 self.add_trampoline_artifact(artifact_id, stream)
             }
+            KnownArtifactKind::InstallinatorDocument => {
+                self.add_installinator_document_artifact(
+                    artifact_id,
+                    artifact_hash,
+                    stream,
+                )
+                .await
+            }
             KnownArtifactKind::ControlPlane => {
                 self.add_control_plane_artifact(
                     artifact_id,
@@ -291,6 +299,7 @@ impl<'a> UpdatePlanBuilder<'a> {
             KnownArtifactKind::GimletRot
             | KnownArtifactKind::Host
             | KnownArtifactKind::Trampoline
+            | KnownArtifactKind::InstallinatorDocument
             | KnownArtifactKind::ControlPlane
             | KnownArtifactKind::Zone
             | KnownArtifactKind::PscRot
@@ -384,6 +393,7 @@ impl<'a> UpdatePlanBuilder<'a> {
             KnownArtifactKind::GimletRot
             | KnownArtifactKind::Host
             | KnownArtifactKind::Trampoline
+            | KnownArtifactKind::InstallinatorDocument
             | KnownArtifactKind::ControlPlane
             | KnownArtifactKind::Zone
             | KnownArtifactKind::PscRot
@@ -479,6 +489,7 @@ impl<'a> UpdatePlanBuilder<'a> {
             KnownArtifactKind::GimletSp
             | KnownArtifactKind::Host
             | KnownArtifactKind::Trampoline
+            | KnownArtifactKind::InstallinatorDocument
             | KnownArtifactKind::ControlPlane
             | KnownArtifactKind::Zone
             | KnownArtifactKind::PscSp
@@ -726,6 +737,38 @@ impl<'a> UpdatePlanBuilder<'a> {
         Ok(())
     }
 
+    async fn add_installinator_document_artifact(
+        &mut self,
+        artifact_id: ArtifactId,
+        artifact_hash: ArtifactHash,
+        stream: impl Stream<Item = Result<bytes::Bytes, tough::error::Error>> + Send,
+    ) -> Result<(), RepositoryError> {
+        // The installinator document is treated as an opaque single-unit
+        // artifact by update-common, so that older versions of update-common
+        // can handle newer versions of this artifact.
+        if self.installinator_doc_hash.is_some() {
+            return Err(RepositoryError::DuplicateInstallinatorDocument);
+        }
+
+        let artifact_kind = artifact_id.kind.clone();
+        let artifact_hash_id =
+            ArtifactHashId { kind: artifact_kind.clone(), hash: artifact_hash };
+
+        let data =
+            self.extracted_artifacts.store(artifact_hash_id, stream).await?;
+
+        self.record_extracted_artifact(
+            artifact_id,
+            data,
+            artifact_kind,
+            self.log,
+        )?;
+
+        self.installinator_doc_hash = Some(artifact_hash);
+
+        Ok(())
+    }
+
     async fn add_control_plane_artifact(
         &mut self,
         artifact_id: ArtifactId,
@@ -782,17 +825,6 @@ impl<'a> UpdatePlanBuilder<'a> {
 
         let data =
             self.extracted_artifacts.store(artifact_hash_id, stream).await?;
-
-        // The installinator document is of course known to us, but it's not
-        // really an artifact in the usual sense -- in fact, we want to treat it
-        // as an opaque blob. It's most convenient to treat it as unknown
-        // artifact except for recording its hash if found.
-        if artifact_kind == ArtifactKind::INSTALLINATOR_DOCUMENT {
-            if self.installinator_doc_hash.is_some() {
-                return Err(RepositoryError::DuplicateInstallinatorDocument);
-            }
-            self.installinator_doc_hash = Some(data.hash());
-        }
 
         self.record_extracted_artifact(
             artifact_id,
@@ -2060,6 +2092,13 @@ mod tests {
                 KnownArtifactKind::ControlPlane => {
                     assert_eq!(hash_ids.len(), 1);
                     assert_eq!(plan.control_plane_hash, hash_ids[0].hash);
+                }
+                KnownArtifactKind::InstallinatorDocument => {
+                    assert_eq!(hash_ids.len(), 1);
+                    assert_eq!(
+                        plan.installinator_doc_hash,
+                        Some(hash_ids[0].hash)
+                    );
                 }
                 KnownArtifactKind::Zone => {
                     unreachable!(
