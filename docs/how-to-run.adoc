@@ -227,6 +227,21 @@ If you're using an existing external network, you likely don't need to specify a
     --physical-link igb0           # The physical link for your external network.
 ----
 
+When running `cargo xtask virtual-hardware create`, consider using the `--vdev-dir` option to place virtual device storage outside your OS or global zone:
+
+```bash
+cargo xtask virtual-hardware create \
+   --vdev-dir /scratch \
+   --gateway-ip 192.168.1.199 \
+   --pxa-start 192.168.1.20 \
+   --pxa-end 192.168.1.40
+```
+
+Why is this useful? Separating vdev storage allows you to granularly control how
+you want to manage zone and storage resources. For example, you can use a
+separate disk or partition for vdevs, which can be useful for performance and
+alleviating hard disk stress.
+
 If you're running on a bench Gimlet, you may not need (or want) most of what `cargo xtask virtual-hardware create` does, but you do still need SoftNPU. You can tweak what resources are created with the `--scope` flag.
 
 Later, you can clean up the resources created by `cargo xtask virtual-hardware create` with:
