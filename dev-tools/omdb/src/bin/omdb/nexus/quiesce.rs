@@ -30,7 +30,7 @@ pub enum QuiesceCommands {
 }
 
 #[derive(Debug, Args)]
-struct QuiesceShowArgs {
+pub struct QuiesceShowArgs {
     /// Show details about held database connections
     #[clap(short, long, default_value_t = false)]
     verbose: bool,
