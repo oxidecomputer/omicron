@@ -12,14 +12,19 @@ use installinator_common::EventReport;
 use ipcc::{InstallinatorImageId, Ipcc};
 use omicron_uuid_kinds::MupdateUuid;
 use tokio::sync::mpsc;
-use tufaceous_artifact::{ArtifactHash, ArtifactHashId};
+use tufaceous_artifact::{
+    ArtifactHash, ArtifactHashId, ArtifactKind, KnownArtifactKind,
+};
 
 use crate::{errors::HttpError, fetch::FetchReceiver};
 
 #[derive(Clone, Debug, Eq, PartialEq, Args)]
 pub(crate) struct ArtifactIdOpts {
     /// Retrieve artifact ID from IPCC
-    #[clap(long, required_unless_present_any = ["update_id", "host_phase_2", "control_plane"])]
+    #[clap(
+        long,
+        required_unless_present_any = ["update_id", "host_phase_2", "control_plane", "installinator_doc"]
+    )]
     from_ipcc: bool,
 
     #[clap(
@@ -31,31 +36,100 @@ pub(crate) struct ArtifactIdOpts {
 
     #[clap(
         long,
-        conflicts_with = "from_ipcc",
-        required_unless_present = "from_ipcc"
+        conflicts_with_all = ["from_ipcc", "installinator_doc"],
+        required_unless_present_any = ["from_ipcc", "installinator_doc"],
     )]
     host_phase_2: Option<ArtifactHash>,
 
     #[clap(
         long,
-        conflicts_with = "from_ipcc",
-        required_unless_present = "from_ipcc"
+        conflicts_with_all = ["from_ipcc", "installinator_doc"],
+        required_unless_present_any = ["from_ipcc", "installinator_doc"],
     )]
     control_plane: Option<ArtifactHash>,
+
+    #[clap(
+        long,
+        conflicts_with_all = ["from_ipcc", "host_phase_2", "control_plane"],
+        required_unless_present_any = ["from_ipcc", "host_phase_2", "control_plane"],
+    )]
+    installinator_doc: Option<ArtifactHash>,
 }
 
 impl ArtifactIdOpts {
-    pub(crate) fn resolve(&self) -> Result<InstallinatorImageId> {
+    pub(crate) fn resolve(&self) -> Result<LookupId> {
         if self.from_ipcc {
             let ipcc = Ipcc::new().context("error opening IPCC")?;
-            ipcc.installinator_image_id()
-                .context("error retrieving installinator image ID")
+            let image_id = ipcc
+                .installinator_image_id()
+                .context("error retrieving installinator image ID")?;
+            Ok(LookupId::from_image_id(&image_id))
         } else {
             let update_id = self.update_id.unwrap();
-            let host_phase_2 = self.host_phase_2.unwrap();
-            let control_plane = self.control_plane.unwrap();
+            let kind =
+                if let Some(installinator_doc_hash) = self.installinator_doc {
+                    LookupIdKind::Document(installinator_doc_hash)
+                } else {
+                    LookupIdKind::Hashes {
+                        host_phase_2: self.host_phase_2.unwrap(),
+                        control_plane: self.control_plane.unwrap(),
+                    }
+                };
 
-            Ok(InstallinatorImageId { update_id, host_phase_2, control_plane })
+            Ok(LookupId { update_id, kind })
+        }
+    }
+}
+
+/// Identifiers used by installinator to retrieve artifacts.
+pub(crate) struct LookupId {
+    pub(crate) update_id: MupdateUuid,
+    pub(crate) kind: LookupIdKind,
+}
+
+impl LookupId {
+    fn from_image_id(image_id: &InstallinatorImageId) -> Self {
+        // This sentinel hash is used to indicate that the host phase 2 hash is
+        // actually the hash to the installinator document.
+        let kind = if image_id.control_plane == ArtifactHash([0; 32]) {
+            LookupIdKind::Document(image_id.host_phase_2)
+        } else {
+            LookupIdKind::Hashes {
+                host_phase_2: image_id.host_phase_2,
+                control_plane: image_id.control_plane,
+            }
+        };
+
+        Self { update_id: image_id.update_id, kind }
+    }
+}
+
+/// Either an installinator document hash, or host phase 2 and control plane
+/// hashes.
+pub(crate) enum LookupIdKind {
+    Document(ArtifactHash),
+    Hashes { host_phase_2: ArtifactHash, control_plane: ArtifactHash },
+}
+
+/// The host phase 2 and control plane hashes to download.
+#[derive(Clone, Debug)]
+pub(crate) struct ArtifactsToDownload {
+    pub(crate) host_phase_2: ArtifactHash,
+    pub(crate) control_plane: ArtifactHash,
+}
+
+impl ArtifactsToDownload {
+    pub(crate) fn host_phase_2_id(&self) -> ArtifactHashId {
+        ArtifactHashId {
+            kind: ArtifactKind::HOST_PHASE_2,
+            hash: self.host_phase_2,
+        }
+    }
+
+    pub(crate) fn control_plane_id(&self) -> ArtifactHashId {
+        ArtifactHashId {
+            kind: KnownArtifactKind::ControlPlane.into(),
+            hash: self.control_plane,
         }
     }
 }

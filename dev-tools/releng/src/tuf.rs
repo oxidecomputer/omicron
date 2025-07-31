@@ -21,6 +21,7 @@ use tokio::io::AsyncReadExt;
 use tufaceous_artifact::ArtifactHash;
 use tufaceous_artifact::ArtifactVersion;
 use tufaceous_artifact::KnownArtifactKind;
+use tufaceous_lib::IncludeInstallinatorDocument;
 use tufaceous_lib::Key;
 use tufaceous_lib::assemble::ArtifactManifest;
 use tufaceous_lib::assemble::DeserializedArtifactData;
@@ -143,6 +144,7 @@ pub(crate) async fn build_tuf_repo(
         manifest,
         keys,
         expiry,
+        IncludeInstallinatorDocument::Yes,
         output_dir.join("repo.zip"),
     )
     .build()

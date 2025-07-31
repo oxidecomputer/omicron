@@ -26,6 +26,7 @@ use std::fmt::Debug;
 use tough::editor::signed::SignedRole;
 use tough::schema::Root;
 use tufaceous_artifact::KnownArtifactKind;
+use tufaceous_lib::IncludeInstallinatorDocument;
 use tufaceous_lib::Key;
 use tufaceous_lib::assemble::{ArtifactManifest, OmicronRepoAssembler};
 use tufaceous_lib::assemble::{DeserializedManifest, ManifestTweak};
@@ -86,6 +87,7 @@ impl TestTrustRoot {
             manifest,
             vec![self.key.clone()],
             self.expiry,
+            IncludeInstallinatorDocument::Yes,
             archive_path.to_path_buf(),
         );
         assembler.set_root_role(self.root_role.clone());
