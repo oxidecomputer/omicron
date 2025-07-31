@@ -534,6 +534,8 @@ impl Handler {
                 no_stage0_caboose,
                 // sidecar doesn't have phase 1 flash; any policy is fine
                 HostFlashHashPolicy::assume_already_hashed(),
+                // TODO-K: For now none, change later
+                None,
             ),
             reset_pending: None,
             should_fail_to_respond_signal: None,

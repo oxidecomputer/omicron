@@ -84,6 +84,7 @@ bind_addr = "[::1]:0"
 serial_number = "SimGimlet00"
 manufacturing_root_cert_seed = "01de01de01de01de01de01de01de01de01de01de01de01de01de01de01de01de"
 device_id_cert_seed = "01de000000000000000000000000000000000000000000000000000000000002"
+board = "BOB"
 
 [[simulated_sps.gimlet.network_config]]
 [simulated_sps.gimlet.network_config.simulated]

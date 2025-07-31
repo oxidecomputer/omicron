@@ -100,6 +100,9 @@ pub struct SpCommonConfig {
     /// Fake ereport configuration
     #[serde(default)]
     pub ereport_config: EreportConfig,
+    /// Configurable name of the board in the caboose. If unset, it will be
+    /// populated with default values
+    pub board: Option<String>,
 }
 
 /// Configuration of a simulated SP component
@@ -121,6 +124,7 @@ pub struct SpComponentConfig {
     pub sensors: Vec<SensorConfig>,
 }
 
+// TODO-K: Change config here
 /// Configuration of a simulated sidecar SP
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
 pub struct SidecarConfig {
@@ -128,6 +132,7 @@ pub struct SidecarConfig {
     pub common: SpCommonConfig,
 }
 
+// TODO-K: Change config here
 /// Configuration of a simulated gimlet SP
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
 pub struct GimletConfig {

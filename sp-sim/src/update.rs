@@ -75,6 +75,7 @@ impl SimSpUpdate {
         baseboard_kind: BaseboardKind,
         no_stage0_caboose: bool,
         phase1_hash_policy: HostFlashHashPolicy,
+        sp_board_name: Option<String>,
     ) -> Self {
         const SP_GITC0: &str = "ffffffff";
         const SP_GITC1: &str = "fefefefe";
@@ -94,14 +95,17 @@ impl SimSpUpdate {
         const STAGE0_VERS0: &str = "0.0.200";
         const STAGE0_VERS1: &str = "0.0.200";
 
-        let sp_board = baseboard_kind.sp_board();
+        // TODO-K: This is where the boards are set?
+        let sp_board = if let Some(b) = sp_board_name  {
+            b
+        } else {baseboard_kind.sp_board().to_string()};
         let sp_name = baseboard_kind.sp_name();
         let rot_name = baseboard_kind.rot_name();
 
         let caboose_sp_active = CabooseValue::Caboose(
             hubtools::CabooseBuilder::default()
                 .git_commit(SP_GITC0)
-                .board(sp_board)
+                .board(&sp_board)
                 .name(sp_name)
                 .version(SP_VERS0)
                 .build(),
@@ -109,7 +113,7 @@ impl SimSpUpdate {
         let caboose_sp_inactive = CabooseValue::Caboose(
             hubtools::CabooseBuilder::default()
                 .git_commit(SP_GITC1)
-                .board(sp_board)
+                .board(&sp_board)
                 .name(sp_name)
                 .version(SP_VERS1)
                 .build(),
@@ -659,6 +663,7 @@ pub enum BaseboardKind {
 }
 
 impl BaseboardKind {
+    // TODO-K: This is where the boards are set?
     fn sp_board(&self) -> &str {
         match self {
             BaseboardKind::Gimlet => &SIM_GIMLET_BOARD,
