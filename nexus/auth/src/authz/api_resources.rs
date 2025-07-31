@@ -239,6 +239,50 @@ impl ApiResourceWithRolesType for Fleet {
     type AllowedRoles = FleetRole;
 }
 
+/// Represents the "quiesce" state of Nexus
+///
+/// It is essential that checking actions on this resource *not* access the
+/// database because we cannot do that while quiesced and we *do* want to be
+/// able to read and modify the quiesce state while quiesced.
+#[derive(Clone, Copy, Debug, Serialize, Deserialize, PolarClass)]
+pub struct QuiesceState;
+/// Singleton representing the [`QuiesceState`] itself for authz purposes
+pub const QUIESCE_STATE: QuiesceState = QuiesceState;
+
+impl Eq for QuiesceState {}
+impl PartialEq for QuiesceState {
+    fn eq(&self, _: &Self) -> bool {
+        // There is only one QuiesceState
+        true
+    }
+}
+
+impl AuthorizedResource for QuiesceState {
+    fn load_roles<'fut>(
+        &'fut self,
+        _: &'fut OpContext,
+        _: &'fut authn::Context,
+        _: &'fut mut RoleSet,
+    ) -> BoxFuture<'fut, Result<(), Error>> {
+        // We don't use (database) roles to grant access to the quiesce state.
+        futures::future::ready(Ok(())).boxed()
+    }
+
+    fn on_unauthorized(
+        &self,
+        _: &Authz,
+        error: Error,
+        _: AnyActor,
+        _: Action,
+    ) -> Error {
+        error
+    }
+
+    fn polar_class(&self) -> oso::Class {
+        Self::get_polar_class()
+    }
+}
+
 // TODO: refactor synthetic resources below
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
