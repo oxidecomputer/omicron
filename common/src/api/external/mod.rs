@@ -2587,6 +2587,16 @@ pub struct AddressLotCreateResponse {
     pub blocks: Vec<AddressLotBlock>,
 }
 
+/// An address lot and associated blocks resulting from viewing an address lot.
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+pub struct AddressLotViewResponse {
+    /// The address lot.
+    pub lot: AddressLot,
+
+    /// The address lot blocks.
+    pub blocks: Vec<AddressLotBlock>,
+}
+
 /// Represents an address lot object, containing the id of the lot that can be
 /// used in other API calls.
 // TODO Add kind attribute to AddressLot
