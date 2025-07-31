@@ -190,6 +190,28 @@ fn mgs_update_status(
     // We check this before anything else because if we get back
     // `MgsUpdateStatus::Done`, then we're done no matter what else is true.
     let caboose_status = match &update.details {
+        PendingMgsUpdateDetails::RotBootloader {
+            expected_stage0_version,
+            expected_stage0_next_version,
+        } => {
+            let Some(stage0_caboose) =
+                inventory.caboose_for(CabooseWhich::Stage0, baseboard_id)
+            else {
+                return Err(MgsUpdateStatusError::MissingActiveCaboose);
+            };
+
+            let found_stage0_next_version = inventory
+                .caboose_for(CabooseWhich::Stage0Next, baseboard_id)
+                .map(|c| c.caboose.version.as_ref());
+
+            Ok(mgs_update_status_rot_bootloader(
+                desired_version,
+                expected_stage0_version,
+                expected_stage0_next_version,
+                &stage0_caboose.caboose.version,
+                found_stage0_next_version,
+            ))
+        }
         PendingMgsUpdateDetails::Sp {
             expected_active_version,
             expected_inactive_version,
@@ -212,8 +234,7 @@ fn mgs_update_status(
                 found_inactive_version,
             ))
         }
-        PendingMgsUpdateDetails::Rot { .. }
-        | PendingMgsUpdateDetails::RotBootloader { .. } => {
+        PendingMgsUpdateDetails::Rot { .. } => {
             return Err(MgsUpdateStatusError::NotYetImplemented);
         }
     };
@@ -255,6 +276,82 @@ fn mgs_update_status(
         Ok(MgsUpdateStatus::Impossible)
     } else {
         caboose_status
+    }
+}
+
+/// Compares a configured SP update with information from inventory and
+/// determines the current status of the update.  See `MgsUpdateStatus`.
+fn mgs_update_status_rot_bootloader(
+    desired_version: &ArtifactVersion,
+    expected_stage0_version: &ArtifactVersion,
+    expected_stage0_next_version: &ExpectedVersion,
+    found_stage0_version: &str,
+    found_stage0_next_version: Option<&str>,
+) -> MgsUpdateStatus {
+    if found_stage0_version == desired_version.as_str() {
+        // If we find the desired version in the active slot, we're done.
+        return MgsUpdateStatus::Done;
+    }
+
+    // The update hasn't completed.
+    //
+    // Check to make sure the contents of the active slot are still what they
+    // were when we configured this update.  If not, then this update cannot
+    // proceed as currently configured.  It will fail its precondition check.
+    if found_stage0_version != expected_stage0_version.as_str() {
+        return MgsUpdateStatus::Impossible;
+    }
+
+    // TODO-K: All SP components have the same logic below. Make it into a
+    // common function
+
+    // Similarly, check the contents of the inactive slot to determine if it
+    // still matches what we saw when we configured this update.  If not, then
+    // this update cannot proceed as currently configured.  It will fail its
+    // precondition check.
+    //
+    // This logic is more complex than for the active slot because unlike the
+    // active slot, it's possible for both the found contents and the expected
+    // contents to be missing and that's not necessarily an error.
+    match (found_stage0_next_version, expected_stage0_next_version) {
+        (Some(_), ExpectedVersion::NoValidVersion) => {
+            // We expected nothing in the inactive slot, but found something.
+            MgsUpdateStatus::Impossible
+        }
+        (Some(found), ExpectedVersion::Version(expected)) => {
+            if found == expected.as_str() {
+                // We found something in the inactive slot that matches what we
+                // expected.
+                MgsUpdateStatus::NotDone
+            } else {
+                // We found something in the inactive slot that differs from
+                // what we expected.
+                MgsUpdateStatus::Impossible
+            }
+        }
+        (None, ExpectedVersion::Version(_)) => {
+            // We expected something in the inactive slot, but found nothing.
+            // This case is tricky because we can't tell from the inventory
+            // whether we transiently failed to fetch the caboose for some
+            // reason or whether the caboose is actually garbage.  We choose to
+            // assume that it's actually garbage, which would mean that this
+            // update as-configured is impossible.  This will cause us to
+            // generate a new update that expects garbage in the inactive slot.
+            // If we're right, great.  If we're wrong, then *that* update will
+            // be impossible to complete, but we should fix this again if the
+            // transient error goes away.
+            //
+            // If we instead assumed that this was a transient error, we'd do
+            // nothing here instead.  But if the caboose was really missing,
+            // then we'd get stuck forever waiting for something that would
+            // never happen.
+            MgsUpdateStatus::Impossible
+        }
+        (None, ExpectedVersion::NoValidVersion) => {
+            // We expected nothing in the inactive slot and found nothing there.
+            // No problem!
+            MgsUpdateStatus::NotDone
+        }
     }
 }
 
@@ -339,11 +436,161 @@ fn try_make_update(
     inventory: &Collection,
     current_artifacts: &TufRepoDescription,
 ) -> Option<PendingMgsUpdate> {
-    // TODO When we add support for planning RoT, RoT bootloader, and host OS
+    // TODO When we add support for planning RoT, and host OS
     // updates, we'll try these in a hardcoded priority order until any of them
     // returns `Some`.  The order is described in RFD 565 section "Update
-    // Sequence".  For now, we only plan SP updates.
-    try_make_update_sp(log, baseboard_id, inventory, current_artifacts)
+    // Sequence".  For now, we only plan SP and RoT bootloader updates.
+    try_make_update_rot_bootloader(
+        log,
+        baseboard_id,
+        inventory,
+        current_artifacts,
+    )
+    .or_else(|| {
+        try_make_update_sp(log, baseboard_id, inventory, current_artifacts)
+    })
+}
+
+/// Determine if the given baseboard needs an RoT bootloader update and, if so,
+/// returns it.
+fn try_make_update_rot_bootloader(
+    log: &slog::Logger,
+    baseboard_id: &Arc<BaseboardId>,
+    inventory: &Collection,
+    current_artifacts: &TufRepoDescription,
+) -> Option<PendingMgsUpdate> {
+    let Some(sp_info) = inventory.sps.get(baseboard_id) else {
+        warn!(
+            log,
+            "cannot configure RoT bootloader update for board \
+             (missing SP info from inventory)";
+            baseboard_id
+        );
+        return None;
+    };
+
+    let Some(stage0_caboose) =
+        inventory.caboose_for(CabooseWhich::Stage0, baseboard_id)
+    else {
+        warn!(
+            log,
+            "cannot configure RoT bootloader update for board \
+             (missing stage0 caboose from inventory)";
+            baseboard_id,
+        );
+        return None;
+    };
+
+    let Ok(expected_stage0_version) = stage0_caboose.caboose.version.parse()
+    else {
+        warn!(
+            log,
+            "cannot configure RoT bootloader update for board \
+             (cannot parse current stage0 version as an ArtifactVersion)";
+            baseboard_id,
+            "found_version" => &stage0_caboose.caboose.version,
+        );
+        return None;
+    };
+
+    let board = &stage0_caboose.caboose.board;
+    let matching_artifacts: Vec<_> = current_artifacts
+        .artifacts
+        .iter()
+        .filter(|a| {
+            // A matching RoT bootloader artifact will have:
+            //
+            // - "name" matching the board name (found above from caboose)
+            // - "kind" matching one of the known SP kinds
+            // - "rkth" verified against the CMPA/CFPA found in inventory
+
+            if a.id.name != *board {
+                return false;
+            }
+
+            match a.id.kind.to_known() {
+                None => false,
+                Some(
+                    KnownArtifactKind::GimletRotBootloader
+                    | KnownArtifactKind::PscRotBootloader
+                    | KnownArtifactKind::SwitchRotBootloader,
+                ) => true,
+                Some(
+                    KnownArtifactKind::GimletRot
+                    | KnownArtifactKind::Host
+                    | KnownArtifactKind::Trampoline
+                    | KnownArtifactKind::ControlPlane
+                    | KnownArtifactKind::Zone
+                    | KnownArtifactKind::PscRot
+                    | KnownArtifactKind::SwitchRot
+                    | KnownArtifactKind::GimletSp
+                    | KnownArtifactKind::PscSp
+                    | KnownArtifactKind::SwitchSp,
+                ) => false,
+            }
+
+            // TODO-K: Verify rkth value against CMPA/CFPA
+        })
+        .collect();
+    if matching_artifacts.is_empty() {
+        warn!(
+            log,
+            "cannot configure RoT bootloader update for board (no matching artifact)";
+            baseboard_id,
+        );
+        return None;
+    }
+
+    if matching_artifacts.len() > 1 {
+        // This should be impossible unless we shipped a TUF repo with multiple
+        // artifacts for the same board and with the same signature. But it
+        // doesn't prevent us from picking one and proceeding.
+        // Make a note and proceed.
+        warn!(
+            log,
+            "found more than one matching artifact for RoT bootloader update"
+        );
+    }
+
+    let artifact = matching_artifacts[0];
+
+    // If the artifact's version matches what's deployed, then no update is
+    // needed.
+    if artifact.id.version == expected_stage0_version {
+        debug!(log, "no RoT bootloader update needed for board"; baseboard_id);
+        return None;
+    }
+
+    // Begin configuring an update.
+    let expected_stage0_next_version = match inventory
+        .caboose_for(CabooseWhich::Stage0Next, baseboard_id)
+        .map(|c| c.caboose.version.parse::<ArtifactVersion>())
+        .transpose()
+    {
+        Ok(None) => ExpectedVersion::NoValidVersion,
+        Ok(Some(v)) => ExpectedVersion::Version(v),
+        Err(_) => {
+            warn!(
+                log,
+                "cannot configure RoT bootloader update for board \
+                 (found stage0 next contents but version was not valid)";
+                baseboard_id
+            );
+            return None;
+        }
+    };
+
+    Some(PendingMgsUpdate {
+        baseboard_id: baseboard_id.clone(),
+        sp_type: sp_info.sp_type,
+        slot_id: sp_info.sp_slot,
+        details: PendingMgsUpdateDetails::RotBootloader {
+            expected_stage0_version,
+            expected_stage0_next_version,
+        },
+        artifact_hash: artifact.hash,
+        artifact_version: artifact.id.version.clone(),
+    })
 }
 
 /// Determine if the given baseboard needs an SP update and, if so, returns it.
