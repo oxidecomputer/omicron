@@ -388,7 +388,8 @@ impl SpComponentUpdateHelper for ReconfiguratorRotUpdater {
                             ..
                         } => expected_active_slot.slot().toggled().to_u16(),
                         PendingMgsUpdateDetails::Sp { .. }
-                        | PendingMgsUpdateDetails::RotBootloader { .. } => {
+                        | PendingMgsUpdateDetails::RotBootloader { .. }
+                        | PendingMgsUpdateDetails::HostPhase1(_) => {
                             unreachable!(
                                 "pending MGS update details within \
                                  ReconfiguratorRotUpdater will always be \

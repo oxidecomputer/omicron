@@ -3,6 +3,7 @@
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 use crate::common_sp_update::error_means_caboose_is_invalid;
+use gateway_client::HostPhase1HashError;
 use gateway_client::SpComponent;
 use gateway_client::types::GetRotBootInfoParams;
 use gateway_client::types::RotState;
@@ -14,7 +15,10 @@ use gateway_types::rot::RotSlot;
 use nexus_types::deployment::ExpectedActiveRotSlot;
 use nexus_types::deployment::ExpectedVersion;
 use nexus_types::inventory::BaseboardId;
+use omicron_common::disk::M2Slot;
 use slog_error_chain::InlineErrorChain;
+use std::time::Duration;
+use tufaceous_artifact::ArtifactHash;
 use tufaceous_artifact::ArtifactVersion;
 
 pub type GatewayClientError =
@@ -59,6 +63,12 @@ pub struct SpTestState {
 
     /// RoT boot information
     pub sp_boot_info: RotState,
+
+    /// Host phase 1 information; these are optional because they only exist for
+    /// `SpType::Sled` SPs.
+    pub host_phase_1_active_slot: Option<M2Slot>,
+    pub host_phase_1_slot_a_hash: Option<ArtifactHash>,
+    pub host_phase_1_slot_b_hash: Option<ArtifactHash>,
 }
 
 impl SpTestState {
@@ -134,6 +144,70 @@ impl SpTestState {
             )
             .await?
             .into_inner();
+
+        // Read these values only for sleds.
+        let host_phase_1_active_slot;
+        let host_phase_1_slot_a_hash;
+        let host_phase_1_slot_b_hash;
+        if matches!(sp_type, SpType::Sled) {
+            host_phase_1_active_slot = Some(
+                M2Slot::from_mgs_firmware_slot(
+                    mgs_client
+                        .sp_component_active_slot_get(
+                            sp_type,
+                            sp_slot,
+                            SpComponent::HOST_CPU_BOOT_FLASH.const_as_str(),
+                        )
+                        .await?
+                        .into_inner()
+                        .slot,
+                )
+                .expect("simulated SP always returns valid slot"),
+            );
+            host_phase_1_slot_a_hash = Some(
+                match mgs_client
+                    .host_phase_1_flash_hash_calculate_with_timeout(
+                        sp_type,
+                        sp_slot,
+                        0,
+                        Duration::from_secs(30),
+                    )
+                    .await
+                {
+                    Ok(hash) => ArtifactHash(hash),
+                    Err(HostPhase1HashError::RequestError { err, .. }) => {
+                        return Err(err);
+                    }
+                    Err(err) => {
+                        panic!("unexpected error from simulator: {err}")
+                    }
+                },
+            );
+            host_phase_1_slot_b_hash = Some(
+                match mgs_client
+                    .host_phase_1_flash_hash_calculate_with_timeout(
+                        sp_type,
+                        sp_slot,
+                        1,
+                        Duration::from_secs(30),
+                    )
+                    .await
+                {
+                    Ok(hash) => ArtifactHash(hash),
+                    Err(HostPhase1HashError::RequestError { err, .. }) => {
+                        return Err(err);
+                    }
+                    Err(err) => {
+                        panic!("unexpected error from simulator: {err}")
+                    }
+                },
+            );
+        } else {
+            host_phase_1_active_slot = None;
+            host_phase_1_slot_a_hash = None;
+            host_phase_1_slot_b_hash = None;
+        }
+
         Ok(SpTestState {
             caboose_sp_active,
             caboose_sp_inactive: ignore_invalid_caboose_error(
@@ -147,6 +221,9 @@ impl SpTestState {
             ),
             sp_state: sp_info,
             sp_boot_info,
+            host_phase_1_active_slot,
+            host_phase_1_slot_a_hash,
+            host_phase_1_slot_b_hash,
         })
     }
 
@@ -309,6 +386,36 @@ impl SpTestState {
                 v.version.parse().expect("valid stage0 next version"),
             ),
             None => ExpectedVersion::NoValidVersion,
+        }
+    }
+
+    pub fn expect_host_phase_1_active_slot(&self) -> M2Slot {
+        self.host_phase_1_active_slot
+            .expect("should be called only for sled SPs")
+    }
+
+    pub fn expect_host_phase_1_active_hash(&self) -> ArtifactHash {
+        let (active, _inactive) = self.expect_host_phase_1_hashes();
+        active
+    }
+
+    pub fn expect_host_phase_1_inactive_hash(&self) -> ArtifactHash {
+        let (_active, inactive) = self.expect_host_phase_1_hashes();
+        inactive
+    }
+
+    // Returns (active, inactive); helper to avoid needing to unpack the
+    // active/inactive slot in both of this method's callers.
+    fn expect_host_phase_1_hashes(&self) -> (ArtifactHash, ArtifactHash) {
+        let a = self
+            .host_phase_1_slot_a_hash
+            .expect("should be called only for sled SPs");
+        let b = self
+            .host_phase_1_slot_b_hash
+            .expect("should be called only for sled SPs");
+        match self.expect_host_phase_1_active_slot() {
+            M2Slot::A => (a, b),
+            M2Slot::B => (b, a),
         }
     }
 }

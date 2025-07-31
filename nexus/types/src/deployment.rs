@@ -1455,12 +1455,17 @@ pub enum PendingMgsUpdateDetails {
         /// expected contents of the stage 0 next
         expected_stage0_next_version: ExpectedVersion,
     },
+    /// the host OS is being updated
+    ///
+    /// We write the phase 1 via MGS, and have a precheck condition that
+    /// sled-agent has already written the matching phase 2.
+    HostPhase1(PendingMgsUpdateHostPhase1Details),
 }
 
 impl slog::KV for PendingMgsUpdateDetails {
     fn serialize(
         &self,
-        _record: &slog::Record,
+        record: &slog::Record,
         serializer: &mut dyn slog::Serializer,
     ) -> slog::Result {
         match self {
@@ -1525,7 +1530,138 @@ impl slog::KV for PendingMgsUpdateDetails {
                     &format!("{:?}", expected_stage0_next_version),
                 )
             }
+            PendingMgsUpdateDetails::HostPhase1(details) => {
+                serializer.emit_str(Key::from("component"), "host_phase_1")?;
+                slog::KV::serialize(details, record, serializer)
+            }
         }
+    }
+}
+
+/// Describes the host-phase-1-specific details of a PendingMgsUpdate
+#[derive(
+    Clone, Debug, Eq, PartialEq, JsonSchema, Deserialize, Serialize, Diffable,
+)]
+#[serde(rename_all = "snake_case")]
+pub struct PendingMgsUpdateHostPhase1Details {
+    pub expected_active_slot: ExpectedActiveHostOsSlot,
+    pub expected_inactive_artifact: ExpectedInactiveHostOsArtifact,
+    pub sled_agent_address: SocketAddrV6,
+}
+
+impl slog::KV for PendingMgsUpdateHostPhase1Details {
+    fn serialize(
+        &self,
+        record: &slog::Record,
+        serializer: &mut dyn slog::Serializer,
+    ) -> slog::Result {
+        let Self {
+            expected_active_slot,
+            expected_inactive_artifact,
+            sled_agent_address,
+        } = self;
+        serializer.emit_str(
+            Key::from("sled_agent_address"),
+            &sled_agent_address.to_string(),
+        )?;
+
+        slog::KV::serialize(expected_active_slot, record, serializer)?;
+        slog::KV::serialize(expected_inactive_artifact, record, serializer)
+    }
+}
+
+#[derive(
+    Clone, Debug, Eq, PartialEq, JsonSchema, Deserialize, Serialize, Diffable,
+)]
+#[serde(rename_all = "snake_case")]
+pub struct ExpectedActiveHostOsSlot {
+    /// Which slot is currently active according to the SP.
+    ///
+    /// This controls which slot will be used the next time the sled boots; it
+    /// will _usually_ match `boot_disk`, but differs in the window of time
+    /// between telling the SP to change which slot to use and the host OS
+    /// rebooting to actually use that slot.
+    pub phase_1_slot: M2Slot,
+    /// Which slot the host OS most recently booted from.
+    pub boot_disk: M2Slot,
+    /// The hash of the currently-active phase 1 artifact.
+    ///
+    /// We should always be able to fetch this. Even if the phase 1 contents
+    /// themselves have been corrupted (very scary for the active slot!), the SP
+    /// can still hash those contents.
+    pub phase_1: ArtifactHash,
+    /// The hash of the currently-active phase 2 artifact.
+    ///
+    /// It's possible sled-agent won't be able to report this value, but that
+    /// would indicate that we don't know the version currently running. The
+    /// planner wouldn't stage an update without knowing the current version, so
+    /// if something has gone wrong in the meantime we won't proceede either.
+    pub phase_2: ArtifactHash,
+}
+
+impl slog::KV for ExpectedActiveHostOsSlot {
+    fn serialize(
+        &self,
+        _record: &slog::Record,
+        serializer: &mut dyn slog::Serializer,
+    ) -> slog::Result {
+        let Self { phase_1_slot, boot_disk, phase_1, phase_2 } = self;
+        serializer.emit_str(
+            Key::from("active_phase_1_slot"),
+            &format!("{phase_1_slot:?}"),
+        )?;
+        serializer
+            .emit_str(Key::from("boot_disk"), &format!("{boot_disk:?}"))?;
+        serializer.emit_str(
+            Key::from("active_phase_1_artifact"),
+            &phase_1.to_string(),
+        )?;
+        serializer.emit_str(
+            Key::from("active_phase_2_artifact"),
+            &phase_2.to_string(),
+        )?;
+        Ok(())
+    }
+}
+
+#[derive(
+    Clone, Debug, Eq, PartialEq, JsonSchema, Deserialize, Serialize, Diffable,
+)]
+#[serde(rename_all = "snake_case")]
+pub struct ExpectedInactiveHostOsArtifact {
+    /// The hash of the currently-inactive phase 1 artifact.
+    ///
+    /// We should always be able to fetch this. Even if the phase 1 contents
+    /// of the inactive slot are entirely bogus, the SP can still hash those
+    /// contents.
+    /// can still hash those contents.
+    pub phase_1: ArtifactHash,
+    /// The hash of the currently-inactive phase 2 artifact.
+    ///
+    /// It's entirely possible that a sled needing a host OS update has no valid
+    /// artifact in its inactive slot. However, a precondition for us performing
+    /// a phase 1 update is that `sled-agent` on the target sled has already
+    /// written the paired phase 2 artifact to the inactive slot; therefore, we
+    /// don't need to be able to represent an invalid inactive slot.
+    pub phase_2: ArtifactHash,
+}
+
+impl slog::KV for ExpectedInactiveHostOsArtifact {
+    fn serialize(
+        &self,
+        _record: &slog::Record,
+        serializer: &mut dyn slog::Serializer,
+    ) -> slog::Result {
+        let Self { phase_1, phase_2 } = self;
+        serializer.emit_str(
+            Key::from("inactive_phase_1_artifact"),
+            &phase_1.to_string(),
+        )?;
+        serializer.emit_str(
+            Key::from("inactive_phase_2_artifact"),
+            &phase_2.to_string(),
+        )?;
+        Ok(())
     }
 }
 

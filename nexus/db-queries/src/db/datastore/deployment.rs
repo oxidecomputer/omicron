@@ -807,8 +807,11 @@ impl DataStore {
                                 _expected_pending_persistent_boot_preference,
                                 _expected_transient_boot_preference,
                             ) = update_dsl::bp_pending_mgs_update_rot::all_columns();
-                         },
-                        PendingMgsUpdateDetails::RotBootloader { expected_stage0_version, expected_stage0_next_version } => {
+                        },
+                        PendingMgsUpdateDetails::RotBootloader {
+                            expected_stage0_version,
+                            expected_stage0_next_version,
+                        } => {
                             let db_blueprint_id = DbTypedUuid::from(
                                 blueprint_id
                             ).into_sql::<diesel::sql_types::Uuid>();
@@ -922,7 +925,9 @@ impl DataStore {
                                 _expected_stage0_version,
                                 _expected_stage0_next_version,
                             ) = update_dsl::bp_pending_mgs_update_rot_bootloader::all_columns();
-                        }
+                        },
+                        // TODO: Implement
+                        PendingMgsUpdateDetails::HostPhase1(_) => continue,
                     };
                 }
 
