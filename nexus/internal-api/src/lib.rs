@@ -28,7 +28,7 @@ use nexus_types::{
             SledAgentInfo, SwitchPutRequest, SwitchPutResponse,
         },
         views::{
-            BackgroundTask, DemoSaga, Ipv4NatEntryView, MgsUpdateDriverStatus,
+            BackgroundTask, DemoSaga, MgsUpdateDriverStatus, NatEntryView,
             Saga, UpdateStatus,
         },
     },
@@ -395,7 +395,7 @@ pub trait NexusInternalApi {
         rqctx: RequestContext<Self::Context>,
         path_params: Path<RpwNatPathParam>,
         query_params: Query<RpwNatQueryParam>,
-    ) -> Result<HttpResponseOk<Vec<Ipv4NatEntryView>>, HttpError>;
+    ) -> Result<HttpResponseOk<Vec<NatEntryView>>, HttpError>;
 
     // APIs for managing blueprints
     //

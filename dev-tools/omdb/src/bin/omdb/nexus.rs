@@ -909,7 +909,7 @@ async fn cmd_nexus_background_tasks_show(
         "dns_config_external",
         "dns_servers_external",
         "dns_propagation_external",
-        "nat_v4_garbage_collector",
+        "nat_garbage_collector",
         "blueprint_loader",
         "blueprint_executor",
     ] {
