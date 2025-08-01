@@ -619,6 +619,7 @@ impl DiskManagementError {
     Deserialize,
     Serialize,
     JsonSchema,
+    Diffable,
     strum::EnumIter,
 )]
 pub enum M2Slot {
@@ -659,6 +660,21 @@ impl fmt::Display for M2Slot {
         match self {
             Self::A => f.write_str("A"),
             Self::B => f.write_str("B"),
+        }
+    }
+}
+
+impl FromStr for M2Slot {
+    type Err = String;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        match s {
+            "a" | "A" => Ok(Self::A),
+            "b" | "B" => Ok(Self::B),
+            _ => Err(format!(
+                "unrecognized value {s} for M2 slot. \
+                 Must be one of `a`, `A`, `b`, or `B`",
+            )),
         }
     }
 }

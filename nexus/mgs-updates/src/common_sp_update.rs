@@ -7,6 +7,7 @@
 
 use super::MgsClients;
 use super::UpdateProgress;
+use crate::host_phase1_updater::ReconfiguratorHostPhase1Updater;
 use crate::rot_bootloader_updater::ReconfiguratorRotBootloaderUpdater;
 use crate::rot_updater::ReconfiguratorRotUpdater;
 use crate::sp_updater::ReconfiguratorSpUpdater;
@@ -17,11 +18,15 @@ use gateway_types::rot::RotSlot;
 use nexus_types::deployment::ExpectedVersion;
 use nexus_types::deployment::PendingMgsUpdate;
 use nexus_types::deployment::PendingMgsUpdateDetails;
+use omicron_common::disk::M2Slot;
 use slog::Logger;
 use slog::{debug, error, info, warn};
+use std::net::SocketAddrV6;
 use std::time::Duration;
 use thiserror::Error;
 use tokio::sync::watch;
+use tufaceous_artifact::ArtifactHash;
+use tufaceous_artifact::ArtifactKind;
 use tufaceous_artifact::ArtifactVersion;
 use uuid::Uuid;
 
@@ -29,6 +34,8 @@ use uuid::Uuid;
 pub(crate) const STATUS_POLL_INTERVAL: Duration = Duration::from_secs(3);
 
 type GatewayClientError = gateway_client::Error<gateway_client::types::Error>;
+type SledAgentClientError =
+    sled_agent_client::Error<sled_agent_client::types::Error>;
 
 /// Error type returned when an update to a component managed by the SP fails.
 ///
@@ -297,6 +304,9 @@ impl SpComponentUpdateHelper {
                 PendingMgsUpdateDetails::RotBootloader { .. } => {
                     Box::new(ReconfiguratorRotBootloaderUpdater {})
                 }
+                PendingMgsUpdateDetails::HostPhase1(details) => Box::new(
+                    ReconfiguratorHostPhase1Updater::new(details.clone()),
+                ),
             };
         Self { inner }
     }
@@ -343,6 +353,13 @@ pub enum PrecheckError {
     #[error("communicating with RoT: {message:?}")]
     RotCommunicationFailed { message: String },
 
+    #[error("fetching inventory from sled-agent at {address}")]
+    SledAgentInventory {
+        address: SocketAddrV6,
+        #[source]
+        err: SledAgentClientError,
+    },
+
     #[error(
         "in {sp_type} slot {slot_id}, expected to find \
          part {expected_part:?} serial {expected_serial:?}, but found \
@@ -369,9 +386,63 @@ pub enum PrecheckError {
     WrongActiveVersion { expected: ArtifactVersion, found: String },
 
     #[error(
+        "expected to find active {kind} artifact {expected}, but found {found}"
+    )]
+    WrongActiveArtifact {
+        kind: ArtifactKind,
+        expected: ArtifactHash,
+        found: ArtifactHash,
+    },
+
+    #[error("failed to determine current active {kind} artifact: {err}")]
+    DeterminingActiveArtifact { kind: ArtifactKind, err: String },
+
+    #[error(
         "expected to find inactive version {expected:?}, but found {found:?}"
     )]
     WrongInactiveVersion { expected: ExpectedVersion, found: FoundVersion },
+
+    #[error(
+        "expected to find inactive {kind} artifact {expected}, \
+         but found {found}"
+    )]
+    WrongInactiveArtifact {
+        kind: ArtifactKind,
+        expected: ArtifactHash,
+        found: ArtifactHash,
+    },
+
+    #[error(
+        "failed to determine current inactive host OS phase 2 artifact: {err}"
+    )]
+    DeterminingInactiveHostPhase2 { err: String },
+
+    #[error("inventory missing `last_reconciliation` result")]
+    SledAgentInventoryMissingLastReconciliation,
+
+    #[error(
+        "invalid host phase 1 slot reported by SP (expected 0 or 1, got {slot})"
+    )]
+    InvalidHostPhase1Slot { slot: u16 },
+
+    #[error(
+        "expected to find active host phase 1 slot {expected}, \
+         but found {found}"
+    )]
+    WrongActiveHostPhase1Slot { expected: M2Slot, found: M2Slot },
+
+    #[error(
+        "expected to find host OS boot disk {expected:?}, but found {found:?}"
+    )]
+    WrongHostOsBootDisk { expected: M2Slot, found: M2Slot },
+
+    #[error(
+        "active phase 1 slot {phase1:?} does not match boot disk {boot_disk:?}"
+    )]
+    MismatchedHostOsActiveSlot { phase1: M2Slot, boot_disk: M2Slot },
+
+    #[error("inventory reported an error determining boot disk: {err}")]
+    DeterminingHostOsBootDisk { err: String },
 }
 
 #[derive(Debug, thiserror::Error)]
