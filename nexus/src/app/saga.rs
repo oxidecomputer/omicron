@@ -472,14 +472,16 @@ impl RunnableSaga {
             .map_err(|error| Error::internal_error(&format!("{:#}", error)))?;
 
         // When the saga finishes, we need to update our state to reflect that
-        // it's no longer running.  We're provided a Future that we can use to
-        // wait for the saga to finish.  We also provide an equivalent Future to
-        // our consumer (in the `RunningSaga` that we return).  It'd be handy to
-        // just hook into that one, but there's a hitch: our consumer is allowed
-        // to drop that Future if they don't care when the saga finishes.  But
-        // we do still care!  So we need to create our own task to poll the
-        // completion future that we were given and pass along the result to the
-        // Future that we provide our consumer.
+        // it's no longer running (so that if Nexus is quiescing, the quiesce
+        // task knows it can proceed to the next step).  We're provided a Future
+        // that we can use to wait for the saga to finish.  We also provide an
+        // equivalent Future to our consumer (in the `RunningSaga` that we
+        // return).  It'd be handy to just hook into that one, but there's a
+        // hitch: our consumer is allowed to drop that Future if they don't care
+        // when the saga finishes.  But we always care (for the reason mentioned
+        // above)!  So we need to create our own task to poll the completion
+        // future that we were given and pass along the result to the Future
+        // that we provide our consumer.
         let saga_ref = self.saga_ref;
         let fut = self.saga_completion_future;
 

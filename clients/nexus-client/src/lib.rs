@@ -89,20 +89,20 @@ progenitor::generate_api!(
 );
 
 impl IdOrdItem for types::RunningSagaInfo {
-    type Key<'a> = &'a Uuid;
+    type Key<'a> = Uuid;
 
     fn key(&self) -> Self::Key<'_> {
-        &self.saga_id
+        self.saga_id
     }
 
     id_upcast!();
 }
 
 impl IdOrdItem for types::HeldDbClaimInfo {
-    type Key<'a> = &'a u64;
+    type Key<'a> = u64;
 
     fn key(&self) -> Self::Key<'_> {
-        &self.id
+        self.id
     }
 
     id_upcast!();

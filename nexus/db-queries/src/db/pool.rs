@@ -29,6 +29,9 @@ use tokio::sync::watch;
 ///
 /// Expected to be used as the primary interface to the database.
 pub struct Pool {
+    // IDs are assigned to each connection, acting as keys within the Quiesce
+    // state.  These are used to track the set of in-use connections and
+    // associated metadata.
     next_id: AtomicU64,
     inner: qorb::pool::Pool<AsyncConnection>,
     log: Logger,
@@ -192,7 +195,7 @@ impl Pool {
 
     /// Returns a connection from the pool
     pub async fn claim(&self) -> Result<DataStoreConnection, Error> {
-        let id = self.next_id.fetch_add(1, Ordering::SeqCst);
+        let id = self.next_id.fetch_add(1, Ordering::Relaxed);
         let held_since = Utc::now();
         let debug = Backtrace::force_capture().to_string();
         let allowed = self.quiesce.send_if_modified(|q| {
