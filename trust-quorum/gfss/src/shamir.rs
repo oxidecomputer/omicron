@@ -23,7 +23,17 @@ pub enum SplitError {
     TooFewTotalShares { n: u8, k: u8 },
 }
 
-#[derive(Debug, Clone, thiserror::Error, PartialEq, Eq)]
+#[derive(
+    Debug,
+    Clone,
+    thiserror::Error,
+    PartialEq,
+    Eq,
+    PartialOrd,
+    Ord,
+    Serialize,
+    Deserialize,
+)]
 pub enum CombineError {
     #[error("must be at least 2 shares to combine")]
     TooFewShares,

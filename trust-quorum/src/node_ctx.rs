@@ -4,7 +4,9 @@
 
 //! Parameter to Node API calls that allows interaction with the system at large
 
-use crate::{Envelope, PeerMsg, PeerMsgKind, PersistentState, PlatformId};
+use crate::{
+    Alarm, Envelope, PeerMsg, PeerMsgKind, PersistentState, PlatformId,
+};
 use std::collections::BTreeSet;
 
 /// An API shared by [`NodeCallerCtx`] and [`NodeHandlerCtx`]
@@ -12,6 +14,7 @@ pub trait NodeCommonCtx {
     fn platform_id(&self) -> &PlatformId;
     fn persistent_state(&self) -> &PersistentState;
     fn connected(&self) -> &BTreeSet<PlatformId>;
+    fn alarms(&self) -> &BTreeSet<Alarm>;
 }
 
 /// An API for an [`NodeCtx`] usable from a [`crate::Node`]
@@ -54,6 +57,9 @@ pub trait NodeHandlerCtx: NodeCommonCtx {
 
     /// Remove a peer from the connected set
     fn remove_connection(&mut self, id: &PlatformId);
+
+    /// Record (in-memory) that an alarm has occurred
+    fn raise_alarm(&mut self, alarm: Alarm);
 }
 
 /// Common parameter to [`crate::Node`] methods
@@ -79,6 +85,9 @@ pub struct NodeCtx {
 
     /// Connected peer nodes
     connected: BTreeSet<PlatformId>,
+
+    /// Any alarms that have occurred
+    alarms: BTreeSet<Alarm>,
 }
 
 impl NodeCtx {
@@ -89,6 +98,7 @@ impl NodeCtx {
             persistent_state_changed: false,
             outgoing: Vec::new(),
             connected: BTreeSet::new(),
+            alarms: BTreeSet::new(),
         }
     }
 }
@@ -104,6 +114,10 @@ impl NodeCommonCtx for NodeCtx {
 
     fn connected(&self) -> &BTreeSet<PlatformId> {
         &self.connected
+    }
+
+    fn alarms(&self) -> &BTreeSet<Alarm> {
+        &self.alarms
     }
 }
 
@@ -137,6 +151,10 @@ impl NodeHandlerCtx for NodeCtx {
 
     fn remove_connection(&mut self, id: &PlatformId) {
         self.connected.remove(id);
+    }
+
+    fn raise_alarm(&mut self, alarm: Alarm) {
+        self.alarms.insert(alarm);
     }
 }
 
