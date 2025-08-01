@@ -240,7 +240,7 @@ fn make_mgs_clients(backends: &AllBackends, log: &slog::Logger) -> MgsClients {
 pub(crate) async fn apply_update(
     artifacts: Arc<ArtifactCache>,
     sp_update: &SpComponentUpdate,
-    update_helper: &(dyn SpComponentUpdateHelper + Send + Sync),
+    update_helper: &SpComponentUpdateHelper,
     mgs_rx: watch::Receiver<AllBackends>,
     update: &PendingMgsUpdate,
     status: UpdateAttemptStatusUpdater,
@@ -679,7 +679,7 @@ fn post_update_timeout(update: &PendingMgsUpdate) -> Duration {
 /// (after the update).
 async fn wait_for_update_done(
     log: &slog::Logger,
-    updater: &(dyn SpComponentUpdateHelper + Send + Sync),
+    updater: &SpComponentUpdateHelper,
     mgs_clients: &mut MgsClients,
     update: &PendingMgsUpdate,
     timeout: Duration,

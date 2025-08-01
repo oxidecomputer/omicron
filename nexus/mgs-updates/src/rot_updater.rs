@@ -9,7 +9,7 @@ use super::SpComponentUpdateError;
 use super::UpdateProgress;
 use super::common_sp_update::SpComponentUpdater;
 use super::common_sp_update::deliver_update;
-use crate::SpComponentUpdateHelper;
+use crate::SpComponentUpdateHelperImpl;
 use crate::common_sp_update::FoundVersion;
 use crate::common_sp_update::PostUpdateError;
 use crate::common_sp_update::PrecheckError;
@@ -205,7 +205,7 @@ impl SpComponentUpdater for RotUpdater {
 }
 
 pub struct ReconfiguratorRotUpdater;
-impl SpComponentUpdateHelper for ReconfiguratorRotUpdater {
+impl SpComponentUpdateHelperImpl for ReconfiguratorRotUpdater {
     /// Checks if the component is already updated or ready for update
     fn precheck<'a>(
         &'a self,

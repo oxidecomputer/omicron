@@ -7,7 +7,7 @@
 //! These are factored to make it easy to write a variety of different kinds of
 //! tests without having to put together too much boilerplate in each test.
 
-use crate::common_sp_update::SpComponentUpdateHelperExt;
+use crate::common_sp_update::SpComponentUpdateHelper;
 use crate::driver::UpdateAttemptStatusUpdater;
 use crate::driver_update::ApplyUpdateError;
 use crate::driver_update::PROGRESS_TIMEOUT;
@@ -258,11 +258,11 @@ impl UpdateDescription<'_> {
                 update_id,
             );
             let sp_update_helper =
-                SpComponentUpdateHelperExt::new_boxed(&request.details);
+                SpComponentUpdateHelper::new(&request.details);
             apply_update(
                 artifact_cache,
                 &sp_update,
-                &*sp_update_helper,
+                &sp_update_helper,
                 mgs_backends.clone(),
                 &request,
                 status_updater,
