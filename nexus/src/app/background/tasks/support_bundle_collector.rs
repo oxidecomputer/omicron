@@ -1082,17 +1082,29 @@ impl BackgroundTask for SupportBundleCollector {
 
 async fn write_ereport(ereport: Ereport, dir: &Utf8Path) -> anyhow::Result<()> {
     // Here's where we construct the file path for each ereport JSON file, given
-    // the top-lebel ereport directory path. Each ereport is stored in a
+    // the top-lebel ereport directory path.  Each ereport is stored in a
     // subdirectory for the serial number of the system that produced the
-    // ereport. These paths take the following form:
+    // ereport.  These paths take the following form:
     //
     //    {serial_number}/{restart_id}/{ENA}.json
     //
     // We can assume that the restart ID and serial number consist only of
     // filesystem-safe characters, as the restart ID is known to be a UUID, and
-    // the ENA is just an integer.
-    let sn =
-        ereport.metadata.serial_number.as_deref().unwrap_or("unknown_serial");
+    // the ENA is just an integer.  For the serial number, which we don't have
+    // full control over --- it came from the ereport metadata --- we must
+    // check that it doesn't contain any characters unsuitable for use in a
+    // filesystem path.
+    let sn = &ereport
+        .metadata
+        .serial_number
+        .as_deref()
+        // If the serial number contains any unsavoury characters, it goes in
+        // the `unknown_serial` hole!  Note that the alleged serial number from
+        // the ereport will still be present in the JSON as a string, so we're
+        // not *lying* about what was received; we're just giving up on using it
+        // in the path.
+        .filter(|&s| is_fs_safe_single_path_component(s))
+        .unwrap_or("unknown_serial");
     let dir = dir
         .join(sn)
         // N.B. that we call `into_untyped_uuid()` here, as the `Display`
@@ -1391,6 +1403,48 @@ async fn save_sp_dumps(
             .context("failed to write SP task dump zip to disk")?;
     }
     Ok(())
+}
+
+fn is_fs_safe_single_path_component(s: &str) -> bool {
+    // Might be path traversal...
+    if s == "." || s == ".." {
+        return false;
+    }
+
+    if s == "~" {
+        return false;
+    }
+
+    const BANNED_CHARS: &[char] = &[
+        // Check for path separators.
+        //
+        // Naively, we might reach for `std::path::is_separator()` here.
+        // However, this function only checks if a path is a permitted
+        // separator on the *current* platform --- so, running on illumos, we
+        // will only check for Unix path separators.  But, because the support
+        // bundle may be extracted on a workstation system by Oxide support
+        // personnel or by the customer, we should also make sure we don't
+        // allow the use of Windows path separators, which `is_separator()`
+        // won't check for on Unix systems.
+        '/', '\\',
+        // Characters forbidden on Windows, per:
+        // https://learn.microsoft.com/en-us/windows/win32/fileio/naming-a-file#naming-conventions
+        '<', '>', ':', '"', '|', '?', '*',
+    ];
+
+    // Rather than using `s.contains()`, we do all the checks in one pass.
+    for c in s.chars() {
+        if BANNED_CHARS.contains(&c) {
+            return false;
+        }
+
+        // Definitely no control characters!
+        if c.is_control() {
+            return false;
+        }
+    }
+
+    true
 }
 
 #[cfg(test)]
