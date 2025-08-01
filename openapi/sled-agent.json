@@ -6590,13 +6590,13 @@
         ]
       },
       "RemoveMupdateOverrideBootSuccessInventory": {
-        "description": "Status of clearing the mupdate override on the boot disk.",
+        "description": "Status of removing the mupdate override on the boot disk.",
         "oneOf": [
           {
             "description": "The mupdate override was successfully removed.",
             "type": "string",
             "enum": [
-              "cleared"
+              "removed"
             ]
           },
           {
@@ -6609,11 +6609,11 @@
         ]
       },
       "RemoveMupdateOverrideInventory": {
-        "description": "Status of clearing the mupdate override in the inventory.",
+        "description": "Status of removing the mupdate override in the inventory.",
         "type": "object",
         "properties": {
           "boot_disk_result": {
-            "description": "The result of clearing the mupdate override on the boot disk.",
+            "description": "The result of removing the mupdate override on the boot disk.",
             "x-rust-type": {
               "crate": "std",
               "parameters": [
