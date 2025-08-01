@@ -1081,9 +1081,24 @@ impl BackgroundTask for SupportBundleCollector {
 }
 
 async fn write_ereport(ereport: Ereport, dir: &Utf8Path) -> anyhow::Result<()> {
+    // Here's where we construct the file path for each ereport JSON file, given
+    // the top-lebel ereport directory path. Each ereport is stored in a
+    // subdirectory for the serial number of the system that produced the
+    // ereport. These paths take the following form:
+    //
+    //    {serial_number}/{restart_id}/{ENA}.json
+    //
+    // We can assume that the restart ID and serial number consist only of
+    // filesystem-safe characters, as the restart ID is known to be a UUID, and
+    // the ENA is just an integer.
     let sn =
         ereport.metadata.serial_number.as_deref().unwrap_or("unknown_serial");
-    let dir = dir.join(sn).join(ereport.id.restart_id.to_string());
+    let dir = dir
+        .join(sn)
+        // N.B. that we call `into_untyped_uuid()` here, as the `Display`
+        // implementation for a typed UUID appends " (ereporter_restart)", which
+        // we don't want.
+        .join(ereport.id.restart_id.into_untyped_uuid().to_string());
     tokio::fs::create_dir_all(&dir)
         .await
         .with_context(|| format!("failed to create directory '{dir}'"))?;
