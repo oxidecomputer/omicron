@@ -430,7 +430,7 @@ dns-server-api = { path = "dns-server-api" }
 dns-service-client = { path = "clients/dns-service-client" }
 dpd-client = { git = "https://github.com/oxidecomputer/dendrite" }
 dropshot = { version = "0.16.2", features = [ "usdt-probes" ] }
-dyn-clone = "1.0.19"
+dyn-clone = "1.0.20"
 either = "1.15.0"
 ereport-types = { path = "ereport/types" }
 expectorate = "1.2.0"
