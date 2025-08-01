@@ -4864,6 +4864,33 @@ CREATE TABLE IF NOT EXISTS omicron.public.bp_pending_mgs_update_rot (
     PRIMARY KEY(blueprint_id, hw_baseboard_id)
 );
 
+-- Blueprint information related to pending host OS phase 1 updates.
+CREATE TABLE IF NOT EXISTS omicron.public.bp_pending_mgs_update_host_phase_1 (
+    -- Foreign key into the `blueprint` table
+    blueprint_id UUID,
+    -- identify of the device to be updated
+    -- (foreign key into the `hw_baseboard_id` table)
+    hw_baseboard_id UUID NOT NULL,
+    -- location of this device according to MGS
+    sp_type omicron.public.sp_type NOT NULL,
+    sp_slot INT4 NOT NULL,
+    -- artifact to be deployed to this device
+    artifact_sha256 STRING(64) NOT NULL,
+    artifact_version STRING(64) NOT NULL,
+
+    -- host-phase-1-specific details
+    expected_active_phase_1_slot omicron.public.hw_m2_slot NOT NULL,
+    expected_active_boot_disk omicron.public.hw_m2_slot NOT NULL,
+    expected_active_phase_1_hash STRING(64) NOT NULL,
+    expected_active_phase_2_hash STRING(64) NOT NULL,
+    expected_inactive_phase_1_hash STRING(64) NOT NULL,
+    expected_inactive_phase_2_hash STRING(64) NOT NULL,
+    sled_agent_ip INET NOT NULL,
+    sled_agent_port INT4 NOT NULL CHECK (sled_agent_port BETWEEN 0 AND 65535),
+
+    PRIMARY KEY(blueprint_id, hw_baseboard_id)
+);
+
 -- Mapping of Omicron zone ID to CockroachDB node ID. This isn't directly used
 -- by the blueprint tables above, but is used by the more general Reconfigurator
 -- system along with them (e.g., to decommission expunged CRDB nodes).

@@ -62,12 +62,15 @@ use nexus_db_model::BpTarget;
 use nexus_db_model::DbArtifactVersion;
 use nexus_db_model::DbTypedUuid;
 use nexus_db_model::HwBaseboardId;
+use nexus_db_model::HwM2Slot;
 use nexus_db_model::HwRotSlot;
+use nexus_db_model::Ipv6Addr;
 use nexus_db_model::SpMgsSlot;
 use nexus_db_model::SpType;
 use nexus_db_model::SqlU16;
 use nexus_db_model::TufArtifact;
 use nexus_db_model::to_db_typed_uuid;
+use nexus_db_schema::enums::HwM2SlotEnum;
 use nexus_db_schema::enums::HwRotSlotEnum;
 use nexus_db_schema::enums::SpTypeEnum;
 use nexus_types::deployment::Blueprint;
@@ -76,10 +79,13 @@ use nexus_types::deployment::BlueprintSledConfig;
 use nexus_types::deployment::BlueprintTarget;
 use nexus_types::deployment::ClickhouseClusterConfig;
 use nexus_types::deployment::CockroachDbPreserveDowngrade;
+use nexus_types::deployment::ExpectedActiveHostOsSlot;
+use nexus_types::deployment::ExpectedInactiveHostOsArtifact;
 use nexus_types::deployment::ExpectedVersion;
 use nexus_types::deployment::OximeterReadMode;
 use nexus_types::deployment::PendingMgsUpdate;
 use nexus_types::deployment::PendingMgsUpdateDetails;
+use nexus_types::deployment::PendingMgsUpdateHostPhase1Details;
 use nexus_types::deployment::PendingMgsUpdates;
 use nexus_types::inventory::BaseboardId;
 use omicron_common::api::external::DataPageParams;
@@ -2302,8 +2308,151 @@ async fn insert_pending_mgs_update(
                 _expected_stage0_next_version,
             ) = update_dsl::bp_pending_mgs_update_rot_bootloader::all_columns();
         }
-        // TODO implement
-        PendingMgsUpdateDetails::HostPhase1(_) => (),
+        PendingMgsUpdateDetails::HostPhase1(
+            PendingMgsUpdateHostPhase1Details {
+                expected_active_slot:
+                    ExpectedActiveHostOsSlot {
+                        phase_1_slot: expected_active_phase_1_slot,
+                        boot_disk: expected_active_boot_disk,
+                        phase_1: expected_active_phase_1_hash,
+                        phase_2: expected_active_phase_2_hash,
+                    },
+                expected_inactive_artifact:
+                    ExpectedInactiveHostOsArtifact {
+                        phase_1: expected_inactive_phase_1_hash,
+                        phase_2: expected_inactive_phase_2_hash,
+                    },
+                sled_agent_address,
+            },
+        ) => {
+            let db_blueprint_id = DbTypedUuid::from(blueprint_id)
+                .into_sql::<diesel::sql_types::Uuid>();
+            let db_sp_type =
+                SpType::from(update.sp_type).into_sql::<SpTypeEnum>();
+            let db_slot_id = SpMgsSlot::from(SqlU16::from(update.slot_id))
+                .into_sql::<diesel::sql_types::Int4>();
+            let db_artifact_hash = ArtifactHash::from(update.artifact_hash)
+                .into_sql::<diesel::sql_types::Text>();
+            let db_artifact_version =
+                DbArtifactVersion::from(update.artifact_version.clone())
+                    .into_sql::<diesel::sql_types::Text>();
+            let db_expected_active_phase_1_slot =
+                HwM2Slot::from(*expected_active_phase_1_slot)
+                    .into_sql::<HwM2SlotEnum>();
+            let db_expected_active_boot_disk =
+                HwM2Slot::from(*expected_active_boot_disk)
+                    .into_sql::<HwM2SlotEnum>();
+            let db_expected_active_phase_1_hash =
+                ArtifactHash(*expected_active_phase_1_hash)
+                    .into_sql::<diesel::sql_types::Text>();
+            let db_expected_active_phase_2_hash =
+                ArtifactHash(*expected_active_phase_2_hash)
+                    .into_sql::<diesel::sql_types::Text>();
+            let db_expected_inactive_phase_1_hash =
+                ArtifactHash(*expected_inactive_phase_1_hash)
+                    .into_sql::<diesel::sql_types::Text>();
+            let db_expected_inactive_phase_2_hash =
+                ArtifactHash(*expected_inactive_phase_2_hash)
+                    .into_sql::<diesel::sql_types::Text>();
+            let db_sled_agent_ip = Ipv6Addr::from(sled_agent_address.ip())
+                .into_sql::<diesel::sql_types::Inet>();
+            let db_sled_agent_port =
+                SqlU16(sled_agent_address.port()).into_sql::<sql_types::Int4>();
+
+            use nexus_db_schema::schema::hw_baseboard_id::dsl as baseboard_dsl;
+            // Skip formatting to prevent rustfmt bailing out.
+            #[rustfmt::skip]
+            use nexus_db_schema::schema::bp_pending_mgs_update_host_phase_1::dsl
+                as update_dsl;
+            let selection = nexus_db_schema::schema::hw_baseboard_id::table
+                .select((
+                    db_blueprint_id,
+                    baseboard_dsl::id,
+                    db_sp_type,
+                    db_slot_id,
+                    db_artifact_hash,
+                    db_artifact_version,
+                    db_expected_active_phase_1_slot,
+                    db_expected_active_boot_disk,
+                    db_expected_active_phase_1_hash,
+                    db_expected_active_phase_2_hash,
+                    db_expected_inactive_phase_1_hash,
+                    db_expected_inactive_phase_2_hash,
+                    db_sled_agent_ip,
+                    db_sled_agent_port,
+                ))
+                .filter(
+                    baseboard_dsl::part_number
+                        .eq(update.baseboard_id.part_number.clone()),
+                )
+                .filter(
+                    baseboard_dsl::serial_number
+                        .eq(update.baseboard_id.serial_number.clone()),
+                );
+            let count = diesel::insert_into(
+                update_dsl::bp_pending_mgs_update_host_phase_1,
+            )
+            .values(selection)
+            .into_columns((
+                update_dsl::blueprint_id,
+                update_dsl::hw_baseboard_id,
+                update_dsl::sp_type,
+                update_dsl::sp_slot,
+                update_dsl::artifact_sha256,
+                update_dsl::artifact_version,
+                update_dsl::expected_active_phase_1_slot,
+                update_dsl::expected_active_boot_disk,
+                update_dsl::expected_active_phase_1_hash,
+                update_dsl::expected_active_phase_2_hash,
+                update_dsl::expected_inactive_phase_1_hash,
+                update_dsl::expected_inactive_phase_2_hash,
+                update_dsl::sled_agent_ip,
+                update_dsl::sled_agent_port,
+            ))
+            .execute_async(conn)
+            .await?;
+            if count != 1 {
+                // As with `PendingMgsUpdateDetails::Sp`, this should be
+                // impossible in practice.
+                error!(
+                    log,
+                    "blueprint insertion: unexpectedly tried to \
+                     insert wrong number of rows into \
+                     bp_pending_mgs_update_host_phase_1 (aborting transaction)";
+                    "count" => count,
+                    &update.baseboard_id,
+                );
+                return Err(TxnError::BadInsertCount {
+                    table_name: "bp_pending_mgs_update_host_phase_1",
+                    count,
+                    baseboard_id: update.baseboard_id.clone(),
+                });
+            }
+
+            // This statement is just here to force a compilation error if the
+            // set of columns in `bp_pending_mgs_update_host_phase_1` changes
+            // because that will affect the correctness of the above statement.
+            //
+            // If you're here because of a compile error, you might be changing
+            // the `bp_pending_mgs_update_host_phase_1` table. Update the
+            // statement below and be sure to update the code above, too!
+            let (
+                _blueprint_id,
+                _hw_baseboard_id,
+                _sp_type,
+                _sp_slot,
+                _artifact_sha256,
+                _artifact_version,
+                _expected_active_phase_1_slot,
+                _expected_active_boot_disk,
+                _expected_active_phase_1_hash,
+                _expected_active_phase_2_hash,
+                _expected_inactive_phase_1_hash,
+                _expected_inactive_phase_2_hash,
+                _sled_agent_ip,
+                _sled_agent_port,
+            ) = update_dsl::bp_pending_mgs_update_host_phase_1::all_columns();
+        }
     }
     Ok(())
 }
