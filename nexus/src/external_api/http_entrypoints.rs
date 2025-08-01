@@ -7828,7 +7828,8 @@ impl NexusExternalApi for NexusExternalApiImpl {
             // keep specifically for this purpose.
             let opctx = nexus.opctx_external_authn();
 
-            let audit = nexus.audit_log_entry_init(&opctx, &rqctx).await?;
+            let audit =
+                nexus.audit_log_entry_init_unauthed(&opctx, &rqctx).await?;
 
             let result = async {
                 let path_params = path_params.into_inner();
@@ -7897,7 +7898,8 @@ impl NexusExternalApi for NexusExternalApiImpl {
             // happen using the Nexus "external authentication" context, which we
             // keep specifically for this purpose.
             let opctx = nexus.opctx_external_authn();
-            let audit = nexus.audit_log_entry_init(&opctx, &rqctx).await?;
+            let audit =
+                nexus.audit_log_entry_init_unauthed(&opctx, &rqctx).await?;
 
             let result = async {
                 let path = path_params.into_inner();
@@ -8167,6 +8169,10 @@ impl NexusExternalApi for NexusExternalApiImpl {
             let opctx =
                 crate::context::op_context_for_external_api(&rqctx).await?;
             let nexus = &apictx.context.nexus;
+            // This is an authenticated request, so we know who the user
+            // is. In that respect it's more like a regular resource create
+            // operation and not like the true login endpoints `login_local`
+            // and `login_saml`.
             let audit = nexus.audit_log_entry_init(&opctx, &rqctx).await?;
 
             let result = async {

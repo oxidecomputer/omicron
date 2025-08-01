@@ -116,20 +116,7 @@ async fn test_audit_log_list(ctx: &ControlPlaneTestContext) {
 
     // login attempts are unauthenticated (until the user is authenticated)
     // assert_eq!(e2.actor, views::AuditLogEntryActor::Unauthenticated);
-
-    // TODO: because we are using the opctx to determine the actor, the actor
-    // here is the built in external authenticator user. This is misleading.
-    // I need to change this in the logging code, maybe with a special init
-    // function for unauthenticated endpoints that doesn't pull the actor out
-    // of the opctx, instead taking a potential actor like the username.
-    assert_eq!(
-        e2.actor,
-        views::AuditLogEntryActor::UserBuiltin {
-            user_builtin_id: "001de000-05e4-4000-8000-000000000003"
-                .parse()
-                .unwrap()
-        }
-    );
+    assert_eq!(e2.actor, views::AuditLogEntryActor::Unauthenticated);
 
     // session create was the test suite user in the test suite silo, which
     // is different from the privileged user, so we need to fetch the user
@@ -168,9 +155,6 @@ async fn test_audit_log_list(ctx: &ControlPlaneTestContext) {
 
     let audit_log = fetch_log(client, t3, None).await;
     assert_eq!(audit_log.items.len(), 1);
-
-    // TODO: think about whether requiring start time and having end time be
-    // optional (and later than it) still makes sense when order is reversed
 
     // test reverse order
     let url = format!(

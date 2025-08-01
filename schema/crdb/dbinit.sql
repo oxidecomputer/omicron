@@ -5815,8 +5815,6 @@ CREATE TABLE IF NOT EXISTS omicron.public.audit_log (
     -- result kind indicating success, error, or timeout
     result_kind omicron.public.audit_log_result_kind,
 
-    -- TODO: constraints on actor and silo ID
-
     -- make sure time_completed and result_kind are either both null or both not
     CONSTRAINT time_completed_and_result_kind CHECK (
         (time_completed IS NULL AND result_kind IS NULL)
