@@ -404,13 +404,18 @@ pub enum PrecheckError {
 
     #[error(
         "expected to find inactive {kind} artifact {expected}, \
-         but found {found:?}"
+         but found {found}"
     )]
     WrongInactiveArtifact {
         kind: ArtifactKind,
         expected: ArtifactHash,
-        found: FoundArtifact,
+        found: ArtifactHash,
     },
+
+    #[error(
+        "failed to determine current inactive host OS phase 2 artifact: {err}"
+    )]
+    DeterminingInactiveHostPhase2 { err: String },
 
     #[error("inventory missing `last_reconciliation` result")]
     SledAgentInventoryMissingLastReconciliation,
@@ -497,29 +502,6 @@ impl FoundVersion {
         };
 
         Ok(())
-    }
-}
-
-#[derive(Debug, Clone)]
-pub enum FoundArtifact {
-    MissingArtifact,
-    Artifact(ArtifactHash),
-}
-
-impl FoundArtifact {
-    pub fn matches(
-        &self,
-        expected: ArtifactHash,
-        kind: ArtifactKind,
-    ) -> Result<(), PrecheckError> {
-        match self {
-            FoundArtifact::Artifact(hash) if *hash == expected => Ok(()),
-            _ => Err(PrecheckError::WrongInactiveArtifact {
-                kind,
-                expected,
-                found: self.clone(),
-            }),
-        }
     }
 }
 

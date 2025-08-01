@@ -558,7 +558,7 @@ async fn basic_failures() {
         eprintln!("{}", message);
         assert!(message.contains(&format!(
             "expected to find inactive host_phase_1 artifact {bad_hash}, \
-             but found Artifact(ArtifactHash(\"{inactive_phase_1_hash}\"))"
+             but found {inactive_phase_1_hash}"
         )));
 
         // No changes should have been made in this case.
@@ -625,7 +625,7 @@ async fn basic_failures() {
         eprintln!("{}", message);
         assert!(message.contains(&format!(
             "expected to find inactive host_phase_2 artifact {bad_hash}, \
-             but found Artifact(ArtifactHash(\"{inactive_phase_2_hash}\"))"
+             but found {inactive_phase_2_hash}"
         )));
 
         // No changes should have been made in this case.

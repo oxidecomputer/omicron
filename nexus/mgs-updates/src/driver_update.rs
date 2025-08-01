@@ -732,6 +732,7 @@ async fn wait_for_update_done(
             Err(PrecheckError::GatewayClientError(_))
             | Err(PrecheckError::WrongInactiveVersion { .. })
             | Err(PrecheckError::WrongInactiveArtifact { .. })
+            | Err(PrecheckError::DeterminingInactiveHostPhase2 { .. })
             | Err(PrecheckError::WrongActiveRotSlot { .. })
             | Err(PrecheckError::WrongActiveHostPhase1Slot { .. })
             | Err(PrecheckError::EphemeralRotBootPreferenceSet)

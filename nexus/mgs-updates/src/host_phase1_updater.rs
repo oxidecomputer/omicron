@@ -119,7 +119,6 @@ use super::UpdateProgress;
 use super::common_sp_update::SpComponentUpdater;
 use super::common_sp_update::deliver_update;
 use crate::SpComponentUpdateHelperImpl;
-use crate::common_sp_update::FoundArtifact;
 use crate::common_sp_update::PostUpdateError;
 use crate::common_sp_update::PrecheckError;
 use crate::common_sp_update::PrecheckStatus;
@@ -465,7 +464,7 @@ impl ReconfiguratorHostPhase1Updater {
             Err(PrecheckError::WrongInactiveArtifact {
                 kind: ArtifactKind::HOST_PHASE_1,
                 expected: expected_inactive_artifact.phase_1,
-                found: FoundArtifact::Artifact(found_inactive_artifact),
+                found: found_inactive_artifact,
             })
         }
     }
@@ -612,29 +611,24 @@ impl ReconfiguratorHostPhase1Updater {
             });
         }
 
-        let found_inactive = match inactive {
-            Ok(details) => FoundArtifact::Artifact(details.artifact_hash),
-            // TODO-correctness There are many reasons sled-agent could report
-            // an error in a phase 2 slot, including a couple cases where we
-            // definitely want to convert the error to
-            // `FoundArtifact::MissingArtifact`:
-            //
-            // 1. it couldn't parse the image header
-            // 2. it parsed the image header, but the contents of the rest of
-            //    the slot didn't match the image header's description (it
-            //    contains a hash of the rest of the data in the slot)
-            //
-            // There are a variety of other errors possible, though, from
-            // garden variety I/O errors to "there is no physical disk present
-            // in this slot". Do we need to distinguish these from the
-            // "indicative of a missing artifact" cases above? At the moment all
-            // we get from inventory is a string...
-            Err(_) => FoundArtifact::MissingArtifact,
+        let inactive = match inactive {
+            Ok(details) => details.artifact_hash,
+            Err(err) => {
+                return Err(PrecheckError::DeterminingInactiveHostPhase2 {
+                    err,
+                });
+            }
         };
-        found_inactive.matches(
-            expected_inactive_artifact.phase_2,
-            ArtifactKind::HOST_PHASE_2,
-        )
+        if inactive != expected_inactive_artifact.phase_2 {
+            return Err(PrecheckError::WrongInactiveArtifact {
+                kind: ArtifactKind::HOST_PHASE_2,
+                expected: expected_inactive_artifact.phase_2,
+                found: inactive,
+            });
+        }
+
+        // Both active and inactive match; we can proceed.
+        Ok(())
     }
 
     async fn post_update_impl(
