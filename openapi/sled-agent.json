@@ -3119,79 +3119,6 @@
           }
         ]
       },
-      "ClearMupdateOverrideBootSuccessInventory": {
-        "description": "Status of clearing the mupdate override on the boot disk.",
-        "oneOf": [
-          {
-            "description": "The mupdate override was successfully cleared.",
-            "type": "string",
-            "enum": [
-              "cleared"
-            ]
-          },
-          {
-            "description": "No mupdate override was found.\n\nThis is considered a success for idempotency reasons.",
-            "type": "string",
-            "enum": [
-              "no_override"
-            ]
-          }
-        ]
-      },
-      "ClearMupdateOverrideInventory": {
-        "description": "Status of clearing the mupdate override in the inventory.",
-        "type": "object",
-        "properties": {
-          "boot_disk_result": {
-            "description": "The result of clearing the mupdate override on the boot disk.",
-            "x-rust-type": {
-              "crate": "std",
-              "parameters": [
-                {
-                  "$ref": "#/components/schemas/ClearMupdateOverrideBootSuccessInventory"
-                },
-                {
-                  "type": "string"
-                }
-              ],
-              "path": "::std::result::Result",
-              "version": "*"
-            },
-            "oneOf": [
-              {
-                "type": "object",
-                "properties": {
-                  "ok": {
-                    "$ref": "#/components/schemas/ClearMupdateOverrideBootSuccessInventory"
-                  }
-                },
-                "required": [
-                  "ok"
-                ]
-              },
-              {
-                "type": "object",
-                "properties": {
-                  "err": {
-                    "type": "string"
-                  }
-                },
-                "required": [
-                  "err"
-                ]
-              }
-            ]
-          },
-          "non_boot_message": {
-            "description": "What happened on non-boot disks.\n\nWe aren't modeling this out in more detail, because we plan to not try and keep ledgered data in sync across both disks in the future.",
-            "type": "string"
-          }
-        },
-        "required": [
-          "boot_disk_result",
-          "non_boot_message"
-        ]
-      },
       "ComponentV0": {
         "oneOf": [
           {
@@ -3632,15 +3559,6 @@
           "boot_partitions": {
             "$ref": "#/components/schemas/BootPartitionContents"
           },
-          "clear_mupdate_override": {
-            "nullable": true,
-            "description": "The result of clearing the mupdate override field.\n\n`None` if `remove_mupdate_override` was not provided in the sled config.",
-            "allOf": [
-              {
-                "$ref": "#/components/schemas/ClearMupdateOverrideInventory"
-              }
-            ]
-          },
           "datasets": {
             "type": "object",
             "additionalProperties": {
@@ -3673,6 +3591,15 @@
               "$ref": "#/components/schemas/OrphanedDataset"
             },
             "uniqueItems": true
+          },
+          "remove_mupdate_override": {
+            "nullable": true,
+            "description": "The result of removing the mupdate override file on disk.\n\n`None` if `remove_mupdate_override` was not provided in the sled config.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/RemoveMupdateOverrideInventory"
+              }
+            ]
           },
           "zones": {
             "type": "object",
@@ -6660,6 +6587,79 @@
           "infra_ip_last",
           "ports",
           "rack_subnet"
+        ]
+      },
+      "RemoveMupdateOverrideBootSuccessInventory": {
+        "description": "Status of clearing the mupdate override on the boot disk.",
+        "oneOf": [
+          {
+            "description": "The mupdate override was successfully removed.",
+            "type": "string",
+            "enum": [
+              "cleared"
+            ]
+          },
+          {
+            "description": "No mupdate override was found.\n\nThis is considered a success for idempotency reasons.",
+            "type": "string",
+            "enum": [
+              "no_override"
+            ]
+          }
+        ]
+      },
+      "RemoveMupdateOverrideInventory": {
+        "description": "Status of clearing the mupdate override in the inventory.",
+        "type": "object",
+        "properties": {
+          "boot_disk_result": {
+            "description": "The result of clearing the mupdate override on the boot disk.",
+            "x-rust-type": {
+              "crate": "std",
+              "parameters": [
+                {
+                  "$ref": "#/components/schemas/RemoveMupdateOverrideBootSuccessInventory"
+                },
+                {
+                  "type": "string"
+                }
+              ],
+              "path": "::std::result::Result",
+              "version": "*"
+            },
+            "oneOf": [
+              {
+                "type": "object",
+                "properties": {
+                  "ok": {
+                    "$ref": "#/components/schemas/RemoveMupdateOverrideBootSuccessInventory"
+                  }
+                },
+                "required": [
+                  "ok"
+                ]
+              },
+              {
+                "type": "object",
+                "properties": {
+                  "err": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "err"
+                ]
+              }
+            ]
+          },
+          "non_boot_message": {
+            "description": "What happened on non-boot disks.\n\nWe aren't modeling this out in more detail, because we plan to not try and keep ledgered data in sync across both disks in the future.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "boot_disk_result",
+          "non_boot_message"
         ]
       },
       "ResolvedVpcFirewallRule": {

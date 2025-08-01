@@ -19,10 +19,10 @@ use indent_write::fmt::IndentWriter;
 use itertools::Itertools;
 use nexus_sled_agent_shared::inventory::{
     BootImageHeader, BootPartitionContents, BootPartitionDetails,
-    ClearMupdateOverrideBootSuccessInventory, ConfigReconcilerInventory,
-    ConfigReconcilerInventoryResult, ConfigReconcilerInventoryStatus,
-    HostPhase2DesiredContents, OmicronSledConfig, OmicronZoneImageSource,
-    OrphanedDataset,
+    ConfigReconcilerInventory, ConfigReconcilerInventoryResult,
+    ConfigReconcilerInventoryStatus, HostPhase2DesiredContents,
+    OmicronSledConfig, OmicronZoneImageSource, OrphanedDataset,
+    RemoveMupdateOverrideBootSuccessInventory,
 };
 use omicron_common::disk::M2Slot;
 use omicron_uuid_kinds::{
@@ -724,7 +724,7 @@ fn display_sleds(
                 orphaned_datasets,
                 zones,
                 boot_partitions,
-                clear_mupdate_override,
+                remove_mupdate_override,
             } = last_reconciliation;
 
             display_boot_partition_contents(boot_partitions, &mut indented)?;
@@ -747,16 +747,16 @@ fn display_sleds(
             {
                 let mut indent2 = IndentWriter::new("    ", &mut indented);
 
-                if let Some(clear_mupdate_override) = clear_mupdate_override {
-                    match &clear_mupdate_override.boot_disk_result {
-                        Ok(ClearMupdateOverrideBootSuccessInventory::Cleared) => {
+                if let Some(remove_mupdate_override) = remove_mupdate_override {
+                    match &remove_mupdate_override.boot_disk_result {
+                        Ok(RemoveMupdateOverrideBootSuccessInventory::Cleared) => {
                             writeln!(
                                 indent2,
                                 "cleared mupdate override on boot disk",
                             )?;
                         }
                         Ok(
-                            ClearMupdateOverrideBootSuccessInventory::NoOverride,
+                            RemoveMupdateOverrideBootSuccessInventory::NoOverride,
                         ) => {
                             writeln!(
                                 indent2,
@@ -781,7 +781,7 @@ fn display_sleds(
                     writeln!(
                         indent3,
                         "{}",
-                        clear_mupdate_override.non_boot_message
+                        remove_mupdate_override.non_boot_message
                     )?;
                 } else {
                     match &zone_image_resolver.mupdate_override.boot_override {

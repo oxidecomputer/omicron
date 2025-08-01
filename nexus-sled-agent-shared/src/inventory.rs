@@ -143,10 +143,10 @@ pub struct ConfigReconcilerInventory {
     pub orphaned_datasets: IdOrdMap<OrphanedDataset>,
     pub zones: BTreeMap<OmicronZoneUuid, ConfigReconcilerInventoryResult>,
     pub boot_partitions: BootPartitionContents,
-    /// The result of clearing the mupdate override field.
+    /// The result of removing the mupdate override file on disk.
     ///
     /// `None` if `remove_mupdate_override` was not provided in the sled config.
-    pub clear_mupdate_override: Option<ClearMupdateOverrideInventory>,
+    pub remove_mupdate_override: Option<RemoveMupdateOverrideInventory>,
 }
 
 impl ConfigReconcilerInventory {
@@ -204,16 +204,17 @@ impl ConfigReconcilerInventory {
             .iter()
             .map(|z| (z.id, ConfigReconcilerInventoryResult::Ok))
             .collect();
-        let clear_mupdate_override = config.remove_mupdate_override.map(|_| {
-            ClearMupdateOverrideInventory {
-                boot_disk_result: Ok(
-                    ClearMupdateOverrideBootSuccessInventory::Cleared,
-                ),
-                non_boot_message: "mupdate override successfully cleared \
+        let remove_mupdate_override =
+            config.remove_mupdate_override.map(|_| {
+                RemoveMupdateOverrideInventory {
+                    boot_disk_result: Ok(
+                        RemoveMupdateOverrideBootSuccessInventory::Cleared,
+                    ),
+                    non_boot_message: "mupdate override successfully cleared \
                                    on non-boot disks"
-                    .to_owned(),
-            }
-        });
+                        .to_owned(),
+                }
+            });
 
         Self {
             last_reconciled_config: config,
@@ -231,7 +232,7 @@ impl ConfigReconcilerInventory {
                     slot_b: Err(err),
                 }
             },
-            clear_mupdate_override,
+            remove_mupdate_override,
         }
     }
 }
@@ -295,14 +296,14 @@ impl IdOrdItem for OrphanedDataset {
 
 /// Status of clearing the mupdate override in the inventory.
 #[derive(Clone, Debug, PartialEq, Eq, Deserialize, JsonSchema, Serialize)]
-pub struct ClearMupdateOverrideInventory {
+pub struct RemoveMupdateOverrideInventory {
     /// The result of clearing the mupdate override on the boot disk.
     #[serde(with = "snake_case_result")]
     #[schemars(
-        schema_with = "SnakeCaseResult::<ClearMupdateOverrideBootSuccessInventory, String>::json_schema"
+        schema_with = "SnakeCaseResult::<RemoveMupdateOverrideBootSuccessInventory, String>::json_schema"
     )]
     pub boot_disk_result:
-        Result<ClearMupdateOverrideBootSuccessInventory, String>,
+        Result<RemoveMupdateOverrideBootSuccessInventory, String>,
 
     /// What happened on non-boot disks.
     ///
@@ -314,8 +315,8 @@ pub struct ClearMupdateOverrideInventory {
 /// Status of clearing the mupdate override on the boot disk.
 #[derive(Clone, Debug, PartialEq, Eq, Deserialize, JsonSchema, Serialize)]
 #[serde(rename_all = "snake_case")]
-pub enum ClearMupdateOverrideBootSuccessInventory {
-    /// The mupdate override was successfully cleared.
+pub enum RemoveMupdateOverrideBootSuccessInventory {
+    /// The mupdate override was successfully removed.
     Cleared,
 
     /// No mupdate override was found.
