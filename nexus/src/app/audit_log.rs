@@ -41,6 +41,8 @@ impl super::Nexus {
             .await
     }
 
+    /// Use for authenticated operations because we want to pull the actor from
+    /// the opctx.
     pub(crate) async fn audit_log_entry_init(
         &self,
         opctx: &OpContext,
@@ -65,6 +67,29 @@ impl super::Nexus {
             None => AuditLogActor::Unauthenticated,
         };
 
+        self.audit_log_entry_init_inner(&opctx, actor, rqctx).await
+    }
+
+    /// For authenticated operations, we can pull the actor out of the opctx
+    /// and have it be the actor we intend (the user). For unauthenticated
+    /// requests like login attempts, the actor on the opctx is the built-in
+    /// external-authenticator user, which would be misleading to consider the
+    /// actor for the request. So for those operations we ignore the opctx.
+    pub(crate) async fn audit_log_entry_init_unauthed(
+        &self,
+        opctx: &OpContext,
+        rqctx: &RequestContext<ApiContext>,
+    ) -> CreateResult<AuditLogEntryInit> {
+        let actor = AuditLogActor::Unauthenticated;
+        self.audit_log_entry_init_inner(&opctx, actor, rqctx).await
+    }
+
+    async fn audit_log_entry_init_inner(
+        &self,
+        opctx: &OpContext,
+        actor: AuditLogActor,
+        rqctx: &RequestContext<ApiContext>,
+    ) -> CreateResult<AuditLogEntryInit> {
         // User agent is truncated for the DB because it can theoretically be
         // very long, but almost never contains useful info past the beginning.
         let user_agent = rqctx
