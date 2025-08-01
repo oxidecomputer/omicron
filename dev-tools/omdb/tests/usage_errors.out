@@ -849,6 +849,7 @@ Commands:
   clickhouse-policy     interact with clickhouse policy
   mgs-updates           print information about pending MGS updates
   oximeter-read-policy  interact with oximeter read policy
+  quiesce               view or modify the quiesce status
   sagas                 view sagas, create and complete demo sagas
   sleds                 interact with sleds
   support-bundles       interact with support bundles [aliases: sb]

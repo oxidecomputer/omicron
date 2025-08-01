@@ -79,6 +79,7 @@ mod network_interface;
 pub(crate) mod oximeter;
 mod probe;
 mod project;
+mod quiesce;
 mod quota;
 mod rack;
 pub(crate) mod saga;
@@ -112,6 +113,7 @@ pub(crate) use nexus_db_model::MAX_NICS_PER_INSTANCE;
 pub(crate) use nexus_db_queries::db::queries::disk::MAX_DISKS_PER_INSTANCE;
 use nexus_mgs_updates::DEFAULT_RETRY_TIMEOUT;
 use nexus_types::internal_api::views::MgsUpdateDriverStatus;
+use nexus_types::internal_api::views::QuiesceState;
 use sagas::demo::CompletingDemoSagas;
 
 // XXX: Might want to recast as max *floating* IPs, we have at most one
@@ -275,6 +277,9 @@ pub struct Nexus {
     // while Nexus is running.
     #[allow(dead_code)]
     repo_depot_resolver: Box<dyn qorb::resolver::Resolver>,
+
+    /// whether Nexus is quiescing, and how far it's gotten
+    quiesce: watch::Sender<QuiesceState>,
 }
 
 impl Nexus {
@@ -451,6 +456,8 @@ impl Nexus {
         let mgs_update_status_rx = mgs_update_driver.status_rx();
         let _mgs_driver_task = tokio::spawn(mgs_update_driver.run());
 
+        let (quiesce, _) = watch::channel(QuiesceState::running());
+
         let nexus = Nexus {
             id: config.deployment.id,
             rack_id,
@@ -503,6 +510,7 @@ impl Nexus {
             mgs_update_status_rx,
             mgs_resolver,
             repo_depot_resolver,
+            quiesce,
         };
 
         // TODO-cleanup all the extra Arcs here seems wrong
