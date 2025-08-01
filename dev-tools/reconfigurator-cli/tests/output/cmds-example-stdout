@@ -1204,7 +1204,6 @@ LEDGERED SLED CONFIG
         image name: fake from debug_assume_success()
         phase 2 hash: 0101010101010101010101010101010101010101010101010101010101010101
     last reconciled config: matches ledgered config
-    no information from NTP for this sled
         no mupdate override to clear
         no orphaned datasets
         all disks reconciled successfully
@@ -1319,7 +1318,6 @@ LEDGERED SLED CONFIG
         image name: fake from debug_assume_success()
         phase 2 hash: 0101010101010101010101010101010101010101010101010101010101010101
     last reconciled config: matches ledgered config
-    no information from NTP for this sled
         no mupdate override to clear
         no orphaned datasets
         all disks reconciled successfully
@@ -1527,8 +1525,6 @@ LEDGERED SLED CONFIG
         image name: fake from debug_assume_success()
         phase 2 hash: 0101010101010101010101010101010101010101010101010101010101010101
     last reconciled config: matches ledgered config
-    no information from NTP for this sled
-    Internal DNS generation: 1
         no mupdate override to clear
         no orphaned datasets
         all disks reconciled successfully
@@ -1543,6 +1539,14 @@ KEEPER MEMBERSHIP
 COCKROACH STATUS
     no cockroach status retrieved
 
+
+NTP STATUS
+    No NTP zones reported timesync information
+
+INTERNAL DNS STATUS
+    Zone 4692cc31-6eb6-437c-9634-9688663d06ae: Internal DNS generation @ 1
+    Zone 587da9e8-8fc0-4854-b585-070741a7b00d: Internal DNS generation @ 1
+    Zone ffbf02f0-261d-4723-b613-eb861245acbd: Internal DNS generation @ 1
 
 
 
