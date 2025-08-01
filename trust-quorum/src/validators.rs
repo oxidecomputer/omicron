@@ -288,12 +288,11 @@ impl ValidatedReconfigureMsg {
             });
         }
 
-        // Ensure that we haven't seen a prepare message for a newer
-        // configuration.
-        if let Some(last_prepared_epoch) = persistent_state.latest_config {
-            if msg.epoch <= last_prepared_epoch {
+        // Ensure that we haven't seen a newer configuration
+        if let Some(latest_epoch) = persistent_state.latest_config {
+            if msg.epoch <= latest_epoch {
                 return Err(ReconfigurationError::PreparedEpochMismatch {
-                    existing: last_prepared_epoch,
+                    existing: latest_epoch,
                     new: msg.epoch,
                 });
             }

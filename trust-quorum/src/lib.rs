@@ -12,6 +12,7 @@
 use derive_more::Display;
 use serde::{Deserialize, Serialize};
 
+mod compute_key_share;
 mod configuration;
 mod coordinator_state;
 pub(crate) mod crypto;
@@ -45,6 +46,12 @@ pub use persistent_state::{PersistentState, PersistentStateSummary};
     Display,
 )]
 pub struct Epoch(pub u64);
+
+impl Epoch {
+    pub fn next(&self) -> Epoch {
+        Epoch(self.0.checked_add(1).expect("fewer than 2^64 epochs"))
+    }
+}
 
 /// The number of shares required to reconstruct the rack secret
 ///

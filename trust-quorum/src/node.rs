@@ -15,6 +15,7 @@
 //! levels. Fortunately, tracking is easier with async code, which drives this
 //! Node, and so this should not be problematic.
 
+use crate::compute_key_share::KeyShareComputer;
 use crate::validators::{
     MismatchedRackIdError, ReconfigurationError, ValidatedReconfigureMsg,
 };
@@ -36,6 +37,10 @@ pub struct Node {
 
     /// In memory state for when this node is coordinating a reconfiguration
     coordinator_state: Option<CoordinatorState>,
+
+    /// In memory state for when this node is trying to compute its own key
+    /// share for a committed epoch.
+    key_share_computer: Option<KeyShareComputer>,
 }
 
 impl Node {
@@ -43,12 +48,12 @@ impl Node {
         let id_str = format!("{:?}", ctx.platform_id());
         let log =
             log.new(o!("component" => "trust-quorum", "platform_id" => id_str));
-        Node { log, coordinator_state: None }
+        Node { log, coordinator_state: None, key_share_computer: None }
     }
 
     /// Start coordinating a reconfiguration
     ///
-    /// On success, puts messages that need sending to other nodes in `outbox`
+    /// On success, queues messages that need sending to other nodes via `ctx`
     /// and returns a `PersistentState` which the caller must write to disk.
     ///
     /// For upgrading from LRTQ, use `coordinate_upgrade_from_lrtq`
@@ -69,9 +74,29 @@ impl Node {
             return Ok(());
         };
 
+        if let Some(kcs) = &self.key_share_computer {
+            // We know from our `ValidatedReconfigureMsg` that we haven't seen a newer
+            // configuration and we have the correct last committed configuration. Therefore if we are computing a key share,
+            // we must be doing it for a stale commit and should cancel it.
+            //
+            // I don't think it's actually possible to hit this condition, but
+            // we check anyway.
+            info!(
+                self.log,
+                "Reconfiguration started. Cancelling key share compute";
+                "reconfiguration_epoch" => %validated_msg.epoch(),
+                "key_share_compute_epoch" => %kcs.config().epoch
+            );
+            self.key_share_computer = None;
+        }
+
         self.set_coordinator_state(ctx, validated_msg)?;
         self.send_coordinator_msgs(ctx);
         Ok(())
+    }
+
+    pub fn is_computing_key_share(&self) -> bool {
+        self.key_share_computer.is_some()
     }
 
     /// Commit a configuration
@@ -110,6 +135,12 @@ impl Node {
             // Is this an idempotent or stale request?
             if let Some(config) = ps.latest_committed_configuration() {
                 if config.epoch >= epoch {
+                    info!(
+                        self.log,
+                        "Received stale or idempotent commit from Nexus";
+                        "latest_committed_epoch" => %config.epoch,
+                        "received_epoch" => %epoch
+                    );
                     return Ok(());
                 }
             }
@@ -143,13 +174,15 @@ impl Node {
 
         // Are we currently coordinating for this epoch?
         // Stop coordinating if we are.
-        if self.coordinator_state.is_some() {
-            info!(
-                self.log,
-                "Stopping coordination due to commit";
-                "epoch" => %epoch
-            );
-            self.coordinator_state = None;
+        if let Some(cs) = &self.coordinator_state {
+            if cs.reconfigure_msg().epoch() == epoch {
+                info!(
+                    self.log,
+                    "Stopping coordination due to commit";
+                    "epoch" => %epoch
+                );
+                self.coordinator_state = None;
+            }
         }
 
         Ok(())
@@ -162,7 +195,10 @@ impl Node {
         peer: PlatformId,
     ) {
         ctx.add_connection(peer.clone());
-        self.send_coordinator_msgs_to(ctx, peer);
+        self.send_coordinator_msgs_to(ctx, peer.clone());
+        if let Some(ksc) = &mut self.key_share_computer {
+            ksc.on_connect(ctx, peer);
+        }
     }
 
     /// A peer node has disconnected from this one
@@ -197,6 +233,15 @@ impl Node {
             }
             PeerMsgKind::Prepare { config, share } => {
                 self.handle_prepare(ctx, from, config, share);
+            }
+            PeerMsgKind::GetShare(epoch) => {
+                self.handle_get_share(ctx, from, epoch);
+            }
+            PeerMsgKind::Share { epoch, share } => {
+                self.handle_share(ctx, from, epoch, share);
+            }
+            PeerMsgKind::CommitAdvance(config) => {
+                self.handle_commit_advance(ctx, from, config)
             }
             _ => todo!(
                 "cannot handle message variant yet - not implemented: {msg:?}"
@@ -233,6 +278,211 @@ impl Node {
                   "Received prepare ack when not coordinating";
                    "from" => %from,
                    "acked_epoch" => %epoch
+            );
+        }
+    }
+
+    fn handle_commit_advance(
+        &mut self,
+        ctx: &mut impl NodeHandlerCtx,
+        from: PlatformId,
+        config: Configuration,
+    ) {
+        // We may have already advanced by the time we receive this message.
+        // Let's check.
+        if ctx.persistent_state().commits.contains(&config.epoch) {
+            info!(
+                self.log,
+                "Received CommitAdvance, but already committed";
+                "from" => %from,
+                "epoch" => %config.epoch
+            );
+            return;
+        }
+        if ctx.persistent_state().has_prepared(config.epoch) {
+            // Go ahead and commit
+            info!(
+                self.log,
+                "Received CommitAdvance. Already prepared, now committing";
+                "from" => %from,
+                "epoch" => %config.epoch
+            );
+            ctx.update_persistent_state(|ps| ps.commits.insert(config.epoch));
+        }
+
+        // Do we have the configuration in our persistent state? If not save it.
+        ctx.update_persistent_state(|ps| {
+            if let Err(e) = ps.configs.insert_unique(config.clone()) {
+                let existing =
+                    e.duplicates().first().expect("duplicate exists");
+                if *existing != &config {
+                    error!(
+                        self.log,
+                        "Received a configuration mismatch";
+                        "from" => %from,
+                        "existing_config" => #?existing,
+                        "received_config" => #?config
+                    );
+                    // TODO: Alarm
+                }
+                false
+            } else {
+                true
+            }
+        });
+
+        // Are we coordinating for an older epoch? If so, cancel.
+        if let Some(cs) = &self.coordinator_state {
+            let coordinating_epoch = cs.reconfigure_msg().epoch();
+            if coordinating_epoch < config.epoch {
+                info!(
+                    self.log,
+                    "Received CommitAdvance. Cancelling stale coordination";
+                    "from" => %from,
+                    "coordinating_epoch" => %coordinating_epoch,
+                    "received_epoch" => %config.epoch
+                );
+                self.coordinator_state = None;
+            } else if coordinating_epoch == config.epoch {
+                error!(
+                    self.log,
+                    "Received CommitAdvance while coordinating for same epoch!";
+                    "from" => %from,
+                    "epoch" => %config.epoch
+                );
+                // TODO: Alarm
+                return;
+            } else {
+                info!(
+                    self.log,
+                    "Received CommitAdvance for stale epoch while coordinating";
+                    "from" => %from,
+                    "received_epoch" => %config.epoch,
+                    "coordinating_epoch" => %coordinating_epoch
+                );
+                return;
+            }
+        }
+
+        // Are we already trying to compute our share for this config?
+        if let Some(ksc) = &mut self.key_share_computer {
+            if ksc.config().epoch > config.epoch {
+                let msg = concat!(
+                    "Received stale CommitAdvance. ",
+                    "Already computing for later epoch"
+                );
+                info!(
+                    self.log,
+                    "{msg}";
+                    "from" => %from,
+                    "epoch" => %ksc.config().epoch,
+                    "received_epoch" => %config.epoch
+                );
+                return;
+            } else if ksc.config().epoch == config.epoch {
+                info!(
+                    self.log,
+                    "Received CommitAdvance while already computing share";
+                    "from" => %from,
+                    "epoch" => %config.epoch
+                );
+                return;
+            } else {
+                info!(
+                    self.log,
+                    "Received CommitAdvance while computing share for old epoch";
+                    "from" => %from,
+                    "epoch" => %ksc.config().epoch,
+                    "received_epoch" => %config.epoch
+                );
+                // Intentionally fall through
+            }
+        }
+
+        // We either were collectiong shares for an old epoch or haven't started yet.
+        self.key_share_computer =
+            Some(KeyShareComputer::new(&self.log, ctx, config));
+    }
+
+    fn handle_get_share(
+        &mut self,
+        ctx: &mut impl NodeHandlerCtx,
+        from: PlatformId,
+        epoch: Epoch,
+    ) {
+        if let Some(latest_committed_config) =
+            ctx.persistent_state().latest_committed_configuration()
+        {
+            if latest_committed_config.epoch > epoch {
+                info!(
+                    self.log,
+                    concat!(
+                        "Received 'GetShare'` from stale node. ",
+                        "Responded with 'CommitAdvance'."
+                    );
+                    "from" => %from,
+                    "latest_committed_epoch" => %latest_committed_config.epoch,
+                    "requested_epoch" => %epoch
+                );
+                ctx.send(
+                    from,
+                    PeerMsgKind::CommitAdvance(latest_committed_config.clone()),
+                );
+                return;
+            }
+        }
+
+        // If we have the share for the requested epoch, we always return it. We
+        // know that it is at least as new as the last committed epoch. We might
+        // not have learned about the configuration being committed yet, but
+        // other nodes have and may need the share to unlock when the control
+        // plane is not up yet.
+        //
+        // See RFD 238 section 5.3.3
+        //
+        if let Some(share) = ctx.persistent_state().shares.get(&epoch) {
+            info!(
+                self.log,
+                "Received 'GetShare'. Responded with 'Share'.";
+                "from" => %from,
+                "epoch" => %epoch
+            );
+            ctx.send(from, PeerMsgKind::Share { epoch, share: share.clone() });
+        } else {
+            // TODO: We may want to return a `NoSuchShare(epoch)` reply if we don't
+            // have the share, but it's not strictly necessary. It would only be for
+            // logging/debugging purposes at the requester.
+            info!(
+                self.log,
+                "Received 'GetShare', but it's missing.";
+                "from" => %from,
+                "epoch" => %epoch
+            );
+        }
+    }
+
+    fn handle_share(
+        &mut self,
+        ctx: &mut impl NodeHandlerCtx,
+        from: PlatformId,
+        epoch: Epoch,
+        share: Share,
+    ) {
+        if let Some(cs) = &mut self.coordinator_state {
+            cs.handle_share(ctx, from, epoch, share);
+        } else if let Some(ksc) = &mut self.key_share_computer {
+            if ksc.handle_share(ctx, from, epoch, share) {
+                // We're have completed computing our share and saved it to
+                // our persistent state. We have also marked the configuration
+                // committed.
+                self.key_share_computer = None;
+            }
+        } else {
+            warn!(
+                self.log,
+                "Received share when not coordinating or computing share";
+                "from" => %from,
+                "epoch" => %epoch
             );
         }
     }
@@ -333,9 +583,7 @@ impl Node {
         }
     }
 
-    /// Set the coordinator state and conditionally set and return the
-    /// persistent state depending upon whether the node is currently
-    /// coordinating and what its persistent state is.
+    /// Start coordinating a reconfiguration
     ///
     /// By the time we get here, we know that we are not upgrading from LRTQ as
     /// we have a `ValidatedReconfigureMsg`.
@@ -344,10 +592,12 @@ impl Node {
         ctx: &mut impl NodeHandlerCtx,
         msg: ValidatedReconfigureMsg,
     ) -> Result<(), ReconfigurationError> {
+        let log = self.log.new(o!("component" => "tq-coordinator-state"));
+
         // We have no committed configuration or lrtq ledger
         if ctx.persistent_state().is_uninitialized() {
             let (coordinator_state, my_config, my_share) =
-                CoordinatorState::new_uninitialized(self.log.clone(), msg)?;
+                CoordinatorState::new_uninitialized(log, msg)?;
             self.coordinator_state = Some(coordinator_state);
             ctx.update_persistent_state(move |ps| {
                 ps.shares.insert(my_config.epoch, my_share);
@@ -359,13 +609,16 @@ impl Node {
         }
 
         // We have a committed configuration that is not LRTQ
-        let config =
-            ctx.persistent_state().latest_committed_configuration().unwrap();
+        let (config, our_share) = ctx
+            .persistent_state()
+            .latest_committed_config_and_share()
+            .expect("committed configuration exists");
 
         self.coordinator_state = Some(CoordinatorState::new_reconfiguration(
-            self.log.clone(),
+            log,
             msg,
-            &config,
+            config,
+            our_share.clone(),
         )?);
 
         Ok(())
