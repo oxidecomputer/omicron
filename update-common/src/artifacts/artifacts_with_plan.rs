@@ -256,6 +256,7 @@ impl ArtifactsWithPlan {
                     RepositoryError::MissingTarget(artifact.target.clone())
                 })?;
 
+            // TODO-K: This is where artifact is built
             builder
                 .add_artifact(artifact.clone().into(), artifact_hash, stream)
                 .await?;

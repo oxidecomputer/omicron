@@ -344,6 +344,7 @@ impl<'a> UpdatePlanBuilder<'a> {
             artifact_id,
             data,
             artifact_kind.into(),
+            None,
             self.log,
         )?;
 
@@ -398,11 +399,13 @@ impl<'a> UpdatePlanBuilder<'a> {
         let (artifact_id, bootloader_caboose) =
             read_hubris_caboose_from_archive(artifact_id, data.clone())?;
 
+        let sign = bootloader_caboose.sign.expect("required SIGN in caboose");
+
         // We restrict the bootloader to exactly one entry per (kind, signature)
-        match self.rot_by_sign.entry(RotSignData {
-            kind: artifact_kind,
-            sign: bootloader_caboose.sign.expect("required SIGN in caboose"),
-        }) {
+        match self
+            .rot_by_sign
+            .entry(RotSignData { kind: artifact_kind, sign: sign.clone() })
+        {
             hash_map::Entry::Occupied(_) => {
                 return Err(RepositoryError::DuplicateBoardEntry {
                     board: bootloader_caboose.board,
@@ -433,12 +436,14 @@ impl<'a> UpdatePlanBuilder<'a> {
             artifact_id,
             data,
             bootloader_kind,
+            Some(sign),
             self.log,
         )?;
 
         Ok(())
     }
 
+    // TODO-K: This is where we construct the artifact?
     async fn add_rot_artifact(
         &mut self,
         artifact_id: ArtifactId,
@@ -533,10 +538,9 @@ impl<'a> UpdatePlanBuilder<'a> {
             });
         }
 
-        let entry_a = RotSignData {
-            kind: artifact_kind,
-            sign: image_a_caboose.sign.expect("required SIGN in caboose"),
-        };
+        let sign_a = image_a_caboose.sign.expect("required SIGN in caboose");
+
+        let entry_a = RotSignData { kind: artifact_kind, sign: sign_a.clone() };
 
         let target_a = RotSignTarget {
             id: artifact_id.clone(),
@@ -561,10 +565,9 @@ impl<'a> UpdatePlanBuilder<'a> {
             }
         };
 
-        let entry_b = RotSignData {
-            kind: artifact_kind,
-            sign: image_b_caboose.sign.expect("required SIGN in caboose"),
-        };
+        let sign_b = image_b_caboose.sign.expect("required SIGN in caboose");
+
+        let entry_b = RotSignData { kind: artifact_kind, sign: sign_b.clone() };
 
         let target_b = RotSignTarget {
             id: artifact_id.clone(),
@@ -598,12 +601,14 @@ impl<'a> UpdatePlanBuilder<'a> {
             artifact_id.clone(),
             rot_a_data,
             rot_a_kind,
+            Some(sign_a),
             self.log,
         )?;
         self.record_extracted_artifact(
             artifact_id,
             rot_b_data,
             rot_b_kind,
+            Some(sign_b),
             self.log,
         )?;
 
@@ -646,12 +651,14 @@ impl<'a> UpdatePlanBuilder<'a> {
             artifact_id.clone(),
             phase_1_data,
             ArtifactKind::HOST_PHASE_1,
+            None,
             self.log,
         )?;
         self.record_extracted_artifact(
             artifact_id,
             phase_2_data,
             ArtifactKind::HOST_PHASE_2,
+            None,
             self.log,
         )?;
 
@@ -703,12 +710,14 @@ impl<'a> UpdatePlanBuilder<'a> {
             artifact_id.clone(),
             phase_1_data,
             ArtifactKind::TRAMPOLINE_PHASE_1,
+            None,
             self.log,
         )?;
         self.record_extracted_artifact(
             artifact_id,
             phase_2_data,
             ArtifactKind::TRAMPOLINE_PHASE_2,
+            None,
             self.log,
         )?;
 
@@ -742,6 +751,7 @@ impl<'a> UpdatePlanBuilder<'a> {
                     artifact_id,
                     data,
                     KnownArtifactKind::ControlPlane.into(),
+                    None,
                     self.log,
                 )?;
             }
@@ -776,6 +786,7 @@ impl<'a> UpdatePlanBuilder<'a> {
             artifact_id,
             data,
             artifact_kind,
+            None,
             self.log,
         )?;
 
@@ -940,6 +951,7 @@ impl<'a> UpdatePlanBuilder<'a> {
                 artifact_id,
                 data,
                 KnownArtifactKind::Zone.into(),
+                None,
                 self.log,
             )?;
             Ok(())
@@ -963,6 +975,8 @@ impl<'a> UpdatePlanBuilder<'a> {
         tuf_repo_artifact_id: ArtifactId,
         data: ExtractedArtifactDataHandle,
         data_kind: ArtifactKind,
+        // TODO-K: This sucks, clean up
+        sign: Option<Vec<u8>>,
         log: &Logger,
     ) -> Result<(), RepositoryError> {
         use std::collections::hash_map::Entry;
@@ -1005,6 +1019,7 @@ impl<'a> UpdatePlanBuilder<'a> {
             id: artifacts_meta_id,
             hash: data.hash(),
             size: data.file_size() as u64,
+            sign,
         });
         by_hash_slot.insert(data);
 
