@@ -5,13 +5,12 @@
 //! Module containing implementation details shared amongst all MGS-to-SP-driven
 //! updates.
 
+use super::MgsClients;
+use super::UpdateProgress;
 use crate::host_phase1_updater::ReconfiguratorHostPhase1Updater;
 use crate::rot_bootloader_updater::ReconfiguratorRotBootloaderUpdater;
 use crate::rot_updater::ReconfiguratorRotUpdater;
 use crate::sp_updater::ReconfiguratorSpUpdater;
-
-use super::MgsClients;
-use super::UpdateProgress;
 use futures::future::BoxFuture;
 use gateway_client::types::SpType;
 use gateway_client::types::SpUpdateStatus;
@@ -262,8 +261,12 @@ fn status_is_complete(
     }
 }
 
-/// Provides helper functions used while updating a particular SP component
-pub trait SpComponentUpdateHelper {
+/// Implementors provide helper functions used while updating a particular SP
+/// component
+///
+/// This trait is object safe; consumers should use `SpComponentUpdateError`,
+/// which wraps an implementor of this trait.
+pub trait SpComponentUpdateHelperImpl {
     /// Checks if the component is already updated or ready for update
     fn precheck<'a>(
         &'a self,
@@ -282,28 +285,51 @@ pub trait SpComponentUpdateHelper {
     ) -> BoxFuture<'a, Result<(), PostUpdateError>>;
 }
 
-/// Extension methods to assist with `SpComponentUpdateHelper` trait objects
-pub struct SpComponentUpdateHelperExt;
+/// Provides helper functions used while updating a particular SP component
+pub struct SpComponentUpdateHelper {
+    inner: Box<dyn SpComponentUpdateHelperImpl + Send + Sync>,
+}
 
-impl SpComponentUpdateHelperExt {
-    /// Construct a new trait object for the given update
-    pub fn new_boxed(
-        details: &PendingMgsUpdateDetails,
-    ) -> Box<dyn SpComponentUpdateHelper + Send + Sync> {
-        match details {
-            PendingMgsUpdateDetails::Sp { .. } => {
-                Box::new(ReconfiguratorSpUpdater {})
-            }
-            PendingMgsUpdateDetails::Rot { .. } => {
-                Box::new(ReconfiguratorRotUpdater {})
-            }
-            PendingMgsUpdateDetails::RotBootloader { .. } => {
-                Box::new(ReconfiguratorRotBootloaderUpdater {})
-            }
-            PendingMgsUpdateDetails::HostPhase1(details) => {
-                Box::new(ReconfiguratorHostPhase1Updater::new(details.clone()))
-            }
-        }
+impl SpComponentUpdateHelper {
+    /// Construct a update helper for a specific kind of update
+    pub fn new(details: &PendingMgsUpdateDetails) -> Self {
+        let inner: Box<dyn SpComponentUpdateHelperImpl + Send + Sync> =
+            match details {
+                PendingMgsUpdateDetails::Sp { .. } => {
+                    Box::new(ReconfiguratorSpUpdater {})
+                }
+                PendingMgsUpdateDetails::Rot { .. } => {
+                    Box::new(ReconfiguratorRotUpdater {})
+                }
+                PendingMgsUpdateDetails::RotBootloader { .. } => {
+                    Box::new(ReconfiguratorRotBootloaderUpdater {})
+                }
+                PendingMgsUpdateDetails::HostPhase1(details) => Box::new(
+                    ReconfiguratorHostPhase1Updater::new(details.clone()),
+                ),
+            };
+        Self { inner }
+    }
+
+    /// Checks if the component is already updated or ready for update
+    pub async fn precheck(
+        &self,
+        log: &slog::Logger,
+        mgs_clients: &mut MgsClients,
+        update: &PendingMgsUpdate,
+    ) -> Result<PrecheckStatus, PrecheckError> {
+        self.inner.precheck(log, mgs_clients, update).await
+    }
+
+    /// Attempts once to perform any post-update actions (e.g., reset the
+    /// device)
+    pub async fn post_update(
+        &self,
+        log: &slog::Logger,
+        mgs_clients: &mut MgsClients,
+        update: &PendingMgsUpdate,
+    ) -> Result<(), PostUpdateError> {
+        self.inner.post_update(log, mgs_clients, update).await
     }
 }
 

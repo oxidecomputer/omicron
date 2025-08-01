@@ -118,7 +118,7 @@ use super::SpComponentUpdateError;
 use super::UpdateProgress;
 use super::common_sp_update::SpComponentUpdater;
 use super::common_sp_update::deliver_update;
-use crate::SpComponentUpdateHelper;
+use crate::SpComponentUpdateHelperImpl;
 use crate::common_sp_update::FoundArtifact;
 use crate::common_sp_update::PostUpdateError;
 use crate::common_sp_update::PrecheckError;
@@ -697,7 +697,7 @@ impl ReconfiguratorHostPhase1Updater {
     }
 }
 
-impl SpComponentUpdateHelper for ReconfiguratorHostPhase1Updater {
+impl SpComponentUpdateHelperImpl for ReconfiguratorHostPhase1Updater {
     fn precheck<'a>(
         &'a self,
         log: &'a slog::Logger,

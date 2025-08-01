@@ -24,6 +24,8 @@ use blueprint_display::BpTableColumn;
 use daft::Diffable;
 use iddqd::IdOrdItem;
 use iddqd::IdOrdMap;
+use iddqd::id_ord_map::Entry;
+use iddqd::id_ord_map::RefMut;
 use iddqd::id_upcast;
 use nexus_sled_agent_shared::inventory::HostPhase2DesiredContents;
 use nexus_sled_agent_shared::inventory::HostPhase2DesiredSlots;
@@ -1301,6 +1303,20 @@ impl PendingMgsUpdates {
 
     pub fn get(&self, baseboard_id: &BaseboardId) -> Option<&PendingMgsUpdate> {
         self.by_baseboard.get(baseboard_id)
+    }
+
+    pub fn get_mut(
+        &mut self,
+        baseboard_id: &BaseboardId,
+    ) -> Option<RefMut<'_, PendingMgsUpdate>> {
+        self.by_baseboard.get_mut(baseboard_id)
+    }
+
+    pub fn entry(
+        &mut self,
+        baseboard_id: &BaseboardId,
+    ) -> Entry<'_, PendingMgsUpdate> {
+        self.by_baseboard.entry(baseboard_id)
     }
 
     pub fn remove(
