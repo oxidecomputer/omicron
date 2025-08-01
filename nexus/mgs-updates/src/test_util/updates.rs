@@ -23,9 +23,7 @@ use futures::FutureExt;
 use gateway_client::types::SpType;
 use gateway_test_utils::setup::GatewayTestContext;
 use gateway_types::rot::RotSlot;
-use nexus_types::deployment::ExpectedActiveHostOsSlot;
 use nexus_types::deployment::ExpectedActiveRotSlot;
-use nexus_types::deployment::ExpectedInactiveHostOsArtifact;
 use nexus_types::deployment::ExpectedVersion;
 use nexus_types::deployment::PendingMgsUpdate;
 use nexus_types::deployment::PendingMgsUpdateDetails;
@@ -232,24 +230,19 @@ impl UpdateDescription<'_> {
                     override_expected_active_phase_2.unwrap_or_else(|| {
                         host_phase_2_state.active_slot_artifact()
                     });
-                let expected_inactive_phase_2_artifact =
+                let expected_inactive_phase_2_hash =
                     override_expected_inactive_phase_2.unwrap_or_else(|| {
                         host_phase_2_state.inactive_slot_artifact()
                     });
                 (
                     PendingMgsUpdateDetails::HostPhase1(
                         PendingMgsUpdateHostPhase1Details {
-                            expected_active_slot: ExpectedActiveHostOsSlot {
-                                phase_1_slot: expected_active_phase_1_slot,
-                                boot_disk: expected_boot_disk,
-                                phase_1: expected_active_phase_1_hash,
-                                phase_2: expected_active_phase_2_hash,
-                            },
-                            expected_inactive_artifact:
-                                ExpectedInactiveHostOsArtifact {
-                                    phase_1: expected_inactive_phase_1_hash,
-                                    phase_2: expected_inactive_phase_2_artifact,
-                                },
+                            expected_active_phase_1_slot,
+                            expected_boot_disk,
+                            expected_active_phase_1_hash,
+                            expected_active_phase_2_hash,
+                            expected_inactive_phase_1_hash,
+                            expected_inactive_phase_2_hash,
                             sled_agent_address: host_phase_2_state
                                 .sled_agent_address,
                         },

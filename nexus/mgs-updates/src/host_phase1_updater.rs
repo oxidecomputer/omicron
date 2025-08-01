@@ -356,9 +356,10 @@ impl ReconfiguratorHostPhase1Updater {
         }
 
         let PendingMgsUpdateHostPhase1Details {
-            expected_active_slot,
-            expected_inactive_artifact,
-            sled_agent_address: _,
+            expected_active_phase_1_slot,
+            expected_active_phase_1_hash,
+            expected_inactive_phase_1_hash,
+            ..
         } = &self.details;
 
         // Fetch the current phase 1 active slot.
@@ -411,14 +412,11 @@ impl ReconfiguratorHostPhase1Updater {
 
         // Otherwise, confirm the currently-active slot matches what we
         // expect...
-        {
-            let expected_active_mgs_slot = expected_active_slot.phase_1_slot;
-            if current_active_slot != expected_active_mgs_slot {
-                return Err(PrecheckError::WrongActiveHostPhase1Slot {
-                    expected: expected_active_mgs_slot,
-                    found: current_active_slot,
-                });
-            }
+        if current_active_slot != *expected_active_phase_1_slot {
+            return Err(PrecheckError::WrongActiveHostPhase1Slot {
+                expected: *expected_active_phase_1_slot,
+                found: current_active_slot,
+            });
         }
 
         // ... and that the artifact hash in the currently active slot matches
@@ -427,18 +425,17 @@ impl ReconfiguratorHostPhase1Updater {
         // back. (If for some reason we *do* want to do this update, the planner
         // will have to notice that what's here is wrong and update the
         // blueprint.)
-        if current_active_slot_hash != expected_active_slot.phase_1 {
+        if current_active_slot_hash != *expected_active_phase_1_hash {
             return Err(PrecheckError::WrongActiveArtifact {
                 kind: ArtifactKind::HOST_PHASE_1,
-                expected: expected_active_slot.phase_1,
+                expected: *expected_active_phase_1_hash,
                 found: current_active_slot_hash,
             });
         }
 
         // For the same reason, check that the artifact hash in the inactive
         // slot matches what we expect to find.
-        let expected_inactive_slot =
-            expected_active_slot.phase_1_slot.toggled();
+        let expected_inactive_slot = expected_active_phase_1_slot.toggled();
         let found_inactive_artifact = self
             .precheck_fetch_phase_1(
                 mgs_clients,
@@ -453,7 +450,7 @@ impl ReconfiguratorHostPhase1Updater {
             "hash" => %found_inactive_artifact,
         );
 
-        if found_inactive_artifact == expected_inactive_artifact.phase_1 {
+        if found_inactive_artifact == *expected_inactive_phase_1_hash {
             // Everything looks good as far as phase 1 preconditions are
             // concerned; also confirm that our phase 2 preconditions are
             // satisfied by contacting sled-agent.
@@ -463,7 +460,7 @@ impl ReconfiguratorHostPhase1Updater {
         } else {
             Err(PrecheckError::WrongInactiveArtifact {
                 kind: ArtifactKind::HOST_PHASE_1,
-                expected: expected_inactive_artifact.phase_1,
+                expected: *expected_inactive_phase_1_hash,
                 found: found_inactive_artifact,
             })
         }
@@ -563,8 +560,9 @@ impl ReconfiguratorHostPhase1Updater {
         log: &Logger,
     ) -> Result<(), PrecheckError> {
         let PendingMgsUpdateHostPhase1Details {
-            expected_active_slot,
-            expected_inactive_artifact,
+            expected_boot_disk: expected_active_boot_disk,
+            expected_active_phase_2_hash,
+            expected_inactive_phase_2_hash,
             ..
         } = &self.details;
 
@@ -573,7 +571,7 @@ impl ReconfiguratorHostPhase1Updater {
             self.get_boot_partition_inventory_from_sled_agent(log).await?;
 
         // Confirm the expected boot disk.
-        match (sled_inventory.boot_disk, expected_active_slot.boot_disk) {
+        match (sled_inventory.boot_disk, *expected_active_boot_disk) {
             (Ok(found), expected) if found == expected => (),
             (Ok(found), expected) => {
                 return Err(PrecheckError::WrongHostOsBootDisk {
@@ -590,7 +588,7 @@ impl ReconfiguratorHostPhase1Updater {
         // can't proceed: either our update has become impossible due to other
         // changes (requires replanning), or we're waiting for sled-agent to
         // write the phase 2 we expect.
-        let (active, inactive) = match expected_active_slot.boot_disk {
+        let (active, inactive) = match expected_active_boot_disk {
             M2Slot::A => (sled_inventory.slot_a, sled_inventory.slot_b),
             M2Slot::B => (sled_inventory.slot_b, sled_inventory.slot_a),
         };
@@ -603,10 +601,10 @@ impl ReconfiguratorHostPhase1Updater {
                 });
             }
         };
-        if active != expected_active_slot.phase_2 {
+        if active != *expected_active_phase_2_hash {
             return Err(PrecheckError::WrongActiveArtifact {
                 kind: ArtifactKind::HOST_PHASE_2,
-                expected: expected_active_slot.phase_2,
+                expected: *expected_active_phase_2_hash,
                 found: active,
             });
         }
@@ -619,10 +617,10 @@ impl ReconfiguratorHostPhase1Updater {
                 });
             }
         };
-        if inactive != expected_inactive_artifact.phase_2 {
+        if inactive != *expected_inactive_phase_2_hash {
             return Err(PrecheckError::WrongInactiveArtifact {
                 kind: ArtifactKind::HOST_PHASE_2,
-                expected: expected_inactive_artifact.phase_2,
+                expected: *expected_inactive_phase_2_hash,
                 found: inactive,
             });
         }
@@ -640,8 +638,7 @@ impl ReconfiguratorHostPhase1Updater {
         debug!(log, "attempting to set active slot");
         let new_active_slot = self
             .details
-            .expected_active_slot
-            .phase_1_slot
+            .expected_active_phase_1_slot
             .toggled()
             .to_mgs_firmware_slot();
         mgs_clients

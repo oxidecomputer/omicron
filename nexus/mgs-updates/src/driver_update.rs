@@ -145,8 +145,7 @@ impl SpComponentUpdate {
                     target_sp_slot: request.slot_id,
                     // Like the SP, we request an update to the inactive slot.
                     firmware_slot: details
-                        .expected_active_slot
-                        .phase_1_slot
+                        .expected_active_phase_1_slot
                         .toggled()
                         .to_mgs_firmware_slot(),
                     update_id,
