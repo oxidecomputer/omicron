@@ -44,8 +44,6 @@ use nexus_db_schema::schema::{
 };
 use nexus_sled_agent_shared::inventory::BootImageHeader;
 use nexus_sled_agent_shared::inventory::BootPartitionDetails;
-use nexus_sled_agent_shared::inventory::ClearMupdateOverrideBootSuccessInventory;
-use nexus_sled_agent_shared::inventory::ClearMupdateOverrideInventory;
 use nexus_sled_agent_shared::inventory::ConfigReconcilerInventoryStatus;
 use nexus_sled_agent_shared::inventory::HostPhase2DesiredContents;
 use nexus_sled_agent_shared::inventory::HostPhase2DesiredSlots;
@@ -53,6 +51,8 @@ use nexus_sled_agent_shared::inventory::MupdateOverrideBootInventory;
 use nexus_sled_agent_shared::inventory::MupdateOverrideInventory;
 use nexus_sled_agent_shared::inventory::MupdateOverrideNonBootInventory;
 use nexus_sled_agent_shared::inventory::OrphanedDataset;
+use nexus_sled_agent_shared::inventory::RemoveMupdateOverrideBootSuccessInventory;
+use nexus_sled_agent_shared::inventory::RemoveMupdateOverrideInventory;
 use nexus_sled_agent_shared::inventory::ZoneArtifactInventory;
 use nexus_sled_agent_shared::inventory::ZoneImageResolverInventory;
 use nexus_sled_agent_shared::inventory::ZoneManifestBootInventory;
@@ -1003,7 +1003,7 @@ pub struct InvSledConfigReconciler {
     pub boot_partition_a_error: Option<String>,
     pub boot_partition_b_error: Option<String>,
     #[diesel(embed)]
-    pub clear_mupdate_override: InvClearMupdateOverride,
+    pub remove_mupdate_override: InvRemoveMupdateOverride,
 }
 
 impl InvSledConfigReconciler {
@@ -1014,7 +1014,7 @@ impl InvSledConfigReconciler {
         boot_disk: Result<M2Slot, String>,
         boot_partition_a_error: Option<String>,
         boot_partition_b_error: Option<String>,
-        clear_mupdate_override: InvClearMupdateOverride,
+        remove_mupdate_override: InvRemoveMupdateOverride,
     ) -> Self {
         // TODO-cleanup We should use `HwM2Slot` instead of integers for this
         // column: https://github.com/oxidecomputer/omicron/issues/8642
@@ -1032,7 +1032,7 @@ impl InvSledConfigReconciler {
             boot_disk_error,
             boot_partition_a_error,
             boot_partition_b_error,
-            clear_mupdate_override,
+            remove_mupdate_override,
         }
     }
 
@@ -1072,48 +1072,50 @@ impl InvSledConfigReconciler {
     }
 }
 
-// See [`nexus_sled_agent_shared::inventory::DbClearMupdateOverrideBootSuccess`].
+// See [`nexus_sled_agent_shared::inventory::DbRemoveMupdateOverrideBootSuccess`].
 impl_enum_type!(
-    ClearMupdateOverrideBootSuccessEnum:
+    RemoveMupdateOverrideBootSuccessEnum:
 
     #[derive(Copy, Clone, Debug, AsExpression, FromSqlRow, PartialEq)]
-    pub enum DbClearMupdateOverrideBootSuccess;
+    pub enum DbRemoveMupdateOverrideBootSuccess;
 
     // Enum values
     Cleared => b"cleared"
     NoOverride => b"no-override"
 );
 
-impl From<ClearMupdateOverrideBootSuccessInventory>
-    for DbClearMupdateOverrideBootSuccess
+impl From<RemoveMupdateOverrideBootSuccessInventory>
+    for DbRemoveMupdateOverrideBootSuccess
 {
-    fn from(value: ClearMupdateOverrideBootSuccessInventory) -> Self {
+    fn from(value: RemoveMupdateOverrideBootSuccessInventory) -> Self {
         match value {
-            ClearMupdateOverrideBootSuccessInventory::Cleared => Self::Cleared,
-            ClearMupdateOverrideBootSuccessInventory::NoOverride => {
+            RemoveMupdateOverrideBootSuccessInventory::Removed => Self::Cleared,
+            RemoveMupdateOverrideBootSuccessInventory::NoOverride => {
                 Self::NoOverride
             }
         }
     }
 }
 
-impl From<DbClearMupdateOverrideBootSuccess>
-    for ClearMupdateOverrideBootSuccessInventory
+impl From<DbRemoveMupdateOverrideBootSuccess>
+    for RemoveMupdateOverrideBootSuccessInventory
 {
-    fn from(value: DbClearMupdateOverrideBootSuccess) -> Self {
+    fn from(value: DbRemoveMupdateOverrideBootSuccess) -> Self {
         match value {
-            DbClearMupdateOverrideBootSuccess::Cleared => Self::Cleared,
-            DbClearMupdateOverrideBootSuccess::NoOverride => Self::NoOverride,
+            DbRemoveMupdateOverrideBootSuccess::Cleared => Self::Removed,
+            DbRemoveMupdateOverrideBootSuccess::NoOverride => Self::NoOverride,
         }
     }
 }
 
-/// See [`nexus_sled_agent_shared::inventory::ClearMupdateOverrideInventory`].
+/// See [`nexus_sled_agent_shared::inventory::RemoveMupdateOverrideInventory`].
 #[derive(Queryable, Clone, Debug, Selectable, Insertable)]
 #[diesel(table_name = inv_sled_config_reconciler)]
-pub struct InvClearMupdateOverride {
+pub struct InvRemoveMupdateOverride {
+    // NOTE: the column names start with "clear_" for legacy reasons. Prefer
+    // "remove" in the future.
     #[diesel(column_name = clear_mupdate_override_boot_success)]
-    pub boot_success: Option<DbClearMupdateOverrideBootSuccess>,
+    pub boot_success: Option<DbRemoveMupdateOverrideBootSuccess>,
 
     #[diesel(column_name = clear_mupdate_override_boot_error)]
     pub boot_error: Option<String>,
@@ -1122,30 +1124,30 @@ pub struct InvClearMupdateOverride {
     pub non_boot_message: Option<String>,
 }
 
-impl InvClearMupdateOverride {
+impl InvRemoveMupdateOverride {
     pub fn new(
-        clear_mupdate_override: Option<&ClearMupdateOverrideInventory>,
+        remove_mupdate_override: Option<&RemoveMupdateOverrideInventory>,
     ) -> Self {
-        let boot_success = clear_mupdate_override.and_then(|inv| {
+        let boot_success = remove_mupdate_override.and_then(|inv| {
             inv.boot_disk_result.as_ref().ok().map(|v| v.clone().into())
         });
-        let boot_error = clear_mupdate_override
+        let boot_error = remove_mupdate_override
             .and_then(|inv| inv.boot_disk_result.as_ref().err().cloned());
         let non_boot_message =
-            clear_mupdate_override.map(|inv| inv.non_boot_message.clone());
+            remove_mupdate_override.map(|inv| inv.non_boot_message.clone());
 
         Self { boot_success, boot_error, non_boot_message }
     }
 
     pub fn into_inventory(
         self,
-    ) -> anyhow::Result<Option<ClearMupdateOverrideInventory>> {
+    ) -> anyhow::Result<Option<RemoveMupdateOverrideInventory>> {
         match self {
             Self {
                 boot_success: Some(success),
                 boot_error: None,
                 non_boot_message: Some(non_boot_message),
-            } => Ok(Some(ClearMupdateOverrideInventory {
+            } => Ok(Some(RemoveMupdateOverrideInventory {
                 boot_disk_result: Ok(success.into()),
                 non_boot_message,
             })),
@@ -1153,7 +1155,7 @@ impl InvClearMupdateOverride {
                 boot_success: None,
                 boot_error: Some(boot_error),
                 non_boot_message: Some(non_boot_message),
-            } => Ok(Some(ClearMupdateOverrideInventory {
+            } => Ok(Some(RemoveMupdateOverrideInventory {
                 boot_disk_result: Err(boot_error),
                 non_boot_message,
             })),

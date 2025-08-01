@@ -1640,7 +1640,7 @@ table! {
         boot_partition_a_error -> Nullable<Text>,
         boot_partition_b_error -> Nullable<Text>,
 
-        clear_mupdate_override_boot_success -> Nullable<crate::enums::ClearMupdateOverrideBootSuccessEnum>,
+        clear_mupdate_override_boot_success -> Nullable<crate::enums::RemoveMupdateOverrideBootSuccessEnum>,
         clear_mupdate_override_boot_error -> Nullable<Text>,
         clear_mupdate_override_non_boot_message -> Nullable<Text>,
     }
