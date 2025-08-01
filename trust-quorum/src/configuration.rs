@@ -30,7 +30,9 @@ pub enum ConfigurationError {
 /// The configuration for a given epoch.
 ///
 /// Only valid for non-lrtq configurations
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(
+    Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize,
+)]
 pub struct Configuration {
     /// Unique Id of the rack
     pub rack_id: RackUuid,

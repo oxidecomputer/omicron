@@ -834,6 +834,7 @@ impl TestState {
         self.invariant_nodes_have_prepared_if_coordinator_has_acks()?;
         self.invariant_nodes_have_committed_if_nexus_has_acks()?;
         self.invariant_nodes_not_coordinating_and_computing_key_share_simultaneously()?;
+        self.invariant_no_alarms()?;
         Ok(())
     }
 
@@ -951,6 +952,20 @@ impl TestState {
             );
         }
 
+        Ok(())
+    }
+
+    // Ensure there has been no alarm at any node
+    fn invariant_no_alarms(&self) -> Result<(), TestCaseError> {
+        for (id, (_, ctx)) in &self.sut.nodes {
+            let alarms = ctx.alarms();
+            prop_assert!(
+                alarms.is_empty(),
+                "Alarms found for {}: {:#?}",
+                id,
+                alarms
+            );
+        }
         Ok(())
     }
 }

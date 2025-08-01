@@ -9,7 +9,9 @@
 //! other nodes so  that it can compute its own key share.
 
 use crate::crypto::Sha3_256Digest;
-use crate::{Configuration, Epoch, NodeHandlerCtx, PeerMsgKind, PlatformId};
+use crate::{
+    Alarm, Configuration, Epoch, NodeHandlerCtx, PeerMsgKind, PlatformId,
+};
 use gfss::gf256::Gf256;
 use gfss::shamir::{self, Share};
 use slog::{Logger, error, o, warn};
@@ -137,11 +139,9 @@ impl KeyShareComputer {
                 });
                 true
             }
-            Err(e) => {
-                // TODO: put the node into into an `Alarm` state similar to
-                // https://github.com/oxidecomputer/omicron/pull/8062 once we
-                // have alarms?
-                error!(self.log, "Failed to compute share: {}", e);
+            Err(err) => {
+                error!(self.log, "Failed to compute share: {}", err);
+                ctx.raise_alarm(Alarm::ShareComputationFailed { epoch, err });
                 false
             }
         }
