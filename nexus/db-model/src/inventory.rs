@@ -1089,7 +1089,7 @@ impl From<RemoveMupdateOverrideBootSuccessInventory>
 {
     fn from(value: RemoveMupdateOverrideBootSuccessInventory) -> Self {
         match value {
-            RemoveMupdateOverrideBootSuccessInventory::Cleared => Self::Cleared,
+            RemoveMupdateOverrideBootSuccessInventory::Removed => Self::Cleared,
             RemoveMupdateOverrideBootSuccessInventory::NoOverride => {
                 Self::NoOverride
             }
@@ -1102,7 +1102,7 @@ impl From<DbRemoveMupdateOverrideBootSuccess>
 {
     fn from(value: DbRemoveMupdateOverrideBootSuccess) -> Self {
         match value {
-            DbRemoveMupdateOverrideBootSuccess::Cleared => Self::Cleared,
+            DbRemoveMupdateOverrideBootSuccess::Cleared => Self::Removed,
             DbRemoveMupdateOverrideBootSuccess::NoOverride => Self::NoOverride,
         }
     }

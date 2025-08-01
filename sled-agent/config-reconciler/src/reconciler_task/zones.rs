@@ -1563,7 +1563,7 @@ mod tests {
             self.inner.lock().unwrap().resolver_status.clone()
         }
 
-        fn clear_mupdate_override(
+        fn remove_mupdate_override(
             &self,
             _override_id: MupdateOverrideUuid,
             _internal_disks: &InternalDisks,

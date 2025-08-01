@@ -208,9 +208,9 @@ impl ConfigReconcilerInventory {
             config.remove_mupdate_override.map(|_| {
                 RemoveMupdateOverrideInventory {
                     boot_disk_result: Ok(
-                        RemoveMupdateOverrideBootSuccessInventory::Cleared,
+                        RemoveMupdateOverrideBootSuccessInventory::Removed,
                     ),
-                    non_boot_message: "mupdate override successfully cleared \
+                    non_boot_message: "mupdate override successfully removed \
                                    on non-boot disks"
                         .to_owned(),
                 }
@@ -294,10 +294,10 @@ impl IdOrdItem for OrphanedDataset {
     id_upcast!();
 }
 
-/// Status of clearing the mupdate override in the inventory.
+/// Status of removing the mupdate override in the inventory.
 #[derive(Clone, Debug, PartialEq, Eq, Deserialize, JsonSchema, Serialize)]
 pub struct RemoveMupdateOverrideInventory {
-    /// The result of clearing the mupdate override on the boot disk.
+    /// The result of removing the mupdate override on the boot disk.
     #[serde(with = "snake_case_result")]
     #[schemars(
         schema_with = "SnakeCaseResult::<RemoveMupdateOverrideBootSuccessInventory, String>::json_schema"
@@ -312,12 +312,12 @@ pub struct RemoveMupdateOverrideInventory {
     pub non_boot_message: String,
 }
 
-/// Status of clearing the mupdate override on the boot disk.
+/// Status of removing the mupdate override on the boot disk.
 #[derive(Clone, Debug, PartialEq, Eq, Deserialize, JsonSchema, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum RemoveMupdateOverrideBootSuccessInventory {
     /// The mupdate override was successfully removed.
-    Cleared,
+    Removed,
 
     /// No mupdate override was found.
     ///

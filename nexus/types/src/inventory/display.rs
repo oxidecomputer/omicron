@@ -749,10 +749,10 @@ fn display_sleds(
 
                 if let Some(remove_mupdate_override) = remove_mupdate_override {
                     match &remove_mupdate_override.boot_disk_result {
-                        Ok(RemoveMupdateOverrideBootSuccessInventory::Cleared) => {
+                        Ok(RemoveMupdateOverrideBootSuccessInventory::Removed) => {
                             writeln!(
                                 indent2,
-                                "cleared mupdate override on boot disk",
+                                "removed mupdate override on boot disk",
                             )?;
                         }
                         Ok(
@@ -760,21 +760,21 @@ fn display_sleds(
                         ) => {
                             writeln!(
                                 indent2,
-                                "attempted to clear mupdate override \
+                                "attempted to remove mupdate override \
                                  on boot disk, but no override was set",
                             )?;
                         }
                         Err(message) => {
                             writeln!(
                                 indent2,
-                                "failed to clear mupdate override on boot disk: {}",
-                                message
+                                "failed to remove mupdate override \
+                                 on boot disk: {message}",
                             )?;
                         }
                     }
                     writeln!(
                         indent2,
-                        "clear mupdate override on non-boot disk:"
+                        "remove mupdate override on non-boot disk:"
                     )?;
 
                     let mut indent3 = IndentWriter::new("  ", &mut indent2);

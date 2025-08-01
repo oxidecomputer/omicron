@@ -5177,7 +5177,7 @@ mod test {
                     remove_mupdate_override: Some(
                         RemoveMupdateOverrideInventory {
                             boot_disk_result: Ok(
-                                RemoveMupdateOverrideBootSuccessInventory::Cleared,
+                                RemoveMupdateOverrideBootSuccessInventory::Removed,
                             ),
                             non_boot_message: "simulated non-boot message"
                                 .to_owned(),

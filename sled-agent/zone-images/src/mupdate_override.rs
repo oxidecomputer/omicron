@@ -114,7 +114,7 @@ impl AllMupdateOverrides {
                             Ok(()) => {
                                 // Remove the in-memory override.
                                 self.boot_disk_override = Ok(None);
-                                Ok(RemoveMupdateOverrideBootSuccess::Cleared(
+                                Ok(RemoveMupdateOverrideBootSuccess::Removed(
                                     info,
                                 ))
                             }
@@ -185,7 +185,7 @@ impl AllMupdateOverrides {
             {
                 // If the boot disk was successfully cleared, we may have
                 // introduced a mismatch.
-                if let Ok(RemoveMupdateOverrideBootSuccess::Cleared(
+                if let Ok(RemoveMupdateOverrideBootSuccess::Removed(
                     boot_disk_info,
                 )) = &boot_disk_result
                 {
@@ -468,7 +468,7 @@ fn remove_non_boot_file(
         Ok(()) => {
             // The new status is now MatchesAbsent.
             let new_result = MupdateOverrideNonBootResult::MatchesAbsent;
-            let clear_result = RemoveMupdateOverrideNonBootResult::Cleared {
+            let clear_result = RemoveMupdateOverrideNonBootResult::Removed {
                 prev_result: info.result.clone(),
             };
             (new_result, clear_result)
@@ -941,7 +941,7 @@ mod tests {
         // The boot disk should be cleared.
         assert_eq!(
             result.boot_disk_result,
-            Ok(RemoveMupdateOverrideBootSuccess::Cleared(info))
+            Ok(RemoveMupdateOverrideBootSuccess::Removed(info))
         );
 
         // The non-boot disk should be cleared too.
@@ -951,7 +951,7 @@ mod tests {
                 RemoveMupdateOverrideNonBootInfo {
                     zpool_id: NON_BOOT_UUID,
                     path: Some(dir.path().join(&NON_BOOT_PATHS.mupdate_override_json)),
-                    result: RemoveMupdateOverrideNonBootResult::Cleared {
+                    result: RemoveMupdateOverrideNonBootResult::Removed {
                         prev_result: MupdateOverrideNonBootResult::MatchesPresent,
                     },
                 }
@@ -1046,7 +1046,7 @@ mod tests {
         // The boot disk should be cleared.
         assert_eq!(
             result.boot_disk_result,
-            Ok(RemoveMupdateOverrideBootSuccess::Cleared(info))
+            Ok(RemoveMupdateOverrideBootSuccess::Removed(info))
         );
 
         // The non-boot disk should remain MatchesAbsent with a NoOverride
@@ -1162,7 +1162,7 @@ mod tests {
         // The boot disk should be cleared.
         assert_eq!(
             result.boot_disk_result,
-            Ok(RemoveMupdateOverrideBootSuccess::Cleared(info))
+            Ok(RemoveMupdateOverrideBootSuccess::Removed(info))
         );
 
         // The non-boot disk should transition to MatchesAbsent.
@@ -1307,7 +1307,7 @@ mod tests {
                 RemoveMupdateOverrideNonBootInfo {
                     zpool_id: NON_BOOT_UUID,
                     path: Some(dir.path().join(&NON_BOOT_PATHS.mupdate_override_json)),
-                    result: RemoveMupdateOverrideNonBootResult::Cleared {
+                    result: RemoveMupdateOverrideNonBootResult::Removed {
                         prev_result: MupdateOverrideNonBootResult::Mismatch(
                             MupdateOverrideNonBootMismatch::BootAbsentOtherPresent {
                                 non_boot_disk_info: info
@@ -1368,7 +1368,7 @@ mod tests {
         // The boot disk should be cleared.
         assert_eq!(
             result.boot_disk_result,
-            Ok(RemoveMupdateOverrideBootSuccess::Cleared(info))
+            Ok(RemoveMupdateOverrideBootSuccess::Removed(info))
         );
 
         // The non-boot disk should be cleared too.
@@ -1378,7 +1378,7 @@ mod tests {
                 RemoveMupdateOverrideNonBootInfo {
                     zpool_id: NON_BOOT_UUID,
                     path: Some(dir.path().join(&NON_BOOT_PATHS.mupdate_override_json)),
-                    result: RemoveMupdateOverrideNonBootResult::Cleared {
+                    result: RemoveMupdateOverrideNonBootResult::Removed {
                         prev_result: MupdateOverrideNonBootResult::Mismatch(
                             MupdateOverrideNonBootMismatch::ValueMismatch {
                                 non_boot_disk_info: info2
@@ -1551,7 +1551,7 @@ mod tests {
         // The boot disk should be cleared.
         assert_eq!(
             result.boot_disk_result,
-            Ok(RemoveMupdateOverrideBootSuccess::Cleared(info))
+            Ok(RemoveMupdateOverrideBootSuccess::Removed(info))
         );
 
         // The non-boot disk should not be altered due to a read error on the
@@ -1619,7 +1619,7 @@ mod tests {
         // The boot disk should be cleared.
         assert_eq!(
             result.boot_disk_result,
-            Ok(RemoveMupdateOverrideBootSuccess::Cleared(info.clone()))
+            Ok(RemoveMupdateOverrideBootSuccess::Removed(info.clone()))
         );
 
         // The non-boot disk should return a DiskMissing result.
@@ -1684,7 +1684,7 @@ mod tests {
         // The boot disk should be cleared.
         assert_eq!(
             result.boot_disk_result,
-            Ok(RemoveMupdateOverrideBootSuccess::Cleared(info))
+            Ok(RemoveMupdateOverrideBootSuccess::Removed(info))
         );
 
         // The non-boot disk should return a NoStatus result.
