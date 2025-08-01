@@ -222,8 +222,6 @@ impl ConfigReconcilerInventory {
             orphaned_datasets: IdOrdMap::new(),
             zones,
             boot_partitions: {
-                // None of our callers care about these details; if that
-                // changes, we could pass in boot partition contents.
                 BootPartitionContents {
                     boot_disk: Ok(M2Slot::A),
                     slot_a: Ok(BootPartitionDetails {
