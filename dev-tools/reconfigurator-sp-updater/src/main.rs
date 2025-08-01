@@ -467,13 +467,13 @@ enum Component {
         #[arg(long)]
         expected_boot_disk: M2Slot,
         #[arg(long)]
-        expected_slot_a_phase_1: ArtifactHash,
+        expected_slot_a_phase_1_hash: ArtifactHash,
         #[arg(long)]
-        expected_slot_a_phase_2: ArtifactHash,
+        expected_slot_a_phase_2_hash: ArtifactHash,
         #[arg(long)]
-        expected_slot_b_phase_1: ArtifactHash,
+        expected_slot_b_phase_1_hash: ArtifactHash,
         #[arg(long)]
-        expected_slot_b_phase_2: ArtifactHash,
+        expected_slot_b_phase_2_hash: ArtifactHash,
         #[arg(long)]
         sled_agent_address: SocketAddrV6,
     },
@@ -547,29 +547,33 @@ fn cmd_set(
             Component::HostPhase1 {
                 expected_active_slot,
                 expected_boot_disk,
-                expected_slot_a_phase_1,
-                expected_slot_a_phase_2,
-                expected_slot_b_phase_1,
-                expected_slot_b_phase_2,
+                expected_slot_a_phase_1_hash,
+                expected_slot_a_phase_2_hash,
+                expected_slot_b_phase_1_hash,
+                expected_slot_b_phase_2_hash,
                 sled_agent_address,
             } => {
                 let (active_phase_1, inactive_phase_1) =
                     match expected_active_slot {
-                        M2Slot::A => {
-                            (expected_slot_a_phase_1, expected_slot_b_phase_1)
-                        }
-                        M2Slot::B => {
-                            (expected_slot_b_phase_1, expected_slot_a_phase_1)
-                        }
+                        M2Slot::A => (
+                            expected_slot_a_phase_1_hash,
+                            expected_slot_b_phase_1_hash,
+                        ),
+                        M2Slot::B => (
+                            expected_slot_b_phase_1_hash,
+                            expected_slot_a_phase_1_hash,
+                        ),
                     };
                 let (active_phase_2, inactive_phase_2) =
                     match expected_active_slot {
-                        M2Slot::A => {
-                            (expected_slot_a_phase_2, expected_slot_b_phase_2)
-                        }
-                        M2Slot::B => {
-                            (expected_slot_b_phase_2, expected_slot_a_phase_2)
-                        }
+                        M2Slot::A => (
+                            expected_slot_a_phase_2_hash,
+                            expected_slot_b_phase_2_hash,
+                        ),
+                        M2Slot::B => (
+                            expected_slot_b_phase_2_hash,
+                            expected_slot_a_phase_2_hash,
+                        ),
                     };
                 let details = PendingMgsUpdateHostPhase1Details {
                     expected_active_slot: ExpectedActiveHostOsSlot {
