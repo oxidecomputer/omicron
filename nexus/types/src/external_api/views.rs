@@ -1575,3 +1575,74 @@ mod test {
         );
     }
 }
+
+#[derive(Debug, Deserialize, Serialize, JsonSchema, PartialEq, Eq)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum AuditLogEntryActor {
+    UserBuiltin { user_builtin_id: Uuid },
+    SiloUser { silo_user_id: Uuid, silo_id: Uuid },
+    Unauthenticated,
+}
+
+/// Result of an audit log entry
+#[derive(Debug, Deserialize, Serialize, JsonSchema, PartialEq, Eq)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum AuditLogEntryResult {
+    /// The operation completed successfully
+    Success {
+        /// HTTP status code
+        http_status_code: u16,
+    },
+    /// The operation failed
+    Error {
+        /// HTTP status code
+        http_status_code: u16,
+        error_code: Option<String>,
+        error_message: String,
+    },
+    // Note that the DB model result kind analogous to Unknown is called Timeout
+    // -- The name "Timeout" feels useful to write down for the DB but also
+    // feels like too much of an implementation detail to expose to the user --
+    // it makes it sounds like the operation timed out rather than the audit log
+    // entry itself.
+    /// After the logged operation completed, our attempt to write the result
+    /// to the audit log failed, so it was automatically marked completed later
+    /// by a background job. This does not imply that the operation itself timed
+    /// out or failed, only our attempts to log its result.
+    Unknown,
+}
+
+/// Audit log entry
+#[derive(Debug, Deserialize, Serialize, JsonSchema)]
+pub struct AuditLogEntry {
+    /// Unique identifier for the audit log entry
+    pub id: Uuid,
+
+    /// When the request was received
+    pub time_started: DateTime<Utc>,
+
+    /// Request ID for tracing requests through the system
+    pub request_id: String,
+    /// Full URL of the request
+    pub request_uri: String,
+    /// API endpoint ID, e.g., `project_create`
+    pub operation_id: String,
+    /// IP address that made the request
+    pub source_ip: IpAddr,
+    /// User agent string from the request
+    pub user_agent: Option<String>,
+
+    pub actor: AuditLogEntryActor,
+
+    /// Indicates whether request was made with an API token or session cookie.
+    /// Optional because it will not be defined on unauthenticated requests like
+    /// login attempts.
+    pub access_method: Option<String>,
+
+    // Fields that are optional because they get filled in after the action completes
+    /// Time operation completed
+    pub time_completed: DateTime<Utc>,
+
+    /// Result of the operation
+    pub result: AuditLogEntryResult,
+}
