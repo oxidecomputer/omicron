@@ -222,13 +222,34 @@ impl ConfigReconcilerInventory {
             orphaned_datasets: IdOrdMap::new(),
             zones,
             boot_partitions: {
-                // None of our callers care about this; if that changes, we
-                // could pass in boot partition contents.
-                let err = "constructed via debug_assume_success()".to_string();
                 BootPartitionContents {
-                    boot_disk: Err(err.clone()),
-                    slot_a: Err(err.clone()),
-                    slot_b: Err(err),
+                    boot_disk: Ok(M2Slot::A),
+                    slot_a: Ok(BootPartitionDetails {
+                        header: BootImageHeader {
+                            flags: 0,
+                            data_size: 1000,
+                            image_size: 1000,
+                            target_size: 1000,
+                            sha256: [0; 32],
+                            image_name: "fake from debug_assume_success()"
+                                .to_string(),
+                        },
+                        artifact_hash: ArtifactHash([0x0a; 32]),
+                        artifact_size: 1000,
+                    }),
+                    slot_b: Ok(BootPartitionDetails {
+                        header: BootImageHeader {
+                            flags: 0,
+                            data_size: 1000,
+                            image_size: 1000,
+                            target_size: 1000,
+                            sha256: [1; 32],
+                            image_name: "fake from debug_assume_success()"
+                                .to_string(),
+                        },
+                        artifact_hash: ArtifactHash([0x0b; 32]),
+                        artifact_size: 1000,
+                    }),
                 }
             },
             clear_mupdate_override,
