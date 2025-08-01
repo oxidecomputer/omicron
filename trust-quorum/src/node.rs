@@ -20,7 +20,7 @@ use crate::validators::{
     MismatchedRackIdError, ReconfigurationError, ValidatedReconfigureMsg,
 };
 use crate::{
-    Configuration, CoordinatorState, Epoch, NodeHandlerCtx, PlatformId,
+    Alarm, Configuration, CoordinatorState, Epoch, NodeHandlerCtx, PlatformId,
     messages::*,
 };
 use gfss::shamir::Share;
@@ -311,25 +311,28 @@ impl Node {
         }
 
         // Do we have the configuration in our persistent state? If not save it.
-        ctx.update_persistent_state(|ps| {
-            if let Err(e) = ps.configs.insert_unique(config.clone()) {
-                let existing =
-                    e.duplicates().first().expect("duplicate exists");
-                if *existing != &config {
-                    error!(
-                        self.log,
-                        "Received a configuration mismatch";
-                        "from" => %from,
-                        "existing_config" => #?existing,
-                        "received_config" => #?config
-                    );
-                    // TODO: Alarm
-                }
-                false
-            } else {
-                true
+        if let Some(existing) =
+            ctx.persistent_state().configuration(config.epoch)
+        {
+            if existing != &config {
+                error!(
+                    self.log,
+                    "Received a configuration mismatch";
+                    "from" => %from,
+                    "existing_config" => #?existing,
+                    "received_config" => #?config
+                );
+                ctx.raise_alarm(Alarm::MismatchedConfigurations {
+                    config1: (*existing).clone(),
+                    config2: config.clone(),
+                });
             }
-        });
+        } else {
+            ctx.update_persistent_state(|ps| {
+                ps.configs.insert_unique(config.clone()).expect("new config");
+                true
+            });
+        }
 
         // Are we coordinating for an older epoch? If so, cancel.
         if let Some(cs) = &self.coordinator_state {
@@ -350,7 +353,9 @@ impl Node {
                     "from" => %from,
                     "epoch" => %config.epoch
                 );
-                // TODO: Alarm
+                ctx.raise_alarm(Alarm::CommitAdvanceForCoordinatingEpoch {
+                    config,
+                });
                 return;
             } else {
                 info!(
