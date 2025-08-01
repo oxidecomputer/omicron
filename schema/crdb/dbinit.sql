@@ -3736,7 +3736,9 @@ CREATE TABLE IF NOT EXISTS omicron.public.inv_sled_agent (
     PRIMARY KEY (inv_collection_id, sled_id)
 );
 
-CREATE TYPE IF NOT EXISTS omicron.public.remove_mupdate_override_boot_success
+-- This type name starts with "clear_" for legacy reasons. Prefer "remove" in
+-- the future.
+CREATE TYPE IF NOT EXISTS omicron.public.clear_mupdate_override_boot_success
 AS ENUM (
     'cleared',
     'no-override'
