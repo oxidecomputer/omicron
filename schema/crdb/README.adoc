@@ -52,6 +52,36 @@ fall-back pathway for performing upgrades.
 
 See RFD 319 for more discussion of the online upgrade plans.
 
+== Self-Service Schema Upgrade
+
+Nexus is currently performing schema migrations using an <<offline-upgrade>>
+mechanism. As a part of this process, there will be a period where we expect
+downtime, and where we must prevent access to the database for the duration of
+the upgrade.
+
+Historically, these updates have taken the following form:
+
+* Nexus boots, and reads the `version` field of `omicron.public.db_metadata`.
+* If this version matches what Nexus was compiled against, it can use the database.
+* If this version does not match what Nexus expects, it waits for the schema to be
+  updated, and periodically re-checks this value.
+* An operator (human) would need to manually execute the `schema-updater` binary
+  (link:../nexus/src/bin/schema-updater.rs[Source]) to upgrade the on-disk schema.
+
+As we've discussed in RFD 527, we're migrating to a more nuanced model for the
+purposes of self-service upgrade. In this model:
+
+* Upgrading will involve running multiple versions of Nexus concurrently.
+* Only one version of Nexus will have unconstrained access to the database at a time.
+* During upgrade from version N to N+1, Nexus zones running at version N will
+  **quiesce** their access to the database. Once this quiescing process is complete,
+  handoff to the Nexuses at version N+1 can proceed.
+* Once handoff occurs, the Nexus at version N+1 can automatically apply schema updates,
+  just as operators had manually been performing with the `schema-updater` tool.
+* Afterwards, the Nexuses operating at N+1 can resume normal operation.
+* This process can repeat indefinitely, when a Nexus with version N+2 appears and forces
+  the Nexuses at version N+1 to quiesce.
+
 == How to change the schema
 
 Assumptions:

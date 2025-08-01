@@ -5,13 +5,16 @@
 //! [`DataStore`] methods on Database Metadata.
 
 use super::DataStore;
-use anyhow::{Context, bail, ensure};
+use anyhow::{Context, anyhow};
 use async_bb8_diesel::{AsyncRunQueryDsl, AsyncSimpleConnection};
 use chrono::Utc;
 use diesel::prelude::*;
 use nexus_db_errors::ErrorHandler;
 use nexus_db_errors::public_error_from_diesel;
 use nexus_db_model::AllSchemaVersions;
+use nexus_db_model::DbMetadata;
+use nexus_db_model::DbMetadataBase;
+use nexus_db_model::DbMetadataUpdate;
 use nexus_db_model::EARLIEST_SUPPORTED_VERSION;
 use nexus_db_model::SchemaUpgradeStep;
 use nexus_db_model::SchemaVersion;
@@ -99,36 +102,114 @@ fn skippable_version(
     return false;
 }
 
+/// Reasons why [DataStore::ensure_schema] might fail
+#[derive(thiserror::Error, Debug)]
+pub enum EnsureSchemaError {
+    /// This Nexus is too old to understand the schema
+    ///
+    /// This may happen when an old Nexus is booting / rebooting during
+    /// a handoff to a newer Nexus.
+    #[error("Nexus is too old to use this schema; handoff: {handoff}")]
+    NexusTooOld {
+        /// Should this Nexus still try to participate in handoff to a newer
+        /// Nexus?
+        ///
+        /// If "no", then we should terminate.
+        handoff: bool,
+    },
+
+    /// This Nexus could upgrade, but is waiting for quiesce to complete
+    #[error("Nexus is waiting for older Nexus versions to quiesce")]
+    WaitingForQuiesce,
+
+    /// The schema does not match, and we aren't considering changing it
+    #[error(
+        "DB schema {found} < Nexus schema {desired}, but schema update is disabled"
+    )]
+    SchemaUpdateDisabled { found: Version, desired: Version },
+
+    /// During schema upgrade, we couldn't find the necessary upgrade steps
+    #[error("Schema update from {found} -> {desired} missing step: {missing}")]
+    SchemaUpdateStepMissing {
+        found: Version,
+        desired: Version,
+        missing: Version,
+    },
+
+    /// Any other reason
+    #[error(transparent)]
+    Other(#[from] anyhow::Error),
+}
+
+/// Describes whether or not [DataStore::ensure_schema] will proceed
+/// with an update.
+pub enum UpdateConfiguration<'a> {
+    /// The update will not be triggered
+    Disabled,
+
+    /// If the schema update is possible, it will trigger
+    Enabled {
+        /// Known schema versions, and ways to upgrade between them
+        all_versions: &'a AllSchemaVersions,
+
+        /// If "true", ignore the quiesce status in the database
+        ///
+        /// This can be used to ignore the work of ongoing Nexuses which may be
+        /// shutting down, and should only be set to "true" cautiously (e.g.,
+        /// this is used by the schema-updater binary, which can be used by
+        /// operators).
+        ///
+        /// For most cases, this should be set to "false".
+        ignore_quiesce: bool,
+    },
+}
+
 impl DataStore {
-    // Ensures that the database schema matches "desired_version".
-    //
-    // - Updating the schema makes the database incompatible with older
-    // versions of Nexus, which are not running "desired_version".
-    // - This is a one-way operation that cannot be undone.
-    // - The caller is responsible for ensuring that the new version is valid,
-    // and that all running Nexus instances can understand the new schema
-    // version.
-    //
-    // TODO: This function assumes that all concurrently executing Nexus
-    // instances on the rack are operating on the same version of software.
-    // If that assumption is broken, nothing would stop a "new deployment"
-    // from making a change that invalidates the queries used by an "old
-    // deployment".
+    /// Ensures that the database schema matches "desired_version".
+    ///
+    /// The `config` argument can be used to upgrade the schema to the desired
+    /// version (if "Enabled") or can be used as a read-only check to validate
+    /// the schema (if "Disabled").
+    ///
+    /// - Updating the schema makes the database incompatible with older
+    /// versions of Nexus, which are not running "desired_version".
+    /// - This is a one-way operation that cannot be undone.
+    /// - The caller is responsible for ensuring that the new version is valid,
+    /// and that all running Nexus instances can understand the new schema
+    /// version.
     pub async fn ensure_schema(
         &self,
         log: &Logger,
         desired_version: Version,
-        all_versions: Option<&AllSchemaVersions>,
-    ) -> Result<(), anyhow::Error> {
-        let (found_version, found_target_version) = self
-            .database_schema_version()
+        config: UpdateConfiguration<'_>,
+    ) -> Result<(), EnsureSchemaError> {
+        let db_metadata = self
+            .database_metadata()
             .await
             .context("Cannot read database schema version")?;
+
+        let found_version: Version = db_metadata.version().clone().into();
+        let found_target_version: Option<Version> =
+            db_metadata.target_version().map(|v| v.clone().into());
+        let quiesce_started = db_metadata.quiesce_started();
+        let quiesce_completed = db_metadata.quiesce_completed();
 
         let log = log.new(o!(
             "found_version" => found_version.to_string(),
             "desired_version" => desired_version.to_string(),
+            "quiesce_started" => quiesce_started,
+            "quiesce_completed" => quiesce_completed,
         ));
+
+        // This case is effectively: Quiesce has already completed, AND the
+        // schema migration has already been marked as completed.
+        if found_version > desired_version {
+            warn!(
+                log,
+                "Found schema version is newer than desired schema version";
+            );
+            return Err(EnsureSchemaError::NexusTooOld { handoff: false });
+        }
 
         // NOTE: We could run with a less tight restriction.
         //
@@ -140,31 +221,50 @@ impl DataStore {
         // not exactly match the schema version, we refuse to continue without
         // modification.
         if found_version == desired_version {
+            if quiesce_completed {
+                warn!(
+                    log,
+                    "Schema version is up-to-date, but quiescing has completed"
+                );
+                return Err(EnsureSchemaError::NexusTooOld { handoff: false });
+            }
+            if quiesce_started {
+                warn!(
+                    log,
+                    "Schema version is up-to-date, but quiescing is in-progress"
+                );
+                return Err(EnsureSchemaError::NexusTooOld { handoff: true });
+            }
             info!(log, "Database schema version is up to date");
             return Ok(());
         }
 
-        if found_version > desired_version {
-            error!(
-                log,
-                "Found schema version is newer than desired schema version";
-            );
-            bail!(
-                "Found schema version ({}) is newer than desired schema \
-                version ({})",
-                found_version,
-                desired_version,
-            )
-        }
+        // At this point, we know the "found_version < desired_version".
 
-        let Some(all_versions) = all_versions else {
-            error!(
-                log,
-                "Database schema version is out of date, but automatic update \
-                is disabled",
-            );
-            bail!("Schema is out of date but automatic update is disabled");
+        let (all_versions, ignore_quiesce) = match config {
+            UpdateConfiguration::Disabled => {
+                error!(
+                    log,
+                    "Database schema version is out of date, but automatic \
+                    update is disabled",
+                );
+                return Err(EnsureSchemaError::SchemaUpdateDisabled {
+                    found: found_version.clone(),
+                    desired: desired_version.clone(),
+                });
+            }
+            UpdateConfiguration::Enabled { all_versions, ignore_quiesce } => {
+                (all_versions, ignore_quiesce)
+            }
         };
+
+        if !ignore_quiesce && !quiesce_completed {
+            warn!(
+                log,
+                "Schema version is older than desired; waiting for quiesce to complete";
+            );
+            return Err(EnsureSchemaError::WaitingForQuiesce);
+        }
 
         // If we're here, we know the following:
         //
@@ -172,16 +272,22 @@ impl DataStore {
         //   didn't when we read it moments ago).
         // - We should attempt to automatically upgrade the schema.
         info!(log, "Database schema is out of date.  Attempting upgrade.");
-        ensure!(
-            all_versions.contains_version(&found_version),
-            "Found schema version {found_version} was not found",
-        );
+        if !all_versions.contains_version(&found_version) {
+            return Err(EnsureSchemaError::SchemaUpdateStepMissing {
+                found: found_version.clone(),
+                desired: desired_version.clone(),
+                missing: found_version.clone(),
+            });
+        }
 
         // TODO: Test this?
-        ensure!(
-            all_versions.contains_version(&desired_version),
-            "Desired version {desired_version} was not found",
-        );
+        if !all_versions.contains_version(&desired_version) {
+            return Err(EnsureSchemaError::SchemaUpdateStepMissing {
+                found: found_version.clone(),
+                desired: desired_version.clone(),
+                missing: desired_version.clone(),
+            });
+        }
 
         let target_versions: Vec<&SchemaVersion> = all_versions
             .versions_range((
@@ -204,7 +310,10 @@ impl DataStore {
 
             // For the rationale here, see: StepSemverVersion::new.
             if target_version.semver().pre != semver::Prerelease::EMPTY {
-                bail!("Cannot upgrade to version which includes pre-release");
+                return Err(anyhow!(
+                    "Cannot upgrade to version which includes pre-release"
+                )
+                .into());
             }
 
             // Iterate over each individual file that comprises a schema change.
@@ -261,11 +370,24 @@ impl DataStore {
             // Now that the schema change has completed, set the following:
             // - db_metadata.version = new version
             // - db_metadata.target_version = NULL
+            // - db_metadata.quiesce_started = false
+            // - db_metadata.quiesce_completed = false
             let last_step_version = last_step_version
                 .ok_or_else(|| anyhow::anyhow!("Missing final step version"))?;
-            self.finalize_schema_update(&current_version, &last_step_version)
-                .await
-                .context("Failed to finalize schema update")?;
+
+            // We will keep "quiesced" set to true up until the last update.
+            //
+            // This means that if we crash and reboot partway through an update,
+            // we'll be able to resume it - Nexuses are still quiesced, and
+            // should not need to re-negotiate.
+            let clear_quiesced = *target_version.semver() == desired_version;
+            self.finalize_schema_update(
+                &current_version,
+                &last_step_version,
+                clear_quiesced,
+            )
+            .await
+            .context("Failed to finalize schema update")?;
 
             info!(
                 log,
@@ -338,6 +460,54 @@ impl DataStore {
             "Applied subcomponent of schema upgrade";
         );
         Ok(())
+    }
+
+    pub async fn database_metadata(&self) -> Result<DbMetadata, Error> {
+        use nexus_db_schema::schema::db_metadata::dsl;
+
+        // The "quiesced" fields do not exist on all deployed schemas,
+        // so we read "DbMetadataBase" before trying to read the rest of the
+        // columns.
+        //
+        // If we don't have these fields yet, read the more stable portions of
+        // db_metadata, and treat the system as "already quiesced". This is
+        // necessary for some of our backwards-compatibility testing.
+        //
+        // TODO: Once we've sufficiently updated in-field devices, we should
+        // be able to read "DbMetadata" entirely, and avoid reading
+        // "DbMetadataBase" altogether.
+        let base = dsl::db_metadata
+            .filter(dsl::singleton.eq(true))
+            .select(DbMetadataBase::as_select())
+            .get_result_async(&*self.pool_connection_unauthorized().await?)
+            .await
+            .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))?;
+        if base.version().0 < nexus_db_model::QUIESCE_VERSION {
+            // Why are we treating this case as "quiesced = true"?
+            //
+            // - If Nexus wants to be running on a schema older than
+            // QUIESCE_VERSION, it's older than this code. As a part of our
+            // operator-driven update process, these Nexuses will be stopped
+            // manually by an operator during MUPdate.
+            // - If Nexus wants to be running on a schema newer than or equal to
+            // QUIESCE_VERSION, but it sees an older schema in the DB, then it
+            // is trying to perform an update (as in our tests) or waiting
+            // for an operator to run the schema-updater. In either of these
+            // cases, Nexus is assuming no older versions of Nexus are running.
+            //
+            // Note that once we've upgraded past QUIESCE_VERSION, this
+            // conditional becomes irrelevant, and we can rely on a more
+            // sophisticated model of "old Nexus" -> "new Nexus" handoff.
+            let quiesced = true;
+            return Ok(DbMetadata::from_base(base, quiesced));
+        }
+
+        dsl::db_metadata
+            .filter(dsl::singleton.eq(true))
+            .select(DbMetadata::as_select())
+            .get_result_async(&*self.pool_connection_unauthorized().await?)
+            .await
+            .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))
     }
 
     pub async fn database_schema_version(
@@ -456,27 +626,36 @@ impl DataStore {
 
     // Completes a schema migration, upgrading to the new version.
     //
+    // This also allows clearing the "quiesce started/completed" state, as
+    // Nexuses on the of the *new* version are not quiescing.
+    //
     // - from_version: What we expect "version" must be to proceed
     // - last_step: What we expect "target_version" must be to proceed.
     async fn finalize_schema_update(
         &self,
         from_version: &Version,
         last_step: &StepSemverVersion,
+        clear_quiesced: bool,
     ) -> Result<(), Error> {
         use nexus_db_schema::schema::db_metadata::dsl;
 
         let to_version = last_step.without_prerelease();
+        let mut updates =
+            DbMetadataUpdate::update_to_version(to_version.clone());
+
+        // We only try to clear the "quiesced" fields (setting them to false)
+        // if we think the schema knows what those fields are.
+        if clear_quiesced && to_version >= nexus_db_model::QUIESCE_VERSION {
+            updates.clear_quiesce();
+        }
+
         let rows_updated = diesel::update(
             dsl::db_metadata
                 .filter(dsl::singleton.eq(true))
                 .filter(dsl::version.eq(from_version.to_string()))
                 .filter(dsl::target_version.eq(last_step.version.to_string())),
         )
-        .set((
-            dsl::time_modified.eq(Utc::now()),
-            dsl::version.eq(to_version.to_string()),
-            dsl::target_version.eq(None as Option<String>),
-        ))
+        .set(updates)
         .execute_async(&*self.pool_connection_unauthorized().await?)
         .await
         .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))?;
@@ -509,7 +688,11 @@ mod test {
         let datastore = db.datastore();
 
         datastore
-            .ensure_schema(&logctx.log, SCHEMA_VERSION, None)
+            .ensure_schema(
+                &logctx.log,
+                SCHEMA_VERSION,
+                UpdateConfiguration::Disabled,
+            )
             .await
             .expect("Failed to ensure schema");
 
@@ -609,6 +792,13 @@ mod test {
             [&v0, &v1, &v2].into_iter(),
         )
         .expect("failed to load schema");
+
+        // Mark quiescing as completed to allow the migration to proceed
+        let quiesce_started = true;
+        let quiesce_completed = true;
+        let datastore = DataStore::new_unchecked(log.clone(), pool.clone());
+        set_quisece(&datastore, quiesce_started, quiesce_completed).await;
+
         let _ = futures::future::join_all((0..10).map(|_| {
             let all_versions = all_versions.clone();
             let log = log.clone();
@@ -650,6 +840,7 @@ mod test {
         .collect::<Result<Vec<DataStore>, _>>()
         .expect("Failed to create datastore");
 
+        datastore.terminate().await;
         db.terminate().await;
         logctx.cleanup_successful();
     }
@@ -743,8 +934,18 @@ mod test {
         // Manually construct the datastore to avoid the backoff timeout.
         // We want to trigger errors, but have no need to wait.
         let datastore = DataStore::new_unchecked(log.clone(), pool.clone());
+        let quiesce_started = true;
+        let quiesce_completed = true;
+        set_quisece(&datastore, quiesce_started, quiesce_completed).await;
         while let Err(e) = datastore
-            .ensure_schema(&log, SCHEMA_VERSION, Some(&all_versions))
+            .ensure_schema(
+                &log,
+                SCHEMA_VERSION,
+                UpdateConfiguration::Enabled {
+                    all_versions: &all_versions,
+                    ignore_quiesce: false,
+                },
+            )
             .await
         {
             warn!(log, "Failed to ensure schema"; "err" => %e);
@@ -767,6 +968,253 @@ mod test {
             .await
             .expect("Failed to get data");
         assert_eq!(data, "abcd");
+
+        db.terminate().await;
+        logctx.cleanup_successful();
+    }
+
+    async fn set_quisece(
+        datastore: &DataStore,
+        started: bool,
+        completed: bool,
+    ) {
+        let conn = datastore.pool_connection_for_tests().await.unwrap();
+        diesel::dsl::sql::<diesel::sql_types::Integer>(&format!(
+            "UPDATE omicron.public.db_metadata \
+                SET \
+                    quiesce_started = {started}, \
+                    quiesce_completed = {completed} \
+                WHERE singleton = TRUE"
+        ))
+        .execute_async(&*conn)
+        .await
+        .expect("Failed to update metadata");
+    }
+
+    #[tokio::test]
+    async fn ensure_schema_with_old_nexus() {
+        let logctx = dev::test_setup_log("ensure_schema_with_old_nexus");
+        let log = &logctx.log;
+        let db = TestDatabase::new_with_pool(&logctx.log).await;
+        let pool = db.pool();
+
+        // The contents don't really matter here - just make the schema appear
+        // "old".
+        let mut old_schema = SCHEMA_VERSION;
+        old_schema.major -= 1;
+
+        // Case: Version matches the DB, and quiesce has started.
+        {
+            let datastore = DataStore::new_unchecked(log.clone(), pool.clone());
+            let quiesce_started = true;
+            let quiesce_completed = false;
+            set_quisece(&datastore, quiesce_started, quiesce_completed).await;
+
+            let Err(err) = datastore
+                .ensure_schema(
+                    &log,
+                    SCHEMA_VERSION,
+                    UpdateConfiguration::Disabled,
+                )
+                .await
+            else {
+                panic!("Ensuring schema mid-quiesce should fail");
+            };
+            assert!(
+                matches!(err, EnsureSchemaError::NexusTooOld { handoff: true },),
+                "Unexpected error: {err:?} (expected: Nexus too old, with handoff)",
+            );
+        }
+
+        // Case: Version matches the DB, and quiesce has completed.
+        {
+            let datastore = DataStore::new_unchecked(log.clone(), pool.clone());
+            let quiesce_started = true;
+            let quiesce_completed = true;
+            set_quisece(&datastore, quiesce_started, quiesce_completed).await;
+
+            let Err(err) = datastore
+                .ensure_schema(
+                    &log,
+                    SCHEMA_VERSION,
+                    UpdateConfiguration::Disabled,
+                )
+                .await
+            else {
+                panic!("Ensuring schema post-quiesce should fail");
+            };
+            assert!(
+                matches!(
+                    err,
+                    EnsureSchemaError::NexusTooOld { handoff: false },
+                ),
+                "Unexpected error: {err:?} (expected: Nexus too old, with no handoff)",
+            );
+        }
+
+        // Case: The schema we request is older than what's in the database.
+        //
+        // This is what would happen if an old Nexus booted after a schema
+        // migration already completed.
+        {
+            let datastore = DataStore::new_unchecked(log.clone(), pool.clone());
+            let quiesce_started = false;
+            let quiesce_completed = false;
+            set_quisece(&datastore, quiesce_started, quiesce_completed).await;
+
+            let Err(err) = datastore
+                .ensure_schema(&log, old_schema, UpdateConfiguration::Disabled)
+                .await
+            else {
+                panic!("Ensuring old schema should fail");
+            };
+            assert!(
+                matches!(
+                    err,
+                    EnsureSchemaError::NexusTooOld { handoff: false },
+                ),
+                "Unexpected error: {err:?} (expected: Nexus too old, with no handoff)",
+            );
+        }
+
+        db.terminate().await;
+        logctx.cleanup_successful();
+    }
+
+    #[tokio::test]
+    async fn ensure_schema_waits_for_quiesce() {
+        let logctx = dev::test_setup_log("ensure_schema_waits_for_quiesce");
+        let log = &logctx.log;
+        let db = TestDatabase::new_with_pool(&logctx.log).await;
+        let pool = db.pool();
+
+        let old_schema = SCHEMA_VERSION;
+        let mut new_schema = SCHEMA_VERSION;
+        new_schema.major += 1;
+
+        let config_dir = Utf8TempDir::new().unwrap();
+        add_upgrade(config_dir.path(), old_schema.clone(), "SELECT true;")
+            .await;
+        add_upgrade(config_dir.path(), new_schema.clone(), "SELECT true;")
+            .await;
+        let all_versions = AllSchemaVersions::load_specific_legacy_versions(
+            config_dir.path(),
+            [&old_schema, &new_schema].into_iter(),
+        )
+        .expect("failed to load schema");
+
+        // Load the new version, before quiescing started
+        //
+        // This is the case where a new Nexus has been started, but old
+        // Nexuses have not yet started quiescing.
+        let datastore = DataStore::new_unchecked(log.clone(), pool.clone());
+        let quiesce_started = false;
+        let quiesce_completed = false;
+        set_quisece(&datastore, quiesce_started, quiesce_completed).await;
+
+        let Err(err) = datastore
+            .ensure_schema(
+                &log,
+                new_schema.clone(),
+                UpdateConfiguration::Enabled {
+                    all_versions: &all_versions,
+                    ignore_quiesce: false,
+                },
+            )
+            .await
+        else {
+            panic!("Ensuring schema pre-quiesce should fail");
+        };
+        assert!(
+            matches!(err, EnsureSchemaError::WaitingForQuiesce),
+            "Unexpected error: {err:?} (expected: Wait for Quiesce)",
+        );
+
+        // Load the new version, but while quiesce is in-progress
+        let datastore = DataStore::new_unchecked(log.clone(), pool.clone());
+        let quiesce_started = true;
+        let quiesce_completed = false;
+        set_quisece(&datastore, quiesce_started, quiesce_completed).await;
+
+        let Err(err) = datastore
+            .ensure_schema(
+                &log,
+                new_schema.clone(),
+                UpdateConfiguration::Enabled {
+                    all_versions: &all_versions,
+                    ignore_quiesce: false,
+                },
+            )
+            .await
+        else {
+            panic!("Ensuring schema mid-quiesce should fail");
+        };
+        assert!(
+            matches!(err, EnsureSchemaError::WaitingForQuiesce),
+            "Unexpected error: {err:?} (expected: Wait for Quiesce)",
+        );
+
+        // Let's suppose that later on, quiesce completes.
+        //
+        // This should let us proceed with the update.
+        let quiesce_started = true;
+        let quiesce_completed = true;
+        set_quisece(&datastore, quiesce_started, quiesce_completed).await;
+        datastore
+            .ensure_schema(
+                &log,
+                new_schema.clone(),
+                UpdateConfiguration::Enabled {
+                    all_versions: &all_versions,
+                    ignore_quiesce: false,
+                },
+            )
+            .await
+            .expect("Ensuring schema should have succeeded");
+
+        let db_metadata = datastore
+            .database_metadata()
+            .await
+            .expect("Should be able to read database metadata post-update");
+
+        // Since the update succeeded, we should be able to see:
+        // - We're using the new version
+        // - There is no "target version"
+        // - Quiescing state is cleared (set to "false")
+        assert_eq!(
+            semver::Version::from(db_metadata.version().clone()),
+            new_schema
+        );
+        assert_eq!(db_metadata.target_version(), None);
+        assert_eq!(db_metadata.quiesce_started(), false);
+        assert_eq!(db_metadata.quiesce_completed(), false);
+
+        db.terminate().await;
+        logctx.cleanup_successful();
+    }
+
+    #[tokio::test]
+    async fn ensure_schema_without_upgrade() {
+        let logctx = dev::test_setup_log("ensure_schema_without_upgrade");
+        let log = &logctx.log;
+        let db = TestDatabase::new_with_pool(&logctx.log).await;
+        let pool = db.pool();
+
+        let mut new_schema = SCHEMA_VERSION;
+        new_schema.major += 1;
+
+        // Load the new version, but don't enabled update.
+        let datastore = DataStore::new_unchecked(log.clone(), pool.clone());
+        let Err(err) = datastore
+            .ensure_schema(&log, new_schema, UpdateConfiguration::Disabled)
+            .await
+        else {
+            panic!("Ensuring schema without enabling update should fail");
+        };
+        assert!(
+            matches!(err, EnsureSchemaError::SchemaUpdateDisabled { .. },),
+            "Unexpected error: {err:?} (expected: Schema Update Disabled)",
+        );
 
         db.terminate().await;
         logctx.cleanup_successful();
