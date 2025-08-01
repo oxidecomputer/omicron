@@ -17,9 +17,7 @@ use gateway_types::rot::RotSlot;
 use internal_dns_types::names::ServiceName;
 use nexus_mgs_updates::ArtifactCache;
 use nexus_mgs_updates::MgsUpdateDriver;
-use nexus_types::deployment::ExpectedActiveHostOsSlot;
 use nexus_types::deployment::ExpectedActiveRotSlot;
-use nexus_types::deployment::ExpectedInactiveHostOsArtifact;
 use nexus_types::deployment::ExpectedVersion;
 use nexus_types::deployment::PendingMgsUpdate;
 use nexus_types::deployment::PendingMgsUpdateDetails;
@@ -367,25 +365,22 @@ fn cmd_config(
             }
             PendingMgsUpdateDetails::HostPhase1(
                 PendingMgsUpdateHostPhase1Details {
-                    expected_active_slot,
-                    expected_inactive_artifact,
+                    expected_active_phase_1_slot,
+                    expected_boot_disk,
+                    expected_active_phase_1_hash,
+                    expected_active_phase_2_hash,
+                    expected_inactive_phase_1_hash,
+                    expected_inactive_phase_2_hash,
                     sled_agent_address,
                 },
             ) => {
-                swriteln!(s,"        preconditions: expected active phase 1 slot {:?}
-                                                    expected boot disk {:?}
-                                                    expected active phase 1 artifact {}
-                                                    expected active phase 2 artifact {}
-                                                    expected inactive phase 1 artifact {}
-                                                    expected inactive phase 2 artifact {}
-                                                    sled_agent_address {}",
-                    expected_active_slot.phase_1_slot,
-                    expected_active_slot.boot_disk,
-                    expected_active_slot.phase_1,
-                    expected_active_slot.phase_2,
-                    expected_inactive_artifact.phase_1,
-                    expected_inactive_artifact.phase_2,
-                    sled_agent_address,
+                swriteln!(s,"        preconditions: expected active phase 1 slot {expected_active_phase_1_slot:?}
+                                                    expected boot disk {expected_boot_disk:?}
+                                                    expected active phase 1 artifact {expected_active_phase_1_hash}
+                                                    expected active phase 2 artifact {expected_active_phase_2_hash}
+                                                    expected inactive phase 1 artifact {expected_inactive_phase_1_hash}
+                                                    expected inactive phase 2 artifact {expected_inactive_phase_2_hash}
+                                                    sled_agent_address {sled_agent_address}",
                 );
             }
         }
@@ -463,7 +458,7 @@ enum Component {
     },
     HostPhase1 {
         #[arg(long)]
-        expected_active_slot: M2Slot,
+        expected_active_phase_1_slot: M2Slot,
         #[arg(long)]
         expected_boot_disk: M2Slot,
         #[arg(long)]
@@ -545,7 +540,7 @@ fn cmd_set(
                 expected_stage0_next_version,
             },
             Component::HostPhase1 {
-                expected_active_slot,
+                expected_active_phase_1_slot,
                 expected_boot_disk,
                 expected_slot_a_phase_1_hash,
                 expected_slot_a_phase_2_hash,
@@ -553,40 +548,39 @@ fn cmd_set(
                 expected_slot_b_phase_2_hash,
                 sled_agent_address,
             } => {
-                let (active_phase_1, inactive_phase_1) =
-                    match expected_active_slot {
-                        M2Slot::A => (
-                            expected_slot_a_phase_1_hash,
-                            expected_slot_b_phase_1_hash,
-                        ),
-                        M2Slot::B => (
-                            expected_slot_b_phase_1_hash,
-                            expected_slot_a_phase_1_hash,
-                        ),
-                    };
-                let (active_phase_2, inactive_phase_2) =
-                    match expected_active_slot {
-                        M2Slot::A => (
-                            expected_slot_a_phase_2_hash,
-                            expected_slot_b_phase_2_hash,
-                        ),
-                        M2Slot::B => (
-                            expected_slot_b_phase_2_hash,
-                            expected_slot_a_phase_2_hash,
-                        ),
-                    };
+                let (
+                    expected_active_phase_1_hash,
+                    expected_inactive_phase_1_hash,
+                ) = match expected_active_phase_1_slot {
+                    M2Slot::A => (
+                        expected_slot_a_phase_1_hash,
+                        expected_slot_b_phase_1_hash,
+                    ),
+                    M2Slot::B => (
+                        expected_slot_b_phase_1_hash,
+                        expected_slot_a_phase_1_hash,
+                    ),
+                };
+                let (
+                    expected_active_phase_2_hash,
+                    expected_inactive_phase_2_hash,
+                ) = match expected_active_phase_1_slot {
+                    M2Slot::A => (
+                        expected_slot_a_phase_2_hash,
+                        expected_slot_b_phase_2_hash,
+                    ),
+                    M2Slot::B => (
+                        expected_slot_b_phase_2_hash,
+                        expected_slot_a_phase_2_hash,
+                    ),
+                };
                 let details = PendingMgsUpdateHostPhase1Details {
-                    expected_active_slot: ExpectedActiveHostOsSlot {
-                        phase_1_slot: expected_active_slot,
-                        boot_disk: expected_boot_disk,
-                        phase_1: active_phase_1,
-                        phase_2: active_phase_2,
-                    },
-                    expected_inactive_artifact:
-                        ExpectedInactiveHostOsArtifact {
-                            phase_1: inactive_phase_1,
-                            phase_2: inactive_phase_2,
-                        },
+                    expected_active_phase_1_slot,
+                    expected_boot_disk,
+                    expected_active_phase_1_hash,
+                    expected_active_phase_2_hash,
+                    expected_inactive_phase_1_hash,
+                    expected_inactive_phase_2_hash,
                     sled_agent_address,
                 };
                 PendingMgsUpdateDetails::HostPhase1(details)
